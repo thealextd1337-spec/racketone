@@ -61,11 +61,16 @@ Windows-Build nicht: Kotlin kompiliert `iosMain`/`watchosMain` lokal bis zur kli
 
 ## Versionen (Welle 0a, geprüft am 2026-10-14)
 
+Gradle, AGP und Kotlin liegen **innerhalb der offiziellen Kompatibilitätsmatrix** von Kotlin 2.4.20
+([KGP-Kompatibilität](https://kotlinlang.org/docs/gradle-configure-project.html)). Zusätzlich lokal verifiziert:
+Gradle 9.7.1 + AGP 9.4.1 bauen ebenfalls grün, liegen aber außerhalb dieser Matrix. Deshalb werden sie erst
+übernommen, wenn eine Kotlin-Version sie offiziell listet (Kotlin, SKIE und CMP gemeinsam anheben).
+
 | Komponente | Version | Hinweis |
 |---|---|---|
-| Gradle | 9.7.1 | Doc: 9.6.0. AGP 9.4 verlangt ≥ 9.6.0, Kotlin 2.4.20 ist bis 9.7.x freigegeben |
+| Gradle | 9.7.0 | Doc: 9.6.0. Höchste Gradle-Version, die Kotlin 2.4.20 offiziell vollständig unterstützt (7.6.3–9.7.0) |
 | Kotlin | 2.4.20 | 2.4.21 existiert, SKIE 0.10.15 ist aber nur für 2.4.20 freigegeben |
-| Android Gradle Plugin | 9.4.1 | Doc: 9.4.0 (Patch-Update) |
+| Android Gradle Plugin | 9.3.1 | Doc: 9.4.0. Kotlin 2.4.20 unterstützt offiziell AGP 8.5.2–9.3.1; AGP 9.3 kann bereits compileSdk 37 |
 | Compose Multiplatform | 1.12.1 | Material 3 für CMP separat versioniert: 1.9.0 (Zuordnung aus dem CMP-Plugin) |
 | SKIE | 0.10.15 | |
 | Wear Compose (Material 3) | 1.7.1 | |
