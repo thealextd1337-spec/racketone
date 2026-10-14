@@ -4,6 +4,8 @@ Stand: 2026-10-14 · Status: Entwurf v1.0 zur Abstimmung · Spec-Version für Te
 
 Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3 Scoring-Engine](01-architektur.md) · [04 UX](04-ux-design.md) · [Testvektoren](testvectors/README.md)
 
+> **Ergänzung 2026-10-14 – Badminton und Tischtennis:** neu sind §2.4, §2.5, §3.4, §4.4, §4.5, §5.1.1, §6.8, §6.9, §7.4, §8.4 sowie zusätzliche Zeilen in §0, §1, §6.7, §9–§12. Wo bestehende Festlegungen für Tennis/Padel/Pickleball verallgemeinert werden mussten, steht **„(Verallgemeinerung B/TT)“**. Für Tennis, Padel und Pickleball ändert sich dadurch nichts. Alle bestehenden Testvektoren bleiben gültig. **Review-Runde 1 (2026-10-15):** `nextGameFirstServer` und `midGameEndChange` sind an die Sportart gebunden. Sportfremde Felder werden weggelassen, nicht auf `null` gesetzt. Bei B/TT gibt es am Satzende nur dann einen Seitenwechsel, wenn ein weiterer Satz folgt. Die Nutzerentscheidungen U11, U14 und U15 sind eingetragen. **Review-Runde 2 (2026-10-15):** Die Satzende-Regel für Seitenwechsel gilt jetzt für **alle** Sportarten (§6.3, §6.4, §6.6, §6.7, §6.8.1, §8.3): nach Matchende nie, am Satzende nur, wenn ein weiterer Satz folgt. TV-PB-001 Checkpoint 19 ist angepasst.
+
 > **Normativ:** „MUSS“, „DARF NICHT“ und „SOLL“ sind verbindlich für die Kotlin-Engine (`core-scoring`) und den Garmin-Port (Monkey C). Was in diesem Dokument nicht festgelegt ist, gilt als nicht spezifiziert. Ein Entwickler muss es dann klären und darf es nicht selbst erfinden. Im Konfliktfall gelten die Testvektoren in `docs/testvectors/` (später die generierten Golden Files in `testvectors/`).
 
 ---
@@ -19,6 +21,9 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | **Match-Tiebreak** | Ein Tiebreak (meist bis 10), der den Entscheidungssatz ersetzt. In der Engine ist er ein Satz mit `setKind = MATCH_TIEBREAK`. |
 | **Aufschlagseite (court)** | `RIGHT` = rechte Hälfte aus Sicht des Aufschlägers (Einstandsseite / „deuce court“), `LEFT` = linke Hälfte (Vorteilsseite / „ad court“). |
 | **Ende (end)** | Platzhälfte `END_1` / `END_2`. Die Start-Ende wird im Lineup festgelegt, danach bestimmt die Engine die Seitenwechsel. |
+| **Rally-Satz** (B/TT) | Badminton-„Game“ (deutsch: **Satz**) und Tischtennis-**Satz** sind Einheiten aus Rally-Punkten. In der Engine sind sie ein Satz mit `setKind = RALLY_GAME`, der genau ein Spiel mit `gameKind = RALLY_GAME` enthält. Die UI zeigt „Satz“ (EN: Badminton „game“, Tischtennis „game“). Konfiguriert wird er über `config.rally` (§3.1). |
+| **Aufschlagfeld** (Badminton) | `RIGHT`/`LEFT` = rechtes/linkes Aufschlagfeld aus Sicht des Aufschlägers. Der Rückschläger steht diagonal gegenüber, also ebenfalls in **seinem** rechten bzw. linken Feld. |
+| **Aufschlagrecht / Aufschlagwechsel** (B/TT) | Die aufschlagende Side wechselt. Badminton: wenn die Rückschlagseite den Ballwechsel gewinnt. Tischtennis: nach festen Punktzahlen, unabhängig vom Gewinner. Effekt `SIDE_OUT` (§8.3). |
 
 ---
 
@@ -35,8 +40,14 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | Q7 | Selkirk, „2026 USA Pickleball Rulebook Changes“ – <https://www.selkirk.com/blogs/pickleball-education/2026-usa-pickleball-rulebook-changes-key-updates-for-the-new-year> | 2026 | Sekundärquelle: Rally Scoring 2026, Wegfall des „Freeze“ |
 | Q8 | tennis.com, „All Grand Slams to use 10-point tiebreaker at 6-6 in final set“ – <https://www.tennis.com/news/articles/all-grand-slams-to-use-10-point-tiebreaker-in-final-set> | 2022 | Hintergrund; heute als ITF Appendix VI Nr. 5 regulär zulässig |
 | Q9 | NFHS/IHSA, *2024-25 NFHS US Tennis* (Folien) – <https://ihsa.org/Portals/0/2024-25_NFHS_US_Tennis_PowerPoint_Slides_Wide_Format.pdf> | 2024/25 | Pro-Set bis 8, Tiebreak bei 8:8 (**keine ITF-Regel**, US-Konvention) |
+| Q10 | BWF Statutes, Section 4.1 *Laws of Badminton*, „In Force 29/05/2023, Version 2.1“ (PDF-Kopie) – <https://cob.org/wp-content/uploads/Section-4.1-Laws-of-Badminton-29-May-2023-V2.1.pdf>. Offizieller Ort: <https://corporate.bwfbadminton.com/statutes/> | gültig bis 03.01.2027 (laut Q11 in der Fassung 2025) | Laws 7, 8, 10, 11, 12, 16.2 (3×21) |
+| Q11 | *The LAWS of Badminton* („effective 4JAN2027 – until then the 2025 Laws apply“, „adopted by BWF on 25APR2026“) – <https://www.worldbadminton.com/rules/> | ab 04.01.2027 | Laws 7.1–7.6 (3×15), 8.1.3 (Wechsel bei 8), 10, 11, 12, 16.2.1 (Pause bei 8) |
+| Q12 | BWF Statutes, Section 4.1.4 *Alternative Laws of Badminton* – **V2.0, „In Force: 04 January 2027“** (Kopie: <https://ghanabadminton.org/wp-content/uploads/Section-4.1.4-Alternative-Laws-of-Badminton-04-January-2027-V2.0.pdf>) und **V1.0, aktuell** (Kopie: <https://www.badmintonpanam.org/wp-content/uploads/2023/01/1.4-Alternative-Laws-of-Badminton-V1.0.pdf>) | V1.0 bis 03.01.2027, V2.0 ab 04.01.2027 | Alternativsysteme 1×21, 3×15 bzw. 3×21, 5×11 |
+| Q13 | BWF, „BWF Members Approve 3×15 Scoring System“ (25.04.2026) – <https://bwfbadminton.com/news-single/2026/04/25/bwf-members-approve-3x15-scoring-system> · „Key Changes Under the 3×15 Scoring System“ (26.04.2026) – <https://bwfbadminton.com/news-single/2026/04/26/key-changes-under-the-3x15-scoring-system> · USA Badminton, „BWF Approves 3×15 Scoring System“ – <https://usabadminton.org/bwf-approves-3x15-scoring-system/> · Badminton Europe – <https://badmintoneurope.com/w/new-scoring-system-3-x-15> | 04/2026 | Beschluss der 87. AGM (Horsens), Inkrafttreten 04.01.2027, 3×21 bleibt Alternative für nationale Wettbewerbe |
+| Q14 | ITTF, *Laws of Table Tennis* aus den ITTF Statutes 2026, wiedergegeben in Table Tennis England, „The Laws of Table Tennis 2026-27“ (Issue 1, 07/2026) – <https://www.tabletennisengland.co.uk/content/uploads/2026/07/Laws-of-Table-Tennis-2026-27.pdf>. Offiziell: ITTF Handbook/Statutes, <https://documents.ittf.sport/> | 2026 | Laws 2.10–2.15 |
+| Q15 | Wikipedia, „Table tennis“ (Abschnitt Scoring) – <https://en.wikipedia.org/wiki/Table_tennis> · All About Table Tennis, „Rules of Table Tennis“ – <https://www.allabouttabletennis.com/rules-of-table-tennis.html> | – | Hintergrund: 21-Punkte-System bis 2001 (Aufschlagwechsel alle 5 Punkte, ab 20:20 jeder Punkt) |
 
-**Quellenlage:** Q1, Q2 und Q6 wurden im Volltext ausgewertet (PDF → Text), die Regelnummern unten beziehen sich darauf. Q3–Q5 und Q7–Q9 sind Sekundärquellen und dienen nur für Geltungsbereich und Hintergrund.
+**Quellenlage:** Q1, Q2 und Q6 wurden im Volltext ausgewertet (PDF → Text), die Regelnummern unten beziehen sich darauf. Q3–Q5 und Q7–Q9 sind Sekundärquellen und dienen nur für Geltungsbereich und Hintergrund. **Ergänzung B/TT:** Q10, Q12 (beide Fassungen) und Q14 wurden im Volltext ausgewertet. Q11 wurde als HTML-Volltext gelesen. Die BWF-Seiten in Q13 blockieren den automatischen Abruf, ihr Inhalt ist über die USA-Badminton-Seite und Suchauszüge belegt. Die Fassung 2025 der Laws (bis 03.01.2027) lag nicht im Volltext vor. Geprüft wurde die Fassung 2023 V2.1 (Q10). Alle Sekundärquellen nennen für 2025/2026 dieselben Werte (21, 20:20, 29:29, Wechsel und Pause bei 11). Q15 ist Sekundärquelle.
 
 ---
 
@@ -104,6 +115,48 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | Zwischen Spielen | 21.F.2/3 | Seitenwechsel **und** Wechsel des ersten Aufschlags. Teams dürfen ihren Startaufschläger neu wählen. |
 | Aufgabe | 23.A.4 | Abgeschlossene Spiele bleiben. Im laufenden Spiel wird der Ist-Score des Aufgebenden notiert, der Gegner erhält die zum Sieg nötigen Punkte. Nicht gespielte Spiele werden 11-0 / 15-0 / 21-0 gewertet. |
 
+### 2.4 Badminton (BWF Laws of Badminton, Q10–Q13)
+
+**Stand Oktober 2026 – das 3×15-System ist beschlossen:** Die 87. BWF-Hauptversammlung hat am **25.04.2026** in Horsens (DK) das 3×15-System mit der nötigen Zweidrittelmehrheit angenommen. Es gilt **ab Montag, 04.01.2027** als Standard (Q11, Q13). Bis zum 03.01.2027 gelten die Laws in der Fassung 2025, also 3×21 (Q10, Q11). Ab 2027 bleibt **3×21 ein zugelassenes Alternativsystem** (Q12 V2.0), das Verbände, Vereine und Ligen für nationale Wettbewerbe wählen dürfen (Q13). Ein früherer Vorschlag (5×11) war 2021 gescheitert. → Die App bietet **beide Systeme als Presets** an (§4.4).
+
+| Thema | Regel | Inhalt |
+|---|---|---|
+| Match | 7.1 | Best of 3 Sätze („games“), sofern nicht anders vereinbart (Statutes 4.1.3 Handicap, 4.1.4 Alternativen). |
+| Rally Point | 7.3 | Jeder Ballwechsel bringt der gewinnenden Seite einen Punkt, egal wer aufschlägt. |
+| **Satz 3×21** (bis 03.01.2027, danach Alternative) | 7.2, 7.4, 7.5 (Q10) | Bis 21. Bei **20:20** gewinnt, wer zuerst 2 Punkte Vorsprung hat. Bei **29:29** entscheidet der 30. Punkt (**Deckel 30**). |
+| **Satz 3×15** (ab 04.01.2027) | 7.2, 7.4, 7.5 (Q11) | Bis 15. Bei **14:14** gewinnt, wer zuerst 2 Punkte Vorsprung hat. Bei **20:20** entscheidet der 21. Punkt (**Deckel 21**). |
+| Aufschlag im Folgesatz | 7.6, 11.6 | Der **Satzsieger** schlägt im nächsten Satz zuerst auf. Doppel: Jeder Spieler des Siegerpaares darf aufschlagen, jeder des Verliererpaares darf annehmen. |
+| Seitenwechsel | 8.1 | Nach Satz 1, nach Satz 2 (wenn ein 3. Satz folgt) und im 3. Satz, sobald eine Seite zuerst **11** (3×21) bzw. **8** (3×15, 8.1.3 neu) Punkte hat. Ein vergessener Wechsel wird nachgeholt, der Stand bleibt (8.2). |
+| Einzel: Aufschlagfeld | 10.1 | Aufschlag und Annahme aus dem **rechten** Feld, wenn der **Aufschläger** 0 oder eine gerade Punktzahl im Satz hat, sonst aus dem **linken**. |
+| Einzel: Punkt und Aufschlag | 10.3 | Gewinnt der Aufschläger, punktet er und schlägt aus dem anderen Feld erneut auf. Gewinnt der Rückschläger, punktet er und wird Aufschläger. |
+| Doppel: Felder | 11.1 | Die aufschlagende Seite schlägt bei 0/geradem **Team-Score** von rechts auf, bei ungeradem von links (11.1.1/2). Auf der Rückschlagseite bleibt, wer zuletzt aufschlug, in diesem Feld, der Partner im anderen (11.1.3). Rückschläger ist, wer diagonal gegenüber steht (11.1.4). **Die Spieler wechseln ihr Feld nur, wenn ihre Seite bei eigenem Aufschlag punktet** (11.1.5). |
+| Doppel: Punkt und Aufschlag | 11.3 | Gewinnt die aufschlagende Seite, punktet sie und derselbe Aufschläger schlägt aus dem anderen Feld auf. Gewinnt die Rückschlagseite, punktet sie und wird aufschlagende Seite, **ohne Feldwechsel**. Aufschläger ist dann, wer im Feld zum neuen Score steht. Es gibt **keinen „zweiten Aufschläger“** wie beim Pickleball-Side-Out. |
+| Doppel: Aufschlagfolge | 11.4, 11.5 | Erstaufschläger (von rechts) → Partner des Erst-Rückschlägers → Partner des Erstaufschlägers → Erst-Rückschläger → Erstaufschläger … Niemand schlägt oder nimmt außer der Reihe an oder zweimal hintereinander. |
+| Aufschlagfeldfehler | 12 | Aufschlag/Annahme außer der Reihe oder aus dem falschen Feld: korrigieren, **der Stand bleibt**. |
+| Pausen | 16.2 | Bis 60 s, wenn der **führende** Score 11 (3×21) bzw. 8 (3×15, 16.2.1 neu) erreicht, in jedem Satz. Bis 120 s zwischen den Sätzen. Nur UI-Hinweis. |
+| Alternativsysteme | Statutes 4.1.4 (Q12) | Nach Vereinbarung: **(1) ein Satz bis 21**, Seitenwechsel bei 11. **(2) bis 03.01.2027 (V1.0): Best of 3 bis 15** (14:14 → 2 Vorsprung, 20:20 → 21. Punkt, Wechsel und Pause bei 8). **Ab 04.01.2027 (V2.0): Best of 3 bis 21** (20:20 → 2 Vorsprung, 29:29 → 30. Punkt, Wechsel bei 11). **(3) Best of 5 bis 11**: Seitenwechsel nach den Sätzen 1–4 und im 5. Satz bei 6, 60-s-Pause nur im 5. Satz bei 6. Laut Wortlaut („first scores 11 points“) ohne Verlängerung. |
+| Unklarheiten in Q12 V2.0 | – | (a) Für Alternative 2 (3×21) nennt V2.0 die 60-s-Pause „when the leading score reaches 8 points“. Das ist vermutlich ein Redaktionsfehler (erwartet: 11). (b) Für Alternative 1 (1×21) ändert V2.0 nur den Seitenwechsel, damit gälten wörtlich die neuen Basisregeln 7.4/7.5 (14:14, 20:20 → 21. Punkt). → Das Preset nimmt die klassische Verlängerung bis 30 an, siehe §12 U12. |
+| Nicht unterstützt | Statutes 4.1.3 | Handicap-Spiele (Startvorgaben, andere Wechsel- und Pausenregeln) und AirBadminton (eigenes Regelwerk). |
+| Freizeit | – | Üblich sind ein Satz bis 21 oder 15 und Doppel/Mixed nach denselben Regeln. Ein eigenes Regelwerk gibt es nicht. |
+
+### 2.5 Tischtennis (ITTF Laws of Table Tennis 2026, Q14)
+
+| Thema | Regel | Inhalt |
+|---|---|---|
+| Punkt | 2.10 | Jeder Ballwechsel, der kein „Let“ ist, ergibt einen Punkt (Rally Point). |
+| Satz | 2.11.1 | Gewonnen hat, wer zuerst **11** Punkte erreicht. Bei **10:10** gewinnt, wer zuerst 2 Punkte Vorsprung hat. **Kein Deckel.** |
+| Match | 2.12.1 | „Best of any odd number of games“. Üblich sind Best of 5 (Ligen und Mannschaftsspiele, deutsch „3 Gewinnsätze“), Best of 7 (internationale Einzel-Hauptfelder) und Best of 3 (Freizeit, manche Team-Formate). Das ist Konvention, die Laws legen es nicht fest. |
+| Wahl | 2.13.1, 2.13.2 | Per Los wird Aufschlag, Rückschlag oder Seite gewählt. Der andere hat die verbleibende Wahl. |
+| Aufschlagwechsel | 2.13.3 | Nach je **2 Punkten** wird der Rückschläger Aufschläger, **unabhängig davon, wer punktet**. Ab **10:10** (oder unter der Wechselmethode) schlägt jeder nur noch **1 Punkt** auf, die Reihenfolge bleibt. |
+| Doppel: Wahl | 2.13.4 | In jedem Satz wählt das Aufschlagpaar, wer aufschlägt. Im 1. Satz wählt das Rückschlagpaar, wer zuerst annimmt. In späteren Sätzen ist Erst-Rückschläger, **wer dem Erstaufschläger im vorigen Satz aufgeschlagen hat**. |
+| Doppel: Wechsel | 2.13.5 | Bei jedem Aufschlagwechsel wird der bisherige Rückschläger Aufschläger und der Partner des bisherigen Aufschlägers Rückschläger. → Zyklus A1→B1, B1→A2, A2→B2, B2→A1. |
+| Folgesatz, Entscheidungssatz Doppel | 2.13.6 | Wer in einem Satz zuerst aufschlug, nimmt im nächsten Satz zuerst an. **Im letztmöglichen Satz eines Doppels wechselt das Paar, das als Nächstes annimmt, seine Rückschlagreihenfolge, sobald ein Paar 5 Punkte hat.** |
+| Seiten | 2.13.7 | Seitenwechsel nach jedem Satz. Im letztmöglichen Satz zusätzlich, sobald ein Spieler bzw. Paar zuerst **5** Punkte hat. |
+| Fehler in der Reihenfolge | 2.14 | Aufschlag/Annahme außer der Reihe oder falsche Seite: sofort korrigieren, und zwar nach der **zu Matchbeginn festgelegten Folge**. Im Doppel gilt die im laufenden Satz gewählte Aufschlagreihenfolge. **Alle bisherigen Punkte zählen.** |
+| Wechselmethode (Expedite) | 2.15 | Sie greift nach 10 min Spielzeit in einem Satz, aber nicht, wenn schon mindestens 18 Punkte gespielt sind, oder auf Wunsch beider Seiten. Dann schlägt jeder abwechselnd 1 Punkt auf. Schafft das Rückschlagpaar 13 korrekte Rückschläge, punktet der Rückschläger. Die Methode gilt bis Matchende, die Reihenfolge bleibt. **Nur Hinweis, in v1 nicht modelliert** (§9.19). |
+| Pausen, Time-out | ITTF-Wettkampfbestimmungen Kap. 3 | Bis 1 min zwischen den Sätzen, 1 Time-out je Match (nicht im Volltext geprüft). Ohne Zählwirkung. |
+| **Freizeit „bis 21“** (alte Zählweise bis 31.08.2001) | Q15 | Satz bis 21 mit 2 Punkten Vorsprung, Aufschlagwechsel alle **5** Punkte, ab **20:20** nach jedem Punkt. Seit 01.09.2001 gilt der Satz bis 11. Seitenwechsel bzw. Rückschlagwechsel im Entscheidungssatz nach alter Regel bei **10** (nicht aus Primärquelle belegt, §12 U18). |
+
 ---
 
 ## 3. Konfigurationsmodell `MatchFormat`
@@ -116,10 +169,10 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 |---|---|---|---|---|---|
 | `formatVersion` | int | `1` | 1 | alle | Schema-Version. |
 | `presetId` | string? | siehe §4 | null | alle | Nur zur Anzeige und Statistik, **nicht** regelrelevant. |
-| `sport` | enum | `TENNIS`, `PADEL`, `PICKLEBALL` | – | alle | |
+| `sport` | enum | `TENNIS`, `PADEL`, `PICKLEBALL`, `BADMINTON`, `TABLE_TENNIS` | – | alle | `BADMINTON`, `TABLE_TENNIS` neu (Verallgemeinerung B/TT). Kürzel in der Spalte „Sport“: B = Badminton, TT = Tischtennis. |
 | `discipline` | enum | `SINGLES`, `DOUBLES` | Padel: `DOUBLES` | alle | Padel-Einzel ist nicht FIP-offiziell, aber erlaubt. |
 | `match.mode` | enum | `BEST_OF`, `OPEN` | `BEST_OF` | alle | Siehe §5. |
-| `match.bestOf` | int | `1`, `3`, `5` | 3 (PB: 1) | alle | Nur bei `BEST_OF`. Gewinnsätze = (bestOf+1)/2. |
+| `match.bestOf` | int | `1`, `3`, `5`, `7` | 3 (PB: 1, TT: **keiner**) | alle | Nur bei `BEST_OF`. Gewinnsätze = (bestOf+1)/2. `7` nur für `TABLE_TENNIS` (Verallgemeinerung B/TT, Validierung 9). Tischtennis: Der Wizard verlangt eine aktive Auswahl (§5.1.1, U14 entschieden). |
 | `game.deuceMode` | enum | `ADVANTAGE`, `DECIDING_POINT`, `STAR_POINT` | `ADVANTAGE` | T, P | `DECIDING_POINT` = No-Ad (Tennis) bzw. Golden Point (Padel). |
 | `game.maxAdvantages` | int | ≥ 1 | 2 | T, P | Nur bei `STAR_POINT`. Anzahl erlaubter Vorteile vor dem Entscheidungspunkt (FIP 2026: 2). |
 | `set.gamesToWin` | int | 1…12 | 6 | T, P | „Games pro Satz“. Ein Satz ist gewonnen mit ≥ gamesToWin und 2 Spielen Vorsprung oder durch den Tiebreak. |
@@ -139,13 +192,29 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | `pickleball.midGameEndChange` | enum | `DECIDING_GAME_ONLY`, `EVERY_GAME`, `NEVER` | `DECIDING_GAME_ONLY` | PB | USAP 21.B: nur im Einzelspiel-Match bzw. im Entscheidungsspiel. Im `OPEN`-Modus gibt es kein Entscheidungsspiel, dort wirkt nur `EVERY_GAME`. |
 | `pickleball.midGameEndChangeAt` | int? | ≥ 1 / null | null | PB | `null` = ⌈pointsToWin/2⌉ → 11→6, 15→8, 21→11, 7→4. |
 | `pickleball.gameWinningPointOnServeOnly` | bool | | false | PB | Nur `RALLY`: Regel bis 2025 („Freeze“). Gewinnt die Rückschlagseite den Ballwechsel, der ihr das Spiel brächte, gibt es Side Out **ohne** Punkt. 2026 aufgehoben. |
+| `rally.pointsToWin` | int | B: 15, 21, 11 · TT: 11, 21 (frei ≥ 1) | B: 15 · TT: 11 | B, TT | „Punkte pro Satz“ |
+| `rally.winBy` | int | `1`, `2` | 2 | B, TT | Vorsprung. `1` nur Badminton 5×11 (Q12 Alt. 3) |
+| `rally.cap` | int? | > pointsToWin / null | B 21er: 30 · B 15er: 21 · TT: null | B, TT | **Deckel**: Wer `cap` erreicht, gewinnt den Satz (BWF 7.5: 29:29 → 30 bzw. 20:20 → 21). Gleiche Semantik wie `pickleball.pointCap`. |
+| `rally.serveRotation` | enum | `WINNER_SERVES`, `EVERY_N_POINTS` | B: `WINNER_SERVES` · TT: `EVERY_N_POINTS` | B, TT | `WINNER_SERVES`: Wer den Ballwechsel gewinnt, schlägt den nächsten auf (BWF 10.3/11.3). `EVERY_N_POINTS`: Die aufschlagende Side wechselt nach je `serveEvery` Punkten, ab dem Verlängerungsstand nach je `serveEveryAtDeuce` Punkten (ITTF 2.13.3). In v1 ist das Wert-Paar an die Sportart gebunden (Validierung 7). |
+| `rally.serveEvery` | int? | ≥ 1 / null | TT: 2 (21er: 5) | TT | Nur `EVERY_N_POINTS` |
+| `rally.serveEveryAtDeuce` | int? | ≥ 1 / null | TT: 1 | TT | Nur `EVERY_N_POINTS`. Gilt, sobald beide `pointsToWin − 1` haben (10:10 bzw. 20:20). |
+| `rally.nextGameFirstServer` | enum | `GAME_WINNER`, `PREVIOUS_FIRST_RECEIVER` | **durch die Sportart festgelegt:** B: `GAME_WINNER` · TT: `PREVIOUS_FIRST_RECEIVER` | B, TT | Wer den nächsten Satz eröffnet: der Satzsieger (BWF 7.6) bzw. die Side, die im Vorsatz zuerst annahm (ITTF 2.13.6). Ein anderer Wert ist ungültig (Validierung 7, Schema). Das Feld steht nur zur Selbstbeschreibung im JSON und für den Garmin-Port. |
+| `rally.midGameEndChange` | enum | `DECIDING_GAME_ONLY`, `EVERY_GAME`, `NEVER` | `DECIDING_GAME_ONLY` (B/TT: **fest**) | B, TT | Einmaliger Seitenwechsel im Satz. Semantik wie `pickleball.midGameEndChange`. **B/TT: nur `DECIDING_GAME_ONLY` zulässig** (Validierung 7, Nutzerentscheidung U15): Wechsel nur im letzten Satz eines Best-of, im `OPEN`-Modus nie. |
+| `rally.midGameEndChangeAt` | int? | ≥ 1 / null | B 21er: 11 · B 15er: 8 · B 11er: 6 · TT: 5 (21er: 10) | B, TT | Seitenwechsel, sobald **eine** Side diese Punktzahl erreicht. `null` = ⌈pointsToWin/2⌉ (wie PB). **Für TT ist der Wert ausdrücklich zu setzen** (5 ≠ ⌈11/2⌉). |
+| `rally.receiverSwapAtMidGameEndChange` | bool | | TT-Doppel: true, sonst false | TT | Beim Seitenwechsel in der Satzmitte tauscht das Paar, das als Nächstes annimmt, seine Rückschlagreihenfolge (ITTF 2.13.6). Wirkt nur bei `DOUBLES`. |
+| `rally.intervalAt` | int? | ≥ 1 / null | B 21er: 11 · B 15er: 8 · sonst null | B | **Nur UI-Hinweis, keine Regelwirkung:** „Pause bis 60 s“, sobald der führende Score diesen Wert erreicht, in jedem Satz (BWF 16.2.1). |
 
 **Semantische Validierung (MUSS beim Erstellen geprüft werden, Fehler = Format ungültig):**
 
-1. `sport = PICKLEBALL` ⇒ `pickleball` gesetzt, `game`/`set`/`decidingSet` fehlen bzw. sind null. Sonst ⇒ `game` und `set` gesetzt, `pickleball` fehlt.
+1. `sport = PICKLEBALL` ⇒ `pickleball` gesetzt, `game`/`set`/`decidingSet`/`matchTiebreak`/`rally` **fehlen**. `sport ∈ {TENNIS, PADEL}` ⇒ `game` und `set` gesetzt, `pickleball` und `rally` **fehlen**. `sport ∈ {BADMINTON, TABLE_TENNIS}` ⇒ `rally` gesetzt, `game`/`set`/`decidingSet`/`matchTiebreak`/`pickleball` **fehlen**. Sportfremde Felder werden **weggelassen**, ein explizites `null` ist ungültig (das Schema in §3.2 erzwingt es). (Verallgemeinerung B/TT: Bisher hieß es „Sonst ⇒ `game` und `set`“ und für Pickleball „fehlen bzw. sind null“. Kein bestehender Vektor ist betroffen.)
 2. `tiebreakAt = null` oder `tiebreakAt ≥ gamesToWin − 1`. Werte darüber sind erlaubt, z. B. Tiebreak erst bei 12:12.
 3. `match.mode = OPEN` ⇒ `decidingSet` wird ignoriert (soll null sein).
 4. `winBy = 1` im Tiebreak nur zusammen mit `pointsToWin ≤ 7` (Short-Set-Tiebreak). Das ist eine Plausibilitätsregel, die UI warnt nur.
+5. `rally.cap ≠ null` ⇒ `rally.cap > rally.pointsToWin`.
+6. `rally.serveRotation = EVERY_N_POINTS` ⇒ `serveEvery ≥ 1`, `serveEveryAtDeuce ≥ 1`, `winBy = 2`, `cap = null` und `2·(pointsToWin − 1) mod serveEvery = 0` (sonst ist der Wechselpunkt in §6.9.2 nicht eindeutig). `WINNER_SERVES` ⇒ `serveEvery` und `serveEveryAtDeuce` sind null.
+7. Die Sportart legt fest (v1, im Schema erzwungen): `BADMINTON` ⇒ `serveRotation = WINNER_SERVES`, `nextGameFirstServer = GAME_WINNER` (BWF 7.6), `midGameEndChange = DECIDING_GAME_ONLY`. `TABLE_TENNIS` ⇒ `serveRotation = EVERY_N_POINTS`, `nextGameFirstServer = PREVIOUS_FIRST_RECEIVER` (ITTF 2.13.6), `midGameEndChange = DECIDING_GAME_ONLY`. Das Doppel-Aufstellungsmodell (§6.8.3 bzw. §6.9.3) hängt ebenfalls an der Sportart.
+8. `receiverSwapAtMidGameEndChange = true` nur bei `TABLE_TENNIS`, sonst ungültig.
+9. `match.bestOf = 7` nur bei `TABLE_TENNIS`, sonst ungültig.
 
 ### 3.2 JSON-Schema (draft 2020-12)
 
@@ -159,14 +228,14 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
   "properties": {
     "formatVersion": { "const": 1 },
     "presetId": { "type": ["string", "null"] },
-    "sport": { "enum": ["TENNIS", "PADEL", "PICKLEBALL"] },
+    "sport": { "enum": ["TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"] },
     "discipline": { "enum": ["SINGLES", "DOUBLES"] },
     "match": {
       "type": "object",
       "required": ["mode"],
       "properties": {
         "mode": { "enum": ["BEST_OF", "OPEN"] },
-        "bestOf": { "enum": [1, 3, 5] }
+        "bestOf": { "enum": [1, 3, 5, 7] }
       },
       "if": { "properties": { "mode": { "const": "BEST_OF" } } },
       "then": { "required": ["bestOf"] }
@@ -184,11 +253,31 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
       "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/regularSet" }, { "$ref": "#/$defs/matchTiebreak" } ]
     },
     "matchTiebreak": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/matchTiebreak" } ] },
-    "pickleball": { "$ref": "#/$defs/pickleball" }
+    "pickleball": { "$ref": "#/$defs/pickleball" },
+    "rally": { "$ref": "#/$defs/rally" }
   },
-  "if": { "properties": { "sport": { "const": "PICKLEBALL" } } },
-  "then": { "required": ["pickleball"] },
-  "else": { "required": ["game", "set"] },
+  "allOf": [
+    { "if": { "properties": { "sport": { "const": "PICKLEBALL" } } },
+      "then": { "required": ["pickleball"],
+                "not": { "anyOf": [ { "required": ["game"] }, { "required": ["set"] }, { "required": ["decidingSet"] }, { "required": ["matchTiebreak"] }, { "required": ["rally"] } ] },
+                "properties": { "match": { "properties": { "bestOf": { "enum": [1, 3, 5] } } } } } },
+    { "if": { "properties": { "sport": { "enum": ["TENNIS", "PADEL"] } } },
+      "then": { "required": ["game", "set"],
+                "not": { "anyOf": [ { "required": ["pickleball"] }, { "required": ["rally"] } ] },
+                "properties": { "match": { "properties": { "bestOf": { "enum": [1, 3, 5] } } } } } },
+    { "if": { "properties": { "sport": { "enum": ["BADMINTON", "TABLE_TENNIS"] } } },
+      "then": { "required": ["rally"],
+                "not": { "anyOf": [ { "required": ["game"] }, { "required": ["set"] }, { "required": ["decidingSet"] }, { "required": ["matchTiebreak"] }, { "required": ["pickleball"] } ] } } },
+    { "if": { "properties": { "sport": { "const": "BADMINTON" } } },
+      "then": { "properties": {
+                  "match": { "properties": { "bestOf": { "enum": [1, 3, 5] } } },
+                  "rally": { "properties": { "serveRotation": { "const": "WINNER_SERVES" }, "nextGameFirstServer": { "const": "GAME_WINNER" },
+                                             "midGameEndChange": { "const": "DECIDING_GAME_ONLY" }, "receiverSwapAtMidGameEndChange": { "const": false } } } } } },
+    { "if": { "properties": { "sport": { "const": "TABLE_TENNIS" } } },
+      "then": { "properties": {
+                  "rally": { "properties": { "serveRotation": { "const": "EVERY_N_POINTS" }, "nextGameFirstServer": { "const": "PREVIOUS_FIRST_RECEIVER" },
+                                             "midGameEndChange": { "const": "DECIDING_GAME_ONLY" } } } } } }
+  ],
   "$defs": {
     "endChange": {
       "type": "object",
@@ -235,10 +324,31 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
         "midGameEndChangeAt": { "type": ["integer", "null"] },
         "gameWinningPointOnServeOnly": { "type": "boolean", "default": false }
       }
+    },
+    "rally": {
+      "type": "object",
+      "required": ["pointsToWin", "winBy", "cap", "serveRotation", "nextGameFirstServer", "midGameEndChange"],
+      "properties": {
+        "pointsToWin": { "type": "integer", "minimum": 1 },
+        "winBy": { "enum": [1, 2] },
+        "cap": { "type": ["integer", "null"], "minimum": 2 },
+        "serveRotation": { "enum": ["WINNER_SERVES", "EVERY_N_POINTS"] },
+        "serveEvery": { "type": ["integer", "null"], "minimum": 1 },
+        "serveEveryAtDeuce": { "type": ["integer", "null"], "minimum": 1 },
+        "nextGameFirstServer": { "enum": ["GAME_WINNER", "PREVIOUS_FIRST_RECEIVER"] },
+        "midGameEndChange": { "enum": ["DECIDING_GAME_ONLY", "EVERY_GAME", "NEVER"], "default": "DECIDING_GAME_ONLY" },
+        "midGameEndChangeAt": { "type": ["integer", "null"], "minimum": 1 },
+        "receiverSwapAtMidGameEndChange": { "type": "boolean", "default": false },
+        "intervalAt": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "if": { "properties": { "serveRotation": { "const": "EVERY_N_POINTS" } } },
+      "then": { "required": ["serveEvery", "serveEveryAtDeuce"] }
     }
   }
 }
 ```
+
+Das bisherige `if/then/else` für `pickleball` vs. `game`/`set` ist durch das `allOf` ersetzt (Verallgemeinerung B/TT). Neu erzwingt es auch, dass sportfremde Felder fehlen, `bestOf = 7` nur bei Tischtennis vorkommt und die sportgebundenen `rally`-Werte stimmen (Validierung 1, 7, 8 (Badminton), 9). Alle bestehenden Testvektoren bleiben gültig. Die Regeln 5, 6 und 8 (Tischtennis) prüft die Engine semantisch.
 
 ### 3.3 Lineup (Besetzung und Start)
 
@@ -250,6 +360,33 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | `startEnds` | {A: `END_1`/`END_2`} | Startende von A. B steht auf dem anderen Ende. Default `END_1`. |
 
 Metadaten ohne Regelwirkung (Belag, Halle, Ort, Mixed-Kennzeichen) stehen in `MatchCreated.meta` (§10), **nicht** im `MatchFormat`.
+
+**Lineup bei Badminton und Tischtennis (Ergänzung B/TT):**
+
+| Sport | Bedeutung der Array-Reihenfolge `A`/`B` | `receiveRight` |
+|---|---|---|
+| Badminton Doppel | **Startaufstellung jedes Satzes:** Index 0 steht bei Satzbeginn im **rechten**, Index 1 im linken Feld, auf beiden Seiten. Damit ist auf der aufschlagenden Seite Index 0 der Erstaufschläger, auf der Rückschlagseite Index 0 der Erst-Rückschläger. | wird ignoriert |
+| Tischtennis Doppel | Index 0 der aufschlagenden Side = **Erstaufschläger** des Satzes. Im 1. Satz ist Index 0 der Rückschlagseite der **Erst-Rückschläger** (2.13.4). Ab Satz 2 ergibt sich der Erst-Rückschläger aus der Regel (§6.9.3). | wird ignoriert |
+| Einzel (beide) | ein Spieler je Side | wird ignoriert |
+
+`firstServer` und das Umdrehen des Team-Arrays gelten wie oben. Änderungen gibt es nur über `Correction(SERVING_ORDER)` vor dem ersten Ballwechsel eines Satzes (§7.4).
+
+### 3.4 Gemeinsames Rally-Modell und Pickleball (Empfehlung, keine Änderung)
+
+`config.rally` ist bewusst so geschnitten, dass es auch **Pickleball-Rally-Scoring** beschreiben könnte. Die Feldnamen `midGameEndChange`/`midGameEndChangeAt` sind von `pickleball` übernommen:
+
+| Pickleball (`pickleball.*`) | Entspricht in `rally.*` | Unterschied |
+|---|---|---|
+| `scoring = RALLY` | `serveRotation = WINNER_SERVES` | – |
+| `pointsToWin`, `winBy` | `pointsToWin`, `winBy` | – |
+| `pointCap` | `cap` | – |
+| `midGameEndChange`, `midGameEndChangeAt` | gleichnamig | – |
+| Wechsel des ersten Aufschlags zwischen Spielen (21.F.2) | `nextGameFirstServer = PREVIOUS_FIRST_RECEIVER` | – |
+| Doppel-Positionen nach **Team-Score-Parität** (5.B.3): Auch das Rückschlagteam tauscht, wenn es punktet. | – | Badminton tauscht **nur das aufschlagende Paar nach eigenem Aufschlagpunkt** (BWF 11.1.5). Ein vereinheitlichtes Modell braucht ein Feld `positionModel: SCORE_PARITY \| SWAP_ON_SERVE_WIN`. |
+| `scoring = SIDE_OUT`, `firstServiceTurnSingleServer`, `gameWinningPointOnServeOnly` | – | Kein Gegenstück, das bleibt Pickleball-spezifisch. |
+| `setKind = PB_GAME`, 3-Zahlen-Ansage | `setKind = RALLY_GAME` | Unterschiedliche Exportform |
+
+**Empfehlung:** In `formatVersion 1` bleibt `pickleball` unverändert. **Kotlin-intern** sollen Pickleball-Rally, Badminton und Tischtennis aber dieselbe Klasse „Rally-Satz“ nutzen (Punkt → Satzende → Seitenwechsel in der Mitte → Folgesatz) und sich nur in einer kleinen Strategie für Aufschläger und Positionen unterscheiden. Das spart vor allem im Monkey-C-Port Code und Speicher. Eine echte Vereinheitlichung des JSON (`pickleball.scoring = RALLY` → `rally` + `positionModel`) lohnt sich erst mit `formatVersion 2` und einer Migration von TV-PB-001. Entscheidung vor dem Garmin-Port (P4), siehe §12 U20.
 
 ---
 
@@ -302,6 +439,39 @@ Presets sind benannte, vollständig ausgefüllte `MatchFormat`-Objekte. Der Wiza
 | `PICKLEBALL_TEAM_WIN_BY_1` | Team-Play, Sieg mit 1 | DOUBLES | BEST_OF 1 | SIDE_OUT | 11 | 1 | DECIDING_GAME_ONLY | 15.C |
 | `PICKLEBALL_OPEN` | Freies Spiel (Spiel für Spiel) | DOUBLES | OPEN | SIDE_OUT | 11 | 2 | EVERY_GAME (Freizeit-Default, §12) | – |
 
+### 4.4 Badminton
+
+Alle Badminton-Presets haben `serveRotation = WINNER_SERVES`, `serveEvery = serveEveryAtDeuce = null`, `nextGameFirstServer = GAME_WINNER` und `receiverSwapAtMidGameEndChange = false`. Kürzel: **R21** = `{pointsToWin 21, winBy 2, cap 30, midGameEndChangeAt 11, intervalAt 11}`, **R15** = `{pointsToWin 15, winBy 2, cap 21, midGameEndChangeAt 8, intervalAt 8}`.
+
+| presetId | Anzeige | discipline | match | rally | midGameEndChange | Quelle |
+|---|---|---|---|---|---|---|
+| `BADMINTON_SINGLES_BO3_15` | Badminton Einzel 3×15 (BWF ab 2027) | SINGLES | BEST_OF 3 | R15 | DECIDING_GAME_ONLY (→ 8) | Q11 Laws 7, 8.1.3, 16.2.1 |
+| `BADMINTON_DOUBLES_BO3_15` | Badminton Doppel 3×15 (BWF ab 2027) | DOUBLES | BEST_OF 3 | R15 | DECIDING_GAME_ONLY (→ 8) | Q11, Law 11 |
+| `BADMINTON_SINGLES_BO3_21` | Badminton Einzel 3×21 (klassisch) | SINGLES | BEST_OF 3 | R21 | DECIDING_GAME_ONLY (→ 11) | Q10 Laws 7, 8 (bis 03.01.2027) · Q12 V2.0 Alt. 2 (ab 04.01.2027) |
+| `BADMINTON_DOUBLES_BO3_21` | Badminton Doppel 3×21 (klassisch) | DOUBLES | BEST_OF 3 | R21 | DECIDING_GAME_ONLY (→ 11) | Q10 Law 11 · Q12 V2.0 Alt. 2 |
+| `BADMINTON_1GAME_21` | Ein Satz bis 21 | SINGLES/DOUBLES | BEST_OF 1 | R21 | DECIDING_GAME_ONLY (→ 11; bei Best of 1 ist der Satz der Entscheidungssatz) | Q12 Alt. 1 (Deckel 30 angenommen, §12 U12) |
+| `BADMINTON_1GAME_15` | Ein Satz bis 15 (Freizeit) | SINGLES/DOUBLES | BEST_OF 1 | R15 | DECIDING_GAME_ONLY (→ 8) | Freizeit, analog 3×15 (keine BWF-Alternative) |
+| `BADMINTON_BO5_11` | Best of 5 bis 11 | SINGLES/DOUBLES | BEST_OF 5 | `{11, winBy 1, cap null, midGameEndChangeAt 6, intervalAt null}` | DECIDING_GAME_ONLY (→ 6 im 5. Satz) | Q12 Alt. 3 (Pause nur im 5. Satz bei 6 → nur Hinweistext, §12 U17) |
+| `BADMINTON_OPEN` | Badminton Freies Spiel (Satz für Satz) | SINGLES/DOUBLES | OPEN | R15 bzw. R21 (nach Datum, siehe unten) | DECIDING_GAME_ONLY (wirkt in OPEN nie, U15) | – |
+
+**Default (U11, entschieden 2026-10-14):** Der Wizard wählt den Default nach dem **lokalen Datum der Match-Erstellung** (Gerätezeit). **Bis einschließlich 03.01.2027** gilt 3×21 (`BADMINTON_SINGLES_BO3_21` bzw. `…_DOUBLES_BO3_21`, R21). **Ab 04.01.2027** gilt automatisch 3×15 (`…_BO3_15`, R15). Beide Systeme bleiben immer wählbar („Punkte pro Satz: 15 / 21“). Das Datum entscheidet nur über die Vorauswahl. Die Engine sieht ausschließlich das fertige `MatchFormat` in `MatchCreated`, der Fold bleibt deterministisch.
+
+### 4.5 Tischtennis
+
+Alle Tischtennis-Presets haben `serveRotation = EVERY_N_POINTS`, `winBy = 2`, `cap = null`, `nextGameFirstServer = PREVIOUS_FIRST_RECEIVER`, `midGameEndChange = DECIDING_GAME_ONLY`, `intervalAt = null` und `receiverSwapAtMidGameEndChange = (discipline == DOUBLES)`. Kürzel: **T11** = `{pointsToWin 11, serveEvery 2, serveEveryAtDeuce 1, midGameEndChangeAt 5}`, **T21** = `{pointsToWin 21, serveEvery 5, serveEveryAtDeuce 1, midGameEndChangeAt 10}`.
+
+| presetId | Anzeige | discipline | match | rally | Quelle |
+|---|---|---|---|---|---|
+| `TABLE_TENNIS_SINGLES_BO5` | Tischtennis Einzel, 3 Gewinnsätze | SINGLES | BEST_OF 5 | T11 | ITTF 2.11–2.13, Ligaformat |
+| `TABLE_TENNIS_SINGLES_BO7` | Tischtennis Einzel, 4 Gewinnsätze | SINGLES | BEST_OF 7 | T11 | ITTF 2.12.1, internationale Einzel |
+| `TABLE_TENNIS_SINGLES_BO3` | Tischtennis Einzel, 2 Gewinnsätze | SINGLES | BEST_OF 3 | T11 | ITTF 2.12.1, Freizeit |
+| `TABLE_TENNIS_DOUBLES_BO5` | Tischtennis Doppel, 3 Gewinnsätze | DOUBLES | BEST_OF 5 | T11 | ITTF 2.13.4–2.13.6 |
+| `TABLE_TENNIS_DOUBLES_BO3` | Tischtennis Doppel, 2 Gewinnsätze | DOUBLES | BEST_OF 3 | T11 | Freizeit (TV-TT-002) |
+| `TABLE_TENNIS_LEISURE_21` | Tischtennis bis 21 (alte Zählweise) | SINGLES/DOUBLES | BEST_OF 3 | T21 | Q15, alte Regel bis 2001. Wechsel bei 10 nicht aus Primärquelle belegt (§12 U18) |
+| `TABLE_TENNIS_OPEN` | Tischtennis Freies Spiel (Satz für Satz) | SINGLES/DOUBLES | OPEN | T11 | – (kein Wechsel bei 5 im Modus Offen, U15) |
+
+**Kein Default-Preset (U14, entschieden 2026-10-14):** Für Tischtennis gibt der Wizard **keine Satzanzahl vor**, der Nutzer wählt aktiv Best of 3, 5, 7 oder Offen (§5.1.1). Das Preset ergibt sich aus Disziplin, Satzanzahl und Punkten.
+
 ---
 
 ## 5. Match-Erstellung und Satzende-Modi
@@ -320,6 +490,32 @@ Presets sind benannte, vollständig ausgefüllte `MatchFormat`-Objekte. Der Wiza
 
 Abhängige Defaults: Wählt der Nutzer „Games pro Satz = 4“, setzt der Wizard `tiebreakAt = 4`. Wählt er bei Tennis-Doppel „Match-Tiebreak“, schlägt er zusätzlich No-Ad vor, ohne es zu erzwingen.
 
+#### 5.1.1 Wizard für Badminton und Tischtennis
+
+Beide Sportarten haben **keinen Belag-Schritt**, die Zählregeln hängen nicht vom Boden ab (§10). Die Modi `BEST_OF`/`OPEN` gelten wie in §5.2. Im Deutschen heißt die Einheit in beiden Sportarten **„Satz“** (Badminton-„Game“). Gezählt wird in reinen Zahlen.
+
+| Wizard-Schritt | Badminton | Tischtennis | Feld |
+|---|---|---|---|
+| 1 Sportart | Default-Preset nach Erstellungsdatum: bis 03.01.2027 `BADMINTON_SINGLES_BO3_21`, ab 04.01.2027 `BADMINTON_SINGLES_BO3_15` (§4.4) | **kein** Default-Preset, es ergibt sich erst aus Schritt 3–5 (§4.5) | `sport` |
+| 2 Umgebung (statt Belag) | optional „Halle/Draußen“, Default Halle | entfällt | `meta.environment` (§10) |
+| 3 Mitspieler/Gegner | 1 oder 2 je Seite. Bei Doppel: Mixed-Schalter. Danach Erstaufschläger, **Startaufstellung** (wer rechts steht, auf beiden Seiten) und Startende. | 1 oder 2 je Seite. Bei Doppel: Erstaufschläger **und Erst-Rückschläger**, dann Startende. | `discipline`, `lineup` (§3.3) |
+| 4 „Sätze“ | „Best of“ 1 / **3** / Offen (5 nur zusammen mit 11 Punkten) | Best of 3 / 5 / 7 / Offen, **ohne Vorauswahl: Pflichtauswahl**, „Weiter“ erst danach aktiv. Anzeige z. B. „Best of 5 (3 Gewinnsätze)“ | `match.mode`, `match.bestOf` |
+| 5 „Punkte pro Satz“ | 15 / 21, vorausgewählt nach Datum (§4.4). 11 nur unter „Erweitert“ | **11** / 21 („alte Zählweise“) | `rally.pointsToWin` + abhängige Felder (unten) |
+| „Erweitert“ (eingeklappt) | Anzeige von Verlängerung, Deckel und Seitenwechsel im letzten Satz (nur lesend, nicht abschaltbar, U15) | Anzeige von Aufschlagwechsel und Seitenwechsel bei 5 im letzten Satz (nur lesend) | übrige `rally`-Felder |
+| Start | | | `MatchCreated(config, lineup, meta)` |
+
+Nach Matchende im Modus `BEST_OF` fragt die App wie bei allen Sportarten „Noch eins in gleicher Besetzung?“. „Ja“ erzeugt ein verknüpftes Folge-Match (§5.2). Im Modus Offen kommt die Frage „Noch ein Satz?“ nach **jedem** Satz (`ASK_ANOTHER_SET`).
+
+Abhängige Defaults bei „Punkte pro Satz“:
+
+| Sport, Punkte | `winBy` | `cap` | `serveEvery`/`AtDeuce` | `midGameEndChangeAt` | `intervalAt` |
+|---|---|---|---|---|---|
+| Badminton 21 | 2 | 30 | – | 11 | 11 |
+| Badminton 15 | 2 | 21 | – | 8 | 8 |
+| Badminton 11 (nur Best of 5) | 1 | null | – | 6 | null |
+| Tischtennis 11 | 2 | null | 2 / 1 | 5 | null |
+| Tischtennis 21 | 2 | null | 5 / 1 | 10 | null |
+
 ### 5.2 Zwei Modi für „Noch ein Satz?“
 
 | | **`BEST_OF` (fest)** | **`OPEN` (offen, Satz für Satz)** |
@@ -331,7 +527,7 @@ Abhängige Defaults: Wählt der Nutzer „Games pro Satz = 4“, setzt der Wizar
 | Sieger | wer die Gewinnsätze erreicht | mehr gewonnene Sätze. Gleichstand → `result.reason = DRAW`, `winner = null` |
 | Nach Matchende | App fragt „Noch ein Satz in gleicher Besetzung?“. „Ja“ erzeugt ein **neues, verknüpftes Match** (`previousMatchId`, gleiche Lineup und Satzformat, `mode = OPEN`). Den Erstaufschläger liefert `state.continuation` (siehe unten). Das ergänzt ein Best-of (z. B. 3. Satz nach 2:0) ohne die Wertung zu verfälschen (wie 01-architektur §3.4). | Match ist beendet |
 
-`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei Pickleball zusätzlich der Startaufschläger. Die Testvektoren prüfen das Feld noch nicht.
+`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei Pickleball zusätzlich der Startaufschläger. Badminton/Tischtennis: nach `rally.nextGameFirstServer` (§6.8.1), `player` = Index 0 der Side. Die Testvektoren prüfen das Feld noch nicht.
 
 Ablauf im Satzende-Dialog (OPEN):
 
@@ -389,22 +585,31 @@ isDecidingSet = mode == BEST_OF && setsWon[A] == setsWon[B] == setsToWin - 1
 
 gameWon(X):                                       // Standardspiel oder Tiebreak
   g[X] += 1
-  if (odd(g[A] + g[B])) changeEnds()              // §6.7
-  if gameKind == TIEBREAK || (g[X] >= sf.gamesToWin && g[X] - g[other(X)] >= 2): setWon(X)
+  setEnds = gameKind == TIEBREAK || (g[X] >= sf.gamesToWin && g[X] - g[other(X)] >= 2)
+  if odd(g[A] + g[B]):
+    if setEnds: pendingEndChange = true           // §6.7: erst beim Start des nächsten Satzes
+    else:       changeEnds()
+  if setEnds: setWon(X)
   else if sf.tiebreakAt != null && g[A] == g[B] == sf.tiebreakAt: startTiebreak()
   else: startStandardGame()
 ```
 
-Ein Satz mit `decidingSet.kind = MATCH_TIEBREAK` besteht nur aus diesem einen Tiebreak.
+Ein Satz mit `decidingSet.kind = MATCH_TIEBREAK` besteht nur aus diesem einen Tiebreak. Er zählt als ein Spiel (1:0), sein Ende setzt also `pendingEndChange = true`.
 
 ### 6.4 Match
 
 ```
 setWon(X):
   append sets[] record; setsWon[X] += 1
-  BEST_OF: if setsWon[X] == (bestOf+1)/2 → FINISHED(winner X, COMPLETED) else startSet(REGULAR or decidingSet)
-  OPEN:    → AWAITING_DECISION (pending ASK_ANOTHER_SET)
+  BEST_OF: if setsWon[X] == (bestOf+1)/2 → FINISHED(winner X, COMPLETED)   // pendingEndChange verfällt: kein Wechsel
+           else startSet(REGULAR or decidingSet)
+  OPEN:    → AWAITING_DECISION (pending ASK_ANOTHER_SET)                    // pendingEndChange bleibt bis zur Antwort
+
+startSet(...):                                    // automatisch (BEST_OF) oder durch ContinueDecision(true) (OPEN)
+  if pendingEndChange: changeEnds(); pendingEndChange = false               // §6.7, gilt für alle Sportarten
 ```
+
+`ContinueDecision(false)` und `MatchEnded` lassen `pendingEndChange` verfallen, die Seiten bleiben, wie sie sind. Undo stellt den Merker über den Fold wieder her.
 
 ### 6.5 Aufschlag (Tennis/Padel)
 
@@ -474,7 +679,7 @@ nach jedem Punkt:
   if (p[X] >= pointsToWin && p[X] - p[other] >= winBy) || (pointCap && p[X] >= pointCap): gameWon(X)
   else if midChangeApplies && !midChangeDone && max(p[A], p[B]) >= midAt: changeEnds(); midChangeDone = true
 
-gameWon(X): changeEnds() (21.F.2); setWon(X) [§6.4]; nächstes Spiel: startGame(other(firstSide des Vorspiels))
+gameWon(X): pendingEndChange = true (21.F.2, angewendet erst beim Start des nächsten Spiels, §6.4/§6.7); setWon(X) [§6.4]; nächstes Spiel: startGame(other(firstSide des Vorspiels))
 midChangeApplies = EVERY_GAME || (DECIDING_GAME_ONLY && mode == BEST_OF && (bestOf == 1 || isDecidingSet))
 ```
 
@@ -486,11 +691,129 @@ Hinweise: Beim Second Server bleibt die Position unverändert. Er schlägt von d
 
 | Sport | Regel | Pause-Hinweis (nur UI, Tennis R29) |
 |---|---|---|
-| Tennis/Padel | nach jedem Spiel, nach dem `g[A]+g[B]` des **laufenden Satzes** ungerade ist (inkl. Tiebreak als Spiel, inkl. letztem Spiel des Satzes). Das deckt die Satzende-Regel aus R10 vollständig ab. | Nach Spiel 1 eines Satzes: Wechsel **ohne** Pause. Sonst 90 s. Satzende: 120 s Satzpause. |
+| Tennis/Padel | nach jedem Spiel, nach dem `g[A]+g[B]` des **laufenden Satzes** ungerade ist (inkl. Tiebreak als Spiel). Ist es das letzte Spiel des Satzes, gilt die Satzende-Regel unten: Wechsel nur, wenn ein weiterer Satz folgt. Das deckt R10 vollständig ab. | Nach Spiel 1 eines Satzes: Wechsel **ohne** Pause. Sonst 90 s. Satzende: 120 s Satzpause. |
 | Tennis/Padel Tiebreak | laut `endChange` (Standard alle 6 Punkte), nur wenn der Tiebreak weitergeht | Wechsel ohne Pause |
-| Pickleball | nach jedem Spiel (21.F.2) und einmal im Spiel bei `midAt` (21.B) | 21.B.5: max. 1 min; zwischen Spielen max. 2 min |
+| Pickleball | nach jedem Spiel, **auf das ein weiteres folgt** (21.F.2), und einmal im Spiel bei `midAt` (21.B) | 21.B.5: max. 1 min; zwischen Spielen max. 2 min |
+| Badminton | nach jedem Satz, **auf den ein weiterer folgt** (BWF 8.1.1/8.1.2), und im letzten Satz eines Best-of einmal, sobald eine Side `midAt` erreicht (8.1.3: 11 bei 3×21, 8 bei 3×15) | 16.2.1: bis 60 s, sobald der führende Score `rally.intervalAt` erreicht (jeder Satz). 16.2.2: bis 120 s zwischen den Sätzen |
+| Tischtennis | nach jedem Satz, **auf den ein weiterer folgt**, und im letztmöglichen Satz einmal bei 5 (ITTF 2.13.7). Im Doppel tauscht dabei das nächste Rückschlagpaar seine Reihenfolge (2.13.6, §6.9.3) | bis 1 min zwischen den Sätzen (Wettkampfbestimmungen) |
 
-Die Engine wendet Seitenwechsel **auch nach dem letzten Punkt eines Matches** an, wenn die Regel greift (Determinismus). Die UI zeigt den Hinweis `CHANGE_ENDS` bei `status = FINISHED` nicht an.
+**Satzende-Regel (normativ, alle Sportarten; Review-Runde 2, 2026-10-15):** Ein Seitenwechsel, der durch das **Ende eines Satzes bzw. Spiels** fällig wird, wird nicht sofort angewendet. Gemeint sind: Tennis/Padel bei ungerader Spielsumme (auch Match-Tiebreak = 1 Spiel), Pickleball nach jedem Spiel, Badminton/Tischtennis nach jedem Satz. Die Engine merkt ihn als `pendingEndChange` vor und wendet ihn erst beim **Start des nächsten Satzes** an (§6.4 `startSet`):
+
+- `BEST_OF` ohne Matchende: sofort im selben Event. Die Effekte enthalten `CHANGE_ENDS` und `SET_STARTED`.
+- `OPEN`: erst mit `ContinueDecision(anotherSet = true)`, Effekte `CHANGE_ENDS` und `SET_STARTED`. Bei `AWAITING_DECISION` stehen die Seiten noch wie beim Satzball.
+- **Nach Matchende gibt es in keiner Sportart einen Seitenwechsel und keinen `CHANGE_ENDS`-Effekt.** Das gilt für das reguläre Ende (`BEST_OF`), für `ContinueDecision(false)` und für `MatchEnded`.
+
+Wechsel **innerhalb** eines Satzes bleiben unverändert sofort wirksam: Tennis/Padel nach ungeraden Spielen und im Tiebreak, Pickleball, Badminton und Tischtennis in der Spielmitte. Grundlage: ITF R10 (Satzende nur, wenn weitergespielt wird), FIP R5, USAP 21.F.2 („between games“), BWF 8.1.2 („if there is to be a third game“), ITTF 2.13.7 („in the next game“). Prüffälle: TV-TEN-001 (Satzende 7:6, Wechsel beim Start von Satz 2), TV-PB-001, TV-BAD-003 und TV-TT-002 (jeweils kein Wechsel am Matchende). Dies ersetzt die frühere Festlegung „Seitenwechsel auch nach dem letzten Punkt eines Matches“.
+
+### 6.8 Rally-Satz: gemeinsamer Rahmen und Badminton
+
+#### 6.8.1 Gemeinsamer Rahmen (Badminton und Tischtennis)
+
+Zustand je Satz: `p[A], p[B]`, `gameFirst` (Side, die den Satz eröffnet), `midDone`, dazu der sportspezifische Aufschlagzustand (§6.8.2, §6.8.3, §6.9). `r = config.rally`.
+
+```
+startRallySet(F):                                        // F = eröffnende Side
+  p = 0:0; gameFirst = F; midDone = false; sportStart(F)  // §6.8.2/6.8.3 bzw. §6.9.3
+
+on PointWon(X):
+  before = serveSide()
+  p[X] += 1                                              // Rally Point: jeder Ballwechsel zählt (BWF 7.3, ITTF 2.10)
+  sportStep(X)                                           // Aufschlagzustand fortschreiben (nur Badminton)
+  if (p[X] >= r.pointsToWin && p[X] - p[other(X)] >= r.winBy) || (r.cap != null && p[X] >= r.cap):
+      rallySetWon(X); return
+  if midApplies && !midDone && max(p[A], p[B]) >= midAt:
+      changeEnds(); midDone = true
+      if DOUBLES && r.receiverSwapAtMidGameEndChange: swapReceivingPair()     // nur TT, §6.9.3
+  if serveSide() != before: effect SIDE_OUT              // nur solange der Satz weiterläuft
+
+rallySetWon(X):
+  sets += {kind: RALLY_GAME, games: null, tiebreak: null, points: {A: p[A], B: p[B]}, winner: X}
+  pendingEndChange = true                                // BWF 8.1.1/8.1.2, ITTF 2.13.7: Wechsel nur, wenn ein weiterer Satz folgt (§6.7)
+  setWon(X) [§6.4]                                       // Matchende (kein Wechsel), AWAITING_DECISION oder nächster Satz
+
+nächster Satz (BEST_OF sofort, OPEN bei ContinueDecision(true); startSet wendet pendingEndChange an, §6.4):
+  startRallySet(sport == BADMINTON ? X : other(gameFirst))   // BWF 7.6 Satzsieger / ITTF 2.13.6 bisheriger Erst-Rückschläger
+                                                         // = r.nextGameFirstServer (durch die Sportart festgelegt, Validierung 7)
+
+midAt      = r.midGameEndChangeAt ?? ⌈r.pointsToWin / 2⌉
+midApplies = EVERY_GAME || (DECIDING_GAME_ONLY && mode == BEST_OF && isDecidingSet)   // wie §6.6; Best of 1 ⇒ Entscheidungssatz
+```
+
+- **Satzende vor Seitenwechsel:** Ein Punkt, der den Satz beendet, löst keinen Wechsel in der Mitte aus. Bei allen Presets gilt `midAt < pointsToWin`, deshalb tritt der Fall nicht auf.
+- **Deckel:** Bei `p[A] = p[B] = cap − 1` entscheidet der nächste Punkt (BWF 7.5). Die Engine braucht dafür keine Sonderlogik, `current.decidingPoint` zeigt es an (§8).
+- **`ContinueDecision(nextSetKind = MATCH_TIEBREAK)`** ist bei Badminton/Tischtennis immer ungültig (`matchTiebreak` fehlt). Es gilt die Regel aus §7.
+- **Ansage `scoreCall`:** `"{p[S]}-{p[other(S)]}"`, Score des Aufschlägers zuerst (Schiedsrichter-Konvention bei BWF und ITTF). Beispiel: Badminton 3:1, B schlägt auf → `"1-3"`.
+
+#### 6.8.2 Badminton Einzel
+
+```
+sportStart(F):  S = F
+serveSide()  = S
+court        = p[S] even ? RIGHT : LEFT                  // 10.1.1/10.1.2: Score des AUFSCHLÄGERS
+server       = order[S][0];  receiver = order[other(S)][0]
+sportStep(X):  if X != S: S = X                          // 10.3.2; bei X == S schlägt er aus dem anderen Feld auf (10.3.1)
+```
+
+`positions` = `{X: {RIGHT: order[X][0], LEFT: null}}` (wie Pickleball-Einzel). Die tatsächliche Seite ergibt sich aus `serve.court`.
+
+#### 6.8.3 Badminton Doppel
+
+```
+sportStart(F):  S = F; pos[X] = {RIGHT: order[X][0], LEFT: order[X][1]} für X ∈ {A, B}   // Startaufstellung (§3.3)
+serveSide()  = S
+court        = p[S] even ? RIGHT : LEFT                  // 11.1.1/11.1.2: TEAM-Score der aufschlagenden Seite
+server       = pos[S][court]                             // 11.1.6
+receiver     = pos[other(S)][court]                      // 11.1.4: diagonal = gleiches Feld aus eigener Sicht
+sportStep(X):
+  if X == S: swap(pos[S].RIGHT, pos[S].LEFT)             // 11.3.1: derselbe Aufschläger, anderes Feld; Partner tauscht mit
+  else:      S = X                                       // 11.3.2 + 11.1.5: Aufschlagrecht wechselt, NIEMAND wechselt das Feld
+```
+
+Daraus folgt ohne weitere Regel die Folge aus Law 11.4: Erstaufschläger → Partner des Erst-Rückschlägers → Partner des Erstaufschlägers → Erst-Rückschläger → Erstaufschläger (Prüffall TV-BAD-002, Checkpoints 1–6). Es gibt **keinen zweiten Aufschläger** und kein `serverNumber` (`null`). Bei jedem Satzbeginn gilt wieder die Startaufstellung aus `order` (Default: Lineup-Reihenfolge). Die Spieler dürfen laut 11.6 frei wählen, also ändert die UI die Aufstellung per `Correction(SERVING_ORDER)` vor dem ersten Ballwechsel (§7.4). Ein Hinweis „Aufstellung ändern?“ erscheint zu Satzbeginn, analog U2.
+
+### 6.9 Tischtennis
+
+#### 6.9.1 Punkt, Satz, Match
+
+Wie §6.8.1 mit `cap = null` und `winBy = 2` (ITTF 2.11.1). Das Match ist Best of `bestOf` (2.12.1). Der nächste Satz wird **normativ** von `other(gameFirst)` eröffnet (ITTF 2.13.6), unabhängig vom Satzsieger. `rally.nextGameFirstServer` ist für Tischtennis fest `PREVIOUS_FIRST_RECEIVER` (Validierung 7, Schema). Es gibt kein `sportStep`, der Aufschlag hängt nur von der Punktsumme ab.
+
+#### 6.9.2 Aufschlagwechsel
+
+```
+k     = p[A] + p[B]                                      // gespielte Punkte im Satz = Index des nächsten Ballwechsels
+n     = r.serveEvery (2);  m = r.serveEveryAtDeuce (1)
+d     = 2 · (r.pointsToWin − 1)                          // 20 bei Satz bis 11, 40 bei Satz bis 21
+slot  = k < d ? k / n : d / n + (k − d) / m              // Nummer der Aufschlagfolge im Satz (0-basiert)
+serveSide()      = slot even ? gameFirst : other(gameFirst)
+servesRemaining  = k < d ? n − (k mod n) : m − ((k − d) mod m)    // 2 oder 1 (Anzeige „2. Aufschlag“)
+Einzel: server = order[serveSide][0]; receiver = order[other(serveSide)][0]
+```
+
+`k ≥ d` ist bei laufendem Satz gleichbedeutend mit „beide haben mindestens `pointsToWin − 1`“ (10:10), denn bei `winBy = 2` wäre z. B. 11:9 schon beendet. Die Rotation hängt **nicht** davon ab, wer punktet (2.13.3), und auch nicht vom Seitenwechsel. Prüffall: TV-TT-001.
+
+#### 6.9.3 Tischtennis Doppel
+
+Die vier Spieler bilden einen **Zyklus** `c[0..3]`. Aufschläger und Rückschläger der Aufschlagfolge `slot`:
+
+```
+server   = c[slot mod 4];  receiver = c[(slot + 1) mod 4]          // 2.13.5: Rückschläger wird Aufschläger,
+                                                                   //         Partner des Aufschlägers wird Rückschläger
+Satz 1:   c = [order[S][0], order[R][0], order[S][1], order[R][1]]  // S = gameFirst, R = other(S); 2.13.4
+Satz n≥2: x = order[S][0]                                           // Aufschlagpaar wählt (Default Index 0)
+          y = Vorgänger von x im Zyklus c' am Ende des Vorsatzes    // „wer ihm im Vorsatz aufschlug“ (2.13.4)
+          c = [x, y, partner(x), partner(y)]
+
+swapReceivingPair():                                               // Entscheidungssatz, sobald ein Paar 5 hat (2.13.6)
+  s = slot(k) nach dem auslösenden Punkt
+  tausche c[(s + 1) mod 4] und c[(s + 3) mod 4]                    // = die beiden Spieler des Paares, das als Nächstes annimmt
+```
+
+- Gerade Indizes von `c` gehören immer zu `gameFirst`, ungerade zur anderen Side. Deshalb passt `serveSide()` aus §6.9.2 zu `c`.
+- Beispiel Satz 1 mit `c = [A1, B1, A2, B2]`: A1→B1, B1→A2, A2→B2, B2→A1. Satz 2 (B eröffnet, x = B1, der Vorgänger von B1 ist A1): `c = [B1, A1, B2, A2]`. Satz 3 (A eröffnet, x = A1, Vorgänger B1): `c = [A1, B1, A2, B2]`.
+- Wechsel im Entscheidungssatz: Schlägt bei 5:2 gerade B2 auf A1 auf (`s = 3`), wird `c[0]` mit `c[2]` getauscht. B2 schlägt danach auf **A2** auf, und die Folge läuft mit dem neuen Zyklus weiter (TV-TT-002, Checkpoint 29). Undo des 5. Punktes nimmt Seitenwechsel und Tausch zurück, weil der Fold neu rechnet.
+- Der Zyklus am Satzende ist nur für den Folgesatz relevant. Nach einem Entscheidungssatz gibt es keinen Folgesatz, im `OPEN`-Modus gibt es keinen Tausch. Deshalb verändert der Tausch nie einen späteren Satz.
+- `serve.court = null`: Im Tischtennis-Doppel wird immer von der rechten Hälfte diagonal aufgeschlagen, ein Feldwechsel ist nicht anzuzeigen. `positions = null`.
+- **Wechselmethode (2.15)** ist nicht modelliert (§9.19).
 
 ---
 
@@ -523,7 +846,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 
 | Feld | Werte | Konsistenzregel (bei Verstoß: Detail wird für Statistik verworfen, Score unberührt) |
 |---|---|---|
-| `kind` | `ACE`, `SERVICE_WINNER`, `DOUBLE_FAULT`, `WINNER`, `FORCED_ERROR`, `UNFORCED_ERROR`, `SERVICE_FAULT` (PB) | `ACE`/`SERVICE_WINNER` ⇒ `side` = aufschlagende Side. `DOUBLE_FAULT` (T/P) ⇒ `side` = Rückschlagseite. `WINNER` ⇒ `by` gehört zu `side`. `*_ERROR` ⇒ `by` gehört zu `other(side)`. |
+| `kind` | `ACE`, `SERVICE_WINNER`, `DOUBLE_FAULT`, `WINNER`, `FORCED_ERROR`, `UNFORCED_ERROR`, `SERVICE_FAULT` (PB) | `ACE`/`SERVICE_WINNER` ⇒ `side` = aufschlagende Side. `DOUBLE_FAULT` (T/P) ⇒ `side` = Rückschlagseite. `WINNER` ⇒ `by` gehört zu `side`. `*_ERROR` ⇒ `by` gehört zu `other(side)`. **Badminton/TT** (Verallgemeinerung B/TT): `SERVICE_FAULT` ist auch dort erlaubt (Aufschlagfehler ⇒ `side` = Rückschlagseite). `DOUBLE_FAULT` und `secondServe` sind ungültig, weil es nur einen Aufschlagversuch gibt. |
 | `by` | Spieler-ID? | Verursacher. Optional, bei ACE/DF ist es der Aufschläger. |
 | `secondServe` | bool? | Punkt wurde mit dem 2. Aufschlag gespielt (Tennis/Padel). Grundlage für die 1.-Aufschlag-Quote. |
 
@@ -538,6 +861,17 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 
 **UI-Undo** (Taste/Wischgeste) erzeugt `Undo(target)` auf das letzte wirksame Event vom Typ `PointWon`, `ContinueDecision`, `Correction` oder `MatchEnded`. Mehrfaches Drücken geht schrittweise zurück, auch über Spiel-, Satz- und Matchgrenzen.
 
+### 7.4 `Correction` bei Badminton und Tischtennis (Ergänzung B/TT)
+
+Die Event-Typen bleiben gleich, nur die Wirkung ist sportspezifisch. Grundsatz beider Regelwerke: Fehler in Reihenfolge oder Feld werden korrigiert, **der Stand bleibt** (BWF 12.2, ITTF 2.14.3).
+
+| `kind` | Badminton | Tischtennis | Gültig wenn |
+|---|---|---|---|
+| `INITIAL_SERVER` | wie §7.1 (rückwirkend) | wie §7.1 (rückwirkend) | wie §7.1 |
+| `SERVER` (`player`, neu optional `receiver`) | `S = side(player)`. Doppel: steht `player` nicht im Feld `court(p[S])`, wird `pos[S]` getauscht. Ab dann gilt §6.8.3. | `gameFirst` wird so gesetzt, dass `serveSide() = side(player)`. Doppel: neuer Zyklus mit `c[slot mod 4] = player` und `c[(slot+1) mod 4] = receiver`. Ohne `receiver` bleibt der bisherige Rückschläger, falls er zur Gegenseite gehört, sonst `order[other][0]`. Die übrigen zwei Plätze bekommen die Partner. | `status ∈ {IN_PROGRESS, PAUSED}` |
+| `SERVING_ORDER` (`side`, `players[]`) | Neue Startaufstellung `order[side]` (Index 0 = bei Satzbeginn rechts), wird sofort auf `pos[side]` angewendet | Aufschlagseite: `players[0]` = Erstaufschläger. Rückschlagseite **nur im 1. Satz**: `players[0]` = Erst-Rückschläger. Ab Satz 2 ist die Rückschlagfolge durch 2.13.4 festgelegt, das Event wird übersprungen (`ignoredEvents`). Der Zyklus wird nach §6.9.3 neu gebildet. | Im laufenden Satz wurde noch kein Ballwechsel gespielt |
+| `RECEIVE_POSITIONS` (`side`, `rightPlayer`) | Doppel: `rightPlayer` steht ab sofort im rechten Feld (`pos[side]` ggf. tauschen), Law 12 | nicht anwendbar → übersprungen (stattdessen `SERVER` mit `receiver`) | Badminton-Doppel, `status ∈ {IN_PROGRESS, PAUSED}` |
+
 ---
 
 ## 8. Zustandsmodell (kanonische Form)
@@ -550,20 +884,20 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 | `pending` | enum? | `ASK_ANOTHER_SET` bei `AWAITING_DECISION`, sonst `null` |
 | `result` | object? | `{winner: A\|B\|null, reason: COMPLETED\|DRAW\|RETIRED\|WALKOVER\|ABANDONED}`, solange nicht beendet `null` |
 | `setsWon` | {A,B} | Gewonnene Sätze (Pickleball: gewonnene Spiele) |
-| `sets` | array | Abgeschlossene Sätze: `{kind: REGULAR\|MATCH_TIEBREAK\|PB_GAME, games: {A,B}\|null, tiebreak: {A,B}\|null, points: {A,B}\|null, winner}` |
+| `sets` | array | Abgeschlossene Sätze: `{kind: REGULAR\|MATCH_TIEBREAK\|PB_GAME\|RALLY_GAME, games: {A,B}\|null, tiebreak: {A,B}\|null, points: {A,B}\|null, winner}`. `RALLY_GAME` (B/TT): `games = tiebreak = null`, `points` = Endstand (Verallgemeinerung B/TT) |
 | `current` | object? | Laufender Satz/Spiel, `null` bei `AWAITING_DECISION` und bei `FINISHED/COMPLETED`. Bei `RETIRED/WALKOVER/ABANDONED` **eingefroren** (letzter Stand). |
 | `current.setIndex` | int | 0-basiert = Anzahl abgeschlossener Sätze |
-| `current.setKind` | enum | `REGULAR`, `MATCH_TIEBREAK`, `PB_GAME` |
-| `current.gameKind` | enum | `STANDARD`, `TIEBREAK`, `MATCH_TIEBREAK`, `RALLY_GAME` (PB) |
-| `current.games` | {A,B}? | Spiele im Satz (PB: `null`) |
+| `current.setKind` | enum | `REGULAR`, `MATCH_TIEBREAK`, `PB_GAME`, `RALLY_GAME` (B/TT, Verallgemeinerung B/TT) |
+| `current.gameKind` | enum | `STANDARD`, `TIEBREAK`, `MATCH_TIEBREAK`, `RALLY_GAME` (PB, B, TT) |
+| `current.games` | {A,B}? | Spiele im Satz (PB, B, TT: `null`) |
 | `current.points` | {A,B} | Rohpunkte (Standardspiel: Anzahl gewonnener Punkte, z. B. 5:5 beim Star Point) |
 | `current.display` | {A,B} strings | siehe 8.1 |
-| `current.callout` | enum? | `DEUCE`, `ADVANTAGE_SERVER`, `ADVANTAGE_RECEIVER`, `DECIDING_POINT`, `STAR_POINT`, sonst `null` |
-| `current.deuceCount` | int? | Standardspiel: `max(0, min(p[A], p[B]) − 2)` = Nummer des erreichten Einstands (Star Point: „Einstand 1/2/3“). Tiebreak: 0. PB: `null`. |
-| `current.decidingPoint` | bool? | Der nächste Punkt entscheidet das Spiel (Golden/No-Ad/Star Point). PB: `null`. |
-| `serve` | object? | `{side, player, court: RIGHT\|LEFT\|RECEIVER_CHOICE, serverNumber: 1\|2\|null, receiver: id\|null}`. `null`, wenn `current = null` oder eingefroren. |
-| `scoreCall` | string? | Tennis/Padel: `"{display[S]}-{display[R]}"` (Aufschläger zuerst, z. B. `"AD-40"`, `"6-5"`). PB siehe §6.6. |
-| `positions` | object? | Nur Pickleball: `{A: {RIGHT, LEFT}, B: {RIGHT, LEFT}}` (Einzel: `LEFT = null`), sonst `null` |
+| `current.callout` | enum? | `DEUCE`, `ADVANTAGE_SERVER`, `ADVANTAGE_RECEIVER`, `DECIDING_POINT`, `STAR_POINT`, sonst `null`. **B/TT** (Verallgemeinerung B/TT): `DECIDING_POINT`, wenn `decidingPoint = true`. Sonst `DEUCE` („Verlängerung“), wenn `p[A] = p[B] ≥ pointsToWin − 1` und `winBy = 2`. Sonst `null`. PB: immer `null`. |
+| `current.deuceCount` | int? | Standardspiel: `max(0, min(p[A], p[B]) − 2)` = Nummer des erreichten Einstands (Star Point: „Einstand 1/2/3“). Tiebreak: 0. PB, B, TT: `null`. |
+| `current.decidingPoint` | bool? | Der nächste Punkt entscheidet das Spiel (Golden/No-Ad/Star Point). PB: `null`. **B/TT:** `p[A] = p[B]` und (`cap ≠ null` und `p[A] = cap − 1`, also 29:29 bzw. 20:20) oder (`winBy = 1` und `p[A] = pointsToWin − 1`). Für TT ist das immer `false`. |
+| `serve` | object? | `{side, player, court: RIGHT\|LEFT\|RECEIVER_CHOICE\|null, serverNumber: 1\|2\|null, receiver: id\|null, servesRemaining: int\|null}`. `null`, wenn `current = null` oder eingefroren. **Verallgemeinerung B/TT:** `court = null` bei Tischtennis. Neuer Schlüssel `servesRemaining` = verbleibende Aufschläge der laufenden Aufschlagfolge inklusive des nächsten (TT: 2 oder 1), bei allen anderen Sportarten `null`. Der Schlüssel ist additiv, bestehende Vektoren prüfen ihn nicht. |
+| `scoreCall` | string? | Tennis/Padel: `"{display[S]}-{display[R]}"` (Aufschläger zuerst, z. B. `"AD-40"`, `"6-5"`). PB siehe §6.6. B/TT: `"{p[S]}-{p[R]}"` (§6.8.1). |
+| `positions` | object? | Pickleball **und Badminton** (Verallgemeinerung B/TT): `{A: {RIGHT, LEFT}, B: {RIGHT, LEFT}}` (Einzel: `LEFT = null`), sonst `null`. Badminton-Doppel: aktuelle Felder laut §6.8.3. |
 | `ends` | {A,B} | `END_1`/`END_2` |
 | `statusFlags` | array | siehe 8.2 |
 | `effects` | array | siehe 8.3 |
@@ -579,6 +913,7 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 | beide ≥ 3, gleich, Entscheidungspunkt | `"40"`/`"40"` | `DECIDING_POINT` (Advantage/No-Ad/Golden) bzw. `STAR_POINT` (deuceMode STAR_POINT) |
 | beide ≥ 3, Differenz 1 | Führender `"AD"`, anderer `"40"` | `ADVANTAGE_SERVER` / `ADVANTAGE_RECEIVER` |
 | Tiebreak / Match-Tiebreak / Pickleball | Dezimalzahl der Rohpunkte | null |
+| Badminton / Tischtennis | Dezimalzahl der Rohpunkte, z. B. `"29"` | `DEUCE` / `DECIDING_POINT` / null (§8, `current.callout`) |
 
 Die Engine liefert `"0"`, nicht „Love“. Lokalisierte Texte („Einstand“, „Vorteil Aufschläger“, „Golden Point“, „Star Point“, „Einstand 2“) erzeugt die UI aus `callout` und `deuceCount`.
 
@@ -589,38 +924,55 @@ Normative Definition per **Was-wäre-wenn**: Für jede Side X (Reihenfolge A, da
 | Ergebnis der Simulation | `level` |
 |---|---|
 | Match endet mit Sieger X (nur `BEST_OF`) | `MATCH_POINT` |
-| sonst: laufender Satz endet mit Sieger X | `SET_POINT` (bei Pickleball = Spielball des Pickleball-Games) |
+| sonst: laufender Satz endet mit Sieger X | `SET_POINT` (bei Pickleball = Spielball des Pickleball-Games, bei Badminton/TT = Satzball) |
 | sonst: laufendes Standardspiel endet mit Sieger X | `GAME_POINT` |
 | sonst | kein Flag für X |
 
 Weitere Felder je Flag:
 
-- `breakPoint` = `sport ≠ PICKLEBALL && gameKind == STANDARD && X ≠ aufschlagende Side`. Ein Satzball als Rückschläger hat `level = SET_POINT, breakPoint = true`.
+- `breakPoint` = `sport ∈ {TENNIS, PADEL} && gameKind == STANDARD && X ≠ aufschlagende Side` (Verallgemeinerung B/TT: bisher `sport ≠ PICKLEBALL`, für T/P/PB gleichwertig; B/TT haben nie `breakPoint = true`). Ein Satzball als Rückschläger hat `level = SET_POINT, breakPoint = true`.
 - `count` = `p[X] − p[other(X)]`, wenn `p[X] > p[other(X)]`, sonst `1` (Entscheidungspunkt). Das entspricht der üblichen Ansage, z. B. 0:40 → „3 Breakbälle“, Pickleball 10-1 → 9.
 - Beim Entscheidungspunkt (Golden/Star/No-Ad) haben **beide** Sides ein Flag.
 - Pickleball Side-Out: Die Rückschlagseite kann nicht punkten und bekommt daher nie ein Flag (die Simulation liefert keinen Punkt).
+- Badminton/TT: Da jeder Ballwechsel zählt, hat auch die Rückschlagseite Flags (z. B. TT 10:9 mit Aufschlag des Gegners). Beim Deckel (29:29 bzw. 20:20) haben **beide** Sides ein Flag mit `count = 1`. Satzbälle zählen wie im Pickleball nach Vorsprung: Badminton 20:15 → „5 Satzbälle“, TT 10:0 → „10 Satzbälle“.
 
 Watch-Anzeige (Hinweis-Pill, 04-ux): `callout ∈ {DECIDING_POINT, STAR_POINT}` hat Vorrang („Golden Point“/„Star Point“), dann das höchste `level` der eigenen bzw. der Gegner-Side: Matchball > Satzball > Breakball (GAME_POINT + breakPoint) > Spielball. Bei `count > 1` lautet der Text „3 Satzbälle“.
 
 ### 8.3 `effects` (Übergänge durch das letzte Event, für Haptik und Toasts)
 
 Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
-`RESUMED, POINT, SECOND_SERVER, SIDE_OUT, GAME_WON, SET_WON, MATCH_WON, MATCH_DRAWN, MATCH_ENDED, CHANGE_ENDS, TIEBREAK_STARTED, SET_STARTED, ASK_ANOTHER_SET, PAUSED, UNDONE, IGNORED`
+`RESUMED, POINT, SECOND_SERVER, SIDE_OUT, GAME_WON, SET_WON, MATCH_WON, MATCH_DRAWN, MATCH_ENDED, CHANGE_ENDS, RECEIVE_ORDER_SWAPPED, TIEBREAK_STARTED, SET_STARTED, ASK_ANOTHER_SET, PAUSED, UNDONE, IGNORED`
+(`RECEIVE_ORDER_SWAPPED` neu, Verallgemeinerung B/TT)
 
 | Effekt | Auslöser |
 |---|---|
-| `POINT` | Tennis/Padel: jedes `PointWon`. PB: Punkt wurde vergeben. |
-| `SECOND_SERVER` / `SIDE_OUT` | PB: Aufschlagwechsel innerhalb des Teams / zur anderen Side |
+| `POINT` | Tennis/Padel/B/TT: jedes `PointWon`. PB: Punkt wurde vergeben. |
+| `SECOND_SERVER` / `SIDE_OUT` | PB: Aufschlagwechsel innerhalb des Teams / zur anderen Side. B/TT: `SIDE_OUT` = aufschlagende Side hat gewechselt und der Satz läuft weiter (nicht beim Satzende), `SECOND_SERVER` kommt nicht vor. |
 | `GAME_WON` | Tennis/Padel: Spiel oder Tiebreak gewonnen (nicht bei PB) |
 | `SET_WON` | Satz / Match-Tiebreak / Pickleball-Spiel gewonnen |
 | `MATCH_WON` / `MATCH_DRAWN` | reguläres Matchende / OPEN mit Gleichstand |
 | `MATCH_ENDED` | `MatchEnded` angewendet |
-| `CHANGE_ENDS` | `ends` hat sich geändert |
+| `CHANGE_ENDS` | `ends` hat sich geändert. Nie nach Matchende, am Satzende erst mit dem Start des nächsten Satzes (§6.7) |
+| `RECEIVE_ORDER_SWAPPED` | TT-Doppel: Das nächste Rückschlagpaar hat im Entscheidungssatz seine Reihenfolge getauscht (§6.9.3) |
 | `TIEBREAK_STARTED` | Satz-Tiebreak beginnt |
 | `SET_STARTED` | neuer Satz begonnen (automatisch bei BEST_OF oder durch `ContinueDecision(true)`) |
 | `ASK_ANOTHER_SET` | OPEN: Satzende-Frage |
 | `PAUSED` / `RESUMED` | Unterbrechung |
 | `UNDONE` / `IGNORED` | §7.3 |
+
+### 8.4 Anzeige Badminton und Tischtennis (Watch und Handy)
+
+Alles lässt sich aus der kanonischen Form ableiten, die Engine liefert keine eigenen Anzeigetexte.
+
+| Element | Badminton | Tischtennis | Quelle im Zustand |
+|---|---|---|---|
+| Spielstand | reine Zahlen je Side, groß; darunter die Satzstände (z. B. „21:19 · 18:21“) | wie Badminton (z. B. „11:9 · 13:11“) | `current.display`, `sets[].points`, `setsWon` |
+| Aufschlag-Indikator | Federball-Symbol an der aufschlagenden Side plus **„R“/„L“** (Aufschlagfeld). Doppel: „A2 → B1“ (Aufschläger → Rückschläger) und kleine Feldskizze aus `positions` | Ball-Symbol an der aufschlagenden Side plus **zwei bzw. ein Punkt** für die verbleibenden Aufschläge. Doppel: „A2 → B1“ | `serve.side`, `serve.court`, `serve.player`, `serve.receiver`, `servesRemaining`, `positions` |
+| Hinweis-Pill (Vorrang von oben) | „Entscheidungspunkt“ (29:29 bzw. 20:20) › Matchball › Satzball › „Verlängerung“ | Matchball › Satzball › „Verlängerung · Aufschlagwechsel jeder Punkt“ | `callout`, `statusFlags` (Text „3 Satzbälle“ bei `count > 1`) |
+| Toast/Haptik | „Seitenwechsel“ (`CHANGE_ENDS`), „Aufschlagwechsel“ (`SIDE_OUT`, optional), „Pause bis 60 s“, wenn `max(p) = intervalAt` neu erreicht wird | „Seitenwechsel“, im Doppel-Entscheidungssatz zusätzlich „Rückschlagreihenfolge wechseln“ (`RECEIVE_ORDER_SWAPPED`), „Aufschlagwechsel“ (`SIDE_OUT`) | `effects`, `current.points` |
+| Ansage (optional, Sprachausgabe) | `scoreCall`, z. B. „1-3“ | `scoreCall` | `scoreCall` |
+
+Begriffe: DE „Satz“, „Satzball“, „Matchball“, „Verlängerung“ in beiden Sportarten. EN in beiden Sportarten „game“, „game point“, „match point“, „deuce“ (umgangssprachlich, die Laws kennen keinen eigenen Begriff).
 
 ---
 
@@ -642,6 +994,15 @@ Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
 | 9.12 | **Seitenwechsel vergessen** | Für den Score irrelevant (R27b, FIP 5.3, PB 21.B.7). Die Engine-Seiten sind die Soll-Seiten, eine Korrektur gibt es nicht. |
 | 9.13 | **Pickleball-Timeouts, Ballwechsel (Tennis)** | Nicht modelliert, weil ohne Score-Wirkung. Pickleball-Timeouts können später als Info-Event folgen. |
 | 9.14 | **Pickleball Rally vor 2026 („Freeze“)** | Über `gameWinningPointOnServeOnly = true`. Kein Preset, nur unter „Erweitert“. |
+| 9.15 | **Badminton-Deckel (29:29 bzw. 20:20)** | `callout = DECIDING_POINT`, `decidingPoint = true`, beide Sides haben Satz- bzw. Matchball mit `count = 1`. Der Satz endet 30:29 bzw. 21:20 (TV-BAD-001, TV-BAD-003). |
+| 9.16 | **Badminton: falscher Aufschläger oder falsches Feld (Law 12)** | Der Stand bleibt. Falscher Aufschläger: `Correction(SERVER)`. Falsche Aufstellung im Doppel: `Correction(RECEIVE_POSITIONS)` für die betroffene Side, sofort wirksam (§7.4). Zu Satzbeginn: `Correction(SERVING_ORDER)`. |
+| 9.17 | **Badminton/TT: Seitenwechsel in der Satzmitte vergessen** | Für den Score irrelevant (BWF 8.2, ITTF 2.14.2). Die Engine-Seiten sind die Soll-Seiten. |
+| 9.18 | **TT: Aufschlag/Annahme außer der Reihe (2.14.1)** | Die Engine berechnet die Soll-Folge immer aus Satzbeginn und Punktsumme. Hat der Nutzer den Erstaufschläger falsch erfasst: `Correction(INITIAL_SERVER)` (rückwirkend) bzw. `Correction(SERVER, receiver)` ab jetzt. Alle Punkte zählen (2.14.3). |
+| 9.19 | **TT-Wechselmethode (Expedite, 2.15)** | **Nicht modelliert in v1.** In Freizeit und Liga ist sie selten. Unter der Wechselmethode schlägt jeder abwechselnd **1** Punkt auf, bis Matchende. Die Engine zeigt dann einen falschen Aufschläger. Workaround: `Correction(SERVER)` je Wechsel. Kandidat für später: Event `ExpediteStarted` und `servesRemaining = 1` bis Matchende (§12 U16). Die 13-Rückschläge-Regel zählt die App nicht. |
+| 9.20 | **TT-Doppel: Undo über den Wechsel bei 5** | Der Fold nimmt Seitenwechsel und Rückschlagtausch zusammen zurück. Erreicht danach die andere Seite zuerst 5, tauscht das dann nächste Rückschlagpaar (TV-TT-002). |
+| 9.21 | **B/TT im `OPEN`-Modus** | Es gibt keinen Entscheidungssatz, daher nie einen Seitenwechsel in der Satzmitte und keinen TT-Rückschlagtausch (U15 entschieden). Satzende → `ASK_ANOTHER_SET` wie bei Tennis. Der Seitenwechsel am Satzende kommt erst mit `ContinueDecision(true)` (§6.7). |
+| 9.22 | **B/TT Aufgabe** | Wie 9.2, `current` wird eingefroren. Exportanzeige z. B. „21:15 · 9:4 Aufg.“. |
+| 9.23 | **Badminton-Handicap, AirBadminton, TT-Time-outs** | Nicht modelliert. Time-outs haben keine Zählwirkung. |
 
 ---
 
@@ -660,6 +1021,8 @@ Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
 | `venue` | string? | Freitext |
 
 Abweichung zum Backend-Entwurf (03, `surface ... 'indoor_hard','indoor_other'`): Empfehlung `surface` + `environment` getrennt, siehe §12.
+
+**Badminton und Tischtennis (Ergänzung B/TT):** BWF und ITTF machen die Zählweise ebenfalls nicht vom Boden abhängig. Der Wizard fragt keinen Belag ab, `surface` bleibt `null` (optional `WOOD`/`OTHER` für Statistik-Fans, nur unter „Erweitert“). Badminton fragt optional `environment` ab (Default `INDOOR`; draußen = Freizeit, Wind). Tischtennis braucht kein `environment`. `mixed` gilt im Badminton-Doppel nur als Kennzeichen, eine Regelwirkung gibt es nicht.
 
 ---
 
@@ -692,6 +1055,13 @@ Basis: Die Engine liefert zu jedem wirksamen `PointWon` den Zustand **vor** dem 
 | Pickleball Rally: Punkte bei Aufschlag / Rückschlag | wie Tennis |
 | Zeiten | Netto-Matchdauer (ohne `Paused`), Satzdauer, Ø Zeit zwischen Punkten (Näherung für Ballwechsel plus Pause, Ausreißer > 120 s verwerfen), längstes Spiel |
 | Belag/Format-Aggregation | alles oben je `meta.surface`, `environment`, `presetId` |
+| **B/TT: Punkte bei eigenem / gegnerischem Aufschlag** | Gewinnquote je Rolle, im Doppel auch je Spieler (`serve.player`, `serve.receiver`). Im TT eine der wichtigsten Kennzahlen („Aufschlagpunkte“). |
+| **TT: Punkte je Aufschlagfolge** | Punkte von X aus den 2er-Folgen des eigenen Aufschlags: Verteilung 0/1/2 je Folge, „2 von 2“-Quote |
+| **Badminton: Aufschlag zurückgeholt** | Anteil der Ballwechsel als Rückschlagseite, die X gewinnt (wie Pickleball-Side-Out-Quote) |
+| **Badminton: längste Aufschlagserie** | Meiste Punkte am Stück mit eigenem Aufschlag (Rally Point: Wer punktet, schlägt weiter auf) |
+| **B/TT: Verlängerungen und Deckel** | Sätze mit `callout = DEUCE` gespielt/gewonnen, Sätze mit `decidingPoint = true` (29:29 bzw. 20:20) gespielt/gewonnen. TT: Gewinnquote der Punkte ab 10:10 |
+| **B/TT: Satz- und Matchbälle** | erspielt, verwertet, abgewehrt (wie Tennis, §11.1). „Satzbälle in Folge abgewehrt“ (z. B. 10:5 → 10:10) |
+| **B/TT: Satzverlauf** | Führungswechsel, größte Führung, Comeback nach Punkten (wie PB). Badminton: Stand bei der Pause (11 bzw. 8) gegen Satzergebnis |
 
 ### 11.2 Optionale erweiterte Eingaben (`PointDetail`)
 
@@ -702,6 +1072,7 @@ Basis: Die Engine liefert zu jedem wirksamen `PointWon` den Zustand **vor** dem 
 | 2. Aufschlag | 1.-Aufschlag-Quote, Punkte nach 1./2. Aufschlag | **Eingeschränkt.** Ein Tap vor dem Punkt („2. Aufschlag“) ist ein zusätzlicher Schritt pro Fehlaufschlag, nur als Opt-in. Empfehlung: Handy oder Nicht-Spieler als Zähler. |
 | Winner / Unforced Error / Forced Error | Winner/UE-Bilanz | **Nein** (live). Das braucht Spieler- und Kategorieauswahl. Nur am Handy, als Zuschauer-Zähler oder nachträglich per `PointDetailSet`. |
 | Pickleball `SERVICE_FAULT` | Aufschlagfehler-Quote | Optional per Long-Press auf die Rückschlagseite (analog Doppelfehler) |
+| Badminton/TT `ACE` / `SERVICE_FAULT` | Direkte Aufschlagpunkte, Aufschlagfehler-Quote (TT: wichtig, Badminton: selten) | Wie Pickleball: Long-Press auf die Hälfte der aufschlagenden Side = `ACE`, auf die Rückschlagseite = `SERVICE_FAULT` |
 
 **Empfehlung:** Auf der Uhr gilt immer nur 1 Tap = 1 Punkt. Als Opt-in kommen Ass und Doppelfehler per Long-Press dazu (eine Geste, eindeutig, mit eigener Haptik). Alles Weitere gibt es nur am Handy oder nachträglich. Die Kennzahlen aus §11.1 kommen ohne jede Zusatzeingabe aus.
 
@@ -721,3 +1092,13 @@ Basis: Die Engine liefert zu jedem wirksamen `PointWon` den Zustand **vor** dem 
 | U8 | Golden-Point-/No-Ad-Hinweis im Mixed („gleichgeschlechtlich returniert“) anzeigen? Dafür braucht es `meta.mixed`. | Ja, nur wenn `mixed = true`. |
 | U9 | Pickleball „Point Cap“ (Freizeit) und Sieg mit 1 Punkt: im Wizard sichtbar oder nur unter „Erweitert“? | Nur unter „Erweitert“. |
 | U10 | Sollen Ass/Doppelfehler per Long-Press auf der Uhr in P1 kommen oder erst P3? | P3 (Event-Feld ist ab P1 im Schema vorhanden). |
+| U11 | Badminton-Default: 3×15 oder 3×21? | **Entschieden (2026-10-14):** 3×21 bis einschließlich 03.01.2027, ab 04.01.2027 automatisch 3×15. Stichtag ist das lokale Datum der Match-Erstellung, beide Systeme sind immer wählbar (§4.4, §5.1.1). |
+| U12 | Badminton „ein Satz bis 21“ ab 2027: Laut Wortlaut von Q12 V2.0 gälten die neuen Basisregeln (Deckel bei 20:20 → 21). Gemeint ist vermutlich weiter 20:20 → 2 Vorsprung, Deckel 30. | Deckel 30 (wie bisher). Bei einer BWF-Klarstellung anpassen. |
+| U13 | Badminton-Doppel: Startaufstellung jedes Satzes = Lineup-Reihenfolge (Default) oder die Felder vom Ende des Vorsatzes übernehmen? | Lineup-Reihenfolge plus Hinweis „Aufstellung ändern?“ zu Satzbeginn (wie U2). |
+| U14 | Tischtennis-Default für die Satzanzahl? | **Entschieden (2026-10-14):** kein Default. Der Wizard verlangt eine aktive Auswahl (Best of 3/5/7 oder Offen). Nach Matchende (`BEST_OF`) kommt „Noch eins in gleicher Besetzung?“ (verknüpftes Folge-Match), im Modus Offen die Frage nach jedem Satz (§5.1.1). |
+| U15 | Seitenwechsel in der Satzmitte bei B/TT? | **Entschieden (2026-10-14):** nur im letzten Satz eines Best-of (TT bei 5, Badminton bei 11 bzw. 8), im Modus Offen nie. `midGameEndChange` ist für B/TT fest `DECIDING_GAME_ONLY` (Validierung 7), es gibt keine Option unter „Erweitert“. |
+| U16 | TT-Wechselmethode (Expedite) modellieren? | Nein in v1 (§9.19). Später ein Event `ExpediteStarted`, falls Liga-Nutzer es wünschen. |
+| U17 | Badminton 5×11: wörtlich ohne Verlängerung (11:10 gewinnt)? | Ja, wie Q12 (`winBy 1`). Nur unter „Erweitert“, nicht im Standard-Wizard. |
+| U18 | Tischtennis „bis 21“: Seitenwechsel und Doppel-Rückschlagtausch im Entscheidungssatz bei 10? Das ist nicht aus einer Primärquelle belegt (alte ITTF-Regeln vor 2001). | 10 übernehmen, als „alte Zählweise (Freizeit)“ gekennzeichnet. |
+| U19 | Badminton-Pausenhinweis bei 11 bzw. 8 (60 s) auf der Uhr mit Haptik? | Ja, dezent (eine kurze Vibration, Toast „Pause bis 60 s“), abschaltbar. |
+| U20 | Pickleball-Rally in das gemeinsame `rally`-Modell überführen (§3.4)? | Kotlin-intern ja (eine Rally-Satz-Klasse). JSON-Vereinheitlichung erst mit `formatVersion 2`, Entscheidung vor P4 (Garmin). |

@@ -20,7 +20,7 @@ Dieser Plan fasst die Fachdokumente zusammen und löst ihre Widersprüche auf. B
 
 **Ein Match – auf Handy und Uhr gleichwertig gezählt, für alle Mitspieler sauber festgehalten, mit der eigenen Belastung im Verlauf.**
 
-- Tennis, Padel, Pickleball · Einzel und Doppel · alle offiziellen Regelvarianten 2026 als getestete Presets
+- Tennis, Padel, Pickleball, Badminton, Tischtennis · Einzel und Doppel · alle offiziellen Regelvarianten 2026 als getestete Presets (Regeln: [02](02-scoring-regeln.md) §2.1–2.5)
 - Schritt-für-Schritt-Assistent **plus Schnellstart** („Wie letztes Mal“, Favoriten-Besetzungen)
 - Zählen auf Apple Watch, Wear OS, Garmin **und** Handy – gleichzeitig, live, offline-fest, mit Undo über Satzgrenzen
 - Nach dem Satz: „Noch ein Satz in gleicher Besetzung?“
@@ -156,7 +156,7 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 | F7 | „Noch ein Satz?“ → Modi wie in K3 | ja, Standard = *Offen* |
 | F8 | Action Button der Ultra im Match | **Undo** (sicher) – einstellbar |
 | F9 | Uhr-Layout | oben = Wir, unten = Gegner (umschaltbar) |
-| F10 | Pickleball-Farbe | Pink (Alternative Violett) |
+| F10 | Sportfarben | Pickleball Pink · **Badminton Violett #A78BFA** · **Tischtennis Smaragd #34D399** (wie auf der Website) |
 | F11 | Vorteil-Anzeige im Deutschen | „AD“ |
 | F12 | Matches standardmäßig mit Freunden teilen? | Nein, Abfrage im Onboarding |
 | F13 | Mindestalter | 16 (Jugendmodus später) |
