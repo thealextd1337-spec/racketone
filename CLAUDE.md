@@ -56,6 +56,9 @@ Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `
 2. Abhängigkeiten nur entlang des Graphen oben (01 §2.2). Keine Zyklen, keine Abkürzungen (z. B. `ui-phone` → `data` direkt ist verboten).
 3. `umbrella-watch` enthält **nichts** von Ktor, supabase-kt, Compose oder Koin (Größenbudget watchOS-Framework).
 4. Die Swift-API der Frameworks bleibt klein (Facade-Objekte/-Funktionen in den umbrella-Modulen).
+   `AdvantlyKit` (iOS) nutzt SKIE. **`AdvantlyWatchKit` (watchOS) nutzt KEIN SKIE** (bricht beim watchOS-Fat-Framework,
+   Abweichung von 01 §0 E3): an dieser Grenze nur String/Int/Long/Boolean, einfache Klassen/Objekte und Listen –
+   keine Flows, suspend-Funktionen, sealed-Hierarchien oder Generics; Asynchrones über Callback-Interfaces.
 5. Versionen **nur** in `gradle/libs.versions.toml`. Kotlin, SKIE und Compose Multiplatform nur gemeinsam anheben.
 6. Neues Modul: in `settings.gradle.kts` eintragen und ein Convention Plugin verwenden – keine eigene Target-/SDK-Konfiguration im Modul.
 

@@ -99,14 +99,17 @@ jobs:
       - name: Simulatoren wählen
         id: sim
         run: python3 .github/scripts/pick_simulators.py >> "$GITHUB_OUTPUT"
-      - name: Kotlin/Native-Tests (iosSimulatorArm64, watchosSimulatorArm64)
+      # Tests in eigenen Steps VOR dem XCFramework-Build, damit ihr Ergebnis separat sichtbar ist
+      - name: Kotlin/Native-Tests iOS-Simulator (iosSimulatorArm64Test)
         env:
           IOS_SIM: ${{ steps.sim.outputs.ios }}
+        run: ./gradlew iosSimulatorArm64Test --continue -Padvantly.simulator.ios="$IOS_SIM"
+      - name: Kotlin/Native-Tests watchOS-Simulator (watchosSimulatorArm64Test)
+        # läuft auch, wenn die iOS-Tests rot sind – beide Ergebnisse sollen sichtbar sein
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        env:
           WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
-        run: >-
-          ./gradlew iosSimulatorArm64Test watchosSimulatorArm64Test --continue
-          -Padvantly.simulator.ios="$IOS_SIM"
-          -Padvantly.simulator.watchos="$WATCHOS_SIM"
+        run: ./gradlew watchosSimulatorArm64Test --continue -Padvantly.simulator.watchos="$WATCHOS_SIM"
       - name: XCFrameworks + Version.xcconfig erzeugen
         run: >-
           ./gradlew

@@ -90,7 +90,7 @@ Gradle 9.7.1 + AGP 9.4.1 bauen ebenfalls grün, liegen aber außerhalb dieser Ma
 | Kotlin | 2.4.20 | 2.4.21 existiert, SKIE 0.10.15 ist aber nur für 2.4.20 freigegeben |
 | Android Gradle Plugin | 9.3.1 | Doc: 9.4.0. Kotlin 2.4.20 unterstützt offiziell AGP 8.5.2–9.3.1; AGP 9.3 kann bereits compileSdk 37 |
 | Compose Multiplatform | 1.12.1 | Material 3 für CMP separat versioniert: 1.9.0 (Zuordnung aus dem CMP-Plugin) |
-| SKIE | 0.10.15 | |
+| SKIE | 0.10.15 | Nur in `umbrella-ios`. **Abweichung von 01 §0 E3:** `umbrella-watch` ohne SKIE, weil SKIE beim watchOS-Fat-Framework (`watchosArm64` + `watchosDeviceArm64`) abbricht (fehlendes `AdvantlyWatchKit-Swift.h`); die Watch-Facade nutzt nur einfache Typen |
 | Wear Compose (Material 3) | 1.7.1 | |
 | kotlinx-serialization / -coroutines | 1.11.0 / 1.11.0 | |
 | androidx.activity | 1.13.0 | |

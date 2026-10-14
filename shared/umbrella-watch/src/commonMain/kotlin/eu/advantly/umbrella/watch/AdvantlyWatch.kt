@@ -6,6 +6,8 @@ import eu.advantly.device.link.DeviceLinkInfo
 
 /**
  * Öffentliche Swift-API von `AdvantlyWatchKit` – bewusst klein halten (Facade).
+ * Ohne SKIE exportiert: nur einfache Typen an der Grenze (String, Int, Long, Boolean, Listen, einfache Klassen);
+ * keine Flows, suspend-Funktionen, sealed-Hierarchien oder Generics. Asynchrones später über Callback-Interfaces.
  * Liefert nur Daten, keine UI-Texte: Lokalisierung passiert auf der Swift-Seite (`watchApp/en.lproj`, `watchApp/de.lproj`).
  * Swift: `AdvantlyWatch.shared.engineModule()`.
  */

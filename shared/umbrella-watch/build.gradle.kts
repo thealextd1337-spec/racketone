@@ -3,9 +3,13 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 // XCFramework "AdvantlyWatchKit" für die watchOS-App: nur Engine, Protokoll, lokaler Store, Transport.
 // KEIN Ktor, supabase-kt, Compose oder Koin (Größenbudget < 8 MB pro Slice, siehe 01 §2.3).
 // Bauen (nur macOS): ./gradlew :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
+//
+// Bewusst OHNE SKIE (Abweichung von 01 §0 E3): SKIE 0.10.15 bricht beim Fat-Framework aus
+// watchosArm64 + watchosDeviceArm64 ab (fehlendes AdvantlyWatchKit-Swift.h, CI-Lauf 38644146968).
+// Die Swift-Grenze bleibt deshalb schlicht: nur String/Int/Long/Boolean, einfache Klassen/Objekte und
+// Listen – keine Flows, suspend-Funktionen, sealed-Hierarchien oder Generics in der öffentlichen API.
 plugins {
     alias(libs.plugins.advantly.kmp.base)
-    alias(libs.plugins.skie)
 }
 
 kotlin {
