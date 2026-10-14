@@ -1,5 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="wear_ready">Bereit zum Zählen</string>
     <string name="wear_version">Version %1$s</string>
+
+    <!-- Spike S5: Workout-Laufzeit -->
+    <string name="setup_title">Workout-Test (S5)</string>
+    <string name="sport_tennis">Tennis</string>
+    <string name="sport_badminton">Badminton</string>
+    <string name="sport_table_tennis">Tischtennis</string>
+    <string name="exercise_type_workout">Training</string>
+    <string name="exercise_type_native">Uhr-Typ: %1$s (nativ)</string>
+    <string name="exercise_type_fallback">Uhr-Typ: %1$s (Ersatz)</string>
+    <string name="exercise_type_unsupported">Kein Trainingstyp unterstützt – Zählen ohne Puls</string>
+    <string name="exercise_type_loading">Prüfe Fähigkeiten der Uhr…</string>
+    <string name="action_start">Match starten</string>
+    <string name="permission_rationale">Für den Feldtest werden Puls und Schritte aufgezeichnet. Die Daten bleiben auf der Uhr.</string>
+    <string name="permission_missing">Berechtigungen fehlen – Puls evtl. nicht verfügbar</string>
+    <string name="gesture_hint">Tippen oben: Wir · unten: Gegner · nach unten wischen: Rückgängig · nach links: Menü</string>
+    <string name="label_us">WIR</string>
+    <string name="label_them">GEGNER</string>
+    <string name="undo_toast">Rückgängig: %1$s → %2$s</string>
+    <string name="nothing_to_undo">Nichts rückgängig zu machen</string>
+    <string name="workout_starting">Workout startet…</string>
+    <string name="controls_title">Steuerung</string>
+    <string name="action_end_match">Match beenden</string>
+    <string name="action_resume">Weiter zählen</string>
+    <string name="log_path">Log: %1$s</string>
+    <string name="stats_line">%1$s kcal · %2$s Schritte</string>
+    <string name="error_title">Workout fehlgeschlagen</string>
+    <string name="action_back">Zurück</string>
+    <string name="notification_channel_workout">Laufendes Match</string>
+    <string name="notification_title">Advantly-Match</string>
+    <string name="notification_text">Tippen, um weiterzuzählen</string>
 </resources>

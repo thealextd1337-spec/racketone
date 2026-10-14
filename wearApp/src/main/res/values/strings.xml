@@ -3,6 +3,38 @@
 <resources>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
-    <string name="wear_ready">Ready to score</string>
     <string name="wear_version">Version %1$s</string>
+
+    <!-- Spike S5: Workout-Laufzeit -->
+    <string name="setup_title">Workout test (S5)</string>
+    <string name="sport_tennis">Tennis</string>
+    <string name="sport_badminton">Badminton</string>
+    <string name="sport_table_tennis">Table tennis</string>
+    <string name="exercise_type_workout">Workout</string>
+    <string name="exercise_type_native">Watch type: %1$s (native)</string>
+    <string name="exercise_type_fallback">Watch type: %1$s (fallback)</string>
+    <string name="exercise_type_unsupported">No workout type supported – counting without heart rate</string>
+    <string name="exercise_type_loading">Checking watch capabilities…</string>
+    <string name="action_start">Start match</string>
+    <string name="permission_rationale">Heart rate and steps are recorded for the field test. The data stays on the watch.</string>
+    <string name="permission_missing">Permissions missing – heart rate may be unavailable</string>
+    <string name="gesture_hint">Tap top: us · bottom: them · swipe down: undo · swipe left: menu</string>
+    <string name="label_us">US</string>
+    <string name="label_them">THEM</string>
+    <string name="heart_rate_value" translatable="false">♥ %1$d</string>
+    <string name="heart_rate_unknown" translatable="false">♥ --</string>
+    <string name="undo_toast">Undo: %1$s → %2$s</string>
+    <string name="nothing_to_undo">Nothing to undo</string>
+    <string name="workout_starting">Starting workout…</string>
+    <string name="controls_title">Controls</string>
+    <string name="action_end_match">End match</string>
+    <string name="action_resume">Continue scoring</string>
+    <string name="log_path">Log: %1$s</string>
+    <string name="stats_line">%1$s kcal · %2$s steps</string>
+    <string name="error_title">Workout failed</string>
+    <string name="action_back">Back</string>
+    <string name="notification_channel_workout">Running match</string>
+    <string name="notification_title">Advantly match</string>
+    <string name="notification_text">Tap to return to scoring</string>
+    <string name="ongoing_status_template" translatable="false">#score# · #duration#</string>
 </resources>
