@@ -1,6 +1,6 @@
 # Advantly – Gesamtplan & Roadmap
 
-Stand: 2026-10-14 · Name: **Advantly** (vorher „RacketOne“, Prüfung: [07](07-namenspruefung-advantly.md)) · Domain `advantly.de` · ID `de.advantly`
+Stand: 2026-10-14 · Name: **Advantly** (vorher „RacketOne“, Prüfung: [07](07-namenspruefung-advantly.md)) · Domain `advantly.eu` · ID `eu.advantly`
 
 Dieser Plan fasst die Fachdokumente zusammen und löst ihre Widersprüche auf. Bei Abweichungen gilt **dieses Dokument**.
 
@@ -60,7 +60,7 @@ graph TB
 | K2 | Belag | 03: kombiniert (`indoor_hard`) · 02/04: getrennt | **Getrennt:** `surface` + `environment` (Halle/Draußen). 03 passt die Constraint an. |
 | K3 | „Noch ein Satz?“ | 04: Dialog nach jedem Satz · 02: nur im Modus „Offen“ | **Zwei Modi (02 §5.2):** *Offen* (Standard bei Freizeit): Dialog nach jedem Satz. *Best-of*: Der nächste Satz startet automatisch, nach Matchende kommt die Frage, und „Ja“ legt ein **verknüpftes Folge-Match** an, ohne die Wertung zu verfälschen. → Rückfrage F7. |
 | K4 | Live-Sync Apple | 01: WatchConnectivity · 05: Workout Mirroring | **Beides:** Mirroring als schneller Kanal während des Workouts, WatchConnectivity als Fallback. Die Anti-Entropie (Abgleich bei jedem Wiederverbinden und alle 30 s) garantiert, dass am Ende alle Events ankommen. |
-| K5 | Name | „RacketOne“ kollidiert ([06 §8](06-marktanalyse.md)) | **Advantly** (Prüfung [07](07-namenspruefung-advantly.md): gelb). `advantly.app` ist fremd vergeben → Domain **`advantly.de`** (+ .eu/.io), Bundle-/Package-ID **`de.advantly`**. Vor dem Store-Release kurze Markenrecherche durch eine Fachperson (Klassen 9/41/42). |
+| K5 | Name | „RacketOne“ kollidiert ([06 §8](06-marktanalyse.md)) | **Advantly** (Prüfung [07](07-namenspruefung-advantly.md): gelb). `advantly.app` ist fremd vergeben → Domain **`advantly.eu`** (gekauft), Bundle-/Package-ID **`eu.advantly`**. Vor dem Store-Release kurze Markenrecherche durch eine Fachperson (Klassen 9/41/42). |
 
 ## 4. Phasen und Meilensteine
 
@@ -147,7 +147,7 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 **Noch offen:**
 | # | Frage | Vorschlag |
 |---|---|---|
-| F5 | `advantly.de`, `.eu`, `.io` registrieren (Stand 14.10. frei) | ja, zeitnah |
+| F5 | Domain | **advantly.eu gekauft**, Website per GitHub Pages (`site/`) |
 
 **Regeln & Bedienung (Vorschläge gelten, wenn du nichts änderst):**
 | # | Frage | Vorschlag |
@@ -167,7 +167,7 @@ Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05
 ## 8. Nächste Schritte
 
 1. Apple Developer Program anlegen (Privatperson oder Firma, siehe Hinweis im Chat).
-2. `advantly.de` (+ .eu/.io) registrieren, GitHub-Repo in `advantly` umbenennen (GitHub leitet alte URLs weiter).
+2. ✅ advantly.eu gekauft, Website `site/` · GitHub-Repo in `advantly` umbenennen (GitHub leitet alte URLs weiter).
 3. Du testest On Court Pro selbst auf Ultra und Galaxy Watch (30 min, Notizen genügen).
 4. Erster Commit dieser Planung nach `main` und Push nach GitHub.
 5. Start P0: Gerüst + Spikes S1–S5 parallel durch Agenten in eigenen Worktrees.

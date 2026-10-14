@@ -16,7 +16,7 @@ Stand: 2026-10-14
 | Sprache | Deutsch + Englisch ab Start |
 | Monetarisierung | Freemium/Abo später – Architektur vorbereiten |
 | Name | **Advantly** (statt RacketOne wegen Namenskollision, siehe 06 §8). Prüfung 07: gelb – Name behalten, `.app`-Domain ist fremd vergeben |
-| Domain / IDs | **advantly.de** (zusätzlich .eu und .io sichern) · Bundle-/Package-ID **`de.advantly`** · Store-Titel z. B. „Advantly – Tennis & Padel Score“ |
+| Domain / IDs | **advantly.eu** (gekauft) · Website über GitHub Pages · Bundle-/Package-ID **`eu.advantly`** · Store-Titel z. B. „Advantly – Tennis & Padel Score“ |
 | Store-Konten | Google Play Console vorhanden. **Apple Developer Program fehlt** (nötig für TestFlight ab P0/S2). Garmin Developer erst P4 |
 | Repo | **öffentlich** (macOS-CI kostenlos) · github.com/thealextd1337-spec/racketone, lokal `H:\racketone`, Branch `main` |
 
