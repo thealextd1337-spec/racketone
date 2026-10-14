@@ -12,7 +12,7 @@ class AdvantlyWatchTest {
     }
 
     @Test
-    fun helloMentionsAdvantly() {
-        assertEquals("Hello Advantly (core-scoring)", AdvantlyWatch.hello())
+    fun engineModuleIsCoreScoring() {
+        assertEquals("core-scoring", AdvantlyWatch.engineModule())
     }
 }

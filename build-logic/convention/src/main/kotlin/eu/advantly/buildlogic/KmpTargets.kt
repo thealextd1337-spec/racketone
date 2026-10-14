@@ -7,8 +7,14 @@ import org.gradle.kotlin.dsl.configure
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
-/** Android-Target über das AGP-Plugin `com.android.kotlin.multiplatform.library`. */
-internal fun Project.configureKmpAndroidTarget(kotlin: KotlinMultiplatformExtension) {
+/**
+ * Android-Target über das AGP-Plugin `com.android.kotlin.multiplatform.library`.
+ * [enableAndroidResources] = true ist für Compose-Multiplatform-Resources nötig (Default im AGP-KMP-Plugin: aus).
+ */
+internal fun Project.configureKmpAndroidTarget(
+    kotlin: KotlinMultiplatformExtension,
+    enableAndroidResources: Boolean = false,
+) {
     pluginManager.apply(libs.pluginId("android-kmp-library"))
     (kotlin as ExtensionAware).extensions.configure<KotlinMultiplatformAndroidLibraryTarget>("android") {
         namespace = advantlyNamespace
@@ -19,6 +25,7 @@ internal fun Project.configureKmpAndroidTarget(kotlin: KotlinMultiplatformExtens
         }
         // commonTest läuft zusätzlich als Android-Host-Test (JVM, ohne Gerät)
         withHostTest {}
+        androidResources.enable = enableAndroidResources
     }
 }
 

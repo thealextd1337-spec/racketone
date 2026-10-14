@@ -5,6 +5,11 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 // Ausgabe: shared/umbrella-ios/build/XCFrameworks/<debug|release>/AdvantlyKit.xcframework
 plugins {
     alias(libs.plugins.advantly.kmp.base)
+    // Compose-Plugin nur, damit die Compose-Resources aus ui-phone ins XCFramework kommen
+    // (AdvantlyKit.framework/composeResources). Die iOS-App kopiert sie beim Build ins App-Bundle,
+    // weil das statische Framework nicht eingebettet wird (siehe iosApp/project.yml).
+    alias(libs.plugins.compose.multiplatform)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.skie)
 }
 
@@ -25,6 +30,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.shared.uiPhone)
+            // Compose-Compiler (für die Resource-Einbettung angewendet) verlangt die Runtime im Klassenpfad
+            implementation(libs.compose.runtime)
         }
     }
 }

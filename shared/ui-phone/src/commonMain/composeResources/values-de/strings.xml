@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Advantly</string>
+    <string name="app_tagline">Tennis, Padel und Pickleball zählen – auf Handy und Uhr.</string>
+    <string name="app_version">Version %1$s</string>
+</resources>

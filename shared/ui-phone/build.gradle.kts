@@ -17,6 +17,12 @@ kotlin {
     }
 }
 
+// Compose-Resources (Strings DE/EN): src/commonMain/composeResources/values[-de]/strings.xml
+compose.resources {
+    packageOfResClass = "eu.advantly.ui.phone.resources"
+    publicResClass = false
+}
+
 // Desktop-Preview: ./gradlew :shared:ui-phone:run
 compose.desktop {
     application {

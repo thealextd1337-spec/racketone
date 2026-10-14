@@ -62,6 +62,12 @@ Android-`versionCode` = `buildNumber * 10 + 1` (Phone) bzw. `+ 2` (Wear), weil G
 alle Formfaktoren verlangt. Apple (iOS + watchOS) bekommt dieselben Werte über
 `gradlew.bat generateAppleVersionConfig` → `iosApp/Config/Version.xcconfig` (nicht eingecheckt, die CI erzeugt es vor `xcodegen`).
 
+**Lokalisierung (DE + EN):** Phone-UI über Compose-Multiplatform-Resources in `shared/ui-phone`
+(`composeResources/values` = Englisch, `values-de`), Wear über Android-Ressourcen, watchOS über `watchApp/<sprache>.lproj`.
+iOS: Kotlin legt die Compose-Resources ins XCFramework (`AdvantlyKit.framework/composeResources`); weil das statische
+Framework nicht eingebettet wird, kopiert ein Build-Skript im Xcode-Target sie nach `Advantly.app/compose-resources/`,
+wo der iOS-Resource-Reader von Compose sucht. Die CI prüft das im fertigen App-Bundle.
+
 **Nur in der CI (macOS):** Kotlin/Native-Tests auf iOS-/watchOS-Simulatoren, Linken der XCFrameworks, `xcodegen` und die
 iOS-/watchOS-App (unsignierte Simulator-Builds, solange kein Apple-Developer-Account existiert). Die Apple-Targets brechen den
 Windows-Build nicht: Kotlin kompiliert `iosMain`/`watchosMain` lokal bis zur klib und überspringt Linken und Tests.

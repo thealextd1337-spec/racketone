@@ -11,7 +11,14 @@ Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 ## Sprache
 - **Code, Identifier, Paketnamen, Test-Namen: Englisch.**
 - **Doku, KDoc-/Code-Kommentare, Commit-Messages, PR-Texte: Deutsch.**
-- **UI-Strings immer Deutsch + Englisch** (nie nur eine Sprache). Markenname „Advantly“ wird nicht übersetzt.
+- **UI-Strings immer Deutsch + Englisch** (nie nur eine Sprache, nie hart im Code). Markenname „Advantly“ wird nicht übersetzt.
+  Default-Sprache ist Englisch, Deutsch liegt daneben:
+  | Wo | Dateien | Absicherung |
+  |---|---|---|
+  | Phone-UI (`ui-phone`, CMP) | `src/commonMain/composeResources/values/strings.xml` + `values-de/` → `Res.string.*` (Paket `eu.advantly.ui.phone.resources`) | `StringResourcesParityTest` (desktopTest) |
+  | Android-Apps | `src/main/res/values/strings.xml` + `values-de/` → `R.string.*` | Android Lint `MissingTranslation` (bricht `check` ab) |
+  | watchOS (`watchApp/`) | `en.lproj/` + `de.lproj/Localizable.strings` | CI prüft beide im App-Bundle |
+  Kotlin-Facades für Swift liefern Daten, keine UI-Texte.
 
 ## Namen und IDs
 | Was | Wert |

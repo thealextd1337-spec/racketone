@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Default: Englisch. Deutsch in values-de/ – Android Lint (MissingTranslation) bricht ab, wenn eine Übersetzung fehlt. -->
 <resources>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
+    <string name="wear_ready">Ready to score</string>
+    <string name="wear_version">Version %1$s</string>
 </resources>
