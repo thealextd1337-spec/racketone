@@ -91,7 +91,12 @@ Typfehler in Apple-Kotlin-Code fallen also schon lokal in `check` auf, nur Linke
 
 ## Tests
 - `kotlin.test` in `commonTest`; läuft auf JVM (und als Android-Host-Test) in Sekunden. Jede Fachlogik bekommt Tests im selben PR.
-- Engine: Regel-Tabellen, Property-Tests und Golden-Testvektoren (`testvectors/`, später) – siehe 01 §8.
+- Engine: Regel-Tabellen, Property-Tests und Golden-Testvektoren – siehe 01 §8.
+  - Property-Tests: Kotest Property (`io.kotest:kotest-property`) in `jvmTest` von `core-scoring`, fester Seed;
+    Vorlage: `PropertyTestingExampleTest`. In `commonMain` der Pure-Module bleibt Kotest tabu.
+  - Golden-Vektoren: generiert nach `testvectors/` (Repo-Root) über `:shared:core-scoring:generateTestVectors`,
+    Drift-Prüfung `:shared:core-scoring:checkTestVectorDrift` – beide noch Platzhalter (TODO Welle 1).
+    Die Spezifikations-Vektoren in `docs/testvectors/` bleiben dort.
 - Android-Apps: JVM-Unit-Tests unter `src/test` (JUnit 4).
 
 ## Git-Workflow

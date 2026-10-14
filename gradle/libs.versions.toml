@@ -26,6 +26,7 @@ kotlinx-coroutines = "1.11.0"
 androidx-activity = "1.13.0"
 wear-compose = "1.7.1"
 junit4 = "4.13.2"
+kotest = "6.2.6"
 
 [libraries]
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
@@ -41,6 +42,7 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "wear-compose" }
 wear-compose-material3 = { module = "androidx.wear.compose:compose-material3", version.ref = "wear-compose" }
 
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 
 # Gradle-Plugins als Bibliotheken für build-logic (compileOnly)
