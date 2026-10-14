@@ -32,3 +32,6 @@ Thumbs.db
 # Logs
 *.log
 hs_err_pid*
+
+# XcodeGen-Ausgaben
+iosApp/Generated/
