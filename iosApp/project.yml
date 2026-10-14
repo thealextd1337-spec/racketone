@@ -1,0 +1,112 @@
+# XcodeGen-Projekt für die iOS-App inkl. eingebetteter watchOS-App.
+# Das .xcodeproj wird NICHT eingecheckt, sondern in der CI (macOS) erzeugt:
+#   ./gradlew generateAppleVersionConfig \
+#             :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework \
+#             :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
+#   cd iosApp && xcodegen generate
+# Ohne Apple-Developer-Account: nur unsignierte Simulator-Builds (CODE_SIGNING_ALLOWED=NO).
+# Signing/TestFlight (fastlane match) folgt in Spike S2.
+name: Advantly
+
+options:
+  bundleIdPrefix: eu.advantly
+  deploymentTarget:
+    iOS: "18.0"      # 05-watches-health E7: iOS ≥ 17, Empfehlung 18
+    watchOS: "11.0"  # 05-watches-health E7
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+# Version: einzige Quelle ist gradle.properties (advantly.versionName / advantly.buildNumber).
+# Config/Version.xcconfig wird von `./gradlew generateAppleVersionConfig` erzeugt und setzt
+# MARKETING_VERSION + CURRENT_PROJECT_VERSION für iOS und watchOS (müssen bei eingebetteten Watch-Apps gleich sein).
+# Diese beiden Settings deshalb NICHT hier oder in den Targets setzen (würde das xcconfig überschreiben).
+configFiles:
+  Debug: Config/Version.xcconfig
+  Release: Config/Version.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Kotlin-Simulator-Slices gibt es nur für arm64 (iosSimulatorArm64 / watchosSimulatorArm64)
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    "EXCLUDED_ARCHS[sdk=watchsimulator*]": x86_64
+
+targets:
+  Advantly:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+    dependencies:
+      # Statisches XCFramework aus shared/umbrella-ios (Compose-UI); wird gelinkt, nicht eingebettet
+      - framework: ../shared/umbrella-ios/build/XCFrameworks/debug/AdvantlyKit.xcframework
+        embed: false
+      # watchOS-App → "Embed Watch Content" ($(CONTENTS_FOLDER_PATH)/Watch)
+      - target: AdvantlyWatch
+    info:
+      path: Generated/iOS-Info.plist
+      properties:
+        CFBundleDisplayName: Advantly
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleLocalizations: [en, de]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Compose Multiplatform: ProMotion (120 Hz) erlauben
+        CADisableMinimumFrameDurationOnPhone: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: eu.advantly
+        PRODUCT_NAME: Advantly
+        TARGETED_DEVICE_FAMILY: "1"
+        OTHER_LDFLAGS: ["$(inherited)", "-lc++"]
+        ADVANTLY_KIT_XCFRAMEWORK: $(SRCROOT)/../shared/umbrella-ios/build/XCFrameworks/debug/AdvantlyKit.xcframework
+        # Das Skript unten liest einen ganzen Ordner aus dem XCFramework (mit Sandbox nicht deklarierbar)
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postCompileScripts:
+      # Compose-Multiplatform-Resources (Strings DE/EN aus shared/ui-phone): Kotlin legt sie in
+      # AdvantlyKit.framework/composeResources ab. Weil das Framework statisch gelinkt und NICHT eingebettet wird,
+      # kopieren wir sie nach <App>.app/compose-resources/composeResources – dort sucht der iOS-ResourceReader
+      # von CMP, wenn kein Framework mit composeResources unter <App>.app/Frameworks liegt.
+      - name: Compose-Resources kopieren
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          SRC=$(find "${ADVANTLY_KIT_XCFRAMEWORK}" -type d -name composeResources -path "*AdvantlyKit.framework/*" | head -n 1)
+          if [ -z "${SRC}" ]; then
+            echo "error: Keine composeResources in ${ADVANTLY_KIT_XCFRAMEWORK} – XCFramework neu bauen"
+            exit 1
+          fi
+          DEST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/compose-resources/composeResources"
+          rm -rf "${DEST}"
+          mkdir -p "$(dirname "${DEST}")"
+          cp -R "${SRC}" "${DEST}"
+          echo "Compose-Resources: ${SRC} -> ${DEST}"
+    scheme: {}
+
+  AdvantlyWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: ../watchApp
+    dependencies:
+      # Statisches XCFramework aus shared/umbrella-watch (Engine, Protokoll, lokaler Store)
+      - framework: ../shared/umbrella-watch/build/XCFrameworks/debug/AdvantlyWatchKit.xcframework
+        embed: false
+    info:
+      path: Generated/Watch-Info.plist
+      properties:
+        CFBundleDisplayName: Advantly
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleLocalizations: [en, de]
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: eu.advantly
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: eu.advantly.watchkitapp
+        PRODUCT_NAME: AdvantlyWatch
+        OTHER_LDFLAGS: ["$(inherited)", "-lc++"]
+    scheme: {}
