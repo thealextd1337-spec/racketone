@@ -1,0 +1,67 @@
+# Einzige Quelle für alle Versionen im Advantly-Monorepo.
+# Kotlin, SKIE und Compose Multiplatform nur gemeinsam anheben (SKIE ist an die Kotlin-Version gebunden).
+# Geprüft gegen Maven Central / Google Maven / Gradle Plugin Portal am 2026-10-14.
+
+[versions]
+# --- App / SDK ---
+android-compileSdk = "37"
+android-targetSdk = "36"
+android-minSdk = "28"
+android-minSdk-wear = "34"
+java = "21"
+jvmTarget = "17"
+
+# --- Build ---
+kotlin = "2.4.20"
+agp = "9.4.1"
+compose-multiplatform = "1.12.1"
+compose-material3 = "1.9.0"
+skie = "0.10.15"
+ktlint-gradle = "14.2.0"
+ktlint = "1.8.0"
+
+# --- Bibliotheken ---
+kotlinx-serialization = "1.11.0"
+kotlinx-coroutines = "1.11.0"
+androidx-activity = "1.13.0"
+wear-compose = "1.7.1"
+junit4 = "4.13.2"
+
+[libraries]
+kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
+
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
+wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "wear-compose" }
+wear-compose-material3 = { module = "androidx.wear.compose:compose-material3", version.ref = "wear-compose" }
+
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+
+# Gradle-Plugins als Bibliotheken für build-logic (compileOnly)
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+compose-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
+composeCompiler-gradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+ktlint-gradlePlugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version.ref = "ktlint-gradle" }
+
+[plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-kmp-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+skie = { id = "co.touchlab.skie", version.ref = "skie" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-gradle" }
+
+# Convention Plugins aus build-logic/
+advantly-kmp-library = { id = "advantly.kmp.library" }
+advantly-kmp-base = { id = "advantly.kmp.base" }
+advantly-kmp-compose = { id = "advantly.kmp.compose" }
+advantly-android-application = { id = "advantly.android.application" }
+advantly-android-compose = { id = "advantly.android.compose" }
