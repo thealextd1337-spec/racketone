@@ -5,13 +5,6 @@ plugins {
 
 android {
     namespace = "eu.advantly.wear"
-    defaultConfig {
-        // Wear OS 5+ (siehe 05-watches-health E7)
-        minSdk =
-            libs.versions.android.minSdk.wear
-                .get()
-                .toInt()
-    }
 }
 
 dependencies {

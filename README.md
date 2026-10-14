@@ -50,6 +50,17 @@ gradlew.bat :shared:ui-phone:run                   :: Desktop-Preview der Phone-
 gradlew.bat ktlintFormat                           :: Code formatieren
 ```
 
+**Phone + Wear zusammen testen (Data Layer):** Phone- und Wear-App haben dieselbe `applicationId` `eu.advantly` und
+müssen mit **demselben Zertifikat** signiert sein, sonst kommt keine Data-Layer-Verbindung zustande. Debug-Builds werden
+mit dem lokalen Debug-Keystore (`~/.android/debug.keystore`) signiert – deshalb beide Apps immer aus **derselben
+Build-Umgebung** installieren (nicht Phone vom Rechner und Wear aus einem CI-Artefakt). Prüfen:
+`gradlew.bat :androidApp:signingReport :wearApp:signingReport` → die SHA-256-Fingerprints der Variante `debug` müssen
+übereinstimmen. Release: ein gemeinsamer Upload-Key + Play App Signing (folgt).
+
+**Versionen:** `advantly.versionName` und `advantly.buildNumber` in `gradle.properties` sind die einzige Quelle.
+Android-`versionCode` = `buildNumber * 10 + 1` (Phone) bzw. `+ 2` (Wear), weil Google Play eindeutige versionCodes über
+alle Formfaktoren verlangt.
+
 **Nur in der CI (macOS):** Kotlin/Native-Tests auf iOS-/watchOS-Simulatoren, Linken der XCFrameworks, `xcodegen` und die
 iOS-/watchOS-App (unsignierte Simulator-Builds, solange kein Apple-Developer-Account existiert). Die Apple-Targets brechen den
 Windows-Build nicht: Kotlin kompiliert `iosMain`/`watchosMain` lokal bis zur klib und überspringt Linken und Tests.
