@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "TV-PAD-002",
+  "title": "Padel Doppel: Star Point (FIP 2026) inkl. Undo",
+  "description": "Best of 3, Star Point mit max. 2 Vorteilen, voller dritter Satz (Premier-Padel-Format). Durchläuft Einstand 1, Vorteil 1, Einstand 2, Vorteil 2, Einstand 3 = Star Point; danach Undo des entscheidenden Punktes und alternativer Ausgang.",
+  "sources": ["FIP Rules of Padel (Review 01.01.2026), Rule 1 Option 2 Star Point"],
+  "config": {"formatVersion": 1, "presetId": "PADEL_PREMIER_2026", "sport": "PADEL", "discipline": "DOUBLES", "match": {"mode": "BEST_OF", "bestOf": 3}, "game": {"deuceMode": "STAR_POINT", "maxAdvantages": 2}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": null},
+  "lineup": {"A": ["A1", "A2"], "B": ["B1", "B2"], "firstServer": "A1", "receiveRight": {"A": "A1", "B": "B1"}, "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "PointWon", "side": "A"},
+    {"id": "e2", "type": "PointWon", "side": "A"},
+    {"id": "e3", "type": "PointWon", "side": "A"},
+    {"id": "e4", "type": "PointWon", "side": "B"},
+    {"id": "e5", "type": "PointWon", "side": "B"},
+    {"id": "e6", "type": "PointWon", "side": "B"},
+    {"id": "e7", "type": "PointWon", "side": "A"},
+    {"id": "e8", "type": "PointWon", "side": "B"},
+    {"id": "e9", "type": "PointWon", "side": "B"},
+    {"id": "e10", "type": "PointWon", "side": "A"},
+    {"id": "e11", "type": "PointWon", "side": "A"},
+    {"id": "e12", "type": "Undo", "target": "e11"},
+    {"id": "e13", "type": "PointWon", "side": "B"}
+  ],
+  "expect": [
+    {"afterEvent": 6, "label": "Einstand 1", "state": {"current": {"display": {"A": "40", "B": "40"}, "callout": "DEUCE", "deuceCount": 1, "decidingPoint": false}, "serve": {"court": "RIGHT", "receiver": "B1"}, "statusFlags": []}},
+    {"afterEvent": 7, "label": "Vorteil 1 Aufschläger", "state": {"current": {"display": {"A": "AD", "B": "40"}, "callout": "ADVANTAGE_SERVER", "deuceCount": 1}, "scoreCall": "AD-40", "serve": {"court": "LEFT", "receiver": "B2"}, "statusFlags": [{"side": "A", "level": "GAME_POINT", "count": 1, "breakPoint": false}]}},
+    {"afterEvent": 8, "label": "Einstand 2", "state": {"current": {"display": {"A": "40", "B": "40"}, "callout": "DEUCE", "deuceCount": 2, "decidingPoint": false}, "statusFlags": []}},
+    {"afterEvent": 9, "label": "Vorteil 2 Rückschläger - Breakball", "state": {"current": {"display": {"A": "40", "B": "AD"}, "callout": "ADVANTAGE_RECEIVER", "deuceCount": 2}, "scoreCall": "40-AD", "statusFlags": [{"side": "B", "level": "GAME_POINT", "count": 1, "breakPoint": true}]}},
+    {"afterEvent": 10, "label": "Einstand 3 = Star Point", "state": {"current": {"display": {"A": "40", "B": "40"}, "callout": "STAR_POINT", "deuceCount": 3, "decidingPoint": true, "points": {"A": 5, "B": 5}}, "serve": {"side": "A", "player": "A1", "court": "RECEIVER_CHOICE", "receiver": null}, "statusFlags": [{"side": "A", "level": "GAME_POINT", "count": 1, "breakPoint": false}, {"side": "B", "level": "GAME_POINT", "count": 1, "breakPoint": true}]}},
+    {"afterEvent": 11, "label": "Star Point gewonnen - 1:0", "state": {"current": {"games": {"A": 1, "B": 0}, "points": {"A": 0, "B": 0}, "deuceCount": 0, "decidingPoint": false}, "serve": {"side": "B", "player": "B1"}, "ends": {"A": "END_2", "B": "END_1"}, "effects": ["POINT", "GAME_WON", "CHANGE_ENDS"]}},
+    {"afterEvent": 12, "label": "Undo über Spielgrenze - wieder Star Point, Seiten zurück", "state": {"current": {"games": {"A": 0, "B": 0}, "points": {"A": 5, "B": 5}, "callout": "STAR_POINT"}, "serve": {"side": "A", "player": "A1", "court": "RECEIVER_CHOICE"}, "ends": {"A": "END_1", "B": "END_2"}, "effects": ["UNDONE"]}},
+    {"afterEvent": 13, "label": "Star Point an B - Break 0:1", "state": {"current": {"games": {"A": 0, "B": 1}}, "serve": {"side": "B", "player": "B1", "court": "RIGHT", "receiver": "A1"}, "ends": {"A": "END_2", "B": "END_1"}}}
+  ]
+}
