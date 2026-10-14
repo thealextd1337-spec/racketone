@@ -4,7 +4,7 @@ Stand: 2026-10-14
 
 | Thema | Entscheidung |
 |---|---|
-| Sportarten | Tennis, Padel, Pickleball – alle offiziellen Varianten je Sportart (Einzel/Doppel, Tiebreak, Match-Tiebreak, No-Ad, Short Sets, Golden/Star Point, Side-Out/Rally Scoring) |
+| Sportarten | Tennis, Padel, Pickleball, **Badminton, Tischtennis** (ergänzt 2026-10-14) – alle offiziellen Varianten je Sportart (Einzel/Doppel, Tiebreak, Match-Tiebreak, No-Ad, Short Sets, Golden/Star Point, Side-Out/Rally Scoring, Badminton bis 21/Deckel 30, Tischtennis bis 11 mit Aufschlagwechsel) |
 | Handy-Plattformen | Android + iOS |
 | Watches | Apple Watch (watchOS), Wear OS (Pixel Watch, Galaxy Watch), Garmin (Connect IQ) |
 | Testgeräte real | iPhone, Apple Watch **Ultra 1** (max. watchOS 26, kein Double Tap), Google-Pixel-Handy + Pixel Watch + Galaxy Watch. Garmin nur im Simulator |
@@ -14,6 +14,7 @@ Stand: 2026-10-14
 | iOS-Builds | Cloud-CI (macOS-Runner) + TestFlight, Entwicklung unter Windows |
 | Vorgehen | Phasenweise: P1 Scoring offline (Handy + Wear OS + Apple Watch) → P2 Accounts/Freunde/Sync → P3 Statistik & Health → P4 Garmin |
 | Sprache | Deutsch + Englisch ab Start |
+| Website | **advantly.eu** live (GitHub Pages, `site/`), ohne Verweise auf GitHub/Entwicklung |
 | Monetarisierung | Freemium/Abo später – Architektur vorbereiten |
 | Name | **Advantly** (statt RacketOne wegen Namenskollision, siehe 06 §8). Prüfung 07: gelb – Name behalten, `.app`-Domain ist fremd vergeben |
 | Domain / IDs | **advantly.eu** (gekauft) · Website über GitHub Pages · Bundle-/Package-ID **`eu.advantly`** · Store-Titel z. B. „Advantly – Tennis & Padel Score“ |

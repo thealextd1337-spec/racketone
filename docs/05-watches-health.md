@@ -20,6 +20,25 @@ Dieses Dokument legt fest, wie RacketOne auf Apple Watch, Wear OS (Pixel Watch, 
 | E8 | Garmin | Phase 4: eigene Monkey-C-Device-App mit `ActivityRecording` (FIT, ein Lap pro Satz) und Live-Sync per Mobile SDK. Fallback ist der Import über Garmin Connect → Apple Health/Health Connect. |
 | E9 | Datenschutz | Health-Daten sind Art.-9-Daten. Es gibt drei getrennte Opt-ins: lokal messen, Cloud-Sync, mit Freunden teilen. Health-Daten gehen nie an Analytics-, Crash- oder Werbe-SDKs. Eine DSFA ist einzuplanen. |
 | E10 | Apple Watch Ultra (Testgerät) | Wir testen auf echter Hardware per TestFlight. Der **Action Button** dient als Schnellstart (`StartWorkoutIntent`) und während des Matches als **Undo**. GPS bleibt **aus**, auch Präzisions-Dual-GPS. |
+| E11 | Aktivitätstyp Badminton/Tischtennis (ergänzt 2026-10-14) | **Überall gibt es native Typen**, kein Tennis-Ersatz nötig: Apple `.badminton`/`.tableTennis`, Wear OS `ExerciseType.BADMINTON`/`TABLE_TENNIS`, Health Connect `EXERCISE_TYPE_BADMINTON`/`EXERCISE_TYPE_TABLE_TENNIS`, Garmin `SPORT_RACKET` + `SUB_SPORT_BADMINTON`/`SUB_SPORT_TABLE_TENNIS`. Details in §0.1. |
+
+### 0.1 Aktivitätstypen Badminton und Tischtennis (ergänzt 2026-10-14)
+
+Geprüft in der Herstellerdokumentation im Oktober 2026:
+
+| Plattform | Badminton | Tischtennis | Verfügbar seit | Quelle |
+|---|---|---|---|---|
+| Apple HealthKit (`HKWorkoutActivityType`) | `.badminton` | `.tableTennis` | iOS 8.0 / watchOS 2.0 (beide) | [Q34] |
+| Wear OS Health Services (`ExerciseType`) | `ExerciseType.BADMINTON` | `ExerciseType.TABLE_TENNIS` | in der aktuellen Referenz vorhanden, unser minSdk 34 liegt ohnehin höher | [Q12] |
+| Health Connect, Jetpack (`ExerciseSessionRecord`) | `EXERCISE_TYPE_BADMINTON` (= 2) | `EXERCISE_TYPE_TABLE_TENNIS` (= 75) | connect-client 1.x | [Q15] |
+| Health Connect, Framework (`ExerciseSessionType`, Android 14+) | `EXERCISE_SESSION_TYPE_BADMINTON` | `EXERCISE_SESSION_TYPE_TABLE_TENNIS` | API 34 | [Q15] |
+| Garmin Connect IQ (`Toybox.Activity`) / FIT | `SPORT_RACKET` (64) + `SUB_SPORT_BADMINTON` (95) | `SPORT_RACKET` (64) + `SUB_SPORT_TABLE_TENNIS` (97) | API Level 4.1.6 | [Q24] |
+
+- **Empfehlung:** Für Badminton und Tischtennis immer den **nativen** Typ nehmen, anders als bei Padel (E3). Die Kalorienschätzung von Apple und Health Services ist dann sportgerecht, und Apple Fitness, Health Connect und Garmin Connect zeigen die richtige Sportart. Unsere eigenen Metadaten-Keys aus 1.1 (Sportart, Match-ID, Format) schreiben wir trotzdem.
+- **Apple `locationType`:** Default `.indoor` (Halle). Bei Badminton „Draußen“ nach Nutzerauswahl (`meta.environment`, 02 §10).
+- **Health Connect:** `title` z. B. „Badminton · Advantly“, Segmente bzw. Laps pro Satz wie in 2.3.
+- **Garmin:** `ActivityRecording.createSession({:sport => Activity.SPORT_RACKET, :subSport => Activity.SUB_SPORT_BADMINTON, :name => "Badminton"})`, Tischtennis analog. Die FIT-Profilwerte entsprechen den CIQ-Konstanten, das FIT-SDK-Profil selbst wurde nicht separat geprüft. Geräte unter API 4.1.6 erhalten wie bei Padel einen generischen Sport mit dem Namen „Badminton“ bzw. „Tischtennis“ (siehe 3.1/3.6).
+- **Schnellstart:** Die Listen für den Action Button (`suggestedWorkouts`), das Wear-OS-Tile und das Garmin-Menü wachsen auf fünf Sportarten und werden nach Nutzung sortiert (2.6).
 
 ---
 
@@ -34,6 +53,8 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 | Tennis | `.tennis` | iOS 8 / watchOS 2 |
 | Pickleball | `.pickleball` | **iOS 14 / watchOS 7** |
 | Padel | **nicht vorhanden** | – |
+| Badminton | `.badminton` (ergänzt 2026-10-14, §0.1) | iOS 8 / watchOS 2 |
+| Tischtennis | `.tableTennis` (ergänzt 2026-10-14, §0.1) | iOS 8 / watchOS 2 |
 | (Verwandte Typen zur Info) | `.squash`, `.badminton`, `.racquetball`, `.tableTennis` | alt |
 
 **Empfehlung zu Padel:** Wir verwenden `.tennis` (dieselbe Energieumsatz-Logik, in Apple Fitness als Rückschlagsport sichtbar) und schreiben zusätzlich die Metadaten `HKMetadataKeyWorkoutBrandName = "RacketOne"` sowie die eigenen Keys `racketone.sport = "padel"`, `racketone.matchId = <uuid>` und `racketone.format = "doubles"`. Begründung: `.other` wird von Apple und Drittanbietern schlechter dargestellt. Sobald Apple einen Typ `.padel` einführt, schalten wir per OS-Versionsweiche um. Bei jedem neuen Xcode-SDK prüfen wir die Liste [Q1].
@@ -110,6 +131,7 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 ### 2.1 Health Services – ExerciseClient
 
 - **ExerciseType:** Die Referenz enthält `TENNIS`, `SQUASH`, `BADMINTON`, `RACQUETBALL` und `TABLE_TENNIS`, aber **weder PADEL noch PICKLEBALL** [Q12] (geprüft im Oktober 2026).
+- **Badminton/Tischtennis** (ergänzt 2026-10-14): native Typen `ExerciseType.BADMINTON` bzw. `ExerciseType.TABLE_TENNIS`, siehe §0.1.
 - **Empfehlung: `ExerciseType.TENNIS` für alle drei Sportarten.** Health Services schätzt Kalorien abhängig vom Typ, und TENNIS liegt näher an Padel und Pickleball als `UNKNOWN`/`WORKOUT`. Die echte Sportart steht in unseren eigenen Daten und im Health-Connect-Titel.
 - **Capabilities zur Laufzeit:** `exerciseClient.getCapabilities()` liefert, welche DataTypes für TENNIS auf **diesem** Gerät unterstützt sind. Wir fordern `HEART_RATE_BPM`, `CALORIES_TOTAL`, `STEPS` (Delta) und `HEART_RATE_BPM_STATS` an, aber nur, was unterstützt ist. **Kein GPS** (`isGpsEnabled = false`, keine Location-DataTypes).
 - **Sätze:** `exerciseClient.markLap()` an jeder Satzgrenze. Zusätzlich stehen die Satzgrenzen in unserem Event-Log.
@@ -124,7 +146,7 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 
 ### 2.3 Health Connect auf dem Handy
 
-- **Exercise-Typen:** Health Connect (Jetpack und Framework) hat `EXERCISE_TYPE_TENNIS`, aber **kein PADEL/PICKLEBALL** [Q15].
+- **Exercise-Typen:** Health Connect (Jetpack und Framework) hat `EXERCISE_TYPE_TENNIS`, aber **kein PADEL/PICKLEBALL** [Q15]. Für Badminton und Tischtennis gibt es `EXERCISE_TYPE_BADMINTON` (2) und `EXERCISE_TYPE_TABLE_TENNIS` (75), siehe §0.1.
 - **Was das Handy nach dem Match schreibt:** Eine `ExerciseSessionRecord` mit `exerciseType = TENNIS`, `title = "Padel · RacketOne"`, Segmente bzw. Laps pro Satz, Metadaten mit `clientRecordId = racketone:<matchId>:<playerId>` (das macht den Vorgang idempotent und erlaubt Updates). Dazu `HeartRateRecord` (Samples) und `TotalCaloriesBurnedRecord` bzw. `ActiveCaloriesBurnedRecord`.
 - **Was es nicht schreibt:** **`StepsRecord`.** Pixel Watch (Fitbit) und Galaxy Watch (Samsung Health) schreiben passive Schritte ohnehin, ein eigener Eintrag würde doppelt zählen. Wir **lesen** Schritte für das Matchfenster stattdessen aggregiert aus Health Connect, wo sie dedupliziert sind, oder nehmen sie aus dem ExerciseClient für die eigene Statistik.
 - **Abhängigkeit:** `androidx.health.connect:connect-client` 1.1.0 stabil (Stand 26.08.2026), 1.2.0 als Alpha [Q16]. Ab Android 14 ist Health Connect Teil des Systems.
@@ -179,6 +201,8 @@ Aus `Toybox.Activity` [Q24]:
 | Tennis | `SPORT_TENNIS` (8) | `SUB_SPORT_GENERIC` | 3.2.0 |
 | Padel | `SPORT_RACKET` (64) | `SUB_SPORT_PADEL` (85) | 4.1.6 |
 | Pickleball | `SPORT_RACKET` (64) | `SUB_SPORT_PICKLEBALL` (84) | 4.1.6 |
+| Badminton | `SPORT_RACKET` (64) | `SUB_SPORT_BADMINTON` (95) | 4.1.6 |
+| Tischtennis | `SPORT_RACKET` (64) | `SUB_SPORT_TABLE_TENNIS` (97) | 4.1.6 |
 
 - **Empfehlung:** `ActivityRecording.createSession({:sport, :subSport, :name => "Padel"})` mit genau diesen Schlüsseln (Achtung auf `:subSport`, nicht `:subsport`, sonst wird der Wert ignoriert [Q30]). Auf älteren Geräten erscheinen Padel und Pickleball in Garmin Connect teils als „Sonstiges“ bzw. „Racket“ [Q30][Q29]. Das akzeptieren wir; der Name bleibt „Padel“.
 - **Ein Lap pro Satz** über `session.addLap()`. Das macht auch Padel Smash so (ein Lap pro Satz, Puls pro Lap in Garmin Connect) [Q29], ein bewährtes Muster.
@@ -432,3 +456,4 @@ Legende: **R** = reales Gerät, **S/E** = Simulator/Emulator, **CI** = macOS-Run
 - [Q31] the5krunner: Garmin Connect → Health Connect – https://the5krunner.com/2025/05/22/garmin-connect-and-strava-runna-new-link-to-goolge-health-connect/ · Tom's Guide – https://www.tomsguide.com/wellness/fitness-trackers/garmin-clarifies-what-data-its-sharing-with-google-health-connect-heres-the-full-list
 - [Q32] Garmin Blog: Pickleball auf Garmin-Uhren aktivieren – https://www.garmin.com/en-US/blog/?p=33677
 - [Q33] Kotlin Gradle Plugin: watchosDeviceArm64 – https://kotlinlang.org/api/kotlin-gradle-plugin/kotlin-gradle-plugin-api/org.jetbrains.kotlin.gradle.dsl/-kotlin-multiplatform-source-set-conventions/watchos-device-arm64-main.html
+- [Q34] Apple: HKWorkoutActivityType.badminton – https://developer.apple.com/documentation/healthkit/hkworkoutactivitytype/badminton · HKWorkoutActivityType.tableTennis – https://developer.apple.com/documentation/healthkit/hkworkoutactivitytype/tabletennis (beide iOS 8.0, watchOS 2.0; geprüft 2026-10-14)

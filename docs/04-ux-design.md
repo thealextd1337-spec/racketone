@@ -359,6 +359,8 @@ Das vorhandene Icon (`assets/icon.svg`) ist ein abgerundetes Quadrat (rx 14/64 �
 | `sport-tennis` | #C8E62E „Optic“ | #6B7F00 | Tennis-Akzent (Ball-Gelbgrün) |
 | `sport-padel` | #22C3E6 „Glass“ | #0E7490 | Padel-Akzent (Glaswand/Cyan) |
 | `sport-pickleball` | #FF5FA2 „Kitchen“ | #BE185D | Pickleball-Akzent |
+| `sport-badminton` | #A78BFA „Shuttle“ | #6D28D9 | Badminton-Akzent (ergänzt 2026-10-14) |
+| `sport-tabletennis` | #34D399 „Table“ | #047857 | Tischtennis-Akzent (ergänzt 2026-10-14). Nah an `success` – deshalb wie alle Sportfarben nie allein, immer mit Icon + Name |
 | `hint` | #FFB020 | #B45309 | Breakball/Satzball/Matchball (10.7:1 auf Schwarz) |
 | `success` / `danger` | #3DDC84 / #FF4D4F | #15803D / #DC2626 | nur Status, immer mit Icon + Text |
 | Belag-Swatches | Sand #C4572A · Hart #2F6DB3 · Rasen #3F8F3A · Teppich #7A5CA8 | dito | nur Illustration im Wizard/Verlauf |
