@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Änderungen erkennen
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      apple: ${{ steps.filter.outputs.apple }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            apple:
+              - 'shared/**'
+              - 'iosApp/**'
+              - 'watchApp/**'
+              - 'build-logic/**'
+              - 'gradle/**'
+              - '*.gradle.kts'
+              - 'gradle.properties'
+              - '.github/workflows/ci.yml'
+              - '.github/scripts/**'
+
+  gradle-check:
+    name: Gradle check + Android/Wear-APKs (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      # check = JVM-/Android-Host-Tests aller shared-Module, App-Unit-Tests, ktlintCheck, Android Lint
+      - name: check + assembleDebug
+        run: ./gradlew check :androidApp:assembleDebug :wearApp:assembleDebug --continue
+      - name: Berichte hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports-ubuntu
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: APKs hochladen
+        uses: actions/upload-artifact@v7
+        with:
+          name: apks-debug
+          path: |
+            androidApp/build/outputs/apk/debug/*.apk
+            wearApp/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+  apple:
+    name: Kotlin/Native-Tests + iOS/watchOS-Simulator-Builds (macOS)
+    needs: changes
+    if: needs.changes.outputs.apple == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Kotlin/Native-Toolchain cachen
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Xcode-Version
+        run: xcodebuild -version
+      - name: Simulatoren wählen
+        id: sim
+        run: python3 .github/scripts/pick_simulators.py >> "$GITHUB_OUTPUT"
+      - name: Kotlin/Native-Tests (iosSimulatorArm64, watchosSimulatorArm64)
+        env:
+          IOS_SIM: ${{ steps.sim.outputs.ios }}
+          WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
+        run: >-
+          ./gradlew iosSimulatorArm64Test watchosSimulatorArm64Test --continue
+          -Padvantly.simulator.ios="$IOS_SIM"
+          -Padvantly.simulator.watchos="$WATCHOS_SIM"
+      - name: XCFrameworks bauen (AdvantlyKit, AdvantlyWatchKit)
+        run: >-
+          ./gradlew
+          :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework
+          :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
+      - name: Framework-Größen
+        run: du -sh shared/umbrella-*/build/XCFrameworks/debug/*.xcframework/*/
+      - name: XcodeGen installieren + Projekt erzeugen
+        run: |
+          brew install xcodegen
+          cd iosApp && xcodegen generate
+      - name: iOS-App bauen (Simulator, unsigniert)
+        run: >-
+          xcodebuild build
+          -project iosApp/Advantly.xcodeproj
+          -scheme Advantly
+          -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath build/DerivedData
+          CODE_SIGNING_ALLOWED=NO
+      - name: watchOS-App bauen (Simulator, unsigniert)
+        run: >-
+          xcodebuild build
+          -project iosApp/Advantly.xcodeproj
+          -scheme AdvantlyWatch
+          -configuration Debug
+          -destination 'generic/platform=watchOS Simulator'
+          -derivedDataPath build/DerivedData
+          CODE_SIGNING_ALLOWED=NO
+      - name: Berichte hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports-macos
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
