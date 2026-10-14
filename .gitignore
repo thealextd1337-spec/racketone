@@ -35,3 +35,5 @@ hs_err_pid*
 
 # XcodeGen-Ausgaben
 iosApp/Generated/
+# aus gradle.properties erzeugt (./gradlew generateAppleVersionConfig)
+iosApp/Config/Version.xcconfig

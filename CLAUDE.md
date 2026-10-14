@@ -17,6 +17,7 @@ Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 | Was | Wert |
 |---|---|
 | Android `applicationId` | `eu.advantly` – **Phone UND Wear identisch** (Pflicht für die Wear Data Layer API, gleicher Signierschlüssel) |
+| App-Version | nur `advantly.versionName` + `advantly.buildNumber` in `gradle.properties`; Android-`versionCode` = `buildNumber*10 + 1` (Phone) / `+ 2` (Wear) – Play verlangt eindeutige Codes je Formfaktor; Apple liest dieselben Werte (`generateAppleVersionConfig`) |
 | Android-Namespaces | `eu.advantly.android` (Phone), `eu.advantly.wear` (Wear), Module automatisch (siehe unten) |
 | iOS / watchOS Bundle-IDs | `eu.advantly` / `eu.advantly.watchkitapp` |
 | XCFrameworks | `AdvantlyKit` (iOS, aus `shared/umbrella-ios`), `AdvantlyWatchKit` (watchOS, aus `shared/umbrella-watch`) |
@@ -57,7 +58,7 @@ Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `
 | `advantly.kmp.library` | Standardmodul: `jvm`, `android`, `iosArm64`, `iosSimulatorArm64`, `watchosArm64`, `watchosDeviceArm64`, `watchosSimulatorArm64`. Ohne watchOS: `advantly.kmp.watchos=false` in `<modul>/gradle.properties` |
 | `advantly.kmp.compose` | CMP-UI-Modul: `android`, iOS, `jvm("desktop")` (+ Compose-Abhängigkeiten) |
 | `advantly.kmp.base` | Nur KMP + ktlint + `kotlin.test`; Targets setzt das Modul selbst (umbrella-Module) |
-| `advantly.android.application` / `.compose` | Android-Apps (applicationId, SDKs, Version aus `gradle.properties`) |
+| `advantly.android.application` / `.compose` | Android-Apps (applicationId, SDKs, Version aus `gradle.properties`); Formfaktor über `advantly.app.formFactor=phone\|wear` in `<app>/gradle.properties` |
 
 Alle Plugins hängen ktlint an (`ktlintCheck` ist Teil von `check`). Stil: `ktlint_official` (siehe `.editorconfig`).
 

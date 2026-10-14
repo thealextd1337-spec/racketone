@@ -1,6 +1,7 @@
 # XcodeGen-Projekt für die iOS-App inkl. eingebetteter watchOS-App.
 # Das .xcodeproj wird NICHT eingecheckt, sondern in der CI (macOS) erzeugt:
-#   ./gradlew :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework \
+#   ./gradlew generateAppleVersionConfig \
+#             :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework \
 #             :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
 #   cd iosApp && xcodegen generate
 # Ohne Apple-Developer-Account: nur unsignierte Simulator-Builds (CODE_SIGNING_ALLOWED=NO).
@@ -15,10 +16,16 @@ options:
   createIntermediateGroups: true
   developmentLanguage: en
 
+# Version: einzige Quelle ist gradle.properties (advantly.versionName / advantly.buildNumber).
+# Config/Version.xcconfig wird von `./gradlew generateAppleVersionConfig` erzeugt und setzt
+# MARKETING_VERSION + CURRENT_PROJECT_VERSION für iOS und watchOS (müssen bei eingebetteten Watch-Apps gleich sein).
+# Diese beiden Settings deshalb NICHT hier oder in den Targets setzen (würde das xcconfig überschreiben).
+configFiles:
+  Debug: Config/Version.xcconfig
+  Release: Config/Version.xcconfig
+
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES

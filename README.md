@@ -59,7 +59,8 @@ Build-Umgebung** installieren (nicht Phone vom Rechner und Wear aus einem CI-Art
 
 **Versionen:** `advantly.versionName` und `advantly.buildNumber` in `gradle.properties` sind die einzige Quelle.
 Android-`versionCode` = `buildNumber * 10 + 1` (Phone) bzw. `+ 2` (Wear), weil Google Play eindeutige versionCodes über
-alle Formfaktoren verlangt.
+alle Formfaktoren verlangt. Apple (iOS + watchOS) bekommt dieselben Werte über
+`gradlew.bat generateAppleVersionConfig` → `iosApp/Config/Version.xcconfig` (nicht eingecheckt, die CI erzeugt es vor `xcodegen`).
 
 **Nur in der CI (macOS):** Kotlin/Native-Tests auf iOS-/watchOS-Simulatoren, Linken der XCFrameworks, `xcodegen` und die
 iOS-/watchOS-App (unsignierte Simulator-Builds, solange kein Apple-Developer-Account existiert). Die Apple-Targets brechen den

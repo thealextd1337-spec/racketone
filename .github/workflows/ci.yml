@@ -107,9 +107,10 @@ jobs:
           ./gradlew iosSimulatorArm64Test watchosSimulatorArm64Test --continue
           -Padvantly.simulator.ios="$IOS_SIM"
           -Padvantly.simulator.watchos="$WATCHOS_SIM"
-      - name: XCFrameworks bauen (AdvantlyKit, AdvantlyWatchKit)
+      - name: XCFrameworks + Version.xcconfig erzeugen
         run: >-
           ./gradlew
+          generateAppleVersionConfig
           :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework
           :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
       - name: Framework-Größen
