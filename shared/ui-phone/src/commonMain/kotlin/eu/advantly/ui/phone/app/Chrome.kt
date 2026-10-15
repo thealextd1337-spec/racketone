@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -41,7 +42,12 @@ import eu.advantly.ui.phone.resources.app_version
 import eu.advantly.ui.phone.resources.coming_soon
 import eu.advantly.ui.phone.resources.coming_soon_friends
 import eu.advantly.ui.phone.resources.coming_soon_profile
+import eu.advantly.ui.phone.resources.imprint_url
 import eu.advantly.ui.phone.resources.mini_scorebar_a11y
+import eu.advantly.ui.phone.resources.privacy_url
+import eu.advantly.ui.phone.resources.profile_imprint
+import eu.advantly.ui.phone.resources.profile_legal
+import eu.advantly.ui.phone.resources.profile_privacy
 import eu.advantly.ui.phone.resources.tab_friends
 import eu.advantly.ui.phone.resources.tab_history
 import eu.advantly.ui.phone.resources.tab_home
@@ -168,8 +174,45 @@ fun ComingSoonScreen(
             style = AdvantlyTheme.typography.body,
             color = colors.text2,
         )
-        if (tab == AppTab.Profile && versionName.isNotBlank()) {
-            Text(stringResource(Res.string.app_version, versionName), style = AdvantlyTheme.typography.caption, color = colors.text2)
+        if (tab == AppTab.Profile) {
+            // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
+            val uriHandler = LocalUriHandler.current
+            val privacyUrl = stringResource(Res.string.privacy_url)
+            val imprintUrl = stringResource(Res.string.imprint_url)
+            Text(
+                stringResource(Res.string.profile_legal).uppercase(),
+                style = AdvantlyTheme.typography.overline,
+                color = colors.text2,
+                modifier = Modifier.padding(top = Spacing.l).semantics { heading() },
+            )
+            LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { uriHandler.openUri(privacyUrl) }
+            LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { uriHandler.openUri(imprintUrl) }
+            if (versionName.isNotBlank()) {
+                Text(stringResource(Res.string.app_version, versionName), style = AdvantlyTheme.typography.caption, color = colors.text2)
+            }
         }
+    }
+}
+
+/** Zeile, die eine Webseite im Browser öffnet (Rolle Link, ≥ 48 dp). */
+@Composable
+private fun LinkRow(
+    text: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    val colors = AdvantlyTheme.colors
+    Row(
+        Modifier
+            .testTag(tag)
+            .fillMaxWidth()
+            .heightIn(min = Spacing.minTouchTarget)
+            .background(colors.surface, Radii.cardShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Spacing.l, vertical = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
+        Icon(AdvantlyIcons.ChevronRight, contentDescription = null, tint = colors.text2)
     }
 }

@@ -167,6 +167,11 @@ class MatchWizard(
 
     fun setSets(choice: SetsChoice) =
         update {
+            // Badminton 11 Punkte gibt es nur als Best of 5 (02 §5.1.1); andere Satzanzahl → Punkte nach Datum
+            if (it.sport == Sport.BADMINTON && it.pointsToWin == 11 && choice != SetsChoice.BestOf(5)) {
+                val day = today()
+                return@update it.copy(sets = choice, pointsToWin = Presets.badmintonDefaultPointsToWin(day.year, day.month, day.day))
+            }
             val pbMid =
                 if (it.sport == Sport.PICKLEBALL && !it.midGameTouched) {
                     if (choice == SetsChoice.Open) MidGameEndChange.EVERY_GAME else MidGameEndChange.DECIDING_GAME_ONLY
@@ -264,7 +269,11 @@ class MatchWizard(
     private fun derive(input: WizardInput): WizardUiState {
         val selfId = players.self.value.id
         val sport = input.sport
-        val options = sport?.let(::optionsFor) ?: EMPTY_OPTIONS
+        val options =
+            sport?.let(::optionsFor)?.let { o ->
+                // Badminton 11 Punkte: nur Best of 5 wählbar (02 §5.1.1)
+                if (sport == Sport.BADMINTON && input.pointsToWin == 11) o.copy(sets = listOf(SetsChoice.BestOf(5))) else o
+            } ?: EMPTY_OPTIONS
         val format = sport?.let { buildFormat(input) }
         val validation = format?.let(MatchFormatValidator::validate)
         val lineup = if (format != null) buildLineup(input, selfId) else null

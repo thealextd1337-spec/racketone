@@ -20,6 +20,7 @@ kotlin {
         named("desktopTest") {
             dependencies {
                 implementation(libs.compose.ui.test)
+                implementation(libs.navigationevent.compose)
             }
         }
     }

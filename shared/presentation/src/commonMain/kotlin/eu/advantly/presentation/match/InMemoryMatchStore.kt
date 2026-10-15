@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.EngineState
+import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventPayload
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchCreated
@@ -62,6 +63,7 @@ class InMemoryMatchStore(
         var revision = 0L
         var finishedAtMs: Long? = null
         var followUp: MatchId? = null
+        val dismissedConflicts = HashSet<String>()
     }
 
     private val entries = LinkedHashMap<MatchId, Entry>()
@@ -164,6 +166,25 @@ class InMemoryMatchStore(
             append(e, if (retroactive) Correction.initialServer(player) else Correction.server(player))
         }
 
+    override fun resolveFork(
+        forkId: String,
+        keep: ForkChoice,
+    ): Boolean = false // Ein Gerät, ein Log: hier entstehen keine Verzweigungen.
+
+    override fun dismissConflict(conflictId: String): Boolean =
+        command(clearRedo = false) { e ->
+            conflictsOf(e).any { it.id == conflictId } && e.dismissedConflicts.add(conflictId).also { if (it) e.revision++ }
+        }
+
+    override fun undoConflictPoint(
+        conflictId: String,
+        side: Side,
+    ): Boolean =
+        command(clearRedo = false) { e ->
+            val conflict = conflictsOf(e).firstOrNull { it.id == conflictId } ?: return@command false
+            append(e, Undo(if (side == Side.A) conflict.pointA else conflict.pointB))
+        }
+
     override fun pause(): Boolean =
         command(clearRedo = false) { e ->
             e.engine.state.status == MatchStatus.IN_PROGRESS && append(e, Paused)
@@ -223,8 +244,9 @@ class InMemoryMatchStore(
     override fun delete(matchId: MatchId): Boolean {
         val entry = entries[matchId] ?: return false
         if (entry.engine.state.status != MatchStatus.FINISHED) return false
+        // Aktives (beendetes) Match zuerst schließen, dann löschen (Vertrag MatchHistoryPort.delete)
+        if (activeId == matchId) dismiss()
         entries.remove(matchId)
-        if (activeId == matchId) activeId = null
         publish()
         return true
     }
@@ -309,6 +331,24 @@ class InMemoryMatchStore(
         guestsFlow.value = used + guestsFlow.value.filterNot { g -> used.any { it.id == g.id } }
     }
 
+    /** Aktive Widersprüche der Engine (01 §4.4), ohne bestätigte. */
+    private fun conflictsOf(entry: Entry): List<ConflictInfo> {
+        val byId = entry.engine.events.associateBy { it.id }
+        return entry.engine.conflicts
+            .mapNotNull { c ->
+                val first = byId[c.first]?.payload as? PointWon ?: return@mapNotNull null
+                val (a, b) = if (first.side == Side.A) c.first to c.second else c.second to c.first
+                ConflictInfo("${c.first}:${c.second}", a, b)
+            }.filterNot { it.id in entry.dismissedConflicts }
+    }
+
+    /** Wirksam angewendete Ballwechsel (auch ohne Punkt, z. B. Pickleball Side-Out). */
+    private fun pointsPlayed(entry: Entry): Int {
+        val log = EventLog.analyze(entry.engine.events)
+        val skipped = log.undone + log.rejected + log.absorbed + entry.engine.state.ignoredEvents
+        return log.ordered.count { it.payload is PointWon && it.id !in skipped }
+    }
+
     private fun summary(entry: Entry): MatchSummary {
         val state = entry.engine.state
         return MatchSummary(
@@ -322,6 +362,7 @@ class InMemoryMatchStore(
                 entry.finishedAtMs ?: entry.engine.events
                     .lastOrNull()
                     ?.wallClockMs ?: entry.genesis.wallClockMs,
+            interruptedSet = state.current.takeIf { state.status == MatchStatus.FINISHED },
         )
     }
 
@@ -338,6 +379,11 @@ class InMemoryMatchStore(
                     finishedAtMs = e.finishedAtMs,
                     followUpMatchId = e.followUp,
                     revision = e.revision,
+                    pointsPlayed = pointsPlayed(e),
+                    sync = SyncInfo.LOCAL_ONLY,
+                    conflicts = conflictsOf(e),
+                    absorbedTaps = e.engine.absorbedEvents.size,
+                    openForks = emptyList(),
                 )
             }
         historyFlow.value =

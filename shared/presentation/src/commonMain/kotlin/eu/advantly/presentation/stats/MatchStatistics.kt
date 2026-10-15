@@ -1,11 +1,13 @@
 package eu.advantly.presentation.stats
 
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.FlagLevel
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointRecord
+import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.SetKind
@@ -113,18 +115,27 @@ object MatchStatistics {
         return (done + listOfNotNull(current)).fold(SidePair(0, 0)) { acc, g -> SidePair(acc.a + g.a, acc.b + g.b) }
     }
 
+    /**
+     * Spielzeit ohne Pausen (02 §9.3): Eine Pause endet mit `Resumed` **oder** dem nächsten wirksamen `PointWon`
+     * (implizite Fortsetzung); eine bis zum Schluss offene Pause zählt bis zum letzten Event nicht mit.
+     * Rückgängig gemachte und übersprungene Events werden ignoriert.
+     */
     private fun netDuration(record: MatchRecord): Long {
         val events = record.events
         if (events.size < 2) return 0
-        var total = events.last().wallClockMs - events.first().wallClockMs
+        val end = events.last().wallClockMs
+        var total = end - events.first().wallClockMs
+        val log = EventLog.analyze(events.drop(1))
+        val skipped = log.undone + log.rejected + log.absorbed + record.finalState.ignoredEvents
         var pausedAt: Long? = null
-        for (e in events) {
+        for (e in log.ordered) {
+            if (e.id in skipped) continue
             when (e.payload) {
                 Paused -> {
-                    pausedAt = e.wallClockMs
+                    if (pausedAt == null) pausedAt = e.wallClockMs
                 }
 
-                Resumed -> {
+                Resumed, is PointWon -> {
                     pausedAt?.let { total -= e.wallClockMs - it }
                     pausedAt = null
                 }
@@ -134,6 +145,7 @@ object MatchStatistics {
                 }
             }
         }
+        pausedAt?.let { total -= end - it }
         return total.coerceAtLeast(0)
     }
 }

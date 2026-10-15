@@ -28,10 +28,17 @@ private class CountingIds : IdFactory {
 }
 
 /** App-Modell über einem frischen In-Memory-Store (Self „Alex“); die Anzeige-Uhr liest die Store-Uhr, ohne sie vorzurücken. */
-fun testModel(): AdvantlyAppModel {
+fun testModel(wrap: (InMemoryMatchStore) -> LiveMatchPort = { it }): AdvantlyAppModel {
     val clock = StepClock()
     val store = InMemoryMatchStore(clock, CountingIds(), selfName = "Alex")
-    return AdvantlyAppModel(store, store, store, clock = WallClock { clock.now })
+    return AdvantlyAppModel(wrap(store), store, store, clock = WallClock { clock.now })
+}
+
+/** App-Modell, dessen Live-Port ein [FakeSyncPort] über der In-Memory-Engine ist. */
+fun fakeSyncModel(): Pair<AdvantlyAppModel, FakeSyncPort> {
+    var fake: FakeSyncPort? = null
+    val model = testModel { store -> FakeSyncPort(store).also { fake = it } }
+    return model to fake!!
 }
 
 /** Setup Self (+ Partner) gegen Gäste; [firstServerSide] schlägt zuerst auf. */

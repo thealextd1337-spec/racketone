@@ -19,12 +19,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +48,9 @@ import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.playerName
+import eu.advantly.ui.phone.common.resultLine
 import eu.advantly.ui.phone.common.scorePair
+import eu.advantly.ui.phone.common.stateScore
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
@@ -63,6 +71,7 @@ import eu.advantly.ui.phone.resources.dialog_show_result
 import eu.advantly.ui.phone.resources.dialog_yes
 import eu.advantly.ui.phone.resources.end_abandon
 import eu.advantly.ui.phone.resources.end_abandon_hint
+import eu.advantly.ui.phone.resources.end_failed
 import eu.advantly.ui.phone.resources.end_retired
 import eu.advantly.ui.phone.resources.end_title
 import eu.advantly.ui.phone.resources.end_walkover
@@ -94,8 +103,10 @@ internal fun BoxScope.LiveSheet(
         Modifier
             .align(Alignment.BottomCenter)
             .testTag(tag)
-            .semantics { paneTitle = title }
-            .fillMaxWidth()
+            .semantics {
+                paneTitle = title
+                isTraversalGroup = true
+            }.fillMaxWidth()
             .heightIn(max = 640.dp)
             .background(colors.surface, RoundedCornerShape(topStart = Radii.sheet, topEnd = Radii.sheet))
             .verticalScroll(rememberScrollState())
@@ -247,15 +258,7 @@ internal fun BoxScope.MatchEndSheet(
             color = AdvantlyTheme.colors.text,
             modifier = Modifier.testTag("match_end_title"),
         )
-        val suffix =
-            when (result.reason) {
-                ResultReason.RETIRED -> " " + stringResource(Res.string.match_end_retired_suffix)
-                ResultReason.WALKOVER -> " " + stringResource(Res.string.match_end_walkover_suffix)
-                else -> ""
-            }
-        val setScores = state.sets.indices.map { setScore(snapshot, it) }
-        val wonSets = scorePair(state.setsWon)
-        SheetBigScore(setScores.joinToString("  ").ifEmpty { wonSets } + suffix)
+        SheetBigScore(resultLine(state.sets, state.current, result, state.setsWon))
         if (canFollowUp) {
             SheetQuestion(stringResource(Res.string.dialog_another_match))
             Text(stringResource(Res.string.result_followup_hint), style = AdvantlyTheme.typography.body, color = AdvantlyTheme.colors.text2)
@@ -285,7 +288,11 @@ internal fun BoxScope.MatchEndSheet(
     }
 }
 
-/** Bestätigung für vorzeitiges Ende (04 Prinzip 4): Aufgabe Wir/Gegner, Nicht angetreten, Abbruch ohne Wertung. */
+/**
+ * Bestätigung für vorzeitiges Ende (04 Prinzip 4): Aufgabe Wir/Gegner bzw. – solange kein Ballwechsel wirksam
+ * gespielt wurde – „nicht angetreten“ (02 §9.8), Abbruch ohne Wertung. Das Sheet schließt nur, wenn die Engine das
+ * Ende annimmt; sonst bleibt es mit Fehlerhinweis offen.
+ */
 @Composable
 internal fun BoxScope.EndMatchSheet(
     controller: LiveScoreController,
@@ -293,33 +300,38 @@ internal fun BoxScope.EndMatchSheet(
     onClose: () -> Unit,
 ) {
     val title = stringResource(Res.string.end_title)
-    val noPoints =
-        snapshot.state.sets.isEmpty() &&
-            snapshot.state.current?.let { it.points.a + it.points.b == 0 && (it.games?.let { g -> g.a + g.b } ?: 0) == 0 } != false
+    // Ballwechsel statt Score: Bei Pickleball Side-Out bleibt der Stand nach einem Rückschlag-Ballwechsel 0:0
+    val noRallies = snapshot.pointsPlayed == 0
+    var failed by remember { mutableStateOf(false) }
+    val end = { reason: EndReason, side: Side? ->
+        if (controller.endMatch(reason, side)) onClose() else failed = true
+    }
     LiveSheet(title = title, tag = "end_match_sheet") {
         SheetQuestion(title)
         for (side in Side.entries) {
-            val reason = if (noPoints) EndReason.WALKOVER else EndReason.RETIRED
+            val reason = if (noRallies) EndReason.WALKOVER else EndReason.RETIRED
             SheetButton(
-                stringResource(if (noPoints) Res.string.end_walkover else Res.string.end_retired, teamName(snapshot.setup, side)),
+                stringResource(if (noRallies) Res.string.end_walkover else Res.string.end_retired, teamName(snapshot.setup, side)),
                 primary = false,
-                onClick = {
-                    controller.endMatch(reason, side)
-                    onClose()
-                },
+                onClick = { end(reason, side) },
                 modifier = Modifier.fillMaxWidth().testTag(if (side == Side.A) "end_retire_us" else "end_retire_them"),
             )
         }
         SheetButton(
             stringResource(Res.string.end_abandon),
             primary = false,
-            onClick = {
-                controller.endMatch(EndReason.ABANDONED, null)
-                onClose()
-            },
+            onClick = { end(EndReason.ABANDONED, null) },
             modifier = Modifier.fillMaxWidth().testTag("end_abandon"),
         )
         Text(stringResource(Res.string.end_abandon_hint), style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
+        if (failed) {
+            Text(
+                stringResource(Res.string.end_failed),
+                style = AdvantlyTheme.typography.label,
+                color = AdvantlyTheme.colors.danger,
+                modifier = Modifier.testTag("end_failed").semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
         SheetButton(
             stringResource(Res.string.action_cancel),
             primary = true,
@@ -376,23 +388,6 @@ internal fun BoxScope.CorrectServerSheet(
     }
 }
 
-/** Kurzer Satzstand für Mini-Scorebar, Verlauf und Ergebnis: „6:4 3:6 (4:2)“. */
+/** Kurzer Stand für Mini-Scorebar und Resume-Karte: „6:4 (3:2) 30:15“. */
 @Composable
-fun compactScore(
-    snapshot: LiveMatchSnapshot,
-    sport: Sport = snapshot.setup.sport,
-): String {
-    val columns = LiveScoreRules.setColumns(snapshot.state)
-    val done = columns.filter { !it.isCurrent }.map { scorePair(it.values) }
-    val current = columns.firstOrNull { it.isCurrent }
-    val live = current?.let { "(" + scorePair(it.values) + ")" }
-    val points =
-        if (sport.isTennisLike && snapshot.state.current != null) {
-            snapshot.state.current!!
-                .display
-                .let { scorePair(it.a, it.b) }
-        } else {
-            null
-        }
-    return (done + listOfNotNull(live, points)).joinToString(" ")
-}
+fun compactScore(snapshot: LiveMatchSnapshot): String = stateScore(snapshot.state, snapshot.setup.sport)

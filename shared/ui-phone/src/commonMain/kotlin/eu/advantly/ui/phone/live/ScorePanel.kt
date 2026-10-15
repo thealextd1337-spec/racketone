@@ -80,8 +80,10 @@ internal data class ScorePanelContent(
     val playerName: String,
     val pointText: String,
     val serving: Boolean,
-    /** z. B. „Aufschlag · R“ oder „Aufschlag · Mia“. */
+    /** z. B. „Aufschlag“ oder „Aufschlag · Mia“ (umbricht bei großer Schrift). */
     val serveLabel: String,
+    /** Aufschlagfeld „R“/„L“ (Badminton, Pickleball) – eigener Platz, wird nie gekürzt. */
+    val serveCourt: String? = null,
     /** Farbe des Aufschlag-Balls (Sportfarbe). */
     val serveColor: Color,
     val a11yDescription: String,
@@ -209,7 +211,7 @@ internal fun ScorePanel(
                 )
                 if (content.serving) {
                     Row(
-                        modifier = Modifier.testTag("${tag}_serve"),
+                        modifier = Modifier.testTag("${tag}_serve").weight(1f, fill = false),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -218,9 +220,20 @@ internal fun ScorePanel(
                             text = content.serveLabel,
                             style = AdvantlyTheme.typography.caption,
                             color = secondary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        content.serveCourt?.let { court ->
+                            Text(
+                                text = court,
+                                style = AdvantlyTheme.typography.label,
+                                color = if (outdoor) Color.White else colors.text,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.testTag("${tag}_court"),
+                            )
+                        }
                     }
                 }
             }

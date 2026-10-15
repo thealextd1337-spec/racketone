@@ -1,5 +1,7 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -8,6 +10,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
@@ -63,6 +66,12 @@ data class MatchSetup(
  * @property finishedAtMs Wanduhr des Events, das das Match beendet hat; `null`, solange es läuft
  * @property followUpMatchId bereits angelegtes Folge-Match (02 §9.1: UI warnt vor Undo)
  * @property revision steigt mit jeder Änderung (auch bei gleichem Zustand, z. B. Redo-Stapel)
+ * @property pointsPlayed wirksam angewendete Ballwechsel (`PointWon`, nicht rückgängig gemacht, nicht absorbiert,
+ *   nicht übersprungen). Auch Ballwechsel ohne Punkt zählen (Pickleball Side-Out) – maßgeblich für `WALKOVER` (02 §9.8)
+ * @property sync Verbindungszustand zu anderen Geräten (Sync-Pill, 04 §3.2)
+ * @property conflicts aktive Widersprüche: gleichzeitige Punkte für A und B (01 §4.4) – UI zeigt Banner mit 1-Tap-Undo
+ * @property absorbedTaps Anzahl als Doppel-Tap zusammengeführter Eingaben (01 §4.4); steigt sie, zeigt die UI einen Hinweis
+ * @property openForks offene Verzweigungen nach Offline-Zählen auf mehreren Geräten, Auflösung über [LiveMatchPort.resolveFork]
  */
 data class LiveMatchSnapshot(
     val matchId: MatchId,
@@ -74,7 +83,74 @@ data class LiveMatchSnapshot(
     val finishedAtMs: Long?,
     val followUpMatchId: MatchId?,
     val revision: Long,
+    val pointsPlayed: Int = 0,
+    val sync: SyncInfo = SyncInfo.LOCAL_ONLY,
+    val conflicts: List<ConflictInfo> = emptyList(),
+    val absorbedTaps: Int = 0,
+    val openForks: List<ForkInfo> = emptyList(),
 )
+
+/** Verbindungszustand des aktiven Matches (Sync-Pill: verbunden · nur lokal · Konflikt). */
+enum class SyncState {
+    /** Mindestens ein weiteres Gerät ist verbunden und auf dem gleichen Stand. */
+    CONNECTED,
+
+    /** Nur dieses Gerät; Events werden nachsynchronisiert. */
+    LOCAL_ONLY,
+
+    /** Widerspruch oder offene Verzweigung, Nutzer muss entscheiden. */
+    CONFLICT,
+}
+
+/**
+ * @property peers verbundene weitere Geräte (Uhr, zweites Handy)
+ */
+data class SyncInfo(
+    val state: SyncState,
+    val peers: Int,
+) {
+    companion object {
+        val LOCAL_ONLY: SyncInfo = SyncInfo(SyncState.LOCAL_ONLY, 0)
+    }
+}
+
+/**
+ * Widerspruch (01 §4.4): zwei wirksame `PointWon` mit gleichem `parentId`, einer für A, einer für B.
+ *
+ * @property pointA Event-ID des Punkts für A
+ * @property pointB Event-ID des Punkts für B
+ */
+data class ConflictInfo(
+    val id: String,
+    val pointA: EventId,
+    val pointB: EventId,
+)
+
+/** Art des Geräts eines Zweigs (für „Version Uhr / Version Handy“). */
+enum class DeviceKind { PHONE, WATCH, OTHER }
+
+/**
+ * Ein Zweig einer Verzweigung.
+ *
+ * @property preview Zustand, wenn nur dieser Zweig gilt (Vorschau aus der Engine)
+ */
+data class ForkBranch(
+    val deviceId: DeviceId,
+    val device: DeviceKind,
+    val preview: MatchState,
+)
+
+/** Offene Verzweigung: zwei Geräte haben unabhängig weitergezählt. Auflösung als repliziertes Event `ForkResolved`. */
+data class ForkInfo(
+    val forkId: String,
+    val branchA: ForkBranch,
+    val branchB: ForkBranch,
+    /** Zustand, wenn beide Zweige zusammengeführt werden. */
+    val mergedPreview: MatchState,
+)
+
+/** Wahl bei der Auflösung einer Verzweigung (`ForkResolved.keep`). */
+enum class ForkChoice { BRANCH_A, BRANCH_B, BOTH }
 
 /** Live-Zählen des aktiven Matches. Es gibt höchstens ein aktives Match pro Gerät. */
 interface LiveMatchPort {
@@ -95,7 +171,11 @@ interface LiveMatchPort {
     /** `Undo` auf das UI-Undo-Ziel. */
     fun undo(): Boolean
 
-    /** Nimmt das letzte Undo zurück (Undo auf Undo). Jedes neue Kommando außer Undo/Redo leert den Redo-Stapel. */
+    /**
+     * Nimmt das letzte Undo zurück (Undo auf Undo). Den Redo-Stapel leeren **nur** neue Events, die selbst UI-Undo-Ziel
+     * sind (02 §7.3): Punkt, Satzende-Entscheidung, Korrektur, vorzeitiges Ende. Pause/Fortsetzen, Konflikt- und
+     * Verzweigungsauflösung lassen ihn stehen (wie Engine und Session).
+     */
     fun redo(): Boolean
 
     /** Antwort auf „Noch ein Satz?“ (nur `AWAITING_DECISION`); [matchTiebreak] nur, wenn `config.matchTiebreak ≠ null`. */
@@ -131,12 +211,29 @@ interface LiveMatchPort {
 
     /** Schließt ein beendetes aktives Match (es bleibt im Verlauf). `false`, solange es noch läuft. */
     fun dismiss(): Boolean
+
+    /** Löst die Verzweigung [forkId] auf (repliziertes Event `ForkResolved(forkId, keep)`); `false`, wenn unbekannt. */
+    fun resolveFork(
+        forkId: String,
+        keep: ForkChoice,
+    ): Boolean
+
+    /** Widerspruch [conflictId] bestätigen: beide Punkte bleiben, der Hinweis verschwindet. */
+    fun dismissConflict(conflictId: String): Boolean
+
+    /** 1-Tap-Korrektur eines Widerspruchs: nimmt den Punkt für [side] zurück (`Undo` auf dessen Event). */
+    fun undoConflictPoint(
+        conflictId: String,
+        side: Side,
+    ): Boolean
 }
 
 /**
  * Eintrag im Verlauf: ein beendetes Match (`status = FINISHED`).
  *
  * @property sets abgeschlossene Sätze (02 §8 `sets`)
+ * @property interruptedSet bei vorzeitigem Ende (Aufgabe, Walkover, Abbruch) der eingefrorene laufende Satz, damit
+ *   „6:4 2:1 (30:0) Aufg.“ angezeigt werden kann (02 §9.2/§9.22); sonst `null`
  * @property durationMs Wanduhr-Dauer von der Genesis bis zum beendenden Event
  */
 data class MatchSummary(
@@ -147,6 +244,7 @@ data class MatchSummary(
     val setsWon: SidePair<Int>,
     val startedAtMs: Long,
     val finishedAtMs: Long,
+    val interruptedSet: CurrentSet? = null,
 ) {
     val durationMs: Long get() = (finishedAtMs - startedAtMs).coerceAtLeast(0)
 }
@@ -169,7 +267,8 @@ interface MatchHistoryPort {
 
     /**
      * Löscht ein beendetes Match samt Event-Log endgültig von diesem Gerät (Datenschutzerklärung: Nutzer können
-     * Matches löschen). Ist es das aktive (beendete, noch nicht geschlossene) Match, wird es dabei geschlossen.
+     * Matches löschen). Ist es das aktive (beendete, noch nicht geschlossene) Match, schließt die Implementierung es
+     * **vorher** wie [LiveMatchPort.dismiss] – der Session-Adapter muss das ebenso tun.
      * `false` für unbekannte oder noch laufende Matches.
      */
     fun delete(matchId: MatchId): Boolean

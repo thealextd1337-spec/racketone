@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.LiveSettings
+import eu.advantly.presentation.match.ForkChoice
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.WallClock
@@ -61,6 +62,10 @@ class LiveScoreController(
     var flashSide by mutableStateOf<Side?>(null)
         private set
     var undoNotice by mutableStateOf<UndoNotice?>(null)
+        private set
+
+    /** ID des Hinweises „Doppelte Eingabe zusammengeführt“; steigt, sobald `absorbedTaps` wächst. */
+    var absorbedNotice by mutableStateOf<Int?>(null)
         private set
 
     private var outdoorState by mutableStateOf(settings.outdoorContrast)
@@ -123,9 +128,37 @@ class LiveScoreController(
             undoNotice = null
             flashSide = null
         }
-        snapshot = next
+        updateSnapshot(next)
         generation++
     }
+
+    /** Übernimmt [next] und meldet neu zusammengeführte Doppel-Taps (01 §4.4). */
+    private fun updateSnapshot(next: LiveMatchSnapshot?) {
+        val previous = snapshot
+        if (next != null && previous != null && next.matchId == previous.matchId && next.absorbedTaps > previous.absorbedTaps) {
+            absorbedNotice = ++noticeIds
+        }
+        snapshot = next
+    }
+
+    fun dismissAbsorbedNotice(id: Int) {
+        if (absorbedNotice == id) absorbedNotice = null
+    }
+
+    /** Verzweigung auflösen (Version A, Version B oder beide). */
+    fun resolveFork(
+        forkId: String,
+        keep: ForkChoice,
+    ) = command { port.resolveFork(forkId, keep) }
+
+    /** Widerspruch bestätigen: beide Punkte bleiben. */
+    fun dismissConflict(conflictId: String) = command { port.dismissConflict(conflictId) }
+
+    /** 1-Tap-Undo eines Widerspruchs: Punkt für [side] zurücknehmen. */
+    fun undoConflictPoint(
+        conflictId: String,
+        side: Side,
+    ) = command { port.undoConflictPoint(conflictId, side) }
 
     /** Tap auf eine Fläche. [eventUptimeMillis] = `PointerInputChange.uptimeMillis` (null bei Bedienhilfe-Klick). */
     fun onTap(
@@ -266,7 +299,7 @@ class LiveScoreController(
         t0: Long,
         source: InputClockSource,
     ) {
-        snapshot = next
+        updateSnapshot(next)
         lastDirection = direction
         flashSide = side
         generation++

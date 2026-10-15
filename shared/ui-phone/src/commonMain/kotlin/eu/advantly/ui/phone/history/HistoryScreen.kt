@@ -31,13 +31,12 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ResultReason
-import eu.advantly.core.scoring.SetKind
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.durationText
-import eu.advantly.ui.phone.common.scorePair
+import eu.advantly.ui.phone.common.resultLine
 import eu.advantly.ui.phone.common.sportName
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -181,17 +180,6 @@ fun ResultBadge(
     )
 }
 
-/** „6:4 3:6 10:7“ aus der Sicht von Wir. */
+/** „6:4 3:6 10:7“ aus der Sicht von Wir; bei Aufgabe mit eingefrorenem Satz („6:4 2:1 (30:0) Aufg.“). */
 @Composable
-fun setsLine(match: MatchSummary): String =
-    match.sets
-        .map { set ->
-            val pair =
-                when (set.kind) {
-                    SetKind.REGULAR -> set.games
-                    SetKind.MATCH_TIEBREAK -> set.tiebreak ?: set.points
-                    else -> set.points
-                }
-            pair?.let { scorePair(it) }.orEmpty()
-        }.joinToString(" ")
-        .ifEmpty { scorePair(match.setsWon) }
+fun setsLine(match: MatchSummary): String = resultLine(match.sets, match.interruptedSet, match.result, match.setsWon)

@@ -3,12 +3,14 @@ package eu.advantly.ui.phone.live
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,13 +40,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -144,6 +150,7 @@ private enum class LiveDialog { EndMatch, CorrectServer }
  * @param onShowResult Ergebnisansicht des beendeten Matches
  * @param onBenchmarkNewMatch legt für den Auto-Benchmark ein frisches Match an (nur [debugTools])
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LiveScoreScreen(
     controller: LiveScoreController,
@@ -199,7 +206,29 @@ fun LiveScoreScreen(
             return@Box
         }
         var dialog by remember { mutableStateOf<LiveDialog?>(null) }
-        BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = Spacing.s)) {
+        val status = snapshot.state.status
+        val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
+        val fork = snapshot.openForks.firstOrNull()
+        val userDialog = dialog.takeIf { running && fork == null }
+        val modal = fork != null || !running || userDialog != null
+        // System-Zurück schließt zuerst einen vom Nutzer geöffneten Dialog (nicht den Live-Screen)
+        BackHandler(enabled = userDialog != null) { dialog = null }
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = Spacing.s)
+                // Modales Sheet: Hintergrund für Screenreader ausblenden und Fokus nicht hineinlassen
+                .then(
+                    if (modal) {
+                        Modifier
+                            .clearAndSetSemantics {
+                            }.focusProperties { onEnter = { cancelFocusChange() } }
+                            .focusGroup()
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
             val landscape = maxWidth > maxHeight
             val infoMaxHeight = maxHeight * INFO_MAX_FRACTION
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
@@ -240,13 +269,17 @@ fun LiveScoreScreen(
                 }
             }
         }
-        // Satzende (OPEN) und Matchende ergeben sich aus dem Zustand; kein Auto-Weiter (04 §4.3.3 Punkt 8).
-        when (snapshot.state.status) {
-            MatchStatus.AWAITING_DECISION -> {
+        // Verzweigung zuerst; Satzende (OPEN) und Matchende ergeben sich aus dem Zustand – kein Auto-Weiter (04 §4.3.3).
+        when {
+            fork != null -> {
+                ForkSheet(controller, snapshot, fork)
+            }
+
+            status == MatchStatus.AWAITING_DECISION -> {
                 SetEndSheet(controller, snapshot)
             }
 
-            MatchStatus.FINISHED -> {
+            status == MatchStatus.FINISHED -> {
                 MatchEndSheet(controller, snapshot, onShowResult = {
                     controller.port.dismiss()
                     onShowResult(snapshot.matchId)
@@ -287,6 +320,12 @@ private fun PanelsWithSnackbar(
 ) {
     Box(modifier) {
         Panels(controller, snapshot, reduceMotion, landscape, Modifier.fillMaxSize())
+        snapshot.conflicts.firstOrNull()?.let { conflict ->
+            ConflictBanner(conflict, controller, Modifier.align(Alignment.TopCenter).padding(Spacing.s))
+        }
+        controller.absorbedNotice?.let { id ->
+            AbsorbedNotice(id, onTimeout = { controller.dismissAbsorbedNotice(id) }, Modifier.align(Alignment.Center))
+        }
         controller.undoNotice?.let { notice ->
             UndoSnackbar(
                 notice = notice,
@@ -323,6 +362,8 @@ private fun Header(
             Icon(AdvantlyIcons.ChevronDown, contentDescription = null, tint = if (outdoor) Color.White else AdvantlyTheme.colors.text)
         }
         SportChip(sport = sport, text = stringResource(sportName(sport)), outdoor = outdoor, modifier = Modifier.testTag("live_sport_chip"))
+        Spacer(Modifier.weight(1f))
+        SyncPill(snapshot.sync, outdoor)
     }
 }
 
@@ -377,9 +418,9 @@ private fun Panels(
         listOfNotNull(
             serveWord,
             serverName?.takeIf { doubles },
-            courtText(serve?.court)?.takeIf { sport == Sport.BADMINTON || sport == Sport.PICKLEBALL },
             serve?.servesRemaining?.let { "●".repeat(it) },
         ).joinToString(" · ")
+    val serveCourt = courtText(serve?.court)?.takeIf { sport == Sport.BADMINTON || sport == Sport.PICKLEBALL }
 
     @Composable
     fun content(side: Side): ScorePanelContent {
@@ -391,6 +432,7 @@ private fun Panels(
             pointText = points.getValue(side),
             serving = serve?.side == side,
             serveLabel = serveDetail,
+            serveCourt = serveCourt,
             serveColor = sportColor(sport),
             a11yDescription =
                 stringResource(

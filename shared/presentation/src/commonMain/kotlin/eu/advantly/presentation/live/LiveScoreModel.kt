@@ -43,6 +43,8 @@ data class ScoreHint(
     val kind: Kind,
     val side: Side? = null,
     val count: Int = 1,
+    /** Zweiter, gleichzeitig nötiger Hinweis (TT-Doppel bei 5 im Entscheidungssatz: Seitenwechsel + Rückschlagtausch). */
+    val also: Kind? = null,
 ) {
     enum class Kind(
         val level: Level,
@@ -91,13 +93,15 @@ data class SetColumn(
 
 /** Reine Ableitungen für den Live-Screen aus dem kanonischen Zustand (02 §8). */
 object LiveScoreRules {
-    /** Punktanzeige je Side; ohne laufenden Satz (Satzende-Frage, Matchende) die gewonnenen Sätze. */
+    /**
+     * Punktanzeige je Side; ohne laufenden Satz (Satzende-Frage, reguläres Matchende) die gewonnenen Sätze. Bei
+     * vorzeitigem Ende bleibt der eingefrorene Stand stehen (02 §9.2: „6:4 2:1 (30:0) Aufg.“).
+     */
     fun pointLabel(
         state: MatchState,
         side: Side,
     ): PointLabel {
-        val current = state.current
-        if (current == null || state.status == MatchStatus.FINISHED) return PointLabel.Number(state.setsWon[side].toString())
+        val current = state.current ?: return PointLabel.Number(state.setsWon[side].toString())
         val text = current.display[side]
         return if (text == "AD") PointLabel.Advantage else PointLabel.Number(text)
     }
@@ -121,7 +125,8 @@ object LiveScoreRules {
                     }
                 }
             }
-        val current = state.current?.takeIf { state.status != MatchStatus.FINISHED } ?: return done
+        // Bei vorzeitigem Ende ist `current` eingefroren und bleibt als letzte Spalte sichtbar (02 §9.2/§9.22)
+        val current = state.current ?: return done
         val values = current.games ?: current.points
         return done + SetColumn(values, null, null, isCurrent = true)
     }
@@ -157,8 +162,11 @@ object LiveScoreRules {
         }
         val current = state.current ?: return null
         val effects = state.effects
-        if (Effect.CHANGE_ENDS in effects) return ScoreHint(ScoreHint.Kind.ChangeEnds)
-        if (Effect.RECEIVE_ORDER_SWAPPED in effects) return ScoreHint(ScoreHint.Kind.ReceiveOrderSwapped)
+        val swap = Effect.RECEIVE_ORDER_SWAPPED in effects
+        if (Effect.CHANGE_ENDS in effects) {
+            return ScoreHint(ScoreHint.Kind.ChangeEnds, also = if (swap) ScoreHint.Kind.ReceiveOrderSwapped else null)
+        }
+        if (swap) return ScoreHint(ScoreHint.Kind.ReceiveOrderSwapped)
         when (current.callout) {
             Callout.DECIDING_POINT -> return ScoreHint(ScoreHint.Kind.DecidingPoint)
             Callout.STAR_POINT -> return ScoreHint(ScoreHint.Kind.StarPoint)

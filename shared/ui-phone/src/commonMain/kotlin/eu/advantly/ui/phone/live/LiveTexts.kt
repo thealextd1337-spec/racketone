@@ -133,7 +133,10 @@ fun hintText(
                 Res.string.hint_match_abandoned to null
             }
         }
-    return if (count != null) stringResource(resource, count) else stringResource(resource)
+    val main = if (count != null) stringResource(resource, count) else stringResource(resource)
+    // TT-Doppel im Entscheidungssatz: Seitenwechsel UND Rückschlagtausch gleichzeitig (02 §8.4)
+    val also = hint.also?.let { hintText(ScoreHint(it), sport) }
+    return if (also != null) "$main · $also" else main
 }
 
 /** „R“/„L“ für das Aufschlagfeld (Badminton, Pickleball, 02 §8.4); `null` sonst. */

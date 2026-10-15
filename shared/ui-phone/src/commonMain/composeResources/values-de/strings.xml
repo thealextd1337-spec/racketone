@@ -294,4 +294,32 @@
     <string name="latency_frames">Frame-Zeit p95 %1$s ms · Jank %2$s/%3$s</string>
     <string name="latency_toggle">Latenz-Overlay auf- oder zuklappen</string>
     <string name="latency_benchmark_running">Auto-Benchmark läuft …</string>
+
+    <!-- Review-Runde 1: Start-Bestätigung, Sync/Konflikt/Verzweigung, Rechtliches -->
+    <string name="abandon_title">Laufendes Match abbrechen?</string>
+    <string name="abandon_text">Das laufende Match wird ohne Wertung beendet und das neue gestartet.</string>
+    <string name="abandon_confirm">Abbrechen und starten</string>
+    <string name="abandon_keep">Weiterspielen</string>
+    <string name="end_failed">Das hat nicht geklappt – der Stand hat sich geändert. Bitte erneut wählen.</string>
+    <string name="sync_connected_one">Uhr verbunden</string>
+    <string name="sync_connected_many">%1$d Geräte verbunden</string>
+    <string name="sync_local">Nur lokal</string>
+    <string name="sync_conflict">Konflikt</string>
+    <string name="conflict_title">Gleichzeitig Punkt für Wir und Gegner – korrigieren?</string>
+    <string name="conflict_undo_us">Punkt Wir zurücknehmen</string>
+    <string name="conflict_undo_them">Punkt Gegner zurücknehmen</string>
+    <string name="conflict_keep">Beide behalten</string>
+    <string name="absorbed_notice">Doppelte Eingabe zusammengeführt</string>
+    <string name="fork_title">Zwei Versionen des Spielstands</string>
+    <string name="fork_text">Zwei Geräte haben getrennt weitergezählt. Welche Version gilt?</string>
+    <string name="fork_version">%1$s · %2$s</string>
+    <string name="fork_merge">Beide zusammenführen · %1$s</string>
+    <string name="device_watch">Version Uhr</string>
+    <string name="device_phone">Version Handy</string>
+    <string name="device_other">Anderes Gerät</string>
+    <string name="profile_legal">Rechtliches</string>
+    <string name="profile_privacy">Datenschutz</string>
+    <string name="profile_imprint">Impressum</string>
+    <string name="privacy_url">https://advantly.eu/app-datenschutz.html</string>
+    <string name="imprint_url">https://advantly.eu/impressum.html</string>
 </resources>

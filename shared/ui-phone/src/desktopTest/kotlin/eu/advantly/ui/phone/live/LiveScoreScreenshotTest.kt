@@ -15,18 +15,28 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Density
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Environment
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
+import eu.advantly.presentation.match.ConflictInfo
+import eu.advantly.presentation.match.DeviceKind
+import eu.advantly.presentation.match.ForkBranch
+import eu.advantly.presentation.match.ForkInfo
+import eu.advantly.presentation.match.SyncInfo
+import eu.advantly.presentation.match.SyncState
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.fakeSyncModel
 import eu.advantly.ui.phone.preview.DemoData
 import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
@@ -317,6 +327,59 @@ class LiveScoreScreenshotTest {
             onNodeWithTag("more_button").performClick()
             onNodeWithTag("menu_end_match").performClick()
         })
+
+    // --- Review-Runde 1: Sync, Konflikt, Verzweigung, Aufgabe, Profil ---
+
+    private fun previewState(points: String) =
+        testModel()
+            .apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), points) }
+            .live.active.value!!
+            .state
+
+    @Test
+    fun liveSyncConflictBanner() {
+        val (model, fake) = fakeSyncModel()
+        model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAB")
+        fake.update {
+            sync = SyncInfo(SyncState.CONNECTED, 1)
+            conflicts = listOf(ConflictInfo("c1", EventId("a"), EventId("b")))
+        }
+        model.controller.sync(model.live.active.value)
+        model.navigator.push(Overlay.Live)
+        capture("live-sync-conflict-de", Locale.GERMANY, model)
+    }
+
+    @Test
+    fun liveForkDialog() {
+        val (model, fake) = fakeSyncModel()
+        model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAAA")
+        fake.update {
+            sync = SyncInfo(SyncState.CONFLICT, 1)
+            forks =
+                listOf(
+                    ForkInfo(
+                        "f1",
+                        ForkBranch(DeviceId("watch"), DeviceKind.WATCH, previewState("AAAAAA")),
+                        ForkBranch(DeviceId("phone"), DeviceKind.PHONE, previewState("AAAABB")),
+                        previewState("AAAAAABB"),
+                    ),
+                )
+        }
+        model.controller.sync(model.live.active.value)
+        model.navigator.push(Overlay.Live)
+        capture("sheet-fork-en", Locale.US, model)
+    }
+
+    @Test
+    fun matchEndRetired() {
+        val model = liveModel(Presets.TENNIS_SINGLES_BO3.format(), "AAAABBBB".repeat(4) + "AAAA".repeat(2) + "AAAABBBB" + "AAAA" + "AA")
+        model.live.endMatch(EndReason.RETIRED, Side.B)
+        model.controller.sync(model.live.active.value)
+        capture("sheet-match-end-retired-de", Locale.GERMANY, model)
+    }
+
+    @Test
+    fun profileLegalLinks() = capture("app-profile-de", Locale.GERMANY, testModel().apply { navigator.tab = AppTab.Profile })
 
     @Test
     fun barlowCondensedDigitsAreTabular() =

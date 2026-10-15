@@ -294,4 +294,32 @@
     <string name="latency_frames">Frame time p95 %1$s ms · jank %2$s/%3$s</string>
     <string name="latency_toggle">Expand or collapse latency overlay</string>
     <string name="latency_benchmark_running">Auto benchmark running …</string>
+
+    <!-- Review-Runde 1: Start-Bestätigung, Sync/Konflikt/Verzweigung, Rechtliches -->
+    <string name="abandon_title">Abandon the running match?</string>
+    <string name="abandon_text">The running match ends without a result and the new one starts.</string>
+    <string name="abandon_confirm">Abandon and start</string>
+    <string name="abandon_keep">Keep playing</string>
+    <string name="end_failed">That did not work – the score has changed. Please choose again.</string>
+    <string name="sync_connected_one">Watch connected</string>
+    <string name="sync_connected_many">%1$d devices connected</string>
+    <string name="sync_local">Local only</string>
+    <string name="sync_conflict">Conflict</string>
+    <string name="conflict_title">Point for us and them at the same time – fix it?</string>
+    <string name="conflict_undo_us">Remove our point</string>
+    <string name="conflict_undo_them">Remove their point</string>
+    <string name="conflict_keep">Keep both</string>
+    <string name="absorbed_notice">Duplicate tap merged</string>
+    <string name="fork_title">Two versions of the score</string>
+    <string name="fork_text">Two devices kept counting separately. Which version is right?</string>
+    <string name="fork_version">%1$s · %2$s</string>
+    <string name="fork_merge">Merge both · %1$s</string>
+    <string name="device_watch">Watch version</string>
+    <string name="device_phone">Phone version</string>
+    <string name="device_other">Other device</string>
+    <string name="profile_legal">Legal</string>
+    <string name="profile_privacy">Privacy</string>
+    <string name="profile_imprint">Imprint</string>
+    <string name="privacy_url">https://advantly.eu/en/app-privacy.html</string>
+    <string name="imprint_url">https://advantly.eu/impressum.html</string>
 </resources>

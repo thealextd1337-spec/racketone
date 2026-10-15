@@ -96,11 +96,41 @@ class AdvantlyAppModel(
         }
     }
 
-    /** Startet [setup] (Assistent oder Schnellstart) und öffnet den Live-Score. */
+    /** Wartender Start, solange der Nutzer den Abbruch des laufenden Matches noch nicht bestätigt hat. */
+    var pendingStart: MatchSetup? by mutableStateOf(null)
+        private set
+
+    /**
+     * Einziger Weg zu `live.start` (Assistent, Schnellstart, „Nochmal in gleicher Besetzung“): Läuft noch ein Match,
+     * wird erst nach Bestätigung gestartet ([confirmPendingStart]) – sonst würde es stillschweigend abgebrochen.
+     */
     fun startMatch(setup: MatchSetup) {
+        if (hasRunningMatch) {
+            pendingStart = setup
+            return
+        }
+        doStart(setup)
+    }
+
+    /** Laufendes Match abbrechen (`ABANDONED`) und das wartende starten. */
+    fun confirmPendingStart() {
+        val setup = pendingStart ?: return
+        pendingStart = null
+        doStart(setup)
+    }
+
+    /** Wartenden Start verwerfen; das laufende Match bleibt unverändert. */
+    fun cancelPendingStart() {
+        pendingStart = null
+    }
+
+    private fun doStart(setup: MatchSetup) {
         live.start(setup)
         controller.sync(live.active.value)
-        if (navigator.top == Overlay.Wizard) navigator.replaceTop(Overlay.Live) else navigator.push(Overlay.Live)
+        when (navigator.top) {
+            Overlay.Wizard, is Overlay.Result -> navigator.replaceTop(Overlay.Live)
+            else -> navigator.push(Overlay.Live)
+        }
     }
 
     /** Assistent abschließen. */
