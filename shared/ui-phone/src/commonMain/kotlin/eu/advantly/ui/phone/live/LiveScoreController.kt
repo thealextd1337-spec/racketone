@@ -1,22 +1,21 @@
 package eu.advantly.ui.phone.live
 
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
-import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.createSavedStateHandle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import eu.advantly.presentation.live.DemoScenario
-import eu.advantly.presentation.live.FakeTennisState
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.MatchState
 import eu.advantly.presentation.live.HapticCue
-import eu.advantly.presentation.live.LiveScoreViewModel
-import eu.advantly.presentation.live.ScoreChange
-import eu.advantly.presentation.live.Team
+import eu.advantly.presentation.live.LiveScoreRules
+import eu.advantly.presentation.live.LiveSettings
+import eu.advantly.presentation.match.LiveMatchPort
+import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.latency.InputClockSource
 import eu.advantly.ui.phone.latency.LatencySummary
 import eu.advantly.ui.phone.latency.LatencyTracker
@@ -29,82 +28,69 @@ import kotlinx.coroutines.delay
 /** Vorher→Nachher für die Undo-Snackbar (04 §5.6). */
 data class UndoNotice(
     val id: Int,
-    val before: FakeTennisState,
-    val after: FakeTennisState,
+    val before: MatchState,
+    val after: MatchState,
 )
 
-/**
- * Controller zum [LiveScoreViewModel] des aktuellen ViewModelStoreOwners (Activity, ComposeUIViewController,
- * Desktop-Fenster). Der Zustand übersteht damit Rotation (ViewModel) und Prozesstod (SavedStateHandle).
- */
-@Composable
-fun rememberLiveScoreController(): LiveScoreController {
-    val viewModel =
-        viewModel {
-            // Bietet ein Host keine SavedState-Unterstützung, bleibt es beim ViewModel ohne Prozesstod-Schutz.
-            LiveScoreViewModel(runCatching { createSavedStateHandle() }.getOrElse { SavedStateHandle() })
-        }
-    return remember(viewModel) { LiveScoreController(viewModel) }
-}
+/** Richtung der Ziffern-Animation: vorwärts (Punkt) oder rückwärts (Undo). */
+enum class ScoreDirection { Forward, Backward }
 
 /**
- * UI-State-Holder des Live-Score-Screens (Spike S4) über dem [LiveScoreViewModel]: Compose-State für Zustand und
- * Einstellungen, Zähler für verlorene/entprellte Taps und den [LatencyTracker]. Nur vom UI-Thread benutzen.
+ * UI-State-Holder des Live-Screens über dem [LiveMatchPort]: spiegelt den Snapshot synchron in Compose-State
+ * (Haptik und Animation im selben Frame wie die Eingabe), zählt Taps für das Latenz-Overlay und hält die
+ * Live-Einstellungen. Änderungen von außen (später: andere Geräte) kommen über [sync]. Nur vom UI-Thread benutzen.
  */
 @Stable
 class LiveScoreController(
-    private val viewModel: LiveScoreViewModel = LiveScoreViewModel(),
+    val port: LiveMatchPort,
+    private val settings: LiveSettings = LiveSettings(),
     val tracker: LatencyTracker = LatencyTracker(),
+    /** Uhr für die Matchdauer (gleiche Basis wie `startedAtMs` des Ports). */
+    val clock: WallClock = WallClock.System,
 ) {
-    var state: FakeTennisState by mutableStateOf(viewModel.state)
-        private set
-    var canUndo by mutableStateOf(viewModel.canUndo)
-        private set
-
-    /** Redo-Stapel nicht leer – auch nach Rotation/Prozesstod, wenn die Snackbar längst weg ist („Mehr → Wiederholen“). */
-    var canRedo by mutableStateOf(viewModel.canRedo)
+    var snapshot: LiveMatchSnapshot? by mutableStateOf(port.active.value)
         private set
 
     /** Wird bei jeder Zustandsänderung erhöht (Roll-Animation, Flash, Latenzmessung). */
     var generation by mutableIntStateOf(0)
         private set
-    var lastDirection by mutableStateOf(ScoreChange.Direction.Forward)
+    var lastDirection by mutableStateOf(ScoreDirection.Forward)
         private set
 
-    /** Team, dessen Fläche zuletzt aufblitzen soll. */
-    var flashTeam by mutableStateOf<Team?>(null)
+    /** Side, deren Fläche zuletzt aufblitzen soll. */
+    var flashSide by mutableStateOf<Side?>(null)
         private set
     var undoNotice by mutableStateOf<UndoNotice?>(null)
         private set
 
-    private var outdoorState by mutableStateOf(viewModel.outdoorContrast)
-    private var keepScreenOnState by mutableStateOf(viewModel.keepScreenOn)
-    private var overlayState by mutableStateOf(viewModel.showLatencyOverlay)
-    private var debounceState by mutableStateOf(viewModel.debounceEnabled)
+    private var outdoorState by mutableStateOf(settings.outdoorContrast)
+    private var keepScreenOnState by mutableStateOf(settings.keepScreenOn)
+    private var overlayState by mutableStateOf(settings.showLatencyOverlay)
+    private var debounceState by mutableStateOf(settings.debounceEnabled)
 
     var outdoorContrast: Boolean
         get() = outdoorState
         set(value) {
             outdoorState = value
-            viewModel.outdoorContrast = value
+            settings.outdoorContrast = value
         }
     var keepScreenOn: Boolean
         get() = keepScreenOnState
         set(value) {
             keepScreenOnState = value
-            viewModel.keepScreenOn = value
+            settings.keepScreenOn = value
         }
     var showLatencyOverlay: Boolean
         get() = overlayState
         set(value) {
             overlayState = value
-            viewModel.showLatencyOverlay = value
+            settings.showLatencyOverlay = value
         }
     var debounceEnabled: Boolean
         get() = debounceState
         set(value) {
             debounceState = value
-            viewModel.debounceEnabled = value
+            settings.debounceEnabled = value
         }
 
     var benchmarkRunning by mutableStateOf(false)
@@ -124,18 +110,30 @@ class LiveScoreController(
     var frameStats: FrameStats? = null
 
     /** Fensterkoordinaten (px) der Tap-Flächen – nur für den Desktop-Benchmark (AWT-Klicks). */
-    val panelBounds = mutableMapOf<Team, Rect>()
+    val panelBounds = mutableMapOf<Side, Rect>()
 
     private var lastPointAtNanos = Long.MIN_VALUE
     private var noticeIds = 0
 
+    /** Übernimmt einen Snapshot, der nicht durch ein eigenes Kommando entstand (Flow des Ports). */
+    fun sync(next: LiveMatchSnapshot?) {
+        val current = snapshot
+        if (next?.matchId == current?.matchId && next?.revision == current?.revision) return
+        if (next?.matchId != current?.matchId) {
+            undoNotice = null
+            flashSide = null
+        }
+        snapshot = next
+        generation++
+    }
+
     /** Tap auf eine Fläche. [eventUptimeMillis] = `PointerInputChange.uptimeMillis` (null bei Bedienhilfe-Klick). */
     fun onTap(
-        team: Team,
+        side: Side,
         eventUptimeMillis: Long?,
     ) {
         val (t0, source) = inputTime(eventUptimeMillis)
-        score(team, t0, source)
+        score(side, t0, source)
     }
 
     private fun inputTime(eventUptimeMillis: Long?): Pair<Long, InputClockSource> {
@@ -145,7 +143,7 @@ class LiveScoreController(
     }
 
     private fun score(
-        team: Team,
+        side: Side,
         t0: Long,
         source: InputClockSource,
     ) {
@@ -155,52 +153,74 @@ class LiveScoreController(
             haptics.perform(HapticCue.Rejected)
             return
         }
-        val change = viewModel.score(team)
-        if (change == null) {
+        if (!port.recordPoint(side)) {
             haptics.perform(HapticCue.Rejected)
             return
         }
         lastPointAtNanos = t0
         countedPoints++
         undoNotice = null
-        apply(change, t0, source)
+        val after = port.active.value
+        after?.let { haptics.perform(LiveScoreRules.cueFor(it.state, side)) }
+        apply(after, ScoreDirection.Forward, side, t0, source)
     }
 
     fun undo(eventUptimeMillis: Long? = null) {
         val (t0, source) = inputTime(eventUptimeMillis)
-        val change = viewModel.undo()
-        if (change == null) {
+        val before = snapshot?.state
+        if (!port.undo()) {
             haptics.perform(HapticCue.Rejected)
             return
         }
-        apply(change, t0, source)
-        undoNotice = UndoNotice(++noticeIds, change.before, change.after)
+        haptics.perform(HapticCue.Undo)
+        val after = port.active.value
+        apply(after, ScoreDirection.Backward, null, t0, source)
+        if (before != null && after != null) undoNotice = UndoNotice(++noticeIds, before, after.state)
     }
 
     fun redo() {
-        val change = viewModel.redo() ?: return
+        if (!port.redo()) return
         undoNotice = null
-        apply(change, monotonicNanos(), InputClockSource.Handler)
+        apply(port.active.value, ScoreDirection.Forward, null, monotonicNanos(), InputClockSource.Handler)
     }
 
     fun dismissUndoNotice(id: Int) {
         if (undoNotice?.id == id) undoNotice = null
     }
 
-    fun demo(scenario: DemoScenario) {
-        undoNotice = null
-        apply(viewModel.demo(scenario), monotonicNanos(), InputClockSource.Handler)
-    }
+    /** Antwort auf „Noch ein Satz?“. */
+    fun continueDecision(
+        anotherSet: Boolean,
+        matchTiebreak: Boolean = false,
+    ) = command { port.continueDecision(anotherSet, matchTiebreak) }
 
-    fun newMatch() {
-        viewModel.reset()
-        undoNotice = null
-        lastPointAtNanos = Long.MIN_VALUE
-        state = viewModel.state
-        canUndo = false
-        canRedo = false
-        flashTeam = null
-        generation++
+    /** Vorzeitiges Matchende (bestätigt im Dialog). */
+    fun endMatch(
+        reason: EndReason,
+        side: Side?,
+    ) = command { port.endMatch(reason, side) }
+
+    fun correctServer(
+        player: PlayerId,
+        retroactive: Boolean,
+    ) = command { port.correctServer(player, retroactive) }
+
+    fun pause() = command { port.pause() }
+
+    fun resume() = command { port.resume() }
+
+    /** Folge-Match in gleicher Besetzung; `true`, wenn es angelegt wurde. */
+    fun createFollowUp(): Boolean = command { port.createFollowUp() != null }
+
+    private inline fun command(block: () -> Boolean): Boolean {
+        val ok = block()
+        if (ok) {
+            undoNotice = null
+            apply(port.active.value, ScoreDirection.Forward, null, monotonicNanos(), InputClockSource.Handler)
+        } else {
+            haptics.perform(HapticCue.Rejected)
+        }
+        return ok
     }
 
     /** Setzt Latenz-Messwerte, Tap-Zähler und Frame-Statistik gemeinsam zurück (gleiches Messfenster). */
@@ -213,20 +233,23 @@ class LiveScoreController(
     }
 
     /**
-     * Auto-Benchmark: [points] Punkte im Abstand von [intervalMillis] ohne echte Eingabe (abwechselnd Wir/Gegner,
-     * endet also nie im Matchende). Misst Zustand → nächster Frame-Beginn, z. B. im iOS-Simulator ohne Touch-Injektion.
+     * Auto-Benchmark: [points] Punkte im Abstand von [intervalMillis] ohne echte Eingabe (abwechselnd Wir/Gegner;
+     * beim Tennis endet das nie). [newMatch] legt vorher ein frisches Match an. Misst Zustand → nächster
+     * Frame-Beginn, z. B. im iOS-Simulator ohne Touch-Injektion.
      */
     suspend fun runAutoBenchmark(
+        newMatch: () -> Unit,
         points: Int = 40,
         intervalMillis: Long = 250,
     ): LatencySummary {
         benchmarkRunning = true
         try {
             newMatch()
+            sync(port.active.value)
             resetMeasurements()
             delay(intervalMillis * 2)
             repeat(points) { i ->
-                score(if (i % 2 == 0) Team.Us else Team.Them, monotonicNanos(), InputClockSource.Synthetic)
+                score(if (i % 2 == 0) Side.A else Side.B, monotonicNanos(), InputClockSource.Synthetic)
                 delay(intervalMillis)
             }
             delay(intervalMillis)
@@ -237,17 +260,15 @@ class LiveScoreController(
     }
 
     private fun apply(
-        change: ScoreChange,
+        next: LiveMatchSnapshot?,
+        direction: ScoreDirection,
+        side: Side?,
         t0: Long,
         source: InputClockSource,
     ) {
-        // Haptik zuerst – sie soll nicht auf den Frame warten.
-        change.cue?.let(haptics::perform)
-        state = change.after
-        canUndo = viewModel.canUndo
-        canRedo = viewModel.canRedo
-        lastDirection = change.direction
-        flashTeam = change.team
+        snapshot = next
+        lastDirection = direction
+        flashSide = side
         generation++
         tracker.onInput(generation, t0, source)
     }

@@ -8,6 +8,7 @@ kotlin {
         commonMain.dependencies {
             api(projects.shared.presentation)
             implementation(libs.lifecycle.viewmodel.compose)
+            implementation(libs.compose.ui.backhandler)
         }
         named("desktopMain") {
             dependencies {

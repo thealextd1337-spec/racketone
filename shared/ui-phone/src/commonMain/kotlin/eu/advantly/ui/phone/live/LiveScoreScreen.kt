@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,7 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,14 +45,28 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import eu.advantly.presentation.live.DemoScenario
-import eu.advantly.presentation.live.FakeTennis
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
-import eu.advantly.presentation.live.Team
+import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.WallClock
+import eu.advantly.ui.phone.common.formatLabel
+import eu.advantly.ui.phone.common.playerName
+import eu.advantly.ui.phone.common.pointText
+import eu.advantly.ui.phone.common.scoreSummary
+import eu.advantly.ui.phone.common.sportColor
+import eu.advantly.ui.phone.common.sportName
+import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
@@ -68,6 +83,7 @@ import eu.advantly.ui.phone.platform.rememberReduceMotion
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.a11y_point_for
 import eu.advantly.ui.phone.resources.a11y_serving
+import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_more
 import eu.advantly.ui.phone.resources.action_outdoor
 import eu.advantly.ui.phone.resources.action_redo
@@ -85,25 +101,23 @@ import eu.advantly.ui.phone.resources.latency_source_line
 import eu.advantly.ui.phone.resources.latency_source_synthetic
 import eu.advantly.ui.phone.resources.latency_stats
 import eu.advantly.ui.phone.resources.latency_toggle
-import eu.advantly.ui.phone.resources.live_format_best_of_3
+import eu.advantly.ui.phone.resources.live_no_match
 import eu.advantly.ui.phone.resources.live_serve
-import eu.advantly.ui.phone.resources.live_sport_tennis
+import eu.advantly.ui.phone.resources.live_serve_line
 import eu.advantly.ui.phone.resources.live_team_them
 import eu.advantly.ui.phone.resources.live_team_them_name
 import eu.advantly.ui.phone.resources.live_team_us
 import eu.advantly.ui.phone.resources.live_team_us_name
 import eu.advantly.ui.phone.resources.menu_auto_benchmark
+import eu.advantly.ui.phone.resources.menu_correct_server
 import eu.advantly.ui.phone.resources.menu_debounce
-import eu.advantly.ui.phone.resources.menu_demo_breakpoint
-import eu.advantly.ui.phone.resources.menu_demo_deuce
-import eu.advantly.ui.phone.resources.menu_demo_matchpoint
-import eu.advantly.ui.phone.resources.menu_demo_setpoint
-import eu.advantly.ui.phone.resources.menu_demo_tiebreak
+import eu.advantly.ui.phone.resources.menu_end_match
 import eu.advantly.ui.phone.resources.menu_keep_screen_on
 import eu.advantly.ui.phone.resources.menu_latency_overlay
-import eu.advantly.ui.phone.resources.menu_new_match
 import eu.advantly.ui.phone.resources.menu_outdoor_contrast
+import eu.advantly.ui.phone.resources.menu_pause
 import eu.advantly.ui.phone.resources.menu_reset_measurements
+import eu.advantly.ui.phone.resources.menu_resume
 import eu.advantly.ui.phone.resources.undo_snackbar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -111,28 +125,33 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
 
-/** Spieler-Namen des Fake-Matches (Daten, keine UI-Texte). */
-private const val FAKE_NAME_US = "Alex"
-private const val FAKE_NAME_THEM = "Jonas"
-
 /** Anteil der Bildschirmhöhe, den Kopf + Overlay + Satztabelle im Hochformat höchstens belegen. */
 private const val INFO_MAX_FRACTION = 0.4f
 
 /** Sichtdauer der Undo-Snackbar. */
 private const val UNDO_NOTICE_MILLIS = 4_000L
 
+/** Offene Dialoge des Live-Screens, die der Nutzer selbst öffnet (Satz-/Matchende folgen aus dem Zustand). */
+private enum class LiveDialog { EndMatch, CorrectServer }
+
 /**
- * H6 Live-Score Handy (04 §4.1) – Spike S4. Schwarzer Live-Screen, zwei Tap-Flächen (Wir oben/Orange,
- * Gegner unten/Blau), Satztabelle, Hinweis-Pill, Undo per Knopf/Wischgeste + Snackbar, Haptik, Outdoor-Kontrast,
- * Latenz-Overlay (Eingabe → nächster Frame-Beginn nach Draw). Zustand liegt im [LiveScoreViewModel]
- * (übersteht Rotation und Prozesstod), siehe [rememberLiveScoreController].
+ * H6 Live-Score Handy (04 §4.1) über der echten Engine: schwarzer Screen, Tap-Flächen Wir (oben/Orange) und
+ * Gegner (unten/Blau), Satztabelle, Hinweis-Pill, Aufschläger/Feld, Undo per Knopf/Wischgeste + Snackbar, Haptik,
+ * Outdoor-Kontrast. Satzende-Frage (OPEN), Matchende (BEST_OF: Folge-Match), vorzeitiges Ende und
+ * Aufschläger-Korrektur als Bottom-Sheets. Das Latenz-Overlay gibt es nur mit [debugTools].
  *
- * [onBenchmarkFinished] erhält die Logzeile eines Auto-Benchmarks (Menü oder [autoBenchmark] beim Start).
+ * @param onMinimize zurück zu den Tabs (Match läuft weiter, Mini-Scorebar)
+ * @param onShowResult Ergebnisansicht des beendeten Matches
+ * @param onBenchmarkNewMatch legt für den Auto-Benchmark ein frisches Match an (nur [debugTools])
  */
 @Composable
 fun LiveScoreScreen(
+    controller: LiveScoreController,
     modifier: Modifier = Modifier,
-    controller: LiveScoreController = rememberLiveScoreController(),
+    debugTools: Boolean = false,
+    onMinimize: () -> Unit = {},
+    onShowResult: (MatchId) -> Unit = {},
+    onBenchmarkNewMatch: (() -> Unit)? = null,
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
@@ -141,6 +160,7 @@ fun LiveScoreScreen(
         controller.haptics = haptics
         onDispose { }
     }
+    LaunchedEffect(controller) { controller.port.active.collect(controller::sync) }
     KeepScreenOn(controller.keepScreenOn)
     val systemReduceMotion = rememberReduceMotion()
     val reduceMotion = systemReduceMotion || controller.outdoorContrast
@@ -152,10 +172,10 @@ fun LiveScoreScreen(
     val scope = rememberCoroutineScope()
     val tracker = controller.tracker
 
-    if (autoBenchmark) {
+    if (autoBenchmark && onBenchmarkNewMatch != null) {
         LaunchedEffect(Unit) {
             delay(1_500)
-            onBenchmarkFinished(controller.runAutoBenchmark().toLogLine())
+            onBenchmarkFinished(controller.runAutoBenchmark(onBenchmarkNewMatch).toLogLine())
         }
     }
 
@@ -173,25 +193,32 @@ fun LiveScoreScreen(
                     }
                 }.windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
+        val snapshot = controller.snapshot
+        if (snapshot == null) {
+            NoMatch(onMinimize)
+            return@Box
+        }
+        var dialog by remember { mutableStateOf<LiveDialog?>(null) }
         BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = Spacing.s)) {
             val landscape = maxWidth > maxHeight
             val infoMaxHeight = maxHeight * INFO_MAX_FRACTION
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
-                    Header(controller)
-                    if (controller.showLatencyOverlay) {
+                    Header(controller, snapshot, onMinimize)
+                    if (debugTools && controller.showLatencyOverlay) {
                         LatencyOverlay(controller, frameStats, Modifier.padding(top = 6.dp))
                     }
                     SetTable(
-                        state = controller.state,
-                        usName = FAKE_NAME_US,
-                        themName = FAKE_NAME_THEM,
-                        header = stringResource(Res.string.live_format_best_of_3),
-                        elapsed = { ElapsedTime(controller.outdoorContrast) },
+                        snapshot = snapshot,
+                        header = formatLabel(snapshot.setup.format),
+                        elapsed = { ElapsedTime(snapshot, controller.clock, controller.outdoorContrast) },
                         outdoor = controller.outdoorContrast,
                         modifier = Modifier.padding(top = Spacing.s),
                     )
                 }
+            }
+            val footer: @Composable (Modifier) -> Unit = { footerModifier ->
+                Footer(controller, snapshot, debugTools, onBenchmarkNewMatch, { dialog = it }, footerModifier)
             }
             if (landscape) {
                 // Querformat: Info + Fußleiste links (scrollbar, damit bei großer Schrift nichts abgeschnitten wird),
@@ -199,20 +226,53 @@ fun LiveScoreScreen(
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     Column(Modifier.weight(0.42f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                         info(Modifier.fillMaxWidth())
-                        Footer(controller, Modifier.padding(top = Spacing.s))
+                        footer(Modifier.padding(top = Spacing.s))
                     }
-                    PanelsWithSnackbar(controller, reduceMotion, landscape = true, Modifier.weight(0.58f).fillMaxHeight())
+                    PanelsWithSnackbar(controller, snapshot, reduceMotion, landscape = true, Modifier.weight(0.58f).fillMaxHeight())
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
                     // Info (Kopf, Overlay, Satztabelle) höchstens 40 % der Höhe und scrollbar: Bei 200 % Schrift und
                     // vollem Overlay behalten die Tap-Flächen so ihren Platz.
                     info(Modifier.fillMaxWidth().heightIn(max = infoMaxHeight).verticalScroll(rememberScrollState()))
-                    PanelsWithSnackbar(controller, reduceMotion, landscape = false, Modifier.weight(1f).padding(top = Spacing.s))
-                    Footer(controller, Modifier.padding(top = Spacing.s))
+                    PanelsWithSnackbar(controller, snapshot, reduceMotion, landscape = false, Modifier.weight(1f).padding(top = Spacing.s))
+                    footer(Modifier.padding(top = Spacing.s))
                 }
             }
         }
+        // Satzende (OPEN) und Matchende ergeben sich aus dem Zustand; kein Auto-Weiter (04 §4.3.3 Punkt 8).
+        when (snapshot.state.status) {
+            MatchStatus.AWAITING_DECISION -> {
+                SetEndSheet(controller, snapshot)
+            }
+
+            MatchStatus.FINISHED -> {
+                MatchEndSheet(controller, snapshot, onShowResult = {
+                    controller.port.dismiss()
+                    onShowResult(snapshot.matchId)
+                })
+            }
+
+            else -> {
+                when (dialog) {
+                    LiveDialog.EndMatch -> EndMatchSheet(controller, snapshot, onClose = { dialog = null })
+                    LiveDialog.CorrectServer -> CorrectServerSheet(controller, snapshot, onClose = { dialog = null })
+                    null -> Unit
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoMatch(onBack: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(Spacing.xl),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(Res.string.live_no_match), style = AdvantlyTheme.typography.title, color = AdvantlyTheme.colors.text)
+        SheetButton(stringResource(Res.string.action_back), primary = true, onClick = onBack, modifier = Modifier.padding(top = Spacing.l))
     }
 }
 
@@ -220,12 +280,13 @@ fun LiveScoreScreen(
 @Composable
 private fun PanelsWithSnackbar(
     controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
     reduceMotion: Boolean,
     landscape: Boolean,
     modifier: Modifier,
 ) {
     Box(modifier) {
-        Panels(controller, reduceMotion, landscape, Modifier.fillMaxSize())
+        Panels(controller, snapshot, reduceMotion, landscape, Modifier.fillMaxSize())
         controller.undoNotice?.let { notice ->
             UndoSnackbar(
                 notice = notice,
@@ -238,22 +299,49 @@ private fun PanelsWithSnackbar(
 }
 
 @Composable
-private fun Header(controller: LiveScoreController) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
-        SportChip(text = stringResource(Res.string.live_sport_tennis), outdoor = controller.outdoorContrast)
+private fun Header(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    onMinimize: () -> Unit,
+) {
+    val outdoor = controller.outdoorContrast
+    val sport = snapshot.setup.sport
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Spacing.minTouchTarget),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        val back = stringResource(Res.string.action_back)
+        Box(
+            Modifier
+                .testTag("live_minimize")
+                .size(Spacing.minTouchTarget)
+                .clickable(role = Role.Button, onClickLabel = back, onClick = onMinimize)
+                .semantics { contentDescription = back },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AdvantlyIcons.ChevronDown, contentDescription = null, tint = if (outdoor) Color.White else AdvantlyTheme.colors.text)
+        }
+        SportChip(sport = sport, text = stringResource(sportName(sport)), outdoor = outdoor, modifier = Modifier.testTag("live_sport_chip"))
     }
 }
 
+/** Matchdauer h:mm:ss seit der Genesis (bei beendetem Match eingefroren). */
 @Composable
-private fun ElapsedTime(outdoor: Boolean) {
-    var seconds by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        val start = monotonicNanos()
-        while (true) {
+private fun ElapsedTime(
+    snapshot: LiveMatchSnapshot,
+    clock: WallClock,
+    outdoor: Boolean,
+) {
+    var now by remember { mutableLongStateOf(clock.nowMs()) }
+    LaunchedEffect(snapshot.finishedAtMs) {
+        while (snapshot.finishedAtMs == null) {
+            now = clock.nowMs()
             delay(1_000)
-            seconds = ((monotonicNanos() - start) / 1_000_000_000L).toInt()
         }
     }
+    val end = snapshot.finishedAtMs ?: now
+    val seconds = ((end - snapshot.startedAtMs) / 1_000).coerceAtLeast(0)
     val h = seconds / 3600
     val m = (seconds / 60) % 60
     val s = seconds % 60
@@ -267,68 +355,84 @@ private fun ElapsedTime(outdoor: Boolean) {
 @Composable
 private fun Panels(
     controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
     reduceMotion: Boolean,
     landscape: Boolean,
     modifier: Modifier,
 ) {
-    val state = controller.state
-    val hint = FakeTennis.hint(state)
+    val state = snapshot.state
+    val setup = snapshot.setup
+    val sport = setup.sport
+    val hint = LiveScoreRules.hint(snapshot)
     val usName = stringResource(Res.string.live_team_us_name)
     val themName = stringResource(Res.string.live_team_them_name)
-    val pointUs = pointText(FakeTennis.pointLabel(state, Team.Us))
-    val pointThem = pointText(FakeTennis.pointLabel(state, Team.Them))
-    val serving = stringResource(Res.string.a11y_serving, if (state.server == Team.Us) usName else themName)
+    val points = Side.entries.associateWith { pointText(LiveScoreRules.pointLabel(state, it)) }
+    val serve = state.serve
+    val serverName = serve?.let { playerName(setup.player(it.player)) }
+    val serving = serve?.let { stringResource(Res.string.a11y_serving, if (it.side == Side.A) usName else themName) }.orEmpty()
     val undoLabel = stringResource(Res.string.action_undo)
-    val serveLabel = stringResource(Res.string.live_serve)
+    val serveWord = stringResource(Res.string.live_serve)
+    val doubles = setup.lineup.a.size > 1
+    val serveDetail =
+        listOfNotNull(
+            serveWord,
+            serverName?.takeIf { doubles },
+            courtText(serve?.court)?.takeIf { sport == Sport.BADMINTON || sport == Sport.PICKLEBALL },
+            serve?.servesRemaining?.let { "●".repeat(it) },
+        ).joinToString(" · ")
 
-    val usContent =
-        ScorePanelContent(
-            team = Team.Us,
-            teamLabel = stringResource(Res.string.live_team_us),
-            playerName = FAKE_NAME_US,
-            pointText = pointUs,
-            serving = state.server == Team.Us && !state.isFinished,
-            serveLabel = serveLabel,
-            a11yDescription = stringResource(Res.string.a11y_point_for, usName, FAKE_NAME_US, pointUs, pointThem) + " " + serving,
+    @Composable
+    fun content(side: Side): ScorePanelContent {
+        val names = teamName(setup, side)
+        return ScorePanelContent(
+            side = side,
+            teamLabel = stringResource(if (side == Side.A) Res.string.live_team_us else Res.string.live_team_them),
+            playerName = names,
+            pointText = points.getValue(side),
+            serving = serve?.side == side,
+            serveLabel = serveDetail,
+            serveColor = sportColor(sport),
+            a11yDescription =
+                stringResource(
+                    Res.string.a11y_point_for,
+                    if (side == Side.A) usName else themName,
+                    names,
+                    points.getValue(Side.A),
+                    points.getValue(Side.B),
+                ) + " " + serving,
             undoLabel = undoLabel,
         )
-    val themContent =
-        ScorePanelContent(
-            team = Team.Them,
-            teamLabel = stringResource(Res.string.live_team_them),
-            playerName = FAKE_NAME_THEM,
-            pointText = pointThem,
-            serving = state.server == Team.Them && !state.isFinished,
-            serveLabel = serveLabel,
-            a11yDescription = stringResource(Res.string.a11y_point_for, themName, FAKE_NAME_THEM, pointUs, pointThem) + " " + serving,
-            undoLabel = undoLabel,
-        )
+    }
+    val usContent = content(Side.A)
+    val themContent = content(Side.B)
+    val enabled = state.status == MatchStatus.IN_PROGRESS || state.status == MatchStatus.PAUSED
 
     @Composable
     fun Panel(
         panelContent: ScorePanelContent,
         panelModifier: Modifier,
     ) {
-        val team = panelContent.team
+        val side = panelContent.side
         ScorePanel(
             content = panelContent,
             direction = controller.lastDirection,
-            flashKey = if (controller.flashTeam == team) controller.generation else 0,
+            flashKey = if (controller.flashSide == side) controller.generation else 0,
             outdoor = controller.outdoorContrast,
             reduceMotion = reduceMotion,
-            enabled = true,
-            onTap = { controller.onTap(team, it) },
+            enabled = enabled,
+            onTap = { controller.onTap(side, it) },
             onSwipeDown = { controller.undo(it) },
-            modifier = panelModifier.onGloballyPositioned { controller.panelBounds[team] = it.boundsInWindow() },
+            modifier = panelModifier.onGloballyPositioned { controller.panelBounds[side] = it.boundsInWindow() },
         )
     }
 
+    val band: @Composable () -> Unit = { HintBand(snapshot, hint, serverName, controller.outdoorContrast, reduceMotion, landscape) }
     // Oben/Unten im Hochformat, nebeneinander im Querformat (04 §4.1 H6) – richtet sich nach dem Bildschirm,
     // nicht nach der Restfläche (bei 200 % Schrift wäre die sonst „quer“).
     Box(modifier) {
         if (landscape) {
             Column(Modifier.fillMaxSize()) {
-                HintBand(hint, controller.outdoorContrast, reduceMotion, landscape)
+                band()
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     Panel(usContent, Modifier.weight(1f).fillMaxSize())
                     Panel(themContent, Modifier.weight(1f).fillMaxSize())
@@ -337,29 +441,68 @@ private fun Panels(
         } else {
             Column(Modifier.fillMaxSize()) {
                 Panel(usContent, Modifier.weight(1f).fillMaxWidth())
-                HintBand(hint, controller.outdoorContrast, reduceMotion, landscape)
+                band()
                 Panel(themContent, Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
 }
 
-/** Mittelband zwischen den Flächen (nicht scorend, 04 §4.3.3). */
+/**
+ * Mittelband zwischen den Flächen (nicht scorend, 04 §4.3.3): Hinweis-Pill, darunter im Doppel „Aufschläger →
+ * Rückschläger“ (02 §8.4) bzw. bei Pickleball die Ansage „4-2-1“.
+ */
 @Composable
 private fun HintBand(
+    snapshot: LiveMatchSnapshot,
     hint: ScoreHint?,
+    serverName: String?,
     outdoor: Boolean,
     reduceMotion: Boolean,
     landscape: Boolean,
 ) {
-    Box(Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(vertical = Spacing.xs), contentAlignment = Alignment.Center) {
-        if (hint != null) HintPill(hint, outdoor, reduceMotion, landscape)
+    val setup = snapshot.setup
+    val serve = snapshot.state.serve
+    val receiverName = serve?.receiver?.let { playerName(setup.player(it)) }
+    val line =
+        when {
+            setup.sport == Sport.PICKLEBALL -> {
+                snapshot.state.scoreCall
+            }
+
+            setup.lineup.a.size > 1 && serverName != null && receiverName != null -> {
+                stringResource(Res.string.live_serve_line, serverName, receiverName)
+            }
+
+            else -> {
+                null
+            }
+        }
+    Column(
+        Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(vertical = Spacing.xs),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        if (hint != null) HintPill(hint, setup.sport, outdoor, reduceMotion, landscape)
+        if (line != null && snapshot.state.status != MatchStatus.FINISHED) {
+            Text(
+                text = line,
+                style = AdvantlyTheme.typography.label.copy(fontSize = 13.sp),
+                color = if (outdoor) Color.White else AdvantlyTheme.colors.text2,
+                modifier = Modifier.testTag("serve_line").padding(top = 2.dp),
+                maxLines = 1,
+            )
+        }
     }
 }
 
 @Composable
 private fun Footer(
     controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    debugTools: Boolean,
+    onBenchmarkNewMatch: (() -> Unit)?,
+    openDialog: (LiveDialog) -> Unit,
     modifier: Modifier,
 ) {
     val outdoor = controller.outdoorContrast
@@ -374,7 +517,7 @@ private fun Footer(
             onClick = { controller.undo() },
             outdoor = outdoor,
             weight = 1.5f,
-            enabled = controller.canUndo,
+            enabled = snapshot.canUndo,
             emphasized = true,
             modifier = Modifier.testTag("undo_button"),
         )
@@ -396,7 +539,15 @@ private fun Footer(
                     modifier = Modifier.testTag("more_button"),
                 )
             }
-            MoreMenu(controller, expanded = menuOpen, onDismiss = { menuOpen = false })
+            MoreMenu(
+                controller,
+                snapshot,
+                debugTools,
+                onBenchmarkNewMatch,
+                openDialog,
+                expanded = menuOpen,
+                onDismiss = { menuOpen = false },
+            )
         }
     }
 }
@@ -404,10 +555,16 @@ private fun Footer(
 @Composable
 private fun MoreMenu(
     controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    debugTools: Boolean,
+    onBenchmarkNewMatch: (() -> Unit)?,
+    openDialog: (LiveDialog) -> Unit,
     expanded: Boolean,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val status = snapshot.state.status
+    val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
 
     @Composable
     fun Item(
@@ -438,25 +595,32 @@ private fun MoreMenu(
         )
     }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (status == MatchStatus.PAUSED) {
+            Item(Res.string.menu_resume, tag = "menu_resume") { controller.resume() }
+        } else {
+            Item(Res.string.menu_pause, enabled = status == MatchStatus.IN_PROGRESS, tag = "menu_pause") { controller.pause() }
+        }
+        Item(Res.string.menu_correct_server, enabled = running, tag = "menu_correct_server") { openDialog(LiveDialog.CorrectServer) }
+        Item(Res.string.action_redo, enabled = snapshot.canRedo, tag = "menu_redo") { controller.redo() }
+        Item(Res.string.menu_end_match, enabled = running, tag = "menu_end_match") { openDialog(LiveDialog.EndMatch) }
+        HorizontalDivider()
         Item(Res.string.menu_outdoor_contrast, controller.outdoorContrast) { controller.outdoorContrast = !controller.outdoorContrast }
         Item(Res.string.menu_keep_screen_on, controller.keepScreenOn) { controller.keepScreenOn = !controller.keepScreenOn }
-        Item(Res.string.menu_latency_overlay, controller.showLatencyOverlay) {
-            controller.showLatencyOverlay = !controller.showLatencyOverlay
+        if (debugTools) {
+            HorizontalDivider()
+            Item(Res.string.menu_latency_overlay, controller.showLatencyOverlay) {
+                controller.showLatencyOverlay = !controller.showLatencyOverlay
+            }
+            Item(Res.string.menu_debounce, controller.debounceEnabled) { controller.debounceEnabled = !controller.debounceEnabled }
+            if (onBenchmarkNewMatch != null) {
+                Item(Res.string.menu_auto_benchmark) {
+                    if (!controller.benchmarkRunning) {
+                        scope.launch { println(controller.runAutoBenchmark(onBenchmarkNewMatch).toLogLine()) }
+                    }
+                }
+            }
+            Item(Res.string.menu_reset_measurements) { controller.resetMeasurements() }
         }
-        Item(Res.string.menu_debounce, controller.debounceEnabled) { controller.debounceEnabled = !controller.debounceEnabled }
-        HorizontalDivider()
-        Item(Res.string.menu_demo_breakpoint) { controller.demo(DemoScenario.BreakPoint) }
-        Item(Res.string.menu_demo_setpoint) { controller.demo(DemoScenario.SetPoint) }
-        Item(Res.string.menu_demo_matchpoint) { controller.demo(DemoScenario.MatchPoint) }
-        Item(Res.string.menu_demo_deuce) { controller.demo(DemoScenario.Deuce) }
-        Item(Res.string.menu_demo_tiebreak) { controller.demo(DemoScenario.Tiebreak) }
-        HorizontalDivider()
-        Item(Res.string.menu_auto_benchmark) {
-            if (!controller.benchmarkRunning) scope.launch { println(controller.runAutoBenchmark().toLogLine()) }
-        }
-        Item(Res.string.action_redo, enabled = controller.canRedo, tag = "menu_redo") { controller.redo() }
-        Item(Res.string.menu_reset_measurements) { controller.resetMeasurements() }
-        Item(Res.string.menu_new_match) { controller.newMatch() }
     }
 }
 
@@ -474,9 +638,8 @@ private fun UndoSnackbar(
     }
     val colors = AdvantlyTheme.colors
     val withGames =
-        notice.before.gamesUs != notice.after.gamesUs ||
-            notice.before.gamesThem != notice.after.gamesThem ||
-            notice.before.completedSets != notice.after.completedSets
+        notice.before.current?.games != notice.after.current?.games ||
+            notice.before.sets != notice.after.sets
     val text =
         stringResource(
             Res.string.undo_snackbar,
@@ -636,6 +799,6 @@ private fun OverlayLine(
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Text(title, style = style.copy(fontWeight = FontWeight.Bold), color = titleColor)
-        Text(value, style = style, color = valueColor)
+        Text(value, style = style, color = valueColor, textAlign = TextAlign.Start)
     }
 }

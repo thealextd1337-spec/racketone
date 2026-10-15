@@ -5,12 +5,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import eu.advantly.presentation.live.Team
-import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.core.model.Side
+import eu.advantly.ui.phone.app.AdvantlyAppModel
+import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.latency.InputClockSource
-import eu.advantly.ui.phone.live.LiveScoreController
-import eu.advantly.ui.phone.live.LiveScoreScreen
-import eu.advantly.ui.phone.live.rememberLiveScoreController
+import eu.advantly.ui.phone.preview.DemoData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.Toolkit
@@ -21,7 +21,8 @@ import javax.swing.JFrame
 import javax.swing.SwingUtilities
 
 /**
- * Desktop-Preview auf Windows (kein Produkt): `./gradlew :shared:ui-phone:run`.
+ * Desktop-Preview auf Windows (kein Produkt): `./gradlew :shared:ui-phone:run` zeigt die ganze App mit
+ * Beispieldaten (Gäste, Verlauf, Favorit) und Debug-Werkzeugen im Live-Menü.
  *
  * Mit `ADVANTLY_BENCH=1` (oder Argument `--bench`) misst die Preview Tap → Frame selbst: Sie stellt echte
  * AWT-Mausereignisse in die System-Event-Queue (gleicher Pfad wie ein Mausklick, nur ohne Maus-Hardware),
@@ -36,13 +37,14 @@ fun main(args: Array<String>) {
             state = rememberWindowState(width = 412.dp, height = 892.dp),
         ) {
             // Gleicher Weg wie auf Android/iOS: ViewModel vom ViewModelStoreOwner des Fensters
-            val controller = rememberLiveScoreController()
-            AdvantlyTheme(darkTheme = true) {
-                LiveScoreScreen(controller = controller, onBenchmarkFinished = { println(it) })
-            }
+            val model = rememberAdvantlyAppModel()
+            LaunchedEffect(model) { if (!bench) DemoData.seed(model) }
+            AdvantlyApp(model = model, darkTheme = true, debugTools = true)
             if (bench) {
                 LaunchedEffect(Unit) {
-                    val report = withContext(Dispatchers.IO) { DesktopBenchmark(window, controller).run() }
+                    model.startBenchmarkMatch()
+                    model.navigator.push(Overlay.Live)
+                    val report = withContext(Dispatchers.IO) { DesktopBenchmark(window, model).run() }
                     println(report)
                     exitApplication()
                 }
@@ -54,19 +56,21 @@ fun main(args: Array<String>) {
 /** Klickt per AWT-Event-Queue auf die Tap-Flächen und liest danach den LatencyTracker aus. */
 private class DesktopBenchmark(
     private val window: JFrame,
-    private val controller: LiveScoreController,
+    private val model: AdvantlyAppModel,
 ) {
+    private val controller = model.controller
+
     fun run(): String {
         Thread.sleep(2_500)
         val lines = mutableListOf<String>()
 
         // Phase 1: einzelne Taps im Abstand von 300 ms (abwechselnd Wir/Gegner → Dauer-Einstand, kein Matchende)
         onEdt {
-            controller.newMatch()
+            model.startBenchmarkMatch()
             controller.resetMeasurements()
         }
         repeat(SINGLE_TAPS) { i ->
-            tap(if (i % 2 == 0) Team.Us else Team.Them)
+            tap(if (i % 2 == 0) Side.A else Side.B)
             Thread.sleep(300)
         }
         Thread.sleep(500)
@@ -74,11 +78,11 @@ private class DesktopBenchmark(
 
         // Phase 2: schnelle Doppel-Taps (70 ms Abstand) – geht ein Tap verloren?
         onEdt {
-            controller.newMatch()
+            model.startBenchmarkMatch()
             controller.resetMeasurements()
         }
         repeat(DOUBLE_TAPS) { i ->
-            val team = if (i % 2 == 0) Team.Us else Team.Them
+            val team = if (i % 2 == 0) Side.A else Side.B
             tap(team)
             Thread.sleep(70)
             tap(team)
@@ -99,7 +103,7 @@ private class DesktopBenchmark(
     private fun counters(): String =
         onEdt { "taps=${controller.rawTaps} points=${controller.countedPoints} debounced=${controller.debouncedTaps}" }
 
-    private fun tap(team: Team) {
+    private fun tap(team: Side) {
         val (target, point) = onEdt { targetFor(team) }
         post(MouseEvent.MOUSE_PRESSED, target, point, InputEvent.BUTTON1_DOWN_MASK)
         Thread.sleep(40)
@@ -107,7 +111,7 @@ private class DesktopBenchmark(
         post(MouseEvent.MOUSE_CLICKED, target, point, 0)
     }
 
-    private fun targetFor(team: Team): Pair<java.awt.Component, Point2D> {
+    private fun targetFor(team: Side): Pair<java.awt.Component, Point2D> {
         val bounds = checkNotNull(controller.panelBounds[team]) { "Panel $team noch nicht gelayoutet" }
         val scale = window.graphicsConfiguration.defaultTransform.scaleX
         val content = window.contentPane

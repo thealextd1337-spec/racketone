@@ -1,8 +1,166 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Deutsch. Schlüssel identisch zu values/strings.xml (StringResourcesParityTest). -->
 <resources>
+    <!-- App -->
     <string name="app_name">Advantly</string>
-    <string name="app_tagline">Tennis, Padel und Pickleball zählen – auf Handy und Uhr.</string>
+    <string name="app_tagline">Tennis, Padel, Pickleball, Badminton und Tischtennis zählen – auf Handy und Uhr.</string>
     <string name="app_version">Version %1$s</string>
+
+    <!-- Navigation (04 §2.1) -->
+    <string name="tab_home">Start</string>
+    <string name="tab_history">Verlauf</string>
+    <string name="tab_play">Spielen</string>
+    <string name="tab_friends">Freunde</string>
+    <string name="tab_profile">Profil</string>
+    <string name="coming_soon">Kommt bald</string>
+    <string name="coming_soon_friends">Freunde, Feed und Head-to-Head-Bilanzen kommen in einer späteren Version.</string>
+    <string name="coming_soon_profile">Deine Statistiken, Uhren und Einstellungen kommen in einer späteren Version.</string>
+    <string name="mini_scorebar_a11y">Laufendes Match öffnen: %1$s, %2$s</string>
+    <string name="action_back">Zurück</string>
+    <string name="action_close">Schließen</string>
+    <string name="action_cancel">Abbrechen</string>
+
+    <!-- Allgemein -->
+    <string name="player_you">Du</string>
+    <string name="team_separator"> / </string>
+    <string name="format_best_of">Best of %1$d</string>
+    <string name="format_open">Offen</string>
+    <string name="duration_hours">%1$d:%2$s h</string>
+    <string name="duration_minutes">%1$d min</string>
+    <string name="sport_tennis">Tennis</string>
+    <string name="sport_padel">Padel</string>
+    <string name="sport_pickleball">Pickleball</string>
+    <string name="sport_badminton">Badminton</string>
+    <string name="sport_table_tennis">Tischtennis</string>
+
+    <!-- Start (H1) -->
+    <string name="home_greeting">Hallo!</string>
+    <string name="home_greeting_named">Hallo, %1$s</string>
+    <string name="home_ready">Bereit für ein Match?</string>
+    <string name="home_new_match">Neues Match</string>
+    <string name="home_new_match_sub">Fünf Sportarten – zählen am Handy, später auch an der Uhr.</string>
+    <string name="home_resume">Laufendes Match</string>
+    <string name="home_resume_finished">Match beendet</string>
+    <string name="home_section_quick">Schnellstart</string>
+    <string name="home_like_last_time">Wie letztes Mal</string>
+    <string name="home_section_favorites">Favoriten</string>
+    <string name="home_remove_favorite">Favorit entfernen</string>
+    <string name="home_versus">gegen %1$s</string>
+    <string name="home_section_week">Letzte 7 Tage</string>
+    <string name="home_week_matches">Matches</string>
+    <string name="home_week_wins">Siege</string>
+    <string name="home_week_time">Spielzeit</string>
+    <string name="home_empty">Noch keine Matches – leg los!</string>
+
+    <!-- Match-Assistent (H2–H5) -->
+    <string name="wizard_step_of">Schritt %1$d von %2$d</string>
+    <string name="wizard_title_sport">Was spielst du?</string>
+    <string name="wizard_title_surface">Auf welchem Belag?</string>
+    <string name="wizard_title_venue">Wo spielt ihr?</string>
+    <string name="wizard_title_players">Wer spielt?</string>
+    <string name="wizard_title_format">Format</string>
+    <string name="sport_tagline_tennis">Sätze, Games, Tiebreak</string>
+    <string name="sport_tagline_padel">Doppel · Golden Point oder Star Point</string>
+    <string name="sport_tagline_pickleball">Side-Out- oder Rally-Zählweise</string>
+    <string name="sport_tagline_badminton">Rally-Point bis 21 oder 15</string>
+    <string name="sport_tagline_table_tennis">Bis 11 · je zwei Aufschläge</string>
+    <string name="wizard_environment">Umgebung</string>
+    <string name="wizard_outdoor">Draußen</string>
+    <string name="wizard_indoor">Halle</string>
+    <string name="surface_clay">Sand</string>
+    <string name="surface_clay_desc">Langsam, hoher Absprung</string>
+    <string name="surface_hard">Hartplatz</string>
+    <string name="surface_hard_desc">Mittel bis schnell</string>
+    <string name="surface_grass">Rasen</string>
+    <string name="surface_grass_desc">Schnell, flach</string>
+    <string name="surface_carpet">Teppich</string>
+    <string name="surface_carpet_desc">Meist in der Halle</string>
+    <string name="surface_artificial">Kunstrasen</string>
+    <string name="surface_artificial_desc">Sandverfüllt, Standard bei Padel</string>
+    <string name="surface_other">Sonstiger</string>
+    <string name="wizard_skip">Überspringen</string>
+    <string name="wizard_continue">Weiter</string>
+    <string name="wizard_singles">Einzel</string>
+    <string name="wizard_doubles">Doppel</string>
+    <string name="wizard_team_us">Wir</string>
+    <string name="wizard_team_them">Gegner</string>
+    <string name="wizard_you">Du · %1$s</string>
+    <string name="wizard_partner">Partner</string>
+    <string name="wizard_empty_slot">Spieler wählen oder Gast anlegen</string>
+    <string name="wizard_swap_order">Reihenfolge tauschen</string>
+    <string name="wizard_team_order_hint_tennis">Oben steht, wer im Team zuerst aufschlägt.</string>
+    <string name="wizard_team_order_hint_badminton">Oben steht, wer zu Satzbeginn im rechten Feld steht.</string>
+    <string name="wizard_team_order_hint_pickleball">Oben steht der Startaufschläger (bei geradem Stand rechts).</string>
+    <string name="wizard_team_order_hint_tabletennis">Oben steht, wer im 1. Satz zuerst aufschlägt bzw. annimmt.</string>
+    <string name="wizard_mixed">Mixed-Doppel</string>
+    <string name="wizard_mixed_hint">Nur für Hinweise, keine Wirkung auf die Regeln.</string>
+    <string name="wizard_guests">Gäste</string>
+    <string name="wizard_add_guest_hint">Name des Gasts</string>
+    <string name="wizard_add_guest">Anlegen</string>
+    <string name="wizard_first_server">Erster Aufschlag</string>
+    <string name="wizard_coin_toss">Münzwurf</string>
+    <string name="wizard_advanced">Erweitert</string>
+    <string name="wizard_save_favorite">Als Favorit speichern</string>
+    <string name="wizard_save_favorite_hint">Auf dem Start-Tab mit einem Tipp wieder starten.</string>
+    <string name="wizard_sets_required">Bitte wähle die Satzanzahl.</string>
+    <string name="wizard_format_invalid">Diese Kombination ist nicht gültig.</string>
+    <string name="wizard_summary">Zusammenfassung</string>
+    <string name="wizard_start">Match starten</string>
+
+    <!-- Format-Optionen (02 §5.1) -->
+    <string name="fmt_sets_title">Sätze</string>
+    <string name="fmt_sets_title_pickleball">Spiele</string>
+    <string name="fmt_one_set">1 Satz</string>
+    <string name="fmt_one_game">1 Spiel</string>
+    <string name="fmt_sets_to_win">%1$d Gewinnsätze</string>
+    <string name="fmt_games_title">Games pro Satz</string>
+    <string name="fmt_games">%1$d</string>
+    <string name="fmt_games_short">%1$d · kurz</string>
+    <string name="fmt_games_pro">%1$d · Pro-Satz</string>
+    <string name="fmt_points_per_game">Punkte pro Spiel</string>
+    <string name="fmt_points_per_set">Punkte pro Satz</string>
+    <string name="fmt_points">%1$d</string>
+    <string name="fmt_points_tt_21">%1$d · alte Zählweise</string>
+    <string name="fmt_points_badminton_11">%1$d · Best of 5</string>
+    <string name="fmt_summary_points">bis %1$d</string>
+    <string name="fmt_summary_games">%1$d Games</string>
+    <string name="fmt_pb_scoring_title">Zählweise</string>
+    <string name="fmt_pb_sideout">Side-Out</string>
+    <string name="fmt_pb_rally">Rally</string>
+    <string name="fmt_pb_scoring_hint">Side-Out: nur das aufschlagende Team punktet. Rally: jeder Ballwechsel zählt.</string>
+    <string name="fmt_pb_winby_title">Gewinn mit Abstand</string>
+    <string name="fmt_pb_winby">Mit %1$d Punkten</string>
+    <string name="fmt_pb_mid_title">Seitenwechsel in der Spielmitte</string>
+    <string name="fmt_pb_mid_deciding">Entscheidungsspiel</string>
+    <string name="fmt_pb_mid_every">Jedes Spiel</string>
+    <string name="fmt_pb_mid_never">Nie</string>
+    <string name="fmt_deuce_title">Einstand</string>
+    <string name="fmt_deuce_advantage">Vorteil</string>
+    <string name="fmt_deuce_noad">No-Ad</string>
+    <string name="fmt_deuce_golden">Golden Point</string>
+    <string name="fmt_deuce_star">Star Point</string>
+    <string name="fmt_deuce_hint_advantage">Bei Einstand braucht es zwei Punkte in Folge.</string>
+    <string name="fmt_deuce_hint_noad">Bei Einstand entscheidet der nächste Punkt das Spiel.</string>
+    <string name="fmt_deuce_hint_golden">Bei 40:40 entscheidet der nächste Punkt das Spiel.</string>
+    <string name="fmt_deuce_hint_star">Nach zwei Vorteilen entscheidet der dritte Einstand.</string>
+    <string name="fmt_deciding_title">Entscheidungssatz</string>
+    <string name="fmt_deciding_title_padel">3. Satz</string>
+    <string name="fmt_deciding_normal">Normal</string>
+    <string name="fmt_deciding_mtb">Match-TB bis 10</string>
+    <string name="fmt_deciding_adv_set">Vorteilssatz</string>
+    <string name="fmt_deciding_tb10">TB bis 10</string>
+    <string name="fmt_deciding_padel_super_tb">Super-Tiebreak</string>
+    <string name="fmt_deciding_padel_no_tb">Ohne Tiebreak</string>
+    <string name="fmt_tiebreak_title">Tiebreak im Satz</string>
+    <string name="fmt_tiebreak_at">Bei %1$d:%2$d</string>
+    <string name="fmt_tiebreak_none">Ohne</string>
+    <string name="fmt_rule_bad_cap">Verlängerung ab %1$d:%1$d: zwei Punkte Vorsprung, wer %2$d erreicht, gewinnt.</string>
+    <string name="fmt_rule_bad_no_extension">Ohne Verlängerung: Wer %1$d erreicht, gewinnt den Satz.</string>
+    <string name="fmt_rule_bad_interval">Pause bis 60 s bei %1$d.</string>
+    <string name="fmt_rule_tt_serve">Aufschlagwechsel alle %1$d Punkte, ab %2$d:%2$d nach jedem Punkt.</string>
+    <string name="fmt_rule_tt_receive_swap">Doppel: Beim Seitenwechsel im Entscheidungssatz tauscht das Rückschlagpaar die Reihenfolge.</string>
+    <string name="fmt_rule_mid_change">Seitenwechsel bei %1$d – nur im letzten Satz eines Best-of.</string>
+    <string name="fmt_rule_mid_change_open">Modus Offen: kein Seitenwechsel in der Satzmitte.</string>
 
     <!-- Live-Score (H6) -->
     <string name="live_team_us">WIR</string>
@@ -10,47 +168,115 @@
     <string name="live_team_us_name">Wir</string>
     <string name="live_team_them_name">Gegner</string>
     <string name="live_serve">Aufschlag</string>
+    <string name="live_serve_line">%1$s → %2$s</string>
     <string name="live_score_advantage">AD</string>
     <string name="live_score_pair">%1$s:%2$s</string>
     <string name="live_games_and_points">%1$s · %2$s</string>
-    <string name="live_sport_tennis">Tennis</string>
-    <string name="live_format_best_of_3">Best of 3</string>
-
+    <string name="live_no_match">Kein laufendes Match.</string>
+    <string name="court_right">R</string>
+    <string name="court_left">L</string>
     <string name="hint_breakpoint">Breakball</string>
+    <string name="hint_breakpoints">%1$d Breakbälle</string>
     <string name="hint_setpoint">Satzball</string>
+    <string name="hint_setpoints">%1$d Satzbälle</string>
+    <string name="hint_rally_setpoint">Satzball</string>
+    <string name="hint_rally_setpoints">%1$d Satzbälle</string>
+    <string name="hint_pb_gamepoint">Spielball</string>
+    <string name="hint_pb_gamepoints">%1$d Spielbälle</string>
     <string name="hint_matchpoint">Matchball</string>
+    <string name="hint_matchpoints">%1$d Matchbälle</string>
+    <string name="hint_gamepoint">Spielball</string>
+    <string name="hint_gamepoints">%1$d Spielbälle</string>
     <string name="hint_deuce">Einstand</string>
+    <string name="hint_extension">Verlängerung</string>
+    <string name="hint_golden_point">Golden Point</string>
+    <string name="hint_deciding_point">Entscheidungspunkt</string>
+    <string name="hint_star_point">Star Point</string>
     <string name="hint_tiebreak">Tiebreak</string>
+    <string name="hint_match_tiebreak">Match-Tiebreak</string>
     <string name="hint_changeends">Seitenwechsel</string>
+    <string name="hint_receive_order_swapped">Rückschlagreihenfolge wechseln</string>
+    <string name="hint_side_out">Side-Out</string>
+    <string name="hint_second_server">2. Aufschläger</string>
+    <string name="hint_interval">Pause bis 60 s</string>
+    <string name="hint_paused">Pausiert</string>
     <string name="hint_match_won">Match gewonnen</string>
     <string name="hint_match_lost">Match verloren</string>
-
+    <string name="hint_match_drawn">Unentschieden</string>
+    <string name="hint_match_abandoned">Abgebrochen</string>
     <string name="action_undo">Rückgängig</string>
     <string name="action_redo">Wiederholen</string>
     <string name="action_more">Mehr</string>
     <string name="action_outdoor">Outdoor</string>
     <string name="undo_snackbar">Rückgängig: %1$s → %2$s</string>
-
     <string name="a11y_point_for">Punkt für %1$s, %2$s. Stand %3$s zu %4$s.</string>
     <string name="a11y_serving">Aufschlag %1$s.</string>
-
     <string name="a11y_hint_for_us">%1$s für Wir</string>
     <string name="a11y_hint_for_them">%1$s für Gegner</string>
-
+    <string name="menu_pause">Pause</string>
+    <string name="menu_resume">Weiter</string>
+    <string name="menu_correct_server">Aufschläger korrigieren</string>
+    <string name="menu_end_match">Match beenden</string>
     <string name="menu_outdoor_contrast">Outdoor-Kontrast</string>
     <string name="menu_keep_screen_on">Bildschirm wach halten</string>
     <string name="menu_latency_overlay">Latenz-Overlay</string>
     <string name="menu_debounce">Taps entprellen (600 ms)</string>
-    <string name="menu_demo_breakpoint">Demo: Breakball</string>
-    <string name="menu_demo_setpoint">Demo: Satzball</string>
-    <string name="menu_demo_matchpoint">Demo: Matchball</string>
-    <string name="menu_demo_deuce">Demo: Einstand</string>
-    <string name="menu_demo_tiebreak">Demo: Tiebreak</string>
     <string name="menu_auto_benchmark">Auto-Benchmark (40 Punkte)</string>
     <string name="menu_reset_measurements">Messwerte zurücksetzen</string>
-    <string name="menu_new_match">Neues Match</string>
 
-    <!-- Latenz-Overlay (Spike S4) -->
+    <!-- Satzende / Matchende / vorzeitiges Ende (H7) -->
+    <string name="dialog_set_won">Satz %1$d · gewonnen</string>
+    <string name="dialog_set_lost">Satz %1$d · verloren</string>
+    <string name="dialog_another_set">Noch ein Satz in gleicher Besetzung?</string>
+    <string name="dialog_another_match">Noch einer in gleicher Besetzung?</string>
+    <string name="result_followup_hint">Startet ein verknüpftes Match im Modus Offen – dieses Ergebnis bleibt, wie es ist.</string>
+    <string name="dialog_yes">Ja</string>
+    <string name="dialog_no_finish">Nein, beenden</string>
+    <string name="dialog_match_tiebreak">Match-Tiebreak</string>
+    <string name="dialog_show_result">Ergebnis ansehen</string>
+    <string name="match_end_retired_suffix">Aufg.</string>
+    <string name="match_end_walkover_suffix">kampflos</string>
+    <string name="end_title">Match vorzeitig beenden?</string>
+    <string name="end_retired">%1$s gibt auf</string>
+    <string name="end_walkover">%1$s nicht angetreten</string>
+    <string name="end_abandon">Abbrechen (ohne Wertung)</string>
+    <string name="end_abandon_hint">Ein abgebrochenes Match behält den Stand, hat aber keinen Sieger.</string>
+    <string name="correct_server_title">Wer schlägt auf?</string>
+    <string name="correct_server_from_start">Korrigiert den Aufschläger ab Matchbeginn – Punkte bleiben, die Statistik zieht mit.</string>
+    <string name="correct_server_from_now">Korrigiert den Aufschläger ab jetzt – gespielte Punkte bleiben.</string>
+
+    <!-- Verlauf (H9) -->
+    <string name="history_title">Verlauf</string>
+    <string name="history_all">Alle</string>
+    <string name="history_record">%1$d Siege aus %2$d Matches</string>
+    <string name="history_empty">Hier erscheinen deine beendeten Matches.</string>
+    <string name="history_empty_filtered">Noch keine Matches in dieser Sportart.</string>
+
+    <!-- Ergebnis (H8) -->
+    <string name="result_title">Ergebnis</string>
+    <string name="result_not_found">Dieses Match gibt es nicht mehr.</string>
+    <string name="result_win">Sieg</string>
+    <string name="result_loss">Niederlage</string>
+    <string name="result_draw">Unentschieden</string>
+    <string name="result_abandoned">Ohne Wertung</string>
+    <string name="result_followup_of">Folge-Match eines Matches in gleicher Besetzung</string>
+    <string name="result_duration">Dauer</string>
+    <string name="result_points_total">Gespielte Punkte</string>
+    <string name="result_section_compare">Wir gegen Gegner</string>
+    <string name="result_stat_points">Gewonnene Punkte</string>
+    <string name="result_stat_serve_points">Gewonnene Aufschlagpunkte</string>
+    <string name="result_stat_return_points">Gewonnene Returnpunkte</string>
+    <string name="result_stat_break_points">Breakbälle verwertet</string>
+    <string name="result_stat_set_points">Satzbälle verwertet</string>
+    <string name="result_stat_set_points_pickleball">Spielbälle verwertet</string>
+    <string name="result_stat_deciding_points">Entscheidungspunkte gewonnen</string>
+    <string name="result_stat_games">Gewonnene Spiele</string>
+    <string name="result_stat_streak">Längste Punkteserie</string>
+    <string name="result_ratio">%1$d/%2$d (%3$d %)</string>
+    <string name="result_compare_a11y">%1$s: Wir %2$s, Gegner %3$s</string>
+    <string name="result_play_again">Nochmal in gleicher Besetzung</string>
+
+    <!-- Latenz-Overlay (Spike S4, nur Debug) -->
     <string name="latency_input_to_next_frame">Eingabe → nächster Frame-Beginn nach Draw</string>
     <string name="latency_input_to_draw">Eingabe → Draw</string>
     <string name="latency_source_line">%1$s: %2$s</string>
@@ -58,7 +284,7 @@
     <string name="latency_source_handler">Handler-Fallback, nicht für G1</string>
     <string name="latency_source_synthetic">Auto-Benchmark</string>
     <string name="latency_stats">p50 %1$s · p95 %2$s · max %3$s ms (n = %4$s)</string>
-    <string name="latency_no_samples">zum Messen eine Fläche antippen</string>
+    <string name="latency_no_samples">zum Messen auf eine Fläche tippen</string>
     <string name="latency_counters">Taps %1$s · Punkte %2$s · entprellt %3$s</string>
     <string name="latency_refresh_rate">%1$s Hz</string>
     <string name="latency_frames">Frame-Zeit p95 %1$s ms · Jank %2$s/%3$s</string>
