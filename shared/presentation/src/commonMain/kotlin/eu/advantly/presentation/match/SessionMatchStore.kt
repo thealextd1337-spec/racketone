@@ -12,7 +12,9 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchFormatValidator
@@ -29,6 +31,9 @@ import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
+import eu.advantly.core.scoring.SetKind
+import eu.advantly.core.scoring.SetRecord
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
@@ -68,7 +73,7 @@ import eu.advantly.data.MatchRecord as StoredMatch
  *
  * Kosten: Pro Punkt baut der Adapter nur den Live-Snapshot neu. Historie, „Wie letztes Mal“ und Spielernamen lädt er
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
- * Matches, Spieler, Identität); Engine-Zusammenfassungen beendeter Matches sind je `updatedAt` zwischengespeichert.
+ * Matches, Spieler, Identität); Ergebnis-Köpfe beendeter Matches sind samt Setup zwischengespeichert; nur Details lesen das Event-Log.
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
@@ -98,7 +103,8 @@ class SessionMatchStore(
     override val ownerAliases: StateFlow<Set<PlayerId>> = aliasesFlow.asStateFlow()
 
     private val players = HashMap<PlayerId, Player>()
-    private val summaries = HashMap<MatchId, Triple<Long, Long, MatchSummary>>()
+    private val summaries = HashMap<MatchId, Pair<StoredMatch, MatchSummary>>()
+    private var summaryPeople: Map<PlayerId, Player> = emptyMap()
     private val records = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
     private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
@@ -376,6 +382,7 @@ class SessionMatchStore(
                     .lastOrNull {
                         it.payload !is PlayerAssigned
                     }?.wallClockMs,
+                engine.events.size + 1,
             )
         val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
         records.remove(matchId)
@@ -647,9 +654,19 @@ class SessionMatchStore(
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
     private fun refreshStored() {
         players.clear()
+        val previousAliases = aliases
         aliases = data.selfAliases()
         aliasesFlow.value = aliases
         guestsFlow.value = loadGuests()
+        val people = (guestsFlow.value + selfFlow.value).associateBy { it.id }
+        val changedPeople = (people.keys + summaryPeople.keys).filter { people[it] != summaryPeople[it] }.toSet()
+        val changedAliases = (previousAliases - aliases) + (aliases - previousAliases)
+        summaries.entries.removeAll { (_, cached) ->
+            val setup = cached.second.setup
+            setup.players.any { it.id in changedPeople || it.id in changedAliases } ||
+                setup.assignedPlayers.values.any { it.id in changedPeople || it.id in changedAliases }
+        }
+        summaryPeople = people
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
         historyFlow.value = loadHistory()
@@ -723,35 +740,92 @@ class SessionMatchStore(
         summaries.keys.retainAll(headers.map { it.id }.toSet())
         return headers
             .filter { it.isFinished }
-            .mapNotNull { header -> cachedSummary(header) }
-            .map { summary -> data.matches.get(summary.matchId)?.let { summary.copy(setup = setupOf(it)) } ?: summary }
-            .sortedWith(compareByDescending<MatchSummary> { it.finishedAtMs }.thenByDescending { it.matchId.value })
+            .map { header ->
+                summaries[header.id]?.takeIf { it.first == header }?.second
+                    ?: headerSummary(header).also { summaries[header.id] = header to it }
+            }.sortedWith(compareByDescending<MatchSummary> { it.finishedAtMs }.thenByDescending { it.matchId.value })
     }
 
-    private fun cachedSummary(header: StoredMatch): MatchSummary? {
-        val eventCount = data.events.count(header.id.value)
-        summaries[header.id]?.let { (updatedAt, count, summary) ->
-            if (updatedAt == header.updatedAtMs && count == eventCount) return summary
-        }
-        val engine =
-            try {
-                ScoringEngine.replay(data.events.scoreEvents(header.id))
-            } catch (e: IllegalArgumentException) {
-                return null
+    /** Nur der Kopf: kein Event-Count, kein Payload-Lesen und kein Replay beim Laden des Verlaufs. */
+    private fun headerSummary(header: StoredMatch): MatchSummary {
+        val score = header.score
+        val tennisLike = header.sport.isTennisLike
+        val sets =
+            score.completedSets ?: score.sets.map { set ->
+                val pair = SidePair(set.a, set.b)
+                val winner = if (set.a > set.b) Side.A else Side.B
+                when {
+                    set.matchTiebreak -> {
+                        SetRecord(SetKind.MATCH_TIEBREAK, SidePair.of { if (it == winner) 1 else 0 }, pair, null, winner)
+                    }
+
+                    tennisLike -> {
+                        SetRecord(
+                            SetKind.REGULAR,
+                            pair,
+                            set.tiebreakA?.let { SidePair(it, set.tiebreakB ?: 0) },
+                            null,
+                            winner,
+                        )
+                    }
+
+                    else -> {
+                        SetRecord(
+                            if (header.sport ==
+                                Sport.PICKLEBALL
+                            ) {
+                                SetKind.PB_GAME
+                            } else {
+                                SetKind.RALLY_GAME
+                            },
+                            null,
+                            null,
+                            pair,
+                            winner,
+                        )
+                    }
+                }
             }
-        val genesis = engine.genesis ?: return null
-        val summary =
-            summaryOf(
-                header,
-                engine.state,
-                genesis.wallClockMs,
-                engine.events
-                    .lastOrNull {
-                        it.payload !is PlayerAssigned
-                    }?.wallClockMs,
-            )
-        summaries[header.id] = Triple(header.updatedAtMs, eventCount, summary)
-        return summary
+        // Ältere Köpfe enthalten nur Games bzw. Satzpunkte; fehlende Ballwechselpunkte werden nicht erfunden.
+        val current =
+            score.currentState ?: score.current?.let { set ->
+                val regular = tennisLike && !set.matchTiebreak
+                val pair = SidePair(set.a, set.b)
+                CurrentSet(
+                    sets.size,
+                    when {
+                        set.matchTiebreak -> SetKind.MATCH_TIEBREAK
+                        regular -> SetKind.REGULAR
+                        header.sport == Sport.PICKLEBALL -> SetKind.PB_GAME
+                        else -> SetKind.RALLY_GAME
+                    },
+                    if (set.matchTiebreak) {
+                        GameKind.MATCH_TIEBREAK
+                    } else if (regular) {
+                        GameKind.STANDARD
+                    } else {
+                        GameKind.RALLY_GAME
+                    },
+                    pair.takeIf { regular },
+                    if (regular) SidePair(0, 0) else pair,
+                    if (regular) SidePair("", "") else SidePair(set.a.toString(), set.b.toString()),
+                    null,
+                    null,
+                    null,
+                )
+            }
+        return MatchSummary(
+            header.id,
+            setupOf(header),
+            MatchResult(score.winner, score.reason ?: ResultReason.ABANDONED),
+            sets,
+            SidePair(score.setsWonA, score.setsWonB),
+            header.createdAtMs,
+            score.lastEventAtMs ?: header.updatedAtMs,
+            current,
+            header.updatedAtMs,
+            score.eventCount,
+        )
     }
 
     private fun summaryOf(
@@ -759,6 +833,7 @@ class SessionMatchStore(
         state: MatchState,
         startedAtMs: Long,
         lastEventAtMs: Long?,
+        eventCount: Int,
     ): MatchSummary =
         MatchSummary(
             matchId = header.id,
@@ -770,6 +845,7 @@ class SessionMatchStore(
             finishedAtMs = lastEventAtMs ?: startedAtMs,
             interruptedSet = state.current.takeIf { state.status == MatchStatus.FINISHED },
             updatedAtMs = header.updatedAtMs,
+            eventCount = eventCount,
         )
 
     // --- Favoriten (Format + Besetzung, JSON in den Settings) ----------------------------------------

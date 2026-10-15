@@ -138,6 +138,18 @@ class SessionMatchStoreTest {
                 .MatchStatisticsCache()
         assertEquals(4, cache.get(first).totalPoints)
         assertEquals(5, cache.get(changed).totalPoints)
+        // Gleicher Stand, gleiche Millisekunde, aber ein neues Log: auch die UI-Revision muss wechseln.
+        rig.phone.undo()
+        rig.phone.endMatch(EndReason.STOPPED)
+        val repeated = assertNotNull(rig.phone.record(id))
+        assertEquals(changed.summary.updatedAtMs, repeated.summary.updatedAtMs)
+        assertEquals(changed.summary.interruptedSet, repeated.summary.interruptedSet)
+        assertTrue(repeated.summary.eventCount > changed.summary.eventCount)
+        assertEquals(
+            repeated.summary,
+            rig.phone.matches.value
+                .single(),
+        )
         assertTrue(rig.phone.delete(id))
         assertNull(rig.phone.record(id))
     }

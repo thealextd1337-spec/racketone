@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
+import eu.advantly.core.scoring.SetRecord
 import eu.advantly.data.db.MatchHeaderQueries
 import eu.advantly.data.db.MatchTombstoneQueries
 import eu.advantly.data.db.Match_header
@@ -46,6 +47,11 @@ data class ScoreSummary(
     val setsWonB: Int = 0,
     val sets: List<SetScore> = emptyList(),
     val current: SetScore? = null,
+    /** Verlustfreier Listen-Cache; optionale Felder halten ältere Köpfe lesbar. */
+    val completedSets: List<SetRecord>? = null,
+    val currentState: CurrentSet? = null,
+    val lastEventAtMs: Long? = null,
+    val eventCount: Int = 0,
 ) {
     companion object {
         val EMPTY: ScoreSummary = ScoreSummary()
@@ -88,6 +94,8 @@ data class ScoreSummary(
                     },
                 // Engine liefert current = null bei regulärem Ende; bei Aufgabe/Abbruch bleibt der Satz eingefroren
                 current = state.current?.let { currentScore(it) },
+                completedSets = state.sets,
+                currentState = state.current,
             )
     }
 }

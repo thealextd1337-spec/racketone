@@ -1075,7 +1075,15 @@ class MatchSession(
 
     private fun persistProgress(m: OpenMatch) {
         val state = m.engine.state
-        data.matches.updateProgress(m.id, state.status, ScoreSummary.of(state), clock.nowMs())
+        val score =
+            ScoreSummary.of(state).copy(
+                lastEventAtMs =
+                    m.engine.events
+                        .lastOrNull { it.payload !is PlayerAssigned }
+                        ?.wallClockMs ?: m.genesis.wallClockMs,
+                eventCount = m.engine.events.size + 1,
+            )
+        data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
     }
 
     // --- Empfang ----------------------------------------------------------------------------------
@@ -1318,7 +1326,12 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return
             }
-        data.matches.updateProgress(matchId, state.status, ScoreSummary.of(state), clock.nowMs())
+        val score =
+            ScoreSummary.of(state).copy(
+                lastEventAtMs = log.lastOrNull { it.payload !is PlayerAssigned }?.wallClockMs,
+                eventCount = log.size,
+            )
+        data.matches.updateProgress(matchId, state.status, score, clock.nowMs())
         dataRevision++
         noteDroppedInputs(matchId, log, state.rejectedByRole)
     }
