@@ -8,11 +8,11 @@ import org.junit.Test
 class DiagnosticLogGuardTest {
     @Test
     fun diagnosticLogIsDebugOnly() {
-        // Das Log enthält Pulswerte: aktiv nur im Debug-Build. Der Release-Zweig greift, sobald Release-Unit-Tests aktiviert sind.
+        // Das Diagnose-Log ist nur im Debug-Build aktiv. Der Release-Zweig greift, sobald Release-Unit-Tests aktiviert sind.
         assertEquals(BuildConfig.DEBUG, DiagnosticLog.ENABLED)
         if (!DiagnosticLog.ENABLED) {
-            DiagnosticLog.log("HR", "bpm" to 120) // darf weder Datei noch Logcat anfassen
-            DiagnosticLog.logAll(listOf("HR" to mapOf("bpm" to 121)))
+            DiagnosticLog.log("TELEMETRY_SENT") // darf weder Datei noch Logcat anfassen
+            DiagnosticLog.logAll(listOf("TELEMETRY_SENT" to emptyMap()))
             assertNull(DiagnosticLog.path)
         }
     }

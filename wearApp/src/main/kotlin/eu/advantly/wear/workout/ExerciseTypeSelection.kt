@@ -35,6 +35,7 @@ enum class WorkoutMetric {
     HEART_RATE_BPM_STATS,
     CALORIES_TOTAL,
     STEPS,
+    STEPS_TOTAL,
 }
 
 /** Sicht auf `ExerciseCapabilities` – in Tests ein Fake, auf der Uhr [HealthServicesMapping.toView]. */
@@ -69,6 +70,7 @@ data class WorkoutPermissions(
                 // (https://developer.android.com/health-and-fitness/health-services/permissions).
                 if (activityRecognition) {
                     add(WorkoutMetric.STEPS)
+                    add(WorkoutMetric.STEPS_TOTAL)
                     add(WorkoutMetric.CALORIES_TOTAL)
                 }
             }
@@ -115,11 +117,12 @@ object ExerciseTypeSelector {
     ): ExerciseSelection? {
         val options = candidates(sport)
         val type = options.firstOrNull { it in capabilities.supportedTypes } ?: return null
+        val metrics = capabilities.supportedMetrics(type).intersect(WANTED_METRICS).intersect(permissions.allowedMetrics)
         return ExerciseSelection(
             sport = sport,
             type = type,
             isFallback = type != options.first(),
-            metrics = capabilities.supportedMetrics(type).intersect(WANTED_METRICS).intersect(permissions.allowedMetrics),
+            metrics = if (WorkoutMetric.STEPS_TOTAL in metrics) metrics - WorkoutMetric.STEPS else metrics,
         )
     }
 }

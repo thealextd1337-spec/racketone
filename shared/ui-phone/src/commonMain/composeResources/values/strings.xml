@@ -390,4 +390,7 @@
     <string name="wizard_drag_hint">Hold a player to drag. Tap to swap or remove.</string>
     <string name="wizard_empty_suggestions">No recent players yet. Create a player to get started.</string>
     <string name="wizard_place_action">Choose a player or destination</string>
+    <string name="live_telemetry_heart_rate">Heart rate: %1$s bpm</string>
+    <string name="live_telemetry_steps">Steps: %1$s</string>
+    <string name="live_telemetry_unknown">—</string>
 </resources>

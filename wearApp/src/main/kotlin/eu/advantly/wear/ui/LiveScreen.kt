@@ -129,7 +129,7 @@ fun LiveScreen(
     var controls by remember(live.matchId) { mutableStateOf(false) }
     when {
         isAmbient -> {
-            ScorePage(live, heartRate, isAmbient = true, toast = null, actions = actions, onOpenControls = {})
+            ScorePage(live, workout, isAmbient = true, toast = null, actions = actions, onOpenControls = {})
         }
 
         live.overlay == LiveOverlay.CONFIRM_TAKE_OVER -> {
@@ -161,7 +161,7 @@ fun LiveScreen(
         }
 
         else -> {
-            ScorePage(live, heartRate, isAmbient = false, toast = toast, actions = actions, onOpenControls = { controls = true })
+            ScorePage(live, workout, isAmbient = false, toast = toast, actions = actions, onOpenControls = { controls = true })
         }
     }
 }
@@ -175,7 +175,7 @@ fun LiveScreen(
 @Composable
 private fun ScorePage(
     live: LiveUi,
-    heartRate: Int?,
+    workout: WorkoutUiState,
     isAmbient: Boolean,
     toast: WatchToast?,
     actions: LiveActions,
@@ -315,7 +315,7 @@ private fun ScorePage(
             }
         }
         TopStatus(live, isAmbient, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * TOP_STATUS_FRACTION))
-        BottomLine(live, heartRate, isAmbient, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * 0.04f))
+        BottomLine(live, workout, isAmbient, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * 0.04f))
     }
 }
 
@@ -474,11 +474,11 @@ private fun TopStatus(
     Text(text, modifier = modifier, fontSize = 10.sp, color = color, maxLines = 1)
 }
 
-/** Unten: Puls bzw. bei der Anzeige nach > 30 s ohne Zähler „Zählen übernehmen“ (tippbar, keine Score-Fläche). */
+/** Unten: Puls und Schritte des laufenden Workouts bzw. bei der Anzeige nach > 30 s ohne Zähler „Zählen übernehmen“ (tippbar, keine Score-Fläche). */
 @Composable
 private fun BottomLine(
     live: LiveUi,
-    heartRate: Int?,
+    workout: WorkoutUiState,
     isAmbient: Boolean,
     actions: LiveActions,
     modifier: Modifier,
@@ -500,12 +500,7 @@ private fun BottomLine(
         )
         return
     }
-    Text(
-        text = heartRate?.let { stringResource(R.string.heart_rate_value, it) } ?: stringResource(R.string.heart_rate_unknown),
-        fontSize = 12.sp,
-        color = if (isAmbient) AmbientDigits else Color.White,
-        modifier = modifier,
-    )
+    WorkoutTelemetry(live.matchId, workout, isAmbient, modifier)
 }
 
 private const val HALF_FRACTION = (1f - TapZones.MIDDLE_BAND) / 2f
