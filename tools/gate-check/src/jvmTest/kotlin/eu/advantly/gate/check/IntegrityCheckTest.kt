@@ -104,6 +104,8 @@ class IntegrityCheckTest {
         assertEquals(2, result.authors.first { it.deviceId == WATCH }.roleRejected)
         assertEquals(listOf("handy", "uhr"), result.scorerChanges.map { it.toLabel })
         assertTrue(result.findings.any { "Rollenprüfung" in it.text })
+        assertEquals(2, result.timeline.count { it.status == "verworfen (Rolle)" && it.authorLabel == "uhr" })
+        assertEquals(4, result.timeline.count { it.status == "wirksam" })
     }
 
     @Test
@@ -176,6 +178,80 @@ class IntegrityCheckTest {
 
         assertEquals(Verdict.FAILED, result.verdict)
         assertEquals("TENNIS", result.sport)
+    }
+
+    @Test
+    fun watchMissingMatchItWasScoringIsOpen() {
+        // Uhr als Zähler eingesetzt, hat das Match aber nie bekommen (keine Events von ihr)
+        val log = LogBuilder(scorer = WATCH)
+
+        val result = single(snapshot("handy", PHONE, MATCH to log.stored()), snapshot("uhr", WATCH))
+
+        assertEquals(Verdict.OPEN, result.verdict, result.findings.toString())
+        assertTrue(result.findings.any { "als Zähler eingesetzt" in it.text })
+    }
+
+    @Test
+    fun watchMissingMatchWithItsOwnEventsFails() {
+        val log = LogBuilder(scorer = WATCH).apply { points(WATCH, A, B) }
+
+        val result = single(snapshot("handy", PHONE, MATCH to log.stored()), snapshot("uhr", WATCH))
+
+        assertEquals(Verdict.FAILED, result.verdict, result.findings.toString())
+        assertTrue(result.findings.any { "2 Event(s) von dort" in it.text })
+    }
+
+    @Test
+    fun watchMissingMatchAfterHandoverToItIsOpen() {
+        val log = LogBuilder(scorer = PHONE).apply { handover(PHONE, WATCH) }
+
+        val result = single(snapshot("handy", PHONE, MATCH to log.stored()), snapshot("uhr", WATCH))
+
+        assertEquals(Verdict.OPEN, result.verdict)
+    }
+
+    @Test
+    fun foldFailureIsReportedPerMatchAndOthersAreChecked() {
+        val broken = LogBuilder("m-broken", firstServer = "X9").apply { points(WATCH, A) } // Aufschläger in keiner Seite
+        val good = LogBuilder("m-good").apply { points(WATCH, A) }
+        val snaps =
+            listOf(
+                snapshot("handy", PHONE, "m-broken" to broken.stored(), "m-good" to good.stored()),
+                snapshot("uhr", WATCH, "m-broken" to broken.stored(), "m-good" to good.stored()),
+            )
+
+        val results = IntegrityCheck.check(snaps).associateBy { it.matchId }
+
+        assertEquals(Verdict.FAILED, results.getValue("m-broken").verdict)
+        assertTrue(results.getValue("m-broken").findings.any { "Fold über alle Events fehlgeschlagen" in it.text })
+        assertEquals(Verdict.PASSED, results.getValue("m-good").verdict)
+        // Filter greift vor dem Fold
+        assertEquals(listOf("m-good"), IntegrityCheck.check(snaps) { id, _ -> id == "m-good" }.map { it.matchId })
+    }
+
+    @Test
+    fun fingerprintIsStableAndSensitive() {
+        val log = LogBuilder().apply { points(WATCH, A, B) }
+        val events = log.stored()
+        val base = IntegrityCheck.fingerprint(events, mapOf("slot" to "{}"))
+
+        assertEquals(base, IntegrityCheck.fingerprint(events.reversed().map { it.copy(confirmed = false) }, mapOf("slot" to "{}")))
+        assertTrue(base != IntegrityCheck.fingerprint(events.dropLast(1), mapOf("slot" to "{}")))
+        assertTrue(base != IntegrityCheck.fingerprint(events, mapOf("slot" to "{\"id\":\"p\"}")))
+        val changed = events.map { if (it.type == "PointWon") it.copy(payload = """{"type":"PointWon","side":"B"}""") else it }
+        assertTrue(base != IntegrityCheck.fingerprint(changed, mapOf("slot" to "{}")))
+    }
+
+    @Test
+    fun comparisonSectionHasNoTimestampsOrPaths() {
+        val log = LogBuilder().apply { points(WATCH, A) }
+        val results = IntegrityCheck.check(listOf(snapshot("handy", PHONE, MATCH to log.stored())))
+
+        val text = IntegrityReport.comparison(results)
+
+        assertEquals(1, text.lines().count { it.isNotBlank() })
+        assertTrue(text.startsWith("$MATCH events=2 pointWon=1 zuweisungen=0 fp="), text)
+        assertEquals(text, IntegrityReport.comparison(IntegrityCheck.check(listOf(snapshot("x", PHONE, MATCH to log.stored())))))
     }
 
     @Test

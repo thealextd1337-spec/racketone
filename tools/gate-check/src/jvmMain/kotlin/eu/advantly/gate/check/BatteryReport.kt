@@ -29,14 +29,18 @@ object BatteryReport {
             appendLine()
             appendLine(
                 "| Abschnitt | Sportart | Start | Dauer (min) | ohne Laden (min) | Akku Start → Ende | Verbrauch | %/h | " +
-                    "mAh | Display an/Ambient/aus (%) | Workout (%) | Punkte | Sync gesendet/empfangen | Neustarts | max. Lücke (min) | Urteil |",
+                    "mAh | Display an/Ambient/aus (%) | Workout (%) | Punkte | Sync gesendet/empfangen | Neustarts | max. Lücke (min) | Abschnitte | Urteil |",
             )
-            appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+            appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
             (matches + listOfNotNull(whole)).forEach { appendLine(row(it)) }
             appendLine()
             appendLine("Hinweise:")
             appendLine(
                 "- %/h zählt nur Zeit ohne Laden; der Akkuwert hat 1 % Auflösung, unter ${BatteryAnalysis.MIN_DISCHARGE_MINUTES.toInt()} min ohne Laden → UNKLAR.",
+            )
+            appendLine(
+                "- Je Match zählen nur zusammenhängende Messpunkte dieses Matches („Abschnitte“); Laden/Leerlauf dazwischen trennt. " +
+                    "Akkuanstieg ohne erkanntes Laden → UNKLAR.",
             )
             appendLine("- Der Minutentakt kann im Tiefschlaf aussetzen („max. Lücke“); %/h nutzt echte Zeitstempel und bleibt gültig.")
             appendLine(
@@ -60,6 +64,6 @@ object BatteryReport {
         val gap = "%.1f".format(s.maxGapMinutes)
         return "| ${s.title} | ${s.sport ?: "—"} | ${IntegrityReport.time(s.startMs)} | $duration | $discharge | $battery | " +
             "${s.dropPercent} % | $rate | $mah | $screen | ${pct(s.workoutPct)} | ${s.points ?: "—"} | $sync | ${s.restarts} | " +
-            "$gap | **${s.verdict.label}** |"
+            "$gap | ${s.segments} | **${s.verdict.label}** |"
     }
 }

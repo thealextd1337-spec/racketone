@@ -81,6 +81,7 @@ private fun compare(options: Options): Int {
     out.mkdirs()
     val now = System.currentTimeMillis()
     File(out, "index.md").writeText(IntegrityReport.index(results, dbs.map { it.first to it.second.absolutePath }, now))
+    File(out, "vergleich.txt").writeText(IntegrityReport.comparison(results))
     results.forEach { File(out, IntegrityReport.fileName(it)).writeText(IntegrityReport.match(it)) }
 
     val overall = IntegrityCheck.overall(results)

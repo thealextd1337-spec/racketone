@@ -46,6 +46,15 @@ object IntegrityReport {
             appendLine("Urteile: BESTANDEN = alle Geräte gleicher Event-Satz und Fold, keine Lücke; OFFEN = Sync ausstehend bzw.")
             appendLine("Teilmenge (nach Abgleich neu ziehen oder begründen); NICHT BESTANDEN = Event verloren/abweichend.")
             appendLine("Den Soll-Stand aus dem Protokollbogen mit „Ergebnis (Fold)“ vergleichen – Abweichung = verlorener/doppelter Punkt.")
+            appendLine()
+            appendLine("## Vergleichsteil (stabil zwischen Läufen, K7)")
+            appendLine()
+            appendLine("Identisch mit `vergleich.txt`; vor/nach einem Update vergleichen (`fc vergleich.txt …`). Fingerabdruck =")
+            appendLine("SHA-256 über alle Event-IDs mit Inhalt und die Personen-Zuweisungen (ohne Bestätigungsstatus, Zeitpunkt, Pfade).")
+            appendLine()
+            appendLine("```")
+            append(comparison(results))
+            appendLine("```")
         }
 
     fun match(m: MatchIntegrity): String =
@@ -107,6 +116,22 @@ object IntegrityReport {
                 appendLine("| aktive Widersprüche | ${u.conflicts} |")
                 appendLine("| ignoredEvents (Engine) | ${u.ignored} |")
             }
+            if (m.timeline.isNotEmpty()) {
+                appendLine()
+                appendLine("## Punkt-Verlauf (für die Strichliste je Szenario-Zeitfenster)")
+                appendLine()
+                appendLine(
+                    "Zeit = Uhrzeit des erzeugenden Geräts. Zeilen im notierten Zeitfenster je Gerät zählen und mit der Strichliste vergleichen.",
+                )
+                appendLine()
+                appendLine("| Zeit (Gerät) | Gerät | device_seq | Eingabe | Status |")
+                appendLine("|---|---|---|---|---|")
+                m.timeline.forEach {
+                    appendLine(
+                        "| ${time(it.wallClockMs)} | ${it.authorLabel} | ${it.deviceSeq} | ${it.what} | ${it.status} |",
+                    )
+                }
+            }
             if (m.scorerChanges.isNotEmpty()) {
                 appendLine()
                 appendLine("## Zählerwechsel")
@@ -115,6 +140,15 @@ object IntegrityReport {
                 appendLine("|---|---|---|---|")
                 m.scorerChanges.forEach { appendLine("| ${it.lamport} | ${time(it.wallClockMs)} | ${it.byLabel} | ${it.toLabel} |") }
             }
+        }
+
+    /** Vergleichsteil aller Matches (eine Zeile je Match, nach Match-ID sortiert); auch Inhalt von `vergleich.txt`. */
+    fun comparison(results: List<MatchIntegrity>): String =
+        buildString {
+            results
+                .filter { it.verdict != Verdict.DELETED }
+                .sortedBy { it.matchId }
+                .forEach { m -> appendLine(m.comparison?.line(m.matchId) ?: "${m.matchId} nicht auswertbar") }
         }
 
     private fun marker(verdict: Verdict): String =

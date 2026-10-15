@@ -80,6 +80,7 @@ class DeviceDatabaseTest {
             assertEquals(0, code)
             val index = File(out, "index.md").readText()
             assertTrue("**Gesamt: BESTANDEN**" in index, index)
+            assertTrue(File(out, "vergleich.txt").readText().startsWith("$MATCH events=4 pointWon=3"))
             assertEquals(1, out.listFiles()!!.count { it.name.startsWith("match-") && "-tennis-" in it.name })
         } finally {
             dir.deleteRecursively()

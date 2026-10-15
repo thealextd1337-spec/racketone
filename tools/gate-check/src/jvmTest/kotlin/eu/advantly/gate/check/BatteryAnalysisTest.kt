@@ -217,4 +217,53 @@ class BatteryAnalysisTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun separateSessionsWithChargingInBetweenAreNotBridged() {
+        // Review: 2× 10 min Spiel (90→87, Laden, 100→97) – früher 81 min/−7 %/BESTANDEN, korrekt 20 min/6 %/18 %/h
+        val first = (0..10).map { sample(it, 90 - it * 3 / 10) }
+        val charge = (11..40).map { sample(it, minOf(100, 87 + (it - 10) / 2), charging = true) }
+        val second = (41..51).map { sample(it, 100 - (it - 41) * 3 / 10) }
+
+        val section = BatteryAnalysis.perMatch(FieldLog(first + charge + second, 0)).single()
+
+        assertEquals(20.0, section.dischargeMinutes, 1e-9)
+        assertEquals(6, section.dropPercent)
+        assertEquals(18.0, section.ratePerHour!!, 1e-9)
+        assertEquals(BatteryVerdict.FAILED, section.verdict)
+        assertEquals(0, section.rises)
+    }
+
+    @Test
+    fun idleChargingRowsOfAnotherStateSplitTheMatch() {
+        val first = (0..10).map { sample(it, 90 - it * 3 / 10) }
+        val idle = (11..40).map { sample(it, 95, match = null, charging = true, workout = false) }
+        val second = (41..51).map { sample(it, 100 - (it - 41) * 3 / 10) }
+
+        val section = BatteryAnalysis.perMatch(FieldLog(first + idle + second, 0)).single()
+
+        assertEquals(2, section.segments)
+        assertEquals(20.0, section.dischargeMinutes, 1e-9)
+        assertEquals(BatteryVerdict.FAILED, section.verdict)
+    }
+
+    @Test
+    fun unnoticedBatteryRiseIsNeverAPass() {
+        // Laden ohne erkanntes Ladesignal (z. B. Messpunkte fehlten): 85 → 100 ohne charging=true
+        val samples = (0..30).map { sample(it, 90 - it / 6) } + (31..70).map { sample(it, 100 - (it - 31) / 10) }
+
+        val section = BatteryAnalysis.perMatch(FieldLog(samples, 0)).single()
+
+        assertEquals(1, section.rises)
+        assertEquals(BatteryVerdict.UNCLEAR, section.verdict)
+        assertTrue("Akkuanstieg" in section.reason)
+    }
+
+    @Test
+    fun unknownChargingStateDoesNotCountAsDischarge() {
+        val samples = (0..40).map { sample(it, 90 - it / 6).copy(charging = null) }
+        val section = BatteryAnalysis.section("m", "m", null, samples)
+        assertNull(section.ratePerHour)
+        assertEquals(BatteryVerdict.UNCLEAR, section.verdict)
+    }
 }

@@ -10,9 +10,11 @@ import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.Undo
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
 import eu.advantly.data.toScoreEventOrNull
+import java.security.MessageDigest
 
 /** Gesamturteil je Match. Reihenfolge = Schwere (für das Gesamturteil über alle Matches). */
 enum class Verdict(
@@ -102,7 +104,36 @@ data class MatchIntegrity(
     val authors: List<AuthorView>,
     val scorerChanges: List<ScorerChange>,
     val union: FoldSummary?,
+    val timeline: List<TimelineRow> = emptyList(),
+    val comparison: Comparison? = null,
 )
+
+/**
+ * Ein `PointWon`/`Undo` im vereinigten Log (Ordnung 01 §3.2) mit seinem Schicksal im Fold – zum Abgleich mit der
+ * Strichliste eines Szenario-Zeitfensters.
+ */
+data class TimelineRow(
+    val wallClockMs: Long,
+    val authorLabel: String,
+    val deviceSeq: Long,
+    val what: String,
+    val status: String,
+)
+
+/**
+ * Normalisierter, zwischen Läufen stabiler Vergleichsteil eines Matches (K7: Historie vor/nach Update): Fingerabdruck
+ * über alle Event-IDs mit Inhalt und die Personen-Zuweisungen – ohne Zeitpunkt der Auswertung, Pfade oder `confirmed`.
+ */
+data class Comparison(
+    val events: Int,
+    val pointEvents: Int,
+    val assignments: Int,
+    val score: String,
+    val fingerprint: String,
+) {
+    fun line(matchId: String): String =
+        "$matchId events=$events pointWon=$pointEvents zuweisungen=$assignments fp=$fingerprint stand=$score"
+}
 
 /**
  * Integritätsprüfung „0 verlorene Punkte“ (PLAN Gate P1) über die Datenbanken mehrerer Geräte.
@@ -111,8 +142,11 @@ data class MatchIntegrity(
  * - **NICHT BESTANDEN:** Sequenzlücke eines Autors im vereinigten Log (ein Event existiert auf keinem Gerät mehr),
  *   ein Event fehlt in der Referenz, obwohl sein Halter es als bestätigt führt (Ack ohne Speicherung), abweichende Kopien
  *   derselben Event-ID, unlesbare Payload, fehlende Genesis oder unterschiedlicher Fold bei identischem Event-Satz.
- * - **OFFEN:** Der Referenz fehlen Events, die ihr Halter noch als unbestätigt führt (Sync ausstehend), oder ein
- *   beteiligtes Gerät hat nur eine Teilmenge (Anzeige nicht synchron) – nach dem Abgleich erneut ziehen.
+ * - **OFFEN:** Der Referenz fehlen Events, die ihr Halter noch als unbestätigt führt (Sync ausstehend), ein
+ *   beteiligtes Gerät hat nur eine Teilmenge (Anzeige nicht synchron) oder ein als Zähler eingesetztes Gerät hat das Match
+ *   gar nicht – nach dem Abgleich erneut ziehen.
+ * - Ein Gerät, von dem Events stammen, das das Match aber gar nicht (und ohne Löschmarkierung) hat: NICHT BESTANDEN.
+ * - Fold-Fehler (z. B. ungültige Besetzung) sind NICHT BESTANDEN für dieses Match; die übrigen Matches werden geprüft.
  * - **GELÖSCHT:** Match auf der Referenz gelöscht (Löschmarkierung), kein Gate-Match – hat Vorrang vor allen Befunden.
  * - sonst **BESTANDEN**: alle beteiligten Geräte haben denselben Event-Satz und denselben Fold.
  *
@@ -128,9 +162,39 @@ object IntegrityCheck {
         val names = DeviceNames(snapshots)
         val ids = snapshots.flatMap { it.matches.keys + it.tombstones.keys }.toSortedSet()
         return ids
-            .map { checkMatch(it, snapshots, names) }
-            .filter { filter(it.matchId, it.createdAtMs) }
-            .sortedWith(compareBy({ it.createdAtMs ?: Long.MAX_VALUE }, { it.matchId }))
+            .mapNotNull { id ->
+                // Filter (--since/--match) vor jedem Fold: kaputte Alt-Matches außerhalb des Fensters stören nicht
+                val (sport, created) = quickMeta(id, snapshots)
+                if (!filter(id, created)) return@mapNotNull null
+                runCatching { checkMatch(id, snapshots, names) }.getOrElse { e ->
+                    MatchIntegrity(
+                        matchId = id,
+                        sport = sport,
+                        createdAtMs = created,
+                        verdict = Verdict.FAILED,
+                        findings = listOf(Finding(Verdict.FAILED, "Prüfung abgebrochen: ${e::class.simpleName}: ${e.message}")),
+                        devices = emptyList(),
+                        authors = emptyList(),
+                        scorerChanges = emptyList(),
+                        union = null,
+                    )
+                }
+            }.sortedWith(compareBy({ it.createdAtMs ?: Long.MAX_VALUE }, { it.matchId }))
+    }
+
+    /** Sportart und Startzeit ohne Fold: aus dem Match-Kopf, sonst aus der Genesis. */
+    private fun quickMeta(
+        matchId: String,
+        snapshots: List<DeviceSnapshot>,
+    ): Pair<String?, Long?> {
+        val data = snapshots.mapNotNull { it.matches[matchId] }
+        data.firstNotNullOfOrNull { it.header }?.let { return it.sport to it.createdAtMs }
+        val genesis =
+            data
+                .flatMap { it.events }
+                .firstOrNull { it.type == "MatchCreated" }
+                ?.toScoreEventOrNull()
+        return (genesis?.payload as? MatchCreated)?.config?.sport?.name to genesis?.wallClockMs
     }
 
     /** Gesamturteil: das schwerste Einzelurteil; gelöschte Matches zählen nicht. */
@@ -172,8 +236,12 @@ object IntegrityCheck {
         val unionEvents = parsed.values.filterNotNull()
 
         // Fold über die Vereinigung; Zähler im Bericht als lesbarer Gerätename
-        val unionFold = fold(unionEvents)?.let { it.copy(scorer = it.scorer?.let(names::of)) }
-        val analysis = unionFold?.let { analysisOf(unionEvents) }
+        val unionResult = runCatching { fold(unionEvents)?.let { it.copy(scorer = it.scorer?.let(names::of)) } }
+        unionResult.exceptionOrNull()?.let { e ->
+            findings += Finding(Verdict.FAILED, "Fold über alle Events fehlgeschlagen: ${e::class.simpleName}: ${e.message}")
+        }
+        val unionFold = unionResult.getOrNull()
+        val analysis = unionFold?.let { runCatching { analysisOf(unionEvents) }.getOrNull() }
         // Sequenzlücken je Autor: lückenlose device_seq 1..max ist Pflicht (01 §4.3)
         val authors =
             union.values
@@ -264,6 +332,36 @@ object IntegrityCheck {
                 }
             }
 
+        // Erwartete Beteiligung: Ein Gerät, das Events erzeugt hat oder als Zähler eingesetzt war, muss das Match haben
+        val genesisEvent = unionEvents.firstOrNull { it.payload is MatchCreated }
+        val scorerIds =
+            buildSet {
+                (genesisEvent?.payload as? MatchCreated)?.let { add((it.scorerDeviceId ?: genesisEvent.deviceId).value) }
+                unionEvents.mapNotNull { (it.payload as? ScorerChanged)?.scorerDeviceId?.value }.forEach(::add)
+            }
+        snapshots.filter { it !== reference && matchId !in it.matches && matchId !in it.tombstones }.forEach { snap ->
+            val own = snap.ownDeviceId ?: return@forEach
+            val authored = union.values.count { it.deviceId == own }
+            when {
+                authored > 0 -> {
+                    findings +=
+                        Finding(
+                            Verdict.FAILED,
+                            "${snap.label} hat das Match nicht, obwohl $authored Event(s) von dort stammen (auf anderen Geräten " +
+                                "vorhanden) – Daten auf ${snap.label} verloren.",
+                        )
+                }
+
+                own in scorerIds -> {
+                    findings +=
+                        Finding(
+                            Verdict.OPEN,
+                            "${snap.label} war als Zähler eingesetzt, hat das Match aber gar nicht (nie zugestellt?) – verbinden, neu ziehen.",
+                        )
+                }
+            }
+        }
+
         devices.filter { it.present && !it.matchesUnion && it.label != reference.label }.forEach {
             findings +=
                 Finding(
@@ -322,8 +420,25 @@ object IntegrityCheck {
                     )
                 }
 
+        val timeline =
+            unionEvents
+                .sortedWith(EventOrdering)
+                .filter { it.payload is PointWon || it.payload is Undo }
+                .map { event ->
+                    TimelineRow(event.wallClockMs, names.of(event.deviceId.value), event.deviceSeq, what(event), status(event, analysis))
+                }
+        val assignmentSource = (listOf(reference) + holders).firstNotNullOfOrNull { it.matches[matchId] }
+        val comparison =
+            Comparison(
+                events = union.size,
+                pointEvents = union.values.count { it.type == "PointWon" },
+                assignments = assignmentSource?.assignments?.size ?: 0,
+                score = unionFold?.score ?: "—",
+                fingerprint = fingerprint(union.values, assignmentSource?.assignments.orEmpty()),
+            )
+
         val header = holders.firstNotNullOfOrNull { it.matches.getValue(matchId).header }
-        val genesis = unionEvents.firstOrNull { it.payload is MatchCreated }
+        val genesis = genesisEvent
         val sport = header?.sport ?: (genesis?.payload as? MatchCreated)?.config?.sport?.name
         val created = header?.createdAtMs ?: genesis?.wallClockMs
 
@@ -338,7 +453,7 @@ object IntegrityCheck {
 
                 else -> Verdict.PASSED
             }
-        return MatchIntegrity(matchId, sport, created, verdict, findings, devices, authors, scorerChanges, unionFold)
+        return MatchIntegrity(matchId, sport, created, verdict, findings, devices, authors, scorerChanges, unionFold, timeline, comparison)
     }
 
     /** Fold über ein vollständiges Log mit Genesis; `null` ohne Genesis. */
@@ -369,6 +484,41 @@ object IntegrityCheck {
         val created = genesis.payload as MatchCreated
         val scorer: DeviceId = created.scorerDeviceId ?: genesis.deviceId
         return EventLog.analyze(ordered.filter { it != genesis }, scorer)
+    }
+
+    private fun what(event: ScoreEvent): String =
+        when (val payload = event.payload) {
+            is PointWon -> "Punkt ${payload.side}"
+            is Undo -> "Undo → ${short(payload.target.value)}"
+            else -> payload::class.simpleName.orEmpty()
+        }
+
+    private fun status(
+        event: ScoreEvent,
+        analysis: LogAnalysis?,
+    ): String =
+        when {
+            analysis == null -> "?"
+            event.id in analysis.rejected -> "abweichende Kopie"
+            event.id in analysis.roleRejected -> "verworfen (Rolle)"
+            event.id in analysis.undone -> "rückgängig"
+            event.id in analysis.absorbed -> "Doppel-Tap"
+            event.id in analysis.invalidUndos -> "ungültig"
+            else -> "wirksam"
+        }
+
+    /** SHA-256 über Events (ohne `confirmed`) und Zuweisungen, sortiert – stabil zwischen Läufen und Geräten. */
+    fun fingerprint(
+        events: Collection<StoredEvent>,
+        assignments: Map<String, String?>,
+    ): String {
+        val eventLines =
+            events.map {
+                "e|${it.id}|${it.deviceId}|${it.deviceSeq}|${it.lamport}|${it.wallClockMs}|${it.parentId}|${it.type}|${it.payload}"
+            }
+        val lines = eventLines.sorted() + assignments.entries.map { "a|${it.key}|${it.value}" }.sorted()
+        val digest = MessageDigest.getInstance("SHA-256").digest(lines.joinToString("\n").toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }.take(16)
     }
 
     /** Fehlende Bereiche in 1..max. */

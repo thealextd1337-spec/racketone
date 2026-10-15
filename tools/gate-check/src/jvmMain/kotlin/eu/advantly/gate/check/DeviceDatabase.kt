@@ -27,11 +27,13 @@ data class HeaderInfo(
  *
  * @property events alle Events in globaler Ordnung (wie `EventStore.eventsFor`)
  * @property unconfirmedIds Events mit `confirmed = 0` (noch keine Gegenstelle hat sie bestätigt)
+ * @property assignments Personen-Zuweisungen `match_assignment` (Slot → Spieler-JSON), nur für den Fingerabdruck
  */
 data class MatchData(
     val events: List<StoredEvent>,
     val unconfirmedIds: Set<String>,
     val header: HeaderInfo?,
+    val assignments: Map<String, String?> = emptyMap(),
 )
 
 /**
@@ -116,7 +118,12 @@ object DeviceDatabase {
                             resultReason = it.score.reason?.name,
                         )
                     }
-                MatchData(data.events.eventsFor(id), unconfirmed, header)
+                val assignments =
+                    stringPairs(
+                        driver,
+                        "SELECT slot_id, coalesce(player_json, '') FROM match_assignment WHERE match_id = '${id.replace("'", "''")}'",
+                    ).associate { (slot, json) -> slot to json.ifEmpty { null } }
+                MatchData(data.events.eventsFor(id), unconfirmed, header, assignments)
             }
         return DeviceSnapshot(label, ownDeviceId, kinds, matches, tombstones)
     }

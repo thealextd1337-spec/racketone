@@ -23,6 +23,8 @@ enum class BatteryVerdict(
  * @property sent/received Nachrichten an/vom Handy (Link-Zähler, Prozessneustarts berücksichtigt)
  * @property restarts Prozesswechsel innerhalb des Abschnitts (App vom System beendet und neu gestartet)
  * @property maxGapMinutes größter Abstand zweier Messpunkte (Tiefschlaf verzögert den Minutentakt)
+ * @property segments zusammenhängende Abschnitte (durch Leerlauf/anderes Match getrennt)
+ * @property rises Akkuanstiege ohne erkanntes Laden (→ immer UNKLAR)
  */
 data class BatterySection(
     val title: String,
@@ -48,6 +50,8 @@ data class BatterySection(
     val points: Int?,
     val restarts: Int,
     val maxGapMinutes: Double,
+    val segments: Int,
+    val rises: Int,
     val verdict: BatteryVerdict,
     val reason: String,
 ) {
@@ -65,23 +69,33 @@ object BatteryAnalysis {
     /** Kürzeste Entladezeit für ein belastbares Urteil (Akkuwert hat nur 1 % Auflösung). */
     const val MIN_DISCHARGE_MINUTES = 20.0
 
+    /**
+     * Je Match: ausgewertet werden nur **zusammenhängende** Paare aufeinanderfolgender Messpunkte des vollständigen Logs,
+     * die beide zu diesem Match gehören. Lade-, Leerlauf- oder Fremd-Match-Zeilen dazwischen trennen die Abschnitte, statt
+     * herausgefiltert und überbrückt zu werden (sonst würde ein Ladevorgang den Verbrauch verdecken).
+     */
     fun perMatch(
         log: FieldLog,
         maxRate: Double = MAX_RATE_PER_HOUR,
-    ): List<BatterySection> =
-        log.samples
-            .filter { it.matchId != null }
-            .groupBy { it.matchId!! }
-            .map { (id, samples) ->
-                val sport = samples.firstNotNullOfOrNull { it.sport }
-                section("Match ${IntegrityCheck.short(id)}", id, sport, samples, maxRate)
+    ): List<BatterySection> {
+        val sorted = log.samples.sortedWith(ORDER)
+        val pairs = sorted.zipWithNext()
+        return sorted
+            .mapNotNull { it.matchId }
+            .distinct()
+            .map { id ->
+                val samples = sorted.filter { it.matchId == id }
+                val own = pairs.filter { (prev, cur) -> prev.matchId == id && cur.matchId == id }
+                section("Match ${IntegrityCheck.short(id)}", id, samples.firstNotNullOfOrNull { it.sport }, samples, own, maxRate)
             }.sortedBy { it.startMs }
+    }
 
     fun whole(
         log: FieldLog,
         maxRate: Double = MAX_RATE_PER_HOUR,
     ): BatterySection? = log.samples.takeIf { it.size >= 2 }?.let { section("Gesamte Aufzeichnung", null, null, it, maxRate) }
 
+    /** Ein lückenloser Abschnitt: alle aufeinanderfolgenden Paare von [samples]. */
     fun section(
         title: String,
         matchId: String?,
@@ -89,7 +103,20 @@ object BatteryAnalysis {
         samples: List<FieldSample>,
         maxRate: Double = MAX_RATE_PER_HOUR,
     ): BatterySection {
-        val sorted = samples.sortedWith(compareBy({ it.wallMs }, { it.elapsedMs }))
+        val sorted = samples.sortedWith(ORDER)
+        return section(title, matchId, sport, sorted, sorted.zipWithNext(), maxRate)
+    }
+
+    private val ORDER = compareBy<FieldSample>({ it.wallMs }, { it.elapsedMs })
+
+    private fun section(
+        title: String,
+        matchId: String?,
+        sport: String?,
+        sorted: List<FieldSample>,
+        pairs: List<Pair<FieldSample, FieldSample>>,
+        maxRate: Double,
+    ): BatterySection {
         var dischargeMs = 0L
         var chargingMs = 0L
         var drop = 0
@@ -105,16 +132,24 @@ object BatteryAnalysis {
         var failed = 0
         var restarts = 0
         var maxGap = 0L
-        sorted.zipWithNext().forEach { (prev, cur) ->
+        var rises = 0
+        var segments = 0
+        var last: FieldSample? = null
+        pairs.forEach { (prev, cur) ->
+            if (last !== prev) segments++
+            last = cur
             val dt = max(0L, cur.wallMs - prev.wallMs)
             spanMs += dt
             maxGap = max(maxGap, dt)
             val samePid = prev.pid == cur.pid
             if (!samePid) restarts++
             val charging = prev.charging == true || cur.charging == true
+            val knownState = prev.charging != null && cur.charging != null
             if (charging) {
                 chargingMs += dt
-            } else if (prev.battery != null && cur.battery != null) {
+            } else if (knownState && prev.battery != null && cur.battery != null) {
+                // Anstieg ohne erkanntes Laden = unklarer Ladeübergang: darf nie als Verbrauchsnachweis gelten
+                if (cur.battery > prev.battery) rises++
                 dischargeMs += dt
                 drop += prev.battery - cur.battery
                 if (prev.chargeUah != null && cur.chargeUah != null) {
@@ -139,6 +174,10 @@ object BatteryAnalysis {
         val dischargeMinutes = dischargeMs / MINUTE
         val (verdict, reason) =
             when {
+                rises > 0 -> {
+                    BatteryVerdict.UNCLEAR to "Akkuanstieg ohne erkanntes Laden ($rises×) – unklarer Ladeübergang"
+                }
+
                 rate == null -> {
                     BatteryVerdict.UNCLEAR to "keine Entladephase mit Akkuwerten"
                 }
@@ -179,6 +218,8 @@ object BatteryAnalysis {
             points = sorted.lastOrNull { it.points != null }?.points,
             restarts = restarts,
             maxGapMinutes = maxGap / MINUTE,
+            segments = segments,
+            rises = rises,
             verdict = verdict,
             reason = reason,
         )

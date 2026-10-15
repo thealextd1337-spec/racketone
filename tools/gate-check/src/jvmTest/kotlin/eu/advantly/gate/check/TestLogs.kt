@@ -26,6 +26,7 @@ const val MATCH = "match-0001"
 class LogBuilder(
     private val matchId: String = MATCH,
     scorer: String = WATCH,
+    firstServer: String = "A1",
 ) {
     private val seqs = HashMap<String, Long>()
     private var lamport = 0L
@@ -37,7 +38,7 @@ class LogBuilder(
             PHONE,
             MatchCreated(
                 Presets.TENNIS_SINGLES_BO3.format(),
-                Lineup(listOf(PlayerId("A1")), listOf(PlayerId("B1")), PlayerId("A1")),
+                Lineup(listOf(PlayerId("A1")), listOf(PlayerId("B1")), PlayerId(firstServer)),
                 scorerDeviceId = DeviceId(scorer),
             ),
         )
