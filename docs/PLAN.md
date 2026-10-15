@@ -1,6 +1,6 @@
 # Advantly – Gesamtplan & Roadmap
 
-Stand: 2026-10-14 · Name: **Advantly** (vorher „RacketOne“, Prüfung: [07](07-namenspruefung-advantly.md)) · Domain `advantly.eu` · ID `eu.advantly`
+Stand: 2026-10-15 · Name: **Advantly** (vorher „RacketOne“, Prüfung: [07](07-namenspruefung-advantly.md)) · Domain `advantly.eu` · ID `eu.advantly`
 
 Dieser Plan fasst die Fachdokumente zusammen und löst ihre Widersprüche auf. Bei Abweichungen gilt **dieses Dokument**.
 
@@ -18,16 +18,17 @@ Dieser Plan fasst die Fachdokumente zusammen und löst ihre Widersprüche auf. B
 
 ## 1. Produktbild
 
-**Ein Match – auf Handy und Uhr gleichwertig gezählt, für alle Mitspieler sauber festgehalten, mit der eigenen Belastung im Verlauf.**
+**Ein Match – genau ein Gerät zählt, alle anderen zeigen den Stand, für alle Mitspieler sauber festgehalten, mit der eigenen Belastung im Verlauf.**
 
 - Tennis, Padel, Pickleball, Badminton, Tischtennis · Einzel und Doppel · alle offiziellen Regelvarianten 2026 als getestete Presets (Regeln: [02](02-scoring-regeln.md) §2.1–2.5)
 - Schritt-für-Schritt-Assistent **plus Schnellstart** („Wie letztes Mal“, Favoriten-Besetzungen)
-- Zählen auf Apple Watch, Wear OS, Garmin **und** Handy – gleichzeitig, live, offline-fest, mit Undo über Satzgrenzen
+- **Single-Scorer:** Standard ist die Uhr des startenden Spielers; alternativ zählt eine außenstehende Person am Handy im **Director-Modus**. Nur das aktive Zähler-Gerät zählt und führt Undo über Satzgrenzen aus; alle übrigen Geräte sind Anzeige.
+- **„Zählen übernehmen“** mit Bestätigung überträgt die Rolle auf ein anderes Gerät, etwa bei leerem Akku. P1: eigene Uhr oder eigenes Handy; ab P2: Zähler-Person beim Start wählbar (Mitspieler/Freund mit Account oder externer Director), Match-Zustellung per Cloud. Benannte Visitor-Accounts sehen ab P2 nur Live-Stand und Ergebnis.
 - Nach dem Satz: „Noch ein Satz in gleicher Besetzung?“
 - Statistik: Ergebnis, Satzverlauf, Momentum, Head-to-Head, Puls-Kurve pro Satz, Schritte, Kalorien
 - Accounts, Freunde, geteilte Matches (bestätigt durch Mitspieler), Gäste können ihr Profil später beanspruchen
 
-**Positionierung (aus der Marktanalyse):** Der Funktionsumfang allein ist nicht einzigartig. On Court Pro, All Sports Score Keeper, Tally und andere decken Teile ab. Advantly gewinnt über **nachweisbare Zuverlässigkeit**: kein verlorener oder doppelter Punkt, echtes gleichwertiges Zählen über gemischte Geräte, korrekte Doppel-Logik und Health-Daten entlang des Punktverlaufs.
+**Positionierung (aus der Marktanalyse):** Der Funktionsumfang allein ist nicht einzigartig. On Court Pro, All Sports Score Keeper, Tally und andere decken Teile ab. Advantly gewinnt über **nachweisbare Zuverlässigkeit**: kein verlorener oder doppelter Punkt, eindeutige Zähler-Rolle mit bestätigter Übergabe über gemischte Geräte, korrekte Doppel-Logik und Health-Daten entlang des Punktverlaufs.
 
 **Freemium:** Zählen, Undo, eigene Historie, Freunde und geteilte Matches sind **immer kostenlos**. Pro bietet tiefe Statistik (H2H über viele Matches, Belag- und Partner-Analysen, Health-Trends) und kostet testweise 3,99 €/Monat oder 29,99 €/Jahr. In P2 wird das nur vorbereitet (Entitlements), die Paywall kommt frühestens nach P3.
 
@@ -37,7 +38,7 @@ Dieser Plan fasst die Fachdokumente zusammen und löst ihre Widersprüche auf. B
 graph TB
   subgraph shared["Kotlin Multiplatform (shared/)"]
     CS["core-scoring<br/>Engine: state = fold(events)"]
-    SP["sync-protocol<br/>Merge, Dedup, Fork-Erkennung"]
+    SP["sync-protocol<br/>Replikation, Dedup, Zählerwechsel"]
     DATA["data<br/>SQLDelight, Outbox"]
     CLOUD["cloud-sync<br/>supabase-kt (P2)"]
     HEALTH["health (P3)"]
@@ -56,10 +57,10 @@ graph TB
 
 | # | Thema | Widerspruch | **Entscheidung** |
 |---|---|---|---|
-| K1 | Gleichzeitiges Zählen | 01: Merge aller Geräte · 03: ein Scorer pro Match (Lease) | **Merge (01 §4)**, weil der Nutzer „Uhr + Handy gleichwertig“ gewählt hat. Der Server nimmt alle Events idempotent an, Dedup und Konflikte löst die Engine; ein Lease gibt es nicht. 03 streicht `scorer_device_id/scorer_lease_until`. **Wer** zählen darf, regelt eine Berechtigung: Teilnehmer des Matches, Standard = der Ersteller und seine Geräte, weitere Teilnehmer per Einladung „Mitzählen“. |
+| K1 | Zähler-Rolle | Bisher: Merge aller Geräte („Uhr + Handy gleichwertig“), **ersetzt am 2026-10-15** | **Single-Scorer:** genau ein Gerät zählt; Standard = Uhr des startenden Spielers, alternativ Handy im Director-Modus. Alle übrigen Geräte zeigen nur an, ohne Zählen/Undo. „Zählen übernehmen“ mit Bestätigung erzeugt das replizierte Engine-Event „Zähler wechselt“; kein Zeit-Lease. Events eines zum jeweiligen Zeitpunkt nicht aktiven Zähler-Geräts ignoriert die Engine deterministisch. Engine-Details: [02](02-scoring-regeln.md), Replikation: [01](01-architektur.md) (parallele Spezifikationsanpassung). P1: eigene Uhr/eigenes Handy; ab P2: Personenwahl und Cloud-Zustellung, Visitor nur lesend. |
 | K2 | Belag | 03: kombiniert (`indoor_hard`) · 02/04: getrennt | **Getrennt:** `surface` + `environment` (Halle/Draußen). 03 passt die Constraint an. |
 | K3 | „Noch ein Satz?“ | 04: Dialog nach jedem Satz · 02: nur im Modus „Offen“ | **Zwei Modi (02 §5.2):** *Offen* (Standard bei Freizeit): Dialog nach jedem Satz. *Best-of*: Der nächste Satz startet automatisch, nach Matchende kommt die Frage, und „Ja“ legt ein **verknüpftes Folge-Match** an, ohne die Wertung zu verfälschen. → Rückfrage F7. |
-| K4 | Live-Sync Apple | 01: WatchConnectivity · 05: Workout Mirroring | **Beides:** Mirroring als schneller Kanal während des Workouts, WatchConnectivity als Fallback. Die Anti-Entropie (Abgleich bei jedem Wiederverbinden und alle 30 s) garantiert, dass am Ende alle Events ankommen. |
+| K4 | Live-Sync Apple | 01: WatchConnectivity · 05: Workout Mirroring | **Beides:** Mirroring als schneller Kanal während des Workouts, WatchConnectivity als Fallback. Score-Events laufen nur **Zähler → Anzeige**, je nach Rolle Uhr → Handy oder Director-Handy → Uhren. Ack, Abgleich und bestätigter Zählerwechsel bleiben möglich. Workout-Primärrolle und Zähler-Rolle sind unabhängig. Die Anti-Entropie (Abgleich bei jedem Wiederverbinden und alle 30 s) garantiert, dass am Ende alle Events ankommen. |
 | K5 | Name | „RacketOne“ kollidiert ([06 §8](06-marktanalyse.md)) | **Advantly** (Prüfung [07](07-namenspruefung-advantly.md): gelb). `advantly.app` ist fremd vergeben → Domain **`advantly.eu`** (gekauft), Bundle-/Package-ID **`eu.advantly`**. Vor dem Store-Release kurze Markenrecherche durch eine Fachperson (Klassen 9/41/42). |
 
 ## 4. Phasen und Meilensteine
@@ -85,17 +86,17 @@ Jede Phase endet mit einem **Quality Gate**. Erst wenn es bestanden ist, beginnt
 | Arbeitspaket | Abhängig von |
 |---|---|
 | **A** `core-scoring`: alle Presets aus 02, Event-Reducer, Zustand inkl. Break-/Satz-/Matchball, Testvektor-Generator (≥ 150 Vektoren), Property-Tests | – (blockiert alle anderen) |
-| **B** `sync-protocol` + `device-link` (Wear Data Layer, Apple WC/Mirroring), Merge, Dedup, Fork-Dialog, Sync-Simulationstests | A |
-| **C** Handy-UI (CMP): Assistent, Schnellstart, Live-Score, Satzende-Dialog, einfache Ergebnisansicht, DE/EN | A |
-| **D** Wear-OS-App: Scoring-Screen, Workout-Session, Tile zum Schnellstart | A, B |
-| **E** Apple-Watch-App (SwiftUI): Scoring-Screen, Workout-Session, Action Button | A, B, S1 |
+| **B** `sync-protocol` + `device-link` (Wear Data Layer, Apple WC/Mirroring), Replikation, Dedup, bestätigter Zählerwechsel, Anzeige-Modus, Sync-Simulationstests | A |
+| **C** Handy-UI (CMP): Assistent mit Zähler-Wahl, Schnellstart, Director-Live-Score und Anzeige, Satzende-Dialog, einfache Ergebnisansicht, DE/EN | A |
+| **D** Wear-OS-App: Scoring-/Anzeige-Screen, rollenunabhängige Workout-Session, Tile zum Schnellstart | A, B |
+| **E** Apple-Watch-App (SwiftUI): Scoring-/Anzeige-Screen, rollenunabhängige Workout-Session, Action Button | A, B, S1 |
 | **F** Lokale Datenbank + Match-Historie | A |
 
-**Gate P1:** 10 echte Matches über alle drei Sportarten auf Ultra, Pixel Watch, Galaxy Watch und Handys. Dabei gehen **0 Punkte verloren und keiner wird doppelt gezählt**, auch bei Flugmodus mitten im Satz. Akku < 15 %/h auf der Uhr. Alle Testvektoren grün.
+**Gate P1:** 10 echte Matches über alle fünf Sportarten auf Ultra, Pixel Watch, Galaxy Watch und Handys. Dabei gehen **0 Punkte verloren**, auch bei Flugmodus mitten im Satz. Übergabe Uhr → Handy und zurück mit Bestätigung testen, einschließlich Ausfall der bisherigen Zähler-Uhr, Wiederverbinden und verspäteten Events des alten Geräts: Danach zählt ausschließlich das neue Gerät, alle anderen bleiben Anzeige ohne Undo. Deterministische Rollenprüfung gemäß 02 und Dedup bleiben Pflicht; gleichzeitige Eingaben zweier gültiger Zähler entfallen durch Single-Scorer. Akku < 15 %/h auf der Uhr. Alle Testvektoren grün.
 
 ### P2 – Accounts, Freunde, Cloud-Sync
-Supabase (Frankfurt), Login mit Apple/Google/E-Mail-Code, Profile, Spieler und Gäste-Claim, Freundschaften (Suche, QR, Einladungslink), Upload der Events über die Outbox, geteilte Matches mit Bestätigung, Push-Benachrichtigungen, Live-Mitverfolgen (Realtime), Account-Löschung und Export, Entitlements vorbereitet. Wear OS synchronisiert standalone.
-**Gate P2:** pgTAP-RLS-Tests grün. Zwei echte Accounts mit gemischten Geräten (iPhone + Ultra / Android + Galaxy Watch) spielen ein Doppel, und beide sehen das Match. Sync verträgt Abbrüche und Wiederholungen ohne Doppelungen.
+Supabase (Frankfurt), Login mit Apple/Google/E-Mail-Code, Profile, Spieler und Gäste-Claim, Freundschaften (Suche, QR, Einladungslink), Upload der Events über die Outbox, geteilte Matches mit Bestätigung, Push-Benachrichtigungen, Zähler-Wahl beim Start (Mitspieler/Freund mit Account oder externer Director) mit Cloud-Zustellung an dessen Gerät, benannte Visitor-Accounts für Live-Stand und Ergebnis (Realtime, ohne Zählen/Health), Account-Löschung und Export, Entitlements vorbereitet. Wear OS synchronisiert standalone.
+**Gate P2:** pgTAP-RLS-Tests grün. Zwei echte Accounts mit gemischten Geräten (iPhone + Ultra / Android + Galaxy Watch) spielen ein Doppel, und beide sehen das Match. Sync verträgt Abbrüche und Wiederholungen ohne Doppelungen. Zähler-Wahl und Übergabe funktionieren accountübergreifend; Visitor-RLS erlaubt nur Live-Lesen und Ergebnis, keine Schreibaktionen und keine Health-Daten.
 
 ### P3 – Statistik & Health
 Puls (5-s-Raster), Kalorien, Schritte und Dauer von der Uhr. Drei getrennte Einwilligungen: messen, synchronisieren, teilen. Schreiben nach Apple Health und Health Connect, ohne Schritte (vermeidet doppelte Zählung). Statistik-Screens: Momentum, Satzverlauf, H2H, Puls pro Satz. Optionale Punktdetails (Ass, Doppelfehler) per Long-Press. Datenschutz-Folgenabschätzung (DSFA) und Datenschutzerklärung.
@@ -130,9 +131,9 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 |---|---|
 | KMP-Framework auf Apple Watch (arm64-Pflicht, Größe) | Spike S1 zuerst. Plan B: Engine-Port in Swift, abgesichert durch dieselben Testvektoren |
 | Kein Mac → langsames Watch-Debugging | Minimaler Swift-Anteil, In-App-Log-Export, CI-Screenshots, notfalls Cloud-Mac stundenweise |
-| Verlorene/doppelte Punkte beim Sync | Event-Log + Anti-Entropie + Dedup, Sync-Simulationstests als CI-Pflicht |
+| Punktverlust beim Sync / Ausfall der Zähler-Uhr | Persistentes Event-Log + Anti-Entropie + Dedup; bestätigte Übergabe auf ein anderes Gerät statt automatischer Übernahme. Ausfall, Wiederverbinden und verspätete Events im P1-Gate testen; Offline-Details gemäß 01/02 |
 | Galaxy Watch beendet Apps / stoppt Sensoren | Foreground Service, Test mit Display aus, Hinweis zu Samsung-Akkueinstellungen |
-| watchOS 27 Puls-Bug, Action-Button-Bug (26.5) | Früh auf der Ultra testen, Undo bleibt immer auf dem Display |
+| watchOS 27 Puls-Bug, Action-Button-Bug (26.5) | Früh auf der Ultra testen, Undo bleibt auf dem Display des Zähler-Geräts |
 | Health-Daten = DSGVO Art. 9 | Privacy by Default, getrennte Tabellen + Einwilligungen, DSFA vor P3 |
 | Starke Konkurrenz (On Court Pro) | On Court Pro vor P1 selbst testen, Fokus auf Zuverlässigkeit, Kernfunktionen bleiben kostenlos |
 | macOS-CI-Kosten (~50–75 $/Monat) | Pfadfilter, nur `main`/Tags bauen, Caching |
@@ -162,8 +163,16 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 | F10 | Sportfarben | Pickleball Pink · **Badminton Violett #A78BFA** · **Tischtennis Smaragd #34D399** (wie auf der Website) |
 | F11 | Vorteil-Anzeige im Deutschen | „AD“ |
 | F12 | Matches standardmäßig mit Freunden teilen? | Nein, Abfrage im Onboarding |
-| F13 | Mindestalter | 16 (Jugendmodus später) |
+| F13 | Mindestalter | **Entschieden 2026-10-15: Mindestalter 14 (AT)**; Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (03 §8.2). |
 | F14 | Ass/Doppelfehler erfassen | ab P3, optional |
+
+**Rollenmodell – entschieden am 2026-10-15:** Single-Scorer, Director, Anzeige, bestätigte Übergabe sowie Zähler-Wahl und Visitor-Accounts ab P2 (K1).
+
+| # | Noch offene Ausgestaltung | Vorschlag |
+|---|---|---|
+| F15 | Wie wird die Übernahme bei nicht erreichbarem bisherigem Zähler bestätigt und welcher Stand ist dabei verfügbar? Wie werden veraltete Anzeige, langer Ausfall und ignorierte Eingaben dargestellt? | Bestätigung am Zielgerät; Vorschlag: „Stand vor X s“, nach > 30 s ohne Verbindung Hinweis + Angebot „Zählen übernehmen“ mit Bestätigung für berechtigte Anzeige-Geräte, auch Uhren. Schwelle, Wiederholung des Hinweises und Verhalten bei langem Ausfall noch abstimmen; kein stiller automatischer Wechsel. Altgerät: Engine meldet ignorierte Eingaben → „N Eingaben nicht übernommen“, mit einsehbarer Liste; Umfang und Aufbewahrung offen. Gleichzeitige Übernahmen werden deterministisch geordnet: Das in der Ordnung letzte `ScorerChanged` gilt (Details in 02); Verfügbarkeitsgrenzen und Rückmeldung mit 01/02 abstimmen. |
+| F16 | Wer darf Visitor benennen/widerrufen und wie lange bleibt das Ergebnis sichtbar? Müssen Mitspieler der Freigabe zustimmen oder sehen Visitor nur Teamnamen? Müssen Visitor Freunde sein? Wie greifen Blockierungen? | Vorschlag: Ersteller verwaltet benannte Accounts; Zugriff bis Widerruf, öffentlicher Link bleibt später. Teilnehmerbezogene Sichtbarkeit gemäß 03 E6, Default aus, auch für Visitor berücksichtigen; Zustimmung, Namensumfang, Freundschaftspflicht und Blockierlogik vor P2 entscheiden. |
+| F17 | Wie startet ein Match offline, wenn die in P2 gewählte Zähler-Person nicht antwortet bzw. die Bereitstellung nicht bestätigt? | Vorschlag: Warten/Abbrechen oder ausdrücklich auf eigene Uhr/eigenes Handy wechseln und diese Zähler-Wahl bestätigen; kein automatischer Start mit unbestätigter fremder Zähler-Zuweisung. Timeout und spätere Zustellung vor P2 klären (04 §3.1). |
 
 Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05 §9.
 
