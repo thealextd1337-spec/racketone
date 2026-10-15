@@ -18,7 +18,7 @@
 | E7 | Uhr↔Handy-Konflikte | **Single-Scorer** (ersetzt „Merge statt Autorität“, 2026-10-15): pro Match zählt genau ein Gerät (Standard: Uhr des Spielers, alternativ Director-Handy), alle anderen zeigen an; Übergabe per `ScorerChanged` (§4.4) | Keine Forks, eindeutige Eingabe; Event-Log + deterministische Ordnung bleiben |
 | E8 | Topologie | **Stern**: Handy = Hub/Gateway (nicht Autorität). Wear OS darf zusätzlich direkt in die Cloud | Apple Watch und Garmin haben keinen sinnvollen eigenen Cloud-Zugang |
 | E9 | Lokale DB | **SQLDelight 2.4.x** (System-SQLite auf Apple) | Klein auf watchOS, SQL-first, kein KSP |
-| E10 | Cloud-Sync | **Outbox + idempotenter Upsert** unveränderlicher Events; LWW nur für veränderliche Stammdaten | Events können nicht kollidieren; Konflikte nur auf Match-Ebene (Fork) |
+| E10 | Cloud-Sync | **Outbox + idempotenter Upsert** unveränderlicher Events; LWW nur für veränderliche Stammdaten | Events können nicht kollidieren; die Zählerrolle (Single-Scorer, §4.4) regelt, wessen Eingaben wirken |
 | E11 | DI | **Koin 4.2.x** in den Apps; Watch-Framework ohne DI-Framework | Leichtgewichtig, keine Codegen-Abhängigkeit |
 | E12 | CI/CD | **GitHub Actions** für alles (ubuntu für Android/Wear/Garmin/Tests, macOS für iOS/watchOS) + **fastlane match** + App-Store-Connect-API-Key; **Codemagic** als Plan B | Eine Pipeline, versioniert im Repo; Codemagic nur falls macOS-Kosten/Signing hakt |
 | E13 | Xcode-Projekt | **XcodeGen** (`project.yml`), `.xcodeproj` wird nur in CI generiert | Auf Windows editierbar, keine Merge-Konflikte im pbxproj |
@@ -64,7 +64,7 @@ racketone/
 ├─ build-logic/                       # Gradle Convention Plugins (kmp-library, android-app, compose, test)
 ├─ shared/
 │  ├─ core-model/                     # IDs (UUIDv7), Sport, Spieler, Team, Lineup, Side – pure Kotlin
-│  ├─ core-scoring/                   # Events, RuleSets (Tennis/Padel/Pickleball), Reducer, Undo, Merge/Fork – pure Kotlin
+│  ├─ core-scoring/                   # Events, RuleSets (Tennis/Padel/Pickleball), Reducer, Undo, Zählerrolle – pure Kotlin
 │  ├─ sync-protocol/                  # Wire-DTOs, Codec (JSON), Anti-Entropy (Versionsvektor), SyncSession-Logik
 │  ├─ device-link/                    # Transport Uhr<->Handy: commonMain-Interface, androidMain (Wear Data Layer), appleMain (WatchConnectivity)
 │  ├─ device-link-garmin/             # P4: Connect IQ Mobile SDK (Android direkt, iOS via Swift-Glue)
@@ -221,13 +221,13 @@ interface RuleSet {
 ### 3.5 Warum Event Sourcing (statt Zustands-Sync)
 
 - Undo beliebig tief, auch geräteübergreifend, ohne Sonderlogik.
-- Geräte-Sync wird zum Mengen-Merge (CRDT-artig) – keine Zustands-Konflikte.
+- Geräte-Sync wird zum Mengen-Abgleich (CRDT-artig) – keine Zustands-Konflikte; wer zählt, regelt die Zählerrolle (§4.4).
 - Statistik (P3) ergibt sich aus dem Log (Punktverläufe, Breakbälle, Momentum).
 - Paritätstests mit Garmin: Events rein, Zustand raus – ideal für Testvektoren.
 
 ---
 
-## 4. Geräte-Sync Uhr ↔ Handy (gleichwertiges Zählen)
+## 4. Geräte-Sync Uhr ↔ Handy (ein Zähler, alle zeigen an)
 
 ### 4.1 Topologie
 
@@ -346,7 +346,7 @@ sequenceDiagram
 
 **Garmin (Connect IQ Mobile SDK, P4)**
 - Uhr: `Communications.transmit` / `registerForPhoneAppMessages`; Handy: Mobile SDK (`sendMessage`, `registerForAppEvents`). Android läuft über die Garmin-Connect-App; iOS-SDK als Framework ([Mobile SDK for iOS](https://developer.garmin.com/connect-iq/core-topics/mobile-sdk-for-ios)).
-- Kompaktes Nachrichtenformat (Arrays statt Maps, Event = `[seq, lamport, parentSeqRef, type, side]`), da Nachrichten klein und Latenzen im Sekundenbereich sind. Gleiche Merge-Regeln.
+- Kompaktes Nachrichtenformat (Arrays statt Maps, Event = `[seq, lamport, parentSeqRef, type, side]`), da Nachrichten klein und Latenzen im Sekundenbereich sind. Gleiche Regeln (Single-Scorer, §4.4).
 
 ### 4.7 Kann die Uhr standalone zählen?
 
@@ -385,7 +385,7 @@ Fallback Apple Watch: Falls der SQLDelight-native-driver kein `watchosDeviceArm6
 ```mermaid
 graph TD
   VM["ViewModel / SwiftUI-Store"] --> REPO["MatchRepository"]
-  REPO --> ENG["core-scoring: fold + merge"]
+  REPO --> ENG["core-scoring: fold"]
   REPO --> ES["EventStore (SQLDelight)"]
   REPO --> LINK["DeviceSyncService (device-link)"]
   REPO --> CSW["CloudSyncWorker (cloud-sync, P2)"]
@@ -471,8 +471,8 @@ iOS + watchOS: TestFlight (interne Tester sofort). Android + Wear: Play Console 
 | Ebene | Werkzeug | Läuft wo | Inhalt |
 |---|---|---|---|
 | Engine-Unit | `kotlin.test` in `commonTest` | lokal (jvm), CI alle Targets | Regel-Tabellen je Sport (Tiebreak, Star Point, Pickleball Side-Out, Seitenwechsel, Aufschlagrotation) |
-| Engine-Property | Kotest Property | jvm | Invarianten: Undo(Punkt) ≡ ohne Punkt; Merge kommutativ/assoziativ/idempotent; beliebige Zustellreihenfolge → gleicher Zustand; Spielstand nie negativ |
-| Sync-Simulation | eigenes In-Memory-Netz | jvm | 2–3 virtuelle Geräte, zufällige Partitionen/Verzögerungen/Duplikate → Konvergenz; Fork- und Doppel-Tap-Szenarien |
+| Engine-Property | Kotest Property | jvm | Invarianten: Undo(Punkt) ≡ ohne Punkt; Abgleich kommutativ/assoziativ/idempotent; Eingaben von Nicht-Zählern wirkungslos; beliebige Zustellreihenfolge → gleicher Zustand; Spielstand nie negativ |
+| Sync-Simulation | eigenes In-Memory-Netz | jvm | 2–3 virtuelle Geräte, zufällige Partitionen/Verzögerungen/Duplikate → Konvergenz; Zählerübergabe (online/offline/gleichzeitig), alle Zustellreihenfolgen kleiner Szenarien |
 | Golden Testvektoren | Generator in `core-scoring` (jvmTest-Task) | CI | siehe 8.1 |
 | Daten | SQLDelight JVM-Treiber | jvm | Migrationen (`verifyMigrations`), Outbox-Verhalten |
 | Phone-UI | CMP `runComposeUiTest` + Screenshot-Tests (Roborazzi) | jvm/Android | Scoring-Screen-Zustände, DE/EN, große Schrift |

@@ -1,5 +1,5 @@
 // Match-Session: lokaler Tap → Event → EventStore → Engine → Broadcast; Empfang → Store → Engine (Batches);
-// Anti-Entropie, Fork-Erkennung/-Auflösung. Ohne Compose, Ktor und Koin (läuft auch im watchOS-Framework).
+// Anti-Entropie, Zählerrolle, Löschmarkierungen. Ohne Compose, Ktor und Koin (läuft auch im watchOS-Framework).
 plugins {
     alias(libs.plugins.advantly.kmp.library)
     alias(libs.plugins.kotlin.serialization)
