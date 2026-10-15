@@ -38,14 +38,18 @@ fun LocalData.recentPeople(limit: Int = 24): List<LocalPlayer> =
         .distinct()
         .filterNot { isSelf(it) || isPlaceholder(it) }
         .mapNotNull(players::get)
+        .filter { it.kind == PlayerKind.GUEST }
         .take(limit)
 
-/** Neue IDs für weiterhin unbesetzte Plätze; Rotation und Annahme werden konsistent mitgenommen. */
+/** Neue IDs für unbesetzte Plätze und entfernte Gäste in neuen Matches; Rotation und Annahme werden konsistent mitgenommen. */
 fun LocalData.freshPlaceholders(
     lineup: Lineup,
     newId: () -> PlayerId,
 ): Lineup {
-    val replacements = (lineup.a + lineup.b).filter(::isPlaceholder).associateWith { Placeholders.id(newId().value) }
+    val replacements =
+        (lineup.a + lineup.b)
+            .filter { isPlaceholder(it) || players.get(it)?.kind == PlayerKind.ARCHIVED }
+            .associateWith { Placeholders.id(newId().value) }
 
     fun person(id: PlayerId) = replacements[id] ?: id
     return lineup.copy(
@@ -54,4 +58,13 @@ fun LocalData.freshPlaceholders(
         firstServer = person(lineup.firstServer),
         receiveRight = lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
     )
+}
+
+/** Handy-Verzeichnis zuerst, ergänzt um lokal gespielte Personen; Archive bleiben reine Namensquellen. */
+fun LocalData.watchPeople(limit: Int = 24): List<LocalPlayer> {
+    val directory = settings.get("players.recentRemote").orEmpty()
+    return (directory.split(',').filter { it.isNotBlank() }.mapNotNull { players.get(PlayerId(it)) } + recentPeople(limit))
+        .filter { it.kind == PlayerKind.GUEST && !isSelf(it.id) && !isPlaceholder(it.id) }
+        .distinctBy { it.id }
+        .take(limit)
 }

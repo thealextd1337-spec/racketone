@@ -91,6 +91,9 @@ class InMemoryMatchStore(
     override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val matches: StateFlow<List<MatchSummary>> = historyFlow.asStateFlow()
     override val self: StateFlow<Player> = selfFlow.asStateFlow()
+    private val archivedFlow = MutableStateFlow<Set<PlayerId>>(emptySet())
+    override val archivedPlayerIds: StateFlow<Set<PlayerId>> = archivedFlow.asStateFlow()
+
     override val guests: StateFlow<List<Player>> = guestsFlow.asStateFlow()
     override val favorites: StateFlow<List<FavoriteLineup>> = favoritesFlow.asStateFlow()
     override val lastSetup: StateFlow<MatchSetup?> = lastSetupFlow.asStateFlow()
@@ -377,7 +380,7 @@ class InMemoryMatchStore(
                     ?.reason != ResultReason.ABANDONED
             }.filter { self.value.id in it.setup.lineup.a + it.setup.lineup.b }
             .flatMap { it.setup.players }
-            .filterNot { it.id == self.value.id }
+            .filterNot { it.id == self.value.id || it.id in archivedFlow.value }
             .distinctBy { it.id }
 
     override fun addGuest(name: String): Player {
@@ -399,6 +402,13 @@ class InMemoryMatchStore(
     }
 
     override fun canRename(id: PlayerId): Boolean = guestsFlow.value.any { it.id == id }
+
+    override fun deleteGuest(id: PlayerId): Boolean {
+        if (!canRename(id)) return false
+        archivedFlow.value += id
+        guestsFlow.value = guestsFlow.value.filterNot { it.id == id }
+        return true
+    }
 
     override fun renameGuest(
         id: PlayerId,
@@ -477,7 +487,7 @@ class InMemoryMatchStore(
     private fun rememberGuests(setup: MatchSetup) {
         val selfId = selfFlow.value.id
         val used = setup.players.filter { it.id != selfId }
-        guestsFlow.value = used + guestsFlow.value.filterNot { g -> used.any { it.id == g.id } }
+        guestsFlow.value = (used + guestsFlow.value.filterNot { g -> used.any { it.id == g.id } }).filterNot { it.id in archivedFlow.value }
     }
 
     /** Wirksam angewendete Ballwechsel (auch ohne Punkt, z. B. Pickleball Side-Out). */

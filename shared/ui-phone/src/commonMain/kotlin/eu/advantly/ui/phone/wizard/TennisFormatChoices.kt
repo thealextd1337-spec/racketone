@@ -8,7 +8,6 @@ import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.TennisMatchChoice
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.ChoiceChip
-import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.set_end_regular
@@ -46,7 +45,7 @@ internal fun TennisFormatChoices(
     state: WizardUiState,
 ) {
     val sport = state.input.sport ?: return
-    SectionTitle(stringResource(Res.string.setup_match_kind))
+    HelpSection(stringResource(Res.string.setup_match_kind), WizardHelp.FORMATS)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         TennisMatchChoice.entries.forEach { choice ->
             ChoiceChip(

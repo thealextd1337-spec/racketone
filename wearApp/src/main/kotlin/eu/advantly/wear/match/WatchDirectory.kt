@@ -9,9 +9,9 @@ import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.freshPlaceholders
-import eu.advantly.data.recentPeople
 import eu.advantly.data.resolvedLineup
 import eu.advantly.data.toScoreEventOrNull
+import eu.advantly.data.watchPeople
 
 /** Optionale Personenplätze eines Uhr-Matches. */
 enum class PlayerSlot { PARTNER, OPPONENT_1, OPPONENT_2 }
@@ -47,21 +47,8 @@ class WatchDirectory(
             selected[PlayerSlot.OPPONENT_2] ?: placeholder(PlayerSlot.OPPONENT_2),
         )
 
-    /** Handy-Verzeichnis zuerst; lokale Match-Historie ergänzt nach Offline-Matches. */
-    fun recentPlayers(): List<Player> {
-        val remote =
-            data.settings
-                .get("players.recentRemote")
-                .orEmpty()
-                .split(',')
-                .filter { it.isNotBlank() }
-                .map(::PlayerId)
-        return (remote.mapNotNull(data.players::get) + data.recentPeople())
-            .filterNot { data.isSelf(it.id) || data.isPlaceholder(it.id) }
-            .distinctBy { it.id }
-            .take(24)
-            .map { it.toPlayer() }
-    }
+    /** Handy-Verzeichnis mit lokaler Offline-Historie, ohne archivierte Personen. */
+    fun recentPlayers(): List<Player> = data.watchPeople().map { it.toPlayer() }
 
     /** Anzeigename oder `null` (unbekannt bzw. leer = Standardbezeichnung der UI). */
     fun displayName(id: PlayerId): String? =

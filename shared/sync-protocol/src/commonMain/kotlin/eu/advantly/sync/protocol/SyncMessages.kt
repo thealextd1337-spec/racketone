@@ -116,6 +116,8 @@ data class MatchMetaMessage(
     val selfAliases: List<PlayerId> = emptyList(),
     val placeholderIds: List<PlayerId> = emptyList(),
     val recentPlayers: List<Player>? = null,
+    /** Additiv in Protokoll 3: nur IDs, damit lokale Uhr-Historie entfernte Gäste nicht erneut anbietet. */
+    val archivedPlayerIds: List<PlayerId> = emptyList(),
     val watchMatch: WatchAssignment? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
 ) : SyncMessage

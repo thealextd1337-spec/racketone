@@ -49,6 +49,7 @@ import eu.advantly.presentation.stats.groupHistory
 import eu.advantly.presentation.stats.historyPeople
 import eu.advantly.presentation.stats.outcome
 import eu.advantly.ui.phone.common.ChoiceChip
+import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.SportIcon
@@ -102,15 +103,17 @@ fun HistoryScreen(
     val filter = filterName?.let(Sport::valueOf)
     val role = roleName?.let(HistoryRole::valueOf)
     val selfIds = LocalSelfAliases.current + listOfNotNull(LocalSelfId.current)
+    val archived = LocalArchivedPlayerIds.current
     val people =
-        remember(matches, selfIds) {
+        remember(matches, selfIds, archived) {
             matches
                 .flatMap {
                     historyPeople(
                         it.setup,
                         selfIds,
                     )
-                }.distinctBy { it.player.id to it.role }
+                }.filterNot { it.player.id in archived }
+                .distinctBy { it.player.id to it.role }
                 .sortedBy { it.player.displayName.lowercase() }
         }
     val shown =

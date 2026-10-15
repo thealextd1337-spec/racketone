@@ -118,6 +118,9 @@ class SessionMatchStore(
     private val watchFlow = MutableStateFlow(false)
 
     override val self: StateFlow<Player> = selfFlow.asStateFlow()
+    private val archivedFlow = MutableStateFlow<Set<PlayerId>>(emptySet())
+    override val archivedPlayerIds: StateFlow<Set<PlayerId>> = archivedFlow.asStateFlow()
+
     override val guests: StateFlow<List<Player>> = guestsFlow.asStateFlow()
     override val favorites: StateFlow<List<FavoriteLineup>> = favoritesFlow.asStateFlow()
     override val lastSetup: StateFlow<MatchSetup?> = lastSetupFlow.asStateFlow()
@@ -410,10 +413,11 @@ class SessionMatchStore(
     /** Je 100 sportbezogene und allgemeine Matches; Zuweisungen lösen die ursprünglichen Platz-IDs auf. */
     override fun recentPlayers(sport: Sport): List<Player> {
         val mine = aliases + self.value.id
+        val archived = data.players.archivedIds()
         return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
             .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
             .flatMap { playersOf(it) }
-            .filterNot { it.id in mine || it.isPlaceholder }
+            .filterNot { it.id in mine || it.isPlaceholder || it.id in archived }
             .filter { it.displayName.isNotBlank() }
             .distinctBy { it.id }
     }
@@ -447,6 +451,13 @@ class SessionMatchStore(
      * der Anleger. Ab P2 (Accounts, geteilte Matches) muss hier der Anleger geprüft werden.
      */
     override fun canRename(id: PlayerId): Boolean = data.players.get(id)?.kind == PlayerKind.GUEST && id !in aliases
+
+    override fun deleteGuest(id: PlayerId): Boolean {
+        if (!canRename(id) || !data.players.deleteGuest(id)) return false
+        refreshStored()
+        session.syncNow()
+        return true
+    }
 
     override fun renameGuest(
         id: PlayerId,
@@ -658,6 +669,7 @@ class SessionMatchStore(
         aliases = data.selfAliases()
         aliasesFlow.value = aliases
         guestsFlow.value = loadGuests()
+        archivedFlow.value = data.players.archivedIds()
         val people = (guestsFlow.value + selfFlow.value).associateBy { it.id }
         val changedPeople = (people.keys + summaryPeople.keys).filter { people[it] != summaryPeople[it] }.toSet()
         val changedAliases = (previousAliases - aliases) + (aliases - previousAliases)
@@ -874,7 +886,7 @@ class SessionMatchStore(
     private fun loadFavorites(): List<FavoriteLineup> =
         readFavorites()
             .filter {
-                (it.lineup.a + it.lineup.b).none(data::isPlaceholder)
+                (it.lineup.a + it.lineup.b).none { id -> data.isPlaceholder(id) || id in archivedPlayerIds.value }
             }.map { FavoriteLineup(it.id, MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup))) }
 
     private companion object {

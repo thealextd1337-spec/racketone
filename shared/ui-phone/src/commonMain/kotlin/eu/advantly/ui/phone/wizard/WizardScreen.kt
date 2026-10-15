@@ -45,7 +45,6 @@ import eu.advantly.presentation.wizard.WizardStep
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.SectionTitle
-import eu.advantly.ui.phone.common.SegmentedChoice
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.TopBar
@@ -216,7 +215,7 @@ private fun SurfaceStep(
     val tennis = state.input.sport == Sport.TENNIS
     StepTitle(stringResource(if (tennis) Res.string.wizard_title_surface else Res.string.wizard_title_venue))
     SectionTitle(stringResource(Res.string.wizard_environment))
-    SegmentedChoice(
+    WizardChoices(
         options = listOf(Environment.OUTDOOR, Environment.INDOOR),
         selected = state.input.environment,
         label = { stringResource(if (it == Environment.INDOOR) Res.string.wizard_indoor else Res.string.wizard_outdoor) },
@@ -279,8 +278,8 @@ private fun FormatStep(
     if (sport.isTennisLike) TennisFormatChoices(wizard, state)
 
     if (input.tennisMatch == TennisMatchChoice.REGULAR || !sport.isTennisLike) {
-        SectionTitle(stringResource(setsTitle(sport)))
-        SegmentedChoice(
+        HelpSection(stringResource(setsTitle(sport)), WizardHelp.SETS)
+        WizardChoices(
             options = options.sets,
             selected = input.sets,
             label = { setsLabel(it, sport) },
@@ -298,13 +297,20 @@ private fun FormatStep(
         }
     }
     if (options.gamesPerSet.isNotEmpty() && input.tennisMatch == TennisMatchChoice.REGULAR) {
-        SectionTitle(stringResource(gamesTitle()))
+        HelpSection(stringResource(gamesTitle()), WizardHelp.GAMES)
         GamesPerSetChoices(wizard, state)
         if (input.gamesPerSet == 1) RuleHint(Res.string.setup_one_game_hint)
     }
     if (options.points.isNotEmpty()) {
-        SectionTitle(stringResource(pointsTitle(sport)))
-        SegmentedChoice(
+        HelpSection(
+            stringResource(pointsTitle(sport)),
+            when (sport) {
+                Sport.BADMINTON -> WizardHelp.BADMINTON
+                Sport.TABLE_TENNIS -> WizardHelp.TABLE_TENNIS
+                else -> WizardHelp.PICKLEBALL
+            },
+        )
+        WizardChoices(
             options = options.points,
             selected = input.pointsToWin.takeIf { it in options.points },
             label = { pointsLabel(it, sport) },
@@ -314,8 +320,8 @@ private fun FormatStep(
         )
     }
     if (sport == Sport.PICKLEBALL) {
-        SectionTitle(stringResource(pickleballScoringTitle()))
-        SegmentedChoice(
+        HelpSection(stringResource(pickleballScoringTitle()), WizardHelp.PICKLEBALL)
+        WizardChoices(
             options = options.pickleballScoring,
             selected = input.pickleballScoring,
             label = { pickleballScoringLabel(it) },
@@ -354,8 +360,8 @@ private fun DeuceChoice(
     state: WizardUiState,
     accent: Color,
 ) {
-    SectionTitle(stringResource(deuceTitle()))
-    SegmentedChoice(
+    HelpSection(stringResource(deuceTitle()), WizardHelp.DEUCE)
+    WizardChoices(
         options = state.options.deuceModes,
         selected = state.input.deuceMode,
         label = { deuceLabel(it, state.input.sport) },
@@ -411,13 +417,17 @@ private fun AdvancedSection(
     if (!input.advancedExpanded) return
     Column(Modifier.testTag("advanced_content")) {
         if (sport.isTennisLike) {
-            ToggleRow(
-                title = stringResource(Res.string.setup_serve_stats),
-                subtitle = null,
-                checked = state.input.serveStats,
-                onChange = wizard::setServeStats,
-                tag = "toggle_serve_stats",
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ToggleRow(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(Res.string.setup_serve_stats),
+                    subtitle = null,
+                    checked = state.input.serveStats,
+                    onChange = wizard::setServeStats,
+                    tag = "toggle_serve_stats",
+                )
+                HelpIcon(stringResource(Res.string.setup_serve_stats), WizardHelp.SERVE_STATS)
+            }
             if (input.tennisMatch != TennisMatchChoice.REGULAR) return@Column
         }
         when (sport) {
@@ -431,8 +441,8 @@ private fun AdvancedSection(
             }
 
             Sport.PICKLEBALL -> {
-                SectionTitle(stringResource(pickleballWinByTitle()))
-                SegmentedChoice(
+                HelpSection(stringResource(pickleballWinByTitle()), WizardHelp.PICKLEBALL)
+                WizardChoices(
                     options = options.pickleballWinBy,
                     selected = input.pickleballWinBy,
                     label = { pickleballWinByLabel(it) },
@@ -440,8 +450,8 @@ private fun AdvancedSection(
                     tagPrefix = "pb_winby",
                     accent = accent,
                 )
-                SectionTitle(stringResource(pickleballMidTitle()))
-                SegmentedChoice(
+                HelpSection(stringResource(pickleballMidTitle()), WizardHelp.END_CHANGE)
+                WizardChoices(
                     options = options.pickleballMidGame,
                     selected = input.pickleballMidGame,
                     label = { pickleballMidLabel(it) },
@@ -453,7 +463,7 @@ private fun AdvancedSection(
 
             Sport.BADMINTON -> {
                 SectionTitle(stringResource(pointsTitle(sport)))
-                SegmentedChoice(
+                WizardChoices(
                     options = options.points + options.advancedPoints,
                     selected = input.pointsToWin,
                     label = { pointsLabel(it, sport) },
@@ -480,8 +490,8 @@ private fun TennisLikeAdvanced(
     val input = state.input
     val options = state.options
     if (input.sets != SetsChoice.Open && input.sets != SetsChoice.BestOf(1)) {
-        SectionTitle(stringResource(decidingTitle(input.sport)))
-        SegmentedChoice(
+        HelpSection(stringResource(decidingTitle(input.sport)), WizardHelp.DECIDING)
+        WizardChoices(
             options = options.decidingSets,
             selected = input.decidingSet,
             label = { decidingLabel(it, input.sport) },
@@ -491,8 +501,8 @@ private fun TennisLikeAdvanced(
         )
     }
     if (options.tiebreakAt.isNotEmpty()) {
-        SectionTitle(stringResource(tiebreakTitle()))
-        SegmentedChoice(
+        HelpSection(stringResource(tiebreakTitle()), WizardHelp.TIEBREAK)
+        WizardChoices(
             options =
                 options.tiebreakAt.filter {
                     input.gamesPerSet > 1 ||

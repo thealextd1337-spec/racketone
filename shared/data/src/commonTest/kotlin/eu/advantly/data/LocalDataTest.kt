@@ -233,7 +233,8 @@ class LocalDataTest {
         assertEquals(PlayerKind.GUEST, data.players.get(PlayerId("dan"))?.kind)
         assertEquals("Ich", data.players.get(PlayerId("me"))?.displayName)
         assertTrue(data.players.deleteGuest(PlayerId("dan")))
-        assertNull(data.players.get(PlayerId("dan")))
+        assertEquals(PlayerKind.ARCHIVED, data.players.get(PlayerId("dan"))?.kind)
+        assertEquals("Dan", data.players.get(PlayerId("dan"))?.displayName)
     }
 
     @Test

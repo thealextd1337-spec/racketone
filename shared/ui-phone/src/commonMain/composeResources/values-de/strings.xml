@@ -516,4 +516,24 @@
     <string name="h2h_recent">Letzte Ergebnisse</string>
     <string name="h2h_local_note">Gewertete Matches auf diesem Gerät. Abbrüche zählen nicht.</string>
     <string name="format_win_by">%1$d Punkte Vorsprung</string>
+
+    <!-- Hilfe nur im Handy-Assistenten; keine Regelwirkung. -->
+    <string name="player_delete">Löschen</string>
+    <string name="player_delete_title">%1$s aus Auswahl entfernen?</string>
+    <string name="player_delete_hint">Aus Auswahl entfernen – vergangene Matches behalten den Namen.</string>
+    <string name="wizard_help_description">%1$s erklären</string>
+    <string name="help_discipline_title">Einzel / Doppel</string>
+    <string name="help_formats">Normale Sätze zählen Games. Kurze Sätze gehen über 4 statt 6 Games. Ein Tiebreak zählt Punkte bis 7 mit zwei Punkten Vorsprung; im normalen Satz beginnt er bei 6:6. „Nur Tiebreak“ spielt das ganze Match als einen einzigen Tiebreak bis 7 oder 10 mit zwei Punkten Vorsprung.</string>
+    <string name="help_sets">Best of 1: 1 Satz gewinnt. Best of 3: 2 Gewinnsätze. Best of 5: 3 Gewinnsätze. Best of 7: 4 Gewinnsätze. Offen: Nach jedem Satz entscheidet ihr, ob ihr weiterspielt; die Satzanzahl ist nicht festgelegt. Bei Pickleball heißen diese Einheiten Spiele.</string>
+    <string name="help_games">Games zum Satzgewinn, normalerweise mit zwei Games Vorsprung. Standard: 6; kurze Sätze: 4. Der Tiebreak beginnt normalerweise beim gewählten Wert, z. B. 4:4. Bei 1 Game kann der Satz trotzdem bis 2:0 oder zum Tiebreak bei 1:1 gehen; er endet nicht automatisch nach einem Game.</string>
+    <string name="help_deuce">Bei 40:40: Mit Vorteil (Advantage) braucht ihr zwei Punkte in Folge zum Gamegewinn. No-Ad (Tennis) und Golden Point (Padel) entscheiden mit einem Punkt; die Rückschlagseite wählt die Annahmeseite. Star Point (Padel): Nach zwei Vorteilsrunden entscheidet beim nächsten Einstand ein Punkt.</string>
+    <string name="help_deciding">Normal: Ihr spielt einen vollen Entscheidungssatz. Match-Tiebreak (auch Champions-Tiebreak, im Padel Super-Tiebreak): bis 10 mit zwei Punkten Vorsprung, ersetzt den Entscheidungssatz. Vorteilssatz: zwei Games Vorsprung, kein Tiebreak. Tiebreak bis 10: voller Entscheidungssatz mit Tiebreak bis 10 beim eingestellten Gleichstand.</string>
+    <string name="help_tiebreak">Ein Tiebreak beginnt normalerweise bei 6:6 und geht bis 7 mit zwei Punkten Vorsprung. Bei kürzeren Sätzen bestimmt die Gamezahl den Gleichstand. Ein Game früher bedeutet z. B. 3:3 im Vier-Game-Satz. Ohne Tiebreak spielt ihr bis zu zwei Games Vorsprung. Die Wahl des Entscheidungssatzes kann diese Regel ersetzen.</string>
+    <string name="help_serve_stats">Erfasst je Punkt ersten Aufschlag, zweiten Aufschlag oder Doppelfehler. So entstehen Aufschlag-Statistiken im Ergebnis; die Zählweise bleibt gleich. Punkte können auch ohne Aufschlagdetails bleiben.</string>
+    <string name="help_discipline">Einzel: ein Spieler pro Seite. Doppel: zwei pro Seite; die App führt die Aufschlagreihenfolge mit. Mixed kennzeichnet ein Doppel und ändert die Zählweise nicht.</string>
+    <string name="help_badminton">Rally Point: Jeder Ballwechsel bringt einen Punkt, unabhängig vom Aufschlag. Bis 21: zwei Punkte Vorsprung, höchstens bis 30. Bis 15: zwei Punkte Vorsprung, höchstens bis 21. Die kurze 11-Punkte-Alternative hat keine Verlängerung. Das gewählte Format legt auch Pause und Seitenwechsel fest.</string>
+    <string name="help_table_tennis">Jeder Ballwechsel bringt einen Punkt. Ein Satz geht bis 11 mit zwei Punkten Vorsprung, ohne Obergrenze. Der Aufschlag wechselt alle zwei Punkte, ab 10:10 nach jedem Punkt. Die Freizeitoption bis 21 wechselt alle fünf Punkte, ab 20:20 nach jedem Punkt. Wählt Best of oder Offen, um nach jedem Satz weiterzuentscheiden.</string>
+    <string name="help_pickleball">Wählt 11, 15 oder 21 Punkte pro Spiel. Side-Out: Nur die aufschlagende Seite kann punkten; gewinnt die Rückschlagseite, wechseln Aufschläger oder Aufschlagrecht. Rally: Jeder Ballwechsel zählt, auch der Siegpunkt. Normalerweise braucht ihr zwei Punkte Vorsprung; ein Punkt Vorsprung unter Erweitert ist eine Freizeit-/Team-Play-Option.</string>
+    <string name="help_end_change">Nur Entscheidungsspiel: Seitenwechsel, sobald eine Seite zuerst 6 (bis 11), 8 (bis 15) oder 11 (bis 21) erreicht. Jedes Spiel: dieser Wechsel gilt in jedem Spiel. Nie: kein Wechsel mitten im Spiel. Zwischen Spielen wechselt ihr, wenn ein weiteres Spiel folgt.</string>
+    <string name="player_actions">Aktionen für %1$s</string>
 </resources>

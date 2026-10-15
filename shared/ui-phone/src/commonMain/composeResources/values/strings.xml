@@ -516,4 +516,24 @@
     <string name="h2h_recent">Last results</string>
     <string name="h2h_local_note">Rated matches on this device. Abandoned matches are excluded.</string>
     <string name="format_win_by">Win by %1$d</string>
+
+    <!-- Hilfe nur im Handy-Assistenten; keine Regelwirkung. -->
+    <string name="player_delete">Delete</string>
+    <string name="player_delete_title">Remove %1$s from selection?</string>
+    <string name="player_delete_hint">Remove from selection — past matches keep the name.</string>
+    <string name="wizard_help_description">Explain %1$s</string>
+    <string name="help_discipline_title">Singles / Doubles</string>
+    <string name="help_formats">Regular sets count games. Short sets use 4 games instead of 6. A tiebreak counts points to 7, with a two-point lead; in a regular set it starts at 6–6. “Tiebreak only” plays just one tiebreak to 7 or 10, with a two-point lead, as the whole match.</string>
+    <string name="help_sets">Best of 1: win 1 set. Best of 3: win 2. Best of 5: win 3. Best of 7: win 4. Open: decide after each set whether to play another; there is no fixed number of sets. In pickleball these units are called games.</string>
+    <string name="help_games">Games needed to win a set, normally with a two-game lead. Standard: 6; short sets: 4. A tiebreak normally starts at the chosen number, e.g. 4–4. With 1 game, the set can still reach 2–0 or a tiebreak at 1–1; it is not automatically over after one game.</string>
+    <string name="help_deuce">At 40–40: Advantage requires two consecutive points to win the game. No-Ad (tennis) and Golden Point (padel) use one deciding point; the receiving team chooses the receiving side. Star Point (padel): after two advantage cycles, the next deuce is decided by one point.</string>
+    <string name="help_deciding">Normal: play a full deciding set. Match tiebreak (also called Champions tiebreak, or Super tiebreak in padel): first to 10 with a two-point lead, replacing the deciding set. Advantage set: two-game lead, no tiebreak. Tiebreak to 10: a full deciding set with a tiebreak to 10 at the configured tie score.</string>
+    <string name="help_tiebreak">A tiebreak normally starts at 6–6 and goes to 7 with a two-point lead. For shorter sets, the chosen game count sets the tie score. One game earlier means e.g. 3–3 in a four-game set. Without a tiebreak, play until a two-game lead. The deciding-set choice can override this rule.</string>
+    <string name="help_serve_stats">Record whether each point used a first serve, second serve or double fault. This adds serve statistics to the result and does not change scoring. You can leave points without serve details.</string>
+    <string name="help_discipline">Singles: one player on each side. Doubles: two on each side; the app tracks the serving order. Mixed labels a doubles match and does not change scoring.</string>
+    <string name="help_badminton">Rally point: every rally gives a point, whoever served. To 21: win by two, capped at 30. To 15: win by two, capped at 21. The short 11-point alternative has no extension. The chosen format also sets the interval and end-change points.</string>
+    <string name="help_table_tennis">Every rally gives a point. A game goes to 11 with a two-point lead and no cap. Serve changes every two points, then every point from 10–10. The 21-point leisure option changes serve every five points, then every point from 20–20. Choose a best-of length or Open to decide after each game.</string>
+    <string name="help_pickleball">Choose 11, 15 or 21 points per game. Side-out: only the serving side can score; winning a rally as receiver changes the server or service side. Rally: every rally scores, including the winning point. Normally win by two; the advanced one-point margin is a leisure / team-play option.</string>
+    <string name="help_end_change">Deciding game only: change ends when the first side reaches 6 (to 11), 8 (to 15) or 11 (to 21). Every game: do this in each game. Never: no mid-game change. Between games, ends change if another game follows.</string>
+    <string name="player_actions">Actions for %1$s</string>
 </resources>

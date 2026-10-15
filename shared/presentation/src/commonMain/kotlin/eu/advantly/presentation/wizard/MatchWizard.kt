@@ -172,8 +172,8 @@ class MatchWizard(
     /** Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. */
     fun playerSuggestions(): List<Player> =
         PlayerSelection.suggestions(
-            createdPlayers,
-            recentPlayers,
+            createdPlayers.filterNot { it.id in players.archivedPlayerIds.value },
+            recentPlayers.filterNot { it.id in players.archivedPlayerIds.value },
             guests.value,
             input,
             players.self.value.id,

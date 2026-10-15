@@ -9,9 +9,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,12 +37,17 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.presentation.match.PlayersPort
+import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_save
+import eu.advantly.ui.phone.resources.player_actions
+import eu.advantly.ui.phone.resources.player_delete
+import eu.advantly.ui.phone.resources.player_delete_hint
+import eu.advantly.ui.phone.resources.player_delete_title
 import eu.advantly.ui.phone.resources.player_name_label
 import eu.advantly.ui.phone.resources.player_rename
 import eu.advantly.ui.phone.resources.player_rename_title
@@ -46,7 +56,7 @@ import eu.advantly.ui.phone.resources.profile_players_empty
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Spielerliste im Profil: Dummy-/Gastspieler mit „Umbenennen“ – nur, wenn dieses Gerät sie angelegt hat
+ * Spielerliste im Profil: Dummy-/Gastspieler mit „Umbenennen“ und „Löschen“ – nur, wenn dieses Gerät sie angelegt hat
  * (`PlayersPort.canRename`, 00 „Aliase“: keine Spitznamen für Nutzer mit App).
  */
 @Composable
@@ -57,6 +67,7 @@ internal fun GuestList(
     val colors = AdvantlyTheme.colors
     val guests by players.guests.collectAsState()
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleting by rememberSaveable { mutableStateOf<String?>(null) }
     Text(
         stringResource(Res.string.profile_players).uppercase(),
         style = AdvantlyTheme.typography.overline,
@@ -72,9 +83,31 @@ internal fun GuestList(
                 guest,
                 canRename = players.canRename(guest.id),
                 onRename = { renaming = guest.id.value },
+                onDelete = { deleting = guest.id.value },
                 onHistory = { onHistory(guest.id) },
             )
         }
+    }
+    guests.firstOrNull { it.id.value == deleting }?.let { guest ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text(stringResource(Res.string.player_delete_title, guest.displayName)) },
+            text = { Text(stringResource(Res.string.player_delete_hint)) },
+            confirmButton = {
+                TextButton(
+                    onClick = { if (players.deleteGuest(guest.id)) deleting = null },
+                    modifier = Modifier.testTag("delete_confirm"),
+                ) {
+                    Text(stringResource(Res.string.player_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }, modifier = Modifier.testTag("delete_cancel")) {
+                    Text(stringResource(Res.string.action_cancel))
+                }
+            },
+            modifier = Modifier.testTag("delete_dialog"),
+        )
     }
     guests.firstOrNull { it.id.value == renaming }?.let { guest ->
         RenameDialog(
@@ -90,6 +123,7 @@ private fun GuestRow(
     guest: Player,
     canRename: Boolean,
     onRename: () -> Unit,
+    onDelete: () -> Unit,
     onHistory: () -> Unit,
 ) {
     val colors = AdvantlyTheme.colors
@@ -106,15 +140,32 @@ private fun GuestRow(
         ) {
             Text(guest.displayName, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
             if (canRename) {
-                Box(
-                    Modifier
-                        .testTag("rename_${guest.id.value}")
-                        .heightIn(min = Spacing.minTouchTarget)
-                        .clickable(role = Role.Button, onClick = onRename)
-                        .padding(horizontal = Spacing.l),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(stringResource(Res.string.player_rename), style = AdvantlyTheme.typography.label, color = colors.brand)
+                var menu by rememberSaveable { mutableStateOf(false) }
+                Box {
+                    IconButton(
+                        onClick = { menu = true },
+                        modifier = Modifier.size(Spacing.minTouchTarget).testTag("guest_actions_${guest.id.value}"),
+                    ) {
+                        Icon(AdvantlyIcons.More, stringResource(Res.string.player_actions, guest.displayName), tint = colors.text2)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.player_rename)) },
+                            onClick = {
+                                menu = false
+                                onRename()
+                            },
+                            modifier = Modifier.testTag("rename_${guest.id.value}"),
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.player_delete), color = colors.danger) },
+                            onClick = {
+                                menu = false
+                                onDelete()
+                            },
+                            modifier = Modifier.testTag("delete_${guest.id.value}"),
+                        )
+                    }
                 }
             }
         }

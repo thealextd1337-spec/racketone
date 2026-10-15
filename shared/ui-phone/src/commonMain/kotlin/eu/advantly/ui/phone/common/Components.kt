@@ -237,14 +237,15 @@ fun ChoiceChip(
     modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null,
     role: Role = Role.Checkbox,
+    accent: Color = AdvantlyTheme.colors.brand,
 ) {
     val colors = AdvantlyTheme.colors
     Row(
         modifier
             .testTag(tag)
             .heightIn(min = Spacing.minTouchTarget)
-            .background(if (selected) colors.brand.copy(alpha = 0.18f) else colors.surface2, Radii.pillShape)
-            .border(1.5.dp, if (selected) colors.brand else Color.Transparent, Radii.pillShape)
+            .background(if (selected) accent.copy(alpha = 0.18f) else colors.surface2, Radii.pillShape)
+            .border(1.5.dp, if (selected) accent else Color.Transparent, Radii.pillShape)
             .clickable(role = role, onClick = onClick)
             .semantics { this.selected = selected }
             .padding(horizontal = Spacing.l, vertical = Spacing.xs),

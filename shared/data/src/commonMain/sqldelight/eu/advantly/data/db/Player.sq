@@ -3,7 +3,7 @@
 CREATE TABLE player (
     id TEXT NOT NULL PRIMARY KEY,
     display_name TEXT NOT NULL,
-    -- SELF | GUEST | PLACEHOLDER (migrierte Uhr-Slots, unsichtbar in Personenlisten)
+    -- SELF | GUEST | ARCHIVED (Name bleibt erhalten) | PLACEHOLDER (migrierte Uhr-Slots, unsichtbar in Personenlisten)
     kind TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL,
     last_used_at_ms INTEGER
@@ -32,7 +32,7 @@ markUsed:
 UPDATE player SET last_used_at_ms = max(coalesce(last_used_at_ms, 0), :nowMs) WHERE id IN :ids;
 
 deleteGuest:
-DELETE FROM player WHERE id = ? AND kind != 'SELF';
+UPDATE player SET kind = 'ARCHIVED' WHERE id = ? AND kind = 'GUEST';
 
 placeholderIds:
 SELECT id FROM player WHERE kind = 'PLACEHOLDER';

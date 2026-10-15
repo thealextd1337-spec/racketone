@@ -1249,6 +1249,7 @@ class MatchSession(
             .filterNot { it.id in protectedIds }
             .forEach { data.players.upsertRemote(it, now) }
         if (corrections.isNotEmpty() && config.kind == PeerKind.PHONE) send(peer, MatchMetaMessage(players = corrections))
+        if (config.kind == PeerKind.WATCH) message.archivedPlayerIds.forEach { data.players.archiveRemote(it, now) }
         message.recentPlayers?.let { people ->
             data.settings.put(
                 "players.recentRemote",
@@ -1704,7 +1705,11 @@ class MatchSession(
             .sortedWith(EventOrdering)
 
     private fun metaMessage(record: MatchRecord?): MatchMetaMessage {
-        val favorites = data.favorites.recent(limit = FAVORITES_IN_META).filter { (it.a + it.b).none(data::isPlaceholder) }
+        val archived = data.players.archivedIds()
+        val favorites =
+            data.favorites.recent(limit = FAVORITES_IN_META).filter {
+                (it.a + it.b).none { id -> data.isPlaceholder(id) || id in archived }
+            }
         val lineupPlayers = record?.lineup?.let { it.a + it.b }.orEmpty()
         val playerIds = (lineupPlayers + favorites.flatMap { it.a + it.b }).distinct()
         return MatchMetaMessage(
@@ -1712,6 +1717,7 @@ class MatchSession(
             players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() },
             placeholderIds = data.players.placeholderIds().toList(),
             recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() } else null,
+            archivedPlayerIds = if (config.kind == PeerKind.PHONE) data.players.archivedIds().toList() else emptyList(),
             favorites = favorites.map { it.toWire() },
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),
