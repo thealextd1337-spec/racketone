@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicLong
  * - **Live:** `MessageClient.sendMessage` an die Node-ID (Pfad [MESSAGE_PATH]).
  * - **Queue-Fallback:** scheitert die Nachricht (Gegenseite nicht verbunden), wird der Frame als dringendes
  *   DataItem unter `/advantly/link/q/<ziel-node>/<eindeutig>` abgelegt. Die Data Layer synchronisiert es beim
- *   Wiederverbinden; der Empfänger liefert es aus und löscht es (Löschen wirkt auf allen Knoten).
+ *   Wiederverbinden; der Empfänger liefert es aus und löscht es erst NACH der Verarbeitung durch den Link
+ *   (Löschen wirkt auf allen Knoten). Generationen und Zielfilter: [WearQueueInbox].
  * - **Peers:** Knoten mit der Capability [CAPABILITY] (beide Apps deklarieren sie in `res/values/wear.xml`),
  *   Filter „erreichbar“; aktualisiert über `CapabilityClient`-Listener und alle [REFRESH_MS] ms.
  *
@@ -45,7 +46,7 @@ class WearDataLayerTransport(
 
     @Volatile private var listener: LinkTransport.Listener? = null
 
-    @Volatile private var localNodeId: String? = null
+    private val inbox = WearQueueInbox { key -> dataClient.deleteDataItems(Uri.parse(key)) }
 
     private val messageListener =
         MessageClient.OnMessageReceivedListener { event ->
@@ -56,10 +57,11 @@ class WearDataLayerTransport(
 
     private val dataListener =
         DataClient.OnDataChangedListener { events ->
+            val generation = inbox.currentGeneration
             val changed =
                 events.filter { it.type == DataEvent.TYPE_CHANGED }.map { it.dataItem.freeze() }
             events.release()
-            changed.forEach(::consumeQueuedItem)
+            changed.forEach { offerQueuedItem(generation, it) }
         }
 
     private val refreshLoop =
@@ -72,16 +74,18 @@ class WearDataLayerTransport(
 
     override fun start(listener: LinkTransport.Listener) {
         this.listener = listener
+        val generation = inbox.start(listener)
         messageClient.addListener(messageListener)
         dataClient.addListener(dataListener)
         capabilityClient.addListener(capabilityListener, CAPABILITY)
         nodeClient.localNode.addOnSuccessListener { node: Node ->
-            localNodeId = node.id
-            // Frames, die eingereiht wurden, während diese App nicht lief
+            inbox.setLocalNode(generation, node.id)
+            // Frames, die eingereiht wurden, während diese App nicht lief. Kommt das Ergebnis erst nach stop()
+            // bzw. einem neuen Start, verwirft die Inbox es (Generation) – nichts wird gelöscht.
             dataClient.dataItems.addOnSuccessListener { buffer ->
                 val items = buffer.map { it.freeze() }
                 buffer.release()
-                items.forEach(::consumeQueuedItem)
+                items.forEach { offerQueuedItem(generation, it) }
             }
         }
         handler.post(refreshLoop)
@@ -92,6 +96,7 @@ class WearDataLayerTransport(
         messageClient.removeListener(messageListener)
         dataClient.removeListener(dataListener)
         capabilityClient.removeListener(capabilityListener, CAPABILITY)
+        inbox.stop()
         listener = null
     }
 
@@ -125,16 +130,12 @@ class WearDataLayerTransport(
             .addOnFailureListener { onResult(DeliveryResult.FAILED) }
     }
 
-    private fun consumeQueuedItem(item: DataItem) {
+    private fun offerQueuedItem(
+        generation: Int,
+        item: DataItem,
+    ) {
         val uri: Uri = item.uri
-        val segments = uri.pathSegments // [advantly, link, q, <ziel>, <id>]
-        val local = localNodeId ?: return
-        if (segments.size != QUEUE_SEGMENTS || "/" + segments.take(3).joinToString("/") != QUEUE_PREFIX) return
-        if (segments[3] != local) return // nicht für uns (z. B. eigenes, noch nicht zugestelltes Item)
-        val source = uri.host ?: return
-        val data = item.data ?: return
-        listener?.onFrame(source, data)
-        dataClient.deleteDataItems(uri)
+        inbox.offer(generation, uri.toString(), uri.host, uri.pathSegments, item.data)
     }
 
     private fun refreshPeers() {
@@ -153,7 +154,6 @@ class WearDataLayerTransport(
         const val CAPABILITY: String = "advantly_device_link"
         const val MESSAGE_PATH: String = "/advantly/link/v1"
         const val QUEUE_PREFIX: String = "/advantly/link/q"
-        private const val QUEUE_SEGMENTS = 5
         private const val REFRESH_MS = 5_000L
     }
 }

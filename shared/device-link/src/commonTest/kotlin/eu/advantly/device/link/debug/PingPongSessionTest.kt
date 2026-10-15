@@ -94,13 +94,30 @@ class PingPongSessionTest {
     @Test
     fun resetStartsNewSeriesAndIgnoresOldPongs() {
         phone.startPings(count = 3, intervalMs = 10)
-        scheduler.advanceBy(30) // Pongs noch unterwegs
+        scheduler.advanceBy(30) // Acks und Pongs noch unterwegs
         phone.reset()
         scheduler.advanceBy(2_000)
         val stats = phone.snapshot()
         assertEquals(0, stats.pingsSent)
+        assertEquals(0, stats.pingsAcked, "Acks der alten Messreihe zählen nicht")
+        assertEquals(0, stats.inFlight)
         assertEquals(0, stats.pongsReceived)
         assertNull(stats.rttP50Ms)
+        assertNull(stats.ackP50Ms)
+    }
+
+    @Test
+    fun lateFailuresOfOldSeriesDoNotCountAfterReset() {
+        network.setConnected("watch", false)
+        scheduler.runUntilIdle()
+        phone.startPings(count = 3, intervalMs = 10) // scheitern erst nach allen Wiederholungen
+        scheduler.advanceBy(50)
+        phone.reset()
+        scheduler.advanceBy(10_000)
+        val stats = phone.snapshot()
+        assertEquals(0, stats.pingsFailed)
+        assertEquals(0, stats.lost)
+        assertEquals(0, stats.inFlight)
     }
 
     @Test

@@ -31,13 +31,20 @@ class MainQueueScheduler : LinkScheduler {
         delayMs: Long,
         action: () -> Unit,
     ): Cancellable {
-        // dispatch_after lässt sich nicht abbrechen → Flag prüfen
-        var cancelled = false
+        // dispatch_after lässt sich nicht abbrechen → der Block hält nur den Halter; cancel() gibt die Action
+        // (und alles, was sie referenziert) sofort frei
+        val holder = DelayedAction(action)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delayMs * NANOS_PER_MS), dispatch_get_main_queue()) {
-            if (!cancelled) action()
+            val pending = holder.action
+            holder.action = null
+            pending?.invoke()
         }
-        return Cancellable { cancelled = true }
+        return Cancellable { holder.action = null }
     }
+
+    private class DelayedAction(
+        var action: (() -> Unit)?,
+    )
 
     private companion object {
         const val NANOS_PER_MS = 1_000_000L

@@ -22,6 +22,9 @@ class PingPongSession(
     private val onUpdate: (PingPongStats) -> Unit,
 ) : DeviceLinkListener {
     private var sessionTag = newTag()
+
+    /** Messgeneration: [reset] erhöht sie; Ack-/Fehler-Callbacks älterer Generationen werden ignoriert. */
+    private var generation = 0
     private var nextSeq = 1
     private var remaining = 0
     private var planned = 0
@@ -86,6 +89,7 @@ class PingPongSession(
         loop = null
         remaining = 0
         sessionTag = newTag()
+        generation++
         nextSeq = 1
         planned = 0
         pingSentAt.clear()
@@ -110,18 +114,21 @@ class PingPongSession(
         val seq = nextSeq++
         pingSentAt[seq] = scheduler.nowMs()
         pingsSent++
-        link.send(peer, "$PING $sessionTag $seq".encodeToByteArray(), pingCallback)
+        link.send(peer, "$PING $sessionTag $seq".encodeToByteArray(), pingCallback(generation))
         loop = if (remaining > 0) scheduler.postDelayed(intervalMs) { sendNextPing() } else null
         publish()
     }
 
-    private val pingCallback =
+    private fun pingCallback(generation: Int) =
         object : SendCallback {
+            private fun current() = generation == this@PingPongSession.generation
+
             override fun onAcked(
                 messageId: String,
                 attempts: Int,
                 latencyMs: Long,
             ) {
+                if (!current()) return
                 pingsAcked++
                 pingRetries += attempts - 1
                 ackLatencies += latencyMs
@@ -129,6 +136,7 @@ class PingPongSession(
             }
 
             override fun onQueued(messageId: String) {
+                if (!current()) return
                 pingsQueued++
                 publish()
             }
@@ -138,13 +146,14 @@ class PingPongSession(
                 attempts: Int,
                 reason: SendFailure,
             ) {
+                if (!current()) return
                 pingsFailed++
                 pingRetries += (attempts - 1).coerceAtLeast(0)
                 publish()
             }
         }
 
-    private val pongCallback =
+    private fun pongCallback(generation: Int) =
         object : SendCallback {
             override fun onAcked(
                 messageId: String,
@@ -157,6 +166,7 @@ class PingPongSession(
                 attempts: Int,
                 reason: SendFailure,
             ) {
+                if (generation != this@PingPongSession.generation) return
                 pongsFailed++
                 publish()
             }
@@ -174,7 +184,7 @@ class PingPongSession(
         when (kind) {
             PING -> {
                 pingsAnswered++
-                link.send(peer, "$PONG $tag $seq".encodeToByteArray(), pongCallback)
+                link.send(peer, "$PONG $tag $seq".encodeToByteArray(), pongCallback(generation))
             }
 
             PONG -> {

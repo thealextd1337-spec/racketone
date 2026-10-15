@@ -15,7 +15,10 @@ data class RetryPolicy(
     val maxAttempts: Int = 5,
     /** Wartezeit auf das Ack einer Nachricht in der OS-Queue (Gegenseite kann lange offline sein). */
     val queuedAckTimeoutMs: Long = 15 * 60_000L,
-    /** Anzahl gemerkter Nachrichten-IDs je Gegenstelle für die Dedup. */
+    /**
+     * Gemerkte Nachrichten-IDs je Gegenstelle für die Dedup (nur RAM, FIFO). Muss größer sein als die Zahl der
+     * Nachrichten, die während der längsten Wiederholungsspanne eintreffen können; jenseits davon gilt at-least-once.
+     */
     val dedupCapacity: Int = 2_048,
 ) {
     init {

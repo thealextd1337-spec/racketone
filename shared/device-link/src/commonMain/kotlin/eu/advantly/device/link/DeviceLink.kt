@@ -6,8 +6,13 @@ package eu.advantly.device.link
  * Transportiert nur Bytes (in der Praxis JSON aus `sync-protocol`). Garantien:
  * - **Ack**: jede Nachricht wird vom Empfänger bestätigt; [SendCallback.onAcked] meldet Versuche und Latenz.
  * - **Timeout + Retry** nach [RetryPolicy]; ohne Ack nach allen Versuchen → [SendCallback.onFailed].
- * - **Dedup**: der Empfänger liefert jede Nachrichten-ID höchstens einmal an [DeviceLinkListener.onMessage] aus
- *   (Wiederholungen und Doppelzustellungen über Live- und Queue-Kanal werden verworfen, aber erneut bestätigt).
+ * - **Dedup (best effort, begrenzt)**: der Empfänger verwirft Wiederholungen und Doppelzustellungen (Live- und
+ *   Queue-Kanal) und bestätigt sie erneut – aber nur innerhalb seines **Speicherfensters**: die letzten
+ *   [RetryPolicy.dedupCapacity] IDs je Gegenstelle, nur im RAM. Ältere IDs und alles vor einem App-Neustart sind
+ *   vergessen; eine späte Wiederholung wird dann erneut ausgeliefert (at-least-once).
+ *   **Exactly-once-Wirkung** entsteht erst eine Ebene höher: Events tragen eine global eindeutige ID, und
+ *   `EventStore.append` ist darüber idempotent (`AppendResult.DUPLICATE`). Empfänger müssen Nachrichten deshalb
+ *   idempotent verarbeiten.
  * - **Queue-Fallback**: ist die Gegenseite nicht live erreichbar, übergibt der Transport die Nachricht einer
  *   Betriebssystem-Warteschlange (Wear `DataClient`, Apple `transferUserInfo`) → [SendCallback.onQueued].
  *

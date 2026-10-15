@@ -14,6 +14,8 @@ import platform.darwin.NSObject
 
 internal actual fun counterpartPeerId(): String = PHONE_PEER
 
+internal actual fun counterpartAppInstalled(session: WCSession): Boolean = session.companionAppInstalled
+
 internal actual fun newSessionDelegate(events: SessionEvents): WCSessionDelegateProtocol = WatchSessionDelegate(events)
 
 /** WCSession-Delegate (Apple Watch). Aufrufe kommen auf einer Hintergrund-Queue; [ReliableDeviceLink] wechselt auf Main. */

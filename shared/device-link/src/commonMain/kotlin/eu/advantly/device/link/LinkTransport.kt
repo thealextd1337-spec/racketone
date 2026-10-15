@@ -21,9 +21,15 @@ interface LinkTransport {
     )
 
     interface Listener {
+        /**
+         * Neuer Frame von [peer]. [onConsumed] ruft der Empfänger erst, NACHDEM er den Frame verarbeitet hat
+         * (bei gestopptem Link nie). Transporte mit persistenter Queue (Wear `DataItem`) löschen den Eintrag erst dann –
+         * so geht kein Frame verloren, wenn er zwischen Übergabe und Verarbeitung auf einen `stop()` trifft.
+         */
         fun onFrame(
             peer: String,
             frame: ByteArray,
+            onConsumed: () -> Unit = {},
         )
 
         /** [available] = false, wenn die Plattform-API grundsätzlich fehlt. */

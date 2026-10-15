@@ -16,7 +16,8 @@ import platform.WatchConnectivity.WCSessionDelegateProtocol
  * - **Live:** `sendMessageData(_:replyHandler:nil, errorHandler:)`, wenn `isReachable` (beide Apps aktiv).
  * - **Queue-Fallback:** `transferUserInfo` (garantierte, geordnete OS-Warteschlange), wenn nicht erreichbar
  *   oder das Live-Senden scheitert.
- * - **Peers:** genau ein Gegenüber ([counterpartPeer]); „verbunden“ = Session aktiviert und erreichbar.
+ * - **Peers:** genau ein Gegenüber ([counterpartPeer]); „verbunden“ = Session aktiviert, Gegen-App installiert, erreichbar.
+ * - Kanalwahl als reine, getestete Funktion: [wcRoute] / [wcFallbackAfterLiveError].
  *
  * Wichtig: `WCSession.default` hat genau EINEN Delegate. Alle WatchConnectivity-Nutzung der App (auch spätere
  * `updateApplicationContext`-Aufrufe) muss deshalb über diese Klasse laufen – Swift darf den Delegate nicht setzen.
@@ -74,21 +75,27 @@ class WatchConnectivityTransport(
             return
         }
         val session = WCSession.defaultSession
-        if (session.activationState != WCSessionActivationStateActivated) {
-            onResult(DeliveryResult.FAILED)
-            return
-        }
         val data = frame.toNSData()
-        if (session.reachable) {
-            session.sendMessageData(data, replyHandler = null) { _ ->
-                // z. B. Gegenseite inzwischen weg → in die Queue (Duplikate verwirft der Empfänger)
-                if (useUserInfoQueue) enqueue(session, data, onResult) else onResult(DeliveryResult.FAILED)
+        when (wcRoute(session.currentState(), useUserInfoQueue)) {
+            WcRoute.LIVE -> {
+                session.sendMessageData(data, replyHandler = null) { _ ->
+                    // Asynchron (Hintergrund-Queue): Zustand NEU lesen – die Session kann inzwischen inaktiv sein
+                    // (iOS-Uhrenwechsel); transferUserInfo auf inaktiver Session wäre ein Programmierfehler.
+                    when (wcFallbackAfterLiveError(session.currentState(), useUserInfoQueue)) {
+                        WcRoute.QUEUE -> enqueue(session, data, onResult)
+                        else -> onResult(DeliveryResult.FAILED) // Ack-Timer wiederholt kontrolliert
+                    }
+                }
+                onResult(DeliveryResult.SENT)
             }
-            onResult(DeliveryResult.SENT)
-        } else if (useUserInfoQueue) {
-            enqueue(session, data, onResult)
-        } else {
-            onResult(DeliveryResult.FAILED)
+
+            WcRoute.QUEUE -> {
+                enqueue(session, data, onResult)
+            }
+
+            WcRoute.FAIL -> {
+                onResult(DeliveryResult.FAILED)
+            }
         }
     }
 
@@ -102,10 +109,15 @@ class WatchConnectivityTransport(
     }
 
     private fun publishPeers() {
-        val session = WCSession.defaultSession
-        val connected = session.activationState == WCSessionActivationStateActivated && session.reachable
-        listener?.onPeersChanged(if (connected) listOf(counterpartPeer) else emptyList(), available = true)
+        listener?.onPeersChanged(wcPeers(WCSession.defaultSession.currentState(), counterpartPeer), available = true)
     }
+
+    private fun WCSession.currentState() =
+        WcSessionState(
+            activated = activationState == WCSessionActivationStateActivated,
+            reachable = reachable,
+            counterpartInstalled = counterpartAppInstalled(this),
+        )
 
     private companion object {
         const val USER_INFO_KEY = "eu.advantly.link.frame"
@@ -126,3 +138,6 @@ internal interface SessionEvents {
  * watchOS nicht – deshalb je Plattform eine eigene Delegate-Klasse.
  */
 internal expect fun newSessionDelegate(events: SessionEvents): WCSessionDelegateProtocol
+
+/** iOS: `isPaired && isWatchAppInstalled`; watchOS: `isCompanionAppInstalled`. */
+internal expect fun counterpartAppInstalled(session: WCSession): Boolean

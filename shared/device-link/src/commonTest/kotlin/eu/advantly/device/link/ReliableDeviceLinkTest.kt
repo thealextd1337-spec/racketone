@@ -205,6 +205,7 @@ class ReliableDeviceLinkTest {
                 override fun onFrame(
                     peer: String,
                     frame: ByteArray,
+                    onConsumed: () -> Unit,
                 ) = Unit
 
                 override fun onPeersChanged(
@@ -217,6 +218,91 @@ class ReliableDeviceLinkTest {
         scheduler.advanceBy(100)
         assertEquals(1, watch.stats.malformedFrames)
         assertTrue(received.isEmpty())
+    }
+
+    private fun collector(into: MutableList<String>) =
+        object : DeviceLinkListener {
+            override fun onMessage(
+                peer: String,
+                messageId: String,
+                payload: ByteArray,
+            ) {
+                into += payload.decodeToString()
+            }
+        }
+
+    @Test
+    fun dedupWindowIsBoundedSoEvictedIdsAreDeliveredAgain() {
+        // Dokumentierte Grenze: nur die letzten dedupCapacity IDs je Gegenstelle werden erkannt (at-least-once)
+        val small = policy.copy(dedupCapacity = 2)
+        val sender = ReliableDeviceLink(network.transport("p"), scheduler, small) { "p-${++ids}" }
+        val receiver = ReliableDeviceLink(network.transport("w"), scheduler, small)
+        val got = mutableListOf<String>()
+        receiver.setListener(collector(got))
+        sender.start()
+        receiver.start()
+        scheduler.runUntilIdle()
+        var acksDropped = 0
+        network.dropFilter = { from, _, frame -> !(from == "w" && !isData(frame) && acksDropped++ == 0) }
+        sender.send("w", "m0".encodeToByteArray(), recorder) // Ack geht verloren → Wiederholung nach 100 ms
+        sender.send("w", "m1".encodeToByteArray(), recorder)
+        sender.send("w", "m2".encodeToByteArray(), recorder) // verdrängt m0 aus dem Fenster
+        scheduler.advanceBy(1_000)
+        assertEquals(listOf("m0", "m1", "m2", "m0"), got)
+        assertEquals(3, sender.stats.acked)
+    }
+
+    @Test
+    fun dedupHistoryDoesNotSurviveRestart() {
+        var acksDropped = 0
+        network.dropFilter = { from, _, frame -> !(from == "watch" && !isData(frame) && acksDropped++ == 0) }
+        phone.send("watch", "x".encodeToByteArray(), recorder)
+        scheduler.advanceBy(30) // zugestellt, Ack verloren
+        assertEquals(listOf("phone:x"), received)
+        watch.stop() // App-Neustart der Uhr: Dedup-Gedächtnis ist weg
+        val restarted = mutableListOf<String>()
+        val watchAfterRestart = ReliableDeviceLink(network.transport("watch"), scheduler, policy)
+        watchAfterRestart.setListener(collector(restarted))
+        watchAfterRestart.start()
+        scheduler.advanceBy(1_000)
+        assertEquals(listOf("x"), restarted, "nach Neustart erneut ausgeliefert – Empfänger muss idempotent sein")
+        assertTrue(results.single().startsWith("acked"))
+    }
+
+    @Test
+    fun framesAreConsumedOnlyAfterProcessingAndNeverAfterStop() {
+        val consumed = mutableListOf<String>()
+        val got = mutableListOf<String>()
+        val captured = mutableListOf<LinkTransport.Listener>()
+        val probe =
+            ReliableDeviceLink(
+                object : LinkTransport {
+                    override fun start(listener: LinkTransport.Listener) {
+                        captured += listener
+                    }
+
+                    override fun stop() = Unit
+
+                    override fun send(
+                        peer: String,
+                        frame: ByteArray,
+                        onResult: (DeliveryResult) -> Unit,
+                    ) = onResult(DeliveryResult.SENT)
+                },
+                scheduler,
+                policy,
+            )
+        probe.setListener(collector(got))
+        probe.start()
+        captured.single().onFrame("peer", LinkFrame.data("a", "1".encodeToByteArray()).encode()) { consumed += "a" }
+        assertTrue(consumed.isEmpty(), "noch nicht verarbeitet")
+        scheduler.runUntilIdle()
+        assertEquals(listOf("a"), consumed)
+        captured.single().onFrame("peer", LinkFrame.data("b", "2".encodeToByteArray()).encode()) { consumed += "b" }
+        probe.stop()
+        scheduler.runUntilIdle()
+        assertEquals(listOf("a"), consumed, "nach stop() nie als verarbeitet melden")
+        assertEquals(listOf("1"), got)
     }
 
     @Test

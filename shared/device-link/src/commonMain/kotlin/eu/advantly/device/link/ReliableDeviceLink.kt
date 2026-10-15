@@ -51,7 +51,13 @@ class ReliableDeviceLink(
                 override fun onFrame(
                     peer: String,
                     frame: ByteArray,
-                ) = scheduler.post { if (running) handleFrame(peer, frame) }
+                    onConsumed: () -> Unit,
+                ) = scheduler.post {
+                    if (running) {
+                        handleFrame(peer, frame)
+                        onConsumed()
+                    }
+                }
 
                 override fun onPeersChanged(
                     peers: List<String>,
@@ -103,8 +109,10 @@ class ReliableDeviceLink(
                 retries = counters.retries + if (attempt > 1) 1 else 0,
             )
         out.timer?.cancel()
-        out.timer = scheduler.postDelayed(policy.ackTimeoutFor(attempt)) { onTimeout(out.id, attempt) }
-        transport.send(out.peer, out.frame) { result -> scheduler.post { onDelivery(out.id, result) } }
+        // Timer/Callbacks halten nur ID + Versuch, nicht Payload und SendCallback (Apple: Block lebt bis zu 15 min)
+        val id = out.id
+        out.timer = scheduler.postDelayed(policy.ackTimeoutFor(attempt)) { onTimeout(id, attempt) }
+        transport.send(out.peer, out.frame) { result -> scheduler.post { onDelivery(id, result) } }
     }
 
     private fun onDelivery(
@@ -123,7 +131,7 @@ class ReliableDeviceLink(
         counters = counters.copy(queued = counters.queued + 1)
         out.timer?.cancel()
         val attempt = out.attempts
-        out.timer = scheduler.postDelayed(policy.queuedAckTimeoutMs) { onTimeout(out.id, attempt) }
+        out.timer = scheduler.postDelayed(policy.queuedAckTimeoutMs) { onTimeout(id, attempt) }
         out.callback?.onQueued(out.id)
     }
 
@@ -220,7 +228,10 @@ class ReliableDeviceLink(
     }
 }
 
-/** Gemerkte Nachrichten-IDs je Gegenstelle, älteste fliegen zuerst raus (FIFO). */
+/**
+ * Gemerkte Nachrichten-IDs je Gegenstelle, älteste fliegen zuerst raus (FIFO). Bewusst begrenzt und flüchtig –
+ * siehe Dedup-Garantie in [DeviceLink].
+ */
 private class DedupCache(
     private val capacityPerPeer: Int,
 ) {
