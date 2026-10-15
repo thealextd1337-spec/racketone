@@ -122,6 +122,9 @@ struct StatusStrip: View {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .bold))
                 Text(scorerText)
+            } else if snap.scorerPending {
+                // iPhone hat „Meine Uhr“ gewählt; die Übergabe an diese Uhr kommt mit dem nächsten Abgleich
+                Text("role.pending")
             } else {
                 Text(loc("role.display.short %@", RoleText.device(snap.scorerKind)))
                     .textCase(.uppercase)
@@ -510,7 +513,7 @@ struct ControlsPage: View {
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(workout.state != .running && workout.state != .paused)
-                Toggle(isOn: $model.workoutAlongside) {
+                Toggle(isOn: Binding(get: { model.workoutWanted(snap) }, set: { model.setWorkout($0, for: snap) })) {
                     Text("controls.workoutAlongside")
                         .font(.footnote)
                 }
@@ -566,7 +569,7 @@ struct ControlsPage: View {
             Text("role.display")
                 .font(.headline)
                 .textCase(.uppercase)
-            Text(loc("role.scorer %@", RoleText.device(snap.scorerKind)))
+            Text(snap.scorerPending ? loc("role.pending") : loc("role.scorer %@", RoleText.device(snap.scorerKind)))
                 .font(.footnote)
                 .foregroundStyle(Brand.text2)
             StalenessLabel(snap: snap, dimmed: false)

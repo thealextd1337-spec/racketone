@@ -65,13 +65,14 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// die Screenshots verdeckt.
     var workoutEnabled = true
 
-    /// „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Standard an) – unabhängig von der Rolle Zähler/Anzeige.
+    /// Voreinstellung „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Standard an) für auf der Uhr gestartete
+    /// Matches; landet als `MatchMeta.watchWorkout` im Match. Vom iPhone gestartete Matches bringen dessen Wahl mit.
     @Published var workoutAlongside = UserDefaults.standard.object(forKey: ScoringModel.workoutKey) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(workoutAlongside, forKey: Self.workoutKey)
-            syncWorkout()
-        }
+        didSet { UserDefaults.standard.set(workoutAlongside, forKey: Self.workoutKey) }
     }
+
+    /// Umschalten während des Matches (Steuerseite) – nur lokal auf dieser Uhr, je Match.
+    @Published private(set) var workoutOverrides: [String: Bool] = [:]
 
     static let workoutKey = "advantly.watch.workoutAlongside"
 
@@ -122,7 +123,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// pausiert, solange das Match unterbrochen ist.
     private func syncWorkout() {
         guard let snap = snapshot else { return }
-        if snap.matchFinished || !workoutEnabled || !workoutAlongside {
+        if snap.matchFinished || !workoutEnabled || !workoutWanted(snap) {
             workout.end()
         } else {
             workout.ensureRunning(
@@ -133,6 +134,16 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
                 paused: snap.paused
             )
         }
+    }
+
+    /// Workout für dieses Match: lokale Umschaltung, sonst der Wunsch aus `MatchMeta.watchWorkout`.
+    func workoutWanted(_ snap: WatchScoreSnapshot) -> Bool {
+        workoutOverrides[snap.matchId] ?? snap.watchWorkout
+    }
+
+    func setWorkout(_ wanted: Bool, for snap: WatchScoreSnapshot) {
+        workoutOverrides[snap.matchId] = wanted
+        syncWorkout()
     }
 
     /// Nach jedem erfolgreichen Befehl (Punkt, Undo, Satzende-Antwort, Pause …): Hinweise und Haptik aus den Effekten.
@@ -195,7 +206,13 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     @discardableResult
     func start(presetId: String, doubles: Bool, weServeFirst: Bool) -> Bool {
-        guard scoring.startMatch(presetId: presetId, doubles: doubles, weServeFirst: weServeFirst) != nil else {
+        let started = scoring.startMatch(
+            presetId: presetId,
+            doubles: doubles,
+            weServeFirst: weServeFirst,
+            watchWorkout: workoutAlongside
+        )
+        guard started != nil else {
             rejected()
             return false
         }
