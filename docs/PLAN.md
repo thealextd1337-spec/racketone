@@ -174,6 +174,7 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 | F16 | Visitor-Regeln | **Entschieden 2026-10-15:** Visitor müssen **Freunde** sein; **keine Zustimmung** der Mitspieler nötig. Offen (Detail, P2): wer widerruft, Sichtbarkeitsdauer nach Matchende. |
 | F17 | Gewählter Zähler (P2) offline | **Entschieden 2026-10-15: Nie blockieren.** Das Match startet sofort, zunächst zählt das Gerät des Starters (Uhr bzw. Handy/Director). Der gewählte Zähler erhält eine Einladung und **übernimmt automatisch** per `ScorerChanged`, sobald er online ist und annimmt; bis dahin gezählte Punkte bleiben erhalten. |
 | F18 | Aliase | **Entschieden 2026-10-15:** Jeder Nutzer legt seinen **eigenen öffentlichen Alias** fest (für Freunde, Mitspieler, Visitor sichtbar; ab P2 im Profil). **Keine privaten Spitznamen** für Nutzer mit App/Account (korrigiert 2026-10-15). Ausnahme: **Dummy-/Gastspieler** ohne App – deren Namen vergibt und ändert der Anleger frei (ab P1). |
+| F19 | Telemetrie-Sichtbarkeit | **Entschieden 2026-10-15:** pro Nutzer „Teilen“ / „Nur für mich“ (Standard) / „Gar nicht“ – gilt ab P2/P3 für Auswertungen; in P1 nur Live-Anzeige (Puls + Schritte) auf eigener Uhr und eigenem Handy ohne Speicherung. |
 
 Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05 §9.
 
