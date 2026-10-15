@@ -163,8 +163,14 @@ class MatchSession(
     /** Art bekannter Geräte aus früheren `Hello` (persistent), für Replikationsziele und den Rückstand. */
     private var knownKindsCache: Map<DeviceId, PeerKind>? = null
 
-    /** Letzter Hinweis: eigene Eingaben in einem nicht offenen Match wurden nach einer Übernahme verworfen (Uhr). */
-    private var droppedInputs: DroppedInputs? = null
+    /**
+     * Anzuzeigender Hinweis: eigene Eingaben wurden nach einer Übernahme verworfen (Uhr). Persistent, bis die UI ihn mit
+     * [acknowledgeDroppedInputs] quittiert (übersteht Neustarts).
+     */
+    private var droppedInputs: DroppedInputs? = loadDroppedNotice()
+
+    /** Matches, die schon einmal an eine Uhr gesendet wurden (Cache der Settings `session.sentToWatch.*`). */
+    private val sentToWatchCache = HashSet<MatchId>()
     private val listeners = mutableListOf<SessionListener>()
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
@@ -299,6 +305,25 @@ class MatchSession(
     }
 
     /**
+     * Uhr: Hinweis „N Eingaben nicht übernommen“ ([SessionState.droppedInputs]) wurde angezeigt – erst danach gilt er als
+     * gesehen (bis dahin übersteht er Neustarts, Review W3-M R2 #4).
+     */
+    fun acknowledgeDroppedInputs() {
+        checkThread()
+        if (droppedInputs == null) return
+        droppedInputs = null
+        data.settings.remove(DROPPED_NOTICE_KEY)
+        publish()
+    }
+
+    private fun loadDroppedNotice(): DroppedInputs? {
+        val stored = data.settings.get(DROPPED_NOTICE_KEY) ?: return null
+        val id = stored.substringBefore('|').takeIf { it.isNotEmpty() } ?: return null
+        val count = stored.substringAfter('|').toIntOrNull() ?: return null
+        return DroppedInputs(MatchId(id), count)
+    }
+
+    /**
      * Handy: öffnet [matchId] in der Liste der offenen Matches, ohne den Fokus zu ändern (z. B. ältere laufende Matches
      * nach einem Neustart – erreichbar, aber nicht automatisch im Vordergrund). `false`, wenn Kopf oder Genesis fehlen.
      */
@@ -354,7 +379,7 @@ class MatchSession(
         if (watchAssignment?.matchId != matchId) {
             if (!takeOverWatchMatch && watchMatchNeedingTakeOver() != null) return false
             releaseWatchMatch(force = takeOverWatchMatch)
-            assignWatch(matchId)
+            assignWatch(matchId, explicit = true)
             broadcastMeta(target.record)
             // bisher nicht an die Uhr repliziert: das ganze Log jetzt nachschieben (idempotent beim Empfänger)
             targets().forEach { sendEvents(it, matchId, data.events.scoreEvents(matchId)) }
@@ -735,7 +760,7 @@ class MatchSession(
         // Ein Folge-Match ersetzt sein beendetes Vor-Match in der Liste (wie auf der Uhr)
         if (previous != null) opened.remove(previous)
         // Zuweisung vor dem Kopf speichern: die Uhr erfährt so im selben MatchMeta, dass sie diesem Match folgen soll
-        if (assignToWatch && config.parallelMatches) assignWatch(matchId)
+        if (assignToWatch && config.parallelMatches) assignWatch(matchId, explicit = isWatchDevice(scorer))
         broadcastMeta(opened[matchId]?.record)
         broadcast(Events(matchId, listOf(genesis)))
         reconcileWatchScorers()
@@ -866,8 +891,21 @@ class MatchSession(
     private fun watchMayHaveScored(m: OpenMatch): Boolean {
         val scorer = m.scorer ?: return false
         if (scorer == PENDING_WATCH) return false
-        if (scorer.value in devicesIn(m.id)) return true
-        return data.events.unconfirmedEvents(m.id.value).none { it.id == m.genesis.id.value }
+        // Review W3-M R2 #1: eine unbestätigte Genesis beweist nichts (Ack unterwegs, Trennung vor dem Ack) –
+        // verlustfrei sofort übernehmen darf das Handy nur, wenn es das Match nie an eine Uhr gesendet hat
+        return scorer.value in devicesIn(m.id) || sentToWatch(m.id)
+    }
+
+    /** Wurde [matchId] je an eine Uhr gesendet (Sendeversuch, persistent)? */
+    private fun sentToWatch(matchId: MatchId): Boolean =
+        matchId in sentToWatchCache ||
+            (data.settings.get(SENT_TO_WATCH_PREFIX + matchId.value) != null).also {
+                if (it) sentToWatchCache += matchId
+            }
+
+    private fun markSentToWatch(matchId: MatchId) {
+        if (!config.parallelMatches || !sentToWatchCache.add(matchId)) return
+        data.settings.put(SENT_TO_WATCH_PREFIX + matchId.value, "1")
     }
 
     /** [device] ist eine verbundene, kompatible Gegenstelle. */
@@ -908,12 +946,17 @@ class MatchSession(
         }
     }
 
-    /** Uhr: [m] ist hier gestartet und jünger als das zugewiesene [target] (oder dessen Kopf ist noch unbekannt). */
+    /**
+     * Uhr: [m] ist hier gestartet und jünger als das zugewiesene [target] (oder dessen Kopf ist noch unbekannt) – bei
+     * einer ausdrücklichen Zuweisung jünger als die Zuweisung selbst (Review W3-M R2 #2).
+     */
     private fun keepsOwnMatch(
         m: OpenMatch,
         target: MatchId,
     ): Boolean {
         if (m.genesis.deviceId != deviceId) return false
+        val assignment = watchAssignment
+        if (assignment?.explicit == true) return m.record.createdAtMs > assignment.assignedAtMs
         val assigned = data.matches.get(target) ?: return true
         return m.record.createdAtMs > assigned.createdAtMs
     }
@@ -930,12 +973,19 @@ class MatchSession(
         return OpenMatch(record, engine.genesis ?: return null, engine)
     }
 
-    /** Handy: neue Zuweisung (Zeitstempel streng steigend, damit die Uhr sie ordnen kann) speichern. */
-    private fun assignWatch(matchId: MatchId?) {
+    /**
+     * Handy: neue Zuweisung speichern (Zeitstempel streng steigend, damit die Uhr sie ordnen kann). [explicit] = vom
+     * Nutzer gewählt („Meine Uhr“, „Auf der Uhr zählen“): Die Uhr folgt ihr auch weg von einem auf ihr gestarteten Match,
+     * das älter ist als die Zuweisung (Review W3-M R2 #2); implizite Zuweisungen unterliegen der Rennregel.
+     */
+    private fun assignWatch(
+        matchId: MatchId?,
+        explicit: Boolean = false,
+    ) {
         val current = watchAssignment
-        if (current != null && current.matchId == matchId) return
+        if (current != null && current.matchId == matchId && (current.explicit || !explicit)) return
         val at = maxOf(clock.nowMs(), (current?.assignedAtMs ?: 0) + 1)
-        storeAssignment(WatchAssignment(matchId, at))
+        storeAssignment(WatchAssignment(matchId, at, explicit))
     }
 
     /** Gelöschtes Match: am Handy ist die Uhr danach frei; die Uhr behält ihre Zuweisung (gelöschten folgt sie nie). */
@@ -954,9 +1004,12 @@ class MatchSession(
         if (!isWatchDevice(genesis.deviceId) && !isWatchDevice(scorer)) return
         val record = data.matches.get(genesis.matchId) ?: return
         if (record.isFinished || watchAssignment?.matchId == record.id) return
-        val current = watchAssignment?.matchId?.let { opened[it]?.record ?: data.matches.get(it) }
-        // nur echt jüngere: bei gleicher Millisekunde bleibt die bestehende Zuweisung (z. B. gerade am Handy angelegt)
-        if (current != null && !current.isFinished && record.createdAtMs <= current.createdAtMs) return
+        val assignment = watchAssignment
+        val current = assignment?.matchId?.let { opened[it]?.record ?: data.matches.get(it) }
+        // nur echt jüngere: bei gleicher Millisekunde bleibt die bestehende Zuweisung (z. B. gerade am Handy angelegt);
+        // gegen eine ausdrückliche Zuweisung zählt deren Zeitpunkt (dieselbe Regel wie keepsOwnMatch auf der Uhr)
+        val reference = if (assignment?.explicit == true) assignment.assignedAtMs else current?.createdAtMs
+        if (current != null && !current.isFinished && reference != null && record.createdAtMs <= reference) return
         assignWatch(record.id)
         broadcastMeta(record)
         reconcileWatchScorers()
@@ -982,6 +1035,7 @@ class MatchSession(
         watchAssignment = assignment
         data.settings.put(WATCH_MATCH_KEY, assignment.matchId?.value.orEmpty())
         data.settings.putLong(WATCH_MATCH_AT_KEY, assignment.assignedAtMs)
+        data.settings.putBoolean(WATCH_MATCH_EXPLICIT_KEY, assignment.explicit)
     }
 
     /**
@@ -993,7 +1047,8 @@ class MatchSession(
         val stored = data.settings.get(WATCH_MATCH_KEY)
         if (stored != null) {
             val at = data.settings.getLong(WATCH_MATCH_AT_KEY, 0)
-            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at)
+            val explicit = data.settings.getBoolean(WATCH_MATCH_EXPLICIT_KEY, false)
+            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit)
         }
         if (!config.parallelMatches) return null
         val legacy = data.matches.active().firstOrNull() ?: return null
@@ -1054,6 +1109,8 @@ class MatchSession(
         sendDeleted(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(primaryRecord()))
+        // jetzt identifiziert: zulässigen Rückstand nachschieben (vorher hielt das Routing alles zurück)
+        if (config.parallelMatches) pushBacklog(peer)
     }
 
     private fun onSummary(
@@ -1265,6 +1322,7 @@ class MatchSession(
         if (count <= data.settings.getLong(key, 0)) return
         data.settings.putLong(key, count.toLong())
         droppedInputs = DroppedInputs(matchId, count)
+        data.settings.put(DROPPED_NOTICE_KEY, matchId.value + "|" + count)
     }
 
     /**
@@ -1414,10 +1472,17 @@ class MatchSession(
         matchId: MatchId,
     ): Boolean {
         if (!config.parallelMatches) return true
-        val device = hellos[peer]?.deviceId ?: data.settings.get(NODE_DEVICE_PREFIX + peer)?.let(::DeviceId) ?: return true
-        val kind = hellos[peer]?.kind ?: knownKinds()[device] ?: return true
+        // Review W3-M R2 #3: noch nicht identifizierte Gegenstelle (kein Hello, kein gemerkter Knoten) bekommt keine
+        // Matchdaten; nach ihrem Hello schiebt onHello Summary und zulässigen Rückstand nach
+        val device = peerDeviceOf(peer) ?: return false
+        val kind = peerKindOf(peer) ?: return false
         return kind != PeerKind.WATCH || matchId == watchAssignment?.matchId || device.value in devicesIn(matchId)
     }
+
+    private fun peerDeviceOf(peer: String): DeviceId? =
+        hellos[peer]?.deviceId ?: data.settings.get(NODE_DEVICE_PREFIX + peer)?.let(::DeviceId)
+
+    private fun peerKindOf(peer: String): PeerKind? = hellos[peer]?.kind ?: peerDeviceOf(peer)?.let { knownKinds()[it] }
 
     /**
      * Hat [matchId] überhaupt ein Replikationsziel? Nur dann zählen seine unbestätigten Events als „ausstehend“ und halten
@@ -1426,8 +1491,6 @@ class MatchSession(
      */
     private fun hasReplicationTarget(matchId: MatchId): Boolean {
         if (!config.parallelMatches) return true
-        // verbundene Gegenstelle unbekannter Art bekommt alles (siehe replicates)
-        if (targets().any { peer -> hellos[peer] == null && data.settings.get(NODE_DEVICE_PREFIX + peer) == null }) return true
         val known = knownKinds()
         if (known.values.any { it != PeerKind.WATCH }) return true
         return known.isNotEmpty() && (matchId == watchAssignment?.matchId || known.keys.any { it.value in devicesIn(matchId) })
@@ -1540,6 +1603,7 @@ class MatchSession(
     ) {
         if (!started) return
         val routed = route(peer, message) ?: return
+        if (routed is Events && routed.events.isNotEmpty() && peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
         val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() }?.let { ackCallback(it) }
         link?.send(peer, SyncCodec.encode(routed), callback)
     }
@@ -1747,6 +1811,15 @@ class MatchSession(
 
         /** Settings: schon gemeldete Zahl verworfener eigener Eingaben je Match (Uhr). */
         private const val DROPPED_PREFIX = "session.dropped."
+
+        /** Settings: noch nicht quittierter Hinweis „matchId|Anzahl“ (Uhr). */
+        private const val DROPPED_NOTICE_KEY = "session.droppedNotice"
+
+        /** Settings: Match wurde je an eine Uhr gesendet (Handy). */
+        private const val SENT_TO_WATCH_PREFIX = "session.sentToWatch."
+
+        /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
+        private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"
 
         /** Settings: Uhr-Match (Handy) bzw. erhaltene Zuweisung (Uhr), leer = keins; dazu ihr Zeitstempel. */
         private const val WATCH_MATCH_KEY = "session.watchMatch"

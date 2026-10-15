@@ -142,9 +142,10 @@ Normativ in 01 §4.9. Kurz:
   wirken auf das **fokussierte** (`resume(id)` fokussiert). `closeMatch()` schließt das fokussierte, danach rückt das
   jüngste offene nach (laufende vor beendeten).
 - **Uhr-Match** (`watchMatchId`, persistent in `session.watchMatch`): „Meine Uhr“ beim Anlegen, Director-Match bei freier
-  Uhr, auf der Uhr gestartetes Match, Folge-Match des Uhr-Matches oder `assignToWatch`. Wechselt die Uhr, gibt sie ihr
-  altes laufendes Match **selbst** per `ScorerChanged` ans Handy ab (nach ihrer letzten Eingabe, verlustfrei); kennt sie
-  es nicht, übernimmt das Handy sofort. Ist sie nicht erreichbar, braucht der Wechsel `takeOverWatchMatch = true`
+  Uhr, auf der Uhr gestartetes Match, Folge-Match des Uhr-Matches oder `assignToWatch` („Meine Uhr“ und `assignToWatch`
+  sind ausdrücklich und schlagen ältere Uhr-Starts). Wechselt die Uhr, gibt sie ihr altes laufendes Match **selbst** per
+  `ScorerChanged` ans Handy ab (nach ihrer letzten Eingabe, verlustfrei); wurde es nie an eine Uhr gesendet, übernimmt
+  das Handy sofort. Ist sie nicht erreichbar, braucht der Wechsel `takeOverWatchMatch = true`
   (`watchMatchNeedingTakeOver()`), die Uhr meldet danach `droppedInputs`. Die Uhr zählt nie zwei Matches.
 - **Routing:** Handy → Uhr nur Uhr-Match und Matches mit Events dieser Uhr; Director-Matches nie. `pendingToPeers` und der
   Takt zählen nur Matches mit Replikationsziel.

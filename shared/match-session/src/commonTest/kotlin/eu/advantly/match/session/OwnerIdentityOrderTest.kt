@@ -25,7 +25,7 @@ class OwnerIdentityOrderTest {
         }
 
     private fun phone(): WireNode =
-        WireNode("phone", seed = 4, kind = PeerKind.PHONE).also {
+        WireNode("phone", seed = 4, kind = PeerKind.PHONE, identifyPeer = false).also {
             it.data.players.ensureSelf("Alex", 1) { phoneSelf.id }
         }
 

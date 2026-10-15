@@ -12,6 +12,8 @@ import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.sync.protocol.Events
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.MatchMetaMessage
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.WatchAssignment
@@ -215,6 +217,123 @@ class ParallelMatchesTest {
         )
         // sichtbarer Hinweis auf der Uhr nach der Wiederverbindung
         assertEquals(DroppedInputs(a, 3), watch.state.value.droppedInputs)
+    }
+
+    /** Review R2 #4: Der Hinweis übersteht einen Neustart der Uhr, bis die UI ihn quittiert. */
+    @Test
+    fun droppedInputsNoticeSurvivesARestartUntilAcknowledged() {
+        val (a, _, _) = threeMatches()
+        watch.points("A")
+        cluster.offline("watch")
+        cluster.settle()
+        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
+        watch.points("AA")
+        cluster.online("watch")
+        cluster.settle()
+        assertEquals(DroppedInputs(a, 2), watch.state.value.droppedInputs)
+
+        fun restartedWatch() =
+            MatchSession(cluster["watch"].data, null, cluster.scheduler, SessionConfig(DeviceId("watch"), PeerKind.WATCH), cluster.clock)
+        assertEquals(DroppedInputs(a, 2), restartedWatch().state.value.droppedInputs, "nach Neustart noch da")
+        watch.acknowledgeDroppedInputs()
+        assertNull(watch.state.value.droppedInputs)
+        assertNull(restartedWatch().state.value.droppedInputs, "quittiert: weg")
+    }
+
+    /** Review R2 #1a: Genesis zugestellt, Ack unterwegs, Uhr zählt – der Wechsel verwirft keinen Uhr-Punkt. */
+    @Test
+    fun switchWhileTheAckIsInFlightKeepsWatchPoints() {
+        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        cluster.settle(25) // Genesis bei der Uhr (20 ms), Ack noch unterwegs
+        assertEquals(
+            a,
+            watch.state.value.match
+                ?.id,
+        )
+        assertTrue(watch.recordPoint(Side.A))
+        assertTrue(watch.recordPoint(Side.A))
+        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        cluster.settle()
+        val old = phone.state.value.match(a)!!
+        assertEquals(0, old.rejectedByRoleCount, "nichts verworfen")
+        assertEquals(
+            "30",
+            old.state.current!!
+                .display.a,
+        )
+        assertTrue(old.isScorer, "danach zählt das Handy")
+    }
+
+    /** Review R2 #1b: Trennung kurz vor dem Ack – der Wechsel verlangt die Bestätigung. */
+    @Test
+    fun disconnectBeforeTheAckStillAsksBeforeTakingOver() {
+        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        cluster.settle(25)
+        assertTrue(watch.recordPoint(Side.A))
+        assertTrue(watch.recordPoint(Side.A))
+        cluster.offline("watch")
+        cluster.settle()
+        assertEquals(a, phone.watchMatchNeedingTakeOver(), "Match wurde an die Uhr gesendet: Rückfrage")
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+    }
+
+    /** Review R2 #2: ausdrücklicher Wechsel zu einem älteren Director-Match – die Uhr folgt und gibt ihr Match ab. */
+    @Test
+    fun explicitSwitchToAnOlderMatchWinsOverTheWatchStartedOne() {
+        val a = phone.create(format, SINGLES) // Director, Uhr frei → zeigt A an
+        cluster.settle(1_000)
+        val w = watch.create(format, SINGLES) // Uhr startet selbst W (jünger)
+        cluster.settle()
+        assertEquals(w, phone.state.value.watchMatchId, "Rennregel: jüngeres Uhr-Match")
+        assertTrue(watch.recordPoint(Side.B))
+        assertTrue(phone.assignToWatch(a, watchScores = true))
+        cluster.settle(65_000)
+        assertEquals(a, phone.state.value.watchMatchId)
+        assertEquals(
+            a,
+            watch.state.value.match
+                ?.id,
+        )
+        assertTrue(
+            watch.state.value.match!!
+                .isScorer,
+        )
+        val watchScored =
+            phone.state.value.matches
+                .filter { it.state.status != MatchStatus.FINISHED && it.scorerDeviceId == DeviceId("watch") }
+                .map { it.id }
+        assertEquals(listOf(a), watchScored, "genau ein Match mit Zähler Uhr")
+        val onPhone = phone.state.value.match(w)!!
+        assertTrue(onPhone.isScorer, "W zählt jetzt das Handy")
+        assertEquals(0, onPhone.rejectedByRoleCount)
+        assertEquals(
+            "15",
+            onPhone.state.current!!
+                .display.b,
+            "Uhr-Punkt in W bleibt",
+        )
+    }
+
+    /** Review R2 #3: Vor dem Hello gehen keine Matchdaten an eine unbekannte Gegenstelle. */
+    @Test
+    fun unidentifiedPeersGetNoMatchData() {
+        for (kind in listOf(PeerKind.WATCH, PeerKind.PHONE)) {
+            val node = WireNode("p-$kind", 21, identifyPeer = false)
+            node.session.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // Uhr-Match (Platzhalter)
+            val id = node.session.create(format, SINGLES) // Director-Match auf dem Nachbarplatz
+            node.points(Side.A, 2)
+            val before = node.link.sent.toList()
+            assertTrue(before.none { it is Events }, "keine Events vor dem Hello")
+            assertTrue(before.filterIsInstance<MatchMetaMessage>().all { it.match == null }, "kein Match-Kopf vor dem Hello")
+            node.link.deliver(Hello(DeviceId("other"), kind))
+            val after = node.link.sent.drop(before.size)
+            val events = after.filterIsInstance<Events>().filter { it.matchId == id }
+            if (kind == PeerKind.WATCH) {
+                assertTrue(events.isEmpty(), "Director-Match nie an eine Uhr")
+            } else {
+                assertEquals(3, events.flatMap { it.events }.size, "zweites Handy: Rückstand nach dem Hello")
+            }
+        }
     }
 
     /** Review #5: Online-Wechsel des Uhr-Matches ist verlustfrei – die Uhr übergibt nach ihrer letzten Eingabe. */

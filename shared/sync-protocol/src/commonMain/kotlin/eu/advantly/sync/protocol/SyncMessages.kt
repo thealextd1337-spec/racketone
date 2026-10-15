@@ -127,12 +127,17 @@ data class MatchMetaMessage(
  * Wiederholung verspätet zugestellte, ignoriert die Uhr).
  *
  * @property matchId das Uhr-Match; `null` = die Uhr ist frei (folgt keinem Match des Handys)
- * @property assignedAtMs Wanduhr des Handys bei der Zuweisung (nur zum Ordnen, nie gegen Uhren anderer Geräte verglichen)
+ * @property assignedAtMs Wanduhr des Handys bei der Zuweisung (Ordnung der Zuweisungen; bei [explicit] zusätzlich die
+ *   Grenze, ab der ein auf der Uhr gestartetes Match als jünger gilt)
+ * @property explicit vom Nutzer gewählt („Meine Uhr“, „Auf der Uhr zählen“): Die Uhr folgt ihr auch weg von einem auf ihr
+ *   gestarteten Match, das vor der Zuweisung begann; implizite Zuweisungen (freie Uhr, Folge-Match, Uhr-Start) unterliegen
+ *   der Rennregel „jüngeres Uhr-Match gewinnt“ (01 §4.9)
  */
 @Serializable
 data class WatchAssignment(
     val matchId: MatchId?,
     val assignedAtMs: Long,
+    val explicit: Boolean = false,
 )
 
 /**

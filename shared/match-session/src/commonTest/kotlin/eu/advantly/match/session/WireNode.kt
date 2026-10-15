@@ -12,6 +12,7 @@ import eu.advantly.device.link.LinkStats
 import eu.advantly.device.link.SendCallback
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.sync.protocol.DecodeResult
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 import eu.advantly.sync.protocol.SyncMessage
@@ -60,6 +61,7 @@ class WireNode(
     kind: PeerKind = PeerKind.PHONE,
     val scheduler: ManualScheduler = ManualScheduler(),
     guard: ThreadGuard = ThreadGuard.NONE,
+    identifyPeer: Boolean = kind == PeerKind.PHONE,
 ) {
     val data = testLocalData()
     val link = WireLink()
@@ -69,6 +71,12 @@ class WireNode(
 
     init {
         session.start()
+        // Handy: die Gegenstelle „lab“ stellt sich als weiteres Handy vor – erst identifizierte Gegenstellen bekommen
+        // Matchdaten (Routing, Review W3-M R2 #3)
+        if (identifyPeer) {
+            link.deliver(Hello(DeviceId("lab"), PeerKind.PHONE))
+            link.sent.clear()
+        }
     }
 
     val match: ActiveMatch get() = checkNotNull(session.state.value.match) { "kein offenes Match" }
