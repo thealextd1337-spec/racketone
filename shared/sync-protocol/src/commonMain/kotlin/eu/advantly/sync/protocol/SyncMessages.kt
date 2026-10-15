@@ -100,6 +100,8 @@ data class Events(
  *   `null` bei älteren Absendern.
  * @property selfAliases frühere bzw. bekannte andere IDs desselben Besitzers (z. B. der Uhr-eigene Spieler vor der
  *   Übernahme) – Matches mit diesen IDs zeigen den Besitzer, keinen Gast
+ * @property watchMatch nur vom Handy: welches seiner (ggf. mehreren) offenen Matches die eigene Uhr zählt bzw. anzeigt
+ *   (F22, 01 §4.3 „Uhr-Match“); `null` = keine Angabe (Uhr, ältere Absender)
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -110,8 +112,24 @@ data class MatchMetaMessage(
     val favorites: List<FavoriteLineup> = emptyList(),
     val self: Player? = null,
     val selfAliases: List<PlayerId> = emptyList(),
+    val watchMatch: WatchAssignment? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
 ) : SyncMessage
+
+/**
+ * Zuweisung des „Uhr-Matches“ durch das Handy (F22, 01 §4.3): Das Handy kann mehrere Matches parallel führen, die eigene
+ * Uhr zählt bzw. zeigt höchstens eines davon. Die Uhr folgt nur diesem Match (kein Auto-Follow auf andere Matches des
+ * Handys). Zuweisungen desselben Handys werden über [assignedAtMs] geordnet (die jüngste gilt; ältere, z. B. durch
+ * Wiederholung verspätet zugestellte, ignoriert die Uhr).
+ *
+ * @property matchId das Uhr-Match; `null` = die Uhr ist frei (folgt keinem Match des Handys)
+ * @property assignedAtMs Wanduhr des Handys bei der Zuweisung (nur zum Ordnen, nie gegen Uhren anderer Geräte verglichen)
+ */
+@Serializable
+data class WatchAssignment(
+    val matchId: MatchId?,
+    val assignedAtMs: Long,
+)
 
 /**
  * Löschmarkierungen (Tombstones): Diese Matches wurden auf einem gekoppelten Gerät gelöscht. Der Empfänger löscht sie
