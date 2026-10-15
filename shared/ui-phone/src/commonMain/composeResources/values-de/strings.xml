@@ -444,4 +444,7 @@
     <string name="result_not_rated">Abgebrochen – zählt nicht für Siege und Statistik.</string>
     <string name="wizard_scorer_watch_busy">Deine Uhr zählt gerade %1$s. Wählst du sie, wechselt die Uhr zu diesem Match – das andere zählt dieses Handy weiter.</string>
     <string name="end_keep_playing">Weiterspielen</string>
+    <string name="watch_takeover_title">Uhr nicht erreichbar</string>
+    <string name="watch_takeover_text">Deine Uhr zählt noch %1$s und ist nicht erreichbar. Dieses Handy übernimmt dieses Match; Eingaben, die die Uhr danach dort noch macht, werden verworfen.</string>
+    <string name="watch_takeover_confirm">Übernehmen und starten</string>
 </resources>

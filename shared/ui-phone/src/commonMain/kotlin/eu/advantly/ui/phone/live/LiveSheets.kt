@@ -222,6 +222,7 @@ internal fun BoxScope.SetEndSheet(
             modifier = Modifier.fillMaxWidth().testTag("decision_no"),
         )
         SheetTextButton(stringResource(Res.string.action_undo), "sheet_undo") { controller.undo() }
+        AbandonFromSetEnd(controller, snapshot)
         PointRemovalActions(controller, snapshot)
     }
 }

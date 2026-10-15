@@ -256,7 +256,7 @@ internal fun displayEndTitle(): String = stringResource(Res.string.end_display_t
 
 /** Bestätigung „Match beenden?“ (mit Ergebnis-Vorschau) bzw. „Match abbrechen?“ (ohne Wertung). */
 @Composable
-private fun EndConfirmDialog(
+internal fun EndConfirmDialog(
     snapshot: LiveMatchSnapshot,
     choice: EndChoice,
     onConfirm: () -> Unit,
@@ -325,4 +325,33 @@ internal fun OpenMatchCardContent(snapshot: LiveMatchSnapshot) {
         color = colors.text2,
         modifier = Modifier.testTag("open_match_role"),
     )
+}
+
+/**
+ * „Abbrechen (ohne Wertung)“ im Satzende-Sheet (Review W3-M #2): mit Bestätigung, erzeugt `MatchEnded(ABANDONED)` –
+ * nicht die reguläre Antwort „kein weiterer Satz“, die das Ergebnis werten würde.
+ */
+@Composable
+internal fun AbandonFromSetEnd(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+) {
+    var confirm by remember { mutableStateOf(false) }
+    SheetButton(
+        stringResource(Res.string.end_abandon),
+        primary = false,
+        onClick = { confirm = true },
+        modifier = Modifier.fillMaxWidth().testTag("set_end_abandon"),
+    )
+    if (confirm) {
+        EndConfirmDialog(
+            snapshot = snapshot,
+            choice = EndChoice.ABANDON,
+            onConfirm = {
+                confirm = false
+                controller.abandonMatch()
+            },
+            onDismiss = { confirm = false },
+        )
+    }
 }

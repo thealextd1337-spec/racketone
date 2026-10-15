@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
@@ -38,8 +39,12 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.history.HistoryScreen
 import eu.advantly.ui.phone.home.HomeScreen
 import eu.advantly.ui.phone.live.LiveScoreScreen
+import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
+import eu.advantly.ui.phone.resources.watch_takeover_confirm
+import eu.advantly.ui.phone.resources.watch_takeover_text
+import eu.advantly.ui.phone.resources.watch_takeover_title
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.result.ResultScreen
@@ -133,6 +138,7 @@ fun AdvantlyApp(
                     }
                 }
                 model.pendingScorerChoice?.let { ScorerDialog(model) }
+                model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
             }
         }
     }
@@ -201,5 +207,37 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
             }
         },
         modifier = Modifier.testTag("scorer_dialog"),
+    )
+}
+
+/**
+ * „Uhr nicht erreichbar“ (Review W3-M #5): Die Uhr zählt noch [busy]. Erst nach Bestätigung übernimmt das Handy dieses
+ * Match und das neue startet auf der Uhr; Eingaben, die die Uhr danach dort noch macht, werden verworfen.
+ */
+@Composable
+private fun WatchTakeOverDialog(
+    model: AdvantlyAppModel,
+    busy: LiveMatchSnapshot,
+) {
+    AlertDialog(
+        onDismissRequest = model::cancelWatchTakeOver,
+        title = { Text(stringResource(Res.string.watch_takeover_title)) },
+        text = {
+            Text(
+                stringResource(Res.string.watch_takeover_text, matchLabel(busy)),
+                modifier = Modifier.testTag("watch_takeover_text"),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = model::confirmWatchTakeOver, modifier = Modifier.testTag("watch_takeover_confirm")) {
+                Text(stringResource(Res.string.watch_takeover_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = model::cancelWatchTakeOver, modifier = Modifier.testTag("watch_takeover_cancel")) {
+                Text(stringResource(Res.string.action_cancel))
+            }
+        },
+        modifier = Modifier.testTag("watch_takeover_dialog"),
     )
 }

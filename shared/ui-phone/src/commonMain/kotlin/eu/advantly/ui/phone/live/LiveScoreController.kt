@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
@@ -188,6 +189,9 @@ class LiveScoreController(
     }
 
     private var lastPointAtNanos = Long.MIN_VALUE
+
+    /** Match des letzten Punktes: die Entprellung gilt je Match (Review W3-M #6, schneller Wechsel zwischen Plätzen). */
+    private var lastPointMatch: MatchId? = null
     private var noticeIds = 0
 
     /** Übernimmt einen Snapshot, der nicht durch ein eigenes Kommando entstand (Flow des Ports). */
@@ -250,7 +254,9 @@ class LiveScoreController(
         source: InputClockSource,
     ) {
         rawTaps++
-        if (debounceEnabled && lastPointAtNanos != Long.MIN_VALUE && t0 - lastPointAtNanos < DEBOUNCE_NANOS) {
+        val match = port.active.value?.matchId
+        val sameMatch = match != null && match == lastPointMatch
+        if (debounceEnabled && sameMatch && lastPointAtNanos != Long.MIN_VALUE && t0 - lastPointAtNanos < DEBOUNCE_NANOS) {
             debouncedTaps++
             haptics.perform(HapticCue.Rejected)
             return
@@ -260,6 +266,7 @@ class LiveScoreController(
             return
         }
         lastPointAtNanos = t0
+        lastPointMatch = match
         countedPoints++
         undoNotice = null
         val after = port.active.value

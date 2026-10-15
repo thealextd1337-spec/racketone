@@ -31,6 +31,13 @@ import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.ui.phone.live.LiveScoreController
 
+/** Start, der auf die bestätigte Übernahme des Matches der nicht erreichbaren Uhr wartet ([busy]). */
+data class PendingWatchTakeOver(
+    val setup: MatchSetup,
+    val options: StartOptions,
+    val busy: LiveMatchSnapshot,
+)
+
 /** Die fünf Tabs der Bottom-Navigation (04 §2.1); [Play] ist eine Aktion, kein eigener Inhalt. */
 enum class AppTab { Home, History, Play, Friends, Profile }
 
@@ -151,10 +158,34 @@ class AdvantlyAppModel(
         pendingScorerChoice = null
     }
 
+    /**
+     * Start mit „Meine Uhr“, während die nicht erreichbare Uhr noch ein anderes Match zählt (Review W3-M #5): wartet auf
+     * die Bestätigung „Das Handy übernimmt …, spätere Uhr-Eingaben dort werden verworfen“.
+     */
+    var pendingWatchTakeOver: PendingWatchTakeOver? by mutableStateOf(null)
+        private set
+
+    /** Übernahme bestätigt: das Handy übernimmt das alte Uhr-Match, das neue Match startet auf der Uhr. */
+    fun confirmWatchTakeOver() {
+        val pending = pendingWatchTakeOver ?: return
+        pendingWatchTakeOver = null
+        doStart(pending.setup, pending.options.copy(takeOverWatchMatch = true))
+    }
+
+    fun cancelWatchTakeOver() {
+        pendingWatchTakeOver = null
+    }
+
     private fun doStart(
         setup: MatchSetup,
         options: StartOptions,
     ) {
+        if (options.scorer == ScorerOption.MY_WATCH && !options.takeOverWatchMatch) {
+            live.watchTakeOverNeeded()?.let { busy ->
+                pendingWatchTakeOver = PendingWatchTakeOver(setup, options, busy)
+                return
+            }
+        }
         live.start(setup, options)
         controller.sync(live.active.value)
         when (navigator.top) {

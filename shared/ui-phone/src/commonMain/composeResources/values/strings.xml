@@ -444,4 +444,7 @@
     <string name="result_not_rated">Abandoned – does not count for wins or statistics.</string>
     <string name="wizard_scorer_watch_busy">Your watch is scoring %1$s. Choosing it moves the watch to this match – this phone keeps scoring the other one.</string>
     <string name="end_keep_playing">Keep playing</string>
+    <string name="watch_takeover_title">Watch not reachable</string>
+    <string name="watch_takeover_text">Your watch is still scoring %1$s and is not reachable. This phone takes over that match; inputs your watch makes there afterwards are discarded.</string>
+    <string name="watch_takeover_confirm">Take over and start</string>
 </resources>
