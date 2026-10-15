@@ -1,5 +1,6 @@
 package eu.advantly.core.scoring
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 
 /**
@@ -35,6 +36,8 @@ data class TapConflict(
  * @property absorbed als Doppel-Tap absorbierte `PointWon`
  * @property activeConflicts Widersprüche zwischen zwei wirksamen, nicht absorbierten `PointWon`
  * @property resolvedConflicts Widersprüche, von denen mindestens eine Seite inzwischen unwirksam ist
+ * @property roleRejected Steuer-/Zähl-Events eines Geräts, das an ihrer Position nicht Zähler ist (02 §7.5)
+ * @property scorer Zähler am Ende des Logs (`null` = kein Zähler festgelegt, alle Geräte zählen)
  */
 data class LogAnalysis(
     val ordered: List<ScoreEvent>,
@@ -44,6 +47,8 @@ data class LogAnalysis(
     val absorbed: Set<EventId>,
     val activeConflicts: List<TapConflict>,
     val resolvedConflicts: List<TapConflict>,
+    val roleRejected: Set<EventId> = emptySet(),
+    val scorer: DeviceId? = null,
 )
 
 /** Reine Funktionen über ein Event-Log: Ordnung, Duplikate, Wirksamkeit (Undo), Doppel-Taps und Widersprüche. */
@@ -63,8 +68,14 @@ object EventLog {
     /** Ein Event je `id` in [EventOrdering] (Platzhalter für abweichende Kopien siehe [LogAnalysis.ordered]). */
     fun ordered(events: Collection<ScoreEvent>): List<ScoreEvent> = analyze(events).ordered
 
-    /** Vollständige Analyse eines (ungeordneten) Logs. */
-    fun analyze(events: Collection<ScoreEvent>): LogAnalysis {
+    /**
+     * Vollständige Analyse eines (ungeordneten) Logs. [initialScorer] ist der Zähler aus der Genesis (02 §7.5);
+     * `null` = kein Zähler festgelegt (Alt-Logs/Testvektoren ohne `scorer`): bis zum ersten `ScorerChanged` zählt jedes Gerät.
+     */
+    fun analyze(
+        events: Collection<ScoreEvent>,
+        initialScorer: DeviceId? = null,
+    ): LogAnalysis {
         val raw = distinctOrdered(events)
         val seen = HashSet<EventId>()
         val rejected = HashSet<EventId>()
@@ -72,12 +83,46 @@ object EventLog {
         for (event in raw) {
             if (seen.add(event.id)) ordered += event else rejected += event.id
         }
-        val (undone, invalidUndos) = effectiveness(ordered, rejected)
-        val candidates = ordered.filter { it.id !in rejected }
+        val (roleRejected, scorer) = roles(ordered, rejected, initialScorer)
+        val (undone, invalidUndos) = effectiveness(ordered, rejected + roleRejected)
+        val candidates = ordered.filter { it.id !in rejected && it.id !in roleRejected }
         val absorbed = absorbedDoubleTaps(candidates)
         val all = conflicts(candidates)
         val (active, resolved) = all.partition { c -> listOf(c.first, c.second).none { it in undone || it in absorbed } }
-        return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved)
+        return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved, roleRejected, scorer)
+    }
+
+    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5). */
+    fun isScorerOnly(payload: EventPayload): Boolean =
+        payload is PointWon ||
+            payload is Undo ||
+            payload is ContinueDecision ||
+            payload is Correction ||
+            payload is Paused ||
+            payload is Resumed ||
+            payload is MatchEnded ||
+            payload is PointDetailSet
+
+    /**
+     * Rollenregel (02 §7.5): Vorwärts durch die Ordnung; `ScorerChanged` setzt den Zähler ab seiner Position. Ein
+     * Steuer-/Zähl-Event eines anderen Geräts ist unwirksam (`roleRejected`). Liefert auch den Zähler am Ende.
+     */
+    private fun roles(
+        ordered: List<ScoreEvent>,
+        rejected: Set<EventId>,
+        initialScorer: DeviceId?,
+    ): Pair<Set<EventId>, DeviceId?> {
+        var scorer = initialScorer
+        val roleRejected = HashSet<EventId>()
+        for (event in ordered) {
+            if (event.id in rejected) continue
+            val payload = event.payload
+            when {
+                payload is ScorerChanged -> scorer = payload.scorerDeviceId
+                scorer != null && isScorerOnly(payload) && event.deviceId != scorer -> roleRejected += event.id
+            }
+        }
+        return roleRejected to scorer
     }
 
     /**
@@ -98,7 +143,7 @@ object EventLog {
             if (event.id in undone || event.id in rejected) continue
             val payload = event.payload as? Undo ?: continue
             val target = position[payload.target] ?: continue
-            if (target >= i) invalid += event.id else undone += payload.target
+            if (target >= i || ordered[target].payload is ScorerChanged) invalid += event.id else undone += payload.target
         }
         return undone to invalid
     }

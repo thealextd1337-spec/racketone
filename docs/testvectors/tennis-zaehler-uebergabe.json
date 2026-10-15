@@ -1,0 +1,328 @@
+{
+  "schema": 1,
+  "id": "TV-TEN-003",
+  "title": "Zählerübergabe mitten im Satz",
+  "description": "Die Uhr zählt; Eingaben des Handys werden ignoriert, bis es per ScorerChanged übernimmt. Danach sind Punkt und Undo der Uhr wirkungslos, das Undo des neuen Zählers wirkt. Rückgabe per erneutem ScorerChanged; Undo auf ScorerChanged ist ungültig.",
+  "sources": [
+    "Advantly 02-scoring-regeln.md §7.5 (Single-Scorer, Entscheidung K13)",
+    "Advantly 01-architektur.md §4.4"
+  ],
+  "config": {
+    "formatVersion": 1,
+    "presetId": "TENNIS_SINGLES_BO3",
+    "sport": "TENNIS",
+    "discipline": "SINGLES",
+    "match": {
+      "mode": "BEST_OF",
+      "bestOf": 3
+    },
+    "game": {
+      "deuceMode": "ADVANTAGE"
+    },
+    "set": {
+      "gamesToWin": 6,
+      "tiebreakAt": 6,
+      "tiebreak": {
+        "pointsToWin": 7,
+        "winBy": 2,
+        "endChange": {
+          "first": 6,
+          "every": 6
+        }
+      }
+    },
+    "decidingSet": null,
+    "matchTiebreak": null
+  },
+  "lineup": {
+    "A": [
+      "A1"
+    ],
+    "B": [
+      "B1"
+    ],
+    "firstServer": "A1"
+  },
+  "scorer": "watch",
+  "events": [
+    {
+      "id": "e1",
+      "lamport": 1,
+      "deviceId": "watch",
+      "parentId": null,
+      "wallClockMs": 10000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e2",
+      "lamport": 2,
+      "deviceId": "watch",
+      "parentId": "e1",
+      "wallClockMs": 20000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e3",
+      "lamport": 3,
+      "deviceId": "phone",
+      "parentId": "e2",
+      "wallClockMs": 25000,
+      "type": "PointWon",
+      "side": "B"
+    },
+    {
+      "id": "e4",
+      "lamport": 4,
+      "deviceId": "phone",
+      "parentId": "e3",
+      "wallClockMs": 30000,
+      "type": "ScorerChanged",
+      "scorerDeviceId": "phone"
+    },
+    {
+      "id": "e5",
+      "lamport": 5,
+      "deviceId": "phone",
+      "parentId": "e4",
+      "wallClockMs": 40000,
+      "type": "PointWon",
+      "side": "B"
+    },
+    {
+      "id": "e6",
+      "lamport": 6,
+      "deviceId": "watch",
+      "parentId": "e5",
+      "wallClockMs": 45000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e7",
+      "lamport": 7,
+      "deviceId": "watch",
+      "parentId": "e6",
+      "wallClockMs": 46000,
+      "type": "Undo",
+      "target": "e5"
+    },
+    {
+      "id": "e8",
+      "lamport": 8,
+      "deviceId": "phone",
+      "parentId": "e7",
+      "wallClockMs": 50000,
+      "type": "Undo",
+      "target": "e5"
+    },
+    {
+      "id": "e9",
+      "lamport": 9,
+      "deviceId": "watch",
+      "parentId": "e8",
+      "wallClockMs": 60000,
+      "type": "ScorerChanged",
+      "scorerDeviceId": "watch"
+    },
+    {
+      "id": "e10",
+      "lamport": 10,
+      "deviceId": "watch",
+      "parentId": "e9",
+      "wallClockMs": 70000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e11",
+      "lamport": 11,
+      "deviceId": "watch",
+      "parentId": "e10",
+      "wallClockMs": 71000,
+      "type": "Undo",
+      "target": "e9"
+    }
+  ],
+  "expect": [
+    {
+      "afterEvent": 0,
+      "label": "Start: Uhr zählt",
+      "state": {
+        "current": {
+          "display": {
+            "A": "0",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "watch",
+        "rejectedByRole": [],
+        "ignoredEvents": []
+      }
+    },
+    {
+      "afterEvent": 2,
+      "label": "30:0 von der Uhr",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "rejectedByRole": []
+      }
+    },
+    {
+      "afterEvent": 3,
+      "label": "Handy-Punkt ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "rejectedByRole": [
+          "e3"
+        ],
+        "ignoredEvents": [
+          "e3"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 4,
+      "label": "Handy übernimmt",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "phone",
+        "effects": [
+          "SCORER_CHANGED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 5,
+      "label": "30:15 vom Handy",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "15"
+          }
+        },
+        "effects": [
+          "POINT"
+        ]
+      }
+    },
+    {
+      "afterEvent": 7,
+      "label": "Punkt und Undo der Uhr ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "15"
+          }
+        },
+        "rejectedByRole": [
+          "e3",
+          "e6",
+          "e7"
+        ],
+        "ignoredEvents": [
+          "e3",
+          "e6",
+          "e7"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 8,
+      "label": "Undo des Zählers wirkt",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "effects": [
+          "UNDONE"
+        ]
+      }
+    },
+    {
+      "afterEvent": 9,
+      "label": "Uhr übernimmt wieder",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "watch",
+        "effects": [
+          "SCORER_CHANGED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 10,
+      "label": "40:0",
+      "state": {
+        "current": {
+          "display": {
+            "A": "40",
+            "B": "0"
+          }
+        },
+        "effects": [
+          "POINT"
+        ]
+      }
+    },
+    {
+      "afterEvent": 11,
+      "label": "Undo auf ScorerChanged ungültig",
+      "state": {
+        "current": {
+          "display": {
+            "A": "40",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "watch",
+        "rejectedByRole": [
+          "e3",
+          "e6",
+          "e7"
+        ],
+        "ignoredEvents": [
+          "e3",
+          "e6",
+          "e7",
+          "e11"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    }
+  ]
+}

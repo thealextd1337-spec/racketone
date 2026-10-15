@@ -1,8 +1,14 @@
 package eu.advantly.data
 
 /**
- * Ein gespeichertes Match-Event (Minimal-Schema aus Spike S1).
- * [payload] ist das serialisierte Event (JSON); das Format legt später `sync-protocol` fest.
+ * Ein gespeichertes Match-Event (01 §5.1 `match_event`). [payload] ist der serialisierte `EventPayload` als JSON in
+ * derselben Form wie auf dem Draht (`{"type":"PointWon","side":"A"}`); typisierte Umwandlung über
+ * [toScoreEvent]/[toStoredEvent].
+ *
+ * @property wallClockMs nur Anzeige/Statistik und Doppel-Tap-Erkennung
+ * @property parentId Log-Kopf, den das erzeugende Gerät gesehen hat (Fork-Erkennung)
+ * @property type Payload-Typ (z. B. `PointWon`) für Abfragen ohne JSON-Parsing
+ * @property confirmed beim Speichern: mindestens eine Gegenstelle hat das Event schon (z. B. von dort empfangen)
  */
 data class StoredEvent(
     val id: String,
@@ -11,6 +17,10 @@ data class StoredEvent(
     val deviceSeq: Long,
     val lamport: Long,
     val payload: String,
+    val wallClockMs: Long = 0,
+    val parentId: String? = null,
+    val type: String = "",
+    val confirmed: Boolean = false,
 )
 
 /** Ergebnis von [EventStore.append]. */
@@ -28,6 +38,12 @@ enum class AppendResult {
     SEQUENCE_CONFLICT,
 }
 
+/** Ein `(deviceId, deviceSeq)`-Paar eines gespeicherten Events (Grundlage des Versionsvektors). */
+data class StoredSequence(
+    val deviceId: String,
+    val deviceSeq: Long,
+)
+
 /**
  * Append-only Event-Log aller Matches (lokale Single Source of Truth, 01 §5).
  * Synchron: ein Match hat < 500 Events, Zugriffe sind klein. Nicht thread-sicher über Plattformgrenzen hinweg –
@@ -37,9 +53,57 @@ interface EventStore {
     /** Speichert [event] idempotent über `id`. */
     fun append(event: StoredEvent): AppendResult
 
+    /** Speichert einen Empfangs-Batch in **einer** Transaktion; Ergebnis je Event in Eingabereihenfolge. */
+    fun appendAll(events: List<StoredEvent>): List<AppendResult>
+
     /** Alle Events eines Matches in der globalen Ordnung `(lamport, deviceId, id)` (01 §3.2). */
     fun eventsFor(matchId: String): List<StoredEvent>
 
+    /** Events von [deviceId] mit `deviceSeq` in [fromSeq]..[toSeq] (Anti-Entropie-Nachlieferung), in globaler Ordnung. */
+    fun eventsInRange(
+        matchId: String,
+        deviceId: String,
+        fromSeq: Long,
+        toSeq: Long,
+    ): List<StoredEvent>
+
+    /** Alle vorhandenen `(deviceId, deviceSeq)` eines Matches (sortiert) – daraus entsteht der Versionsvektor. */
+    fun sequences(matchId: String): List<StoredSequence>
+
+    /** Höchste Lamport-Zeit eines Matches (0 ohne Events). */
+    fun maxLamport(matchId: String): Long
+
+    /** Höchste `deviceSeq` von [deviceId] in einem Match (0 ohne Events). */
+    fun maxDeviceSeq(
+        matchId: String,
+        deviceId: String,
+    ): Long
+
     /** Anzahl der Events eines Matches. */
     fun count(matchId: String): Long
+
+    /** Markiert Events als bei einer Gegenstelle vorhanden (Ack einer `Events`-Nachricht, empfangene Events). */
+    fun markConfirmed(
+        matchId: String,
+        sequences: Collection<StoredSequence>,
+    )
+
+    /** Markiert alle Events von [deviceId] bis einschließlich [seq] als bei einer Gegenstelle vorhanden (`Summary`). */
+    fun markConfirmedUpTo(
+        matchId: String,
+        deviceId: String,
+        seq: Long,
+    )
+
+    /** Ausgangs-Rückstand über alle Matches: Events, die noch keine Gegenstelle bestätigt hat. */
+    fun unconfirmedCount(): Long
+
+    /** Matches mit Ausgangs-Rückstand (sortiert). */
+    fun unconfirmedMatches(): List<String>
+
+    /** Unbestätigte Events eines Matches in globaler Ordnung. */
+    fun unconfirmedEvents(matchId: String): List<StoredEvent>
+
+    /** Löscht alle Events eines Matches (nur für „Match löschen“ in der Historie). */
+    fun deleteMatch(matchId: String)
 }

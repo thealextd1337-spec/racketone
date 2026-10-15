@@ -33,10 +33,11 @@ Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 ## Modulstruktur und Regeln
 ```
 shared/core-model      pure  IDs, Sport, Spieler, Team, Lineup
-shared/core-scoring    pure  Events, RuleSets, Reducer, Undo, Merge        → core-model
+shared/core-scoring    pure  Events, RuleSets, Reducer, Undo, Zählerrolle  → core-model
 shared/sync-protocol   pure  Wire-DTOs, JSON-Codec, Anti-Entropy           → core-scoring
 shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
+shared/match-session         Session: Zähler/Anzeige, Event→Store→Engine   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
 shared/presentation          ViewModels + UI-State (kein watchOS)          → data, device-link, entitlements
 shared/ui-phone              CMP-Screens (android, ios, jvm("desktop"))    → presentation
@@ -50,7 +51,8 @@ watchApp/                    SwiftUI-Quellen der watchOS-App               → A
 Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `backend/`, `testvectors/`.
 
 **Harte Regeln**
-1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`.
+1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`
+   (Ausnahme: `sync-protocol` zusätzlich `kotlinx-serialization-json` für den Wire-Codec, 01 §4.3).
    **Kein `Clock.System`/`Clock`, kein I/O, keine Coroutines, keine Plattform-APIs, kein Zufall, keine Floats** in der Engine-Logik.
    Zeit und IDs kommen als Parameter herein. Deterministisch: gleiche Events → gleicher Zustand auf jedem Gerät.
 2. Abhängigkeiten nur entlang des Graphen oben (01 §2.2). Keine Zyklen, keine Abkürzungen (z. B. `ui-phone` → `data` direkt ist verboten).

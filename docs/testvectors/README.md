@@ -4,7 +4,7 @@ Stand: 2026-10-14 · Spezifikation: [02-scoring-regeln.md](../02-scoring-regeln.
 
 Testvektoren sind die **Paritätsgrundlage** zwischen der Kotlin-Engine (`core-scoring`) und dem Garmin-Port (Monkey C). Ein Vektor besteht aus Konfiguration, Lineup und Eventfolge. Dazu kommen erwartete (Teil-)Zustände nach bestimmten Events. Beide Implementierungen MÜSSEN alle Vektoren bestehen.
 
-Die Dateien in diesem Ordner sind **handgeschriebene Referenzbeispiele** aus der Regelspezifikation. Die aus der Kotlin-Engine generierten [Golden-Vektoren im Repo-Root](../../testvectors/README.md) verwenden dasselbe Format: 206 JSON-Dateien unter `testvectors/<sport>/presets/`, `rules/` und `random/` (Stand 2026-10-15). Sie enthalten Preset-Beispiele, Regel-Szenarien und deterministische Zufallsmatches mit Mehrgeräte-Logs. Bei Abweichungen zwischen Golden File und diesen Beispielen ist **ein Bug oder eine Spec-Lücke** zu klären, nicht einfach neu zu generieren. `:shared:core-scoring:checkTestVectorDrift` prüft die generierten Dateien und hängt an `check`.
+Die Dateien in diesem Ordner sind **handgeschriebene Referenzbeispiele** aus der Regelspezifikation. Die aus der Kotlin-Engine generierten [Golden-Vektoren im Repo-Root](../../testvectors/README.md) verwenden dasselbe Format: 209 JSON-Dateien unter `testvectors/<sport>/presets/`, `rules/` und `random/` (Stand 2026-10-15). Sie enthalten Preset-Beispiele, Regel-Szenarien und deterministische Zufallsmatches mit Mehrgeräte-Logs. Bei Abweichungen zwischen Golden File und diesen Beispielen ist **ein Bug oder eine Spec-Lücke** zu klären, nicht einfach neu zu generieren. `:shared:core-scoring:checkTestVectorDrift` prüft die generierten Dateien und hängt an `check`.
 
 ---
 
@@ -38,6 +38,7 @@ Die Dateien in diesem Ordner sind **handgeschriebene Referenzbeispiele** aus der
 | `sources` | ja | Regelstellen (ITF/FIP/USAP/BWF/ITTF-Regelnummer oder Abschnitt in 02) |
 | `config` | ja | `MatchFormat` (02 §3.1/3.2) |
 | `lineup` | ja | Lineup (02 §3.3): `A`, `B`, `firstServer`, optional `receiveRight`, `startEnds` |
+| `scorer` | nein | Startzähler (`deviceId`, 02 §7.5) – entspricht `MatchCreated.scorerDeviceId` der impliziten Genesis. Fehlt er, gibt es bis zum ersten `ScorerChanged` keine Rollenprüfung (Vektoren vor der Single-Scorer-Entscheidung). |
 | `events` | ja | Event-Payloads in **Eingabereihenfolge**, siehe 1.1 |
 | `expect` | ja | Checkpoints, siehe 1.2 |
 
@@ -102,6 +103,9 @@ for vector in testvectors/*.json:
 | [badminton-3x15-entscheidungssatz.json](badminton-3x15-entscheidungssatz.json) | TV-BAD-003 | Badminton Einzel 3×15 (ab 04.01.2027) | 14 Satzbälle, Satzsieger schlägt auf, Entscheidungssatz mit einmaligem Seitenwechsel bei 8, Verlängerung ab 14:14, Matchball 15:14, Deckel 20:20 (beide Matchball), Matchende 20:21 **ohne Seitenwechsel** nach dem letzten Satz | 71 | 13 |
 | [tischtennis-einzel-deuce.json](tischtennis-einzel-deuce.json) | TV-TT-001 | Tischtennis Einzel Best of 5 | Aufschlagwechsel alle 2 Punkte unabhängig vom Gewinner, `servesRemaining`, Satzball als Rückschläger, ab 10:10 Wechsel nach jedem Punkt, 13:11, Folgesatz eröffnet der bisherige Erst-Rückschläger, Seitenwechsel nach jedem Satz, kein Wechsel bei 5 außerhalb des Entscheidungssatzes, „10 Satzbälle“/„10 Matchbälle“, Undo | 47 | 16 |
 | [tischtennis-doppel-entscheidungssatz.json](tischtennis-doppel-entscheidungssatz.json) | TV-TT-002 | Tischtennis Doppel Best of 3 | Zyklus A1→B1→A2→B2, Erst-Rückschläger im Folgesatz (2.13.4), Entscheidungssatz: Seitenwechsel + Rückschlagtausch bei 5 (`RECEIVE_ORDER_SWAPPED`), Undo beider Wechsel, Auslösung durch die andere Seite, Verlängerung ab 10:10, Matchball, Matchende **ohne Seitenwechsel** | 48 | 23 |
+| [tennis-zaehler-uebergabe.json](tennis-zaehler-uebergabe.json) | TV-TEN-003 | Tennis Einzel, Best of 3, Zähler Uhr | Single-Scorer: Handy-Eingaben ignoriert (`rejectedByRole`), `ScorerChanged` mitten im Spiel, Punkt und Undo des Altzählers wirkungslos, Undo des neuen Zählers wirkt, Rückgabe, Undo auf `ScorerChanged` ungültig | 11 | 10 |
+| [tennis-altzaehler-offline.json](tennis-altzaehler-offline.json) | TV-TEN-004 | Tennis Einzel, Best of 3, Zähler Uhr | Altzähler zählt offline weiter: nach dem `ScorerChanged` geordnete Events werden beim Eintreffen der Übernahme nachträglich ignoriert, gleicher Lamport entscheidet über `deviceId` | 6 | 4 |
+| [padel-director-handy.json](padel-director-handy.json) | TV-PAD-003 | Padel Doppel, Star Point, Zähler Handy | Director-Modus: Punkt, Undo und `Paused` von der Uhr wirkungslos | 6 | 4 |
 
 **Verifikation:** Alle 54 Checkpoints wurden von Hand aus den Regeln abgeleitet und zusätzlich gegen eine unabhängige Wegwerf-Referenzimplementierung der Algorithmen aus 02 §6–§8 geprüft (0 Abweichungen, Mutationstest erkennt Abweichungen). Die Referenzimplementierung ist nicht Teil des Repos, maßgeblich ist die Kotlin-Engine.
 
@@ -109,6 +113,8 @@ for vector in testvectors/*.json:
 
 **Verifikation Review-Runde 2 (2026-10-15), Satzende-Regel für alle Sportarten (02 §6.7):** Nach Matchende gibt es keinen Seitenwechsel, am Satzende nur, wenn ein weiterer Satz folgt. TV-PB-001 Checkpoint 19 ist angepasst: kein `CHANGE_ENDS`, `ends` bleibt `{A: END_2, B: END_1}`. **Alle 10 Vektoren (136 Checkpoints)** wurden mit einer neuen, vollständigen Wegwerf-Referenzimplementierung für alle fünf Sportarten nachgerechnet (außerhalb des Repos): 0 Abweichungen. Mit der alten Regel weicht die Referenz genau an den 3 Matchende-Checkpoints ab (TV-PB-001, TV-BAD-003, TV-TT-002).
 
+
+**Verifikation Single-Scorer (2026-10-15):** Die 18 Checkpoints von TV-TEN-003, TV-TEN-004 und TV-PAD-003 wurden von Hand aus 02 §7.5 abgeleitet und gegen die Regel-Szenarien `scorer-handover-mid-set`, `scorer-offline-old-scorer` und `director-phone-scorer` der Golden-Vektoren gegengeprüft: 0 Abweichungen. **Alle 13 Vektoren: 154 Checkpoints.** Die Golden-Vektoren wurden regeneriert, weil der kanonische Zustand zwei neue Schlüssel hat (`scorerDeviceId`, `rejectedByRole`); bestehende Checkpoints sind sonst unverändert.
 ---
 
 ## 3. Abdeckungsplan (noch zu erstellen, Generator oder Hand)

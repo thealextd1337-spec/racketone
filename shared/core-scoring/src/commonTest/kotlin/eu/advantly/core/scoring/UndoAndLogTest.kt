@@ -297,7 +297,7 @@ class UndoAndLogTest {
     fun pointHistoryDeliversStateBeforeAndAfter() {
         val format = Presets.TENNIS_SINGLES_BO3.format()
         val m = MatchDriver(format).points("AAA")
-        val history = ScoringEngine.pointHistory(format, m.lineup, m.events)
+        val history = ScoringEngine.pointHistory(format, m.lineup, m.events, scorer = null)
         assertEquals(3, history.size)
         assertEquals("30-0", history[2].before.scoreCall)
         assertTrue(history[2].after.statusFlags.isNotEmpty())

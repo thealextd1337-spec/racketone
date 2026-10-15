@@ -44,7 +44,7 @@ play-services-wearable = "20.0.1"
 
 [libraries]
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
-# Nur für Tests/Werkzeuge der Pure-Module (Testvektoren lesen/schreiben) – nie in commonMain
+# core-model/core-scoring: nur Tests/Werkzeuge (Testvektoren). Einzige Pure-Ausnahme in commonMain: sync-protocol (Wire-Codec, 01 §4.3)
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }

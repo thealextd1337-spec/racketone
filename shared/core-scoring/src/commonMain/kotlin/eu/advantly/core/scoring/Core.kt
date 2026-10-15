@@ -2,6 +2,7 @@ package eu.advantly.core.scoring
 
 import eu.advantly.core.model.CourtSide
 import eu.advantly.core.model.DeuceMode
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.End
 import eu.advantly.core.model.EventId
@@ -140,6 +141,7 @@ internal class Core private constructor(
                 is PointDetailSet -> isAppliedPoint(payload.target)
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
+                is ScorerChanged -> error("ScorerChanged wirkt in der Log-Analyse (02 §7.5)")
             }
         if (!applied) markIgnored(event.id)
         return applied
@@ -854,7 +856,10 @@ internal class Core private constructor(
     // Export in die kanonische Form (02 §8)
     // =================================================================================================================
 
-    fun export(): MatchState {
+    fun export(
+        scorer: DeviceId? = null,
+        rejectedByRole: List<EventId> = emptyList(),
+    ): MatchState {
         val live = inSet && !frozen
         val serve = if (live) serveInfo() else null
         return MatchState(
@@ -872,6 +877,8 @@ internal class Core private constructor(
             effects = effects.sortedBy { it.ordinal },
             ignoredEvents = ignored,
             continuation = continuation(),
+            scorerDeviceId = scorer,
+            rejectedByRole = rejectedByRole,
         )
     }
 

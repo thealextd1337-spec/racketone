@@ -39,6 +39,8 @@ include(":shared:sync-protocol")
 include(":shared:device-link")
 include(":shared:data")
 include(":shared:entitlements")
+// Match-Session: Orchestrierung Engine + Store + Geräte-Sync (ohne UI/DI)
+include(":shared:match-session")
 // Präsentation
 include(":shared:presentation")
 include(":shared:ui-phone")

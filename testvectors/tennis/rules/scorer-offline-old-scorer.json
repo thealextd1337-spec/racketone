@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "GV-TEN-RULE-SCORER-OFFLINE-OLD-SCORER",
+  "title": "Regel-Szenario scorer-offline-old-scorer (generiert)",
+  "description": "Altzähler zählt offline weiter: seine nach dem ScorerChanged geordneten Events werden ignoriert Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.",
+  "sources": ["Advantly 02-scoring-regeln.md §6–§9; Regel-Tabellen-Tests in core-scoring/commonTest"],
+  "config": {"formatVersion":1,"presetId":"TENNIS_SINGLES_BO3","sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},"set":{"gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},"decidingSet":null,"matchTiebreak":null},
+  "lineup": {"A":["A1"],"B":["B1"],"firstServer":"A1"},
+  "scorer": "watch",
+  "events": [
+    {"id":"e1","lamport":1,"deviceId":"watch","parentId":null,"wallClockMs":10000,"type":"PointWon","side":"A"},
+    {"id":"e2","lamport":2,"deviceId":"watch","parentId":"e1","wallClockMs":20000,"type":"PointWon","side":"A"},
+    {"id":"p1","lamport":3,"deviceId":"phone","parentId":"e2","wallClockMs":31000,"type":"ScorerChanged","scorerDeviceId":"phone"},
+    {"id":"w3","lamport":3,"deviceId":"watch","parentId":"e2","wallClockMs":30000,"type":"PointWon","side":"A"},
+    {"id":"p2","lamport":4,"deviceId":"phone","parentId":"p1","wallClockMs":41000,"type":"PointWon","side":"B"},
+    {"id":"w4","lamport":4,"deviceId":"watch","parentId":"w3","wallClockMs":40000,"type":"PointWon","side":"B"}
+  ],
+  "expect": [
+    {"afterEvent":0,"label":"Start","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":0,"B":0},"display":{"A":"0","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"0-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":[],"ignoredEvents":[],"continuation":null,"scorerDeviceId":"watch","rejectedByRole":[]}},
+    {"afterEvent":3,"label":"nach p1","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":2,"B":0},"display":{"A":"30","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"30-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["SCORER_CHANGED"],"ignoredEvents":[],"continuation":null,"scorerDeviceId":"phone","rejectedByRole":[]}},
+    {"afterEvent":4,"label":"nach w3","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":2,"B":0},"display":{"A":"30","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"30-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["IGNORED"],"ignoredEvents":["w3"],"continuation":null,"scorerDeviceId":"phone","rejectedByRole":["w3"]}},
+    {"afterEvent":5,"label":"nach p2","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":2,"B":1},"display":{"A":"30","B":"15"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"LEFT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"30-15","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["POINT"],"ignoredEvents":["w3"],"continuation":null,"scorerDeviceId":"phone","rejectedByRole":["w3"]}},
+    {"afterEvent":6,"label":"nach w4","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":2,"B":1},"display":{"A":"30","B":"15"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"LEFT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"30-15","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["IGNORED"],"ignoredEvents":["w3","w4"],"continuation":null,"scorerDeviceId":"phone","rejectedByRole":["w3","w4"]}}
+  ]
+}

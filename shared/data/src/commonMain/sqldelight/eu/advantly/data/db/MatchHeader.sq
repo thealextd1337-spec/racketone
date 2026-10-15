@@ -1,0 +1,71 @@
+-- Match-Kopf (01 §5.1 „match“ + „match_summary“): unveränderliche Daten aus der Genesis plus abgeleiteter
+-- Ergebnis-Cache für Listen. Der Cache ist jederzeit aus den Events neu berechenbar.
+CREATE TABLE match_header (
+    id TEXT NOT NULL PRIMARY KEY,
+    sport TEXT NOT NULL,
+    discipline TEXT NOT NULL,
+    format_json TEXT NOT NULL,
+    lineup_json TEXT NOT NULL,
+    meta_json TEXT NOT NULL,
+    surface TEXT,
+    environment TEXT,
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    -- MatchStatus der Engine: IN_PROGRESS, PAUSED, AWAITING_DECISION, FINISHED
+    status TEXT NOT NULL,
+    previous_match_id TEXT,
+    winner TEXT,
+    result_reason TEXT,
+    sets_won_a INTEGER NOT NULL DEFAULT 0,
+    sets_won_b INTEGER NOT NULL DEFAULT 0,
+    -- Satzstände (ScoreSummary) als JSON
+    score_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX match_header_created ON match_header (created_at_ms);
+CREATE INDEX match_header_sport ON match_header (sport, created_at_ms);
+CREATE INDEX match_header_previous ON match_header (previous_match_id);
+
+insertOrIgnore:
+INSERT OR IGNORE INTO match_header (
+    id, sport, discipline, format_json, lineup_json, meta_json, surface, environment,
+    created_at_ms, updated_at_ms, status, previous_match_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+countById:
+SELECT count(*) FROM match_header WHERE id = ?;
+
+updateProgress:
+UPDATE match_header
+SET status = ?, winner = ?, result_reason = ?, sets_won_a = ?, sets_won_b = ?, score_json = ?, updated_at_ms = ?
+WHERE id = ?;
+
+updatePrevious:
+UPDATE match_header SET previous_match_id = ? WHERE id = ? AND previous_match_id IS NULL;
+
+selectById:
+SELECT * FROM match_header WHERE id = ?;
+
+history:
+SELECT * FROM match_header
+WHERE (:sport IS NULL OR sport = :sport) AND created_at_ms >= :fromMs AND created_at_ms < :toMs
+ORDER BY created_at_ms DESC, id DESC
+LIMIT :limit OFFSET :offset;
+
+active:
+SELECT * FROM match_header WHERE status != 'FINISHED' ORDER BY updated_at_ms DESC, id;
+
+recent:
+SELECT * FROM match_header ORDER BY updated_at_ms DESC, id LIMIT ?;
+
+followUps:
+SELECT * FROM match_header WHERE previous_match_id = ? ORDER BY created_at_ms, id;
+
+lastOfSport:
+SELECT * FROM match_header
+WHERE sport = :sport AND (:discipline IS NULL OR discipline = :discipline)
+ORDER BY created_at_ms DESC, id DESC
+LIMIT 1;
+
+deleteById:
+DELETE FROM match_header WHERE id = ?;

@@ -1,4 +1,4 @@
-// Scoring-Engine: Events, RuleSets, Reducer, Undo, Merge – pure Kotlin (kein Clock/IO).
+// Scoring-Engine: Events, RuleSets, Reducer, Undo, Zählerrolle – pure Kotlin (kein Clock/IO).
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinJvmCompilation
 
 plugins {
