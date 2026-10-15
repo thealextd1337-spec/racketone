@@ -195,6 +195,8 @@ sealed interface EventPayload {
 
 **UI-Undo**: Der Undo-Button erzeugt `Undo(target = letztes wirksames PointWon/ContinueDecision)` – das Ziel ist eine konkrete Event-ID, daher auch bei parallelen Taps eindeutig.
 
+**Klarstellung 2026-10-15:** Maßgeblich ist [02 §7.3](02-scoring-regeln.md#73-effektive-events-und-fold-normativ): UI-Undo umfasst auch wirksam angewendete `Correction` und `MatchEnded`; ignorierte Events sind nie UI-Undo-Ziel.
+
 ### 3.3 Regelwerke (`RuleSet`)
 
 ```kotlin
