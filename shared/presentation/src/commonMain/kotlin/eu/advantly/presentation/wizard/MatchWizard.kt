@@ -505,16 +505,13 @@ class MatchWizard(
             return Lineup(a = a, b = b, firstServer = server)
         }
 
-        /** Erkennt ein Preset aus 02 §4 mit identischem Format (nur Anzeige/Statistik). */
-        fun recognizePreset(format: MatchFormat): String? {
-            val plain = format.copy(presetId = null)
-            return Presets.all
-                .firstOrNull { p ->
-                    p.sport == format.sport && format.discipline in p.disciplines &&
-                        p.format(format.discipline).copy(presetId = null) == plain
-                }?.id
+        /**
+         * Erkennt ein Preset aus 02 §4 mit identischem Format (nur Anzeige/Statistik), eindeutig über
+         * [Presets.recognize]: eine passende vorhandene `presetId` bleibt, sonst das bevorzugte Preset (keine Aliase).
+         */
+        fun recognizePreset(format: MatchFormat): String? =
+            Presets.recognize(format)
                 ?: if (format.sport == Sport.BADMINTON && format.match.mode == MatchMode.OPEN) "BADMINTON_OPEN" else null
-        }
 
         private fun WizardInput.withDiscipline(discipline: Discipline): WizardInput {
             val size = discipline.playersPerSide

@@ -337,6 +337,37 @@ class OperationRulesTest {
         assertEquals(MatchTiebreakFormat.MTB10, Presets.withGamesPerSet(Presets.PADEL_GOLDEN_STB.format(), 2).decidingSet)
     }
 
+    /** Review: Preset-ID eindeutig, Aliase nur für bestehende IDs, withGamesPerSet ohne irreführenden Namen. */
+    @Test
+    fun presetRecognitionIsUniqueAndGamesPerSetRenames() {
+        for (preset in Presets.all) {
+            for (d in preset.disciplines) {
+                val format = preset.format(d)
+                assertEquals(preset.id, Presets.recognize(format), "eigene ID bleibt")
+                val expected = Presets.aliases[preset.id] ?: preset.id
+                assertEquals(expected, Presets.recognize(format.copy(presetId = null)), "ohne ID: bevorzugtes Preset")
+                // keine weiteren strukturellen Duplikate außer den erklärten Aliasen
+                val twins =
+                    Presets.all.filter { other ->
+                        other !== preset && other.sport == preset.sport && d in other.disciplines &&
+                            other.format(d).copy(presetId = null) == format.copy(presetId = null)
+                    }
+                assertTrue(twins.all { Presets.aliases[it.id] == preset.id || Presets.aliases[preset.id] == it.id }, "${preset.id}: $twins")
+            }
+        }
+        assertEquals(
+            "TENNIS_TIEBREAK_ONLY_10",
+            Presets.recognize(Presets.TENNIS_MATCH_TB_ONLY.format().copy(presetId = "TENNIS_SINGLES_BO3")),
+        )
+
+        val bo3 = Presets.TENNIS_SINGLES_BO3.format()
+        assertEquals("TENNIS_SINGLES_BO3", Presets.withGamesPerSet(bo3, 6).presetId, "unverändertes Format")
+        assertNull(Presets.withGamesPerSet(bo3, 4).presetId, "Best of 3 mit 4 Games: benutzerdefiniert")
+        assertNull(Presets.withGamesPerSet(bo3, 1).presetId)
+        assertEquals("TENNIS_SHORT_SETS", Presets.withGamesPerSet(Presets.TENNIS_BO3_MTB10.format(), 4).presetId)
+        assertEquals("PADEL_MINI_SETS", Presets.withGamesPerSet(Presets.PADEL_GOLDEN_STB.format(), 4).presetId)
+    }
+
     @Test
     fun oneGameSetNeedsTwoLeadOrTiebreakAtOneAll() {
         val format = Presets.withGamesPerSet(Presets.TENNIS_SINGLES_BO3.format(), 1)
