@@ -64,12 +64,15 @@ function Find-Adb {
 
 $AdbExe = Find-Adb
 
-# stderr von adb (z. B. "No such file") darf unter ErrorActionPreference=Stop nicht abbrechen (PowerShell 5.1)
+# stderr von adb (z. B. "No such file") darf unter ErrorActionPreference=Stop nicht abbrechen (PowerShell 5.1).
+# Der Exit-Code des letzten Aufrufs steht danach in $script:AdbExit.
+$script:AdbExit = 0
 function Invoke-Adb([string]$Serial, [string[]]$Arguments) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
         $output = & $AdbExe -s $Serial @Arguments 2>&1 | ForEach-Object { "$_" }
+        $script:AdbExit = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -80,7 +83,42 @@ function Invoke-Adb([string]$Serial, [string[]]$Arguments) {
 function Save-ExecOut([string]$Serial, [string]$Command, [string]$Target) {
     $line = "`"$AdbExe`" -s $Serial exec-out $Command > `"$Target`""
     cmd /c $line | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Fehlgeschlagen: adb exec-out $Command" }
+    return ($LASTEXITCODE -eq 0)
+}
+
+# Groesse einer Datei auf dem Geraet in Bytes; $RunAs = im App-Kontext (relativer Pfad = App-Datenverzeichnis)
+function Get-RemoteSize([string]$Serial, [string]$Path, [bool]$RunAs) {
+    if ($RunAs) { $arguments = @("shell", "run-as", $Package, "stat", "-c", "%s", $Path) }
+    else { $arguments = @("shell", "stat", "-c", "%s", $Path) }
+    $out = (Invoke-Adb $Serial $arguments).Trim()
+    if ($script:AdbExit -eq 0 -and $out -match "^\d+$") { return [int64]$out }
+    if (-not $RunAs) { return (Get-RemoteSize $Serial $Path $true) }
+    throw "Groesse von $Path auf $Serial nicht ermittelbar ($out)."
+}
+
+# Kopiert eine Geraetedatei verifiziert: frische Temp-Datei, Exit-Code und Groesse >= Remote-Groesse pruefen, erst dann
+# an den Zielort verschieben. Ohne $RunAsOnly zuerst adb pull, sonst bzw. als Fallback run-as cat.
+function Copy-Verified([string]$Serial, [string]$Remote, [bool]$RunAsOnly, [string]$Dest) {
+    $expected = Get-RemoteSize $Serial $Remote $RunAsOnly
+    $tmp = "$Dest.part"
+    Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+    $ok = $false
+    if (-not $RunAsOnly) {
+        Invoke-Adb $Serial @("pull", $Remote, $tmp) | Out-Null
+        $ok = ($script:AdbExit -eq 0) -and (Test-Path $tmp) -and ((Get-Item $tmp).Length -ge $expected)
+    }
+    if (-not $ok) {
+        # Fallback: manche Android-Versionen sperren Android/data fuer adb pull
+        Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+        $exit = Save-ExecOut $Serial "run-as $Package cat $Remote" $tmp
+        $ok = $exit -and (Test-Path $tmp) -and ((Get-Item $tmp).Length -ge $expected)
+    }
+    if (-not $ok) {
+        Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+        throw "Kopie von $Remote unvollstaendig oder fehlgeschlagen (erwartet mindestens $expected Bytes)."
+    }
+    Move-Item -Force $tmp $Dest
+    return $expected
 }
 
 function Assert-Device([string]$Label, [string]$Serial) {
@@ -120,11 +158,13 @@ function Pull-Database([string]$Label, [string]$Serial, [string]$Target) {
         Invoke-Adb $Serial @("shell", "am", "force-stop", $Package) | Out-Null
         Start-Sleep -Milliseconds 500
     }
+    # Alte DB/WAL aus einem frueheren Lauf im selben Ordner duerfen nie mit der neuen Kopie gemischt werden
+    foreach ($file in $DbFiles) { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $Target $file) }
     foreach ($file in $DbFiles) {
         if ($present -contains $file) {
             $dest = Join-Path $Target $file
-            Save-ExecOut $Serial "run-as $Package cat databases/$file" $dest
-            Write-Host ("  {0}: {1} ({2:N0} Bytes)" -f $Label, $file, (Get-Item $dest).Length)
+            $size = Copy-Verified $Serial "databases/$file" $true $dest
+            Write-Host ("  {0}: {1} ({2:N0} Bytes, verifiziert)" -f $Label, $file, $size)
         }
     }
     $db = Join-Path $Target "advantly.db"
@@ -133,25 +173,34 @@ function Pull-Database([string]$Label, [string]$Serial, [string]$Target) {
     return $db
 }
 
-# Zieht fieldtest*.jsonl (Feldtest-Modus) und s5-diag*.log (Workout-Diagnose, nur Debug); liefert die Feldtest-Dateien
+# Zieht fieldtest*.jsonl (Feldtest-Modus) und s5-diag*.log (Workout-Diagnose, nur Debug); liefert die Feldtest-Dateien.
+# Loeschen auf der Uhr (-ClearFieldLog) erst, wenn ALLE Kopien verifiziert sind und die Datei seitdem nicht gewachsen ist.
 function Pull-FieldLog([string]$Label, [string]$Serial, [string]$Target) {
-    $all = (Invoke-Adb $Serial @("shell", "ls", $DiagDir)) -split "\s+" | Where-Object { $_ -like "fieldtest*.jsonl" -or $_ -like "s5-diag*.log" }
-    $names = @($all | Where-Object { $_ -like "fieldtest*.jsonl" })
+    $listing = Invoke-Adb $Serial @("shell", "ls", $DiagDir)
+    if ($script:AdbExit -ne 0) { $listing = Invoke-Adb $Serial @("shell", "run-as", $Package, "ls", $DiagDir) }
+    $all = @($listing -split "\s+" | Where-Object { $_ -like "fieldtest*.jsonl" -or $_ -like "s5-diag*.log" })
+    Get-ChildItem $Target -Include "fieldtest*.jsonl", "s5-diag*.log" -File -Recurse -ErrorAction SilentlyContinue |
+        Remove-Item -Force
     $pulled = @()
+    $sizes = @{}
     foreach ($name in $all) {
         $dest = Join-Path $Target $name
-        Invoke-Adb $Serial @("pull", "$DiagDir/$name", "$dest") | Out-Null
-        if (-not (Test-Path $dest) -or (Get-Item $dest).Length -eq 0) {
-            # Manche Android-Versionen sperren Android/data fuer adb pull
-            Save-ExecOut $Serial "run-as $Package cat $DiagDir/$name" $dest
-        }
+        $sizes[$name] = Copy-Verified $Serial "$DiagDir/$name" $false $dest
         if ($name -like "fieldtest*.jsonl") { $pulled += $dest }
-        Write-Host ("  {0}: {1} ({2:N0} Bytes)" -f $Label, $name, (Get-Item $dest).Length)
+        Write-Host ("  {0}: {1} ({2:N0} Bytes, verifiziert)" -f $Label, $name, (Get-Item $dest).Length)
     }
     if ($pulled.Count -eq 0) { Write-Host "  $Label`: kein Feldtest-Protokoll (Feldtest-Modus aus?)" }
     if ($ClearFieldLog -and $pulled.Count -gt 0) {
-        foreach ($name in $names) { Invoke-Adb $Serial @("shell", "rm", "$DiagDir/$name") | Out-Null }
-        Write-Host "  $Label`: Feldtest-Protokoll auf der Uhr geloescht"
+        foreach ($name in ($all | Where-Object { $_ -like "fieldtest*.jsonl" })) {
+            $now = Get-RemoteSize $Serial "$DiagDir/$name" $false
+            if ($now -ne $sizes[$name]) {
+                Write-Host "  $Label`: $name ist seit dem Kopieren gewachsen (Feldtest-Modus noch an?) - NICHT geloescht"
+                continue
+            }
+            Invoke-Adb $Serial @("shell", "rm", "$DiagDir/$name") | Out-Null
+            if ($script:AdbExit -ne 0) { Invoke-Adb $Serial @("shell", "run-as", $Package, "rm", "$DiagDir/$name") | Out-Null }
+            Write-Host "  $Label`: $name auf der Uhr geloescht"
+        }
     }
     return $pulled
 }

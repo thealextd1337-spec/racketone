@@ -42,3 +42,16 @@ hs_err_pid*
 iosApp/Generated/
 # aus gradle.properties erzeugt (./gradlew generateAppleVersionConfig)
 iosApp/Config/Version.xcconfig
+
+# P1-Gate-Rohdaten (tools/p1-gate, docs/release/p1-gate-protokoll.md §7): Datenbanken enthalten Spielernamen
+*.db
+# SQLDelight-Schema-Snapshots (verifyMigrations) bleiben versioniert
+!shared/data/src/commonMain/sqldelight/databases/*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.part
+fieldtest*.jsonl
+s5-diag*.log
+p1-gate/
+!tools/p1-gate/
