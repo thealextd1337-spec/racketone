@@ -2,15 +2,20 @@ package eu.advantly.android.sync
 
 import android.os.Handler
 import android.os.Looper
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.sync.protocol.PeerKind
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Empfang von Uhr-Events, wenn keine Activity läuft (App im Hintergrund oder Prozess beendet, W1-I): Google Play
@@ -19,8 +24,10 @@ import java.util.concurrent.TimeUnit
  * - **Nachricht** (Live-Kanal): Session sicherstellen, Frame an den laufenden Transport geben
  *   ([WearDataLayerInbound]) und warten, bis die Session ihn auf dem Main-Thread gespeichert hat – erst dann endet der
  *   Callback. Das Ack geht wie gewohnt an die Uhr; fehlt es, wiederholt die Uhr bzw. gleicht beim nächsten `Hello` ab.
- * - **DataItem** (Queue-Kanal): Session sicherstellen; deren Transport liest beim Start alle wartenden Items und löscht
- *   sie erst nach der Verarbeitung (nichts geht verloren, auch wenn der Prozess danach endet).
+ * - **DataItem** (Queue-Kanal, Kaltstart): Items einfrieren (`freeze()`), Session sicherstellen, jedes Item für dieses
+ *   Gerät mit Verarbeitungsbestätigung an den Transport geben und den Callback offenhalten (mit Timeout), bis die
+ *   Session alle gespeichert hat. Gelöscht wird ein Item erst NACH dem Speichern; bleibt es wegen Timeout/Prozess-Tod
+ *   liegen, liest es der Transport beim nächsten Start erneut (idempotent).
  *
  * Callbacks laufen auf einem Worker-Thread; die Session nur auf dem Main-Thread benutzen.
  */
@@ -38,9 +45,39 @@ class PhoneSyncListenerService : WearableListenerService() {
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
+        // Buffer gilt nur während dieses Aufrufs: Items einfrieren, dann freigeben
+        val items = events.filter { it.type == DataEvent.TYPE_CHANGED }.map { it.dataItem.freeze() }
         events.release()
         onMainAndWait { ensureSession() }
+        if (items.isEmpty()) return
+        val localNode = localNodeId() ?: return // ohne eigene Node-ID kein sicheres Zielfiltern; Transport liest beim Start
+        val dataClient = Wearable.getDataClient(applicationContext)
+        val persisted = CountDownLatch(items.size)
+        onMainAndWait {
+            items.forEach { item ->
+                val uri = item.uri
+                val delivered =
+                    WearDataLayerInbound.deliverQueuedItem(localNode, uri.host, uri.pathSegments, item.data) {
+                        // Session hat den Frame gespeichert → erst jetzt aus der Queue löschen
+                        dataClient.deleteDataItems(uri)
+                        persisted.countDown()
+                    }
+                if (!delivered) persisted.countDown()
+            }
+        }
+        persisted.await(QUEUE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
     }
+
+    private fun localNodeId(): String? =
+        try {
+            Tasks.await(Wearable.getNodeClient(applicationContext).localNode, QUEUE_TIMEOUT_SECONDS, TimeUnit.SECONDS).id
+        } catch (e: ExecutionException) {
+            null
+        } catch (e: TimeoutException) {
+            null
+        } catch (e: InterruptedException) {
+            null
+        }
 
     private fun ensureSession() {
         AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
@@ -64,5 +101,6 @@ class PhoneSyncListenerService : WearableListenerService() {
 
     private companion object {
         const val MAIN_TIMEOUT_SECONDS = 5L
+        const val QUEUE_TIMEOUT_SECONDS = 10L
     }
 }

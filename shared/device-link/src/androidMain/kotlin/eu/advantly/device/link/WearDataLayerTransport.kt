@@ -55,7 +55,9 @@ class WearDataLayerTransport(
 
     private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { refreshPeers() }
 
-    private val inboundSink: (String, ByteArray) -> Unit = { node, frame -> listener?.onFrame(node, frame) }
+    private val inboundSink: (String, ByteArray, () -> Unit) -> Unit = { node, frame, onConsumed ->
+        listener?.onFrame(node, frame, onConsumed)
+    }
 
     private val dataListener =
         DataClient.OnDataChangedListener { events ->
