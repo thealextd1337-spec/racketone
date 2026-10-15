@@ -181,6 +181,39 @@ jobs:
           test -f "$products/Debug-watchsimulator/AdvantlyWatch.app/en.lproj/Localizable.strings"
           test -f "$products/Debug-iphonesimulator/Advantly.app/de.lproj/Localizable.strings"
           test -f "$products/Debug-iphonesimulator/Advantly.app/en.lproj/Localizable.strings"
+      # Spike S4: Live-Score (Compose Multiplatform) im iOS-Simulator starten, Auto-Benchmark (40 synthetische Punkte,
+      # misst Zustand → Frame über die CADisplayLink-getriebene Frame-Clock) ablesen und Screenshots EN/DE ablegen.
+      - name: iOS-Simulator – App starten, Benchmark + Screenshots (Spike S4)
+        timeout-minutes: 15
+        env:
+          IOS_SIM: ${{ steps.sim.outputs.ios }}
+        run: |
+          set -euo pipefail
+          app=build/DerivedData/Build/Products/Debug-iphonesimulator/Advantly.app
+          out="$PWD/build/simulator"
+          mkdir -p "$out"
+          # macOS hat kein `timeout` – perl-alarm begrenzt das Warten auf den Boot
+          xcrun simctl boot "$IOS_SIM" || true
+          perl -e 'alarm shift; exec @ARGV' 300 xcrun simctl bootstatus "$IOS_SIM" -b
+          xcrun simctl status_bar "$IOS_SIM" override --time 9:41 --batteryState charged --batteryLevel 100 || true
+          xcrun simctl install "$IOS_SIM" "$app"
+          xcrun simctl launch --terminate-running-process --stdout="$out/app-en.log" --stderr="$out/app-en.err.log" "$IOS_SIM" eu.advantly -advantlyAutoBench -AppleLanguages "(en)" -AppleLocale en_US
+          for _ in $(seq 1 90); do grep -q ADVANTLY_BENCH "$out/app-en.log" 2>/dev/null && break; sleep 1; done
+          xcrun simctl io "$IOS_SIM" screenshot "$out/live-score-en.png"
+          xcrun simctl launch --terminate-running-process --stdout="$out/app-de.log" --stderr="$out/app-de.err.log" "$IOS_SIM" eu.advantly -AppleLanguages "(de)" -AppleLocale de_DE
+          sleep 10
+          xcrun simctl io "$IOS_SIM" screenshot "$out/live-score-de.png"
+          # Validiert n ≥ 40 und numerische Perzentile (sonst Fehler), bewertet G7 (Go/No-Go im Summary)
+          python3 .github/scripts/check_s4_bench.py --self-test
+          python3 .github/scripts/check_s4_bench.py "$out/app-en.log" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Simulator-Screenshots + Logs hochladen
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-simulator-s4
+          path: build/simulator/
+          if-no-files-found: warn
+          retention-days: 14
       # Spike S1: Watch-App im Simulator starten; ContentView schreibt per WatchStore.smokeCheck() in die
       # SQLite-Datei und druckt ADVANTLY_SMOKE. Informativ (Simulator-Start kann flaky sein), Ergebnis im Summary.
       - name: watchOS-App-Smoke im Simulator (EventStore)

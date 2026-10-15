@@ -4,4 +4,65 @@
     <string name="app_name">Advantly</string>
     <string name="app_tagline">Score tennis, padel and pickleball – on your phone and watch.</string>
     <string name="app_version">Version %1$s</string>
+
+    <!-- Live-Score (H6) -->
+    <string name="live_team_us">US</string>
+    <string name="live_team_them">THEM</string>
+    <string name="live_team_us_name">Us</string>
+    <string name="live_team_them_name">Them</string>
+    <string name="live_serve">Serve</string>
+    <string name="live_score_advantage">AD</string>
+    <string name="live_score_pair">%1$s–%2$s</string>
+    <string name="live_games_and_points">%1$s · %2$s</string>
+    <string name="live_sport_tennis">Tennis</string>
+    <string name="live_format_best_of_3">Best of 3</string>
+
+    <string name="hint_breakpoint">Break point</string>
+    <string name="hint_setpoint">Set point</string>
+    <string name="hint_matchpoint">Match point</string>
+    <string name="hint_deuce">Deuce</string>
+    <string name="hint_tiebreak">Tiebreak</string>
+    <string name="hint_changeends">Change ends</string>
+    <string name="hint_match_won">Match won</string>
+    <string name="hint_match_lost">Match lost</string>
+
+    <string name="action_undo">Undo</string>
+    <string name="action_redo">Redo</string>
+    <string name="action_more">More</string>
+    <string name="action_outdoor">Outdoor</string>
+    <string name="undo_snackbar">Undo: %1$s → %2$s</string>
+
+    <string name="a11y_point_for">Point for %1$s, %2$s. Score %3$s to %4$s.</string>
+    <string name="a11y_serving">%1$s serving.</string>
+
+    <string name="a11y_hint_for_us">%1$s for us</string>
+    <string name="a11y_hint_for_them">%1$s for them</string>
+
+    <string name="menu_outdoor_contrast">Outdoor contrast</string>
+    <string name="menu_keep_screen_on">Keep screen on</string>
+    <string name="menu_latency_overlay">Latency overlay</string>
+    <string name="menu_debounce">Debounce taps (600 ms)</string>
+    <string name="menu_demo_breakpoint">Demo: break point</string>
+    <string name="menu_demo_setpoint">Demo: set point</string>
+    <string name="menu_demo_matchpoint">Demo: match point</string>
+    <string name="menu_demo_deuce">Demo: deuce</string>
+    <string name="menu_demo_tiebreak">Demo: tiebreak</string>
+    <string name="menu_auto_benchmark">Auto benchmark (40 points)</string>
+    <string name="menu_reset_measurements">Reset measurements</string>
+    <string name="menu_new_match">New match</string>
+
+    <!-- Latenz-Overlay (Spike S4) -->
+    <string name="latency_input_to_next_frame">Input → next frame start after draw</string>
+    <string name="latency_input_to_draw">Input → draw</string>
+    <string name="latency_source_line">%1$s: %2$s</string>
+    <string name="latency_source_event">input event</string>
+    <string name="latency_source_handler">handler fallback, not for G1</string>
+    <string name="latency_source_synthetic">auto benchmark</string>
+    <string name="latency_stats">p50 %1$s · p95 %2$s · max %3$s ms (n = %4$s)</string>
+    <string name="latency_no_samples">tap a panel to measure</string>
+    <string name="latency_counters">Taps %1$s · points %2$s · debounced %3$s</string>
+    <string name="latency_refresh_rate">%1$s Hz</string>
+    <string name="latency_frames">Frame time p95 %1$s ms · jank %2$s/%3$s</string>
+    <string name="latency_toggle">Expand or collapse latency overlay</string>
+    <string name="latency_benchmark_running">Auto benchmark running …</string>
 </resources>
