@@ -11,6 +11,7 @@ import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.presentation.match.LocalDay
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,10 +36,10 @@ class SetupCatalogTest {
     }
 
     @Test
-    fun everySportOffersThreeToFiveFormats() {
+    fun everySportOffersThreeToSevenFormats() {
         for (sport in SetupCatalog.sports) {
             val formats = SetupCatalog.formats(sport, day)
-            assertTrue("$sport", formats.size in 3..5)
+            assertTrue("$sport", formats.size in 3..7)
             assertTrue("$sport", formats.all { it.sport == sport })
         }
         assertEquals(Sport.entries.toSet(), SetupCatalog.sports.toSet())
@@ -122,5 +123,73 @@ class SetupCatalogTest {
     fun badmintonIsPlayedIndoorsByDefault() {
         assertEquals(Environment.INDOOR, SetupCatalog.meta(Sport.BADMINTON).environment)
         assertNull(SetupCatalog.meta(Sport.TENNIS).environment)
+    }
+
+    @Test
+    fun tiebreakOnlyChoicesUseTheSpecPresets() {
+        fun preset(
+            choice: FormatChoice,
+            discipline: Discipline,
+        ) = SetupCatalog.format(choice, discipline, day).presetId
+        assertEquals("TENNIS_TIEBREAK_ONLY_7", preset(FormatChoice.TENNIS_TIEBREAK_7, Discipline.SINGLES))
+        assertEquals("TENNIS_TIEBREAK_ONLY_10", preset(FormatChoice.TENNIS_TIEBREAK_10, Discipline.DOUBLES))
+        assertEquals("PADEL_TIEBREAK_ONLY_7", preset(FormatChoice.PADEL_TIEBREAK_7, Discipline.DOUBLES))
+        assertEquals("PADEL_TIEBREAK_ONLY_10", preset(FormatChoice.PADEL_TIEBREAK_10, Discipline.DOUBLES))
+        for (choice in FormatChoice.entries.filter { it.tiebreakOnly }) {
+            assertEquals("$choice", emptyList<Int>(), SetupCatalog.gamesOptions(choice))
+            assertNull(SetupCatalog.defaultGames(choice))
+            assertTrue("$choice", choice in SetupCatalog.formats(choice.sport, day))
+        }
+    }
+
+    @Test
+    fun gamesPerSetOneToSixUseTiebreakAtNAllAndAreRecognizedAgain() {
+        for (choice in FormatChoice.entries.filter { SetupCatalog.gamesOptions(it).isNotEmpty() }) {
+            val discipline = SetupCatalog.disciplines(choice.sport).first()
+            for (games in SetupCatalog.gamesOptions(choice)) {
+                val format = SetupCatalog.format(choice, discipline, day, games)
+                assertTrue("$choice/$games", MatchFormatValidator.validate(format).isValid)
+                assertEquals("$choice/$games", games, format.set?.gamesToWin)
+                assertEquals("$choice/$games: Tiebreak bei n:n (K17)", games, format.set?.tiebreakAt)
+                val recognized = SetupCatalog.recognize(format, day)!!
+                val rebuilt = SetupCatalog.format(recognized.choice, discipline, day, recognized.gamesPerSet)
+                assertEquals("$choice/$games", format.copy(presetId = null), rebuilt.copy(presetId = null))
+            }
+        }
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), SetupCatalog.gamesOptions(FormatChoice.TENNIS_BO3))
+        assertEquals(emptyList<Int>(), SetupCatalog.gamesOptions(FormatChoice.PICKLEBALL_11))
+    }
+
+    @Test
+    fun defaultGamesComeFromTheChoice() {
+        assertEquals(6, SetupCatalog.defaultGames(FormatChoice.TENNIS_BO3))
+        assertEquals(4, SetupCatalog.defaultGames(FormatChoice.TENNIS_SHORT_SETS))
+        assertEquals(6, SetupCatalog.defaultGames(FormatChoice.PADEL_GOLDEN))
+        assertNull(SetupCatalog.defaultGames(FormatChoice.BADMINTON_BO3_21))
+        // Standard-Games ändern das Format nicht (gleiches Preset)
+        assertEquals(
+            SetupCatalog.format(FormatChoice.TENNIS_BO3, Discipline.SINGLES, day),
+            SetupCatalog.format(FormatChoice.TENNIS_BO3, Discipline.SINGLES, day, 6),
+        )
+        val failed = runCatching { SetupCatalog.format(FormatChoice.TENNIS_TIEBREAK_7, Discipline.SINGLES, day, 4) }
+        assertTrue("Nur Tiebreak hat keine Games", failed.isFailure)
+    }
+
+    @Test
+    fun recognizePrefersUnchangedChoices() {
+        val short = SetupCatalog.format(FormatChoice.TENNIS_SHORT_SETS, Discipline.SINGLES, day)
+        assertEquals(RecognizedFormat(FormatChoice.TENNIS_SHORT_SETS, null), SetupCatalog.recognize(short, day))
+        val four = SetupCatalog.format(FormatChoice.TENNIS_BO3, Discipline.SINGLES, day, 4)
+        assertEquals(RecognizedFormat(FormatChoice.TENNIS_BO3, 4), SetupCatalog.recognize(four, day))
+        assertEquals("kein Preset mehr", null, four.presetId)
+    }
+
+    @Test
+    fun serveStatsMetaOnlyForTennisAndPadel() {
+        assertTrue(SetupCatalog.meta(Sport.TENNIS).serveStats)
+        assertFalse(SetupCatalog.meta(Sport.PADEL, serveStats = false).serveStats)
+        assertTrue("ohne Wirkung bei anderen Sportarten", SetupCatalog.meta(Sport.BADMINTON, serveStats = false).serveStats)
+        assertTrue(SetupCatalog.serveStatsAvailable(Sport.TENNIS))
+        assertFalse(SetupCatalog.serveStatsAvailable(Sport.PICKLEBALL))
     }
 }

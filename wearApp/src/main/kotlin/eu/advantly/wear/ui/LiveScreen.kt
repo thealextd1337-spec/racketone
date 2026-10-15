@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,8 +56,10 @@ import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveOverlay
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
+import eu.advantly.wear.live.OperationRules
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.WatchToast
+import eu.advantly.wear.scoring.ActionStrip
 import eu.advantly.wear.scoring.GestureClassifier
 import eu.advantly.wear.scoring.ScoringGesture
 import eu.advantly.wear.scoring.TapGuard
@@ -66,7 +69,7 @@ import eu.advantly.wear.workout.WorkoutUiState
 import kotlinx.coroutines.delay
 
 /** Aktionen des Live-Screens (Zähler und Anzeige). */
-interface LiveActions {
+interface LiveActions : OperationActions {
     fun point(side: Side): Boolean
 
     fun undo(): Boolean
@@ -144,6 +147,10 @@ fun LiveScreen(
             CorrectServerScreen(live, live.corrections, actions)
         }
 
+        live.overlay == LiveOverlay.SERVER_CHOICE && live.serverChoice != null -> {
+            ServerChoiceScreen(live, live.serverChoice, actions)
+        }
+
         workout.phase == WorkoutPhase.CONFLICT -> {
             WorkoutConflictScreen(actions)
         }
@@ -192,6 +199,9 @@ private fun ScorePage(
     val currentLive by rememberUpdatedState(live)
     val currentActions by rememberUpdatedState(actions)
     val currentOpenControls by rememberUpdatedState(onOpenControls)
+    // Aktionsleiste im Mittelband (Aufschlag-Leiste, „Rückgängig“ nach Punkt abziehen, „Aufschlag wählen“)
+    val strip = if (isAmbient) null else OperationRules.stripAction(live, toast)
+    val currentStrip by rememberUpdatedState(strip)
     val touchSlop = LocalViewConfiguration.current.touchSlop
     val swipeThreshold = with(LocalDensity.current) { SWIPE_THRESHOLD.toPx() }
     val scorer = live.role == LiveRole.SCORER
@@ -226,10 +236,15 @@ private fun ScorePage(
                                 swipeThresholdPx = swipeThreshold,
                             )
                         val isScorer = currentLive.role == LiveRole.SCORER
+                        val width = size.width.toFloat()
+                        val height = size.height.toFloat()
                         when (gesture) {
                             ScoringGesture.TAP -> {
-                                if (isScorer) {
-                                    TapZones.classify(down.position.y, size.height.toFloat())?.let { side ->
+                                val stripAction = currentStrip
+                                if (stripAction != null && ActionStrip.contains(down.position.x, down.position.y, width, height)) {
+                                    onStripTap(stripAction, down.position.x, width, currentActions)
+                                } else if (isScorer) {
+                                    TapZones.classify(down.position.y, height)?.let { side ->
                                         if (currentActions.point(side)) {
                                             flashSide = side
                                             flashKey++
@@ -238,8 +253,13 @@ private fun ScorePage(
                                 }
                             }
 
+                            // Halten: entsperren bzw. (Zähler) letzten Punkt dieser Hälfte abziehen
                             ScoringGesture.LONG_PRESS -> {
-                                if (currentLive.locked) currentActions.unlock()
+                                if (currentLive.locked) {
+                                    currentActions.unlock()
+                                } else if (isScorer) {
+                                    TapZones.classify(down.position.y, height)?.let { currentActions.removePoint(it) }
+                                }
                             }
 
                             ScoringGesture.SWIPE_DOWN -> {
@@ -285,6 +305,7 @@ private fun ScorePage(
         ) {
             listOf(Side.A, Side.B).forEachIndexed { i, side ->
                 val pointLabel = stringResource(if (side == Side.A) R.string.a11y_point_us else R.string.a11y_point_them)
+                val removeLabel = stringResource(if (side == Side.A) R.string.live_remove_point_us else R.string.live_remove_point_them)
                 TeamHalf(
                     live = live,
                     side = side,
@@ -300,8 +321,10 @@ private fun ScorePage(
                                 contentDescription = "$pointLabel. $scoreDescription. $serveDescription"
                                 onClick { actions.point(side) }
                                 customActions =
-                                    listOf(
+                                    listOfNotNull(
                                         CustomAccessibilityAction(undoLabel) { actions.undo() },
+                                        CustomAccessibilityAction(removeLabel) { actions.removePoint(side) }
+                                            .takeIf { live.canRemovePoint[side] },
                                         CustomAccessibilityAction(controlsLabel) { onOpenControls().let { true } },
                                     )
                             }
@@ -310,10 +333,15 @@ private fun ScorePage(
                         },
                 )
                 if (i == 0) {
-                    MiddleBand(live, toast.takeUnless { isAmbient }, isAmbient, Modifier.height(bandHeight))
+                    if (strip == null) {
+                        MiddleBand(live, toast.takeUnless { isAmbient }, isAmbient, Modifier.height(bandHeight))
+                    } else {
+                        Spacer(Modifier.height(bandHeight)) // die Aktionsleiste liegt darüber
+                    }
                 }
             }
         }
+        if (strip != null) ActionStripContent(strip, live, maxWidth, maxHeight, actions, Modifier.align(Alignment.Center))
         TopStatus(live, isAmbient, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * TOP_STATUS_FRACTION))
         BottomLine(live, heartRate, isAmbient, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * 0.04f))
     }
@@ -456,6 +484,8 @@ private fun TopStatus(
         when {
             live.locked -> stringResource(R.string.locked_label)
 
+            live.updateRequired != null -> updateText(live.updateRequired, short = true)
+
             live.role == LiveRole.SCORER -> syncText(live.sync)
 
             live.sync == SyncUi.Live -> "${stringResource(
@@ -467,6 +497,7 @@ private fun TopStatus(
     val color =
         when {
             isAmbient -> AmbientDigits
+            live.updateRequired != null -> HintAmber
             live.role == LiveRole.DISPLAY && live.sync != SyncUi.Live -> HintAmber
             live.sync is SyncUi.Pending -> HintAmber
             else -> TextSecondary

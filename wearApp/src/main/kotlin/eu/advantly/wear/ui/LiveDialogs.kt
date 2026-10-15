@@ -1,6 +1,7 @@
 package eu.advantly.wear.ui
 
 import android.os.SystemClock
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -14,6 +15,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -27,6 +29,7 @@ import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.wear.R
 import eu.advantly.wear.live.CorrectionsUi
 import eu.advantly.wear.live.DecisionUi
@@ -34,6 +37,7 @@ import eu.advantly.wear.live.FinishedUi
 import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
+import eu.advantly.wear.live.ServerChoiceUi
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.workout.WorkoutError
@@ -135,6 +139,10 @@ fun ControlsPage(
                 actions.lock()
                 onClose()
             })
+            if (live.serverChoice != null) actionItem(R.string.server_choice_prompt, onClick = actions::openServerChoice)
+            // Alternative zum Long-Press (auffindbar, TalkBack): letzten Punkt einer Seite abziehen
+            if (live.canRemovePoint.a) actionItem(R.string.live_remove_point_us, onClick = touch { actions.removePoint(Side.A) })
+            if (live.canRemovePoint.b) actionItem(R.string.live_remove_point_them, onClick = touch { actions.removePoint(Side.B) })
             if (live.corrections != null) actionItem(R.string.action_correct_server, onClick = actions::requestCorrection)
             actionItem(R.string.action_end_match, onClick = actions::requestEnd)
         } else {
@@ -145,6 +153,17 @@ fun ControlsPage(
             }
         }
         if (live.rejectedInputs > 0) textItem { pluralStringResource(R.plurals.rejected_inputs, live.rejectedInputs, live.rejectedInputs) }
+        live.updateRequired?.let { required ->
+            item {
+                Text(
+                    updateText(required),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = HintAmber,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         fitnessItems(workout, heartRate, actions)
     }
 }
@@ -239,8 +258,10 @@ private fun errorText(error: WorkoutError?): Int =
     }
 
 /**
- * Satzende-Dialog (04 W6, 02 §5.2, Modus Offen): nur der Zähler entscheidet – „Ja“ (EdgeButton), „Nein, beenden“,
- * optional Match-Tiebreak; keine automatische Auswahl. Die Anzeige sieht das Satzergebnis und „Handy entscheidet“.
+ * Satzende-Dialog (04 W6, 02 §5.2, Modus Offen): nur der Zähler entscheidet – keine automatische Auswahl. Tennis/Padel
+ * (W2, K18): „Normaler Satz“ (EdgeButton), „Tiebreak bis 7“, „Champions-Tiebreak bis 10“ (Padel: Super-Tiebreak),
+ * „Match beenden“; andere Sportarten: „Ja“ / „Nein, beenden“. Dazu ggf. die Aufschlag-Leiste für den Satzball und
+ * Rückgängig. Die Anzeige sieht das Satzergebnis und „Handy entscheidet“.
  */
 @Composable
 fun DecisionScreen(
@@ -258,19 +279,36 @@ fun DecisionScreen(
         }
     val outcome = stringResource(if (decision.winner == Side.A) R.string.decision_won else R.string.decision_lost)
     val question = stringResource(if (live.sport == Sport.PICKLEBALL) R.string.dialog_another_game else R.string.dialog_another_set)
+    // mehr als „normaler Satz“ im Angebot → Satzarten ausschreiben, sonst die kurze Ja/Nein-Frage wie bisher
+    val withKinds = decision.options.size > 1
     ListPage(
-        edgeLabel = if (scorer) stringResource(R.string.action_yes) else null,
-        onEdge = { actions.continueDecision(anotherSet = true, matchTiebreak = false) },
+        edgeLabel =
+            when {
+                !scorer -> null
+                withKinds -> stringResource(R.string.set_end_regular)
+                else -> stringResource(R.string.action_yes)
+            },
+        onEdge = { actions.startNextSet(NextSetKind.REGULAR) },
     ) {
         item { ListHeader { Text("$unit · ${decision.score.a}:${decision.score.b}") } }
         textItem(secondary = false) { outcome }
         if (toast != null) textItem { toastText(toast) }
+        live.serveBar?.let { bar -> item { ServeChips(bar, actions) } }
         if (scorer) {
             item { Text(question, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
-            if (decision.offerMatchTiebreak) {
-                actionItem(R.string.action_match_tiebreak) { actions.continueDecision(anotherSet = true, matchTiebreak = true) }
+            decision.options.filter { it != NextSetKind.REGULAR }.forEach { kind ->
+                item {
+                    Button(
+                        onClick = { actions.startNextSet(kind) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        label = { Text(nextSetText(kind, live.sport), maxLines = 2) },
+                    )
+                }
             }
-            actionItem(R.string.action_no_end) { actions.continueDecision(anotherSet = false, matchTiebreak = false) }
+            actionItem(if (withKinds) R.string.set_end_finish else R.string.action_no_end) {
+                actions.continueDecision(anotherSet = false, matchTiebreak = false)
+            }
             actionItem(R.string.action_undo) { actions.undo() }
         } else {
             textItem { stringResource(R.string.decision_waiting, deviceName(live.scorerKind)) }
@@ -297,6 +335,7 @@ fun FinishedScreen(
             )
         }
         textItem(secondary = false) { "${sportName(live.sport)} · ${LiveModel.setsText(finished.sets)}" }
+        live.serveBar?.let { bar -> item { ServeChips(bar, actions) } }
         if (finished.canFollowUp) actionItem(R.string.action_follow_up, primary = true) { actions.followUp() }
         if (live.role == LiveRole.SCORER && live.canUndo) actionItem(R.string.action_undo) { actions.undo() }
     }
@@ -362,6 +401,43 @@ fun CorrectServerScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * „Wer schlägt auf?“ im Doppel (02 §6.5.5, W2-Vertrag §2): Game 1 alle vier Spieler (Team nach Regel zuerst), Game 2
+ * die zwei Spieler des anderen Teams. Gewählter Spieler hervorgehoben (änderbar, solange das Fenster offen ist).
+ * Nicht blockierend: „Später“ (EdgeButton) bzw. Zurück schließt, es gilt die bisherige Reihenfolge.
+ */
+@Composable
+fun ServerChoiceScreen(
+    live: LiveUi,
+    choice: ServerChoiceUi,
+    actions: LiveActions,
+) {
+    BackToScore(actions::dismissOverlay)
+    val title =
+        when {
+            choice.game == 1 -> stringResource(R.string.server_choice_title_game1)
+            choice.side == Side.A -> stringResource(R.string.server_choice_title_game2_us)
+            else -> stringResource(R.string.server_choice_title_game2_them)
+        }
+    ListPage(edgeLabel = stringResource(R.string.action_later), onEdge = actions::dismissOverlay) {
+        item { ListHeader { Text(title, textAlign = TextAlign.Center) } }
+        choice.players.forEach { player ->
+            item {
+                val team = stringResource(if (player.side == Side.A) R.string.label_us else R.string.label_them)
+                Button(
+                    onClick = { actions.chooseServer(player.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = if (player.id == choice.chosen) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                    border = BorderStroke(2.dp, teamColor(player.side)),
+                    label = { Text(playerName(player, live.doubles), maxLines = 1) },
+                    secondaryLabel = { Text(team, maxLines = 1) },
+                )
+            }
+        }
+        textItem { stringResource(R.string.server_choice_hint) }
     }
 }
 

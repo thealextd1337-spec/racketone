@@ -3,6 +3,7 @@ package eu.advantly.wear.ui
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -54,11 +55,16 @@ fun HomeScreen(
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
             item { ListHeader { Text(stringResource(R.string.app_name)) } }
             item {
-                // Verbindungsstatus zum Handy (Feldtest Pixel Watch 3)
+                // Verbindungsstatus zum Handy (Feldtest Pixel Watch 3); Versionsunterschied statt „nicht verbunden“ (W2)
+                val required = home.updateRequired
                 Text(
-                    stringResource(if (home.phoneConnected) R.string.home_phone_connected else R.string.home_phone_disconnected),
+                    when {
+                        required != null -> updateText(required)
+                        home.phoneConnected -> stringResource(R.string.home_phone_connected)
+                        else -> stringResource(R.string.home_phone_disconnected)
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (home.phoneConnected) MaterialTheme.colorScheme.onSurface else HintAmber,
+                    color = if (home.phoneConnected && required == null) MaterialTheme.colorScheme.onSurface else HintAmber,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -94,7 +100,8 @@ fun HomeScreen(
                                 R.string.discipline_singles
                             },
                         )
-                    val format = last.choice?.let { formatLabel(it) } ?: genericFormatLabel(last.format)
+                    val games = last.gamesPerSet?.let { " · ${pluralStringResource(R.plurals.games_per_set_value, it, it)}" }.orEmpty()
+                    val format = (last.choice?.let { formatLabel(it) } ?: genericFormatLabel(last.format)) + games
                     Button(
                         onClick = { actions.repeatLast() },
                         modifier = Modifier.fillMaxWidth(),

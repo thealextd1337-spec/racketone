@@ -7,6 +7,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.ScorerChoice
@@ -260,7 +261,7 @@ class WatchControllerTest {
         val decision = assertNotNull(live.decision).let { live.decision!! }
         assertEquals(1, decision.setNumber)
         assertEquals(SidePair(6, 0), decision.score)
-        assertTrue(decision.offerMatchTiebreak)
+        assertEquals(listOf(NextSetKind.REGULAR, NextSetKind.TIEBREAK_7, NextSetKind.MATCH_TIEBREAK_10), decision.options)
         // Handy (Anzeige) sieht denselben Zustand, kann aber nicht entscheiden
         assertFalse(h.phone.continueDecision(anotherSet = true))
         assertTrue(c.continueDecision(anotherSet = true))

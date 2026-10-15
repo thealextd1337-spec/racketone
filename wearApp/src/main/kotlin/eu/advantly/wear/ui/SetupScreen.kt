@@ -45,6 +45,12 @@ interface SetupActions {
     fun back()
 
     fun setWorkoutEnabled(enabled: Boolean)
+
+    /** „Games pro Satz“ (Tennis/Padel 1–6). */
+    fun selectGamesPerSet(games: Int)
+
+    /** „Aufschlag-Statistik erfassen“ (Tennis/Padel). */
+    fun setServeStats(enabled: Boolean)
 }
 
 /**
@@ -169,6 +175,7 @@ private fun ScalingLazyListScope.serverStep(
     item {
         Text(stringResource(R.string.setup_server_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
     }
+    matchOptions(setup, actions)
     item {
         SwitchButton(
             checked = setup.workoutEnabled,
@@ -176,5 +183,40 @@ private fun ScalingLazyListScope.serverStep(
             modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.workout_toggle)) },
         )
+    }
+}
+
+/**
+ * Match-Optionen im letzten Schritt (W2-Vertrag §5, unter den Startknöpfen – ohne Änderung startet der Standard mit
+ * einem Tap): Tennis/Padel „Games pro Satz“ 1–6 als 2 × 3 runde Umschalter (nicht bei „Nur Tiebreak“) und der Schalter
+ * „Aufschlag-Statistik erfassen“ (Default an).
+ */
+private fun ScalingLazyListScope.matchOptions(
+    setup: WatchScreen.Setup,
+    actions: SetupActions,
+) {
+    if (setup.gamesOptions.isNotEmpty()) {
+        item { ListHeader { Text(stringResource(R.string.setup_games_per_set)) } }
+        item { NumberChips(setup.gamesOptions, setup.gamesPerSet, actions::selectGamesPerSet) }
+        if (setup.gamesPerSet == 1) {
+            item {
+                Text(
+                    stringResource(R.string.setup_games_one_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+    if (setup.serveStatsAvailable) {
+        item {
+            SwitchButton(
+                checked = setup.serveStats,
+                onCheckedChange = actions::setServeStats,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.setup_serve_stats), maxLines = 2) },
+                secondaryLabel = { Text(stringResource(R.string.setup_serve_stats_hint), maxLines = 2) },
+            )
+        }
     }
 }

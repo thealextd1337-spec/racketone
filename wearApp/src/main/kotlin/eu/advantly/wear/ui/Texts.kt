@@ -7,9 +7,12 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.presentation.live.PointLabel
 import eu.advantly.presentation.live.ScoreHint
+import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.R
 import eu.advantly.wear.live.PlayerUi
@@ -112,6 +115,18 @@ fun formatLabel(choice: FormatChoice): String =
 
         FormatChoice.TABLE_TENNIS_BO7 -> {
             stringResource(R.string.format_table_tennis, 7, 4)
+        }
+
+        FormatChoice.TENNIS_TIEBREAK_7, FormatChoice.PADEL_TIEBREAK_7 -> {
+            stringResource(R.string.setup_tiebreak_only_7)
+        }
+
+        FormatChoice.TENNIS_TIEBREAK_10 -> {
+            stringResource(R.string.setup_tiebreak_only_10)
+        }
+
+        FormatChoice.PADEL_TIEBREAK_10 -> {
+            stringResource(R.string.setup_padel_tiebreak_only_10)
         }
     }
 
@@ -351,4 +366,69 @@ fun toastText(toast: WatchToast): String =
         WatchToast.StartFailed -> {
             stringResource(R.string.toast_start_failed)
         }
+
+        is WatchToast.PointRemoved -> {
+            stringResource(R.string.live_point_removed)
+        }
+
+        WatchToast.NothingToRemove -> {
+            stringResource(R.string.toast_nothing_to_remove)
+        }
     }
+
+/** Kurzlabel der Aufschlag-Leiste („1.“, „2.“, „DF“). */
+@Composable
+fun serveShortText(outcome: ServeOutcome): String =
+    stringResource(
+        when (outcome) {
+            ServeOutcome.FIRST_SERVE_IN -> R.string.serve_first_short
+            ServeOutcome.SECOND_SERVE_IN -> R.string.serve_second_short
+            ServeOutcome.DOUBLE_FAULT -> R.string.serve_double_fault_short
+        },
+    )
+
+/** Langlabel (TalkBack, Listen): „1. Aufschlag“, „2. Aufschlag“, „Doppelfehler“. */
+@Composable
+fun serveText(outcome: ServeOutcome): String =
+    stringResource(
+        when (outcome) {
+            ServeOutcome.FIRST_SERVE_IN -> R.string.serve_first_in
+            ServeOutcome.SECOND_SERVE_IN -> R.string.serve_second_in
+            ServeOutcome.DOUBLE_FAULT -> R.string.serve_double_fault
+        },
+    )
+
+/** Satzende-Option (02 §5.2): normaler Satz, Tiebreak bis 7, Champions- bzw. (Padel) Super-Tiebreak bis 10. */
+@Composable
+fun nextSetText(
+    kind: NextSetKind,
+    sport: Sport,
+): String =
+    stringResource(
+        when (kind) {
+            NextSetKind.REGULAR -> {
+                R.string.set_end_regular
+            }
+
+            NextSetKind.TIEBREAK_7 -> {
+                R.string.set_end_tiebreak_7
+            }
+
+            NextSetKind.MATCH_TIEBREAK, NextSetKind.MATCH_TIEBREAK_10 -> {
+                if (sport == Sport.PADEL) R.string.set_end_super_10 else R.string.set_end_champions_10
+            }
+        },
+    )
+
+/** Versionshinweis (W2-Vertrag §5); [short] für die Statuszeile im Score. */
+@Composable
+fun updateText(
+    required: UpdateRequired,
+    short: Boolean = false,
+): String =
+    stringResource(
+        when (required) {
+            UpdateRequired.OTHER_DEVICE -> if (short) R.string.update_other_device_short else R.string.update_other_device
+            UpdateRequired.THIS_DEVICE -> if (short) R.string.update_this_device_short else R.string.update_this_device
+        },
+    )
