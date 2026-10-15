@@ -754,12 +754,30 @@ internal class Core private constructor(
     private fun onCorrection(c: Correction): Boolean {
         if (c.kind == CorrectionKind.INITIAL_SERVER) return c.player != null && sideOf(c.player) != null
         val live = inSet && (status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED)
-        return when (c.kind) {
-            CorrectionKind.SERVER -> live && correctServer(c)
-            CorrectionKind.SERVING_ORDER -> live && correctServingOrder(c)
-            CorrectionKind.RECEIVE_POSITIONS -> correctReceivePositions(c)
-            CorrectionKind.INITIAL_SERVER -> false
-        }
+        val applied =
+            when (c.kind) {
+                CorrectionKind.SERVER -> live && correctServer(c)
+                CorrectionKind.SERVING_ORDER -> live && correctServingOrder(c)
+                CorrectionKind.RECEIVE_POSITIONS -> correctReceivePositions(c)
+                CorrectionKind.INITIAL_SERVER -> false
+            }
+        if (applied) dropStaleServerChoices()
+        return applied
+    }
+
+    /**
+     * §6.5.5: Eine Aufschlägerwahl gilt nur, solange der gewählte Spieler tatsächlich der nächste Aufschläger seines
+     * Teams ist. Ändert eine Korrektur das (z. B. `SERVING_ORDER` nach der Wahl), ist die Wahl aufgehoben (`chosen = null`,
+     * Wahl wieder erwartet); eine erneute Wahl setzt den Spieler wieder ein.
+     */
+    private fun dropStaleServerChoices() {
+        if (!sport.isTennisLike || !doubles || !inSet) return
+        openingChoice = openingChoice?.takeIf { rallies == 0 && tpServeSide() == sideOf(it) && tpServer() == it }
+        secondChoice =
+            secondChoice?.takeIf { player ->
+                val side = sideOf(player)
+                side != null && !servedInSet[side] && rotate(side, serveIdx[side]) == player
+            }
     }
 
     private fun correctServer(c: Correction): Boolean {
@@ -843,9 +861,11 @@ internal class Core private constructor(
         if (!sport.isTennisLike || !doubles || !inSet || frozen) return null
         if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return null
         val next = tpServeSide()
-        if (rallies == 0) return ServerChoice(1, next, order[next] + order[next.other], openingChoice)
+        val server = tpServer()
+        // `chosen` ist nur der tatsächlich wirksame nächste Aufschläger (Invariante: chosen ∈ {null, serve.player})
+        if (rallies == 0) return ServerChoice(1, next, order[next] + order[next.other], openingChoice?.takeIf { it == server })
         if (servedInSet[next]) return null
-        return ServerChoice(2, next, order[next], secondChoice?.takeIf { sideOf(it) == next })
+        return ServerChoice(2, next, order[next], secondChoice?.takeIf { it == server })
     }
 
     private fun correctServingOrder(c: Correction): Boolean {
