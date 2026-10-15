@@ -11,7 +11,7 @@ import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * Manifest der Phone-App. Hintergrund-Empfang (W1-I): Der WearableListenerService ist registriert und seine
+ * Manifest der Phone-App. Hintergrund-Empfang (W1-I): Application startet die Session, der WearableListenerService ist registriert und seine
  * Pfadfilter passen zu den Pfaden des Transports (Live-Nachrichten und DataItem-Queue).
  */
 class ManifestTest {
@@ -34,7 +34,7 @@ class ManifestTest {
     }
 
     @Test
-    fun applicationIsRegistered() {
+    fun applicationStartsTheSession() {
         assertEquals(".AdvantlyPhoneApplication", elements("application").single().getAttributeNS(android, "name"))
     }
 

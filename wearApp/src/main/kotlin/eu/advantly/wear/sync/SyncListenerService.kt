@@ -16,6 +16,8 @@ import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import eu.advantly.sync.protocol.LiveTelemetrySubscriptionCodec
 import eu.advantly.wear.diagnostics.DiagnosticLog
+import eu.advantly.wear.live.telemetryActive
+import eu.advantly.wear.workout.WorkoutStateHolder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -43,6 +45,8 @@ class SyncListenerService : WearableListenerService() {
 
     override fun onMessageReceived(event: MessageEvent) {
         if (event.path == LiveTelemetrySubscription.MESSAGE_PATH) {
+            // Ohne laufende Exercise wird nie gesendet: Abo verwerfen, ohne IPC oder kalten Session-Aufbau
+            if (!WorkoutStateHolder.state.value.telemetryActive) return
             val payload = LiveTelemetrySubscriptionCodec.decode(event.data) ?: return
             val receivedAtMs = SystemClock.elapsedRealtime()
             // Nur beim Keepalive (~20 s) prüfen, nicht bei jedem Sensorupdate. Cloud-erreichbar allein reicht nicht.
