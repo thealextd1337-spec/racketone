@@ -54,8 +54,8 @@ object MatchStatistics {
     fun compute(record: MatchRecord): MatchStats {
         val genesis = record.events.first()
         val created = genesis.payload as MatchCreated
-        val events = record.events.drop(1)
-        val points = ScoringEngine.pointHistory(created.config, created.lineup, events)
+        // Vollständiges Log inkl. Genesis: Zähler-Rolle aus MatchCreated (Single-Scorer, 02 §7.1a).
+        val points = ScoringEngine.pointHistory(record.events)
         return MatchStats(
             pointsWon = count(points) { p, side -> p.point.side == side },
             servicePoints = ratio(points, { p, side -> p.before.serve?.side == side }) { p, side -> p.point.side == side },
