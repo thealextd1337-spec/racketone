@@ -13,12 +13,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,9 +38,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
@@ -55,6 +63,8 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.a11y_hint_for_them
+import eu.advantly.ui.phone.resources.a11y_hint_for_us
 import eu.advantly.ui.phone.resources.hint_breakpoint
 import eu.advantly.ui.phone.resources.hint_changeends
 import eu.advantly.ui.phone.resources.hint_deuce
@@ -104,7 +114,7 @@ internal fun HintPill(
     modifier: Modifier = Modifier,
 ) {
     val colors = AdvantlyTheme.colors
-    val text =
+    val name =
         stringResource(
             when (hint.kind) {
                 ScoreHint.Kind.MatchPoint -> Res.string.hint_matchpoint
@@ -116,7 +126,15 @@ internal fun HintPill(
                 ScoreHint.Kind.MatchWon -> Res.string.hint_match_won
                 ScoreHint.Kind.MatchLost -> Res.string.hint_match_lost
             },
-        ).uppercase()
+        )
+    val text = name.uppercase()
+    // Screenreader: „Matchball für Wir“ statt „MATCHBALL“ + stummem Pfeil; Änderungen werden angesagt.
+    val description =
+        when (hint.team) {
+            Team.Us -> stringResource(Res.string.a11y_hint_for_us, name)
+            Team.Them -> stringResource(Res.string.a11y_hint_for_them, name)
+            null -> name
+        }
     val filled = outdoor || hint.kind.level == ScoreHint.Level.Filled
     val background =
         when {
@@ -126,28 +144,30 @@ internal fun HintPill(
         }
     val content = if (filled) colors.onHint else colors.hint
     val pulse = hint.kind == ScoreHint.Kind.MatchPoint && !reduceMotion && !outdoor
-    val pulseAlpha =
+    // Puls nur im Draw-Pass auslesen (graphicsLayer), damit er nicht jeden Frame neu komponiert.
+    val pulseAlpha: State<Float>? =
         if (pulse) {
-            val transition = rememberInfiniteTransition(label = "hint-pulse")
-            val value by transition.animateFloat(
+            rememberInfiniteTransition(label = "hint-pulse").animateFloat(
                 initialValue = 1f,
                 targetValue = 0.72f,
                 animationSpec = infiniteRepeatable(tween(650, easing = LinearEasing), RepeatMode.Reverse),
                 label = "hint-pulse-alpha",
             )
-            value
         } else {
-            1f
+            null
         }
     Row(
         modifier =
             modifier
                 .testTag("hint_pill")
-                .alpha(pulseAlpha)
-                .height(30.dp)
+                .clearAndSetSemantics {
+                    contentDescription = description
+                    liveRegion = LiveRegionMode.Polite
+                }.graphicsLayer { alpha = pulseAlpha?.value ?: 1f }
+                .heightIn(min = 30.dp)
                 .background(background, Radii.pillShape)
                 .border(1.5.dp, colors.hint, Radii.pillShape)
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = 14.dp, vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -231,7 +251,8 @@ private fun SetRow(
 ) {
     val colors = AdvantlyTheme.colors
     val teamColor = if (team == Team.Us) colors.teamUs else colors.teamThem
-    Row(modifier = Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Höhe folgt dem Inhalt (Schriftgröße bis 200 %), mindestens 28 dp; IntrinsicSize für die hinterlegte Game-Spalte.
+    Row(modifier = Modifier.heightIn(min = 28.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(4.dp).height(16.dp).background(teamColor, RoundedCornerShape(2.dp)))
         Spacer(Modifier.width(7.dp))
         Box(
@@ -245,7 +266,7 @@ private fun SetRow(
             text = name,
             style = AdvantlyTheme.typography.label.copy(fontSize = 14.sp),
             color = if (outdoor) Color.White else colors.text,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).testTag(if (team == Team.Us) "set_name_us" else "set_name_them"),
             maxLines = 1,
         )
         state.completedSets.forEach { set ->
@@ -256,14 +277,14 @@ private fun SetRow(
                 Text(
                     text = mine.toString(),
                     style = AdvantlyTheme.typography.scoreS,
-                    color = if (won || outdoor) colors.text else colors.text3,
+                    color = if (won || outdoor) colors.text else colors.text2,
                     textAlign = TextAlign.Center,
                 )
                 if (tiebreak != null) {
                     Text(
                         text = tiebreak.toString(),
                         style = AdvantlyTheme.typography.caption.copy(fontSize = 10.sp, baselineShift = BaselineShift.Superscript),
-                        color = if (outdoor) Color.White else colors.text3,
+                        color = if (outdoor) Color.White else colors.text2,
                     )
                 }
             }
@@ -352,10 +373,10 @@ internal fun SportChip(
     Row(
         modifier =
             modifier
-                .height(28.dp)
+                .heightIn(min = 28.dp)
                 .background(if (outdoor) Color.Black else colors.surface, Radii.pillShape)
                 .then(if (outdoor) Modifier.border(1.5.dp, Color.White, Radii.pillShape) else Modifier)
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

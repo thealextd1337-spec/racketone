@@ -2,10 +2,14 @@ package eu.advantly.ui.phone.platform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import eu.advantly.presentation.live.HapticCue
+import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSProcessInfo
 import platform.UIKit.UIAccessibilityIsReduceMotionEnabled
+import platform.UIKit.UIAccessibilityReduceMotionStatusDidChangeNotification
 import platform.UIKit.UIApplication
 import platform.UIKit.UIImpactFeedbackGenerator
 import platform.UIKit.UIImpactFeedbackStyle
@@ -28,8 +32,22 @@ actual fun KeepScreenOn(enabled: Boolean) {
     }
 }
 
+/** Liest „Bewegung reduzieren“ und beobachtet `UIAccessibilityReduceMotionStatusDidChangeNotification`. */
 @Composable
-actual fun rememberReduceMotion(): Boolean = remember { UIAccessibilityIsReduceMotionEnabled() }
+actual fun rememberReduceMotion(): Boolean {
+    val reduce = remember { mutableStateOf(UIAccessibilityIsReduceMotionEnabled()) }
+    DisposableEffect(Unit) {
+        val token =
+            NSNotificationCenter.defaultCenter.addObserverForName(
+                name = UIAccessibilityReduceMotionStatusDidChangeNotification,
+                `object` = null,
+                queue = NSOperationQueue.mainQueue,
+            ) { _ -> reduce.value = UIAccessibilityIsReduceMotionEnabled() }
+        reduce.value = UIAccessibilityIsReduceMotionEnabled()
+        onDispose { NSNotificationCenter.defaultCenter.removeObserver(token) }
+    }
+    return reduce.value
+}
 
 /** `systemUptime` – dieselbe Basis wie `UIEvent.timestamp` und `CACurrentMediaTime()` (CADisplayLink). */
 actual fun monotonicNanos(): Long = (NSProcessInfo.processInfo.systemUptime * 1_000_000_000.0).toLong()

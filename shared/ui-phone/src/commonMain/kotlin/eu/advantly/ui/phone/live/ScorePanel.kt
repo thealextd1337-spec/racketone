@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -52,6 +53,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
@@ -179,34 +181,42 @@ internal fun ScorePanel(
                 },
     ) {
         val textColor = if (outdoor) Color.White else teamColor
-        val labelAlignment = if (content.team == Team.Us) Alignment.TopStart else Alignment.BottomStart
-        val serveAlignment = if (content.team == Team.Us) Alignment.TopEnd else Alignment.BottomEnd
-
+        val secondary = if (outdoor) Color.White else colors.text2
+        // Team-Label + Name links, Aufschlag rechts in EINER Zeile: bei großer Schrift kürzt der Name (Ellipse),
+        // statt mit dem Aufschlag-Hinweis zu überlappen.
         Row(
-            modifier = Modifier.align(labelAlignment).padding(horizontal = Spacing.l, vertical = Spacing.m),
+            modifier =
+                Modifier
+                    .align(if (content.team == Team.Us) Alignment.TopStart else Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.l, vertical = Spacing.m),
             horizontalArrangement = Arrangement.spacedBy(Spacing.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = content.teamLabel, style = AdvantlyTheme.typography.overline, color = textColor)
+            Text(text = content.teamLabel, style = AdvantlyTheme.typography.overline, color = textColor, maxLines = 1)
             Text(
                 text = content.playerName,
                 style = AdvantlyTheme.typography.caption,
-                color = if (outdoor) Color.White else colors.text2,
+                color = secondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-        }
-
-        if (content.serving) {
-            Row(
-                modifier = Modifier.align(serveAlignment).padding(horizontal = Spacing.l, vertical = Spacing.m).testTag("${tag}_serve"),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(12.dp).background(colors.sportTennis, CircleShape))
-                Text(
-                    text = content.serveLabel,
-                    style = AdvantlyTheme.typography.caption,
-                    color = if (outdoor) Color.White else colors.text2,
-                )
+            if (content.serving) {
+                Row(
+                    modifier = Modifier.testTag("${tag}_serve"),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(12.dp).background(colors.sportTennis, CircleShape))
+                    Text(
+                        text = content.serveLabel,
+                        style = AdvantlyTheme.typography.caption,
+                        color = secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 

@@ -7,14 +7,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -67,16 +72,17 @@ import eu.advantly.ui.phone.resources.action_outdoor
 import eu.advantly.ui.phone.resources.action_redo
 import eu.advantly.ui.phone.resources.action_undo
 import eu.advantly.ui.phone.resources.latency_benchmark_running
-import eu.advantly.ui.phone.resources.latency_clock_event
-import eu.advantly.ui.phone.resources.latency_clock_handler
-import eu.advantly.ui.phone.resources.latency_clock_synthetic
 import eu.advantly.ui.phone.resources.latency_counters
 import eu.advantly.ui.phone.resources.latency_frames
+import eu.advantly.ui.phone.resources.latency_input_to_draw
+import eu.advantly.ui.phone.resources.latency_input_to_next_frame
 import eu.advantly.ui.phone.resources.latency_no_samples
 import eu.advantly.ui.phone.resources.latency_refresh_rate
+import eu.advantly.ui.phone.resources.latency_source_event
+import eu.advantly.ui.phone.resources.latency_source_handler
+import eu.advantly.ui.phone.resources.latency_source_line
+import eu.advantly.ui.phone.resources.latency_source_synthetic
 import eu.advantly.ui.phone.resources.latency_stats
-import eu.advantly.ui.phone.resources.latency_tap_to_draw
-import eu.advantly.ui.phone.resources.latency_tap_to_frame
 import eu.advantly.ui.phone.resources.live_format_best_of_3
 import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_sport_tennis
@@ -113,14 +119,15 @@ private const val UNDO_NOTICE_MILLIS = 4_000L
 /**
  * H6 Live-Score Handy (04 §4.1) – Spike S4. Schwarzer Live-Screen, zwei Tap-Flächen (Wir oben/Orange,
  * Gegner unten/Blau), Satztabelle, Hinweis-Pill, Undo per Knopf/Wischgeste + Snackbar, Haptik, Outdoor-Kontrast,
- * Latenz-Overlay (Tap → Frame).
+ * Latenz-Overlay (Eingabe → nächster Frame-Beginn nach Draw). Zustand liegt im [LiveScoreViewModel]
+ * (übersteht Rotation und Prozesstod), siehe [rememberLiveScoreController].
  *
  * [onBenchmarkFinished] erhält die Logzeile eines Auto-Benchmarks (Menü oder [autoBenchmark] beim Start).
  */
 @Composable
 fun LiveScoreScreen(
     modifier: Modifier = Modifier,
-    controller: LiveScoreController = remember { LiveScoreController() },
+    controller: LiveScoreController = rememberLiveScoreController(),
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
@@ -133,6 +140,10 @@ fun LiveScoreScreen(
     val systemReduceMotion = rememberReduceMotion()
     val reduceMotion = systemReduceMotion || controller.outdoorContrast
     val frameStats = rememberFrameStats()
+    DisposableEffect(frameStats) {
+        controller.frameStats = frameStats
+        onDispose { controller.frameStats = null }
+    }
     val scope = rememberCoroutineScope()
     val tracker = controller.tracker
 
@@ -148,8 +159,8 @@ fun LiveScoreScreen(
             modifier
                 .fillMaxSize()
                 .background(AdvantlyTheme.colors.liveBackground)
-                // Latenzmessung: Dieser Draw-Pass enthält den neuen Zustand; der nächste Frame-Callback danach
-                // markiert die Übergabe des Frames an den Compositor (siehe LatencyTracker).
+                // Latenzmessung: Dieser Draw-Pass zeichnet den neuen Zustand auf; gemessen wird bis zum Beginn des
+                // nächsten Frame-Callbacks – kein Nachweis, wann der Frame auf dem Display erscheint (LatencyTracker).
                 .drawWithContent {
                     drawContent()
                     if (tracker.onDrawn(controller.generation, monotonicNanos())) {
@@ -157,29 +168,62 @@ fun LiveScoreScreen(
                     }
                 }.windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = Spacing.s)) {
-            Header(controller)
-            if (controller.showLatencyOverlay) {
-                LatencyOverlay(controller, frameStats, Modifier.padding(top = 6.dp))
+        BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = Spacing.s)) {
+            val landscape = maxWidth > maxHeight
+            val info: @Composable (Modifier) -> Unit = { infoModifier ->
+                Column(infoModifier) {
+                    Header(controller)
+                    if (controller.showLatencyOverlay) {
+                        LatencyOverlay(controller, frameStats, Modifier.padding(top = 6.dp))
+                    }
+                    SetTable(
+                        state = controller.state,
+                        usName = FAKE_NAME_US,
+                        themName = FAKE_NAME_THEM,
+                        header = stringResource(Res.string.live_format_best_of_3),
+                        elapsed = { ElapsedTime(controller.outdoorContrast) },
+                        outdoor = controller.outdoorContrast,
+                        modifier = Modifier.padding(top = Spacing.s),
+                    )
+                }
             }
-            SetTable(
-                state = controller.state,
-                usName = FAKE_NAME_US,
-                themName = FAKE_NAME_THEM,
-                header = stringResource(Res.string.live_format_best_of_3),
-                elapsed = { ElapsedTime(controller.outdoorContrast) },
-                outdoor = controller.outdoorContrast,
-                modifier = Modifier.padding(top = Spacing.s),
-            )
-            Panels(controller, reduceMotion, Modifier.weight(1f).padding(top = Spacing.s))
-            Footer(controller, Modifier.padding(top = Spacing.s))
+            if (landscape) {
+                // Querformat: Info + Fußleiste links (scrollbar, damit bei großer Schrift nichts abgeschnitten wird),
+                // Tap-Flächen rechts nebeneinander.
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    Column(Modifier.weight(0.42f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                        info(Modifier.fillMaxWidth())
+                        Footer(controller, Modifier.padding(top = Spacing.s))
+                    }
+                    PanelsWithSnackbar(controller, reduceMotion, landscape = true, Modifier.weight(0.58f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    info(Modifier.fillMaxWidth())
+                    PanelsWithSnackbar(controller, reduceMotion, landscape = false, Modifier.weight(1f).padding(top = Spacing.s))
+                    Footer(controller, Modifier.padding(top = Spacing.s))
+                }
+            }
         }
+    }
+}
+
+/** Tap-Flächen; die Undo-Snackbar liegt unten über der Gegner-Fläche (wächst nicht in die Fußleiste). */
+@Composable
+private fun PanelsWithSnackbar(
+    controller: LiveScoreController,
+    reduceMotion: Boolean,
+    landscape: Boolean,
+    modifier: Modifier,
+) {
+    Box(modifier) {
+        Panels(controller, reduceMotion, landscape, Modifier.fillMaxSize())
         controller.undoNotice?.let { notice ->
             UndoSnackbar(
                 notice = notice,
                 onRedo = controller::redo,
                 onTimeout = { controller.dismissUndoNotice(notice.id) },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 88.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(Spacing.s),
             )
         }
     }
@@ -187,7 +231,7 @@ fun LiveScoreScreen(
 
 @Composable
 private fun Header(controller: LiveScoreController) {
-    Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
         SportChip(text = stringResource(Res.string.live_sport_tennis), outdoor = controller.outdoorContrast)
     }
 }
@@ -216,6 +260,7 @@ private fun ElapsedTime(outdoor: Boolean) {
 private fun Panels(
     controller: LiveScoreController,
     reduceMotion: Boolean,
+    landscape: Boolean,
     modifier: Modifier,
 ) {
     val state = controller.state
@@ -270,8 +315,9 @@ private fun Panels(
         )
     }
 
-    BoxWithConstraints(modifier) {
-        val landscape = maxWidth > maxHeight
+    // Oben/Unten im Hochformat, nebeneinander im Querformat (04 §4.1 H6) – richtet sich nach dem Bildschirm,
+    // nicht nach der Restfläche (bei 200 % Schrift wäre die sonst „quer“).
+    Box(modifier) {
         if (landscape) {
             Column(Modifier.fillMaxSize()) {
                 HintBand(hint, controller.outdoorContrast, reduceMotion)
@@ -297,7 +343,7 @@ private fun HintBand(
     outdoor: Boolean,
     reduceMotion: Boolean,
 ) {
-    Box(Modifier.fillMaxWidth().height(46.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(vertical = Spacing.xs), contentAlignment = Alignment.Center) {
         if (hint != null) HintPill(hint, outdoor, reduceMotion)
     }
 }
@@ -309,7 +355,10 @@ private fun Footer(
 ) {
     val outdoor = controller.outdoorContrast
     var menuOpen by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+    Row(
+        modifier.fillMaxWidth().heightIn(min = 64.dp).height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
         FooterButton(
             icon = AdvantlyIcons.Undo,
             label = stringResource(Res.string.action_undo),
@@ -454,7 +503,10 @@ private fun UndoSnackbar(
     }
 }
 
-/** Debug-Overlay: Tap → Frame / Tap → Draw (p50/p95/max), Tap-Zähler, Bildrate, Frame-Zeiten (Android). */
+/**
+ * Debug-Overlay: Eingabe → nächster Frame-Beginn nach Draw und Eingabe → Draw (p50/p95/max) **getrennt nach
+ * Zeitquelle**, Tap-Zähler, Bildrate, Frame-Zeiten (Android). Handler-Fallback-Werte zählen nicht für G1.
+ */
 @Composable
 private fun LatencyOverlay(
     controller: LiveScoreController,
@@ -478,39 +530,55 @@ private fun LatencyOverlay(
                 .border(1.dp, colors.line, Radii.chipShape)
                 .padding(horizontal = Spacing.s, vertical = 6.dp),
     ) {
-        val summary = tracker.summary()
         if (controller.benchmarkRunning) {
             Text(stringResource(Res.string.latency_benchmark_running), style = style, color = colors.hint)
         }
-        val stats =
-            if (summary.samples == 0) {
-                stringResource(Res.string.latency_no_samples)
-            } else {
+        Text(
+            text = stringResource(Res.string.latency_input_to_next_frame),
+            style = style.copy(fontWeight = FontWeight.Bold),
+            color = colors.text,
+        )
+        val summaries = tracker.summaries()
+        if (summaries.isEmpty()) {
+            Text(stringResource(Res.string.latency_no_samples), style = style, color = colors.text2)
+        }
+        summaries.forEach { summary ->
+            val label =
                 stringResource(
-                    Res.string.latency_stats,
-                    formatMillis(summary.tapToFrameP50),
-                    formatMillis(summary.tapToFrameP95),
-                    formatMillis(summary.tapToFrameMax),
-                    summary.samples.toString(),
+                    when (summary.source) {
+                        InputClockSource.InputEvent -> Res.string.latency_source_event
+                        InputClockSource.Handler -> Res.string.latency_source_handler
+                        InputClockSource.Synthetic -> Res.string.latency_source_synthetic
+                    },
+                )
+            val primary = summary.source != InputClockSource.Handler
+            Text(
+                text =
+                    stringResource(
+                        Res.string.latency_source_line,
+                        label,
+                        stringResource(
+                            Res.string.latency_stats,
+                            formatMillis(summary.inputToNextFrameP50),
+                            formatMillis(summary.inputToNextFrameP95),
+                            formatMillis(summary.inputToNextFrameMax),
+                            summary.samples.toString(),
+                        ),
+                    ),
+                style = style,
+                color = if (primary) colors.hint else colors.text2,
+                modifier = Modifier.testTag("latency_${summary.source.name}"),
+            )
+            if (primary) {
+                OverlayLine(
+                    stringResource(Res.string.latency_input_to_draw),
+                    "p50 ${formatMillis(summary.inputToDrawP50)} · p95 ${formatMillis(summary.inputToDrawP95)} ms",
+                    style,
+                    colors.text2,
+                    colors.text2,
                 )
             }
-        OverlayLine(stringResource(Res.string.latency_tap_to_frame), stats, style, colors.text, colors.hint)
-        if (summary.samples > 0) {
-            OverlayLine(
-                stringResource(Res.string.latency_tap_to_draw),
-                "p50 ${formatMillis(summary.tapToDrawP50)} · p95 ${formatMillis(summary.tapToDrawP95)} ms",
-                style,
-                colors.text2,
-                colors.text2,
-            )
         }
-        val clock =
-            when (summary.source) {
-                InputClockSource.InputEvent -> stringResource(Res.string.latency_clock_event)
-                InputClockSource.Handler -> stringResource(Res.string.latency_clock_handler)
-                InputClockSource.Synthetic -> stringResource(Res.string.latency_clock_synthetic)
-                null -> null
-            }
         val counters =
             stringResource(
                 Res.string.latency_counters,
@@ -520,7 +588,7 @@ private fun LatencyOverlay(
             )
         val hz = refresh?.let { stringResource(Res.string.latency_refresh_rate, it.roundToInt().toString()) }
         Text(
-            text = listOfNotNull(counters, hz, clock).joinToString(" · "),
+            text = listOfNotNull(counters, hz).joinToString(" · "),
             style = style,
             color = colors.text2,
             modifier = Modifier.testTag("latency_counters"),

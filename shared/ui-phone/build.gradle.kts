@@ -7,6 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.shared.presentation)
+            implementation(libs.lifecycle.viewmodel.compose)
         }
         named("desktopMain") {
             dependencies {

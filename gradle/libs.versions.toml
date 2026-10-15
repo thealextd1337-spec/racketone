@@ -16,6 +16,8 @@ kotlin = "2.4.20"
 agp = "9.3.1"
 compose-multiplatform = "1.12.1"
 compose-material3 = "1.9.0"
+# KMP-Lifecycle (JetBrains) – dieselbe Linie, die Compose Multiplatform 1.12.1 transitiv nutzt; mit CMP anheben
+jetbrains-lifecycle = "2.9.6"
 skie = "0.10.15"
 ktlint-gradle = "14.2.0"
 ktlint = "1.8.0"
@@ -37,6 +39,9 @@ compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", v
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+lifecycle-viewmodel = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel", version.ref = "jetbrains-lifecycle" }
+lifecycle-viewmodel-savedstate = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate", version.ref = "jetbrains-lifecycle" }
+lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "jetbrains-lifecycle" }
 # Compose-UI-Tests (Desktop/JVM, runComposeUiTest)
 compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
 

@@ -34,6 +34,9 @@
     <string name="a11y_point_for">Punkt für %1$s, %2$s. Stand %3$s zu %4$s.</string>
     <string name="a11y_serving">Aufschlag %1$s.</string>
 
+    <string name="a11y_hint_for_us">%1$s für Wir</string>
+    <string name="a11y_hint_for_them">%1$s für Gegner</string>
+
     <string name="menu_outdoor_contrast">Outdoor-Kontrast</string>
     <string name="menu_keep_screen_on">Bildschirm wach halten</string>
     <string name="menu_latency_overlay">Latenz-Overlay</string>
@@ -48,15 +51,16 @@
     <string name="menu_new_match">Neues Match</string>
 
     <!-- Latenz-Overlay (Spike S4) -->
-    <string name="latency_tap_to_frame">Tap → Frame</string>
-    <string name="latency_tap_to_draw">Tap → Zeichnen</string>
+    <string name="latency_input_to_next_frame">Eingabe → nächster Frame-Beginn nach Draw</string>
+    <string name="latency_input_to_draw">Eingabe → Draw</string>
+    <string name="latency_source_line">%1$s: %2$s</string>
+    <string name="latency_source_event">Eingabe-Ereignis</string>
+    <string name="latency_source_handler">Handler-Fallback, nicht für G1</string>
+    <string name="latency_source_synthetic">Auto-Benchmark</string>
     <string name="latency_stats">p50 %1$s · p95 %2$s · max %3$s ms (n = %4$s)</string>
     <string name="latency_no_samples">zum Messen eine Fläche antippen</string>
     <string name="latency_counters">Taps %1$s · Punkte %2$s · entprellt %3$s</string>
     <string name="latency_refresh_rate">%1$s Hz</string>
-    <string name="latency_clock_event">Uhr: Eingabe-Ereignis</string>
-    <string name="latency_clock_handler">Uhr: Handler (Fallback)</string>
-    <string name="latency_clock_synthetic">Uhr: Auto-Benchmark</string>
     <string name="latency_frames">Frame-Zeit p95 %1$s ms · Jank %2$s/%3$s</string>
     <string name="latency_benchmark_running">Auto-Benchmark läuft …</string>
 </resources>

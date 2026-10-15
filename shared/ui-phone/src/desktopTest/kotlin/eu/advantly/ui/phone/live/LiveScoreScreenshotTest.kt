@@ -33,16 +33,19 @@ class LiveScoreScreenshotTest {
     private fun capture(
         name: String,
         locale: Locale,
+        widthDp: Int = 412,
+        heightDp: Int = 892,
+        fontScale: Float = 1f,
         configure: LiveScoreController.() -> Unit,
     ) {
         val previous = Locale.getDefault()
         Locale.setDefault(locale)
         try {
-            // 412 × 892 dp (Pixel-Klasse) bei Dichte 2
-            runDesktopComposeUiTest(width = 824, height = 1784) {
+            // Standard 412 × 892 dp (Pixel-Klasse) bei Dichte 2
+            runDesktopComposeUiTest(width = widthDp * 2, height = heightDp * 2) {
                 val controller = LiveScoreController()
                 setContent {
-                    CompositionLocalProvider(LocalDensity provides Density(2f)) {
+                    CompositionLocalProvider(LocalDensity provides Density(2f, fontScale)) {
                         AdvantlyTheme(darkTheme = true) {
                             LiveScoreScreen(modifier = Modifier.fillMaxSize(), controller = controller)
                         }
@@ -86,6 +89,18 @@ class LiveScoreScreenshotTest {
             repeat(3) { onTap(Team.Us, null) }
             onTap(Team.Them, null)
             undo()
+        }
+
+    @Test
+    fun liveScoreFontScale200Percent() =
+        capture("live-score-de-fontscale-2", Locale.GERMANY, fontScale = 2f) {
+            demo(DemoScenario.Tiebreak)
+        }
+
+    @Test
+    fun liveScoreCompactLandscapeFontScale200Percent() =
+        capture("live-score-de-landscape-fontscale-2", Locale.GERMANY, widthDp = 892, heightDp = 412, fontScale = 2f) {
+            demo(DemoScenario.MatchPoint)
         }
 
     @Test

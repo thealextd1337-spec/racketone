@@ -3,20 +3,22 @@ package eu.advantly.ui.phone.latency
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlin.math.ceil
 import kotlin.math.roundToLong
 
-/** Woher der Eingabe-Zeitpunkt t0 stammt. */
+/** Woher der Eingabe-Zeitpunkt t0 stammt. Jede Messung behält ihre Quelle; ausgewertet wird getrennt. */
 enum class InputClockSource {
     /** Zeitstempel des Plattform-Ereignisses (MotionEvent/UIEvent/AWT) – enthält die Zustellzeit bis zum Handler. */
     InputEvent,
 
-    /** Zeitpunkt, an dem der Compose-Handler lief (Fallback, z. B. Bedienhilfe-Klick). */
+    /**
+     * Zeitpunkt, an dem der Handler lief (Bedienhilfe-Klick, Knopf ohne Ereigniszeit oder unplausibler Zeitstempel).
+     * Fehlt die Zustellzeit → zu optimistisch, zählt **nicht** für das Go-Kriterium G1.
+     */
     Handler,
 
-    /** Auto-Benchmark ohne echte Eingabe (misst nur Zustand → Frame). */
+    /** Auto-Benchmark ohne echte Eingabe (misst nur Zustand → Frame-Beginn), Grundlage für G7 (Simulator). */
     Synthetic,
 }
 
@@ -51,19 +53,21 @@ fun percentileOf(
     return sorted[rank - 1]
 }
 
+/** Auswertung EINER Quelle. */
 data class LatencySummary(
-    val tapToFrameP50: Double?,
-    val tapToFrameP95: Double?,
-    val tapToFrameMax: Double?,
-    val tapToDrawP50: Double?,
-    val tapToDrawP95: Double?,
+    val source: InputClockSource,
+    val inputToNextFrameP50: Double?,
+    val inputToNextFrameP95: Double?,
+    val inputToNextFrameMax: Double?,
+    val inputToDrawP50: Double?,
+    val inputToDrawP95: Double?,
     val samples: Int,
-    val source: InputClockSource?,
 ) {
+    /** Maschinenlesbare Zeile (CI wertet sie aus, siehe `.github/scripts/check_s4_bench.py`). */
     fun toLogLine(): String =
-        "ADVANTLY_BENCH tapToFrame p50=${formatMillis(tapToFrameP50)} p95=${formatMillis(tapToFrameP95)} " +
-            "max=${formatMillis(tapToFrameMax)} tapToDraw p50=${formatMillis(tapToDrawP50)} p95=${formatMillis(tapToDrawP95)} " +
-            "n=$samples source=$source"
+        "ADVANTLY_BENCH source=$source inputToNextFrame p50=${formatMillis(inputToNextFrameP50)} " +
+            "p95=${formatMillis(inputToNextFrameP95)} max=${formatMillis(inputToNextFrameMax)} " +
+            "inputToDraw p50=${formatMillis(inputToDrawP50)} p95=${formatMillis(inputToDrawP95)} n=$samples"
 }
 
 /** „12.3“ – eine Nachkommastelle, ohne Plattform-Formatierer; „–“ ohne Wert. */
@@ -74,46 +78,47 @@ fun formatMillis(value: Double?): String {
 }
 
 /**
- * Misst **Tap → Frame** (Spike S4):
+ * Misst **Eingabe → nächster Frame-Beginn nach Draw** (Spike S4):
  * 1. `t0` = Eingabe (Zeitstempel des Plattform-Ereignisses, sonst Handler-Zeit) – [onInput].
- * 2. `tDraw` = Draw-Pass, der den neuen Zustand zeichnet – [onDrawn] (Wurzel-Modifier des Screens).
- * 3. `tFrame` = nächster Frame-Callback danach (Android: Choreographer, iOS: CADisplayLink, Desktop: Compose-Frame-Clock)
- *    – ab hier ist der gezeichnete Frame an den Compositor übergeben, er wird mit der nächsten Bildwiederholung sichtbar.
+ * 2. `tDraw` = Draw-Pass, der den neuen Zustand aufzeichnet – [onDrawn] (Wurzel-Modifier des Screens).
+ * 3. `tNext` = Beginn des nächsten Frame-Callbacks danach (Android: Choreographer, iOS: CADisplayLink-getriebene
+ *    Frame-Clock, Desktop: Compose-Frame-Clock).
  *
- * „Tap → Frame“ = `tFrame - t0` ist damit eine Untergrenze der Ende-zu-Ende-Latenz (ohne Touch-Panel-Abtastung und
- * Display-Scanout). Alle Aufrufe auf dem UI-Thread.
+ * Das ist **kein Präsentationsnachweis**: Wann der Frame tatsächlich auf dem Display erscheint (RenderThread/GPU,
+ * Compositor, Scanout) und die Touch-Abtastung sind nicht enthalten. Kalibrierung siehe Spike-Bericht
+ * (`dumpsys gfxinfo … framestats`, Perfetto, Zeitlupenvideo). Alle Aufrufe auf dem UI-Thread.
  */
 @Stable
 class LatencyTracker(
-    capacity: Int = 500,
+    private val capacity: Int = 500,
 ) {
     private class Pending(
         val generation: Int,
         val t0: Long,
+        val source: InputClockSource,
     ) {
         var tDraw: Long = 0L
     }
 
     private val pending = ArrayList<Pending>()
     private val awaitingFrame = ArrayList<Pending>()
-
-    val tapToDraw = SampleWindow(capacity)
-    val tapToFrame = SampleWindow(capacity)
+    private val draw = InputClockSource.entries.associateWith { SampleWindow(capacity) }
+    private val nextFrame = InputClockSource.entries.associateWith { SampleWindow(capacity) }
 
     /** Zählt jede neue Messung hoch; das Overlay liest diesen Wert, um sich neu zu zeichnen. */
     var version by mutableIntStateOf(0)
         private set
 
-    var lastSource by mutableStateOf<InputClockSource?>(null)
-        private set
+    fun inputToDraw(source: InputClockSource): SampleWindow = draw.getValue(source)
+
+    fun inputToNextFrame(source: InputClockSource): SampleWindow = nextFrame.getValue(source)
 
     fun onInput(
         generation: Int,
         t0Nanos: Long,
         source: InputClockSource,
     ) {
-        pending += Pending(generation, t0Nanos)
-        lastSource = source
+        pending += Pending(generation, t0Nanos, source)
     }
 
     /** Aus dem Draw-Pass: `true`, wenn jetzt auf den nächsten Frame gewartet werden muss. */
@@ -135,8 +140,8 @@ class LatencyTracker(
     fun onNextFrame(nowNanos: Long) {
         if (awaitingFrame.isEmpty()) return
         awaitingFrame.forEach {
-            tapToDraw.add((it.tDraw - it.t0) / 1_000_000.0)
-            tapToFrame.add((nowNanos - it.t0) / 1_000_000.0)
+            draw.getValue(it.source).add((it.tDraw - it.t0) / 1_000_000.0)
+            nextFrame.getValue(it.source).add((nowNanos - it.t0) / 1_000_000.0)
         }
         awaitingFrame.clear()
         version++
@@ -145,20 +150,25 @@ class LatencyTracker(
     fun reset() {
         pending.clear()
         awaitingFrame.clear()
-        tapToDraw.clear()
-        tapToFrame.clear()
-        lastSource = null
+        draw.values.forEach { it.clear() }
+        nextFrame.values.forEach { it.clear() }
         version++
     }
 
-    fun summary(): LatencySummary =
-        LatencySummary(
-            tapToFrameP50 = tapToFrame.percentile(50.0),
-            tapToFrameP95 = tapToFrame.percentile(95.0),
-            tapToFrameMax = tapToFrame.max(),
-            tapToDrawP50 = tapToDraw.percentile(50.0),
-            tapToDrawP95 = tapToDraw.percentile(95.0),
-            samples = tapToFrame.count,
-            source = lastSource,
+    fun summary(source: InputClockSource): LatencySummary {
+        val frame = nextFrame.getValue(source)
+        val drawn = draw.getValue(source)
+        return LatencySummary(
+            source = source,
+            inputToNextFrameP50 = frame.percentile(50.0),
+            inputToNextFrameP95 = frame.percentile(95.0),
+            inputToNextFrameMax = frame.max(),
+            inputToDrawP50 = drawn.percentile(50.0),
+            inputToDrawP95 = drawn.percentile(95.0),
+            samples = frame.count,
         )
+    }
+
+    /** Auswertungen aller Quellen mit Messwerten, in der Reihenfolge von [InputClockSource]. */
+    fun summaries(): List<LatencySummary> = InputClockSource.entries.map(::summary).filter { it.samples > 0 }
 }

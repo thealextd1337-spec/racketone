@@ -35,6 +35,9 @@
     <string name="a11y_point_for">Point for %1$s, %2$s. Score %3$s to %4$s.</string>
     <string name="a11y_serving">%1$s serving.</string>
 
+    <string name="a11y_hint_for_us">%1$s for us</string>
+    <string name="a11y_hint_for_them">%1$s for them</string>
+
     <string name="menu_outdoor_contrast">Outdoor contrast</string>
     <string name="menu_keep_screen_on">Keep screen on</string>
     <string name="menu_latency_overlay">Latency overlay</string>
@@ -49,15 +52,16 @@
     <string name="menu_new_match">New match</string>
 
     <!-- Latenz-Overlay (Spike S4) -->
-    <string name="latency_tap_to_frame">Tap → frame</string>
-    <string name="latency_tap_to_draw">Tap → draw</string>
+    <string name="latency_input_to_next_frame">Input → next frame start after draw</string>
+    <string name="latency_input_to_draw">Input → draw</string>
+    <string name="latency_source_line">%1$s: %2$s</string>
+    <string name="latency_source_event">input event</string>
+    <string name="latency_source_handler">handler fallback, not for G1</string>
+    <string name="latency_source_synthetic">auto benchmark</string>
     <string name="latency_stats">p50 %1$s · p95 %2$s · max %3$s ms (n = %4$s)</string>
     <string name="latency_no_samples">tap a panel to measure</string>
     <string name="latency_counters">Taps %1$s · points %2$s · debounced %3$s</string>
     <string name="latency_refresh_rate">%1$s Hz</string>
-    <string name="latency_clock_event">clock: input event</string>
-    <string name="latency_clock_handler">clock: handler (fallback)</string>
-    <string name="latency_clock_synthetic">clock: auto benchmark</string>
     <string name="latency_frames">Frame time p95 %1$s ms · jank %2$s/%3$s</string>
     <string name="latency_benchmark_running">Auto benchmark running …</string>
 </resources>

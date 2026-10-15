@@ -1,11 +1,14 @@
 package eu.advantly.ui.phone.platform
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Context
 import android.content.ContextWrapper
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -17,6 +20,7 @@ import android.view.Window
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -38,13 +42,29 @@ actual fun KeepScreenOn(enabled: Boolean) {
     }
 }
 
+/** Liest „Animationen entfernen“ (Animator-Skala 0) und beobachtet Änderungen per ContentObserver. */
 @Composable
 actual fun rememberReduceMotion(): Boolean {
     val context = LocalContext.current
-    return remember(context) {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    val resolver = context.contentResolver
+    val reduce = remember(context) { mutableStateOf(readReduceMotion(resolver)) }
+    DisposableEffect(resolver) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    reduce.value = readReduceMotion(resolver)
+                }
+            }
+        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
+        // Falls sich die Einstellung geändert hat, während kein Observer registriert war
+        reduce.value = readReduceMotion(resolver)
+        onDispose { resolver.unregisterContentObserver(observer) }
     }
+    return reduce.value
 }
+
+private fun readReduceMotion(resolver: ContentResolver): Boolean =
+    Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
 /** `System.nanoTime()` = CLOCK_MONOTONIC – dieselbe Uhr wie `SystemClock.uptimeMillis()` und Choreographer. */
 actual fun monotonicNanos(): Long = System.nanoTime()
@@ -89,34 +109,37 @@ private tailrec fun Context.findActivity(): Activity? =
         else -> null
     }
 
-/** Frame-Dauern (`FrameMetrics.TOTAL_DURATION`) der letzten 600 Frames; Jank = Dauer über der Frame-Deadline. */
+/**
+ * Frame-Dauern (`FrameMetrics.TOTAL_DURATION`) seit dem letzten Zurücksetzen, höchstens die letzten 600 Frames.
+ * p95 und Jank (Dauer über der Frame-Deadline) beziehen sich auf dasselbe Fenster.
+ */
 private class AndroidFrameStats : FrameStats {
+    private class Frame(
+        val millis: Double,
+        val jank: Boolean,
+    )
+
     private val lock = Any()
-    private val durations = ArrayDeque<Double>()
-    private var jank = 0
-    private var frames = 0
+    private val frames = ArrayDeque<Frame>()
 
     fun add(
         totalNanos: Long,
         deadlineNanos: Long,
     ) = synchronized(lock) {
-        if (durations.size == CAPACITY) durations.removeFirst()
-        durations.addLast(totalNanos / 1_000_000.0)
-        frames++
-        if (totalNanos > deadlineNanos) jank++
+        if (frames.size == CAPACITY) frames.removeFirst()
+        frames.addLast(Frame(totalNanos / 1_000_000.0, totalNanos > deadlineNanos))
     }
 
     override fun snapshot(): FrameStatsSnapshot =
         synchronized(lock) {
-            FrameStatsSnapshot(frames = frames, p95Millis = percentileOf(durations.toList(), 95.0), jankFrames = jank)
+            FrameStatsSnapshot(
+                frames = frames.size,
+                p95Millis = percentileOf(frames.map { it.millis }, 95.0),
+                jankFrames = frames.count { it.jank },
+            )
         }
 
-    override fun reset() =
-        synchronized(lock) {
-            durations.clear()
-            jank = 0
-            frames = 0
-        }
+    override fun reset() = synchronized(lock) { frames.clear() }
 
     private companion object {
         const val CAPACITY = 600

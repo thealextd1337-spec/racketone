@@ -96,6 +96,24 @@ class LiveScoreSession(
         state = FakeTennisState(format)
     }
 
+    /** Ereignis-Log als kompakter String (für SavedState: Rotation, Prozesstod). */
+    fun exportLog(): Log = Log(encode(events), encode(redoStack))
+
+    /** Stellt Log und Redo-Stapel wieder her; unbekannte Einträge werden übersprungen. */
+    fun restore(log: Log) {
+        events.clear()
+        redoStack.clear()
+        events += decode(log.events)
+        redoStack += decode(log.redo)
+        state = fold(events)
+    }
+
+    /** Persistierbare Form: Ereignisse durch `;` getrennt – `U` (Wir), `T` (Gegner), `D:<Szenario>`. */
+    data class Log(
+        val events: String,
+        val redo: String,
+    )
+
     private fun append(event: LiveEvent): ScoreChange {
         val before = state
         events += event
@@ -158,6 +176,35 @@ class LiveScoreSession(
     }
 
     companion object {
+        private fun encode(log: List<LiveEvent>): String =
+            log.joinToString(";") { event ->
+                when (event) {
+                    is LiveEvent.Point -> if (event.team == Team.Us) "U" else "T"
+                    is LiveEvent.Demo -> "D:${event.scenario.name}"
+                }
+            }
+
+        private fun decode(text: String): List<LiveEvent> =
+            text.split(';').mapNotNull { token ->
+                when {
+                    token == "U" -> {
+                        LiveEvent.Point(Team.Us)
+                    }
+
+                    token == "T" -> {
+                        LiveEvent.Point(Team.Them)
+                    }
+
+                    token.startsWith("D:") -> {
+                        DemoScenario.entries.firstOrNull { it.name == token.removePrefix("D:") }?.let { LiveEvent.Demo(it) }
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+            }
+
         /** Stärkstes Ereignis gewinnt: Satz > Seitenwechsel > Game > Punkt (04 §5.8, Spalte Handy). */
         fun cueFor(
             before: FakeTennisState,

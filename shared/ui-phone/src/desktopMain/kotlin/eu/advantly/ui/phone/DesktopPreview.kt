@@ -1,15 +1,16 @@
 package eu.advantly.ui.phone
 
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import eu.advantly.presentation.live.Team
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.latency.InputClockSource
 import eu.advantly.ui.phone.live.LiveScoreController
 import eu.advantly.ui.phone.live.LiveScoreScreen
+import eu.advantly.ui.phone.live.rememberLiveScoreController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.Toolkit
@@ -29,12 +30,13 @@ import javax.swing.SwingUtilities
 fun main(args: Array<String>) {
     val bench = "--bench" in args || System.getenv("ADVANTLY_BENCH") == "1"
     application {
-        val controller = remember { LiveScoreController() }
         Window(
             onCloseRequest = ::exitApplication,
             title = "Advantly – Desktop-Preview",
             state = rememberWindowState(width = 412.dp, height = 892.dp),
         ) {
+            // Gleicher Weg wie auf Android/iOS: ViewModel vom ViewModelStoreOwner des Fensters
+            val controller = rememberLiveScoreController()
             AdvantlyTheme(darkTheme = true) {
                 LiveScoreScreen(controller = controller, onBenchmarkFinished = { println(it) })
             }
@@ -68,7 +70,7 @@ private class DesktopBenchmark(
             Thread.sleep(300)
         }
         Thread.sleep(500)
-        lines += "single taps:  " + onEdt { controller.tracker.summary().toLogLine() } + " " + counters()
+        lines += "single taps:  " + report()
 
         // Phase 2: schnelle Doppel-Taps (70 ms Abstand) – geht ein Tap verloren?
         onEdt {
@@ -83,10 +85,16 @@ private class DesktopBenchmark(
             Thread.sleep(400)
         }
         Thread.sleep(500)
-        lines += "double taps:  " + onEdt { controller.tracker.summary().toLogLine() } + " " + counters() +
-            " injected=${DOUBLE_TAPS * 2}"
+        lines += "double taps:  " + report() + " injected=${DOUBLE_TAPS * 2}"
         return lines.joinToString("\n")
     }
+
+    /** Nur Messungen mit Ereignis-Zeitstempel; Handler-Fallbacks werden separat gezählt. */
+    private fun report(): String =
+        onEdt {
+            controller.tracker.summary(InputClockSource.InputEvent).toLogLine() +
+                " fallback_n=${controller.tracker.summary(InputClockSource.Handler).samples}"
+        } + " " + counters()
 
     private fun counters(): String =
         onEdt { "taps=${controller.rawTaps} points=${controller.countedPoints} debounced=${controller.debouncedTaps}" }

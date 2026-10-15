@@ -151,6 +151,7 @@ jobs:
       # Spike S4: Live-Score (Compose Multiplatform) im iOS-Simulator starten, Auto-Benchmark (40 synthetische Punkte,
       # misst Zustand → Frame über die CADisplayLink-getriebene Frame-Clock) ablesen und Screenshots EN/DE ablegen.
       - name: iOS-Simulator – App starten, Benchmark + Screenshots (Spike S4)
+        timeout-minutes: 15
         env:
           IOS_SIM: ${{ steps.sim.outputs.ios }}
         run: |
@@ -158,23 +159,19 @@ jobs:
           app=build/DerivedData/Build/Products/Debug-iphonesimulator/Advantly.app
           out="$PWD/build/simulator"
           mkdir -p "$out"
+          # macOS hat kein `timeout` – perl-alarm begrenzt das Warten auf den Boot
           xcrun simctl boot "$IOS_SIM" || true
-          xcrun simctl bootstatus "$IOS_SIM" -b
+          perl -e 'alarm shift; exec @ARGV' 300 xcrun simctl bootstatus "$IOS_SIM" -b
           xcrun simctl status_bar "$IOS_SIM" override --time 9:41 --batteryState charged --batteryLevel 100 || true
           xcrun simctl install "$IOS_SIM" "$app"
-          xcrun simctl launch --terminate-running-process --stdout="$out/app-en.log" --stderr="$out/app-en.err.log"             "$IOS_SIM" eu.advantly -advantlyAutoBench -AppleLanguages "(en)" -AppleLocale en_US
+          xcrun simctl launch --terminate-running-process --stdout="$out/app-en.log" --stderr="$out/app-en.err.log" "$IOS_SIM" eu.advantly -advantlyAutoBench -AppleLanguages "(en)" -AppleLocale en_US
           for _ in $(seq 1 90); do grep -q ADVANTLY_BENCH "$out/app-en.log" 2>/dev/null && break; sleep 1; done
           xcrun simctl io "$IOS_SIM" screenshot "$out/live-score-en.png"
-          xcrun simctl launch --terminate-running-process --stdout="$out/app-de.log" --stderr="$out/app-de.err.log"             "$IOS_SIM" eu.advantly -AppleLanguages "(de)" -AppleLocale de_DE
+          xcrun simctl launch --terminate-running-process --stdout="$out/app-de.log" --stderr="$out/app-de.err.log" "$IOS_SIM" eu.advantly -AppleLanguages "(de)" -AppleLocale de_DE
           sleep 10
           xcrun simctl io "$IOS_SIM" screenshot "$out/live-score-de.png"
-          {
-            echo "### Spike S4 – iOS-Simulator"
-            echo '```'
-            grep ADVANTLY_BENCH "$out/app-en.log" || echo "kein Benchmark-Ergebnis (siehe app-en.log)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          grep -q ADVANTLY_BENCH "$out/app-en.log"
+          # Validiert n ≥ 40 und numerische Perzentile (sonst Fehler), bewertet G7 (Go/No-Go im Summary)
+          python3 .github/scripts/check_s4_bench.py "$out/app-en.log" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Simulator-Screenshots + Logs hochladen
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
