@@ -2,6 +2,7 @@ package eu.advantly.data
 
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.data.db.AdvantlyDatabase
@@ -41,6 +42,29 @@ class LocalData(
             matches.delete(id)
         }
     }
+
+    /** F20: nur die durch wear.guest.* belegten Slots mit unveränderten DE/EN-Standardnamen migrieren. */
+    fun migrateWatchPlaceholders() {
+        val names =
+            mapOf(
+                "PARTNER" to setOf("Partner"),
+                "OPPONENT_1" to setOf("Gegner 1", "Opponent 1"),
+                "OPPONENT_2" to setOf("Gegner 2", "Opponent 2"),
+            )
+        transaction {
+            names.forEach { (slot, defaults) ->
+                val key = "wear.guest.$slot"
+                val id = settings.get(key)?.let(::PlayerId) ?: return@forEach
+                val player = players.get(id)
+                if (player == null || player.displayName in defaults || player.kind == PlayerKind.PLACEHOLDER) {
+                    players.markPlaceholder(id, player?.createdAtMs ?: 0)
+                    settings.remove(key)
+                }
+            }
+        }
+    }
+
+    fun isPlaceholder(id: PlayerId): Boolean = Placeholders.isPlaceholder(id) || players.get(id)?.kind == PlayerKind.PLACEHOLDER
 
     // --- Identität des Besitzers über eigene Geräte (W1-I) -----------------------------------------------
 

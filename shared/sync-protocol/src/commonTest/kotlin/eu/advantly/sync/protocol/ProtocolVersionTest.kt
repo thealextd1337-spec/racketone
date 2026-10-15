@@ -22,16 +22,16 @@ class ProtocolVersionTest {
 
     @Test
     fun disjointRangesAreIncompatible() {
-        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(3, 3).status)
+        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(4, 4).status)
         assertEquals(CompatibilityStatus.PEER_TOO_OLD, ProtocolVersion.negotiate(1, 1, localVersion = 3, localMinSupported = 2).status)
-        assertFalse(ProtocolVersion.negotiate(3, 3).isCompatible)
+        assertFalse(ProtocolVersion.negotiate(4, 4).isCompatible)
     }
 
     /** W1 (Protokoll 1) ↔ W2 (Protokoll 2): auf beiden Seiten sichtbar inkompatibel, nie halb-synchron. */
     @Test
-    fun version1And2AreIncompatibleInBothDirections() {
-        assertEquals(2, ProtocolVersion.CURRENT)
-        assertEquals(2, ProtocolVersion.MIN_SUPPORTED)
+    fun version2And3AreIncompatibleInBothDirections() {
+        assertEquals(3, ProtocolVersion.CURRENT)
+        assertEquals(3, ProtocolVersion.MIN_SUPPORTED)
         // neues Gerät sieht ein altes
         assertEquals(Compatibility(CompatibilityStatus.PEER_TOO_OLD, null), ProtocolVersion.negotiate(1, 1))
         // altes Gerät (CURRENT = MIN_SUPPORTED = 1) sieht ein neues
@@ -39,7 +39,7 @@ class ProtocolVersionTest {
             Compatibility(CompatibilityStatus.PEER_TOO_NEW, null),
             ProtocolVersion.negotiate(ProtocolVersion.CURRENT, ProtocolVersion.MIN_SUPPORTED, localVersion = 1, localMinSupported = 1),
         )
-        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 2), ProtocolVersion.negotiate(2, 2))
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 3), ProtocolVersion.negotiate(3, 3))
         assertFalse(ProtocolVersion.accepts(1))
     }
 

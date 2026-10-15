@@ -144,7 +144,14 @@ object EventLog {
             if (event.id in undone || event.id in rejected) continue
             val payload = event.payload as? Undo ?: continue
             val target = position[payload.target] ?: continue
-            if (target >= i || ordered[target].payload is ScorerChanged) invalid += event.id else undone += payload.target
+            if (target >= i ||
+                (ordered[target].payload is ScorerChanged || ordered[target].payload is PlayerAssigned)
+            ) {
+                invalid += event.id
+            } else {
+                undone +=
+                    payload.target
+            }
         }
         return undone to invalid
     }

@@ -228,7 +228,7 @@ class MultiDeviceSyncTest {
         val phoneData = testLocalData()
         val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("old-phone"), PeerKind.PHONE), cluster.clock)
         val id = phone.create(format, SINGLES)
-        val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":2", "\"v\":1")
+        val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":3", "\"v\":1")
         old.send("watch", v1.encodeToByteArray())
         cluster.settle()
         assertNull(cluster["watch"].data.matches.get(id))
@@ -242,7 +242,7 @@ class MultiDeviceSyncTest {
         val cluster = Cluster("watch" to PeerKind.WATCH)
         val lab = ReliableDeviceLink(cluster.network.transport("lab"), cluster.scheduler).apply { start() }
         cluster.settle()
-        lab.send("watch", SyncCodec.encode(Hello(DeviceId("future"), PeerKind.PHONE, minV = 3, v = 3)))
+        lab.send("watch", SyncCodec.encode(Hello(DeviceId("future"), PeerKind.PHONE, minV = 4, v = 4)))
         cluster.settle()
         val peer =
             cluster["watch"]

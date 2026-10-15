@@ -21,6 +21,7 @@ import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
@@ -38,6 +39,9 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredSequence
+import eu.advantly.data.assignments
+import eu.advantly.data.recentPeople
+import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.data.toScoreEventOrNull
 import eu.advantly.data.toStoredEvent
@@ -163,6 +167,7 @@ class MatchSession(
     fun start() {
         checkThread()
         if (started) return
+        data.migrateWatchPlaceholders()
         started = true
         link?.setListener(linkListener)
         link?.start()
@@ -263,8 +268,48 @@ class MatchSession(
         val previous = m.record
         val format = previous.format.copy(match = MatchSettings.OPEN, decidingSet = null)
         val next = m.engine.state.continuation
-        val lineup = if (next != null) previous.lineup.copy(firstServer = next.player) else previous.lineup
+        val resolved = data.resolvedLineup(previous)
+        val nextPlayer = next?.player?.let { data.assignments(previous.id)[it]?.id ?: it }
+        val lineup = if (nextPlayer != null) resolved.copy(firstServer = nextPlayer) else resolved
         return createMatch(format, lineup, previous.meta, m.scorer ?: deviceId, previous = previous.id)
+    }
+
+    /** Erstellerprüfung unabhängig von Zähler und Matchstatus; P1: eigene Geräte desselben Besitzers. */
+    fun canAssignPlayer(matchId: MatchId): Boolean {
+        checkThread()
+        val created =
+            data.events
+                .scoreEvents(matchId)
+                .firstOrNull { it.payload is MatchCreated }
+                ?.payload as? MatchCreated ?: return false
+        return data.isSelf(created.createdBy ?: created.lineup.a.first())
+    }
+
+    /** Erste gültige Zuweisung gewinnt; identische Wiederholung schreibt kein weiteres Event. */
+    fun assignPlayer(
+        matchId: MatchId,
+        slot: PlayerId,
+        playerId: PlayerId,
+    ): Boolean {
+        checkThread()
+        if (!canAssignPlayer(matchId) || !data.isPlaceholder(slot)) return false
+        val record = data.matches.get(matchId) ?: return false
+        if (record.lineup.sideOf(slot) == null) return false
+        val assigned = data.assignments(matchId)
+        assigned[slot]?.let { return it.id == playerId }
+        val player = data.players.get(playerId)?.toPlayer() ?: return false
+        if (data.isPlaceholder(playerId) || player.displayName.isBlank()) return false
+        val occupied = data.resolvedLineup(record).let { it.a + it.b }
+        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return false
+        val m =
+            open?.takeIf { it.id == matchId } ?: run {
+                val engine = ScoringEngine.replay(data.events.scoreEvents(matchId))
+                OpenMatch(record, checkNotNull(engine.genesis), engine)
+            }
+        val created = m.genesis.payload as MatchCreated
+        val actor = created.createdBy ?: created.lineup.a.first()
+        emit(m, listOf(PlayerAssigned(slot, player, actor)))
+        return true
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
@@ -492,6 +537,7 @@ class MatchSession(
     fun syncNow() {
         checkThread()
         sendSummaries()
+        if (started) broadcastMeta()
     }
 
     // --- Lokale Events ----------------------------------------------------------------------------
@@ -513,13 +559,15 @@ class MatchSession(
         ScoringEngine.replay(format, lineup, emptyList()) // prüft Format und Lineup
         val now = clock.nowMs()
         val matchId = MatchId.of(ids.newUuid7(now))
-        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer)
+        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer, createdBy = data.players.self()?.id)
         val genesis = ScoreEvent(EventId.of(ids.newUuid7(now)), matchId, deviceId, 1, 1, now, null, created)
         data.transaction {
             data.events.append(genesis.toStoredEvent())
             data.matches.insertIfAbsent(matchId, format, lineup, meta, now, previous)
             data.players.markUsed(lineup.a + lineup.b, now)
-            data.favorites.recordUse(format.sport, format.discipline, lineup.a, lineup.b, now)
+            if ((lineup.a + lineup.b).none(data::isPlaceholder)) {
+                data.favorites.recordUse(format.sport, format.discipline, lineup.a, lineup.b, now)
+            }
         }
         openMatch(matchId)
         broadcastMeta()
@@ -543,6 +591,7 @@ class MatchSession(
             }
         data.events.appendAll(events.map { it.toStoredEvent() })
         m.engine = ScoringEngine.applyAll(m.engine, events)
+        if (payloads.any { it is PlayerAssigned }) reconcilePeople(m.id)
         persistProgress(m)
         broadcast(Events(m.id, events))
         maybeFollow(null)
@@ -689,6 +738,7 @@ class MatchSession(
         } else {
             refreshHeader(matchId)
         }
+        if (inserted.any { it.payload is PlayerAssigned || it.payload is MatchCreated }) reconcilePeople(matchId)
         val forward = Events(matchId, inserted, message.more)
         targets().filter { it != peer }.forEach { send(it, forward) }
         return matchId
@@ -699,8 +749,17 @@ class MatchSession(
         message: MatchMetaMessage,
     ): MatchId? {
         val now = clock.nowMs()
-        message.players.forEach { data.players.upsertRemote(it, now) }
-        message.favorites.forEach { data.favorites.merge(it.toLocal()) }
+        val newlyMigrated = message.placeholderIds.any { !data.isPlaceholder(it) }
+        message.placeholderIds.forEach { data.players.markPlaceholder(it, now) }
+        if (newlyMigrated) data.matches.history(limit = Long.MAX_VALUE).forEach { reconcilePeople(it.id) }
+        (message.players + message.recentPlayers.orEmpty()).forEach { data.players.upsertRemote(it, now) }
+        message.recentPlayers?.let { people ->
+            data.settings.put(
+                "players.recentRemote",
+                people.joinToString(",") { it.id.value },
+            )
+        }
+        message.favorites.filter { (it.a + it.b).none(data::isPlaceholder) }.forEach { data.favorites.merge(it.toLocal()) }
         dataRevision++
         adoptOwnerIdentity(peer, message)
         val header = message.match ?: return null
@@ -739,6 +798,15 @@ class MatchSession(
                 if (data.addSelfAliases(listOf(owner.id))) dataRevision++
             }
         }
+    }
+
+    private fun reconcilePeople(matchId: MatchId) {
+        val at = data.matches.get(matchId)?.createdAtMs ?: return
+        data.assignments(matchId).values.forEach {
+            data.players.upsertRemote(it, clock.nowMs())
+            data.players.markUsed(listOf(it.id), at)
+        }
+        dataRevision++
     }
 
     /** Status/Ergebnis eines nicht offenen Matches aus seinem Log neu berechnen. */
@@ -941,12 +1009,14 @@ class MatchSession(
             .sortedWith(EventOrdering)
 
     private fun metaMessage(record: MatchRecord?): MatchMetaMessage {
-        val favorites = data.favorites.recent(limit = FAVORITES_IN_META)
+        val favorites = data.favorites.recent(limit = FAVORITES_IN_META).filter { (it.a + it.b).none(data::isPlaceholder) }
         val lineupPlayers = record?.lineup?.let { it.a + it.b }.orEmpty()
         val playerIds = (lineupPlayers + favorites.flatMap { it.a + it.b }).distinct()
         return MatchMetaMessage(
             match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
-            players = playerIds.mapNotNull { data.players.get(it)?.toPlayer() },
+            players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() },
+            placeholderIds = data.players.placeholderIds().toList(),
+            recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() } else null,
             favorites = favorites.map { it.toWire() },
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),

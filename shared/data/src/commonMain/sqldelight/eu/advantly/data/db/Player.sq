@@ -3,7 +3,7 @@
 CREATE TABLE player (
     id TEXT NOT NULL PRIMARY KEY,
     display_name TEXT NOT NULL,
-    -- SELF | GUEST
+    -- SELF | GUEST | PLACEHOLDER (migrierte Uhr-Slots, unsichtbar in Personenlisten)
     kind TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL,
     last_used_at_ms INTEGER

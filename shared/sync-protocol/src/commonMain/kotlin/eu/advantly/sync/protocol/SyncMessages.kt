@@ -98,6 +98,8 @@ data class Events(
  * @property self eigener Spieler des Absenders („Ich“). Das Handy ist Identitätsquelle: Eine Uhr übernimmt den `self`
  *   eines Handys als ihren eigenen Spieler; ein Handy merkt sich den `self` anderer eigener Geräte als Alias (W1-I).
  *   `null` bei älteren Absendern.
+ * @property placeholderIds dauerhaft migrierte Uhr-Slot-IDs; dürfen nie als Gäste importiert werden
+ * @property recentPlayers höchstens 24 zuletzt gespielte Personen vom Handy, ohne Self/Platzhalter; null = kein Verzeichnis-Update
  * @property selfAliases frühere bzw. bekannte andere IDs desselben Besitzers (z. B. der Uhr-eigene Spieler vor der
  *   Übernahme) – Matches mit diesen IDs zeigen den Besitzer, keinen Gast
  */
@@ -110,6 +112,8 @@ data class MatchMetaMessage(
     val favorites: List<FavoriteLineup> = emptyList(),
     val self: Player? = null,
     val selfAliases: List<PlayerId> = emptyList(),
+    val placeholderIds: List<PlayerId> = emptyList(),
+    val recentPlayers: List<Player>? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
 ) : SyncMessage
 

@@ -146,6 +146,7 @@ internal class Core private constructor(
                 Resumed -> onResumed()
                 is PointDetailSet -> onPointDetailSet(payload, appliedPoint(payload.target))
                 is ServerChosen -> onServerChosen(payload)
+                is PlayerAssigned -> error("PlayerAssigned wirkt nur in der Identitätsprojektion")
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
                 is ScorerChanged -> error("ScorerChanged wirkt in der Log-Analyse (02 §7.5)")

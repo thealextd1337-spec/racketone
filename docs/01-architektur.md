@@ -297,8 +297,13 @@ Regeln:
 |---|---|---|---|
 | 1 | W1 | Events bis Single-Scorer | 1 |
 | 2 | W2-A | zusätzlich `ServerChosen`, `nextSetKind = TIEBREAK_7 \| MATCH_TIEBREAK_10`, `PointDetail` ohne `kind` (02 §7) | **2** |
+| 3 | W3-S / F20 | zusätzlich `PlayerAssigned`, `createdBy`, Platzhalter-Kennzeichnung und kleines Personenverzeichnis in `MatchMeta` | **3** |
 
-Begründung `minV = 2`: Event-Inhalte lassen sich nicht in eine ältere Version „herunterschreiben“. Ein Gerät mit Version 1 würde Nachrichten mit den neuen Inhalten verwerfen und die übrigen übernehmen – ein halb-synchroner Zustand mit falschem Spielstand, den die Anti-Entropie nie auflöst. Deshalb sind 1 und 2 bewusst inkompatibel; Uhr und Handy müssen gemeinsam aktualisiert werden. Alte Logs (gespeicherte Events) bleiben lesbar, die Engine faltet sie unverändert.
+**Aktuell: `CURRENT = MIN_SUPPORTED = 3`.** Version 2 versteht `PlayerAssigned` nicht; deshalb sind auch 2 und 3
+bewusst inkompatibel. Die Versionsprüfung und der Aktualisierungshinweis bleiben unverändert. Gespeicherte alte Logs
+werden weiterhin gelesen, ohne Genesis oder Score umzuschreiben.
+
+Begründung `minV = 2` (historisch): Event-Inhalte lassen sich nicht in eine ältere Version „herunterschreiben“. Ein Gerät mit Version 1 würde Nachrichten mit den neuen Inhalten verwerfen und die übrigen übernehmen – ein halb-synchroner Zustand mit falschem Spielstand, den die Anti-Entropie nie auflöst. Deshalb sind 1 und 2 bewusst inkompatibel; Uhr und Handy müssen gemeinsam aktualisiert werden. Alte Logs (gespeicherte Events) bleiben lesbar, die Engine faltet sie unverändert.
 
 ### 4.4 Single-Scorer: Zähler, Anzeige und Übergabe
 

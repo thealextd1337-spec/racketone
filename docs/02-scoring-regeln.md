@@ -949,6 +949,38 @@ Testvektoren: TV-TEN-003 (Übergabe mitten im Satz), TV-TEN-004 (Altzähler offl
 
 ---
 
+### 7.6 Uhr-Platzhalter und Personenzuweisung (F20, normativ)
+
+- **Platz ist keine Person:** Ein ungewählter Uhr-Platz hat eine eindeutige ID im reservierten Namensraum
+  `placeholder:`; keine Spieler-/Gastzeile. Die ID bleibt für Rotation, Rückschläger und Korrekturen dauerhaft gleich.
+  Die Anzeige leitet „Partner“ bzw. „Gegner 1/2“ aus Side und ursprünglichem Lineup-Index ab (DE/EN), nie aus einem
+  gespeicherten Namen. Platzhalter erscheinen nicht in Gästen, Vorschlägen, Favoriten, zuletzt gespielten Personen
+  oder Statistiken je Person; Teamstatistiken bleiben vollständig.
+- **Ersteller:** `MatchCreated.createdBy` ist die Self-ID des Erstellers. Bei alten Uhr-Logs ohne dieses Feld gilt
+  `lineup.A[0]`. Eigene Geräte desselben Besitzers gelten über Self/Aliase als Ersteller. P1 vertraut ausschließlich
+  dem gekoppelten Geräteverbund; P2 muss die behauptete Akteur-ID zusätzlich gegen den authentifizierten Account prüfen.
+- **Zuweisung:** `PlayerAssigned(slot, player: {id, displayName}, assignedBy)` ist ein append-only Metadaten-Event im
+  selben Match-Log und nutzt dessen Ordnung, Ack/Retry und Anti-Entropie. Erlaubt während und nach dem Match, auch
+  bei geschlossenem Match und auf einem Anzeige-Handy: eine Personenidentität korrigiert keine Zählentscheidung,
+  deshalb ist die Zählerrolle hierfür unerheblich. Nur der Ersteller darf das Kommando ausführen.
+- **Determinismus:** Separate reine Projektion `PlayerAssignments.resolve` neben dem Scoring-Fold. Erstes gültiges
+  Event je Platz in `(lamport, deviceId, id)` gewinnt; konkurrierende spätere Zuweisungen bleiben im Log ohne Wirkung.
+  Gleiche Wiederholung erzeugt lokal kein weiteres Event, erneut empfangene IDs sind No-ops. Unterschiedliche Kopien
+  einer Event-ID werden wie andere Log-Kollisionen ausgeschlossen. Ziel muss ein ursprünglicher Platzhalter des
+  Matches sein, Akteur muss der Genesis-Ersteller sein, die Person darf weder Platzhalter noch bereits anderswo im
+  Lineup besetzt sein. Ungültige Zuweisungen werden nur in dieser Projektion verworfen: der kanonische Score-Zustand
+  einschließlich Effekten bleibt bitgleich. Zuweisungen sind keine Undo-Ziele; auch explizites Undo darauf ist ungültig.
+- **Wirkung:** Namen, Verlauf und Statistiken je Person lösen Platz-ID → Person auf; historische Aufschlagpunkte
+  bleiben am stabilen Platz und werden der gewählten Person zugerechnet. Matchdauer und Ende berücksichtigen keine
+  Zuweisungs-Events. Neue Wiederholungs-/Folge-Matches übernehmen die aufgelöste Besetzung.
+- **Migration:** Die Uhr identifiziert alte unverändert benannte DE/EN-Slots ausschließlich über `wear.guest.*`.
+  Deren IDs werden dauerhaft als `PlayerKind.PLACEHOLDER` markiert, die Settings-Schlüssel entfernt und die IDs an
+  das Handy repliziert. Match-Logs und Lineups werden nicht umgeschrieben. Ein gewöhnlicher Gast namens „Partner“
+  ohne Slot-Schlüssel oder ein umbenannter echter Gast bleibt erhalten. Am Handy wirkt die Klassifizierung nach dem
+  ersten Abgleich mit der aktualisierten Uhr; alte Namensnachrichten können sie nicht wieder in Gäste verwandeln.
+  Eine solche Platz-Zuweisung gilt nur für dieses Match. Die globale Dummy→Account-Verknüpfung aus F18/P2 bleibt
+  ein eigener Vorgang und ist hierdurch nicht vorweggenommen.
+
 ## 8. Zustandsmodell (kanonische Form)
 
 Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstrukturen dürfen abweichen, der Export MUSS genau so aussehen. Schlüssel immer vorhanden, `null` explizit.

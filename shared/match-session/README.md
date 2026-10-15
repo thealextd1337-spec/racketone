@@ -161,3 +161,27 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 | `Summary` „maxDeviceSeq“ | höchste Sequenz | **lückenloser Wasserstand** | außer der Reihe angekommene Events dürfen keine Lücke verdecken |
 | `Events` in Teilen | – | Feld `more` nur als Hinweis | Fold ist reihenfolgeunabhängig; Puffern bis zum letzten Teil hatte Events dauerhaft ungefaltet gelassen (Review-Befund 1) |
 | `sync-protocol` | nur `kotlinx-serialization-core` | zusätzlich `kotlinx-serialization-json` | Wire-Codec braucht JSON (01 §4.3), CLAUDE.md Regel 1 angepasst |
+
+
+## F20: Uhr-Spieler, neutrale Plätze und Zuweisung
+
+- `MatchMeta` liefert vom Handy `recentPlayers`: maximal 24 verschiedene Personen aus den jüngsten 100 Matches,
+  einschließlich aufgelöster Zuweisungen, ohne Self/Aliase/Platzhalter. Der Austausch erfolgt auch ohne aktives Match
+  bei Hello, erneutem Verbinden und `syncNow`; keine neue Nachrichtenart. Namen bleiben in der lokalen Spieler-DB,
+  die Verzeichnisreihenfolge im Setting `players.recentRemote` (`null` = kein Update, leere Liste = Verzeichnis leeren).
+  Die Uhr ergänzt offline gespielte lokale Besetzungen.
+- Neue Uhr-Platzhalter haben nur reservierte `placeholder:`-IDs. Migrierte alte Uhr-Gäste behalten ihre ursprüngliche
+  ID als dauerhafte `PLACEHOLDER`-Zeile; `placeholderIds` in `MatchMeta` repliziert diese Klassifizierung zum Handy.
+  Die Migration nutzt `wear.guest.*` plus unveränderte DE/EN-Standardnamen, niemals bloß einen ähnlich klingenden Namen.
+- `canAssignPlayer(matchId)` prüft Ersteller-Self/Aliase aus der Genesis; `assignPlayer(matchId, slot, playerId)` wirkt
+  auch auf geschlossene/beendete Matches und ohne Zählrecht. `PlayerAssigned` enthält die wirkliche Person samt Name,
+  damit auch reine Events-Nachlieferung genügt. Erste gültige Zuweisung in Eventordnung gewinnt, Wiederholung ist
+  idempotent. `dataRevision` aktualisiert Verlauf und Personenlisten. Keine Änderung an Match-Auswahl/Lebenszyklus.
+- Die Engine behält ursprüngliche Platz-IDs; `PlayerAssignments`/`LocalData.assignments` projizieren Personen daneben
+  (02 §7.6). Anzeige und Statistik lösen sie auf; Wiederholung/Folge-Match verwendet echte Personen-IDs.
+- Wire-Version **3**, `minV = 3`: ältere Decoder kennen das neue Event nicht. Uhr und Handy gemeinsam aktualisieren;
+  gespeicherte ältere Logs bleiben lesbar. Apple-Watch-UI/Facade wurden nicht verändert; die gemeinsame Kotlin-API
+  bleibt quellenkompatibel. F20-Bedienoberflächen auf watchOS bleiben außerhalb dieses Pakets.
+- Tests: `PlayerAssignmentsTest`, `PlaceholderMigrationTest`, `PlaceholderSyncTest`, `PlaceholderPresentationTest`,
+  `PlaceholderCodecTest`, `PlayerChoiceTest`, `PlaceholderAssignmentsUiTest`; vorhandene Golden-Vektoren müssen
+  driftfrei bleiben. Hardware: rundes Display (klein/groß), Rotary, lange Namen, echtes Data-Layer-Reconnect/Neustart.
