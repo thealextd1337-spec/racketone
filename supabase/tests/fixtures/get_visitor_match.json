@@ -1,0 +1,36 @@
+{
+  "live": {
+    "sets": [
+      [
+        1,
+        0
+      ]
+    ],
+    "points": [
+      "15",
+      "0"
+    ]
+  },
+  "sport": "tennis",
+  "teams": [
+    {
+      "name": "Alice",
+      "team": "A",
+      "position": 1
+    },
+    {
+      "name": "Max",
+      "team": "B",
+      "position": 1
+    }
+  ],
+  "result": null,
+  "status": "in_progress",
+  "winner": null,
+  "channel": "match-live:a9500000-0000-7000-8000-000000000001:1",
+  "endedAt": null,
+  "matchId": "a9500000-0000-7000-8000-000000000001",
+  "startedAt": "2026-10-16T12:00:00+02:00",
+  "discipline": "singles",
+  "resultReason": null
+}

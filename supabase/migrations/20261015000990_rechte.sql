@@ -58,7 +58,7 @@ grant execute on function
   public.unassign_player(uuid),
   public.create_invite(text, uuid, integer),
   public.redeem_invite(text),
-  public.respond_match_participation(uuid, boolean),
+  public.reject_match_participation(uuid),
   public.set_my_participation(uuid, boolean, boolean),
   public.request_account_deletion(),
   public.cancel_account_deletion(),

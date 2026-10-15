@@ -18,12 +18,13 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…0300_rls_helfer_policies.sql` | RLS-Helfer (`private.*`) und Policies |
 | `migrations/…0400_rpc_profil_freunde.sql` | Onboarding mit Länder-/Altersprüfung, Suche, Freundschafts-RPCs, Blockieren |
 | `migrations/…0500_rpc_sync.sql` | `register_device`, `sync_push` (Outbox-Upload), `sync_pull` (Delta), `pull_match_events`, `match_event_watermarks` |
-| `migrations/…0600_rpc_rollen_visitor_live.sql` | Zähler-Wahl (F17), Visitor (F16), bereinigte Live-Sicht, Realtime-Trigger und -Policy |
-| `migrations/…0700_rpc_zuweisung_claim.sql` | Dummy-Zuweisung, „War ich nicht“, Einladungslink/QR/Claim, Teilnahme bestätigen |
+| `migrations/…0600_rpc_rollen_visitor_live.sql` | Zähler-Wahl (F17), Visitor (F16/F25), schemageprüfte Live-Sicht, versionierte Realtime-Kanäle (Trigger + Policy) |
+| `migrations/…0700_rpc_zuweisung_claim.sql` | Dummy-Zuweisung, „War ich nicht“ (je Dummy und je Match, F23), Einladungslink/QR/Claim |
 | `migrations/…0800_rpc_konto_export.sql` | Löschung mit Karenz, Anonymisierung (Trigger), Löschjob, Export |
 | `migrations/…0900_turnier.sql` | Turnierhelfer, Live-Übersicht (F22) |
 | `migrations/…0990_rechte.sql` | Least-Privilege-Grants (zuletzt) |
-| `tests/database/*.test.sql` | pgTAP: Schema/Rechte, Onboarding, Freunde, Events, Zähler-Wahl, Visitor, Zuweisung/Claim, Löschung/Export, Turnier/Realtime |
+| `tests/database/*.test.sql` | pgTAP (258 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
+| `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 
 ## Lokal ausführen (Docker nötig)
 
@@ -45,6 +46,18 @@ Schlanker Start wie in der CI (nur DB, Auth, Realtime, API):
 **Ohne Docker (Windows-Entwicklungsrechner):** Die Tests laufen zusätzlich in einem dockerfreien Harness gegen
 echtes Postgres 17 mit einem minimalen Supabase-Nachbau (Rollen `anon`/`authenticated`/`service_role`, `auth.uid()`,
 `realtime.messages/send/topic`) – nicht im Repo, nur zur Vorprüfung. Maßgeblich ist der CI-Job.
+
+## Wire-Fixtures neu erzeugen
+
+Ändern sich Antworten von `sync_push`, `sync_pull`, `pull_match_events`, `match_event_watermarks` oder
+`get_visitor_match`, schlägt `095_wire_vertrag.test.sql` fehl. Dann Fixtures neu erzeugen und die DTOs in
+`shared/cloud-sync` anpassen (`WireFixturesTest` vergleicht Feldnamen exakt):
+
+```bash
+npx supabase test db   # legt die Test-Helfer an
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -At -F '|' -f supabase/tests/fixtures/generate.psql
+# je Zeile <datei>|<json>: JSON nach supabase/tests/fixtures/<datei> schreiben (formatiert, Schlüsselreihenfolge egal)
+```
 
 ## CI
 

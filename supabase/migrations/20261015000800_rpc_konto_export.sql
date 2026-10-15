@@ -22,6 +22,8 @@ begin
   update public.match_roles set status = 'declined', responded_at = now()
    where profile_id = v_uid and status = 'invited';
   update public.invites set revoked_at = now() where created_by = v_uid and used_at is null and revoked_at is null;
+  -- Feeds der Freunde ändern sich ohne neue Match-Version → Vollabgleich auslösen
+  perform private.bump_visibility(private.friend_ids(v_uid));
 end;
 $$;
 
@@ -40,6 +42,7 @@ begin
     perform private.fail('no_deletion_pending');
   end if;
   update public.profile_settings set deletion_requested_at = null, updated_at = now() where profile_id = v_uid;
+  perform private.bump_visibility(private.friend_ids(v_uid));
 end;
 $$;
 
@@ -50,7 +53,12 @@ $$;
 --  2. Zuweisungen fremder Dummys an den Nutzer → gelöst (Platz zeigt wieder den Dummy-Namen)
 --  3. eigene Teilnehmer-Zeilen in verbleibenden Matches → „Gelöschter Spieler“ (Snapshot, Flag für Lokalisierung)
 --  4. beanspruchte/zugewiesene eigene Dummys gehen an die verknüpfte Person über, übrige Spieler werden gelöscht
---  5. danach Kaskade (Einstellungen, Freundschaften, Blocks, Geräte, Rollen, Visitor, Outbox …)
+--  5. Lösch-Ausnahme vom unveränderlichen Log (Review P2 #4): Klarnamen der Person in Event-Payloads
+--     (PlayerAssigned.player.displayName mit ihrer Profil- oder Self-ID) werden ersetzt; redacted_at markiert das
+--     Event, redaction_epoch des Matches steigt → Clients laden die Events neu und überschreiben ihre lokale Kopie
+--     (Ausnahme von „bitgleich“, 02 §7.3: Name ohne Wirkung auf Score/Zuweisung). Re-Uploads alter Kopien gelten
+--     weiter als Duplikat (private.same_event).
+--  6. danach Kaskade (Einstellungen, Freundschaften, Blocks, Geräte, Rollen, Visitor, Outbox …)
 -- Sign-in-with-Apple-Token-Widerruf übernimmt die Edge Function delete-account (O5).
 create or replace function private.anonymize_profile()
 returns trigger
@@ -63,6 +71,20 @@ declare
   v_p   record;
   v_new uuid;
 begin
+  with redacted as (
+    update public.match_events e
+       set payload = jsonb_set(e.payload, '{player,displayName}', to_jsonb('Gelöschter Spieler'::text)),
+           redacted_at = now()
+     where e.type = 'PlayerAssigned'
+       and jsonb_typeof(e.payload -> 'player') = 'object'
+       and (e.payload -> 'player' ->> 'id') in (
+             select p.id::text from public.players p where p.owner_id = old.id and p.kind = 'self'
+             union all select old.id::text)
+    returning e.match_id
+  )
+  update public.matches m set redaction_epoch = redaction_epoch + 1
+   where m.id in (select r.match_id from redacted r);
+
   for v_m in select m.id from public.matches m where m.created_by = old.id loop
     select mp.profile_id into v_new
     from public.match_participants mp
@@ -133,7 +155,9 @@ end;
 $$;
 
 -- Export eigener Daten als JSON (Art. 15/20). Später erzeugt die Edge Function daraus ZIP (JSON + CSV).
--- Nur eigene Daten und Matches, an denen der Nutzer beteiligt ist; keine privaten Einstellungen Dritter.
+-- Feste Whitelist (Review P2): nur eigene Daten und Matches, an denen der Nutzer beteiligt ist; keine fremden
+-- Profil-IDs (Ersteller, Einladende), keine fremden Geräte-IDs, keine Push-Tokens, keine Einstellungen Dritter.
+-- Events: eigene (Autor = ich) vollständig; Events anderer Personen nur als Typ/Ordnung ohne Gerät und Payload.
 create or replace function public.export_my_data()
 returns jsonb
 language plpgsql
@@ -148,38 +172,64 @@ begin
   end if;
   return jsonb_build_object(
     'exportedAt', now(),
-    'profile', (select to_jsonb(p) - 'server_version' from public.profiles p where p.id = v_uid),
-    'settings', (select to_jsonb(s) from public.profile_settings s where s.profile_id = v_uid),
-    'devices', (select coalesce(jsonb_agg(to_jsonb(d) - 'push_token'), '[]'::jsonb)
+    'profile', (select jsonb_build_object('id', p.id, 'alias', p.alias, 'username', p.username,
+                                          'friendCode', p.friend_code, 'discoverable', p.discoverable,
+                                          'status', p.status, 'createdAt', p.created_at)
+                from public.profiles p where p.id = v_uid),
+    'settings', (select jsonb_build_object('country', s.country, 'ageConfirmedAt', s.age_confirmed_at,
+                                           'telemetryVisibility', s.telemetry_visibility,
+                                           'shareMatchesDefault', s.share_matches_default, 'locale', s.locale,
+                                           'deletionRequestedAt', s.deletion_requested_at)
+                 from public.profile_settings s where s.profile_id = v_uid),
+    'devices', (select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'kind', d.kind, 'platform', d.platform,
+                                                             'model', d.model, 'appVersion', d.app_version,
+                                                             'lastSeenAt', d.last_seen_at)), '[]'::jsonb)
                 from public.devices d where d.profile_id = v_uid),
-    'friendships', (select coalesce(jsonb_agg(jsonb_build_object(
-                       'otherProfileId', case when f.requester_id = v_uid then f.addressee_id else f.requester_id end,
-                       'status', f.status, 'outgoing', f.requester_id = v_uid, 'createdAt', f.created_at)), '[]'::jsonb)
-                    from public.friendships f where v_uid in (f.requester_id, f.addressee_id)),
-    'blocks', (select coalesce(jsonb_agg(b.blocked_id), '[]'::jsonb) from public.user_blocks b where b.blocker_id = v_uid),
-    'players', (select coalesce(jsonb_agg(to_jsonb(p) - 'server_version'), '[]'::jsonb)
+    'friends', (select coalesce(jsonb_agg(jsonb_build_object(
+                   'alias', o.alias, 'status', f.status, 'outgoing', f.requester_id = v_uid,
+                   'createdAt', f.created_at)), '[]'::jsonb)
+                from public.friendships f
+                join public.profiles o on o.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
+                where v_uid in (f.requester_id, f.addressee_id)),
+    'blockedCount', (select count(*) from public.user_blocks b where b.blocker_id = v_uid),
+    'players', (select coalesce(jsonb_agg(case when p.owner_id = v_uid
+                   then jsonb_build_object('id', p.id, 'kind', p.kind, 'displayName', p.display_name,
+                                           'assignedToFriend', p.profile_id is not null and p.profile_id <> v_uid,
+                                           'deleted', p.deleted_at is not null)
+                   else jsonb_build_object('id', p.id, 'kind', p.kind, 'displayName', p.display_name,
+                                           'assignedToMe', true, 'source', p.assignment_source) end), '[]'::jsonb)
                 from public.players p where p.owner_id = v_uid or p.profile_id = v_uid),
     'matches', (select coalesce(jsonb_agg(jsonb_build_object(
-                   'match', to_jsonb(m) - 'server_version',
+                   'id', m.id, 'createdByMe', m.created_by = v_uid, 'sport', m.sport, 'discipline', m.discipline,
+                   'format', m.format, 'meta', m.meta, 'status', m.status, 'resultReason', m.result_reason,
+                   'winner', m.winner, 'startedAt', m.started_at, 'endedAt', m.ended_at, 'summary', m.summary,
                    'participants', (select jsonb_agg(jsonb_build_object(
-                                       'slotId', mp.slot_id, 'team', mp.team, 'position', mp.position,
-                                       'displayName', mp.display_name, 'isMe', mp.profile_id = v_uid))
+                                       'team', mp.team, 'position', mp.position, 'displayName', mp.display_name,
+                                       'isMe', mp.profile_id = v_uid) order by mp.team, mp.position)
                                     from public.match_participants mp where mp.match_id = m.id),
-                   'events', (select coalesce(jsonb_agg(jsonb_build_object(
-                                 'id', e.id, 'deviceId', e.device_id, 'deviceSeq', e.device_seq, 'lamport', e.lamport,
-                                 'wallClockMs', e.wall_clock_ms, 'parentId', e.parent_id, 'type', e.type,
-                                 'payload', e.payload) order by e.lamport, e.device_id, e.id), '[]'::jsonb)
+                   'events', (select coalesce(jsonb_agg(case when e.author_id = v_uid
+                                 then jsonb_build_object('id', e.id, 'deviceId', e.device_id, 'deviceSeq', e.device_seq,
+                                                         'lamport', e.lamport, 'wallClockMs', e.wall_clock_ms,
+                                                         'parentId', e.parent_id, 'type', e.type, 'payload', e.payload,
+                                                         'mine', true)
+                                 else jsonb_build_object('id', e.id, 'lamport', e.lamport, 'wallClockMs', e.wall_clock_ms,
+                                                         'type', e.type, 'mine', false) end
+                                 order by e.lamport, e.device_id, e.id), '[]'::jsonb)
                               from public.match_events e where e.match_id = m.id))), '[]'::jsonb)
                 from public.matches m
                 where m.created_by = v_uid
                    or exists (select 1 from public.match_participants mp
                               where mp.match_id = m.id and mp.profile_id = v_uid)),
-    'roles', (select coalesce(jsonb_agg(to_jsonb(r) - 'server_version'), '[]'::jsonb)
+    'roles', (select coalesce(jsonb_agg(jsonb_build_object('matchId', r.match_id, 'role', r.role, 'status', r.status,
+                                                           'invitedAt', r.invited_at, 'respondedAt', r.responded_at)),
+                              '[]'::jsonb)
               from public.match_roles r where r.profile_id = v_uid),
     'visitorOf', (select coalesce(jsonb_agg(jsonb_build_object('matchId', v.match_id, 'createdAt', v.created_at,
                                                                'revokedAt', v.revoked_at)), '[]'::jsonb)
                   from public.match_visitors v where v.profile_id = v_uid),
-    'entitlements', (select coalesce(jsonb_agg(to_jsonb(e)), '[]'::jsonb)
+    'entitlements', (select coalesce(jsonb_agg(jsonb_build_object('entitlement', e.entitlement, 'source', e.source,
+                                                                  'productId', e.product_id, 'expiresAt', e.expires_at)),
+                                     '[]'::jsonb)
                      from public.entitlements e where e.profile_id = v_uid));
 end;
 $$;

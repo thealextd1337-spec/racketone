@@ -107,7 +107,7 @@ begin
 end;
 $$;
 
--- F16: Visitor benennen. Nur Ersteller oder verknüpfte Mitspieler (nicht „pending“), nur eigene Freunde,
+-- F16/F25: Visitor benennen. Nur Ersteller oder verknüpfte Mitspieler, nur eigene Freunde,
 -- keine Zustimmung der Mitspieler. Mitglieder (Spieler/Director) werden nicht zusätzlich Visitor.
 create or replace function public.add_match_visitor(p_match_id uuid, p_profile_id uuid)
 returns void
@@ -126,7 +126,7 @@ begin
   if not (v_m.created_by = v_uid
           or exists (select 1 from public.match_participants mp
                      where mp.match_id = p_match_id and mp.profile_id = v_uid
-                       and mp.link_status in ('self', 'confirmed', 'assigned'))) then
+                       and mp.link_status in ('self', 'linked', 'assigned', 'confirmed'))) then
     perform private.fail('forbidden', '42501');
   end if;
   if p_profile_id is null or not private.are_friends(v_uid, p_profile_id) or private.is_blocked(v_uid, p_profile_id) then
@@ -167,19 +167,98 @@ begin
 end;
 $$;
 
--- Bereinigte Live-Projektion: nur freigegebene Schlüssel (Whitelist) – nie Geräte-/Profil-IDs, Event-Log
--- oder Telemetrie (F19), auch wenn ein Client mehr in live_state/summary schreibt.
-create or replace function private.sanitize_projection(p jsonb)
+-- Bereinigte Live-/Ergebnis-Projektion (Review P2 #3): Die Ausgabe wird aus einem festen Schema NEU aufgebaut, mit
+-- Typ- und Wertprüfung auf jeder Ebene – nichts aus dem Client-JSON wird ungeprüft durchgereicht (keine
+-- verschachtelten IDs, keine Telemetrie, F19). Schema (alle Felder optional):
+--   sets            [[int, int], …]  höchstens 9 Sätze, Werte 0..99
+--   games           [int, int]       0..99
+--   points          [text, text]     ^[0-9A-Za-z]{1,3}$ (z. B. "0", "15", "40", "AD", "11")
+--   serving         "A" | "B"
+--   flags           [text, …]        ^[A-Z_]{1,24}$, höchstens 6 (Spielball, Breakball …)
+--   status          in_progress | paused | awaiting_decision | finished
+--   winner          "A" | "B"
+--   tiebreak, scorerConnected  boolean
+--   updatedAtMs     Zahl ≥ 0
+create or replace function private.int_pair(p jsonb, p_max integer)
 returns jsonb
 language sql
 immutable
 set search_path = ''
 as $$
-  select case when p is null or jsonb_typeof(p) <> 'object' then null else
-    coalesce((select jsonb_object_agg(e.key, e.value) from jsonb_each(p) e
-              where e.key in ('sets', 'games', 'points', 'serving', 'flags', 'status', 'winner', 'tiebreak',
-                              'scorerConnected', 'updatedAtMs')), '{}'::jsonb)
+  select case
+    when jsonb_typeof(p) = 'array' and jsonb_array_length(p) = 2
+         and jsonb_typeof(p -> 0) = 'number' and jsonb_typeof(p -> 1) = 'number'
+         and (p ->> 0) ~ '^[0-9]{1,2}$' and (p ->> 1) ~ '^[0-9]{1,2}$'
+         and (p ->> 0)::int <= p_max and (p ->> 1)::int <= p_max
+    then jsonb_build_array((p ->> 0)::int, (p ->> 1)::int)
   end;
+$$;
+
+create or replace function private.sanitize_projection(p jsonb)
+returns jsonb
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_out  jsonb := '{}'::jsonb;
+  v_sets jsonb := '[]'::jsonb;
+  v_set  jsonb;
+  v_flag jsonb;
+  v_flags jsonb := '[]'::jsonb;
+begin
+  if p is null or jsonb_typeof(p) <> 'object' then
+    return null;
+  end if;
+  if jsonb_typeof(p -> 'sets') = 'array' and jsonb_array_length(p -> 'sets') <= 9 then
+    for v_set in select value from jsonb_array_elements(p -> 'sets') loop
+      if private.int_pair(v_set, 99) is null then
+        v_sets := null;
+        exit;
+      end if;
+      v_sets := v_sets || jsonb_build_array(private.int_pair(v_set, 99));
+    end loop;
+    if v_sets is not null then
+      v_out := v_out || jsonb_build_object('sets', v_sets);
+    end if;
+  end if;
+  if private.int_pair(p -> 'games', 99) is not null then
+    v_out := v_out || jsonb_build_object('games', private.int_pair(p -> 'games', 99));
+  end if;
+  if jsonb_typeof(p -> 'points') = 'array' and jsonb_array_length(p -> 'points') = 2
+     and jsonb_typeof(p -> 'points' -> 0) = 'string' and jsonb_typeof(p -> 'points' -> 1) = 'string'
+     and (p -> 'points' ->> 0) ~ '^[0-9A-Za-z]{1,3}$' and (p -> 'points' ->> 1) ~ '^[0-9A-Za-z]{1,3}$' then
+    v_out := v_out || jsonb_build_object('points', jsonb_build_array(p -> 'points' ->> 0, p -> 'points' ->> 1));
+  end if;
+  if jsonb_typeof(p -> 'serving') = 'string' and p ->> 'serving' in ('A', 'B') then
+    v_out := v_out || jsonb_build_object('serving', p ->> 'serving');
+  end if;
+  if jsonb_typeof(p -> 'flags') = 'array' and jsonb_array_length(p -> 'flags') <= 6 then
+    for v_flag in select value from jsonb_array_elements(p -> 'flags') loop
+      if jsonb_typeof(v_flag) = 'string' and (v_flag #>> '{}') ~ '^[A-Z_]{1,24}$' then
+        v_flags := v_flags || jsonb_build_array(v_flag #>> '{}');
+      end if;
+    end loop;
+    v_out := v_out || jsonb_build_object('flags', v_flags);
+  end if;
+  if jsonb_typeof(p -> 'status') = 'string'
+     and p ->> 'status' in ('in_progress', 'paused', 'awaiting_decision', 'finished') then
+    v_out := v_out || jsonb_build_object('status', p ->> 'status');
+  end if;
+  if jsonb_typeof(p -> 'winner') = 'string' and p ->> 'winner' in ('A', 'B') then
+    v_out := v_out || jsonb_build_object('winner', p ->> 'winner');
+  end if;
+  if jsonb_typeof(p -> 'tiebreak') = 'boolean' then
+    v_out := v_out || jsonb_build_object('tiebreak', (p ->> 'tiebreak')::boolean);
+  end if;
+  if jsonb_typeof(p -> 'scorerConnected') = 'boolean' then
+    v_out := v_out || jsonb_build_object('scorerConnected', (p ->> 'scorerConnected')::boolean);
+  end if;
+  if jsonb_typeof(p -> 'updatedAtMs') = 'number' and (p ->> 'updatedAtMs') ~ '^[0-9]{1,15}$' then
+    v_out := v_out || jsonb_build_object('updatedAtMs', (p ->> 'updatedAtMs')::bigint);
+  end if;
+  return v_out;
+end;
 $$;
 
 create or replace function private.visitor_view(p_match_id uuid)
@@ -192,6 +271,8 @@ as $$
   select jsonb_build_object(
     'matchId', m.id, 'sport', m.sport, 'discipline', m.discipline, 'status', m.status,
     'resultReason', m.result_reason, 'winner', m.winner, 'startedAt', m.started_at, 'endedAt', m.ended_at,
+    -- aktueller Realtime-Kanal (Version steigt bei Rechteentzug → nach „rotate“ neu holen)
+    'channel', 'match-live:' || m.id::text || ':' || m.access_epoch::text,
     'teams', (select coalesce(jsonb_agg(jsonb_build_object(
                        'team', mp.team, 'position', mp.position,
                        'name', case when pr.status in ('active', 'deletion_requested') then pr.alias
@@ -206,7 +287,7 @@ as $$
   where m.id = p_match_id;
 $$;
 
--- Initialstand und Reconnect für Visitor (und Mitglieder) – kein Zugriff auf Basistabellen nötig.
+-- Initialstand und Reconnect für Visitor und Mitglieder (Feed-Leser nicht) – kein Zugriff auf Basistabellen nötig.
 create or replace function public.get_visitor_match(p_match_id uuid)
 returns jsonb
 language plpgsql
@@ -216,7 +297,8 @@ as $$
 declare
   v_uid uuid := auth.uid();
 begin
-  if v_uid is null or not (private.is_match_visitor(p_match_id, v_uid) or private.can_view_match(p_match_id, v_uid)) then
+  if v_uid is null
+     or not (private.is_match_visitor(p_match_id, v_uid) or private.is_match_member(p_match_id, v_uid)) then
     perform private.fail('forbidden', '42501');
   end if;
   return private.visitor_view(p_match_id);
@@ -239,8 +321,21 @@ begin
 end;
 $$;
 
--- Realtime (03 §4.4/E12): Broadcast aus DB-Triggern auf private Kanäle. realtime.send fängt eigene Fehler ab;
--- fehlt die Funktion (reines Postgres), wird nicht gesendet.
+-- Realtime (03 §4.4/E12): Broadcast aus DB-Triggern auf private, versionierte Kanäle. realtime.send fängt eigene
+-- Fehler ab; fehlt die Funktion (reines Postgres), wird nicht gesendet.
+create or replace function private.realtime_send(p_payload jsonb, p_event text, p_topic text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if to_regprocedure('realtime.send(jsonb,text,text,boolean)') is not null then
+    perform realtime.send(p_payload, p_event, p_topic, true);
+  end if;
+end;
+$$;
+
 create or replace function private.broadcast_match_event()
 returns trigger
 language plpgsql
@@ -248,14 +343,13 @@ security definer
 set search_path = ''
 as $$
 begin
-  if to_regprocedure('realtime.send(jsonb,text,text,boolean)') is not null then
-    perform realtime.send(
-      jsonb_build_object('id', new.id, 'matchId', new.match_id, 'deviceId', new.device_id,
-                         'deviceSeq', new.device_seq, 'lamport', new.lamport, 'wallClockMs', new.wall_clock_ms,
-                         'parentId', new.parent_id, 'type', new.type, 'payload', new.payload,
-                         'serverSeq', new.server_seq),
-      'event', 'match:' || new.match_id::text, true);
-  end if;
+  perform private.realtime_send(
+    jsonb_build_object('id', new.id, 'matchId', new.match_id, 'deviceId', new.device_id,
+                       'deviceSeq', new.device_seq, 'lamport', new.lamport, 'wallClockMs', new.wall_clock_ms,
+                       'parentId', new.parent_id, 'type', new.type, 'payload', new.payload,
+                       'serverSeq', new.server_seq, 'redacted', new.redacted_at is not null),
+    'event',
+    'match:' || new.match_id::text || ':' || (select m.access_epoch from public.matches m where m.id = new.match_id));
   return null;
 end;
 $$;
@@ -272,15 +366,21 @@ set search_path = ''
 as $$
 declare
   v_view jsonb;
+  v_tour bigint;
 begin
-  if (new.live_state is distinct from old.live_state or new.status is distinct from old.status
-      or new.summary is distinct from old.summary)
-     and to_regprocedure('realtime.send(jsonb,text,text,boolean)') is not null then
+  -- Rechteentzug: alte Kanäle bekommen nur noch den inhaltslosen Hinweis „rotate“, nie wieder Daten.
+  if new.access_epoch <> old.access_epoch then
+    perform private.realtime_send('{}'::jsonb, 'rotate', 'match:' || old.id::text || ':' || old.access_epoch::text);
+    perform private.realtime_send('{}'::jsonb, 'rotate', 'match-live:' || old.id::text || ':' || old.access_epoch::text);
+  end if;
+  if new.live_state is distinct from old.live_state or new.status is distinct from old.status
+     or new.summary is distinct from old.summary then
     v_view := private.visitor_view(new.id);
-    perform realtime.send(v_view, 'live', 'match-live:' || new.id::text, true);
+    perform private.realtime_send(v_view, 'live', 'match-live:' || new.id::text || ':' || new.access_epoch::text);
     if new.tournament_id is not null then
-      perform realtime.send(v_view || jsonb_build_object('courtId', new.court_id), 'live',
-                            'tournament:' || new.tournament_id::text, true);
+      select t.access_epoch into v_tour from public.tournaments t where t.id = new.tournament_id;
+      perform private.realtime_send(v_view || jsonb_build_object('courtId', new.court_id), 'live',
+                                    'tournament:' || new.tournament_id::text || ':' || v_tour::text);
     end if;
   end if;
   return null;

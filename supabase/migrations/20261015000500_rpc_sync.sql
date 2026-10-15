@@ -89,7 +89,8 @@ end;
 $$;
 
 -- Teilnehmer eines Matches setzen (nur Ersteller). Verknüpfung mit Accounts:
---   eigener Self-Spieler / eigene profileId → self · Dummy mit Zuweisung → assigned · Freund → pending (Bestätigung)
+--   eigener Self-Spieler / eigene profileId → self · Dummy mit Zuweisung → assigned · Freund → linked (sofort
+--   sichtbar und gewertet, F23; Widerspruch „War ich nicht“)
 --   alles andere bleibt unverknüpft (nur Snapshot-Name).
 create or replace function private.push_participants(p_uid uuid, p_match uuid, p_parts jsonb)
 returns jsonb
@@ -141,7 +142,7 @@ begin
         v_status := 'self';
       elsif private.are_friends(p_uid, v_req) and not private.is_blocked(p_uid, v_req) then
         v_profile := v_req;
-        v_status := 'pending';
+        v_status := 'linked';
       else
         v_notes := v_notes || jsonb_build_object('slotId', v_slot, 'note', 'not_friend');
       end if;
@@ -187,7 +188,7 @@ begin
                                     then mp.share_with_friends else excluded.share_with_friends end,
           hidden = case when mp.profile_id is not distinct from excluded.profile_id then mp.hidden else false end;
 
-    if v_status = 'pending' and (not v_had_row or v_existing.profile_id is distinct from v_profile) then
+    if v_status = 'linked' and (not v_had_row or v_existing.profile_id is distinct from v_profile) then
       perform private.notify(v_profile, 'match_shared', jsonb_build_object('matchId', p_match));
     end if;
   end loop;
@@ -277,6 +278,26 @@ begin
 end;
 $$;
 
+-- Vergleich eines gespeicherten Events mit einem erneut hochgeladenen (Idempotenz). Alle unveränderlichen Felder
+-- müssen gleich sein. Redigierte Events (Kontolöschung) gelten als gleich, wenn sich nur der redigierte Klarname
+-- unterscheidet – der Client hält noch die alte Payload.
+create or replace function private.same_event(p_existing public.match_events, p_match uuid, p_device uuid,
+                                              p_seq bigint, p_lamport bigint, p_wall bigint, p_parent uuid,
+                                              p_type text, p_payload jsonb)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select p_existing.match_id = p_match and p_existing.device_id = p_device and p_existing.device_seq = p_seq
+     and p_existing.lamport = p_lamport and p_existing.wall_clock_ms = p_wall
+     and p_existing.parent_id is not distinct from p_parent and p_existing.type = p_type
+     and (p_existing.payload = p_payload
+          or (p_existing.redacted_at is not null and jsonb_typeof(p_payload -> 'player') = 'object'
+              and p_existing.payload = jsonb_set(p_payload, '{player,displayName}',
+                                                 p_existing.payload -> 'player' -> 'displayName')));
+$$;
+
 -- Ein Event idempotent übernehmen. Prüft Identität (Autor = auth.uid(), Quellgerät gehört dem Autor),
 -- Upload-Recht am Match und die Single-Scorer-Regeln über Accounts (wer darf übernehmen/zuweisen).
 -- Ob ein Event fachlich wirkt (aktiver Zähler zum Zeitpunkt), entscheidet weiterhin die Engine beim Replay.
@@ -323,10 +344,7 @@ begin
   -- Idempotenz: gleiche ID + gleicher Inhalt = Duplikat (No-op), abweichender Inhalt = Kollision.
   select * into v_existing from public.match_events e where e.id = v_id;
   if found then
-    if v_existing.match_id = v_match and v_existing.device_id = v_device and v_existing.device_seq = v_seq
-       and v_existing.lamport = v_lamport and v_existing.wall_clock_ms = v_wall
-       and v_existing.parent_id is not distinct from v_parent and v_existing.type = v_type
-       and v_existing.payload = v_payload then
+    if private.same_event(v_existing, v_match, v_device, v_seq, v_lamport, v_wall, v_parent, v_type, v_payload) then
       return jsonb_build_object('id', v_id, 'result', 'duplicate');
     end if;
     return jsonb_build_object('id', v_id, 'result', 'rejected', 'reason', 'id_conflict');
@@ -358,8 +376,15 @@ begin
     if v_target is null or v_target !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
       return jsonb_build_object('id', v_id, 'result', 'rejected', 'reason', 'scorer_target_invalid');
     end if;
+    -- Review P2 #5: Ziel ist ein eigenes Gerät des Hochladenden (Übernahme/Rückgabe im eigenen Verbund) oder das
+    -- Gerät, mit dem eine andere Person ihre Zähler-/Director-Rolle serverseitig angenommen hat. Nie ein beliebiges
+    -- Gerät eines anderen Kontos.
     select d.profile_id into v_owner from public.devices d where d.id = v_target::uuid and d.revoked_at is null;
-    if v_owner is null or not private.can_take_over(v_match, v_owner) then
+    if v_owner is null
+       or not (v_owner = p_uid
+               or exists (select 1 from public.match_roles r
+                          where r.match_id = v_match and r.profile_id = v_owner and r.status = 'accepted'
+                            and r.device_id = v_target::uuid)) then
       return jsonb_build_object('id', v_id, 'result', 'rejected', 'reason', 'scorer_target_forbidden');
     end if;
   elsif v_type = 'PlayerAssigned' then
@@ -376,8 +401,13 @@ begin
   returning id into v_new;
 
   if v_new is null then
-    if exists (select 1 from public.match_events e where e.id = v_id) then
-      return jsonb_build_object('id', v_id, 'result', 'duplicate');
+    -- Review P2 #8: paralleler Upload derselben ID – nur bei identischem Inhalt ein Duplikat.
+    select * into v_existing from public.match_events e where e.id = v_id;
+    if found then
+      if private.same_event(v_existing, v_match, v_device, v_seq, v_lamport, v_wall, v_parent, v_type, v_payload) then
+        return jsonb_build_object('id', v_id, 'result', 'duplicate');
+      end if;
+      return jsonb_build_object('id', v_id, 'result', 'rejected', 'reason', 'id_conflict');
     elsif v_type = 'MatchCreated'
           and exists (select 1 from public.match_events e where e.match_id = v_match and e.type = 'MatchCreated') then
       return jsonb_build_object('id', v_id, 'result', 'rejected', 'reason', 'genesis_exists');
@@ -390,8 +420,10 @@ exception when data_exception or integrity_constraint_violation then
 end;
 $$;
 
--- Projektion (Status, Ergebnis, bereinigter Live-Stand) – berechnet die Client-Engine (03 E9).
--- Jedes Mitglied mit Upload-Recht darf sie liefern; monoton über eventCount (ältere Stände werden ignoriert).
+-- Projektion (Status, Ergebnis, bereinigter Live-Stand) – berechnet die Client-Engine (03 E9) über die Events, die
+-- bereits in der Cloud liegen. Review P2 #10: an den tatsächlichen Server-Stand gebunden (eventCount ≤ Anzahl
+-- gespeicherter Events, sonst ahead_of_events → später erneut), monoton (ältere Stände → stale) und nur von
+-- Personen mit Übernahme-Recht (widerrufene Zähler nicht).
 create or replace function private.apply_projection(p_uid uuid, p_match uuid, p_proj jsonb)
 returns text
 language plpgsql
@@ -407,12 +439,14 @@ begin
     return 'unknown_match';
   elsif v_m.deleted_at is not null then
     return 'match_deleted';
-  elsif not private.can_submit_events(p_match, p_uid) then
+  elsif not private.can_take_over(p_match, p_uid) then
     return 'forbidden';
   end if;
   v_count := coalesce((p_proj ->> 'eventCount')::integer, 0);
   if v_count < v_m.projection_event_count then
     return 'stale';
+  elsif v_count > (select count(*) from public.match_events e where e.match_id = p_match) then
+    return 'ahead_of_events';
   end if;
   update public.matches
      set status = coalesce(p_proj ->> 'status', status),
@@ -446,7 +480,6 @@ declare
   v_players  jsonb;
   v_matches  jsonb := '[]'::jsonb;
   v_events   jsonb := '[]'::jsonb;
-  v_res      jsonb;
   v_proj     text;
 begin
   if p is null or jsonb_typeof(p) <> 'object' then
@@ -455,6 +488,8 @@ begin
   if jsonb_array_length(coalesce(p -> 'events', '[]'::jsonb)) > 500 then
     perform private.fail('batch_too_large');
   end if;
+  -- Versionen dieses Uploads in Commit-Reihenfolge (siehe private.touch_row), vor allen Zeilensperren
+  perform pg_advisory_xact_lock(private.sync_lock_key());
 
   for v_item in select value from jsonb_array_elements(coalesce(p -> 'devices', '[]'::jsonb)) loop
     begin
@@ -495,18 +530,19 @@ begin
     end if;
   end loop;
 
-  v_res := jsonb_build_object(
-    'devices', v_devices,
-    'players', v_players,
-    'matches', v_matches,
-    'events', v_events);
-  return v_res;
+  return jsonb_build_object('devices', v_devices, 'players', v_players, 'matches', v_matches, 'events', v_events);
 end;
 $$;
 
--- Delta-Pull: alle für mich sichtbaren Matches (inkl. Tombstones) mit server_version > Cursor,
--- eigene/zugewiesene Spieler und Freundschaften. Namen werden aufgelöst (F18: Alias, sonst Snapshot).
--- Events kommen NICHT im Feed, sondern je Match über pull_match_events (03 §5.5).
+-- Delta-Pull: alle für mich sichtbaren Matches (inkl. Tombstones) mit server_version > Cursor, eigene/zugewiesene
+-- Spieler und Freundschaften.
+--  * Konsistenz (Review P2 #6): Lesen unter der geteilten Versionssperre → kein Schreiber committet währenddessen
+--    neue Versionen; Cursor = höchste vergebene Version (nicht das Maximum der gelieferten Zeilen).
+--  * Sichtbarkeitsverlust (#7): `visibilityEpoch` steigt, wenn sich meine Sichtbarkeit ohne neue Match-Version
+--    ändert → Client macht einen Vollabgleich ab Cursor 0 und entfernt nicht mehr gelieferte Cloud-Matches.
+--  * Feed (#2): Freunde eines teilenden Teilnehmers erhalten eine bereinigte Sicht (`access = feed`): kein Ersteller,
+--    keine Rollen, kein Live-Stand, Profil-ID/Alias nur von eigenen Freunden, Ergebnis per Whitelist.
+-- Events kommen NICHT im Feed, sondern je Match über pull_match_events (nur Mitglieder, 03 §5.5).
 create or replace function public.sync_pull(p_cursor bigint default 0, p_limit integer default 200)
 returns jsonb
 language plpgsql
@@ -517,6 +553,7 @@ declare
   v_uid     uuid := auth.uid();
   v_cursor  bigint := coalesce(p_cursor, 0);
   v_limit   integer := least(greatest(coalesce(p_limit, 200), 1), 500);
+  v_hwm     bigint;
   v_friends uuid[];
   v_ids     uuid[];
   v_matches jsonb;
@@ -528,6 +565,8 @@ begin
   if v_uid is null or not private.has_profile(v_uid) then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform pg_advisory_xact_lock_shared(private.sync_lock_key());
+  v_hwm := coalesce(pg_sequence_last_value('private.sync_version_seq'), 0);
   v_friends := private.friend_ids(v_uid);
 
   with candidates as (
@@ -544,7 +583,7 @@ begin
     select m.id, m.server_version
     from public.matches m
     join candidates c on c.id = m.id
-    where m.server_version > v_cursor and private.can_view_match(m.id, v_uid)
+    where m.server_version > v_cursor and m.server_version <= v_hwm and private.can_view_match(m.id, v_uid)
     order by m.server_version
     limit v_limit + 1
   ) x;
@@ -553,47 +592,59 @@ begin
     v_ids := v_ids[1:v_limit];
   end if;
 
-  select coalesce(jsonb_agg(jsonb_build_object(
-           'id', m.id, 'createdBy', m.created_by, 'sport', m.sport, 'discipline', m.discipline,
-           'format', m.format, 'meta', m.meta, 'previousMatchId', m.previous_match_id,
-           'tournamentId', m.tournament_id, 'courtId', m.court_id, 'scheduledAt', m.scheduled_at,
-           'startedAt', m.started_at, 'endedAt', m.ended_at, 'status', m.status, 'resultReason', m.result_reason,
-           'winner', m.winner, 'summary', m.summary, 'liveState', m.live_state,
-           'projectionEventCount', m.projection_event_count, 'deleted', m.deleted_at is not null,
-           'serverVersion', m.server_version,
-           'participants', (
-             select coalesce(jsonb_agg(jsonb_build_object(
-                      'slotId', mp.slot_id, 'team', mp.team, 'position', mp.position,
-                      'playerId', case when pl.owner_id = v_uid then mp.player_id end,
-                      -- Mitglieder sehen Konten und Aliase der Mitspieler; Freunde eines teilenden Teilnehmers
-                      -- (Feed) nur die ihrer eigenen Freunde, sonst den Snapshot-Namen (03 §4.1)
-                      'profileId', case when private.is_match_member(m.id, v_uid) or mp.profile_id = v_uid
-                                             or mp.profile_id = any (v_friends) then mp.profile_id end,
-                      'linkStatus', mp.link_status,
-                      'displayName', case when pr.status in ('active', 'deletion_requested')
-                                               and (private.is_match_member(m.id, v_uid) or mp.profile_id = v_uid
-                                                    or mp.profile_id = any (v_friends))
-                                          then pr.alias else mp.display_name end,
-                      'deletedProfile', mp.deleted_profile,
-                      'shareWithFriends', case when mp.profile_id = v_uid then mp.share_with_friends end,
-                      'hidden', case when mp.profile_id = v_uid then mp.hidden end)
-                    order by mp.team, mp.position), '[]'::jsonb)
-             from public.match_participants mp
-             left join public.players pl on pl.id = mp.player_id
-             left join public.profiles pr on pr.id = mp.profile_id
-             where mp.match_id = m.id),
-           'roles', (
-             select coalesce(jsonb_agg(jsonb_build_object(
-                      'profileId', r.profile_id, 'alias', pr.alias, 'role', r.role, 'status', r.status,
-                      'deviceId', case when r.profile_id = v_uid then r.device_id end)
-                    order by r.invited_at), '[]'::jsonb)
-             from public.match_roles r
-             join public.profiles pr on pr.id = r.profile_id
-             where r.match_id = m.id and private.is_match_member(m.id, v_uid))
-         ) order by m.server_version), '[]'::jsonb)
-    into v_matches
-  from public.matches m
-  where m.id = any (v_ids);
+  select coalesce(jsonb_agg(x.j order by x.v), '[]'::jsonb) into v_matches
+  from (
+    select m.server_version as v,
+           jsonb_build_object(
+             'id', m.id,
+             'access', case when mem.is_member then 'member' else 'feed' end,
+             'createdBy', case when mem.is_member or m.created_by = v_uid or m.created_by = any (v_friends)
+                               then m.created_by end,
+             'sport', m.sport, 'discipline', m.discipline, 'format', m.format, 'meta', m.meta,
+             'previousMatchId', case when mem.is_member then m.previous_match_id end,
+             'tournamentId', case when mem.is_member then m.tournament_id end,
+             'courtId', case when mem.is_member then m.court_id end,
+             'scheduledAt', m.scheduled_at, 'startedAt', m.started_at, 'endedAt', m.ended_at,
+             'status', m.status, 'resultReason', m.result_reason, 'winner', m.winner,
+             'summary', case when mem.is_member then m.summary else private.sanitize_projection(m.summary) end,
+             'liveState', case when mem.is_member then m.live_state end,
+             'projectionEventCount', m.projection_event_count,
+             'accessEpoch', case when mem.is_member then m.access_epoch end,
+             'redactionEpoch', m.redaction_epoch,
+             'deleted', m.deleted_at is not null,
+             'serverVersion', m.server_version,
+             'participants', (
+               select coalesce(jsonb_agg(jsonb_build_object(
+                        'slotId', mp.slot_id, 'team', mp.team, 'position', mp.position,
+                        'playerId', case when pl.owner_id = v_uid then mp.player_id end,
+                        -- Mitglieder sehen Konten und Aliase der Mitspieler; Feed-Leser nur die ihrer Freunde
+                        'profileId', case when mem.is_member or mp.profile_id = v_uid or mp.profile_id = any (v_friends)
+                                          then mp.profile_id end,
+                        'linkStatus', case when mem.is_member then mp.link_status end,
+                        'displayName', case when pr.status in ('active', 'deletion_requested')
+                                                 and (mem.is_member or mp.profile_id = v_uid
+                                                      or mp.profile_id = any (v_friends))
+                                            then pr.alias else mp.display_name end,
+                        'deletedProfile', mp.deleted_profile,
+                        'shareWithFriends', case when mp.profile_id = v_uid then mp.share_with_friends end,
+                        'hidden', case when mp.profile_id = v_uid then mp.hidden end)
+                      order by mp.team, mp.position), '[]'::jsonb)
+               from public.match_participants mp
+               left join public.players pl on pl.id = mp.player_id
+               left join public.profiles pr on pr.id = mp.profile_id
+               where mp.match_id = m.id),
+             'roles', (
+               select coalesce(jsonb_agg(jsonb_build_object(
+                        'profileId', r.profile_id, 'alias', pr.alias, 'role', r.role, 'status', r.status,
+                        'deviceId', case when r.profile_id = v_uid then r.device_id end)
+                      order by r.invited_at), '[]'::jsonb)
+               from public.match_roles r
+               join public.profiles pr on pr.id = r.profile_id
+               where r.match_id = m.id and mem.is_member)) as j
+    from public.matches m
+    cross join lateral (select private.is_match_member(m.id, v_uid) as is_member) mem
+    where m.id = any (v_ids)
+  ) x;
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'id', p.id, 'kind', p.kind, 'displayName', p.display_name, 'owned', p.owner_id = v_uid,
@@ -601,7 +652,7 @@ begin
            'deleted', p.deleted_at is not null, 'serverVersion', p.server_version) order by p.server_version), '[]'::jsonb)
     into v_players
   from public.players p
-  where (p.owner_id = v_uid or p.profile_id = v_uid) and p.server_version > v_cursor;
+  where (p.owner_id = v_uid or p.profile_id = v_uid) and p.server_version > v_cursor and p.server_version <= v_hwm;
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'profileId', o.id, 'alias', case when o.status = 'active' then o.alias end,
@@ -610,36 +661,35 @@ begin
     into v_friendships
   from public.friendships f
   join public.profiles o on o.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
-  where v_uid in (f.requester_id, f.addressee_id) and f.server_version > v_cursor;
+  where v_uid in (f.requester_id, f.addressee_id) and f.server_version > v_cursor and f.server_version <= v_hwm;
 
   if v_more then
     v_next := (select max((x ->> 'serverVersion')::bigint) from jsonb_array_elements(v_matches) x);
   else
-    v_next := greatest(
-      v_cursor,
-      coalesce((select max((x ->> 'serverVersion')::bigint) from jsonb_array_elements(v_matches) x), 0),
-      coalesce((select max((x ->> 'serverVersion')::bigint) from jsonb_array_elements(v_players) x), 0),
-      coalesce((select max((x ->> 'serverVersion')::bigint) from jsonb_array_elements(v_friendships) x), 0));
+    v_next := greatest(v_cursor, v_hwm);
   end if;
 
-  return jsonb_build_object('matches', v_matches, 'players', v_players, 'friendships', v_friendships,
-                            'cursor', v_next, 'hasMore', v_more);
+  return jsonb_build_object(
+    'matches', v_matches, 'players', v_players, 'friendships', v_friendships,
+    'cursor', v_next, 'hasMore', v_more,
+    'visibilityEpoch', (select s.visibility_epoch from public.profile_settings s where s.profile_id = v_uid));
 end;
 $$;
 
--- Event-Download je Match über den Server-Cursor (RLS greift: SECURITY INVOKER; Visitor sehen nichts).
+-- Event-Download je Match über den Server-Cursor (RLS greift: SECURITY INVOKER; nur Mitglieder, nie Feed/Visitor).
+-- Spaltennamen in camelCase = Wire-Format (PostgREST liefert sie unverändert als JSON-Schlüssel, Review P2 #9).
 create or replace function public.pull_match_events(p_match_id uuid, p_after_seq bigint default 0,
                                                     p_limit integer default 500)
 returns table (
-  id uuid, match_id uuid, device_id uuid, device_seq bigint, lamport bigint, wall_clock_ms bigint,
-  parent_id uuid, type text, payload jsonb, server_seq bigint)
+  "id" uuid, "matchId" uuid, "deviceId" uuid, "deviceSeq" bigint, "lamport" bigint, "wallClockMs" bigint,
+  "parentId" uuid, "type" text, "payload" jsonb, "serverSeq" bigint, "redacted" boolean)
 language sql
 stable
 security invoker
 set search_path = ''
 as $$
   select e.id, e.match_id, e.device_id, e.device_seq, e.lamport, e.wall_clock_ms, e.parent_id, e.type, e.payload,
-         e.server_seq
+         e.server_seq, e.redacted_at is not null
   from public.match_events e
   where e.match_id = p_match_id and e.server_seq > coalesce(p_after_seq, 0)
   order by e.server_seq
@@ -649,7 +699,7 @@ $$;
 -- Anti-Entropie gegen die Cloud wie zwischen Geräten (01 §4.3): Wasserstand je Gerät. Weicht er vom lokalen
 -- Stand ab, lädt der Client das Match vollständig nach (schließt Lücken durch spät committete Uploads).
 create or replace function public.match_event_watermarks(p_match_id uuid)
-returns table (device_id uuid, max_seq bigint, event_count bigint)
+returns table ("deviceId" uuid, "maxSeq" bigint, "eventCount" bigint)
 language sql
 stable
 security invoker

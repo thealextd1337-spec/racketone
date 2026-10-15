@@ -72,7 +72,7 @@ returns boolean language sql stable security definer set search_path = '' as $$
                  and private.is_tournament_staff(m.tournament_id, p_profile)));
 $$;
 
--- Lesen von Match, Teilnehmern, Event-Log: Mitglieder + Freunde eines Teilnehmers, der teilt (03 E6).
+-- Im Feed sichtbar: Mitglieder + Freunde eines Teilnehmers, der teilt (03 E6). Basistabellen lesen nur Mitglieder.
 create or replace function private.can_view_match(p_match uuid, p_profile uuid default auth.uid())
 returns boolean language sql stable security definer set search_path = '' as $$
   select private.is_match_member(p_match, p_profile)
@@ -110,12 +110,7 @@ returns boolean language sql stable security definer set search_path = '' as $$
                  and private.is_tournament_director(m.tournament_id, p_profile)));
 $$;
 
--- Wie lange Visitor ein beendetes Match noch sehen (offene Frage P2-Q4, Vorschlag 7 Tage).
-create or replace function private.visitor_retention()
-returns interval language sql immutable set search_path = '' as $$
-  select interval '7 days';
-$$;
-
+-- Visitor (F25): sehen ein Match dauerhaft bis zum Widerruf (kein Ablauf nach Matchende).
 create or replace function private.is_match_visitor(p_match uuid, p_profile uuid default auth.uid())
 returns boolean language sql stable security definer set search_path = '' as $$
   select private.is_active(p_profile) and exists (
@@ -123,28 +118,126 @@ returns boolean language sql stable security definer set search_path = '' as $$
     from public.match_visitors v
     join public.matches m on m.id = v.match_id
     where v.match_id = p_match and v.profile_id = p_profile and v.revoked_at is null
-      and m.deleted_at is null
-      and (m.status <> 'finished' or m.ended_at is null or m.ended_at > now() - private.visitor_retention()));
+      and m.deleted_at is null);
 $$;
 
--- Realtime-Autorisierung (private Kanäle):
---   match:<id>       Engine-Events für Mitglieder (Spieler-Anzeige, Director, Zähler)
---   match-live:<id>  bereinigte Live-Projektion für Mitglieder und Visitor
---   tournament:<id>  Live-Übersicht für Turnierleitung/-helfer
+-- Realtime-Autorisierung (private Kanäle) mit Kanalversion (Review P2 #1): Supabase prüft die Policy nur beim
+-- Beitritt. Jeder Rechteentzug erhöht die Version (access_epoch); Trigger senden nur auf den aktuellen Kanal, ein
+-- Beitritt zu einer alten Version wird abgelehnt. Bestehende Abos auf der alten Version erhalten nur noch das
+-- inhaltslose Ereignis „rotate“ (Hinweis: aktuellen Kanal per RPC neu holen).
+--   match:<id>:<epoch>          Engine-Events nur für Mitglieder (Spieler-Anzeige, Director, Zähler)
+--   match-live:<id>:<epoch>     bereinigte Live-Sicht für Mitglieder und Visitor
+--   tournament:<id>:<epoch>     Live-Übersicht für Turnierleitung/-helfer
 create or replace function private.can_receive_realtime(p_topic text, p_profile uuid default auth.uid())
 returns boolean language plpgsql stable security definer set search_path = '' as $$
+declare
+  v_parts text[] := regexp_match(coalesce(p_topic, ''),
+    '^(match|match-live|tournament):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([0-9]{1,18})$');
+  v_id    uuid;
+  v_epoch bigint;
 begin
-  if p_topic ~ '^match:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
-    return private.can_view_match(substr(p_topic, 7)::uuid, p_profile);
-  elsif p_topic ~ '^match-live:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
-    return private.can_view_match(substr(p_topic, 12)::uuid, p_profile)
-        or private.is_match_visitor(substr(p_topic, 12)::uuid, p_profile);
-  elsif p_topic ~ '^tournament:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
-    return private.is_tournament_staff(substr(p_topic, 12)::uuid, p_profile);
+  if v_parts is null then
+    return false;
   end if;
-  return false;
+  v_id := v_parts[2]::uuid;
+  v_epoch := v_parts[3]::bigint;
+  if v_parts[1] = 'tournament' then
+    return exists (select 1 from public.tournaments t where t.id = v_id and t.access_epoch = v_epoch)
+       and private.is_tournament_staff(v_id, p_profile);
+  end if;
+  if not exists (select 1 from public.matches m where m.id = v_id and m.access_epoch = v_epoch) then
+    return false;
+  end if;
+  if v_parts[1] = 'match' then
+    return private.is_match_member(v_id, p_profile);
+  end if;
+  return private.is_match_member(v_id, p_profile) or private.is_match_visitor(v_id, p_profile);
 end;
 $$;
+
+create or replace function private.bump_access_epoch(p_matches uuid[])
+returns void language sql security definer set search_path = '' as $$
+  update public.matches set access_epoch = access_epoch + 1 where id = any (p_matches);
+$$;
+
+-- Rechteentzug → Kanalversion erhöhen; Sichtbarkeitsverlust → visibility_epoch der Betroffenen (Review P2 #7).
+create or replace function private.participant_access_change()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_lost      boolean;
+  v_share_off boolean;
+begin
+  if old.profile_id is null then
+    return null;
+  end if;
+  v_lost := tg_op = 'DELETE' or new.profile_id is distinct from old.profile_id;
+  v_share_off := old.share_with_friends and (v_lost or not new.share_with_friends);
+  if v_lost then
+    perform private.bump_access_epoch(array[old.match_id]);
+    perform private.bump_visibility(array[old.profile_id]);
+  end if;
+  if v_share_off then
+    perform private.bump_visibility(private.friend_ids(old.profile_id));
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function private.role_access_change()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if old.status in ('invited', 'accepted')
+     and (tg_op = 'DELETE' or new.status not in ('invited', 'accepted') or new.profile_id <> old.profile_id) then
+    perform private.bump_access_epoch(array[old.match_id]);
+    perform private.bump_visibility(array[old.profile_id]);
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function private.visitor_access_change()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if old.revoked_at is null and (tg_op = 'DELETE' or new.revoked_at is not null) then
+    perform private.bump_access_epoch(array[old.match_id]);
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function private.staff_access_change()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  update public.tournaments set access_epoch = access_epoch + 1 where id = old.tournament_id;
+  perform private.bump_access_epoch(array(select m.id from public.matches m where m.tournament_id = old.tournament_id));
+  perform private.bump_visibility(array[old.profile_id]);
+  return null;
+end;
+$$;
+
+create trigger match_participants_access after update or delete on public.match_participants
+  for each row execute function private.participant_access_change();
+create trigger match_roles_access after update or delete on public.match_roles
+  for each row execute function private.role_access_change();
+create trigger match_visitors_access after update or delete on public.match_visitors
+  for each row execute function private.visitor_access_change();
+create trigger tournament_staff_access after delete on public.tournament_staff
+  for each row execute function private.staff_access_change();
+
+-- Blockieren ändert Sichtbarkeit beidseitig (Freundschaft wird zusätzlich gelöscht).
+create or replace function private.block_visibility()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_op = 'DELETE' then
+    perform private.bump_visibility(array[old.blocker_id, old.blocked_id]);
+  else
+    perform private.bump_visibility(array[new.blocker_id, new.blocked_id]);
+  end if;
+  return null;
+end;
+$$;
+create trigger user_blocks_visibility after insert or delete on public.user_blocks
+  for each row execute function private.block_visibility();
 
 -- ---------------------------------------------------------------------------------------------------------
 -- RLS aktivieren (alle Tabellen in public; Prüfung im pgTAP-Test 010)
@@ -215,13 +308,15 @@ create policy tournament_courts_write on public.tournament_courts for all to aut
 create policy tournament_staff_select on public.tournament_staff for select to authenticated
   using (private.is_tournament_staff(tournament_id));
 
--- MATCHES/TEILNEHMER/EVENTS: nur lesen; Schreiben ausschließlich über RPCs (sync_push u. a.).
+-- MATCHES/TEILNEHMER/EVENTS: nur Mitglieder lesen die Basistabellen (Review P2 #2). Freunde eines teilenden
+-- Teilnehmers (Feed) bekommen ausschließlich die bereinigte Sicht aus sync_pull – keine fremden Profil-IDs,
+-- Ersteller, Autoren oder Geräte-IDs. Schreiben ausschließlich über RPCs (sync_push u. a.).
 create policy matches_select on public.matches for select to authenticated
-  using (private.can_view_match(id));
+  using (private.is_match_member(id));
 create policy match_participants_select on public.match_participants for select to authenticated
-  using (private.can_view_match(match_id));
+  using (private.is_match_member(match_id));
 create policy match_events_select on public.match_events for select to authenticated
-  using (private.can_view_match(match_id));
+  using (private.is_match_member(match_id));
 create policy match_link_rejections_select on public.match_link_rejections for select to authenticated
   using (profile_id = (select auth.uid())
          or exists (select 1 from public.matches m where m.id = match_id and m.created_by = (select auth.uid())));

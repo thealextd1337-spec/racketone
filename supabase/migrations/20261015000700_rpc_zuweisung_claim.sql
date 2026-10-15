@@ -216,8 +216,10 @@ begin
 end;
 $$;
 
--- Geteiltes Match bestätigen/ablehnen (04 §3.5): pending → confirmed bzw. Verknüpfung lösen + Sperre.
-create or replace function public.respond_match_participation(p_match_id uuid, p_accept boolean)
+-- „War ich nicht“ für ein einzelnes Match (F23): Freunde, die der Ersteller einträgt, sehen das Match sofort und es
+-- zählt sofort; der Widerspruch löst die Verknüpfung und sperrt sie für dieses Match. Für Dummy-Zuweisungen über
+-- alle Matches gilt reject_player_assignment.
+create or replace function public.reject_match_participation(p_match_id uuid)
 returns void
 language plpgsql
 security definer
@@ -226,21 +228,13 @@ as $$
 declare
   v_uid uuid := private.require_active();
 begin
-  if p_accept then
-    update public.match_participants set link_status = 'confirmed'
-     where match_id = p_match_id and profile_id = v_uid and link_status = 'pending';
-    if not found then
-      perform private.fail('no_pending_participation');
-    end if;
-  else
-    update public.match_participants
-       set profile_id = null, link_status = null, linked_at = null, share_with_friends = false, hidden = false
-     where match_id = p_match_id and profile_id = v_uid and link_status in ('pending', 'confirmed', 'assigned');
-    if not found then
-      perform private.fail('no_participation');
-    end if;
-    insert into public.match_link_rejections (match_id, profile_id) values (p_match_id, v_uid) on conflict do nothing;
+  update public.match_participants
+     set profile_id = null, link_status = null, linked_at = null, share_with_friends = false, hidden = false
+   where match_id = p_match_id and profile_id = v_uid and link_status in ('linked', 'assigned', 'confirmed');
+  if not found then
+    perform private.fail('no_participation');
   end if;
+  insert into public.match_link_rejections (match_id, profile_id) values (p_match_id, v_uid) on conflict do nothing;
 end;
 $$;
 

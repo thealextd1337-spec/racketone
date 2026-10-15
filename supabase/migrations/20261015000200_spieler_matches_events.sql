@@ -44,6 +44,7 @@ create table public.tournaments (
   starts_on      date,
   ends_on        date,
   status         text not null default 'planned' check (status in ('planned', 'running', 'finished', 'cancelled')),
+  access_epoch   bigint not null default 1,   -- Realtime-Kanalversion (tournament:<id>:<epoch>)
   server_version bigint not null default 0,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
@@ -92,6 +93,11 @@ create table public.matches (
   summary                 jsonb check (summary is null or jsonb_typeof(summary) = 'object'),
   live_state              jsonb check (live_state is null or jsonb_typeof(live_state) = 'object'),
   projection_event_count  integer not null default 0 check (projection_event_count >= 0),
+  -- Realtime-Kanalversion: steigt bei jedem Rechteentzug; gesendet wird nur auf match:<id>:<epoch> bzw.
+  -- match-live:<id>:<epoch> (Supabase prüft Kanalrechte nur beim Beitritt, Review P2 #1).
+  access_epoch            bigint not null default 1,
+  -- steigt bei Redaktion von Event-Payloads (Kontolöschung) → Clients laden die Events neu
+  redaction_epoch         integer not null default 0,
   deleted_at              timestamptz,
   server_version          bigint not null default 0,
   created_at              timestamptz not null default now(),
@@ -104,8 +110,9 @@ create trigger matches_touch before insert or update on public.matches
   for each row execute function private.touch_row();
 
 -- Teilnehmer je Lineup-Platz. slot_id = PlayerId im Lineup (UUID oder 'placeholder:…', 02 §7.6).
--- link_status: self (eigener Platz) · pending (Freund eingetragen, Bestätigung offen) · confirmed (bestätigt
--- oder per Link beansprucht) · assigned (Dummy-Zuweisung, sofort wirksam, Widerspruch möglich).
+-- link_status (F23): self (eigener Platz) · linked (Freund vom Ersteller eingetragen) · assigned (Dummy einem Freund
+-- zugewiesen) · confirmed (per Einladungslink selbst beansprucht). Alle wirken sofort (sichtbar und gewertet);
+-- Widerspruch „War ich nicht“ löst die Verknüpfung und sperrt sie für dieses Match bzw. diesen Dummy.
 create table public.match_participants (
   match_id           uuid not null references public.matches (id) on delete cascade,
   slot_id            text not null check (length(slot_id) between 1 and 80),
@@ -113,7 +120,7 @@ create table public.match_participants (
   position           smallint not null check (position in (1, 2)),
   player_id          uuid references public.players (id) on delete set null,
   profile_id         uuid references public.profiles (id) on delete set null,
-  link_status        text check (link_status in ('self', 'pending', 'confirmed', 'assigned')),
+  link_status        text check (link_status in ('self', 'linked', 'assigned', 'confirmed')),
   display_name       text not null check (length(display_name) between 1 and 40),   -- Snapshot
   share_with_friends boolean not null default false,
   hidden             boolean not null default false,
@@ -132,7 +139,7 @@ create index match_participants_player_idx on public.match_participants (player_
 create trigger match_participants_touch before insert or update on public.match_participants
   for each row execute function private.touch_row();
 
--- Abgelehnte Teilnahme an einem Match („das war ich nicht“ bei pending) → kein erneutes Verknüpfen.
+-- „War ich nicht“ für ein einzelnes Match → kein erneutes Verknüpfen in diesem Match.
 create table public.match_link_rejections (
   match_id   uuid not null references public.matches (id) on delete cascade,
   profile_id uuid not null references public.profiles (id) on delete cascade,
@@ -185,6 +192,9 @@ create table public.match_events (
                   'Paused', 'Resumed', 'ScorerChanged', 'PointDetailSet', 'ServerChosen', 'PlayerAssigned')),
   payload       jsonb not null check (jsonb_typeof(payload) = 'object' and payload ->> 'type' = type),
   author_id     uuid references public.profiles (id) on delete set null,   -- serverseitig = auth.uid()
+  -- Lösch-Ausnahme (Review P2 #4): bei Kontolöschung werden Klarnamen in Payloads ersetzt (PlayerAssigned.player.
+  -- displayName); Identität des Events (ID, Ordnung, Wirkung) bleibt gleich.
+  redacted_at   timestamptz,
   server_seq    bigint generated always as identity,
   received_at   timestamptz not null default now(),
   constraint match_events_device_seq_uq unique (match_id, device_id, device_seq)

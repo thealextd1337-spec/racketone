@@ -1,6 +1,6 @@
 -- Freundschaften: Anfrage, Annahme, Gegenanfrage, Ablehnung, Blockieren, Einladungslink/QR.
 begin;
-select plan(18);
+select plan(19);
 
 select tests.world();
 
@@ -20,7 +20,10 @@ select throws_ok($$ insert into public.friendships (requester_id, addressee_id, 
                  'Freundschaften nicht direkt schreibbar');
 
 select tests.authenticate_as('dave');
+select set_config('tests.dave_epoch', public.sync_pull(0) ->> 'visibilityEpoch', true);
 select is(public.send_friend_request(tests.uid('carol')), 'accepted', 'Gegenanfrage nimmt die offene Anfrage an');
+select ok((public.sync_pull(0) ->> 'visibilityEpoch')::bigint > current_setting('tests.dave_epoch')::bigint,
+          'neue Freundschaft löst Vollabgleich aus (ältere geteilte Matches des Freundes)');
 select results_eq($$ select status from public.friendships where tests.uid('carol') in (requester_id, addressee_id) and tests.uid('dave') in (requester_id, addressee_id) $$,
                   $$ values ('accepted'::text) $$, 'genau eine Zeile pro Paar, akzeptiert');
 select isnt_empty($$ select 1 from public.profiles where id = tests.uid('carol') $$, 'Freund sieht Profil');

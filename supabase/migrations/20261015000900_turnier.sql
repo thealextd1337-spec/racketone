@@ -63,6 +63,7 @@ begin
     select jsonb_build_object(
       'tournament', jsonb_build_object('id', t.id, 'name', t.name, 'sport', t.sport, 'status', t.status,
                                        'startsOn', t.starts_on, 'endsOn', t.ends_on),
+      'channel', 'tournament:' || t.id::text || ':' || t.access_epoch::text,
       'courts', (select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name) order by c.sort_order, c.name),
                                  '[]'::jsonb)
                  from public.tournament_courts c where c.tournament_id = t.id),

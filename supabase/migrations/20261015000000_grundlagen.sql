@@ -17,6 +17,21 @@ grant usage on schema ops to service_role;
 -- Globaler, monotoner Versionszähler für sync_pull (Cursor statt Uhrzeit, 03 §3.1).
 create sequence private.sync_version_seq;
 
+-- Commit-geordnete Versionen (Review P2 #6): Eine Sequenz allein vergibt Nummern in Aufrufreihenfolge, Commits können
+-- sich aber überholen → ein Cursor würde später committete, kleinere Versionen überspringen. Deshalb hält jede
+-- schreibende Transaktion ab der ersten Versionsvergabe eine exklusive Transaktions-Sperre bis zum Commit (Versionen
+-- entstehen damit in Commit-Reihenfolge); sync_pull liest unter der geteilten Sperre (konsistenter Stand über alle
+-- Anweisungen, Cursor = höchste vergebene Version). Preis: Schreibvorgänge mit Versionsvergabe sind serialisiert –
+-- für P2 unkritisch (kurze Transaktionen), vor großem Wachstum durch einen commit-geordneten Änderungsstrom ersetzen.
+create or replace function private.sync_lock_key()
+returns bigint
+language sql
+immutable
+set search_path = ''
+as $$
+  select 7341029101::bigint;   -- fester Schlüssel „advantly sync“
+$$;
+
 -- Setzt server_version/updated_at bei jedem Insert/Update einer syncbaren Zeile.
 create or replace function private.touch_row()
 returns trigger
@@ -25,6 +40,7 @@ security definer
 set search_path = ''
 as $$
 begin
+  perform pg_advisory_xact_lock(private.sync_lock_key());
   new.server_version := nextval('private.sync_version_seq');
   new.updated_at := now();
   return new;

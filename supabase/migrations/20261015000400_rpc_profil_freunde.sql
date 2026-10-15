@@ -17,6 +17,8 @@ begin
   if not private.is_active(v_uid) then
     perform private.fail('profile_not_active', '42501');
   end if;
+  -- Versionssperre vor allen Zeilensperren der RPC (Commit-Reihenfolge der Versionen, siehe private.touch_row)
+  perform pg_advisory_xact_lock(private.sync_lock_key());
   return v_uid;
 end;
 $$;

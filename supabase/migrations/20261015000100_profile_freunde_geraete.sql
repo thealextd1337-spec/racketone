@@ -50,8 +50,22 @@ create table public.profile_settings (
   share_matches_default boolean not null default false,   -- Privacy by Default (F12/O1)
   locale                text not null default 'de' check (locale in ('de', 'en')),
   deletion_requested_at timestamptz,
+  -- Steigt, wenn sich die Menge der für mich sichtbaren Matches ändern kann, ohne dass die Matches selbst eine neue
+  -- Version bekommen (Freundschaft, Blockieren, Entzug von Teilnahme/Rolle, Freund teilt nicht mehr). Ändert sie
+  -- sich, macht der Client einen verbindlichen Vollabgleich (sync_pull ab 0, Fehlendes lokal entfernen).
+  visibility_epoch      bigint not null default 0,
   updated_at            timestamptz not null default now()
 );
+
+create or replace function private.bump_visibility(p_profiles uuid[])
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  update public.profile_settings set visibility_epoch = visibility_epoch + 1
+   where profile_id = any (p_profiles);
+$$;
 
 -- Beim Anlegen eines Auth-Nutzers: Profil (Status onboarding) + Einstellungen.
 create or replace function private.handle_new_user()
@@ -100,6 +114,26 @@ create unique index friendships_pair_uq on public.friendships
 create index friendships_addressee_idx on public.friendships (addressee_id, status);
 create trigger friendships_touch before insert or update on public.friendships
   for each row execute function private.touch_row();
+
+-- Jede Freundschaftsänderung kann Sichtbarkeit (Feed geteilter Matches) in beide Richtungen ändern.
+create or replace function private.friendship_visibility()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform private.bump_visibility(array[old.requester_id, old.addressee_id]);
+  elsif tg_op = 'INSERT' or new.status is distinct from old.status then
+    perform private.bump_visibility(array[new.requester_id, new.addressee_id]);
+  end if;
+  return null;
+end;
+$$;
+
+create trigger friendships_visibility after insert or update or delete on public.friendships
+  for each row execute function private.friendship_visibility();
 
 -- Geräte: stabile Installations-ID (= DeviceId der Engine, UUIDv7). Eine ID gehört genau einem Profil.
 -- Uhren werden vom gekoppelten Handy registriert (gleiches Profil); Wear OS standalone registriert sich selbst.

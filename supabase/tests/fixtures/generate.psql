@@ -1,0 +1,33 @@
+-- (Endung .psql, damit `supabase test db` die Datei nicht als Test ausführt.)
+-- Erzeugt die Wire-Fixtures (echte RPC-Antworten) für shared/cloud-sync (WireFixturesTest).
+-- Voraussetzung: lokaler Stack mit Test-Helfern (einmal `supabase test db` gelaufen). Ausgabe: je Zeile
+-- `<datei>|<json>` – den JSON-Teil unverändert nach supabase/tests/fixtures/<datei> schreiben:
+--   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -At -F '|' -f supabase/tests/fixtures/generate.psql
+-- Die Schlüssel prüft zusätzlich pgTAP (095_wire_vertrag.test.sql). Läuft in einer Transaktion und hinterlässt nichts.
+begin;
+select tests.world();
+select tests.authenticate_as('alice');
+select set_config('fx.push', public.sync_push(jsonb_build_object(
+  'devices', jsonb_build_array(jsonb_build_object('id', tests.device('a1'), 'kind', 'phone', 'platform', 'android')),
+  'players', jsonb_build_array(jsonb_build_object('id', 'b9500000-0000-7000-8000-000000000001', 'kind', 'guest', 'displayName', 'Max')),
+  'matches', jsonb_build_array(tests.match('a9500000-0000-7000-8000-000000000001', jsonb_build_array(
+      tests.part('s-a', 'A', 1, 'Alice', tests.uid('alice')),
+      tests.part('s-b', 'B', 1, 'Max', null, 'b9500000-0000-7000-8000-000000000001')),
+      jsonb_build_object('projection', jsonb_build_object('status', 'in_progress', 'eventCount', 2,
+                                                          'liveState', '{"sets":[[1,0]],"points":["15","0"]}'::jsonb)))),
+  'events', jsonb_build_array(
+      tests.event('e9500000-0000-7000-8000-000000000001', 'a9500000-0000-7000-8000-000000000001', tests.device('a1'), 1, 'MatchCreated'),
+      tests.event('e9500000-0000-7000-8000-000000000002', 'a9500000-0000-7000-8000-000000000001', tests.device('a1'), 2, 'PointWon', '{"side":"A"}'),
+      tests.event('e9500000-0000-7000-8000-000000000002', 'a9500000-0000-7000-8000-000000000001', tests.device('a1'), 2, 'PointWon', '{"side":"A"}'),
+      tests.event('e9500000-0000-7000-8000-000000000003', 'a9500000-0000-7000-8000-000000000001', tests.device('b1'), 1, 'PointWon', '{"side":"B"}'))))::text,
+  true);
+select public.invite_scorer('a9500000-0000-7000-8000-000000000001', tests.uid('bob'));
+
+select 'sync_push.json', current_setting('fx.push');
+select 'sync_pull.json', public.sync_pull(0)::text;
+select 'pull_match_events.json', (select jsonb_agg(to_jsonb(e) order by e."serverSeq")
+                                  from public.pull_match_events('a9500000-0000-7000-8000-000000000001') e)::text;
+select 'match_event_watermarks.json', (select jsonb_agg(to_jsonb(w))
+                                       from public.match_event_watermarks('a9500000-0000-7000-8000-000000000001') w)::text;
+select 'get_visitor_match.json', public.get_visitor_match('a9500000-0000-7000-8000-000000000001')::text;
+rollback;

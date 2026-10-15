@@ -1,7 +1,7 @@
 -- F17 Zähler-Wahl + Single-Scorer-Regeln über Accounts: Einladung, Annahme, Übergabe (ScorerChanged),
 -- Widerruf, verspätete Events des früheren Zählers.
 begin;
-select plan(22);
+select plan(24);
 
 select tests.world();
 
@@ -54,6 +54,10 @@ select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build
             tests.event('e2000000-0000-7000-8000-000000000022', 'a2000000-0000-7000-8000-000000000001', tests.device('a1'), 1, 'ScorerChanged',
                         jsonb_build_object('scorerDeviceId', tests.device('a1')))))), 'events', 0),
           'accepted', 'Ersteller darf (mit Bestätigung in der UI) zurückübernehmen');
+select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
+            tests.event('e2000000-0000-7000-8000-000000000023', 'a2000000-0000-7000-8000-000000000001', tests.device('a1'), 2, 'ScorerChanged',
+                        jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
+          'accepted', 'Übergabe an das Gerät, mit dem bob seine Rolle angenommen hat');
 
 -- Widerruf: verspätete Events bleiben gültig, neue Übernahmen nicht
 select lives_ok($$ select public.revoke_scorer('a2000000-0000-7000-8000-000000000001', tests.uid('bob')) $$, 'alice entzieht bob das Zählrecht');
@@ -65,6 +69,10 @@ select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build
             tests.event('e2000000-0000-7000-8000-000000000014', 'a2000000-0000-7000-8000-000000000001', tests.device('b1'), 4, 'ScorerChanged',
                         jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
           'rejected:takeover_forbidden', 'früherer Zähler kann nicht erneut übernehmen');
+select is((public.sync_push(jsonb_build_object('matches', jsonb_build_array(jsonb_build_object(
+            'id', 'a2000000-0000-7000-8000-000000000001',
+            'projection', jsonb_build_object('status', 'in_progress', 'eventCount', 1))))) -> 'matches' -> 0 ->> 'projection'),
+          'forbidden', 'früherer Zähler schreibt keine Projektion mehr');
 
 -- Unbeteiligte können nicht übernehmen
 select tests.authenticate_as('carol');

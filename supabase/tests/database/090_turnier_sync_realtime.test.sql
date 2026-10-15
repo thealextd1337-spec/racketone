@@ -1,6 +1,6 @@
 -- Turnierdirektor-Grundgerüst (F22), Delta-Cursor von sync_pull und Realtime-Broadcasts.
 begin;
-select plan(24);
+select plan(28);
 
 select tests.world();
 
@@ -40,14 +40,16 @@ select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_buil
 select is_empty($$ select 1 from public.tournaments $$, 'Fremde sehen das Turnier nicht');
 select throws_ok($$ select public.tournament_overview('f9000000-0000-7000-8000-000000000001') $$, '42501', 'forbidden',
                  'Fremde bekommen keine Live-Übersicht');
-select ok(not private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001'), 'Fremde empfangen den Turnier-Kanal nicht');
+select ok(not private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001:1'), 'Fremde empfangen den Turnier-Kanal nicht');
 
 -- Helfer bob
 select tests.authenticate_as('bob');
 select throws_ok($$ insert into public.tournament_courts (tournament_id, name) values ('f9000000-0000-7000-8000-000000000001', 'Platz 2') $$,
                  '42501', null, 'Helfer ändern keine Plätze');
 select isnt_empty($$ select 1 from public.matches where id = 'a9000000-0000-7000-8000-000000000001' $$, 'Helfer sieht das Turnier-Match');
-select ok(private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001'), 'Helfer empfängt den Turnier-Kanal');
+select is(public.tournament_overview('f9000000-0000-7000-8000-000000000001') ->> 'channel',
+          'tournament:f9000000-0000-7000-8000-000000000001:1', 'Übersicht nennt den versionierten Turnier-Kanal');
+select ok(private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001:1'), 'Helfer empfängt den Turnier-Kanal');
 select lives_ok($$ select public.respond_scorer_invitation('a9000000-0000-7000-8000-000000000001', true, tests.device('b1')) $$,
                 'bob nimmt die Zuweisung an');
 select is(tests.result(public.sync_push(jsonb_build_object(
@@ -72,28 +74,33 @@ select is((select r ->> 'status' from jsonb_array_elements(public.sync_pull(0) -
 
 -- Realtime-Broadcast aus Triggern (privater Kanal). Falls lokal keine Realtime-Partition existiert, übersprungen.
 reset role;
-create function pg_temp.realtime_checks() returns setof text language plpgsql as $fn$
-begin
-  begin
-    if exists (select 1 from realtime.messages where topic = 'match:a9000000-0000-7000-8000-000000000001')
-       or (select c.relkind from pg_class c where c.oid = 'realtime.messages'::regclass) <> 'p' then
-      return next ok(exists (select 1 from realtime.messages
-                             where topic = 'match:a9000000-0000-7000-8000-000000000001' and event = 'event'),
-                     'Event-Insert sendet auf match:<id>');
-      return next ok(exists (select 1 from realtime.messages
-                             where topic = 'match-live:a9000000-0000-7000-8000-000000000001' and event = 'live'),
-                     'Projektion sendet bereinigt auf match-live:<id>');
-      return next ok(exists (select 1 from realtime.messages where topic = 'tournament:f9000000-0000-7000-8000-000000000001'),
-                     'Turnier-Kanal erhält Platz-Updates');
-    else
-      return next skip('realtime.messages ohne aktuelle Partition (Realtime-Dienst nicht gestartet)', 3);
-    end if;
-  exception when insufficient_privilege or undefined_table then
-    return next skip('kein Lesezugriff auf realtime.messages in dieser Umgebung', 3);
-  end;
-end;
-$fn$;
-select * from pg_temp.realtime_checks();
+-- Strikt (kein Überspringen): fehlende Partition oder fehlende Rechte sollen in der CI auffallen.
+select ok(exists (select 1 from realtime.messages
+                  where topic = 'match:a9000000-0000-7000-8000-000000000001:' ||
+                                (select m.access_epoch from public.matches m where m.id = 'a9000000-0000-7000-8000-000000000001')
+                    and event = 'event'),
+          'Event-Insert sendet auf match:<id>:<epoch>');
+select ok(exists (select 1 from realtime.messages
+                  where topic like 'match-live:a9000000-0000-7000-8000-000000000001:%' and event = 'live'
+                    and payload::text !~ 'profileId|deviceId'),
+          'Projektion sendet bereinigt auf match-live:<id>:<epoch>');
+select ok(exists (select 1 from realtime.messages where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1'),
+          'Turnier-Kanal erhält Platz-Updates');
+
+-- Commit-geordneter Cursor (Review P2 #6): Cursor = höchste vergebene Version unter der Versionssperre
+select tests.authenticate_as('bob');
+select set_config('tests.bob_cursor', public.sync_pull(0) ->> 'cursor', true);
+reset role;
+select is(current_setting('tests.bob_cursor')::bigint, pg_sequence_last_value('private.sync_version_seq'),
+          'sync_pull liefert die höchste vergebene Version als Cursor');
+
+-- Helfer entfernen → Turnier- und Match-Kanäle rotieren, Sichtbarkeit wird neu abgeglichen
+select set_config('tests.bob_epoch', (select visibility_epoch::text from public.profile_settings where profile_id = tests.uid('bob')), true);
+delete from public.tournament_staff where tournament_id = 'f9000000-0000-7000-8000-000000000001' and profile_id = tests.uid('bob');
+select is((select access_epoch from public.tournaments where id = 'f9000000-0000-7000-8000-000000000001'), 2::bigint,
+          'Entfernen eines Helfers erhöht die Turnier-Kanalversion');
+select ok((select visibility_epoch from public.profile_settings where profile_id = tests.uid('bob'))
+          > current_setting('tests.bob_epoch')::bigint, 'entfernter Helfer bekommt das Signal zum Vollabgleich');
 
 select * from finish();
 rollback;

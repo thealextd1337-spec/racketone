@@ -1,6 +1,6 @@
 -- Matches + Event-Log: Upload über sync_push (Idempotenz, Gerätebindung), RLS für Teilnehmer/Fremde/Freunde.
 begin;
-select plan(36);
+select plan(53);
 
 select tests.world();
 
@@ -63,15 +63,42 @@ select throws_ok($$ update public.match_events set payload = '{"type":"PointWon"
 select throws_ok($$ delete from public.match_events where id = 'e1000000-0000-7000-8000-000000000002' $$, '42501', null,
                  'Events sind unveränderlich (kein DELETE)');
 
--- Teilnehmer bob (pending) sieht das Match und kann bestätigen
+-- Konkurrierender Upload derselben ID (Review P2 #8): Vergleich aller unveränderlichen Felder
+reset role;
+select ok(private.same_event((select e from public.match_events e where e.id = 'e1000000-0000-7000-8000-000000000002'),
+                             'a1000000-0000-7000-8000-000000000001', tests.device('a2'), 1, 1, 1760608801000, null,
+                             'PointWon', '{"type":"PointWon","side":"A"}'), 'gleicher Inhalt = Duplikat');
+select ok(not private.same_event((select e from public.match_events e where e.id = 'e1000000-0000-7000-8000-000000000002'),
+                                 'a1000000-0000-7000-8000-000000000001', tests.device('a2'), 1, 1, 1760608801000, null,
+                                 'PointWon', '{"type":"PointWon","side":"B"}'), 'abweichende Payload = Kollision');
+select ok(not private.same_event((select e from public.match_events e where e.id = 'e1000000-0000-7000-8000-000000000002'),
+                                 'a1000000-0000-7000-8000-000000000001', tests.device('a2'), 1, 2, 1760608801000, null,
+                                 'PointWon', '{"type":"PointWon","side":"A"}'), 'abweichende Lamport-Zeit = Kollision');
+
+-- Projektion an den Server-Stand gebunden (Review P2 #10)
+select tests.authenticate_as('alice');
+select is((public.sync_push(jsonb_build_object('matches', jsonb_build_array(jsonb_build_object(
+            'id', 'a1000000-0000-7000-8000-000000000001',
+            'projection', jsonb_build_object('status', 'in_progress', 'eventCount', 4))))) -> 'matches' -> 0 ->> 'projection'),
+          'ahead_of_events', 'Projektion vor dem Event-Log wird nicht übernommen');
+select is((public.sync_push(jsonb_build_object('matches', jsonb_build_array(jsonb_build_object(
+            'id', 'a1000000-0000-7000-8000-000000000001',
+            'projection', jsonb_build_object('status', 'in_progress', 'eventCount', 3))))) -> 'matches' -> 0 ->> 'projection'),
+          'applied', 'Projektion auf vorhandenem Stand wird übernommen');
+
+-- Zählerwechsel auf das Gerät eines fremden Kontos ohne angenommene Rolle (Review P2 #5)
+select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
+            tests.event('e1000000-0000-7000-8000-000000000014', 'a1000000-0000-7000-8000-000000000001', tests.device('a1'), 3, 'ScorerChanged',
+                        jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
+          'rejected:scorer_target_forbidden', 'Übergabe an ein Gerät von bob nur mit dessen angenommener Rolle');
+
+-- Freund bob ist sofort verknüpft (F23): sieht das Match, es zählt für ihn
 select tests.authenticate_as('bob');
 select is((select count(*)::int from public.match_events where match_id = 'a1000000-0000-7000-8000-000000000001'), 3,
           'Teilnehmer sieht das Event-Log');
 select results_eq($$ select link_status from public.match_participants
                      where match_id = 'a1000000-0000-7000-8000-000000000001' and profile_id = tests.uid('bob') $$,
-                  $$ values ('pending'::text) $$, 'Freund ist als pending verknüpft (Bestätigung offen)');
-select lives_ok($$ select public.respond_match_participation('a1000000-0000-7000-8000-000000000001', true) $$,
-                'Teilnehmer bestätigt das geteilte Match');
+                  $$ values ('linked'::text) $$, 'Freund ist sofort verknüpft (keine Bestätigung je Match)');
 select is((select p -> 'participants' -> 0 ->> 'displayName'
            from jsonb_array_elements(public.sync_pull(0) -> 'matches') p
            where p ->> 'id' = 'a1000000-0000-7000-8000-000000000001'),
@@ -99,15 +126,25 @@ select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_buil
           'not_owner', 'Fremder kann fremden Match-Kopf nicht überschreiben');
 select is((select jsonb_array_length(public.sync_pull(0) -> 'matches')), 0, 'sync_pull des Fremden ist leer');
 
--- Freundes-Feed: carol (Freundin von bob) sieht das Match erst, wenn bob teilt (03 E6)
+-- Freundes-Feed: carol (Freundin von bob) sieht das Match erst, wenn bob teilt (03 E6) – und nur bereinigt
 select tests.authenticate_as('carol');
-select is_empty($$ select 1 from public.matches where id = 'a1000000-0000-7000-8000-000000000001' $$,
-                'Freund eines Teilnehmers sieht nichts, solange nicht geteilt');
+select is(jsonb_array_length(public.sync_pull(0) -> 'matches'), 0, 'Freund eines Teilnehmers sieht nichts, solange nicht geteilt');
 select tests.authenticate_as('bob');
 select lives_ok($$ select public.set_my_participation('a1000000-0000-7000-8000-000000000001', true, null) $$, 'bob teilt mit Freunden');
 select tests.authenticate_as('carol');
-select isnt_empty($$ select 1 from public.matches where id = 'a1000000-0000-7000-8000-000000000001' $$,
-                  'Freund sieht das geteilte Match');
+select set_config('tests.carol_epoch', (public.sync_pull(0) ->> 'visibilityEpoch'), true);
+select is((select m ->> 'access' from jsonb_array_elements(public.sync_pull(0) -> 'matches') m), 'feed',
+          'Freund sieht das geteilte Match im Feed');
+select is((select m ->> 'createdBy' from jsonb_array_elements(public.sync_pull(0) -> 'matches') m), null,
+          'Feed: Ersteller (kein Freund) wird nicht verraten');
+select is_empty($$ select 1 from public.matches where id = 'a1000000-0000-7000-8000-000000000001' $$,
+                'Feed-Leser liest die Match-Tabelle nicht (created_by)');
+select is_empty($$ select 1 from public.match_participants where match_id = 'a1000000-0000-7000-8000-000000000001' $$,
+                'Feed-Leser liest keine Teilnehmer-Zeilen (profile_id)');
+select is_empty($$ select 1 from public.match_events where match_id = 'a1000000-0000-7000-8000-000000000001' $$,
+                'Feed-Leser liest kein Event-Log (author_id, Geräte)');
+select is_empty($$ select 1 from public.pull_match_events('a1000000-0000-7000-8000-000000000001') $$,
+                'Feed-Leser bekommt keine Events per RPC');
 select is((select jsonb_agg(jsonb_build_array(p ->> 'displayName', p ->> 'profileId' is not null) order by p ->> 'team')
            from jsonb_array_elements(public.sync_pull(0) -> 'matches') m, jsonb_array_elements(m -> 'participants') p),
           '[["Snapshot A", false], ["Bob", true]]'::jsonb,
@@ -115,11 +152,35 @@ select is((select jsonb_agg(jsonb_build_array(p ->> 'displayName', p ->> 'profil
 select is((select jsonb_array_length(m -> 'roles') from jsonb_array_elements(public.sync_pull(0) -> 'matches') m), 0,
           'Feed-Leser sieht keine Zähler-Rollen');
 select tests.authenticate_as('vera');
-select is_empty($$ select 1 from public.matches where id = 'a1000000-0000-7000-8000-000000000001' $$,
-                'Freund von alice sieht es nicht (alice teilt nicht)');
+select is(jsonb_array_length(public.sync_pull(0) -> 'matches'), 0, 'Freund von alice sieht es nicht (alice teilt nicht)');
 
--- Löschen durch den Ersteller: mit anderen Accounts nur ausblenden
+-- Teilen beenden → Feed-Leser verliert die Sicht ohne neue Version für ihn → visibilityEpoch steigt (Review P2 #7)
+select tests.authenticate_as('bob');
+select lives_ok($$ select public.set_my_participation('a1000000-0000-7000-8000-000000000001', false, null) $$, 'bob teilt nicht mehr');
+select tests.authenticate_as('carol');
+select ok((public.sync_pull(0) ->> 'visibilityEpoch')::bigint > current_setting('tests.carol_epoch')::bigint,
+          'Feed-Leser bekommt das Signal zum Vollabgleich');
+select is(jsonb_array_length(public.sync_pull(0) -> 'matches'), 0, 'Vollabgleich liefert das Match nicht mehr');
+
+-- „War ich nicht“ je Match (F23)
+select tests.authenticate_as('bob');
+select lives_ok($$ select public.reject_match_participation('a1000000-0000-7000-8000-000000000001') $$, 'bob: „War ich nicht“');
+select is_empty($$ select 1 from public.matches where id = 'a1000000-0000-7000-8000-000000000001' $$,
+                'nach Widerspruch sieht bob das Match nicht mehr');
 select tests.authenticate_as('alice');
+select is((public.sync_push(jsonb_build_object('matches', jsonb_build_array(
+            tests.match('a1000000-0000-7000-8000-000000000001', jsonb_build_array(
+              tests.part('a1000000-0000-7000-8000-0000000000f1', 'A', 1, 'Snapshot A', tests.uid('alice')),
+              tests.part('a1000000-0000-7000-8000-0000000000f2', 'B', 1, 'Bob', tests.uid('bob')))))))
+           -> 'matches' -> 0 -> 'notes' -> 0 ->> 'note'),
+          'link_rejected', 'erneutes Verknüpfen nach Widerspruch ist gesperrt');
+
+-- Löschen durch den Ersteller: mit anderen Accounts nur ausblenden (vera als weitere verknüpfte Freundin)
+select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_build_array(
+            tests.match('a1000000-0000-7000-8000-000000000001', jsonb_build_array(
+              tests.part('a1000000-0000-7000-8000-0000000000f1', 'A', 1, 'Snapshot A', tests.uid('alice')),
+              tests.part('a1000000-0000-7000-8000-0000000000f2', 'B', 1, 'Vera', tests.uid('vera'))))))), 'matches', 0),
+          'updated', 'vera eingetragen');
 select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_build_array(
             jsonb_build_object('id', 'a1000000-0000-7000-8000-000000000001', 'deleted', true)))), 'matches', 0),
           'hidden_only', 'geteiltes Match wird für den Ersteller nur ausgeblendet');
