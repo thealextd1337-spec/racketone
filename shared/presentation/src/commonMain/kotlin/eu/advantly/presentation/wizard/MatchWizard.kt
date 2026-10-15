@@ -27,6 +27,8 @@ import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.match.LocalDay
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.PlayersPort
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.presentation.match.systemLocalDay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,17 +36,24 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlin.random.Random
 
 /**
- * Match-Assistent (04 §3.1, H2–H5): Sportart → Belag/Umgebung (Tennis, Badminton) → Spieler → Format → Start.
+ * Match-Assistent (04 §3.1, H2–H5): Sportart → Belag/Umgebung (Tennis, Badminton) → Spieler → Format → Wer zählt?
+ * → Start.
  * Bildet die Eingaben nach 02 §5.1/§5.1.1 auf ein `MatchFormat` ab und prüft es mit `MatchFormatValidator` und
  * `LineupValidator`. Defaults: Tennis `TENNIS_SINGLES_BO3`, Padel Golden Point (U1), Pickleball Doppel bis 11,
  * Badminton nach Datum (U11), Tischtennis ohne Satzanzahl (Pflichtauswahl, U14).
  *
  * Nur vom UI-Thread benutzen.
+ *
+ * @param watchStatus Stand der eigenen Uhr (`LiveMatchPort.watchStatus`); die UI meldet Änderungen über
+ *   [setWatchStatus], damit der Standard „Meine Uhr“ nachzieht
+ * @param refreshWatch fragt den Stand der Uhr neu ab (`LiveMatchPort.refreshWatchStatus`)
  */
 class MatchWizard(
     private val players: PlayersPort,
     private val today: () -> LocalDay = ::systemLocalDay,
     private val random: Random = Random.Default,
+    val watchStatus: StateFlow<WatchStatus> = MutableStateFlow(WatchStatus.UNKNOWN),
+    private val refreshWatch: () -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow(derive(initialInput()))
     val state: StateFlow<WizardUiState> = mutableState.asStateFlow()
@@ -221,6 +230,30 @@ class MatchWizard(
 
     fun setSaveAsFavorite(save: Boolean) = update { it.copy(saveAsFavorite = save) }
 
+    // --- Schritt 5: Wer zählt? ---
+
+    /** Zähler wählen; „Meine Uhr“ nur, wenn eine Uhr verbunden ist (sonst No-op). */
+    fun setScorer(option: ScorerOption) {
+        if (option == ScorerOption.MY_WATCH && !input.watchAvailable) return
+        update { it.copy(scorer = option) }
+    }
+
+    fun setWatchWorkout(enabled: Boolean) = update { it.copy(watchWorkout = enabled) }
+
+    /** Stand der Uhr geändert (aus [watchStatus]); eine explizite Wahl bleibt erhalten. */
+    fun setWatchStatus(status: WatchStatus) {
+        if (input.watchStatus != status) update { it.copy(watchStatus = status) }
+    }
+
+    /** Kurzform für Tests: Uhr verfügbar bzw. unbekannt. */
+    fun setWatchAvailable(available: Boolean) = setWatchStatus(if (available) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+
+    /** „Erneut prüfen“ bzw. Betreten des Schritts „Wer zählt?“: Stand der Uhr neu abfragen. */
+    fun refreshWatchStatus() {
+        refreshWatch()
+        setWatchStatus(watchStatus.value)
+    }
+
     // --- Navigation ---
 
     /** Nächster Schritt, wenn [WizardUiState.canContinue]; im letzten Schritt No-op. */
@@ -229,6 +262,8 @@ class MatchWizard(
         if (!s.canContinue) return false
         val nextStep = s.steps.getOrNull(s.stepIndex + 1) ?: return false
         update { it.copy(step = nextStep) }
+        // „Wer zählt?“: Stand der Uhr bei jedem Betreten neu abfragen (Uhr-App evtl. inzwischen geöffnet)
+        if (nextStep == WizardStep.SCORER) refreshWatchStatus()
         return true
     }
 
@@ -249,7 +284,8 @@ class MatchWizard(
 
     // --- intern ---
 
-    private fun initialInput(): WizardInput = WizardInput(teamA = listOf(players.self.value), teamB = listOf(null))
+    private fun initialInput(): WizardInput =
+        WizardInput(teamA = listOf(players.self.value), teamB = listOf(null), watchStatus = watchStatus.value)
 
     private fun setSlot(
         side: Side,
@@ -292,7 +328,7 @@ class MatchWizard(
             }
         return WizardUiState(
             input = input,
-            steps = sport?.let(::stepsFor) ?: listOf(WizardStep.SPORT, WizardStep.PLAYERS, WizardStep.FORMAT),
+            steps = sport?.let(::stepsFor) ?: listOf(WizardStep.SPORT, WizardStep.PLAYERS, WizardStep.FORMAT, WizardStep.SCORER),
             options = options,
             format = format?.copy(presetId = presetId),
             validation = validation,
@@ -322,12 +358,12 @@ class MatchWizard(
 
         private fun bestOf(vararg n: Int): List<SetsChoice> = n.map { SetsChoice.BestOf(it) }
 
-        /** Schritte je Sportart: Belag nur bei Tennis, Umgebung (Halle/Draußen) bei Badminton. */
+        /** Schritte je Sportart: Belag nur bei Tennis, Umgebung (Halle/Draußen) bei Badminton; „Wer zählt?“ immer zuletzt. */
         fun stepsFor(sport: Sport): List<WizardStep> =
             if (sport == Sport.TENNIS || sport == Sport.BADMINTON) {
-                listOf(WizardStep.SPORT, WizardStep.SURFACE, WizardStep.PLAYERS, WizardStep.FORMAT)
+                listOf(WizardStep.SPORT, WizardStep.SURFACE, WizardStep.PLAYERS, WizardStep.FORMAT, WizardStep.SCORER)
             } else {
-                listOf(WizardStep.SPORT, WizardStep.PLAYERS, WizardStep.FORMAT)
+                listOf(WizardStep.SPORT, WizardStep.PLAYERS, WizardStep.FORMAT, WizardStep.SCORER)
             }
 
         /** Auswahl je Sportart nach 02 §5.1 und §5.1.1. */

@@ -1,0 +1,5 @@
+First internal Play test for phone and Wear OS.
+• Match setup, live score and local history for five racket sports.
+• One device keeps score: watch or phone in Director mode; other devices display it.
+Please test undo, offline play, reconnecting and confirmed scorer handover.
+Accounts, cloud sync and Health Connect are not included yet.

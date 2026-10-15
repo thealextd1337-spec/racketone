@@ -11,6 +11,3 @@ internal expect fun platformLocalData(): LocalData
  * Main-Queue-Scheduler, Thread-Prüfung; JVM: ohne Link (nur Tests).
  */
 internal expect fun platformWatchSession(data: LocalData): MatchSession
-
-/** watchOS: WatchConnectivity; JVM: nicht verfügbar. */
-internal expect fun platformLinkDebug(): LinkDebug

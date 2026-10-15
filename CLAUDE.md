@@ -39,7 +39,7 @@ shared/data                  SQLDelight, EventStore, Repositories, Outbox  → c
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
 shared/match-session         Session: Zähler/Anzeige, Event→Store→Engine   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
-shared/presentation          ViewModels + UI-State (kein watchOS)          → data, device-link, entitlements
+shared/presentation          ViewModels, UI-State, Session-Adapter (kein watchOS) → match-session, data, device-link, entitlements
 shared/ui-phone              CMP-Screens (android, ios, jvm("desktop"))    → presentation
 shared/umbrella-ios          XCFramework AdvantlyKit                       → ui-phone
 shared/umbrella-watch        XCFramework AdvantlyWatchKit                  → match-session, data, device-link

@@ -12,5 +12,3 @@ internal actual fun platformLocalData(): LocalData = createInMemoryJvmLocalData(
 
 internal actual fun platformWatchSession(data: LocalData): MatchSession =
     MatchSessions.create(data, link = null, scheduler = ManualScheduler(), kind = PeerKind.WATCH).also { it.start() }
-
-internal actual fun platformLinkDebug(): LinkDebug = throw UnsupportedOperationException("WatchConnectivity gibt es nur auf watchOS")

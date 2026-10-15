@@ -337,51 +337,6 @@
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.TABLE_TENNIS_OPEN" = "Offen (Satz für Satz)";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.debug.open" = "Link-Debug";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.CONNECTED" = "Verbunden";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.DISCONNECTED" = "Getrennt";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.UNAVAILABLE" = "Nicht verfügbar";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.send10" = "10 Pings";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.stop" = "Stopp";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.reset" = "Zurücksetzen";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.sent %@" = "Gesendet: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.pongs %@" = "Pongs: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.answered %@" = "Beantwortet: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.queued %@" = "In Queue: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.lost %@" = "Verloren: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.retries %@" = "Wiederholungen: %@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.rtt %@ %@" = "RTT p50/p95: %1$@ / %2$@";
-
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.nopeer" = "Noch keine Gegenstelle – ist die andere App offen?";
-
 /* Hinweis TT-Doppel: Rückschlagreihenfolge wechselt (Effekt RECEIVE_ORDER_SWAPPED) */
 "banner.receiveOrder" = "⇄ Rückschlag-Reihenfolge wechseln";
 
@@ -489,3 +444,6 @@
 
 /* Startliste: Datenbank nicht lesbar (Dev-Daten-Reset) */
 "start.storeUnavailable" = "Speicher nicht lesbar (alte Testdaten?). Bitte Watch-App neu installieren.";
+
+/* Anzeige: iPhone hat „Meine Uhr“ gewählt, Übergabe per ScorerChanged steht aus (PENDING_WATCH) */
+"role.pending" = "Übergabe an diese Uhr läuft …";

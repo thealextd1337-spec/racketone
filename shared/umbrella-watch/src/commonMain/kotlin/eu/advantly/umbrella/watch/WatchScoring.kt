@@ -5,6 +5,7 @@ import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
@@ -48,11 +49,18 @@ import eu.advantly.sync.protocol.SyncCodec
  *   `STORE_READ`; Abhilfe: Watch-App löschen und neu installieren (Simulator: `xcrun simctl uninstall`).
  * - **Sync:** Die Session sendet jedes Event sofort an das gekoppelte iPhone (WatchConnectivity aus `device-link`),
  *   puffert offline und liefert bei Wiederverbindung nach; der Snapshot trägt den Sync-Status.
- * - Side A = „Wir“ (Besitzer der Uhr), Side B = „Gegner“ – reine Anzeige-Perspektive.
+ * - **Perspektive:** Im Snapshot und bei [point] ist „A“ immer „Wir“ = die Seite des Besitzers (`LocalData.isSelf`,
+ *   inkl. vom iPhone übernommenem Self und Aliasen), „B“ die Gegner. Steht der Besitzer in der Engine auf Side B
+ *   (z. B. vom iPhone so angelegt), dreht die Facade die Seiten; ohne Besitzer im Match gilt Engine-A = „Wir“.
+ * - **Self:** Neue Matches lesen den Self jedes Mal frisch aus `players` – nach dem ersten `Hello` übernimmt die Session
+ *   den Self des iPhones (`adoptSelf`), der alte Uhr-Self wird Alias.
+ * - **Workout-Wunsch:** `MatchMeta.watchWorkout` – auf der Uhr gestartete Matches schreiben den Wunsch der Uhr hinein,
+ *   vom iPhone gestartete bringen dessen Wahl mit ([WatchScoreSnapshot.watchWorkout]).
  * - Nur auf der Main-Queue aufrufen; [WatchScoringListener] wird synchron auf der Main-Queue benachrichtigt (auch bei
  *   Änderungen durch das Handy).
  *
- * Swift: `let scoring = AdvantlyWatch.shared.scoring(); scoring.startMatch(presetId: "TENNIS_SINGLES_BO3", doubles: false, weServeFirst: true)`.
+ * Swift: `let scoring = AdvantlyWatch.shared.scoring()`, dann z. B.
+ * `scoring.startMatch(presetId: "TENNIS_SINGLES_BO3", doubles: false, weServeFirst: true, watchWorkout: true)`.
  */
 class WatchScoring internal constructor(
     private val open: () -> Backend,
@@ -154,7 +162,8 @@ class WatchScoring internal constructor(
     /**
      * Startet ein neues Match aus einem Preset; **die Uhr zählt** (Standard). Besetzung: A = Self-Player der Uhr (+ Partner),
      * B = Gegner; bei „Wie letztes Mal“ derselben Sportart/Disziplin dieselben Spieler-IDs wie zuletzt.
-     * [weServeFirst] wählt den Erstaufschläger (A bzw. B, jeweils Nummer 1).
+     * [weServeFirst] wählt den Erstaufschläger (A bzw. B, jeweils Nummer 1). [watchWorkout] landet als Wunsch
+     * „Workout auf meiner Uhr“ im `MatchMeta` (geht mit dem Match ans iPhone).
      *
      * @return Zustand nach dem Start oder `null` (`INVALID_INPUT`, `STORE_WRITE`, `STORE_READ`)
      */
@@ -162,12 +171,13 @@ class WatchScoring internal constructor(
         presetId: String,
         doubles: Boolean,
         weServeFirst: Boolean,
+        watchWorkout: Boolean,
     ): WatchScoreSnapshot? {
         error = ""
         val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
         val discipline = if (doubles) Discipline.DOUBLES else Discipline.SINGLES
         if (discipline !in preset.disciplines) return fail(INVALID_INPUT)
-        val snapshot = begin(preset.format(discipline), weServeFirst, ScorerChoice.ThisDevice) ?: return null
+        val snapshot = begin(preset.format(discipline), weServeFirst, ScorerChoice.ThisDevice, watchWorkout) ?: return null
         putSetting(KEY_LAST_SETUP, listOf(preset.id, flag(doubles), flag(weServeFirst)).joinToString(";"))
         return snapshot
     }
@@ -179,6 +189,7 @@ class WatchScoring internal constructor(
     fun startMatchFromFormatJson(
         formatJson: String,
         weServeFirst: Boolean,
+        watchWorkout: Boolean,
     ): WatchScoreSnapshot? {
         error = ""
         val format =
@@ -189,7 +200,7 @@ class WatchScoring internal constructor(
                 return fail(INVALID_INPUT)
             }
         if (MatchFormatValidator.validate(format).errors.isNotEmpty()) return fail(INVALID_INPUT)
-        return begin(format, weServeFirst, ScorerChoice.ThisDevice)
+        return begin(format, weServeFirst, ScorerChoice.ThisDevice, watchWorkout)
     }
 
     /**
@@ -225,7 +236,7 @@ class WatchScoring internal constructor(
     fun snapshot(): WatchScoreSnapshot? {
         backend() ?: return null
         val state = current ?: return null
-        return state.match?.let { buildSnapshot(it, state.sync, scorerLostAtMs) }
+        return state.match?.let { buildSnapshot(it, state.sync, scorerLostAtMs, usSide(it)) }
     }
 
     /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Es bleibt gespeichert und wird weiter synchronisiert. */
@@ -239,12 +250,13 @@ class WatchScoring internal constructor(
 
     // --- Befehle (nur der Zähler) ---------------------------------------------------------------------------------
 
-    /** Punkt für Side A (`true`, „Wir“) bzw. B. Nur im laufenden bzw. pausierten Satz. */
+    /** Punkt für „Wir“ (`sideA = true`, Seite des Besitzers) bzw. die Gegner. Nur im laufenden bzw. pausierten Satz. */
     fun point(sideA: Boolean): WatchScoreSnapshot? =
         command { session, m ->
             val status = m.state.status
             if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return@command false
-            session.recordPoint(if (sideA) Side.A else Side.B)
+            val us = usSide(m)
+            session.recordPoint(if (sideA) us else us.other)
         }
 
     /** Macht das letzte wirksame Zähl-Event rückgängig (auch über Satz- und Matchende hinweg). */
@@ -318,7 +330,7 @@ class WatchScoring internal constructor(
         val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
         // Session-interner Schlüssel der Gerätart, damit die Anzeige „zählt: Handy“ zeigt
         call { b.data.settings.put("session.peerKind.$DEMO_SCORER", "PHONE") }
-        return begin(preset.format(), weServeFirst = true, scorer = ScorerChoice.Device(DeviceId(DEMO_SCORER)))
+        return begin(preset.format(), weServeFirst = true, scorer = ScorerChoice.Device(DeviceId(DEMO_SCORER)), watchWorkout = false)
     }
 
     // --- intern ---------------------------------------------------------------------------------------------------
@@ -353,13 +365,14 @@ class WatchScoring internal constructor(
         if (id != null && id != lastOpenId) putSetting(KEY_OPEN_MATCH, id)
         if (id == null && lastOpenId != null) removeSetting(KEY_OPEN_MATCH)
         lastOpenId = id
-        listener?.onSnapshot(match?.let { buildSnapshot(it, state.sync, scorerLostAtMs) })
+        listener?.onSnapshot(match?.let { buildSnapshot(it, state.sync, scorerLostAtMs, usSide(it)) })
     }
 
     private fun begin(
         format: MatchFormat,
         weServeFirst: Boolean,
         scorer: ScorerChoice,
+        watchWorkout: Boolean,
     ): WatchScoreSnapshot? {
         val b = backend() ?: return fail(STORE_READ)
         val lineup =
@@ -369,7 +382,7 @@ class WatchScoring internal constructor(
                 return fail(STORE_WRITE)
             }
         try {
-            b.session.create(format, lineup, scorer = scorer)
+            b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout), scorer)
         } catch (e: IllegalArgumentException) {
             return fail(INVALID_INPUT)
         } catch (e: Exception) {
@@ -409,17 +422,29 @@ class WatchScoring internal constructor(
         weServeFirst: Boolean,
     ): Lineup {
         val now = clock.nowMs()
+        // jedes Mal frisch: nach dem ersten Hello kann die Session den Self des iPhones übernommen haben
         val self = data.players.ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }.id
         val size = format.discipline.playersPerSide
         val last = data.matches.lastLineup(format.sport, format.discipline)
         val (a, b) =
-            if (last != null && last.a.firstOrNull() == self && last.a.size == size && last.b.size == size) {
-                last.a to last.b
+            if (last != null && last.a.size == size && last.b.size == size && last.a.firstOrNull()?.let { data.isSelf(it) } == true) {
+                // dieselben Mitspieler wie zuletzt; ein alter Uhr-Self (jetzt Alias) wird durch den aktuellen ersetzt
+                (listOf(self) + last.a.drop(1)) to last.b
             } else {
                 val partner = (2..size).map { PlayerId(ids.newUuid7(now).value) }
                 (listOf(self) + partner) to (1..size).map { PlayerId(ids.newUuid7(now).value) }
             }
         return Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())
+    }
+
+    /**
+     * Engine-Side des Besitzers („Wir“): B, wenn ein Self/Alias nur auf B steht, sonst A (auch ohne Besitzer im Match,
+     * z. B. Director-Modus am iPhone).
+     */
+    private fun usSide(match: ActiveMatch): Side {
+        val data = backend?.data ?: return Side.A
+        val selfOnB = call { match.lineup.b.any { data.isSelf(it) } && match.lineup.a.none { data.isSelf(it) } } ?: false
+        return if (selfOnB) Side.B else Side.A
     }
 
     private fun fail(code: String): WatchScoreSnapshot? {
@@ -503,7 +528,9 @@ class WatchMatchSetup(
 )
 
 /**
- * Flacher Anzeige-Zustand (aus 02 §8 abgeleitet). Nur Daten und Codes, keine UI-Texte – Swift übersetzt über
+ * Flacher Anzeige-Zustand (aus 02 §8 abgeleitet), **aus Sicht des Besitzers**: Felder mit „A“ (`pointsA`, `gamesA`,
+ * `setScoresA`, `rightNoA` …) und Side-Codes `A`/`B` (`winner`, `serveSide`, `hintSide`, `setWinners`) meinen „Wir“ bzw.
+ * „Gegner“, nicht die Engine-Side (siehe [perspectiveSwapped]). Nur Daten und Codes, keine UI-Texte – Swift übersetzt über
  * Localizable.strings. Leerer String bzw. `-1`/`0` = „nicht vorhanden“ (statt Optionals, die ohne SKIE unhandlich sind).
  *
  * @property status `IN_PROGRESS`, `PAUSED`, `AWAITING_DECISION` oder `FINISHED`
@@ -550,6 +577,10 @@ class WatchMatchSetup(
  * @property lastSyncAtMs Wanduhrzeit des letzten Abgleichs mit einer Gegenstelle, sonst `0`
  * @property scorerDisconnectedSinceMs Anzeige: seit wann der Zähler nicht erreichbar ist (nach > 30 s Angebot
  *   „Zählen übernehmen“), sonst `0`
+ * @property scorerPending das iPhone hat „Meine Uhr“ gewählt, aber noch keine Uhr gekannt (`PENDING_WATCH`): beim
+ *   ersten `Hello` übergibt es per `ScorerChanged` an diese Uhr; bis dahin zählt niemand
+ * @property watchWorkout Wunsch „Workout auf meiner Uhr mitlaufen lassen“ aus `MatchMeta.watchWorkout`
+ * @property perspectiveSwapped der Besitzer steht in der Engine auf Side B; die Facade hat die Seiten gedreht
  */
 class WatchScoreSnapshot(
     val matchId: String,
@@ -614,6 +645,9 @@ class WatchScoreSnapshot(
     val lastEventReceivedAtMs: Long,
     val lastSyncAtMs: Long,
     val scorerDisconnectedSinceMs: Long,
+    val scorerPending: Boolean,
+    val watchWorkout: Boolean,
+    val perspectiveSwapped: Boolean,
 )
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
@@ -660,7 +694,13 @@ internal fun buildSnapshot(
     match: ActiveMatch,
     sync: SyncStatus,
     scorerDisconnectedSinceMs: Long,
+    us: Side = Side.A,
 ): WatchScoreSnapshot {
+    val them = us.other
+
+    // Engine-Side → Snapshot-Code aus Sicht des Besitzers
+    fun code(side: Side): String = if (side == us) "A" else "B"
+
     val state = match.state
     val format = match.format
     val lineup = match.lineup
@@ -707,44 +747,49 @@ internal fun buildSnapshot(
         winner =
             state.result
                 ?.winner
-                ?.name
+                ?.let { code(it) }
                 .orEmpty(),
         resultReason =
             state.result
                 ?.reason
                 ?.name
                 .orEmpty(),
-        pointsA = current?.display?.a.orEmpty(),
-        pointsB = current?.display?.b.orEmpty(),
-        gamesA = current?.games?.a ?: -1,
-        gamesB = current?.games?.b ?: -1,
+        pointsA = current?.display?.get(us).orEmpty(),
+        pointsB = current?.display?.get(them).orEmpty(),
+        gamesA = current?.games?.get(us) ?: -1,
+        gamesB = current?.games?.get(them) ?: -1,
         setIndex = current?.setIndex ?: sets.size,
         setKind = current?.setKind?.name.orEmpty(),
         gameKind = current?.gameKind?.name.orEmpty(),
-        setsWonA = state.setsWon.a,
-        setsWonB = state.setsWon.b,
-        setScoresA = sets.indices.map { setScore(Side.A, it) },
-        setScoresB = sets.indices.map { setScore(Side.B, it) },
-        setTiebreaksA = sets.indices.map { tiebreak(Side.A, it) },
-        setTiebreaksB = sets.indices.map { tiebreak(Side.B, it) },
-        setWinners = sets.map { it.winner.name },
+        setsWonA = state.setsWon[us],
+        setsWonB = state.setsWon[them],
+        setScoresA = sets.indices.map { setScore(us, it) },
+        setScoresB = sets.indices.map { setScore(them, it) },
+        setTiebreaksA = sets.indices.map { tiebreak(us, it) },
+        setTiebreaksB = sets.indices.map { tiebreak(them, it) },
+        setWinners = sets.map { code(it.winner) },
         paused = state.status == MatchStatus.PAUSED,
-        serveSide = serve?.side?.name.orEmpty(),
+        serveSide = serve?.side?.let { code(it) }.orEmpty(),
         serveCourt = serve?.court?.name.orEmpty(),
         server = serve?.player?.value.orEmpty(),
         receiver = serve?.receiver?.value.orEmpty(),
         serverNo = numberOf(serve?.player),
         receiverNo = numberOf(serve?.receiver),
-        rightNoA = numberOf(positions?.a?.right),
-        leftNoA = numberOf(positions?.a?.left),
-        rightNoB = numberOf(positions?.b?.right),
-        leftNoB = numberOf(positions?.b?.left),
+        rightNoA = numberOf(positions?.get(us)?.right),
+        leftNoA = numberOf(positions?.get(us)?.left),
+        rightNoB = numberOf(positions?.get(them)?.right),
+        leftNoB = numberOf(positions?.get(them)?.left),
         receiveOrderSwapped = Effect.RECEIVE_ORDER_SWAPPED in state.effects,
         serverNumber = serve?.serverNumber ?: 0,
         servesRemaining = serve?.servesRemaining ?: 0,
         scoreCall = state.scoreCall.orEmpty(),
         hintCode = hint?.code.orEmpty(),
-        hintSide = hint?.side.orEmpty(),
+        hintSide =
+            hint
+                ?.side
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { code(Side.valueOf(it)) }
+                .orEmpty(),
         hintCount = hint?.count ?: 0,
         callout = current?.callout?.name.orEmpty(),
         deuceCount = current?.deuceCount ?: 0,
@@ -764,5 +809,8 @@ internal fun buildSnapshot(
         lastEventReceivedAtMs = sync.lastEventReceivedAtMs ?: 0,
         lastSyncAtMs = sync.lastSyncAtMs ?: 0,
         scorerDisconnectedSinceMs = scorerDisconnectedSinceMs,
+        scorerPending = match.scorerDeviceId == MatchSession.PENDING_WATCH,
+        watchWorkout = match.meta.watchWorkout,
+        perspectiveSwapped = us == Side.B,
     )
 }

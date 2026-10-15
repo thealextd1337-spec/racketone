@@ -19,7 +19,7 @@ FACADE = ROOT / "shared/umbrella-watch/src/commonMain/kotlin/eu/advantly/umbrell
 SPORTS = ["TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"]
 # Schlüssel-Präfixe der App; andere Literale (SF Symbols, UserDefaults-Keys, Metadaten) werden ignoriert
 PREFIXES = ("start", "setup", "sport", "team", "serve", "score", "hint", "action", "banner", "a11y", "controls",
-            "common", "fitness", "setend", "matchend", "intent", "preset", "link", "watch", "status",
+            "common", "fitness", "setend", "matchend", "intent", "preset", "watch", "status",
             "role", "sync", "takeOver")
 ENTRY = re.compile(r'^"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)";\s*$')
 PLACEHOLDER = re.compile(r"%(?:\d+\$)?[@dDuUxXoOfeEgGcCsSpaAF]")

@@ -37,22 +37,23 @@ import kotlinx.coroutines.flow.asStateFlow
  * Engine-gestützte In-Memory-Implementierung aller drei Ports (W1-C). Jedes Match ist ein append-only Event-Log
  * (`MatchCreated` + Events) über der echten [ScoringEngine]; Zeit und IDs kommen aus [clock] und [ids].
  *
- * Platzhalter für `shared/match-session`: keine Persistenz (Prozesstod verliert alles), kein Sync, ein Gerät.
+ * Für Tests und Previews (die Apps nutzen `SessionMatchStore`): keine Persistenz (Prozesstod verliert alles), kein
+ * Sync, ein Gerät – es zählt immer selbst ([LiveRole.SCORER]), auch wenn „Meine Uhr“ gewählt wird.
  * Nur vom UI-Thread benutzen.
  *
  * @param selfName Anzeigename des Besitzers (leer = UI zeigt „Du“)
+ * @param watchAvailable simulierte verbundene Uhr (nur für den Assistenten „Wer zählt?“)
  */
 class InMemoryMatchStore(
     private val clock: WallClock = WallClock.System,
     private val ids: IdFactory = IdFactory.uuid7(clock),
     private val deviceId: DeviceId = DeviceId("phone"),
     selfName: String = "",
-) : LiveMatchPort,
-    MatchHistoryPort,
-    PlayersPort {
+    watchAvailable: Boolean = false,
+) : MatchStore {
     private class Entry(
         val id: MatchId,
-        val setup: MatchSetup,
+        var setup: MatchSetup,
         val genesis: ScoreEvent,
         var engine: EngineState,
     ) {
@@ -63,7 +64,6 @@ class InMemoryMatchStore(
         var revision = 0L
         var finishedAtMs: Long? = null
         var followUp: MatchId? = null
-        val dismissedConflicts = HashSet<String>()
     }
 
     private val entries = LinkedHashMap<MatchId, Entry>()
@@ -83,9 +83,34 @@ class InMemoryMatchStore(
     override val favorites: StateFlow<List<FavoriteLineup>> = favoritesFlow.asStateFlow()
     override val lastSetup: StateFlow<MatchSetup?> = lastSetupFlow.asStateFlow()
 
+    private val watchFlow = MutableStateFlow(watchAvailable)
+    override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
+    private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+    override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+
+    /** Anzahl der Neuabfragen ([refreshWatchStatus]) – für Tests. */
+    var watchRefreshes: Int = 0
+        private set
+
+    /** Simuliert das Verbinden/Trennen einer Uhr (Previews, Tests). */
+    fun setWatchAvailable(available: Boolean) = setWatchStatus(if (available) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+
+    /** Simuliert den Stand der Uhr (Previews, Tests). */
+    fun setWatchStatus(status: WatchStatus) {
+        watchStatusFlow.value = status
+        watchFlow.value = status == WatchStatus.AVAILABLE
+    }
+
+    override fun refreshWatchStatus() {
+        watchRefreshes++
+    }
+
     // --- LiveMatchPort ---
 
-    override fun start(setup: MatchSetup): MatchId {
+    override fun start(
+        setup: MatchSetup,
+        options: StartOptions,
+    ): MatchId {
         val formatErrors = MatchFormatValidator.validate(setup.format).errors
         require(formatErrors.isEmpty()) { "Ungültiges MatchFormat: ${formatErrors.joinToString { it.message }}" }
         val lineupErrors = LineupValidator.validate(setup.format, setup.lineup)
@@ -97,6 +122,7 @@ class InMemoryMatchStore(
             if (previous.engine.state.status != MatchStatus.FINISHED) append(previous, MatchEnded(EndReason.ABANDONED))
         }
         val id = MatchId.of(ids.newId())
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
         val genesis =
             ScoreEvent(
                 id = EventId.of(ids.newId()),
@@ -106,9 +132,9 @@ class InMemoryMatchStore(
                 lamport = 1,
                 wallClockMs = clock.nowMs(),
                 parentId = null,
-                payload = MatchCreated(setup.format, setup.lineup, setup.meta),
+                payload = MatchCreated(setup.format, setup.lineup, meta),
             )
-        val entry = Entry(id, setup, genesis, ScoringEngine.replay(listOf(genesis)))
+        val entry = Entry(id, setup.copy(meta = meta), genesis, ScoringEngine.replay(listOf(genesis)))
         entries[id] = entry
         activeId = id
         lastSetupFlow.value = setup.copy(previousMatchId = null)
@@ -166,25 +192,6 @@ class InMemoryMatchStore(
             append(e, if (retroactive) Correction.initialServer(player) else Correction.server(player))
         }
 
-    override fun resolveFork(
-        forkId: String,
-        keep: ForkChoice,
-    ): Boolean = false // Ein Gerät, ein Log: hier entstehen keine Verzweigungen.
-
-    override fun dismissConflict(conflictId: String): Boolean =
-        command(clearRedo = false) { e ->
-            conflictsOf(e).any { it.id == conflictId } && e.dismissedConflicts.add(conflictId).also { if (it) e.revision++ }
-        }
-
-    override fun undoConflictPoint(
-        conflictId: String,
-        side: Side,
-    ): Boolean =
-        command(clearRedo = false) { e ->
-            val conflict = conflictsOf(e).firstOrNull { it.id == conflictId } ?: return@command false
-            append(e, Undo(if (side == Side.A) conflict.pointA else conflict.pointB))
-        }
-
     override fun pause(): Boolean =
         command(clearRedo = false) { e ->
             e.engine.state.status == MatchStatus.IN_PROGRESS && append(e, Paused)
@@ -220,11 +227,17 @@ class InMemoryMatchStore(
                 lineup = previous.setup.lineup.copy(firstServer = opener.player),
                 previousMatchId = previous.id,
             )
-        val id = start(setup)
+        val id = start(setup, StartOptions())
         previous.followUp = id
         publish()
         return id
     }
+
+    /** Ein Gerät: es zählt immer selbst, Übernehmen ist nie nötig. */
+    override fun takeOverScoring(): Boolean = false
+
+    /** Ein Gerät: keine Rollenkonflikte, nichts verworfen. */
+    override fun rejectedInputs(): List<RejectedInput> = emptyList()
 
     override fun dismiss(): Boolean {
         val entry = current() ?: return false
@@ -269,6 +282,28 @@ class InMemoryMatchStore(
 
     override fun removeFavorite(id: String) {
         favoritesFlow.value = favoritesFlow.value.filterNot { it.id == id }
+    }
+
+    override fun canRename(id: PlayerId): Boolean = guestsFlow.value.any { it.id == id }
+
+    override fun renameGuest(
+        id: PlayerId,
+        name: String,
+    ): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || !canRename(id)) return false
+        val renamed = Player(id, trimmed)
+        guestsFlow.value = guestsFlow.value.map { if (it.id == id) renamed else it }
+
+        fun MatchSetup.renamed() = copy(players = players.map { if (it.id == id) renamed else it })
+        entries.values.forEach { e ->
+            e.setup = e.setup.renamed()
+            e.revision++
+        }
+        favoritesFlow.value = favoritesFlow.value.map { it.copy(setup = it.setup.renamed()) }
+        lastSetupFlow.value = lastSetupFlow.value?.renamed()
+        publish()
+        return true
     }
 
     // --- intern ---
@@ -331,17 +366,6 @@ class InMemoryMatchStore(
         guestsFlow.value = used + guestsFlow.value.filterNot { g -> used.any { it.id == g.id } }
     }
 
-    /** Aktive Widersprüche der Engine (01 §4.4), ohne bestätigte. */
-    private fun conflictsOf(entry: Entry): List<ConflictInfo> {
-        val byId = entry.engine.events.associateBy { it.id }
-        return entry.engine.conflicts
-            .mapNotNull { c ->
-                val first = byId[c.first]?.payload as? PointWon ?: return@mapNotNull null
-                val (a, b) = if (first.side == Side.A) c.first to c.second else c.second to c.first
-                ConflictInfo("${c.first}:${c.second}", a, b)
-            }.filterNot { it.id in entry.dismissedConflicts }
-    }
-
     /** Wirksam angewendete Ballwechsel (auch ohne Punkt, z. B. Pickleball Side-Out). */
     private fun pointsPlayed(entry: Entry): Int {
         val log = EventLog.analyze(entry.engine.events)
@@ -380,10 +404,11 @@ class InMemoryMatchStore(
                     followUpMatchId = e.followUp,
                     revision = e.revision,
                     pointsPlayed = pointsPlayed(e),
+                    role = LiveRole.SCORER,
+                    scorerName = selfFlow.value.displayName,
+                    scorerKind = DeviceKind.PHONE,
                     sync = SyncInfo.LOCAL_ONLY,
-                    conflicts = conflictsOf(e),
                     absorbedTaps = e.engine.absorbedEvents.size,
-                    openForks = emptyList(),
                 )
             }
         historyFlow.value =

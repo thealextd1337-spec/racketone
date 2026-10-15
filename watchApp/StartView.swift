@@ -51,9 +51,8 @@ struct StartView: View {
                     Text("start.newMatch")
                 }
                 #if DEBUG
-                Section {
-                    NavigationLink("link.debug.open") { LinkDebugView() }
-                    if !debugInfo.isEmpty {
+                if !debugInfo.isEmpty {
+                    Section {
                         Text(debugInfo).font(.footnote).foregroundStyle(Brand.text2)
                     }
                 }

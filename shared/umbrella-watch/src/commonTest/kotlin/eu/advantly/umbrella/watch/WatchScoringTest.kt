@@ -1,9 +1,11 @@
 package eu.advantly.umbrella.watch
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
@@ -14,6 +16,7 @@ import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.match.session.RandomIdGenerator
+import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.WallClock
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
@@ -42,7 +45,8 @@ private class Rig {
 
     var watchSession: MatchSession = newSession("watch", PeerKind.WATCH, watchData)
     var watch: WatchScoring = facade()
-    val phone: MatchSession by lazy { newSession("phone", PeerKind.PHONE, testLocalData()).also { settle() } }
+    val phoneData: LocalData by lazy { testLocalData() }
+    val phone: MatchSession by lazy { newSession("phone", PeerKind.PHONE, phoneData).also { settle() } }
 
     fun newSession(
         name: String,
@@ -104,7 +108,7 @@ class WatchScoringTest {
     @Test
     fun startOnWatchMakesTheWatchTheScorer() {
         val rig = Rig()
-        val snap = assertNotNull(rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = false))
+        val snap = assertNotNull(rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = false, watchWorkout = true))
         assertTrue(snap.isScorer)
         assertEquals("WATCH", snap.scorerKind)
         assertEquals("IN_PROGRESS", snap.status)
@@ -120,7 +124,7 @@ class WatchScoringTest {
     @Test
     fun pointsHintsUndoAndRedo() {
         val rig = Rig()
-        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true)
         val game = assertNotNull(rig.points("AAAA"))
         assertEquals(1, game.gamesA)
         assertTrue("GAME_WON" in game.effects)
@@ -140,7 +144,11 @@ class WatchScoringTest {
     @Test
     fun openModeSetEndAndMatchTiebreak() {
         val rig = Rig()
-        assertTrue(assertNotNull(rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)).offerMatchTiebreak)
+        assertTrue(
+            assertNotNull(
+                rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true),
+            ).offerMatchTiebreak,
+        )
         val setEnd = assertNotNull(rig.points("A".repeat(24)))
         assertTrue(setEnd.pendingDecision)
         assertEquals(listOf(6), setEnd.setScoresA)
@@ -159,7 +167,7 @@ class WatchScoringTest {
     @Test
     fun pauseAndResumePlay() {
         val rig = Rig()
-        rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)
+        rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true)
         assertNull(rig.watch.resumePlay())
         val paused = assertNotNull(rig.watch.pause())
         assertTrue(paused.paused)
@@ -173,15 +181,15 @@ class WatchScoringTest {
         val rig = Rig()
         assertNull(rig.watch.point(sideA = true))
         assertEquals("NO_MATCH", rig.watch.lastError())
-        assertNull(rig.watch.startMatch("NOPE", doubles = false, weServeFirst = true))
+        assertNull(rig.watch.startMatch("NOPE", doubles = false, weServeFirst = true, watchWorkout = true))
         assertEquals("INVALID_INPUT", rig.watch.lastError())
-        assertNull(rig.watch.startMatch("PADEL_PREMIER_2026", doubles = false, weServeFirst = true))
+        assertNull(rig.watch.startMatch("PADEL_PREMIER_2026", doubles = false, weServeFirst = true, watchWorkout = true))
         assertEquals("INVALID_INPUT", rig.watch.lastError())
-        assertNull(rig.watch.startMatchFromFormatJson("kein json", weServeFirst = true))
+        assertNull(rig.watch.startMatchFromFormatJson("kein json", weServeFirst = true, watchWorkout = true))
         assertEquals("INVALID_INPUT", rig.watch.lastError())
         val broken = WatchScoring({ error("disk I/O error") })
         assertFalse(broken.isAvailable())
-        assertNull(broken.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true))
+        assertNull(broken.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true))
         assertEquals("STORE_READ", broken.lastError())
         assertNull(broken.restore())
         assertEquals("STORE_READ", broken.lastError())
@@ -192,7 +200,7 @@ class WatchScoringTest {
     fun startFromFormatJson() {
         val rig = Rig()
         val json = SyncCodec.json.encodeToString(MatchFormat.serializer(), Presets.PICKLEBALL_RALLY_BO3_15.format(Discipline.SINGLES))
-        val snap = assertNotNull(rig.watch.startMatchFromFormatJson(json, weServeFirst = true))
+        val snap = assertNotNull(rig.watch.startMatchFromFormatJson(json, weServeFirst = true, watchWorkout = true))
         assertEquals("PICKLEBALL", snap.sport)
         assertEquals("0-0", snap.scoreCall)
     }
@@ -200,7 +208,7 @@ class WatchScoringTest {
     @Test
     fun restartRestoresTheOpenMatchAndKeepsCounting() {
         val rig = Rig()
-        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true)
         val before = assertNotNull(rig.points("AAAAB"))
         rig.restartWatch()
         assertTrue(rig.watch.hasActiveMatch())
@@ -230,13 +238,13 @@ class WatchScoringTest {
     fun lastSetupAndLineupReuse() {
         val rig = Rig()
         assertNull(rig.watch.lastSetup())
-        val first = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false))
+        val first = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false, watchWorkout = true))
         val setup = assertNotNull(rig.watch.lastSetup())
         assertEquals("TENNIS_BO3_MTB10", setup.presetId)
         assertTrue(setup.doubles)
         assertFalse(setup.weServeFirst)
         rig.watch.close()
-        val second = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = true))
+        val second = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = true, watchWorkout = true))
         val lineup1 = assertNotNull(rig.watchData.matches.get(MatchId(first.matchId))).lineup
         val lineup2 = assertNotNull(rig.watchData.matches.get(MatchId(second.matchId))).lineup
         assertEquals(lineup1.a, lineup2.a, "gleiche Spieler wie letztes Mal")
@@ -255,7 +263,7 @@ class WatchScoringTest {
     fun scorerSyncsImmediatelyAndBuffersOffline() {
         val rig = Rig()
         val phone = rig.phone
-        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true)
         rig.points("AA")
         rig.settle()
         assertEquals(
@@ -355,7 +363,8 @@ class WatchScoringTest {
     @Test
     fun doublesServeHelpExportsNumbersAndPositions() {
         val rig = Rig()
-        val badminton = assertNotNull(rig.watch.startMatch("BADMINTON_DOUBLES_BO3_21", doubles = true, weServeFirst = true))
+        val badminton =
+            assertNotNull(rig.watch.startMatch("BADMINTON_DOUBLES_BO3_21", doubles = true, weServeFirst = true, watchWorkout = true))
         assertEquals("RIGHT", badminton.serveCourt)
         assertEquals(1, badminton.serverNo)
         assertEquals(1, badminton.rightNoA)
@@ -364,9 +373,126 @@ class WatchScoringTest {
         assertEquals("LEFT", next.serveCourt)
         assertEquals(2, next.rightNoA)
         assertEquals(1, next.leftNoA)
-        val tennis = assertNotNull(rig.watch.startMatch("TENNIS_DOUBLES_MTB10", doubles = true, weServeFirst = false))
+        val tennis = assertNotNull(rig.watch.startMatch("TENNIS_DOUBLES_MTB10", doubles = true, weServeFirst = false, watchWorkout = true))
         assertEquals("B", tennis.serveSide)
         assertEquals(1, tennis.receiverNo)
         assertEquals(0, tennis.rightNoA)
     }
+
+    @Test
+    fun watchAdoptsPhoneSelfAndShowsOwnerSideAsUs() {
+        val rig = Rig()
+        val phone = rig.phone
+        val phoneData = phoneDataOf(rig)
+        val owner = phoneData.players.ensureSelf("Alex", 0) { PlayerId("owner") }.id
+        val watchId = DeviceId(rig.watch.deviceId())
+        // Uhr hat vorher schon einen eigenen Self (wird beim Hello Alias)
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true)
+        rig.watch.close()
+        val oldSelf = assertNotNull(rig.watchData.players.self()).id
+        // Handy legt an: Besitzer auf Side B, die Uhr zählt
+        phone.create(
+            Presets.TENNIS_SINGLES_BO3.format(),
+            Lineup(listOf(PlayerId("bea")), listOf(owner), PlayerId("bea")),
+            scorer = ScorerChoice.Device(watchId),
+        )
+        rig.settle()
+        assertEquals(
+            owner,
+            rig.watchData.players
+                .self()
+                ?.id,
+            "Self des iPhones übernommen",
+        )
+        assertTrue(rig.watchData.isSelf(oldSelf), "alter Uhr-Self ist Alias")
+        val snap = assertNotNull(rig.snapshots.last())
+        assertTrue(snap.isScorer)
+        assertTrue(snap.perspectiveSwapped)
+        assertEquals("B", snap.serveSide, "bea (Gegner) schlägt auf")
+        // „Wir“ = Engine-Side B
+        val point = assertNotNull(rig.watch.point(sideA = true))
+        assertEquals("15", point.pointsA)
+        assertEquals("0", point.pointsB)
+        rig.settle()
+        assertEquals(
+            "15",
+            phone.state.value.match
+                ?.state
+                ?.current
+                ?.display
+                ?.b,
+        )
+        // Neues Match auf der Uhr: frischer Self (= Besitzer) auf A
+        rig.watch.close()
+        val own = assertNotNull(rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true))
+        assertFalse(own.perspectiveSwapped)
+        assertEquals(owner, assertNotNull(rig.watchData.matches.get(MatchId(own.matchId))).lineup.a.first())
+    }
+
+    @Test
+    fun watchWorkoutWishTravelsInMatchMeta() {
+        val rig = Rig()
+        val phone = rig.phone
+        val snap = assertNotNull(rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = false))
+        assertFalse(snap.watchWorkout)
+        rig.settle()
+        assertEquals(
+            false,
+            phone.state.value.match
+                ?.meta
+                ?.watchWorkout,
+        )
+        rig.watch.close()
+        // vom Handy gestartet: dessen Wahl gilt
+        phone.create(
+            Presets.TENNIS_SINGLES_BO3.format(),
+            Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me")),
+            MatchMeta(watchWorkout = true),
+            ScorerChoice.Device(DeviceId(rig.watch.deviceId())),
+        )
+        rig.settle()
+        assertTrue(assertNotNull(rig.snapshots.last()).watchWorkout)
+    }
+
+    @Test
+    fun myWatchPlaceholderHandsOverOnFirstHello() {
+        val rig = Rig()
+        rig.network.setConnected("watch", false)
+        val phone = rig.phone
+        phone.create(
+            Presets.TENNIS_SINGLES_BO3.format(),
+            Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me")),
+            scorer = ScorerChoice.MyWatch,
+        )
+        rig.settle()
+        assertEquals(
+            MatchSession.PENDING_WATCH,
+            phone.state.value.match
+                ?.scorerDeviceId,
+        )
+        assertNull(rig.watch.snapshot(), "Uhr kennt das Match noch nicht")
+        rig.network.setConnected("watch", true)
+        rig.settle(5_000)
+        val snap = assertNotNull(rig.watch.snapshot())
+        assertTrue(snap.isScorer, "Uhr zählt nach dem ersten Hello")
+        assertFalse(snap.scorerPending)
+        assertEquals("15", assertNotNull(rig.watch.point(sideA = true)).pointsA)
+    }
+
+    @Test
+    fun pendingWatchPlaceholderIsFlaggedInTheSnapshot() {
+        val rig = Rig()
+        val pending =
+            rig.watchSession.create(
+                Presets.TENNIS_SINGLES_BO3.format(),
+                Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me")),
+                scorer = ScorerChoice.Device(MatchSession.PENDING_WATCH),
+            )
+        val snap = assertNotNull(rig.watch.snapshot())
+        assertEquals(pending.value, snap.matchId)
+        assertTrue(snap.scorerPending)
+        assertFalse(snap.isScorer)
+    }
+
+    private fun phoneDataOf(rig: Rig): LocalData = rig.phoneData
 }

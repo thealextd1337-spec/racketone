@@ -40,6 +40,7 @@ import eu.advantly.device.link.DeviceLink
 import eu.advantly.device.link.DeviceLinkListener
 import eu.advantly.device.link.LinkScheduler
 import eu.advantly.device.link.LinkState
+import eu.advantly.device.link.LinkStats
 import eu.advantly.device.link.SendCallback
 import eu.advantly.device.link.SendFailure
 import eu.advantly.sync.protocol.AntiEntropy
@@ -81,11 +82,14 @@ import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
  * **Threading:** Alle öffentlichen Aufrufe und Callbacks laufen auf dem Thread des [scheduler]; [threadGuard] erzwingt
  * das (Android: Main-Looper, Apple: Main-Queue, Tests: `ManualScheduler`).
  *
+ * @param data lokale Datenbank dieses Geräts; öffentlich, damit UI-Adapter (Historie, Spieler, Favoriten) dieselbe
+ *   Instanz nutzen statt eine zweite Verbindung auf dieselbe Datei zu öffnen. Nur lesen bzw. Spieler/Favoriten/
+ *   Settings schreiben – Events und Match-Köpfe ändert ausschließlich die Session. Nur auf dem Scheduler-Thread.
  * @param link Geräte-Link oder `null` (Standalone, nur lokal zählen)
  */
 @Suppress("TooManyFunctions")
 class MatchSession(
-    private val data: LocalData,
+    val data: LocalData,
     private val link: DeviceLink?,
     private val scheduler: LinkScheduler,
     val config: SessionConfig,
@@ -116,10 +120,14 @@ class MatchSession(
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
+
+    /** Besitzer-Angaben aus `MatchMeta`, die vor dem `Hello` der Gegenstelle kamen (Art noch unbekannt). */
+    private val earlyOwners = HashMap<String, MatchMetaMessage>()
     private var started = false
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
     private var lastEventReceivedAtMs: Long? = null
+    private var dataRevision = 0L
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -139,6 +147,9 @@ class MatchSession(
 
     /** Aktueller Zustand (Match, Rolle, Sync-Status). */
     val state: StateFlow<SessionState> = mutableState.asStateFlow()
+
+    /** Zähler des Geräte-Links (Diagnose-Anzeige), `null` ohne Link. */
+    val linkStats: LinkStats? get() = link?.stats
 
     // --- Lebenszyklus ---------------------------------------------------------------------------
 
@@ -166,6 +177,7 @@ class MatchSession(
         hellos.clear()
         compatibility.clear()
         helloSent.clear()
+        earlyOwners.clear()
         publish()
     }
 
@@ -196,7 +208,12 @@ class MatchSession(
         scorer: ScorerChoice = ScorerChoice.ThisDevice,
     ): MatchId {
         checkThread()
-        val scorerId = if (scorer is ScorerChoice.Device) scorer.deviceId else deviceId
+        val scorerId =
+            when (scorer) {
+                is ScorerChoice.Device -> scorer.deviceId
+                ScorerChoice.MyWatch -> myWatch()
+                ScorerChoice.ThisDevice -> deviceId
+            }
         return createMatch(format, lineup, meta, scorerId, previous = null)
     }
 
@@ -223,6 +240,7 @@ class MatchSession(
         if (open?.id == matchId) open = null
         val now = clock.nowMs()
         data.deleteMatch(matchId, now)
+        dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
         publish()
     }
@@ -244,6 +262,33 @@ class MatchSession(
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
+
+    /**
+     * Geräte, die sich irgendwann per `Hello` als [kind] gemeldet haben (gemerkt in den Settings), z. B. die eigene Uhr.
+     */
+    fun knownDevices(kind: PeerKind): List<DeviceId> {
+        checkThread()
+        return data.settings
+            .all()
+            .filter { (key, value) -> key.startsWith(PEER_KIND_PREFIX) && value == kind.name }
+            .map { (key, _) -> DeviceId(key.removePrefix(PEER_KIND_PREFIX)) }
+            .filter { it != deviceId }
+    }
+
+    /** Zähler für [ScorerChoice.MyWatch]: verbundene Uhr, sonst die einzige bekannte, sonst [PENDING_WATCH]. */
+    private fun myWatch(): DeviceId {
+        val connected =
+            targets().mapNotNull { peer -> hellos[peer]?.takeIf { it.kind == PeerKind.WATCH }?.deviceId }.firstOrNull()
+        return connected ?: knownDevices(PeerKind.WATCH).singleOrNull() ?: PENDING_WATCH
+    }
+
+    /** Erste Meldung einer Uhr: ein offenes Match mit Platzhalter-Zähler geht per `ScorerChanged` an sie. */
+    private fun handOverToWaitingWatch(hello: Hello) {
+        if (hello.kind != PeerKind.WATCH) return
+        val m = open ?: return
+        if (m.scorer != PENDING_WATCH || m.status == MatchStatus.FINISHED) return
+        emit(m, listOf(ScorerChanged(hello.deviceId)))
+    }
 
     /**
      * „Zählen übernehmen“ (02 §7.5): dieses Gerät wird Zähler (`ScorerChanged`). Die Bestätigung fragt die UI vorher ab.
@@ -462,7 +507,7 @@ class MatchSession(
                     is Hello -> onHello(peer, message).let { null }
                     is Summary -> onSummary(peer, message).let { null }
                     is Events -> onEvents(peer, message)
-                    is MatchMetaMessage -> onMatchMeta(message)
+                    is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
                 }
             } catch (e: IllegalArgumentException) {
@@ -481,8 +526,14 @@ class MatchSession(
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
         data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
-        if (!result.isCompatible) return
+        if (!result.isCompatible) {
+            earlyOwners.remove(peer)
+            return
+        }
+        // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
+        earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
         if (peer !in helloSent) sendHello(peer)
+        handOverToWaitingWatch(hello)
         sendDeleted(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(open?.record))
@@ -522,6 +573,7 @@ class MatchSession(
             if (open?.id == tombstone.matchId) open = null
             data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
         }
+        dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
     }
@@ -557,15 +609,51 @@ class MatchSession(
         return matchId
     }
 
-    private fun onMatchMeta(message: MatchMetaMessage): MatchId? {
+    private fun onMatchMeta(
+        peer: String,
+        message: MatchMetaMessage,
+    ): MatchId? {
         val now = clock.nowMs()
         message.players.forEach { data.players.upsertRemote(it, now) }
         message.favorites.forEach { data.favorites.merge(it.toLocal()) }
+        dataRevision++
+        adoptOwnerIdentity(peer, message)
         val header = message.match ?: return null
         data.matches.insertIfAbsent(header.matchId, header.format, header.lineup, header.meta, header.createdAtMs, header.previousMatchId)
         val m = open
         if (m != null && m.id == header.matchId) data.matches.get(m.id)?.let { m.record = it }
         return header.matchId
+    }
+
+    /**
+     * Identität des Besitzers über eigene Geräte (W1-I): Das Handy ist Identitätsquelle. Eine Uhr übernimmt den `self`
+     * eines Handys (ihr bisheriger Self wird Alias und geht sofort zurück ans Handy); ein Handy merkt sich den `self`
+     * anderer eigener Geräte als Alias. Aliase des Absenders werden immer übernommen.
+     */
+    private fun adoptOwnerIdentity(
+        peer: String,
+        message: MatchMetaMessage,
+    ) {
+        if (data.addSelfAliases(message.selfAliases)) dataRevision++
+        val owner = message.self ?: return
+        val senderKind = hellos[peer]?.kind
+        if (senderKind == null) {
+            // Art der Gegenstelle noch unbekannt (Hello steht aus) → puffern, im Hello verarbeiten
+            earlyOwners[peer] = message
+            return
+        }
+        when {
+            config.kind != PeerKind.PHONE && senderKind == PeerKind.PHONE -> {
+                if (data.adoptSelf(owner, clock.nowMs())) {
+                    dataRevision++
+                    send(peer, metaMessage(open?.record))
+                }
+            }
+
+            config.kind == PeerKind.PHONE -> {
+                if (data.addSelfAliases(listOf(owner.id))) dataRevision++
+            }
+        }
     }
 
     /** Status/Ergebnis eines nicht offenen Matches aus seinem Log neu berechnen. */
@@ -579,6 +667,7 @@ class MatchSession(
                 return
             }
         data.matches.updateProgress(matchId, state.status, ScoreSummary.of(state), clock.nowMs())
+        dataRevision++
     }
 
     /**
@@ -619,16 +708,17 @@ class MatchSession(
 
     private fun ensureHeader(genesis: ScoreEvent) {
         val created = genesis.payload as MatchCreated
-        data.matches.insertIfAbsent(genesis.matchId, created.config, created.lineup, created.meta, genesis.wallClockMs)
+        if (data.matches.insertIfAbsent(genesis.matchId, created.config, created.lineup, created.meta, genesis.wallClockMs)) dataRevision++
     }
 
     private fun peersChanged(peers: List<String>) {
         checkThread()
-        val gone = (hellos.keys + helloSent + compatibility.keys) - peers.toSet()
+        val gone = (hellos.keys + helloSent + compatibility.keys + earlyOwners.keys) - peers.toSet()
         gone.forEach {
             hellos.remove(it)
             compatibility.remove(it)
             helloSent.remove(it)
+            earlyOwners.remove(it)
         }
         if (started) {
             peers.filter { it !in helloSent }.forEach { peer ->
@@ -773,6 +863,8 @@ class MatchSession(
             match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
             players = playerIds.mapNotNull { data.players.get(it)?.toPlayer() },
             favorites = favorites.map { it.toWire() },
+            self = data.players.self()?.toPlayer(),
+            selfAliases = data.selfAliases().toList(),
         )
     }
 
@@ -802,7 +894,11 @@ class MatchSession(
         val scorerConnected =
             match != null && (match.isScorer || (started && compatiblePeers.any { it.deviceId == match.scorerDeviceId }))
         val pending = data.events.unconfirmedCount().toInt()
-        return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs))
+        return SessionState(
+            match,
+            SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs),
+            dataRevision,
+        )
     }
 
     private fun activeMatch(m: OpenMatch): ActiveMatch {
@@ -838,6 +934,12 @@ class MatchSession(
         return top.takeIf { it !in analysis.undone && it !in analysis.roleRejected && undo.target in analysis.undone }
     }
 
+    /** Art des Geräts [device] (dieses, eine Gegenstelle aus einem `Hello` oder `null`), z. B. für „Eingaben ansehen“. */
+    fun peerKind(device: DeviceId): PeerKind? {
+        checkThread()
+        return kindOf(device)
+    }
+
     private fun kindOf(device: DeviceId): PeerKind? =
         if (device == deviceId) {
             config.kind
@@ -845,10 +947,14 @@ class MatchSession(
             data.settings.get(peerKindKey(device))?.let { name -> PeerKind.entries.firstOrNull { it.name == name } }
         }
 
-    private fun peerKindKey(device: DeviceId) = "session.peerKind.${device.value}"
+    private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
-    private companion object {
-        const val FAVORITES_IN_META = 10L
+    companion object {
+        private const val FAVORITES_IN_META = 10L
+        private const val PEER_KIND_PREFIX = "session.peerKind."
+
+        /** Platzhalter-Zähler „die eigene Uhr, sobald sie sich meldet“ ([ScorerChoice.MyWatch]); zählt selbst nie. */
+        val PENDING_WATCH: DeviceId = DeviceId("pending-watch")
     }
 }
 

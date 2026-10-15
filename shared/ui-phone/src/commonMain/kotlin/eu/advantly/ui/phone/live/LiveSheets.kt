@@ -246,8 +246,10 @@ internal fun BoxScope.MatchEndSheet(
                 else -> Res.string.hint_match_lost
             },
         )
+    // Folge-Match und Undo nur am Zähler (04 §3.3); Anzeige-Geräte sehen Ergebnis und „Ergebnis ansehen“
     val canFollowUp =
-        result.reason == ResultReason.COMPLETED &&
+        snapshot.isScorer &&
+            result.reason == ResultReason.COMPLETED &&
             snapshot.setup.format.match.mode == MatchMode.BEST_OF &&
             state.continuation != null
     LiveSheet(title = title, tag = "match_end_sheet") {

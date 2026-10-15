@@ -16,10 +16,13 @@ import eu.advantly.sync.protocol.PeerKind
  * Gesamtzustand einer [MatchSession] – genau das, was eine UI zum Rendern braucht.
  *
  * @property match offenes Match oder `null` (Startbildschirm)
+ * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des offenen Matches ändern (Löschung,
+ *   Match-Kopf/-Stand eines anderen Matches, Spieler, Favoriten, Identität) – Signal für Listen-UIs (Verlauf), neu zu laden
  */
 data class SessionState(
     val match: ActiveMatch?,
     val sync: SyncStatus,
+    val dataRevision: Long = 0,
 )
 
 /**
@@ -106,6 +109,14 @@ sealed interface ScorerChoice {
     data class Device(
         val deviceId: DeviceId,
     ) : ScorerChoice
+
+    /**
+     * Die eigene Uhr – auch ohne Live-Verbindung (W1-I): verbundene Uhr, sonst die einzige bekannte Uhr (aus einem
+     * früheren `Hello`), sonst Platzhalter [MatchSession.PENDING_WATCH]. Beim Platzhalter übergibt die Session beim
+     * ersten `Hello` einer Uhr per `ScorerChanged` an sie; bis dahin zählt niemand (Anzeige „Warte auf Uhr …“, Ausweg
+     * `takeOverScoring()`).
+     */
+    data object MyWatch : ScorerChoice
 }
 
 /** Callback-Variante von [MatchSession.state] (für die Swift-Facade ohne Flows). Aufruf auf dem Scheduler-Thread. */
