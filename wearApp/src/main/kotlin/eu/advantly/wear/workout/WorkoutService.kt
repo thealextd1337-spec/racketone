@@ -42,6 +42,7 @@ import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.HeartRateGapDetector
 import eu.advantly.wear.diagnostics.PeriodicTrigger
 import eu.advantly.wear.live.LiveModel
+import eu.advantly.wear.sync.LiveTelemetrySender
 import eu.advantly.wear.sync.WearSessions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -62,8 +63,8 @@ import kotlin.math.roundToInt
  * Foreground Service (Typ `health`) mit Health-Services-`ExerciseClient` und Ongoing Activity (05 §2.1/§2.2, 01 E15).
  * Hält die Zähl-App während des Matches am Leben – auch bei Display aus / Handgelenk unten –, zeigt den Live-Puls und
  * in der Ongoing Activity den Spielstand der Match-Session. Der Puls wird **nicht gespeichert** (P1, Health erst P3);
- * am Ende wird die Exercise beendet und verworfen. Im Debug-Build schreibt der Dienst zusätzlich das Diagnose-Log
- * (aus Spike S5): Lebenszyklus, Puls-Samples, Lücken > 10 s, Akku alle 5 min, Display an/aus.
+ * am Ende wird die Exercise beendet und verworfen. Flüchtige Werte gehen nur live ans eigene Handy.
+ * Das Debug-Diagnoselog enthält Lebenszyklus, Sensor-Lücken, Akku und Displaystatus, keine Messwerte.
  *
  * Robustheit:
  * - Eine **fremde** Exercise wird nie stillschweigend ersetzt ([ExerciseOwnership]); die UI fragt nach ([WorkoutPhase.CONFLICT]).
@@ -100,7 +101,7 @@ class WorkoutService : Service() {
     private var hrGapCount = 0L
     private var stepsTotal = 0L
     private var updateCount = 0L
-    private var statsSummary: String? = null
+    private val telemetry by lazy { LiveTelemetrySender(this, WearSessions.get(this).session) }
 
     private val screenReceiver =
         object : BroadcastReceiver() {
@@ -412,7 +413,6 @@ class WorkoutService : Service() {
         hrGapCount = 0
         stepsTotal = 0
         updateCount = 0
-        statsSummary = null
     }
 
     private fun logPermissions(permissions: WorkoutPermissions) {
@@ -642,7 +642,6 @@ class WorkoutService : Service() {
                         "sec" to gap.durationMillis / 1000.0,
                     )
             }
-            lines += "HR" to mapOf("t" to DiagLine.isoUtc(sampleMillis), "bpm" to point.value.roundToInt())
         }
         hrSampleCount += hrPoints.size
         lines += "EXERCISE_UPDATE" to mapOf("n" to updateCount, "hrSamples" to hrPoints.size, "state" to state.name)
@@ -651,9 +650,6 @@ class WorkoutService : Service() {
         val calories = metrics.getData(DataType.CALORIES_TOTAL)?.total
         val stepDelta = metrics.getData(DataType.STEPS).sumOf { it.value }
         stepsTotal += stepDelta
-        metrics.getData(DataType.HEART_RATE_BPM_STATS)?.let {
-            statsSummary = "avg=${it.average.roundToInt()}/min=${it.min.roundToInt()}/max=${it.max.roundToInt()}"
-        }
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->
             current.copy(
@@ -667,6 +663,7 @@ class WorkoutService : Service() {
                     } ?: current.durationAnchorElapsedMillis,
             )
         }
+        telemetry.onUpdate(WorkoutStateHolder.state.value, exerciseActive = state == ExerciseState.ACTIVE)
         maybeLogBattery()
 
         if (state.isEnded && WorkoutStateHolder.state.value.phase != WorkoutPhase.ENDING) {
@@ -714,9 +711,6 @@ class WorkoutService : Service() {
             "hrGaps" to hrGapCount,
             "updates" to updateCount,
             "activeSec" to state.activeDurationMillis / 1000,
-            "kcal" to state.caloriesKcal?.roundToInt(),
-            "steps" to state.steps,
-            "hrStats" to statsSummary,
         )
     }
 

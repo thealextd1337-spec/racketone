@@ -208,4 +208,7 @@
     <string name="notification_match_title">Match läuft</string>
     <string name="notification_match_scorer">Diese Uhr zählt – tippen zum Öffnen</string>
     <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
+    <string name="live_workout_telemetry">♥ %1$s · %2$s Schr.</string>
+    <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
+    <string name="telemetry_unknown">—</string>
 </resources>

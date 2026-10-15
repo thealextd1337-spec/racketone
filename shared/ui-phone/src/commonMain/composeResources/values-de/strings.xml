@@ -390,4 +390,7 @@
     <string name="wizard_drag_hint">Spieler zum Ziehen gedrückt halten. Antippen zum Tauschen oder Entfernen.</string>
     <string name="wizard_empty_suggestions">Noch keine letzten Mitspieler. Lege einen Spieler an.</string>
     <string name="wizard_place_action">Spieler oder Zielplatz auswählen</string>
+    <string name="live_telemetry_heart_rate">Puls: %1$s bpm</string>
+    <string name="live_telemetry_steps">Schritte: %1$s</string>
+    <string name="live_telemetry_unknown">—</string>
 </resources>

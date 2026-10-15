@@ -1,6 +1,7 @@
 package eu.advantly.android
 
 import eu.advantly.device.link.WearDataLayerTransport
+import eu.advantly.sync.protocol.LiveTelemetry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,14 +43,16 @@ class ManifestTest {
         assertEquals("true", service.getAttributeNS(android, "exported"))
         val filters = service.getElementsByTagName("intent-filter").let { n -> (0 until n.length).map { n.item(it) as Element } }
 
-        fun prefixFor(action: String): String {
-            val filter =
-                filters.single { f ->
+        fun pathsFor(action: String): List<Element> =
+            filters
+                .filter { f ->
                     (f.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name") == action
-                }
-            return (filter.getElementsByTagName("data").item(0) as Element).getAttributeNS(android, "pathPrefix")
-        }
-        assertTrue(WearDataLayerTransport.MESSAGE_PATH.startsWith(prefixFor("com.google.android.gms.wearable.MESSAGE_RECEIVED")))
-        assertTrue(WearDataLayerTransport.QUEUE_PREFIX.startsWith(prefixFor("com.google.android.gms.wearable.DATA_CHANGED")))
+                }.map { it.getElementsByTagName("data").item(0) as Element }
+
+        val messages = pathsFor("com.google.android.gms.wearable.MESSAGE_RECEIVED")
+        val dataItems = pathsFor("com.google.android.gms.wearable.DATA_CHANGED")
+        assertTrue(messages.any { it.getAttributeNS(android, "pathPrefix") == "/advantly/link" })
+        assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveTelemetry.MESSAGE_PATH })
+        assertTrue(dataItems.all { it.getAttributeNS(android, "pathPrefix") == WearDataLayerTransport.QUEUE_PREFIX })
     }
 }
