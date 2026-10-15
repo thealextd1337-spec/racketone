@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -232,6 +233,52 @@ class UndoAndLogTest {
         val state = ScoringEngine.fold(log)
         assertEquals("1-0-2", state.scoreCall)
         assertEquals(listOf(EventId("e2")), state.ignoredEvents)
+    }
+
+    @Test
+    fun genesisIdCollisionMakesLogInvalidInFoldAndApply() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val lineup = lineupFor(format.discipline)
+        val genesis = ev("g", 0, MatchCreated(format, lineup))
+        val clash = ev("g", 0, PointWon(Side.B))
+        // Review-Gegenprobe: [g=MatchCreated, g=PointWon(B)] darf nicht 0:1 ergeben
+        assertFailsWith<IllegalArgumentException> { ScoringEngine.fold(listOf(genesis, clash)) }
+        assertFailsWith<IllegalArgumentException> { ScoringEngine.fold(listOf(clash, genesis)) }
+        val start = ScoringEngine.replay(listOf(genesis, ev("e1", 1, PointWon(Side.A))))
+        assertFailsWith<IllegalArgumentException> { ScoringEngine.apply(start, clash) }
+        assertFailsWith<IllegalArgumentException> { ScoringEngine.applyAll(start, listOf(ev("e2", 2, PointWon(Side.A)), clash)) }
+    }
+
+    @Test
+    fun repeatedGenesisIsNoOpInFoldAndApply() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val lineup = lineupFor(format.discipline)
+        val genesis = ev("g", 0, MatchCreated(format, lineup))
+        val point = ev("e1", 1, PointWon(Side.A))
+        val once = ScoringEngine.replay(listOf(genesis, point))
+        assertEquals(once.state, ScoringEngine.fold(listOf(genesis, point, genesis)))
+        assertEquals(genesis, once.genesis)
+        val again = ScoringEngine.apply(once, genesis)
+        assertTrue(again === once, "bitgleiche Genesis ist ein No-op")
+        assertEquals(emptyList(), again.state.ignoredEvents)
+        // eine zweite Genesis mit eigener ID bleibt ein übersprungenes Event
+        val second = ev("g2", 2, MatchCreated(format, lineup))
+        assertEquals(listOf(EventId("g2")), ScoringEngine.apply(once, second).state.ignoredEvents)
+        assertEquals(ScoringEngine.fold(listOf(genesis, point, second)), ScoringEngine.apply(once, second).state)
+    }
+
+    @Test
+    fun applyAllEqualsFoldForLateBatches() {
+        val format = Presets.TENNIS_OPEN.format()
+        val lineup = lineupFor(format.discipline)
+        val events = (1..60).map { ev("e$it", it.toLong(), PointWon(if (it % 3 == 0) Side.B else Side.A), parent = "e${it - 1}") }
+        val early = events.filterIndexed { i, _ -> i % 2 == 0 }
+        val late = events - early.toSet()
+        val start = ScoringEngine.replay(format, lineup, early)
+        assertEquals(ScoringEngine.fold(format, lineup, events), ScoringEngine.applyAll(start, late.reversed()).state)
+        val inOrder = ScoringEngine.applyAll(ScoringEngine.replay(format, lineup, emptyList()), events)
+        assertEquals(ScoringEngine.fold(format, lineup, events), inOrder.state)
+        assertTrue(ScoringEngine.applyAll(inOrder, events) === inOrder, "bekannte Events sind ein No-op")
     }
 
     @Test

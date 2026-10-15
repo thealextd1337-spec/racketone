@@ -39,7 +39,9 @@ internal class Core private constructor(
     var pendingEndChange: Boolean = false
     var inSet: Boolean = false
     var frozen: Boolean = false
-    var appliedPoints: Set<EventId> = emptySet()
+
+    /** Anzahl angewendeter `PointWon` (WALKOVER-Prüfung); die IDs hält der Aufrufer (keine quadratischen Kopien). */
+    var pointsApplied: Int = 0
     var ignored: List<EventId> = emptyList()
     var effects: Set<Effect> = emptySet()
     var order: SidePair<List<PlayerId>> = SidePair(lineup.a, lineup.b)
@@ -86,7 +88,7 @@ internal class Core private constructor(
             c.pendingEndChange = pendingEndChange
             c.inSet = inSet
             c.frozen = frozen
-            c.appliedPoints = appliedPoints
+            c.pointsApplied = pointsApplied
             c.ignored = ignored
             c.effects = effects
             c.order = order
@@ -118,18 +120,24 @@ internal class Core private constructor(
     // Events (02 §7)
     // =================================================================================================================
 
-    /** Wendet ein wirksames Event an; ist seine Vorbedingung verletzt, landet es in [ignored] (02 §7.3 Schritt 4). */
-    fun step(event: ScoreEvent): Boolean {
+    /**
+     * Wendet ein wirksames Event an; ist seine Vorbedingung verletzt, landet es in [ignored] (02 §7.3 Schritt 4).
+     * [isAppliedPoint] beantwortet, ob eine Event-ID ein bereits angewendetes `PointWon` ist (für `PointDetailSet`).
+     */
+    fun step(
+        event: ScoreEvent,
+        isAppliedPoint: (EventId) -> Boolean,
+    ): Boolean {
         effects = emptySet()
         val applied =
             when (val payload = event.payload) {
-                is PointWon -> onPointWon(event.id, payload)
+                is PointWon -> onPointWon(payload)
                 is ContinueDecision -> onContinueDecision(payload)
                 is Correction -> onCorrection(payload)
                 is MatchEnded -> onMatchEnded(payload)
                 Paused -> onPaused()
                 Resumed -> onResumed()
-                is PointDetailSet -> payload.target in appliedPoints
+                is PointDetailSet -> isAppliedPoint(payload.target)
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
             }
@@ -143,16 +151,13 @@ internal class Core private constructor(
         effects = setOf(Effect.IGNORED)
     }
 
-    private fun onPointWon(
-        id: EventId,
-        payload: PointWon,
-    ): Boolean {
+    private fun onPointWon(payload: PointWon): Boolean {
         if (!inSet || (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED)) return false
         if (status == MatchStatus.PAUSED) {
             status = MatchStatus.IN_PROGRESS
             effects = effects + Effect.RESUMED
         }
-        appliedPoints = appliedPoints + id
+        pointsApplied += 1
         pointWon(payload.side)
         return true
     }
@@ -193,7 +198,7 @@ internal class Core private constructor(
     private fun onMatchEnded(payload: MatchEnded): Boolean {
         if (status == MatchStatus.FINISHED) return false
         if (payload.reason != EndReason.ABANDONED && payload.side == null) return false
-        if (payload.reason == EndReason.WALKOVER && appliedPoints.isNotEmpty()) return false
+        if (payload.reason == EndReason.WALKOVER && pointsApplied > 0) return false
         val winner = if (payload.reason == EndReason.ABANDONED) null else payload.side?.other
         val reason =
             when (payload.reason) {

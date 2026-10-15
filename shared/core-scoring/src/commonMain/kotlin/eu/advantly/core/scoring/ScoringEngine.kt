@@ -16,6 +16,7 @@ import eu.advantly.core.model.MatchFormat
  * @property conflicts aktive Widersprüche (01 §4.4): beide `PointWon` wirksam und nicht absorbiert
  * @property resolvedConflicts frühere Widersprüche, die inzwischen (z. B. per Undo) aufgelöst sind
  * @property rejectedEvents IDs mit abweichenden Kopien; keine Kopie geht in den Fold ein (stehen in `ignoredEvents`)
+ * @property genesis die `MatchCreated`-Genesis, falls über [ScoringEngine.replay] mit vollständigem Log erzeugt
  */
 class EngineState internal constructor(
     val format: MatchFormat,
@@ -27,7 +28,9 @@ class EngineState internal constructor(
     val conflicts: List<TapConflict>,
     val resolvedConflicts: List<TapConflict>,
     val rejectedEvents: List<EventId>,
+    val genesis: ScoreEvent?,
     internal val core: Core,
+    internal val appliedPoints: Set<EventId>,
 )
 
 /**
@@ -83,53 +86,97 @@ object ScoringEngine {
         events: Collection<ScoreEvent>,
     ): EngineState = Replay.run(format, lineup, events, null)
 
-    /** Wie [fold] über ein vollständiges Log mit Genesis. */
+    /**
+     * Wie [fold] über ein vollständiges Log mit Genesis. Die Genesis ist die in Ordnung erste [MatchCreated].
+     * Die ID-Kollisionsprüfung läuft **vor** der Genesis-Auswahl über das ganze Log: Bitgleiche Wiederholungen der Genesis
+     * sind No-ops; trägt ein abweichendes Event die ID der Genesis, ist das Log ungültig (es gibt dann keinen eindeutigen
+     * Matchbeginn).
+     *
+     * @throws IllegalArgumentException ohne `MatchCreated` oder bei kollidierender Genesis-ID
+     */
     fun replay(log: Collection<ScoreEvent>): EngineState {
         val ordered = EventLog.distinctOrdered(log)
         val genesis = requireNotNull(ordered.firstOrNull { it.payload is MatchCreated }) { "Log ohne MatchCreated" }
+        require(ordered.count { it.id == genesis.id } == 1) {
+            "Genesis-ID ${genesis.id} kollidiert mit einem abweichenden Event – Log ungültig"
+        }
         val created = genesis.payload as MatchCreated
-        return Replay.run(created.config, created.lineup, ordered.filter { it != genesis }, null)
+        return Replay.run(created.config, created.lineup, ordered.filter { it != genesis }, null, genesis)
     }
 
     /**
-     * Wendet [event] inkrementell an. Das Ergebnis ist per Definition identisch zum Fold über `state.events + event`
-     * (per Property-Test abgesichert, auch bei Zustellung in beliebiger Reihenfolge). Schneller Pfad nur, wenn das
-     * Event in der Ordnung hinten anliegt, seine `id` neu ist und von keinem `Undo` referenziert wird und es weder
-     * Undo, rückwirkende Korrektur noch Doppel-Tap-/Widerspruchskandidat ist; sonst wird neu gefaltet.
-     * Eine bitgleiche Wiederholung ist ein No-op.
+     * Wendet [event] inkrementell an; Kurzform für [applyAll] mit einem Event. Das Ergebnis ist per Definition identisch
+     * zum Fold über `state.events + event`. Eine bitgleiche Wiederholung ist ein No-op.
+     *
+     * @throws IllegalArgumentException wenn [event] die ID der Genesis mit anderem Inhalt trägt (siehe [replay])
      */
     fun apply(
         state: EngineState,
         event: ScoreEvent,
+    ): EngineState = applyAll(state, listOf(event))
+
+    /**
+     * Wendet einen **Empfangs-Batch** an: Die neuen Events werden gemeinsam eingeordnet und höchstens **einmal** neu
+     * gefaltet. Der Sync-Layer SOLL nach einem Verbindungsabriss alle nachgelieferten Events als ein Batch übergeben –
+     * einzelne `apply`-Aufrufe außer der Ordnung falten jeweils neu und werden bei großen Rückständen quadratisch teuer.
+     *
+     * Schneller Pfad (ohne Neu-Falten), solange jedes Event des Batches in der Ordnung hinten anliegt, seine `id` neu
+     * ist und von keinem `Undo` referenziert wird und es weder Undo, rückwirkende Korrektur noch Doppel-Tap-/
+     * Widerspruchskandidat ist. Das Ergebnis ist immer identisch zum Fold über `state.events + events`.
+     *
+     * @throws IllegalArgumentException wenn ein Event die ID der Genesis mit anderem Inhalt trägt (siehe [replay])
+     */
+    fun applyAll(
+        state: EngineState,
+        events: Collection<ScoreEvent>,
     ): EngineState {
-        if (event in state.events) return state
-        val last = state.events.lastOrNull()
-        val payload = event.payload
-        val fastPath =
-            (last == null || EventOrdering.compare(event, last) > 0) &&
-                payload !is Undo &&
-                payload !is MatchCreated &&
-                !(payload is Correction && payload.kind == CorrectionKind.INITIAL_SERVER) &&
-                state.events.none { it.id == event.id || (it.payload as? Undo)?.target == event.id } &&
-                !(
-                    payload is PointWon && event.parentId != null &&
-                        state.events.any { it.parentId == event.parentId && it.payload is PointWon }
-                )
-        if (!fastPath) return Replay.run(state.format, state.lineup, state.events + event, null)
+        val genesis = state.genesis
+        if (genesis != null) {
+            events.firstOrNull { it.id == genesis.id && it != genesis }?.let {
+                throw IllegalArgumentException("Genesis-ID ${genesis.id} kollidiert mit einem abweichenden Event – Log ungültig")
+            }
+        }
+        val known = state.events.toHashSet()
+        val fresh = EventLog.distinctOrdered(events.filter { it !in known && it != genesis })
+        if (fresh.isEmpty()) return state
+        val ids = state.events.mapTo(HashSet()) { it.id }
+        val undoTargets = state.events.mapNotNullTo(HashSet()) { (it.payload as? Undo)?.target }
+        val pointParents = state.events.filter { it.payload is PointWon }.mapNotNullTo(HashSet()) { it.parentId }
+        val applied = HashSet(state.appliedPoints)
         val core = state.core.copy()
-        val applied = core.step(event)
-        val undoTarget = if (applied && Replay.isUndoTargetType(payload)) event.id else state.undoTarget
+        var undoTarget = state.undoTarget
+        var last = state.events.lastOrNull()
+        for (event in fresh) {
+            val payload = event.payload
+            val fastPath =
+                (last == null || EventOrdering.compare(event, last) > 0) &&
+                    payload !is Undo &&
+                    payload !is MatchCreated &&
+                    !(payload is Correction && payload.kind == CorrectionKind.INITIAL_SERVER) &&
+                    event.id !in ids &&
+                    event.id !in undoTargets &&
+                    !(payload is PointWon && event.parentId != null && event.parentId in pointParents)
+            if (!fastPath) return Replay.run(state.format, state.lineup, state.events + fresh, null, genesis)
+            val ok = core.step(event) { it in applied }
+            if (ok && payload is PointWon) applied += event.id
+            if (ok && Replay.isUndoTargetType(payload)) undoTarget = event.id
+            ids += event.id
+            if (payload is PointWon) event.parentId?.let { pointParents += it }
+            last = event
+        }
         return EngineState(
             format = state.format,
             lineup = state.lineup,
-            events = state.events + event,
+            events = state.events + fresh,
             state = core.export(),
             undoTarget = undoTarget,
             absorbedEvents = state.absorbedEvents,
             conflicts = state.conflicts,
             resolvedConflicts = state.resolvedConflicts,
             rejectedEvents = state.rejectedEvents,
+            genesis = genesis,
             core = core,
+            appliedPoints = applied,
         )
     }
 
@@ -140,9 +187,9 @@ object ScoringEngine {
         events: Collection<ScoreEvent>,
     ): List<PointRecord> {
         val records = mutableListOf<PointRecord>()
-        Replay.run(format, lineup, events) { event, before, after ->
+        Replay.run(format, lineup, events, onPoint = { event, before, after ->
             records += PointRecord(event, event.payload as PointWon, before, after)
-        }
+        })
         return records
     }
 }
@@ -157,6 +204,7 @@ internal object Replay {
         lineup: Lineup,
         events: Collection<ScoreEvent>,
         onPoint: ((ScoreEvent, MatchState, MatchState) -> Unit)?,
+        genesis: ScoreEvent? = null,
     ): EngineState {
         val formatErrors = MatchFormatValidator.validate(format).errors
         require(formatErrors.isEmpty()) { "Ungültiges MatchFormat: ${formatErrors.joinToString { it.message }}" }
@@ -180,6 +228,7 @@ internal object Replay {
         val effectiveLineup = if (initialServer != null) lineup.copy(firstServer = initialServer) else lineup
         val core = Core.initial(format, effectiveLineup)
         var undoTarget: EventId? = null
+        val appliedPoints = HashSet<EventId>()
         for (event in log.ordered) {
             val payload = event.payload
             when {
@@ -201,7 +250,8 @@ internal object Replay {
 
                 else -> {
                     val before = if (onPoint != null && payload is PointWon) core.export() else null
-                    val applied = core.step(event)
+                    val applied = core.step(event) { it in appliedPoints }
+                    if (applied && payload is PointWon) appliedPoints += event.id
                     if (applied && isUndoTargetType(payload)) undoTarget = event.id
                     if (applied && before != null) onPoint?.invoke(event, before, core.export())
                 }
@@ -217,7 +267,9 @@ internal object Replay {
             conflicts = log.activeConflicts,
             resolvedConflicts = log.resolvedConflicts,
             rejectedEvents = log.ordered.filter { it.id in log.rejected }.map { it.id },
+            genesis = genesis,
             core = core,
+            appliedPoints = appliedPoints,
         )
     }
 }
