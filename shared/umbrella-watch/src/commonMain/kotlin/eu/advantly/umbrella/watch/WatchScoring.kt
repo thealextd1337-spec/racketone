@@ -25,9 +25,11 @@ import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.SetKind
@@ -44,7 +46,7 @@ import kotlin.random.Random
  * `null`/`false` gemeldet.
  *
  * - Ein Match lebt ausschließlich im Event-Log ([EventStore], SQLite-Datei `advantly.db`): Genesis `MatchCreated`, danach
- *   `PointWon`/`Undo`/`ContinueDecision`/`MatchEnded`. Nach einem App-Neustart stellt [resume] den Zustand per Replay wieder her.
+ *   `PointWon`/`Undo`/`ContinueDecision`/`MatchEnded`/`Paused`/`Resumed`. Nach einem App-Neustart stellt [restore] den Zustand per Replay wieder her.
  * - Side A = „Wir“ (Besitzer der Uhr), Side B = „Gegner“. Die Engine bleibt neutral (A/B), die Perspektive ist reine Anzeige.
  * - Nicht thread-sicher: Swift ruft alles auf der Main-Queue auf; [WatchScoringListener] wird synchron im selben Aufruf benachrichtigt.
  * - Sync mit dem Handy ist nicht Teil dieser Facade (folgt in der Integration über `sync-protocol`/`device-link`).
@@ -59,6 +61,7 @@ class WatchScoring internal constructor(
 ) {
     private var listener: WatchScoringListener? = null
     private var active: ActiveMatch? = null
+    private var error: String = ""
 
     private class ActiveMatch(
         val matchId: MatchId,
@@ -72,6 +75,17 @@ class WatchScoring internal constructor(
     fun setListener(listener: WatchScoringListener?) {
         this.listener = listener
     }
+
+    /**
+     * Grund, warum der letzte Befehl `null` geliefert hat, sonst `""` (wird bei jedem Befehl zurückgesetzt):
+     * - `STORE_WRITE`: Event konnte nicht gespeichert werden – Zustand unverändert, derselbe Befehl kann wiederholt werden
+     * - `STORE_READ`: Log nicht lesbar (z. B. SQLite-Fehler) – Zeiger auf das Match bleibt, [restore] später erneut
+     * - `LOG_INVALID`: Log vorhanden, aber nicht auswertbar – Match wird verworfen
+     * - `INVALID_INPUT`: unbekanntes Preset, falsche Disziplin oder ungültiges Format
+     * - `NOT_ALLOWED`: Befehl passt nicht zum Zustand (z. B. Punkt im Satzende-Dialog, nichts rückgängig zu machen)
+     * - `NO_MATCH`: kein Match geöffnet
+     */
+    fun lastError(): String = error
 
     /** Stabile Installations-ID der Uhr (UUIDv7, beim ersten Aufruf erzeugt und gespeichert). */
     fun deviceId(): String = prefs.get(KEY_DEVICE_ID) ?: newUuid().value.also { prefs.set(KEY_DEVICE_ID, it) }
@@ -135,9 +149,10 @@ class WatchScoring internal constructor(
         doubles: Boolean,
         weServeFirst: Boolean,
     ): WatchScoreSnapshot? {
-        val preset = Presets.byId(presetId) ?: return null
+        error = ""
+        val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
         val discipline = if (doubles) Discipline.DOUBLES else Discipline.SINGLES
-        if (discipline !in preset.disciplines) return null
+        if (discipline !in preset.disciplines) return fail(INVALID_INPUT)
         val snapshot = begin(preset.format(discipline), weServeFirst) ?: return null
         prefs.set(KEY_LAST_SETUP, listOf(preset.id, flag(doubles), flag(weServeFirst)).joinToString(";"))
         return snapshot
@@ -151,28 +166,37 @@ class WatchScoring internal constructor(
         formatJson: String,
         weServeFirst: Boolean,
     ): WatchScoreSnapshot? {
+        error = ""
         val format =
             try {
                 eventJson.decodeFromString(MatchFormat.serializer(), formatJson)
             } catch (e: IllegalArgumentException) {
                 // SerializationException ist eine IllegalArgumentException
-                return null
+                return fail(INVALID_INPUT)
             }
-        if (MatchFormatValidator.validate(format).errors.isNotEmpty()) return null
+        if (MatchFormatValidator.validate(format).errors.isNotEmpty()) return fail(INVALID_INPUT)
         return begin(format, weServeFirst)
     }
 
     /**
-     * Setzt das zuletzt aktive Match nach einem App-Neustart fort (Replay des Event-Logs).
-     * `null`, wenn es keines gibt oder das Log unlesbar ist (dann wird der Zeiger verworfen).
+     * Stellt das zuletzt geöffnete Match nach einem App-Neustart wieder her (Replay des Event-Logs).
+     * `null`, wenn es keines gibt (`""`), der Store nicht lesbar ist (`STORE_READ`, Zeiger bleibt für einen neuen Versuch)
+     * oder das Log nicht auswertbar ist (`LOG_INVALID`, Zeiger wird verworfen).
      */
-    fun resume(): WatchScoreSnapshot? {
+    fun restore(): WatchScoreSnapshot? {
+        error = ""
         active?.let { return notify(it) }
         val matchId = prefs.get(KEY_ACTIVE_MATCH) ?: return null
-        val loaded = load(matchId)
+        val stored =
+            try {
+                store.eventsFor(matchId)
+            } catch (e: Exception) {
+                return fail(STORE_READ)
+            }
+        val loaded = load(matchId, stored)
         if (loaded == null) {
             prefs.set(KEY_ACTIVE_MATCH, null)
-            return null
+            return fail(LOG_INVALID)
         }
         active = loaded
         return notify(loaded)
@@ -197,16 +221,18 @@ class WatchScoring internal constructor(
 
     /** Punkt für Side A (`true`, „Wir“) bzw. B. Nur im laufenden bzw. pausierten Satz; sonst `null`. */
     fun point(sideA: Boolean): WatchScoreSnapshot? {
-        val match = active ?: return null
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
         val status = match.engine.state.status
-        if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return null
+        if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return fail(NOT_ALLOWED)
         return emit(match, PointWon(if (sideA) Side.A else Side.B))
     }
 
     /** Macht das letzte wirksame Zähl-Event rückgängig (auch über Satz- und Matchende hinweg). `null`, wenn nichts da ist. */
     fun undo(): WatchScoreSnapshot? {
-        val match = active ?: return null
-        val target = match.engine.undoTarget ?: return null
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
+        val target = match.engine.undoTarget ?: return fail(NOT_ALLOWED)
         return emit(match, Undo(target))
     }
 
@@ -218,8 +244,9 @@ class WatchScoring internal constructor(
         anotherSet: Boolean,
         matchTiebreak: Boolean,
     ): WatchScoreSnapshot? {
-        val match = active ?: return null
-        if (match.engine.state.status != MatchStatus.AWAITING_DECISION) return null
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
+        if (match.engine.state.status != MatchStatus.AWAITING_DECISION) return fail(NOT_ALLOWED)
         val kind =
             if (anotherSet && matchTiebreak && match.engine.format.matchTiebreak != null) {
                 NextSetKind.MATCH_TIEBREAK
@@ -234,12 +261,32 @@ class WatchScoring internal constructor(
      * Bereits beendet → aktueller Zustand. Rückgängig machbar über [undo].
      */
     fun end(): WatchScoreSnapshot? {
-        val match = active ?: return null
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
         return when (match.engine.state.status) {
             MatchStatus.FINISHED -> notify(match)
             MatchStatus.AWAITING_DECISION -> emit(match, ContinueDecision(anotherSet = false))
             else -> emit(match, MatchEnded(EndReason.ABANDONED))
         }
+    }
+
+    /**
+     * Unterbrechung (Regen, Verletzung; 02 §7 `Paused`) ohne Wirkung auf den Score, nur im laufenden Satz. Die Uhr
+     * pausiert dazu die Workout-Session. Seitenwechsel und Satzende-Dialog sind **keine** Pause.
+     */
+    fun pause(): WatchScoreSnapshot? {
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
+        if (match.engine.state.status != MatchStatus.IN_PROGRESS) return fail(NOT_ALLOWED)
+        return emit(match, Paused)
+    }
+
+    /** Fortsetzung nach [pause]. Ein Punkt während der Pause setzt ebenfalls fort (Engine-Regel). */
+    fun resumePlay(): WatchScoreSnapshot? {
+        error = ""
+        val match = active ?: return fail(NO_MATCH)
+        if (match.engine.state.status != MatchStatus.PAUSED) return fail(NOT_ALLOWED)
+        return emit(match, Resumed)
     }
 
     // --- intern ---------------------------------------------------------------------------------------------------
@@ -266,9 +313,9 @@ class WatchScoring internal constructor(
             try {
                 ScoringEngine.replay(listOf(genesis))
             } catch (e: IllegalArgumentException) {
-                return null
+                return fail(INVALID_INPUT)
             }
-        if (store.append(genesis.toStored()) != AppendResult.INSERTED) return null
+        if (!append(genesis)) return fail(STORE_WRITE)
         val match = ActiveMatch(matchId, engine, nextDeviceSeq = 2, lamport = 1, startedAtMs = time)
         active = match
         prefs.set(KEY_ACTIVE_MATCH, matchId.value)
@@ -294,16 +341,38 @@ class WatchScoring internal constructor(
                         ?.id ?: match.engine.genesis?.id,
                 payload = payload,
             )
-        // Erst speichern, dann anwenden: Was die Anzeige zeigt, überlebt jeden Absturz
-        if (store.append(event.toStored()) != AppendResult.INSERTED) return null
-        match.engine = ScoringEngine.apply(match.engine, event)
+        // Erst speichern, dann anwenden: Was die Anzeige zeigt, überlebt jeden Absturz. Schlägt das Speichern fehl,
+        // bleibt der Zustand (inkl. deviceSeq/lamport) unverändert – derselbe Befehl kann wiederholt werden.
+        if (!append(event)) return fail(STORE_WRITE)
         match.nextDeviceSeq += 1
         match.lamport = event.lamport
+        match.engine =
+            try {
+                ScoringEngine.apply(match.engine, event)
+            } catch (e: IllegalArgumentException) {
+                // Bei eigenen Events nicht zu erwarten; das Event steht im Log und wirkt beim nächsten Replay
+                return fail(LOG_INVALID)
+            }
         return notify(match)
     }
 
-    private fun load(matchId: String): ActiveMatch? {
-        val stored = store.eventsFor(matchId)
+    /** `true`, wenn neu gespeichert. SQLite-/Treiber-Ausnahmen dürfen nie über die Swift-Grenze laufen. */
+    private fun append(event: ScoreEvent): Boolean =
+        try {
+            store.append(event.toStored()) == AppendResult.INSERTED
+        } catch (e: Exception) {
+            false
+        }
+
+    private fun fail(code: String): WatchScoreSnapshot? {
+        error = code
+        return null
+    }
+
+    private fun load(
+        matchId: String,
+        stored: List<StoredEvent>,
+    ): ActiveMatch? {
         if (stored.isEmpty()) return null
         return try {
             val log = stored.map { eventJson.decodeFromString(ScoreEvent.serializer(), it.payload) }
@@ -334,6 +403,13 @@ class WatchScoring internal constructor(
         const val KEY_ACTIVE_MATCH = "advantly.watch.activeMatchId"
         const val KEY_DEVICE_ID = "advantly.watch.deviceId"
         const val KEY_LAST_SETUP = "advantly.watch.lastSetup"
+
+        const val STORE_WRITE = "STORE_WRITE"
+        const val STORE_READ = "STORE_READ"
+        const val LOG_INVALID = "LOG_INVALID"
+        const val INVALID_INPUT = "INVALID_INPUT"
+        const val NOT_ALLOWED = "NOT_ALLOWED"
+        const val NO_MATCH = "NO_MATCH"
 
         /** Payload-Format im lokalen Store: das ganze [ScoreEvent] als JSON (Diskriminator `type`, wie die Testvektoren). */
         val eventJson: Json =
@@ -429,7 +505,13 @@ class WatchMatchSetup(
  * @property setWinners Sieger je abgeschlossenem Satz (`A`/`B`)
  * @property serveSide `A`, `B` oder `""`
  * @property serveCourt `RIGHT`, `LEFT`, `RECEIVER_CHOICE` oder `""` (Tischtennis, kein Aufschlag)
+ * @property paused Unterbrechung läuft (`status == PAUSED`)
  * @property server Spieler-ID des Aufschlägers (`A1`, `B2` …) oder `""`
+ * @property serverNo Aufschläger als Nummer im Team (1/2, Reihenfolge der Besetzung), sonst `0` – Doppel „2 → 1“
+ * @property receiverNo Rückschläger als Nummer im Team (1/2), `0` wenn offen (Entscheidungspunkt) oder ohne Aufschlag
+ * @property rightNoA wer von A im rechten Feld steht (1/2; Pickleball/Badminton, 02 §8 `positions`), sonst `0`
+ * @property leftNoA wer von A im linken Feld steht (1/2), `0` im Einzel bzw. ohne Positionen
+ * @property receiveOrderSwapped Tischtennis-Doppel: Rückschlagreihenfolge hat gewechselt (Effekt `RECEIVE_ORDER_SWAPPED`)
  * @property serverNumber Pickleball-Doppel 1/2, sonst `0`
  * @property servesRemaining Tischtennis: verbleibende Aufschläge inkl. des nächsten, sonst `0`
  * @property scoreCall Ansage (Pickleball `"4-2-1"`), `""` ohne laufenden Satz
@@ -470,10 +552,18 @@ class WatchScoreSnapshot(
     val setTiebreaksA: List<Int>,
     val setTiebreaksB: List<Int>,
     val setWinners: List<String>,
+    val paused: Boolean,
     val serveSide: String,
     val serveCourt: String,
     val server: String,
     val receiver: String,
+    val serverNo: Int,
+    val receiverNo: Int,
+    val rightNoA: Int,
+    val leftNoA: Int,
+    val rightNoB: Int,
+    val leftNoB: Int,
+    val receiveOrderSwapped: Boolean,
     val serverNumber: Int,
     val servesRemaining: Int,
     val scoreCall: String,
@@ -557,6 +647,14 @@ internal fun buildSnapshot(
         side: Side,
         index: Int,
     ): Int = sets[index].takeIf { it.kind == SetKind.REGULAR }?.tiebreak?.get(side) ?: -1
+
+    // Nummer im Team laut Besetzung (stabile Identität, unabhängig von der Aufschlagreihenfolge der Engine)
+    fun numberOf(player: PlayerId?): Int {
+        if (player == null) return 0
+        val side = engine.lineup.sideOf(player) ?: return 0
+        return engine.lineup.players(side).indexOf(player) + 1
+    }
+    val positions = state.positions
     return WatchScoreSnapshot(
         matchId = matchId,
         sport = format.sport.name,
@@ -592,10 +690,18 @@ internal fun buildSnapshot(
         setTiebreaksA = sets.indices.map { tiebreak(Side.A, it) },
         setTiebreaksB = sets.indices.map { tiebreak(Side.B, it) },
         setWinners = sets.map { it.winner.name },
+        paused = state.status == MatchStatus.PAUSED,
         serveSide = serve?.side?.name.orEmpty(),
         serveCourt = serve?.court?.name.orEmpty(),
         server = serve?.player?.value.orEmpty(),
         receiver = serve?.receiver?.value.orEmpty(),
+        serverNo = numberOf(serve?.player),
+        receiverNo = numberOf(serve?.receiver),
+        rightNoA = numberOf(positions?.a?.right),
+        leftNoA = numberOf(positions?.a?.left),
+        rightNoB = numberOf(positions?.b?.right),
+        leftNoB = numberOf(positions?.b?.left),
+        receiveOrderSwapped = Effect.RECEIVE_ORDER_SWAPPED in state.effects,
         serverNumber = serve?.serverNumber ?: 0,
         servesRemaining = serve?.servesRemaining ?: 0,
         scoreCall = state.scoreCall.orEmpty(),

@@ -18,8 +18,16 @@ import kotlin.test.assertTrue
 internal class FakeEventStore : EventStore {
     val events = mutableListOf<StoredEvent>()
 
+    /** Simuliert SQLite-Fehler (z. B. volle Platte, gesperrte Datei). */
+    var failWrites = false
+    var failReads = false
+
     override fun append(event: StoredEvent): AppendResult =
         when {
+            failWrites -> {
+                throw IllegalStateException("disk I/O error")
+            }
+
             events.any { it.id == event.id } -> {
                 AppendResult.DUPLICATE
             }
@@ -35,7 +43,14 @@ internal class FakeEventStore : EventStore {
         }
 
     override fun eventsFor(matchId: String): List<StoredEvent> =
-        events.filter { it.matchId == matchId }.sortedWith(compareBy({ it.lamport }, { it.deviceId }, { it.id }))
+        if (failReads) {
+            throw IllegalStateException("database is locked")
+        } else {
+            events
+                .filter {
+                    it.matchId == matchId
+                }.sortedWith(compareBy({ it.lamport }, { it.deviceId }, { it.id }))
+        }
 
     override fun count(matchId: String): Long = events.count { it.matchId == matchId }.toLong()
 }
@@ -257,14 +272,14 @@ class WatchScoringTest {
     }
 
     @Test
-    fun resumeAfterRestartRestoresStateAndKeepsCounting() {
+    fun restoreAfterRestartRestoresStateAndKeepsCounting() {
         val first = scoring(seed = 1)
         first.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
         val before = assertNotNull(first.points("AAAAB"))
         // „Neustart“: neue Facade auf demselben Store und denselben Prefs
         val second = scoring(seed = 2)
         assertTrue(second.hasActiveMatch())
-        val resumed = assertNotNull(second.resume())
+        val resumed = assertNotNull(second.restore())
         assertEquals(before.matchId, resumed.matchId)
         assertEquals(1, resumed.gamesA)
         assertEquals("15", resumed.pointsB)
@@ -278,15 +293,119 @@ class WatchScoringTest {
         assertEquals((1L..store.events.size).toList(), store.events.map { it.deviceSeq })
         second.close()
         assertFalse(second.hasActiveMatch())
-        assertNull(scoring().resume())
+        assertNull(scoring().restore())
     }
 
     @Test
-    fun resumeDropsPointerToUnreadableMatch() {
+    fun restoreDropsPointerToUnreadableMatch() {
         prefs.set(WatchScoring.KEY_ACTIVE_MATCH, "missing")
         val s = scoring()
-        assertNull(s.resume())
+        assertNull(s.restore())
+        assertEquals("LOG_INVALID", s.lastError())
         assertFalse(s.hasActiveMatch())
+    }
+
+    @Test
+    fun storeWriteFailureKeepsStateAndAllowsRetry() {
+        val s = scoring()
+        store.failWrites = true
+        assertNull(s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true))
+        assertEquals("STORE_WRITE", s.lastError())
+        assertFalse(s.hasActiveMatch())
+        store.failWrites = false
+        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        assertEquals("", s.lastError())
+        s.point(sideA = true)
+        store.failWrites = true
+        assertNull(s.point(sideA = true))
+        assertEquals("STORE_WRITE", s.lastError())
+        assertEquals("15", assertNotNull(s.snapshot()).pointsA, "Zustand unverändert")
+        assertNull(s.undo())
+        store.failWrites = false
+        assertEquals("30", assertNotNull(s.point(sideA = true)).pointsA, "Wiederholung klappt")
+        assertEquals(listOf(1L, 2L, 3L), store.events.map { it.deviceSeq }, "keine Lücke in deviceSeq")
+    }
+
+    @Test
+    fun storeReadFailureKeepsPointerForRetry() {
+        scoring().apply {
+            startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+            point(sideA = true)
+        }
+        store.failReads = true
+        val restarted = scoring()
+        assertNull(restarted.restore())
+        assertEquals("STORE_READ", restarted.lastError())
+        assertTrue(restarted.hasActiveMatch())
+        store.failReads = false
+        assertEquals("15", assertNotNull(restarted.restore()).pointsA)
+    }
+
+    @Test
+    fun commandsReportWhyTheyWereRejected() {
+        val s = scoring()
+        assertNull(s.point(sideA = true))
+        assertEquals("NO_MATCH", s.lastError())
+        assertNull(s.startMatch("NOPE", doubles = false, weServeFirst = true))
+        assertEquals("INVALID_INPUT", s.lastError())
+        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        assertNull(s.undo())
+        assertEquals("NOT_ALLOWED", s.lastError())
+    }
+
+    @Test
+    fun pauseAndResumePlay() {
+        val s = scoring()
+        s.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)
+        assertNull(s.resumePlay())
+        assertEquals("NOT_ALLOWED", s.lastError())
+        val paused = assertNotNull(s.pause())
+        assertTrue(paused.paused)
+        assertEquals("PAUSED", paused.status)
+        assertTrue("PAUSED" in paused.effects)
+        assertNull(s.pause())
+        val resumed = assertNotNull(s.resumePlay())
+        assertFalse(resumed.paused)
+        assertTrue("RESUMED" in resumed.effects)
+        s.pause()
+        // Ein Punkt während der Pause setzt fort
+        val point = assertNotNull(s.point(sideA = true))
+        assertEquals("IN_PROGRESS", point.status)
+        assertEquals("15", point.pointsA)
+        s.points("AAA".repeat(8))
+        assertTrue(assertNotNull(s.snapshot()).pendingDecision)
+        assertNull(s.pause(), "Satzende-Dialog ist keine Pause")
+        // Pause/Fortsetzen sind kein Undo-Ziel: Undo nimmt den letzten Punkt zurück
+        s.undo()
+        s.pause()
+        assertEquals("30", assertNotNull(s.undo()).pointsA)
+    }
+
+    @Test
+    fun doublesServeHelpExportsNumbersAndPositions() {
+        val s = scoring()
+        val tennis = assertNotNull(s.startMatch("TENNIS_DOUBLES_MTB10", doubles = true, weServeFirst = false))
+        assertEquals("B", tennis.serveSide)
+        assertEquals(1, tennis.serverNo)
+        assertEquals(1, tennis.receiverNo)
+        assertEquals(0, tennis.rightNoA, "Tennis hat keine Positionen")
+        val badminton = assertNotNull(s.startMatch("BADMINTON_DOUBLES_BO3_21", doubles = true, weServeFirst = true))
+        assertEquals("RIGHT", badminton.serveCourt)
+        assertEquals(1, badminton.serverNo)
+        assertEquals(1, badminton.rightNoA)
+        assertEquals(2, badminton.leftNoA)
+        assertEquals(1, badminton.rightNoB)
+        assertEquals(2, badminton.leftNoB)
+        // A gewinnt: A1 wechselt nach links und schlägt weiter auf
+        val next = assertNotNull(s.point(sideA = true))
+        assertEquals("LEFT", next.serveCourt)
+        assertEquals(1, next.serverNo)
+        assertEquals(2, next.rightNoA)
+        assertEquals(1, next.leftNoA)
+        assertFalse(next.receiveOrderSwapped)
+        val singles = assertNotNull(s.startMatch("BADMINTON_SINGLES_BO3_21", doubles = false, weServeFirst = true))
+        assertEquals(1, singles.rightNoA)
+        assertEquals(0, singles.leftNoA)
     }
 
     @Test

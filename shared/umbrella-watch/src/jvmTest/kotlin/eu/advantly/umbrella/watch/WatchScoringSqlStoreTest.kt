@@ -27,7 +27,7 @@ class WatchScoringSqlStoreTest {
         assertTrue(pending.pendingDecision)
 
         val second = WatchScoring(store, prefs, now = ::tick, random = Random(4))
-        val resumed = assertNotNull(second.resume())
+        val resumed = assertNotNull(second.restore())
         assertTrue(resumed.pendingDecision)
         assertEquals(listOf(6), resumed.setScoresA)
         val next = assertNotNull(second.continueDecision(anotherSet = true, matchTiebreak = false))
