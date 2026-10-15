@@ -23,17 +23,35 @@ Im Hintergrund laufen ein Health-Services-Workout (`ExerciseClient`), ein Foregr
 | Schmales Band in der Mitte | Uhr-Typ (z. B. „Badminton“) und Dauer. Nicht zum Tippen gedacht |
 | Unten „♥ 142“ | Live-Puls |
 | Nach unten wischen | Letzten Punkt zurücknehmen (Vibration „abwärts“, Hinweis „Rückgängig: 3:2 → 2:2“) |
-| Nach links wischen | Steuerseite: „Match beenden“, kcal/Schritte, Pfad der Log-Datei |
+| Nach links wischen | Steuerseite: „Match beenden“ (mit Rückfrage), kcal/Schritte, Pfad der Log-Datei |
 
 Nach jedem Punkt sind beide Hälften 0,6 s gesperrt, damit ein Doppeltipp nicht doppelt zählt. Bei gesenktem Handgelenk
 (Always-on/Ambient) wird die Anzeige schwarz-grau und Tippen zählt nicht.
+
+**Weitere Zustände**
+
+- **„Nur Zählen“** (im Mittelband statt des Uhr-Typs): Puls- **und** Aktivitätsrecht wurden verweigert. Dann läuft kein Workout
+  und kein Hintergrunddienst, die Uhr darf die App jederzeit beenden. Solche Sessions zählen **nicht** als Test
+  (Skript: „UNKLAR“). Rechte in den Uhr-Einstellungen → Apps → Advantly → Berechtigungen erteilen und neu starten.
+- **„Eine andere App zeichnet ein Training auf“:** Läuft schon ein Training (Fitbit, Samsung Health), fragt die App, ob sie es
+  ersetzen soll. „Abbrechen“ lässt das andere Training in Ruhe.
+- **„Workout fehlgeschlagen“** mit Grund und „Erneut versuchen“: z. B. wenn die Uhr den Trainingsstatus nicht liefert oder das
+  Beenden scheitert. Erst „Erneut versuchen“, sonst „Match beenden“. Bitte im Ergebnis notieren.
+
+**Datenschutz:** Das Diagnose-Log (mit Pulswerten) gibt es nur im Debug-Build, den du hier installierst. Es wird nicht in
+Cloud-Backups oder beim Umzug auf eine neue Uhr übernommen. Nach dem Test bitte löschen (Abschnitt 5).
 
 ---
 
 ## 1. Was du brauchst
 
-- Windows-PC mit `adb`: `H:\dev\android-sdk\platform-tools\adb.exe`. Die Befehle unten gehen davon aus, dass du in diesem Ordner bist
-  oder ihn im `PATH` hast.
+- Windows-PC mit `adb`: `H:\dev\android-sdk\platform-tools\adb.exe`.
+- Alle Befehle sind für **PowerShell**. Zuerst einmal pro Fenster den adb-Pfad als Variable setzen, danach heißt jeder Aufruf
+  `& $adb …`:
+  ```powershell
+  $adb = "H:\dev\android-sdk\platform-tools\adb.exe"
+  & $adb version
+  ```
 - Python 3 (für die Auswertung): `python --version`
 - Die APK: `H:\racketone-wt\w0-s5-wear-workout\wearApp\build\outputs\apk\debug\wearApp-debug.apk`
   (neu bauen: im Repo `gradlew.bat :wearApp:assembleDebug`)
@@ -49,14 +67,14 @@ Nach jedem Punkt sind beide Hälften 0,6 s gesperrt, damit ein Doppeltipp nicht 
 4. Entwickleroptionen → **Debugging über WLAN** an → **Neues Gerät koppeln**. Die Uhr zeigt einen **Kopplungscode** und
    `IP:Port` (Kopplungsport).
 5. Am PC (Bildschirm der Uhr anlassen):
-   ```
-   adb pair 192.168.x.y:PAIRPORT
+   ```powershell
+   & $adb pair 192.168.x.y:PAIRPORT
    ```
    Code von der Uhr eingeben.
 6. Auf dem Screen „Debugging über WLAN“ steht eine **zweite** Adresse `IP:Port` (Verbindungsport, ≠ Kopplungsport):
-   ```
-   adb connect 192.168.x.y:PORT
-   adb devices
+   ```powershell
+   & $adb connect 192.168.x.y:PORT
+   & $adb devices
    ```
    Die Uhr muss als `device` erscheinen.
 7. **Always-on-Display einschalten:** Einstellungen → Display → **Always-on-Display** an. Ohne Always-on gibt es keinen
@@ -69,7 +87,7 @@ Nach jedem Punkt sind beide Hälften 0,6 s gesperrt, damit ein Doppeltipp nicht 
 2. Einstellungen → **Entwickleroptionen** → **ADB-Debugging** an.
 3. Einstellungen → Verbindungen → **WLAN** an und verbinden. Bei manchen Modellen „WLAN: immer an“ statt „automatisch“ wählen.
 4. Entwickleroptionen → **Debuggen über WLAN** an → **Neues Gerät koppeln** → weiter wie bei Pixel ab Schritt 5
-   (`adb pair …`, dann `adb connect …`).
+   (`& $adb pair …`, dann `& $adb connect …`).
 5. **Always On Display:** Einstellungen → Anzeige → **Always On Display** an.
 
 Die Menünamen weichen je nach Softwarestand leicht ab. Fehlt „Debuggen über WLAN“, bitte erst ein Softwareupdate machen.
@@ -78,20 +96,21 @@ USB-Debugging über die Ladeschale geht bei den aktuellen Modellen nicht.
 ### 2c. Wenn die Verbindung abbricht
 
 Uhren schalten WLAN zum Stromsparen ab, wenn das Handy per Bluetooth erreichbar ist. Dann WLAN auf der Uhr erneut verbinden und
-`adb connect IP:PORT` wiederholen. Der Port ändert sich nach jedem Aus/Einschalten von „Debugging über WLAN“. Während des
+`& $adb connect IP:PORT` wiederholen. Der Port ändert sich nach jedem Aus/Einschalten von „Debugging über WLAN“. Während des
 eigentlichen Tests braucht es **keine** adb-Verbindung.
 
 ## 3. App installieren
 
-```
-adb -s 192.168.x.y:PORT install -r H:\racketone-wt\w0-s5-wear-workout\wearApp\build\outputs\apk\debug\wearApp-debug.apk
+```powershell
+& $adb -s 192.168.x.y:PORT install -r H:\racketone-wt\w0-s5-wear-workout\wearApp\build\outputs\apk\debug\wearApp-debug.apk
 ```
 
 `-s …` kannst du weglassen, wenn nur die Uhr verbunden ist. Danach auf der Uhr **Advantly** im App-Menü öffnen.
 
 **Erster Start:** Sportart wählen → **Match starten**. Die Uhr fragt nach drei Berechtigungen, bitte alle **zulassen**:
 Herzfrequenz bzw. Körpersensoren (Wear OS 6 heißt es „Herzfrequenz“), Körperliche Aktivität (Schritte), Benachrichtigungen
-(für das Symbol auf dem Zifferblatt).
+(für das Symbol auf dem Zifferblatt). Fehlt ein Recht, zeigt der Startscreen rot, was dann fehlt; ohne Puls- **und**
+Aktivitätsrecht startet nur „Nur Zählen“ (siehe oben).
 
 Unter den Sport-Knöpfen steht, welcher **Uhr-Typ** wirklich genutzt wird, z. B. „Uhr-Typ: Badminton (nativ)“ oder
 „Uhr-Typ: Tennis (Ersatz)“. Bitte für alle drei Sportarten notieren (Ergebnistabelle unten).
@@ -111,7 +130,7 @@ Das Log enthält alle Tests nacheinander, das Skript trennt sie automatisch nach
    2–3 Punkte zählen, wieder senken.
 5. **Einmal zwischendurch:** Seitentaste drücken (zurück zum Zifferblatt), 1 Minute warten, dann über das
    **Advantly-Symbol auf dem Zifferblatt** bzw. die laufende Aktivität zurückkehren. Notieren, ob das klappt.
-6. Nach 30 Minuten: nach links wischen → **Match beenden**.
+6. Nach 30 Minuten: nach links wischen → **Match beenden** → Rückfrage mit **Beenden** bestätigen.
 
 ### Test 2 – 60 Minuten am Stück (beide Uhren)
 
@@ -123,11 +142,11 @@ Das Log enthält alle Tests nacheinander, das Skript trennt sie automatisch nach
 
 Samsung beendet Hintergrund-Apps aggressiver (05 R4). Wiederhole Test 1 ohne Akku-Optimierung für Advantly:
 
-```
-adb shell dumpsys deviceidle whitelist +eu.advantly
+```powershell
+& $adb shell dumpsys deviceidle whitelist +eu.advantly
 ```
 
-(Rückgängig: `adb shell dumpsys deviceidle whitelist -eu.advantly`.) Alternativ auf der Uhr: Einstellungen → Apps → Advantly →
+(Rückgängig: `& $adb shell dumpsys deviceidle whitelist -eu.advantly`.) Alternativ auf der Uhr: Einstellungen → Apps → Advantly →
 Akku → „Nicht eingeschränkt“, sofern vorhanden. Bitte zusätzlich prüfen und notieren, ob in Einstellungen → Akku eine Option wie
 „Apps in den Ruhezustand versetzen“ aktiv ist. Wichtig für die Auswertung: Test 1 **mit** Standardeinstellungen ist der relevante Fall,
 weil echte Nutzer nichts umstellen.
@@ -142,33 +161,36 @@ weil echte Nutzer nichts umstellen.
 ## 5. Log abholen
 
 Die Datei liegt auf der Uhr unter `/sdcard/Android/data/eu.advantly/files/diag/s5-diag.log`
-(der Pfad steht auch auf der Steuerseite der App). Uhr wieder per `adb connect` verbinden, dann am PC:
+(der Pfad steht auch auf der Steuerseite der App). Sie liegt im app-eigenen Speicher und ist vom Backup ausgeschlossen.
+Uhr wieder per `& $adb connect …` verbinden, dann in PowerShell:
 
-```
-mkdir H:\s5-logs\pixel
-adb -s 192.168.x.y:PORT pull /sdcard/Android/data/eu.advantly/files/diag/ H:\s5-logs\pixel\
+```powershell
+New-Item -ItemType Directory -Force H:\s5-logs\pixel
+& $adb -s 192.168.x.y:PORT pull /sdcard/Android/data/eu.advantly/files/diag/ H:\s5-logs\pixel
 ```
 
 Damit kommt der ganze Ordner, auch rotierte Dateien (`s5-diag-<zeit>.log`, ab 20 MB). Falls `adb pull` „Permission denied“
 meldet (einige Android-Versionen sperren `Android/data`), geht es über die Debug-App selbst:
 
-```
-adb exec-out run-as eu.advantly cat /sdcard/Android/data/eu.advantly/files/diag/s5-diag.log > H:\s5-logs\pixel\s5-diag.log
+```powershell
+cmd /c "H:\dev\android-sdk\platform-tools\adb.exe exec-out run-as eu.advantly cat /sdcard/Android/data/eu.advantly/files/diag/s5-diag.log > H:\s5-logs\pixel\s5-diag.log"
 ```
 
-Live mitlesen, solange die Uhr verbunden ist: `adb logcat -s AdvantlyS5`.
+(Über `cmd /c`, weil die PowerShell-Umleitung `>` die Datei sonst als UTF-16 schreibt. Das Skript liest zur Not auch UTF-16.)
 
-Log danach auf der Uhr löschen (enthält Pulswerte): `adb shell rm -r /sdcard/Android/data/eu.advantly/files/diag`.
-Ganz entfernen: `adb uninstall eu.advantly`.
+Live mitlesen, solange die Uhr verbunden ist: `& $adb logcat -s AdvantlyS5`.
+
+Log danach auf der Uhr löschen (enthält Pulswerte): `& $adb shell rm -r /sdcard/Android/data/eu.advantly/files/diag`.
+Ganz entfernen: `& $adb uninstall eu.advantly`.
 
 ## 6. Auswerten
 
-```
+```powershell
 cd H:\racketone-wt\w0-s5-wear-workout
 python tools\s5_analyze.py H:\s5-logs\pixel\s5-diag.log
 ```
 
-Mehrere Dateien gehen auch: `python tools\s5_analyze.py H:\s5-logs\pixel\*.log`. Mit `--json` kommt maschinenlesbare Ausgabe,
+Mehrere Dateien gehen auch: `python tools\s5_analyze.py "H:\s5-logs\pixel\*.log"` (das Skript löst das Muster selbst auf). Mit `--json` kommt maschinenlesbare Ausgabe,
 `--gap 15` ändert die Lückenschwelle. `python tools\s5_analyze.py --selftest` prüft das Skript selbst.
 
 Pro Session gibt das Skript aus:
@@ -178,7 +200,7 @@ Pro Session gibt das Skript aus:
 | Sport → Uhr-Typ (Fallback) | Welcher Health-Services-Typ lief und welche Datentypen angefordert wurden |
 | Prozess-Neustarts / Service-Neustarts / FGS-Fehler | Muss alles **0** sein. „früheres Prozessende“ nennt den Grund vom System (z. B. `LOW_MEMORY`, `USER_REQUESTED`) |
 | Puls: Samples, /min, erstes Sample | Wie dicht die Pulsserie ist. Bei Ambient kommen Werte gebündelt, aber mit echten Messzeitpunkten |
-| Lücken > Schwelle | Pausen > 10 s zwischen zwei Pulswerten, Summe in Sekunden und % der Session-Zeit, größte Lücke |
+| Lücken > Schwelle | Pausen > 10 s ohne Pulswert – auch vom Workout-Start bis zum ersten und vom letzten Wert bis zum Session-Ende. Summe in Sekunden und % der Session-Zeit, größte Lücke |
 | Akku | Akkustand Start/Ende ohne Ladekabel und Verbrauch in %/h |
 | Ambient / Display aus / Activity gestoppt | Wie oft die Uhr in Always-on bzw. aus ging und wie oft die App den Vordergrund verlassen hat |
 | ERGEBNIS | `GO`, `NO-GO` oder `UNKLAR` mit Begründung |
@@ -189,7 +211,7 @@ Pro Uhr (Pixel **und** Galaxy) mit **Standardeinstellungen** in Test 1 und Test 
 
 | # | Kriterium | Schwelle | Quelle im Log |
 |---|---|---|---|
-| G1 | Keine Prozess-Kills, keine Service-Neustarts durch das System, kein FGS-Startfehler, Exercise nicht extern beendet | 0 | `PROCESS_RESTART_DURING_SESSION`, `SERVICE_START_COMMAND action=null…`, `FOREGROUND_START_FAILED`, `EXERCISE_ENDED_EXTERNALLY` |
+| G1 | Keine Prozess-Kills, keine Service-Neustarts durch das System, kein FGS-Startfehler, Exercise nicht extern beendet, Session im Workout-Modus (nicht „Nur Zählen“) | 0 | `PROCESS_RESTART_DURING_SESSION`, `SERVICE_START_COMMAND action=null…`, `FOREGROUND_START_FAILED`, `EXERCISE_ENDED_EXTERNALLY`, `SESSION_START mode=…` |
 | G2 | Pulslücken (> 10 s) | **< 5 %** der Session-Zeit (Uhr am Handgelenk) | `HR`-Zeilen |
 | G3 | Akkuverbrauch | **< 15 %/h** (05 §5.6) | `BATTERY`, `SESSION_END` |
 | G4 | App nach Handgelenk-Heben ohne Umweg erreichbar (Ambient-Anzeige oder 1 Tipp auf das Zifferblatt-Symbol) | immer | Notiz + `AMBIENT_*`, `ACTIVITY_*` |
@@ -208,6 +230,7 @@ Das Skript bewertet G1–G3 automatisch, G4–G6 kommen aus deinen Notizen.
 - Debug-Build (nicht optimiert). Der Akkuverbrauch ist eher etwas höher als später im Release.
 - Der Akkustand wird alle 5 min **oder** beim nächsten Workout-Update danach geloggt. Wenn die Uhr tief schläft, liegen die
   Punkte deshalb manchmal weiter auseinander. Für %/h zählt das nicht, weil das Skript echte Zeitstempel nutzt.
+- Das Diagnose-Log existiert nur im Debug-Build; ein Release-Build schreibt weder Datei noch Logcat.
 - Geloggt wird nur auf der Uhr. Die Verbindung zum Handy (Data Layer) ist nicht Teil dieses Spikes.
 - Wird die App vom System beendet und nicht wieder geöffnet, fehlt `SESSION_END`. Das Skript meldet dann „UNKLAR“ bzw. Prozess-Neustarts,
   sobald die App wieder startet.

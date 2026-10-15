@@ -15,6 +15,7 @@ Nur Standardbibliothek, Python >= 3.9.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import sys
 from dataclasses import dataclass, field
@@ -108,6 +109,19 @@ def minutes(delta: timedelta) -> float:
     return delta.total_seconds() / 60.0
 
 
+def hr_gap_durations(samples: list[datetime], window_start: datetime, end: datetime, threshold_s: float) -> list[float]:
+    """Alle Pulslücken > Schwelle in Sekunden: Anfangslücke (Messbeginn → erstes Sample), Lücken zwischen Samples
+    und Endlücke (letztes Sample → Session-Ende). Ohne Samples ist das ganze Fenster eine Lücke."""
+    if not samples:
+        whole = (end - window_start).total_seconds()
+        return [whole] if whole > threshold_s else []
+    points = [window_start] + [t for t in samples if window_start <= t <= end] + [end]
+    if len(points) == 2:  # alle Samples außerhalb des Fensters
+        points = [window_start, end]
+    durations = [(b - a).total_seconds() for a, b in zip(points, points[1:])]
+    return [d for d in durations if d > threshold_s]
+
+
 def analyze_session(s: Session, gap_threshold_s: float) -> dict:
     entries = s.entries
     last_time = entries[-1].time
@@ -118,6 +132,8 @@ def analyze_session(s: Session, gap_threshold_s: float) -> dict:
         return [e for e in entries if e.event == name]
 
     start_req = next(iter(events("EXERCISE_START_REQUESTED")), None)
+    session_start = next(iter(events("SESSION_START")), None)
+    count_only = bool(session_start and session_start.fields.get("mode") == "count_only")
     start_ok = next(iter(events("EXERCISE_START_OK")), None) or next(iter(events("EXERCISE_REATTACHED")), None)
 
     # --- Prozess / Service
@@ -135,17 +151,11 @@ def analyze_session(s: Session, gap_threshold_s: float) -> dict:
     samples = sorted({parse_time(e.fields["t"]) for e in events("HR") if "t" in e.fields})
     window_start = start_ok.time if start_ok else s.start
     window_min = max(minutes(end - window_start), 1e-9)
-    gaps = []
-    for a, b in zip(samples, samples[1:]):
-        if (b - a).total_seconds() > gap_threshold_s:
-            gaps.append((a, b))
-    tail_gap_s = (end - samples[-1]).total_seconds() if samples else window_min * 60
+    gap_durations = hr_gap_durations(samples, window_start, end, gap_threshold_s)
     first_sample_delay_s = (samples[0] - window_start).total_seconds() if samples else None
-    gap_total_s = sum((b - a).total_seconds() for a, b in gaps)
-    if tail_gap_s > gap_threshold_s:
-        gap_total_s += tail_gap_s
+    gap_total_s = sum(gap_durations)
     gap_share = 100.0 * gap_total_s / (window_min * 60)
-    max_gap_s = max([(b - a).total_seconds() for a, b in gaps] + ([tail_gap_s] if tail_gap_s > gap_threshold_s else []), default=0.0)
+    max_gap_s = max(gap_durations, default=0.0)
     bpm = [int(e.fields["bpm"]) for e in events("HR") if e.fields.get("bpm", "").isdigit()]
     off_body = [e for e in events("AVAILABILITY") if "OFF_BODY" in e.fields.get("availability", "")]
 
@@ -188,6 +198,9 @@ def analyze_session(s: Session, gap_threshold_s: float) -> dict:
         "end": end.isoformat(),
         "regularEnd": s.end is not None,
         "durationMin": round(duration_min, 1),
+        "countOnly": count_only,
+        "conflicts": len(events("EXERCISE_CONFLICT_OTHER_APP")),
+        "endFailed": len(events("SESSION_END_FAILED")),
         "processRestarts": len(restarts),
         "previousExits": exits,
         "serviceSystemRestarts": len(system_restarts),
@@ -196,7 +209,7 @@ def analyze_session(s: Session, gap_threshold_s: float) -> dict:
         "hrSamples": len(samples),
         "hrSamplesPerMin": round(len(samples) / window_min, 1),
         "hrFirstSampleDelaySec": round(first_sample_delay_s, 1) if first_sample_delay_s is not None else None,
-        "hrGapsOverThreshold": len(gaps) + (1 if tail_gap_s > gap_threshold_s else 0),
+        "hrGapsOverThreshold": len(gap_durations),
         "hrGapTotalSec": round(gap_total_s, 1),
         "hrGapSharePercent": round(gap_share, 2),
         "hrMaxGapSec": round(max_gap_s, 1),
@@ -222,6 +235,11 @@ def verdict(r: dict) -> tuple[str, list[str]]:
     reasons = []
     nogo = False
     unclear = False
+    if r["countOnly"]:
+        unclear = True
+        reasons.append("Nur-Zählen-Modus ohne Workout (Puls-/Aktivitätsrecht fehlte) – kein gültiger Laufzeittest")
+    if r["endFailed"] > 0:
+        reasons.append(f"Beenden {r['endFailed']}x fehlgeschlagen (Exercise lief weiter)")
     if r["processRestarts"] > 0 or r["serviceSystemRestarts"] > 0:
         nogo = True
         reasons.append(f"Prozess/Service neu gestartet ({r['processRestarts']}x Prozess, {r['serviceSystemRestarts']}x Service)")
@@ -231,7 +249,7 @@ def verdict(r: dict) -> tuple[str, list[str]]:
     if not r["regularEnd"]:
         unclear = True
         reasons.append("kein SESSION_END (Session lief beim Abholen noch oder Prozess wurde beendet)")
-    if r["hrSamples"] == 0:
+    if r["hrSamples"] == 0 and not r["countOnly"]:
         nogo = True
         reasons.append("keine Puls-Samples")
     elif r["hrGapSharePercent"] >= MAX_GAP_SHARE_PERCENT:
@@ -257,7 +275,8 @@ def print_report(results: list[dict]) -> None:
     for r in results:
         print("=" * 72)
         print(f"Session {r['session']}  Gerät: {r['device']}")
-        print(f"  Sport {r['sport']} → Uhr-Typ {r['exerciseType']} (Fallback: {r['fallback']}), Daten: {r['metrics']}")
+        print(f"  Sport {r['sport']} → Uhr-Typ {r['exerciseType']} (Fallback: {r['fallback']}), Daten: {r['metrics']}"
+              f"{'  [NUR ZÄHLEN]' if r['countOnly'] else ''}  Konflikte mit anderer App: {r['conflicts']}")
         print(f"  {r['start']} … {r['end']}  Dauer {r['durationMin']} min  reguläres Ende: {r['regularEnd']}")
         print(f"  Prozess-Neustarts: {r['processRestarts']}  Service-Neustarts durch System: {r['serviceSystemRestarts']}"
               f"  FGS-Fehler: {r['foregroundStartFailed']}  extern beendet: {r['exerciseEndedExternally']}")
@@ -275,11 +294,33 @@ def print_report(results: list[dict]) -> None:
         print(f"  ERGEBNIS: {r['verdict']} – " + "; ".join(r["reasons"]))
 
 
+def expand_paths(patterns: list[str]) -> list[str]:
+    """Löst Dateimuster selbst auf (PowerShell/cmd expandieren `*.log` nicht)."""
+    paths: list[str] = []
+    for pattern in patterns:
+        if any(ch in pattern for ch in "*?["):
+            matches = sorted(glob.glob(pattern))
+            if not matches:
+                raise SystemExit(f"Keine Datei passt zu {pattern}")
+            paths.extend(matches)
+        else:
+            paths.append(pattern)
+    return paths
+
+
+def read_text(path: str) -> str:
+    """UTF-8 (mit/ohne BOM) oder UTF-16 (z. B. nach PowerShell-Umleitung `>`)."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    return raw.decode("utf-8-sig", errors="replace")
+
+
 def run(paths: list[str], gap: float, as_json: bool) -> int:
     lines = []
-    for p in paths:
-        with open(p, encoding="utf-8", errors="replace") as f:
-            lines.extend(f.readlines())
+    for p in expand_paths(paths):
+        lines.extend(read_text(p).splitlines())
     results = [analyze_session(s, gap) for s in split_sessions(parse_lines(lines))]
     if as_json:
         print(json.dumps(results, indent=2, ensure_ascii=False))
@@ -290,7 +331,7 @@ def run(paths: list[str], gap: float, as_json: bool) -> int:
 
 # ----------------------------------------------------------------------------------------------- Selbsttest
 
-def _synthetic_log(kill: bool) -> list[str]:
+def _synthetic_log(kill: bool, start_outage_s: int = 0) -> list[str]:
     t0 = datetime(2026, 10, 15, 8, 0, tzinfo=timezone.utc)
 
     def iso(t: datetime) -> str:
@@ -307,7 +348,7 @@ def _synthetic_log(kill: bool) -> list[str]:
     ]
     # 60 min Puls im Sekundentakt, mit einer 30-s-Lücke bei Minute 10
     for s in range(2, 3600):
-        if 600 <= s < 630:
+        if 600 <= s < 630 or s < start_outage_s:
             continue
         t = t0 + timedelta(seconds=s)
         out.append(line(t, "HR", f"t={iso(t)} bpm={120 + s % 30}"))
@@ -331,6 +372,16 @@ def selftest() -> int:
     assert r["verdict"] == "GO", r
     bad = analyze_session(split_sessions(parse_lines(_synthetic_log(kill=True)))[0], 10)
     assert bad["processRestarts"] == 1 and bad["verdict"] == "NO-GO", bad
+    # Regression: 30 min Ausfall direkt nach dem Start muss als Lücke zählen (nicht GO/0 %)
+    late = analyze_session(split_sessions(parse_lines(_synthetic_log(kill=False, start_outage_s=1800)))[0], 10)
+    assert late["hrGapsOverThreshold"] == 1 and late["hrMaxGapSec"] >= 1798, late
+    assert 49.0 <= late["hrGapSharePercent"] <= 51.0 and late["verdict"] == "NO-GO", late
+    # Endlücke: Puls bricht 20 min vor Session-Ende ab
+    tail = [ln for ln in _synthetic_log(kill=False) if not (ln.split("\t")[2] == "HR" and ln.startswith(("2026-10-15T08:4", "2026-10-15T08:5")))]
+    tail_r = analyze_session(split_sessions(parse_lines(tail))[0], 10)
+    assert tail_r["hrMaxGapSec"] >= 1199 and tail_r["verdict"] == "NO-GO", tail_r
+    # Ohne jedes Sample: ganzes Fenster ist Lücke
+    assert hr_gap_durations([], datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc), 10) == [60.0]
     assert parse_time("2026-10-15T08:00:00Z") == datetime(2026, 10, 15, 8, 0, tzinfo=timezone.utc)
     assert parse_time("2026-10-15T08:00:00.5Z").microsecond == 500000
     print("Selbsttest OK")
