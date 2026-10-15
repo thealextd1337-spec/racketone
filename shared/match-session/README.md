@@ -92,6 +92,38 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 - Tests: `ImmediateSyncTest` (Event nach einer Einweg-Latenz persistiert, Ack nach einer Runde; Offline-Puffer nach
   Wiederverbindung in < 200 ms virtueller Zeit vollständig beim Handy).
 
+## Identität des Besitzers über eigene Geräte (W1-I)
+
+- **Das Handy ist Identitätsquelle.** Jede Session schickt im `MatchMeta` ihren eigenen Spieler (`self`) und bekannte
+  frühere IDs desselben Besitzers (`selfAliases`).
+- **Uhr** (Session mit `kind != PHONE`), Nachricht von einem Handy: `LocalData.adoptSelf` – der Self des Handys wird
+  der eigene Self der Uhr (ID + Name), der bisherige Uhr-Self wird Alias und geht sofort per `MatchMeta` ans Handy.
+- **Handy:** merkt sich `self`/`selfAliases` anderer eigener Geräte als Aliase (`LocalData.selfAliases()`,
+  `isSelf(id)`). Matches, die die Uhr mit ihrem alten Self angelegt hat, zeigen den Besitzer – keinen Gast
+  (Phone-Adapter `SessionMatchStore`).
+- **Was die Uhr-Apps (Wear OS, watchOS-Facade) tun müssen:** beim Anlegen eines Matches den Self **jedes Mal** aus
+  `data.players.self()` lesen (nicht zwischenspeichern – er kann sich nach dem ersten `Hello` ändern) und Spieler-IDs
+  mit `data.isSelf(id)` als „Ich“ anzeigen. Sonst nichts; der Austausch läuft in der Session.
+
+## „Meine Uhr“ ohne Live-Verbindung (`ScorerChoice.MyWatch`, W1-I)
+
+- Zähler wird die **verbundene** Uhr, sonst die **einzige bekannte** Uhr (aus einem früheren `Hello`,
+  `knownDevices(WATCH)`), sonst der Platzhalter `MatchSession.PENDING_WATCH`.
+- Platzhalter: Niemand zählt; beim ersten `Hello` einer Uhr gibt die Session das offene Match per `ScorerChanged` an
+  sie ab. „Doch am Handy zählen“ = `takeOverScoring()` – danach übergibt die Session nicht mehr automatisch.
+- Ob „Meine Uhr“ angeboten wird, entscheidet die App über `CompanionDetector` (`device-link`: Wear-Capability mit
+  `FILTER_ALL` bzw. `WCSession.isPaired && isWatchAppInstalled`), nicht über eine laufende Verbindung.
+- **Uhr-Apps:** Zusätzlich zu den Punkten unter „Identität“ sollte die Uhr beim Empfang von Nachrichten geweckt werden
+  (Wear: eigener `WearableListenerService`, siehe Phone-Variante `PhoneSyncListenerService`), damit sie das Match
+  zeitnah übernimmt.
+
+## `dataRevision` und `MatchMeta.watchWorkout`
+
+- `SessionState.dataRevision` steigt bei Änderungen außerhalb des offenen Matches (empfangene/eigene Löschung,
+  Kopf/Stand anderer Matches, Spieler/Favoriten/Identität per `MatchMeta`). Listen-UIs (Verlauf) laden dann neu.
+- `MatchMeta.watchWorkout` (Default `true`, 02 §10): Wunsch „Workout auf meiner Uhr mitlaufen lassen“; kommt mit
+  Genesis und Match-Kopf auf die Uhr. Die Uhr-Apps lesen es aus `ActiveMatch.meta`.
+
 ## Löschen (Löschmarkierungen)
 
 - `deleteMatch(id)` löscht Kopf und Events und legt eine **dauerhafte Löschmarkierung** (`match_tombstone`) an.

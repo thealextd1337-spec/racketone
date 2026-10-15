@@ -11,9 +11,11 @@ import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.PointLabel
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.match.CountingIds
-import eu.advantly.presentation.match.ForkChoice
 import eu.advantly.presentation.match.InMemoryMatchStore
+import eu.advantly.presentation.match.LiveRole
 import eu.advantly.presentation.match.LocalDay
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.StepClock
 import eu.advantly.presentation.match.SyncInfo
 import eu.advantly.presentation.match.play
@@ -133,18 +135,40 @@ class ReviewRound1Test {
     }
 
     @Test
-    fun inMemoryPortReportsLocalOnlyWithoutConflictsOrForks() {
+    fun inMemoryPortAlwaysScoresLocally() {
         val store = testStore()
-        store.start(store.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
+        store.start(store.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.MY_WATCH))
         store.play("AB")
         val snapshot = store.active.value!!
         assertEquals(SyncInfo.LOCAL_ONLY, snapshot.sync)
-        assertTrue(snapshot.conflicts.isEmpty())
-        assertTrue(snapshot.openForks.isEmpty())
+        assertEquals(LiveRole.SCORER, snapshot.role)
+        assertEquals(0, snapshot.rejectedByRoleCount)
         assertEquals(0, snapshot.absorbedTaps)
-        assertFalse(store.resolveFork("x", ForkChoice.BOTH))
-        assertFalse(store.dismissConflict("x"))
-        assertFalse(store.undoConflictPoint("x", Side.A))
+        assertFalse(store.takeOverScoring(), "ein Gerät zählt immer selbst")
+        assertFalse(store.watchAvailable.value)
+    }
+
+    @Test
+    fun inMemoryRenamesOnlyGuests() {
+        val store = testStore()
+        store.start(store.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
+        val guest = store.guests.value.first()
+        assertFalse(store.canRename(store.self.value.id))
+        assertFalse(store.renameGuest(guest.id, "  "))
+        assertTrue(store.renameGuest(guest.id, " Jo "))
+        assertEquals(
+            "Jo",
+            store.guests.value
+                .first()
+                .displayName,
+        )
+        assertEquals(
+            "Jo",
+            store.active.value!!
+                .setup
+                .player(guest.id)!!
+                .displayName,
+        )
     }
 
     @Test

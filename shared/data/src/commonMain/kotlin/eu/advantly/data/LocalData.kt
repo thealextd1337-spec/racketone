@@ -2,6 +2,8 @@ package eu.advantly.data
 
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Player
+import eu.advantly.core.model.PlayerId
 import eu.advantly.data.db.AdvantlyDatabase
 
 /**
@@ -40,7 +42,52 @@ class LocalData(
         }
     }
 
+    // --- Identität des Besitzers über eigene Geräte (W1-I) -----------------------------------------------
+
+    /**
+     * Andere Spieler-IDs desselben Besitzers, z. B. der Uhr-eigene Self-Player vor der Übernahme der Handy-Identität.
+     * Matches mit diesen IDs zeigen den Besitzer („Du“), keinen Gast.
+     */
+    fun selfAliases(): Set<PlayerId> =
+        settings
+            .get(SELF_ALIASES_KEY)
+            ?.split(',')
+            ?.filter { it.isNotBlank() }
+            ?.map { PlayerId(it) }
+            ?.toSet()
+            .orEmpty()
+
+    /** Merkt [ids] als Aliase des Besitzers (der aktuelle Self wird ausgelassen). `true`, wenn sich etwas geändert hat. */
+    fun addSelfAliases(ids: Collection<PlayerId>): Boolean {
+        val self = players.self()?.id
+        val current = selfAliases()
+        val next = current + ids.filter { it != self && it.value.isNotBlank() && ',' !in it.value }
+        if (next == current) return false
+        settings.put(SELF_ALIASES_KEY, next.joinToString(",") { it.value })
+        return true
+    }
+
+    /** [id] ist der Besitzer selbst oder einer seiner Aliase. */
+    fun isSelf(id: PlayerId): Boolean = id == players.self()?.id || id in selfAliases()
+
+    /**
+     * Übernimmt [owner] (Self-Player des Handys) als eigenen Spieler; ein bisheriger, anderer Self wird Alias.
+     * `true`, wenn sich die Identität geändert hat.
+     */
+    fun adoptSelf(
+        owner: Player,
+        nowMs: Long,
+    ): Boolean =
+        transaction {
+            val previous = players.adoptSelf(owner, nowMs) ?: return@transaction false
+            addSelfAliases(listOf(previous.id))
+            true
+        }
+
     companion object {
+        /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
+        const val SELF_ALIASES_KEY: String = "players.selfAliases"
+
         /**
          * Schema-Version der lokalen Datenbank. Vor dem ersten Release ändert sich das Schema ohne Migration
          * (Version bleibt 1, Entwicklungsgeräte: App-Daten löschen). Ab Release: `.sqm`-Migrationen, Version steigt.

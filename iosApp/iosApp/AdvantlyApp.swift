@@ -1,23 +1,14 @@
 import SwiftUI
 
-/// Swift-Host der iPhone-App. Die eigentliche UI ist Compose Multiplatform aus `AdvantlyKit`.
-/// In DEBUG-Builds gibt es zusätzlich einen Tab für den Link-Debug-Feldtest (Spike S3).
+/// Swift-Host der iPhone-App. Die eigentliche UI ist Compose Multiplatform aus `AdvantlyKit`, die Match-Session
+/// (WatchConnectivity zur Apple Watch) startet `AdvantlyKitKt.mainViewController()`.
+/// Kein eigener Link-Debug-Tab mehr: WCSession hat nur einen Delegate, ein zweiter Link würde die Session stören (W1-I).
 @main
 struct AdvantlyApp: App {
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            TabView {
-                ComposeView()
-                    .ignoresSafeArea()
-                    .tabItem { Label("tab.app", systemImage: "sportscourt") }
-                LinkDebugView()
-                    .tabItem { Label("tab.linkdebug", systemImage: "applewatch.radiowaves.left.and.right") }
-            }
-            #else
             ComposeView()
                 .ignoresSafeArea()
-            #endif
         }
     }
 }

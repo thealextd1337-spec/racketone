@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Nur Debug: Ping-Pong-Feldtest (Spike S3). -->
+<!-- Nur Debug: Zustand des Session-Links (W1-I). -->
 <resources>
     <string name="link_debug_launcher">Advantly Link-Debug</string>
     <string name="link_debug_title">Link-Debug (Wear Data Layer)</string>
@@ -8,26 +8,11 @@
     <string name="link_state_unavailable">Nicht verfügbar (Wear-OS-App / Play-Dienste fehlen?)</string>
     <string name="link_peer">Gegenstelle: %1$s</string>
     <string name="link_peer_none">keine</string>
-    <string name="link_send_10">10 Pings</string>
-    <string name="link_send_100">100 Pings</string>
-    <string name="link_stop">Stopp</string>
-    <string name="link_reset">Zurücksetzen</string>
-    <string name="link_no_peer">Noch keine Gegenstelle – ist die andere App offen?</string>
-    <string name="link_running">Messreihe läuft …</string>
-    <string name="link_sent">Gesendet: %1$d von %2$d</string>
-    <string name="link_acked">Bestätigt: %1$d (unterwegs %2$d)</string>
-    <string name="link_pongs">Pongs empfangen: %1$d</string>
-    <string name="link_answered">Pings beantwortet: %1$d</string>
-    <string name="link_queued">In Queue (offline): %1$d</string>
-    <string name="link_lost">Verloren nach Wiederholung: %1$d</string>
-    <string name="link_retries">Wiederholungen: %1$d</string>
-    <string name="link_duplicates">Duplikate verworfen: %1$d</string>
-    <string name="link_rtt">RTT p50 / p95 / max: %1$s / %2$s / %3$s</string>
-    <string name="link_ack_latency">Ack p50 / p95: %1$s / %2$s</string>
-    <string name="link_ms">%1$d ms</string>
-    <string name="link_go_rtt">Go: RTT p95 &lt; 500 ms – %1$s</string>
-    <string name="link_go_loss">Go: 0 verloren – %1$s</string>
-    <string name="link_go_met">erfüllt</string>
-    <string name="link_go_not_met">NICHT erfüllt</string>
-    <string name="link_go_open">offen</string>
+    <string name="link_pending">Ausstehend an Gegenstellen: %1$s</string>
+    <string name="link_last_event">Letztes Event empfangen (ms): %1$s</string>
+    <string name="link_last_sync">Letzter Abgleich (ms): %1$s</string>
+    <string name="link_scorer_connected">Zähler verbunden: %1$s</string>
+    <string name="link_frames">Frames gesendet / bestätigt / wiederholt: %1$s</string>
+    <string name="link_queue">Eingereiht / fehlgeschlagen: %1$s</string>
+    <string name="link_delivered">Zugestellt / Duplikate: %1$s</string>
 </resources>

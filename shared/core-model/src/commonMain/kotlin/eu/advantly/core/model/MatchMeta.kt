@@ -27,6 +27,8 @@ enum class Environment {
  *
  * @property courtPace ITF Court Pace Rating 1–5 oder `null`
  * @property mixed Mixed-Doppel: steuert nur UI-Hinweise (02 §9.11)
+ * @property watchWorkout „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Standard an, unabhängig vom Zähler): die
+ *   Uhr des Besitzers startet beim Match eine Workout-Session. Fehlt das Feld (ältere Daten), gilt `true`.
  */
 @Serializable
 data class MatchMeta(
@@ -35,4 +37,5 @@ data class MatchMeta(
     val courtPace: Int? = null,
     val mixed: Boolean = false,
     val venue: String? = null,
+    val watchWorkout: Boolean = true,
 )

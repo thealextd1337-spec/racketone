@@ -1,0 +1,5 @@
+Erster interner Play-Test für Handy und Wear OS.
+• Match-Assistent, Live-Score und lokaler Verlauf für fünf Racketsportarten.
+• Ein Gerät zählt: Uhr oder Handy im Director-Modus; andere Geräte zeigen den Stand.
+Bitte testen: Undo, Offline-Spiel, Wiederverbinden und bestätigte Zählerübergabe.
+Noch keine Accounts, Cloud-Synchronisierung oder Health-Connect-Anbindung.

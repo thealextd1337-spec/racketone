@@ -28,8 +28,8 @@ import java.util.concurrent.atomic.AtomicLong
  * - **Peers:** Knoten mit der Capability [CAPABILITY] (beide Apps deklarieren sie in `res/values/wear.xml`),
  *   Filter „erreichbar“; aktualisiert über `CapabilityClient`-Listener und alle [REFRESH_MS] ms.
  *
- * Listener laufen nur, solange [start] aktiv ist (Spike: Debug-Screen im Vordergrund). Hintergrund-Empfang
- * per `WearableListenerService` folgt mit dem Sync-Service (P1).
+ * Listener laufen, solange [start] aktiv ist. Hintergrund-Empfang: Ein manifestregistrierter `WearableListenerService`
+ * der App reicht Nachrichten über [WearDataLayerInbound] an den laufenden Transport weiter (Phone-App: W1-I).
  */
 class WearDataLayerTransport(
     context: Context,
@@ -55,6 +55,10 @@ class WearDataLayerTransport(
 
     private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { refreshPeers() }
 
+    private val inboundSink: (String, ByteArray, () -> Unit) -> Unit = { node, frame, onConsumed ->
+        listener?.onFrame(node, frame, onConsumed)
+    }
+
     private val dataListener =
         DataClient.OnDataChangedListener { events ->
             val generation = inbox.currentGeneration
@@ -74,6 +78,7 @@ class WearDataLayerTransport(
 
     override fun start(listener: LinkTransport.Listener) {
         this.listener = listener
+        WearDataLayerInbound.attach(inboundSink)
         val generation = inbox.start(listener)
         messageClient.addListener(messageListener)
         dataClient.addListener(dataListener)
@@ -92,6 +97,7 @@ class WearDataLayerTransport(
     }
 
     override fun stop() {
+        WearDataLayerInbound.detach(inboundSink)
         handler.removeCallbacks(refreshLoop)
         messageClient.removeListener(messageListener)
         dataClient.removeListener(dataListener)
