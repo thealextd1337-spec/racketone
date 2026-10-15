@@ -168,6 +168,17 @@ class EnginePropertiesTest {
             }
         }
 
+    /** Review R1: `serverChoice.chosen` ist nie veraltet – entweder `null` oder der tatsächlich nächste Aufschläger. */
+    @Test
+    fun chosenServerIsAlwaysTheEffectiveServer() =
+        property { m ->
+            for (n in listOf(m.events.size / 4, m.events.size / 2, 3 * m.events.size / 4, m.events.size)) {
+                val state = ScoringEngine.fold(m.format, m.lineup, m.events.subList(0, n))
+                val chosen = state.serverChoice?.chosen ?: continue
+                assertEquals(state.serve?.player, chosen, "${state.serverChoice}")
+            }
+        }
+
     private fun checkInvariants(
         m: RandomMatch,
         state: MatchState,

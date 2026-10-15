@@ -11,6 +11,10 @@ import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.presentation.live.LiveTelemetryGate
+import eu.advantly.presentation.live.LiveTelemetryStore
+import eu.advantly.sync.protocol.LiveTelemetry
+import eu.advantly.sync.protocol.LiveTelemetryCodec
 import eu.advantly.sync.protocol.PeerKind
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
@@ -29,12 +33,36 @@ import java.util.concurrent.TimeoutException
  *   Session alle gespeichert hat. Gelöscht wird ein Item erst NACH dem Speichern; bleibt es wegen Timeout/Prozess-Tod
  *   liegen, liest es der Transport beim nächsten Start erneut (idempotent).
  *
+ * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und passendes Workout-Match.
+ *
  * Callbacks laufen auf einem Worker-Thread; die Session nur auf dem Main-Thread benutzen.
  */
 class PhoneSyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
+    private val expireTelemetry = Runnable { LiveTelemetryStore.Phone.expire() }
+
     override fun onMessageReceived(event: MessageEvent) {
+        if (event.path == LiveTelemetry.MESSAGE_PATH) {
+            val payload = LiveTelemetryCodec.decode(event.data) ?: return
+            onMainAndWait {
+                val state = AndroidMatchSessions.current()?.state?.value ?: return@onMainAndWait
+                if (LiveTelemetryGate.accept(
+                        payload,
+                        event.sourceNodeId,
+                        state.match?.id,
+                        state.match?.meta?.watchWorkout == true,
+                        state.sync.peers,
+                    )
+                ) {
+                    LiveTelemetryStore.Phone.receive(payload)
+                    main.removeCallbacks(expireTelemetry)
+                    // Handler nutzt uptime: Tiefschlaf kann das Aufräumen verschieben; Lesen prüft elapsedRealtime.
+                    main.postDelayed(expireTelemetry, LiveTelemetryStore.STALE_AFTER_MS)
+                }
+            }
+            return
+        }
         if (event.path != WearDataLayerTransport.MESSAGE_PATH) return
         onMainAndWait {
             ensureSession()

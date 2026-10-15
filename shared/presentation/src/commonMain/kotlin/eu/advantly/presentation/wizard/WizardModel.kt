@@ -77,8 +77,8 @@ enum class TiebreakAtChoice {
 }
 
 /**
- * Eingaben des Assistenten. [teamA]/[teamB] sind Slots (Länge = Spieler je Side), `null` = leer; Slot A0 ist der
- * eigene Spieler. Die Reihenfolge ist die Lineup-Reihenfolge (02 §3.3).
+ * Eingaben des Assistenten. [teamA]/[teamB] sind Slots (Länge = Spieler je Side), `null` = leer; der eigene
+ * Spieler bleibt auf Side A, seine Reihenfolge kann im Doppel wechseln. Die Reihenfolge ist die Lineup-Reihenfolge (02 §3.3).
  */
 data class WizardInput(
     val step: WizardStep = WizardStep.SPORT,

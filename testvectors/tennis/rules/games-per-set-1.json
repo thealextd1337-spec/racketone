@@ -4,7 +4,7 @@
   "title": "Regel-Szenario games-per-set-1 (generiert)",
   "description": "Games pro Satz = 1: 1:0 kein Satz, 2:0 Satz, Tiebreak bei 1:1 Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.",
   "sources": ["Advantly 02-scoring-regeln.md §6–§9; Regel-Tabellen-Tests in core-scoring/commonTest"],
-  "config": {"formatVersion":1,"presetId":"TENNIS_SINGLES_BO3","sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},"set":{"gamesToWin":1,"tiebreakAt":1,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},"decidingSet":null,"matchTiebreak":null},
+  "config": {"formatVersion":1,"presetId":null,"sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},"set":{"gamesToWin":1,"tiebreakAt":1,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},"decidingSet":null,"matchTiebreak":null},
   "lineup": {"A":["A1"],"B":["B1"],"firstServer":"A1"},
   "events": [
     {"id":"e1","type":"PointWon","side":"A"},

@@ -276,6 +276,7 @@ fun LiveScoreScreen(
                 Column(infoModifier) {
                     Header(controller, snapshot, now, onMinimize)
                     UpdateRequiredBanner(snapshot.sync.updateRequired ?: requiredUpdate)
+                    LiveWorkoutTelemetry(snapshot.matchId, snapshot.setup.meta.watchWorkout, controller.outdoorContrast)
                     if (display) {
                         // Übernahmeangebot ersetzt den Anzeige-Banner (gleicher Platz) – kostet den Flächen keine Höhe
                         val staleOffer = snapshot.sync.offersTakeOver(now) && snapshot.state.status != MatchStatus.FINISHED
