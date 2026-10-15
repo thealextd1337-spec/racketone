@@ -240,7 +240,10 @@ class LocalDataTest {
         assertTrue(data.settings.getBoolean("b", false))
         assertEquals(Long.MAX_VALUE, data.settings.getLong("l", 0))
         assertEquals(7, data.settings.getLong("missing", 7))
-        assertEquals(mapOf("b" to "true", "device.id" to "id-1", "k" to "w", "l" to Long.MAX_VALUE.toString()), data.settings.all())
+        assertEquals(
+            mapOf("b" to "true", "device.id" to "id-1", "k" to "w", "l" to Long.MAX_VALUE.toString()),
+            data.settings.all() - "assignments.projectionVersion",
+        )
         data.settings.remove("k")
         assertNull(data.settings.get("k"))
     }

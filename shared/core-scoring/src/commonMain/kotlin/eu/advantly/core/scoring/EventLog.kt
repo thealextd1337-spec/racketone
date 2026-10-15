@@ -129,7 +129,8 @@ object EventLog {
     /**
      * 02 §7.3 Schritt 2: Das geordnete Log wird rückwärts durchlaufen; ein Event ist unwirksam, wenn ein *wirksames*
      * `Undo` auf seine `id` zeigt. Ein `Undo` wirkt nur auf Events, die in der Ordnung **vor** ihm stehen; zeigt es auf
-     * ein späteres Event (oder sich selbst), ist es ungültig und wird übersprungen. Ein unbekanntes Ziel ist ein No-op.
+     * ein späteres Event (oder sich selbst), ist es ungültig und wird übersprungen. Rollenwechsel und Personenzuweisung
+     * sind ebenfalls keine Undo-Ziele; ihre Korrektur erfolgt durch ein neues Metadaten-Event. Ein unbekanntes Ziel ist ein No-op.
      */
     private fun effectiveness(
         ordered: List<ScoreEvent>,

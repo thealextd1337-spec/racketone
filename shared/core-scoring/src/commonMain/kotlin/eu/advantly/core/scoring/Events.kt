@@ -274,6 +274,8 @@ data class PointDetail(
 @SerialName("PlayerAssigned")
 data class PlayerAssigned(
     val slot: PlayerId,
-    val player: Player,
+    val player: Player?,
     val assignedBy: PlayerId,
+    val legacySlot: Boolean = false,
+    val creatorAlias: PlayerId? = null,
 ) : EventPayload

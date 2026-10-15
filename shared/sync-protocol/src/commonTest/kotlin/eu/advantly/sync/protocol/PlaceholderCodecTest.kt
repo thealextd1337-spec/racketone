@@ -15,6 +15,25 @@ class PlaceholderCodecTest {
         val messages =
             listOf(
                 Events(MATCH, listOf(ev("assignment", "phone", 2, 3, "g", PlayerAssigned(slot, person, PlayerId("owner"))))),
+                Events(
+                    MATCH,
+                    listOf(
+                        ev(
+                            "release",
+                            "phone",
+                            3,
+                            4,
+                            "assignment",
+                            PlayerAssigned(
+                                PlayerId("legacy"),
+                                null,
+                                PlayerId("owner"),
+                                legacySlot = true,
+                                creatorAlias = PlayerId("old-self"),
+                            ),
+                        ),
+                    ),
+                ),
                 MatchMetaMessage(placeholderIds = listOf(PlayerId("legacy")), recentPlayers = listOf(person)),
             )
         messages.forEach { assertEquals(DecodeResult.Ok(it), SyncCodec.decode(SyncCodec.encode(it))) }

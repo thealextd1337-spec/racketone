@@ -1,6 +1,7 @@
 package eu.advantly.core.scoring
 
 import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
@@ -58,8 +59,47 @@ class PlayerAssignmentsTest {
         val second = event(2, PlayerAssigned(slot, Player(PlayerId("max"), "Max"), owner))
         val undo = event(3, Undo(first.id))
         val log = listOf(genesis, first, second, undo)
-        assertEquals(mapOf(slot to person), PlayerAssignments.resolve(log.reversed() + first))
+        assertEquals(mapOf(slot to Player(PlayerId("max"), "Max")), PlayerAssignments.resolve(log.reversed() + first))
         assertTrue(undo.id in EventLog.analyze(log).invalidUndos)
+    }
+
+    @Test
+    fun correctionReleasesPreviousPersonAndNullReleasesSlot() {
+        val secondSlot = Placeholders.id("partner")
+        val genesis =
+            event(
+                0,
+                MatchCreated(
+                    format.copy(discipline = Discipline.DOUBLES),
+                    lineup.copy(a = listOf(owner, secondSlot), b = listOf(slot, Placeholders.id("b2"))),
+                    createdBy = owner,
+                ),
+            )
+        val max = Player(PlayerId("max"), "Max")
+        val log =
+            listOf(
+                genesis,
+                event(1, PlayerAssigned(slot, person, owner)),
+                event(2, PlayerAssigned(slot, max, owner)),
+                event(3, PlayerAssigned(secondSlot, person, owner)),
+            )
+        assertEquals(mapOf(slot to max, secondSlot to person), PlayerAssignments.resolve(log.reversed()))
+        assertEquals(mapOf(secondSlot to person), PlayerAssignments.resolve(log + event(4, PlayerAssigned(slot, null, owner))))
+    }
+
+    @Test
+    fun legacyFlagMakesEventOnlyDeliveryIndependentOfLocalRegistry() {
+        val legacy = PlayerId("legacy")
+        val genesis = event(0, MatchCreated(format, lineup.copy(b = listOf(legacy)), createdBy = owner))
+        assertEquals(
+            mapOf(legacy to person),
+            PlayerAssignments.resolve(
+                listOf(
+                    genesis,
+                    event(1, PlayerAssigned(legacy, person, owner, legacySlot = true)),
+                ),
+            ),
+        )
     }
 
     @Test

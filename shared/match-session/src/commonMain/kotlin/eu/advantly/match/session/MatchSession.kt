@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchSettings
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
@@ -40,6 +41,7 @@ import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredSequence
 import eu.advantly.data.assignments
+import eu.advantly.data.freshPlaceholders
 import eu.advantly.data.recentPeople
 import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
@@ -271,44 +273,66 @@ class MatchSession(
         val resolved = data.resolvedLineup(previous)
         val nextPlayer = next?.player?.let { data.assignments(previous.id)[it]?.id ?: it }
         val lineup = if (nextPlayer != null) resolved.copy(firstServer = nextPlayer) else resolved
-        return createMatch(format, lineup, previous.meta, m.scorer ?: deviceId, previous = previous.id)
+        val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
+        return createMatch(format, fresh, previous.meta, m.scorer ?: deviceId, previous = previous.id)
     }
 
     /** Erstellerprüfung unabhängig von Zähler und Matchstatus; P1: eigene Geräte desselben Besitzers. */
     fun canAssignPlayer(matchId: MatchId): Boolean {
         checkThread()
-        val created =
-            data.events
-                .scoreEvents(matchId)
-                .firstOrNull { it.payload is MatchCreated }
-                ?.payload as? MatchCreated ?: return false
-        return data.isSelf(created.createdBy ?: created.lineup.a.first())
+        val creator = data.matchCreator(matchId) ?: return false
+        return data.isSelf(creator)
     }
 
-    /** Erste gültige Zuweisung gewinnt; identische Wiederholung schreibt kein weiteres Event. */
+    fun assignmentFailure(
+        matchId: MatchId,
+        slot: PlayerId,
+        playerId: PlayerId?,
+    ): PlayerAssignmentFailure? {
+        checkThread()
+        val record = data.matches.get(matchId) ?: return PlayerAssignmentFailure.MATCH_UNAVAILABLE
+        if (!canAssignPlayer(matchId)) return PlayerAssignmentFailure.NOT_OWNER
+        if (!data.isMatchPlaceholder(matchId, slot) || record.lineup.sideOf(slot) == null) return PlayerAssignmentFailure.INVALID_SLOT
+        val assigned = data.assignments(matchId)
+        if (assigned[slot]?.id == playerId || playerId == null) return null
+        val player = data.players.get(playerId) ?: return PlayerAssignmentFailure.INVALID_PLAYER
+        if (data.isPlaceholder(playerId) || player.displayName.isBlank()) return PlayerAssignmentFailure.INVALID_PLAYER
+        val occupied = data.resolvedLineup(record).let { it.a + it.b } - listOfNotNull(assigned[slot]?.id)
+        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return PlayerAssignmentFailure.OCCUPIED
+        return null
+    }
+
+    /** Letzte gültige Zuweisung gewinnt; null gibt den Platz frei. Identische Wiederholung ist ein No-op. */
     fun assignPlayer(
         matchId: MatchId,
         slot: PlayerId,
-        playerId: PlayerId,
+        playerId: PlayerId?,
     ): Boolean {
         checkThread()
-        if (!canAssignPlayer(matchId) || !data.isPlaceholder(slot)) return false
+        if (assignmentFailure(matchId, slot, playerId) != null) return false
         val record = data.matches.get(matchId) ?: return false
-        if (record.lineup.sideOf(slot) == null) return false
         val assigned = data.assignments(matchId)
-        assigned[slot]?.let { return it.id == playerId }
-        val player = data.players.get(playerId)?.toPlayer() ?: return false
-        if (data.isPlaceholder(playerId) || player.displayName.isBlank()) return false
-        val occupied = data.resolvedLineup(record).let { it.a + it.b }
-        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return false
+        if (assigned[slot]?.id == playerId) return true
+        val player = playerId?.let { data.players.get(it)?.toPlayer() ?: return false }
         val m =
             open?.takeIf { it.id == matchId } ?: run {
                 val engine = ScoringEngine.replay(data.events.scoreEvents(matchId))
                 OpenMatch(record, checkNotNull(engine.genesis), engine)
             }
-        val created = m.genesis.payload as MatchCreated
-        val actor = created.createdBy ?: created.lineup.a.first()
-        emit(m, listOf(PlayerAssigned(slot, player, actor)))
+        val actor = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }.id
+        val creator = data.matchCreator(matchId)
+        emit(
+            m,
+            listOf(
+                PlayerAssigned(
+                    slot,
+                    player,
+                    actor,
+                    legacySlot = !Placeholders.isPlaceholder(slot),
+                    creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
+                ),
+            ),
+        )
         return true
     }
 
@@ -559,7 +583,8 @@ class MatchSession(
         ScoringEngine.replay(format, lineup, emptyList()) // prüft Format und Lineup
         val now = clock.nowMs()
         val matchId = MatchId.of(ids.newUuid7(now))
-        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer, createdBy = data.players.self()?.id)
+        val owner = data.players.ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }.id
+        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer, createdBy = owner)
         val genesis = ScoreEvent(EventId.of(ids.newUuid7(now)), matchId, deviceId, 1, 1, now, null, created)
         data.transaction {
             data.events.append(genesis.toStoredEvent())
@@ -749,10 +774,28 @@ class MatchSession(
         message: MatchMetaMessage,
     ): MatchId? {
         val now = clock.nowMs()
-        val newlyMigrated = message.placeholderIds.any { !data.isPlaceholder(it) }
-        message.placeholderIds.forEach { data.players.markPlaceholder(it, now) }
-        if (newlyMigrated) data.matches.history(limit = Long.MAX_VALUE).forEach { reconcilePeople(it.id) }
-        (message.players + message.recentPlayers.orEmpty()).forEach { data.players.upsertRemote(it, now) }
+        val corrections =
+            (message.placeholderIds + message.players.filter { it.isPlaceholder }.map { it.id })
+                .distinct()
+                .filterNot(data.players::canMarkPlaceholder)
+                .mapNotNull {
+                    data.players
+                        .get(it)
+                        ?.toPlayer()
+                        ?.copy(isPlaceholder = false)
+                }
+        if (config.kind == PeerKind.PHONE) corrections.forEach { data.players.upsertRemote(it, now) }
+        message.placeholderIds.filter(data.players::canMarkPlaceholder).forEach {
+            if (!data.isPlaceholder(it)) {
+                data.players.markPlaceholder(it, now)
+                data.rebuildAssignmentsForSlot(it)
+            }
+        }
+        val protectedIds = corrections.map { it.id }.toSet()
+        (message.players + message.recentPlayers.orEmpty())
+            .filterNot { it.id in protectedIds }
+            .forEach { data.players.upsertRemote(it, now) }
+        if (corrections.isNotEmpty() && config.kind == PeerKind.PHONE) send(peer, MatchMetaMessage(players = corrections))
         message.recentPlayers?.let { people ->
             data.settings.put(
                 "players.recentRemote",

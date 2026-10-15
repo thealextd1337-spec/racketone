@@ -1,0 +1,21 @@
+CREATE TABLE match_assignment (
+    match_id TEXT NOT NULL,
+    slot_id TEXT NOT NULL,
+    player_json TEXT,
+    PRIMARY KEY (match_id, slot_id)
+);
+
+forMatch:
+SELECT slot_id, player_json FROM match_assignment WHERE match_id = ?;
+
+put:
+INSERT OR REPLACE INTO match_assignment (match_id, slot_id, player_json) VALUES (?, ?, ?);
+
+clearMatch:
+DELETE FROM match_assignment WHERE match_id = ?;
+
+clearAll:
+DELETE FROM match_assignment;
+
+hasSlot:
+SELECT count(*) FROM match_assignment WHERE match_id = ? AND slot_id = ?;

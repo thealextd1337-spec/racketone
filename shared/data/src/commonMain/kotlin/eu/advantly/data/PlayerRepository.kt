@@ -77,10 +77,15 @@ class PlayerRepository internal constructor(
         queries.transaction {
             if (Placeholders.isPlaceholder(player.id)) return@transaction
             if (player.isPlaceholder) {
-                markPlaceholder(player.id, nowMs)
+                if (canMarkPlaceholder(player.id)) markPlaceholder(player.id, nowMs)
                 return@transaction
             }
             val existing = get(player.id)
+            if (existing?.kind == PlayerKind.PLACEHOLDER && !isDefaultSlotName(player.displayName) && player.displayName.isNotBlank()) {
+                queries.updateKind(PlayerKind.GUEST.name, player.id.value)
+                queries.rename(player.displayName, player.id.value)
+                return@transaction
+            }
             when {
                 existing == null -> {
                     queries.insertOrIgnore(player.id.value, player.displayName, PlayerKind.GUEST.name, nowMs, null)
@@ -131,7 +136,7 @@ class PlayerRepository internal constructor(
 
     fun get(id: PlayerId): LocalPlayer? = queries.selectById(id.value).executeAsOneOrNull()?.toLocal()
 
-    /** Dauerhafte Kennzeichnung alter Uhr-Gäste; alte Namensnachrichten ändern die Art nicht. */
+    /** Kennzeichnung alter Uhr-Gäste ohne Namensverlust; echte Namen können sie zurückkorrigieren. */
     fun markPlaceholder(
         id: PlayerId,
         nowMs: Long,
@@ -139,15 +144,24 @@ class PlayerRepository internal constructor(
         if (Placeholders.isPlaceholder(id) || get(id)?.kind == PlayerKind.SELF) return
         queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
         queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
-        queries.rename("", id.value)
     }
+
+    fun canMarkPlaceholder(id: PlayerId): Boolean =
+        get(id).let {
+            it == null || (
+                it.kind != PlayerKind.SELF &&
+                    (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
+            )
+        }
+
+    private fun isDefaultSlotName(name: String) =
+        name in setOf("Partner", "Gegner", "Opponent", "Gegner 1", "Opponent 1", "Gegner 2", "Opponent 2")
 
     fun placeholderIds(): Set<PlayerId> =
         queries
-            .selectAll()
+            .placeholderIds()
             .executeAsList()
-            .filter { it.kind == PlayerKind.PLACEHOLDER.name }
-            .map { PlayerId(it.id) }
+            .map(::PlayerId)
             .toSet()
 
     /** Self zuerst, dann zuletzt verwendete Gäste. */

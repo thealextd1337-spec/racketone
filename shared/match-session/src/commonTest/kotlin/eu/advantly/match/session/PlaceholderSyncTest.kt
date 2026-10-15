@@ -2,8 +2,10 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.assignments
 import eu.advantly.data.recentPeople
@@ -16,6 +18,42 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class PlaceholderSyncTest {
+    @Test
+    fun assignmentAfterOwnerAdoptionUsesCurrentSelfAndCanBeCorrectedAndRemoved() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        val phone = c["phone"]
+        val watch = c["watch"]
+        val oldSelf =
+            watch.data.players
+                .ensureSelf("", 1) { PlayerId("watch-self") }
+                .id
+        val self =
+            phone.data.players
+                .ensureSelf("Alex", 1) { PlayerId("phone-self") }
+                .id
+        val slot = Placeholders.id("legacy-owner-slot")
+        val id = watch.session.create(Presets.BADMINTON_1GAME_15.format(), Lineup(listOf(oldSelf), listOf(slot), oldSelf))
+        c.settle()
+        val bea = phone.data.players.addGuest(PlayerId("bea"), "Bea", 1)
+        val max = phone.data.players.addGuest(PlayerId("max"), "Max", 1)
+        assertTrue(phone.session.assignPlayer(id, slot, bea.id))
+        c.settle()
+        val assignment =
+            phone.data.events
+                .scoreEvents(id)
+                .last()
+                .payload as PlayerAssigned
+        assertEquals(self, assignment.assignedBy)
+        assertEquals(oldSelf, assignment.creatorAlias)
+        assertEquals(bea.id, watch.data.assignments(id)[slot]?.id)
+        assertTrue(phone.session.assignPlayer(id, slot, max.id))
+        c.settle()
+        assertEquals(max.id, watch.data.assignments(id)[slot]?.id)
+        assertTrue(phone.session.assignPlayer(id, slot, null))
+        c.settle()
+        assertTrue(watch.data.assignments(id).isEmpty())
+    }
+
     @Test
     fun displayOwnerAssignsFinishedWatchMatchOfflineAndRetryIsIdempotent() {
         val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
@@ -53,11 +91,52 @@ class PlaceholderSyncTest {
         assertTrue(phone.data.recentPeople().any { it.id == bea.id })
         val stranger = PlayerId("stranger")
         phone.data.players.adoptSelf(
-            eu.advantly.core.model
-                .Player(stranger, "Stranger"),
+            Player(stranger, "Stranger"),
             2,
         )
         assertFalse(phone.session.canAssignPlayer(id))
+    }
+
+    @Test
+    fun phoneRenameBeforeWatchMigrationWinsAndCorrectsWatch() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        val phone = c["phone"]
+        val watch = c["watch"]
+        val legacy = PlayerId("renamed-on-phone")
+        phone.data.players.addGuest(legacy, "Max", 1)
+        watch.data.players.addGuest(legacy, "Gegner 1", 1)
+        watch.data.settings.put("wear.guest.OPPONENT_1", legacy.value)
+        watch.data.migrateWatchPlaceholders()
+        assertEquals(
+            "Gegner 1",
+            watch.data.players
+                .get(legacy)
+                ?.displayName,
+        )
+        watch.session.syncNow()
+        c.settle()
+        assertEquals(
+            "Max",
+            phone.data.players
+                .get(legacy)
+                ?.displayName,
+        )
+        assertEquals(
+            "Max",
+            watch.data.players
+                .get(legacy)
+                ?.displayName,
+        )
+        assertFalse(phone.data.isPlaceholder(legacy))
+        assertFalse(watch.data.isPlaceholder(legacy))
+        watch.session.syncNow()
+        c.settle()
+        assertEquals(
+            "Max",
+            phone.data.players
+                .get(legacy)
+                ?.displayName,
+        )
     }
 
     @Test
@@ -142,7 +221,7 @@ class PlaceholderSyncTest {
             originalLog,
             watch.data.events
                 .scoreEvents(id)
-                .filterNot { it.payload is eu.advantly.core.scoring.PlayerAssigned },
+                .filterNot { it.payload is PlayerAssigned },
         )
     }
 }

@@ -61,5 +61,6 @@ class PlaceholderMigrationTest {
         data.settings.put("wear.guest.OPPONENT_1", id.value)
         data.migrateWatchPlaceholders()
         assertEquals(PlayerKind.GUEST, data.players.get(id)?.kind)
+        assertNull(data.settings.get("wear.guest.OPPONENT_1"))
     }
 }
