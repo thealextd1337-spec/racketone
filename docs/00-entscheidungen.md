@@ -14,6 +14,8 @@ Stand: 2026-10-15
 | Zählen | **Single-Scorer (2026-10-15): genau ein Gerät pro Match** zählt und führt Undo aus. Standard: Uhr des startenden Spielers; alternativ Handy im Director-Modus. Ersetzt „Uhr und Handy gleichwertig“. |
 | Rollen | **Zähler:** aktives Gerät. **Director:** außenstehende Person zählt am Handy. **Anzeige:** alle übrigen Uhren/Handys, ohne Zählen/Undo. **Visitor ab P2:** benannte Zuschauer-Accounts, nur Live-Stand und Ergebnis, keine Health-Daten. **Übergabe:** „Zählen übernehmen“ mit Bestätigung und repliziertem Engine-Event „Zähler wechselt“. P1: eigene Uhr/eigenes Handy; P2: Zähler-Person beim Start wählbar, Zustellung per Cloud. |
 | Sync Zähler → Handy | Die zählende Uhr sendet **jedes Event sofort** ans gekoppelte Handy (Ack + Retry); ohne Verbindung lokal puffern und bei Wiederverbindung **sofort** nachliefern. Das Handy speichert alles dauerhaft (Backup, Grundlage für Übergabe und Cloud). Zähler zeigt „synchron / N ausstehend“, Anzeige-Geräte „Stand vor X s“ (Entscheidung 2026-10-15) |
+| Visitor & Zähler-Wahl (P2) | Visitor müssen **Freunde** sein, **keine Zustimmung** der Mitspieler. Ist der gewählte Zähler offline: **nie blockieren** – Starter zählt, automatische Übergabe bei Annahme (2026-10-15) |
+| Aliase | Eigener öffentlicher **Alias** pro Nutzer + **private Spitznamen** für Freunde/Gäste (nur für mich sichtbar, Vorrang in meiner Ansicht) (2026-10-15) |
 | iOS-Builds | Cloud-CI (macOS-Runner) + TestFlight, Entwicklung unter Windows |
 | Vorgehen | Phasenweise: P1 Scoring offline (Handy + Wear OS + Apple Watch) → P2 Accounts/Freunde/Sync → P3 Statistik & Health → P4 Garmin |
 | Sprache | Deutsch + Englisch ab Start |

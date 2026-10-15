@@ -155,7 +155,7 @@ flowchart TD
 
 **Zähler-Auswahl:** P1 bietet „Meine Uhr“ (Standard: Uhr des startenden Spielers) und „Dieses Handy (Director)“. Ohne verfügbare Uhr ist nur das Handy wählbar. Im Director-Modus zählt die außenstehende Person am Handy, die Spieler-Uhren zeigen nur an. Ab P2 folgt eine Personen-Auswahl: ich, Mitspieler/Freund mit Account oder externe Person/Director mit Account; anschließend konkretes Zähler-Gerät bestätigen. Das Match wird dessen Gerät per Cloud zugestellt; erst nach bestätigter Bereitstellung startet es. Spieler und Zähler sind getrennte Rollen. Watch-Start setzt die eigene Uhr als Zähler; Presets vergeben keine dauerhaften Zählrechte.
 
-**Offline-Start ab P2:** Antwortet die gewählte Zähler-Person nicht, bleibt der Start unbestätigt. Offene Frage F17 in PLAN: Wartezeit, Abbruch bzw. ausdrücklich bestätigter Wechsel auf ein eigenes Gerät und Umgang mit späterer Zustellung.
+**Offline-Start ab P2 (entschieden, F17):** Das Match startet sofort; bis die gewählte Zähler-Person online ist und die Einladung annimmt, zählt das Gerät des Starters (Uhr bzw. Handy als Director). Mit der Annahme übernimmt deren Gerät automatisch (`ScorerChanged`), alle bisherigen Punkte bleiben erhalten. Hinweis im Live-Screen: „Zählen geht an [Alias], sobald verbunden“.
 
 **Workout-Option:** Im Startdialog steht unabhängig von der Zähler-Wahl „Workout auf meiner Uhr mitlaufen lassen“ (Standard an), auch im Director-Modus. Die Option startet nur die eigene Uhr und ordnet einem außenstehenden Director kein Spieler-Workout zu. In P1/P2 hält die Session die App wach und zeigt Live-Puls; am Ende wird sie verworfen (`discardWorkout`, kein Health-Connect-Write). Persistenz und Health-Einwilligungen folgen ab P3; nötige Systemberechtigungen für Session/Sensor werden zuvor separat erklärt (05 E2/E5).
 
@@ -184,6 +184,8 @@ UX-Regeln zur Synchronität:
 **Übergabe „Zählen übernehmen“:** Auf einem berechtigten Anzeige-Gerät Rolleninfo öffnen → „Zählen übernehmen“ → Bestätigung „Auf diesem Gerät zählen? Bisher zählt [Name · Gerät]. Danach zeigt das bisherige Gerät nur noch an.“ → „Übernehmen“ / „Abbrechen“. Erst der angewandte replizierte Engine-Event „Zähler wechselt“ schaltet die Eingaben am Ziel frei und am bisherigen Gerät aus. Während der Bestätigung bleibt das Ziel Anzeige; Abbruch ändert nichts. Alle Geräte zeigen danach den neuen Zähler. P1: eigene Uhr ↔ eigenes Handy; P2: auch dafür berechtigte andere Accounts/Geräte, niemals Visitor. Bei leerem Akku/nicht erreichbarem Altgerät zeigt der Flow letzten bekannten Stand und Verbindungsstatus; Bestätigungs-/Verfügbarkeitsdetails sind mit 01/02 abzustimmen (PLAN F15). Keine parallele Zählfreigabe und kein Zeit-Lease.
 
 **Visitor (P2):** Benannte Zuschauer-Accounts öffnen ein freigegebenes Match aus ihrer Live-Liste/Einladung. Sie sehen Stand, Sätze, Hinweise, Zähler und Verbindungsstatus sowie nach Ende das Ergebnis. Keine Tap-Flächen, kein Undo, kein Übernehmen, keine Match-Steuerung, keine Health-Daten. Zugriff bis Widerruf gemäß noch festzulegender Verwaltung (PLAN F16); öffentlicher Live-Link bleibt später.
+
+**Visitor-Regeln (entschieden, F16):** Nur **Freunde** können als Visitor benannt werden; Mitspieler müssen nicht zustimmen. **Namen & Aliase (F18):** Überall, wo Personen erscheinen (Spieler-Slots, Live, Verlauf, Feed, Visitor-Ansicht), wird der Anzeigename so aufgelöst: privater Spitzname (nur eigene Ansicht) → öffentlicher Alias → Profil-/Gastname. Bearbeiten: Profil → „Mein Alias“; bei Freund/Gast → „Spitzname vergeben“.
 
 ### 3.3 Satzende & Matchende
 
