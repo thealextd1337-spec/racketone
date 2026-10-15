@@ -4,6 +4,9 @@ import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.MatchTiebreakFormat
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
 
 /**
  * Ergebnis eines Folds inklusive Log – Grundlage für das inkrementelle [ScoringEngine.apply].
@@ -19,6 +22,7 @@ import eu.advantly.core.model.MatchFormat
  * @property rejectedEvents IDs mit abweichenden Kopien; keine Kopie geht in den Fold ein (stehen in `ignoredEvents`)
  * @property genesis die `MatchCreated`-Genesis, falls über [ScoringEngine.replay] mit vollständigem Log erzeugt
  * @property initialScorer Zähler zu Matchbeginn (Genesis bzw. Parameter), `null` = keine Rollenprüfung (02 §7.5)
+ * @property lastPoint zuletzt wirksam angewendeter Ballwechsel (Ziel der Aufschlag-Leiste), sonst `null`
  */
 class EngineState internal constructor(
     val format: MatchFormat,
@@ -32,25 +36,59 @@ class EngineState internal constructor(
     val rejectedEvents: List<EventId>,
     val genesis: ScoreEvent?,
     internal val core: Core,
-    internal val appliedPoints: Set<EventId>,
+    internal val appliedPoints: Map<EventId, AppliedPoint>,
     val initialScorer: DeviceId? = null,
 ) {
     /** Anzahl wirksam angewendeter Ballwechsel (`PointWon`). */
     val pointsPlayed: Int get() = appliedPoints.size
+
+    val lastPoint: AppliedPoint? = appliedPoints.values.lastOrNull()
+
+    /** Wirksam angewendeter Ballwechsel [id] mit aktuellem Detail, sonst `null` (unbekannt, unwirksam oder übersprungen). */
+    fun point(id: EventId): AppliedPoint? = appliedPoints[id]
+
+    /** Alle wirksam angewendeten Ballwechsel in Fold-Reihenfolge. */
+    val points: Collection<AppliedPoint> get() = appliedPoints.values
 }
+
+/**
+ * Ein wirksam angewendetes `PointWon` (02 §7.3) mit Zuordnung für Statistik und Bedienung.
+ *
+ * @property side Gewinner des Ballwechsels
+ * @property servingSide aufschlagende Side **vor** dem Ballwechsel
+ * @property server Aufschläger vor dem Ballwechsel (im Doppel nach Aufschlägerwahl bzw. Rotation)
+ * @property detail wirksames Detail: letztes gültiges `PointDetailSet` auf diesen Punkt, sonst `PointWon.detail`
+ * @property awarded der Ballwechsel brachte [side] einen Punkt (`POINT`-Effekt); nur bei Pickleball-Side-Out bzw.
+ *   „Freeze“ kann das `false` sein
+ */
+data class AppliedPoint(
+    val id: EventId,
+    val side: Side,
+    val servingSide: Side,
+    val server: PlayerId,
+    val detail: PointDetail?,
+    val awarded: Boolean,
+)
 
 /**
  * Ein wirksames `PointWon` mit dem Zustand davor und danach – Basis der Statistik (02 §11.1).
  *
  * @property before Zustand **vor** dem Punkt (Aufschläger, Flags, Callout)
  * @property after Zustand danach (u. a. `effects`)
+ * @property detail wirksames Detail am Ende des Logs (letztes gültiges `PointDetailSet`, sonst `PointWon.detail`)
+ * @property serve wirksame Aufschlag-Info für die Statistik ([PointDetailRules.serveOutcome]), `null` = nicht erfasst
  */
 data class PointRecord(
     val event: ScoreEvent,
     val point: PointWon,
     val before: MatchState,
     val after: MatchState,
-)
+    val detail: PointDetail? = point.detail,
+    val serve: ServeOutcome? = null,
+) {
+    /** Aufschläger dieses Ballwechsels (Doppel: nach Wahl bzw. Rotation). */
+    val server: PlayerId? get() = before.serve?.player
+}
 
 /**
  * Öffentliche API der Scoring-Engine (01 §3, 02 §6–§8). Rein funktional und deterministisch:
@@ -157,7 +195,7 @@ object ScoringEngine {
         val ids = state.events.mapTo(HashSet()) { it.id }
         val undoTargets = state.events.mapNotNullTo(HashSet()) { (it.payload as? Undo)?.target }
         val pointParents = state.events.filter { it.payload is PointWon }.mapNotNullTo(HashSet()) { it.parentId }
-        val applied = HashSet(state.appliedPoints)
+        val applied = LinkedHashMap(state.appliedPoints)
         val core = state.core.copy()
         var undoTarget = state.undoTarget
         var last = state.events.lastOrNull()
@@ -175,8 +213,7 @@ object ScoringEngine {
                     event.id !in undoTargets &&
                     !(payload is PointWon && event.parentId != null && event.parentId in pointParents)
             if (!fastPath) return Replay.run(state.format, state.lineup, state.events + fresh, null, genesis, state.initialScorer)
-            val ok = core.step(event) { it in applied }
-            if (ok && payload is PointWon) applied += event.id
+            val ok = Replay.stepTracked(core, event, applied)
             if (ok && Replay.isUndoTargetType(payload)) undoTarget = event.id
             ids += event.id
             if (payload is PointWon) event.parentId?.let { pointParents += it }
@@ -197,6 +234,60 @@ object ScoringEngine {
             appliedPoints = applied,
             initialScorer = state.initialScorer,
         )
+    }
+
+    /**
+     * Letzter wirksamer Punkt der Side [side] (02 §7.3 „Punkt einer Seite abziehen“): das in Fold-Reihenfolge letzte
+     * wirksam angewendete `PointWon(side)`, das [side] einen Punkt brachte – auch wenn danach Punkte der Gegenseite oder
+     * neue Sätze folgen. `null`, wenn es keinen gibt. Abziehen = `Undo(target)`; der Fold rechnet alles danach neu.
+     */
+    fun lastEffectivePointOf(
+        state: EngineState,
+        side: Side,
+    ): EventId? =
+        state.appliedPoints.values
+            .lastOrNull { it.side == side && it.awarded }
+            ?.id
+
+    /**
+     * Wählbare Satzarten im Satzende-Dialog (02 §5.2, OPEN): Tennis/Padel normaler Satz, Tiebreak bis 7 und
+     * Champions-Tiebreak bis 10; alle anderen Sportarten nur der normale Satz. `NextSetKind.MATCH_TIEBREAK` bleibt als
+     * ältere Wire-Form gültig (nur mit `config.matchTiebreak`), wird hier aber nicht angeboten.
+     */
+    fun nextSetOptions(format: MatchFormat): List<NextSetKind> =
+        if (format.sport.isTennisLike) {
+            listOf(NextSetKind.REGULAR, NextSetKind.TIEBREAK_7, NextSetKind.MATCH_TIEBREAK_10)
+        } else {
+            listOf(NextSetKind.REGULAR)
+        }
+
+    /**
+     * `ContinueDecision` für „weiter mit einem Satz der Art [kind]“ (02 §5.2) oder `null`, wenn das Format die Art nicht
+     * zulässt. Entspricht ein Tiebreak-Satz genau `config.matchTiebreak`, wird die ältere Wire-Form `MATCH_TIEBREAK`
+     * erzeugt (gleiche Wirkung, auch für Geräte mit älterem App-Stand faltbar).
+     */
+    fun nextSetDecision(
+        format: MatchFormat,
+        kind: NextSetKind,
+    ): ContinueDecision? {
+        val wire =
+            when (kind) {
+                NextSetKind.REGULAR -> {
+                    kind
+                }
+
+                NextSetKind.MATCH_TIEBREAK -> {
+                    if (!format.sport.isTennisLike || format.matchTiebreak == null) return null
+                    kind
+                }
+
+                NextSetKind.TIEBREAK_7, NextSetKind.MATCH_TIEBREAK_10 -> {
+                    if (kind !in nextSetOptions(format)) return null
+                    val tiebreak = if (kind == NextSetKind.TIEBREAK_7) MatchTiebreakFormat.MTB7 else MatchTiebreakFormat.MTB10
+                    if (format.matchTiebreak == tiebreak) NextSetKind.MATCH_TIEBREAK else kind
+                }
+            }
+        return ContinueDecision(true, wire)
     }
 
     /**
@@ -221,10 +312,15 @@ object ScoringEngine {
         scorer: DeviceId?,
     ): List<PointRecord> {
         val records = mutableListOf<PointRecord>()
-        Replay.run(format, lineup, events, onPoint = { event, before, after ->
-            records += PointRecord(event, event.payload as PointWon, before, after)
-        }, scorer = scorer)
-        return records
+        val engine =
+            Replay.run(format, lineup, events, onPoint = { event, before, after ->
+                records += PointRecord(event, event.payload as PointWon, before, after)
+            }, scorer = scorer)
+        return records.map { r ->
+            val applied = engine.appliedPoints[r.event.id] ?: return@map r
+            val detail = applied.detail
+            r.copy(detail = detail, serve = PointDetailRules.serveOutcome(detail, applied.side, applied.servingSide, format.sport))
+        }
     }
 }
 
@@ -232,6 +328,36 @@ object ScoringEngine {
 internal object Replay {
     fun isUndoTargetType(payload: EventPayload): Boolean =
         payload is PointWon || payload is ContinueDecision || payload is Correction || payload is MatchEnded
+
+    /**
+     * Wendet ein wirksames Event an und führt [applied] nach: neue `PointWon` mit Aufschlag-Zuordnung, gültige
+     * `PointDetailSet` ersetzen das Detail ihres Ziels (letztes gilt). Liefert, ob das Event angewendet wurde.
+     */
+    fun stepTracked(
+        core: Core,
+        event: ScoreEvent,
+        applied: MutableMap<EventId, AppliedPoint>,
+    ): Boolean {
+        val payload = event.payload
+        val serve = if (payload is PointWon) core.serveNow() else null
+        val ok = core.step(event) { applied[it] }
+        if (!ok) return false
+        when (payload) {
+            is PointWon -> {
+                val s = checkNotNull(serve) { "PointWon ohne laufenden Satz angewendet" }
+                applied[event.id] = AppliedPoint(event.id, payload.side, s.side, s.player, payload.detail, Effect.POINT in core.effects)
+            }
+
+            is PointDetailSet -> {
+                applied[payload.target]?.let { applied[payload.target] = it.copy(detail = payload.detail) }
+            }
+
+            else -> {
+                Unit
+            }
+        }
+        return true
+    }
 
     fun run(
         format: MatchFormat,
@@ -263,7 +389,7 @@ internal object Replay {
         val effectiveLineup = if (initialServer != null) lineup.copy(firstServer = initialServer) else lineup
         val core = Core.initial(format, effectiveLineup)
         var undoTarget: EventId? = null
-        val appliedPoints = HashSet<EventId>()
+        val appliedPoints = LinkedHashMap<EventId, AppliedPoint>()
         val rejectedByRole = mutableListOf<EventId>()
         var currentScorer = scorer
         for (event in log.ordered) {
@@ -298,8 +424,7 @@ internal object Replay {
 
                 else -> {
                     val before = if (onPoint != null && payload is PointWon) core.export(currentScorer, rejectedByRole.toList()) else null
-                    val applied = core.step(event) { it in appliedPoints }
-                    if (applied && payload is PointWon) appliedPoints += event.id
+                    val applied = stepTracked(core, event, appliedPoints)
                     if (applied && isUndoTargetType(payload)) undoTarget = event.id
                     if (applied && before != null) onPoint?.invoke(event, before, core.export(currentScorer, rejectedByRole.toList()))
                 }

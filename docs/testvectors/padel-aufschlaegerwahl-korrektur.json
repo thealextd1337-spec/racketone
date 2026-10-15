@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "TV-PAD-006",
+  "title": "Padel Doppel: Korrektur nach der Aufschlägerwahl hebt die Wahl auf",
+  "description": "Review-Runde 1 zu W2-A: serverChoice.chosen ist nie veraltet (02 §6.5.5). Correction(SERVING_ORDER) bzw. Correction(SERVER), die den gewählten Spieler als nächsten Aufschläger ablöst, hebt die Wahl auf (chosen = null, Wahl wieder erwartet); eine erneute Wahl desselben Spielers wirkt wieder.",
+  "sources": ["Advantly 02-scoring-regeln.md §6.5.5, §7.1 (Review-Runde 1, 2026-10-15)"],
+  "config": {"formatVersion": 1, "presetId": "PADEL_GOLDEN_BO3", "sport": "PADEL", "discipline": "DOUBLES", "match": {"mode": "BEST_OF", "bestOf": 3}, "game": {"deuceMode": "DECIDING_POINT"}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": null},
+  "lineup": {"A": ["A1", "A2"], "B": ["B1", "B2"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "ServerChosen", "set": 0, "side": "A", "player": "A2"},
+    {"id": "e2", "type": "Correction", "kind": "SERVING_ORDER", "side": "A", "players": ["A1", "A2"]},
+    {"id": "e3", "type": "ServerChosen", "set": 0, "side": "A", "player": "A2"},
+    {"id": "e4", "type": "PointWon", "side": "A"},
+    {"id": "e5", "type": "PointWon", "side": "A"},
+    {"id": "e6", "type": "PointWon", "side": "A"},
+    {"id": "e7", "type": "PointWon", "side": "A"},
+    {"id": "e8", "type": "ServerChosen", "set": 0, "side": "B", "player": "B2"},
+    {"id": "e9", "type": "Correction", "kind": "SERVER", "player": "B1"},
+    {"id": "e10", "type": "PointWon", "side": "B"}
+  ],
+  "expect": [
+    {"afterEvent": 1, "label": "A2 gewählt", "state": {"serve": {"side": "A", "player": "A2"}, "serverChoice": {"game": 1, "side": "A", "players": ["A2", "A1", "B1", "B2"], "chosen": "A2"}}},
+    {"afterEvent": 2, "label": "SERVING_ORDER [A1, A2]: A1 schlägt auf, Wahl aufgehoben", "state": {"serve": {"side": "A", "player": "A1"}, "serverChoice": {"game": 1, "side": "A", "players": ["A1", "A2", "B1", "B2"], "chosen": null}, "effects": [], "ignoredEvents": []}},
+    {"afterEvent": 3, "label": "A2 erneut gewählt – wirkt", "state": {"serve": {"player": "A2"}, "serverChoice": {"game": 1, "chosen": "A2"}, "ignoredEvents": []}},
+    {"afterEvent": 7, "label": "Spiel 1 an A; Game 2: B wählt", "state": {"current": {"games": {"A": 1, "B": 0}}, "serverChoice": {"game": 2, "side": "B", "players": ["B1", "B2"], "chosen": null}}},
+    {"afterEvent": 8, "label": "B2 gewählt", "state": {"serve": {"side": "B", "player": "B2"}, "serverChoice": {"game": 2, "players": ["B2", "B1"], "chosen": "B2"}}},
+    {"afterEvent": 9, "label": "Correction(SERVER, B1): Wahl aufgehoben", "state": {"serve": {"side": "B", "player": "B1"}, "serverChoice": {"game": 2, "side": "B", "players": ["B2", "B1"], "chosen": null}}},
+    {"afterEvent": 10, "label": "B hat aufgeschlagen – Fenster zu", "state": {"serverChoice": null, "serve": {"player": "B1"}}}
+  ]
+}

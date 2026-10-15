@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "id": "TV-PAD-004",
+  "title": "Padel Doppel: Aufschlägerwahl in Game 1 (alle vier) und Game 2 (anderes Team), festgelegte Rotation",
+  "description": "Golden Point, Best of 3. Prüft serverChoice (02 §6.5.5, §8): Vor dem ersten Ballwechsel ist jeder der vier Spieler wählbar – die Wahl von B2 lässt B eröffnen. Zu Beginn von Game 2 wählt Team A (A2). Eine Wahl für ein Team, das schon aufgeschlagen hat, wird übersprungen. Danach ist die Rotation B2-A2-B1-A1-B2 für den Satz festgelegt.",
+  "sources": ["FIP Rules of Padel (Review 01.01.2026), Rule 6.8", "ITF Rules of Tennis 2026, Regel 14 (Doppel-Aufschlagfolge)", "Advantly 02-scoring-regeln.md §6.5.5 (Entscheidung 2026-10-15)"],
+  "config": {"formatVersion": 1, "presetId": "PADEL_GOLDEN_BO3", "sport": "PADEL", "discipline": "DOUBLES", "match": {"mode": "BEST_OF", "bestOf": 3}, "game": {"deuceMode": "DECIDING_POINT"}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": null},
+  "lineup": {"A": ["A1", "A2"], "B": ["B1", "B2"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "ServerChosen", "set": 0, "side": "B", "player": "B2"},
+    {"id": "e2", "type": "PointWon", "side": "B"},
+    {"id": "e3", "type": "PointWon", "side": "B"},
+    {"id": "e4", "type": "PointWon", "side": "B"},
+    {"id": "e5", "type": "PointWon", "side": "B"},
+    {"id": "e6", "type": "ServerChosen", "set": 0, "side": "B", "player": "B1"},
+    {"id": "e7", "type": "ServerChosen", "set": 0, "side": "A", "player": "A2"},
+    {"id": "e8", "type": "PointWon", "side": "A"},
+    {"id": "e9", "type": "PointWon", "side": "A"},
+    {"id": "e10", "type": "PointWon", "side": "A"},
+    {"id": "e11", "type": "PointWon", "side": "A"},
+    {"id": "e12", "type": "PointWon", "side": "B"},
+    {"id": "e13", "type": "PointWon", "side": "B"},
+    {"id": "e14", "type": "PointWon", "side": "B"},
+    {"id": "e15", "type": "PointWon", "side": "B"},
+    {"id": "e16", "type": "PointWon", "side": "A"},
+    {"id": "e17", "type": "PointWon", "side": "A"},
+    {"id": "e18", "type": "PointWon", "side": "A"},
+    {"id": "e19", "type": "PointWon", "side": "A"}
+  ],
+  "expect": [
+    {"afterEvent": 0, "label": "Satzbeginn: Wahl aus allen vier erwartet (Default A1)", "state": {"serverChoice": {"game": 1, "side": "A", "players": ["A1", "A2", "B1", "B2"], "chosen": null}, "serve": {"side": "A", "player": "A1", "court": "RIGHT", "receiver": "B1"}}},
+    {"afterEvent": 1, "label": "B2 gewählt: B eröffnet, Wahl bleibt bis zum ersten Ballwechsel änderbar", "state": {"serverChoice": {"game": 1, "side": "B", "players": ["B2", "B1", "A1", "A2"], "chosen": "B2"}, "serve": {"side": "B", "player": "B2", "court": "RIGHT", "receiver": "A1"}, "effects": [], "ignoredEvents": []}},
+    {"afterEvent": 2, "label": "erster Ballwechsel gespielt – keine Wahl offen", "state": {"serverChoice": null}},
+    {"afterEvent": 5, "label": "Spiel 1 an B, Seitenwechsel; Game 2: Team A wählt", "state": {"current": {"games": {"A": 0, "B": 1}}, "serverChoice": {"game": 2, "side": "A", "players": ["A1", "A2"], "chosen": null}, "serve": {"side": "A", "player": "A1"}, "ends": {"A": "END_2", "B": "END_1"}}},
+    {"afterEvent": 6, "label": "Wahl für B ungültig (B hat schon aufgeschlagen)", "state": {"effects": ["IGNORED"], "ignoredEvents": ["e6"], "serverChoice": {"game": 2, "side": "A", "chosen": null}}},
+    {"afterEvent": 7, "label": "A2 gewählt", "state": {"serverChoice": {"game": 2, "side": "A", "players": ["A2", "A1"], "chosen": "A2"}, "serve": {"side": "A", "player": "A2", "receiver": "B1"}, "effects": []}},
+    {"afterEvent": 8, "label": "A hat aufgeschlagen – keine Wahl offen", "state": {"serverChoice": null, "serve": {"player": "A2"}}},
+    {"afterEvent": 11, "label": "Spiel 3: B1", "state": {"current": {"games": {"A": 1, "B": 1}}, "serve": {"side": "B", "player": "B1"}, "serverChoice": null}},
+    {"afterEvent": 15, "label": "Spiel 4: A1", "state": {"current": {"games": {"A": 1, "B": 2}}, "serve": {"side": "A", "player": "A1"}, "ends": {"A": "END_1", "B": "END_2"}}},
+    {"afterEvent": 19, "label": "Spiel 5: wieder B2", "state": {"current": {"games": {"A": 2, "B": 2}}, "serve": {"side": "B", "player": "B2"}, "serverChoice": null}}
+  ]
+}

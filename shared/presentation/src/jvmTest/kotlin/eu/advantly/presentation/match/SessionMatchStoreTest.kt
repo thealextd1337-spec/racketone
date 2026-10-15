@@ -126,6 +126,99 @@ class SessionMatchStoreTest {
 
     private fun Rig.watchScoredMatch() = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
 
+    /** Versionsunterschied (Protokoll 1 ↔ 2) wird sichtbar: „Bitte Uhr aktualisieren“ bzw. „dieses Gerät aktualisieren“. */
+    @Test
+    fun protocolVersionMismatchIsReported() {
+        val rig = Rig()
+        assertNull(rig.phone.updateRequired.value)
+        val old = ReliableDeviceLink(rig.network.transport("old-watch"), rig.scheduler).apply { start() }
+        rig.settle()
+        old.send(
+            "phone",
+            eu.advantly.sync.protocol.SyncCodec
+                .encode(
+                    eu.advantly.sync.protocol
+                        .Hello(DeviceId("old"), PeerKind.WATCH, minV = 1, v = 1),
+                ),
+        )
+        rig.settle()
+        assertEquals(UpdateRequired.OTHER_DEVICE, rig.phone.updateRequired.value)
+        rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.THIS_PHONE))
+        assertEquals(
+            UpdateRequired.OTHER_DEVICE,
+            rig.phone.active.value
+                ?.sync
+                ?.updateRequired,
+        )
+        val future = ReliableDeviceLink(rig.network.transport("future"), rig.scheduler).apply { start() }
+        rig.offline("old-watch")
+        rig.settle()
+        future.send(
+            "phone",
+            eu.advantly.sync.protocol.SyncCodec
+                .encode(
+                    eu.advantly.sync.protocol
+                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 3, v = 3),
+                ),
+        )
+        rig.settle()
+        assertEquals(UpdateRequired.THIS_DEVICE, rig.phone.updateRequired.value)
+    }
+
+    /** Neue Kommandos (Feldtest 2026-10-15) laufen über die Session; auf dem Anzeige-Gerät wirken sie nicht. */
+    @Test
+    fun operationCommandsGoThroughTheSession() {
+        val rig = Rig()
+        rig.phone.start(rig.phone.setupFor(Presets.TENNIS_OPEN.format()), StartOptions(ScorerOption.THIS_PHONE))
+        repeat(3) { rig.phone.recordPoint(Side.A) }
+        rig.phone.recordPoint(Side.B)
+        val last =
+            assertNotNull(
+                rig.phone.active.value
+                    ?.lastPoint,
+            )
+        assertTrue(
+            rig.phone.active.value!!
+                .serveInfoEnabled,
+        )
+        assertTrue(rig.phone.setServeInfo(last.id, eu.advantly.core.scoring.ServeOutcome.DOUBLE_FAULT))
+        assertEquals(
+            eu.advantly.core.scoring.ServeOutcome.DOUBLE_FAULT,
+            rig.phone.active.value
+                ?.lastPoint
+                ?.serve,
+        )
+        assertTrue(rig.phone.removeLastPointOf(Side.A))
+        assertEquals(
+            SidePair(2, 1),
+            rig.phone.active.value
+                ?.state
+                ?.current
+                ?.points,
+        )
+        assertEquals(
+            SidePair(true, true),
+            rig.phone.active.value
+                ?.canRemovePoint,
+        )
+        repeat(24) { rig.phone.recordPoint(Side.A) }
+        assertTrue(
+            rig.phone.active.value!!
+                .nextSetOptions
+                .contains(eu.advantly.core.scoring.NextSetKind.TIEBREAK_7),
+        )
+        assertTrue(rig.phone.startNextSet(eu.advantly.core.scoring.NextSetKind.TIEBREAK_7))
+        rig.settle()
+        assertEquals(
+            eu.advantly.core.scoring.SetKind.MATCH_TIEBREAK,
+            rig.watch.state.value.match
+                ?.state
+                ?.current
+                ?.setKind,
+        )
+        assertFalse(rig.watch.removeLastPointOf(Side.A), "Uhr zeigt nur an")
+    }
+
     @Test
     fun recentPlayersReadMatchHistoryWithSportPriorityAndDeduplication() {
         val rig = Rig(watchOnline = false)

@@ -24,11 +24,16 @@ import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PointDetailRules
+import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +93,9 @@ class InMemoryMatchStore(
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+
+    /** Ein Gerät: nie ein Versionsunterschied. */
+    override val updateRequired: StateFlow<UpdateRequired?> = MutableStateFlow<UpdateRequired?>(null).asStateFlow()
 
     /** Anzahl der Neuabfragen ([refreshWatchStatus]) – für Tests. */
     var watchRefreshes: Int = 0
@@ -173,6 +181,44 @@ class InMemoryMatchStore(
             if (matchTiebreak && (!anotherSet || e.setup.format.matchTiebreak == null)) return@command false
             append(e, ContinueDecision(anotherSet, if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR))
         }
+
+    override fun startNextSet(kind: NextSetKind): Boolean =
+        command(clearRedo = true) { e ->
+            if (e.engine.state.status != MatchStatus.AWAITING_DECISION) return@command false
+            append(e, ScoringEngine.nextSetDecision(e.setup.format, kind) ?: return@command false)
+        }
+
+    override fun removeLastPointOf(side: Side): Boolean =
+        command(clearRedo = false) { e ->
+            val target = ScoringEngine.lastEffectivePointOf(e.engine, side) ?: return@command false
+            val undo = appendEvent(e, Undo(target)) ?: return@command false
+            e.redo.addLast(undo.id)
+            true
+        }
+
+    override fun chooseServer(player: PlayerId): Boolean =
+        command(clearRedo = false) { e ->
+            val state = e.engine.state
+            val choice = state.serverChoice ?: return@command false
+            val setIndex = state.current?.setIndex ?: return@command false
+            val side = e.setup.lineup.sideOf(player) ?: return@command false
+            if (player !in choice.players) return@command false
+            choice.chosen == player || append(e, ServerChosen(setIndex, side, player))
+        }
+
+    override fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean =
+        command(clearRedo = false) { e ->
+            if (!serveInfoEnabled(e)) return@command false
+            val point = e.engine.point(pointId) ?: return@command false
+            if (value == ServeOutcome.DOUBLE_FAULT && point.side == point.servingSide) return@command false
+            val detail = PointDetailRules.withServe(point.detail, value)
+            detail == point.detail || append(e, PointDetailSet(pointId, detail))
+        }
+
+    private fun serveInfoEnabled(e: Entry): Boolean = e.setup.format.sport.isTennisLike && e.setup.meta.serveStats
 
     override fun endMatch(
         reason: EndReason,
@@ -419,6 +465,18 @@ class InMemoryMatchStore(
                     scorerKind = DeviceKind.PHONE,
                     sync = SyncInfo.LOCAL_ONLY,
                     absorbedTaps = e.engine.absorbedEvents.size,
+                    lastPoint =
+                        e.engine.lastPoint?.let {
+                            LastPointInfo(it.id, it.side, it.servingSide, it.server, it.detail?.serve, it.side != it.servingSide)
+                        },
+                    serveInfoEnabled = serveInfoEnabled(e),
+                    canRemovePoint = SidePair.of { ScoringEngine.lastEffectivePointOf(e.engine, it) != null },
+                    nextSetOptions =
+                        if (e.engine.state.status == MatchStatus.AWAITING_DECISION) {
+                            ScoringEngine.nextSetOptions(e.setup.format)
+                        } else {
+                            emptyList()
+                        },
                 )
             }
         historyFlow.value =

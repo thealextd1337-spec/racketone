@@ -169,8 +169,11 @@ data class MatchTiebreakFormat(
     override val kind: SetFormatKind get() = SetFormatKind.MATCH_TIEBREAK
 
     companion object {
-        /** MTB10: bis 10, 2 Vorsprung, Wechsel alle 6 Punkte. */
+        /** MTB10 („Champions-Tiebreak“): bis 10, 2 Vorsprung, Wechsel alle 6 Punkte. */
         val MTB10: MatchTiebreakFormat = MatchTiebreakFormat(10, 2, EndChange(6, 6))
+
+        /** MTB7 (Tiebreak als eigener Satz, ITF App. VI 3): bis 7, 2 Vorsprung, Wechsel alle 6 Punkte. */
+        val MTB7: MatchTiebreakFormat = MatchTiebreakFormat(7, 2, EndChange(6, 6))
     }
 }
 

@@ -216,6 +216,20 @@ class MatchWizardTest {
         assertTrue(w.state.value.canStart)
     }
 
+    /** Review: strukturell gleiche Presets werden eindeutig erkannt (vorhandene ID, sonst bevorzugte statt Alias). */
+    @Test
+    fun recognizePresetIsUniqueForTiebreakOnly() {
+        val champions =
+            eu.advantly.core.scoring.Presets.TENNIS_TIEBREAK_ONLY_10
+                .format()
+        assertEquals("TENNIS_TIEBREAK_ONLY_10", MatchWizard.recognizePreset(champions))
+        assertEquals("TENNIS_TIEBREAK_ONLY_10", MatchWizard.recognizePreset(champions.copy(presetId = null)))
+        val legacy =
+            eu.advantly.core.scoring.Presets.TENNIS_MATCH_TB_ONLY
+                .format()
+        assertEquals("TENNIS_MATCH_TB_ONLY", MatchWizard.recognizePreset(legacy), "bestehende ID bleibt")
+    }
+
     @Test
     fun everyOfferedOptionCombinationIsValid() {
         for (sport in Sport.entries) {

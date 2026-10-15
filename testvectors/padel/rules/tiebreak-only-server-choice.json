@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "GV-PAD-RULE-TIEBREAK-ONLY-SERVER-CHOICE",
+  "title": "Regel-Szenario tiebreak-only-server-choice (generiert)",
+  "description": "Nur Tiebreak bis 7 im Doppel mit Aufschlägerwahl (erster Punkt / erster Aufschlag des anderen Teams) Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.",
+  "sources": ["Advantly 02-scoring-regeln.md §6–§9; Regel-Tabellen-Tests in core-scoring/commonTest"],
+  "config": {"formatVersion":1,"presetId":"PADEL_TIEBREAK_ONLY_7","sport":"PADEL","discipline":"DOUBLES","match":{"mode":"BEST_OF","bestOf":1},"game":{"deuceMode":"DECIDING_POINT"},"set":{"gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},"decidingSet":{"kind":"MATCH_TIEBREAK","pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}},"matchTiebreak":null},
+  "lineup": {"A":["A1","A2"],"B":["B1","B2"],"firstServer":"A1"},
+  "events": [
+    {"id":"e1","type":"ServerChosen","set":0,"side":"B","player":"B1"},
+    {"id":"e2","type":"PointWon","side":"A"},
+    {"id":"e3","type":"ServerChosen","set":0,"side":"A","player":"A2"},
+    {"id":"e4","type":"PointWon","side":"B"},
+    {"id":"e5","type":"PointWon","side":"A"},
+    {"id":"e6","type":"PointWon","side":"B"},
+    {"id":"e7","type":"PointWon","side":"A"},
+    {"id":"e8","type":"PointWon","side":"B"},
+    {"id":"e9","type":"PointWon","side":"A"},
+    {"id":"e10","type":"PointWon","side":"B"},
+    {"id":"e11","type":"PointWon","side":"A"},
+    {"id":"e12","type":"PointWon","side":"B"},
+    {"id":"e13","type":"PointWon","side":"A"},
+    {"id":"e14","type":"PointWon","side":"A"}
+  ],
+  "expect": [
+    {"afterEvent":0,"label":"Start","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"MATCH_TIEBREAK","gameKind":"MATCH_TIEBREAK","games":{"A":0,"B":0},"points":{"A":0,"B":0},"display":{"A":"0","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"0-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":[],"ignoredEvents":[],"continuation":null,"scorerDeviceId":null,"rejectedByRole":[],"serverChoice":{"game":1,"side":"A","players":["A1","A2","B1","B2"],"chosen":null}}},
+    {"afterEvent":5,"label":"nach e5","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"MATCH_TIEBREAK","gameKind":"MATCH_TIEBREAK","games":{"A":0,"B":0},"points":{"A":2,"B":1},"display":{"A":"2","B":"1"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"B","player":"B2","court":"LEFT","serverNumber":null,"receiver":"A2","servesRemaining":null},"scoreCall":"1-2","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["POINT"],"ignoredEvents":[],"continuation":null,"scorerDeviceId":null,"rejectedByRole":[],"serverChoice":null}},
+    {"afterEvent":8,"label":"nach e8","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"MATCH_TIEBREAK","gameKind":"MATCH_TIEBREAK","games":{"A":0,"B":0},"points":{"A":3,"B":3},"display":{"A":"3","B":"3"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"3-3","positions":null,"ends":{"A":"END_2","B":"END_1"},"statusFlags":[],"effects":["POINT","CHANGE_ENDS"],"ignoredEvents":[],"continuation":null,"scorerDeviceId":null,"rejectedByRole":[],"serverChoice":null}},
+    {"afterEvent":10,"label":"nach e10","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"MATCH_TIEBREAK","gameKind":"MATCH_TIEBREAK","games":{"A":0,"B":0},"points":{"A":4,"B":4},"display":{"A":"4","B":"4"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"B","player":"B1","court":"RIGHT","serverNumber":null,"receiver":"A1","servesRemaining":null},"scoreCall":"4-4","positions":null,"ends":{"A":"END_2","B":"END_1"},"statusFlags":[],"effects":["POINT"],"ignoredEvents":[],"continuation":null,"scorerDeviceId":null,"rejectedByRole":[],"serverChoice":null}},
+    {"afterEvent":14,"label":"nach e14","state":{"status":"FINISHED","pending":null,"result":{"winner":"A","reason":"COMPLETED"},"setsWon":{"A":1,"B":0},"sets":[{"kind":"MATCH_TIEBREAK","games":{"A":1,"B":0},"tiebreak":{"A":7,"B":5},"points":null,"winner":"A"}],"current":null,"serve":null,"scoreCall":null,"positions":null,"ends":{"A":"END_2","B":"END_1"},"statusFlags":[],"effects":["POINT","GAME_WON","SET_WON","MATCH_WON"],"ignoredEvents":[],"continuation":{"side":"A","player":"A2"},"scorerDeviceId":null,"rejectedByRole":[],"serverChoice":null}}
+  ]
+}

@@ -92,7 +92,7 @@ object EventLog {
         return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved, roleRejected, scorer)
     }
 
-    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5). */
+    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5, seit 2026-10-15 auch `ServerChosen`). */
     fun isScorerOnly(payload: EventPayload): Boolean =
         payload is PointWon ||
             payload is Undo ||
@@ -101,7 +101,8 @@ object EventLog {
             payload is Paused ||
             payload is Resumed ||
             payload is MatchEnded ||
-            payload is PointDetailSet
+            payload is PointDetailSet ||
+            payload is ServerChosen
 
     /**
      * Rollenregel (02 §7.5): Vorwärts durch die Ordnung; `ScorerChanged` setzt den Zähler ab seiner Position. Ein

@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "TV-PAD-005",
+  "title": "Padel Doppel: Match nur aus einem Super-Tiebreak bis 10 mit Aufschlägerwahl",
+  "description": "Preset PADEL_TIEBREAK_ONLY_10 (Best of 1, decidingSet = MATCH_TIEBREAK bis 10). Prüft die Aufschlägerwahl im Tiebreak-Satz (Game 1 = erster Punkt, Game 2 = erster Aufschlag des anderen Teams), Rotation B2-A2-B1-A1 in 1-2-2-Folge, Seitenwechsel alle 6 Punkte und Ende 10:8.",
+  "sources": ["FIP Rules of Padel (Review 01.01.2026), Tie-break, Alternative score methods 1c", "Advantly 02-scoring-regeln.md §4.2, §6.5.5 (Entscheidung 2026-10-15)"],
+  "config": {"formatVersion": 1, "presetId": "PADEL_TIEBREAK_ONLY_10", "sport": "PADEL", "discipline": "DOUBLES", "match": {"mode": "BEST_OF", "bestOf": 1}, "game": {"deuceMode": "DECIDING_POINT"}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": {"kind": "MATCH_TIEBREAK", "pointsToWin": 10, "winBy": 2, "endChange": {"first": 6, "every": 6}}, "matchTiebreak": null},
+  "lineup": {"A": ["A1", "A2"], "B": ["B1", "B2"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "ServerChosen", "set": 0, "side": "B", "player": "B2"},
+    {"id": "e2", "type": "PointWon", "side": "A"},
+    {"id": "e3", "type": "ServerChosen", "set": 0, "side": "A", "player": "A2"},
+    {"id": "e4", "type": "PointWon", "side": "B"},
+    {"id": "e5", "type": "PointWon", "side": "A"},
+    {"id": "e6", "type": "PointWon", "side": "B"},
+    {"id": "e7", "type": "PointWon", "side": "A"},
+    {"id": "e8", "type": "PointWon", "side": "B"},
+    {"id": "e9", "type": "PointWon", "side": "A"},
+    {"id": "e10", "type": "PointWon", "side": "B"},
+    {"id": "e11", "type": "PointWon", "side": "A"},
+    {"id": "e12", "type": "PointWon", "side": "B"},
+    {"id": "e13", "type": "PointWon", "side": "A"},
+    {"id": "e14", "type": "PointWon", "side": "B"},
+    {"id": "e15", "type": "PointWon", "side": "A"},
+    {"id": "e16", "type": "PointWon", "side": "B"},
+    {"id": "e17", "type": "PointWon", "side": "A"},
+    {"id": "e18", "type": "PointWon", "side": "B"},
+    {"id": "e19", "type": "PointWon", "side": "A"},
+    {"id": "e20", "type": "PointWon", "side": "A"}
+  ],
+  "expect": [
+    {"afterEvent": 0, "label": "Wahl aus allen vier", "state": {"serverChoice": {"game": 1, "side": "A", "players": ["A1", "A2", "B1", "B2"], "chosen": null}, "current": {"setKind": "MATCH_TIEBREAK"}}},
+    {"afterEvent": 1, "label": "B2 eröffnet", "state": {"serve": {"side": "B", "player": "B2", "court": "RIGHT"}, "serverChoice": {"game": 1, "side": "B", "players": ["B2", "B1", "A1", "A2"], "chosen": "B2"}}},
+    {"afterEvent": 2, "label": "Team A wählt", "state": {"serve": {"side": "A", "player": "A1", "court": "LEFT"}, "serverChoice": {"game": 2, "side": "A", "players": ["A1", "A2"], "chosen": null}}},
+    {"afterEvent": 3, "label": "A2 gewählt", "state": {"serve": {"side": "A", "player": "A2"}, "serverChoice": {"game": 2, "side": "A", "players": ["A2", "A1"], "chosen": "A2"}, "effects": []}},
+    {"afterEvent": 4, "label": "A2 schlägt auch Punkt 3 auf", "state": {"serve": {"side": "A", "player": "A2", "court": "RIGHT"}, "serverChoice": null}},
+    {"afterEvent": 6, "label": "Punkt 5: B1", "state": {"serve": {"side": "B", "player": "B1"}, "current": {"points": {"A": 2, "B": 2}}}},
+    {"afterEvent": 8, "label": "3:3 – Seitenwechsel, Punkt 7: A1", "state": {"serve": {"side": "A", "player": "A1"}, "effects": ["POINT", "CHANGE_ENDS"], "ends": {"A": "END_2", "B": "END_1"}}},
+    {"afterEvent": 10, "label": "Punkt 9: wieder B2", "state": {"serve": {"side": "B", "player": "B2"}}},
+    {"afterEvent": 19, "label": "9:8 – Matchball A", "state": {"current": {"points": {"A": 9, "B": 8}}, "statusFlags": [{"side": "A", "level": "MATCH_POINT", "count": 1, "breakPoint": false}]}},
+    {"afterEvent": 20, "label": "10:8 – Match A", "state": {"status": "FINISHED", "result": {"winner": "A", "reason": "COMPLETED"}, "sets": [{"kind": "MATCH_TIEBREAK", "games": {"A": 1, "B": 0}, "tiebreak": {"A": 10, "B": 8}, "points": null, "winner": "A"}], "serverChoice": null, "ends": {"A": "END_1", "B": "END_2"}}}
+  ]
+}
