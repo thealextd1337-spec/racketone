@@ -55,6 +55,8 @@ JVM-Werkzeug `tools/gate-check` (nutzt `shared/data` + `core-scoring` nur lesend
 | Gerät hat nur eine Teilmenge | Anzeige nicht synchron (z. B. Uhr folgt dem Match nicht mehr) | OFFEN – begründen oder nach Sync neu ziehen |
 | Gerät hat das Match **gar nicht**, obwohl Events von ihm stammen | Daten auf dem Gerät verloren | NICHT BESTANDEN |
 | Gerät hat das Match gar nicht, war aber als Zähler eingesetzt (Genesis/Zählerwechsel) | nie zugestellt | OFFEN |
+| Gerät ohne Geräte-ID (z. B. geleerte DB) hat das Match nicht, beteiligt sind nicht zugeordnete Geräte | Beteiligung nicht widerlegbar | OFFEN – ID mit `--db uhr=<pfad>@<deviceId>` zuordnen |
+| Geräte mit gleichem Event-Satz haben verschiedene Personen-Zuweisungen (Slot → Spieler-ID) | Zuweisung verloren/nicht nachgezogen | OFFEN |
 | Fold nicht berechenbar (z. B. ungültige Besetzung) | Match nicht rekonstruierbar; übrige Matches werden weiter geprüft | NICHT BESTANDEN |
 | Ergebnis-Cache `match_header` passt zum Fold | nur Hinweis | – |
 
@@ -63,9 +65,11 @@ Widersprüche), Events und PointWon **je erzeugendem Gerät**, alle Zählerwechs
 **Punkt-Verlauf**: jedes `PointWon`/`Undo` mit Uhrzeit des erzeugenden Geräts, Gerät und Status (wirksam, rückgängig,
 verworfen (Rolle), Doppel-Tap). Reine Director-Matches ohne Beteiligung einer Uhr gelten nicht als „fehlt auf der Uhr“.
 
-`index.md` enthält zusätzlich einen **Vergleichsteil** (auch als `vergleich.txt`): je Match Event-Zahl, PointWon-Zahl,
-Zuweisungen, Endstand und einen Fingerabdruck (SHA-256 über alle Event-IDs mit Inhalt und die Personen-Zuweisungen) – ohne
-Auswertungszeit, Pfade oder Bestätigungsstatus, also zwischen zwei Läufen direkt vergleichbar (K7).
+`index.md` enthält zusätzlich einen **Vergleichsteil** (auch als `vergleich.txt`): je Match eine Zeile „gesamt“ (Event-Zahl,
+PointWon-Zahl, Fingerabdruck über alle Event-IDs mit Inhalt, Endstand) und **je Geräte-Datenbank** eine Zeile (Event-Zahl und
+-Fingerabdruck dieses Geräts, Zahl und Fingerabdruck seiner Personen-Zuweisungen) – ohne Auswertungszeit, Pfade oder
+Bestätigungsstatus, also zwischen zwei Läufen mit denselben `--db`-Labels direkt vergleichbar (K7). Geht auf der Uhr ein Event
+oder eine Zuweisung verloren, ändert sich ihre Zeile.
 Gelöschte Matches (Löschmarkierung auf dem Handy) erscheinen als GELÖSCHT und zählen nicht.
 
 **Grenze:** Verliert ein Gerät seine **letzten** Events (keine Lücke dahinter) oder wird ein Tipp gar nicht erst zum Event, sieht das
@@ -78,7 +82,7 @@ Verbrauch, **%/h**, mAh (Ladungszähler), Anteile Display an/Ambient/aus, Workou
 Prozessneustarts, größte Messlücke, Zahl der zusammenhängenden Abschnitte. Gewertet werden je Match nur direkt
 aufeinanderfolgende Messpunkte dieses Matches; Lade- oder Leerlaufzeilen dazwischen trennen Abschnitte und werden nie
 überbrückt. Urteil: BESTANDEN (< 15 %/h), NICHT BESTANDEN (≥ 15 %/h), UNKLAR (< 20 min ohne Laden **oder** ein Akkuanstieg ohne
-erkanntes Laden – ein unklarer Ladeübergang ist nie ein Nachweis).
+erkanntes oder bei unbekanntem Ladezustand – jeder Anstieg ist eine Abschnittsgrenze und nie ein Nachweis).
 
 ### 2.4 Skript `tools/p1-gate/pull-and-compare.ps1`
 
@@ -203,7 +207,9 @@ Das Skript beendet die App per `force-stop`, damit Datenbank und WAL-Datei zusam
 .\gradlew.bat :tools:gate-check:gateCheck --args="compare --db handy=H:/p1-gate/x/roh/handy/advantly.db --db pixel=H:/p1-gate/x/roh/pixel/advantly.db --out H:/p1-gate/x/berichte --since 2026-10-20"
 ```
 
-Die erste `--db` ist die Referenz (Handy). Weitere Optionen: `--match <ID-Anfang oder -Ende>`, `--strict`.
+Die erste `--db` ist die Referenz (Handy). Weitere Optionen: `--match <ID-Anfang oder -Ende>`, `--strict`. Hat eine Datenbank
+keine Geräte-ID mehr (App-Daten gelöscht), die ID anhängen: `--db pixel=H:/…/advantly.db@<deviceId>` (die ID steht im Match-Bericht
+eines früheren Laufs bzw. als Autor „watch-…“ in der Handy-Datenbank; widerspricht sie einer vorhandenen ID, bricht der Vergleich ab).
 Pfade mit Leerzeichen in einfache Anführungszeichen setzen (`--db 'handy=H:/p1 gate/…'`). Datenbank von Hand ziehen:
 
 ```powershell

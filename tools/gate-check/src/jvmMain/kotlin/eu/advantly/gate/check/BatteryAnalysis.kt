@@ -133,6 +133,7 @@ object BatteryAnalysis {
         var restarts = 0
         var maxGap = 0L
         var rises = 0
+        var unknownRises = 0
         var segments = 0
         var last: FieldSample? = null
         pairs.forEach { (prev, cur) ->
@@ -145,11 +146,14 @@ object BatteryAnalysis {
             if (!samePid) restarts++
             val charging = prev.charging == true || cur.charging == true
             val knownState = prev.charging != null && cur.charging != null
+            val rise = prev.battery != null && cur.battery != null && cur.battery > prev.battery
             if (charging) {
                 chargingMs += dt
+            } else if (rise) {
+                // Jeder Anstieg ohne erkanntes Laden ist ein Ladeübergang: Abschnittsgrenze, nie Verbrauchsnachweis
+                rises++
+                if (!knownState) unknownRises++
             } else if (knownState && prev.battery != null && cur.battery != null) {
-                // Anstieg ohne erkanntes Laden = unklarer Ladeübergang: darf nie als Verbrauchsnachweis gelten
-                if (cur.battery > prev.battery) rises++
                 dischargeMs += dt
                 drop += prev.battery - cur.battery
                 if (prev.chargeUah != null && cur.chargeUah != null) {
@@ -174,6 +178,10 @@ object BatteryAnalysis {
         val dischargeMinutes = dischargeMs / MINUTE
         val (verdict, reason) =
             when {
+                unknownRises > 0 -> {
+                    BatteryVerdict.UNCLEAR to "Akkuanstieg bei unbekanntem Ladezustand ($unknownRises×) – unklarer Ladeübergang"
+                }
+
                 rises > 0 -> {
                     BatteryVerdict.UNCLEAR to "Akkuanstieg ohne erkanntes Laden ($rises×) – unklarer Ladeübergang"
                 }

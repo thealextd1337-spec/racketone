@@ -7,7 +7,7 @@ import kotlin.system.exitProcess
 
 private const val USAGE = """P1-Gate-Werkzeuge (docs/release/p1-gate-protokoll.md)
 
-  compare --db <label>=<advantly.db> [--db <label>=<advantly.db> …] --out <verzeichnis>
+  compare --db <label>=<advantly.db>[@<deviceId>] [--db …] --out <verzeichnis>
           [--since <JJJJ-MM-TT>] [--match <id-präfix>] [--strict]
       Vergleicht die Datenbanken (erste = Referenz, das Handy). Schreibt index.md + je Match eine Datei.
       --strict: Exit-Code 1 bei NICHT BESTANDEN, 2 bei OFFEN.
@@ -55,12 +55,23 @@ private fun compare(options: Options): Int {
     val dbs =
         options.all("db").map { spec ->
             val label = spec.substringBefore('=', "")
-            val path = spec.substringAfter('=', "")
-            require(label.isNotBlank() && path.isNotBlank()) { "--db erwartet <label>=<pfad>, nicht '$spec'" }
-            label to File(path)
+            var path = spec.substringAfter('=', "")
+            // Optional: <pfad>@<deviceId> – Geräte-ID ohne Pfadtrenner hinter dem letzten @
+            val at = path.lastIndexOf('@')
+            val deviceId =
+                if (at > 0 &&
+                    path.substring(at + 1).let { it.isNotBlank() && '/' !in it && '\\' !in it }
+                ) {
+                    path.substring(at + 1)
+                } else {
+                    null
+                }
+            if (deviceId != null) path = path.substring(0, at)
+            require(label.isNotBlank() && path.isNotBlank()) { "--db erwartet <label>=<pfad>[@<deviceId>], nicht '$spec'" }
+            DbSpec(label, File(path), deviceId)
         }
     require(dbs.isNotEmpty()) { "mindestens eine --db angeben (erste = Handy/Referenz)" }
-    require(dbs.map { it.first }.toSet().size == dbs.size) { "Labels müssen eindeutig sein" }
+    require(dbs.map { it.label }.toSet().size == dbs.size) { "Labels müssen eindeutig sein" }
     val out = File(options.one("out") ?: throw IllegalArgumentException("--out fehlt"))
     val since =
         options.one("since")?.let {
@@ -72,7 +83,10 @@ private fun compare(options: Options): Int {
         }
     val prefix = options.one("match")
 
-    val snapshots = dbs.map { (label, file) -> DeviceDatabase.load(label, file) }
+    val snapshots = dbs.map { DeviceDatabase.load(it.label, it.file, it.deviceId) }
+    snapshots.filter { it.ownDeviceId == null }.forEach {
+        println("Warnung: ${it.label} ohne Geräte-ID (geleerte Datenbank?) – mit --db ${it.label}=<pfad>@<deviceId> zuordnen.")
+    }
     val results =
         IntegrityCheck.check(snapshots) { id, created ->
             (prefix == null || id.startsWith(prefix) || id.endsWith(prefix)) &&
@@ -80,7 +94,7 @@ private fun compare(options: Options): Int {
         }
     out.mkdirs()
     val now = System.currentTimeMillis()
-    File(out, "index.md").writeText(IntegrityReport.index(results, dbs.map { it.first to it.second.absolutePath }, now))
+    File(out, "index.md").writeText(IntegrityReport.index(results, dbs.map { it.label to it.file.absolutePath }, now))
     File(out, "vergleich.txt").writeText(IntegrityReport.comparison(results))
     results.forEach { File(out, IntegrityReport.fileName(it)).writeText(IntegrityReport.match(it)) }
 
@@ -121,6 +135,12 @@ private fun battery(options: Options): Int {
     println("Bericht: ${file.absolutePath}")
     return 0
 }
+
+private data class DbSpec(
+    val label: String,
+    val file: File,
+    val deviceId: String?,
+)
 
 /** Minimaler Parser für `--key value`, `--key=value` und Schalter. */
 class Options private constructor(

@@ -266,4 +266,28 @@ class BatteryAnalysisTest {
         assertNull(section.ratePerHour)
         assertEquals(BatteryVerdict.UNCLEAR, section.verdict)
     }
+
+    @Test
+    fun riseWithUnknownChargingStateIsUnclear() {
+        // Review: 90→85 %, dann 100 % bei charging=null, danach normale Entladung – früher BESTANDEN 9,31 %/h
+        val samples =
+            (0..30).map { sample(it, 90 - it / 6) } +
+                sample(31, 100).copy(charging = null) +
+                (32..70).map { sample(it, 100 - (it - 32) / 6) }
+
+        val section = BatteryAnalysis.perMatch(FieldLog(samples, 0)).single()
+
+        assertEquals(1, section.rises)
+        assertEquals(BatteryVerdict.UNCLEAR, section.verdict)
+        assertTrue("unbekanntem Ladezustand" in section.reason, section.reason)
+    }
+
+    @Test
+    fun risePairIsABoundaryNotDischarge() {
+        val samples = listOf(sample(0, 90), sample(30, 80), sample(31, 95), sample(61, 90))
+        val section = BatteryAnalysis.section("m", "m", null, samples)
+        assertEquals(60.0, section.dischargeMinutes, 1e-9)
+        assertEquals(15, section.dropPercent)
+        assertEquals(BatteryVerdict.UNCLEAR, section.verdict)
+    }
 }

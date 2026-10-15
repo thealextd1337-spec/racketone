@@ -12,6 +12,7 @@ import java.nio.file.Files
 import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -56,6 +57,29 @@ class DeviceDatabaseTest {
     }
 
     @Test
+    fun deviceIdFromCommandLineFillsEmptyDatabaseAndMustMatch() {
+        val dir = Files.createTempDirectory("gate-id").toFile()
+        try {
+            val file = File(dir, "advantly.db")
+            JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}", Properties(), AdvantlyDatabase.Schema).close()
+
+            assertNull(DeviceDatabase.load("uhr", file).ownDeviceId)
+            assertEquals(WATCH, DeviceDatabase.load("uhr", file, WATCH).ownDeviceId)
+
+            val named = File(dir, "named.db")
+            writeDb(named, WATCH, emptyList())
+            assertEquals(WATCH, DeviceDatabase.load("uhr", named, WATCH).ownDeviceId)
+            assertFailsWith<IllegalArgumentException> { DeviceDatabase.load("uhr", named, "other") }
+
+            val out = File(dir, "out")
+            val code = run(listOf("compare", "--db", "handy=${named.path}", "--db", "uhr=${file.path}@$WATCH", "--out", out.path))
+            assertEquals(0, code)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun endToEndCompareWritesReports() {
         val dir = Files.createTempDirectory("gate-e2e").toFile()
         try {
@@ -80,7 +104,9 @@ class DeviceDatabaseTest {
             assertEquals(0, code)
             val index = File(out, "index.md").readText()
             assertTrue("**Gesamt: BESTANDEN**" in index, index)
-            assertTrue(File(out, "vergleich.txt").readText().startsWith("$MATCH events=4 pointWon=3"))
+            val comparison = File(out, "vergleich.txt").readLines()
+            assertTrue(comparison[0].startsWith("$MATCH gesamt events=4 pointWon=3"), comparison.toString())
+            assertEquals(listOf("handy", "uhr"), comparison.drop(1).map { it.split(' ')[1] })
             assertEquals(1, out.listFiles()!!.count { it.name.startsWith("match-") && "-tennis-" in it.name })
         } finally {
             dir.deleteRecursively()

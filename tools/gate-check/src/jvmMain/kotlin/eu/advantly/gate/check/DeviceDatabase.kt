@@ -59,9 +59,14 @@ data class DeviceSnapshot(
 object DeviceDatabase {
     private val SIDE_FILES = listOf("-wal", "-shm", "-journal")
 
+    /**
+     * @param deviceId Geräte-ID aus der Kommandozeile (`--db label=pfad@deviceId`), z. B. wenn die Datenbank der Uhr
+     *   geleert wurde. Widerspricht sie der ID in der Datenbank, bricht der Vergleich ab.
+     */
     fun load(
         label: String,
         file: File,
+        deviceId: String? = null,
     ): DeviceSnapshot {
         require(file.isFile) { "Datenbank nicht gefunden: ${file.absolutePath}" }
         val dir = Files.createTempDirectory("advantly-gate-").toFile()
@@ -74,7 +79,12 @@ object DeviceDatabase {
             }
             val driver = JdbcSqliteDriver("jdbc:sqlite:${copy.absolutePath}", Properties(), AdvantlyDatabase.Schema)
             try {
-                return read(label, driver)
+                val snapshot = read(label, driver)
+                if (deviceId == null) return snapshot
+                require(snapshot.ownDeviceId == null || snapshot.ownDeviceId == deviceId) {
+                    "$label: Geräte-ID $deviceId passt nicht zur Datenbank (${snapshot.ownDeviceId})"
+                }
+                return snapshot.copy(ownDeviceId = deviceId)
             } finally {
                 driver.close()
             }

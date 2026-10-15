@@ -50,7 +50,8 @@ object IntegrityReport {
             appendLine("## Vergleichsteil (stabil zwischen Läufen, K7)")
             appendLine()
             appendLine("Identisch mit `vergleich.txt`; vor/nach einem Update vergleichen (`fc vergleich.txt …`). Fingerabdruck =")
-            appendLine("SHA-256 über alle Event-IDs mit Inhalt und die Personen-Zuweisungen (ohne Bestätigungsstatus, Zeitpunkt, Pfade).")
+            appendLine("SHA-256 über alle Event-IDs mit Inhalt (`fp`) bzw. die Personen-Zuweisungen (`zfp`), je Match gesamt und je Gerät")
+            appendLine("(ohne Bestätigungsstatus, Zeitpunkt, Pfade). Beide Läufe mit denselben `--db`-Labels.")
             appendLine()
             appendLine("```")
             append(comparison(results))
@@ -148,7 +149,7 @@ object IntegrityReport {
             results
                 .filter { it.verdict != Verdict.DELETED }
                 .sortedBy { it.matchId }
-                .forEach { m -> appendLine(m.comparison?.line(m.matchId) ?: "${m.matchId} nicht auswertbar") }
+                .forEach { m -> (m.comparison?.lines(m.matchId) ?: listOf("${m.matchId} nicht auswertbar")).forEach(::appendLine) }
         }
 
     private fun marker(verdict: Verdict): String =

@@ -14,6 +14,9 @@ import eu.advantly.core.scoring.Undo
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
 import eu.advantly.data.toScoreEventOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.security.MessageDigest
 
 /** Gesamturteil je Match. Reihenfolge = Schwere (für das Gesamturteil über alle Matches). */
@@ -127,13 +130,26 @@ data class TimelineRow(
 data class Comparison(
     val events: Int,
     val pointEvents: Int,
-    val assignments: Int,
     val score: String,
     val fingerprint: String,
+    val devices: List<DeviceComparison> = emptyList(),
 ) {
-    fun line(matchId: String): String =
-        "$matchId events=$events pointWon=$pointEvents zuweisungen=$assignments fp=$fingerprint stand=$score"
+    /** Eine Zeile für die Vereinigung, dann eine je Gerät, das das Match hat (Labels aus der Kommandozeile). */
+    fun lines(matchId: String): List<String> =
+        listOf("$matchId gesamt events=$events pointWon=$pointEvents fp=$fingerprint stand=$score") +
+            devices.map {
+                "$matchId ${it.label} events=${it.events} fp=${it.eventFingerprint} zuweisungen=${it.assignments} zfp=${it.assignmentFingerprint}"
+            }
 }
+
+/** Vergleichsdaten einer Geräte-Datenbank: Events und Personen-Zuweisungen getrennt gehasht. */
+data class DeviceComparison(
+    val label: String,
+    val events: Int,
+    val eventFingerprint: String,
+    val assignments: Int,
+    val assignmentFingerprint: String,
+)
 
 /**
  * Integritätsprüfung „0 verlorene Punkte“ (PLAN Gate P1) über die Datenbanken mehrerer Geräte.
@@ -339,8 +355,24 @@ object IntegrityCheck {
                 (genesisEvent?.payload as? MatchCreated)?.let { add((it.scorerDeviceId ?: genesisEvent.deviceId).value) }
                 unionEvents.mapNotNull { (it.payload as? ScorerChanged)?.scorerDeviceId?.value }.forEach(::add)
             }
+        // Geräte, die an diesem Match beteiligt sind, aber keiner gezogenen Datenbank zugeordnet werden können
+        val knownIds = snapshots.mapNotNull { it.ownDeviceId }.toSet()
+        val foreignIds = (union.values.map { it.deviceId } + scorerIds).toSet() - knownIds
         snapshots.filter { it !== reference && matchId !in it.matches && matchId !in it.tombstones }.forEach { snap ->
-            val own = snap.ownDeviceId ?: return@forEach
+            val own = snap.ownDeviceId
+            if (own == null) {
+                // Ohne Geräte-ID (z. B. geleerte Datenbank) lässt sich Beteiligung nicht widerlegen
+                if (foreignIds.isNotEmpty()) {
+                    findings +=
+                        Finding(
+                            Verdict.OPEN,
+                            "${snap.label} hat keine Geräte-ID und das Match nicht; beteiligt sind nicht zugeordnete Geräte " +
+                                "(${foreignIds.joinToString { names.of(it) }}) – Beteiligung nicht widerlegbar. " +
+                                "Geräte-ID mit --db ${snap.label}=<pfad>@<deviceId> angeben.",
+                        )
+                }
+                return@forEach
+            }
             val authored = union.values.count { it.deviceId == own }
             when {
                 authored > 0 -> {
@@ -427,14 +459,42 @@ object IntegrityCheck {
                 .map { event ->
                     TimelineRow(event.wallClockMs, names.of(event.deviceId.value), event.deviceSeq, what(event), status(event, analysis))
                 }
-        val assignmentSource = (listOf(reference) + holders).firstNotNullOfOrNull { it.matches[matchId] }
+        // Zuweisungen je Gerät: Geräte mit vollständigem Event-Satz müssen dieselben Slot→Spieler-Zuordnungen haben
+        val assignmentViews =
+            holders
+                .filter {
+                    it.matches
+                        .getValue(matchId)
+                        .events
+                        .map { e -> e.id }
+                        .toSet() == union.keys
+                }.map { it.label to playerIds(it.matches.getValue(matchId).assignments) }
+        if (assignmentViews.map { it.second }.distinct().size > 1) {
+            findings +=
+                Finding(
+                    Verdict.OPEN,
+                    "Personen-Zuweisungen weichen zwischen Geräten mit gleichem Event-Satz ab: " +
+                        assignmentViews.joinToString { (label, slots) -> "$label=${slots.size} Slot(s)" } +
+                        " – Zuweisung auf einem Gerät verloren oder nicht nachgezogen.",
+                )
+        }
         val comparison =
             Comparison(
                 events = union.size,
                 pointEvents = union.values.count { it.type == "PointWon" },
-                assignments = assignmentSource?.assignments?.size ?: 0,
                 score = unionFold?.score ?: "—",
-                fingerprint = fingerprint(union.values, assignmentSource?.assignments.orEmpty()),
+                fingerprint = fingerprint(union.values, emptyMap()),
+                devices =
+                    holders.map { snap ->
+                        val data = snap.matches.getValue(matchId)
+                        DeviceComparison(
+                            label = snap.label,
+                            events = data.events.size,
+                            eventFingerprint = fingerprint(data.events, emptyMap()),
+                            assignments = data.assignments.size,
+                            assignmentFingerprint = fingerprint(emptyList(), data.assignments),
+                        )
+                    },
             )
 
         val header = holders.firstNotNullOfOrNull { it.matches.getValue(matchId).header }
@@ -520,6 +580,20 @@ object IntegrityCheck {
         val digest = MessageDigest.getInstance("SHA-256").digest(lines.joinToString("\n").toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }.take(16)
     }
+
+    /** Slot → Spieler-ID (bzw. `null`) aus den gespeicherten Zuweisungen; Anzeigenamen dürfen je Gerät abweichen. */
+    private fun playerIds(assignments: Map<String, String?>): Map<String, String?> =
+        assignments.mapValues { (_, json) ->
+            json?.let {
+                runCatching {
+                    Json
+                        .parseToJsonElement(it)
+                        .jsonObject["id"]
+                        ?.jsonPrimitive
+                        ?.content
+                }.getOrNull() ?: it
+            }
+        }
 
     /** Fehlende Bereiche in 1..max. */
     fun gapsOf(seqs: Collection<Long>): List<LongRange> {

@@ -247,11 +247,66 @@ class IntegrityCheckTest {
         val log = LogBuilder().apply { points(WATCH, A) }
         val results = IntegrityCheck.check(listOf(snapshot("handy", PHONE, MATCH to log.stored())))
 
-        val text = IntegrityReport.comparison(results)
+        val lines = IntegrityReport.comparison(results).lines().filter { it.isNotBlank() }
 
-        assertEquals(1, text.lines().count { it.isNotBlank() })
-        assertTrue(text.startsWith("$MATCH events=2 pointWon=1 zuweisungen=0 fp="), text)
-        assertEquals(text, IntegrityReport.comparison(IntegrityCheck.check(listOf(snapshot("x", PHONE, MATCH to log.stored())))))
+        assertEquals(2, lines.size, lines.toString())
+        assertTrue(lines[0].startsWith("$MATCH gesamt events=2 pointWon=1 fp="), lines[0])
+        assertTrue(lines[1].startsWith("$MATCH handy events=2 fp="), lines[1])
+        assertTrue(lines[1].contains("zuweisungen=0 zfp="), lines[1])
+        val again = IntegrityReport.comparison(IntegrityCheck.check(listOf(snapshot("handy", PHONE, MATCH to log.stored()))))
+        assertEquals(lines, again.lines().filter { it.isNotBlank() })
+    }
+
+    @Test
+    fun lostAssignmentOnWatchIsVisibleInComparisonAndOpen() {
+        val log = LogBuilder().apply { points(WATCH, A) }
+        val slot = mapOf("PARTNER" to """{"id":"p-1","displayName":"Anna"}""")
+
+        fun withAssignments(
+            snap: DeviceSnapshot,
+            a: Map<String, String?>,
+        ) = snap.copy(matches = snap.matches.mapValues { it.value.copy(assignments = a) })
+        val phone = withAssignments(snapshot("handy", PHONE, MATCH to log.stored()), slot)
+        val watchOk =
+            withAssignments(
+                snapshot("uhr", WATCH, MATCH to log.stored()),
+                mapOf("PARTNER" to """{"id":"p-1","displayName":"A."}"""),
+            )
+        val watchLost = withAssignments(snapshot("uhr", WATCH, MATCH to log.stored()), emptyMap())
+
+        val ok = single(phone, watchOk)
+        val lost = single(phone, watchLost)
+
+        // Anzeigename darf je Gerät abweichen, die Spieler-ID nicht
+        assertEquals(Verdict.PASSED, ok.verdict, ok.findings.toString())
+        assertEquals(Verdict.OPEN, lost.verdict)
+        assertTrue(lost.findings.any { "Personen-Zuweisungen weichen" in it.text })
+        val before = IntegrityReport.comparison(listOf(ok))
+        val after = IntegrityReport.comparison(listOf(lost))
+        assertTrue(before != after, "K7-Vergleich muss den Verlust auf der Uhr zeigen")
+        assertTrue(after.lines().any { it.startsWith("$MATCH uhr ") && "zuweisungen=0" in it }, after)
+    }
+
+    @Test
+    fun watchWithoutDeviceIdCannotRefuteParticipation() {
+        // Uhr-DB samt Geräte-ID geleert, Uhr-Events liegen weiter auf dem Handy
+        val log = LogBuilder().apply { points(WATCH, A, B) }
+        val emptyWatch = snapshot("uhr", WATCH).copy(ownDeviceId = null, knownKinds = emptyMap())
+
+        val result = single(snapshot("handy", PHONE, MATCH to log.stored()), emptyWatch)
+
+        assertEquals(Verdict.OPEN, result.verdict, result.findings.toString())
+        assertTrue(result.findings.any { "keine Geräte-ID" in it.text && "@<deviceId>" in it.text })
+        // Mit zugeordneter ID (--db uhr=…@watch-device): Daten auf der Uhr verloren
+        assertEquals(Verdict.FAILED, single(snapshot("handy", PHONE, MATCH to log.stored()), emptyWatch.copy(ownDeviceId = WATCH)).verdict)
+    }
+
+    @Test
+    fun directorMatchStaysPassedWithUnidentifiedWatch() {
+        val log = LogBuilder(scorer = PHONE).apply { points(PHONE, A) }
+        val emptyWatch = snapshot("uhr", WATCH).copy(ownDeviceId = null)
+
+        assertEquals(Verdict.PASSED, single(snapshot("handy", PHONE, MATCH to log.stored()), emptyWatch).verdict)
     }
 
     @Test
