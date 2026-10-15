@@ -208,7 +208,12 @@ class MatchSession(
         scorer: ScorerChoice = ScorerChoice.ThisDevice,
     ): MatchId {
         checkThread()
-        val scorerId = if (scorer is ScorerChoice.Device) scorer.deviceId else deviceId
+        val scorerId =
+            when (scorer) {
+                is ScorerChoice.Device -> scorer.deviceId
+                ScorerChoice.MyWatch -> myWatch()
+                ScorerChoice.ThisDevice -> deviceId
+            }
         return createMatch(format, lineup, meta, scorerId, previous = null)
     }
 
@@ -257,6 +262,33 @@ class MatchSession(
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
+
+    /**
+     * Geräte, die sich irgendwann per `Hello` als [kind] gemeldet haben (gemerkt in den Settings), z. B. die eigene Uhr.
+     */
+    fun knownDevices(kind: PeerKind): List<DeviceId> {
+        checkThread()
+        return data.settings
+            .all()
+            .filter { (key, value) -> key.startsWith(PEER_KIND_PREFIX) && value == kind.name }
+            .map { (key, _) -> DeviceId(key.removePrefix(PEER_KIND_PREFIX)) }
+            .filter { it != deviceId }
+    }
+
+    /** Zähler für [ScorerChoice.MyWatch]: verbundene Uhr, sonst die einzige bekannte, sonst [PENDING_WATCH]. */
+    private fun myWatch(): DeviceId {
+        val connected =
+            targets().mapNotNull { peer -> hellos[peer]?.takeIf { it.kind == PeerKind.WATCH }?.deviceId }.firstOrNull()
+        return connected ?: knownDevices(PeerKind.WATCH).singleOrNull() ?: PENDING_WATCH
+    }
+
+    /** Erste Meldung einer Uhr: ein offenes Match mit Platzhalter-Zähler geht per `ScorerChanged` an sie. */
+    private fun handOverToWaitingWatch(hello: Hello) {
+        if (hello.kind != PeerKind.WATCH) return
+        val m = open ?: return
+        if (m.scorer != PENDING_WATCH || m.status == MatchStatus.FINISHED) return
+        emit(m, listOf(ScorerChanged(hello.deviceId)))
+    }
 
     /**
      * „Zählen übernehmen“ (02 §7.5): dieses Gerät wird Zähler (`ScorerChanged`). Die Bestätigung fragt die UI vorher ab.
@@ -501,6 +533,7 @@ class MatchSession(
         // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
         earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
         if (peer !in helloSent) sendHello(peer)
+        handOverToWaitingWatch(hello)
         sendDeleted(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(open?.record))
@@ -914,10 +947,14 @@ class MatchSession(
             data.settings.get(peerKindKey(device))?.let { name -> PeerKind.entries.firstOrNull { it.name == name } }
         }
 
-    private fun peerKindKey(device: DeviceId) = "session.peerKind.${device.value}"
+    private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
-    private companion object {
-        const val FAVORITES_IN_META = 10L
+    companion object {
+        private const val FAVORITES_IN_META = 10L
+        private const val PEER_KIND_PREFIX = "session.peerKind."
+
+        /** Platzhalter-Zähler „die eigene Uhr, sobald sie sich meldet“ ([ScorerChoice.MyWatch]); zählt selbst nie. */
+        val PENDING_WATCH: DeviceId = DeviceId("pending-watch")
     }
 }
 

@@ -109,6 +109,14 @@ sealed interface ScorerChoice {
     data class Device(
         val deviceId: DeviceId,
     ) : ScorerChoice
+
+    /**
+     * Die eigene Uhr – auch ohne Live-Verbindung (W1-I): verbundene Uhr, sonst die einzige bekannte Uhr (aus einem
+     * früheren `Hello`), sonst Platzhalter [MatchSession.PENDING_WATCH]. Beim Platzhalter übergibt die Session beim
+     * ersten `Hello` einer Uhr per `ScorerChanged` an sie; bis dahin zählt niemand (Anzeige „Warte auf Uhr …“, Ausweg
+     * `takeOverScoring()`).
+     */
+    data object MyWatch : ScorerChoice
 }
 
 /** Callback-Variante von [MatchSession.state] (für die Swift-Facade ohne Flows). Aufruf auf dem Scheduler-Thread. */

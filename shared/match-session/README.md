@@ -105,6 +105,18 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
   `data.players.self()` lesen (nicht zwischenspeichern – er kann sich nach dem ersten `Hello` ändern) und Spieler-IDs
   mit `data.isSelf(id)` als „Ich“ anzeigen. Sonst nichts; der Austausch läuft in der Session.
 
+## „Meine Uhr“ ohne Live-Verbindung (`ScorerChoice.MyWatch`, W1-I)
+
+- Zähler wird die **verbundene** Uhr, sonst die **einzige bekannte** Uhr (aus einem früheren `Hello`,
+  `knownDevices(WATCH)`), sonst der Platzhalter `MatchSession.PENDING_WATCH`.
+- Platzhalter: Niemand zählt; beim ersten `Hello` einer Uhr gibt die Session das offene Match per `ScorerChanged` an
+  sie ab. „Doch am Handy zählen“ = `takeOverScoring()` – danach übergibt die Session nicht mehr automatisch.
+- Ob „Meine Uhr“ angeboten wird, entscheidet die App über `CompanionDetector` (`device-link`: Wear-Capability mit
+  `FILTER_ALL` bzw. `WCSession.isPaired && isWatchAppInstalled`), nicht über eine laufende Verbindung.
+- **Uhr-Apps:** Zusätzlich zu den Punkten unter „Identität“ sollte die Uhr beim Empfang von Nachrichten geweckt werden
+  (Wear: eigener `WearableListenerService`, siehe Phone-Variante `PhoneSyncListenerService`), damit sie das Match
+  zeitnah übernimmt.
+
 ## `dataRevision` und `MatchMeta.watchWorkout`
 
 - `SessionState.dataRevision` steigt bei Änderungen außerhalb des offenen Matches (empfangene/eigene Löschung,
