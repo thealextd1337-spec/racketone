@@ -62,9 +62,14 @@ class AppFlowTest {
         scroll: Boolean,
     ) = if (scroll) click(tag) else onNodeWithTag(tag).performClick()
 
-    private fun ComposeUiTest.addGuest(name: String) {
-        onNodeWithTag("guest_name_input").performScrollTo().performTextInput(name)
-        click("guest_add")
+    private fun ComposeUiTest.addGuest(
+        name: String,
+        place: String,
+    ) {
+        click(place)
+        click("player_create")
+        onNodeWithTag("picker_name").performTextInput(name)
+        click("picker_add")
     }
 
     /** Assistent über die UI: Sportart → (Belag/Umgebung) → Spieler (Gäste per Name) → Format → Wer zählt? → Start. */
@@ -84,7 +89,7 @@ class AppFlowTest {
         if (doubles && sport != Sport.PADEL) click("discipline_1")
         onNodeWithTag("wizard_next").assertIsNotEnabled()
         val names = if (doubles) listOf("Jonas", "Mia", "Tom") else listOf("Jonas")
-        names.forEach { addGuest(it) }
+        names.zip(listOf("slot_B_0", "slot_A_1", "slot_B_1")).forEach { (name, place) -> addGuest(name, place) }
         click("wizard_next", scroll = false)
         beforeStart()
         click("wizard_next", scroll = false)

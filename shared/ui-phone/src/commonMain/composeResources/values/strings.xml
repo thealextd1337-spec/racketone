@@ -85,7 +85,6 @@
     <string name="wizard_team_us">Us</string>
     <string name="wizard_team_them">Opponents</string>
     <string name="wizard_you">You · %1$s</string>
-    <string name="wizard_partner">Partner</string>
     <string name="wizard_empty_slot">Pick a player or add a guest</string>
     <string name="wizard_swap_order">Swap order</string>
     <string name="wizard_team_order_hint_tennis">Top player serves first for the team.</string>
@@ -385,7 +384,7 @@
     <string name="wizard_choose_player">Choose player</string>
     <string name="wizard_new_player">Create new player</string>
     <string name="wizard_player_actions">Player: %1$s</string>
-    <string name="wizard_change_place">Swap or move to a place</string>
+    <string name="wizard_change_place">Swap or move</string>
     <string name="wizard_remove_player">Remove player</string>
     <string name="wizard_choose_place">Choose destination</string>
     <string name="wizard_place">%1$s, place %2$d: %3$s</string>

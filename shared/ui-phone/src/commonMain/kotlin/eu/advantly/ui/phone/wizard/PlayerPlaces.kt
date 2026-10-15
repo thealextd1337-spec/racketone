@@ -25,10 +25,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,6 +77,12 @@ import eu.advantly.ui.phone.resources.wizard_team_them
 import eu.advantly.ui.phone.resources.wizard_team_us
 import org.jetbrains.compose.resources.stringResource
 
+private val PlayerPlaceSaver =
+    listSaver<PlayerPlace?, String>(
+        save = { place -> place?.let { listOf(it.side.name, it.index.toString()) }.orEmpty() },
+        restore = { values -> values.takeIf { it.isNotEmpty() }?.let { PlayerPlace(Side.valueOf(it[0]), it[1].toInt()) } },
+    )
+
 /** Gemeinsamer Aktionspfad für Ziehen und die barrierearme Platzwahl per Tippen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,32 +93,24 @@ internal fun PlayerPlaces(
 ) {
     val colors = AdvantlyTheme.colors
     val current by rememberUpdatedState(state)
-    val bounds = remember(state.input.discipline, state.input.sport) { mutableStateMapOf<PlayerPlace, Rect>() }
+    val bounds = remember(state.input.discipline, state.input.sport) { mutableMapOf<PlayerPlace, Rect>() }
     var dragged by remember { mutableStateOf<PlayerPlace?>(null) }
-    var pointer by remember { mutableStateOf(Offset.Zero) }
+    var target by remember { mutableStateOf<PlayerPlace?>(null) }
     var delta by remember { mutableStateOf(Offset.Zero) }
-    var selected by remember { mutableStateOf<PlayerPlace?>(null) }
-    var destination by remember { mutableStateOf(false) }
-    var creating by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
+    var selected by rememberSaveable(state.input.discipline, state.input.sport, stateSaver = PlayerPlaceSaver) {
+        mutableStateOf<PlayerPlace?>(null)
+    }
+    var destination by rememberSaveable { mutableStateOf(false) }
+    var creating by rememberSaveable { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
     val haptic = LocalHapticFeedback.current
-    val validTargets =
-        dragged
-            ?.let { from ->
-                PlayerSelection.places(state.input).filter { to ->
-                    PlayerSelection.exchange(state.input, from, to, state.selfId) != state.input
-                }
-            }.orEmpty()
-    val target =
-        bounds.entries
-            .firstOrNull { it.key in validTargets && it.value.contains(pointer) }
-            ?.key
-            .takeIf { dragged != null }
+    val changePlace = stringResource(Res.string.wizard_change_place)
     val action = stringResource(Res.string.wizard_place_action)
     val hint = stringResource(Res.string.wizard_drag_hint)
     LaunchedEffect(state.input.discipline, state.input.sport) {
         dragged = null
-        selected = null
+        target = null
+        delta = Offset.Zero
     }
 
     Side.entries.forEach { side ->
@@ -139,6 +138,7 @@ internal fun PlayerPlaces(
                 state.input.team(side).forEachIndexed { index, player ->
                     val place = PlayerPlace(side, index)
                     val label = placeLabel(state, place)
+                    val moveTargets = PlayerSelection.validTargets(state.input, place, state.selfId)
                     val highlight by animateColorAsState(if (target == place && place != dragged) teamColor else colors.surface)
                     Row(
                         Modifier
@@ -155,29 +155,38 @@ internal fun PlayerPlaces(
                                     shadowElevation = 4.dp.toPx()
                                 }
                             }.background(highlight, Radii.chipShape)
-                            .pointerInput(place, player?.id) {
-                                if (player != null && (player.id != current.selfId || doubles)) {
+                            .pointerInput(place, player?.id, doubles, moveTargets) {
+                                if (moveTargets.isNotEmpty()) {
+                                    var pointer = Offset.Zero
+
+                                    fun targetAtPointer(): PlayerPlace? =
+                                        bounds.entries.firstOrNull { it.key in moveTargets && it.value.contains(pointer) }?.key
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = { local ->
                                             selected = null
                                             dragged = place
                                             delta = Offset.Zero
                                             pointer = (bounds[place]?.topLeft ?: Offset.Zero) + local
+                                            target = targetAtPointer()
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
                                         onDrag = { change, amount ->
                                             change.consume()
                                             pointer += amount
+                                            target = targetAtPointer()
                                             delta += amount
                                         },
                                         onDragEnd = {
-                                            val to = bounds.entries.firstOrNull { it.key != dragged && it.value.contains(pointer) }?.key
+                                            val validTargets = PlayerSelection.validTargets(current.input, place, current.selfId)
+                                            val to = targetAtPointer()?.takeIf { it in validTargets }
                                             if (to != null) wizard.exchangePlayers(place, to)
                                             dragged = null
+                                            target = null
                                             delta = Offset.Zero
                                         },
                                         onDragCancel = {
                                             dragged = null
+                                            target = null
                                             delta = Offset.Zero
                                         },
                                     )
@@ -189,8 +198,8 @@ internal fun PlayerPlaces(
                                 name = ""
                             }.semantics {
                                 contentDescription = label
-                                if (player != null && (player.id != state.selfId || doubles)) {
-                                    onLongClick(hint) {
+                                if (moveTargets.isNotEmpty()) {
+                                    onLongClick(changePlace) {
                                         selected = place
                                         destination = true
                                         true
@@ -218,10 +227,13 @@ internal fun PlayerPlaces(
             }
         }
     }
-    Text(hint, style = AdvantlyTheme.typography.caption, color = colors.text2, modifier = Modifier.padding(top = Spacing.s))
+    if (doubles) {
+        Text(hint, style = AdvantlyTheme.typography.caption, color = colors.text2, modifier = Modifier.padding(top = Spacing.s))
+    }
 
     val place = selected ?: return
     val player = current.input.team(place.side).getOrNull(place.index)
+    val moveTargets = PlayerSelection.validTargets(current.input, place, current.selfId)
     ModalBottomSheet(onDismissRequest = { selected = null }, containerColor = colors.surface) {
         Column(
             Modifier
@@ -270,12 +282,14 @@ internal fun PlayerPlaces(
                 }
             } else if (!destination) {
                 SectionTitle(stringResource(Res.string.wizard_player_actions, playerName(player)))
-                AdvantlyButton(
-                    stringResource(Res.string.wizard_change_place),
-                    primary = false,
-                    onClick = { destination = true },
-                    modifier = Modifier.fillMaxWidth().testTag("player_move"),
-                )
+                if (moveTargets.isNotEmpty()) {
+                    AdvantlyButton(
+                        changePlace,
+                        primary = false,
+                        onClick = { destination = true },
+                        modifier = Modifier.fillMaxWidth().testTag("player_move"),
+                    )
+                }
                 if (player.id != state.selfId) {
                     TextButton(
                         onClick = {
@@ -289,19 +303,15 @@ internal fun PlayerPlaces(
                 }
             } else {
                 SectionTitle(stringResource(Res.string.wizard_choose_place))
-                PlayerSelection
-                    .places(current.input)
-                    .filter { to ->
-                        PlayerSelection.exchange(current.input, place, to, current.selfId) != current.input
-                    }.forEach { to ->
-                        TextButton(
-                            onClick = {
-                                wizard.exchangePlayers(place, to)
-                                selected = null
-                            },
-                            modifier = Modifier.fillMaxWidth().testTag("destination_${to.side.name}_${to.index}"),
-                        ) { Text(placeLabel(current, to)) }
-                    }
+                moveTargets.forEach { to ->
+                    TextButton(
+                        onClick = {
+                            wizard.exchangePlayers(place, to)
+                            selected = null
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("destination_${to.side.name}_${to.index}"),
+                    ) { Text(placeLabel(current, to)) }
+                }
             }
         }
     }

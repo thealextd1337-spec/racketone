@@ -85,7 +85,6 @@
     <string name="wizard_team_us">Wir</string>
     <string name="wizard_team_them">Gegner</string>
     <string name="wizard_you">Du · %1$s</string>
-    <string name="wizard_partner">Partner</string>
     <string name="wizard_empty_slot">Spieler wählen oder Gast anlegen</string>
     <string name="wizard_swap_order">Reihenfolge tauschen</string>
     <string name="wizard_team_order_hint_tennis">Oben steht, wer im Team zuerst aufschlägt.</string>

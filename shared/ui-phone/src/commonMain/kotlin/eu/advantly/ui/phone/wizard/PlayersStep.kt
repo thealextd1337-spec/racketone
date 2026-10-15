@@ -3,25 +3,13 @@ package eu.advantly.ui.phone.wizard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Sport
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.WizardUiState
-import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.SegmentedChoice
@@ -30,12 +18,9 @@ import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
-import eu.advantly.ui.phone.resources.wizard_add_guest
-import eu.advantly.ui.phone.resources.wizard_add_guest_hint
 import eu.advantly.ui.phone.resources.wizard_coin_toss
 import eu.advantly.ui.phone.resources.wizard_doubles
 import eu.advantly.ui.phone.resources.wizard_first_server
-import eu.advantly.ui.phone.resources.wizard_guests
 import eu.advantly.ui.phone.resources.wizard_mixed
 import eu.advantly.ui.phone.resources.wizard_mixed_hint
 import eu.advantly.ui.phone.resources.wizard_singles
@@ -84,61 +69,8 @@ internal fun PlayersStep(
             )
         }
     }
-    GuestPicker(wizard, state)
     if (state.playersComplete) FirstServerPicker(wizard, state)
 }
-
-/** Gäste: zuletzt verwendete als Chips, neue per Name (nur Name, später verknüpfbar). */
-@Composable
-private fun GuestPicker(
-    wizard: MatchWizard,
-    state: WizardUiState,
-) {
-    if (state.playersComplete) return
-    var name by rememberSaveable { mutableStateOf("") }
-    val players = wizard.playerSuggestions()
-    SectionTitle(stringResource(Res.string.wizard_guests))
-    val inLineup =
-        state.input.players
-            .map { it.id }
-            .toSet()
-    players.filter { it.id !in inLineup }.take(MAX_GUEST_CHIPS).chunked(2).forEach { row ->
-        Row(Modifier.padding(bottom = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            row.forEach { guest ->
-                ChoiceChip(
-                    text = playerName(guest),
-                    selected = false,
-                    onClick = { wizard.pickPlayer(guest) },
-                    tag = "guest_${guest.displayName}",
-                )
-            }
-        }
-    }
-    val add = {
-        wizard.addGuest(name)
-        name = ""
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text(stringResource(Res.string.wizard_add_guest_hint)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { add() }),
-            modifier = Modifier.weight(1f).testTag("guest_name_input"),
-        )
-        AdvantlyButton(
-            text = stringResource(Res.string.wizard_add_guest),
-            primary = false,
-            enabled = name.isNotBlank(),
-            onClick = add,
-            modifier = Modifier.testTag("guest_add"),
-        )
-    }
-}
-
-private const val MAX_GUEST_CHIPS = 6
 
 /** Erster Aufschlag: Chips je Spieler + Münzwurf (02 §5.1: Default „Ich“). */
 @Composable
