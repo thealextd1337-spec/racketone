@@ -69,6 +69,7 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.formatLabel
+import eu.advantly.ui.phone.common.formatModeLabel
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.pointText
 import eu.advantly.ui.phone.common.safeContentPadding
@@ -325,7 +326,9 @@ fun LiveScoreScreen(
                     }
                     SetTable(
                         snapshot = snapshot,
-                        header = formatLabel(snapshot.setup.format),
+                        header =
+                            formatLabel(snapshot.setup.format) +
+                                if (snapshot.setup.format.presetId == null) " · " + formatModeLabel(snapshot.setup.format) else "",
                         elapsed = { ElapsedTime(snapshot, controller.clock, controller.outdoorContrast) },
                         outdoor = controller.outdoorContrast,
                         modifier = Modifier.padding(top = Spacing.s),

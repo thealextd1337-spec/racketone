@@ -55,3 +55,9 @@ data class FrameStatsSnapshot(
 
 /** Datum + Uhrzeit kurz und lokalisiert (z. B. „15.10.26, 18:05“ bzw. „10/15/26, 6:05 PM“). */
 expect fun formatDateTime(epochMs: Long): String
+
+/** Lokalisierter Monatsname und Jahr für Verlauf-Gruppen. */
+expect fun formatMonth(
+    year: Int,
+    month: Int,
+): String

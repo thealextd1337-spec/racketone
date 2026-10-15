@@ -49,7 +49,7 @@ fun resultLine(
                     ) {
                         "[${scorePair(it)}]"
                     } else {
-                        scorePair(it)
+                        scorePair(it) + (set.tiebreak?.let { tb -> " (${scorePair(tb)})" } ?: "")
                     }
                 }
             }.toMutableList()

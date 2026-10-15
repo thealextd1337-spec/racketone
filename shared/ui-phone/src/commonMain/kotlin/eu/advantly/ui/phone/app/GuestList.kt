@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import eu.advantly.core.model.Player
+import eu.advantly.core.model.PlayerId
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
@@ -49,7 +50,10 @@ import org.jetbrains.compose.resources.stringResource
  * (`PlayersPort.canRename`, 00 „Aliase“: keine Spitznamen für Nutzer mit App).
  */
 @Composable
-internal fun GuestList(players: PlayersPort) {
+internal fun GuestList(
+    players: PlayersPort,
+    onHistory: (PlayerId) -> Unit = {},
+) {
     val colors = AdvantlyTheme.colors
     val guests by players.guests.collectAsState()
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
@@ -64,7 +68,12 @@ internal fun GuestList(players: PlayersPort) {
     }
     Column(Modifier.testTag("guest_list"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         guests.forEach { guest ->
-            GuestRow(guest, canRename = players.canRename(guest.id), onRename = { renaming = guest.id.value })
+            GuestRow(
+                guest,
+                canRename = players.canRename(guest.id),
+                onRename = { renaming = guest.id.value },
+                onHistory = { onHistory(guest.id) },
+            )
         }
     }
     guests.firstOrNull { it.id.value == renaming }?.let { guest ->
@@ -81,28 +90,32 @@ private fun GuestRow(
     guest: Player,
     canRename: Boolean,
     onRename: () -> Unit,
+    onHistory: () -> Unit,
 ) {
     val colors = AdvantlyTheme.colors
-    Row(
-        Modifier
-            .testTag("guest_row_${guest.id.value}")
-            .fillMaxWidth()
-            .heightIn(min = Spacing.minTouchTarget)
-            .background(colors.surface, Radii.cardShape)
-            .padding(start = Spacing.l),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(guest.displayName, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
-        if (canRename) {
-            Box(
-                Modifier
-                    .testTag("rename_${guest.id.value}")
-                    .heightIn(min = Spacing.minTouchTarget)
-                    .clickable(role = Role.Button, onClick = onRename)
-                    .padding(horizontal = Spacing.l),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(stringResource(Res.string.player_rename), style = AdvantlyTheme.typography.label, color = colors.brand)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .testTag("guest_row_${guest.id.value}")
+                .clickable(role = Role.Button, onClick = onHistory)
+                .fillMaxWidth()
+                .heightIn(min = Spacing.minTouchTarget)
+                .background(colors.surface, Radii.cardShape)
+                .padding(start = Spacing.l),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(guest.displayName, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
+            if (canRename) {
+                Box(
+                    Modifier
+                        .testTag("rename_${guest.id.value}")
+                        .heightIn(min = Spacing.minTouchTarget)
+                        .clickable(role = Role.Button, onClick = onRename)
+                        .padding(horizontal = Spacing.l),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(Res.string.player_rename), style = AdvantlyTheme.typography.label, color = colors.brand)
+                }
             }
         }
     }

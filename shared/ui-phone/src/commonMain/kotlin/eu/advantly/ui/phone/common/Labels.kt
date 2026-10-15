@@ -4,11 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import eu.advantly.core.model.DeuceMode
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.MatchTiebreakFormat
+import eu.advantly.core.model.PickleballScoring
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.RegularSet
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchState
@@ -20,8 +23,23 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.duration_hours
 import eu.advantly.ui.phone.resources.duration_minutes
+import eu.advantly.ui.phone.resources.fmt_deuce_advantage
+import eu.advantly.ui.phone.resources.fmt_deuce_golden
+import eu.advantly.ui.phone.resources.fmt_deuce_noad
+import eu.advantly.ui.phone.resources.fmt_deuce_star
+import eu.advantly.ui.phone.resources.fmt_pb_rally
+import eu.advantly.ui.phone.resources.fmt_pb_sideout
 import eu.advantly.ui.phone.resources.format_best_of
+import eu.advantly.ui.phone.resources.format_cap
+import eu.advantly.ui.phone.resources.format_custom
+import eu.advantly.ui.phone.resources.format_decider
+import eu.advantly.ui.phone.resources.format_games
+import eu.advantly.ui.phone.resources.format_mtb
+import eu.advantly.ui.phone.resources.format_no_tb
 import eu.advantly.ui.phone.resources.format_open
+import eu.advantly.ui.phone.resources.format_points
+import eu.advantly.ui.phone.resources.format_tb
+import eu.advantly.ui.phone.resources.format_win_by
 import eu.advantly.ui.phone.resources.live_games_and_points
 import eu.advantly.ui.phone.resources.live_score_advantage
 import eu.advantly.ui.phone.resources.live_score_pair
@@ -114,6 +132,10 @@ fun teamName(
 /** „Best of 3“ bzw. „Offen“. */
 @Composable
 fun formatLabel(format: MatchFormat): String =
+    if (format.presetId == null) stringResource(Res.string.format_custom) else formatModeLabel(format)
+
+@Composable
+fun formatModeLabel(format: MatchFormat): String =
     if (format.match.bestOf == 1 && format.decidingSet is MatchTiebreakFormat) {
         stringResource(
             when {
@@ -169,4 +191,54 @@ fun durationText(ms: Long): String {
     } else {
         stringResource(Res.string.duration_minutes, m)
     }
+}
+
+/** Struktur bleibt auch bei benutzerdefiniertem Titel vollständig sichtbar. */
+@Composable
+fun formatDescription(format: MatchFormat): String {
+    val onlyTiebreak = (format.decidingSet as? MatchTiebreakFormat)?.takeIf { format.match.bestOf == 1 }
+    if (onlyTiebreak != null) {
+        return listOf(
+            stringResource(Res.string.format_best_of, 1),
+            stringResource(Res.string.format_mtb, onlyTiebreak.pointsToWin),
+            stringResource(Res.string.format_win_by, onlyTiebreak.winBy),
+        ).joinToString(" · ")
+    }
+    val parts = mutableListOf(formatModeLabel(format))
+
+    @Composable fun regular(set: RegularSet): String =
+        listOf(
+            stringResource(Res.string.format_games, set.gamesToWin),
+            set.tiebreakAt?.let { stringResource(Res.string.format_tb, it, set.tiebreak.pointsToWin) }
+                ?: stringResource(Res.string.format_no_tb),
+        ).joinToString(" · ")
+    format.set?.let { parts += regular(it) }
+    format.game?.let {
+        parts +=
+            stringResource(
+                when (it.deuceMode) {
+                    DeuceMode.ADVANTAGE -> Res.string.fmt_deuce_advantage
+                    DeuceMode.DECIDING_POINT -> if (format.sport == Sport.PADEL) Res.string.fmt_deuce_golden else Res.string.fmt_deuce_noad
+                    DeuceMode.STAR_POINT -> Res.string.fmt_deuce_star
+                },
+            )
+    }
+    format.decidingSet?.takeIf { format.match.bestOf != 1 }?.let {
+        val text =
+            when (it) {
+                is RegularSet -> regular(it)
+                is MatchTiebreakFormat -> stringResource(Res.string.format_mtb, it.pointsToWin)
+            }
+        parts += stringResource(Res.string.format_decider, text)
+    }
+    format.pickleball?.let {
+        parts += stringResource(Res.string.format_points, it.pointsToWin, it.winBy)
+        parts += stringResource(if (it.scoring == PickleballScoring.SIDE_OUT) Res.string.fmt_pb_sideout else Res.string.fmt_pb_rally)
+        it.pointCap?.let { cap -> parts += stringResource(Res.string.format_cap, cap) }
+    }
+    format.rally?.let {
+        parts += stringResource(Res.string.format_points, it.pointsToWin, it.winBy)
+        it.cap?.let { cap -> parts += stringResource(Res.string.format_cap, cap) }
+    }
+    return parts.joinToString(" · ")
 }
