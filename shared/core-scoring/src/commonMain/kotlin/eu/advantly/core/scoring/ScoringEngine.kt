@@ -71,8 +71,10 @@ object ScoringEngine {
     ): MatchState = fold(format, lineup, emptyList())
 
     /**
-     * Fold über [events] (ohne Genesis; Format, Besetzung und Zähler kommen als Parameter; [scorer] `null` = keine
-     * Rollenprüfung bis zum ersten `ScorerChanged`, 02 §7.5). Die Events dürfen in beliebiger
+     * Fold über [events] (ohne Genesis; Format, Besetzung und Zähler kommen als Parameter). **Produktivcode nutzt die
+     * Genesis-Varianten** ([fold]/[replay] mit vollständigem Log), damit der Zähler aus `MatchCreated` gilt. Diese Variante
+     * dient Testvektoren und Werkzeugen: [scorer] `null` = keine Rollenprüfung bis zum ersten `ScorerChanged`
+     * (Alt-Logs, 02 §7.5 Punkt 1). Die Events dürfen in beliebiger
      * Reihenfolge und mit Duplikaten vorliegen; maßgeblich ist [EventOrdering].
      *
      * @throws IllegalArgumentException wenn Format oder Lineup ungültig sind ([MatchFormatValidator], [LineupValidator])
@@ -87,7 +89,10 @@ object ScoringEngine {
     /** Fold über ein vollständiges Log; die in Ordnung erste [MatchCreated] ist die Genesis. */
     fun fold(log: Collection<ScoreEvent>): MatchState = replay(log).state
 
-    /** Wie [fold], liefert aber zusätzlich Log, Undo-Ziel und Sync-Hinweise ([EngineState]). */
+    /**
+     * Wie [fold], liefert aber zusätzlich Log, Undo-Ziel und Sync-Hinweise ([EngineState]). Ohne Genesis: Startzähler
+     * [scorer] wie bei [fold] (Produktivcode: [replay] mit vollständigem Log).
+     */
     fun replay(
         format: MatchFormat,
         lineup: Lineup,
@@ -194,16 +199,31 @@ object ScoringEngine {
         )
     }
 
-    /** Alle wirksam angewendeten Punkte mit Zustand davor und danach (Statistik-Basis, 02 §11.1). */
+    /**
+     * Alle wirksam angewendeten Punkte mit Zustand davor und danach (Statistik-Basis, 02 §11.1) über ein
+     * vollständiges Log mit Genesis – Zähler wie bei [replay] (Rollenregel 02 §7.5).
+     */
+    fun pointHistory(log: Collection<ScoreEvent>): List<PointRecord> {
+        val ordered = EventLog.distinctOrdered(log)
+        val genesis = requireNotNull(ordered.firstOrNull { it.payload is MatchCreated }) { "Log ohne MatchCreated" }
+        val created = genesis.payload as MatchCreated
+        return pointHistory(created.config, created.lineup, ordered.filter { it != genesis }, created.scorerDeviceId ?: genesis.deviceId)
+    }
+
+    /**
+     * Wie [pointHistory] über ein Log ohne Genesis; der Startzähler [scorer] ist Pflicht (`null` nur bewusst für
+     * Alt-Logs ohne Rollenprüfung, siehe 02 §7.5 Punkt 1).
+     */
     fun pointHistory(
         format: MatchFormat,
         lineup: Lineup,
         events: Collection<ScoreEvent>,
+        scorer: DeviceId?,
     ): List<PointRecord> {
         val records = mutableListOf<PointRecord>()
         Replay.run(format, lineup, events, onPoint = { event, before, after ->
             records += PointRecord(event, event.payload as PointWon, before, after)
-        })
+        }, scorer = scorer)
         return records
     }
 }
@@ -245,6 +265,7 @@ internal object Replay {
         var undoTarget: EventId? = null
         val appliedPoints = HashSet<EventId>()
         val rejectedByRole = mutableListOf<EventId>()
+        var currentScorer = scorer
         for (event in log.ordered) {
             val payload = event.payload
             when {
@@ -260,6 +281,7 @@ internal object Replay {
 
                 payload is ScorerChanged -> {
                     core.effects = setOf(Effect.SCORER_CHANGED)
+                    currentScorer = payload.scorerDeviceId
                 }
 
                 event.id in log.undone -> {
@@ -275,11 +297,11 @@ internal object Replay {
                 }
 
                 else -> {
-                    val before = if (onPoint != null && payload is PointWon) core.export() else null
+                    val before = if (onPoint != null && payload is PointWon) core.export(currentScorer, rejectedByRole.toList()) else null
                     val applied = core.step(event) { it in appliedPoints }
                     if (applied && payload is PointWon) appliedPoints += event.id
                     if (applied && isUndoTargetType(payload)) undoTarget = event.id
-                    if (applied && before != null) onPoint?.invoke(event, before, core.export())
+                    if (applied && before != null) onPoint?.invoke(event, before, core.export(currentScorer, rejectedByRole.toList()))
                 }
             }
         }

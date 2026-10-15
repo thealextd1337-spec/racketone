@@ -96,6 +96,31 @@ class ScorerRulesTest {
     }
 
     @Test
+    fun pointHistoryAppliesTheRoleRule() {
+        // Review-Runde 2, Befund 3: unzulässiger Handy-Punkt darf nicht in der Statistik-Basis auftauchen
+        val log = listOf(genesis(watch), ev("w", 1, watch, PointWon(Side.A)), ev("p", 2, phone, PointWon(Side.B)))
+        val history = ScoringEngine.pointHistory(log)
+        assertEquals(listOf(EventId("w")), history.map { it.event.id })
+        assertEquals(ScoringEngine.replay(log).pointsPlayed, history.size)
+        assertEquals(watch, history.single().after.scorerDeviceId)
+        assertEquals(watch, history.single().before.scorerDeviceId)
+        val withParameter = ScoringEngine.pointHistory(format, lineup, log.drop(1), scorer = watch)
+        assertEquals(history, withParameter)
+        // Wechsel mitten im Log: Zähler und rejectedByRole stehen im Verlauf
+        val changed =
+            log +
+                listOf(
+                    ev("c", 3, phone, ScorerChanged(phone)),
+                    ev("x", 4, watch, PointWon(Side.A)),
+                    ev("q", 5, phone, PointWon(Side.B)),
+                )
+        val last = ScoringEngine.pointHistory(changed).last()
+        assertEquals(EventId("q"), last.event.id)
+        assertEquals(phone, last.after.scorerDeviceId)
+        assertEquals(listOf(EventId("p"), EventId("x")), last.after.rejectedByRole)
+    }
+
+    @Test
     fun incrementalApplyEqualsFoldWithRoles() {
         val log =
             listOf(
