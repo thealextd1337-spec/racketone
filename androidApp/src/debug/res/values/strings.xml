@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Nur Debug: Ping-Pong-Feldtest (Spike S3). Default Englisch, Deutsch in values-de/. -->
+<!-- Nur Debug: Zustand des Session-Links (W1-I). Default Englisch, Deutsch in values-de/. -->
 <resources>
     <string name="link_none" translatable="false">–</string>
     <string name="link_debug_launcher">Advantly Link Debug</string>
@@ -9,26 +9,11 @@
     <string name="link_state_unavailable">Unavailable (Wear OS app / Play Services missing?)</string>
     <string name="link_peer">Peer: %1$s</string>
     <string name="link_peer_none">none</string>
-    <string name="link_send_10">10 pings</string>
-    <string name="link_send_100">100 pings</string>
-    <string name="link_stop">Stop</string>
-    <string name="link_reset">Reset</string>
-    <string name="link_no_peer">No peer found yet – is the other app open?</string>
-    <string name="link_running">Series running …</string>
-    <string name="link_sent">Sent: %1$d of %2$d</string>
-    <string name="link_acked">Acked: %1$d (in flight %2$d)</string>
-    <string name="link_pongs">Pongs received: %1$d</string>
-    <string name="link_answered">Pings answered: %1$d</string>
-    <string name="link_queued">Queued (offline): %1$d</string>
-    <string name="link_lost">Lost after retries: %1$d</string>
-    <string name="link_retries">Retries: %1$d</string>
-    <string name="link_duplicates">Duplicates dropped: %1$d</string>
-    <string name="link_rtt">RTT p50 / p95 / max: %1$s / %2$s / %3$s</string>
-    <string name="link_ack_latency">Ack p50 / p95: %1$s / %2$s</string>
-    <string name="link_ms">%1$d ms</string>
-    <string name="link_go_rtt">Go: RTT p95 &lt; 500 ms – %1$s</string>
-    <string name="link_go_loss">Go: 0 lost – %1$s</string>
-    <string name="link_go_met">met</string>
-    <string name="link_go_not_met">NOT met</string>
-    <string name="link_go_open">open</string>
+    <string name="link_pending">Pending to peers: %1$s</string>
+    <string name="link_last_event">Last event received (ms): %1$s</string>
+    <string name="link_last_sync">Last sync (ms): %1$s</string>
+    <string name="link_scorer_connected">Scorer connected: %1$s</string>
+    <string name="link_frames">Frames sent / acked / retries: %1$s</string>
+    <string name="link_queue">Queued / failed: %1$s</string>
+    <string name="link_delivered">Delivered / duplicates: %1$s</string>
 </resources>
