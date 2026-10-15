@@ -378,6 +378,21 @@ class WatchControllerTest {
     }
 
     @Test
+    fun newSummaryContactIsSeenAfterAWallClockJumpBack() {
+        h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        h.settle()
+        h.phone.recordPoint(Side.A) // letztes Event mit „später“ Wanduhr
+        h.settle()
+        h.wallOffsetMs = -3_600_000 // Uhrzeit springt zurück, Verbindung bleibt
+        h.settle(31_000) // Abgleich im 30-s-Takt (Summary) ohne neue Events: kleinere Wanduhr als das letzte Event
+        h.offline("phone")
+        h.settle(5_000)
+        val seconds = (live.sync as SyncUi.Stale).seconds
+        assertTrue("Stand seit dem letzten Summary, nicht seit dem letzten Event: $seconds", seconds != null && seconds < 30)
+        assertFalse("Übernahme erst nach 30 s ohne Kontakt", live.takeOverOffered)
+    }
+
+    @Test
     fun doublesStartWithTheChosenServerOnTheRightCourt() {
         startOnWatch(sport = Sport.BADMINTON, discipline = Discipline.DOUBLES, format = FormatChoice.BADMINTON_BO3_21, serverIndex = 1)
         val serve = live.serve!!

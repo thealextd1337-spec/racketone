@@ -39,6 +39,7 @@ class AdvantlyWearApplication : Application() {
         logExitReasons(store)
 
         val holder = WearSessions.get(this)
+        val workoutStore = SessionStore(this)
         holder.session.addListener(MatchNotifier(this))
         holder.session.addListener(
             SessionListener { state ->
@@ -50,6 +51,7 @@ class AdvantlyWearApplication : Application() {
                         sport = match?.format?.sport,
                         phase = WorkoutStateHolder.state.value.phase,
                         handledMatchId = holder.prefs.workoutHandledMatchId,
+                        markerActive = workoutStore.sessionActive,
                     )
                 // Start nur aus der sichtbaren Activity (FGS-Startverbot im Hintergrund); Stoppen geht immer
                 if (WorkoutCoordinator.decide(inputs) == WorkoutAction.Stop) WorkoutService.stop(this)

@@ -11,10 +11,10 @@ import androidx.core.content.edit
  */
 class SessionStore(
     context: Context,
-) {
+) : WorkoutMarker {
     private val prefs: SharedPreferences = context.getSharedPreferences("workout_session", Context.MODE_PRIVATE)
 
-    var sessionActive: Boolean
+    override var sessionActive: Boolean
         get() = prefs.getBoolean(KEY_ACTIVE, false)
         set(value) = prefs.edit { putBoolean(KEY_ACTIVE, value) }
 
@@ -22,7 +22,7 @@ class SessionStore(
      * Beenden wurde verlangt (Match geschlossen/gelöscht), aber das Ende der Exercise ist noch nicht bestätigt. Überlebt
      * einen Prozessabbruch: Die Recovery beendet dann, statt wieder anzubinden oder neu zu starten.
      */
-    var endRequested: Boolean
+    override var endRequested: Boolean
         get() = prefs.getBoolean(KEY_END_REQUESTED, false)
         set(value) = prefs.edit { putBoolean(KEY_END_REQUESTED, value) }
 

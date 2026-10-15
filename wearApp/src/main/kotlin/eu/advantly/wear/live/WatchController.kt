@@ -64,9 +64,14 @@ class WatchController(
     /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
     private var disconnectedSince: Long? = null
 
-    /** Zuletzt gesehener Kontakt-Zeitstempel der Session (Wanduhr) und wann er – monoton gemessen – stattfand. */
-    private var lastContactWall: Long? = null
-    private var lastContactAt: Long? = null
+    /** Zuletzt gesehene Kontakt-Zeitstempel der Session (Wanduhr), je Quelle getrennt. */
+    private var seenEventWall: Long? = null
+    private var seenSyncWall: Long? = null
+
+    /** Wann (monoton) der jeweils letzte neue Kontakt kam. */
+    private var eventAt: Long? = null
+    private var syncAt: Long? = null
+    private val lastContactAt: Long? get() = listOfNotNull(eventAt, syncAt).maxOrNull()
     private var seenMatch: MatchId? = null
     private var seenScorer: Boolean? = null
     private var seenRejected = 0
@@ -407,11 +412,19 @@ class WatchController(
         match: ActiveMatch?,
         state: SessionState,
     ) {
-        val contact = listOfNotNull(state.sync.lastEventReceivedAtMs, state.sync.lastSyncAtMs).maxOrNull()
-        if (contact != null && contact != lastContactWall) {
-            val now = elapsed()
-            lastContactAt = if (lastContactWall == null) now - (wallClock() - contact).coerceAtLeast(0) else now
-            lastContactWall = contact
+        // Beide Quellen getrennt: ein neuer Summary-Kontakt nach einem Wanduhr-Rücksprung ist kleiner als das letzte
+        // Event und ginge in einem gemeinsamen Maximum verloren.
+        state.sync.lastEventReceivedAtMs?.let { wall ->
+            if (wall != seenEventWall) {
+                eventAt = contactTime(wall, first = seenEventWall == null)
+                seenEventWall = wall
+            }
+        }
+        state.sync.lastSyncAtMs?.let { wall ->
+            if (wall != seenSyncWall) {
+                syncAt = contactTime(wall, first = seenSyncWall == null)
+                seenSyncWall = wall
+            }
         }
         disconnectedSince =
             when {
@@ -419,6 +432,15 @@ class WatchController(
                 disconnectedSince != null -> disconnectedSince
                 else -> lastContactAt ?: elapsed()
             }
+    }
+
+    /** Neuer Kontakt = jetzt; nur der beim Start schon vorhandene Wert wird über die Wanduhr zurückgerechnet. */
+    private fun contactTime(
+        wall: Long,
+        first: Boolean,
+    ): Long {
+        val now = elapsed()
+        return if (first) now - (wallClock() - wall).coerceAtLeast(0) else now
     }
 
     private fun publish() {

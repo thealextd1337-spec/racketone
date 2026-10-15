@@ -55,6 +55,59 @@ class WorkoutCoordinatorTest {
     }
 
     @Test
+    fun followingFromAWorkoutMatchToAMatchWithoutWorkoutStopsIt() {
+        // A (watchWorkout = true) läuft, Uhr folgt Handy-Match B mit watchWorkout = false
+        assertEquals(WorkoutAction.Stop, decide(enabled = false, match = m2, phase = WorkoutPhase.ACTIVE, handled = m1))
+        assertEquals(WorkoutAction.Stop, decide(enabled = false, match = m2, phase = WorkoutPhase.STARTING, handled = m1))
+        // nichts läuft → nichts zu tun, auch kein Start
+        assertEquals(WorkoutAction.None, decide(enabled = false, match = m2, phase = WorkoutPhase.IDLE, handled = m1))
+    }
+
+    @Test
+    fun persistentMarkerIsTheSourceOfTruthAfterProcessLoss() {
+        fun marker(
+            match: MatchId?,
+            enabled: Boolean = true,
+            phase: WorkoutPhase = WorkoutPhase.IDLE,
+        ) = WorkoutCoordinator.decide(
+            WorkoutInputs(enabled, match, match?.let { Sport.TENNIS }, phase, handledMatchId = null, markerActive = true),
+        )
+        // Match im Hintergrund gelöscht, UI-Phase nach Neustart IDLE → trotzdem beenden
+        assertEquals(WorkoutAction.Stop, marker(match = null))
+        // neues Match vor der Recovery: erst abgleichen, keinen zweiten Start daneben
+        assertEquals(WorkoutAction.Recover, marker(match = m2))
+        assertEquals(WorkoutAction.Stop, marker(match = m2, enabled = false))
+        assertEquals(WorkoutAction.None, marker(match = null, phase = WorkoutPhase.ENDING))
+    }
+
+    @Test
+    fun stopIntentIsPersistedBeforeTheServiceIsCalled() {
+        val marker =
+            object : WorkoutMarker {
+                override var sessionActive = true
+                override var endRequested = false
+            }
+        var persistedAtDelivery: Boolean? = null
+        WorkoutCoordinator.requestStop(marker) { persistedAtDelivery = marker.endRequested }
+        assertEquals(true, persistedAtDelivery)
+        // ohne aktives Workout keine Absicht hinterlassen
+        val idle =
+            object : WorkoutMarker {
+                override var sessionActive = false
+                override var endRequested = false
+            }
+        var delivered = false
+        WorkoutCoordinator.requestStop(idle) { delivered = true }
+        assertEquals(true, delivered)
+        assertEquals(false, idle.endRequested)
+    }
+
+    @Test
+    fun recoveryEndsWhenTheOpenMatchWantsNoWorkout() {
+        assertEquals(RecoveryIntent.END, WorkoutCoordinator.recovery(endRequested = false, matchOpen = true, workoutWanted = false))
+    }
+
+    @Test
     fun padelAndPickleballRunAsTennis() {
         assertEquals(WorkoutSport.TENNIS, WorkoutSport.of(Sport.PICKLEBALL))
         assertEquals(WorkoutSport.TENNIS, WorkoutSport.of(Sport.PADEL))

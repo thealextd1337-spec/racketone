@@ -216,13 +216,17 @@ class WorkoutService : Service() {
             stopSession()
             return
         }
-        val matchOpen =
-            WearSessions
-                .get(this)
-                .session.state.value.match != null
-        if (WorkoutCoordinator.recovery(store.endRequested, matchOpen) == RecoveryIntent.END) {
-            // Prozess starb zwischen Match-Schließen und bestätigtem Exercise-Ende → nicht wieder anbinden
-            DiagnosticLog.log("SESSION_RECOVER_END", "endRequested" to store.endRequested, "matchOpen" to matchOpen)
+        val holder = WearSessions.get(this)
+        val match = holder.session.state.value.match
+        val wanted = WorkoutCoordinator.enabled(match?.meta, holder.prefs.workoutEnabled)
+        if (WorkoutCoordinator.recovery(store.endRequested, match != null, wanted) == RecoveryIntent.END) {
+            // Prozess starb zwischen Match-Schließen und bestätigtem Exercise-Ende bzw. neues Match ohne Workout
+            DiagnosticLog.log(
+                "SESSION_RECOVER_END",
+                "endRequested" to store.endRequested,
+                "matchOpen" to (match != null),
+                "wanted" to wanted,
+            )
             stopSession()
             return
         }
@@ -782,7 +786,10 @@ class WorkoutService : Service() {
             sport: WorkoutSport,
         ) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_START).putExtra(EXTRA_SPORT, sport.name))
 
-        fun stop(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
+        fun stop(context: Context) =
+            WorkoutCoordinator.requestStop(SessionStore(context)) {
+                send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
+            }
 
         /** Nach einem Prozess-Neustart oder als „Erneut versuchen“: laufende Session wieder übernehmen. */
         fun recover(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_RECOVER))

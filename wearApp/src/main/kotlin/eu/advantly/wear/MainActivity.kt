@@ -154,8 +154,7 @@ class MainActivity : ComponentActivity() {
             runCatching { CapabilitiesRepository.load(this@MainActivity) }
                 .onFailure { DiagnosticLog.log("CAPABILITIES_FAILED", "error" to it.javaClass.simpleName, "message" to it.message) }
         }
-        // Workout war aktiv, Prozess wurde aber beendet → Service/Exercise wieder übernehmen.
-        if (SessionStore(this).sessionActive) WorkoutService.recover(this)
+        // Workout war aktiv, Prozess wurde aber beendet → evaluateWorkout() (onResume) gleicht über den Marker ab
 
         // Workout an das offene Match koppeln, solange die UI sichtbar ist (FGS-Start nur aus dem Vordergrund)
         lifecycleScope.launch {
@@ -308,10 +307,12 @@ class MainActivity : ComponentActivity() {
                 phase = WorkoutStateHolder.state.value.phase,
                 handledMatchId = holder.prefs.workoutHandledMatchId,
                 pendingMatchId = holder.prefs.workoutPending?.first,
+                markerActive = SessionStore(this).sessionActive,
             )
         when (val action = WorkoutCoordinator.decide(inputs)) {
             is WorkoutAction.Start -> requestWorkout(action)
             WorkoutAction.Stop -> WorkoutService.stop(this)
+            WorkoutAction.Recover -> WorkoutService.recover(this)
             WorkoutAction.None -> Unit
         }
     }
