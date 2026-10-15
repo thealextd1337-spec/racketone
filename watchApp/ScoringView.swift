@@ -53,8 +53,11 @@ struct ScorePage: View {
     @State private var confirmTakeOver = false
     @State private var chooseServer = false
     @State private var target: ScoreTouchTarget?
+    @State private var touchId: SpatialEventCollection.Event.ID?
+    @State private var touchIds: Set<SpatialEventCollection.Event.ID> = []
     @State private var touchMatchId = ""
-    @State private var touchStart = Date.distantPast
+    @State private var touchStart: TimeInterval = 0
+    @State private var touchStartLocation = CGPoint.zero
     @State private var furthestTravel: CGFloat = 0
 
     var body: some View {
@@ -85,32 +88,26 @@ struct ScorePage: View {
             }
             .contentShape(Rectangle())
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { value in
-                        if target == nil {
-                            touchStart = value.time
-                            touchMatchId = snap.matchId
-                            furthestTravel = 0
-                            let y = value.startLocation.y
-                            if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
-                                target = .half(sideA: true, canRemove: snap.canRemovePointA)
-                            } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleTop + middle + 2 * guardHeight {
-                                target = .half(sideA: false, canRemove: snap.canRemovePointB)
-                            } else {
-                                target = .ignored
-                            }
-                        }
-                        furthestTravel = max(furthestTravel, max(abs(value.translation.width), abs(value.translation.height)))
+                SpatialEventGesture(coordinateSpace: .local)
+                    .onChanged { events in
+                        trackTouch(events, deadTop: deadTop, middleTop: middleTop, middleBottom: middleTop + middle + 2 * guardHeight)
                     }
-                    .onEnded { value in
-                        defer { target = nil }
-                        guard let target, snap.matchId == touchMatchId, snap.isScorer, !dimmed, scenePhase == .active else { return }
+                    .onEnded { events in
+                        defer {
+                            target = nil
+                            touchId = nil
+                            touchIds = []
+                        }
+                        guard touchIds.count == 1, events.count == 1, let event = events.first,
+                              event.id == touchId, event.phase == .ended,
+                              let target, snap.matchId == touchMatchId, snap.isScorer, !dimmed, scenePhase == .active else { return }
                         guard case let .half(sideA, canRemove) = target else { return }
-                        let dy = value.translation.height
-                        if dy > 40 && abs(value.translation.width) < dy {
+                        let dx = event.location.x - touchStartLocation.x
+                        let dy = event.location.y - touchStartLocation.y
+                        if dy > 40 && abs(dx) < dy {
                             model.undo()
-                        } else if furthestTravel < 14 && abs(value.translation.width) < 14 && abs(dy) < 14 {
-                            if value.time.timeIntervalSince(touchStart) >= 1 {
+                        } else if furthestTravel < 14 && abs(dx) < 14 && abs(dy) < 14 {
+                            if event.timestamp - touchStart >= 1 {
                                 if canRemove { model.removePoint(sideA: sideA) }
                             } else {
                                 model.tap(sideA: sideA)
@@ -128,22 +125,60 @@ struct ScorePage: View {
         }
         .ignoresSafeArea()
         .background(Color.black)
-        .onChange(of: dimmed) { _, isDimmed in
-            if target != nil { target = .ignored }
+        .onChange(of: dimmed) { _, _ in
+            target = nil
         }
         .onChange(of: scenePhase) { _, phase in
+            target = nil
             if phase != .active {
-                if target != nil { target = .ignored }
                 model.dismissServeBar()
             }
         }
         .onChange(of: snap.isScorer) { _, _ in
-            if target != nil { target = .ignored }
+            target = nil
         }
+        .onChange(of: snap.matchId) { _, _ in target = nil }
+        .onDisappear { target = nil }
         .sheet(isPresented: $chooseServer) {
             ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
         }
         .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
+    }
+
+    private func trackTouch(_ events: SpatialEventCollection, deadTop: CGFloat, middleTop: CGFloat, middleBottom: CGFloat) {
+        guard !events.isEmpty else { return }
+        // Neue IDs erkennen auch nach einem Abbruch ohne onEnded eine neue Berührung – selbst am selben Ort.
+        if events.allSatisfy({ !touchIds.contains($0.id) }) {
+            target = nil
+            touchId = nil
+            touchIds = []
+        }
+        touchIds.formUnion(events.map(\.id))
+        // Mehrfinger/Handballen sperren die gesamte Folge, auch nachdem der erste Finger losgelassen wurde.
+        guard touchIds.count == 1, let event = events.first else {
+            target = .ignored
+            return
+        }
+        if event.phase == .cancelled {
+            target = nil
+            return
+        }
+        if touchId != event.id && event.phase == .active {
+            touchId = event.id
+            touchStart = event.timestamp
+            touchStartLocation = event.location
+            touchMatchId = snap.matchId
+            furthestTravel = 0
+            let y = event.location.y
+            if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
+                target = .half(sideA: true, canRemove: snap.canRemovePointA)
+            } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleBottom {
+                target = .half(sideA: false, canRemove: snap.canRemovePointB)
+            } else {
+                target = .ignored
+            }
+        }
+        furthestTravel = max(furthestTravel, max(abs(event.location.x - touchStartLocation.x), abs(event.location.y - touchStartLocation.y)))
     }
 
     @ViewBuilder
@@ -592,7 +627,7 @@ struct ControlsPage: View {
         UpdateRequiredLabel(code: snap.updateRequired)
         RemovePointButtons(model: model, snap: snap)
         if model.banner == .pointRemoved && snap.canRedo {
-            Button("action.undo", action: model.redoRemoval)
+            Button("action.restorePoint", action: model.redoRemoval)
         }
         if snap.serverChoiceGame > 0 {
             Button("serve.choose") { chooseServer = true }

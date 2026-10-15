@@ -94,8 +94,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         super.init()
         scoring.setListener(listener: self)
         lastSetup = scoring.lastSetup()
-        recentPeople = scoring.recentPeople()
-        updateRequired = scoring.updateRequired()
+        refreshStartInfo()
         workout.onUnavailable = { [weak self] in
             if self?.snapshot != nil { self?.show(.healthUnavailable) }
         }
@@ -113,8 +112,11 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func onSnapshot(snapshot: WatchScoreSnapshot?) {
         let before = self.snapshot
         self.snapshot = snapshot
-        updateRequired = scoring.updateRequired()
-        recentPeople = scoring.recentPeople()
+        // Mit Match kommt der Versionshinweis direkt aus dem Snapshot; ohne Match liest der Getter nur Session-State.
+        updateRequired = snapshot?.updateRequired ?? scoring.updateRequired()
+        if snapshot?.matchId != before?.matchId {
+            recentPeople = scoring.recentPeople()
+        }
         if snapshot?.matchId != before?.matchId || snapshot?.isScorer != true ||
             (!serveBarPointId.isEmpty && snapshot?.lastPointId != serveBarPointId) {
             dismissServeBar()
@@ -143,6 +145,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         } else {
             syncWorkout()
         }
+    }
+
+    /// Personenverzeichnis nur beim Betreten des Starts oder beim Matchwechsel aus der Datenbank lesen.
+    func refreshStartInfo() {
+        recentPeople = scoring.recentPeople()
+        updateRequired = scoring.updateRequired()
     }
 
     /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist
@@ -498,7 +506,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         self.banner = banner
         let work = DispatchWorkItem { [weak self] in self?.banner = nil }
         bannerWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (banner == .pointRemoved ? 5 : 3), execute: work)
     }
 }
 

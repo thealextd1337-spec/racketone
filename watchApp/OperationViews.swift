@@ -27,11 +27,13 @@ struct OperationStrip: View {
                     }
                 }
                 .accessibilityIdentifier("serve.bar")
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text("serve.bar"))
             } else if model.banner == .pointRemoved && snap.canRedo {
                 Button(action: model.redoRemoval) {
                     VStack(spacing: 1) {
                         Text("banner.pointRemoved").font(.system(size: 10))
-                        Text("action.undo").font(.system(size: 13, weight: .bold)).foregroundStyle(Brand.hint)
+                        Text("action.restorePoint").font(.system(size: 13, weight: .bold)).foregroundStyle(Brand.hint)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .contentShape(Rectangle())
@@ -39,11 +41,19 @@ struct OperationStrip: View {
                 .buttonStyle(.plain)
             } else if snap.serverChoicePrompt {
                 Button(action: chooseServer) {
-                    Text("serve.choose")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Brand.hint)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 6) {
+                        let sets = ScoreText.sets(snap)
+                        if !sets.isEmpty {
+                            Text(sets).font(.system(size: 12)).foregroundStyle(Color.white)
+                        }
+                        Text("serve.choose")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Brand.hint)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -52,14 +62,15 @@ struct OperationStrip: View {
 
     private func serveButton(_ value: String, short: String, label: String) -> some View {
         let selected = snap.lastPointServe == value
+        let color = value == "DOUBLE_FAULT" ? Color.red : Color.white
         // pointId wird mit der dargestellten Schaltfläche eingefangen; nie auf einen späteren Punkt umleiten.
         let pointId = snap.lastPointId
         return Button { model.setServeInfo(pointId: pointId, value: value) } label: {
             Text(LocalizedStringKey(short))
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(selected ? Color.black : Color.white)
+                .foregroundStyle(selected ? Color.black : color)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.white : Color(hex: 0x1E2128)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(selected ? color : Color(hex: 0x1E2128)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -81,8 +92,8 @@ struct ServerChoiceView: View {
     var body: some View {
         List {
             if let snap = model.snapshot, snap.isScorer, snap.serverChoiceGame > 0, Self.key(snap) == window {
-                Text(snap.serverChoiceGame == 1 ? loc("serve.choice.first") :
-                     loc("serve.choice.second %@", loc(snap.serverChoiceSide == "A" ? "team.us" : "team.them")))
+                Text(LocalizedStringKey(snap.serverChoiceGame == 1 ? "serve.choice.first" :
+                     snap.serverChoiceSide == "A" ? "serve.choice.second.us" : "serve.choice.second.them"))
                     .font(.headline)
                 ForEach(snap.serverChoicePlayers, id: \.id) { player in
                     Button {

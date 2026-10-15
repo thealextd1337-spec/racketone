@@ -455,6 +455,7 @@
 /* Bedienung und Setup nach W2-Vertrag. */
 "action.removeUs" = "Remove our last point";
 "action.removeThem" = "Remove opponents’ last point";
+"action.restorePoint" = "Restore point";
 "banner.pointRemoved" = "Point removed";
 "serve.first.short" = "1.";
 "serve.second.short" = "2.";
@@ -464,7 +465,8 @@
 "serve.df" = "Double fault";
 "serve.choose" = "Choose server";
 "serve.choice.first" = "Who serves first?";
-"serve.choice.second %@" = "Who serves for %@?";
+"serve.choice.second.us" = "Who serves for us?";
+"serve.choice.second.them" = "Who serves for the opponents?";
 "serve.choice.hint" = "Choose later – the current order applies.";
 "setend.regular" = "Regular set";
 "setend.tiebreak7" = "Tiebreak to 7";

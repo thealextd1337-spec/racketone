@@ -64,6 +64,7 @@ struct StartView: View {
             }
             .navigationTitle("Advantly")
         }
+        .onAppear { model.refreshStartInfo() }
     }
 
     private func setupDetail(_ setup: WatchMatchSetup) -> String {
@@ -133,7 +134,7 @@ struct SetupView: View {
         self.model = model
         self.preset = preset
         _doubles = State(initialValue: preset.defaultDoubles)
-        _gamesPerSet = State(initialValue: preset.tiebreakOnly > 0 ? 0 : preset.gamesPerSet)
+        _gamesPerSet = State(initialValue: 0)
     }
 
     private var tennisLike: Bool { preset.sport == "TENNIS" || preset.sport == "PADEL" }
@@ -155,9 +156,9 @@ struct SetupView: View {
             if tennisLike {
                 if preset.tiebreakOnly == 0 {
                     NavigationLink {
-                        GamesPerSetView(value: $gamesPerSet, tennis: preset.sport == "TENNIS")
+                        GamesPerSetView(value: $gamesPerSet, presetGames: preset.gamesPerSet, tennis: preset.sport == "TENNIS")
                     } label: {
-                        Text(loc("setup.games %@", String(gamesPerSet)))
+                        Text(loc("setup.games %@", String(gamesPerSet == 0 ? preset.gamesPerSet : gamesPerSet)))
                     }
                     if gamesPerSet == 1 {
                         Text("setup.oneGameHint").font(.footnote).foregroundStyle(Brand.text2)
@@ -214,6 +215,7 @@ struct SetupView: View {
 
 struct GamesPerSetView: View {
     @Binding var value: Int32
+    let presetGames: Int32
     let tennis: Bool
     @Environment(\.dismiss) private var dismiss
 
@@ -221,13 +223,13 @@ struct GamesPerSetView: View {
         List {
             ForEach(tennis ? [1, 2, 3, 4, 5, 6, 8, 10] : [1, 2, 3, 4, 5, 6], id: \.self) { games in
                 Button {
-                    value = Int32(games)
+                    value = Int32(games) == presetGames ? 0 : Int32(games)
                     dismiss()
                 } label: {
                     HStack {
                         Text(String(games))
                         Spacer()
-                        if Int32(games) == value { Image(systemName: "checkmark") }
+                        if Int32(games) == (value == 0 ? presetGames : value) { Image(systemName: "checkmark") }
                     }
                 }
             }

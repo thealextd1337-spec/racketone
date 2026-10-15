@@ -454,7 +454,8 @@
 
 /* Bedienung und Setup nach W2-Vertrag. */
 "action.removeUs" = "Letzten Punkt von uns abziehen";
-"action.removeThem" = "Letzten Gegner-Punkt abziehen";
+"action.removeThem" = "Letzten Punkt der Gegner abziehen";
+"action.restorePoint" = "Punkt zurückholen";
 "banner.pointRemoved" = "Punkt abgezogen";
 "serve.first.short" = "1.";
 "serve.second.short" = "2.";
@@ -464,7 +465,8 @@
 "serve.df" = "Doppelfehler";
 "serve.choose" = "Aufschläger wählen";
 "serve.choice.first" = "Wer schlägt auf?";
-"serve.choice.second %@" = "Wer schlägt bei %@ auf?";
+"serve.choice.second.us" = "Wer schlägt bei uns auf?";
+"serve.choice.second.them" = "Wer schlägt bei den Gegnern auf?";
 "serve.choice.hint" = "Später wählen – es gilt die bisherige Reihenfolge.";
 "setend.regular" = "Normaler Satz";
 "setend.tiebreak7" = "Tiebreak bis 7";
