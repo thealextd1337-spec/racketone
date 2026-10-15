@@ -359,6 +359,20 @@ object RuleScenarios {
             // --- Padel ---
             s(
                 Sport.PADEL,
+                "server-choice-correction",
+                "Korrektur nach der Aufschlägerwahl hebt die Wahl auf, erneute Wahl wirkt (Review-Runde 1)",
+                Presets.PADEL_GOLDEN_BO3.format(),
+            ) {
+                send(ServerChosen(0, Side.A, p("A2")))
+                send(Correction.servingOrder(Side.A, listOf(p("A1"), p("A2"))))
+                send(ServerChosen(0, Side.A, p("A2")))
+                win(Side.A)
+                send(ServerChosen(0, Side.B, p("B2")))
+                send(Correction.server(p("B1")))
+                points("BB")
+            },
+            s(
+                Sport.PADEL,
                 "tiebreak-only-server-choice",
                 "Nur Tiebreak bis 7 im Doppel mit Aufschlägerwahl (erster Punkt / erster Aufschlag des anderen Teams)",
                 Presets.PADEL_TIEBREAK_ONLY_7.format(),
