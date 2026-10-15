@@ -60,8 +60,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
-import eu.advantly.presentation.live.ScoreChange
-import eu.advantly.presentation.live.Team
+import eu.advantly.core.model.Side
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
@@ -76,12 +75,17 @@ private const val FLASH_ALPHA = 0.24f
 
 /** Inhalt eines Score-Panels. */
 internal data class ScorePanelContent(
-    val team: Team,
+    val side: Side,
     val teamLabel: String,
     val playerName: String,
     val pointText: String,
     val serving: Boolean,
+    /** z. B. „Aufschlag“ oder „Aufschlag · Mia“ (umbricht bei großer Schrift). */
     val serveLabel: String,
+    /** Aufschlagfeld „R“/„L“ (Badminton, Pickleball) – eigener Platz, wird nie gekürzt. */
+    val serveCourt: String? = null,
+    /** Farbe des Aufschlag-Balls (Sportfarbe). */
+    val serveColor: Color,
     val a11yDescription: String,
     val undoLabel: String,
 )
@@ -95,7 +99,7 @@ internal data class ScorePanelContent(
 @Composable
 internal fun ScorePanel(
     content: ScorePanelContent,
-    direction: ScoreChange.Direction,
+    direction: ScoreDirection,
     flashKey: Int,
     outdoor: Boolean,
     reduceMotion: Boolean,
@@ -105,8 +109,8 @@ internal fun ScorePanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = AdvantlyTheme.colors
-    val teamColor = if (content.team == Team.Us) colors.teamUs else colors.teamThem
-    val tint = if (content.team == Team.Us) colors.teamUsTint else colors.teamThemTint
+    val teamColor = if (content.side == Side.A) colors.teamUs else colors.teamThem
+    val tint = if (content.side == Side.A) colors.teamUsTint else colors.teamThemTint
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
     var pressed by remember { mutableStateOf(false) }
@@ -117,7 +121,7 @@ internal fun ScorePanel(
     LaunchedEffect(flash) { if (flash.value > 0f) flash.animateTo(0f, tween(FLASH_MILLIS, easing = EaseOut)) }
 
     val shape = Radii.scorePanelShape
-    val tag = if (content.team == Team.Us) "panel_us" else "panel_them"
+    val tag = if (content.side == Side.A) "panel_us" else "panel_them"
     Box(
         modifier =
             modifier
@@ -207,18 +211,29 @@ internal fun ScorePanel(
                 )
                 if (content.serving) {
                     Row(
-                        modifier = Modifier.testTag("${tag}_serve"),
+                        modifier = Modifier.testTag("${tag}_serve").weight(1f, fill = false),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(12.dp).background(colors.sportTennis, CircleShape))
+                        Box(Modifier.size(12.dp).background(content.serveColor, CircleShape))
                         Text(
                             text = content.serveLabel,
                             style = AdvantlyTheme.typography.caption,
                             color = secondary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        content.serveCourt?.let { court ->
+                            Text(
+                                text = court,
+                                style = AdvantlyTheme.typography.label,
+                                color = if (outdoor) Color.White else colors.text,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.testTag("${tag}_court"),
+                            )
+                        }
                     }
                 }
             }
@@ -227,7 +242,7 @@ internal fun ScorePanel(
         // Label-Zeile oben (Wir) bzw. unten (Gegner); die Ziffer bekommt nur den RESTLICHEN Platz und kann die
         // Labels damit auch bei 200 % Schrift oder sehr flachen Flächen nicht überdecken.
         Column(Modifier.fillMaxSize()) {
-            if (content.team == Team.Us) labelRow()
+            if (content.side == Side.A) labelRow()
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
                 // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
@@ -243,7 +258,7 @@ internal fun ScorePanel(
                 ) { text ->
                     Text(
                         text = text,
-                        modifier = Modifier.testTag(if (content.team == Team.Us) "score_us" else "score_them"),
+                        modifier = Modifier.testTag(if (content.side == Side.A) "score_us" else "score_them"),
                         style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
                         color = Color.White,
                         textAlign = TextAlign.Center,
@@ -251,7 +266,7 @@ internal fun ScorePanel(
                     )
                 }
             }
-            if (content.team == Team.Them) labelRow()
+            if (content.side == Side.B) labelRow()
         }
     }
 }
@@ -260,12 +275,12 @@ internal fun ScorePanel(
 private fun scoreTransition(
     animate: Boolean,
     reduceMotion: Boolean,
-    direction: ScoreChange.Direction,
+    direction: ScoreDirection,
 ): ContentTransform {
     if (!animate) return EnterTransition.None togetherWith ExitTransition.None
     val spec = tween<Float>(ROLL_MILLIS, easing = EaseOut)
     if (reduceMotion) return fadeIn(spec) togetherWith fadeOut(spec)
-    val sign = if (direction == ScoreChange.Direction.Forward) 1 else -1
+    val sign = if (direction == ScoreDirection.Forward) 1 else -1
     val slide = tween<IntOffset>(ROLL_MILLIS, easing = EaseOut)
     return ContentTransform(
         targetContentEnter = slideInVertically(slide) { sign * it } + fadeIn(spec),

@@ -3,7 +3,7 @@
   "id": "TV-TEN-002",
   "title": "Tennis offenes Format: Satzende-Dialog, Undo über Satzgrenze, ignorierte Events, Pause, Aufgabe, Abbruch",
   "description": "Kurzsatz bis 4 (Tiebreak bei 4:4) im offenen Modus. Prüft: kein Matchball im offenen Modus, ASK_ANOTHER_SET nach Satzende, PointWon während offener Frage wird ignoriert, Undo des Satzballs, ContinueDecision, Aufgabe mit eingefrorenem Spielstand, Undo der Aufgabe, Pause mit implizitem Fortsetzen, Abbruch ohne Sieger.",
-  "sources": ["ITF Rules of Tennis 2026, Appendix VI (Short Sets)", "RacketOne 02-scoring-regeln.md Abschnitte 6 und 9"],
+  "sources": ["ITF Rules of Tennis 2026, Appendix VI (Short Sets)", "Advantly 02-scoring-regeln.md Abschnitte 6 und 9"],
   "config": {"formatVersion": 1, "presetId": "TENNIS_OPEN_SHORT", "sport": "TENNIS", "discipline": "SINGLES", "match": {"mode": "OPEN"}, "game": {"deuceMode": "ADVANTAGE"}, "set": {"gamesToWin": 4, "tiebreakAt": 4, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": {"kind": "MATCH_TIEBREAK", "pointsToWin": 10, "winBy": 2, "endChange": {"first": 6, "every": 6}}},
   "lineup": {"A": ["A1"], "B": ["B1"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
   "events": [

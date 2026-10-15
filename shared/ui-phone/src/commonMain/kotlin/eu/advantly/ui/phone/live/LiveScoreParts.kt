@@ -35,7 +35,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
@@ -53,55 +52,25 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import eu.advantly.presentation.live.FakeTennis
-import eu.advantly.presentation.live.FakeTennisState
-import eu.advantly.presentation.live.PointLabel
+import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
+import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
-import eu.advantly.presentation.live.Team
+import eu.advantly.presentation.live.SetColumn
+import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.ui.phone.common.SportIcon
+import eu.advantly.ui.phone.common.sportColor
+import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.a11y_hint_for_them
 import eu.advantly.ui.phone.resources.a11y_hint_for_us
-import eu.advantly.ui.phone.resources.hint_breakpoint
-import eu.advantly.ui.phone.resources.hint_changeends
-import eu.advantly.ui.phone.resources.hint_deuce
-import eu.advantly.ui.phone.resources.hint_match_lost
-import eu.advantly.ui.phone.resources.hint_match_won
-import eu.advantly.ui.phone.resources.hint_matchpoint
-import eu.advantly.ui.phone.resources.hint_setpoint
-import eu.advantly.ui.phone.resources.hint_tiebreak
-import eu.advantly.ui.phone.resources.live_games_and_points
-import eu.advantly.ui.phone.resources.live_score_advantage
-import eu.advantly.ui.phone.resources.live_score_pair
 import org.jetbrains.compose.resources.stringResource
-
-@Composable
-internal fun pointText(label: PointLabel): String =
-    when (label) {
-        is PointLabel.Number -> label.value.toString()
-        PointLabel.Advantage -> stringResource(Res.string.live_score_advantage)
-    }
-
-/** „30:15“ (DE) bzw. „30–15“ (EN); mit [withGames] zusätzlich der Game-Stand davor. */
-@Composable
-internal fun scoreSummary(
-    state: FakeTennisState,
-    withGames: Boolean,
-): String {
-    val points =
-        stringResource(
-            Res.string.live_score_pair,
-            pointText(FakeTennis.pointLabel(state, Team.Us)),
-            pointText(FakeTennis.pointLabel(state, Team.Them)),
-        )
-    if (!withGames) return points
-    val games = stringResource(Res.string.live_score_pair, state.gamesUs.toString(), state.gamesThem.toString())
-    return stringResource(Res.string.live_games_and_points, games, points)
-}
 
 /**
  * Hinweis-Pill (04 §4.3.1/§5.6): Amber, Versalien, Pfeil zum betroffenen Team – nie nur Farbe.
@@ -110,31 +79,20 @@ internal fun scoreSummary(
 @Composable
 internal fun HintPill(
     hint: ScoreHint,
+    sport: Sport,
     outdoor: Boolean,
     reduceMotion: Boolean,
     landscape: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = AdvantlyTheme.colors
-    val name =
-        stringResource(
-            when (hint.kind) {
-                ScoreHint.Kind.MatchPoint -> Res.string.hint_matchpoint
-                ScoreHint.Kind.SetPoint -> Res.string.hint_setpoint
-                ScoreHint.Kind.BreakPoint -> Res.string.hint_breakpoint
-                ScoreHint.Kind.Deuce -> Res.string.hint_deuce
-                ScoreHint.Kind.Tiebreak -> Res.string.hint_tiebreak
-                ScoreHint.Kind.ChangeEnds -> Res.string.hint_changeends
-                ScoreHint.Kind.MatchWon -> Res.string.hint_match_won
-                ScoreHint.Kind.MatchLost -> Res.string.hint_match_lost
-            },
-        )
+    val name = hintText(hint, sport)
     val text = name.uppercase()
     // Screenreader: „Matchball für Wir“ statt „MATCHBALL“ + stummem Pfeil; Änderungen werden angesagt.
     val description =
-        when (hint.team) {
-            Team.Us -> stringResource(Res.string.a11y_hint_for_us, name)
-            Team.Them -> stringResource(Res.string.a11y_hint_for_them, name)
+        when (hint.side) {
+            Side.A -> stringResource(Res.string.a11y_hint_for_us, name)
+            Side.B -> stringResource(Res.string.a11y_hint_for_them, name)
             null -> name
         }
     val filled = outdoor || hint.kind.level == ScoreHint.Level.Filled
@@ -165,7 +123,7 @@ internal fun HintPill(
                 .clearAndSetSemantics {
                     contentDescription = description
                     liveRegion = LiveRegionMode.Polite
-                    hint.team?.let { this[HintArrowDirection] = arrowDirection(it, landscape) }
+                    hint.side?.let { this[HintArrowDirection] = arrowDirection(it, landscape) }
                 }.graphicsLayer { alpha = pulseAlpha?.value ?: 1f }
                 .heightIn(min = 30.dp)
                 .background(background, Radii.pillShape)
@@ -174,7 +132,7 @@ internal fun HintPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        hint.team?.let { TeamArrow(team = it, landscape = landscape, color = content) }
+        hint.side?.let { TeamArrow(side = it, landscape = landscape, color = content) }
         Text(
             text = text,
             style = AdvantlyTheme.typography.overline.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
@@ -190,7 +148,7 @@ internal fun HintPill(
  */
 @Composable
 private fun TeamArrow(
-    team: Team,
+    side: Side,
     landscape: Boolean,
     color: Color,
 ) {
@@ -200,7 +158,7 @@ private fun TeamArrow(
         val path =
             Path().apply {
                 when {
-                    landscape && team == Team.Us -> {
+                    landscape && side == Side.A -> {
                         moveTo(0f, h / 2)
                         lineTo(w, 0f)
                         lineTo(w, h)
@@ -212,7 +170,7 @@ private fun TeamArrow(
                         lineTo(0f, h)
                     }
 
-                    team == Team.Us -> {
+                    side == Side.A -> {
                         moveTo(w / 2, 0f)
                         lineTo(w, h)
                         lineTo(0f, h)
@@ -230,12 +188,10 @@ private fun TeamArrow(
     }
 }
 
-/** Satztabelle (04 §5.6): Zeilen Wir/Gegner, Spalten Sätze + aktueller Satz; gewonnene Sätze hell. */
+/** Satztabelle (04 §5.6): Zeilen Wir/Gegner, Spalten Sätze + laufender Satz; gewonnene Sätze hell. */
 @Composable
 internal fun SetTable(
-    state: FakeTennisState,
-    usName: String,
-    themName: String,
+    snapshot: LiveMatchSnapshot,
     header: String,
     elapsed: @Composable () -> Unit,
     outdoor: Boolean,
@@ -243,6 +199,8 @@ internal fun SetTable(
 ) {
     val colors = AdvantlyTheme.colors
     val shape = Radii.cardShape
+    val columns = LiveScoreRules.setColumns(snapshot.state)
+    val serving = snapshot.state.serve?.side
     Column(
         modifier =
             modifier
@@ -262,73 +220,79 @@ internal fun SetTable(
             )
             elapsed()
         }
-        SetRow(Team.Us, usName, state, outdoor)
-        SetRow(Team.Them, themName, state, outdoor)
+        for (side in Side.entries) {
+            SetRow(side, teamName(snapshot.setup, side), columns, serving == side, snapshot.setup.sport, outdoor)
+        }
     }
 }
 
 @Composable
 private fun SetRow(
-    team: Team,
+    side: Side,
     name: String,
-    state: FakeTennisState,
+    columns: List<SetColumn>,
+    serving: Boolean,
+    sport: Sport,
     outdoor: Boolean,
 ) {
     val colors = AdvantlyTheme.colors
-    val teamColor = if (team == Team.Us) colors.teamUs else colors.teamThem
-    // Höhe folgt dem Inhalt (Schriftgröße bis 200 %), mindestens 28 dp; IntrinsicSize für die hinterlegte Game-Spalte.
+    val teamColor = if (side == Side.A) colors.teamUs else colors.teamThem
+    val tagSuffix = if (side == Side.A) "us" else "them"
+    // Höhe folgt dem Inhalt (Schriftgröße bis 200 %), mindestens 28 dp; IntrinsicSize für die hinterlegte Spalte.
     Row(modifier = Modifier.heightIn(min = 28.dp).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(4.dp).height(16.dp).background(teamColor, RoundedCornerShape(2.dp)))
         Spacer(Modifier.width(7.dp))
         Box(
             Modifier
                 .size(8.dp)
-                .alpha(if (state.server == team && !state.isFinished) 1f else 0f)
-                .background(colors.sportTennis, CircleShape),
+                .alpha(if (serving) 1f else 0f)
+                .background(sportColor(sport), CircleShape),
         )
         Spacer(Modifier.width(7.dp))
         Text(
             text = name,
             style = AdvantlyTheme.typography.label.copy(fontSize = 14.sp),
             color = if (outdoor) Color.White else colors.text,
-            modifier = Modifier.weight(1f).testTag(if (team == Team.Us) "set_name_us" else "set_name_them"),
+            modifier = Modifier.weight(1f).testTag("set_name_$tagSuffix"),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        state.completedSets.forEach { set ->
-            val mine = if (team == Team.Us) set.gamesUs else set.gamesThem
-            val won = set.winner == team
-            val tiebreak = set.tiebreakLoserPoints?.takeIf { !won }
-            Row(Modifier.widthIn(min = 30.dp), horizontalArrangement = Arrangement.Center) {
-                Text(
-                    text = mine.toString(),
-                    style = AdvantlyTheme.typography.scoreS,
-                    color = if (won || outdoor) colors.text else colors.text2,
-                    textAlign = TextAlign.Center,
-                )
-                if (tiebreak != null) {
+        columns.forEachIndexed { index, column ->
+            val value = column.values[side]
+            if (column.isCurrent) {
+                Box(
+                    modifier =
+                        Modifier
+                            .widthIn(min = 36.dp)
+                            .fillMaxHeight()
+                            .background(if (outdoor) Color.Black else colors.surface2, RoundedCornerShape(7.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text(
-                        text = tiebreak.toString(),
-                        style = AdvantlyTheme.typography.caption.copy(fontSize = 10.sp, baselineShift = BaselineShift.Superscript),
-                        color = if (outdoor) Color.White else colors.text2,
+                        text = value.toString(),
+                        style = AdvantlyTheme.typography.scoreS.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
+                        color = if (outdoor) Color.White else colors.text,
+                        modifier = Modifier.testTag("current_$tagSuffix"),
                     )
                 }
-            }
-        }
-        if (!state.isFinished) {
-            Box(
-                modifier =
-                    Modifier
-                        .widthIn(min = 36.dp)
-                        .fillMaxHeight()
-                        .background(if (outdoor) Color.Black else colors.surface2, RoundedCornerShape(7.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = state.games(team).toString(),
-                    style = AdvantlyTheme.typography.scoreS.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
-                    color = if (outdoor) Color.White else colors.text,
-                    modifier = Modifier.testTag(if (team == Team.Us) "games_us" else "games_them"),
-                )
+            } else {
+                val won = column.winner == side
+                val tiebreak = column.tiebreakLoserPoints?.takeIf { !won }
+                Row(Modifier.widthIn(min = 30.dp).testTag("set_${index}_$tagSuffix"), horizontalArrangement = Arrangement.Center) {
+                    Text(
+                        text = value.toString(),
+                        style = AdvantlyTheme.typography.scoreS.copy(fontWeight = if (won) FontWeight.Bold else FontWeight.Medium),
+                        color = if (won || outdoor) colors.text else colors.text2,
+                        textAlign = TextAlign.Center,
+                    )
+                    if (tiebreak != null) {
+                        Text(
+                            text = tiebreak.toString(),
+                            style = AdvantlyTheme.typography.caption.copy(fontSize = 10.sp, baselineShift = BaselineShift.Superscript),
+                            color = if (outdoor) Color.White else colors.text2,
+                        )
+                    }
+                }
             }
         }
     }
@@ -390,6 +354,7 @@ internal fun RowScope.FooterButton(
 /** Kleiner Status-Chip im Kopf (Sportart). */
 @Composable
 internal fun SportChip(
+    sport: Sport,
     text: String,
     outdoor: Boolean,
     modifier: Modifier = Modifier,
@@ -405,17 +370,7 @@ internal fun SportChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Canvas(Modifier.size(8.dp)) {
-            drawCircle(
-                colors.sportTennis,
-                radius = size.minDimension / 2,
-                center =
-                    Offset(
-                        size.width / 2,
-                        size.height / 2,
-                    ),
-            )
-        }
+        SportIcon(sport, size = 14.dp)
         Text(text = text, style = AdvantlyTheme.typography.label.copy(fontSize = 13.sp), color = if (outdoor) Color.White else colors.text)
     }
 }
@@ -425,12 +380,12 @@ internal val HintArrowDirection = SemanticsPropertyKey<String>("HintArrowDirecti
 
 /** `up`/`down` (Hochformat) bzw. `left`/`right` (Querformat). */
 internal fun arrowDirection(
-    team: Team,
+    side: Side,
     landscape: Boolean,
 ): String =
     when {
-        landscape && team == Team.Us -> "left"
+        landscape && side == Side.A -> "left"
         landscape -> "right"
-        team == Team.Us -> "up"
+        side == Side.A -> "up"
         else -> "down"
     }

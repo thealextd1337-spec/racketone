@@ -4,7 +4,7 @@ Gilt für alle Agenten (Claude, Codex, …) und Menschen, die in diesem Repo arb
 Planung und Architektur: `docs/PLAN.md` (gilt bei Widersprüchen), `docs/01-architektur.md`, `docs/00-entscheidungen.md`.
 
 ## Projekt in einem Satz
-Advantly zählt Racketsport-Matches (Tennis, Padel, Pickleball; später Badminton, Tischtennis) gleichwertig auf Handy und Uhr.
+Advantly zählt Racketsport-Matches (Tennis, Padel, Pickleball, Badminton und Tischtennis; alle fünf Sportarten sind umgesetzt) gleichwertig auf Handy und Uhr.
 Kotlin Multiplatform: gemeinsame Logik in `shared/`, Phone-UI mit Compose Multiplatform (Android + iOS),
 Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 

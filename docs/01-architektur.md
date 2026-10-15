@@ -193,7 +193,7 @@ sealed interface EventPayload {
 
 **Effektive Events**: Rückwärts über das geordnete Log; ein Event ist wirksam, wenn es von keinem *wirksamen* `Undo` referenziert wird. Undo auf ein bereits rückgängig gemachtes Event ist ein No-op (idempotent).
 
-**UI-Undo**: Der Undo-Button erzeugt `Undo(target = letztes wirksames PointWon/ContinueDecision)` – das Ziel ist eine konkrete Event-ID, daher auch bei parallelen Taps eindeutig.
+**UI-Undo**: Der Undo-Button erzeugt `Undo(target = letztes wirksam angewendetes PointWon/ContinueDecision/Correction/MatchEnded)` – das Ziel ist eine konkrete Event-ID, daher auch bei parallelen Taps eindeutig. Ignorierte Events sind nie UI-Undo-Ziel; maßgeblich ist [02 §7.3](02-scoring-regeln.md#73-effektive-events-und-fold-normativ).
 
 ### 3.3 Regelwerke (`RuleSet`)
 

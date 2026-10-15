@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Entwurf zur Entscheidung |
-| **Stand** | 14.10.2026 |
+| **Stand** | 15.10.2026 |
 | **Rolle** | Backend-Architektur |
 | **Betrifft Phasen** | P2 (Accounts/Freunde/Sync), P3 (Statistik & Health), P4 (Garmin) – P1 ist backendfrei |
 | **Ziel** | Datenmodell, RLS, Sync-Protokoll, Freundes-Flows, Statistik, DSGVO, Betrieb und Kosten so weit festlegen, dass P2 ohne Grundsatzdiskussion starten kann |
@@ -23,7 +23,7 @@
 | E5 | Spieler-Identität | `players`-Tabelle: **Self-Player mit `id = profile.id`**, Gäste mit eigener UUID; Claim setzt `players.profile_id` (Historie bleibt unverändert) | Kein Umschreiben alter Matches; Statistik-Schlüssel `coalesce(profile_id, player_id)`. |
 | E6 | Sichtbarkeit | **Pro Teilnehmer** steuerbar (`share_with_friends`), Default **aus** (Privacy by Default) | Jeder entscheidet selbst, ob *seine* Matches bei *seinen* Freunden auftauchen. |
 | E7 | Events | Zeilenbasiert in `match_events`, append-only, `ON CONFLICT DO NOTHING`; Kompaktierung alter Matches optional ab P3 | Idempotenz + Realtime + einfache RLS; Speicher ist kein Kostentreiber. |
-| E8 | Konflikte | **Ein aktiver Scorer pro Match (Lease)**; Ordnung über `(lamport, device_id)`; Undo referenziert Event-ID | Echte Doppelerfassung ist fachlich nicht automatisch auflösbar → vermeiden statt mergen. |
+| E8 | Zähler-Rolle | **Entschieden 2026-10-15: genau ein Zähler-Gerät**, Wechsel durch repliziertes Engine-Event „Zähler wechselt“ (`scorer_handover` als Arbeitsname), kein Zeit-Lease | Nur der zum jeweiligen Event-Zeitpunkt aktive Zähler erzeugt wirksame Zähl-/Undo-Events. Engine- und Ordnungsdetails siehe [02](02-scoring-regeln.md), Replikation siehe [01](01-architektur.md). |
 | E9 | Match-Zusammenfassung | **Client-Engine berechnet**, Server prüft **Plausibilität in SQL** beim Finalisieren; vollständiger Server-Replay (Kotlin/JS-Engine in Edge Function) erst bei Ranglisten | Eine Engine-Implementierung, keine Duplikation; Manipulation hat heute keinen Anreiz. |
 | E10 | Health-Zeitreihe | **Ein Datensatz pro Session & Metrik mit `smallint[]` auf festem 5-s-Raster** (NULL = Lücke) | ~2 KB pro Match statt 5.000 Zeilen; Postgres komprimiert (TOAST); trivial zu löschen/exportieren. |
 | E11 | Health-Sichtbarkeit | Eigene Tabellen, eigene Policies, Default `private`; Erfassung nur mit Art.-9-Einwilligung (in DB geprüft) | Gesundheitsdaten strikt getrennt von Spieldaten. |
@@ -165,6 +165,10 @@ erDiagram
   profiles ||--o{ matches : "erstellt"
   matches ||--|{ match_participants : "2 oder 4"
   players ||--o{ match_participants : "spielt"
+  matches ||--o{ match_roles : "Director / Uebernahme-Kandidaten"
+  profiles ||--o{ match_roles : "zugewiesen"
+  matches ||--o{ match_visitors : "nur Live / Ergebnis"
+  profiles ||--o{ match_visitors : "benannt"
   matches ||--o{ match_events : "append-only"
   devices ||--o{ match_events : "erzeugt"
   matches ||--o{ match_sets : "materialisiert"
@@ -205,7 +209,8 @@ erDiagram
     text status
     text winner_team
     jsonb summary
-    uuid scorer_device_id
+    uuid scorer_device_id "Engine-Projektion"
+    uuid scorer_event_id
     bigint server_version
   }
   match_participants {
@@ -216,6 +221,18 @@ erDiagram
     smallint position
     text display_name "Snapshot"
     bool share_with_friends
+  }
+  match_roles {
+    uuid match_id PK
+    uuid profile_id PK
+    text role "director player-viewer"
+    bool may_take_over
+  }
+  match_visitors {
+    uuid match_id PK
+    uuid profile_id PK
+    uuid invited_by FK
+    timestamptz revoked_at
   }
   match_events {
     uuid id PK
@@ -374,7 +391,7 @@ create table public.user_blocks (
 create table public.matches (
   id                uuid primary key,                       -- Client-UUIDv7
   created_by        uuid not null references public.profiles(id),
-  sport             text not null check (sport in ('tennis','padel','pickleball')),
+  sport             text not null check (sport in ('tennis','padel','pickleball','badminton','table_tennis')),
   discipline        text not null check (discipline in ('singles','doubles')),
   surface           text check (surface in ('clay','hard','grass','carpet','artificial_grass',
                                             'indoor_hard','indoor_other')),
@@ -393,8 +410,8 @@ create table public.matches (
   validation_status text not null default 'pending'
                       check (validation_status in ('pending','ok','suspicious','invalid')),
   validation_notes  text[],
-  scorer_device_id  uuid,                                   -- Scorer-Lease (siehe 5.3)
-  scorer_lease_until timestamptz,
+  scorer_device_id  uuid,                                   -- Projektion des Engine-Zustands, siehe 5.3
+  scorer_event_id   uuid,                                   -- zuletzt angewandter Zählerwechsel, kein Zeit-Lease
   deleted_at        timestamptz,
   server_version    bigint not null,
   created_at        timestamptz not null default now(),
@@ -409,7 +426,6 @@ create table public.match_participants (
   team               text not null check (team in ('A','B')),
   position           smallint not null check (position in (1,2)),
   display_name       text not null,                    -- Snapshot zum Match-Zeitpunkt
-  can_score          boolean not null default false,   -- darf Events schreiben (Creator immer)
   share_with_friends boolean not null default false,   -- Sichtbarkeit für MEINE Freunde
   hidden             boolean not null default false,   -- „aus meiner Liste ausblenden“
   server_version     bigint not null,
@@ -443,6 +459,39 @@ create index on public.match_events (match_id, lamport, device_id);
 ```
 
 **Warum `device_id` ohne FK?** Events von Uhren werden über das Handy hochgeladen; die Uhr bekommt eine eigene `devices`-Zeile, die aber evtl. erst im selben Sync-Batch angelegt wird. Der RPC legt fehlende Geräte vorab an; ein FK würde nur Reihenfolgeprobleme erzeugen.
+
+#### 3.3.3a Rollen und Visitor (P2)
+
+**Entschieden 2026-10-15 (PLAN K1):** Teilnehmeridentität, Zugriffsrecht und aktives Zähler-Gerät sind getrennt. Standard ist die Uhr des startenden Spielers; Director ist eine außenstehende Person am Handy, ohne Spieler-/Health-Zuordnung. P1 bleibt lokal (eigene Uhr oder eigenes Handy). Ab P2 wählt der Starter die Zähler-Person (Mitspieler/Freund mit Account oder externer Director mit Account) und deren Gerät; das Match wird per Cloud zugestellt.
+
+| Rolle | Abbildung | Rechte |
+|---|---|---|
+| `scorer` | Genau eine aktive `device_id`, aus Start-/Zählerwechsel-Events abgeleitet; `matches.scorer_device_id` ist nur Projektion | Punkte, Undo und Match-Steuerung am aktiven Gerät |
+| `director` | `match_roles.role = 'director'`, unabhängig von `match_participants` | Match lesen; am zugewiesenen aktiven Handy zählen, übrige Geräte Anzeige; keine fremden Health-Rechte |
+| `player-viewer` | Spieler aus `match_participants`, optional zusätzlich in `match_roles` als Übernahme-Kandidat | Anzeige; Übergabe nur nach Bestätigung und Berechtigung, niemals paralleles Zählen |
+| `visitor` | Benannter Account in `match_visitors` | Nur Live-Kanal und reduziertes Match-Ergebnis lesen, kein Zählen/Undo/Übernehmen, keine Health-Daten |
+
+```sql
+-- Zugriffs-/Übernahme-Kandidaten; kein zweiter autoritativer Zählerstand.
+create table public.match_roles (
+  match_id uuid not null references public.matches(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  role text not null check (role in ('director','player-viewer')),
+  may_take_over boolean not null default false,
+  server_version bigint not null,
+  primary key (match_id, profile_id)
+);
+create table public.match_visitors (
+  match_id uuid not null references public.matches(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  invited_by uuid not null references public.profiles(id) on delete cascade,
+  revoked_at timestamptz,
+  server_version bigint not null,
+  primary key (match_id, profile_id)
+);
+```
+
+Rollen-/Visitor-Vergabe nur über validierte Verwaltungs-RPCs, kein direktes Client-Schreiben. Entschieden (F16, 2026-10-15): Visitor müssen Freunde des Benennenden sein (RLS/RPC prüft `friendships.status = accepted`), keine Zustimmung der Mitspieler; Ersteller verwaltet Einladungen/Widerruf. Aliase (F18): `profiles.alias` (öffentlich, optional; nur der Nutzer selbst schreibt). Keine Spitznamen-Tabelle; Dummy-/Gastspieler (`players` ohne `profile_id`) benennt nur der Anleger (`created_by`). `scorer` ist **keine frei schreibbare Rollen-Zeile**: Start und bestätigter Zählerwechsel bestimmen genau ein Gerät. Projektionen `scorer_device_id/scorer_event_id` werden nur aus dem Engine-Log aktualisiert, nie über Match-Upsert oder Ablaufzeit. Autorisierte Gerätezuordnung und Übernahme-Kandidaten müssen auch für historische Events nachvollziehbar bleiben (keine Prüfung verspäteter Uploads allein gegen den aktuellen Zähler). Visitor werden nicht gleichzeitig als Spieler/Director geführt; Rollenwechsel erfordern eine explizite neue Zuweisung. Auch eine bestehende Freundschaft erteilt Visitor keine Health-Rechte; dies ist in den Health-Policies ausdrücklich ausgeschlossen.
 
 #### 3.3.4 Materialisierte Ergebnisse für Statistik
 
@@ -609,7 +658,7 @@ create table ops.revenuecat_events (
 create table ops.notification_outbox (
   id          bigint generated always as identity primary key,
   profile_id  uuid not null references public.profiles(id) on delete cascade,
-  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done
+  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done | player_assigned | player_assignment_rejected | scorer_assigned | visitor_invited
   payload     jsonb not null,              -- nur IDs + Titel-Keys, keine Gesundheitsdaten
   created_at  timestamptz not null default now(),
   sent_at     timestamptz,
@@ -642,12 +691,14 @@ create table ops.notification_outbox (
 
 | Datensatz | Ich (Ersteller) | Teilnehmer mit Account | Freund eines Teilnehmers X | Fremder / Blockierter |
 |---|---|---|---|---|
-| Match, Sets, Teilnehmer (Snapshot-Namen), Ergebnis | lesen + schreiben | lesen; Events schreiben, wenn `can_score` | lesen, **wenn X `share_with_friends = true`** | nichts |
+| Match, Sets, Teilnehmer (Snapshot-Namen), Ergebnis | lesen; Verwaltung per RPC, Zählen nur am Zähler-Gerät | lesen; Zählen nur am Zähler-Gerät | lesen, **wenn X `share_with_friends = true`** | nichts |
 | Match-Events (Detailverlauf) | ja | ja | ja (wie Match) | nichts |
 | `player_match_results` | ja | ja | wie Match | nichts |
 | Health-Session/Serie von Person P | nur P selbst | nur bei P.visibility ∈ {participants, friends} | nur bei `friends` **und** Freund von P **und** Match sichtbar | nichts |
 | Profil (Name, Avatar, Username) | eigenes voll | Co-Teilnehmer: Basisfelder | Freunde: Basisfelder | nur via Such-RPC bei exaktem Treffer |
 | Gast-Spieler | Besitzer | – (Snapshot im Match genügt) | – | – |
+
+**Zusätzliche Rollen:** Director liest das Match/Event-Log für seine Aufgabe, schreibt nur über die gerätegebundene Event-Annahme (4.3/5.3) und erhält dadurch keine Health-Rechte. Visitor erhält **keinen** Zugriff auf diese Basistabellen oder das vollständige Event-Log: ausschließlich privater Live-Kanal und reduzierte Ergebnis-RPC (4.4), keine Schreibrechte, keine Health-Daten.
 
 Begründung für „pro Teilnehmer“ statt „pro Match“: Ein Match gehört allen Beteiligten. Wenn ich es mit meinen Freunden teilen will, ist das meine Entscheidung – unabhängig davon, wer gezählt hat. Gegner, die privat bleiben wollen, sind trotzdem nur mit ihrem Snapshot-Namen sichtbar (keine Profilverlinkung für Nicht-Freunde, siehe 4.3).
 
@@ -667,14 +718,17 @@ $$;
 create or replace function private.is_match_participant(p_match uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.match_participants mp
-                 where mp.match_id = p_match and mp.profile_id = auth.uid())
-      or exists (select 1 from public.matches m
-                 where m.id = p_match and m.created_by = auth.uid());
+                 where mp.match_id = p_match and mp.profile_id = auth.uid());
 $$;
 
 create or replace function private.can_view_match(p_match uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select private.is_match_participant(p_match)
+      or exists (select 1 from public.matches m
+                 where m.id = p_match and m.created_by = auth.uid())
+      or exists (select 1 from public.match_roles r
+                 where r.match_id = p_match and r.profile_id = auth.uid()
+                   and r.role = 'director')
       or exists (
         select 1 from public.match_participants mp
         where mp.match_id = p_match
@@ -683,12 +737,21 @@ returns boolean language sql stable security definer set search_path = '' as $$
       );
 $$;
 
-create or replace function private.can_score_match(p_match uuid)
+-- Identitäts-/Uploadrecht, NICHT die aktive Zähler-Rolle.
+create or replace function private.can_submit_match_events(p_match uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.matches m
                  where m.id = p_match and m.created_by = auth.uid() and m.deleted_at is null)
-      or exists (select 1 from public.match_participants mp
-                 where mp.match_id = p_match and mp.profile_id = auth.uid() and mp.can_score);
+      or exists (select 1 from public.match_roles r
+                 where r.match_id = p_match and r.profile_id = auth.uid()
+                   and (r.role = 'director' or r.may_take_over));
+$$;
+
+create or replace function private.is_match_visitor(p_match uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.match_visitors v
+                 where v.match_id = p_match and v.profile_id = auth.uid()
+                   and v.revoked_at is null);
 $$;
 
 create or replace function private.has_consent(p_purpose text)
@@ -707,6 +770,8 @@ $$;
 alter table public.matches               enable row level security;
 alter table public.match_participants    enable row level security;
 alter table public.match_events          enable row level security;
+alter table public.match_roles           enable row level security;
+alter table public.match_visitors        enable row level security;
 alter table public.match_sets            enable row level security;
 alter table public.player_match_results  enable row level security;
 alter table public.players               enable row level security;
@@ -731,7 +796,17 @@ create policy matches_update on public.matches for update to authenticated
   with check ( created_by = (select auth.uid()) );
 -- kein DELETE: Löschen = deleted_at setzen (Tombstone)
 -- Spalten summary/validation_* werden nur über RPC finalize_match geschrieben:
-revoke update (validation_status, validation_notes) on public.matches from authenticated;
+revoke update (validation_status, validation_notes, scorer_device_id, scorer_event_id)
+  on public.matches from authenticated;
+-- Produktive Migration: kein übergeordnetes Tabellen-UPDATE-Grant stehen lassen;
+-- nur erlaubte Metadatenspalten freigeben. Zählerprojektion ausschließlich intern.
+
+-- ROLLEN / VISITOR: Client darf eigene Zuweisung lesen, nur RPCs verwalten.
+create policy roles_own_select on public.match_roles for select to authenticated
+  using (profile_id = (select auth.uid()));
+create policy visitors_own_select on public.match_visitors for select to authenticated
+  using (profile_id = (select auth.uid()));
+-- Keine INSERT/UPDATE/DELETE-Policies für diese Tabellen.
 
 -- TEILNEHMER --------------------------------------------------------------
 create policy mp_select on public.match_participants for select to authenticated
@@ -748,10 +823,10 @@ create policy mp_write_by_creator on public.match_participants for all to authen
 create policy events_select on public.match_events for select to authenticated
   using ( (select private.can_view_match(match_id)) );
 
-create policy events_insert on public.match_events for insert to authenticated
-  with check ( author_id = (select auth.uid())
-               and (select private.can_score_match(match_id)) );
--- bewusst keine UPDATE/DELETE-Policy → unveränderlich
+-- Kein direkter Client-INSERT: sync_push prüft Uploadrecht, Gerätebindung,
+-- zulässige Event-Typen und Übergabe-Berechtigung in einem engen internen Pfad.
+revoke insert, update, delete on public.match_events from authenticated;
+-- Keine UPDATE/DELETE-Policy → unveränderlich. Visitor hat keinen Schreibpfad.
 
 -- ABGELEITETE TABELLEN: nur lesen ------------------------------------------
 create policy sets_select on public.match_sets for select to authenticated
@@ -781,8 +856,11 @@ create policy profiles_update on public.profiles for update to authenticated
 create policy hs_select on public.health_sessions for select to authenticated
   using (
     profile_id = (select auth.uid())
-    or (visibility = 'participants' and (select private.is_match_participant(match_id)))
+    or (visibility = 'participants'
+        and not (select private.is_match_visitor(match_id))
+        and (select private.is_match_participant(match_id)))
     or (visibility = 'friends'
+        and not (select private.is_match_visitor(match_id))
         and profile_id = any ((select private.my_friend_ids()))
         and (select private.can_view_match(match_id)))
   );
@@ -854,7 +932,23 @@ create policy live_match_receive on realtime.messages for select to authenticate
   );
 ```
 
-Für „Spielstand nur ansehen“ empfangen Clients Events und füttern dieselbe Engine (Replay im Viewer) – kein separates Score-Format nötig.
+Spieler-Anzeige und Director empfangen Engine-Events und verwenden dieselbe Engine. **Visitor erhalten einen separaten privaten Kanal `match-live:<id>` mit bereinigter Stand-Projektion** (Teams/Snapshot-Namen, Sätze, Punkte, Hinweise, Zähler, Versionsstand), ohne vollständiges Event-Log, Geräte-/Profilmetadaten oder Health. Die obige Event-Broadcast-Skizze bleibt nur für voll leseberechtigte Match-Geräte; sie darf nicht für Visitor geöffnet werden.
+
+RLS-/RPC-Skizze für Visitor:
+```sql
+create policy visitor_live_receive on realtime.messages for select to authenticated
+  using (realtime.messages.extension = 'broadcast'
+    and realtime.topic() ~ '^match-live:[0-9a-f-]{36}$'
+    and private.is_match_visitor(substring(realtime.topic() from 12)::uuid));
+-- Keine Send-Policy für Visitor; Veröffentlichung nur serverseitig.
+-- get_visitor_match_result(match_id): SECURITY DEFINER, search_path = '',
+-- prüft is_match_visitor; liefert nur Sport, Snapshot-Teamnamen, Sätze,
+-- Endstand, Status. Kein SELECT * und kein Zugriff auf health_* / Storage.
+```
+
+Die bereinigte Stand-Projektion folgt dem wirksamen Engine-Zustand einschließlich Zählerwechsel, nicht einem ungeprüften Zählen aller eingehenden Punkt-Events. Publishing-/Validierungspfad ist in P2 mit 01/02 abzustimmen.
+
+Initialstand und Reconnect über eine ebenso autorisierte `get_visitor_live_state`-RPC, nicht `sync_pull_events`. Widerruf muss auch aktive Abos beenden bzw. vor weiterer Auslieferung neu autorisieren; bereits angezeigte Stände lassen sich nicht zurückholen. Visitor werden weder in `can_view_match` noch als Teilnehmer ergänzt. Eine Freundschaft allein erweitert den Visitor-Kanal nicht um Health. Health-Freigaben erfordern weiterhin separate Berechtigung/Einwilligung; der externe Director zählt nicht als Teilnehmer. Testen: Visitor kann weder Events/Übergaben schreiben noch Health-Tabellen/-Storage lesen, auch nicht über verschachtelte RPCs.
 
 ### 4.5 Performance-Regeln für RLS
 1. `auth.uid()` und Helper immer in `(select …)` wrappen → wird als InitPlan einmal pro Query ausgewertet.
@@ -869,7 +963,7 @@ Für „Spielstand nur ansehen“ empfangen Clients Events und füttern dieselbe
 ### 5.1 Clientseite
 - Lokale Datenbank (SQLDelight) spiegelt die syncbaren Tabellen + eine **Outbox** (`pending_ops`) mit Ops in Reihenfolge.
 - Jede Entität und jedes Event bekommt beim Erzeugen eine **UUIDv7**; Events zusätzlich **Lamport-Zähler** (pro Match, pro Gerät: `lamport = max(eigener, max_gesehener) + 1`) und `device_id`.
-- Sync-Trigger: App-Start, Netz wieder da, Match beendet, alle 10 s während Live-Match mit aktivem Zuschauer-Modus, manueller Pull-to-Refresh.
+- Sync-Trigger: App-Start, Netz wieder da, Match beendet, alle 10 s während Live-Match mit aktiver Anzeige/Visitor, manueller Pull-to-Refresh.
 
 ### 5.2 Upload: `sync_push` (idempotent, transaktional)
 
@@ -886,7 +980,14 @@ begin
   --                             (Felder summary/status nur via finalize_match)
   -- 4) Teilnehmer ersetzen (nur Creator, nur solange status = 'in_progress' oder bei Korrektur)
   --    profile_id wird serverseitig aus players.profile_id übernommen, nie vom Client
-  -- 5) Events:
+  -- 5) Events: SQL unten ist nur der Insert-Kern eines internen Pfads.
+  --    Vorher can_submit_match_events, authentifizierten Autor, Besitz/Bindung
+  --    der Quell-device_id (auch beim Companion-Relay), zulässige Event-Typen
+  --    und Übergabe-Kandidaten prüfen; Visitor strikt abweisen.
+  --    RPC-Rechte/enge SECURITY-DEFINER-Grenze in Migration ausarbeiten:
+  --    SECURITY INVOKER allein kann nach Entzug direkter INSERT-Rechte nicht schreiben.
+  --    Aktuelle Zählerprojektion NICHT als Filter für verspätete Events verwenden.
+  -- Insert-Kern:
   with ins as (
     insert into public.match_events (id, match_id, device_id, author_id, lamport, client_ts, type, payload)
     select e.id, e.match_id, e.device_id, auth.uid(), e.lamport, e.client_ts, e.type, e.payload
@@ -916,20 +1017,19 @@ Eigenschaften:
 - **Konflikt `unique (match_id, lamport, device_id)`** mit *anderer* `id` bedeutet Client-Bug → Request schlägt fehl, Client loggt und setzt Match auf „Sync-Fehler“ (sollte nie passieren).
 - `author_id` setzt der Server, nie der Client.
 
-### 5.3 Ordnung und Konflikte
+### 5.3 Ordnung und Zählerwechsel
 
-**Kanonische Reihenfolge:** `order by lamport, device_id`. Die Engine ist eine reine Funktion `fold(format, events) → state`, daher konvergieren alle Geräte, sobald sie dieselbe Event-Menge haben.
-
-**Undo** referenziert immer `target_event_id` (nicht „letztes Event“). Damit ist Undo auch dann eindeutig, wenn Events verspätet eintreffen. Doppeltes Undo desselben Ziels ist ein No-op.
-
-**Echte Konflikte** (zwei Geräte zählen gleichzeitig denselben Ballwechsel) sind fachlich nicht automatisch lösbar. Deshalb:
+**Entschieden 2026-10-15:** Genau ein Gerät zählt. Kein Handy-Master, keine zwischen Uhr und Handy geteilte Lease und keine zeitliche Verlängerung. Start-/Zählerwechsel-Events sind die einzige fachliche Quelle der Rolle; der Backend-Stand ist eine Projektion. Kanonische Event-Ordnung, Übergabe-Validierung und deterministische Behandlung konkurrierender Wechsel spezifiziert der Engine-Entwickler in [02](02-scoring-regeln.md), Replikation in [01](01-architektur.md). Die SQL-/Wire-Skizzen hier werden daran ausgerichtet und definieren keine abweichenden Regeln.
 
 | Fall | Behandlung |
 |---|---|
-| Uhr + Handy desselben Nutzers | Handy ist Master; Uhr schickt Events via WatchConnectivity/Data Layer, Handy vergibt keine neuen Lamports, sondern übernimmt die der Uhr. Beide teilen sich die Lease. |
-| Zweiter Nutzer will mitzählen (z. B. Doppelpartner) | **Scorer-Lease:** `matches.scorer_device_id` + `scorer_lease_until` (verlängert bei jedem Push, 5 min). Übernahme per `scorer_handover`-Event (UI: „Zählen übernehmen“). Andere Geräte sind Viewer. |
-| Offline-Übernahme ohne Lease-Info (beide offline) | Server akzeptiert alle Events. Beim nächsten Sync erkennt die Engine **überlappende Punkt-Events zweier Geräte im selben Zeitfenster** und markiert das Match „Konflikt prüfen“; Nutzer löst per Undo der Duplikate. Keine automatische Magie. |
-| Korrektur nach Matchende | Creator hängt `correction`-/`undo`-Events an und ruft erneut `finalize_match` auf. Historie bleibt nachvollziehbar. |
+| Standard / Director | Uhr des startenden Spielers zählt; alternativ Director-Handy. Alle übrigen Geräte sind Anzeige, ohne Punkte/Undo. |
+| „Zählen übernehmen“ | Bestätigter Wechsel wird als Engine-Event repliziert; danach zählt ausschließlich das neue Gerät. Kein Zeit-Lease und keine automatische Übernahme bei Verbindungsabbruch. |
+| Altgerät sendet verspätet / nach Ausfall | Autorisierte Events werden idempotent transportiert; die Engine prüft die Rolle zum jeweiligen Event-Zeitpunkt und ignoriert Events eines dann nicht aktiven Geräts deterministisch. Kein Zeitfenster-Dedup von Ballwechseln und kein Konflikt-Dialog. |
+| Übernahme bei getrennten Geräten | Bestätigungs-/Verfügbarkeitsgrenzen gemäß 01/02; UX zeigt letzten bekannten Stand (PLAN F15). Keine zusätzliche serverseitige Lease-Logik. |
+| Korrektur / Undo | Nur das aktive Zähler-Gerät erzeugt wirksame Korrektur-/Undo-Events gemäß 02. Erstellerstatus allein berechtigt kein zweites Gerät. |
+
+Uploadberechtigung und Engine-Wirksamkeit sind getrennt: `sync_push` authentifiziert Autor/Quellgerät und prüft Übergabeberechtigung; die Engine entscheidet beim Replay über den aktiven Zähler. Ein gültiges historisches Event wird nicht verworfen, nur weil inzwischen ein anderes Gerät zählt. `matches.scorer_device_id/scorer_event_id` sind nicht vom Client frei änderbar.
 
 ### 5.4 Match-Zusammenfassung: Client berechnet, Server prüft
 
@@ -938,7 +1038,7 @@ Eigenschaften:
 1. `event_count`/`last_lamport` stimmen mit dem Server-Bestand überein (sonst: „erst Events hochladen“ → Client pusht und wiederholt).
 2. Satzergebnisse passen zum `format` (z. B. Tennis: Sieger hat ≥ `games_per_set`, Differenz ≥ 2 oder Tiebreak-Ergebnis 7:6; Pickleball: bis 11/15/21, 2 Punkte Abstand; Padel inkl. Golden Point/Star Point je Format).
 3. Anzahl gewonnener Sätze des Siegers = `sets_to_win` (außer `retired`/`abandoned`).
-4. Anzahl `point`-Events minus rückgängig gemachte ≥ theoretisches Minimum für das Ergebnis (z. B. 6:0 6:0 → ≥ 48).
+4. Anzahl **wirksamer** `point`-Events nach Rollenprüfung gemäß 02 minus rückgängig gemachte ≥ theoretisches Minimum für das Ergebnis (z. B. 6:0 6:0 → ≥ 48).
 5. Dauer `ended_at - started_at` ≥ Punkte × 5 s (sonst `suspicious`, nicht `invalid`).
 
 Ergebnis: `validation_status = ok | suspicious | invalid`. `invalid` wird nicht in Statistik übernommen; `suspicious` schon, aber markiert. Danach (gleiche Transaktion): `match_sets` und `player_match_results` neu schreiben, `status` setzen, **Outbox-Einträge** für alle verknüpften Teilnehmer außer dem Aufrufer.
@@ -951,9 +1051,9 @@ Ergebnis: `validation_status = ok | suspicious | invalid`. `invalid` wird nicht 
 - Erst-Sync nach Login: Cursor 0, Paging à 200 Matches.
 - **Hinweis:** Sichtbarkeitsänderungen (neuer Freund, Claim) ändern keine `server_version` der betroffenen Matches. Deshalb erhöhen die RPCs `accept_friend`, `claim_player`, `set_my_participation` die `server_version` der betroffenen Teilnehmerzeilen („touch“), damit diese Matches im nächsten Pull auftauchen. Beim Entfreunden/Blocken kann ein Match unsichtbar werden → Client macht nach solchen Aktionen einen **Full-Resync der Freundes-Matches** (selten, günstig).
 
-### 5.6 Live-Mitverfolgen
-- Scorer-Handy lädt im Live-Modus Events sofort hoch (statt gebündelt). Trigger broadcastet auf `match:<id>` (4.4).
-- Zuschauer: `sync_pull_events` für den Anfangszustand, dann Abo des privaten Kanals; bei Reconnect Lücke über `after_lamport` schließen.
+### 5.6 Live-Anzeige und Visitor-Accounts (P2)
+- Das aktive Zähler-Gerät lädt Events sofort hoch, ggf. über sein Companion-Handy. Beim Start gewählter Mitspieler/Freund oder externer Director bekommt das Match per Cloud; alle anderen Geräte bleiben Anzeige. Broadcast gemäß 4.4.
+- Spieler-Anzeige: `sync_pull_events` für den Anfangszustand, dann privater Event-Kanal; Reconnect gemäß 01/02. Benannte Visitor-Accounts: nur bereinigter Live-Kanal/Stand-RPC und Ergebnis-RPC (4.4), kein vollständiges Event-Log, keine Health-Daten, kein Zählen/Undo/Übernehmen.
 - Uhren-Zuschauer (z. B. Partner) bekommen den Stand über ihr Handy.
 - Kosten: Nachrichten = Events × Zuschauer. 25.000 Matches/Monat × 10 % live × 300 Events × 2 Zuschauer ≈ 1,5 Mio. Nachrichten → im Pro-Kontingent (5 Mio.).
 
@@ -965,7 +1065,7 @@ Ergebnis: `validation_status = ok | suspicious | invalid`. `invalid` wird nicht 
 - Garmin bekommt keine Push-Mitteilungen aus dem Backend (Mitteilungen spiegelt das Handy ohnehin).
 
 ### 5.8 Uhren & Garmin
-- Uhr erzeugt Events mit eigener `device_id` und eigenem Lamport-Zähler, offline beliebig lange. Das Handy übernimmt die Events 1:1 in seine Outbox (Autor = eingeloggter Nutzer).
+- Nur die aktive Zähler-Uhr erzeugt wirksame Zähl-/Undo-Events mit eigener `device_id` und Event-Ordnung gemäß 02, auch offline. Anzeige-Uhren messen ihre eigene Belastung unabhängig davon weiter. Das Handy übernimmt die Events 1:1 in seine Outbox (Autor = eingeloggter Nutzer).
 - **Health-Daten** werden ebenfalls auf dem Handy finalisiert: Apple HealthKit-Workout bzw. Health Connect / Health Services / Garmin-FIT-Daten → Resampling (5 s) → `health_sessions` + `health_series`.
 - P4 Garmin: Connect IQ Watch App ↔ Companion (Handy-App) über Connect IQ Mobile SDK; gleiche Event-Struktur, `platform = 'garmin'`. Kein direkter Backend-Zugriff, keine Garmin-Cloud-API in P4.
 
@@ -983,7 +1083,7 @@ Ergebnis: `validation_status = ok | suspicious | invalid`. `invalid` wird nicht 
 |---|---|---|
 | **Benutzername** | RPC `search_profiles(q)` – **exakter** Treffer auf `username` (case-insensitive), nur wenn `discoverable_by_username` | Keine Präfix-/Volltextsuche → keine Nutzer-Enumeration; Rate-Limit 30/min pro Nutzer |
 | **Freundescode** | 8 Zeichen Crockford-Base32 (z. B. `K7QF-92MX`), exakter Treffer | Neu generierbar („Code zurücksetzen“) |
-| **QR-Code** | QR enthält `https://racketone.app/f/<friend_code>`; Scannen → Anfrage. Variante „persönlich treffen“: Gerät zeigt einen **kurzlebigen QR-Token** (5 min, aus `create_friend_qr()`); wer ihn scannt, wird **sofort** Freund (Zeigen = Zustimmung) | Kurzlebiger Token verhindert, dass ein abfotografierter QR dauerhaft Freundschaften erzeugt |
+| **QR-Code** | QR enthält `https://advantly.eu/f/<friend_code>`; Scannen → Anfrage. Variante „persönlich treffen“: Gerät zeigt einen **kurzlebigen QR-Token** (5 min, aus `create_friend_qr()`); wer ihn scannt, wird **sofort** Freund (Zeigen = Zustimmung) | Kurzlebiger Token verhindert, dass ein abfotografierter QR dauerhaft Freundschaften erzeugt |
 | Kontakte-Abgleich | **Nicht** in P2 | Telefonbuch-Upload wäre unverhältnismäßig (Daten Dritter) |
 
 `search_profiles` gibt nur `id, username, display_name, avatar_url` zurück und lässt blockierende/blockierte Nutzer aus.
@@ -1011,7 +1111,7 @@ sequenceDiagram
   participant S as Supabase
   participant M as Max (Gast, noch ohne App)
   A->>S: create_invite(kind=claim_player, player_id=Gast "Max")
-  S-->>A: Link https://racketone.app/i/<token> (Token nur im Link, DB speichert sha256)
+  S-->>A: Link https://advantly.eu/i/<token> (Token nur im Link, DB speichert sha256)
   A->>M: Teilen (WhatsApp, Signal …)
   M->>M: Installiert App (Deferred Deep Link / Token in Zwischenablage-Fallback)
   M->>S: Registrierung (Apple/Google/E-Mail)
@@ -1027,11 +1127,12 @@ sequenceDiagram
 Regeln:
 - Token: 128 Bit zufällig, **einmalig**, 14 Tage gültig, widerrufbar; DB speichert nur `sha256`.
 - **Rückgängig machen:** Der Besitzer des Gasts kann einen Claim **14 Tage** lang zurücksetzen („Das ist nicht Max“) → `profile_id = null`, Teilnehmer und Statistik werden zurückgenommen. Schützt gegen weitergeleitete Links.
-- **Gast ist bereits Freund mit Account** (häufig nach P1): Besitzer stellt `player_link_request` („Dieser Gast ist Max“), Max bestätigt in der App → gleicher Ablauf wie Claim, ohne Link.
+- **Zuweisung durch den Erfasser (entschieden 2026-10-15):** Ist Max bereits **Freund** mit Account, weist der Besitzer des Dummys direkt zu (RPC `assign_player(player_id, profile_id)`, prüft Freundschaft `accepted` und Besitz `created_by`). Die Verknüpfung wirkt **sofort** wie ein Claim (`players.profile_id`, `match_participants.profile_id` für alle Matches des Dummys, `stat_key`), `assigned_at`/`assigned_by` werden gesetzt. Max erhält eine Benachrichtigung (`kind = 'player_assigned'`) und kann jederzeit **„War ich nicht“** wählen (RPC `reject_player_assignment`) → Verknüpfung, Teilnehmer und Statistik werden zurückgenommen, Besitzer wird benachrichtigt; eine erneute Zuweisung desselben Dummys an Max ist danach gesperrt. Keine vorherige Bestätigung nötig (ersetzt den früheren `player_link_request` mit Bestätigung).
+- Typischer Fall: Doppel mit 2 App-Nutzern + 2 Dummys; jeder Dummy kann später unabhängig zugewiesen werden.
 - **Mehrere Gast-Einträge derselben Person** bei verschiedenen Besitzern: Jeder Besitzer lädt separat ein bzw. stellt einen Link-Request. Keine automatische „Ist das du?“-Erkennung (Datenschutz, Fehlzuordnungen).
 - Konflikt: Max war im selben Match bereits mit Account eingetragen → Claim für dieses Match wird abgelehnt (Unique-Index `match_participants_profile_once`), restliche Matches werden übernommen; Meldung an Besitzer.
 - **Freundes-Einladung** (`kind = 'friend'`) für Personen ohne Gast-Eintrag: gleicher Link-Mechanismus, Ergebnis ist nur die Freundschaft.
-- Links: Universal Links (iOS) / App Links (Android) auf `racketone.app`; Fallback-Webseite mit Store-Links (statische Seite, kein Tracking).
+- Links: Universal Links (iOS) / App Links (Android) auf `advantly.eu`; Fallback-Webseite mit Store-Links (statische Seite, kein Tracking).
 
 ---
 
@@ -1148,7 +1249,7 @@ $$;
 - **Health-Einwilligung** erst beim ersten Aktivieren von „Gesundheitsdaten erfassen“ (nicht im Onboarding gebündelt), eigener Screen mit: welche Daten, wozu, wer sieht sie (Default nur ich), Widerruf jederzeit, Löschung bei Widerruf.
 - Zusätzlich die **Plattform-Berechtigungen** (HealthKit, Health Connect, Garmin) – sie ersetzen die DSGVO-Einwilligung nicht.
 - Jede Einwilligung/jeder Widerruf ist eine neue Zeile in `consents` mit Textversion; bei neuer Textversion erneut einholen, wenn sich Zweck/Empfänger ändern.
-- **Mindestalter 14** (Nutzerentscheidung 2026-10-15; Anbieter in Österreich: Art. 8 DSGVO i. V. m. § 4 Abs. 4 DSG). **Für Deutschland gilt 16** – vor P2 (Accounts) Altersabfrage je Land bei der Registrierung einplanen (DE: unter 16 nur mit Eltern-Einwilligung bzw. ohne Health-/Cloud-Funktionen).
+- **Mindestalter 14 (AT), entschieden 2026-10-15:** Anbieter in Österreich; Art. 8 DSGVO i. V. m. § 4 Abs. 4 DSG. Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (Nutzungsbedingungen und Altersprüfung je Land). Die ausdrückliche Art.-9-Einwilligung für Health bleibt separat erforderlich, ab P3.
 - **Plattformregeln:** Apple HealthKit (Guideline 5.1.3): keine Nutzung für Werbung/Data-Mining, keine Weitergabe an Dritte ohne Zustimmung, Zweckangabe in der App und Datenschutzerklärung. Google Health Connect: Berechtigungsdeklaration und „Limited Use“-Richtlinie. Beides deckt sich mit unserem Design (keine Werbung, keine Analyse-SDKs auf Health-Daten).
 
 ### 8.3 Betroffenenrechte
@@ -1186,6 +1287,7 @@ Kaskaden im Detail:
 | Matches **nur mit Gästen** | komplett gelöscht (Events, Sets, Ergebnisse) |
 | Eigene Gast-Spieler | gelöscht, sofern nicht von anderen beansprucht; beanspruchte Gäste gehen an das Profil des Claimers über |
 | `player_match_results` | Zeilen des Gelöschten: `profile_id = null`, `stat_key = player_id` (Statistik der anderen bleibt korrekt, H2H gegen „Gelöschter Spieler“) |
+| `match_roles`, `match_visitors` | Zuweisungen des gelöschten Accounts sowie von ihm erteilte Visitor-Zugriffe kaskadierend löschen; aktive Live-Abos entziehen. Laufender Zählerwechsel bleibt ein Engine-Event, keine stille Neuzuweisung. |
 | `ops.notification_outbox` | cascade |
 | `ops.revenuecat_events` | `app_user_id` wird gehasht (Abrechnung läuft über Apple/Google, wir stellen keine Rechnungen → keine HGB/AO-Aufbewahrung bei uns) |
 | Backups | Daten verschwinden spätestens nach 7 Tagen aus den täglichen Backups (PITR nicht aktivieren oder Retention dokumentieren) |
@@ -1206,7 +1308,7 @@ Kaskaden im Detail:
 7. Drittlandübermittlung (USA): EU-US Data Privacy Framework/SCC je Anbieter.
 8. Speicherdauern (8.1), Backups 7 Tage.
 9. Betroffenenrechte inkl. In-App-Export und -Löschung, Beschwerderecht bei Aufsichtsbehörde.
-10. Mindestalter 14 (AT), länderabhängig 16 (DE) – siehe §8.2.
+10. Mindestalter 14 (AT); Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen.
 11. Keine automatisierte Entscheidungsfindung/Profiling im Sinne Art. 22.
 
 ### 8.5 Organisatorisches
@@ -1275,7 +1377,7 @@ backend/
 
 ### 9.5 Tests (pgTAP)
 - Ausführung: `supabase test db` (lokal und in CI). Helfer: **supabase_test_helpers** (basejump) für `tests.create_supabase_user()` / `tests.authenticate_as()`.
-- Pflicht-Testmatrix RLS: Ersteller, Teilnehmer, Freund mit/ohne `share_with_friends`, Freund eines Nicht-Teilnehmers, Fremder, Blockierter, anon – jeweils für `matches`, `match_events`, `player_match_results`, `health_*`, `players`, `profiles`, Realtime-Policy.
+- Pflicht-Testmatrix RLS: Ersteller, aktiver Zähler, ehemaliger Zähler (verspäteter Upload), Director, Spieler-Anzeige, Visitor (auch nach Widerruf, inkl. Live-Kanal/Ergebnis und Health-Storage), Teilnehmer, Freund mit/ohne `share_with_friends`, Freund eines Nicht-Teilnehmers, Fremder, Blockierter, anon – jeweils für `matches`, `match_events`, `player_match_results`, `health_*`, `players`, `profiles`, Realtime-Policy.
 
 ```sql
 begin;
@@ -1346,7 +1448,7 @@ Annahmen pro aktivem Nutzer/Monat: 4 Matches (≈ 1,6 Accounts pro Match), 50 % 
 | RevenueCat | 0 | 0 bis 2.500 $ MTR, danach 1 % des Umsatzes |
 | **Summe laufend** | **0–25 $** | **≈ 50–110 $** (ohne PITR) |
 
-Einmalig/jährlich außerhalb des Backends: Apple Developer Program 99 $/Jahr, Google Play 25 $ einmalig, Domain `racketone.app` ~15–20 $/Jahr.
+Einmalig/jährlich außerhalb des Backends: Apple Developer Program 99 $/Jahr, Google Play 25 $ einmalig, Domain `advantly.eu` ~15–20 $/Jahr.
 
 Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer und Monat**. Kostentreiber ist ab dann eher Compute (gleichzeitige Last am Wochenende) als Speicher. Wichtige Stellschraube: Realtime nur im Live-Screen öffnen (sonst greift das 500-Verbindungen-Limit des Spend Caps).
 
@@ -1356,8 +1458,8 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 
 | Phase | Backend-Umfang |
 |---|---|
-| **P1** | Kein Backend. Aber: UUIDv7, Lamport, `device_id`, Event-Typen und `format`-JSON schon so wie hier spezifiziert → P2 ist reines Hochladen. Self-Player lokal mit eigener UUID. |
-| **P2** | Projekte + Region, Auth (Apple/Google/E-Mail), `profiles`, `players`, `friendships`, `user_blocks`, `invites`, `player_link_requests`, `matches`, `match_participants`, `match_events`, `match_sets`, `player_match_results`, `devices`, `consents` (terms/privacy), Outbox + `push-dispatch`, `sync_push/sync_pull/finalize_match`, Claim-Flow, Realtime-Live, Account-Löschung, Export (ohne Health), `entitlements` + RevenueCat-Webhook (vorbereitet, ohne Paywall). |
+| **P1** | Kein Backend. Aber: IDs, Event-Ordnung, `device_id`, Event-Typen (inkl. Zählerwechsel) und `format`-JSON gemäß 01/02 → P2 ist reines Hochladen. Self-Player lokal mit eigener UUID. |
+| **P2** | Projekte + Region, Auth (Apple/Google/E-Mail), `profiles`, `players`, `friendships`, `user_blocks`, `invites`, `player_link_requests`, `matches`, `match_participants`, `match_roles`, `match_visitors`, `match_events`, `match_sets`, `player_match_results`, `devices`, `consents` (terms/privacy), Outbox + `push-dispatch`, `sync_push/sync_pull/finalize_match`, Claim-Flow, Realtime-Live, Account-Löschung, Export (ohne Health), `entitlements` + RevenueCat-Webhook (vorbereitet, ohne Paywall). |
 | **P3** | `health_sessions/series`, Health-Einwilligungen, DSFA, Statistik-RPCs (Bilanz, H2H, Verlauf, Health-Trend), Export mit Health, optional Event-Kompaktierung. |
 | **P4** | `platform = 'garmin'`, Garmin-Health-Quelle; keine Schemaänderung erwartet. |
 
@@ -1369,13 +1471,13 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 |---|---|---|
 | O1 | Sollen Matches standardmäßig mit Freunden geteilt werden (`share_matches_default`)? | **Aus** (Privacy by Default), mit einmaliger Abfrage im Onboarding. |
 | O2 | Health-Sichtbarkeit für Mitspieler/Freunde überhaupt in P3 anbieten oder erst später? | Erst „nur ich“; Teilen in P3.1, weil zweite Einwilligung + mehr Tests. |
-| O3 | Mindestalter? | **Entschieden 2026-10-15: 14** (AT); DE 16 → Länderabfrage vor P2. Jugendmodus später. |
-| O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `racketone.app` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
+| O3 | Mindestalter | **Entschieden 2026-10-15: Mindestalter 14 (AT)**; Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (8.2). |
+| O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `advantly.eu` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
 | O5 | Sign-in-with-Apple-Token-Widerruf bei Löschung: Authorization-Code serverseitig speichern (zusätzliche Edge Function beim ersten Login)? | Ja, in P2 einplanen (App-Review-Thema). |
 | O6 | Datenschutzbeauftragter/DSFA: extern beauftragen oder selbst mit Vorlage? | DSFA selbst (DSK-Vorlage), DSB-Pflicht vor P3 prüfen lassen. |
 | O7 | Belag als feste Liste (Vorschlag in 3.3.3) oder zusätzlich Freitext/Hallen? | Feste Liste + `indoor_*`; Freitext nur für Venue. |
-| O8 | Soll der Doppelpartner standardmäßig mitzählen dürfen (`can_score`)? | Nein, Lease-Übergabe explizit. |
-| O9 | Live-Mitverfolgen nur für Freunde oder per Link auch für Unbekannte (z. B. Familie ohne Account)? | P2: nur sichtbarkeitsberechtigte Accounts; öffentlicher Live-Link später (eigene Sicherheitsbetrachtung). |
+| O8 | Doppelpartner mitzählen? | **Entschieden 2026-10-15:** kein paralleles Zählen; nur ein Gerät. Ab P2 beim Start Zähler wählen oder später Rolle bestätigt übergeben. Sonst Spieler-Anzeige. `can_score` entfällt zugunsten Rollen-/Übernahmeberechtigung. |
+| O9 | Live-Mitverfolgen / Zuschauer? | **Entschieden 2026-10-15:** ab P2 benannte Visitor-Accounts, ausschließlich Live-Stand und Ergebnis, kein Zählen und keine Health-Daten. Verwaltung/Widerruf/Dauer noch offen (PLAN F16); öffentlicher Live-Link später. |
 | O10 | Freemium-Grenzen (was ist „Pro“)? | Für Backend irrelevant bis P3; Entitlement-Tabelle steht. |
 
 ---
