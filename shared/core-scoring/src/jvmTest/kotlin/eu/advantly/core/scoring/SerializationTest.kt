@@ -108,6 +108,7 @@ class SerializationTest {
                 "effects",
                 "ignoredEvents",
                 "continuation",
+                "openForks",
             ),
             obj.keys.toList(),
         )

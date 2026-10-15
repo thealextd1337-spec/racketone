@@ -167,6 +167,22 @@ data object Paused : EventPayload
 @SerialName("Resumed")
 data object Resumed : EventPayload
 
+/**
+ * Auflösung einer Gabelung (01 §4.4, 02 §7.5): Ab [ancestor] haben die Zweige mit den Wurzel-Events [branches]
+ * unabhängig voneinander gezählt. [keep] = Wurzel des behaltenen Zweigs – die Events aller anderen gelisteten Zweige
+ * werden unwirksam (wie durch Undo); `null` = alle Zweige behalten (Quittung „zusammenführen“).
+ *
+ * Mehrere Auflösungen derselben Gabelung (gleicher [ancestor], gleiche Menge [branches]): Es gilt die in der Ordnung
+ * erste wirksame, spätere stehen in `ignoredEvents`. Undo auf eine Auflösung öffnet die Gabelung wieder.
+ */
+@Serializable
+@SerialName("ForkResolved")
+data class ForkResolved(
+    val ancestor: EventId,
+    val branches: List<EventId>,
+    val keep: EventId? = null,
+) : EventPayload
+
 /** Setzt bzw. löscht (`null`) nachträglich das Detail eines wirksamen `PointWon` – ohne Score-Wirkung. */
 @Serializable
 @SerialName("PointDetailSet")

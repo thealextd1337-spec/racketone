@@ -1,8 +1,10 @@
 package eu.advantly.core.scoring
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.MatchId
 
 /**
  * Ergebnis eines Folds inklusive Log – Grundlage für das inkrementelle [ScoringEngine.apply].
@@ -31,7 +33,11 @@ class EngineState internal constructor(
     val genesis: ScoreEvent?,
     internal val core: Core,
     internal val appliedPoints: Set<EventId>,
-)
+    internal val branching: Boolean = false,
+) {
+    /** Anzahl wirksam angewendeter Ballwechsel (`PointWon`). */
+    val pointsPlayed: Int get() = appliedPoints.size
+}
 
 /**
  * Ein wirksames `PointWon` mit dem Zustand davor und danach – Basis der Statistik (02 §11.1).
@@ -149,8 +155,10 @@ object ScoringEngine {
         for (event in fresh) {
             val payload = event.payload
             val fastPath =
-                (last == null || EventOrdering.compare(event, last) > 0) &&
+                !state.branching &&
+                    (last == null || (EventOrdering.compare(event, last) > 0 && event.parentId == last.id)) &&
                     payload !is Undo &&
+                    payload !is ForkResolved &&
                     payload !is MatchCreated &&
                     !(payload is Correction && payload.kind == CorrectionKind.INITIAL_SERVER) &&
                     event.id !in ids &&
@@ -180,6 +188,29 @@ object ScoringEngine {
         )
     }
 
+    /**
+     * Vorschau einer Fork-Auflösung (02 §7.5): Zustand, wenn `ForkResolved(fork.ancestor, Wurzeln, keep)` als nächstes
+     * Event im Log stünde – dieselbe Fold-Funktion wie für das echte Event. [keep] = Wurzel oder `null` (alle behalten).
+     */
+    fun previewResolution(
+        state: EngineState,
+        fork: OpenFork,
+        keep: EventId?,
+    ): MatchState =
+        Replay.withResolution(
+            state.format,
+            state.lineup,
+            state.events,
+            state.genesis,
+            ForkResolved(
+                fork.ancestor,
+                fork.branches.map {
+                    it.root
+                },
+                keep,
+            ),
+        )
+
     /** Alle wirksam angewendeten Punkte mit Zustand davor und danach (Statistik-Basis, 02 §11.1). */
     fun pointHistory(
         format: MatchFormat,
@@ -194,17 +225,22 @@ object ScoringEngine {
     }
 }
 
-/** Fold nach 02 §7.3. */
+/** Fold nach 02 §7.3 und §7.5. */
 internal object Replay {
     fun isUndoTargetType(payload: EventPayload): Boolean =
         payload is PointWon || payload is ContinueDecision || payload is Correction || payload is MatchEnded
 
+    private val PREVIEW_DEVICE = DeviceId("~preview")
+    private val PREVIEW_ID = EventId("~preview")
+
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     fun run(
         format: MatchFormat,
         lineup: Lineup,
         events: Collection<ScoreEvent>,
         onPoint: ((ScoreEvent, MatchState, MatchState) -> Unit)?,
         genesis: ScoreEvent? = null,
+        previews: Boolean = true,
     ): EngineState {
         val formatErrors = MatchFormatValidator.validate(format).errors
         require(formatErrors.isEmpty()) { "Ungültiges MatchFormat: ${formatErrors.joinToString { it.message }}" }
@@ -212,8 +248,8 @@ internal object Replay {
         require(lineupErrors.isEmpty()) { "Ungültiges Lineup: ${lineupErrors.joinToString()}" }
 
         val raw = EventLog.distinctOrdered(events)
-        val log = EventLog.analyze(raw)
-        val excluded = log.undone + log.rejected
+        val (log, forks) = EventLog.analyzeWithForks(raw)
+        val excluded = log.undone + log.rejected + log.discarded
         // Schritt 3: rückwirkende Correction(INITIAL_SERVER) – das letzte wirksame gilt
         val initialServer =
             log.ordered
@@ -236,12 +272,21 @@ internal object Replay {
                     core.markIgnored(event.id)
                 }
 
-                event.id in log.undone -> {
-                    // Unwirksame Events verändern weder Zustand noch Effekte.
+                event.id in log.undone || event.id in log.discarded -> {
+                    // Unwirksame (rückgängig gemachte bzw. verworfene) Events verändern weder Zustand noch Effekte.
                 }
 
                 payload is Undo -> {
                     if (event.id in log.invalidUndos) core.markIgnored(event.id) else core.effects = setOf(Effect.UNDONE)
+                }
+
+                payload is ForkResolved -> {
+                    if (event.id in log.resolutions) {
+                        core.effects = emptySet()
+                        undoTarget = event.id
+                    } else {
+                        core.markIgnored(event.id)
+                    }
                 }
 
                 event.id in log.absorbed -> {
@@ -257,11 +302,12 @@ internal object Replay {
                 }
             }
         }
+        val openForks = if (previews) forks.map { openFork(format, lineup, raw, it) } else emptyList()
         return EngineState(
             format = format,
             lineup = lineup,
             events = raw,
-            state = core.export(),
+            state = core.export(openForks),
             undoTarget = undoTarget,
             absorbedEvents = log.ordered.filter { it.id in log.absorbed }.map { it.id },
             conflicts = log.activeConflicts,
@@ -270,6 +316,51 @@ internal object Replay {
             genesis = genesis,
             core = core,
             appliedPoints = appliedPoints,
+            branching =
+                log.ordered
+                    .groupingBy { it.parentId }
+                    .eachCount()
+                    .any { (parent, n) -> parent != null && n >= 2 },
         )
+    }
+
+    /** Offene Gabelung mit Vorschau je Zweig: derselbe Fold mit hypothetischem `ForkResolved(keep = Wurzel)`. */
+    private fun openFork(
+        format: MatchFormat,
+        lineup: Lineup,
+        events: List<ScoreEvent>,
+        fork: ForkCandidate,
+    ): OpenFork {
+        val roots = fork.live.map { it.id }
+        val branches =
+            fork.live.map { root ->
+                val chain = fork.point.branches.getValue(root.id)
+                ForkBranch(
+                    root = root.id,
+                    events = chain.map { it.id },
+                    devices = chain.map { it.deviceId }.distinct().sorted(),
+                    points = fork.points.getValue(root.id),
+                    preview =
+                        ForkPreview.of(
+                            withResolution(format, lineup, events, null, ForkResolved(fork.point.ancestor, roots, root.id)),
+                        ),
+                )
+            }
+        val merged = ForkPreview.of(withResolution(format, lineup, events, null, ForkResolved(fork.point.ancestor, roots, null)))
+        return OpenFork(ForkAnalysis.id(fork.point.ancestor, roots), fork.point.ancestor, branches, merged)
+    }
+
+    /** Fold über [events] plus ein hypothetisches, in der Ordnung letztes [resolution] (ohne weitere Vorschauen). */
+    fun withResolution(
+        format: MatchFormat,
+        lineup: Lineup,
+        events: List<ScoreEvent>,
+        genesis: ScoreEvent?,
+        resolution: ForkResolved,
+    ): MatchState {
+        val lamport = (events.maxOfOrNull { it.lamport } ?: 0L) + 1
+        val matchId = (events.firstOrNull() ?: genesis)?.matchId ?: MatchId("~preview")
+        val hypothetical = ScoreEvent(PREVIEW_ID, matchId, PREVIEW_DEVICE, 0, lamport, 0, null, resolution)
+        return run(format, lineup, events + hypothetical, null, genesis, previews = false).state
     }
 }
