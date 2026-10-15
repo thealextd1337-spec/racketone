@@ -59,6 +59,13 @@ WHERE (:sport IS NULL OR sport = :sport) AND (result_reason IS NULL OR result_re
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit;
 
+-- „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung ist (F21) – gefiltert vor dem Limit
+lastRated:
+SELECT * FROM match_header
+WHERE result_reason IS NULL OR result_reason != 'ABANDONED'
+ORDER BY created_at_ms DESC, id DESC
+LIMIT 1;
+
 active:
 SELECT * FROM match_header WHERE status != 'FINISHED' ORDER BY updated_at_ms DESC, id;
 

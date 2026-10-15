@@ -150,6 +150,7 @@ class WatchFollowsItsMatchTest {
                 .rejectedByRoleCount,
         )
         assertTrue(h.toasts.any { it == WatchToast.InputsRejected(2) })
+        assertNull("nach der Anzeige quittiert", h.watch.state.value.droppedInputs)
     }
 
     private fun singlesPadel() = Lineup(listOf(PlayerId("me"), PlayerId("ann")), listOf(PlayerId("bea"), PlayerId("cid")), PlayerId("me"))

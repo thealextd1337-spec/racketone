@@ -596,6 +596,27 @@ class WatchScoringTest {
         assertEquals("15", assertNotNull(rig.watch.point(sideA = true)).pointsA)
     }
 
+    /** Review W3-M R2 #5: verworfene Uhr-Eingaben nach bestätigter Übernahme kommen im Snapshot an, bis quittiert. */
+    @Test
+    fun droppedInputsAreExportedUntilAcknowledged() {
+        val rig = Rig()
+        val phone = rig.phone
+        val singles = Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me"))
+        phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles, scorer = ScorerChoice.MyWatch)
+        rig.settle()
+        assertNotNull(rig.watch.point(sideA = true))
+        rig.settle()
+        rig.network.setConnected("watch", false)
+        rig.settle()
+        phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
+        assertNotNull(rig.watch.point(sideA = true))
+        rig.network.setConnected("watch", true)
+        rig.settle(5_000)
+        assertEquals(1, assertNotNull(rig.watch.snapshot()).droppedInputs)
+        rig.watch.acknowledgeDroppedInputs()
+        assertEquals(0, assertNotNull(rig.watch.snapshot()).droppedInputs)
+    }
+
     /** F21: „Beenden, wie es steht“ am Handy – Sieger bzw. Gleichstand kommen als bekannte Codes an. */
     @Test
     fun stoppedOnThePhoneIsShownWithKnownCodes() {

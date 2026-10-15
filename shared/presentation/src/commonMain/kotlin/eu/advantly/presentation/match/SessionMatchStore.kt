@@ -694,8 +694,7 @@ class SessionMatchStore(
     /** „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung war (F21). */
     private fun loadLastSetup(): MatchSetup? =
         data.matches
-            .history(limit = LAST_SETUP_SCAN)
-            .firstOrNull { it.score.reason != ResultReason.ABANDONED }
+            .lastRated()
             ?.let {
                 val lineup = data.freshPlaceholders(data.resolvedLineup(it)) { PlayerId(ids.newId().value) }
                 MatchSetup(it.format, lineup, it.meta, playersOf(lineup))
@@ -782,7 +781,6 @@ class SessionMatchStore(
 
     private companion object {
         const val DEFAULT_HISTORY_LIMIT = 200L
-        const val LAST_SETUP_SCAN = 20L
 
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000

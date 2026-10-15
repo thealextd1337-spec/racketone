@@ -118,6 +118,11 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
                 Haptics.play(.notification)
             }
         }
+        // Eingaben im früheren Uhr-Match nach der bestätigten Übernahme durchs iPhone verworfen (F22): einmal zeigen, quittieren
+        if let snapshot, snapshot.droppedInputs > 0 {
+            show(.rejectedInputs(Int(snapshot.droppedInputs)))
+            scoring.acknowledgeDroppedInputs()
+        }
         if snapshot == nil {
             workout.end()
         } else {

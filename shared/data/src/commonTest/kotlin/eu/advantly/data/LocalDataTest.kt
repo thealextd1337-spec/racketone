@@ -156,6 +156,17 @@ class LocalDataTest {
     }
 
     @Test
+    fun lastRatedSkipsAnyNumberOfAbandonedMatches() {
+        data.matches.insertIfAbsent(MatchId("rated"), tennis, singles, MatchMeta(), createdAtMs = 1_000)
+        repeat(25) { i ->
+            val id = MatchId("abandoned-$i")
+            data.matches.insertIfAbsent(id, padel, doubles, MatchMeta(), createdAtMs = 2_000L + i)
+            data.matches.updateProgress(id, MatchStatus.FINISHED, ScoreSummary(reason = ResultReason.ABANDONED), updatedAtMs = 3_000)
+        }
+        assertEquals(MatchId("rated"), data.matches.lastRated()?.id)
+    }
+
+    @Test
     fun unconfirmedCountsPerMatch() {
         data.events.append(StoredEvent("a1", "m1", "d", 1, 1, "{}"))
         data.events.append(StoredEvent("a2", "m1", "d", 2, 2, "{}"))

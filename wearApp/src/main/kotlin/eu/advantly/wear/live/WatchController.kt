@@ -541,6 +541,8 @@ class WatchController(
         state.droppedInputs?.let { dropped ->
             if (dropped != seenDropped && dropped.matchId != match?.id) emit(WatchEffect.Toast(WatchToast.InputsRejected(dropped.count)))
             seenDropped = dropped
+            // angezeigt (bzw. am offenen Match schon sichtbar): erst jetzt als gesehen quittieren (übersteht sonst Neustarts)
+            session.acknowledgeDroppedInputs()
         }
         // Auswahl „Wer schlägt auf?“ schließt, sobald das Fenster zu ist (Punkt, Undo, Rollenwechsel)
         if (overlay == LiveOverlay.SERVER_CHOICE && (match?.isScorer != true || match.serverChoice == null)) overlay = null

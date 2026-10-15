@@ -245,6 +245,11 @@ class WatchScoring internal constructor(
         return state.match?.let { snapshotOf(it, state.sync) }
     }
 
+    /** Hinweis [WatchScoreSnapshot.droppedInputs] wurde angezeigt – erst danach gilt er als gesehen (übersteht sonst Neustarts). */
+    fun acknowledgeDroppedInputs() {
+        call { backend()?.session?.acknowledgeDroppedInputs() }
+    }
+
     /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Es bleibt gespeichert und wird weiter synchronisiert. */
     fun close() {
         error = ""
@@ -394,7 +399,7 @@ class WatchScoring internal constructor(
             } catch (e: Exception) {
                 null
             } ?: sync.pendingToPeers
-        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending)
+        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending, current?.droppedInputs?.count ?: 0)
     }
 
     private fun begin(
@@ -611,6 +616,8 @@ class WatchMatchSetup(
  * @property isScorer die Uhr zählt (02 §7.5); sonst ist sie Anzeige (keine Tap-Flächen, kein Undo)
  * @property scorerKind Art des zählenden Geräts: `WATCH`, `PHONE`, `OTHER` oder `""` (unbekannt)
  * @property rejectedByRoleCount Eingaben von Nicht-Zählern, die die Engine verworfen hat („N Eingaben nicht übernommen“)
+ * @property droppedInputs eigene Eingaben in einem **früheren** Uhr-Match, die nach der bestätigten Übernahme durch das
+ *   iPhone verworfen wurden (F22); `0` = kein Hinweis. Nach der Anzeige [WatchScoring.acknowledgeDroppedInputs] aufrufen
  * @property pointsPlayed wirksam gezählte Ballwechsel
  * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
  * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
@@ -691,6 +698,7 @@ class WatchScoreSnapshot(
     val scorerPending: Boolean,
     val watchWorkout: Boolean,
     val perspectiveSwapped: Boolean,
+    val droppedInputs: Int = 0,
 )
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
@@ -739,6 +747,7 @@ internal fun buildSnapshot(
     scorerDisconnectedSinceMs: Long,
     us: Side = Side.A,
     pendingToPeers: Int = sync.pendingToPeers,
+    droppedInputs: Int = 0,
 ): WatchScoreSnapshot {
     val them = us.other
 
@@ -856,5 +865,6 @@ internal fun buildSnapshot(
         scorerPending = match.scorerDeviceId == MatchSession.PENDING_WATCH,
         watchWorkout = match.meta.watchWorkout,
         perspectiveSwapped = us == Side.B,
+        droppedInputs = droppedInputs,
     )
 }

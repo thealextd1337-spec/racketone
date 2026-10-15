@@ -212,6 +212,9 @@ class MatchRepository internal constructor(
             )
         }
 
+    /** Jüngstes Match, das kein Abbruch ohne Wertung ist („Wie letztes Mal“, F21); `null` = keins. */
+    fun lastRated(): MatchRecord? = queries.lastRated().executeAsOneOrNull()?.toRecord()
+
     /** Nicht beendete Matches, zuletzt geändertes zuerst (Resume-Karte). */
     fun active(): List<MatchRecord> = queries.active().executeAsList().map { it.toRecord() }
 
