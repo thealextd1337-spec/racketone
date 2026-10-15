@@ -9,16 +9,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -69,6 +65,7 @@ import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.TopBar
 import eu.advantly.ui.phone.common.playerName
+import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.common.sportColor
 import eu.advantly.ui.phone.common.sportName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -141,8 +138,8 @@ fun WizardScreen(
         modifier
             .fillMaxSize()
             .background(colors.bg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .imePadding()
+            // Statusleiste, Navigationsleiste und Tastatur (safeDrawing enthält ime)
+            .safeContentPadding()
             .testTag("wizard"),
     ) {
         val first = state.stepIndex <= 0

@@ -11,16 +11,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
@@ -69,6 +66,7 @@ import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.common.formatLabel
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.pointText
+import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.common.scoreSummary
 import eu.advantly.ui.phone.common.sportColor
 import eu.advantly.ui.phone.common.sportName
@@ -210,7 +208,7 @@ fun LiveScoreScreen(
                     if (tracker.onDrawn(controller.generation, monotonicNanos())) {
                         scope.launch { withFrameNanos { tracker.onNextFrame(monotonicNanos()) } }
                     }
-                }.windowInsetsPadding(WindowInsets.safeDrawing),
+                }.safeContentPadding(),
     ) {
         val snapshot = controller.snapshot
         if (snapshot == null) {

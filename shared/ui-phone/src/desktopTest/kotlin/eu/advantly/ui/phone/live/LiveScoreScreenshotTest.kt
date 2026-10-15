@@ -1,7 +1,16 @@
 package eu.advantly.ui.phone.live
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
@@ -15,6 +24,7 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.MatchMeta
@@ -30,6 +40,7 @@ import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.common.LocalSafeInsets
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.play
 import eu.advantly.ui.phone.preview.DemoData
@@ -219,6 +230,49 @@ class LiveScoreScreenshotTest {
             },
             interact = { onNodeWithTag("advanced_content").performScrollTo() },
         )
+
+    // --- Edge-to-Edge: simulierte Status-/Navigationsleiste (halbtransparent eingezeichnet) ---
+
+    private val withSystemBars: @Composable (AdvantlyAppModel) -> Unit = { model ->
+        CompositionLocalProvider(LocalSafeInsets provides WindowInsets(0.dp, 52.dp, 0.dp, 24.dp)) {
+            Box(Modifier.fillMaxSize()) {
+                AdvantlyApp(model = model, darkTheme = true)
+                Box(Modifier.fillMaxWidth().height(52.dp).background(Color.Magenta.copy(alpha = 0.35f)))
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .background(Color.Magenta.copy(alpha = 0.35f)),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun wizardPlayersDoublesWithSystemBars() =
+        capture(
+            "insets-wizard-3-players-de",
+            Locale.GERMANY,
+            testModel().apply {
+                onPlay()
+                wizard.selectSport(Sport.PADEL)
+                wizard.addGuest("Jonas")
+            },
+            content = withSystemBars,
+        )
+
+    @Test
+    fun liveWithSystemBars() =
+        capture(
+            "insets-live-de",
+            Locale.GERMANY,
+            liveModel(Presets.TENNIS_SINGLES_BO3.format(), "AAB"),
+            content = withSystemBars,
+        )
+
+    @Test
+    fun homeWithSystemBars() = capture("insets-home-en", Locale.US, testModel().apply { DemoData.seed(this) }, content = withSystemBars)
 
     // --- Live, alle Sportarten ---
 

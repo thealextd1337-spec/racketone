@@ -8,9 +8,12 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <!-- Edge-to-Edge: Fenster nie für die Tastatur verschieben (sonst rutscht der Inhalt unter die Statusleiste);
+             Compose weicht über WindowInsets.safeDrawing (inkl. ime) aus. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

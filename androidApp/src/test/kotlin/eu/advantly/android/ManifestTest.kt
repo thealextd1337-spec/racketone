@@ -9,10 +9,10 @@ import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * Hintergrund-Empfang (W1-I): Application startet die Session, der WearableListenerService ist registriert und seine
+ * Manifest der Phone-App. Hintergrund-Empfang (W1-I): Application startet die Session, der WearableListenerService ist registriert und seine
  * Pfadfilter passen zu den Pfaden des Transports (Live-Nachrichten und DataItem-Queue).
  */
-class SyncServiceManifestTest {
+class ManifestTest {
     private val android = "http://schemas.android.com/apk/res/android"
     private val manifest =
         DocumentBuilderFactory
@@ -23,6 +23,13 @@ class SyncServiceManifestTest {
 
     private fun elements(name: String): List<Element> =
         manifest.getElementsByTagName(name).let { nodes -> (0 until nodes.length).map { nodes.item(it) as Element } }
+
+    /** Feldtest Pixel 9 Pro XL: ohne adjustResize verschiebt Android das Fenster für die Tastatur unter die Statusleiste. */
+    @Test
+    fun mainActivityResizesForTheKeyboard() {
+        val main = elements("activity").single { it.getAttributeNS(android, "name") == ".MainActivity" }
+        assertEquals("adjustResize", main.getAttributeNS(android, "windowSoftInputMode"))
+    }
 
     @Test
     fun applicationStartsTheSession() {
