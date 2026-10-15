@@ -16,6 +16,7 @@ import eu.advantly.core.scoring.FormatValidation
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
+import eu.advantly.presentation.match.WatchStatus
 
 /** Schritte des Match-Assistenten (04 §3.1, 02 §5.1). */
 enum class WizardStep {
@@ -101,14 +102,17 @@ data class WizardInput(
     val scorer: ScorerOption? = null,
     /** „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, auch im Director-Modus, 04 §3.1). */
     val watchWorkout: Boolean = true,
-    /** Eine eigene Uhr ist verbunden (sonst ist nur „Dieses Handy“ wählbar). */
-    val watchAvailable: Boolean = false,
+    /** Stand der eigenen Uhr; nur `AVAILABLE` macht „Meine Uhr“ wählbar (sonst Hinweis, warum nicht). */
+    val watchStatus: WatchStatus = WatchStatus.UNKNOWN,
     /** Nutzer hat den Einstand selbst gewählt (dann kein automatischer No-Ad-Vorschlag, 02 §5.1). */
     internal val deuceTouched: Boolean = false,
     /** Nutzer hat den Pickleball-Seitenwechsel selbst gewählt (sonst Freizeit-Default je Modus, U4). */
     internal val midGameTouched: Boolean = false,
 ) {
     fun team(side: Side): List<Player?> = if (side == Side.A) teamA else teamB
+
+    /** Die eigene Uhr ist als Zähler wählbar. */
+    val watchAvailable: Boolean get() = watchStatus == WatchStatus.AVAILABLE
 
     /** Tatsächlicher Zähler: ohne verbundene Uhr immer dieses Handy, sonst die Wahl (Standard: Meine Uhr). */
     val effectiveScorer: ScorerOption

@@ -33,6 +33,8 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
+import eu.advantly.device.link.CompanionState
+import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.AdvantlyApp
@@ -417,6 +419,29 @@ class LiveScoreScreenshotTest {
             wizard.next()
         }
         capture("wizard-5-scorer-de", Locale.GERMANY, rig.model)
+    }
+
+    @Test
+    fun wizardWatchNotInstalled() {
+        val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
+        rig.model.apply {
+            onPlay()
+            wizard.selectSport(Sport.TENNIS)
+            wizard.selectSurface(Surface.HARD)
+            wizard.addGuest("Jonas")
+            wizard.next()
+            wizard.next()
+        }
+        capture("wizard-5-scorer-not-installed-de", Locale.GERMANY, rig.model)
+    }
+
+    @Test
+    fun liveWaitingForTheWatch() {
+        val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+        rig.store.start(rig.model.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.MY_WATCH))
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-waiting-for-watch-en", Locale.US, rig.model)
     }
 
     @Test

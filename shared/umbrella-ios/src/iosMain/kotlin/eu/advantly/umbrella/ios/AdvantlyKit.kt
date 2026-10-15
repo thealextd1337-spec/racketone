@@ -1,5 +1,6 @@
 package eu.advantly.umbrella.ios
 
+import eu.advantly.device.link.WatchConnectivityCompanionDetector
 import eu.advantly.match.session.AppleMatchSessions
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.sync.protocol.PeerKind
@@ -14,4 +15,8 @@ import platform.UIKit.UIViewController
  * Datenbank im App-Container). Ohne Uhr bleibt der Link „nicht verfügbar“ und das iPhone zählt selbst (Director).
  * Aufruf auf der Main-Queue (SwiftUI `makeUIViewController`).
  */
-fun mainViewController(): UIViewController = advantlyViewController { SessionMatchStore(AppleMatchSessions.shared(PeerKind.PHONE)) }
+fun mainViewController(): UIViewController =
+    advantlyViewController {
+        // „Meine Uhr“: WCSession.isPaired && isWatchAppInstalled, auch wenn die Watch-App gerade nicht läuft
+        SessionMatchStore(AppleMatchSessions.shared(PeerKind.PHONE), companion = WatchConnectivityCompanionDetector())
+    }

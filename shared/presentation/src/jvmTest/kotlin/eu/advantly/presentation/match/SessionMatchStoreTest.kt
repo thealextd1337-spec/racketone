@@ -12,7 +12,9 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.data.LocalData
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.data.db.AdvantlyDatabase
+import eu.advantly.device.link.CompanionState
 import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -40,6 +42,8 @@ private const val BASE_MS = 1_760_000_000_000L
 private class Rig(
     phoneData: LocalData = createInMemoryJvmLocalData(),
     private val watchData: LocalData = createInMemoryJvmLocalData(),
+    watchOnline: Boolean = true,
+    val companion: FakeCompanionDetector = FakeCompanionDetector(),
 ) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
@@ -52,10 +56,11 @@ private class Rig(
     val watch: MatchSession = session("watch", PeerKind.WATCH, watchData)
     var phoneSession: MatchSession = session("phone", PeerKind.PHONE, phoneData)
         private set
-    var phone: SessionMatchStore = SessionMatchStore(phoneSession, uiClock, CountingIds(), monotonic = mono)
+    var phone: SessionMatchStore = SessionMatchStore(phoneSession, uiClock, CountingIds(), monotonic = mono, companion = companion)
         private set
 
     init {
+        if (!watchOnline) offline("watch")
         settle()
     }
 
@@ -74,7 +79,7 @@ private class Rig(
         phone.close()
         phoneSession.close()
         phoneSession = session("phone", PeerKind.PHONE, data)
-        phone = SessionMatchStore(phoneSession, uiClock, CountingIds(n = 1_000), monotonic = mono)
+        phone = SessionMatchStore(phoneSession, uiClock, CountingIds(n = 1_000), monotonic = mono, companion = companion)
         settle()
     }
 
@@ -620,6 +625,78 @@ class SessionMatchStoreTest {
         assertEquals(listOf(InputKind.POINT, InputKind.POINT), inputs.map { it.kind })
         assertEquals(listOf(Side.A, Side.B), inputs.map { it.side })
         assertTrue(inputs.all { it.device == DeviceKind.WATCH && it.matchTimeMs > 0 })
+    }
+
+    /** Feldtest W1-I: Uhr mit installierter App ist wählbar, auch ohne laufende Uhr-App/Verbindung. */
+    @Test
+    fun watchIsAvailableWithoutALiveSession() {
+        val rig = Rig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
+        assertFalse(rig.phone.watchAvailable.value)
+        assertEquals(WatchStatus.APP_NOT_INSTALLED, rig.phone.watchStatus.value)
+        rig.companion.state = CompanionState.APP_INSTALLED
+        assertTrue(rig.phone.watchAvailable.value)
+        assertEquals(WatchStatus.AVAILABLE, rig.phone.watchStatus.value)
+        val before = rig.companion.refreshes
+        rig.phone.refreshWatchStatus()
+        assertEquals(before + 1, rig.companion.refreshes)
+    }
+
+    /** Start mit „Meine Uhr“ ohne Verbindung, die Uhr war nie verbunden → sie zählt, sobald sie sich meldet. */
+    @Test
+    fun startWithoutConnectionThenTheWatchConnectsAndScores() {
+        val rig = Rig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+        rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH))
+        val waiting = rig.phone.active.value!!
+        assertEquals(LiveRole.DISPLAY, waiting.role)
+        assertEquals(DeviceKind.WATCH, waiting.scorerKind)
+        assertTrue(waiting.waitingForScorer)
+        assertFalse(rig.phone.recordPoint(Side.A))
+
+        rig.online("watch")
+        rig.settle()
+        assertTrue(
+            rig.watch.state.value.match
+                ?.isScorer == true,
+        )
+        assertTrue(rig.watch.recordPoint(Side.A))
+        rig.settle()
+        val live = rig.phone.active.value!!
+        assertFalse(live.waitingForScorer)
+        assertEquals(
+            "15",
+            live.state.current!!
+                .display.a,
+        )
+    }
+
+    /** „Doch am Handy zählen“ während des Wartens. */
+    @Test
+    fun countingOnThePhoneWhileWaitingForTheWatch() {
+        val rig = Rig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+        rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH))
+        assertTrue(
+            rig.phone.active.value!!
+                .waitingForScorer,
+        )
+        assertTrue(rig.phone.takeOverScoring())
+        assertEquals(
+            LiveRole.SCORER,
+            rig.phone.active.value!!
+                .role,
+        )
+        assertFalse(
+            rig.phone.active.value!!
+                .waitingForScorer,
+        )
+        assertTrue(rig.phone.recordPoint(Side.A))
+        rig.online("watch")
+        rig.settle()
+        assertEquals(
+            LiveRole.SCORER,
+            rig.phone.active.value!!
+                .role,
+            "Uhr übernimmt nicht mehr automatisch",
+        )
     }
 
     @Test

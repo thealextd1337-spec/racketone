@@ -374,4 +374,12 @@
     <string name="device_other">Anderes Gerät</string>
     <string name="abandon_current_score">Aktueller Stand: %1$s</string>
     <string name="abandon_scoring_elsewhere">Bisher zählt: %1$s. Das Match wird auf allen Geräten ohne Wertung beendet.</string>
+
+    <!-- W1-I: Uhr ohne Live-Verbindung -->
+    <string name="wizard_scorer_no_watch">Keine Uhr mit diesem Handy gekoppelt.</string>
+    <string name="wizard_scorer_not_installed">Advantly ist auf deiner Uhr nicht installiert.</string>
+    <string name="wizard_scorer_recheck">Erneut prüfen</string>
+    <string name="waiting_title">Warte auf Uhr …</string>
+    <string name="waiting_text">Das Match ist an deine Uhr gesendet. Öffne Advantly auf der Uhr, um dort zu zählen.</string>
+    <string name="count_on_phone">Doch am Handy zählen</string>
 </resources>

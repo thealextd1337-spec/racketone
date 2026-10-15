@@ -28,6 +28,7 @@ import eu.advantly.presentation.match.LocalDay
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.presentation.match.systemLocalDay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,14 +44,16 @@ import kotlin.random.Random
  *
  * Nur vom UI-Thread benutzen.
  *
- * @param watchAvailable verbundene eigene Uhr (`LiveMatchPort.watchAvailable`); die UI meldet Änderungen über
- *   [setWatchAvailable], damit der Standard „Meine Uhr“ nachzieht
+ * @param watchStatus Stand der eigenen Uhr (`LiveMatchPort.watchStatus`); die UI meldet Änderungen über
+ *   [setWatchStatus], damit der Standard „Meine Uhr“ nachzieht
+ * @param refreshWatch fragt den Stand der Uhr neu ab (`LiveMatchPort.refreshWatchStatus`)
  */
 class MatchWizard(
     private val players: PlayersPort,
     private val today: () -> LocalDay = ::systemLocalDay,
     private val random: Random = Random.Default,
-    val watchAvailable: StateFlow<Boolean> = MutableStateFlow(false),
+    val watchStatus: StateFlow<WatchStatus> = MutableStateFlow(WatchStatus.UNKNOWN),
+    private val refreshWatch: () -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow(derive(initialInput()))
     val state: StateFlow<WizardUiState> = mutableState.asStateFlow()
@@ -237,9 +240,18 @@ class MatchWizard(
 
     fun setWatchWorkout(enabled: Boolean) = update { it.copy(watchWorkout = enabled) }
 
-    /** Uhr verbunden/getrennt (aus [watchAvailable]); eine explizite Wahl bleibt erhalten. */
-    fun setWatchAvailable(available: Boolean) {
-        if (input.watchAvailable != available) update { it.copy(watchAvailable = available) }
+    /** Stand der Uhr geändert (aus [watchStatus]); eine explizite Wahl bleibt erhalten. */
+    fun setWatchStatus(status: WatchStatus) {
+        if (input.watchStatus != status) update { it.copy(watchStatus = status) }
+    }
+
+    /** Kurzform für Tests: Uhr verfügbar bzw. unbekannt. */
+    fun setWatchAvailable(available: Boolean) = setWatchStatus(if (available) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+
+    /** „Erneut prüfen“ bzw. Betreten des Schritts „Wer zählt?“: Stand der Uhr neu abfragen. */
+    fun refreshWatchStatus() {
+        refreshWatch()
+        setWatchStatus(watchStatus.value)
     }
 
     // --- Navigation ---
@@ -250,6 +262,8 @@ class MatchWizard(
         if (!s.canContinue) return false
         val nextStep = s.steps.getOrNull(s.stepIndex + 1) ?: return false
         update { it.copy(step = nextStep) }
+        // „Wer zählt?“: Stand der Uhr bei jedem Betreten neu abfragen (Uhr-App evtl. inzwischen geöffnet)
+        if (nextStep == WizardStep.SCORER) refreshWatchStatus()
         return true
     }
 
@@ -271,7 +285,7 @@ class MatchWizard(
     // --- intern ---
 
     private fun initialInput(): WizardInput =
-        WizardInput(teamA = listOf(players.self.value), teamB = listOf(null), watchAvailable = watchAvailable.value)
+        WizardInput(teamA = listOf(players.self.value), teamB = listOf(null), watchStatus = watchStatus.value)
 
     private fun setSlot(
         side: Side,

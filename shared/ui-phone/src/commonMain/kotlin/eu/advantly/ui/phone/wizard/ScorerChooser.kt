@@ -2,6 +2,7 @@ package eu.advantly.ui.phone.wizard
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,13 +23,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.wizard_scorer_no_watch
+import eu.advantly.ui.phone.resources.wizard_scorer_not_installed
 import eu.advantly.ui.phone.resources.wizard_scorer_phone
 import eu.advantly.ui.phone.resources.wizard_scorer_phone_sub
+import eu.advantly.ui.phone.resources.wizard_scorer_recheck
 import eu.advantly.ui.phone.resources.wizard_scorer_watch
 import eu.advantly.ui.phone.resources.wizard_scorer_watch_none
 import eu.advantly.ui.phone.resources.wizard_scorer_watch_sub
@@ -40,23 +45,32 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * „Wer zählt?“ (04 §3.1, P1): „Meine Uhr“ (Standard, wenn eine Uhr verbunden ist; sonst gesperrt mit Hinweis) oder
  * „Dieses Handy (Director)“, darunter „Workout auf meiner Uhr mitlaufen lassen“. Genutzt im Assistenten und in der
- * Bestätigung beim Schnellstart.
+ * Bestätigung beim Schnellstart. Ist die Uhr nicht wählbar, steht dort warum (keine Uhr gekoppelt, App nicht
+ * installiert) und „Erneut prüfen“ ([onRecheck]).
  */
 @Composable
 internal fun ScorerChooser(
     selected: ScorerOption,
-    watchAvailable: Boolean,
+    watchStatus: WatchStatus,
     watchWorkout: Boolean,
     onSelect: (ScorerOption) -> Unit,
     onWatchWorkout: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onRecheck: (() -> Unit)? = null,
 ) {
+    val watchAvailable = watchStatus == WatchStatus.AVAILABLE
     Column(modifier.fillMaxWidth()) {
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
             ScorerOptionCard(
                 option = ScorerOption.MY_WATCH,
                 title = Res.string.wizard_scorer_watch,
-                subtitle = if (watchAvailable) Res.string.wizard_scorer_watch_sub else Res.string.wizard_scorer_watch_none,
+                subtitle =
+                    when (watchStatus) {
+                        WatchStatus.AVAILABLE -> Res.string.wizard_scorer_watch_sub
+                        WatchStatus.NO_WATCH -> Res.string.wizard_scorer_no_watch
+                        WatchStatus.APP_NOT_INSTALLED -> Res.string.wizard_scorer_not_installed
+                        WatchStatus.UNKNOWN -> Res.string.wizard_scorer_watch_none
+                    },
                 selected = selected == ScorerOption.MY_WATCH,
                 enabled = watchAvailable,
                 onSelect = onSelect,
@@ -69,6 +83,22 @@ internal fun ScorerChooser(
                 enabled = true,
                 onSelect = onSelect,
             )
+        }
+        if (!watchAvailable && onRecheck != null) {
+            Box(
+                Modifier
+                    .testTag("scorer_recheck")
+                    .heightIn(min = Spacing.minTouchTarget)
+                    .clickable(role = Role.Button, onClick = onRecheck)
+                    .padding(horizontal = Spacing.m),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    stringResource(Res.string.wizard_scorer_recheck),
+                    style = AdvantlyTheme.typography.label,
+                    color = AdvantlyTheme.colors.brand,
+                )
+            }
         }
         ToggleRow(
             title = stringResource(Res.string.wizard_watch_workout),

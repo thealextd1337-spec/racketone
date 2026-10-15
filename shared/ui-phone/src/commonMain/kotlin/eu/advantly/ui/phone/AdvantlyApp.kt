@@ -21,8 +21,10 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
+import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
@@ -79,6 +81,11 @@ fun AdvantlyApp(
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
     }
     BackHandler(enabled = navigator.top != null) { model.onBack() }
+    // App wieder im Vordergrund: Stand der Uhr neu prüfen (Uhr-App evtl. inzwischen installiert/geöffnet)
+    LifecycleResumeEffect(model) {
+        model.live.refreshWatchStatus()
+        onPauseOrDispose {}
+    }
     CompositionLocalProvider(LocalSelfId provides self.id) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
@@ -157,7 +164,9 @@ private fun TabLayer(
 /** Schnellstart mit verbundener Uhr: „Wer zählt?“ bestätigen (04 §3.1, Presets vergeben keine Zählrechte). */
 @Composable
 private fun ScorerDialog(model: AdvantlyAppModel) {
-    val watchAvailable by model.live.watchAvailable.collectAsState()
+    val watchStatus by model.live.watchStatus.collectAsState()
+    val watchAvailable = watchStatus == WatchStatus.AVAILABLE
+    LaunchedEffect(Unit) { model.live.refreshWatchStatus() }
     var scorer by remember { mutableStateOf(if (watchAvailable) ScorerOption.MY_WATCH else ScorerOption.THIS_PHONE) }
     var workout by remember { mutableStateOf(true) }
     val effective = if (watchAvailable) scorer else ScorerOption.THIS_PHONE
@@ -167,10 +176,11 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
         text = {
             ScorerChooser(
                 selected = effective,
-                watchAvailable = watchAvailable,
+                watchStatus = watchStatus,
                 watchWorkout = workout,
                 onSelect = { scorer = it },
                 onWatchWorkout = { workout = it },
+                onRecheck = model.live::refreshWatchStatus,
             )
         },
         confirmButton = {

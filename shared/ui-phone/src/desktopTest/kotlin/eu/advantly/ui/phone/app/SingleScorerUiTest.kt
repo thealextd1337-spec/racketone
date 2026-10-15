@@ -11,6 +11,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
@@ -24,6 +25,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Presets
+import eu.advantly.device.link.CompanionState
+import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.presentation.match.LiveRole
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
@@ -101,9 +104,7 @@ class SingleScorerUiTest {
     @Test
     fun withoutWatchTheWizardOnlyOffersThisPhone() =
         runComposeUiTest {
-            val rig = SessionRig()
-            rig.offline()
-            rig.settle()
+            val rig = SessionRig(watchOnline = false)
             showApp(rig.model)
             onNodeWithTag("tab_play").performClick()
             click("sport_PICKLEBALL")
@@ -198,6 +199,70 @@ class SingleScorerUiTest {
             onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("0")
             onNodeWithTag("rejected_ok").performClick()
             onNodeWithTag("rejected_notice").assertDoesNotExist()
+        }
+
+    /** Feldtest W1-I: „Meine Uhr“ wird im Schritt „Wer zählt?“ wählbar, ohne den Assistenten zu verlassen. */
+    @Test
+    fun watchBecomesSelectableInsideTheWizard() =
+        runComposeUiTest {
+            val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
+            showApp(rig.model)
+            onNodeWithTag("tab_play").performClick()
+            click("sport_PADEL")
+            listOf("Jonas", "Mia", "Tom").forEach {
+                onNodeWithTag("guest_name_input").performScrollTo().performTextInput(it)
+                click("guest_add")
+            }
+            onNodeWithTag("wizard_next").performClick()
+            val refreshesBefore = rig.companion.refreshes
+            onNodeWithTag("wizard_next").performClick()
+            assertTrue(rig.companion.refreshes > refreshesBefore, "Betreten von „Wer zählt?“ prüft neu")
+            onNodeWithTag("scorer_MY_WATCH").assertIsNotEnabled()
+            val hint = onNodeWithTag("scorer_MY_WATCH").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue(hint.contains("nicht installiert") || hint.contains("not installed"), hint)
+            // „Erneut prüfen“ fragt den Stand neu ab
+            val beforeRecheck = rig.companion.refreshes
+            onNodeWithTag("scorer_recheck").performClick()
+            assertEquals(beforeRecheck + 1, rig.companion.refreshes)
+            // Nutzer installiert/öffnet die Uhr-App: der Capability-Listener meldet es, der Schritt zieht sofort nach
+            runOnIdle { rig.companion.state = CompanionState.APP_INSTALLED }
+            onNodeWithTag("scorer_MY_WATCH").assertIsEnabled().assertIsSelected()
+            onNodeWithTag("scorer_recheck").assertDoesNotExist()
+        }
+
+    /** Start mit „Meine Uhr“ ohne Verbindung: „Warte auf Uhr …“, die Uhr meldet sich später und zählt. */
+    @Test
+    fun waitingForTheWatchUntilItConnectsAndScores() =
+        runComposeUiTest {
+            val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+            rig.store.start(rig.model.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.MY_WATCH))
+            rig.model.controller.sync(rig.store.active.value)
+            rig.model.navigator.push(Overlay.Live)
+            showApp(rig.model)
+            onNodeWithTag("waiting_for_scorer").assertExists()
+            onNodeWithTag("panel_us").assertHasNoClickAction()
+            runOnIdle {
+                rig.online()
+                rig.watchPlays("A")
+            }
+            onNodeWithTag("waiting_for_scorer").assertDoesNotExist()
+            onNodeWithTag("display_banner").assertExists()
+            onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("15")
+        }
+
+    /** „Doch am Handy zählen“ beendet das Warten sofort. */
+    @Test
+    fun countOnThePhoneInsteadOfWaiting() =
+        runComposeUiTest {
+            val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+            rig.store.start(rig.model.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.MY_WATCH))
+            rig.model.controller.sync(rig.store.active.value)
+            rig.model.navigator.push(Overlay.Live)
+            showApp(rig.model)
+            onNodeWithTag("count_on_phone").performClick()
+            onNodeWithTag("waiting_for_scorer").assertDoesNotExist()
+            onNodeWithTag("panel_us").assertHasClickAction().performClick()
+            onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("15")
         }
 
     /** Review W1-I #8: „Eingaben ansehen“ zeigt die verworfenen Eingaben (Zeit, Gerät, Art, Seite). */

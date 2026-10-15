@@ -257,7 +257,10 @@ fun LiveScoreScreen(
                     if (display) {
                         // Übernahmeangebot ersetzt den Anzeige-Banner (gleicher Platz) – kostet den Flächen keine Höhe
                         val staleOffer = snapshot.sync.offersTakeOver(now) && snapshot.state.status != MatchStatus.FINISHED
-                        if (staleOffer) {
+                        if (snapshot.waitingForScorer) {
+                            // Match an die Uhr gesendet, sie hat sich noch nicht gemeldet (Feldtest W1-I)
+                            WaitingForScorer({ controller.takeOverScoring() }, Modifier.padding(top = Spacing.xs))
+                        } else if (staleOffer) {
                             StaleHint(
                                 snapshot,
                                 snapshot.sync.staleForMs(now),

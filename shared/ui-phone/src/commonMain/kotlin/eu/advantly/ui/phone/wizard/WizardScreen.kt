@@ -130,9 +130,9 @@ fun WizardScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by wizard.state.collectAsState()
-    // Uhr verbunden/getrennt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1)
-    val watchAvailable by wizard.watchAvailable.collectAsState()
-    LaunchedEffect(watchAvailable) { wizard.setWatchAvailable(watchAvailable) }
+    // Uhr installiert/entfernt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1), reaktiv
+    val watchStatus by wizard.watchStatus.collectAsState()
+    LaunchedEffect(watchStatus) { wizard.setWatchStatus(watchStatus) }
     val colors = AdvantlyTheme.colors
     Column(
         modifier
@@ -766,10 +766,11 @@ private fun ScorerStep(
     StepTitle(stringResource(Res.string.wizard_title_scorer))
     ScorerChooser(
         selected = state.input.effectiveScorer,
-        watchAvailable = state.input.watchAvailable,
+        watchStatus = state.input.watchStatus,
         watchWorkout = state.input.watchWorkout,
         onSelect = wizard::setScorer,
         onWatchWorkout = wizard::setWatchWorkout,
+        onRecheck = wizard::refreshWatchStatus,
     )
 }
 

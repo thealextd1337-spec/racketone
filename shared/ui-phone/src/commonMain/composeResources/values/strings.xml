@@ -374,4 +374,12 @@
     <string name="device_other">Other device</string>
     <string name="abandon_current_score">Current score: %1$s</string>
     <string name="abandon_scoring_elsewhere">Currently scoring: %1$s. That match will be ended without a result on all devices.</string>
+
+    <!-- W1-I: Uhr ohne Live-Verbindung -->
+    <string name="wizard_scorer_no_watch">No watch paired with this phone.</string>
+    <string name="wizard_scorer_not_installed">Advantly is not installed on your watch.</string>
+    <string name="wizard_scorer_recheck">Check again</string>
+    <string name="waiting_title">Waiting for your watch …</string>
+    <string name="waiting_text">The match was sent to your watch. Open Advantly on the watch to score there.</string>
+    <string name="count_on_phone">Score on this phone instead</string>
 </resources>

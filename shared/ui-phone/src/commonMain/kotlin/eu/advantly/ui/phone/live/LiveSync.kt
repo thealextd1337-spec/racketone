@@ -51,6 +51,7 @@ import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_ok
 import eu.advantly.ui.phone.resources.age_minutes
 import eu.advantly.ui.phone.resources.age_seconds
+import eu.advantly.ui.phone.resources.count_on_phone
 import eu.advantly.ui.phone.resources.device_other
 import eu.advantly.ui.phone.resources.device_phone
 import eu.advantly.ui.phone.resources.device_watch
@@ -88,6 +89,8 @@ import eu.advantly.ui.phone.resources.takeover_confirm
 import eu.advantly.ui.phone.resources.takeover_short
 import eu.advantly.ui.phone.resources.takeover_text
 import eu.advantly.ui.phone.resources.takeover_title
+import eu.advantly.ui.phone.resources.waiting_text
+import eu.advantly.ui.phone.resources.waiting_title
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -329,6 +332,23 @@ internal fun StaleHint(
             stringResource(Res.string.stale_text, ageText(staleForMs), scorerDevice(snapshot))
         },
     actions = listOf(NoticeAction(stringResource(Res.string.takeover_short), "stale_takeover", onTakeOver)),
+    modifier = modifier,
+)
+
+/**
+ * „Warte auf Uhr …“: Das Match ist an die Uhr gesendet (sie wird ggf. vom System geweckt), hat sich aber noch nicht
+ * gemeldet. „Doch am Handy zählen“ übernimmt sofort (noch nichts gezählt, daher ohne Rückfrage).
+ */
+@Composable
+internal fun WaitingForScorer(
+    onCountOnPhone: () -> Unit,
+    modifier: Modifier = Modifier,
+) = NoticeBar(
+    tag = "waiting_for_scorer",
+    overline = stringResource(Res.string.live_role_display),
+    title = stringResource(Res.string.waiting_title),
+    text = stringResource(Res.string.waiting_text),
+    actions = listOf(NoticeAction(stringResource(Res.string.count_on_phone), "count_on_phone", onCountOnPhone)),
     modifier = modifier,
 )
 

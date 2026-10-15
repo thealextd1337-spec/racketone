@@ -69,6 +69,24 @@ enum class LiveRole {
 /** Art des zählenden Geräts (Anzeige „Es zählt: Uhr von …“). */
 enum class DeviceKind { PHONE, WATCH, OTHER }
 
+/**
+ * Ist die eigene Uhr als Zähler wählbar? Maßgeblich ist, ob Advantly auf einer gekoppelten Uhr **installiert** ist
+ * (Wear `CapabilityClient` bzw. `WCSession`), nicht ob sie gerade verbunden ist (Feldtest W1-I).
+ */
+enum class WatchStatus {
+    /** Nicht feststellbar (Desktop, Play-Dienste fehlen) und keine Uhr verbunden. */
+    UNKNOWN,
+
+    /** Keine Uhr gekoppelt. */
+    NO_WATCH,
+
+    /** Uhr gekoppelt, Advantly dort nicht installiert. */
+    APP_NOT_INSTALLED,
+
+    /** Advantly ist auf der Uhr installiert (läuft evtl. gerade nicht) oder die Uhr ist verbunden. */
+    AVAILABLE,
+}
+
 /** Wer zählt ein neues Match (04 §3.1 „Wer zählt?“, P1: nur eigene Geräte). */
 enum class ScorerOption {
     /** Die eigene, gekoppelte Uhr zählt; das Handy zeigt an. */
@@ -106,6 +124,8 @@ data class StartOptions(
  * @property rejectedByRoleCount ignorierte Eingaben eines Nicht-Zählers (02 §7.5: „N Eingaben nicht übernommen“)
  * @property sync Verbindungszustand (Sync-Pill, Staleness, 04 §3.2)
  * @property absorbedTaps Anzahl als Doppel-Tap zusammengeführter Eingaben (01 §4.4); steigt sie, zeigt die UI einen Hinweis
+ * @property waitingForScorer das Match ist an die Uhr gesendet, sie hat sich dafür aber noch nicht gemeldet (keine
+ *   Verbindung, noch keine Eingabe) – UI: „Warte auf Uhr …“ mit „Doch am Handy zählen“
  */
 data class LiveMatchSnapshot(
     val matchId: MatchId,
@@ -124,6 +144,7 @@ data class LiveMatchSnapshot(
     val rejectedByRoleCount: Int = 0,
     val sync: SyncInfo = SyncInfo.LOCAL_ONLY,
     val absorbedTaps: Int = 0,
+    val waitingForScorer: Boolean = false,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 }
@@ -177,8 +198,14 @@ interface LiveMatchPort {
     /** Aktives Match (läuft, wartet auf Entscheidung oder ist beendet, aber noch nicht geschlossen); `null` = keins. */
     val active: StateFlow<LiveMatchSnapshot?>
 
-    /** Eine eigene Uhr ist verbunden und kann als Zähler gewählt werden (04 §3.1); `false` = nur Director. */
+    /** Die eigene Uhr kann als Zähler gewählt werden (= [watchStatus] ist `AVAILABLE`); `false` = nur Director. */
     val watchAvailable: StateFlow<Boolean>
+
+    /** Stand der eigenen Uhr für „Wer zählt?“ (auch ohne Live-Verbindung, reagiert auf Änderungen). */
+    val watchStatus: StateFlow<WatchStatus>
+
+    /** Stand der Uhr sofort neu prüfen (Schritt „Wer zählt?“, App im Vordergrund, „Erneut prüfen“). */
+    fun refreshWatchStatus()
 
     /**
      * Legt ein Match an und macht es aktiv. Ein noch nicht beendetes aktives Match wird vorher mit

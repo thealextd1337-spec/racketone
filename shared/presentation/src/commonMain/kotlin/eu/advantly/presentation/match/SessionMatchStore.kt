@@ -27,6 +27,8 @@ import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
 import eu.advantly.data.scoreEvents
+import eu.advantly.device.link.CompanionDetector
+import eu.advantly.device.link.CompanionState
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
@@ -76,6 +78,7 @@ class SessionMatchStore(
     private val ids: IdFactory = IdFactory.uuid7(clock),
     private val historyLimit: Long = DEFAULT_HISTORY_LIMIT,
     private val monotonic: MonotonicClock = MonotonicClock.System,
+    private val companion: CompanionDetector? = null,
 ) : MatchStore {
     private val data: LocalData = session.data
     private var aliases: Set<PlayerId> = emptySet()
@@ -99,6 +102,9 @@ class SessionMatchStore(
     override val matches: StateFlow<List<MatchSummary>> = historyFlow.asStateFlow()
     override val active: StateFlow<LiveMatchSnapshot?> = activeFlow.asStateFlow()
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
+    private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
+    override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+    private var companionState = CompanionState.UNKNOWN
 
     // Zustand für Revision und „Stand vor X s“
     private var lastState: SessionState? = null
@@ -116,11 +122,35 @@ class SessionMatchStore(
         if (session.state.value.match == null) resumeRecentMatch()
         // addListener liefert sofort den aktuellen Zustand (lädt dabei auch Historie, Spieler und Favoriten)
         session.addListener(listener)
+        // Uhr mit installierter App zählt als verfügbar, auch wenn sie gerade nicht verbunden ist (Feldtest W1-I)
+        companion?.start { state ->
+            companionState = state
+            updateWatchStatus(session.state.value)
+        }
     }
 
     /** Meldet den Adapter von der Session ab (die Session selbst läuft prozessweit weiter). */
     fun close() {
+        companion?.stop()
         session.removeListener(listener)
+    }
+
+    override fun refreshWatchStatus() {
+        companion?.refresh()
+        session.syncNow()
+        updateWatchStatus(session.state.value)
+    }
+
+    private fun updateWatchStatus(state: SessionState) {
+        val status =
+            when {
+                connectedWatch(state) != null || companionState == CompanionState.APP_INSTALLED -> WatchStatus.AVAILABLE
+                companionState == CompanionState.APP_NOT_INSTALLED -> WatchStatus.APP_NOT_INSTALLED
+                companionState == CompanionState.NO_WATCH -> WatchStatus.NO_WATCH
+                else -> WatchStatus.UNKNOWN
+            }
+        watchStatusFlow.value = status
+        watchFlow.value = status == WatchStatus.AVAILABLE
     }
 
     /** Workout-Wunsch des Matches (`MatchMeta.watchWorkout`, geht mit dem Match-Kopf an die Uhr), `null` = unbekannt. */
@@ -152,7 +182,9 @@ class SessionMatchStore(
         }
         val scorer =
             when (options.scorer) {
-                ScorerOption.MY_WATCH -> connectedWatch()?.let { ScorerChoice.Device(it) } ?: ScorerChoice.ThisDevice
+                // Ohne Live-Verbindung: bekannte Uhr bzw. Platzhalter „Uhr, sobald sie sich meldet“ (Session)
+                ScorerOption.MY_WATCH -> if (watchFlow.value) ScorerChoice.MyWatch else ScorerChoice.ThisDevice
+
                 ScorerOption.THIS_PHONE -> ScorerChoice.ThisDevice
             }
         // Workout-Wunsch als Metadatum am Match (MatchMeta.watchWorkout) – geht mit Genesis und Match-Kopf an die Uhr
@@ -329,7 +361,7 @@ class SessionMatchStore(
         val previous = lastState
         lastState = state
         trackScorerContact(state)
-        watchFlow.value = connectedWatch(state) != null
+        updateWatchStatus(state)
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }
@@ -426,7 +458,7 @@ class SessionMatchStore(
             role = if (m.isScorer) LiveRole.SCORER else LiveRole.DISPLAY,
             // P1: es zählt immer ein eigenes Gerät (Uhr oder Handy des Besitzers)
             scorerName = selfFlow.value.displayName,
-            scorerKind = m.scorerKind.toDeviceKind(m.isScorer),
+            scorerKind = if (m.scorerDeviceId == MatchSession.PENDING_WATCH) DeviceKind.WATCH else m.scorerKind.toDeviceKind(m.isScorer),
             rejectedByRoleCount = m.rejectedByRoleCount,
             sync =
                 SyncInfo(
@@ -438,7 +470,22 @@ class SessionMatchStore(
                     withoutScorerSinceMono = if (m.isScorer) null else withoutScorerSinceMono,
                 ),
             absorbedTaps = m.absorbedTaps.size,
+            waitingForScorer = waitingForScorer(m, state),
         )
+    }
+
+    /**
+     * Anzeige-Gerät, der Zähler war für dieses Match noch nie in Kontakt (auch nicht vor einem Neustart) und hat noch
+     * nichts gesendet – das Match wartet auf die Uhr. War er schon verbunden, gilt stattdessen „Stand vor X s“.
+     */
+    private fun waitingForScorer(
+        m: ActiveMatch,
+        state: SessionState,
+    ): Boolean {
+        if (m.isScorer || state.sync.scorerConnected || m.state.status == MatchStatus.FINISHED) return false
+        if (contactMono != null) return false
+        val scorer = m.scorerDeviceId ?: return false
+        return data.events.sequences(m.id.value).none { it.deviceId == scorer.value }
     }
 
     /** Wanduhr des letzten Events eines beendeten Matches (je Match und Log-Länge zwischengespeichert). */

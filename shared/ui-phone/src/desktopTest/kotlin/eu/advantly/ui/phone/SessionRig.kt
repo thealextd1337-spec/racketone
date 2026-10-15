@@ -7,6 +7,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -27,7 +28,10 @@ import eu.advantly.match.session.WallClock as SessionClock
  * In-Memory-Netz mit virtueller Zeit ([ManualScheduler]). Die Wanduhr beider Geräte und der UI folgt der virtuellen
  * Zeit; [settle] lässt sie laufen. Der Besitzer heißt „Alex“.
  */
-class SessionRig {
+class SessionRig(
+    watchOnline: Boolean = true,
+    val companion: FakeCompanionDetector = FakeCompanionDetector(),
+) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
     val clock = WallClock { BASE_MS + scheduler.nowMs() }
@@ -40,10 +44,11 @@ class SessionRig {
         session("phone", PeerKind.PHONE, seed = 1).also {
             it.data.players.ensureSelf("Alex", BASE_MS) { PlayerId("alex") }
         }
-    val store = SessionMatchStore(phoneSession, clock, monotonic = monotonic)
+    val store = SessionMatchStore(phoneSession, clock, monotonic = monotonic, companion = companion)
     val model = AdvantlyAppModel(store, store, store, clock = clock, monotonic = monotonic)
 
     init {
+        if (!watchOnline) offline()
         settle()
     }
 

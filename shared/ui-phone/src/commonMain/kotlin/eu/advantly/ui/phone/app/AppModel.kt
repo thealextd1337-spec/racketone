@@ -88,7 +88,7 @@ class AdvantlyAppModel(
     /** Monotone Uhr für „Stand vor X s“; dieselbe Basis wie `SyncInfo.lastScorerContactMono` des Ports. */
     val monotonic: MonotonicClock = MonotonicClock.System,
 ) {
-    val wizard = MatchWizard(players, watchAvailable = live.watchAvailable)
+    val wizard = MatchWizard(players, watchStatus = live.watchStatus, refreshWatch = live::refreshWatchStatus)
     val controller = LiveScoreController(live, settings, clock = clock, monotonic = monotonic)
     val navigator = AppNavigator()
 

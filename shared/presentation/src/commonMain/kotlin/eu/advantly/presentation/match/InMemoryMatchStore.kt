@@ -85,10 +85,24 @@ class InMemoryMatchStore(
 
     private val watchFlow = MutableStateFlow(watchAvailable)
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
+    private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+    override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+
+    /** Anzahl der Neuabfragen ([refreshWatchStatus]) – für Tests. */
+    var watchRefreshes: Int = 0
+        private set
 
     /** Simuliert das Verbinden/Trennen einer Uhr (Previews, Tests). */
-    fun setWatchAvailable(available: Boolean) {
-        watchFlow.value = available
+    fun setWatchAvailable(available: Boolean) = setWatchStatus(if (available) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
+
+    /** Simuliert den Stand der Uhr (Previews, Tests). */
+    fun setWatchStatus(status: WatchStatus) {
+        watchStatusFlow.value = status
+        watchFlow.value = status == WatchStatus.AVAILABLE
+    }
+
+    override fun refreshWatchStatus() {
+        watchRefreshes++
     }
 
     // --- LiveMatchPort ---
