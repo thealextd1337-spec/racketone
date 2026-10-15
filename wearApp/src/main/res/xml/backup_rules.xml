@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup bis Android 11 (fullBackupContent); gleiche Ausschlüsse wie data_extraction_rules.xml. -->
+<full-backup-content>
+    <exclude domain="file" path="diag/" />
+    <exclude domain="external" path="diag/" />
+    <exclude domain="sharedpref" path="s5_session.xml" />
+</full-backup-content>

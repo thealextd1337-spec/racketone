@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (minSdk 34): Cloud-Backup und Gerätetransfer.
+  Ausgeschlossen: Diagnose-Log mit Pulswerten (Spike S5, intern + extern) und der Session-Zustand
+  (ein wiederhergestelltes "sessionActive" würde auf dem neuen Gerät eine Wiederaufnahme auslösen).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="diag/" />
+        <exclude domain="external" path="diag/" />
+        <exclude domain="sharedpref" path="s5_session.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="diag/" />
+        <exclude domain="external" path="diag/" />
+        <exclude domain="sharedpref" path="s5_session.xml" />
+    </device-transfer>
+</data-extraction-rules>

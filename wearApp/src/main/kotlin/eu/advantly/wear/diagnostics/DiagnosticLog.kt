@@ -3,6 +3,7 @@ package eu.advantly.wear.diagnostics
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import eu.advantly.wear.BuildConfig
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
@@ -15,9 +16,16 @@ import java.util.concurrent.Executors
  * Ablage: app-spezifischer externer Speicher `/sdcard/Android/data/eu.advantly/files/diag/s5-diag.log`
  * (per `adb pull` abholbar, keine Berechtigung nötig), Fallback interner Speicher `files/diag/`.
  * Geschrieben wird auf einem eigenen Thread; jede Zeile wird sofort geflusht, damit bei einem Prozess-Kill
- * nichts Wesentliches verloren geht. Enthält Pulswerte – nur für den internen Feldtest, nie in Release-Builds übernehmen.
+ * nichts Wesentliches verloren geht.
+ *
+ * **Nur in Debug-Builds aktiv** ([ENABLED] = `BuildConfig.DEBUG`): Das Log enthält Pulswerte (Art.-9-Daten, 05 §6.3).
+ * In Release-Builds wird weder eine Datei angelegt noch nach Logcat geschrieben; R8 entfernt die Aufrufe.
+ * Das Verzeichnis ist vom Cloud-Backup und Gerätetransfer ausgeschlossen (`res/xml/data_extraction_rules.xml`).
  */
 object DiagnosticLog {
+    /** Schalter für das gesamte Diagnose-Log (Datei **und** Logcat). */
+    val ENABLED: Boolean = BuildConfig.DEBUG
+
     private const val TAG = "AdvantlyS5"
     const val FILE_NAME = "s5-diag.log"
     private const val MAX_BYTES = 20L * 1024 * 1024
@@ -30,7 +38,7 @@ object DiagnosticLog {
 
     /** Einmal in `Application.onCreate` aufrufen. */
     fun init(context: Context) {
-        if (file != null) return
+        if (!ENABLED || file != null) return
         val dir = (context.getExternalFilesDir("diag") ?: File(context.filesDir, "diag")).apply { mkdirs() }
         file = File(dir, FILE_NAME)
     }
@@ -42,6 +50,7 @@ object DiagnosticLog {
         event: String,
         vararg fields: Pair<String, Any?>,
     ) {
+        if (!ENABLED) return
         val line = DiagLine.format(System.currentTimeMillis(), SystemClock.elapsedRealtime(), event, linkedMapOf(*fields))
         Log.i(TAG, line)
         executor.execute { append(listOf(line)) }
@@ -49,7 +58,7 @@ object DiagnosticLog {
 
     /** Mehrere Zeilen am Stück (z. B. ein Batch Puls-Samples) mit einem Flush. */
     fun logAll(lines: List<Pair<String, Map<String, Any?>>>) {
-        if (lines.isEmpty()) return
+        if (!ENABLED || lines.isEmpty()) return
         val now = System.currentTimeMillis()
         val elapsed = SystemClock.elapsedRealtime()
         val formatted = lines.map { (event, fields) -> DiagLine.format(now, elapsed, event, fields) }
