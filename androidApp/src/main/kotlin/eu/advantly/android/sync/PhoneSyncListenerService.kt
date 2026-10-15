@@ -33,7 +33,7 @@ import java.util.concurrent.TimeoutException
  *   Session alle gespeichert hat. Gelöscht wird ein Item erst NACH dem Speichern; bleibt es wegen Timeout/Prozess-Tod
  *   liegen, liest es der Transport beim nächsten Start erneut (idempotent).
  *
- * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und passendes Workout-Match.
+ * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und ihr Uhr-Match mit Workout.
  *
  * Callbacks laufen auf einem Worker-Thread; die Session nur auf dem Main-Thread benutzen.
  */
@@ -47,11 +47,13 @@ class PhoneSyncListenerService : WearableListenerService() {
             val payload = LiveTelemetryCodec.decode(event.data) ?: return
             onMainAndWait {
                 val state = AndroidMatchSessions.current()?.state?.value ?: return@onMainAndWait
+                // nur Werte des Uhr-Matches (F22: das Handy kann mehrere Matches offen haben)
+                val watchMatch = state.watchMatchId?.let(state::match)
                 if (LiveTelemetryGate.accept(
                         payload,
                         event.sourceNodeId,
-                        state.match?.id,
-                        state.match?.meta?.watchWorkout == true,
+                        watchMatch?.id,
+                        watchMatch?.meta?.watchWorkout == true,
                         state.sync.peers,
                     )
                 ) {
