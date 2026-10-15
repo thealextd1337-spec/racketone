@@ -59,7 +59,9 @@ class LinkDebugSnapshot(
     val pingsAnswered: Int,
     val queued: Int,
     val lost: Int,
+    /** Wiederholungen der eigenen Pings dieser Messreihe. */
     val retries: Int,
+    /** Verworfene Duplikate, link-weit seit Start/Reset (Empfangsseite, keiner Messreihe zuordenbar). */
     val duplicates: Int,
     val rttP50Ms: Long,
     val rttP95Ms: Long,
@@ -78,7 +80,9 @@ internal fun PingPongStats.toSnapshot() =
         pingsAnswered = pingsAnswered,
         queued = pingsQueued,
         lost = lost,
-        retries = link.retries,
+        // Wiederholungen der Pings DIESER Messreihe – link.retries ist link-weit und enthält nach einem Reset
+        // noch Wiederholungen alter, weiterlaufender Sendungen
+        retries = pingRetries,
         duplicates = link.duplicatesDropped,
         rttP50Ms = rttP50Ms ?: -1,
         rttP95Ms = rttP95Ms ?: -1,

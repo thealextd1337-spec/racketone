@@ -251,7 +251,10 @@ data class PingPongStats(
     val pingsQueued: Int,
     /** Pings ohne Ack nach allen Wiederholungen = verloren. */
     val pingsFailed: Int,
-    /** Wiederholungen der eigenen Pings (Versuche − 1, aufsummiert). */
+    /**
+     * Wiederholungen der eigenen Pings dieser Messreihe (Versuche − 1, aufsummiert). Für die Anzeige DIESEN Wert nutzen,
+     * nicht [LinkStats.retries]: der ist link-weit und zählt nach [PingPongSession.reset] auch weiterlaufende alte Sendungen.
+     */
     val pingRetries: Int,
     val pongsReceived: Int,
     val pingsAnswered: Int,

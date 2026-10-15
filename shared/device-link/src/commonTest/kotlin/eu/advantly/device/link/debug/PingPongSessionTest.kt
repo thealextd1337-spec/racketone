@@ -121,6 +121,21 @@ class PingPongSessionTest {
     }
 
     @Test
+    fun retriesOfOldSeriesAreNotShownAfterReset() {
+        // Review S3 Runde 2: alte Sendung wiederholt nach dem Reset → darf nicht in die neue Messung zählen
+        var acksDropped = 0
+        network.dropFilter = { from, _, frame -> !(from == "watch" && frame.size < 40 && acksDropped++ == 0) }
+        phone.startPings(count = 1, intervalMs = 10)
+        scheduler.advanceBy(60) // Ping zugestellt, Ack verloren, Wiederholung steht aus
+        phone.reset()
+        scheduler.advanceBy(2_000) // Wiederholung + Ack der alten Messreihe
+        val stats = phone.snapshot()
+        assertTrue(stats.link.retries > 0, "link-weiter Zähler sieht die alte Wiederholung")
+        assertEquals(0, stats.pingsSent)
+        assertEquals(0, stats.pingRetries, "angezeigte Wiederholungen gehören nur zur neuen Messreihe")
+    }
+
+    @Test
     fun percentileUsesNearestRank() {
         assertNull(percentile(emptyList(), 95))
         assertEquals(7, percentile(listOf(7), 50))

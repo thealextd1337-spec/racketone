@@ -111,7 +111,7 @@ private fun LinkDebugScreen(
         Text(stringResource(R.string.link_answered, stats.pingsAnswered))
         Text(stringResource(R.string.link_queued, stats.pingsQueued))
         Text(stringResource(R.string.link_lost, stats.lost))
-        Text(stringResource(R.string.link_retries, stats.link.retries))
+        Text(stringResource(R.string.link_retries, stats.pingRetries))
         Text(stringResource(R.string.link_duplicates, stats.link.duplicatesDropped))
         Text(stringResource(R.string.link_rtt, ms(stats.rttP50Ms), ms(stats.rttP95Ms), ms(stats.rttMaxMs)))
         Text(stringResource(R.string.link_ack_latency, ms(stats.ackP50Ms), ms(stats.ackP95Ms)))

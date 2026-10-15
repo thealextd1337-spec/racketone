@@ -103,7 +103,7 @@ private fun WearLinkDebugScreen(
         Text(stringResource(R.string.link_answered, stats.pingsAnswered), style = small)
         Text(stringResource(R.string.link_queued, stats.pingsQueued), style = small)
         Text(stringResource(R.string.link_lost, stats.lost), style = small)
-        Text(stringResource(R.string.link_retries, stats.link.retries), style = small)
+        Text(stringResource(R.string.link_retries, stats.pingRetries), style = small)
         Text(
             stringResource(R.string.link_rtt, ms(stats.rttP50Ms), ms(stats.rttP95Ms), ms(stats.rttMaxMs)),
             style = small,
