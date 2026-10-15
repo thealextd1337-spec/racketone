@@ -237,7 +237,7 @@ internal object Replay {
                 }
 
                 event.id in log.undone -> {
-                    Unit
+                    // Unwirksame Events verändern weder Zustand noch Effekte.
                 }
 
                 payload is Undo -> {

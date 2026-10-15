@@ -983,7 +983,7 @@ Ergebnis: `validation_status = ok | suspicious | invalid`. `invalid` wird nicht 
 |---|---|---|
 | **Benutzername** | RPC `search_profiles(q)` – **exakter** Treffer auf `username` (case-insensitive), nur wenn `discoverable_by_username` | Keine Präfix-/Volltextsuche → keine Nutzer-Enumeration; Rate-Limit 30/min pro Nutzer |
 | **Freundescode** | 8 Zeichen Crockford-Base32 (z. B. `K7QF-92MX`), exakter Treffer | Neu generierbar („Code zurücksetzen“) |
-| **QR-Code** | QR enthält `https://racketone.app/f/<friend_code>`; Scannen → Anfrage. Variante „persönlich treffen“: Gerät zeigt einen **kurzlebigen QR-Token** (5 min, aus `create_friend_qr()`); wer ihn scannt, wird **sofort** Freund (Zeigen = Zustimmung) | Kurzlebiger Token verhindert, dass ein abfotografierter QR dauerhaft Freundschaften erzeugt |
+| **QR-Code** | QR enthält `https://advantly.eu/f/<friend_code>`; Scannen → Anfrage. Variante „persönlich treffen“: Gerät zeigt einen **kurzlebigen QR-Token** (5 min, aus `create_friend_qr()`); wer ihn scannt, wird **sofort** Freund (Zeigen = Zustimmung) | Kurzlebiger Token verhindert, dass ein abfotografierter QR dauerhaft Freundschaften erzeugt |
 | Kontakte-Abgleich | **Nicht** in P2 | Telefonbuch-Upload wäre unverhältnismäßig (Daten Dritter) |
 
 `search_profiles` gibt nur `id, username, display_name, avatar_url` zurück und lässt blockierende/blockierte Nutzer aus.
@@ -1011,7 +1011,7 @@ sequenceDiagram
   participant S as Supabase
   participant M as Max (Gast, noch ohne App)
   A->>S: create_invite(kind=claim_player, player_id=Gast "Max")
-  S-->>A: Link https://racketone.app/i/<token> (Token nur im Link, DB speichert sha256)
+  S-->>A: Link https://advantly.eu/i/<token> (Token nur im Link, DB speichert sha256)
   A->>M: Teilen (WhatsApp, Signal …)
   M->>M: Installiert App (Deferred Deep Link / Token in Zwischenablage-Fallback)
   M->>S: Registrierung (Apple/Google/E-Mail)
@@ -1031,7 +1031,7 @@ Regeln:
 - **Mehrere Gast-Einträge derselben Person** bei verschiedenen Besitzern: Jeder Besitzer lädt separat ein bzw. stellt einen Link-Request. Keine automatische „Ist das du?“-Erkennung (Datenschutz, Fehlzuordnungen).
 - Konflikt: Max war im selben Match bereits mit Account eingetragen → Claim für dieses Match wird abgelehnt (Unique-Index `match_participants_profile_once`), restliche Matches werden übernommen; Meldung an Besitzer.
 - **Freundes-Einladung** (`kind = 'friend'`) für Personen ohne Gast-Eintrag: gleicher Link-Mechanismus, Ergebnis ist nur die Freundschaft.
-- Links: Universal Links (iOS) / App Links (Android) auf `racketone.app`; Fallback-Webseite mit Store-Links (statische Seite, kein Tracking).
+- Links: Universal Links (iOS) / App Links (Android) auf `advantly.eu`; Fallback-Webseite mit Store-Links (statische Seite, kein Tracking).
 
 ---
 
@@ -1346,7 +1346,7 @@ Annahmen pro aktivem Nutzer/Monat: 4 Matches (≈ 1,6 Accounts pro Match), 50 % 
 | RevenueCat | 0 | 0 bis 2.500 $ MTR, danach 1 % des Umsatzes |
 | **Summe laufend** | **0–25 $** | **≈ 50–110 $** (ohne PITR) |
 
-Einmalig/jährlich außerhalb des Backends: Apple Developer Program 99 $/Jahr, Google Play 25 $ einmalig, Domain `racketone.app` ~15–20 $/Jahr.
+Einmalig/jährlich außerhalb des Backends: Apple Developer Program 99 $/Jahr, Google Play 25 $ einmalig, Domain `advantly.eu` ~15–20 $/Jahr.
 
 Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer und Monat**. Kostentreiber ist ab dann eher Compute (gleichzeitige Last am Wochenende) als Speicher. Wichtige Stellschraube: Realtime nur im Live-Screen öffnen (sonst greift das 500-Verbindungen-Limit des Spend Caps).
 
@@ -1370,7 +1370,7 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 | O1 | Sollen Matches standardmäßig mit Freunden geteilt werden (`share_matches_default`)? | **Aus** (Privacy by Default), mit einmaliger Abfrage im Onboarding. |
 | O2 | Health-Sichtbarkeit für Mitspieler/Freunde überhaupt in P3 anbieten oder erst später? | Erst „nur ich“; Teilen in P3.1, weil zweite Einwilligung + mehr Tests. |
 | O3 | Mindestalter 16 akzeptabel (Jugendspieler im Verein fallen raus)? | Ja für Start; Jugendmodus (ohne Health, Eltern-Einwilligung) später. |
-| O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `racketone.app` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
+| O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `advantly.eu` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
 | O5 | Sign-in-with-Apple-Token-Widerruf bei Löschung: Authorization-Code serverseitig speichern (zusätzliche Edge Function beim ersten Login)? | Ja, in P2 einplanen (App-Review-Thema). |
 | O6 | Datenschutzbeauftragter/DSFA: extern beauftragen oder selbst mit Vorlage? | DSFA selbst (DSK-Vorlage), DSB-Pflicht vor P3 prüfen lassen. |
 | O7 | Belag als feste Liste (Vorschlag in 3.3.3) oder zusätzlich Freitext/Hallen? | Feste Liste + `indoor_*`; Freitext nur für Venue. |
