@@ -95,6 +95,7 @@ internal data class ScorePanelContent(
  *
  * Gesten: Tap (zählt beim Loslassen, solange der Finger nicht über die Touch-Slop wandert) = Punkt;
  * Wischen nach unten = Rückgängig; Mehrfinger-Kontakt wird ignoriert (Handballen-Filter, 04 §4.3.3).
+ * Mit [interactive] = `false` (Anzeige-Gerät, 04 H6a) gleiche Darstellung ohne Tap-Fläche, Geste und Button-Rolle.
  */
 @Composable
 internal fun ScorePanel(
@@ -107,6 +108,7 @@ internal fun ScorePanel(
     onTap: (eventUptimeMillis: Long?) -> Unit,
     onSwipeDown: (eventUptimeMillis: Long?) -> Unit,
     modifier: Modifier = Modifier,
+    interactive: Boolean = true,
 ) {
     val colors = AdvantlyTheme.colors
     val teamColor = if (content.side == Side.A) colors.teamUs else colors.teamThem
@@ -138,22 +140,24 @@ internal fun ScorePanel(
                     val alpha = flash.value
                     if (alpha > 0f) drawRect(Color.White.copy(alpha = alpha))
                 }.semantics(mergeDescendants = true) {
-                    role = Role.Button
                     contentDescription = content.a11yDescription
                     liveRegion = LiveRegionMode.Polite
-                    onClick {
-                        currentOnTap(null)
-                        true
+                    if (interactive) {
+                        role = Role.Button
+                        onClick {
+                            currentOnTap(null)
+                            true
+                        }
+                        customActions =
+                            listOf(
+                                CustomAccessibilityAction(content.undoLabel) {
+                                    currentOnSwipeDown(null)
+                                    true
+                                },
+                            )
                     }
-                    customActions =
-                        listOf(
-                            CustomAccessibilityAction(content.undoLabel) {
-                                currentOnSwipeDown(null)
-                                true
-                            },
-                        )
-                }.pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
+                }.pointerInput(enabled, interactive) {
+                    if (!enabled || !interactive) return@pointerInput
                     val swipeMin = 72.dp.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)

@@ -94,6 +94,7 @@ import eu.advantly.ui.phone.resources.action_more
 import eu.advantly.ui.phone.resources.action_outdoor
 import eu.advantly.ui.phone.resources.action_redo
 import eu.advantly.ui.phone.resources.action_undo
+import eu.advantly.ui.phone.resources.display_set_end
 import eu.advantly.ui.phone.resources.latency_benchmark_running
 import eu.advantly.ui.phone.resources.latency_counters
 import eu.advantly.ui.phone.resources.latency_frames
@@ -124,6 +125,7 @@ import eu.advantly.ui.phone.resources.menu_outdoor_contrast
 import eu.advantly.ui.phone.resources.menu_pause
 import eu.advantly.ui.phone.resources.menu_reset_measurements
 import eu.advantly.ui.phone.resources.menu_resume
+import eu.advantly.ui.phone.resources.takeover_action
 import eu.advantly.ui.phone.resources.undo_snackbar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -145,6 +147,10 @@ private enum class LiveDialog { EndMatch, CorrectServer }
  * Gegner (unten/Blau), Satztabelle, Hinweis-Pill, Aufschläger/Feld, Undo per Knopf/Wischgeste + Snackbar, Haptik,
  * Outdoor-Kontrast. Satzende-Frage (OPEN), Matchende (BEST_OF: Folge-Match), vorzeitiges Ende und
  * Aufschläger-Korrektur als Bottom-Sheets. Das Latenz-Overlay gibt es nur mit [debugTools].
+ *
+ * Zwei Modi (Single-Scorer, 02 §7.5): **Zähler/Director** wie oben; **Anzeige** (H6a), wenn ein anderes Gerät zählt –
+ * gleiche Darstellung ohne Tap-Flächen, Undo und Match-Steuerung, deutlich als „Anzeige · Es zählt: …“ markiert, mit
+ * „Stand vor X s“, Übernahmeangebot nach mehr als 30 s ohne Verbindung und bestätigtem „Zählen übernehmen“.
  *
  * @param onMinimize zurück zu den Tabs (Match läuft weiter, Mini-Scorebar)
  * @param onShowResult Ergebnisansicht des beendeten Matches
@@ -206,11 +212,16 @@ fun LiveScoreScreen(
             return@Box
         }
         var dialog by remember { mutableStateOf<LiveDialog?>(null) }
+        var takeOverDialog by remember { mutableStateOf(false) }
+        val display = !snapshot.isScorer
+        LaunchedEffect(display) { if (!display) takeOverDialog = false }
+        val now = rememberNow(controller.clock, ticking = display)
         val status = snapshot.state.status
         val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
-        val fork = snapshot.openForks.firstOrNull()
-        val userDialog = dialog.takeIf { running && fork == null }
-        val modal = fork != null || !running || userDialog != null
+        val userDialog = dialog.takeIf { running && !display }
+        // Satzende-Frage nur am Zähler (04 §3.3); die Anzeige zeigt stattdessen einen Hinweis über den Flächen
+        val sheet = status == MatchStatus.FINISHED || (status == MatchStatus.AWAITING_DECISION && !display)
+        val modal = sheet || userDialog != null
         // System-Zurück schließt zuerst einen vom Nutzer geöffneten Dialog (nicht den Live-Screen)
         BackHandler(enabled = userDialog != null) { dialog = null }
         BoxWithConstraints(
@@ -233,7 +244,8 @@ fun LiveScoreScreen(
             val infoMaxHeight = maxHeight * INFO_MAX_FRACTION
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
-                    Header(controller, snapshot, onMinimize)
+                    Header(controller, snapshot, now, onMinimize)
+                    if (display) DisplayBanner(snapshot, controller.outdoorContrast, Modifier.padding(top = Spacing.xs))
                     if (debugTools && controller.showLatencyOverlay) {
                         LatencyOverlay(controller, frameStats, Modifier.padding(top = 6.dp))
                     }
@@ -247,7 +259,14 @@ fun LiveScoreScreen(
                 }
             }
             val footer: @Composable (Modifier) -> Unit = { footerModifier ->
-                Footer(controller, snapshot, debugTools, onBenchmarkNewMatch, { dialog = it }, footerModifier)
+                if (display) {
+                    DisplayFooter(controller, snapshot, onTakeOver = { takeOverDialog = true }, footerModifier)
+                } else {
+                    Footer(controller, snapshot, debugTools, onBenchmarkNewMatch, { dialog = it }, footerModifier)
+                }
+            }
+            val panels: @Composable (Boolean, Modifier) -> Unit = { landscapePanels, panelsModifier ->
+                PanelsWithSnackbar(controller, snapshot, now, reduceMotion, landscapePanels, { takeOverDialog = true }, panelsModifier)
             }
             if (landscape) {
                 // Querformat: Info + Fußleiste links (scrollbar, damit bei großer Schrift nichts abgeschnitten wird),
@@ -257,25 +276,21 @@ fun LiveScoreScreen(
                         info(Modifier.fillMaxWidth())
                         footer(Modifier.padding(top = Spacing.s))
                     }
-                    PanelsWithSnackbar(controller, snapshot, reduceMotion, landscape = true, Modifier.weight(0.58f).fillMaxHeight())
+                    panels(true, Modifier.weight(0.58f).fillMaxHeight())
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
                     // Info (Kopf, Overlay, Satztabelle) höchstens 40 % der Höhe und scrollbar: Bei 200 % Schrift und
                     // vollem Overlay behalten die Tap-Flächen so ihren Platz.
                     info(Modifier.fillMaxWidth().heightIn(max = infoMaxHeight).verticalScroll(rememberScrollState()))
-                    PanelsWithSnackbar(controller, snapshot, reduceMotion, landscape = false, Modifier.weight(1f).padding(top = Spacing.s))
+                    panels(false, Modifier.weight(1f).padding(top = Spacing.s))
                     footer(Modifier.padding(top = Spacing.s))
                 }
             }
         }
-        // Verzweigung zuerst; Satzende (OPEN) und Matchende ergeben sich aus dem Zustand – kein Auto-Weiter (04 §4.3.3).
+        // Satzende (OPEN, nur Zähler) und Matchende ergeben sich aus dem Zustand – kein Auto-Weiter (04 §4.3.3).
         when {
-            fork != null -> {
-                ForkSheet(controller, snapshot, fork)
-            }
-
-            status == MatchStatus.AWAITING_DECISION -> {
+            status == MatchStatus.AWAITING_DECISION && !display -> {
                 SetEndSheet(controller, snapshot)
             }
 
@@ -286,6 +301,10 @@ fun LiveScoreScreen(
                 })
             }
 
+            display -> {
+                Unit
+            }
+
             else -> {
                 when (dialog) {
                     LiveDialog.EndMatch -> EndMatchSheet(controller, snapshot, onClose = { dialog = null })
@@ -293,6 +312,16 @@ fun LiveScoreScreen(
                     null -> Unit
                 }
             }
+        }
+        if (takeOverDialog && display) {
+            TakeOverDialog(
+                snapshot = snapshot,
+                onConfirm = {
+                    takeOverDialog = false
+                    controller.takeOverScoring()
+                },
+                onDismiss = { takeOverDialog = false },
+            )
         }
     }
 }
@@ -309,19 +338,45 @@ private fun NoMatch(onBack: () -> Unit) {
     }
 }
 
-/** Tap-Flächen; die Undo-Snackbar liegt unten über der Gegner-Fläche (wächst nicht in die Fußleiste). */
+/**
+ * Tap-Flächen; die Undo-Snackbar liegt unten über der Gegner-Fläche (wächst nicht in die Fußleiste). Oben darüber:
+ * „N Eingaben nicht übernommen“, auf Anzeige-Geräten das Übernahmeangebot (mehr als 30 s ohne Zähler) bzw. „Zähler
+ * entscheidet“ am Satzende.
+ */
 @Composable
 private fun PanelsWithSnackbar(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
+    nowMs: Long,
     reduceMotion: Boolean,
     landscape: Boolean,
+    onTakeOver: () -> Unit,
     modifier: Modifier,
 ) {
+    val display = !snapshot.isScorer
     Box(modifier) {
         Panels(controller, snapshot, reduceMotion, landscape, Modifier.fillMaxSize())
-        snapshot.conflicts.firstOrNull()?.let { conflict ->
-            ConflictBanner(conflict, controller, Modifier.align(Alignment.TopCenter).padding(Spacing.s))
+        Column(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(Spacing.s),
+            verticalArrangement = Arrangement.spacedBy(Spacing.s),
+        ) {
+            controller.rejectedNotice?.let { count -> RejectedNotice(count, onDismiss = controller::acknowledgeRejected) }
+            if (display && snapshot.state.status == MatchStatus.AWAITING_DECISION) {
+                Text(
+                    stringResource(Res.string.display_set_end, snapshot.state.sets.size),
+                    style = AdvantlyTheme.typography.label,
+                    color = AdvantlyTheme.colors.text,
+                    modifier =
+                        Modifier
+                            .testTag("display_set_end")
+                            .fillMaxWidth()
+                            .background(AdvantlyTheme.colors.surface2, Radii.cardShape)
+                            .padding(Spacing.m),
+                )
+            }
+            if (display && snapshot.sync.offersTakeOver(nowMs) && snapshot.state.status != MatchStatus.FINISHED) {
+                StaleHint(snapshot, snapshot.sync.staleForMs(nowMs) ?: 0, onTakeOver)
+            }
         }
         controller.absorbedNotice?.let { id ->
             AbsorbedNotice(id, onTimeout = { controller.dismissAbsorbedNotice(id) }, Modifier.align(Alignment.Center))
@@ -341,6 +396,7 @@ private fun PanelsWithSnackbar(
 private fun Header(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
+    nowMs: Long,
     onMinimize: () -> Unit,
 ) {
     val outdoor = controller.outdoorContrast
@@ -363,7 +419,7 @@ private fun Header(
         }
         SportChip(sport = sport, text = stringResource(sportName(sport)), outdoor = outdoor, modifier = Modifier.testTag("live_sport_chip"))
         Spacer(Modifier.weight(1f))
-        SyncPill(snapshot.sync, outdoor)
+        SyncPill(snapshot, nowMs, outdoor)
     }
 }
 
@@ -448,6 +504,7 @@ private fun Panels(
     val usContent = content(Side.A)
     val themContent = content(Side.B)
     val enabled = state.status == MatchStatus.IN_PROGRESS || state.status == MatchStatus.PAUSED
+    val interactive = snapshot.isScorer
 
     @Composable
     fun Panel(
@@ -465,6 +522,7 @@ private fun Panels(
             onTap = { controller.onTap(side, it) },
             onSwipeDown = { controller.undo(it) },
             modifier = panelModifier.onGloballyPositioned { controller.panelBounds[side] = it.boundsInWindow() },
+            interactive = interactive,
         )
     }
 
@@ -591,6 +649,41 @@ private fun Footer(
                 onDismiss = { menuOpen = false },
             )
         }
+    }
+}
+
+/** Fußleiste des Anzeige-Geräts: „Zählen übernehmen“ (mit Bestätigung) und Outdoor-Kontrast – kein Undo/Mehr. */
+@Composable
+private fun DisplayFooter(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    onTakeOver: () -> Unit,
+    modifier: Modifier,
+) {
+    val outdoor = controller.outdoorContrast
+    val finished = snapshot.state.status == MatchStatus.FINISHED
+    Row(
+        modifier.fillMaxWidth().heightIn(min = 64.dp).height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        FooterButton(
+            icon = AdvantlyIcons.Replay,
+            label = stringResource(Res.string.takeover_action),
+            onClick = onTakeOver,
+            outdoor = outdoor,
+            weight = 2f,
+            enabled = !finished,
+            emphasized = true,
+            modifier = Modifier.testTag("takeover_button"),
+        )
+        FooterButton(
+            icon = AdvantlyIcons.Sun,
+            label = stringResource(Res.string.action_outdoor),
+            onClick = { controller.outdoorContrast = !controller.outdoorContrast },
+            outdoor = outdoor,
+            selected = outdoor,
+            modifier = Modifier.testTag("outdoor_toggle"),
+        )
     }
 }
 

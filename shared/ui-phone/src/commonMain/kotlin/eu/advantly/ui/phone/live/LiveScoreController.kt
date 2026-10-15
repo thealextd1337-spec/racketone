@@ -13,7 +13,6 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.LiveSettings
-import eu.advantly.presentation.match.ForkChoice
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.WallClock
@@ -39,7 +38,8 @@ enum class ScoreDirection { Forward, Backward }
 /**
  * UI-State-Holder des Live-Screens über dem [LiveMatchPort]: spiegelt den Snapshot synchron in Compose-State
  * (Haptik und Animation im selben Frame wie die Eingabe), zählt Taps für das Latenz-Overlay und hält die
- * Live-Einstellungen. Änderungen von außen (später: andere Geräte) kommen über [sync]. Nur vom UI-Thread benutzen.
+ * Live-Einstellungen. Änderungen von außen (andere Geräte, z. B. die zählende Uhr) kommen über [sync].
+ * Nur vom UI-Thread benutzen.
  */
 @Stable
 class LiveScoreController(
@@ -67,6 +67,17 @@ class LiveScoreController(
     /** ID des Hinweises „Doppelte Eingabe zusammengeführt“; steigt, sobald `absorbedTaps` wächst. */
     var absorbedNotice by mutableStateOf<Int?>(null)
         private set
+
+    /**
+     * Bereits bestätigte Zahl ignorierter Eingaben (02 §7.5); der Hinweis „N Eingaben nicht übernommen“ erscheint,
+     * solange `rejectedByRoleCount` darüber liegt.
+     */
+    var acknowledgedRejected by mutableIntStateOf(0)
+        private set
+
+    /** Zeigt der Live-Screen den Hinweis „N Eingaben nicht übernommen“? */
+    val rejectedNotice: Int?
+        get() = snapshot?.rejectedByRoleCount?.takeIf { it > acknowledgedRejected }
 
     private var outdoorState by mutableStateOf(settings.outdoorContrast)
     private var keepScreenOnState by mutableStateOf(settings.keepScreenOn)
@@ -127,6 +138,7 @@ class LiveScoreController(
         if (next?.matchId != current?.matchId) {
             undoNotice = null
             flashSide = null
+            acknowledgedRejected = 0
         }
         updateSnapshot(next)
         generation++
@@ -145,20 +157,13 @@ class LiveScoreController(
         if (absorbedNotice == id) absorbedNotice = null
     }
 
-    /** Verzweigung auflösen (Version A, Version B oder beide). */
-    fun resolveFork(
-        forkId: String,
-        keep: ForkChoice,
-    ) = command { port.resolveFork(forkId, keep) }
+    /** Hinweis „N Eingaben nicht übernommen“ schließen (erscheint erst bei weiteren wieder). */
+    fun acknowledgeRejected() {
+        acknowledgedRejected = snapshot?.rejectedByRoleCount ?: 0
+    }
 
-    /** Widerspruch bestätigen: beide Punkte bleiben. */
-    fun dismissConflict(conflictId: String) = command { port.dismissConflict(conflictId) }
-
-    /** 1-Tap-Undo eines Widerspruchs: Punkt für [side] zurücknehmen. */
-    fun undoConflictPoint(
-        conflictId: String,
-        side: Side,
-    ) = command { port.undoConflictPoint(conflictId, side) }
+    /** „Zählen übernehmen“ (nach Bestätigung im Dialog): dieses Gerät wird Zähler. */
+    fun takeOverScoring(): Boolean = command { port.takeOverScoring() }
 
     /** Tap auf eine Fläche. [eventUptimeMillis] = `PointerInputChange.uptimeMillis` (null bei Bedienhilfe-Klick). */
     fun onTap(

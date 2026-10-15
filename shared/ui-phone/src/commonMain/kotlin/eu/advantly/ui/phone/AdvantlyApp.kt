@@ -16,10 +16,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
@@ -37,7 +42,11 @@ import eu.advantly.ui.phone.resources.abandon_confirm
 import eu.advantly.ui.phone.resources.abandon_keep
 import eu.advantly.ui.phone.resources.abandon_text
 import eu.advantly.ui.phone.resources.abandon_title
+import eu.advantly.ui.phone.resources.action_cancel
+import eu.advantly.ui.phone.resources.wizard_start
+import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.result.ResultScreen
+import eu.advantly.ui.phone.wizard.ScorerChooser
 import eu.advantly.ui.phone.wizard.WizardScreen
 import org.jetbrains.compose.resources.stringResource
 
@@ -97,7 +106,7 @@ fun AdvantlyApp(
                         ResultScreen(
                             record = model.history.record(top.matchId),
                             onBack = { navigator.pop() },
-                            onPlayAgain = model::startMatch,
+                            onPlayAgain = { model.startMatch(it) },
                             onDelete = {
                                 model.history.delete(top.matchId)
                                 navigator.pop()
@@ -109,6 +118,7 @@ fun AdvantlyApp(
                         Unit
                     }
                 }
+                model.pendingScorerChoice?.let { ScorerDialog(model) }
                 model.pendingStart?.let { AbandonDialog(model) }
             }
         }
@@ -129,7 +139,7 @@ private fun TabLayer(
                 AppTab.Home, AppTab.Play -> HomeScreen(model, clock = model.clock)
                 AppTab.History -> HistoryScreen(model.history, onOpen = model::openResult)
                 AppTab.Friends -> ComingSoonScreen(AppTab.Friends, versionName)
-                AppTab.Profile -> ComingSoonScreen(AppTab.Profile, versionName)
+                AppTab.Profile -> ComingSoonScreen(AppTab.Profile, versionName, players = model.players)
             }
         }
         active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }) }
@@ -138,6 +148,40 @@ private fun TabLayer(
             onSelect = { tab -> if (tab == AppTab.Play) model.onPlay() else navigator.tab = tab },
         )
     }
+}
+
+/** Schnellstart mit verbundener Uhr: „Wer zählt?“ bestätigen (04 §3.1, Presets vergeben keine Zählrechte). */
+@Composable
+private fun ScorerDialog(model: AdvantlyAppModel) {
+    val watchAvailable by model.live.watchAvailable.collectAsState()
+    var scorer by remember { mutableStateOf(if (watchAvailable) ScorerOption.MY_WATCH else ScorerOption.THIS_PHONE) }
+    var workout by remember { mutableStateOf(true) }
+    val effective = if (watchAvailable) scorer else ScorerOption.THIS_PHONE
+    AlertDialog(
+        onDismissRequest = model::cancelScorerChoice,
+        title = { Text(stringResource(Res.string.wizard_title_scorer)) },
+        text = {
+            ScorerChooser(
+                selected = effective,
+                watchAvailable = watchAvailable,
+                watchWorkout = workout,
+                onSelect = { scorer = it },
+                onWatchWorkout = { workout = it },
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { model.confirmScorerChoice(StartOptions(effective, workout)) },
+                modifier = Modifier.testTag("scorer_dialog_start"),
+            ) { Text(stringResource(Res.string.wizard_start)) }
+        },
+        dismissButton = {
+            TextButton(onClick = model::cancelScorerChoice, modifier = Modifier.testTag("scorer_dialog_cancel")) {
+                Text(stringResource(Res.string.action_cancel))
+            }
+        },
+        modifier = Modifier.testTag("scorer_dialog"),
+    )
 }
 
 /** Bestätigung, bevor ein laufendes Match für einen neuen Start abgebrochen wird (Review W1-C, Punkt 1). */

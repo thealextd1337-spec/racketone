@@ -38,7 +38,7 @@
     <string name="home_greeting_named">Hello, %1$s</string>
     <string name="home_ready">Ready to play?</string>
     <string name="home_new_match">New match</string>
-    <string name="home_new_match_sub">Five sports – count on your phone, later on your watch too.</string>
+    <string name="home_new_match_sub">Five sports – score on your watch or on this phone.</string>
     <string name="home_resume">Match in progress</string>
     <string name="home_resume_finished">Match finished</string>
     <string name="home_section_quick">Quick start</string>
@@ -295,28 +295,14 @@
     <string name="latency_toggle">Expand or collapse latency overlay</string>
     <string name="latency_benchmark_running">Auto benchmark running …</string>
 
-    <!-- Review-Runde 1: Start-Bestätigung, Sync/Konflikt/Verzweigung, Rechtliches -->
+    <!-- Review-Runde 1: Start-Bestätigung, Sync, Rechtliches -->
     <string name="abandon_title">Abandon the running match?</string>
     <string name="abandon_text">The running match ends without a result and the new one starts.</string>
     <string name="abandon_confirm">Abandon and start</string>
     <string name="abandon_keep">Keep playing</string>
     <string name="end_failed">That did not work – the score has changed. Please choose again.</string>
-    <string name="sync_connected_one">Watch connected</string>
-    <string name="sync_connected_many">%1$d devices connected</string>
     <string name="sync_local">Local only</string>
-    <string name="sync_conflict">Conflict</string>
-    <string name="conflict_title">Point for us and them at the same time – fix it?</string>
-    <string name="conflict_undo_us">Remove our point</string>
-    <string name="conflict_undo_them">Remove their point</string>
-    <string name="conflict_keep">Keep both</string>
     <string name="absorbed_notice">Duplicate tap merged</string>
-    <string name="fork_title">Two versions of the score</string>
-    <string name="fork_text">Two devices kept counting separately. Which version is right?</string>
-    <string name="fork_version">%1$s · %2$s</string>
-    <string name="fork_merge">Merge both · %1$s</string>
-    <string name="device_watch">Watch version</string>
-    <string name="device_phone">Phone version</string>
-    <string name="device_other">Other device</string>
     <string name="profile_legal">Legal</string>
     <string name="profile_privacy">Privacy</string>
     <string name="profile_imprint">Imprint</string>
@@ -325,4 +311,47 @@
     <string name="link_failed_title">Could not open the link</string>
     <string name="link_failed_text">No browser was found on this device. You can copy the link and open it elsewhere:</string>
     <string name="link_copy">Copy link</string>
+
+    <!-- W1-I: Single-Scorer (Wer zählt?, Anzeige, Übernahme, Sync), Spielerliste -->
+    <string name="wizard_title_scorer">Who keeps score?</string>
+    <string name="wizard_scorer_watch">My watch</string>
+    <string name="wizard_scorer_watch_sub">You score on your wrist, this phone shows the score.</string>
+    <string name="wizard_scorer_watch_none">No watch connected – open Advantly on your watch to score there.</string>
+    <string name="wizard_scorer_phone">This phone (director)</string>
+    <string name="wizard_scorer_phone_sub">Someone courtside scores on this phone, watches only show the score.</string>
+    <string name="wizard_watch_workout">Run a workout on my watch</string>
+    <string name="wizard_watch_workout_hint">Keeps the watch app awake and shows your heart rate. Discarded after the match.</string>
+    <string name="wizard_summary_scorer">Scorer: %1$s</string>
+    <string name="live_role_director">Scorer · director</string>
+    <string name="live_role_display">Display</string>
+    <string name="live_scoring_by">Scoring: %1$s</string>
+    <string name="scorer_your_watch">your watch</string>
+    <string name="scorer_watch_of">%1$s’s watch</string>
+    <string name="scorer_your_phone">your phone</string>
+    <string name="scorer_phone_of">%1$s’s phone</string>
+    <string name="scorer_other_device">another device</string>
+    <string name="sync_in_sync">In sync</string>
+    <string name="sync_pending">%1$d pending</string>
+    <string name="sync_scorer_connected">Scorer connected</string>
+    <string name="sync_scorer_unknown">Scorer not connected</string>
+    <string name="sync_stale">Updated %1$s ago</string>
+    <string name="age_seconds">%1$d s</string>
+    <string name="age_minutes">%1$d min</string>
+    <string name="stale_title">Connection to the scorer lost</string>
+    <string name="stale_text">Last update %1$s ago. If %2$s is no longer scoring, you can take over on this phone.</string>
+    <string name="takeover_action">Take over scoring</string>
+    <string name="takeover_title">Score on this device?</string>
+    <string name="takeover_text">Currently scoring: %1$s. Afterwards, that device only shows the score.</string>
+    <string name="takeover_confirm">Take over</string>
+    <string name="rejected_title">Scoring was taken over</string>
+    <string name="rejected_one">1 input was not applied.</string>
+    <string name="rejected_many">%1$d inputs were not applied.</string>
+    <string name="action_ok">OK</string>
+    <string name="display_set_end">Set %1$d finished – the scorer decides whether to play on.</string>
+    <string name="profile_players">Guests &amp; placeholder players</string>
+    <string name="profile_players_empty">No guests yet. Add them when you start a match.</string>
+    <string name="player_rename">Rename</string>
+    <string name="player_rename_title">Rename player</string>
+    <string name="player_name_label">Name</string>
+    <string name="action_save">Save</string>
 </resources>

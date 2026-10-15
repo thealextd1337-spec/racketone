@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.wizard.DecidingSetChoice
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.SetsChoice
@@ -94,12 +96,15 @@ import eu.advantly.ui.phone.resources.wizard_outdoor
 import eu.advantly.ui.phone.resources.wizard_partner
 import eu.advantly.ui.phone.resources.wizard_save_favorite
 import eu.advantly.ui.phone.resources.wizard_save_favorite_hint
+import eu.advantly.ui.phone.resources.wizard_scorer_phone
+import eu.advantly.ui.phone.resources.wizard_scorer_watch
 import eu.advantly.ui.phone.resources.wizard_sets_required
 import eu.advantly.ui.phone.resources.wizard_singles
 import eu.advantly.ui.phone.resources.wizard_skip
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_step_of
 import eu.advantly.ui.phone.resources.wizard_summary
+import eu.advantly.ui.phone.resources.wizard_summary_scorer
 import eu.advantly.ui.phone.resources.wizard_swap_order
 import eu.advantly.ui.phone.resources.wizard_team_order_hint_badminton
 import eu.advantly.ui.phone.resources.wizard_team_order_hint_pickleball
@@ -109,6 +114,7 @@ import eu.advantly.ui.phone.resources.wizard_team_them
 import eu.advantly.ui.phone.resources.wizard_team_us
 import eu.advantly.ui.phone.resources.wizard_title_format
 import eu.advantly.ui.phone.resources.wizard_title_players
+import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.resources.wizard_title_sport
 import eu.advantly.ui.phone.resources.wizard_title_surface
 import eu.advantly.ui.phone.resources.wizard_title_venue
@@ -117,7 +123,7 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * Match-Assistent H2–H5 (04 §3.1/§4.1): Sportart → Belag (Tennis) bzw. Halle/Draußen (Badminton) → Spieler →
- * Format → Start. Defaults und Abbildung auf `MatchFormat` liegen im [MatchWizard] (presentation).
+ * Format → Wer zählt? → Start. Defaults und Abbildung auf `MatchFormat` liegen im [MatchWizard] (presentation).
  */
 @Composable
 fun WizardScreen(
@@ -127,6 +133,9 @@ fun WizardScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by wizard.state.collectAsState()
+    // Uhr verbunden/getrennt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1)
+    val watchAvailable by wizard.watchAvailable.collectAsState()
+    LaunchedEffect(watchAvailable) { wizard.setWatchAvailable(watchAvailable) }
     val colors = AdvantlyTheme.colors
     Column(
         modifier
@@ -155,6 +164,7 @@ fun WizardScreen(
                 WizardStep.SURFACE -> SurfaceStep(wizard, state)
                 WizardStep.PLAYERS -> PlayersStep(wizard, state)
                 WizardStep.FORMAT -> FormatStep(wizard, state)
+                WizardStep.SCORER -> ScorerStep(wizard, state)
             }
         }
         Footer(wizard, state, onStart)
@@ -749,6 +759,28 @@ private fun ColumnScope.ReadOnlyRules(lines: List<String>) {
     }
 }
 
+// --- Wer zählt? ---
+
+@Composable
+private fun ScorerStep(
+    wizard: MatchWizard,
+    state: WizardUiState,
+) {
+    StepTitle(stringResource(Res.string.wizard_title_scorer))
+    ScorerChooser(
+        selected = state.input.effectiveScorer,
+        watchAvailable = state.input.watchAvailable,
+        watchWorkout = state.input.watchWorkout,
+        onSelect = wizard::setScorer,
+        onWatchWorkout = wizard::setWatchWorkout,
+    )
+}
+
+/** „Meine Uhr“ / „Dieses Handy (Director)“ für Zusammenfassungen. */
+@Composable
+internal fun scorerLabel(option: ScorerOption): String =
+    stringResource(if (option == ScorerOption.MY_WATCH) Res.string.wizard_scorer_watch else Res.string.wizard_scorer_phone)
+
 // --- Fußleiste ---
 
 @Composable
@@ -767,13 +799,19 @@ private fun Footer(
         verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         when (state.step) {
-            WizardStep.FORMAT -> {
+            WizardStep.SCORER -> {
                 Text(stringResource(Res.string.wizard_summary).uppercase(), style = AdvantlyTheme.typography.overline, color = colors.text2)
                 Text(
                     formatSummary(state),
                     style = AdvantlyTheme.typography.label,
                     color = colors.text,
                     modifier = Modifier.testTag("wizard_summary"),
+                )
+                Text(
+                    stringResource(Res.string.wizard_summary_scorer, scorerLabel(state.input.effectiveScorer)),
+                    style = AdvantlyTheme.typography.caption,
+                    color = colors.text2,
+                    modifier = Modifier.testTag("wizard_summary_scorer"),
                 )
                 AdvantlyButton(
                     text = stringResource(Res.string.wizard_start),

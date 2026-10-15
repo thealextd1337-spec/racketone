@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.advantly.core.model.Side
 import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -163,16 +166,24 @@ fun MiniScoreBar(
     }
 }
 
-/** Platzhalter für Freunde/Profil in P1 („kommt bald“). */
+/**
+ * Platzhalter für Freunde/Profil in P1 („kommt bald“). Das Profil enthält schon Rechtliches und die Spielerliste
+ * (Dummy-/Gastspieler umbenennen, 04 §3.2 „Namen & Aliase“).
+ */
 @Composable
 fun ComingSoonScreen(
     tab: AppTab,
     versionName: String,
     modifier: Modifier = Modifier,
+    players: PlayersPort? = null,
 ) {
     val colors = AdvantlyTheme.colors
     Column(
-        modifier.fillMaxSize().padding(Spacing.xl).testTag("coming_soon_${tab.name.lowercase()}"),
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(Spacing.xl)
+            .testTag("coming_soon_${tab.name.lowercase()}"),
         verticalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
         Text(
@@ -187,6 +198,7 @@ fun ComingSoonScreen(
             style = AdvantlyTheme.typography.body,
             color = colors.text2,
         )
+        if (tab == AppTab.Profile && players != null) GuestList(players)
         if (tab == AppTab.Profile) {
             // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
             val openLink = rememberSafeLinkOpener()

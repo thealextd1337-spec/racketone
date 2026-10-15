@@ -1,7 +1,5 @@
 package eu.advantly.presentation.match
 
-import eu.advantly.core.model.DeviceId
-import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -20,9 +18,9 @@ import eu.advantly.core.scoring.SidePair
 import kotlinx.coroutines.flow.StateFlow
 
 /*
- * Port-Schnittstellen der Phone-UI (W1-C). Die Screens kennen nur diese Interfaces; heute erfüllt sie die
- * engine-gestützte In-Memory-Implementierung (`InMemoryMatchStore`), später `shared/match-session`
- * (Persistenz, Sync, Mehrgeräte). Vertrag für alle Implementierungen:
+ * Port-Schnittstellen der Phone-UI. Die Screens kennen nur diese Interfaces; in den Apps erfüllt sie der
+ * Session-Adapter `SessionMatchStore` (Persistenz, Sync, Single-Scorer über `shared/match-session`), in Tests und
+ * Previews die engine-gestützte In-Memory-Implementierung `InMemoryMatchStore`. Vertrag für alle Implementierungen:
  *
  * - **Perspektive:** Side A ist immer das Team des Geräte-Besitzers („Wir“), Side B die Gegner (04 §3.2).
  * - **Local-first, synchron:** Ein Kommando (z. B. [LiveMatchPort.recordPoint]) wirkt sofort lokal; kehrt es mit
@@ -31,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
  *   den Flow.
  * - **Keine ungültigen Events:** Kommandos, deren Vorbedingung (02 §7) nicht erfüllt ist, liefern `false` und
  *   schreiben nichts ins Log (02 §7.3 Schritt 4: „Die UI DARF solche Events nicht erzeugen“).
+ * - **Single-Scorer (02 §7.5):** Zähl-Kommandos wirken nur auf dem Zähler; auf Anzeige-Geräten liefern sie `false`.
  * - Alle Methoden werden nur vom UI-Thread aufgerufen.
  */
 
@@ -57,21 +56,55 @@ data class MatchSetup(
     fun team(side: Side): List<Player> = lineup.players(side).mapNotNull(::player)
 }
 
+/** Rolle dieses Geräts im aktiven Match (Single-Scorer, 02 §7.5). */
+enum class LiveRole {
+    /** Dieses Gerät zählt (Handy im Director-Modus bzw. allein). */
+    SCORER,
+
+    /** Ein anderes Gerät zählt; dieses zeigt nur an (kein Zählen, kein Undo, 04 §4.1 H6a). */
+    DISPLAY,
+}
+
+/** Art des zählenden Geräts (Anzeige „Es zählt: Uhr von …“). */
+enum class DeviceKind { PHONE, WATCH, OTHER }
+
+/** Wer zählt ein neues Match (04 §3.1 „Wer zählt?“, P1: nur eigene Geräte). */
+enum class ScorerOption {
+    /** Die eigene, gekoppelte Uhr zählt; das Handy zeigt an. */
+    MY_WATCH,
+
+    /** Dieses Handy zählt (Director-Modus); Uhren zeigen an. */
+    THIS_PHONE,
+}
+
+/**
+ * Start-Optionen, die nicht zum Setup gehören – Presets und Favoriten vergeben keine Zählrechte (04 §3.1).
+ *
+ * @property watchWorkout „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, unabhängig vom Zähler)
+ */
+data class StartOptions(
+    val scorer: ScorerOption = ScorerOption.THIS_PHONE,
+    val watchWorkout: Boolean = true,
+)
+
 /**
  * Momentaufnahme des laufenden Matches für die UI.
  *
- * @property canUndo es gibt ein UI-Undo-Ziel (02 §7.3: letztes wirksames PointWon/ContinueDecision/Correction/MatchEnded)
- * @property canRedo der Redo-Stapel ist nicht leer (Redo = Undo auf das letzte Undo)
+ * @property canUndo dieses Gerät zählt und es gibt ein UI-Undo-Ziel (02 §7.3: letztes wirksames
+ *   PointWon/ContinueDecision/Correction/MatchEnded)
+ * @property canRedo das zuletzt auf diesem Gerät rückgängig gemachte Event lässt sich wiederherstellen
  * @property startedAtMs Erstellzeit (Wanduhr der Genesis)
  * @property finishedAtMs Wanduhr des Events, das das Match beendet hat; `null`, solange es läuft
  * @property followUpMatchId bereits angelegtes Folge-Match (02 §9.1: UI warnt vor Undo)
  * @property revision steigt mit jeder Änderung (auch bei gleichem Zustand, z. B. Redo-Stapel)
  * @property pointsPlayed wirksam angewendete Ballwechsel (`PointWon`, nicht rückgängig gemacht, nicht absorbiert,
  *   nicht übersprungen). Auch Ballwechsel ohne Punkt zählen (Pickleball Side-Out) – maßgeblich für `WALKOVER` (02 §9.8)
- * @property sync Verbindungszustand zu anderen Geräten (Sync-Pill, 04 §3.2)
- * @property conflicts aktive Widersprüche: gleichzeitige Punkte für A und B (01 §4.4) – UI zeigt Banner mit 1-Tap-Undo
+ * @property role zählt dieses Gerät ([LiveRole.SCORER]) oder zeigt es nur an ([LiveRole.DISPLAY])
+ * @property scorerName Anzeigename der Person, deren Gerät zählt (P1: der Besitzer; leer = „Du“), `null` = unbekannt
+ * @property scorerKind Art des zählenden Geräts
+ * @property rejectedByRoleCount ignorierte Eingaben eines Nicht-Zählers (02 §7.5: „N Eingaben nicht übernommen“)
+ * @property sync Verbindungszustand (Sync-Pill, Staleness, 04 §3.2)
  * @property absorbedTaps Anzahl als Doppel-Tap zusammengeführter Eingaben (01 §4.4); steigt sie, zeigt die UI einen Hinweis
- * @property openForks offene Verzweigungen nach Offline-Zählen auf mehreren Geräten, Auflösung über [LiveMatchPort.resolveFork]
  */
 data class LiveMatchSnapshot(
     val matchId: MatchId,
@@ -84,97 +117,79 @@ data class LiveMatchSnapshot(
     val followUpMatchId: MatchId?,
     val revision: Long,
     val pointsPlayed: Int = 0,
+    val role: LiveRole = LiveRole.SCORER,
+    val scorerName: String? = null,
+    val scorerKind: DeviceKind = DeviceKind.PHONE,
+    val rejectedByRoleCount: Int = 0,
     val sync: SyncInfo = SyncInfo.LOCAL_ONLY,
-    val conflicts: List<ConflictInfo> = emptyList(),
     val absorbedTaps: Int = 0,
-    val openForks: List<ForkInfo> = emptyList(),
-)
-
-/** Verbindungszustand des aktiven Matches (Sync-Pill: verbunden · nur lokal · Konflikt). */
-enum class SyncState {
-    /** Mindestens ein weiteres Gerät ist verbunden und auf dem gleichen Stand. */
-    CONNECTED,
-
-    /** Nur dieses Gerät; Events werden nachsynchronisiert. */
-    LOCAL_ONLY,
-
-    /** Widerspruch oder offene Verzweigung, Nutzer muss entscheiden. */
-    CONFLICT,
+) {
+    val isScorer: Boolean get() = role == LiveRole.SCORER
 }
 
 /**
- * @property peers verbundene weitere Geräte (Uhr, zweites Handy)
+ * Verbindungszustand für die Sync-Pill (04 §3.2, Entscheidung „Sync Zähler → Handy“): Zähler zeigen „synchron /
+ * N ausstehend“, Anzeige-Geräte „Stand vor X s“ und nach mehr als [STALE_AFTER_MS] ohne Verbindung das
+ * Übernahmeangebot.
+ *
+ * @property peers verbundene, kompatible weitere Geräte (Uhr, zweites Handy)
+ * @property scorerConnected dieses Gerät zählt selbst oder der Zähler ist gerade verbunden
+ * @property pendingToPeers Events, die noch keine Gegenstelle bestätigt hat (über alle Matches, persistent)
+ * @property lastEventReceivedAtMs Wanduhr des zuletzt empfangenen neuen Events, `null` = noch keins
+ * @property lastScorerContactAtMs letzter Kontakt zum Zähler (Verbindung, empfangenes Event); Basis für „Stand vor X s“
  */
 data class SyncInfo(
-    val state: SyncState,
     val peers: Int,
+    val scorerConnected: Boolean,
+    val pendingToPeers: Int = 0,
+    val lastEventReceivedAtMs: Long? = null,
+    val lastScorerContactAtMs: Long? = null,
 ) {
+    /** Millisekunden seit dem letzten Kontakt zum Zähler (nie negativ), `null` = noch nie Kontakt. */
+    fun staleForMs(nowMs: Long): Long? = lastScorerContactAtMs?.let { (nowMs - it).coerceAtLeast(0) }
+
+    /** Ohne Verbindung zum Zähler seit mehr als [STALE_AFTER_MS] → Hinweis + „Zählen übernehmen“ (04 §3.2). */
+    fun offersTakeOver(nowMs: Long): Boolean = !scorerConnected && (staleForMs(nowMs) ?: Long.MAX_VALUE) > STALE_AFTER_MS
+
     companion object {
-        val LOCAL_ONLY: SyncInfo = SyncInfo(SyncState.LOCAL_ONLY, 0)
+        /** Nur dieses Gerät, es zählt selbst. */
+        val LOCAL_ONLY: SyncInfo = SyncInfo(peers = 0, scorerConnected = true)
+
+        /** Schwelle für das Übernahmeangebot (04 §3.2: „nach > 30 s ohne Verbindung“, Feinschliff PLAN F15). */
+        const val STALE_AFTER_MS: Long = 30_000
     }
 }
-
-/**
- * Widerspruch (01 §4.4): zwei wirksame `PointWon` mit gleichem `parentId`, einer für A, einer für B.
- *
- * @property pointA Event-ID des Punkts für A
- * @property pointB Event-ID des Punkts für B
- */
-data class ConflictInfo(
-    val id: String,
-    val pointA: EventId,
-    val pointB: EventId,
-)
-
-/** Art des Geräts eines Zweigs (für „Version Uhr / Version Handy“). */
-enum class DeviceKind { PHONE, WATCH, OTHER }
-
-/**
- * Ein Zweig einer Verzweigung.
- *
- * @property preview Zustand, wenn nur dieser Zweig gilt (Vorschau aus der Engine)
- */
-data class ForkBranch(
-    val deviceId: DeviceId,
-    val device: DeviceKind,
-    val preview: MatchState,
-)
-
-/** Offene Verzweigung: zwei Geräte haben unabhängig weitergezählt. Auflösung als repliziertes Event `ForkResolved`. */
-data class ForkInfo(
-    val forkId: String,
-    val branchA: ForkBranch,
-    val branchB: ForkBranch,
-    /** Zustand, wenn beide Zweige zusammengeführt werden. */
-    val mergedPreview: MatchState,
-)
-
-/** Wahl bei der Auflösung einer Verzweigung (`ForkResolved.keep`). */
-enum class ForkChoice { BRANCH_A, BRANCH_B, BOTH }
 
 /** Live-Zählen des aktiven Matches. Es gibt höchstens ein aktives Match pro Gerät. */
 interface LiveMatchPort {
     /** Aktives Match (läuft, wartet auf Entscheidung oder ist beendet, aber noch nicht geschlossen); `null` = keins. */
     val active: StateFlow<LiveMatchSnapshot?>
 
+    /** Eine eigene Uhr ist verbunden und kann als Zähler gewählt werden (04 §3.1); `false` = nur Director. */
+    val watchAvailable: StateFlow<Boolean>
+
     /**
      * Legt ein Match an und macht es aktiv. Ein noch nicht beendetes aktives Match wird vorher mit
      * `MatchEnded(ABANDONED)` abgeschlossen (die UI fragt vorher nach).
      *
+     * @param options wer zählt (ohne verfügbare Uhr immer dieses Handy) und Workout-Wunsch
      * @throws IllegalArgumentException wenn Format oder Lineup ungültig sind (`MatchFormatValidator`, `LineupValidator`)
      */
-    fun start(setup: MatchSetup): MatchId
+    fun start(
+        setup: MatchSetup,
+        options: StartOptions = StartOptions(),
+    ): MatchId
 
-    /** `PointWon(side)`; nur bei `IN_PROGRESS`/`PAUSED`. */
+    /** `PointWon(side)`; nur bei `IN_PROGRESS`/`PAUSED` und nur auf dem Zähler. */
     fun recordPoint(side: Side): Boolean
 
-    /** `Undo` auf das UI-Undo-Ziel. */
+    /** `Undo` auf das UI-Undo-Ziel (nur Zähler). */
     fun undo(): Boolean
 
     /**
      * Nimmt das letzte Undo zurück (Undo auf Undo). Den Redo-Stapel leeren **nur** neue Events, die selbst UI-Undo-Ziel
-     * sind (02 §7.3): Punkt, Satzende-Entscheidung, Korrektur, vorzeitiges Ende. Pause/Fortsetzen, Konflikt- und
-     * Verzweigungsauflösung lassen ihn stehen (wie Engine und Session).
+     * sind (02 §7.3): Punkt, Satzende-Entscheidung, Korrektur, vorzeitiges Ende. Pause/Fortsetzen lassen ihn stehen
+     * (wie Engine und Session). Der Stapel ist gerätelokal.
      */
     fun redo(): Boolean
 
@@ -205,27 +220,18 @@ interface LiveMatchPort {
     /**
      * „Noch einer in gleicher Besetzung?“ nach einem regulär beendeten `BEST_OF`-Match (02 §5.2, U3): neues,
      * verknüpftes Match (`previousMatchId`, gleiche Besetzung und Satzformat, `mode = OPEN`, Erstaufschläger aus
-     * `state.continuation`). Das neue Match wird aktiv; `null`, wenn nicht möglich.
+     * `state.continuation`, gleicher Zähler). Das neue Match wird aktiv; `null`, wenn nicht möglich.
      */
     fun createFollowUp(): MatchId?
 
     /** Schließt ein beendetes aktives Match (es bleibt im Verlauf). `false`, solange es noch läuft. */
     fun dismiss(): Boolean
 
-    /** Löst die Verzweigung [forkId] auf (repliziertes Event `ForkResolved(forkId, keep)`); `false`, wenn unbekannt. */
-    fun resolveFork(
-        forkId: String,
-        keep: ForkChoice,
-    ): Boolean
-
-    /** Widerspruch [conflictId] bestätigen: beide Punkte bleiben, der Hinweis verschwindet. */
-    fun dismissConflict(conflictId: String): Boolean
-
-    /** 1-Tap-Korrektur eines Widerspruchs: nimmt den Punkt für [side] zurück (`Undo` auf dessen Event). */
-    fun undoConflictPoint(
-        conflictId: String,
-        side: Side,
-    ): Boolean
+    /**
+     * „Zählen übernehmen“ (02 §7.5, 04 §3.2): dieses Gerät wird Zähler (repliziertes `ScorerChanged`). Die UI fragt
+     * vorher nach. `false`, wenn kein Match aktiv ist, es beendet ist oder dieses Gerät schon zählt.
+     */
+    fun takeOverScoring(): Boolean
 }
 
 /**
@@ -306,4 +312,22 @@ interface PlayersPort {
 
     /** Entfernt den Favoriten [id]; unbekannte IDs sind ein No-op. */
     fun removeFavorite(id: String)
+
+    /**
+     * Darf dieses Gerät [id] umbenennen? Nur Dummy-/Gastspieler und nur durch den Anleger (00 „Aliase“); den eigenen
+     * Spieler (Alias, ab P2 im Profil) nie.
+     */
+    fun canRename(id: PlayerId): Boolean
+
+    /** Benennt einen Dummy-/Gastspieler um ([name] getrimmt, nicht leer); `false`, wenn nicht erlaubt. */
+    fun renameGuest(
+        id: PlayerId,
+        name: String,
+    ): Boolean
 }
+
+/** Alle drei Ports aus einer Quelle (In-Memory für Tests/Previews, Session-Adapter in den Apps). */
+interface MatchStore :
+    LiveMatchPort,
+    MatchHistoryPort,
+    PlayersPort

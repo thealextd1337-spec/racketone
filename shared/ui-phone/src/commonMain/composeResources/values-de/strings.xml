@@ -38,7 +38,7 @@
     <string name="home_greeting_named">Hallo, %1$s</string>
     <string name="home_ready">Bereit für ein Match?</string>
     <string name="home_new_match">Neues Match</string>
-    <string name="home_new_match_sub">Fünf Sportarten – zählen am Handy, später auch an der Uhr.</string>
+    <string name="home_new_match_sub">Fünf Sportarten – zählen an der Uhr oder am Handy.</string>
     <string name="home_resume">Laufendes Match</string>
     <string name="home_resume_finished">Match beendet</string>
     <string name="home_section_quick">Schnellstart</string>
@@ -295,28 +295,14 @@
     <string name="latency_toggle">Latenz-Overlay auf- oder zuklappen</string>
     <string name="latency_benchmark_running">Auto-Benchmark läuft …</string>
 
-    <!-- Review-Runde 1: Start-Bestätigung, Sync/Konflikt/Verzweigung, Rechtliches -->
+    <!-- Review-Runde 1: Start-Bestätigung, Sync, Rechtliches -->
     <string name="abandon_title">Laufendes Match abbrechen?</string>
     <string name="abandon_text">Das laufende Match wird ohne Wertung beendet und das neue gestartet.</string>
     <string name="abandon_confirm">Abbrechen und starten</string>
     <string name="abandon_keep">Weiterspielen</string>
     <string name="end_failed">Das hat nicht geklappt – der Stand hat sich geändert. Bitte erneut wählen.</string>
-    <string name="sync_connected_one">Uhr verbunden</string>
-    <string name="sync_connected_many">%1$d Geräte verbunden</string>
     <string name="sync_local">Nur lokal</string>
-    <string name="sync_conflict">Konflikt</string>
-    <string name="conflict_title">Gleichzeitig Punkt für Wir und Gegner – korrigieren?</string>
-    <string name="conflict_undo_us">Punkt Wir zurücknehmen</string>
-    <string name="conflict_undo_them">Punkt Gegner zurücknehmen</string>
-    <string name="conflict_keep">Beide behalten</string>
     <string name="absorbed_notice">Doppelte Eingabe zusammengeführt</string>
-    <string name="fork_title">Zwei Versionen des Spielstands</string>
-    <string name="fork_text">Zwei Geräte haben getrennt weitergezählt. Welche Version gilt?</string>
-    <string name="fork_version">%1$s · %2$s</string>
-    <string name="fork_merge">Beide zusammenführen · %1$s</string>
-    <string name="device_watch">Version Uhr</string>
-    <string name="device_phone">Version Handy</string>
-    <string name="device_other">Anderes Gerät</string>
     <string name="profile_legal">Rechtliches</string>
     <string name="profile_privacy">Datenschutz</string>
     <string name="profile_imprint">Impressum</string>
@@ -325,4 +311,47 @@
     <string name="link_failed_title">Link konnte nicht geöffnet werden</string>
     <string name="link_failed_text">Auf diesem Gerät wurde kein Browser gefunden. Du kannst den Link kopieren und anderswo öffnen:</string>
     <string name="link_copy">Link kopieren</string>
+
+    <!-- W1-I: Single-Scorer (Wer zählt?, Anzeige, Übernahme, Sync), Spielerliste -->
+    <string name="wizard_title_scorer">Wer zählt?</string>
+    <string name="wizard_scorer_watch">Meine Uhr</string>
+    <string name="wizard_scorer_watch_sub">Du zählst am Handgelenk, dieses Handy zeigt den Stand.</string>
+    <string name="wizard_scorer_watch_none">Keine Uhr verbunden – öffne Advantly auf deiner Uhr, um dort zu zählen.</string>
+    <string name="wizard_scorer_phone">Dieses Handy (Director)</string>
+    <string name="wizard_scorer_phone_sub">Eine Person am Spielfeldrand zählt am Handy, Uhren zeigen nur an.</string>
+    <string name="wizard_watch_workout">Workout auf meiner Uhr mitlaufen lassen</string>
+    <string name="wizard_watch_workout_hint">Hält die Uhr-App wach und zeigt deinen Puls. Wird nach dem Match verworfen.</string>
+    <string name="wizard_summary_scorer">Zähler: %1$s</string>
+    <string name="live_role_director">Zähler · Director</string>
+    <string name="live_role_display">Anzeige</string>
+    <string name="live_scoring_by">Es zählt: %1$s</string>
+    <string name="scorer_your_watch">deine Uhr</string>
+    <string name="scorer_watch_of">Uhr von %1$s</string>
+    <string name="scorer_your_phone">dein Handy</string>
+    <string name="scorer_phone_of">Handy von %1$s</string>
+    <string name="scorer_other_device">anderes Gerät</string>
+    <string name="sync_in_sync">Synchron</string>
+    <string name="sync_pending">%1$d ausstehend</string>
+    <string name="sync_scorer_connected">Zähler verbunden</string>
+    <string name="sync_scorer_unknown">Zähler nicht verbunden</string>
+    <string name="sync_stale">Stand vor %1$s</string>
+    <string name="age_seconds">%1$d s</string>
+    <string name="age_minutes">%1$d min</string>
+    <string name="stale_title">Verbindung zum Zähler unterbrochen</string>
+    <string name="stale_text">Letzter Stand vor %1$s. Zählt %2$s nicht mehr, kannst du auf diesem Handy übernehmen.</string>
+    <string name="takeover_action">Zählen übernehmen</string>
+    <string name="takeover_title">Auf diesem Gerät zählen?</string>
+    <string name="takeover_text">Bisher zählt: %1$s. Danach zeigt das bisherige Gerät nur noch an.</string>
+    <string name="takeover_confirm">Übernehmen</string>
+    <string name="rejected_title">Zählen wurde übernommen</string>
+    <string name="rejected_one">1 Eingabe nicht übernommen.</string>
+    <string name="rejected_many">%1$d Eingaben nicht übernommen.</string>
+    <string name="action_ok">OK</string>
+    <string name="display_set_end">Satz %1$d beendet – der Zähler entscheidet, ob weitergespielt wird.</string>
+    <string name="profile_players">Gäste &amp; Dummyspieler</string>
+    <string name="profile_players_empty">Noch keine Gäste. Du legst sie beim Matchstart an.</string>
+    <string name="player_rename">Umbenennen</string>
+    <string name="player_rename_title">Spieler umbenennen</string>
+    <string name="player_name_label">Name</string>
+    <string name="action_save">Speichern</string>
 </resources>
