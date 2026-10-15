@@ -5,6 +5,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.runComposeUiTest
@@ -14,9 +15,47 @@ import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
 import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
 class ScoreTextsTest {
+    @Test
+    fun historyMonthUsesLocalizedMonthNames() {
+        val previous = Locale.getDefault()
+        try {
+            for ((locale, expected) in listOf(Locale.GERMANY to "Oktober 2026", Locale.US to "October 2026")) {
+                Locale.setDefault(locale)
+                assertEquals(
+                    expected,
+                    eu.advantly.ui.phone.platform
+                        .formatMonth(2026, 10),
+                )
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun regularSetFormatHasAnIntactLocalizedTiebreakSeparator() {
+        val previous = Locale.getDefault()
+        try {
+            for ((locale, expected) in listOf(Locale.GERMANY to "Tiebreak bei 6:6 (bis 7)", Locale.US to "Tiebreak at 6–6 (to 7)")) {
+                Locale.setDefault(locale)
+                runComposeUiTest {
+                    setContent {
+                        AdvantlyTheme(darkTheme = true) {
+                            Text(formatDescription(Presets.TENNIS_SINGLES_BO3.format()), Modifier.testTag("set_format"))
+                        }
+                    }
+                    onNodeWithTag("set_format").assertTextContains(expected, substring = true)
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
     @Test
     fun customTiebreakDescriptionOnlyDescribesThePlayedFormat() {
         val previous = Locale.getDefault()

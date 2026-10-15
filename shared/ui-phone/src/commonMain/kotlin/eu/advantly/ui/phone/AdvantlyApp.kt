@@ -129,10 +129,10 @@ fun AdvantlyApp(
 
                     is Overlay.Result -> {
                         val history by model.history.matches.collectAsState()
+                        val revision = history.firstOrNull { it.matchId == top.matchId }
+                        val record = remember(top.matchId, revision) { model.history.record(top.matchId) }
                         ResultScreen(
-                            record =
-                                history.firstOrNull { it.matchId == top.matchId }?.let { model.history.record(it.matchId) }
-                                    ?: model.history.record(top.matchId),
+                            record = record,
                             statisticsCache = model.statistics,
                             headToHead = { setup -> HeadToHeadLinks(setup) { navigator.push(Overlay.PlayerHistory(it)) } },
                             playerAssignments = {

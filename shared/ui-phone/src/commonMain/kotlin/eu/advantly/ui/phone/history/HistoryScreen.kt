@@ -60,6 +60,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.platform.formatDateTime
+import eu.advantly.ui.phone.platform.formatMonth
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.history_abandoned_note
 import eu.advantly.ui.phone.resources.history_all
@@ -70,7 +71,6 @@ import eu.advantly.ui.phone.resources.history_chip_loss
 import eu.advantly.ui.phone.resources.history_chip_win
 import eu.advantly.ui.phone.resources.history_empty
 import eu.advantly.ui.phone.resources.history_empty_filtered
-import eu.advantly.ui.phone.resources.history_month_group
 import eu.advantly.ui.phone.resources.history_opponents
 import eu.advantly.ui.phone.resources.history_partners
 import eu.advantly.ui.phone.resources.history_people_all
@@ -221,7 +221,7 @@ fun HistoryScreen(
                 val d = date.day.toString().padStart(2, '0')
                 Text(
                     if (grouping == HistoryGrouping.MONTH) {
-                        stringResource(Res.string.history_month_group, y, m)
+                        formatMonth(date.year, date.month)
                     } else {
                         stringResource(Res.string.history_week_group, y, m, d)
                     },

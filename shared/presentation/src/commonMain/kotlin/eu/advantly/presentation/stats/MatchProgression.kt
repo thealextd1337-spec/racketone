@@ -26,6 +26,7 @@ data class GameProgress(
     val winner: Side?,
     val isBreak: Boolean,
     val points: List<PointProgress>,
+    val server: Side? = null,
 ) {
     val margin: Int get() = pointsWon.a - pointsWon.b
 }
@@ -45,7 +46,11 @@ fun matchProgression(points: List<PointRecord>): List<GameProgress> =
                 kind = key.third,
                 pointsWon = SidePair.of { side -> gamePoints.count { it.point.side == side } },
                 winner = last.point.side.takeIf { complete },
-                isBreak = complete && key.third == GameKind.STANDARD && last.before.serve?.side != last.point.side,
+                isBreak = complete && key.third == GameKind.STANDARD && last.before.serve?.side == last.point.side.other,
+                server =
+                    last.before.serve
+                        ?.side
+                        .takeIf { key.third == GameKind.STANDARD },
                 points =
                     gamePoints.mapIndexed { index, p ->
                         PointProgress(index + 1, p.point.side, checkNotNull(p.before.current).display, Effect.POINT in p.after.effects)

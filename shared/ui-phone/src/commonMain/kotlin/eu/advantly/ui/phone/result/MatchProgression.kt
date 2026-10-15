@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.stats.GameProgress
@@ -42,11 +43,15 @@ import eu.advantly.ui.phone.resources.detail_hide_points
 import eu.advantly.ui.phone.resources.detail_momentum
 import eu.advantly.ui.phone.resources.detail_momentum_hint
 import eu.advantly.ui.phone.resources.detail_momentum_rally
+import eu.advantly.ui.phone.resources.detail_momentum_rally_hint
+import eu.advantly.ui.phone.resources.detail_momentum_sets
+import eu.advantly.ui.phone.resources.detail_momentum_sets_hint
 import eu.advantly.ui.phone.resources.detail_no_point
 import eu.advantly.ui.phone.resources.detail_point
 import eu.advantly.ui.phone.resources.detail_progress_empty
 import eu.advantly.ui.phone.resources.detail_rallies
 import eu.advantly.ui.phone.resources.detail_rally_game
+import eu.advantly.ui.phone.resources.detail_rally_set
 import eu.advantly.ui.phone.resources.detail_show_games
 import eu.advantly.ui.phone.resources.detail_show_points
 import eu.advantly.ui.phone.resources.detail_tiebreak
@@ -56,9 +61,12 @@ import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
 
 @Composable
-private fun gameLabel(game: GameProgress): String =
+private fun gameLabel(
+    game: GameProgress,
+    setup: MatchSetup,
+): String =
     if (game.kind == GameKind.RALLY_GAME) {
-        stringResource(Res.string.detail_rally_game, game.set)
+        stringResource(if (setup.sport == Sport.PICKLEBALL) Res.string.detail_rally_game else Res.string.detail_rally_set, game.set)
     } else {
         stringResource(Res.string.detail_game, game.set, game.game) +
             if (game.kind == GameKind.STANDARD) "" else " · " + stringResource(Res.string.detail_tiebreak)
@@ -70,7 +78,7 @@ private fun gameDescription(
     setup: MatchSetup,
 ): String =
     listOfNotNull(
-        gameLabel(game),
+        gameLabel(game, setup),
         stringResource(Res.string.detail_rallies, scorePair(game.pointsWon)),
         game.winner?.let { teamName(setup, it) } ?: stringResource(Res.string.detail_unfinished),
         stringResource(Res.string.detail_break).takeIf { game.isBreak },
@@ -86,12 +94,30 @@ internal fun MatchProgression(
     val descriptions = games.map { gameDescription(it, setup) }
     val alternative = descriptions.joinToString(". ")
     var showGames by rememberSaveable { mutableStateOf(false) }
-    SectionTitle(stringResource(if (setup.sport.isTennisLike) Res.string.detail_momentum else Res.string.detail_momentum_rally))
+    SectionTitle(
+        stringResource(
+            when {
+                setup.sport.isTennisLike -> Res.string.detail_momentum
+                setup.sport == Sport.PICKLEBALL -> Res.string.detail_momentum_rally
+                else -> Res.string.detail_momentum_sets
+            },
+        ),
+    )
     if (games.isEmpty()) {
         Text(stringResource(Res.string.detail_progress_empty), color = colors.text2)
         return
     }
-    Text(stringResource(Res.string.detail_momentum_hint), style = AdvantlyTheme.typography.caption, color = colors.text2)
+    Text(
+        stringResource(
+            when {
+                setup.sport.isTennisLike -> Res.string.detail_momentum_hint
+                setup.sport == Sport.PICKLEBALL -> Res.string.detail_momentum_rally_hint
+                else -> Res.string.detail_momentum_sets_hint
+            },
+        ),
+        style = AdvantlyTheme.typography.caption,
+        color = colors.text2,
+    )
     val chartWidth = maxOf(280f, games.size * 40f * LocalDensity.current.fontScale).dp
     Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
         Canvas(
@@ -140,7 +166,7 @@ internal fun MatchProgression(
         Row(Modifier.width(chartWidth)) {
             games.forEach { game ->
                 Text(
-                    "${game.set}.${game.game}",
+                    if (setup.sport.isTennisLike) "${game.set}.${game.game}" else game.set.toString(),
                     style = AdvantlyTheme.typography.caption,
                     color = colors.text2,
                     textAlign = TextAlign.Center,

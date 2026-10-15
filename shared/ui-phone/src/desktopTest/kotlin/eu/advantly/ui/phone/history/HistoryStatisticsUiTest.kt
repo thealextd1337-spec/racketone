@@ -3,6 +3,7 @@ package eu.advantly.ui.phone.history
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -13,10 +14,12 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
@@ -74,6 +77,51 @@ class HistoryStatisticsUiTest {
             }
         }
         waitForIdle()
+    }
+
+    @Test
+    fun customLiveHeaderRetainsTheMatchMode() =
+        matrix { locale, suffix ->
+            val model = testModel()
+            model.live.start(model.setupFor(Presets.TENNIS_SINGLES_BO3.format().copy(presetId = null)))
+            model.navigator.push(eu.advantly.ui.phone.app.Overlay.Live)
+            show(model)
+            onNodeWithText(if (locale == Locale.GERMANY) "BENUTZERDEFINIERT · BEST OF 3" else "CUSTOM · BEST OF 3").assertIsDisplayed()
+            capture("live-custom-$suffix")
+        }
+
+    @Test
+    fun rallyProgressionUsesSportLabelsAndHasNoBreakHint() {
+        for (preset in listOf(Presets.BADMINTON_1GAME_15, Presets.TABLE_TENNIS_SINGLES_BO3, Presets.PICKLEBALL_DOUBLES_11_SIDEOUT)) {
+            matrix { locale, suffix ->
+                val model = testModel()
+                val id = model.live.start(model.setupFor(preset.format()))
+                model.live.play("ABBA")
+                model.live.endMatch(EndReason.STOPPED)
+                model.openResult(id)
+                show(model)
+                onNodeWithTag("show_game_history").performScrollTo()
+                val description =
+                    onNodeWithTag(
+                        "momentum_chart",
+                    ).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
+                val expected =
+                    if (locale == Locale.GERMANY &&
+                        preset.sport != eu.advantly.core.model.Sport.PICKLEBALL
+                    ) {
+                        "Satz 1"
+                    } else if (locale ==
+                        Locale.GERMANY
+                    ) {
+                        "Spiel 1"
+                    } else {
+                        "Game 1"
+                    }
+                assertTrue(description.startsWith(expected), description)
+                assertTrue(!description.contains("Break", ignoreCase = true), description)
+                capture("rally-${preset.sport}-$suffix")
+            }
+        }
     }
 
     @Test
@@ -151,7 +199,9 @@ class HistoryStatisticsUiTest {
             onNodeWithTag("history").performScrollToNode(hasTestTag("history_empty"))
             onNodeWithTag("history_empty").assertExists()
             runOnIdle { model.navigator.tab = AppTab.Profile }
-            click("guest_h2h_${setup.lineup.b.first().value}")
+            onNodeWithTag("guest_row_${setup.lineup.b.first().value}")
+                .performScrollTo()
+                .performSemanticsAction(SemanticsActions.OnClick) { it() }
             onNodeWithTag("h2h").assertExists()
             assertEquals(2, model.history.matches.value.size)
             val description = onNodeWithTag("h2h_record_OPPONENT").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()

@@ -135,7 +135,7 @@ fun formatLabel(format: MatchFormat): String =
     if (format.presetId == null) stringResource(Res.string.format_custom) else formatModeLabel(format)
 
 @Composable
-private fun formatModeLabel(format: MatchFormat): String =
+fun formatModeLabel(format: MatchFormat): String =
     if (format.match.bestOf == 1 && format.decidingSet is MatchTiebreakFormat) {
         stringResource(
             when {

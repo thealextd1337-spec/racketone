@@ -68,6 +68,7 @@ import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_delete
 import eu.advantly.ui.phone.resources.detail_break_saved
+import eu.advantly.ui.phone.resources.detail_breaks
 import eu.advantly.ui.phone.resources.detail_elapsed_duration
 import eu.advantly.ui.phone.resources.detail_format
 import eu.advantly.ui.phone.resources.detail_lineup
@@ -315,6 +316,7 @@ private fun Comparison(
     rows += ratioRow(Res.string.result_stat_serve_points, stats.servicePoints)
     rows += ratioRow(Res.string.result_stat_return_points, stats.returnPoints)
     if (sport.isTennisLike) {
+        rows += ratioRow(Res.string.detail_breaks, stats.breaks)
         rows += ratioRow(Res.string.result_stat_break_points, stats.breakPoints)
         rows += ratioRow(Res.string.detail_break_saved, stats.breakPointsSaved)
     }

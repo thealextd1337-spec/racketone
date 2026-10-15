@@ -473,15 +473,20 @@
     <string name="detail_lineup">Besetzung · lokale Bilanz</string>
     <string name="detail_sets">Satzverlauf</string>
     <string name="detail_set_score">Satz %1$d: %2$s</string>
-    <string name="detail_net_duration">Netto-Spielzeit</string>
-    <string name="detail_elapsed_duration">Gesamtdauer</string>
+    <string name="detail_net_duration">Netto</string>
+    <string name="detail_elapsed_duration">Dauer</string>
     <string name="detail_break_saved">Breakbälle abgewehrt</string>
-    <string name="detail_momentum">Momentum über Games</string>
-    <string name="detail_momentum_rally">Momentum über Spiele / Sätze</string>
-    <string name="detail_momentum_hint">Ballwechseldifferenz je Game (Satz.Game): Orange = wir, Blau = Gegner. Ein Kreis markiert ein Break.</string>
+    <string name="detail_momentum">Momentum über Spiele</string>
+    <string name="detail_momentum_rally">Momentum über Spiele</string>
+    <string name="detail_momentum_sets">Momentum über Sätze</string>
+    <string name="detail_momentum_hint">Ballwechseldifferenz je Spiel (Satz.Spiel): Orange = wir, Blau = Gegner. Ein Kreis markiert ein Break.</string>
     <string name="detail_progress_empty">Keine Ballwechsel erfasst.</string>
-    <string name="detail_game">Satz %1$d · Game %2$d</string>
-    <string name="detail_rally_game">Spiel / Satz %1$d</string>
+    <string name="detail_game">Satz %1$d · Spiel %2$d</string>
+    <string name="detail_rally_game">Spiel %1$d</string>
+    <string name="detail_rally_set">Satz %1$d</string>
+    <string name="detail_momentum_rally_hint">Ballwechseldifferenz je Spiel: Orange = wir, Blau = Gegner.</string>
+    <string name="detail_momentum_sets_hint">Ballwechseldifferenz je Satz: Orange = wir, Blau = Gegner.</string>
+    <string name="detail_breaks">Breaks</string>
     <string name="detail_tiebreak">Tiebreak</string>
     <string name="detail_break">Break</string>
     <string name="detail_unfinished">Nicht beendet</string>
@@ -490,8 +495,8 @@
     <string name="detail_no_point">Aufschlagwechsel · kein Zählpunkt</string>
     <string name="detail_show_points">Punktverlauf anzeigen</string>
     <string name="detail_hide_points">Punktverlauf ausblenden</string>
-    <string name="detail_show_games">Game-Verlauf anzeigen</string>
-    <string name="detail_hide_games">Game-Verlauf ausblenden</string>
+    <string name="detail_show_games">Spielverlauf anzeigen</string>
+    <string name="detail_hide_games">Spielverlauf ausblenden</string>
     <string name="history_search">Spielernamen suchen</string>
     <string name="history_people_all">Alle Personen</string>
     <string name="history_role_all">Gegner &amp; Partner</string>
@@ -499,7 +504,6 @@
     <string name="history_partners">Partner</string>
     <string name="history_by_month">Nach Monat</string>
     <string name="history_by_week">Nach Woche</string>
-    <string name="history_month_group">%2$s/%1$s</string>
     <string name="history_week_group">Woche ab %3$s.%2$s.%1$s</string>
     <string name="history_chip_win">S</string>
     <string name="history_chip_loss">N</string>

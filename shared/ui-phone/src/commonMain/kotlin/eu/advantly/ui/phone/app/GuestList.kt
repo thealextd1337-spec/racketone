@@ -38,7 +38,6 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_save
-import eu.advantly.ui.phone.resources.h2h_title
 import eu.advantly.ui.phone.resources.player_name_label
 import eu.advantly.ui.phone.resources.player_rename
 import eu.advantly.ui.phone.resources.player_rename_title
@@ -98,6 +97,7 @@ private fun GuestRow(
         Row(
             Modifier
                 .testTag("guest_row_${guest.id.value}")
+                .clickable(role = Role.Button, onClick = onHistory)
                 .fillMaxWidth()
                 .heightIn(min = Spacing.minTouchTarget)
                 .background(colors.surface, Radii.cardShape)
@@ -117,9 +117,6 @@ private fun GuestRow(
                     Text(stringResource(Res.string.player_rename), style = AdvantlyTheme.typography.label, color = colors.brand)
                 }
             }
-        }
-        TextButton(onClick = onHistory, modifier = Modifier.testTag("guest_h2h_${guest.id.value}")) {
-            Text(stringResource(Res.string.h2h_title))
         }
     }
 }

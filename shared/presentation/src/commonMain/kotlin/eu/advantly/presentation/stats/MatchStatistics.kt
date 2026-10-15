@@ -62,6 +62,13 @@ data class MatchStats(
     val progression: List<GameProgress> = emptyList(),
 ) {
     val totalPoints: Int get() = pointsWon.a + pointsWon.b
+
+    /** Gewonnene / abgeschlossene Rückschlagspiele; Tiebreaks und laufende Spiele zählen nicht. */
+    val breaks: SidePair<Ratio> get() =
+        SidePair.of { side ->
+            val returns = progression.filter { it.kind == GameKind.STANDARD && it.server == side.other && it.winner != null }
+            Ratio(returns.count { it.winner == side }, returns.size)
+        }
 }
 
 /**

@@ -82,14 +82,16 @@ internal fun HeadToHeadScreen(
     val matches by history.matches.collectAsState()
     val selfIds = LocalSelfAliases.current + listOfNotNull(LocalSelfId.current)
     val name =
-        matches
-            .asSequence()
-            .flatMap { historyPeople(it.setup, selfIds).asSequence() }
-            .firstOrNull { it.player.id == player }
-            ?.player
-            ?.displayName
-            .orEmpty()
-            .ifBlank { fallbackName }
+        remember(matches, player, selfIds, fallbackName) {
+            matches
+                .asSequence()
+                .flatMap { historyPeople(it.setup, selfIds).asSequence() }
+                .firstOrNull { it.player.id == player }
+                ?.player
+                ?.displayName
+                .orEmpty()
+                .ifBlank { fallbackName }
+        }
     Column(Modifier.fillMaxSize().safeContentPadding().testTag("h2h")) {
         TopBar(stringResource(Res.string.h2h_title), onBack, stringResource(Res.string.action_back))
         Column(
