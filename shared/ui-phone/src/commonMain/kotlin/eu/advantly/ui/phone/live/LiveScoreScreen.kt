@@ -136,6 +136,12 @@ import kotlin.math.roundToInt
 /** Anteil der Bildschirmhöhe, den Kopf + Overlay + Satztabelle im Hochformat höchstens belegen. */
 private const val INFO_MAX_FRACTION = 0.4f
 
+/** Anteil der Bildschirmhöhe für Hinweise (Übernahme, abgelehnte Eingaben) im Hochformat. */
+private const val NOTICES_MAX_FRACTION = 0.2f
+
+/** Mindesthöhe beider Flächen zusammen – der Stand bleibt immer sichtbar. */
+private val MIN_PANELS_HEIGHT = 120.dp
+
 /** Sichtdauer der Undo-Snackbar. */
 private const val UNDO_NOTICE_MILLIS = 4_000L
 
@@ -164,7 +170,7 @@ fun LiveScoreScreen(
     debugTools: Boolean = false,
     onMinimize: () -> Unit = {},
     onShowResult: (MatchId) -> Unit = {},
-    onBenchmarkNewMatch: (() -> Unit)? = null,
+    onBenchmarkNewMatch: (() -> Boolean)? = null,
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
@@ -213,17 +219,21 @@ fun LiveScoreScreen(
         }
         var dialog by remember { mutableStateOf<LiveDialog?>(null) }
         var takeOverDialog by remember { mutableStateOf(false) }
+        var rejectedSheet by remember { mutableStateOf(false) }
         val display = !snapshot.isScorer
         LaunchedEffect(display) { if (!display) takeOverDialog = false }
-        val now = rememberNow(controller.clock, ticking = display)
+        val now = rememberNow(controller.monotonic, ticking = display)
         val status = snapshot.state.status
         val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
         val userDialog = dialog.takeIf { running && !display }
         // Satzende-Frage nur am Zähler (04 §3.3); die Anzeige zeigt stattdessen einen Hinweis über den Flächen
         val sheet = status == MatchStatus.FINISHED || (status == MatchStatus.AWAITING_DECISION && !display)
-        val modal = sheet || userDialog != null
+        val modal = sheet || userDialog != null || rejectedSheet
         // System-Zurück schließt zuerst einen vom Nutzer geöffneten Dialog (nicht den Live-Screen)
-        BackHandler(enabled = userDialog != null) { dialog = null }
+        BackHandler(enabled = userDialog != null || rejectedSheet) {
+            dialog = null
+            rejectedSheet = false
+        }
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
@@ -242,10 +252,24 @@ fun LiveScoreScreen(
         ) {
             val landscape = maxWidth > maxHeight
             val infoMaxHeight = maxHeight * INFO_MAX_FRACTION
+            val noticesMaxHeight = maxHeight * NOTICES_MAX_FRACTION
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
                     Header(controller, snapshot, now, onMinimize)
-                    if (display) DisplayBanner(snapshot, controller.outdoorContrast, Modifier.padding(top = Spacing.xs))
+                    if (display) {
+                        // Übernahmeangebot ersetzt den Anzeige-Banner (gleicher Platz) – kostet den Flächen keine Höhe
+                        val staleOffer = snapshot.sync.offersTakeOver(now) && snapshot.state.status != MatchStatus.FINISHED
+                        if (staleOffer) {
+                            StaleHint(
+                                snapshot,
+                                snapshot.sync.staleForMs(now),
+                                { takeOverDialog = true },
+                                Modifier.padding(top = Spacing.xs),
+                            )
+                        } else {
+                            DisplayBanner(snapshot, controller.outdoorContrast, Modifier.padding(top = Spacing.xs))
+                        }
+                    }
                     if (debugTools && controller.showLatencyOverlay) {
                         LatencyOverlay(controller, frameStats, Modifier.padding(top = 6.dp))
                     }
@@ -266,7 +290,11 @@ fun LiveScoreScreen(
                 }
             }
             val panels: @Composable (Boolean, Modifier) -> Unit = { landscapePanels, panelsModifier ->
-                PanelsWithSnackbar(controller, snapshot, now, reduceMotion, landscapePanels, { takeOverDialog = true }, panelsModifier)
+                PanelsWithSnackbar(controller, snapshot, reduceMotion, landscapePanels, panelsModifier)
+            }
+            // Hinweise haben einen eigenen Platz zwischen Satztabelle und Flächen – sie verdecken nie den Stand
+            val notices: @Composable (Modifier) -> Unit = { noticesModifier ->
+                Notices(controller, snapshot, { rejectedSheet = true }, noticesModifier)
             }
             if (landscape) {
                 // Querformat: Info + Fußleiste links (scrollbar, damit bei großer Schrift nichts abgeschnitten wird),
@@ -274,6 +302,7 @@ fun LiveScoreScreen(
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     Column(Modifier.weight(0.42f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                         info(Modifier.fillMaxWidth())
+                        notices(Modifier.padding(top = Spacing.s))
                         footer(Modifier.padding(top = Spacing.s))
                     }
                     panels(true, Modifier.weight(0.58f).fillMaxHeight())
@@ -283,7 +312,9 @@ fun LiveScoreScreen(
                     // Info (Kopf, Overlay, Satztabelle) höchstens 40 % der Höhe und scrollbar: Bei 200 % Schrift und
                     // vollem Overlay behalten die Tap-Flächen so ihren Platz.
                     info(Modifier.fillMaxWidth().heightIn(max = infoMaxHeight).verticalScroll(rememberScrollState()))
-                    panels(false, Modifier.weight(1f).padding(top = Spacing.s))
+                    // Hinweise höchstens 20 % (scrollbar), damit den Flächen auch bei 200 % Schrift Platz bleibt
+                    notices(Modifier.padding(top = Spacing.s).heightIn(max = noticesMaxHeight).verticalScroll(rememberScrollState()))
+                    panels(false, Modifier.weight(1f).padding(top = Spacing.s).heightIn(min = MIN_PANELS_HEIGHT))
                     footer(Modifier.padding(top = Spacing.s))
                 }
             }
@@ -313,6 +344,12 @@ fun LiveScoreScreen(
                 }
             }
         }
+        if (rejectedSheet) {
+            RejectedInputsSheet(snapshot, remember(snapshot.rejectedByRoleCount) { controller.port.rejectedInputs() }, onClose = {
+                rejectedSheet = false
+                controller.acknowledgeRejected()
+            })
+        }
         if (takeOverDialog && display) {
             TakeOverDialog(
                 snapshot = snapshot,
@@ -339,49 +376,54 @@ private fun NoMatch(onBack: () -> Unit) {
 }
 
 /**
- * Tap-Flächen; die Undo-Snackbar liegt unten über der Gegner-Fläche (wächst nicht in die Fußleiste). Oben darüber:
- * „N Eingaben nicht übernommen“, auf Anzeige-Geräten das Übernahmeangebot (mehr als 30 s ohne Zähler) bzw. „Zähler
- * entscheidet“ am Satzende.
+ * Hinweise mit eigenem Platz im Layout (Review W1-I: nie über dem Stand): „N Eingaben nicht übernommen“ und auf
+ * Anzeige-Geräten „Zähler entscheidet“ am Satzende. Das Übernahmeangebot sitzt im Info-Bereich (statt Anzeige-Banner).
  */
+@Composable
+private fun Notices(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    onViewRejected: () -> Unit,
+    modifier: Modifier,
+) {
+    val display = !snapshot.isScorer
+    val rejected = controller.rejectedNotice
+    val setEnd = display && snapshot.state.status == MatchStatus.AWAITING_DECISION
+    if (rejected == null && !setEnd) return
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        rejected?.let { count -> RejectedNotice(count, onView = onViewRejected, onDismiss = controller::acknowledgeRejected) }
+        if (setEnd) {
+            Text(
+                stringResource(Res.string.display_set_end, snapshot.state.sets.size),
+                style = AdvantlyTheme.typography.label,
+                color = AdvantlyTheme.colors.text,
+                modifier =
+                    Modifier
+                        .testTag("display_set_end")
+                        .fillMaxWidth()
+                        .background(AdvantlyTheme.colors.surface2, Radii.cardShape)
+                        .padding(Spacing.m),
+            )
+        }
+    }
+}
+
+/** Tap-Flächen; die Undo-Snackbar (nur am Zähler) liegt unten über der Gegner-Fläche (wächst nicht in die Fußleiste). */
 @Composable
 private fun PanelsWithSnackbar(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
-    nowMs: Long,
     reduceMotion: Boolean,
     landscape: Boolean,
-    onTakeOver: () -> Unit,
     modifier: Modifier,
 ) {
-    val display = !snapshot.isScorer
     Box(modifier) {
         Panels(controller, snapshot, reduceMotion, landscape, Modifier.fillMaxSize())
-        Column(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(Spacing.s),
-            verticalArrangement = Arrangement.spacedBy(Spacing.s),
-        ) {
-            controller.rejectedNotice?.let { count -> RejectedNotice(count, onDismiss = controller::acknowledgeRejected) }
-            if (display && snapshot.state.status == MatchStatus.AWAITING_DECISION) {
-                Text(
-                    stringResource(Res.string.display_set_end, snapshot.state.sets.size),
-                    style = AdvantlyTheme.typography.label,
-                    color = AdvantlyTheme.colors.text,
-                    modifier =
-                        Modifier
-                            .testTag("display_set_end")
-                            .fillMaxWidth()
-                            .background(AdvantlyTheme.colors.surface2, Radii.cardShape)
-                            .padding(Spacing.m),
-                )
-            }
-            if (display && snapshot.sync.offersTakeOver(nowMs) && snapshot.state.status != MatchStatus.FINISHED) {
-                StaleHint(snapshot, snapshot.sync.staleForMs(nowMs) ?: 0, onTakeOver)
-            }
-        }
         controller.absorbedNotice?.let { id ->
             AbsorbedNotice(id, onTimeout = { controller.dismissAbsorbedNotice(id) }, Modifier.align(Alignment.Center))
         }
-        controller.undoNotice?.let { notice ->
+        // Nach Rollenverlust kein „Wiederholen“ mehr (Review W1-I #5)
+        controller.undoNotice?.takeIf { snapshot.isScorer }?.let { notice ->
             UndoSnackbar(
                 notice = notice,
                 onRedo = controller::redo,
@@ -601,7 +643,7 @@ private fun Footer(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
     debugTools: Boolean,
-    onBenchmarkNewMatch: (() -> Unit)?,
+    onBenchmarkNewMatch: (() -> Boolean)?,
     openDialog: (LiveDialog) -> Unit,
     modifier: Modifier,
 ) {
@@ -692,7 +734,7 @@ private fun MoreMenu(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
     debugTools: Boolean,
-    onBenchmarkNewMatch: (() -> Unit)?,
+    onBenchmarkNewMatch: (() -> Boolean)?,
     openDialog: (LiveDialog) -> Unit,
     expanded: Boolean,
     onDismiss: () -> Unit,

@@ -108,6 +108,7 @@ class InMemoryMatchStore(
             if (previous.engine.state.status != MatchStatus.FINISHED) append(previous, MatchEnded(EndReason.ABANDONED))
         }
         val id = MatchId.of(ids.newId())
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
         val genesis =
             ScoreEvent(
                 id = EventId.of(ids.newId()),
@@ -117,9 +118,9 @@ class InMemoryMatchStore(
                 lamport = 1,
                 wallClockMs = clock.nowMs(),
                 parentId = null,
-                payload = MatchCreated(setup.format, setup.lineup, setup.meta),
+                payload = MatchCreated(setup.format, setup.lineup, meta),
             )
-        val entry = Entry(id, setup, genesis, ScoringEngine.replay(listOf(genesis)))
+        val entry = Entry(id, setup.copy(meta = meta), genesis, ScoringEngine.replay(listOf(genesis)))
         entries[id] = entry
         activeId = id
         lastSetupFlow.value = setup.copy(previousMatchId = null)
@@ -220,6 +221,9 @@ class InMemoryMatchStore(
 
     /** Ein Gerät: es zählt immer selbst, Übernehmen ist nie nötig. */
     override fun takeOverScoring(): Boolean = false
+
+    /** Ein Gerät: keine Rollenkonflikte, nichts verworfen. */
+    override fun rejectedInputs(): List<RejectedInput> = emptyList()
 
     override fun dismiss(): Boolean {
         val entry = current() ?: return false

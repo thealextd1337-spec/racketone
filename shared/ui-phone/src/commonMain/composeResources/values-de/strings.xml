@@ -333,7 +333,7 @@
     <string name="sync_in_sync">Synchron</string>
     <string name="sync_pending">%1$d ausstehend</string>
     <string name="sync_scorer_connected">Zähler verbunden</string>
-    <string name="sync_scorer_unknown">Zähler nicht verbunden</string>
+    <string name="sync_scorer_unknown">Stand unbekannt</string>
     <string name="sync_stale">Stand vor %1$s</string>
     <string name="age_seconds">%1$d s</string>
     <string name="age_minutes">%1$d min</string>
@@ -354,4 +354,24 @@
     <string name="player_rename_title">Spieler umbenennen</string>
     <string name="player_name_label">Name</string>
     <string name="action_save">Speichern</string>
+
+    <!-- W1-I Review 1 -->
+    <string name="stale_text_unknown">Aktualität unbekannt. Zählt %1$s nicht mehr, kannst du auf diesem Handy übernehmen.</string>
+    <string name="takeover_short">Übernehmen</string>
+    <string name="rejected_view">Ansehen</string>
+    <string name="rejected_list_title">Nicht übernommene Eingaben</string>
+    <string name="rejected_list_hint">Diese Eingaben kamen von einem Gerät, das nicht mehr gezählt hat. Sie zählen nicht.</string>
+    <string name="input_point_for">Punkt %1$s</string>
+    <string name="input_undo">Rückgängig</string>
+    <string name="input_set_decision">Satzende-Entscheidung</string>
+    <string name="input_correction">Korrektur</string>
+    <string name="input_pause">Pause</string>
+    <string name="input_resume">Fortsetzen</string>
+    <string name="input_end">Matchende</string>
+    <string name="input_detail">Punkt-Detail</string>
+    <string name="device_watch">Uhr</string>
+    <string name="device_phone">Handy</string>
+    <string name="device_other">Anderes Gerät</string>
+    <string name="abandon_current_score">Aktueller Stand: %1$s</string>
+    <string name="abandon_scoring_elsewhere">Bisher zählt: %1$s. Das Match wird auf allen Geräten ohne Wertung beendet.</string>
 </resources>

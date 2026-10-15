@@ -21,6 +21,7 @@ import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchStore
+import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.SessionMatchStore
@@ -82,11 +83,13 @@ class AdvantlyAppModel(
     val history: MatchHistoryPort,
     val players: PlayersPort,
     settings: LiveSettings = LiveSettings(),
-    /** Uhr für Anzeigen (Matchdauer, Wochenbilanz, „Stand vor X s“); dieselbe Basis wie die Zeitstempel des Ports. */
+    /** Uhr für Anzeigen (Matchdauer, Wochenbilanz); dieselbe Basis wie die Zeitstempel des Ports. */
     val clock: WallClock = WallClock.System,
+    /** Monotone Uhr für „Stand vor X s“; dieselbe Basis wie `SyncInfo.lastScorerContactMono` des Ports. */
+    val monotonic: MonotonicClock = MonotonicClock.System,
 ) {
     val wizard = MatchWizard(players, watchAvailable = live.watchAvailable)
-    val controller = LiveScoreController(live, settings, clock = clock)
+    val controller = LiveScoreController(live, settings, clock = clock, monotonic = monotonic)
     val navigator = AppNavigator()
 
     /** Läuft ein Match (nicht beendet)? Dann führen „Spielen“ und Schnellstart zum Live-Score. */
@@ -190,8 +193,12 @@ class AdvantlyAppModel(
             else -> navigator.pop()
         }
 
-    /** Einfaches Tennis-Match für den Auto-Benchmark (Debug, Spike S4). */
-    fun startBenchmarkMatch() {
+    /**
+     * Einfaches Tennis-Match für den Auto-Benchmark (Debug, Spike S4). Bricht nie ein echtes laufendes Match ab:
+     * läuft eines, liefert es `false` und der Benchmark misst nichts.
+     */
+    fun startBenchmarkMatch(): Boolean {
+        if (hasRunningMatch) return false
         val self = players.self.value
         val opponent = players.guests.value.firstOrNull() ?: players.addGuest(BENCHMARK_OPPONENT)
         live.start(
@@ -202,6 +209,7 @@ class AdvantlyAppModel(
             ),
         )
         controller.sync(live.active.value)
+        return true
     }
 
     private companion object {

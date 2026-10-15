@@ -8,15 +8,22 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.LineupValidator
+import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PointDetailSet
+import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
 import eu.advantly.data.scoreEvents
@@ -49,10 +56,15 @@ import eu.advantly.data.MatchRecord as StoredMatch
  *   `false`. „Zählen übernehmen“ erzeugt `ScorerChanged` ([takeOverScoring]).
  *
  * Kosten: Pro Punkt baut der Adapter nur den Live-Snapshot neu. Historie, „Wie letztes Mal“ und Spielernamen lädt er
- * neu, wenn sich Match oder Status ändern oder Daten anderer Geräte eintreffen (nicht bei jedem eigenen Punkt);
- * Engine-Zusammenfassungen beendeter Matches sind je `updatedAt` zwischengespeichert.
+ * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
+ * Matches, Spieler, Identität); Engine-Zusammenfassungen beendeter Matches sind je `updatedAt` zwischengespeichert.
  *
  * Nach einem App-Neustart öffnet der Adapter das zuletzt geänderte, noch laufende Match wieder (höchstens 12 h alt).
+ * „Stand vor X s“ misst er monoton ([monotonic]); den letzten Kontakt zum Zähler merkt er sich je Match in den Settings,
+ * damit das Alter einen Neustart übersteht. Ohne gemerkten Kontakt ist es unbekannt (nicht 0).
+ *
+ * Identität: Spieler-IDs, die die Datenbank als Alias des Besitzers kennt (z. B. der Self der Uhr vor der Übernahme),
+ * zeigt der Adapter als Besitzer – nie als Gast.
  *
  * Nur auf dem Scheduler-Thread der Session (Main-Thread) benutzen; [close] meldet den Listener ab.
  *
@@ -63,8 +75,10 @@ class SessionMatchStore(
     private val clock: WallClock = WallClock.System,
     private val ids: IdFactory = IdFactory.uuid7(clock),
     private val historyLimit: Long = DEFAULT_HISTORY_LIMIT,
+    private val monotonic: MonotonicClock = MonotonicClock.System,
 ) : MatchStore {
     private val data: LocalData = session.data
+    private var aliases: Set<PlayerId> = emptySet()
 
     private val players = HashMap<PlayerId, Player>()
     private val summaries = HashMap<MatchId, Pair<Long, MatchSummary>>()
@@ -90,7 +104,9 @@ class SessionMatchStore(
     private var lastState: SessionState? = null
     private var revision = 0L
     private var observedMatch: MatchId? = null
-    private var scorerSeenAtMs: Long? = null
+    private var contactMono: Long? = null
+    private var withoutScorerSinceMono: Long? = null
+    private var contactPersistedMono: Long? = null
     private var scorerWasConnected = false
 
     private val listener = SessionListener { onSessionState(it) }
@@ -107,8 +123,12 @@ class SessionMatchStore(
         session.removeListener(listener)
     }
 
-    /** Workout-Wunsch, mit dem [matchId] auf diesem Handy gestartet wurde (`null` = unbekannt). */
-    fun watchWorkout(matchId: MatchId): Boolean? = data.settings.get(workoutKey(matchId))?.toBooleanStrictOrNull()
+    /** Workout-Wunsch des Matches (`MatchMeta.watchWorkout`, geht mit dem Match-Kopf an die Uhr), `null` = unbekannt. */
+    fun watchWorkout(matchId: MatchId): Boolean? =
+        data.matches
+            .get(matchId)
+            ?.meta
+            ?.watchWorkout
 
     // --- LiveMatchPort ---------------------------------------------------------------------------
 
@@ -135,10 +155,8 @@ class SessionMatchStore(
                 ScorerOption.MY_WATCH -> connectedWatch()?.let { ScorerChoice.Device(it) } ?: ScorerChoice.ThisDevice
                 ScorerOption.THIS_PHONE -> ScorerChoice.ThisDevice
             }
-        val id = session.create(setup.format, setup.lineup, setup.meta, scorer)
-        // Metadatum am Match (P1: lokal; die Übertragung an die Uhr braucht ein Feld im Protokoll, siehe Bericht W1-I)
-        data.settings.putBoolean(workoutKey(id), options.watchWorkout)
-        return id
+        // Workout-Wunsch als Metadatum am Match (MatchMeta.watchWorkout) – geht mit Genesis und Match-Kopf an die Uhr
+        return session.create(setup.format, setup.lineup, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
     }
 
     override fun recordPoint(side: Side): Boolean = session.recordPoint(side)
@@ -198,6 +216,31 @@ class SessionMatchStore(
 
     override fun takeOverScoring(): Boolean = session.takeOverScoring()
 
+    override fun rejectedInputs(): List<RejectedInput> {
+        val m = current() ?: return emptyList()
+        val rejected = m.state.rejectedByRole.toSet()
+        if (rejected.isEmpty()) return emptyList()
+        return data.events
+            .scoreEvents(m.id)
+            .filter { it.id in rejected }
+            .mapNotNull { event ->
+                val (kind, side) =
+                    when (val payload = event.payload) {
+                        is PointWon -> InputKind.POINT to payload.side
+                        is Undo -> InputKind.UNDO to null
+                        is ContinueDecision -> InputKind.SET_DECISION to null
+                        is Correction -> InputKind.CORRECTION to null
+                        Paused -> InputKind.PAUSE to null
+                        Resumed -> InputKind.RESUME to null
+                        is MatchEnded -> InputKind.END to payload.side
+                        is PointDetailSet -> InputKind.DETAIL to null
+                        else -> return@mapNotNull null
+                    }
+                val device = if (event.deviceId == session.deviceId) PeerKind.PHONE else session.peerKind(event.deviceId)
+                RejectedInput(event.id, (event.wallClockMs - m.createdAtMs).coerceAtLeast(0), device.toDeviceKind(false), kind, side)
+            }
+    }
+
     // --- MatchHistoryPort ------------------------------------------------------------------------
 
     override fun record(matchId: MatchId): MatchRecord? {
@@ -219,6 +262,7 @@ class SessionMatchStore(
         // Aktives (beendetes) Match zuerst schließen (Vertrag), dann löschen; die Löschmarkierung geht an die Uhr
         if (current()?.id == matchId) session.closeMatch()
         session.deleteMatch(matchId)
+        data.settings.remove(contactKey(matchId))
         summaries.remove(matchId)
         refreshStored()
         return true
@@ -254,7 +298,7 @@ class SessionMatchStore(
      * P1: alle lokalen Dummy-/Gastspieler stammen vom Besitzer (dieses Handy oder seine gekoppelte Uhr) – er ist also
      * der Anleger. Ab P2 (Accounts, geteilte Matches) muss hier der Anleger geprüft werden.
      */
-    override fun canRename(id: PlayerId): Boolean = data.players.get(id)?.kind == PlayerKind.GUEST
+    override fun canRename(id: PlayerId): Boolean = data.players.get(id)?.kind == PlayerKind.GUEST && id !in aliases
 
     override fun renameGuest(
         id: PlayerId,
@@ -284,40 +328,63 @@ class SessionMatchStore(
     private fun onSessionState(state: SessionState) {
         val previous = lastState
         lastState = state
-        val now = clock.nowMs()
-        val m = state.match
-        if (m?.id != observedMatch) {
-            // Neues Match im Blick: Basis für „Stand vor X s“ ist der Moment, ab dem es hier angezeigt wird
-            observedMatch = m?.id
-            scorerSeenAtMs = now
-            scorerWasConnected = false
-        }
-        // Solange der Zähler verbunden ist (und im Moment der Trennung), gilt der Stand als aktuell
-        if (state.sync.scorerConnected || scorerWasConnected) scorerSeenAtMs = now
-        scorerWasConnected = state.sync.scorerConnected
+        trackScorerContact(state)
         watchFlow.value = connectedWatch(state) != null
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }
 
     /**
+     * Letzter Kontakt zum Zähler, monoton gemessen. Beim Öffnen eines Matches aus dem gemerkten Wert (Wanduhr, übersteht
+     * Neustarts) übernommen; ohne gemerkten Wert unbekannt. Während der Zähler verbunden ist, gilt der Stand als aktuell
+     * (gemerkt höchstens alle 10 s), beim Trennen wird der Moment sofort gemerkt.
+     */
+    private fun trackScorerContact(state: SessionState) {
+        val m = state.match
+        val nowMono = monotonic.nowMs()
+        if (m?.id != observedMatch) {
+            observedMatch = m?.id
+            scorerWasConnected = false
+            contactPersistedMono = null
+            withoutScorerSinceMono = nowMono
+            contactMono =
+                m?.let { data.settings.get(contactKey(it.id))?.toLongOrNull() }?.let { savedWall ->
+                    nowMono - (clock.nowMs() - savedWall).coerceAtLeast(0)
+                }
+        }
+        if (m == null || m.isScorer) {
+            scorerWasConnected = state.sync.scorerConnected
+            return
+        }
+        val connected = state.sync.scorerConnected
+        if (connected || scorerWasConnected) {
+            contactMono = nowMono
+            val lastSave = contactPersistedMono
+            if (!connected || lastSave == null || nowMono - lastSave >= CONTACT_PERSIST_INTERVAL_MS) {
+                data.settings.putLong(contactKey(m.id), clock.nowMs())
+                contactPersistedMono = nowMono
+            }
+        }
+        if (connected) {
+            withoutScorerSinceMono = null
+        } else if (withoutScorerSinceMono == null) {
+            withoutScorerSinceMono = nowMono
+        }
+        scorerWasConnected = connected
+    }
+
+    /**
      * Historie & Co. nur neu laden, wenn sich etwas außerhalb des offenen Matches geändert haben kann: anderes Match,
-     * anderer Status, oder empfangene Daten/Gegenstellen ohne neues Event im offenen Match (z. B. Verlauf von der Uhr).
+     * anderer Status oder eine neue `dataRevision` der Session (Löschung, andere Matches, Spieler, Identität).
      */
     private fun storedDataMayHaveChanged(
         previous: SessionState?,
         state: SessionState,
     ): Boolean {
-        if (previous == null) return true
+        if (previous == null || previous.dataRevision != state.dataRevision) return true
         val before = previous.match
         val after = state.match
-        if (before?.id != after?.id || before?.state?.status != after?.state?.status) return true
-        val sameLog = before?.eventCount == after?.eventCount
-        val received =
-            previous.sync.lastEventReceivedAtMs != state.sync.lastEventReceivedAtMs ||
-                previous.sync.lastSyncAtMs != state.sync.lastSyncAtMs ||
-                previous.sync.peers != state.sync.peers
-        return sameLog && received
+        return before?.id != after?.id || before?.state?.status != after?.state?.status
     }
 
     private fun publishActive(state: SessionState) {
@@ -337,7 +404,6 @@ class SessionMatchStore(
     ): LiveMatchSnapshot {
         val finished = m.state.status == MatchStatus.FINISHED
         val sync = state.sync
-        val lastContact = listOfNotNull(scorerSeenAtMs, sync.lastEventReceivedAtMs).maxOrNull()
         return LiveMatchSnapshot(
             matchId = m.id,
             setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup), m.previousMatchId),
@@ -368,7 +434,8 @@ class SessionMatchStore(
                     scorerConnected = sync.scorerConnected,
                     pendingToPeers = sync.pendingToPeers,
                     lastEventReceivedAtMs = sync.lastEventReceivedAtMs,
-                    lastScorerContactAtMs = lastContact,
+                    lastScorerContactMono = if (m.isScorer) null else contactMono,
+                    withoutScorerSinceMono = if (m.isScorer) null else withoutScorerSinceMono,
                 ),
             absorbedTaps = m.absorbedTaps.size,
         )
@@ -397,6 +464,7 @@ class SessionMatchStore(
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
     private fun refreshStored() {
         players.clear()
+        aliases = data.selfAliases()
         guestsFlow.value = loadGuests()
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
@@ -411,14 +479,15 @@ class SessionMatchStore(
     private fun loadGuests(): List<Player> =
         data.players
             .all()
-            .filter { it.kind == PlayerKind.GUEST }
+            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases }
             .map { it.toPlayer() }
 
+    /** Anzeigename je Spieler-ID; Aliase des Besitzers (z. B. alter Uhr-Self) tragen den Namen des Besitzers. */
     private fun player(id: PlayerId): Player =
-        players[id] ?: data.players
-            .get(id)
-            ?.toPlayer()
-            ?.also { players[id] = it } ?: Player(id, "")
+        players[id] ?: run {
+            val resolved = if (id in aliases) Player(id, selfFlow.value.displayName) else data.players.get(id)?.toPlayer()
+            resolved?.also { players[id] = it } ?: Player(id, "")
+        }
 
     private fun playersOf(lineup: Lineup): List<Player> = (lineup.a + lineup.b).distinct().map(::player)
 
@@ -507,10 +576,11 @@ class SessionMatchStore(
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
         const val FAVORITES_KEY = "phone.favorites"
+        const val CONTACT_PERSIST_INTERVAL_MS = 10_000L
         val FAVORITES = ListSerializer(StoredFavorite.serializer())
         val FavoritesJson = Json { ignoreUnknownKeys = true }
 
-        fun workoutKey(id: MatchId) = "match.watchWorkout.${id.value}"
+        fun contactKey(id: MatchId) = "phone.scorerContact.${id.value}"
     }
 }
 

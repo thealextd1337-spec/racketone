@@ -23,6 +23,8 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.app.AdvantlyAppModel
@@ -367,6 +369,48 @@ class LiveScoreScreenshotTest {
                 rig.settle(42_000)
             }
             mainClock.advanceTimeBy(1_100)
+        })
+    }
+
+    /** Review W1-I #2: kleines Display (360 × 640 dp) mit 200 % Schrift – Hinweis, Stand und Flächen sichtbar. */
+    @Test
+    fun liveDisplayStaleSmallScreenFontScale200Percent() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAB")
+        rig.model.navigator.push(Overlay.Live)
+        val goOffline: androidx.compose.ui.test.ComposeUiTest.(AdvantlyAppModel) -> Unit = {
+            runOnIdle {
+                rig.offline()
+                rig.settle(42_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+        }
+        capture("live-display-stale-small-fontscale-2-de", Locale.GERMANY, rig.model, 360, 640, 2f, goOffline)
+    }
+
+    @Test
+    fun rejectedInputsSheet() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.offline()
+        rig.settle(31_000)
+        rig.store.takeOverScoring()
+        rig.watchPlays("AAB")
+        rig.online()
+        rig.settle()
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("sheet-rejected-inputs-de", Locale.GERMANY, rig.model, interact = { onNodeWithTag("rejected_view").performClick() })
+    }
+
+    @Test
+    fun abandonWhileTheWatchScores() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAAAB")
+        capture("dialog-abandon-watch-en", Locale.US, rig.model, interact = {
+            runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
         })
     }
 

@@ -15,6 +15,7 @@ import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.LiveSettings
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.latency.InputClockSource
 import eu.advantly.ui.phone.latency.LatencySummary
@@ -48,6 +49,8 @@ class LiveScoreController(
     val tracker: LatencyTracker = LatencyTracker(),
     /** Uhr für die Matchdauer (gleiche Basis wie `startedAtMs` des Ports). */
     val clock: WallClock = WallClock.System,
+    /** Monotone Uhr für „Stand vor X s“ (gleiche Basis wie `SyncInfo.lastScorerContactMono` des Ports). */
+    val monotonic: MonotonicClock = MonotonicClock.System,
 ) {
     var snapshot: LiveMatchSnapshot? by mutableStateOf(port.active.value)
         private set
@@ -140,6 +143,8 @@ class LiveScoreController(
             flashSide = null
             acknowledgedRejected = 0
         }
+        // Rollenwechsel: kein Undo/Redo-Angebot aus der alten Rolle stehen lassen
+        if (next?.role != current?.role) undoNotice = null
         updateSnapshot(next)
         generation++
     }
@@ -276,13 +281,14 @@ class LiveScoreController(
      * Frame-Beginn, z. B. im iOS-Simulator ohne Touch-Injektion.
      */
     suspend fun runAutoBenchmark(
-        newMatch: () -> Unit,
+        newMatch: () -> Boolean,
         points: Int = 40,
         intervalMillis: Long = 250,
     ): LatencySummary {
+        // Kein frisches Match (z. B. echtes laufendes Match): nichts zählen, leere Messung
+        if (!newMatch()) return tracker.summary(InputClockSource.Synthetic)
         benchmarkRunning = true
         try {
-            newMatch()
             sync(port.active.value)
             resetMeasurements()
             delay(intervalMillis * 2)

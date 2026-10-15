@@ -2,6 +2,7 @@ package eu.advantly.ui.phone
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -34,12 +35,17 @@ import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.history.HistoryScreen
 import eu.advantly.ui.phone.home.HomeScreen
 import eu.advantly.ui.phone.live.LiveScoreScreen
+import eu.advantly.ui.phone.live.compactScore
+import eu.advantly.ui.phone.live.scorerDevice
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.abandon_confirm
+import eu.advantly.ui.phone.resources.abandon_current_score
 import eu.advantly.ui.phone.resources.abandon_keep
+import eu.advantly.ui.phone.resources.abandon_scoring_elsewhere
 import eu.advantly.ui.phone.resources.abandon_text
 import eu.advantly.ui.phone.resources.abandon_title
 import eu.advantly.ui.phone.resources.action_cancel
@@ -190,7 +196,25 @@ private fun AbandonDialog(model: AdvantlyAppModel) {
     AlertDialog(
         onDismissRequest = model::cancelPendingStart,
         title = { Text(stringResource(Res.string.abandon_title)) },
-        text = { Text(stringResource(Res.string.abandon_text)) },
+        text = {
+            // Was abgebrochen wird: aktueller Stand und – zählt ein anderes Gerät – welches (Review W1-I #10)
+            val running = model.live.active.value
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                Text(stringResource(Res.string.abandon_text))
+                if (running != null) {
+                    Text(
+                        stringResource(Res.string.abandon_current_score, compactScore(running)),
+                        modifier = Modifier.testTag("abandon_score"),
+                    )
+                    if (!running.isScorer) {
+                        Text(
+                            stringResource(Res.string.abandon_scoring_elsewhere, scorerDevice(running)),
+                            modifier = Modifier.testTag("abandon_scorer"),
+                        )
+                    }
+                }
+            }
+        },
         confirmButton = {
             TextButton(onClick = model::confirmPendingStart, modifier = Modifier.testTag("abandon_confirm")) {
                 Text(stringResource(Res.string.abandon_confirm), color = AdvantlyTheme.colors.danger)

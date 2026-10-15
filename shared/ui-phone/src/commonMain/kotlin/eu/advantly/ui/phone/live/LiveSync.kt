@@ -2,8 +2,10 @@ package eu.advantly.ui.phone.live
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -33,10 +36,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.advantly.presentation.match.DeviceKind
+import eu.advantly.presentation.match.InputKind
 import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.MonotonicClock
+import eu.advantly.presentation.match.RejectedInput
 import eu.advantly.presentation.match.SyncInfo
-import eu.advantly.presentation.match.WallClock
-import eu.advantly.ui.phone.common.AdvantlyButton
+import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
@@ -46,17 +51,32 @@ import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_ok
 import eu.advantly.ui.phone.resources.age_minutes
 import eu.advantly.ui.phone.resources.age_seconds
+import eu.advantly.ui.phone.resources.device_other
+import eu.advantly.ui.phone.resources.device_phone
+import eu.advantly.ui.phone.resources.device_watch
+import eu.advantly.ui.phone.resources.input_correction
+import eu.advantly.ui.phone.resources.input_detail
+import eu.advantly.ui.phone.resources.input_end
+import eu.advantly.ui.phone.resources.input_pause
+import eu.advantly.ui.phone.resources.input_point_for
+import eu.advantly.ui.phone.resources.input_resume
+import eu.advantly.ui.phone.resources.input_set_decision
+import eu.advantly.ui.phone.resources.input_undo
 import eu.advantly.ui.phone.resources.live_role_display
 import eu.advantly.ui.phone.resources.live_scoring_by
+import eu.advantly.ui.phone.resources.rejected_list_hint
+import eu.advantly.ui.phone.resources.rejected_list_title
 import eu.advantly.ui.phone.resources.rejected_many
 import eu.advantly.ui.phone.resources.rejected_one
 import eu.advantly.ui.phone.resources.rejected_title
+import eu.advantly.ui.phone.resources.rejected_view
 import eu.advantly.ui.phone.resources.scorer_other_device
 import eu.advantly.ui.phone.resources.scorer_phone_of
 import eu.advantly.ui.phone.resources.scorer_watch_of
 import eu.advantly.ui.phone.resources.scorer_your_phone
 import eu.advantly.ui.phone.resources.scorer_your_watch
 import eu.advantly.ui.phone.resources.stale_text
+import eu.advantly.ui.phone.resources.stale_text_unknown
 import eu.advantly.ui.phone.resources.stale_title
 import eu.advantly.ui.phone.resources.sync_in_sync
 import eu.advantly.ui.phone.resources.sync_local
@@ -64,8 +84,8 @@ import eu.advantly.ui.phone.resources.sync_pending
 import eu.advantly.ui.phone.resources.sync_scorer_connected
 import eu.advantly.ui.phone.resources.sync_scorer_unknown
 import eu.advantly.ui.phone.resources.sync_stale
-import eu.advantly.ui.phone.resources.takeover_action
 import eu.advantly.ui.phone.resources.takeover_confirm
+import eu.advantly.ui.phone.resources.takeover_short
 import eu.advantly.ui.phone.resources.takeover_text
 import eu.advantly.ui.phone.resources.takeover_title
 import kotlinx.coroutines.delay
@@ -78,12 +98,12 @@ private const val ABSORBED_NOTICE_MILLIS = 3_000L
 private const val STALENESS_TICK_MILLIS = 1_000L
 
 /**
- * Aktuelle Wanduhrzeit, auf Anzeige-Geräten ([ticking]) jede Sekunde neu gelesen – Basis für „Stand vor X s“ und das
+ * Aktuelle monotone Zeit, auf Anzeige-Geräten ([ticking]) jede Sekunde neu gelesen – Basis für „Stand vor X s“ und das
  * Übernahmeangebot nach > 30 s (04 §3.2).
  */
 @Composable
 internal fun rememberNow(
-    clock: WallClock,
+    clock: MonotonicClock,
     ticking: Boolean,
 ): Long {
     var now by remember { mutableLongStateOf(clock.nowMs()) }
@@ -229,16 +249,25 @@ internal fun DisplayBanner(
     }
 }
 
-/** Hinweiskarte über den Flächen (Titel, Text, Aktion). */
+/** Aktion einer [NoticeBar]. */
+internal class NoticeAction(
+    val label: String,
+    val tag: String,
+    val onClick: () -> Unit,
+)
+
+/**
+ * Kompakter Hinweis mit eigenem Platz im Layout (nie über dem Stand): optional Overline (z. B. „ANZEIGE“), Titel,
+ * ein Satz, darunter rechtsbündig Text-Aktionen (≥ 48 dp) – bricht auch bei 200 % Schrift nicht zeichenweise um.
+ */
 @Composable
-private fun NoticeCard(
+internal fun NoticeBar(
     tag: String,
     title: String,
-    text: String,
-    action: String,
-    actionTag: String,
-    onAction: () -> Unit,
-    modifier: Modifier,
+    text: String?,
+    actions: List<NoticeAction>,
+    modifier: Modifier = Modifier,
+    overline: String? = null,
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -247,48 +276,140 @@ private fun NoticeCard(
             .fillMaxWidth()
             .background(colors.surface2, Radii.cardShape)
             .border(1.5.dp, colors.hint, Radii.cardShape)
-            .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(Spacing.m),
-        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+            .semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }
+            .padding(start = Spacing.m, top = Spacing.s),
     ) {
-        Text(title, style = AdvantlyTheme.typography.label, color = colors.text)
-        Text(text, style = AdvantlyTheme.typography.body, color = colors.text2)
-        AdvantlyButton(action, primary = true, onClick = onAction, modifier = Modifier.fillMaxWidth().testTag(actionTag))
+        if (overline != null) Text(overline.uppercase(), style = AdvantlyTheme.typography.overline, color = colors.hint)
+        Text(title, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.padding(end = Spacing.m))
+        if (text !=
+            null
+        ) {
+            Text(text, style = AdvantlyTheme.typography.caption, color = colors.text2, modifier = Modifier.padding(end = Spacing.m))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { NoticeActions(actions) }
     }
 }
 
-/** Nach > 30 s ohne Verbindung zum Zähler (04 §3.2): Hinweis mit „Zählen übernehmen“ (öffnet die Bestätigung). */
+@Composable
+private fun NoticeActions(actions: List<NoticeAction>) {
+    val colors = AdvantlyTheme.colors
+    actions.forEach { action ->
+        Box(
+            Modifier
+                .testTag(action.tag)
+                .heightIn(min = Spacing.minTouchTarget)
+                .clickable(role = Role.Button, onClick = action.onClick)
+                .padding(horizontal = Spacing.m),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(action.label, style = AdvantlyTheme.typography.label, color = colors.brand)
+        }
+    }
+}
+
+/**
+ * Nach > 30 s ohne Verbindung zum Zähler (04 §3.2): Hinweis mit „Übernehmen“ (öffnet die Bestätigung). Ersetzt auf dem
+ * Anzeige-Gerät den Anzeige-Banner (gleicher Platz, weiter als „ANZEIGE“ markiert). [staleForMs] `null` = Aktualität
+ * unbekannt.
+ */
 @Composable
 internal fun StaleHint(
     snapshot: LiveMatchSnapshot,
-    staleForMs: Long,
+    staleForMs: Long?,
     onTakeOver: () -> Unit,
     modifier: Modifier = Modifier,
-) = NoticeCard(
+) = NoticeBar(
     tag = "stale_hint",
+    overline = stringResource(Res.string.live_role_display),
     title = stringResource(Res.string.stale_title),
-    text = stringResource(Res.string.stale_text, ageText(staleForMs), scorerDevice(snapshot)),
-    action = stringResource(Res.string.takeover_action),
-    actionTag = "stale_takeover",
-    onAction = onTakeOver,
+    text =
+        if (staleForMs == null) {
+            stringResource(Res.string.stale_text_unknown, scorerDevice(snapshot))
+        } else {
+            stringResource(Res.string.stale_text, ageText(staleForMs), scorerDevice(snapshot))
+        },
+    actions = listOf(NoticeAction(stringResource(Res.string.takeover_short), "stale_takeover", onTakeOver)),
     modifier = modifier,
 )
 
-/** „Zählen wurde übernommen – N Eingaben nicht übernommen“ (02 §7.5 Nr. 4). */
+/** „Zählen wurde übernommen – N Eingaben nicht übernommen“ (02 §7.5 Nr. 4) mit „Ansehen“ und „OK“. */
 @Composable
 internal fun RejectedNotice(
     count: Int,
+    onView: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-) = NoticeCard(
+) = NoticeBar(
     tag = "rejected_notice",
     title = stringResource(Res.string.rejected_title),
     text = if (count == 1) stringResource(Res.string.rejected_one) else stringResource(Res.string.rejected_many, count),
-    action = stringResource(Res.string.action_ok),
-    actionTag = "rejected_ok",
-    onAction = onDismiss,
+    actions =
+        listOf(
+            NoticeAction(stringResource(Res.string.rejected_view), "rejected_view", onView),
+            NoticeAction(stringResource(Res.string.action_ok), "rejected_ok", onDismiss),
+        ),
     modifier = modifier,
 )
+
+/** „Eingaben ansehen“: verworfene Eingaben mit Spielzeit, Gerät, Art und Seite (02 §7.5, PLAN F15 einfache Liste). */
+@Composable
+internal fun BoxScope.RejectedInputsSheet(
+    snapshot: LiveMatchSnapshot,
+    inputs: List<RejectedInput>,
+    onClose: () -> Unit,
+) {
+    val title = stringResource(Res.string.rejected_list_title)
+    LiveSheet(title = title, tag = "rejected_sheet") {
+        Text(title, style = AdvantlyTheme.typography.title, color = AdvantlyTheme.colors.text)
+        Text(stringResource(Res.string.rejected_list_hint), style = AdvantlyTheme.typography.body, color = AdvantlyTheme.colors.text2)
+        inputs.forEachIndexed { index, input ->
+            Text(
+                listOf(clockText(input.matchTimeMs), deviceText(input.device), inputText(input, snapshot)).joinToString(" · "),
+                style = AdvantlyTheme.typography.label,
+                color = AdvantlyTheme.colors.text,
+                modifier = Modifier.testTag("rejected_item_$index").padding(vertical = Spacing.xs),
+            )
+        }
+        SheetButton(
+            stringResource(Res.string.action_ok),
+            primary = true,
+            onClick = onClose,
+            modifier = Modifier.fillMaxWidth().testTag("rejected_close"),
+        )
+    }
+}
+
+/** Spielzeit h:mm:ss. */
+private fun clockText(ms: Long): String {
+    val seconds = ms / 1_000
+    return "${seconds / 3600}:${((seconds / 60) % 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun deviceText(kind: DeviceKind): String =
+    stringResource(
+        when (kind) {
+            DeviceKind.WATCH -> Res.string.device_watch
+            DeviceKind.PHONE -> Res.string.device_phone
+            DeviceKind.OTHER -> Res.string.device_other
+        },
+    )
+
+@Composable
+private fun inputText(
+    input: RejectedInput,
+    snapshot: LiveMatchSnapshot,
+): String =
+    when (input.kind) {
+        InputKind.POINT -> stringResource(Res.string.input_point_for, input.side?.let { teamName(snapshot.setup, it) }.orEmpty())
+        InputKind.UNDO -> stringResource(Res.string.input_undo)
+        InputKind.SET_DECISION -> stringResource(Res.string.input_set_decision)
+        InputKind.CORRECTION -> stringResource(Res.string.input_correction)
+        InputKind.PAUSE -> stringResource(Res.string.input_pause)
+        InputKind.RESUME -> stringResource(Res.string.input_resume)
+        InputKind.END -> stringResource(Res.string.input_end)
+        InputKind.DETAIL -> stringResource(Res.string.input_detail)
+    }
 
 /**
  * Bestätigung „Zählen übernehmen“ (04 §3.2): „Auf diesem Gerät zählen? Bisher zählt [Gerät]. Danach zeigt das bisherige

@@ -12,6 +12,7 @@ import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
+import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.presentation.match.StartOptions
@@ -30,6 +31,7 @@ class SessionRig {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
     val clock = WallClock { BASE_MS + scheduler.nowMs() }
+    val monotonic = MonotonicClock { scheduler.nowMs() }
     private val sessionClock = SessionClock { BASE_MS + scheduler.nowMs() }
     private var messages = 0
 
@@ -38,8 +40,8 @@ class SessionRig {
         session("phone", PeerKind.PHONE, seed = 1).also {
             it.data.players.ensureSelf("Alex", BASE_MS) { PlayerId("alex") }
         }
-    val store = SessionMatchStore(phoneSession, clock)
-    val model = AdvantlyAppModel(store, store, store, clock = clock)
+    val store = SessionMatchStore(phoneSession, clock, monotonic = monotonic)
+    val model = AdvantlyAppModel(store, store, store, clock = clock, monotonic = monotonic)
 
     init {
         settle()

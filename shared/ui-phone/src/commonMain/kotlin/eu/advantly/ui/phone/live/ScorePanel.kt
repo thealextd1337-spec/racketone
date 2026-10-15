@@ -69,6 +69,9 @@ import kotlin.math.abs
 /** Dauer der Ziffern-Roll-Animation (04 §5.7). */
 private const val ROLL_MILLIS = 150
 
+/** Kleinste Ziffernhöhe des Stands. */
+private val MIN_DIGIT_HEIGHT = 24.dp
+
 /** Aufblitzen der Fläche (04 §5.6 Score-Panel). */
 private const val FLASH_MILLIS = 120
 private const val FLASH_ALPHA = 0.24f
@@ -251,7 +254,8 @@ internal fun ScorePanel(
                 // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
                 // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
                 val density = LocalDensity.current
-                val digitHeight = min(min(maxHeight * 0.9f, maxWidth * 0.42f), 132.dp)
+                // Untergrenze: auch eine sehr flache Fläche (kleines Display, 200 % Schrift) zeigt den Stand lesbar
+                val digitHeight = min(min(maxHeight * 0.9f, maxWidth * 0.42f), 132.dp).coerceAtLeast(MIN_DIGIT_HEIGHT)
                 val fontSize = (digitHeight.value / density.fontScale).sp
                 val animate = !outdoor
                 AnimatedContent(

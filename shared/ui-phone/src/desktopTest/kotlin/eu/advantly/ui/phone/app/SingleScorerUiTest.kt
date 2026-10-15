@@ -10,6 +10,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
@@ -25,6 +26,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.match.LiveRole
 import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.setupFor
@@ -197,6 +199,112 @@ class SingleScorerUiTest {
             onNodeWithTag("rejected_ok").performClick()
             onNodeWithTag("rejected_notice").assertDoesNotExist()
         }
+
+    /** Review W1-I #8: „Eingaben ansehen“ zeigt die verworfenen Eingaben (Zeit, Gerät, Art, Seite). */
+    @Test
+    fun rejectedInputsCanBeViewed() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.model.navigator.push(Overlay.Live)
+            showApp(rig.model)
+            runOnIdle {
+                rig.offline()
+                rig.settle(31_000)
+                assertTrue(rig.model.controller.takeOverScoring())
+                rig.watchPlays("AB")
+                rig.online()
+                rig.settle()
+            }
+            onNodeWithTag("rejected_view").performClick()
+            onNodeWithTag("rejected_sheet").assertExists()
+            val first = onNodeWithTag("rejected_item_0").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue((first.contains("Uhr") || first.contains("Watch")) && first.contains("Alex"), first)
+            onNodeWithTag("rejected_item_1").assertExists()
+            onNodeWithTag("rejected_close").performScrollTo().performClick()
+            onNodeWithTag("rejected_sheet").assertDoesNotExist()
+            onNodeWithTag("rejected_notice").assertDoesNotExist()
+        }
+
+    /** Review W1-I #2: Der Übernahme-Hinweis hat eigenen Platz und verdeckt die Flächen nicht. */
+    @Test
+    fun staleHintNeverCoversTheScore() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.model.navigator.push(Overlay.Live)
+            showApp(rig.model)
+            runOnIdle {
+                rig.offline()
+                rig.settle(40_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+            val hint = onNodeWithTag("stale_hint").fetchSemanticsNode().boundsInRoot
+            val panel = onNodeWithTag("panel_us").fetchSemanticsNode().boundsInRoot
+            assertTrue(hint.bottom <= panel.top, "Hinweis $hint überlappt Fläche $panel")
+            onNodeWithTag("score_us", useUnmergedTree = true).assertIsDisplayed()
+        }
+
+    /** Review W1-I #5: Nach Rollenverlust bleibt kein „Wiederholen“ aus der alten Rolle stehen. */
+    @Test
+    fun undoSnackbarDisappearsWhenTheRoleIsLost() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.offline()
+            rig.settle(31_000)
+            rig.store.takeOverScoring()
+            rig.model.controller.sync(rig.store.active.value)
+            rig.model.navigator.push(Overlay.Live)
+            showApp(rig.model)
+            onNodeWithTag("panel_us").performClick()
+            onNodeWithTag("undo_button").performClick()
+            onNodeWithTag("undo_snackbar").assertExists()
+            // die Uhr übernimmt wieder
+            runOnIdle {
+                rig.online()
+                rig.settle()
+                assertTrue(rig.watch.takeOverScoring())
+                rig.settle()
+            }
+            onNodeWithTag("display_banner").assertExists()
+            onNodeWithTag("undo_snackbar").assertDoesNotExist()
+            onNodeWithTag("redo_button").assertDoesNotExist()
+        }
+
+    /** Review W1-I #10: Neues Match, während die Uhr zählt → Dialog nennt Zähler und Stand. */
+    @Test
+    fun abandonDialogNamesTheScorerAndTheScore() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.watchPlays("AA")
+            showApp(rig.model)
+            runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
+            onNodeWithTag("abandon_dialog").assertExists()
+            val scorer = onNodeWithTag("abandon_scorer").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue(scorer.contains("Uhr von Alex") || scorer.contains("Alex’s watch"), scorer)
+            val score = onNodeWithTag("abandon_score").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue(score.contains("30"), score)
+        }
+
+    /** Review W1-I #10: Der Debug-Auto-Benchmark bricht kein echtes laufendes Match ab. */
+    @Test
+    fun benchmarkNeverAbandonsARealMatch() {
+        val rig = SessionRig()
+        val id = rig.startWatchScoredTennis()
+        assertFalse(rig.model.startBenchmarkMatch())
+        assertEquals(
+            id,
+            rig.store.active.value!!
+                .matchId,
+        )
+        assertEquals(
+            eu.advantly.core.scoring.MatchStatus.IN_PROGRESS,
+            rig.store.active.value!!
+                .state.status,
+        )
+    }
 
     @Test
     fun quickStartConfirmsWhoScoresWhenAWatchIsConnected() =

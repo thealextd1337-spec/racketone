@@ -44,6 +44,7 @@ private class Rig(
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
     val uiClock = WallClock { BASE_MS + scheduler.nowMs() }
+    val mono = MonotonicClock { scheduler.nowMs() }
     private val sessionClock = SessionClock { BASE_MS + scheduler.nowMs() }
     private var messages = 0
     private var seeds = 0
@@ -51,7 +52,7 @@ private class Rig(
     val watch: MatchSession = session("watch", PeerKind.WATCH, watchData)
     var phoneSession: MatchSession = session("phone", PeerKind.PHONE, phoneData)
         private set
-    var phone: SessionMatchStore = SessionMatchStore(phoneSession, uiClock, CountingIds())
+    var phone: SessionMatchStore = SessionMatchStore(phoneSession, uiClock, CountingIds(), monotonic = mono)
         private set
 
     init {
@@ -73,7 +74,7 @@ private class Rig(
         phone.close()
         phoneSession.close()
         phoneSession = session("phone", PeerKind.PHONE, data)
-        phone = SessionMatchStore(phoneSession, uiClock, CountingIds(n = 1_000))
+        phone = SessionMatchStore(phoneSession, uiClock, CountingIds(n = 1_000), monotonic = mono)
         settle()
     }
 
@@ -152,7 +153,7 @@ class SessionMatchStoreTest {
         val shown = rig.phone.active.value!!
         assertEquals(SidePair("30", "0"), shown.state.current!!.display)
         assertNotNull(shown.sync.lastEventReceivedAtMs)
-        assertFalse(shown.sync.offersTakeOver(rig.uiClock.nowMs() + 60_000), "verbunden: kein Übernahmeangebot")
+        assertFalse(shown.sync.offersTakeOver(rig.mono.nowMs() + 60_000), "verbunden: kein Übernahmeangebot")
         assertTrue(shown.revision > snapshot.revision)
     }
 
@@ -186,11 +187,11 @@ class SessionMatchStoreTest {
         rig.settle(1_000)
         val lost = rig.phone.active.value!!
         assertFalse(lost.sync.scorerConnected)
-        assertFalse(lost.sync.offersTakeOver(rig.uiClock.nowMs()), "erst nach > 30 s")
+        assertFalse(lost.sync.offersTakeOver(rig.mono.nowMs()), "erst nach > 30 s")
         rig.settle(31_000)
         val stale = rig.phone.active.value!!
-        assertTrue(stale.sync.offersTakeOver(rig.uiClock.nowMs()))
-        assertTrue(stale.sync.staleForMs(rig.uiClock.nowMs())!! > SyncInfo.STALE_AFTER_MS)
+        assertTrue(stale.sync.offersTakeOver(rig.mono.nowMs()))
+        assertTrue(stale.sync.staleForMs(rig.mono.nowMs())!! > SyncInfo.STALE_AFTER_MS)
 
         assertTrue(rig.phone.takeOverScoring())
         assertFalse(rig.phone.takeOverScoring(), "zählt schon")
@@ -477,6 +478,148 @@ class SessionMatchStoreTest {
         assertEquals(SidePair("15", "15"), resumed.state.current!!.display)
         assertTrue(after.recordPoint(Side.A))
         assertEquals(false, after.watchWorkout(done))
+    }
+
+    /** Review W1-I #1: Die Uhr löscht ein am Handy geschlossenes Match → Verlauf aktualisiert sich sofort. */
+    @Test
+    fun deletionOnTheWatchUpdatesThePhoneHistory() {
+        val rig = Rig()
+        val phone = rig.phone
+        val id = phone.start(phone.setupFor(badminton15))
+        phone.play("A".repeat(15))
+        assertTrue(phone.dismiss())
+        rig.settle()
+        assertEquals(listOf(id), phone.matches.value.map { it.matchId })
+        rig.watch.deleteMatch(id)
+        rig.settle()
+        assertTrue(phone.matches.value.isEmpty())
+        assertNull(phone.record(id))
+        assertNull(phone.lastSetup.value)
+    }
+
+    /** Review W1-I #4: Offline-Alter übersteht einen Neustart des Handys (kein Zurücksetzen auf 0). */
+    @Test
+    fun stalenessSurvivesARestart() {
+        val file = File.createTempFile("advantly-stale", ".db").also { files += it }
+        file.delete()
+        val rig = Rig(phoneData = fileData(file))
+        rig.watchScoredMatch()
+        rig.watch.recordPoint(Side.A)
+        rig.settle()
+        rig.offline("watch")
+        rig.settle(65_000)
+        assertTrue(
+            rig.phone.active.value!!
+                .sync
+                .offersTakeOver(rig.mono.nowMs()),
+        )
+
+        rig.restartPhone(fileData(file))
+        val after = rig.phone.active.value!!
+        val stale = assertNotNull(after.sync.staleForMs(rig.mono.nowMs()))
+        assertTrue(stale >= 65_000, "Alter $stale")
+        assertTrue(after.sync.offersTakeOver(rig.mono.nowMs()))
+    }
+
+    /** Ohne gemerkten Kontakt ist die Aktualität unbekannt; das Angebot kommt nach 30 s eigener Beobachtung. */
+    @Test
+    fun unknownStalenessIsNotZero() {
+        val rig = Rig()
+        rig.offline("watch")
+        rig.settle()
+        val setup = rig.phone.setupFor(tennis)
+        // Match der Uhr, das das Handy nur als Kopf/Log kennt (z. B. aus einem früheren Abgleich): direkt eingespielt
+        rig.online("watch")
+        rig.settle()
+        rig.watch.create(setup.format, setup.lineup)
+        rig.settle()
+        rig.offline("watch")
+        rig.phone.close()
+        rig.phoneSession.data.settings.all().keys.filter { it.startsWith("phone.scorerContact.") }.forEach {
+            rig.phoneSession.data.settings
+                .remove(it)
+        }
+        rig.restartPhone(rig.phoneSession.data)
+        val shown = rig.phone.active.value!!
+        assertNull(shown.sync.staleForMs(rig.mono.nowMs()), "unbekannt, nicht 0")
+        assertFalse(shown.sync.offersTakeOver(rig.mono.nowMs()))
+        rig.settle(31_000)
+        assertTrue(
+            rig.phone.active.value!!
+                .sync
+                .offersTakeOver(rig.mono.nowMs()),
+        )
+    }
+
+    /** Review W1-I #6: Matches, die die Uhr mit ihrem alten Self angelegt hat, zeigen am Handy den Besitzer. */
+    @Test
+    fun watchSelfIsShownAsTheOwnerNotAsAGuest() {
+        val watchData = createInMemoryJvmLocalData()
+        val watchSelf =
+            watchData.players.ensureSelf("", 1) {
+                eu.advantly.core.model
+                    .PlayerId("watch-self")
+            }
+        val rig = Rig(watchData = watchData)
+        rig.offline("watch")
+        rig.settle()
+        val bea = rig.phone.addGuest("Bea")
+        rig.watch.create(
+            tennis,
+            eu.advantly.core.model
+                .Lineup(listOf(watchSelf.id), listOf(bea.id), watchSelf.id),
+        )
+        rig.online("watch")
+        rig.settle()
+        val shown = assertNotNull(rig.phone.active.value)
+        assertEquals(rig.phone.self.value.displayName, shown.setup.player(watchSelf.id)!!.displayName)
+        assertTrue(
+            rig.phone.guests.value
+                .none { it.id == watchSelf.id },
+            "kein Gast",
+        )
+        assertFalse(rig.phone.canRename(watchSelf.id))
+        assertEquals(rig.phone.self.value.id, watchData.players.self()?.id, "Uhr übernimmt die Handy-Identität")
+    }
+
+    /** Review W1-I #7: Workout-Wunsch geht als MatchMeta mit dem Match an die Uhr. */
+    @Test
+    fun workoutChoiceReachesTheWatch() {
+        val rig = Rig()
+        val id = rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH, watchWorkout = false))
+        rig.settle()
+        assertEquals(false, rig.phone.watchWorkout(id))
+        assertEquals(
+            false,
+            rig.watch.data.matches
+                .get(id)
+                ?.meta
+                ?.watchWorkout,
+        )
+        assertEquals(
+            false,
+            rig.watch.state.value.match
+                ?.meta
+                ?.watchWorkout,
+        )
+    }
+
+    /** Review W1-I #8: „Eingaben ansehen“ listet die verworfenen Eingaben des Altzählers. */
+    @Test
+    fun rejectedInputsAreListed() {
+        val rig = Rig()
+        rig.watchScoredMatch()
+        rig.offline("watch")
+        rig.settle(31_000)
+        assertTrue(rig.phone.takeOverScoring())
+        assertTrue(rig.watch.recordPoint(Side.A))
+        assertTrue(rig.watch.recordPoint(Side.B))
+        rig.online("watch")
+        rig.settle()
+        val inputs = rig.phone.rejectedInputs()
+        assertEquals(listOf(InputKind.POINT, InputKind.POINT), inputs.map { it.kind })
+        assertEquals(listOf(Side.A, Side.B), inputs.map { it.side })
+        assertTrue(inputs.all { it.device == DeviceKind.WATCH && it.matchTimeMs > 0 })
     }
 
     @Test

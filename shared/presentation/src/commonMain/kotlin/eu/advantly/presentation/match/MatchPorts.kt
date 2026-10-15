@@ -1,5 +1,6 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -130,26 +131,37 @@ data class LiveMatchSnapshot(
 /**
  * Verbindungszustand für die Sync-Pill (04 §3.2, Entscheidung „Sync Zähler → Handy“): Zähler zeigen „synchron /
  * N ausstehend“, Anzeige-Geräte „Stand vor X s“ und nach mehr als [STALE_AFTER_MS] ohne Verbindung das
- * Übernahmeangebot.
+ * Übernahmeangebot. Alle Spannen laufen über eine monotone Uhr ([MonotonicClock]); die UI übergibt deren `nowMs`.
  *
  * @property peers verbundene, kompatible weitere Geräte (Uhr, zweites Handy)
  * @property scorerConnected dieses Gerät zählt selbst oder der Zähler ist gerade verbunden
  * @property pendingToPeers Events, die noch keine Gegenstelle bestätigt hat (über alle Matches, persistent)
  * @property lastEventReceivedAtMs Wanduhr des zuletzt empfangenen neuen Events, `null` = noch keins
- * @property lastScorerContactAtMs letzter Kontakt zum Zähler (Verbindung, empfangenes Event); Basis für „Stand vor X s“
+ * @property lastScorerContactMono monotone Zeit des letzten Kontakts zum Zähler (auch über App-Neustarts gemerkt);
+ *   `null` = unbekannt – die UI zeigt dann „Stand unbekannt“ statt eines erfundenen Alters
+ * @property withoutScorerSinceMono monotone Zeit, seit der dieses Gerät das Match ohne Zähler-Kontakt beobachtet;
+ *   Untergrenze für das Übernahmeangebot, wenn der letzte Kontakt unbekannt ist
  */
 data class SyncInfo(
     val peers: Int,
     val scorerConnected: Boolean,
     val pendingToPeers: Int = 0,
     val lastEventReceivedAtMs: Long? = null,
-    val lastScorerContactAtMs: Long? = null,
+    val lastScorerContactMono: Long? = null,
+    val withoutScorerSinceMono: Long? = null,
 ) {
-    /** Millisekunden seit dem letzten Kontakt zum Zähler (nie negativ), `null` = noch nie Kontakt. */
-    fun staleForMs(nowMs: Long): Long? = lastScorerContactAtMs?.let { (nowMs - it).coerceAtLeast(0) }
+    /** Millisekunden seit dem letzten Kontakt zum Zähler (nie negativ), `null` = unbekannt. */
+    fun staleForMs(nowMono: Long): Long? = lastScorerContactMono?.let { (nowMono - it).coerceAtLeast(0) }
 
-    /** Ohne Verbindung zum Zähler seit mehr als [STALE_AFTER_MS] → Hinweis + „Zählen übernehmen“ (04 §3.2). */
-    fun offersTakeOver(nowMs: Long): Boolean = !scorerConnected && (staleForMs(nowMs) ?: Long.MAX_VALUE) > STALE_AFTER_MS
+    /**
+     * Ohne Verbindung zum Zähler seit mehr als [STALE_AFTER_MS] → Hinweis + „Zählen übernehmen“ (04 §3.2). Bei
+     * unbekanntem letztem Kontakt zählt die selbst beobachtete Zeit ohne Zähler.
+     */
+    fun offersTakeOver(nowMono: Long): Boolean {
+        if (scorerConnected) return false
+        val stale = staleForMs(nowMono) ?: withoutScorerSinceMono?.let { (nowMono - it).coerceAtLeast(0) } ?: return false
+        return stale > STALE_AFTER_MS
+    }
 
     companion object {
         /** Nur dieses Gerät, es zählt selbst. */
@@ -232,7 +244,28 @@ interface LiveMatchPort {
      * vorher nach. `false`, wenn kein Match aktiv ist, es beendet ist oder dieses Gerät schon zählt.
      */
     fun takeOverScoring(): Boolean
+
+    /** „Eingaben ansehen“: Eingaben des aktiven Matches, die die Rollenprüfung verworfen hat (02 §7.5), in Log-Ordnung. */
+    fun rejectedInputs(): List<RejectedInput>
 }
+
+/** Art einer verworfenen Eingabe. */
+enum class InputKind { POINT, UNDO, SET_DECISION, CORRECTION, PAUSE, RESUME, END, DETAIL }
+
+/**
+ * Eine wegen der Zählerrolle verworfene Eingabe (02 §7.5 Nr. 4) für „Eingaben ansehen“.
+ *
+ * @property matchTimeMs Zeitpunkt relativ zum Matchbeginn (Wanduhr des Geräts, nur Anzeige)
+ * @property device Gerät, das die Eingabe gemacht hat
+ * @property side Seite bei Punkten bzw. Aufgabe, sonst `null`
+ */
+data class RejectedInput(
+    val eventId: EventId,
+    val matchTimeMs: Long,
+    val device: DeviceKind,
+    val kind: InputKind,
+    val side: Side?,
+)
 
 /**
  * Eintrag im Verlauf: ein beendetes Match (`status = FINISHED`).
