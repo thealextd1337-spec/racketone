@@ -50,7 +50,8 @@ watchApp/                    SwiftUI-Quellen der watchOS-App               → A
 Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `backend/`, `testvectors/`.
 
 **Harte Regeln**
-1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`.
+1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`
+   (Ausnahme: `sync-protocol` zusätzlich `kotlinx-serialization-json` für den Wire-Codec, 01 §4.3).
    **Kein `Clock.System`/`Clock`, kein I/O, keine Coroutines, keine Plattform-APIs, kein Zufall, keine Floats** in der Engine-Logik.
    Zeit und IDs kommen als Parameter herein. Deterministisch: gleiche Events → gleicher Zustand auf jedem Gerät.
 2. Abhängigkeiten nur entlang des Graphen oben (01 §2.2). Keine Zyklen, keine Abkürzungen (z. B. `ui-phone` → `data` direkt ist verboten).
