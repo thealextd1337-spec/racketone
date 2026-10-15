@@ -9,6 +9,11 @@ local.properties
 *.keystore
 *.jks
 !debug.keystore
+# Release-Signierung (Upload-Key, docs/release/play-console.md) – nie einchecken
+*.p12
+*.pepk
+*upload*.properties
+*signing*.properties
 
 # IDE
 .idea/

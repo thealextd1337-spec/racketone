@@ -230,3 +230,13 @@ private class AndroidHaptics(
         }
     }
 }
+
+actual fun formatDateTime(epochMs: Long): String =
+    java.time.format.DateTimeFormatter
+        .ofLocalizedDateTime(java.time.format.FormatStyle.SHORT)
+        .withLocale(java.util.Locale.getDefault())
+        .format(
+            java.time.Instant
+                .ofEpochMilli(epochMs)
+                .atZone(java.time.ZoneId.systemDefault()),
+        )

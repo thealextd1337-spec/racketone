@@ -124,3 +124,11 @@ private class IosHaptics : Haptics {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, millis * 1_000_000), dispatch_get_main_queue(), block)
     }
 }
+
+actual fun formatDateTime(epochMs: Long): String {
+    val formatter = platform.Foundation.NSDateFormatter()
+    formatter.dateStyle = platform.Foundation.NSDateFormatterShortStyle
+    formatter.timeStyle = platform.Foundation.NSDateFormatterShortStyle
+    // Designierter Initialisierer: Sekunden seit 2001-01-01 (Referenzdatum) = Unix-Sekunden − 978 307 200
+    return formatter.stringFromDate(platform.Foundation.NSDate(timeIntervalSinceReferenceDate = epochMs / 1000.0 - 978_307_200.0))
+}

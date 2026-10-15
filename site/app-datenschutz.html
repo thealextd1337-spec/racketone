@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datenschutzerklärung der Advantly-Apps – Advantly</title>
+  <meta name="description" content="Datenschutzerklärung der Advantly-Apps für Android, Wear OS, iPhone und Apple Watch.">
+  <meta name="theme-color" content="#0b0c0f">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="alternate" hreflang="de" href="https://advantly.eu/app-datenschutz.html">
+  <link rel="alternate" hreflang="en" href="https://advantly.eu/en/app-privacy.html">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <!--
+    Datenschutzerklärung der Apps, Stand Phase 1 (offline). Diese URL ist in der Google Play Console als
+    Datenschutz-URL hinterlegt (docs/release/play-console.md) – Pfad nicht ändern, Inhalt aktuell halten.
+    Englische Fassung: en/app-privacy.html (inhaltlich synchron halten).
+    Abschnitte mit "ÜBERARBEITEN vor Phase 2/3" müssen vor dem jeweiligen Release angepasst werden
+    (Grundlage: docs/03-backend-datenmodell.md §8.4, docs/05-watches-health.md §6).
+  -->
+  <header class="top">
+    <div class="wrap">
+      <a class="logo" href="./"><img src="assets/icon.svg" alt="" width="32" height="32">Advantly</a>
+      <nav class="lang" aria-label="Sprache">
+        <a href="app-datenschutz.html" aria-current="true" lang="de">DE</a>
+        <a href="en/app-privacy.html" lang="en">EN</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="legal">
+    <div class="wrap">
+      <h1>Datenschutzerklärung der Advantly-Apps</h1>
+      <p class="note">Diese Erklärung gilt für die Advantly-Apps für Android-Smartphones und Wear-OS-Uhren sowie – sobald verfügbar – für iPhone und Apple Watch. Für die Website advantly.eu gilt die <a href="datenschutz.html">Datenschutzerklärung der Website</a>.</p>
+
+      <h2>1. Kurz gesagt</h2>
+      <ul>
+        <li>Advantly speichert Ihre Matches <strong>nur lokal</strong> auf Ihrem Handy und Ihrer Uhr. Es gibt derzeit kein Benutzerkonto und keine Cloud.</li>
+        <li>Daten werden nur zwischen <strong>Ihren eigenen Geräten</strong> (Handy und gekoppelte Uhr) übertragen.</li>
+        <li>Die Herzfrequenz wird auf der Uhr während eines Matches gemessen und angezeigt, aber <strong>nicht in einer Cloud gespeichert und nicht weitergegeben</strong>.</li>
+        <li><strong>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge.</strong> Ich als Anbieter erhalte keine Ihrer Match- oder Gesundheitsdaten.</li>
+      </ul>
+
+      <h2>2. Verantwortlicher</h2>
+      <p>
+        Carlo-Alexander Kamper<br>
+        Am Anger 11, 8054 Seiersberg, Österreich<br>
+        E-Mail: <a href="mailto:alxpro@cakamper.at">alxpro@cakamper.at</a>
+      </p>
+      <p>Ein Datenschutzbeauftragter ist nicht bestellt.</p>
+      <!-- ÜBERARBEITEN vor Phase 3: Pflicht zur Bestellung eines Datenschutzbeauftragten prüfen (03 §8.4 Punkt 1, O6). -->
+
+      <h2>3. Welche Daten die Apps verarbeiten</h2>
+
+      <h3>3.1 Match-Daten</h3>
+      <p>Wenn Sie ein Match zählen, speichert die App Sportart, Regeln und Format, den Spielstand mit allen Punkten (einschließlich Korrekturen), Zeitpunkte sowie die Namen oder Bezeichnungen der Spieler, die Sie selbst eingeben. Diese Daten liegen ausschließlich im privaten Speicherbereich der App auf Ihrem Gerät.</p>
+      <p>Zweck ist das Zählen, Fortsetzen und Anzeigen Ihrer Matches. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von Ihnen genutzten App-Funktion). Wenn Sie Namen von Mitspielern eingeben, geschieht das in Ihrem berechtigten Interesse, Ihre Spiele zu dokumentieren (Art. 6 Abs. 1 lit. f DSGVO); diese Namen verlassen Ihre Geräte nicht.</p>
+      <!-- ÜBERARBEITEN vor Phase 2: Konto, Cloud-Sync (Supabase, EU), Freunde, Gäste-Claim, Sichtbarkeit für Mitspieler,
+           Empfänger/Auftragsverarbeiter, Drittlandübermittlung (03 §8.1, §8.4 Punkte 4–7). -->
+
+      <h3>3.2 Übertragung zwischen Ihren eigenen Geräten</h3>
+      <p>Damit Sie auf Handy und Uhr gleichzeitig zählen können, gleichen die Apps Match-Daten zwischen Ihrem Handy und Ihrer gekoppelten Uhr ab:</p>
+      <ul>
+        <li><strong>Android und Wear OS:</strong> über die Wear Data Layer API der Google-Play-Dienste. Die Übertragung läuft direkt per verschlüsselter Bluetooth-Verbindung oder, wenn diese nicht verfügbar ist, Ende-zu-Ende-verschlüsselt über Server von Google. Nur die Advantly-App mit derselben Signatur auf Ihren gekoppelten Geräten kann diese Daten lesen.</li>
+        <li><strong>iPhone und Apple Watch</strong> (sobald verfügbar): über Apples WatchConnectivity zwischen Ihren gekoppelten Geräten.</li>
+      </ul>
+      <p>Ich als Anbieter betreibe dafür keinen Server und erhalte keine dieser Daten.</p>
+
+      <h3>3.3 Herzfrequenz und Workout-Session auf der Uhr</h3>
+      <p>Während eines Matches startet die Uhr-App eine Trainings-Session (Wear OS: Health Services, Apple Watch: Workout-Session). Das sorgt dafür, dass die App bei ausgeschaltetem Display weiterläuft und den Spielstand nicht verliert. Wenn Sie es erlauben, zeigt die App dabei Ihre aktuelle Herzfrequenz an.</p>
+      <ul>
+        <li>Die Herzfrequenz wird nur während einer laufenden Match-Session gelesen, nur für die Anzeige auf der Uhr verwendet und von Advantly <strong>nicht dauerhaft gespeichert</strong>.</li>
+        <li>Sie wird <strong>nicht in eine Cloud übertragen</strong>, nicht an mich und nicht an Dritte weitergegeben und nicht für Werbung verwendet.</li>
+        <li>Advantly schreibt derzeit nichts in Health Connect, Apple Health oder andere Gesundheitsspeicher.</li>
+        <li>Die Messung selbst übernehmen die Sensoren und Systemdienste Ihrer Uhr (Google bzw. Samsung unter Wear OS, Apple unter watchOS) nach deren eigenen Datenschutzbestimmungen.</li>
+      </ul>
+      <p>Die Herzfrequenz ist ein Gesundheitsdatum (Art. 9 DSGVO). Sie wird nur verarbeitet, wenn Sie die Berechtigung erteilen und ein Match starten; Rechtsgrundlage ist Ihre ausdrückliche Einwilligung (Art. 9 Abs. 2 lit. a DSGVO). Sie können die Berechtigung jederzeit in den Einstellungen der Uhr entziehen – das Zählen funktioniert dann weiterhin, nur ohne Pulsanzeige.</p>
+      <!-- ÜBERARBEITEN vor Phase 3: Health-Speicherung (Pulsserie, kcal, Schritte pro Match), Übertragung an das Handy,
+           Health Connect / Apple Health, eigene In-App-Einwilligung getrennt nach Messen/Cloud/Teilen (05 §6.3, 03 §8.2),
+           Widerruf = Löschung, Freigabe an Freunde, DSFA. Data-safety-Angaben in der Play Console mit anpassen. -->
+
+      <h3>3.4 Was Advantly nicht tut</h3>
+      <p>Die Apps enthalten <strong>keine Werbung</strong>, <strong>keine Tracking- oder Analyse-Werkzeuge</strong> und keine Werbe-ID-Nutzung. Die aktuellen Versionen haben <strong>keine Internet-Berechtigung</strong>, es gibt kein Benutzerkonto und keinen Standortzugriff. Es findet keine automatisierte Entscheidungsfindung oder Profilbildung statt.</p>
+      <!-- ÜBERARBEITEN vor Phase 2: Internet-Berechtigung, Push (FCM/APNs), ggf. Crash-Reporting, Abo (RevenueCat). -->
+
+      <h2>4. Berechtigungen und ihr Zweck</h2>
+      <p>Die Uhr-App (Wear OS) fragt nur nach Berechtigungen, die sie für das Zählen mit Trainings-Session braucht. Alle können Sie verweigern oder später entziehen.</p>
+      <ul>
+        <li><strong>Herzfrequenz / Körpersensoren</strong> (<code>health.READ_HEART_RATE</code>, bis Wear OS 5 <code>BODY_SENSORS</code>): Anzeige Ihres Pulses während des Matches.</li>
+        <li><strong>Körperliche Aktivität</strong> (<code>ACTIVITY_RECOGNITION</code>): Erfassung der Schritte während der Trainings-Session durch die Systemdienste der Uhr.</li>
+        <li><strong>Benachrichtigungen</strong> (<code>POST_NOTIFICATIONS</code>): Hinweis auf das laufende Match, über den Sie zurück in die App gelangen.</li>
+        <li><strong>Vordergrunddienst „Gesundheit“</strong> und Bildschirm aktiv halten: damit das Match bei ausgeschaltetem Display weiterläuft.</li>
+        <li><strong>Vibration</strong> (Handy und Uhr): spürbare Bestätigung jedes Punkts.</li>
+      </ul>
+
+      <h2>5. Speicherdauer und Löschung</h2>
+      <p>Match-Daten bleiben auf Ihren Geräten, bis Sie sie löschen. Einzelne Matches löschen Sie in der <strong>Handy-App</strong> unter Verlauf → Match → Löschen. In der Uhr-App gibt es keine Löschfunktion für einzelne Matches. Alle Daten entfernen Sie vollständig, indem Sie die App auf Handy und Uhr deinstallieren oder in den Systemeinstellungen des jeweiligen Geräts „App-Daten löschen“ wählen. Das wirkt jeweils nur auf dem betreffenden Gerät, deshalb auf Handy <em>und</em> Uhr durchführen. Die Herzfrequenz wird nicht gespeichert und muss daher nicht gelöscht werden.</p>
+      <!-- Stand: „Match löschen“ nur in der Handy-App (PR #14, Verlauf → Match → Löschen), nicht auf der Uhr.
+           ÜBERARBEITEN, wenn sich Menüpfad oder Funktionsumfang ändern (z. B. Löschen auf der Uhr oder Cloud-Kopie ab P2). -->
+      <p>Wenn Sie die Android-Datensicherung in Ihrem Google-Konto aktiviert haben, kann das System die Match-Daten der Handy-App in diese Sicherung aufnehmen. Diese Sicherung verwaltet Google für Sie; ich habe darauf keinen Zugriff. Sie können sie in den Android-Einstellungen unter „Sicherung“ steuern und löschen.</p>
+
+      <h2>6. Google Play und App-Store</h2>
+      <p>Wenn Sie Advantly über Google Play (oder später Apples App Store) herunterladen, verarbeitet der Store-Betreiber dabei Daten in eigener Verantwortung. Wenn Sie in Ihrem Gerät der Weitergabe von Absturz- und Nutzungsdaten an Google bzw. Apple zugestimmt haben, kann ich in der jeweiligen Entwicklerkonsole zusammengefasste, nicht personenbezogene Absturzstatistiken sehen.</p>
+
+      <h2>7. Ihre Rechte</h2>
+      <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20), Widerspruch (Art. 21) sowie das Recht, eine erteilte Einwilligung jederzeit mit Wirkung für die Zukunft zu widerrufen (Art. 7 Abs. 3). Da Ihre Daten derzeit nur auf Ihren Geräten liegen, können Sie die meisten dieser Rechte direkt selbst ausüben (Anzeigen und Ändern in der App, Löschen einzelner Matches in der Handy-App bzw. aller Daten durch Deinstallation oder „App-Daten löschen“, Entzug von Berechtigungen). Bei Fragen wenden Sie sich an die oben genannte E-Mail-Adresse.</p>
+      <p>Sie haben außerdem das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren (Art. 77 DSGVO). In Österreich ist das die Österreichische Datenschutzbehörde, Barichgasse 40–42, 1030 Wien, <a href="https://www.dsb.gv.at/">dsb.gv.at</a>. Sie können sich auch an die Aufsichtsbehörde Ihres Aufenthaltsorts wenden.</p>
+
+      <h2>8. Mindestalter</h2>
+      <p>Advantly richtet sich an Personen ab 14 Jahren.</p>
+      <!-- Mindestalter 14: § 4 Abs. 4 DSG (Österreich) i. V. m. Art. 8 DSGVO. In Deutschland gilt für Einwilligungen 16.
+           ÜBERARBEITEN vor Phase 2/3: Altersabfrage bei der Registrierung je Land (docs/release/play-console.md §6.5). -->
+
+      <h2>9. Änderungen</h2>
+      <p>Advantly befindet sich in Entwicklung. Mit Benutzerkonten, Freunden und Cloud-Synchronisation (Phase 2) sowie der Speicherung und Auswertung von Gesundheitsdaten (Phase 3) wird diese Erklärung erweitert, <strong>bevor</strong> die jeweiligen Funktionen verfügbar werden. Gesundheitsdaten werden auch dann nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert.</p>
+
+      <h2>10. Stand</h2>
+      <p>Oktober 2026 (Version 1, Phase 1 – offline)</p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>© 2026 Advantly</span>
+      <nav aria-label="Rechtliches">
+        <a href="./">Start</a>
+        <a href="impressum.html">Impressum</a>
+        <a href="datenschutz.html">Datenschutz</a>
+        <a href="app-datenschutz.html">App-Datenschutz</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

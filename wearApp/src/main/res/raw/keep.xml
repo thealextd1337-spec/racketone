@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource-Shrinker (Release): Ressourcen behalten, die nur per Name gelesen werden.
+     android_wear_capabilities liest Google Play Services für den CapabilityClient (Wear Data Layer).
+     tools:keep in res/values/wear.xml allein reicht dafür nicht (W1-G, im Release-AAB geprüft). -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@array/android_wear_capabilities" />
