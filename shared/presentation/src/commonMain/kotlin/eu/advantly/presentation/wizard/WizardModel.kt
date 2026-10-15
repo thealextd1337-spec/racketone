@@ -46,6 +46,9 @@ sealed interface SetsChoice {
         }
 }
 
+/** Ein normaler Satz oder ein einzelner Tiebreak als komplettes Match. */
+enum class TennisMatchChoice { REGULAR, TIEBREAK_7, TIEBREAK_10 }
+
 /** Entscheidungssatz bei Best-of (Tennis/Padel, 02 §5.1 „Erweitert“). */
 enum class DecidingSetChoice {
     /** Wie die anderen Sätze. */
@@ -89,6 +92,8 @@ data class WizardInput(
     val mixed: Boolean = false,
     val sets: SetsChoice? = null,
     val gamesPerSet: Int = 6,
+    val tennisMatch: TennisMatchChoice = TennisMatchChoice.REGULAR,
+    val serveStats: Boolean = true,
     val tiebreakAt: TiebreakAtChoice = TiebreakAtChoice.AT_GAMES,
     val deuceMode: DeuceMode = DeuceMode.ADVANTAGE,
     val decidingSet: DecidingSetChoice = DecidingSetChoice.NORMAL,

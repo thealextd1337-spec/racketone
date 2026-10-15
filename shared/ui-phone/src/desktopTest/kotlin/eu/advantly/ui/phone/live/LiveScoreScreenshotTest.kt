@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -110,6 +112,85 @@ class LiveScoreScreenshotTest {
         startWith(format, points, firstServerSide, meta)
         navigator.push(Overlay.Live)
     }
+
+    @Test
+    fun doublesServerChoice() =
+        capture(
+            "w2-server-choice-de",
+            Locale.GERMANY,
+            liveModel(Presets.PADEL_GOLDEN_BO3.format(), ""),
+        )
+
+    @Test
+    fun serveInfoWithLargeText() {
+        for ((language, locale) in listOf("en" to Locale.US, "de" to Locale.GERMANY)) {
+            capture(
+                "w2-serve-info-$language-200",
+                locale,
+                liveModel(Presets.TENNIS_SINGLES_BO3.format(), ""),
+                fontScale = 2f,
+                interact = {
+                    onNodeWithTag("panel_them").performClick()
+                    waitForIdle()
+                    val chip = onNodeWithTag("serve_DOUBLE_FAULT")
+                    val full = chip.getUnclippedBoundsInRoot()
+                    val visible = chip.getBoundsInRoot()
+                    assertEquals(full.bottom - full.top, visible.bottom - visible.top)
+                },
+            )
+        }
+    }
+
+    @Test
+    fun tiebreakOnlyResult() =
+        capture(
+            "w2-tiebreak-result-top-de",
+            Locale.GERMANY,
+            testModel().apply {
+                startWith(Presets.TENNIS_TIEBREAK_ONLY_7.format())
+                live.play("ABABABABABAA")
+                val id =
+                    live.active.value!!
+                        .lastPoint!!
+                        .id
+                live.setServeInfo(id, eu.advantly.core.scoring.ServeOutcome.FIRST_SERVE_IN)
+                navigator.push(Overlay.Result(live.active.value!!.matchId))
+            },
+        )
+
+    @Test
+    fun tiebreakOnlyResultAndServeStats() =
+        capture(
+            "w2-tiebreak-result-de",
+            Locale.GERMANY,
+            testModel().apply {
+                startWith(Presets.TENNIS_TIEBREAK_ONLY_7.format())
+                live.play("ABABABABABAA")
+                val id =
+                    live.active.value!!
+                        .lastPoint!!
+                        .id
+                live.setServeInfo(id, eu.advantly.core.scoring.ServeOutcome.FIRST_SERVE_IN)
+                navigator.push(Overlay.Result(live.active.value!!.matchId))
+            },
+            interact = { onNodeWithTag("serve_statistics").performScrollTo() },
+        )
+
+    @Test
+    fun wizardTiebreakOnlyAdvanced() =
+        capture(
+            "w2-wizard-tiebreak-de",
+            Locale.GERMANY,
+            testModel().apply {
+                onPlay()
+                wizard.selectSport(Sport.TENNIS)
+                wizard.selectSurface(null)
+                wizard.addGuest("Jonas")
+                wizard.next()
+                wizard.toggleAdvanced()
+                wizard.setTennisMatch(eu.advantly.presentation.wizard.TennisMatchChoice.TIEBREAK_10)
+            },
+        )
 
     // --- Tabs ---
 

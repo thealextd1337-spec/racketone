@@ -33,6 +33,7 @@ import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.common.LocalSelfId
+import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
@@ -76,6 +77,7 @@ fun AdvantlyApp(
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
     val self by model.players.self.collectAsState()
+    val updateRequired by model.live.updateRequired.collectAsState()
     val navigator = model.navigator
     if (autoBenchmark) {
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
@@ -92,11 +94,17 @@ fun AdvantlyApp(
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
                 // oder für Screenreader erreichbar.
                 if (navigator.top == null) {
-                    TabLayer(model, versionName)
+                    Column(Modifier.fillMaxSize().safeContentPadding()) {
+                        UpdateRequiredBanner(updateRequired)
+                        Box(Modifier.weight(1f)) { TabLayer(model, versionName) }
+                    }
                 }
                 when (val top = navigator.top) {
                     Overlay.Wizard -> {
-                        WizardScreen(model.wizard, onClose = { navigator.pop() }, onStart = model::finishWizard)
+                        Column(Modifier.fillMaxSize().safeContentPadding()) {
+                            UpdateRequiredBanner(updateRequired)
+                            WizardScreen(model.wizard, onClose = { navigator.pop() }, onStart = model::finishWizard)
+                        }
                     }
 
                     Overlay.Live -> {

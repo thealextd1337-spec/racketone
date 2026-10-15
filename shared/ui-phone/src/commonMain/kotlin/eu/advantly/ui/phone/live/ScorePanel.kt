@@ -7,6 +7,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -54,6 +57,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -85,6 +89,9 @@ private val MIN_DIGIT_HEIGHT = 24.dp
 private const val FLASH_MILLIS = 120
 private const val FLASH_ALPHA = 0.24f
 
+/** Gleiche bewusste Haltegeste wie auf der Uhr. */
+private const val REMOVE_HOLD_MILLIS = 1_000L
+
 /** Inhalt eines Score-Panels. */
 internal data class ScorePanelContent(
     val side: Side,
@@ -100,6 +107,7 @@ internal data class ScorePanelContent(
     val serveColor: Color,
     val a11yDescription: String,
     val undoLabel: String,
+    val removeLabel: String = undoLabel,
 )
 
 /**
@@ -121,13 +129,22 @@ internal fun ScorePanel(
     onSwipeDown: (eventUptimeMillis: Long?) -> Unit,
     modifier: Modifier = Modifier,
     interactive: Boolean = true,
+    canRemovePoint: Boolean = false,
+    onRemovePoint: () -> Unit = {},
 ) {
     val colors = AdvantlyTheme.colors
     val teamColor = if (content.side == Side.A) colors.teamUs else colors.teamThem
     val tint = if (content.side == Side.A) colors.teamUsTint else colors.teamThemTint
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
+    val currentOnRemove by rememberUpdatedState(onRemovePoint)
+    val currentCanRemove by rememberUpdatedState(canRemovePoint)
     var pressed by remember { mutableStateOf(false) }
+    val holdProgress = remember { Animatable(0f) }
+    LaunchedEffect(pressed, canRemovePoint) {
+        holdProgress.snapTo(0f)
+        if (pressed && canRemovePoint) holdProgress.animateTo(1f, tween(REMOVE_HOLD_MILLIS.toInt(), easing = LinearEasing))
+    }
 
     // Neues Animatable pro Punkt, mit Startwert > 0: Der Blitz ist damit schon im ERSTEN Frame nach dem Tap
     // sichtbar (wichtig für die Tap→Frame-Messung), danach klingt er in 120 ms ab.
@@ -151,14 +168,30 @@ internal fun ScorePanel(
                     drawContent()
                     val alpha = flash.value
                     if (alpha > 0f) drawRect(Color.White.copy(alpha = alpha))
+                    if (holdProgress.value > 0f) {
+                        val height = 3.dp.toPx()
+                        drawRect(
+                            teamColor.copy(alpha = 0.65f),
+                            topLeft = Offset(0f, size.height - height),
+                            size = Size(size.width * holdProgress.value, height),
+                        )
+                    }
                 }.semantics(mergeDescendants = true) {
                     contentDescription = content.a11yDescription
                     liveRegion = LiveRegionMode.Polite
                     if (interactive) {
                         role = Role.Button
-                        onClick {
-                            currentOnTap(null)
-                            true
+                        if (enabled) {
+                            onClick {
+                                currentOnTap(null)
+                                true
+                            }
+                        }
+                        if (canRemovePoint) {
+                            onLongClick(label = content.removeLabel) {
+                                currentOnRemove()
+                                true
+                            }
                         }
                         customActions =
                             listOf(
@@ -169,7 +202,7 @@ internal fun ScorePanel(
                             )
                     }
                 }.pointerInput(enabled, interactive) {
-                    if (!enabled || !interactive) return@pointerInput
+                    if (!interactive) return@pointerInput
                     val swipeMin = 72.dp.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -177,12 +210,37 @@ internal fun ScorePanel(
                         var multiTouch = false
                         var moved = false
                         var up: PointerInputChange? = null
+                        var longPressHandled = false
                         try {
                             while (true) {
-                                val event = awaitPointerEvent()
+                                val event =
+                                    if (currentCanRemove && !moved && !multiTouch && !longPressHandled) {
+                                        val remaining =
+                                            (
+                                                REMOVE_HOLD_MILLIS -
+                                                    (
+                                                        currentEvent.changes
+                                                            .firstOrNull { it.id == down.id }
+                                                            ?.uptimeMillis
+                                                            ?.minus(down.uptimeMillis) ?: 0L
+                                                    )
+                                            ).coerceAtLeast(1L)
+                                        withTimeoutOrNull(remaining) { awaitPointerEvent() }
+                                    } else {
+                                        awaitPointerEvent()
+                                    }
+                                if (event == null) {
+                                    if (currentCanRemove) {
+                                        longPressHandled = true
+                                        pressed = false
+                                        currentOnRemove()
+                                    }
+                                    continue
+                                }
                                 if (event.changes.count { it.pressed } > 1) multiTouch = true
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                                if (moved || multiTouch) pressed = false
                                 if (!change.pressed) {
                                     change.consume()
                                     up = change
@@ -195,9 +253,9 @@ internal fun ScorePanel(
                         val release = up ?: return@awaitEachGesture
                         val delta = release.position - down.position
                         when {
-                            multiTouch -> Unit
-                            !moved -> currentOnTap(release.uptimeMillis)
-                            delta.y > swipeMin && delta.y > abs(delta.x) * 1.5f -> currentOnSwipeDown(release.uptimeMillis)
+                            multiTouch || longPressHandled -> Unit
+                            !moved && enabled -> currentOnTap(release.uptimeMillis)
+                            enabled && delta.y > swipeMin && delta.y > abs(delta.x) * 1.5f -> currentOnSwipeDown(release.uptimeMillis)
                         }
                     }
                 },

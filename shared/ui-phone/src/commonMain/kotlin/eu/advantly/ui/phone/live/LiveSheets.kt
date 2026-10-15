@@ -42,6 +42,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.GameKind
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.presentation.live.LiveScoreRules
@@ -63,7 +64,6 @@ import eu.advantly.ui.phone.resources.correct_server_from_start
 import eu.advantly.ui.phone.resources.correct_server_title
 import eu.advantly.ui.phone.resources.dialog_another_match
 import eu.advantly.ui.phone.resources.dialog_another_set
-import eu.advantly.ui.phone.resources.dialog_match_tiebreak
 import eu.advantly.ui.phone.resources.dialog_no_finish
 import eu.advantly.ui.phone.resources.dialog_set_lost
 import eu.advantly.ui.phone.resources.dialog_set_won
@@ -82,6 +82,7 @@ import eu.advantly.ui.phone.resources.hint_match_won
 import eu.advantly.ui.phone.resources.match_end_retired_suffix
 import eu.advantly.ui.phone.resources.match_end_walkover_suffix
 import eu.advantly.ui.phone.resources.result_followup_hint
+import eu.advantly.ui.phone.resources.set_end_finish
 import org.jetbrains.compose.resources.stringResource
 
 /** Bottom-Sheet über dem Live-Score (04 §5.6 „Bottom-Sheet-Dialog“): Scrim blockiert die Tap-Flächen. */
@@ -178,7 +179,7 @@ private fun setScore(
             SetKind.MATCH_TIEBREAK -> set.tiebreak ?: set.points
             else -> set.points
         } ?: return ""
-    return scorePair(pair)
+    return if (set.kind == SetKind.MATCH_TIEBREAK) "[${scorePair(pair)}]" else scorePair(pair)
 }
 
 /**
@@ -199,29 +200,30 @@ internal fun BoxScope.SetEndSheet(
             SheetBigScore(setScore(snapshot, sets.lastIndex))
         }
         SheetQuestion(question)
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), modifier = Modifier.fillMaxWidth()) {
+        ServeInfoBar(controller, snapshot, persistent = true)
+        snapshot.nextSetOptions.forEach { kind ->
             SheetButton(
-                stringResource(Res.string.dialog_no_finish),
-                primary = false,
-                onClick = { controller.continueDecision(anotherSet = false) },
-                modifier = Modifier.weight(1f).testTag("decision_no"),
-            )
-            SheetButton(
-                stringResource(Res.string.dialog_yes),
-                primary = true,
-                onClick = { controller.continueDecision(anotherSet = true) },
-                modifier = Modifier.weight(1f).testTag("decision_yes"),
-            )
-        }
-        if (snapshot.setup.format.matchTiebreak != null) {
-            SheetButton(
-                stringResource(Res.string.dialog_match_tiebreak),
-                primary = false,
-                onClick = { controller.continueDecision(anotherSet = true, matchTiebreak = true) },
-                modifier = Modifier.fillMaxWidth().testTag("decision_match_tiebreak"),
+                nextSetLabel(kind, singleOption = snapshot.nextSetOptions.size == 1),
+                primary = kind == NextSetKind.REGULAR,
+                onClick = { controller.startNextSet(kind) },
+                modifier =
+                    Modifier.fillMaxWidth().testTag(
+                        when (kind) {
+                            NextSetKind.REGULAR -> "decision_yes"
+                            NextSetKind.TIEBREAK_7 -> "decision_tiebreak_7"
+                            else -> "decision_match_tiebreak"
+                        },
+                    ),
             )
         }
+        SheetButton(
+            stringResource(if (snapshot.nextSetOptions.size == 1) Res.string.dialog_no_finish else Res.string.set_end_finish),
+            primary = false,
+            onClick = { controller.continueDecision(anotherSet = false) },
+            modifier = Modifier.fillMaxWidth().testTag("decision_no"),
+        )
         SheetTextButton(stringResource(Res.string.action_undo), "sheet_undo") { controller.undo() }
+        PointRemovalActions(controller, snapshot)
     }
 }
 
@@ -261,6 +263,7 @@ internal fun BoxScope.MatchEndSheet(
             modifier = Modifier.testTag("match_end_title"),
         )
         SheetBigScore(resultLine(state.sets, state.current, result, state.setsWon))
+        ServeInfoBar(controller, snapshot, persistent = true)
         if (canFollowUp) {
             SheetQuestion(stringResource(Res.string.dialog_another_match))
             Text(stringResource(Res.string.result_followup_hint), style = AdvantlyTheme.typography.body, color = AdvantlyTheme.colors.text2)
@@ -287,6 +290,7 @@ internal fun BoxScope.MatchEndSheet(
             )
         }
         if (snapshot.canUndo) SheetTextButton(stringResource(Res.string.action_undo), "sheet_undo") { controller.undo() }
+        PointRemovalActions(controller, snapshot)
     }
 }
 

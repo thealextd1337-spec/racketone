@@ -38,6 +38,8 @@ import eu.advantly.core.model.Surface
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.SetsChoice
+import eu.advantly.presentation.wizard.TennisMatchChoice
+import eu.advantly.presentation.wizard.TiebreakAtChoice
 import eu.advantly.presentation.wizard.WizardStep
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.AdvantlyButton
@@ -56,6 +58,8 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
+import eu.advantly.ui.phone.resources.setup_one_game_hint
+import eu.advantly.ui.phone.resources.setup_serve_stats
 import eu.advantly.ui.phone.resources.wizard_advanced
 import eu.advantly.ui.phone.resources.wizard_continue
 import eu.advantly.ui.phone.resources.wizard_environment
@@ -77,6 +81,7 @@ import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.resources.wizard_title_sport
 import eu.advantly.ui.phone.resources.wizard_title_surface
 import eu.advantly.ui.phone.resources.wizard_title_venue
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -269,34 +274,31 @@ private fun FormatStep(
     val options = state.options
     val accent = sportColor(sport)
     StepTitle(stringResource(Res.string.wizard_title_format))
+    if (sport.isTennisLike) TennisFormatChoices(wizard, state)
 
-    SectionTitle(stringResource(setsTitle(sport)))
-    SegmentedChoice(
-        options = options.sets,
-        selected = input.sets,
-        label = { setsLabel(it, sport) },
-        onSelect = wizard::setSets,
-        tagPrefix = "sets",
-        accent = accent,
-    )
-    if (input.sets == null) {
-        Text(
-            stringResource(Res.string.wizard_sets_required),
-            style = AdvantlyTheme.typography.caption,
-            color = AdvantlyTheme.colors.hint,
-            modifier = Modifier.padding(top = Spacing.xs).testTag("sets_required"),
-        )
-    }
-    if (options.gamesPerSet.isNotEmpty()) {
-        SectionTitle(stringResource(gamesTitle()))
+    if (input.tennisMatch == TennisMatchChoice.REGULAR || !sport.isTennisLike) {
+        SectionTitle(stringResource(setsTitle(sport)))
         SegmentedChoice(
-            options = options.gamesPerSet,
-            selected = input.gamesPerSet,
-            label = { gamesLabel(it) },
-            onSelect = wizard::setGamesPerSet,
-            tagPrefix = "games",
+            options = options.sets,
+            selected = input.sets,
+            label = { setsLabel(it, sport) },
+            onSelect = wizard::setSets,
+            tagPrefix = "sets",
             accent = accent,
         )
+        if (input.sets == null) {
+            Text(
+                stringResource(Res.string.wizard_sets_required),
+                style = AdvantlyTheme.typography.caption,
+                color = AdvantlyTheme.colors.hint,
+                modifier = Modifier.padding(top = Spacing.xs).testTag("sets_required"),
+            )
+        }
+    }
+    if (options.gamesPerSet.isNotEmpty() && input.tennisMatch == TennisMatchChoice.REGULAR) {
+        SectionTitle(stringResource(gamesTitle()))
+        GamesPerSetChoices(wizard, state)
+        if (input.gamesPerSet == 1) RuleHint(Res.string.setup_one_game_hint)
     }
     if (options.points.isNotEmpty()) {
         SectionTitle(stringResource(pointsTitle(sport)))
@@ -321,7 +323,7 @@ private fun FormatStep(
         )
         RuleHint(pickleballScoringHint())
     }
-    if (sport == Sport.PADEL && options.deuceModes.isNotEmpty()) {
+    if (sport == Sport.PADEL && input.tennisMatch == TennisMatchChoice.REGULAR && options.deuceModes.isNotEmpty()) {
         DeuceChoice(wizard, state, accent)
     }
 
@@ -363,7 +365,7 @@ private fun DeuceChoice(
 }
 
 @Composable
-private fun RuleHint(text: org.jetbrains.compose.resources.StringResource) {
+private fun RuleHint(text: StringResource) {
     Text(
         stringResource(text),
         style = AdvantlyTheme.typography.caption,
@@ -406,6 +408,16 @@ private fun AdvancedSection(
     }
     if (!input.advancedExpanded) return
     Column(Modifier.testTag("advanced_content")) {
+        if (sport.isTennisLike) {
+            ToggleRow(
+                title = stringResource(Res.string.setup_serve_stats),
+                subtitle = null,
+                checked = state.input.serveStats,
+                onChange = wizard::setServeStats,
+                tag = "toggle_serve_stats",
+            )
+            if (input.tennisMatch != TennisMatchChoice.REGULAR) return@Column
+        }
         when (sport) {
             Sport.TENNIS -> {
                 DeuceChoice(wizard, state, accent)
@@ -479,7 +491,11 @@ private fun TennisLikeAdvanced(
     if (options.tiebreakAt.isNotEmpty()) {
         SectionTitle(stringResource(tiebreakTitle()))
         SegmentedChoice(
-            options = options.tiebreakAt,
+            options =
+                options.tiebreakAt.filter {
+                    input.gamesPerSet > 1 ||
+                        it != TiebreakAtChoice.AT_GAMES_MINUS_ONE
+                },
             selected = input.tiebreakAt,
             label = { tiebreakLabel(it, input.gamesPerSet) },
             onSelect = wizard::setTiebreakAt,

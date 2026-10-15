@@ -1,0 +1,92 @@
+package eu.advantly.ui.phone.common
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.runComposeUiTest
+import eu.advantly.core.scoring.Presets
+import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.startWith
+import eu.advantly.ui.phone.testModel
+import java.util.Locale
+import kotlin.test.Test
+
+@OptIn(ExperimentalTestApi::class)
+class ScoreTextsTest {
+    @Test
+    fun completedTiebreakHasBracketsInResultAndState() {
+        val previous = Locale.getDefault()
+        try {
+            for ((locale, expected) in listOf(Locale.GERMANY to "[7:5]", Locale.US to "[7–5]")) {
+                Locale.setDefault(locale)
+                runComposeUiTest {
+                    val model = testModel().apply { startWith(Presets.TENNIS_TIEBREAK_ONLY_7.format(), "AB".repeat(5) + "AA") }
+                    val state =
+                        model.live.active.value!!
+                            .state
+                    setContent {
+                        AdvantlyTheme(darkTheme = true) {
+                            Column {
+                                Text(resultLine(state.sets, state.current, state.result, state.setsWon), Modifier.testTag("result_line"))
+                                Text(
+                                    stateScore(
+                                        state,
+                                        model.live.active.value!!
+                                            .setup.sport,
+                                    ),
+                                    Modifier.testTag("state_score"),
+                                )
+                            }
+                        }
+                    }
+                    onNodeWithTag("result_line").assertTextEquals(expected)
+                    onNodeWithTag("state_score").assertTextEquals(expected)
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun tiebreakOnlyFormatsHaveLocalizedLabels() {
+        val previous = Locale.getDefault()
+        val presets =
+            listOf(
+                Presets.TENNIS_TIEBREAK_ONLY_7,
+                Presets.TENNIS_TIEBREAK_ONLY_10,
+                Presets.PADEL_TIEBREAK_ONLY_7,
+                Presets.PADEL_TIEBREAK_ONLY_10,
+            )
+        val german =
+            listOf("Nur Tiebreak (bis 7)", "Nur Champions-Tiebreak (bis 10)", "Nur Tiebreak (bis 7)", "Nur Super-Tiebreak (bis 10)")
+        val english =
+            listOf("Tiebreak only (to 7)", "Champions tiebreak only (to 10)", "Tiebreak only (to 7)", "Super tiebreak only (to 10)")
+        try {
+            for ((locale, labels) in listOf(Locale.GERMANY to german, Locale.US to english)) {
+                Locale.setDefault(locale)
+                runComposeUiTest {
+                    setContent {
+                        AdvantlyTheme(darkTheme = true) {
+                            Column {
+                                presets.forEachIndexed {
+                                    index,
+                                    preset,
+                                    ->
+                                    Text(formatLabel(preset.format()), Modifier.testTag("format_$index"))
+                                }
+                            }
+                        }
+                    }
+                    labels.forEachIndexed { index, label -> onNodeWithTag("format_$index").assertTextEquals(label) }
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+}

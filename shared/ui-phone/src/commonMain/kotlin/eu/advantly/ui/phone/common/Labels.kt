@@ -6,6 +6,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchMode
+import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
@@ -25,6 +26,9 @@ import eu.advantly.ui.phone.resources.live_games_and_points
 import eu.advantly.ui.phone.resources.live_score_advantage
 import eu.advantly.ui.phone.resources.live_score_pair
 import eu.advantly.ui.phone.resources.player_you
+import eu.advantly.ui.phone.resources.setup_padel_tiebreak_only_10
+import eu.advantly.ui.phone.resources.setup_tiebreak_only_10
+import eu.advantly.ui.phone.resources.setup_tiebreak_only_7
 import eu.advantly.ui.phone.resources.sport_badminton
 import eu.advantly.ui.phone.resources.sport_padel
 import eu.advantly.ui.phone.resources.sport_pickleball
@@ -81,7 +85,15 @@ fun teamName(
 /** „Best of 3“ bzw. „Offen“. */
 @Composable
 fun formatLabel(format: MatchFormat): String =
-    if (format.match.mode == MatchMode.OPEN) {
+    if (format.match.bestOf == 1 && format.decidingSet is MatchTiebreakFormat) {
+        stringResource(
+            when {
+                (format.decidingSet as? MatchTiebreakFormat)?.pointsToWin == 7 -> Res.string.setup_tiebreak_only_7
+                format.sport == Sport.PADEL -> Res.string.setup_padel_tiebreak_only_10
+                else -> Res.string.setup_tiebreak_only_10
+            },
+        )
+    } else if (format.match.mode == MatchMode.OPEN) {
         stringResource(Res.string.format_open)
     } else {
         stringResource(Res.string.format_best_of, format.match.bestOf ?: 1)

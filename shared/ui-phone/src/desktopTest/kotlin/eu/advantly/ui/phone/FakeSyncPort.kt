@@ -1,9 +1,12 @@
 package eu.advantly.ui.phone
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchSetup
@@ -59,6 +62,17 @@ class FakeSyncPort(
     ): MatchId = after(base.start(setup, options))
 
     override fun recordPoint(side: Side): Boolean = after(base.recordPoint(side))
+
+    override fun removeLastPointOf(side: Side): Boolean = after(base.removeLastPointOf(side))
+
+    override fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean = after(base.setServeInfo(pointId, value))
+
+    override fun chooseServer(player: PlayerId): Boolean = after(base.chooseServer(player))
+
+    override fun startNextSet(kind: NextSetKind): Boolean = after(base.startNextSet(kind))
 
     override fun undo(): Boolean = after(base.undo())
 

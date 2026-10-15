@@ -13,6 +13,7 @@ import eu.advantly.core.model.Surface
 import eu.advantly.presentation.wizard.DecidingSetChoice
 import eu.advantly.presentation.wizard.PlayerPlace
 import eu.advantly.presentation.wizard.SetsChoice
+import eu.advantly.presentation.wizard.TennisMatchChoice
 import eu.advantly.presentation.wizard.TiebreakAtChoice
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.formatLabel
@@ -68,6 +69,7 @@ import eu.advantly.ui.phone.resources.fmt_sets_title
 import eu.advantly.ui.phone.resources.fmt_sets_title_pickleball
 import eu.advantly.ui.phone.resources.fmt_sets_to_win
 import eu.advantly.ui.phone.resources.fmt_summary_games
+import eu.advantly.ui.phone.resources.fmt_summary_one_game
 import eu.advantly.ui.phone.resources.fmt_summary_points
 import eu.advantly.ui.phone.resources.fmt_tiebreak_at
 import eu.advantly.ui.phone.resources.fmt_tiebreak_none
@@ -306,8 +308,10 @@ internal fun formatSummary(state: WizardUiState): String {
         parts += stringResource(Res.string.fmt_sets_to_win, format.setsToWin ?: 1)
     }
     when {
-        sport.isTennisLike -> {
-            parts += stringResource(Res.string.fmt_summary_games, format.set?.gamesToWin ?: 6)
+        sport.isTennisLike && state.input.tennisMatch == TennisMatchChoice.REGULAR -> {
+            val games = format.set?.gamesToWin ?: 6
+            parts +=
+                if (games == 1) stringResource(Res.string.fmt_summary_one_game) else stringResource(Res.string.fmt_summary_games, games)
             format.game?.let { parts += deuceLabel(it.deuceMode, sport) }
         }
 
