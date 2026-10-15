@@ -1,0 +1,5 @@
+# Lokale CLI-Zustände und Secrets nie einchecken
+.branches
+.temp
+.env
+.env.*
