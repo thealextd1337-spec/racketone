@@ -1,6 +1,6 @@
 # Advantly (ehem. RacketOne) – Grundsatzentscheidungen
 
-Stand: 2026-10-14
+Stand: 2026-10-15
 
 | Thema | Entscheidung |
 |---|---|
@@ -10,7 +10,12 @@ Stand: 2026-10-14
 | Testgeräte real | iPhone, Apple Watch **Ultra 1** (max. watchOS 26, kein Double Tap), Google-Pixel-Handy + Pixel Watch + Galaxy Watch. Garmin nur im Simulator |
 | Tech-Stack | Kotlin Multiplatform: gemeinsame Scoring-Engine für Android, iOS, Wear OS, watchOS. Garmin separat in Monkey C, abgesichert durch gemeinsame JSON-Testvektoren |
 | Backend | Supabase (Auth, Postgres, RLS, Realtime) |
-| Zählen | Uhr und Handy gleichwertig, live synchron, Undo |
+| Mindestalter | **Entschieden 2026-10-15: Mindestalter 14 (AT)** – Anbieter in Österreich, Art. 8 DSGVO i. V. m. § 4 Abs. 4 DSG. Deutschland: 16; Länderabfrage bei Registrierung vor P2 einplanen. |
+| Zählen | **Single-Scorer (2026-10-15): genau ein Gerät pro Match** zählt und führt Undo aus. Standard: Uhr des startenden Spielers; alternativ Handy im Director-Modus. Ersetzt „Uhr und Handy gleichwertig“. |
+| Rollen | **Zähler:** aktives Gerät. **Director:** außenstehende Person zählt am Handy. **Anzeige:** alle übrigen Uhren/Handys, ohne Zählen/Undo. **Visitor ab P2:** benannte Zuschauer-Accounts, nur Live-Stand und Ergebnis, keine Health-Daten. **Übergabe:** „Zählen übernehmen“ mit Bestätigung und repliziertem Engine-Event „Zähler wechselt“. P1: eigene Uhr/eigenes Handy; P2: Zähler-Person beim Start wählbar, Zustellung per Cloud. |
+| Sync Zähler → Handy | Die zählende Uhr sendet **jedes Event sofort** ans gekoppelte Handy (Ack + Retry); ohne Verbindung lokal puffern und bei Wiederverbindung **sofort** nachliefern. Das Handy speichert alles dauerhaft (Backup, Grundlage für Übergabe und Cloud). Zähler zeigt „synchron / N ausstehend“, Anzeige-Geräte „Stand vor X s“ (Entscheidung 2026-10-15) |
+| Visitor & Zähler-Wahl (P2) | Visitor müssen **Freunde** sein, **keine Zustimmung** der Mitspieler. Ist der gewählte Zähler offline: **nie blockieren** – Starter zählt, automatische Übergabe bei Annahme (2026-10-15) |
+| Aliase | Jeder Nutzer bestimmt seinen **eigenen öffentlichen Alias**. **Keine privaten Spitznamen** für andere Nutzer; nur **Dummy-/Gastspieler** ohne App benennt der Anleger frei (2026-10-15) |
 | iOS-Builds | Cloud-CI (macOS-Runner) + TestFlight, Entwicklung unter Windows |
 | Vorgehen | Phasenweise: P1 Scoring offline (Handy + Wear OS + Apple Watch) → P2 Accounts/Freunde/Sync → P3 Statistik & Health → P4 Garmin |
 | Sprache | Deutsch + Englisch ab Start |
