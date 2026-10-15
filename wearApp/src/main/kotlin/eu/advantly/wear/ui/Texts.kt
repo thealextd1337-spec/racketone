@@ -138,13 +138,21 @@ fun pointText(label: PointLabel): String =
 fun playerName(
     player: PlayerUi,
     doubles: Boolean,
+): String = player.name ?: defaultPlayerName(player.side, player.index, doubles)
+
+/** Standardbezeichnung eines Slots („Du“, „Partner“, „Gegner 1/2“). */
+@Composable
+fun defaultPlayerName(
+    side: Side,
+    index: Int,
+    doubles: Boolean,
 ): String =
-    player.name ?: stringResource(
+    stringResource(
         when {
-            player.side == Side.A && player.index == 0 -> R.string.player_you
-            player.side == Side.A -> R.string.player_partner
+            side == Side.A && index == 0 -> R.string.player_you
+            side == Side.A -> R.string.player_partner
             !doubles -> R.string.player_opponent
-            player.index == 0 -> R.string.player_opponent_1
+            index == 0 -> R.string.player_opponent_1
             else -> R.string.player_opponent_2
         },
     )
@@ -318,6 +326,10 @@ fun toastText(toast: WatchToast): String =
 
         WatchToast.Unlocked -> {
             stringResource(R.string.toast_unlocked)
+        }
+
+        WatchToast.Corrected -> {
+            stringResource(R.string.toast_corrected)
         }
 
         is WatchToast.RoleChanged -> {

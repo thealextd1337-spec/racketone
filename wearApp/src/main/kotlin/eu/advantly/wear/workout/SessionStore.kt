@@ -18,6 +18,14 @@ class SessionStore(
         get() = prefs.getBoolean(KEY_ACTIVE, false)
         set(value) = prefs.edit { putBoolean(KEY_ACTIVE, value) }
 
+    /**
+     * Beenden wurde verlangt (Match geschlossen/gelöscht), aber das Ende der Exercise ist noch nicht bestätigt. Überlebt
+     * einen Prozessabbruch: Die Recovery beendet dann, statt wieder anzubinden oder neu zu starten.
+     */
+    var endRequested: Boolean
+        get() = prefs.getBoolean(KEY_END_REQUESTED, false)
+        set(value) = prefs.edit { putBoolean(KEY_END_REQUESTED, value) }
+
     var sessionId: String?
         get() = prefs.getString(KEY_SESSION_ID, null)
         set(value) = prefs.edit { putString(KEY_SESSION_ID, value) }
@@ -33,6 +41,7 @@ class SessionStore(
 
     private companion object {
         const val KEY_ACTIVE = "session_active"
+        const val KEY_END_REQUESTED = "end_requested"
         const val KEY_SESSION_ID = "session_id"
         const val KEY_SPORT = "sport"
         const val KEY_LAST_EXIT = "last_exit_info_ts"

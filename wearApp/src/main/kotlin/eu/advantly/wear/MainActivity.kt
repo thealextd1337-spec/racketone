@@ -82,7 +82,9 @@ class MainActivity : ComponentActivity() {
     private val clearToast = Runnable { toast.value = null }
     private lateinit var haptics: Haptics
     private lateinit var holder: WearSessions.Holder
-    private var pendingWorkout: WorkoutSport? = null
+
+    /** Ein Rechte-Dialog ist offen (übersteht die Neuerstellung über den Saved State). */
+    private var permissionRequestInFlight = false
 
     private val viewModel: WatchViewModel by viewModels {
         viewModelFactory { initializer { WatchViewModel(createController()) } }
@@ -116,8 +118,8 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
             permissions.value = Permissions.current(this)
-            pendingWorkout?.let(::launchWorkout)
-            pendingWorkout = null
+            permissionRequestInFlight = false
+            onPermissionDecision()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -126,6 +128,11 @@ class MainActivity : ComponentActivity() {
         haptics = Haptics(this)
         holder = WearSessions.get(this)
         permissions.value = Permissions.current(this)
+        permissionRequestInFlight = savedInstanceState?.getBoolean(KEY_PERMISSION_IN_FLIGHT) == true
+        if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {
+            // Dialog ging verloren (z. B. Prozess neu, ohne Ergebnis) → Match gilt nicht als erledigt, neu fragen
+            holder.prefs.workoutPending = null
+        }
         DiagnosticLog.log("ACTIVITY_CREATE", "restored" to (savedInstanceState != null))
 
         // Capabilities beim App-Start abfragen und cachen (05 §0.1).
@@ -170,6 +177,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+    }
+
     override fun onStart() {
         super.onStart()
         controller.effects = ::onEffect
@@ -183,6 +195,7 @@ class MainActivity : ComponentActivity() {
         holder.session.syncNow()
         controller.tick()
         evaluateWorkout()
+        askNotificationsOnce()
         DiagnosticLog.log("ACTIVITY_RESUME")
     }
 
@@ -227,6 +240,7 @@ class MainActivity : ComponentActivity() {
             directory = directory,
             prefs = h.prefs,
             wallClock = System::currentTimeMillis,
+            elapsed = SystemClock::elapsedRealtime,
             uptime = SystemClock::uptimeMillis,
             today = ::systemLocalDay,
         )
@@ -262,6 +276,7 @@ class MainActivity : ComponentActivity() {
                 sport = match?.format?.sport,
                 phase = WorkoutStateHolder.state.value.phase,
                 handledMatchId = holder.prefs.workoutHandledMatchId,
+                pendingMatchId = holder.prefs.workoutPending?.first,
             )
         when (val action = WorkoutCoordinator.decide(inputs)) {
             is WorkoutAction.Start -> requestWorkout(action)
@@ -270,16 +285,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Einmal je Match: Rechte erfragen (kontextuell beim ersten Workout), dann starten. */
+    /**
+     * Einmal je Match: fehlende Rechte erfragen (kontextuell beim ersten Workout), dann starten. Der Auftrag liegt bis
+     * zur Antwort persistent in den Prefs; als „erledigt“ gilt das Match erst nach der Entscheidung.
+     */
     private fun requestWorkout(action: WorkoutAction.Start) {
-        holder.prefs.workoutHandledMatchId = action.matchId
+        if (permissionRequestInFlight) return // anderer Dialog offen; nach dessen Antwort wird neu bewertet
         val missing = Permissions.missing(this)
-        if (missing.isEmpty() || pendingWorkout != null) {
+        if (missing.isEmpty()) {
+            holder.prefs.workoutHandledMatchId = action.matchId
             launchWorkout(action.sport)
-        } else {
-            pendingWorkout = action.sport
-            permissionLauncher.launch(missing.toTypedArray())
+            return
         }
+        holder.prefs.workoutPending = action.matchId to action.sport
+        launchPermissions(missing)
+    }
+
+    /** Antwort auf einen Rechte-Dialog: ausstehenden Workout-Auftrag abschließen, dann neu bewerten. */
+    private fun onPermissionDecision() {
+        val pending = holder.prefs.workoutPending
+        holder.prefs.workoutPending = null
+        if (pending != null) {
+            holder.prefs.workoutHandledMatchId = pending.first
+            // Match inzwischen gewechselt/geschlossen → nichts starten, die Bewertung unten entscheidet neu
+            if (holder.session.state.value.match
+                    ?.id == pending.first
+            ) {
+                launchWorkout(pending.second)
+            }
+        }
+        evaluateWorkout()
+    }
+
+    /** Benachrichtigungen unabhängig vom Workout einmal anbieten (Hinweis auf Handy-Matches, Zifferblatt-Symbol). */
+    private fun askNotificationsOnce() {
+        if (holder.prefs.notificationsAsked || permissionRequestInFlight || permissions.value.notifications) return
+        holder.prefs.notificationsAsked = true
+        launchPermissions(listOf(android.Manifest.permission.POST_NOTIFICATIONS))
+    }
+
+    private fun launchPermissions(missing: List<String>) {
+        permissionRequestInFlight = true
+        permissionLauncher.launch(missing.toTypedArray())
     }
 
     /** Mit Puls- oder Aktivitätsrecht Health-FGS + Exercise, sonst Match ohne Workout (Hinweis in der UI). */
@@ -308,7 +355,10 @@ class MainActivity : ComponentActivity() {
 
             override fun selectFormat(choice: FormatChoice) = controller.selectFormat(choice)
 
-            override fun selectServer(server: Side): Boolean = controller.selectServer(server)
+            override fun selectServer(
+                server: Side,
+                serverIndex: Int,
+            ): Boolean = controller.selectServer(server, serverIndex)
 
             override fun back() = controller.back()
 
@@ -327,6 +377,12 @@ class MainActivity : ComponentActivity() {
             override fun unlock() = controller.unlock()
 
             override fun requestEnd() = controller.requestEnd()
+
+            override fun requestCorrection() = controller.requestCorrection()
+
+            override fun correctServer(player: PlayerId): Boolean = controller.correctServer(player)
+
+            override fun swapPositions(side: Side): Boolean = controller.swapPositions(side)
 
             override fun confirmEnd(): Boolean = controller.confirmEnd()
 
@@ -354,6 +410,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val TOAST_MS = 3_000L
+        const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val TICK_MS = 1_000L
     }
 }

@@ -28,6 +28,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.wear.R
+import eu.advantly.wear.live.CorrectionsUi
 import eu.advantly.wear.live.DecisionUi
 import eu.advantly.wear.live.FinishedUi
 import eu.advantly.wear.live.LiveModel
@@ -134,6 +135,7 @@ fun ControlsPage(
                 actions.lock()
                 onClose()
             })
+            if (live.corrections != null) actionItem(R.string.action_correct_server, onClick = actions::requestCorrection)
             actionItem(R.string.action_end_match, onClick = actions::requestEnd)
         } else {
             item { ListHeader { Text(stringResource(R.string.role_view)) } }
@@ -312,6 +314,54 @@ fun ConfirmTakeOverScreen(
         textItem { stringResource(R.string.confirm_take_over_text, deviceName(live.scorerKind)) }
         if (live.sync is SyncUi.Stale) textItem { stringResource(R.string.sync_last_update, syncText(live.sync)) }
         actionItem(R.string.action_cancel, onClick = actions::dismissOverlay)
+    }
+}
+
+/**
+ * Aufschläger korrigieren (02 §7.1/§9.4): Spieler wählen – im ersten Spiel bzw. Satz „ab Beginn“ (rückwirkend), sonst
+ * „ab jetzt“. Im Doppel zusätzlich Positionen der Seite tauschen (Tennis/Padel: Rückschlagseite, Badminton: Feld,
+ * Tischtennis: Rückschläger). Nur am Zähler.
+ */
+@Composable
+fun CorrectServerScreen(
+    live: LiveUi,
+    corrections: CorrectionsUi,
+    actions: LiveActions,
+) {
+    BackToScore(actions::dismissOverlay)
+    ListPage(edgeLabel = stringResource(R.string.action_cancel), onEdge = actions::dismissOverlay) {
+        item { ListHeader { Text(stringResource(R.string.action_correct_server), textAlign = TextAlign.Center) } }
+        textItem { stringResource(if (corrections.retroactive) R.string.correct_from_start else R.string.correct_from_now) }
+        corrections.players.forEach { player ->
+            item {
+                val team = stringResource(if (player.side == Side.A) R.string.label_us else R.string.label_them)
+                Button(
+                    onClick = { actions.correctServer(player.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors =
+                        if (player.id ==
+                            corrections.currentServer
+                        ) {
+                            ButtonDefaults.buttonColors()
+                        } else {
+                            ButtonDefaults.filledTonalButtonColors()
+                        },
+                    label = { Text("$team · ${playerName(player, live.doubles)}", maxLines = 2) },
+                )
+            }
+        }
+        corrections.swaps.forEach { swap ->
+            item {
+                val team = stringResource(if (swap.side == Side.A) R.string.label_us else R.string.label_them)
+                val label = if (live.sport == Sport.TABLE_TENNIS) R.string.swap_receiver else R.string.swap_positions
+                Button(
+                    onClick = { actions.swapPositions(swap.side) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    label = { Text(stringResource(label, team), maxLines = 2) },
+                )
+            }
+        }
     }
 }
 

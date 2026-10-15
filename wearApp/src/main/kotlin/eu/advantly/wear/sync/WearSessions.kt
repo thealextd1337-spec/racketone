@@ -2,6 +2,7 @@ package eu.advantly.wear.sync
 
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
 import eu.advantly.data.LocalData
 import eu.advantly.data.createAndroidLocalData
 import eu.advantly.device.link.MainLooperScheduler
@@ -11,6 +12,7 @@ import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.match.session.SessionListener
+import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.diagnostics.DiagnosticLog
 
@@ -37,9 +39,36 @@ object WearSessions {
     )
 
     private var holder: Holder? = null
+    private var startedAtElapsed = 0L
+    private var coldStartConsumed = false
 
-    /** Ob die Session in diesem Prozess schon läuft. Nur Main-Thread. */
-    val isStarted: Boolean get() = holder != null
+    /**
+     * `true` genau einmal, wenn die Session gerade erst (≤ [COLD_START_WINDOW_MS]) mit dem Prozess gestartet wurde –
+     * typisch: Play Services hat den Prozess für eine Handy-Nachricht geweckt. `Application.onCreate` startet die
+     * Session immer, „schon gestartet“ allein sagt darüber also nichts. Nur Main-Thread.
+     */
+    fun consumeColdStart(): Boolean {
+        if (holder == null || coldStartConsumed) return false
+        coldStartConsumed = true
+        return SystemClock.elapsedRealtime() - startedAtElapsed <= COLD_START_WINDOW_MS
+    }
+
+    /**
+     * Abgleich nach dem Start abgeschlossen: eine kompatible Gegenstelle ist da, ein Abgleich kam an und nichts ist
+     * mehr ausstehend. Nur Main-Thread.
+     */
+    fun isSyncSettled(): Boolean {
+        val sync =
+            holder
+                ?.session
+                ?.state
+                ?.value
+                ?.sync ?: return false
+        val peerReady = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
+        return peerReady && sync.lastSyncAtMs != null && sync.pendingToPeers == 0
+    }
+
+    private const val COLD_START_WINDOW_MS = 10_000L
 
     /** Liefert die gestartete Session; legt sie beim ersten Aufruf an. Nur Main-Thread. */
     fun get(context: Context): Holder {
@@ -48,6 +77,7 @@ object WearSessions {
     }
 
     private fun create(app: Context): Holder {
+        startedAtElapsed = SystemClock.elapsedRealtime()
         val scheduler = MainLooperScheduler()
         val data = createAndroidLocalData(app)
         val transport = InjectableTransport(WearDataLayerTransport(app))

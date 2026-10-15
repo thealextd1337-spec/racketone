@@ -183,6 +183,7 @@ class WorkoutService : Service() {
         store.sessionId = sessionId
         store.sport = sport
         store.sessionActive = true
+        store.endRequested = false
         resetCounters()
         DiagnosticLog.log("SESSION_START", "sessionId" to sessionId, "sport" to sport, "mode" to "workout")
         logPermissions(permissions)
@@ -212,6 +213,16 @@ class WorkoutService : Service() {
         if (sessionJob?.isActive == true || stopJob?.isActive == true) return
         if (phase == WorkoutPhase.FAILED && WorkoutStateHolder.state.value.error == WorkoutError.END) {
             // Beenden war fehlgeschlagen – „Erneut versuchen“ heißt hier: erneut beenden.
+            stopSession()
+            return
+        }
+        val matchOpen =
+            WearSessions
+                .get(this)
+                .session.state.value.match != null
+        if (WorkoutCoordinator.recovery(store.endRequested, matchOpen) == RecoveryIntent.END) {
+            // Prozess starb zwischen Match-Schließen und bestätigtem Exercise-Ende → nicht wieder anbinden
+            DiagnosticLog.log("SESSION_RECOVER_END", "endRequested" to store.endRequested, "matchOpen" to matchOpen)
             stopSession()
             return
         }
@@ -330,6 +341,7 @@ class WorkoutService : Service() {
     private fun stopSession() {
         if (stopJob?.isActive == true) return
         DiagnosticLog.log("SESSION_STOP_REQUESTED", "sessionId" to store.sessionId)
+        if (store.sessionActive) store.endRequested = true
         WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ENDING, error = null, errorDetail = null) }
         sessionJob?.cancel()
         stopJob =
@@ -343,6 +355,7 @@ class WorkoutService : Service() {
                 unregisterCallback()
                 logStatus("SESSION_END")
                 store.sessionActive = false
+                store.endRequested = false
                 tickerJob?.cancel()
                 WorkoutStateHolder.reset()
                 ServiceCompat.stopForeground(this@WorkoutService, ServiceCompat.STOP_FOREGROUND_REMOVE)

@@ -34,12 +34,13 @@ class WatchControllerTest {
         discipline: Discipline = Discipline.SINGLES,
         format: FormatChoice = FormatChoice.TENNIS_BO3,
         server: Side = Side.A,
+        serverIndex: Int = 0,
     ) {
         c.newMatch()
         c.selectSport(sport)
         if (sport != Sport.PADEL) c.selectDiscipline(discipline)
         c.selectFormat(format)
-        assertTrue(c.selectServer(server))
+        assertTrue(c.selectServer(server, serverIndex))
     }
 
     /** Punkte mit genug Abstand für die 600-ms-Entprellung. */
@@ -360,6 +361,72 @@ class WatchControllerTest {
         assertEquals(first.format, second.format)
         assertEquals(first.lineup, second.lineup)
         assertTrue(second.isScorer)
+    }
+
+    @Test
+    fun stalenessIsMeasuredMonotonicallyDespiteWallClockJumps() {
+        h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        h.settle()
+        h.offline("phone")
+        h.settle(10_000)
+        val before = (live.sync as SyncUi.Stale).seconds!!
+        h.wallOffsetMs = -3_600_000 // Zeitumstellung um eine Stunde zurück
+        c.tick()
+        assertEquals(before, (live.sync as SyncUi.Stale).seconds)
+        h.settle(21_000)
+        assertTrue("Angebot nach 30 s trotz Zeitsprung", live.takeOverOffered)
+    }
+
+    @Test
+    fun doublesStartWithTheChosenServerOnTheRightCourt() {
+        startOnWatch(sport = Sport.BADMINTON, discipline = Discipline.DOUBLES, format = FormatChoice.BADMINTON_BO3_21, serverIndex = 1)
+        val serve = live.serve!!
+        assertEquals(Side.A, serve.server?.side)
+        assertEquals("Partner schlägt auf", 1, serve.server?.index)
+        assertEquals(CourtLetter.R, serve.court)
+    }
+
+    @Test
+    fun serverCorrectionIsRetroactiveInTheFirstGameOnly() {
+        startOnWatch(discipline = Discipline.DOUBLES, server = Side.A)
+        val corrections = live.corrections!!
+        assertTrue(corrections.retroactive)
+        assertEquals(4, corrections.players.size)
+        val opponent2 = corrections.players.single { it.side == Side.B && it.index == 1 }
+        c.requestCorrection()
+        assertEquals(LiveOverlay.CORRECT_SERVER, live.overlay)
+        assertTrue(c.correctServer(opponent2.id))
+        assertNull(live.overlay)
+        assertEquals(opponent2.id, live.serve?.server?.id)
+        assertEquals(WatchToast.Corrected, h.toasts.last())
+        points(Side.A, Side.A, Side.A, Side.A) // 1. Spiel vorbei → ab jetzt
+        assertFalse(live.corrections!!.retroactive)
+    }
+
+    @Test
+    fun badmintonDoublesCanSwapCourtPositions() {
+        startOnWatch(sport = Sport.BADMINTON, discipline = Discipline.DOUBLES, format = FormatChoice.BADMINTON_BO3_21)
+        val before =
+            h.watch.state.value.match!!
+                .state.positions!!
+                .b
+        assertTrue(c.swapPositions(Side.B))
+        val after =
+            h.watch.state.value.match!!
+                .state.positions!!
+                .b
+        assertEquals(before.left, after.right)
+        assertEquals(before.right, after.left)
+    }
+
+    @Test
+    fun displayOffersNoCorrections() {
+        h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        h.settle()
+        assertNull(live.corrections)
+        c.requestCorrection()
+        assertNull(live.overlay)
+        assertFalse(c.correctServer(PlayerId("me")))
     }
 
     @Test

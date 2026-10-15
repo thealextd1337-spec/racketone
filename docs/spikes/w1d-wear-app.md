@@ -23,13 +23,13 @@ mit „Wer zählt?“, der Live-Screen und der Verlauf.
 | Wo | Was |
 |---|---|
 | Startliste | „Wie letztes Mal“ (gleiche Besetzung und Format), Schalter **Workout mitlaufen lassen** (Standard an), letzte Ergebnisse, unten **Neues Match** |
-| Neues Match | Sportart → Einzel/Doppel (Padel immer Doppel) → Format → „Wer schlägt zuerst auf?“ (**Tippen startet**). Tischtennis hat bewusst keine vorausgewählte Satzanzahl. Badminton schlägt bis 03.01.2027 „3 × 21“ vor, danach „3 × 15“. Nach rechts wischen = einen Schritt zurück |
+| Neues Match | Sportart → Einzel/Doppel (Padel immer Doppel) → Format → „Wer schlägt zuerst auf?“ (**Tippen startet**; im Doppel wählst du den konkreten Spieler: Du, Partner, Gegner 1, Gegner 2). Tischtennis hat bewusst keine vorausgewählte Satzanzahl. Badminton schlägt bis 03.01.2027 „3 × 21“ vor, danach „3 × 15“. Nach rechts wischen = einen Schritt zurück |
 | Score (Zähler) | Obere Hälfte (orange) = Punkt **Wir** (1 Vibration), untere Hälfte (blau) = **Gegner** (2 Vibrationen). Nach jedem Punkt 0,6 s Sperre gegen Doppeltipps. **Nach unten wischen** = Rückgängig („Rückgängig: 30:15 → 15:15“). **Nach links wischen** = Steuerung |
 | Score (Anzeige) | Gleiche Darstellung, oben „ANZEIGE · Es zählt: Handy“ bzw. „ANZEIGE · Stand vor 42 s“. Tippen zählt nicht. Nach > 30 s ohne Verbindung unten **Zählen übernehmen** |
 | Oben im Score | Zähler: „Synchron“ bzw. „N ausstehend“ (noch nicht beim Handy) oder „Nur lokal“ |
 | Mittelband | Satzstände und Hinweis (Breakball, Satzball, Matchball, Einstand/Verlängerung, Golden/Star Point, Tiebreak, Seitenwechsel, Rückschlag tauschen …); Pickleball-Doppel: Ansage „4-2-1“ |
 | Aufschlag | „●“ in der Hälfte der aufschlagenden Seite, dazu Feld **R/L** (Tennis, Padel, Pickleball, Badminton) bzw. Punkte für verbleibende Aufschläge (Tischtennis); im Doppel „Aufschläger → Rückschläger“ |
-| Steuerung (Zähler) | Rückgängig, Wiederholen, Pause/Fortsetzen, Sperren (Entsperren: 1 s auf den Score drücken), Match beenden (mit Rückfrage), Puls/kcal/Schritte, Workout-Status |
+| Steuerung (Zähler) | Rückgängig, Wiederholen, Pause/Fortsetzen, Sperren (Entsperren: 1 s auf den Score drücken), **Aufschläger korrigieren** (im ersten Spiel bzw. Satz rückwirkend, sonst ab jetzt; im Doppel zusätzlich „Positionen tauschen“ bzw. Tischtennis „Rückschläger tauschen“), Match beenden (mit Rückfrage), Puls/kcal/Schritte, Workout-Status |
 | Steuerung (Anzeige) | Wer zählt, Stand vor X s, **Zählen übernehmen** (mit Rückfrage), Puls |
 | Satzende (Modus „Offen“) | „Noch ein Satz?“ – **Ja** (unten), „Nein, beenden“, ggf. „Match-Tiebreak“, Rückgängig. Nur am Zähler; die Anzeige zeigt „Handy entscheidet“ |
 | Matchende | Ergebnis und Sätze; am Zähler nach Best-of **Noch einer?** (verknüpftes Folge-Match), **Fertig** schließt das Match (Workout endet) |
@@ -82,12 +82,12 @@ Galaxy Watch 2b), dann:
 Meldet `install` **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`**, war vorher eine anders signierte Version installiert. Dann erst
 deinstallieren (löscht die App-Daten auf diesem Gerät): `& $adb -s <GERÄT> uninstall eu.advantly`.
 
-**Erster Start auf der Uhr:** Advantly öffnen. Beim ersten Match mit Workout fragt die Uhr nach Herzfrequenz, Körperlicher
-Aktivität und Benachrichtigungen – bitte **zulassen**. Ohne Benachrichtigungen fehlt das Symbol auf dem Zifferblatt und
+**Erster Start auf der Uhr:** Advantly öffnen. Die Uhr fragt zuerst nach **Benachrichtigungen**, beim ersten Match mit
+Workout nach Herzfrequenz und Körperlicher Aktivität – bitte **zulassen**. Ohne Benachrichtigungen fehlt das Symbol auf dem Zifferblatt und
 der Hinweis auf Matches, die das Handy startet. Ohne Puls- **und** Aktivitätsrecht zählt die App ohne Workout
 („Ohne Workout: die Uhr kann die App beenden“).
 
-**Nicht während der Tests öffnen:** den zweiten Launcher-Eintrag **„Link-Debug“** (nur Debug-Build, Spike S3). Er öffnet
+**Nicht während der Tests öffnen:** am **Handy** einen ggf. noch vorhandenen Launcher-Eintrag „Link Debug“ (Spike S3; auf der Uhr ist er entfernt). Er öffnet
 einen eigenen Kanal auf denselben Pfaden und kann Nachrichten der Match-Session abfangen.
 
 ## 4. Testszenarien
@@ -162,6 +162,8 @@ Bitte je Szenario das Ergebnis in die Tabelle (Abschnitt 5) eintragen.
 ### T7 – Kurz-Wizard, „Wie letztes Mal“, Sprache, TalkBack (kurz)
 
 1. Tischtennis → Doppel: keine Satzanzahl vorausgewählt, erst nach Auswahl geht es weiter.
+   Badminton-Doppel mit **Partner** als Erstaufschläger starten: Der Partner schlägt von rechts („● R“, „Partner →
+   Gegner …“). Steuerung → Aufschläger korrigieren → „Positionen tauschen: GEGNER“ tauscht die Felder der Gegner.
 2. Badminton: „Best of 3 · 21 Punkte“ ist „Standard“ (bis 03.01.2027).
 3. Nach einem Match: Startliste → **Wie letztes Mal** startet sofort mit gleicher Besetzung und gleichem Format.
 4. Uhr-Sprache auf Englisch stellen: alle Texte englisch (US/THEM, „Take over scoring“ …).
@@ -179,7 +181,7 @@ Bitte je Szenario das Ergebnis in die Tabelle (Abschnitt 5) eintragen.
 | T4b Uhr übernimmt | | | |
 | T5 60 min, Akku %/h | | | |
 | T6 Löschen am Handy (geschlossen / laufend) | | | |
-| T7 Wizard, Wie letztes Mal, EN, TalkBack | | | |
+| T7 Wizard, Doppel-Aufschläger, Korrektur, Wie letztes Mal, EN, TalkBack | | | |
 
 ## 6. Logs bei Problemen
 
@@ -191,8 +193,9 @@ Debug-Build: Diagnose-Log der Uhr (nur Debug, enthält Pulswerte – danach lös
 & $adb -s 192.168.x.y:PORT shell rm -r /sdcard/Android/data/eu.advantly/files/diag
 ```
 
-Relevante Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine Handy-Nachricht geweckt),
-`MATCH_RESUME_AFTER_RESTART`, `SESSION_START`/`SESSION_END` (Workout), `SERVICE_START_REJECTED`.
+Relevante Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine Handy-Nachricht geweckt; `settled`
+= Abgleich vor dem Einfrieren abgeschlossen), `MATCH_RESUME_AFTER_RESTART`, `SESSION_START`/`SESSION_END` (Workout),
+`SESSION_RECOVER_END` (Workout nach Neustart beendet, weil kein Match mehr offen war), `SERVICE_START_REJECTED`.
 
 ## 7. Bekannte Grenzen (P1)
 

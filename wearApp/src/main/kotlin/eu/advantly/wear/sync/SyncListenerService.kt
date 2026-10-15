@@ -2,6 +2,7 @@ package eu.advantly.wear.sync
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.google.android.gms.wearable.CapabilityInfo
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
@@ -22,9 +23,10 @@ import java.util.concurrent.TimeUnit
  * - **Queue-DataItem** (`/advantly/link/q/…`) bzw. **Capability**: Session sicherstellen; der Transport liest die Queue
  *   beim Start bzw. im Live-Listener, die Session gleicht bei Wiederverbindung sofort ab (Hello/Summary/Rückstand).
  *
- * Die Callbacks laufen auf einem Hintergrund-Thread; die Session ist Main-Thread-gebunden. Danach bleibt der Dienst
- * kurz gebunden ([LINGER_MS]), damit Antwort-Runden (Summary, fehlende Events) noch durchlaufen, bevor das System den
- * Prozess einfriert.
+ * Die Callbacks laufen auf einem Hintergrund-Thread; die Session ist Main-Thread-gebunden. Wurde der Prozess für den
+ * Aufruf frisch gestartet (Kaltstart), bleibt der Dienst gebunden, bis der Abgleich abgeschlossen ist (Gegenstelle
+ * kompatibel, Abgleich empfangen, nichts ausstehend) – höchstens [SETTLE_TIMEOUT_MS] –, damit Queue und
+ * Antwort-Runden (Summary, fehlende Events, Löschmarkierungen) durchlaufen, bevor das System den Prozess einfriert.
  */
 class SyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
@@ -46,26 +48,44 @@ class SyncListenerService : WearableListenerService() {
     }
 
     private fun onMain(action: (WearSessions.Holder) -> Unit) {
+        val cold =
+            runOnMain {
+                val holder = WearSessions.get(this)
+                action(holder)
+                WearSessions.consumeColdStart()
+            } ?: return
+        if (!cold) {
+            Thread.sleep(LINGER_MS)
+            return
+        }
+        // Kaltstart: bis zum abgeschlossenen Abgleich gebunden bleiben (begrenzt)
+        val deadline = SystemClock.elapsedRealtime() + SETTLE_TIMEOUT_MS
+        var settled = false
+        while (!settled && SystemClock.elapsedRealtime() < deadline) {
+            Thread.sleep(POLL_MS)
+            settled = runOnMain { WearSessions.isSyncSettled() } == true
+        }
+        DiagnosticLog.log("SYNC_SERVICE_WAKE", "settled" to settled)
+    }
+
+    /** Führt [block] auf dem Main-Thread aus und wartet auf das Ergebnis (`null` bei Zeitüberschreitung). */
+    private fun <T> runOnMain(block: () -> T): T? {
         val done = CountDownLatch(1)
-        var fresh = false
+        var result: T? = null
         main.post {
             try {
-                fresh = !WearSessions.isStarted
-                val holder = WearSessions.get(this)
-                if (fresh) DiagnosticLog.log("SYNC_SERVICE_WAKE")
-                action(holder)
+                result = block()
             } finally {
                 done.countDown()
             }
         }
-        if (!done.await(MAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return
-        // Frisch geweckter Prozess: Abgleich-Runden (Hello → Summary → Events) abwarten; sonst nur kurz
-        Thread.sleep(if (fresh) LINGER_AFTER_WAKE_MS else LINGER_MS)
+        return if (done.await(MAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) result else null
     }
 
     private companion object {
         const val MAIN_TIMEOUT_MS = 5_000L
-        const val LINGER_AFTER_WAKE_MS = 3_000L
+        const val SETTLE_TIMEOUT_MS = 8_000L
+        const val POLL_MS = 200L
         const val LINGER_MS = 300L
     }
 }

@@ -5,6 +5,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
@@ -31,7 +32,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * Alle Aufrufe auf dem Session-Thread (Main). Zähl-Kommandos wirken nur, wenn dieses Gerät Zähler ist – die Session
  * prüft das ohnehin; hier kommen Entprellung (600 ms), Touch-Sperre und Rückmeldungen dazu.
  *
- * @param wallClock Wanduhr (ms seit Epoche) – Staleness, Vergleich mit `SyncStatus`
+ * @param wallClock Wanduhr (ms seit Epoche) – nur zum einmaligen Umrechnen der Zeitstempel aus `SyncStatus`
+ * @param elapsed monotone Uhr inkl. Tiefschlaf (`SystemClock.elapsedRealtime()`) – Staleness und 30-s-Schwelle
  * @param uptime monotone Uhr für die Entprellung
  */
 @Suppress("TooManyFunctions")
@@ -40,6 +42,7 @@ class WatchController(
     private val directory: WatchDirectory,
     private val prefs: WatchPrefs,
     private val wallClock: () -> Long,
+    private val elapsed: () -> Long,
     private val uptime: () -> Long,
     private val today: () -> LocalDay,
     private val tapGuard: TapGuard = TapGuard(),
@@ -55,7 +58,13 @@ class WatchController(
     private var draft: Draft? = null
     private var overlay: LiveOverlay? = null
     private var locked = false
-    private var disconnectedSinceMs: Long? = null
+
+    /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
+    private var disconnectedSince: Long? = null
+
+    /** Zuletzt gesehener Kontakt-Zeitstempel der Session (Wanduhr) und wann er – monoton gemessen – stattfand. */
+    private var lastContactWall: Long? = null
+    private var lastContactAt: Long? = null
     private var seenMatch: MatchId? = null
     private var seenScorer: Boolean? = null
     private var seenRejected = 0
@@ -138,8 +147,14 @@ class WatchController(
         publish()
     }
 
-    /** Letzter Schritt: Erstaufschläger wählen = Match starten (diese Uhr zählt). */
-    fun selectServer(server: Side): Boolean {
+    /**
+     * Letzter Schritt: Erstaufschläger wählen = Match starten (diese Uhr zählt). Im Doppel wählt [serverIndex] den
+     * konkreten Spieler (0 = Du bzw. Gegner 1, 1 = Partner bzw. Gegner 2).
+     */
+    fun selectServer(
+        server: Side,
+        serverIndex: Int = 0,
+    ): Boolean {
         val d = draft ?: return false
         val sport = d.sport ?: return false
         val discipline = d.discipline ?: return false
@@ -147,7 +162,7 @@ class WatchController(
         val setup =
             WatchSetup(
                 format = SetupCatalog.format(choice, discipline, today()),
-                lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(), server),
+                lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(), server, serverIndex),
                 meta = SetupCatalog.meta(sport),
             )
         return start(setup)
@@ -258,6 +273,40 @@ class WatchController(
 
     fun requestEnd() = setOverlay(LiveOverlay.CONFIRM_END)
 
+    /** Steuerseite → „Aufschläger korrigieren“ (nur Zähler, laufendes Match). */
+    fun requestCorrection() {
+        if (mutableState.value.live?.corrections == null) return
+        setOverlay(LiveOverlay.CORRECT_SERVER)
+    }
+
+    /**
+     * Aufschläger korrigieren: im ersten Spiel bzw. Satz rückwirkend (`INITIAL_SERVER`), sonst ab jetzt (`SERVER`),
+     * 02 §7.1/§9.4.
+     */
+    fun correctServer(player: PlayerId): Boolean {
+        val corrections = mutableState.value.live?.corrections ?: return false
+        if (corrections.players.none { it.id == player }) return false
+        return applyCorrection(corrections.serverCorrection(player))
+    }
+
+    /** Positionen von [side] tauschen (Doppel; Tischtennis: Rückschläger), nur wenn angeboten. */
+    fun swapPositions(side: Side): Boolean {
+        val swap =
+            mutableState.value.live
+                ?.corrections
+                ?.swaps
+                ?.firstOrNull { it.side == side } ?: return false
+        return applyCorrection(swap.correction)
+    }
+
+    private fun applyCorrection(correction: Correction): Boolean {
+        overlay = null
+        val applied = session.correct(correction)
+        if (applied) emit(WatchEffect.Toast(WatchToast.Corrected))
+        publish()
+        return applied
+    }
+
     /** Bestätigtes Matchende (im Satzende-Dialog regulär, sonst Abbruch ohne Wertung). */
     fun confirmEnd(): Boolean {
         overlay = null
@@ -324,7 +373,7 @@ class WatchController(
             seenRejected = match?.rejectedByRoleCount ?: 0
             overlay = null
             locked = false
-            disconnectedSinceMs = null
+            disconnectedSince = null
             if (match != null) draft = null // ein vom Handy gestartetes Match übernimmt den Bildschirm
         } else if (match != null) {
             if (seenScorer != match.isScorer) {
@@ -346,24 +395,26 @@ class WatchController(
         publish()
     }
 
-    /** Seit wann die Anzeige keinen Kontakt zum Zähler hat (Grundlage für das Übernahme-Angebot). */
+    /**
+     * Kontakt zum Zähler monoton verfolgen (Staleness, Übernahme-Angebot): Die Session liefert Wanduhr-Zeitstempel;
+     * ein neuer Wert heißt „Kontakt jetzt“. Nur der erste beim Start schon vorhandene Wert wird über die Wanduhr
+     * zurückgerechnet. Zeitumstellungen verfälschen die Dauern damit nicht.
+     */
     private fun trackConnection(
         match: ActiveMatch?,
         state: SessionState,
     ) {
-        disconnectedSinceMs =
+        val contact = listOfNotNull(state.sync.lastEventReceivedAtMs, state.sync.lastSyncAtMs).maxOrNull()
+        if (contact != null && contact != lastContactWall) {
+            val now = elapsed()
+            lastContactAt = if (lastContactWall == null) now - (wallClock() - contact).coerceAtLeast(0) else now
+            lastContactWall = contact
+        }
+        disconnectedSince =
             when {
-                match == null || match.isScorer || state.sync.scorerConnected -> {
-                    null
-                }
-
-                disconnectedSinceMs != null -> {
-                    disconnectedSinceMs
-                }
-
-                else -> {
-                    listOfNotNull(state.sync.lastEventReceivedAtMs, state.sync.lastSyncAtMs).maxOrNull() ?: wallClock()
-                }
+                match == null || match.isScorer || state.sync.scorerConnected -> null
+                disconnectedSince != null -> disconnectedSince
+                else -> lastContactAt ?: elapsed()
             }
     }
 
@@ -376,7 +427,15 @@ class WatchController(
         val match = sessionState.match
         if (match != null) {
             return WatchScreen.Live(
-                LiveModel.build(match, sessionState.sync, ::nameOf, wallClock(), disconnectedSinceMs, locked, overlay),
+                LiveModel.build(
+                    match = match,
+                    sync = sessionState.sync,
+                    names = ::nameOf,
+                    contactAgoMs = lastContactAt?.let { elapsed() - it },
+                    disconnectedForMs = disconnectedSince?.let { elapsed() - it },
+                    locked = locked,
+                    overlay = overlay,
+                ),
             )
         }
         val d = draft ?: return homeScreen()

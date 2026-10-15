@@ -27,24 +27,43 @@ class MatchNotifier(
     context: Context,
 ) : SessionListener {
     private val app = context.applicationContext
-    private var lastOpen: MatchId? = null
-    private var initialized = false
+
+    /** Zuletzt gesehener Stand: Match, Rolle, beendet. */
+    private data class Seen(
+        val matchId: MatchId?,
+        val isScorer: Boolean,
+        val finished: Boolean,
+    )
+
+    private var seen: Seen? = null
+    private var posted = false
 
     override fun onStateChanged(state: SessionState) {
         val match = state.match
-        if (!initialized) {
-            // Erster Aufruf beim Anmelden (Prozessstart, ggf. wiederhergestelltes Match): kein neuer Hinweis
-            initialized = true
-            lastOpen = match?.id
-            return
+        val now = Seen(match?.id, match?.isScorer == true, match?.state?.status == MatchStatus.FINISHED)
+        val before = seen
+        seen = now
+        // Erster Aufruf beim Anmelden (Prozessstart, ggf. wiederhergestelltes Match): kein neuer Hinweis
+        if (before == null || before == now) return
+        when {
+            match == null || now.finished -> {
+                remove()
+            }
+
+            now.matchId != before.matchId -> {
+                if (UiVisibility.resumed) remove() else post(now.isScorer)
+            }
+
+            // gleiches Match, Rolle gewechselt (Übernahme): Text eines sichtbaren Hinweises nachziehen
+            posted && !UiVisibility.resumed && now.isScorer != before.isScorer -> {
+                post(now.isScorer)
+            }
         }
-        if (match?.id == lastOpen) return
-        lastOpen = match?.id
-        if (match != null && match.state.status != MatchStatus.FINISHED && !UiVisibility.resumed) {
-            post(match.isScorer)
-        } else {
-            cancel(app)
-        }
+    }
+
+    private fun remove() {
+        posted = false
+        cancel(app)
     }
 
     private fun post(isScorer: Boolean) {
@@ -74,7 +93,7 @@ class MatchNotifier(
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
-        runCatching { NotificationManagerCompat.from(app).notify(NOTIFICATION_ID, notification) }
+        posted = runCatching { NotificationManagerCompat.from(app).notify(NOTIFICATION_ID, notification) }.isSuccess
     }
 
     companion object {

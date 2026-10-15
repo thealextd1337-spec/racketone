@@ -164,15 +164,22 @@ object SetupCatalog {
     /** Metadaten: Badminton in der Halle (Default des Assistenten), sonst ohne Angabe. */
     fun meta(sport: Sport): MatchMeta = if (sport == Sport.BADMINTON) MatchMeta(environment = Environment.INDOOR) else MatchMeta()
 
-    /** Besetzung: [server] = Side, deren erster Spieler das Match eröffnet. */
+    /**
+     * Besetzung: [server]/[serverIndex] = Spieler, der das Match eröffnet (im Doppel konkret gewählt: Du/Partner bzw.
+     * Gegner 1/2). Steht er nicht an Index 0 seines Teams, dreht die Engine die Teamreihenfolge (02 §3.3) – bei
+     * Badminton steht der Aufschläger damit zu Satzbeginn rechts.
+     */
     fun lineup(
         discipline: Discipline,
         players: LineupPlayers,
         server: Side,
+        serverIndex: Int = 0,
     ): Lineup {
         val a = if (discipline == Discipline.DOUBLES) listOf(players.self, players.partner) else listOf(players.self)
         val b = if (discipline == Discipline.DOUBLES) listOf(players.opponent1, players.opponent2) else listOf(players.opponent1)
-        return Lineup(a = a, b = b, firstServer = if (server == Side.A) a.first() else b.first())
+        val team = if (server == Side.A) a else b
+        require(serverIndex in team.indices) { "Aufschläger $serverIndex gibt es in $discipline nicht" }
+        return Lineup(a = a, b = b, firstServer = team[serverIndex])
     }
 
     /** Vorschlag, der genau [format] erzeugt (für „Wie letztes Mal“-Beschriftung), sonst `null`. */

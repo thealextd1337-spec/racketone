@@ -100,6 +100,14 @@ class SetupCatalogTest {
     }
 
     @Test
+    fun doublesFirstServerIsTheChosenPlayer() {
+        assertEquals(PlayerId("partner"), SetupCatalog.lineup(Discipline.DOUBLES, players, Side.A, serverIndex = 1).firstServer)
+        assertEquals(PlayerId("o2"), SetupCatalog.lineup(Discipline.DOUBLES, players, Side.B, serverIndex = 1).firstServer)
+        val failed = runCatching { SetupCatalog.lineup(Discipline.SINGLES, players, Side.A, serverIndex = 1) }
+        assertTrue("Einzel hat keinen zweiten Spieler", failed.isFailure)
+    }
+
+    @Test
     fun choiceForFindsAChoiceProducingTheSameFormat() {
         for (choice in FormatChoice.entries) {
             val discipline = SetupCatalog.disciplines(choice.sport).last()

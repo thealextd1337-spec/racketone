@@ -153,6 +153,14 @@
     <string name="workout_off">Without workout</string>
     <string name="count_only_label">Without workout: the watch may close the app</string>
 
+    <!-- Korrekturen (02 §7.1/§7.4) -->
+    <string name="action_correct_server">Correct server</string>
+    <string name="correct_from_start">Applies from the start (retroactive)</string>
+    <string name="correct_from_now">Applies from now on</string>
+    <string name="swap_positions">Swap positions: %1$s</string>
+    <string name="swap_receiver">Swap receiver: %1$s</string>
+    <string name="toast_corrected">Corrected</string>
+
     <!-- Dialoge (W6/W7) -->
     <string name="confirm_take_over_title">Score on this watch?</string>
     <string name="confirm_take_over_text">Currently scoring: %1$s. It will then only display.</string>

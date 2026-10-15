@@ -13,6 +13,8 @@ data class WorkoutInputs(
     val phase: WorkoutPhase,
     /** Match, für das das Workout schon gestartet, abgelehnt oder bewusst beendet wurde. */
     val handledMatchId: MatchId?,
+    /** Match, für das gerade die Rechte-Abfrage läuft (Entscheidung steht noch aus). */
+    val pendingMatchId: MatchId? = null,
 )
 
 /** Was mit dem Workout passieren soll. */
@@ -40,10 +42,24 @@ object WorkoutCoordinator {
             return if (inputs.phase == WorkoutPhase.IDLE || inputs.phase == WorkoutPhase.ENDING) WorkoutAction.None else WorkoutAction.Stop
         }
         val sport = inputs.sport ?: return WorkoutAction.None
+        if (inputs.pendingMatchId == matchId) return WorkoutAction.None // Rechte-Dialog läuft noch
         return if (inputs.enabled && inputs.phase == WorkoutPhase.IDLE && inputs.handledMatchId != matchId) {
             WorkoutAction.Start(matchId, WorkoutSport.of(sport))
         } else {
             WorkoutAction.None
         }
     }
+
+    /**
+     * Recovery nach Prozess-/Dienst-Neustart mit aktivem Workout-Marker: Wurde das Beenden schon verlangt oder ist nach
+     * dem Neustart kein Match mehr offen (inzwischen geschlossen/gelöscht), wird die eigene Exercise beendet statt
+     * wieder angebunden bzw. neu gestartet.
+     */
+    fun recovery(
+        endRequested: Boolean,
+        matchOpen: Boolean,
+    ): RecoveryIntent = if (endRequested || !matchOpen) RecoveryIntent.END else RecoveryIntent.RESUME
 }
+
+/** Was die Recovery mit einem als aktiv markierten Workout tut. */
+enum class RecoveryIntent { RESUME, END }

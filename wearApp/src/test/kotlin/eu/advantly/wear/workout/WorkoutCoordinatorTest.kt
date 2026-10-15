@@ -41,6 +41,20 @@ class WorkoutCoordinatorTest {
     }
 
     @Test
+    fun pendingPermissionDecisionBlocksARestartButNotOtherMatches() {
+        fun pending(match: MatchId) = WorkoutCoordinator.decide(WorkoutInputs(true, match, Sport.TENNIS, WorkoutPhase.IDLE, null, m1))
+        assertEquals(WorkoutAction.None, pending(m1))
+        assertEquals(WorkoutAction.Start(m2, WorkoutSport.TENNIS), pending(m2))
+    }
+
+    @Test
+    fun recoveryEndsTheExerciseWhenEndWasRequestedOrNoMatchIsOpen() {
+        assertEquals(RecoveryIntent.RESUME, WorkoutCoordinator.recovery(endRequested = false, matchOpen = true))
+        assertEquals(RecoveryIntent.END, WorkoutCoordinator.recovery(endRequested = true, matchOpen = true))
+        assertEquals(RecoveryIntent.END, WorkoutCoordinator.recovery(endRequested = false, matchOpen = false))
+    }
+
+    @Test
     fun padelAndPickleballRunAsTennis() {
         assertEquals(WorkoutSport.TENNIS, WorkoutSport.of(Sport.PICKLEBALL))
         assertEquals(WorkoutSport.TENNIS, WorkoutSport.of(Sport.PADEL))

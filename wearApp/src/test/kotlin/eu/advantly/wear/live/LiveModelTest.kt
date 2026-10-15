@@ -40,17 +40,16 @@ class LiveModelTest {
 
     @Test
     fun scorerShowsSyncedPendingOrLocalOnly() {
-        assertEquals(SyncUi.Synced, LiveModel.syncUi(LiveRole.SCORER, sync(), now))
-        assertEquals(SyncUi.Pending(4), LiveModel.syncUi(LiveRole.SCORER, sync(pending = 4, peers = false), now))
-        assertEquals(SyncUi.LocalOnly, LiveModel.syncUi(LiveRole.SCORER, sync(peers = false), now))
+        assertEquals(SyncUi.Synced, LiveModel.syncUi(LiveRole.SCORER, sync(), null))
+        assertEquals(SyncUi.Pending(4), LiveModel.syncUi(LiveRole.SCORER, sync(pending = 4, peers = false), null))
+        assertEquals(SyncUi.LocalOnly, LiveModel.syncUi(LiveRole.SCORER, sync(peers = false), null))
     }
 
     @Test
     fun displayShowsLiveOrSecondsSinceLastContact() {
-        assertEquals(SyncUi.Live, LiveModel.syncUi(LiveRole.DISPLAY, sync(), now))
-        val stale = sync(scorerConnected = false, lastEvent = now - 42_500, lastSync = now - 50_000)
-        assertEquals(SyncUi.Stale(42), LiveModel.syncUi(LiveRole.DISPLAY, stale, now))
-        assertEquals(SyncUi.Stale(null), LiveModel.syncUi(LiveRole.DISPLAY, sync(scorerConnected = false), now))
+        assertEquals(SyncUi.Live, LiveModel.syncUi(LiveRole.DISPLAY, sync(), 5_000))
+        assertEquals(SyncUi.Stale(42), LiveModel.syncUi(LiveRole.DISPLAY, sync(scorerConnected = false), 42_500))
+        assertEquals(SyncUi.Stale(null), LiveModel.syncUi(LiveRole.DISPLAY, sync(scorerConnected = false), null))
     }
 
     @Test
@@ -75,12 +74,14 @@ class LiveModelTest {
         val match = session.state.value.match!!
         val disconnected = sync(scorerConnected = false)
 
-        fun offered(since: Long?) = LiveModel.build(match, disconnected, { null }, now, since).takeOverOffered
+        fun offered(disconnectedFor: Long?) = LiveModel.build(match, disconnected, { null }, null, disconnectedFor).takeOverOffered
         assertFalse(offered(null))
-        assertFalse(offered(now - 29_999))
-        assertTrue(offered(now - 30_000))
-        assertFalse("verbunden", LiveModel.build(match, sync(), { null }, now, now - 60_000).takeOverOffered)
-        assertEquals(LiveRole.DISPLAY, LiveModel.build(match, disconnected, { null }, now, null).role)
+        assertFalse(offered(29_999))
+        assertTrue(offered(30_000))
+        assertFalse("verbunden", LiveModel.build(match, sync(), { null }, null, 60_000).takeOverOffered)
+        val display = LiveModel.build(match, disconnected, { null }, null, null)
+        assertEquals(LiveRole.DISPLAY, display.role)
+        assertEquals("Anzeige korrigiert nichts", null, display.corrections)
     }
 
     @Test

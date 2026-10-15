@@ -37,7 +37,10 @@ interface SetupActions {
 
     fun selectFormat(choice: FormatChoice)
 
-    fun selectServer(server: Side): Boolean
+    fun selectServer(
+        server: Side,
+        serverIndex: Int,
+    ): Boolean
 
     fun back()
 
@@ -146,14 +149,20 @@ private fun ScalingLazyListScope.serverStep(
     actions: SetupActions,
 ) {
     item { ListHeader { Text(stringResource(R.string.setup_server_title), textAlign = TextAlign.Center) } }
-    listOf(Side.A, Side.B).forEach { side ->
+    // Doppel: konkreter Erstaufschläger (bestimmt Rotation bzw. Badminton-Feld, 02 §3.3); Einzel: Wir/Gegner
+    val doubles = setup.discipline == Discipline.DOUBLES
+    val choices = listOf(Side.A, Side.B).flatMap { side -> (0 until if (doubles) 2 else 1).map { side to it } }
+    choices.forEach { (side, index) ->
         item {
             Button(
-                onClick = { actions.selectServer(side) },
+                onClick = { actions.selectServer(side, index) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.filledTonalButtonColors(),
                 border = BorderStroke(2.dp, teamColor(side)),
-                label = { Text(stringResource(if (side == Side.A) R.string.label_us else R.string.label_them)) },
+                label = {
+                    val team = stringResource(if (side == Side.A) R.string.label_us else R.string.label_them)
+                    Text(if (doubles) "$team · ${defaultPlayerName(side, index, doubles = true)}" else team)
+                },
             )
         }
     }

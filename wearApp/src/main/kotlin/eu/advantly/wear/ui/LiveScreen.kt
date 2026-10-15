@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material3.Text
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.presentation.live.ScoreHint
@@ -81,6 +82,12 @@ interface LiveActions {
     fun unlock()
 
     fun requestEnd()
+
+    fun requestCorrection()
+
+    fun correctServer(player: PlayerId): Boolean
+
+    fun swapPositions(side: Side): Boolean
 
     fun confirmEnd(): Boolean
 
@@ -131,6 +138,10 @@ fun LiveScreen(
 
         live.overlay == LiveOverlay.CONFIRM_END -> {
             ConfirmEndScreen(live, actions)
+        }
+
+        live.overlay == LiveOverlay.CORRECT_SERVER && live.corrections != null -> {
+            CorrectServerScreen(live, live.corrections, actions)
         }
 
         workout.phase == WorkoutPhase.CONFLICT -> {

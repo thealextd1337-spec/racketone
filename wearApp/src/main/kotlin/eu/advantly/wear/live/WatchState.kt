@@ -104,6 +104,9 @@ sealed interface WatchToast {
 
     data object Unlocked : WatchToast
 
+    /** Aufschläger/Aufstellung korrigiert. */
+    data object Corrected : WatchToast
+
     /** Rolle hat gewechselt: [nowScorer] = dieses Gerät zählt jetzt, sonst zählt [scorerKind]. */
     data class RoleChanged(
         val nowScorer: Boolean,

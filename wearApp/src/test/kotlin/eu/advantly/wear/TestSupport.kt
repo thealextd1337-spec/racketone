@@ -48,7 +48,10 @@ class WatchHarness(
     private var messages = 0
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = latencyMs)
-    val clock = WallClock { BASE_MS + scheduler.nowMs() }
+
+    /** Verstellbare Wanduhr (Zeitumstellung simulieren); monotone Zeit = virtuelle Zeit des Schedulers. */
+    var wallOffsetMs = 0L
+    val clock = WallClock { BASE_MS + scheduler.nowMs() + wallOffsetMs }
     val phoneData = testLocalData()
     val watchData = testLocalData()
     val phone = session("phone", PeerKind.PHONE, phoneData, seed = 1)
@@ -63,6 +66,7 @@ class WatchHarness(
             directory = directory,
             prefs = prefs,
             wallClock = clock::nowMs,
+            elapsed = scheduler::nowMs,
             uptime = scheduler::nowMs,
             today = { today },
         )

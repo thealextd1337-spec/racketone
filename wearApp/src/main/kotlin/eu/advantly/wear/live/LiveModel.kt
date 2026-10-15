@@ -5,6 +5,8 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
@@ -73,6 +75,7 @@ data class ServeUi(
 
 /** Spieler für die Anzeige: [name] `null` = Standardbezeichnung („Du“, „Gegner 1“ …) anhand von Side/Index. */
 data class PlayerUi(
+    val id: PlayerId,
     val side: Side,
     val index: Int,
     val name: String?,
@@ -103,6 +106,29 @@ enum class LiveOverlay {
 
     /** „Match beenden?“ (04 §4.3.3 Punkt 8). */
     CONFIRM_END,
+
+    /** Aufschläger bzw. Aufstellung korrigieren (02 §7.1/§7.4). */
+    CORRECT_SERVER,
+}
+
+/** Positionstausch einer Side im Doppel (02 §7.1 `RECEIVE_POSITIONS`, §7.4; Tischtennis: Rückschläger tauschen). */
+data class PositionSwap(
+    val side: Side,
+    val correction: Correction,
+)
+
+/**
+ * Korrekturen am Zähler, solange das Match läuft (02 §7.1/§7.4, §9.4): Aufschläger „ab Beginn“ im ersten Spiel bzw.
+ * Satz (`INITIAL_SERVER`, rückwirkend), sonst „ab jetzt“ (`SERVER`); im Doppel zusätzlich Positionen tauschen.
+ */
+data class CorrectionsUi(
+    val retroactive: Boolean,
+    val players: List<PlayerUi>,
+    val currentServer: PlayerId?,
+    val swaps: List<PositionSwap>,
+) {
+    /** Payload für die Wahl von [player] als Aufschläger. */
+    fun serverCorrection(player: PlayerId): Correction = if (retroactive) Correction.initialServer(player) else Correction.server(player)
 }
 
 /** Alles, was der Live-Screen (Zähler und Anzeige) rendert. */
@@ -133,6 +159,8 @@ data class LiveUi(
     val finished: FinishedUi?,
     val locked: Boolean,
     val overlay: LiveOverlay?,
+    /** Nur Zähler bei laufendem Match, sonst `null`. */
+    val corrections: CorrectionsUi?,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 }
@@ -143,25 +171,28 @@ object LiveModel {
     const val TAKE_OVER_AFTER_MS: Long = 30_000
 
     /**
+     * Zeiten sind **Dauern** (monoton gemessen, keine Wanduhr-Differenzen):
+     *
      * @param names Anzeigename je Spieler (`null` = Standardbezeichnung)
-     * @param disconnectedSinceMs seit wann der Zähler (aus Sicht dieser Anzeige) nicht verbunden ist
+     * @param contactAgoMs seit wann kein neuer Abgleich/kein neues Event vom Zähler kam, `null` = noch keiner
+     * @param disconnectedForMs wie lange der Zähler (aus Sicht dieser Anzeige) schon nicht verbunden ist
      */
     fun build(
         match: ActiveMatch,
         sync: SyncStatus,
         names: (PlayerId) -> String?,
-        nowMs: Long,
-        disconnectedSinceMs: Long?,
+        contactAgoMs: Long?,
+        disconnectedForMs: Long?,
         locked: Boolean = false,
         overlay: LiveOverlay? = null,
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
-        val teams = SidePair.of { side -> match.lineup.players(side).mapIndexed { i, id -> PlayerUi(side, i, names(id)) } }
+        val teams = SidePair.of { side -> match.lineup.players(side).mapIndexed { i, id -> PlayerUi(id, side, i, names(id)) } }
 
         fun player(id: PlayerId?): PlayerUi? {
             val side = id?.let { match.lineup.sideOf(it) } ?: return null
-            return PlayerUi(side, match.lineup.players(side).indexOf(id), names(id))
+            return PlayerUi(id, side, match.lineup.players(side).indexOf(id), names(id))
         }
         val doubles = match.lineup.a.size > 1
         val serve =
@@ -195,13 +226,13 @@ object LiveModel {
             hint = LiveScoreRules.hint(snapshot(match)),
             serve = serve,
             status = state.status,
-            sync = syncUi(role, sync, nowMs),
+            sync = syncUi(role, sync, contactAgoMs),
             takeOverOffered =
                 role == LiveRole.DISPLAY &&
                     !finished &&
                     !sync.scorerConnected &&
-                    disconnectedSinceMs != null &&
-                    nowMs - disconnectedSinceMs >= TAKE_OVER_AFTER_MS,
+                    disconnectedForMs != null &&
+                    disconnectedForMs >= TAKE_OVER_AFTER_MS,
             rejectedInputs = match.rejectedByRoleCount,
             canUndo = match.canUndo,
             canRedo = match.canRedo,
@@ -209,6 +240,7 @@ object LiveModel {
             finished = if (finished) finishedUi(match) else null,
             locked = locked && role == LiveRole.SCORER,
             overlay = overlay,
+            corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,
         )
     }
 
@@ -216,7 +248,7 @@ object LiveModel {
     fun syncUi(
         role: LiveRole,
         sync: SyncStatus,
-        nowMs: Long,
+        contactAgoMs: Long?,
     ): SyncUi {
         if (role == LiveRole.SCORER) {
             val connected = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
@@ -227,8 +259,64 @@ object LiveModel {
             }
         }
         if (sync.scorerConnected) return SyncUi.Live
-        val lastContact = listOfNotNull(sync.lastEventReceivedAtMs, sync.lastSyncAtMs).maxOrNull()
-        return SyncUi.Stale(lastContact?.let { ((nowMs - it).coerceAtLeast(0)) / 1_000 })
+        return SyncUi.Stale(contactAgoMs?.let { it.coerceAtLeast(0) / 1_000 })
+    }
+
+    /** Zulässige Korrekturen (nur `IN_PROGRESS`/`PAUSED`; die UI erzeugt keine ungültigen Events, 02 §7.3). */
+    private fun corrections(
+        match: ActiveMatch,
+        teams: SidePair<List<PlayerUi>>,
+    ): CorrectionsUi? {
+        val state = match.state
+        if (state.status != MatchStatus.IN_PROGRESS && state.status != MatchStatus.PAUSED) return null
+        val current = state.current ?: return null
+        val sport = match.format.sport
+        // wie am Handy (02 §9.4): rückwirkend nur im ersten Spiel bzw. ersten Satz
+        val firstGame =
+            state.sets.isEmpty() &&
+                (!sport.isTennisLike || (current.games?.let { it.a + it.b == 0 } == true && current.gameKind == GameKind.STANDARD))
+        val serve = state.serve
+        val swaps = mutableListOf<PositionSwap>()
+        if (match.lineup.a.size > 1 && serve != null) {
+            when (sport) {
+                // Badminton-Doppel: rechts/links einer Side sofort tauschen (Law 12)
+                Sport.BADMINTON -> {
+                    state.positions?.let { positions ->
+                        Side.entries.forEach { side ->
+                            positions[side].left?.let { swaps += PositionSwap(side, Correction.receivePositions(side, it)) }
+                        }
+                    }
+                }
+
+                // Tennis/Padel-Doppel: Rückschlagseite der rückschlagenden Side (ohne Punkt sofort, sonst ab nächstem Spiel)
+                Sport.TENNIS, Sport.PADEL -> {
+                    val receiving = serve.side.other
+                    val receiver = serve.receiver
+                    val partner = match.lineup.players(receiving).firstOrNull { it != receiver }
+                    val newRight =
+                        when (serve.court) {
+                            ServeCourt.RIGHT -> partner
+                            ServeCourt.LEFT -> receiver
+                            else -> null
+                        }
+                    newRight?.let { swaps += PositionSwap(receiving, Correction.receivePositions(receiving, it)) }
+                }
+
+                // Tischtennis-Doppel: anderer Rückschläger (SERVER mit receiver, 02 §7.4)
+                Sport.TABLE_TENNIS -> {
+                    val receiving = serve.side.other
+                    match.lineup
+                        .players(receiving)
+                        .firstOrNull { it != serve.receiver }
+                        ?.let { swaps += PositionSwap(receiving, Correction.server(serve.player, receiver = it)) }
+                }
+
+                Sport.PICKLEBALL -> {
+                    Unit
+                }
+            }
+        }
+        return CorrectionsUi(firstGame, teams.a + teams.b, serve?.player, swaps)
     }
 
     /** Stand als kurzer Text für Undo-Toast und Ongoing Activity, z. B. „30:15“, „AD:40“, ohne laufenden Satz „2:1“. */
