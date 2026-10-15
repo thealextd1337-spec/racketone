@@ -5,7 +5,7 @@ Stand: 2026-10-15 · Branch `w0/s4-cmp-scoring` · Bezug: [01 §0 E2, §6, §10]
 **Frage:** Fühlt sich der CMP-Live-Score auf dem Handy schnell, nativ und sonnenlichttauglich an – auf Android real, auf iOS zunächst im Simulator?
 Wenn nicht: Plan B = SwiftUI fürs iPhone (Android bleibt CMP).
 
-**Status:** Umsetzung fertig, Desktop gemessen, Review-Runde 1 eingearbeitet. **Offen:** Messung auf dem Pixel (Nutzer) und iOS-Simulator-Lauf (CI).
+**Status:** Umsetzung fertig, Desktop gemessen, iOS-Simulator-Vorlauf ausgewertet (G7 knapp Go), Review-Runden 1 + 2 eingearbeitet. **Offen:** Messung auf dem Pixel (Nutzer), CI-Lauf mit dem aktuellen Stand.
 
 ---
 
@@ -18,7 +18,7 @@ Wenn nicht: Plan B = SwiftUI fürs iPhone (Android bleibt CMP).
 | Designsystem | Farb-Tokens 04 §5.2 (Dark + Light), Typo-Rollen 04 §5.4, Raster/Radien 04 §5.5, M3-Mapping | `shared/ui-phone/…/designsystem/` |
 | Schriften | Barlow Condensed (Medium/SemiBold/Bold) + Inter (Regular/Medium/SemiBold/Bold) als Compose-Resources; OFL-Lizenzen in `composeResources/files/licenses/` (werden mit ausgeliefert) | `composeResources/font/` |
 | Live-Screen H6 | Schwarzer Screen, Tap-Fläche Wir (oben, Orange) / Gegner (unten, Blau), Score XL mit tabellarischen Ziffern und Roll-Animation 150 ms (Undo rollt rückwärts; „Bewegung reduzieren“ → nur Überblendung), Flash 120 ms, Satztabelle, Aufschlag-Ball, Hinweis-Pill (3 Stufen, Pfeil zum Team, Matchball pulsiert), Fußleiste Rückgängig/Outdoor/Mehr, Querformat nebeneinander | `shared/ui-phone/…/live/` |
-| Undo | Knopf, **Wischen nach unten** auf einer Fläche, Bedienhilfen-Aktion; Snackbar „Rückgängig: 30:15 → 15:15“ + „Wiederholen“ (4 s) | `LiveScoreController`, `LiveScoreScreen` |
+| Undo | Knopf, **Wischen nach unten** auf einer Fläche, Bedienhilfen-Aktion; Snackbar „Rückgängig: 30:15 → 15:15“ + „Wiederholen“ (4 s); „Wiederholen“ zusätzlich dauerhaft unter „Mehr“, solange der Redo-Stapel nicht leer ist (auch nach Rotation/Prozesstod) | `LiveScoreController`, `LiveScoreScreen` |
 | Fehlbedienung | Tap zählt beim Loslassen, Abbruch durch Wegziehen; Mehrfinger ignoriert; optionale Entprellung 600 ms (Menü, Standard aus); Taps nach Matchende → Ablehnungs-Haptik | `ScorePanel` |
 | Haptik (expect/actual) | Android: `VibrationEffect.Composition` (CLICK, TICK, QUICK_FALL/RISE, SLOW_RISE), Fallback vordefinierte Effekte; iOS: `UIImpactFeedbackGenerator`/`UINotificationFeedbackGenerator`; Muster nach 04 §5.8 (Wir 1×, Gegner 2× im Abstand 120 ms, Undo „abwärts“ …) | `platform/Platform.*.kt` |
 | Plattform | Bildschirm wach (Android `keepScreenOn`, iOS `idleTimerDisabled`), „Bewegung reduzieren“ (Android Animator-Skala 0 per ContentObserver, iOS `UIAccessibilityIsReduceMotionEnabled` + Änderungs-Notification – wirkt ohne Neustart), Outdoor-Kontrast-Schalter (6-dp-Kanten, alles weiß, Pill gefüllt, keine Animationen) | dito |
@@ -31,7 +31,7 @@ Nicht im Spike: Sperren (1 s halten), Sync-Pill, Satzende-Sheet, echte Engine, P
 
 ## 2. Messung: Eingabe → nächster Frame-Beginn nach Draw
 
-Overlay oben im Screen (abschaltbar unter „Mehr“): **Eingabe → nächster Frame-Beginn nach Draw** (p50/p95/max) und **Eingabe → Draw**, **getrennt nach Zeitquelle**, dazu Taps/Punkte/entprellt und Bildrate. Auf Android kommen Frame-Zeit p95 und Jank aus `FrameMetrics` dazu, im selben Fenster wie die Latenzwerte: „Messwerte zurücksetzen“ setzt alles gemeinsam zurück.
+Overlay oben im Screen (abschaltbar unter „Mehr“, per Tippen einklappbar; Kopf + Overlay + Satztabelle belegen im Hochformat höchstens 40 % der Höhe und scrollen, damit die Tap-Flächen auch bei 200 % Schrift Platz behalten): **Eingabe → nächster Frame-Beginn nach Draw** (p50/p95/max) und **Eingabe → Draw**, **getrennt nach Zeitquelle**, dazu Taps/Punkte/entprellt und Bildrate. Auf Android kommen Frame-Zeit p95 und Jank aus `FrameMetrics` dazu, im selben Fenster wie die Latenzwerte: „Messwerte zurücksetzen“ setzt alles gemeinsam zurück.
 
 Definition (`LatencyTracker`):
 1. **t0** = Zeitstempel des Plattform-Ereignisses beim Loslassen (`PointerInputChange.uptimeMillis` → Android `MotionEvent.eventTime`, iOS `UIEvent.timestamp` – laut Review im CMP-1.12.1-Quellartefakt bestätigt –, Desktop `MouseEvent.getWhen`).
@@ -88,11 +88,12 @@ Einordnung: Lauf A entspricht bei 60 Hz p50 ≈ 1½ Frames – erwartbar. Lauf B
 
 | Messung | Wert |
 |---|---|
-| Auto-Benchmark (Zeile `ADVANTLY_BENCH source=Synthetic …` + G7-Bewertung im Job-Summary) | _…_ |
-| Screenshots EN/DE (Artefakt `ios-simulator-s4`) | _…_ |
-| Schriften, Umlaute, Safe-Area korrekt? | _…_ |
+| Auto-Benchmark, Vorlauf mit Stand `420c61a` (40 synthetische Punkte, damals noch „tapToFrame“ benannt) | Zustand → nächster Frame-Beginn **p50 27,3 ms · p95 46,8 ms · max 74,7 ms**, → Draw p50 19,7 / p95 35,5 ms, n = 40 → **G7 knapp Go** |
+| Screenshots EN/DE (Artefakt `ios-simulator-s4`) | vorhanden, unauffällig |
+| Schriften, Umlaute, Safe-Area korrekt? | ja (Barlow/Inter, „ü“, Safe-Area, DE/EN geprüft im Review) |
+| Lauf mit aktuellem Stand (`check_s4_bench.py`-Bewertung) | _…_ |
 
-Simulator-Zeiten sagen wenig über ein echtes iPhone (kein Touch, Mac-GPU). Für die endgültige iOS-Entscheidung braucht es ein echtes iPhone (Apple-Developer-Account/TestFlight, Spike S2).
+Die p95 von 46,8 ms liegt nur knapp unter der Schwelle; der Simulator rendert auf dem geteilten CI-Runner, die Werte können von Lauf zu Lauf deutlich schwanken. Simulator-Zeiten sagen wenig über ein echtes iPhone (kein Touch, andere GPU). Für die endgültige iOS-Entscheidung braucht es ein echtes iPhone (Apple-Developer-Account/TestFlight, Spike S2).
 
 ## 3. Anleitung für den Nutzer: APK auf dem Pixel
 

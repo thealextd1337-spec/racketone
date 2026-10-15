@@ -63,5 +63,6 @@
     <string name="latency_counters">Taps %1$s · points %2$s · debounced %3$s</string>
     <string name="latency_refresh_rate">%1$s Hz</string>
     <string name="latency_frames">Frame time p95 %1$s ms · jank %2$s/%3$s</string>
+    <string name="latency_toggle">Expand or collapse latency overlay</string>
     <string name="latency_benchmark_running">Auto benchmark running …</string>
 </resources>

@@ -62,5 +62,6 @@
     <string name="latency_counters">Taps %1$s · Punkte %2$s · entprellt %3$s</string>
     <string name="latency_refresh_rate">%1$s Hz</string>
     <string name="latency_frames">Frame-Zeit p95 %1$s ms · Jank %2$s/%3$s</string>
+    <string name="latency_toggle">Latenz-Overlay auf- oder zuklappen</string>
     <string name="latency_benchmark_running">Auto-Benchmark läuft …</string>
 </resources>

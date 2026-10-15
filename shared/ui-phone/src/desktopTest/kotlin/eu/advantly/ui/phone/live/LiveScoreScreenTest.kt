@@ -14,16 +14,19 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
 import eu.advantly.presentation.live.DemoScenario
@@ -35,6 +38,7 @@ import eu.advantly.ui.phone.latency.InputClockSource
 import eu.advantly.ui.phone.platform.Haptics
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Compose-UI-Tests (Desktop/JVM) für den Live-Score-Screen: Tap → Score, Undo, Geste, Entprellung, Hinweis. */
@@ -225,6 +229,78 @@ class LiveScoreScreenTest {
             onNodeWithTag("panel_them").assertHeightIsAtLeast(120.dp)
             onNodeWithTag("undo_button").assertHeightIsAtLeast(64.dp)
         }
+
+    @Test
+    fun fullOverlayAtFontScale200KeepsScorePanelsAndLabelsApart() =
+        runComposeUiTest {
+            val controller = LiveScoreController()
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, fontScale = 2f)) {
+                    AdvantlyTheme(darkTheme = true) {
+                        Box(Modifier.size(412.dp, 892.dp)) { LiveScoreScreen(controller = controller) }
+                    }
+                }
+            }
+            // Overlay mit allen drei Quellen füllen (Review: Flächen schrumpften sonst auf 55 dp)
+            runOnIdle {
+                InputClockSource.entries.forEachIndexed { i, source ->
+                    controller.tracker.onInput(100 + i, 0, source)
+                    controller.tracker.onDrawn(100 + i, 5_000_000)
+                    controller.tracker.onNextFrame(16_000_000)
+                }
+                controller.demo(DemoScenario.BreakPoint)
+            }
+            waitForIdle()
+            for (team in listOf("us", "them")) {
+                onNodeWithTag("panel_$team").assertHeightIsAtLeast(150.dp)
+                val score = onNodeWithTag("score_$team", useUnmergedTree = true).getBoundsInRoot()
+                val label = onNodeWithTag("panel_${team}_label", useUnmergedTree = true).getBoundsInRoot()
+                val apart = if (team == "us") score.top >= label.bottom else score.bottom <= label.top
+                assertTrue(apart, "Ziffer überdeckt Label ($team): score=$score label=$label")
+            }
+        }
+
+    @Test
+    fun redoStaysReachableAfterRecreationWithoutSnackbar() =
+        runComposeUiTest {
+            val handle = SavedStateHandle()
+            LiveScoreViewModel(handle).apply {
+                score(Team.Us)
+                score(Team.Us)
+                undo()
+            }
+            val controller = LiveScoreController(LiveScoreViewModel(handle))
+            setContent {
+                AdvantlyTheme(darkTheme = true) {
+                    Box(Modifier.size(412.dp, 892.dp)) { LiveScoreScreen(controller = controller) }
+                }
+            }
+            assertScore("15", "0")
+            onNodeWithTag("undo_snackbar").assertDoesNotExist()
+            assertTrue(controller.canRedo)
+            onNodeWithTag("more_button").performClick()
+            onNodeWithTag("menu_redo").assertIsEnabled().performClick()
+            assertScore("30", "0")
+            assertFalse(controller.canRedo)
+        }
+
+    @Test
+    fun hintArrowPointsToTheTeamPanelInBothOrientations() {
+        for ((size, expected) in listOf(DpSize(412.dp, 892.dp) to "up", DpSize(892.dp, 412.dp) to "left")) {
+            runComposeUiTest {
+                val controller = LiveScoreController()
+                setContent {
+                    AdvantlyTheme(darkTheme = true) {
+                        Box(Modifier.size(size)) { LiveScoreScreen(controller = controller) }
+                    }
+                }
+                // Breakball für Wir
+                runOnIdle { controller.demo(DemoScenario.BreakPoint) }
+                val node = onNodeWithTag("hint_pill").fetchSemanticsNode()
+                assertEquals(expected, node.config[HintArrowDirection])
+            }
+        }
+    }
 
     @Test
     fun compactLandscapeKeepsUsableTapPanels() =

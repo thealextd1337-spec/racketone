@@ -20,7 +20,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -116,7 +118,7 @@ internal fun ScorePanel(
 
     val shape = Radii.scorePanelShape
     val tag = if (content.team == Team.Us) "panel_us" else "panel_them"
-    BoxWithConstraints(
+    Box(
         modifier =
             modifier
                 .testTag(tag)
@@ -182,65 +184,74 @@ internal fun ScorePanel(
     ) {
         val textColor = if (outdoor) Color.White else teamColor
         val secondary = if (outdoor) Color.White else colors.text2
-        // Team-Label + Name links, Aufschlag rechts in EINER Zeile: bei großer Schrift kürzt der Name (Ellipse),
-        // statt mit dem Aufschlag-Hinweis zu überlappen.
-        Row(
-            modifier =
-                Modifier
-                    .align(if (content.team == Team.Us) Alignment.TopStart else Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.l, vertical = Spacing.m),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = content.teamLabel, style = AdvantlyTheme.typography.overline, color = textColor, maxLines = 1)
-            Text(
-                text = content.playerName,
-                style = AdvantlyTheme.typography.caption,
-                color = secondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (content.serving) {
-                Row(
-                    modifier = Modifier.testTag("${tag}_serve"),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(12.dp).background(colors.sportTennis, CircleShape))
-                    Text(
-                        text = content.serveLabel,
-                        style = AdvantlyTheme.typography.caption,
-                        color = secondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        val labelRow: @Composable () -> Unit = {
+            // Team-Label + Name links, Aufschlag rechts in EINER Zeile: bei großer Schrift kürzt der Name (Ellipse),
+            // statt mit dem Aufschlag-Hinweis zu überlappen.
+            Row(
+                modifier =
+                    Modifier
+                        .testTag("${tag}_label")
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.l, vertical = Spacing.m),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = content.teamLabel, style = AdvantlyTheme.typography.overline, color = textColor, maxLines = 1)
+                Text(
+                    text = content.playerName,
+                    style = AdvantlyTheme.typography.caption,
+                    color = secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (content.serving) {
+                    Row(
+                        modifier = Modifier.testTag("${tag}_serve"),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(12.dp).background(colors.sportTennis, CircleShape))
+                        Text(
+                            text = content.serveLabel,
+                            style = AdvantlyTheme.typography.caption,
+                            color = secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
 
-        // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
-        // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
-        val density = LocalDensity.current
-        val digitHeight = min(min(maxHeight * 0.62f, maxWidth * 0.42f), 132.dp)
-        val fontSize = (digitHeight.value / density.fontScale).sp
-        val animate = !outdoor
-        AnimatedContent(
-            targetState = content.pointText,
-            modifier = Modifier.align(Alignment.Center),
-            transitionSpec = { scoreTransition(animate, reduceMotion, direction) },
-            contentAlignment = Alignment.Center,
-            label = "score-roll",
-        ) { text ->
-            Text(
-                text = text,
-                modifier = Modifier.testTag(if (content.team == Team.Us) "score_us" else "score_them"),
-                style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
+        // Label-Zeile oben (Wir) bzw. unten (Gegner); die Ziffer bekommt nur den RESTLICHEN Platz und kann die
+        // Labels damit auch bei 200 % Schrift oder sehr flachen Flächen nicht überdecken.
+        Column(Modifier.fillMaxSize()) {
+            if (content.team == Team.Us) labelRow()
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
+                // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
+                val density = LocalDensity.current
+                val digitHeight = min(min(maxHeight * 0.9f, maxWidth * 0.42f), 132.dp)
+                val fontSize = (digitHeight.value / density.fontScale).sp
+                val animate = !outdoor
+                AnimatedContent(
+                    targetState = content.pointText,
+                    transitionSpec = { scoreTransition(animate, reduceMotion, direction) },
+                    contentAlignment = Alignment.Center,
+                    label = "score-roll",
+                ) { text ->
+                    Text(
+                        text = text,
+                        modifier = Modifier.testTag(if (content.team == Team.Us) "score_us" else "score_them"),
+                        style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                }
+            }
+            if (content.team == Team.Them) labelRow()
         }
     }
 }

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -111,6 +112,7 @@ internal fun HintPill(
     hint: ScoreHint,
     outdoor: Boolean,
     reduceMotion: Boolean,
+    landscape: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = AdvantlyTheme.colors
@@ -163,6 +165,7 @@ internal fun HintPill(
                 .clearAndSetSemantics {
                     contentDescription = description
                     liveRegion = LiveRegionMode.Polite
+                    hint.team?.let { this[HintArrowDirection] = arrowDirection(it, landscape) }
                 }.graphicsLayer { alpha = pulseAlpha?.value ?: 1f }
                 .heightIn(min = 30.dp)
                 .background(background, Radii.pillShape)
@@ -171,7 +174,7 @@ internal fun HintPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        hint.team?.let { TeamArrow(team = it, color = content) }
+        hint.team?.let { TeamArrow(team = it, landscape = landscape, color = content) }
         Text(
             text = text,
             style = AdvantlyTheme.typography.overline.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
@@ -181,23 +184,45 @@ internal fun HintPill(
     }
 }
 
-/** ▲ = Wir (obere Fläche), ▼ = Gegner (untere Fläche). */
+/**
+ * Pfeil zur Fläche des Teams: Hochformat ▲ Wir (oben) / ▼ Gegner (unten), Querformat ◀ Wir (links) / ▶ Gegner (rechts).
+ * Rein dekorativ – die Pill-Semantik nennt das Team im Text.
+ */
 @Composable
 private fun TeamArrow(
     team: Team,
+    landscape: Boolean,
     color: Color,
 ) {
     Canvas(Modifier.size(9.dp)) {
+        val w = size.width
+        val h = size.height
         val path =
             Path().apply {
-                if (team == Team.Us) {
-                    moveTo(size.width / 2, 0f)
-                    lineTo(size.width, size.height)
-                    lineTo(0f, size.height)
-                } else {
-                    moveTo(0f, 0f)
-                    lineTo(size.width, 0f)
-                    lineTo(size.width / 2, size.height)
+                when {
+                    landscape && team == Team.Us -> {
+                        moveTo(0f, h / 2)
+                        lineTo(w, 0f)
+                        lineTo(w, h)
+                    }
+
+                    landscape -> {
+                        moveTo(w, h / 2)
+                        lineTo(0f, 0f)
+                        lineTo(0f, h)
+                    }
+
+                    team == Team.Us -> {
+                        moveTo(w / 2, 0f)
+                        lineTo(w, h)
+                        lineTo(0f, h)
+                    }
+
+                    else -> {
+                        moveTo(0f, 0f)
+                        lineTo(w, 0f)
+                        lineTo(w / 2, h)
+                    }
                 }
                 close()
             }
@@ -394,3 +419,18 @@ internal fun SportChip(
         Text(text = text, style = AdvantlyTheme.typography.label.copy(fontSize = 13.sp), color = if (outdoor) Color.White else colors.text)
     }
 }
+
+/** Richtung des Teampfeils als Semantik-Eigenschaft (nur für Tests, wird nicht vorgelesen). */
+internal val HintArrowDirection = SemanticsPropertyKey<String>("HintArrowDirection")
+
+/** `up`/`down` (Hochformat) bzw. `left`/`right` (Querformat). */
+internal fun arrowDirection(
+    team: Team,
+    landscape: Boolean,
+): String =
+    when {
+        landscape && team == Team.Us -> "left"
+        landscape -> "right"
+        team == Team.Us -> "up"
+        else -> "down"
+    }

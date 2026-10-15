@@ -171,6 +171,7 @@ jobs:
           sleep 10
           xcrun simctl io "$IOS_SIM" screenshot "$out/live-score-de.png"
           # Validiert n ≥ 40 und numerische Perzentile (sonst Fehler), bewertet G7 (Go/No-Go im Summary)
+          python3 .github/scripts/check_s4_bench.py --self-test
           python3 .github/scripts/check_s4_bench.py "$out/app-en.log" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Simulator-Screenshots + Logs hochladen
         if: ${{ !cancelled() }}

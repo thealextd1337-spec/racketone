@@ -61,6 +61,10 @@ class LiveScoreController(
     var canUndo by mutableStateOf(viewModel.canUndo)
         private set
 
+    /** Redo-Stapel nicht leer – auch nach Rotation/Prozesstod, wenn die Snackbar längst weg ist („Mehr → Wiederholen“). */
+    var canRedo by mutableStateOf(viewModel.canRedo)
+        private set
+
     /** Wird bei jeder Zustandsänderung erhöht (Roll-Animation, Flash, Latenzmessung). */
     var generation by mutableIntStateOf(0)
         private set
@@ -194,6 +198,7 @@ class LiveScoreController(
         lastPointAtNanos = Long.MIN_VALUE
         state = viewModel.state
         canUndo = false
+        canRedo = false
         flashTeam = null
         generation++
     }
@@ -240,6 +245,7 @@ class LiveScoreController(
         change.cue?.let(haptics::perform)
         state = change.after
         canUndo = viewModel.canUndo
+        canRedo = viewModel.canRedo
         lastDirection = change.direction
         flashTeam = change.team
         generation++

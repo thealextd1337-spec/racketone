@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.Density
 import eu.advantly.presentation.live.DemoScenario
 import eu.advantly.presentation.live.Team
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.latency.InputClockSource
 import java.io.File
 import java.util.Locale
 import javax.imageio.ImageIO
@@ -95,6 +96,17 @@ class LiveScoreScreenshotTest {
     fun liveScoreFontScale200Percent() =
         capture("live-score-de-fontscale-2", Locale.GERMANY, fontScale = 2f) {
             demo(DemoScenario.Tiebreak)
+        }
+
+    @Test
+    fun liveScoreFontScale200PercentWithFullOverlay() =
+        capture("live-score-de-fontscale-2-overlay", Locale.GERMANY, fontScale = 2f) {
+            InputClockSource.entries.forEachIndexed { i, source ->
+                tracker.onInput(100 + i, 0, source)
+                tracker.onDrawn(100 + i, 5_000_000)
+                tracker.onNextFrame(16_000_000)
+            }
+            demo(DemoScenario.BreakPoint)
         }
 
     @Test

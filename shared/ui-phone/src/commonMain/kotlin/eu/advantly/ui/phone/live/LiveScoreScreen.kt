@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -83,6 +84,7 @@ import eu.advantly.ui.phone.resources.latency_source_handler
 import eu.advantly.ui.phone.resources.latency_source_line
 import eu.advantly.ui.phone.resources.latency_source_synthetic
 import eu.advantly.ui.phone.resources.latency_stats
+import eu.advantly.ui.phone.resources.latency_toggle
 import eu.advantly.ui.phone.resources.live_format_best_of_3
 import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_sport_tennis
@@ -112,6 +114,9 @@ import kotlin.math.roundToInt
 /** Spieler-Namen des Fake-Matches (Daten, keine UI-Texte). */
 private const val FAKE_NAME_US = "Alex"
 private const val FAKE_NAME_THEM = "Jonas"
+
+/** Anteil der Bildschirmhöhe, den Kopf + Overlay + Satztabelle im Hochformat höchstens belegen. */
+private const val INFO_MAX_FRACTION = 0.4f
 
 /** Sichtdauer der Undo-Snackbar. */
 private const val UNDO_NOTICE_MILLIS = 4_000L
@@ -170,6 +175,7 @@ fun LiveScoreScreen(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = Spacing.s)) {
             val landscape = maxWidth > maxHeight
+            val infoMaxHeight = maxHeight * INFO_MAX_FRACTION
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
                     Header(controller)
@@ -199,7 +205,9 @@ fun LiveScoreScreen(
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    info(Modifier.fillMaxWidth())
+                    // Info (Kopf, Overlay, Satztabelle) höchstens 40 % der Höhe und scrollbar: Bei 200 % Schrift und
+                    // vollem Overlay behalten die Tap-Flächen so ihren Platz.
+                    info(Modifier.fillMaxWidth().heightIn(max = infoMaxHeight).verticalScroll(rememberScrollState()))
                     PanelsWithSnackbar(controller, reduceMotion, landscape = false, Modifier.weight(1f).padding(top = Spacing.s))
                     Footer(controller, Modifier.padding(top = Spacing.s))
                 }
@@ -320,7 +328,7 @@ private fun Panels(
     Box(modifier) {
         if (landscape) {
             Column(Modifier.fillMaxSize()) {
-                HintBand(hint, controller.outdoorContrast, reduceMotion)
+                HintBand(hint, controller.outdoorContrast, reduceMotion, landscape)
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     Panel(usContent, Modifier.weight(1f).fillMaxSize())
                     Panel(themContent, Modifier.weight(1f).fillMaxSize())
@@ -329,7 +337,7 @@ private fun Panels(
         } else {
             Column(Modifier.fillMaxSize()) {
                 Panel(usContent, Modifier.weight(1f).fillMaxWidth())
-                HintBand(hint, controller.outdoorContrast, reduceMotion)
+                HintBand(hint, controller.outdoorContrast, reduceMotion, landscape)
                 Panel(themContent, Modifier.weight(1f).fillMaxWidth())
             }
         }
@@ -342,9 +350,10 @@ private fun HintBand(
     hint: ScoreHint?,
     outdoor: Boolean,
     reduceMotion: Boolean,
+    landscape: Boolean,
 ) {
     Box(Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(vertical = Spacing.xs), contentAlignment = Alignment.Center) {
-        if (hint != null) HintPill(hint, outdoor, reduceMotion)
+        if (hint != null) HintPill(hint, outdoor, reduceMotion, landscape)
     }
 }
 
@@ -404,10 +413,14 @@ private fun MoreMenu(
     fun Item(
         text: StringResource,
         checked: Boolean? = null,
+        enabled: Boolean = true,
+        tag: String? = null,
         onClick: () -> Unit,
     ) {
         DropdownMenuItem(
             text = { Text(stringResource(text)) },
+            enabled = enabled,
+            modifier = if (tag != null) Modifier.testTag(tag) else Modifier,
             onClick = {
                 onClick()
                 if (checked == null) onDismiss()
@@ -441,6 +454,7 @@ private fun MoreMenu(
         Item(Res.string.menu_auto_benchmark) {
             if (!controller.benchmarkRunning) scope.launch { println(controller.runAutoBenchmark().toLogLine()) }
         }
+        Item(Res.string.action_redo, enabled = controller.canRedo, tag = "menu_redo") { controller.redo() }
         Item(Res.string.menu_reset_measurements) { controller.resetMeasurements() }
         Item(Res.string.menu_new_match) { controller.newMatch() }
     }
@@ -521,11 +535,13 @@ private fun LatencyOverlay(
     val colors = AdvantlyTheme.colors
     val style = AdvantlyTheme.typography.caption.copy(fontSize = 11.sp, lineHeight = 14.sp)
     val refresh = displayRefreshRateHz()
+    var expanded by rememberSaveable { mutableStateOf(true) }
     Column(
         modifier =
             modifier
                 .testTag("latency_overlay")
                 .fillMaxWidth()
+                .clickable(onClickLabel = stringResource(Res.string.latency_toggle)) { expanded = !expanded }
                 .background(Color(0xFF0E1013), Radii.chipShape)
                 .border(1.dp, colors.line, Radii.chipShape)
                 .padding(horizontal = Spacing.s, vertical = 6.dp),
@@ -538,7 +554,7 @@ private fun LatencyOverlay(
             style = style.copy(fontWeight = FontWeight.Bold),
             color = colors.text,
         )
-        val summaries = tracker.summaries()
+        val summaries = tracker.summaries().let { if (expanded) it else it.take(1) }
         if (summaries.isEmpty()) {
             Text(stringResource(Res.string.latency_no_samples), style = style, color = colors.text2)
         }
@@ -569,7 +585,7 @@ private fun LatencyOverlay(
                 color = if (primary) colors.hint else colors.text2,
                 modifier = Modifier.testTag("latency_${summary.source.name}"),
             )
-            if (primary) {
+            if (primary && expanded) {
                 OverlayLine(
                     stringResource(Res.string.latency_input_to_draw),
                     "p50 ${formatMillis(summary.inputToDrawP50)} · p95 ${formatMillis(summary.inputToDrawP95)} ms",
@@ -579,6 +595,7 @@ private fun LatencyOverlay(
                 )
             }
         }
+        if (!expanded) return@Column
         val counters =
             stringResource(
                 Res.string.latency_counters,
