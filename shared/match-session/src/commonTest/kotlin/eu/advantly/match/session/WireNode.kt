@@ -22,8 +22,10 @@ import kotlin.random.Random
  * mit [deliver] in beliebiger Reihenfolge eingespeist. So lassen sich Zustellreihenfolgen exakt durchspielen.
  */
 class WireLink : DeviceLink {
-    private var sink: DeviceLinkListener? = null
+    var sink: DeviceLinkListener? = null
+        private set
     val sent = mutableListOf<SyncMessage>()
+    val callbacks = mutableListOf<SendCallback>()
     override val state = LinkState.CONNECTED
     override val peers = listOf("lab")
     override val stats = LinkStats()
@@ -42,6 +44,7 @@ class WireLink : DeviceLink {
         callback: SendCallback?,
     ): String {
         sent += (SyncCodec.decode(payload) as DecodeResult.Ok).message
+        callback?.let { callbacks += it }
         return "message-${sent.size}"
     }
 
@@ -56,12 +59,13 @@ class WireNode(
     seed: Int,
     kind: PeerKind = PeerKind.PHONE,
     val scheduler: ManualScheduler = ManualScheduler(),
+    guard: ThreadGuard = ThreadGuard.NONE,
 ) {
     val data = testLocalData()
     val link = WireLink()
     var time = 10_000L
     val session =
-        MatchSession(data, link, scheduler, SessionConfig(DeviceId(name), kind), WallClock { time }, RandomIdGenerator(Random(seed)))
+        MatchSession(data, link, scheduler, SessionConfig(DeviceId(name), kind), WallClock { time }, RandomIdGenerator(Random(seed)), guard)
 
     init {
         session.start()

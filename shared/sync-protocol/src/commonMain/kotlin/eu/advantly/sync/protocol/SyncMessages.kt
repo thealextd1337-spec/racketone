@@ -107,6 +107,27 @@ data class MatchMetaMessage(
 ) : SyncMessage
 
 /**
+ * Löschmarkierungen (Tombstones): Diese Matches wurden auf einem gekoppelten Gerät gelöscht. Der Empfänger löscht sie
+ * ebenfalls (ein offenes wird geschlossen) und ignoriert danach dauerhaft alle Events und Köpfe dazu. Wird bei jedem
+ * `Hello` vollständig gesendet und beim Löschen sofort. P1: nur eigene Geräte; P2 (geteilte Matches): Löschen betrifft
+ * nur die eigene Sicht.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("Deleted")
+data class Deleted(
+    val matches: List<DeletedMatch>,
+    @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+) : SyncMessage
+
+/** Ein gelöschtes Match mit Zeitpunkt der Löschung (Wanduhr des löschenden Geräts). */
+@Serializable
+data class DeletedMatch(
+    val matchId: MatchId,
+    val deletedAtMs: Long,
+)
+
+/**
  * Unveränderlicher Kopf eines Matches. Format, Besetzung und Metadaten stehen zusätzlich in der Genesis (`MatchCreated`);
  * hier kommen die Daten dazu, die nicht im Event-Log stehen.
  *

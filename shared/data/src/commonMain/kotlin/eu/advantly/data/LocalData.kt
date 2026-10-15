@@ -17,7 +17,7 @@ class LocalData(
     private val database = AdvantlyDatabase(driver)
 
     val events: EventStore = SqlDelightEventStore(database.matchEventQueries)
-    val matches: MatchRepository = MatchRepository(database.matchHeaderQueries)
+    val matches: MatchRepository = MatchRepository(database.matchHeaderQueries, database.matchTombstoneQueries)
     val players: PlayerRepository = PlayerRepository(database.playerQueries)
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
@@ -25,9 +25,16 @@ class LocalData(
     /** Führt [block] in einer Transaktion aus (alles oder nichts). */
     fun <T> transaction(block: () -> T): T = database.transactionWithResult { block() }
 
-    /** Löscht ein Match vollständig (Kopf + Events) – „Wischen → löschen“ in der Historie. */
-    fun deleteMatch(id: MatchId) {
+    /**
+     * Löscht ein Match vollständig (Kopf + Events) und hinterlässt eine dauerhafte Löschmarkierung, damit es durch
+     * keinen Abgleich wieder auftaucht – „Wischen → löschen“ in der Historie bzw. empfangene Löschung.
+     */
+    fun deleteMatch(
+        id: MatchId,
+        deletedAtMs: Long = 0,
+    ) {
         database.transaction {
+            matches.markDeleted(id, deletedAtMs)
             events.deleteMatch(id.value)
             matches.delete(id)
         }

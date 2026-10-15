@@ -31,6 +31,7 @@ import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
+import eu.advantly.data.StoredSequence
 import eu.advantly.data.scoreEvents
 import eu.advantly.data.toScoreEventOrNull
 import eu.advantly.data.toStoredEvent
@@ -45,6 +46,8 @@ import eu.advantly.sync.protocol.AntiEntropy
 import eu.advantly.sync.protocol.Compatibility
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.DecodeResult
+import eu.advantly.sync.protocol.Deleted
+import eu.advantly.sync.protocol.DeletedMatch
 import eu.advantly.sync.protocol.DeviceSeq
 import eu.advantly.sync.protocol.Events
 import eu.advantly.sync.protocol.Hello
@@ -117,9 +120,6 @@ class MatchSession(
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
     private var lastEventReceivedAtMs: Long? = null
-
-    /** Von einer Gegenstelle bestätigte Events je Match (Ack einer `Events`-Nachricht oder deren `Summary`). */
-    private val confirmed = HashMap<MatchId, MutableSet<DeviceSeq>>()
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -213,11 +213,17 @@ class MatchSession(
         publish()
     }
 
-    /** Löscht ein Match vollständig (Kopf + Events); ein offenes wird vorher geschlossen. */
+    /**
+     * Löscht ein Match vollständig (Kopf + Events); ein offenes wird vorher geschlossen. Die dauerhafte Löschmarkierung
+     * geht sofort (und bei jedem `Hello`) an die gekoppelten Geräte; dort wird das Match ebenfalls gelöscht und taucht
+     * durch keinen Abgleich wieder auf.
+     */
     fun deleteMatch(matchId: MatchId) {
         checkThread()
         if (open?.id == matchId) open = null
-        data.deleteMatch(matchId)
+        val now = clock.nowMs()
+        data.deleteMatch(matchId, now)
+        broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
         publish()
     }
 
@@ -447,6 +453,7 @@ class MatchSession(
         peer: String,
         payload: ByteArray,
     ) {
+        checkThread()
         val message = (SyncCodec.decode(payload) as? DecodeResult.Ok)?.message ?: return
         if (message !is Hello && compatibility[peer]?.isCompatible == false) return
         val touched =
@@ -456,6 +463,7 @@ class MatchSession(
                     is Summary -> onSummary(peer, message).let { null }
                     is Events -> onEvents(peer, message)
                     is MatchMetaMessage -> onMatchMeta(message)
+                    is Deleted -> onDeleted(peer, message).let { null }
                 }
             } catch (e: IllegalArgumentException) {
                 // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) → verwerfen; der Rest bleibt konsistent
@@ -475,8 +483,9 @@ class MatchSession(
         data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
         if (!result.isCompatible) return
         if (peer !in helloSent) sendHello(peer)
+        sendDeleted(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
-        send(peer, metaMessage())
+        send(peer, metaMessage(open?.record))
     }
 
     private fun onSummary(
@@ -485,27 +494,53 @@ class MatchSession(
     ) {
         lastSyncAtMs = clock.nowMs()
         val behind = mutableListOf<MatchId>()
+        val deleted = mutableListOf<MatchId>()
         for ((key, remote) in summary.matches) {
             val matchId = MatchId(key)
+            if (data.matches.isDeleted(matchId)) {
+                deleted += matchId
+                continue
+            }
+            remote.watermarks.forEach { (device, seq) -> data.events.markConfirmedUpTo(key, device.value, seq) }
             val local = sequences(matchId)
-            confirm(matchId, local.filter { it.seq <= remote[it.deviceId] })
             val ranges = AntiEntropy.missingRanges(local, remote)
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
             if (AntiEntropy.isBehind(VersionVector.fromSequences(local), remote)) behind += matchId
         }
         if (!summary.reply && behind.isNotEmpty()) send(peer, summaryOf(behind, reply = true))
+        if (deleted.isNotEmpty()) sendDeleted(peer, deleted)
+    }
+
+    /** Löschmarkierungen einer Gegenstelle übernehmen (offenes Match schließen) und an die übrigen weiterreichen. */
+    private fun onDeleted(
+        peer: String,
+        message: Deleted,
+    ) {
+        val fresh = message.matches.filter { !data.matches.isDeleted(it.matchId) }
+        if (fresh.isEmpty()) return
+        fresh.forEach { tombstone ->
+            if (open?.id == tombstone.matchId) open = null
+            data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
+        }
+        val forward = Deleted(fresh)
+        targets().filter { it != peer }.forEach { send(it, forward) }
     }
 
     /** Speichert neue Events sofort und wendet sie als Batch an (kein Puffern, `more` ist nur ein Hinweis). */
     private fun onEvents(
         peer: String,
         message: Events,
-    ): MatchId {
+    ): MatchId? {
         lastSyncAtMs = clock.nowMs()
         val matchId = message.matchId
+        if (data.matches.isDeleted(matchId)) {
+            sendDeleted(peer, listOf(matchId)) // Absender soll es auch löschen, statt es immer wieder zu senden
+            return null
+        }
         val valid = message.events.filter { AntiEntropy.isPlausible(it, matchId) }
-        val results = data.events.appendAll(valid.map { it.toStoredEvent() })
-        confirm(matchId, valid.map { DeviceSeq(it.deviceId, it.deviceSeq) }) // der Absender hat sie
+        // der Absender hat sie: als bestätigt speichern bzw. eigene Echos als bestätigt markieren
+        val results = data.events.appendAll(valid.map { it.toStoredEvent().copy(confirmed = true) })
+        data.events.markConfirmed(matchId.value, valid.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
         if (inserted.isEmpty()) return matchId
         lastEventReceivedAtMs = clock.nowMs()
@@ -588,6 +623,7 @@ class MatchSession(
     }
 
     private fun peersChanged(peers: List<String>) {
+        checkThread()
         val gone = (hellos.keys + helloSent + compatibility.keys) - peers.toSet()
         gone.forEach {
             hellos.remove(it)
@@ -598,8 +634,9 @@ class MatchSession(
             peers.filter { it !in helloSent }.forEach { peer ->
                 // sofort abgleichen (nicht erst im 30-s-Takt): Hello, eigener Stand, unbestätigte Events direkt nachschieben
                 sendHello(peer)
+                sendDeleted(peer)
                 send(peer, summaryOf(summaryMatches(), reply = false))
-                open?.let { m -> sendEvents(peer, m.id, unconfirmed(m.id)) }
+                pushBacklog(peer)
             }
         }
         publish()
@@ -629,23 +666,30 @@ class MatchSession(
         targets().forEach { send(it, message) }
     }
 
-    /** Events, die noch keine Gegenstelle bestätigt hat (Offline-Puffer des Zählers), in Ordnung. */
-    private fun unconfirmed(matchId: MatchId): List<ScoreEvent> {
-        val done = confirmed[matchId].orEmpty()
-        return data.events
-            .scoreEvents(matchId)
-            .filter { DeviceSeq(it.deviceId, it.deviceSeq) !in done }
+    /**
+     * Gesamter Ausgangs-Rückstand (persistent, über alle Matches): je Match mit unbestätigten Events den Kopf
+     * (`MatchMeta`) und die Events in Teilen – damit kommt auch ein langer Offline-Rückstand vollständig an.
+     */
+    private fun pushBacklog(peer: String) {
+        for (key in data.events.unconfirmedMatches()) {
+            val matchId = MatchId(key)
+            if (data.matches.isDeleted(matchId)) continue
+            data.matches.get(matchId)?.let { send(peer, metaMessage(it)) }
+            sendEvents(peer, matchId, data.events.unconfirmedEvents(key).mapNotNull { it.toScoreEventOrNull() })
+        }
     }
 
-    private fun confirm(
-        matchId: MatchId,
-        sequences: Collection<DeviceSeq>,
+    private fun sendDeleted(
+        peer: String,
+        matches: List<MatchId>? = null,
     ) {
-        if (sequences.isNotEmpty()) confirmed.getOrPut(matchId) { HashSet() } += sequences
+        val all = data.matches.deleted()
+        val selected = if (matches == null) all else all.filter { it.matchId in matches }
+        if (selected.isNotEmpty()) send(peer, Deleted(selected.map { DeletedMatch(it.matchId, it.deletedAtMs) }))
     }
 
     private fun broadcastMeta() {
-        if (targets().isNotEmpty()) broadcast(metaMessage())
+        if (targets().isNotEmpty()) broadcast(metaMessage(open?.record))
     }
 
     private fun send(
@@ -665,7 +709,8 @@ class MatchSession(
                 attempts: Int,
                 latencyMs: Long,
             ) {
-                confirm(message.matchId, message.events.map { DeviceSeq(it.deviceId, it.deviceSeq) })
+                checkThread()
+                data.events.markConfirmed(message.matchId.value, message.events.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
                 publish()
             }
 
@@ -683,23 +728,25 @@ class MatchSession(
         timer?.cancel()
         timer =
             scheduler.postDelayed(config.antiEntropyIntervalMs) {
+                checkThread()
                 timer = null
                 if (!started) return@postDelayed
                 val m = open
-                if (m != null && m.status != MatchStatus.FINISHED) sendSummaries()
+                val active = m != null && m.status != MatchStatus.FINISHED
+                if (active || data.events.unconfirmedCount() > 0) sendSummaries()
                 scheduleAntiEntropy()
             }
     }
 
     // --- Nachrichten bauen ------------------------------------------------------------------------
 
+    /** Offenes Match, zuletzt geänderte und alle mit Ausgangs-Rückstand (gelöschte nie). */
     private fun summaryMatches(): List<MatchId> =
         (
             listOfNotNull(open?.id) +
-                data.matches.recent(config.summaryMatchLimit).map {
-                    it.id
-                }
-        ).distinct()
+                data.matches.recent(config.summaryMatchLimit).map { it.id } +
+                data.events.unconfirmedMatches().map { MatchId(it) }
+        ).distinct().filter { !data.matches.isDeleted(it) }
 
     private fun summaryOf(
         matches: List<MatchId>,
@@ -718,20 +765,12 @@ class MatchSession(
             .mapNotNull { it.toScoreEventOrNull() }
             .sortedWith(EventOrdering)
 
-    private fun metaMessage(): MatchMetaMessage {
-        val m = open
+    private fun metaMessage(record: MatchRecord?): MatchMetaMessage {
         val favorites = data.favorites.recent(limit = FAVORITES_IN_META)
-        val playerIds =
-            (
-                m
-                    ?.record
-                    ?.lineup
-                    ?.let { it.a + it.b }
-                    .orEmpty() + favorites.flatMap { it.a + it.b }
-            ).distinct()
+        val lineupPlayers = record?.lineup?.let { it.a + it.b }.orEmpty()
+        val playerIds = (lineupPlayers + favorites.flatMap { it.a + it.b }).distinct()
         return MatchMetaMessage(
-            match =
-                m?.record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
+            match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
             players = playerIds.mapNotNull { data.players.get(it)?.toPlayer() },
             favorites = favorites.map { it.toWire() },
         )
@@ -762,7 +801,7 @@ class MatchSession(
             }
         val scorerConnected =
             match != null && (match.isScorer || (started && compatiblePeers.any { it.deviceId == match.scorerDeviceId }))
-        val pending = open?.let { m -> sequences(m.id).count { it !in confirmed[m.id].orEmpty() } } ?: 0
+        val pending = data.events.unconfirmedCount().toInt()
         return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs))
     }
 

@@ -141,13 +141,20 @@ class LocalDataTest {
     }
 
     @Test
-    fun deleteMatchRemovesHeaderAndEvents() {
+    fun deleteMatchRemovesHeaderAndEventsAndLeavesATombstone() {
         val id = MatchId("m1")
         data.matches.insertIfAbsent(id, tennis, singles, MatchMeta(), createdAtMs = 1_000)
         data.events.append(StoredEvent("e1", "m1", "d", 1, 1, "{}"))
-        data.deleteMatch(id)
+        data.deleteMatch(id, deletedAtMs = 5_000)
         assertNull(data.matches.get(id))
         assertEquals(0, data.events.count("m1"))
+        assertTrue(data.matches.isDeleted(id))
+        assertEquals(listOf(MatchTombstone(id, 5_000)), data.matches.deleted())
+        // ein später eintreffender Kopf legt das Match nicht wieder an
+        assertFalse(data.matches.insertIfAbsent(id, tennis, singles, MatchMeta(), createdAtMs = 1_000))
+        assertNull(data.matches.get(id))
+        data.deleteMatch(id, deletedAtMs = 9_000)
+        assertEquals(listOf(MatchTombstone(id, 5_000)), data.matches.deleted())
     }
 
     @Test

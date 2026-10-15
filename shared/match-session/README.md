@@ -81,19 +81,32 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 
 - **Live:** Jedes Event des Zählers geht direkt nach dem Tap an alle erreichbaren Gegenstellen – kein Sammeln, kein
   Debounce. `ReliableDeviceLink` sorgt für Ack und Wiederholung.
-- **Offline:** Events bleiben lokal gespeichert (Puffer = Event-Store). Taucht eine Gegenstelle wieder auf, sendet die
-  Session **sofort** `Hello`, ihren `Summary` und alle unbestätigten Events des offenen Matches – nicht erst im 30-s-Takt.
+- **Offline:** Events bleiben lokal gespeichert; jedes Event trägt im Store das Flag `confirmed` (eine Gegenstelle hat
+  es: Ack, `Summary` oder von dort empfangen). Taucht eine Gegenstelle wieder auf, sendet die Session **sofort**
+  `Hello`, Löschmarkierungen, ihren `Summary` und den gesamten Rückstand **aller** Matches (je Match `MatchMeta` +
+  Events in Teilen) – nicht erst im 30-s-Takt. Der Takt läuft weiter, solange ein Match aktiv ist oder Rückstand besteht.
 - **Handy = Hub/Backup:** Jedes empfangene Event wird sofort persistiert (Grundlage für Übergabe und später Cloud).
-- **Anzeige:** `SyncStatus.pendingToPeers` auf dem Zähler (0 = „synchron“, sonst „N ausstehend“; bestätigt durch Ack
-  oder `Summary` der Gegenstelle). `SyncStatus.lastEventReceivedAtMs` auf dem Handy („Stand vor X s“, zusammen mit
+- **Anzeige:** `SyncStatus.pendingToPeers` = persistenter Rückstand über alle Matches (0 = „synchron“, sonst
+  „N ausstehend“; übersteht App-Neustarts). `SyncStatus.lastEventReceivedAtMs` auf dem Handy („Stand vor X s“, zusammen mit
   `scorerConnected`).
 - Tests: `ImmediateSyncTest` (Event nach einer Einweg-Latenz persistiert, Ack nach einer Runde; Offline-Puffer nach
   Wiederverbindung in < 200 ms virtueller Zeit vollständig beim Handy).
 
+## Löschen (Löschmarkierungen)
+
+- `deleteMatch(id)` löscht Kopf und Events und legt eine **dauerhafte Löschmarkierung** (`match_tombstone`) an.
+- Die Markierung geht sofort per `Deleted` an die gekoppelten Geräte und bei jedem `Hello` erneut vollständig; dort wird
+  das Match ebenfalls gelöscht und ein dort offenes Match geschlossen.
+- Empfang, Abgleich (`Summary`), `MatchMeta` und Auto-Follow ignorieren gelöschte Matches dauerhaft; wer noch Events
+  dazu sendet, bekommt die Löschung zurück.
+- **P2 (geteilte Matches):** Löschen entfernt dann nur die eigene Sicht; die Markierung darf nicht an fremde Teilnehmer
+  repliziert werden (Cloud-Modell klären).
+
 ## Regeln und Garantien
 
-- **Ein Thread:** alle öffentlichen Aufrufe auf dem Thread des `LinkScheduler`; `ThreadGuard` erzwingt das
-  (Android: Main-Looper, Apple: `NSThread.isMainThread`), sonst `IllegalStateException`.
+- **Ein Thread:** alle öffentlichen Aufrufe **und** Callback-Eingänge (Empfang, Peer-Wechsel, Ack, Takt) auf dem Thread
+  des `LinkScheduler`; `ThreadGuard` erzwingt das (Android: Main-Looper, Apple: `NSThread.isMainThread`), sonst
+  `IllegalStateException`.
 - **Rolle:** Zähl-Kommandos (`recordPoint`, `undo`, `redo`, `continueDecision`, `correct`, `pause`, `resumePlay`,
   `endMatch`) wirken nur auf dem Zähler. Kommen trotzdem Eingaben eines Nicht-Zählers an (z. B. Altzähler offline),
   verwirft sie die Engine deterministisch (`rejectedByRole`, `ActiveMatch.rejectedByRoleCount`).

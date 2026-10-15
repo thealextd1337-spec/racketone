@@ -25,6 +25,7 @@ class SyncCodecTest {
     @Test
     fun allMessageTypesRoundTrip() {
         roundTrip(Hello(DeviceId("watch-1"), PeerKind.WATCH, listOf(MATCH)))
+        roundTrip(Deleted(listOf(DeletedMatch(MATCH, 1_760_000_000_000))))
         roundTrip(Summary(mapOf("m1" to VersionVector.of(mapOf(DeviceId("watch") to 3L, DeviceId("phone") to 1L))), reply = true))
         roundTrip(
             Events(

@@ -8,6 +8,7 @@ package eu.advantly.data
  * @property wallClockMs nur Anzeige/Statistik und Doppel-Tap-Erkennung
  * @property parentId Log-Kopf, den das erzeugende Gerät gesehen hat (Fork-Erkennung)
  * @property type Payload-Typ (z. B. `PointWon`) für Abfragen ohne JSON-Parsing
+ * @property confirmed beim Speichern: mindestens eine Gegenstelle hat das Event schon (z. B. von dort empfangen)
  */
 data class StoredEvent(
     val id: String,
@@ -19,6 +20,7 @@ data class StoredEvent(
     val wallClockMs: Long = 0,
     val parentId: String? = null,
     val type: String = "",
+    val confirmed: Boolean = false,
 )
 
 /** Ergebnis von [EventStore.append]. */
@@ -79,6 +81,28 @@ interface EventStore {
 
     /** Anzahl der Events eines Matches. */
     fun count(matchId: String): Long
+
+    /** Markiert Events als bei einer Gegenstelle vorhanden (Ack einer `Events`-Nachricht, empfangene Events). */
+    fun markConfirmed(
+        matchId: String,
+        sequences: Collection<StoredSequence>,
+    )
+
+    /** Markiert alle Events von [deviceId] bis einschließlich [seq] als bei einer Gegenstelle vorhanden (`Summary`). */
+    fun markConfirmedUpTo(
+        matchId: String,
+        deviceId: String,
+        seq: Long,
+    )
+
+    /** Ausgangs-Rückstand über alle Matches: Events, die noch keine Gegenstelle bestätigt hat. */
+    fun unconfirmedCount(): Long
+
+    /** Matches mit Ausgangs-Rückstand (sortiert). */
+    fun unconfirmedMatches(): List<String>
+
+    /** Unbestätigte Events eines Matches in globaler Ordnung. */
+    fun unconfirmedEvents(matchId: String): List<StoredEvent>
 
     /** Löscht alle Events eines Matches (nur für „Match löschen“ in der Historie). */
     fun deleteMatch(matchId: String)

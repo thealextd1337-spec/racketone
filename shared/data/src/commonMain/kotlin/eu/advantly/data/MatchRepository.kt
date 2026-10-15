@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.db.MatchHeaderQueries
+import eu.advantly.data.db.MatchTombstoneQueries
 import eu.advantly.data.db.Match_header
 import kotlinx.serialization.Serializable
 
@@ -112,13 +113,20 @@ data class MatchRecord(
     val isFinished: Boolean get() = status == MatchStatus.FINISHED
 }
 
+/** Dauerhafte Löschmarkierung eines Matches. */
+data class MatchTombstone(
+    val matchId: MatchId,
+    val deletedAtMs: Long,
+)
+
 /** Match-Köpfe und Historie-Abfragen. Synchron, ein Thread (siehe [EventStore]). */
 class MatchRepository internal constructor(
     private val queries: MatchHeaderQueries,
+    private val tombstones: MatchTombstoneQueries,
 ) {
     /**
      * Legt den Kopf an, falls [id] noch unbekannt ist (idempotent – Genesis und `MatchMeta` können beide zuerst
-     * ankommen). Liefert `true`, wenn neu angelegt.
+     * ankommen). Liefert `true`, wenn neu angelegt. Gelöschte Matches (Tombstone) werden nie wieder angelegt.
      */
     @Suppress("LongParameterList")
     fun insertIfAbsent(
@@ -130,6 +138,7 @@ class MatchRepository internal constructor(
         previousMatchId: MatchId? = null,
     ): Boolean =
         queries.transactionWithResult {
+            if (isDeleted(id)) return@transactionWithResult false
             if (queries.countById(id.value).executeAsOne() > 0) {
                 previousMatchId?.let { queries.updatePrevious(it.value, id.value) }
                 return@transactionWithResult false
@@ -202,6 +211,19 @@ class MatchRepository internal constructor(
             .executeAsOneOrNull()
             ?.toRecord()
             ?.lineup
+
+    /** `true`, wenn [id] gelöscht wurde (dauerhafte Löschmarkierung). */
+    fun isDeleted(id: MatchId): Boolean = tombstones.countById(id.value).executeAsOne() > 0
+
+    /** Alle Löschmarkierungen (für die Replikation an gekoppelte Geräte), älteste zuerst. */
+    fun deleted(): List<MatchTombstone> = tombstones.selectAll { id, at -> MatchTombstone(MatchId(id), at) }.executeAsList()
+
+    internal fun markDeleted(
+        id: MatchId,
+        deletedAtMs: Long,
+    ) {
+        tombstones.insertOrIgnore(id.value, deletedAtMs)
+    }
 
     /** Löscht nur den Kopf; Events löscht [LocalData.deleteMatch] mit. */
     fun delete(id: MatchId) {

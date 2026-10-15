@@ -118,6 +118,22 @@ class EventStoreTest {
     }
 
     @Test
+    fun confirmationTracksTheOutgoingBacklogAcrossMatches() {
+        (1L..4L).forEach { store.append(event("w$it", deviceSeq = it, lamport = it)) }
+        store.append(event("x1", matchId = "m2", deviceSeq = 1))
+        store.append(event("r1", deviceId = "phone", deviceSeq = 1, lamport = 9).copy(confirmed = true))
+        assertEquals(5, store.unconfirmedCount())
+        assertEquals(listOf("m1", "m2"), store.unconfirmedMatches())
+        store.markConfirmed("m1", listOf(StoredSequence("watch", 2)))
+        store.markConfirmedUpTo("m1", "watch", 1)
+        assertEquals(listOf("w3", "w4"), store.unconfirmedEvents("m1").map { it.id })
+        store.markConfirmedUpTo("m1", "watch", 9)
+        store.markConfirmed("m2", listOf(StoredSequence("watch", 1)))
+        assertEquals(0, store.unconfirmedCount())
+        assertEquals(emptyList(), store.unconfirmedMatches())
+    }
+
+    @Test
     fun largeLongValuesAndUnicodePayloadRoundTrip() {
         val e = event("e1", deviceSeq = Long.MAX_VALUE, lamport = Long.MAX_VALUE - 1, payload = """{"name":"Müller ✓ 🎾"}""")
         store.append(e)

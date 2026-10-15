@@ -36,6 +36,7 @@ class SqlDelightEventStore internal constructor(
                     parent_id = event.parentId,
                     type = event.type,
                     payload = event.payload,
+                    confirmed = if (event.confirmed) 1L else 0L,
                 )
                 AppendResult.INSERTED
             }
@@ -61,6 +62,28 @@ class SqlDelightEventStore internal constructor(
     ): Long = queries.maxDeviceSeq(matchId, deviceId).executeAsOne()
 
     override fun count(matchId: String): Long = queries.countForMatch(matchId).executeAsOne()
+
+    override fun markConfirmed(
+        matchId: String,
+        sequences: Collection<StoredSequence>,
+    ) {
+        if (sequences.isEmpty()) return
+        queries.transaction { sequences.forEach { queries.markConfirmed(matchId, it.deviceId, it.deviceSeq) } }
+    }
+
+    override fun markConfirmedUpTo(
+        matchId: String,
+        deviceId: String,
+        seq: Long,
+    ) {
+        if (seq > 0) queries.markConfirmedUpTo(matchId, deviceId, seq)
+    }
+
+    override fun unconfirmedCount(): Long = queries.unconfirmedCount().executeAsOne()
+
+    override fun unconfirmedMatches(): List<String> = queries.unconfirmedMatches().executeAsList()
+
+    override fun unconfirmedEvents(matchId: String): List<StoredEvent> = queries.unconfirmedForMatch(matchId, ::stored).executeAsList()
 
     override fun deleteMatch(matchId: String) {
         queries.deleteForMatch(matchId)
