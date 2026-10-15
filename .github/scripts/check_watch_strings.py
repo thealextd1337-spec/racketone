@@ -19,7 +19,8 @@ FACADE = ROOT / "shared/umbrella-watch/src/commonMain/kotlin/eu/advantly/umbrell
 SPORTS = ["TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"]
 # Schlüssel-Präfixe der App; andere Literale (SF Symbols, UserDefaults-Keys, Metadaten) werden ignoriert
 PREFIXES = ("start", "setup", "sport", "team", "serve", "score", "hint", "action", "banner", "a11y", "controls",
-            "common", "fitness", "setend", "matchend", "intent", "preset", "link", "watch", "status")
+            "common", "fitness", "setend", "matchend", "intent", "preset", "link", "watch", "status",
+            "role", "sync", "takeOver")
 ENTRY = re.compile(r'^"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)";\s*$')
 PLACEHOLDER = re.compile(r"%(?:\d+\$)?[@dDuUxXoOfeEgGcCsSpaAF]")
 
@@ -72,7 +73,9 @@ def main():
     # Varianten wie in HintPill.text (ScoringView.swift)
     hint_keys = {f"hint.{c}" for c in hint_codes} | {"hint.SET_POINT_PB", "hint.DEUCE_RALLY", "hint.DECIDING_POINT_RALLY"}
     hint_keys |= {f"hint.{c}.n %@" for c in ("MATCH_POINT", "SET_POINT", "SET_POINT_PB", "BREAK_POINT")}
-    required = swift_keys() | {f"preset.{p}" for p in preset_ids} | {f"sport.{s}" for s in SPORTS} | hint_keys
+    # Gerätart des Zählers (RoleText.device, PeerKind aus sync-protocol)
+    role_keys = {f"role.kind.{k}" for k in ("PHONE", "WATCH", "OTHER")}
+    required = swift_keys() | {f"preset.{p}" for p in preset_ids} | {f"sport.{s}" for s in SPORTS} | hint_keys | role_keys
     for key in sorted(required - set(en)):
         errors.append(f"fehlt in Localizable.strings: {key}")
     for error in errors:
