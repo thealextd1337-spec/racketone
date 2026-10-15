@@ -417,6 +417,8 @@ Presets sind benannte, vollständig ausgefüllte `MatchFormat`-Objekte. Der Wiza
 | `TENNIS_TIEBREAK_ONLY_10` | Nur Champions-Tiebreak (bis 10) | SINGLES/DOUBLES | BEST_OF 1 | ADVANTAGE | (6, TB@6, TB7) | MTB10 | App. VI 4; wie `TENNIS_MATCH_TB_ONLY` (bleibt für ältere Matches), neu 2026-10-15 |
 | `TENNIS_OPEN` | Freies Spiel (Satz für Satz) | SINGLES/DOUBLES | OPEN | ADVANTAGE | 6, TB@6, TB7 | – | `matchTiebreak` = MTB10 (Option im Dialog) |
 
+**Preset-Erkennung (Review 2026-10-15):** `presetId` ist nur Anzeige/Statistik. Erkannt wird eindeutig: Eine vorhandene `presetId`, deren Preset genau das Format beschreibt, bleibt; sonst gilt das erste exakt passende Preset ohne Aliase; sonst `null` (benutzerdefiniert). `TENNIS_MATCH_TB_ONLY` ist ein Alias von `TENNIS_TIEBREAK_ONLY_10` (gleiches Format, ältere Matches behalten ihre ID). Ändert der Wizard ein Preset-Format (z. B. Games pro Satz), wird die `presetId` neu bestimmt.
+
 ### 4.2 Padel (immer `discipline: DOUBLES`)
 
 | presetId | Anzeige | match | deuceMode | set | decidingSet | Quelle |
