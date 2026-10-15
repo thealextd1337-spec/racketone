@@ -1148,7 +1148,7 @@ $$;
 - **Health-Einwilligung** erst beim ersten Aktivieren von „Gesundheitsdaten erfassen“ (nicht im Onboarding gebündelt), eigener Screen mit: welche Daten, wozu, wer sieht sie (Default nur ich), Widerruf jederzeit, Löschung bei Widerruf.
 - Zusätzlich die **Plattform-Berechtigungen** (HealthKit, Health Connect, Garmin) – sie ersetzen die DSGVO-Einwilligung nicht.
 - Jede Einwilligung/jeder Widerruf ist eine neue Zeile in `consents` mit Textversion; bei neuer Textversion erneut einholen, wenn sich Zweck/Empfänger ändern.
-- **Mindestalter 16** (Nutzungsbedingungen + Abfrage bei Registrierung), weil Art.-9-Einwilligungen und Art. 8 DSGVO (Deutschland: 16) sonst Eltern-Einwilligung erfordern würden.
+- **Mindestalter 14** (Nutzerentscheidung 2026-10-15; Anbieter in Österreich: Art. 8 DSGVO i. V. m. § 4 Abs. 4 DSG). **Für Deutschland gilt 16** – vor P2 (Accounts) Altersabfrage je Land bei der Registrierung einplanen (DE: unter 16 nur mit Eltern-Einwilligung bzw. ohne Health-/Cloud-Funktionen).
 - **Plattformregeln:** Apple HealthKit (Guideline 5.1.3): keine Nutzung für Werbung/Data-Mining, keine Weitergabe an Dritte ohne Zustimmung, Zweckangabe in der App und Datenschutzerklärung. Google Health Connect: Berechtigungsdeklaration und „Limited Use“-Richtlinie. Beides deckt sich mit unserem Design (keine Werbung, keine Analyse-SDKs auf Health-Daten).
 
 ### 8.3 Betroffenenrechte
@@ -1206,7 +1206,7 @@ Kaskaden im Detail:
 7. Drittlandübermittlung (USA): EU-US Data Privacy Framework/SCC je Anbieter.
 8. Speicherdauern (8.1), Backups 7 Tage.
 9. Betroffenenrechte inkl. In-App-Export und -Löschung, Beschwerderecht bei Aufsichtsbehörde.
-10. Mindestalter 16.
+10. Mindestalter 14 (AT), länderabhängig 16 (DE) – siehe §8.2.
 11. Keine automatisierte Entscheidungsfindung/Profiling im Sinne Art. 22.
 
 ### 8.5 Organisatorisches
@@ -1369,7 +1369,7 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 |---|---|---|
 | O1 | Sollen Matches standardmäßig mit Freunden geteilt werden (`share_matches_default`)? | **Aus** (Privacy by Default), mit einmaliger Abfrage im Onboarding. |
 | O2 | Health-Sichtbarkeit für Mitspieler/Freunde überhaupt in P3 anbieten oder erst später? | Erst „nur ich“; Teilen in P3.1, weil zweite Einwilligung + mehr Tests. |
-| O3 | Mindestalter 16 akzeptabel (Jugendspieler im Verein fallen raus)? | Ja für Start; Jugendmodus (ohne Health, Eltern-Einwilligung) später. |
+| O3 | Mindestalter? | **Entschieden 2026-10-15: 14** (AT); DE 16 → Länderabfrage vor P2. Jugendmodus später. |
 | O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `racketone.app` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
 | O5 | Sign-in-with-Apple-Token-Widerruf bei Löschung: Authorization-Code serverseitig speichern (zusätzliche Edge Function beim ersten Login)? | Ja, in P2 einplanen (App-Review-Thema). |
 | O6 | Datenschutzbeauftragter/DSFA: extern beauftragen oder selbst mit Vorlage? | DSFA selbst (DSK-Vorlage), DSB-Pflicht vor P3 prüfen lassen. |
