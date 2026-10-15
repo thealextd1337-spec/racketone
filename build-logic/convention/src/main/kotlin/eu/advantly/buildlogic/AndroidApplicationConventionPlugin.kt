@@ -29,6 +29,7 @@ internal enum class FormFactor(
  * `applicationId` ist für Phone UND Wear `eu.advantly`, der Signierschlüssel ebenfalls identisch
  * (Pflicht für die Wear Data Layer API). Version kommt aus `advantly.versionName` / `advantly.buildNumber`
  * im Root-`gradle.properties` (einzige Versionsquelle, auch für Apple).
+ * Release: R8 + Resource-Shrinking, signiert mit dem Upload-Key, sofern konfiguriert ([configureReleaseSigning]).
  */
 class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) =
@@ -57,6 +58,18 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 buildFeatures {
                     buildConfig = true
                 }
+                buildTypes.getByName("release") {
+                    // R8: Code verkleinern/verschleiern, ungenutzte Ressourcen entfernen. Gemeinsame Keep-Regeln
+                    // in gradle/proguard/, modulspezifische in <app>/proguard-rules.pro (falls vorhanden).
+                    isMinifyEnabled = true
+                    isShrinkResources = true
+                    proguardFiles(
+                        getDefaultProguardFile("proguard-android-optimize.txt"),
+                        rootDir.resolve(COMMON_PROGUARD_RULES),
+                    )
+                    file("proguard-rules.pro").takeIf { it.isFile }?.let { proguardFiles(it) }
+                }
+                configureReleaseSigning(this)
             }
             dependencies {
                 add("testImplementation", libs.library("junit4"))
@@ -69,5 +82,9 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 ?: throw GradleException("$path: advantly.app.formFactor=phone|wear in gradle.properties des Moduls setzen")
         return FormFactor.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
             ?: throw GradleException("$path: unbekannter Formfaktor '$value' (erlaubt: phone, wear)")
+    }
+
+    private companion object {
+        const val COMMON_PROGUARD_RULES = "gradle/proguard/android-app-common.pro"
     }
 }
