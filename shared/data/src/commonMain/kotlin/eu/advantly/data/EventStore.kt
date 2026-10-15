@@ -101,6 +101,9 @@ interface EventStore {
     /** Matches mit Ausgangs-Rückstand (sortiert). */
     fun unconfirmedMatches(): List<String>
 
+    /** Ausgangs-Rückstand je Match (Match-ID → Anzahl unbestätigter Events). */
+    fun unconfirmedCountByMatch(): Map<String, Long>
+
     /** Unbestätigte Events eines Matches in globaler Ordnung. */
     fun unconfirmedEvents(matchId: String): List<StoredEvent>
 

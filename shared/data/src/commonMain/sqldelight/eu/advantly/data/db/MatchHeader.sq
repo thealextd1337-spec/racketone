@@ -52,9 +52,10 @@ WHERE (:sport IS NULL OR sport = :sport) AND created_at_ms >= :fromMs AND create
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit OFFSET :offset;
 
+-- Abgebrochene Matches (ohne Wertung, F21) zählen nicht als „zuletzt gespielt“
 recentLineups:
 SELECT lineup_json FROM match_header
-WHERE (:sport IS NULL OR sport = :sport)
+WHERE (:sport IS NULL OR sport = :sport) AND (result_reason IS NULL OR result_reason != 'ABANDONED')
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit;
 

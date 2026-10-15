@@ -138,6 +138,23 @@ class LocalDataTest {
         assertEquals(listOf(newer, singles), data.matches.recentLineups(Sport.TENNIS))
         assertEquals(listOf(newer), data.matches.recentLineups(limit = 1))
         assertTrue(data.matches.recentLineups(Sport.BADMINTON).isEmpty())
+        // F21: abgebrochene Matches zählen nicht als „zuletzt gespielt“
+        data.matches.updateProgress(
+            MatchId("t2"),
+            MatchStatus.FINISHED,
+            ScoreSummary(reason = ResultReason.ABANDONED),
+            updatedAtMs = 4_000,
+        )
+        assertEquals(listOf(singles), data.matches.recentLineups(Sport.TENNIS))
+    }
+
+    @Test
+    fun unconfirmedCountsPerMatch() {
+        data.events.append(StoredEvent("a1", "m1", "d", 1, 1, "{}"))
+        data.events.append(StoredEvent("a2", "m1", "d", 2, 2, "{}"))
+        data.events.append(StoredEvent("b1", "m2", "d", 1, 1, "{}"))
+        data.events.markConfirmed("m2", listOf(StoredSequence("d", 1)))
+        assertEquals(mapOf("m1" to 2L), data.events.unconfirmedCountByMatch())
     }
 
     @Test

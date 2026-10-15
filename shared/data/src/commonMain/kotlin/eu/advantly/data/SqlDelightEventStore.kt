@@ -83,6 +83,9 @@ class SqlDelightEventStore internal constructor(
 
     override fun unconfirmedMatches(): List<String> = queries.unconfirmedMatches().executeAsList()
 
+    override fun unconfirmedCountByMatch(): Map<String, Long> =
+        queries.unconfirmedCountByMatch().executeAsList().associate { it.match_id to it.count }
+
     override fun unconfirmedEvents(matchId: String): List<StoredEvent> = queries.unconfirmedForMatch(matchId, ::stored).executeAsList()
 
     override fun deleteMatch(matchId: String) {
