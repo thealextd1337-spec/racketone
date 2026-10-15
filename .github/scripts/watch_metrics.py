@@ -16,6 +16,8 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 BUDGET_BYTES = 8 * 1024 * 1024
+# Das 8-MB-Budget (01 §2.3) gilt NUR für das watchOS-Framework; AdvantlyKit (iOS, inkl. Compose) wird nur informativ gelistet
+BUDGET_FRAMEWORKS = {"AdvantlyWatchKit"}
 
 
 def emit(text):
@@ -71,7 +73,12 @@ def frameworks(paths):
             binary_archs = archs(binary)
             for arch in binary_archs:
                 size = thin_size(binary, arch, binary_archs)
-                verdict = "✅" if size < BUDGET_BYTES else over_budget(f"{name} {config} {arch} (Archiv)", size)
+                if name not in BUDGET_FRAMEWORKS:
+                    verdict = "– (informativ, kein Budget)"
+                elif size < BUDGET_BYTES:
+                    verdict = "✅"
+                else:
+                    verdict = over_budget(f"{name} {config} {arch} (Archiv)", size)
                 emit(f"| {name} | {config} | {slice_name} | {arch} | {mb(size)} | {verdict} |")
     emit("")
 

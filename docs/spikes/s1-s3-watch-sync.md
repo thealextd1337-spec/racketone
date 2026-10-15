@@ -6,8 +6,8 @@ Stand: 2026-10-15 · Branch `w0/s1s3-watch-sync` · Bezug: [01 §2.3, §4, §5.1
 
 | Frage | Ergebnis | Status |
 |---|---|---|
-| S1: SQLDelight-native-driver auf watchOS (inkl. `watchosDeviceArm64`, Tier 3)? | Alle Artefakte (SQLDelight 2.4.1 `runtime`/`native-driver`, sqliter 1.3.3, stately 2.1.0) gibt es für `watchosDeviceArm64`; `:shared:data` kompiliert auf Windows für alle Apple-Targets bis zur klib. **SQLDelight bleibt, Plan B (JSON-Datei-Store) wird nicht gebraucht** – endgültig erst, wenn die CI-Schritte unten grün sind. | lokal ✅, Linken/Ausführen ⏳ CI |
-| S1: Framework-Größe < 8 MB je Slice | wird von der CI gemessen (Tabelle unten) | ⏳ CI |
+| S1: SQLDelight-native-driver auf watchOS (inkl. `watchosDeviceArm64`, Tier 3)? | Alle Artefakte (SQLDelight 2.4.1 `runtime`/`native-driver`, sqliter 1.3.3, stately 2.1.0) gibt es für `watchosDeviceArm64`; `:shared:data` kompiliert auf Windows für alle Apple-Targets bis zur klib; die macOS-CI linkt alle Slices, die Tests laufen auf dem watchOS-Simulator, die Watch-App startet und schreibt in die SQLite-Datei. **SQLDelight bleibt, Plan B (JSON-Datei-Store) ist nicht nötig.** | **GO** ✅ (CI-Lauf 38667438785) |
+| S1: Framework-Größe < 8 MB je Slice | Release-Archiv 2,27–2,44 MB je Slice, gelinkte Watch-App (Release) 1,34–1,47 MB je Arch | **GO** ✅ |
 | S3: WatchConnectivity – Kotlin-Interop oder Swift-Adapter? | **Kotlin-Interop direkt** (`appleMain`), Swift-Adapter nur als Rückfallebene | lokal ✅ (klib), Laufzeit ⏳ Apple-Account |
 | S3: Wear Data Layer Ping-Pong | Debug-Screens in `androidApp` + `wearApp`, Feldtest unten | ⏳ Feldtest |
 
@@ -70,25 +70,39 @@ Stand: 2026-10-15 · Branch `w0/s1s3-watch-sync` · Bezug: [01 §2.3, §4, §5.1
 
 | CI-Schritt | Beweist | Ergebnis |
 |---|---|---|
-| `watchosSimulatorArm64Test` + „Testergebnisse ins Summary“ | `EventStoreTest` mit native-driver (In-Memory) und `WatchFacadeTest` mit Datei-DB laufen auf watchOS | _⏳ eintragen_ |
-| `iosSimulatorArm64Test` | dasselbe auf iOS; `-lsqlite3`-Convention für `presentation`/`ui-phone`/`umbrella-ios` | _⏳_ |
-| `assembleAdvantlyWatchKit{Debug,Release}XCFramework` | Linken aller Slices inkl. `watchosDeviceArm64` | _⏳_ |
+| `watchosSimulatorArm64Test` + „Testergebnisse ins Summary“ | `EventStoreTest` mit native-driver (In-Memory) und `WatchFacadeTest` mit Datei-DB laufen auf watchOS | ✅ |
+| `iosSimulatorArm64Test` | dasselbe auf iOS; `-lsqlite3`-Convention für `presentation`/`ui-phone`/`umbrella-ios` | ✅ |
+| `assembleAdvantlyWatchKit{Debug,Release}XCFramework` | Linken aller Slices inkl. `watchosDeviceArm64` | ✅ |
 | „Framework-Größen (Summary)“ | Größe je Slice/Arch, Budget 8 MB | siehe Tabelle |
-| „watchOS-App für Gerät bauen (arm64_32 + arm64, unsigniert)“ | echte Uhren-Architekturen linken mit SQLite + WatchConnectivity | _⏳_ |
+| „watchOS-App für Gerät bauen (arm64_32 + arm64, unsigniert)“ | echte Uhren-Architekturen linken mit SQLite + WatchConnectivity | ✅ |
 | „Größe gelinkte Watch-App (Debug/Release, Gerät)“ | kaltstart-relevante Größe (`__TEXT`/`__DATA` je Arch), gebaut mit `ENABLE_DEBUG_DYLIB=NO`; eine evtl. `*.debug.dylib` wird mitgezählt. Über 8 MB → `::warning` im Lauf | siehe Tabelle |
-| „watchOS-App-Smoke im Simulator“ | App startet mit `-advantlySmoke`, `WatchStore.smokeCheck()` schreibt in die SQLite-Datei → `ADVANTLY_SMOKE eventstore=ok count=1` (nur Debug-Build + Startparameter; Release schreibt nie) | _⏳_ |
-| iOS-/watchOS-Simulator-Build | Swift-Debug-Views (`LinkDebugView`) kompilieren gegen die Kotlin-API | _⏳_ |
+| „watchOS-App-Smoke im Simulator“ | App startet mit `-advantlySmoke`, `WatchStore.smokeCheck()` schreibt in die SQLite-Datei → `ADVANTLY_SMOKE eventstore=ok count=1` (nur Debug-Build + Startparameter; Release schreibt nie) | ✅ `ADVANTLY_SMOKE eventstore=ok count=1` |
+| iOS-/watchOS-Simulator-Build | Swift-Debug-Views (`LinkDebugView`) kompilieren gegen die Kotlin-API | ✅ |
 
-**Größen (aus dem CI-Summary eintragen):**
+**Größen** (CI-Lauf 38667438785, Stand `5770909`, alle Jobs grün):
 
-| Messung | arm64_32 (`watchosArm64`) | arm64 (`watchosDeviceArm64`) | Simulator arm64 |
+A) Statisches Kotlin-Archiv `AdvantlyWatchKit` je Slice/Arch (Budget 8 MB):
+
+| Konfiguration | arm64_32 (`watchosArm64`) | arm64 (`watchosDeviceArm64`) | Simulator arm64 |
 |---|---|---|---|
-| `AdvantlyWatchKit` Release, statisches Archiv | _⏳_ | _⏳_ | _⏳_ |
-| `AdvantlyWatchKit` Debug, statisches Archiv | _⏳_ | _⏳_ | _⏳_ |
-| `AdvantlyWatch` gelinkt, Release-Kotlin (`__TEXT`) | _⏳_ | _⏳_ | – |
-| `AdvantlyWatch` gelinkt, Debug-Kotlin (`__TEXT`) | _⏳_ | _⏳_ | – |
+| Release | 2,27 MB ✅ | 2,44 MB ✅ | 2,44 MB ✅ |
+| Debug | 3,80 MB ✅ | 3,89 MB ✅ | 3,89 MB ✅ |
 
-Go S1: alle Schritte grün, Release-Slices < 8 MB. Nicht abgedeckt (braucht Apple-Account, Spike S2): App-Store-Connect-Upload-Validierung
+B) Gelinktes Executable `AdvantlyWatch` (Gerät, `ENABLE_DEBUG_DYLIB=NO`) – kaltstart-relevant:
+
+| Konfiguration | Arch | Datei (thin) | `__TEXT` | `__DATA` |
+|---|---|---|---|---|
+| Release-Kotlin | arm64_32 | 1,34 MB | 0,61 MB | 0,03 MB |
+| Release-Kotlin | arm64 | 1,47 MB | 0,61 MB | 0,05 MB |
+| Debug-Kotlin | arm64_32 | 2,74 MB | 1,42 MB | 0,03 MB |
+| Debug-Kotlin | arm64 | 2,82 MB | 1,28 MB | 0,05 MB |
+
+Einordnung: Engine, Store (SQLDelight + System-SQLite) und Transport kosten im Release-Build rund 0,6 MB `__TEXT` je Arch –
+weit unter dem Budget, mit Luft für `core-scoring`/`sync-protocol`. `AdvantlyKit` (iOS, mit Compose) wird nur informativ
+gelistet; das 8-MB-Budget gilt nach 01 §2.3 nur für das watchOS-Framework.
+
+**Ergebnis S1: GO** – KMP mit SQLDelight auf der Apple Watch ist tragfähig, Plan B (JSON-Datei-Store) wird nicht umgesetzt.
+Go-Kriterium war: alle Schritte grün, Release-Slices < 8 MB. Nicht abgedeckt (braucht Apple-Account, Spike S2): App-Store-Connect-Upload-Validierung
 des arm64-Slices, Lauf auf echter Uhr.
 
 ## Feldtest Ping-Pong Phone ↔ Wear OS (Android)
