@@ -50,3 +50,5 @@ include(":shared:umbrella-watch")
 // Apps
 include(":androidApp")
 include(":wearApp")
+// Werkzeuge (nur JVM, kein App-Bestandteil): P1-Gate-Messung
+include(":tools:gate-check")
