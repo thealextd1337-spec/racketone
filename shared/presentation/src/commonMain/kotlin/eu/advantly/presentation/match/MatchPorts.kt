@@ -358,6 +358,9 @@ interface PlayersPort {
     /** Angelegte Gäste (nur Name, später mit Konten verknüpfbar), zuletzt verwendete zuerst. */
     val guests: StateFlow<List<Player>>
 
+    /** Mitspieler aus den letzten Matches, eigene Sportart zuerst; ohne Besitzer und Duplikate. */
+    fun recentPlayers(sport: Sport): List<Player>
+
     /** Favoriten-Besetzungen für den Schnellstart. */
     val favorites: StateFlow<List<FavoriteLineup>>
 

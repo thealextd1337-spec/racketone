@@ -8,6 +8,7 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
@@ -301,6 +302,15 @@ class SessionMatchStore(
     }
 
     // --- PlayersPort ------------------------------------------------------------------------------
+
+    /** Je 100 sportbezogene und allgemeine Matches; nutzt die bestehende Historienabfrage ohne Schemaänderung. */
+    override fun recentPlayers(sport: Sport): List<Player> =
+        (data.matches.history(sport = sport, limit = 100) + data.matches.history(limit = 100))
+            .distinctBy { it.id }
+            .filter { self.value.id in it.lineup.a + it.lineup.b }
+            .flatMap { playersOf(it.lineup) }
+            .filterNot { it.id == self.value.id }
+            .distinctBy { it.id }
 
     override fun addGuest(name: String): Player {
         val trimmed = name.trim()

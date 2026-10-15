@@ -9,6 +9,7 @@ import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
@@ -265,6 +266,15 @@ class InMemoryMatchStore(
     }
 
     // --- PlayersPort ---
+
+    override fun recentPlayers(sport: Sport): List<Player> =
+        entries.values
+            .sortedByDescending { it.genesis.wallClockMs }
+            .sortedBy { it.setup.format.sport != sport }
+            .filter { self.value.id in it.setup.lineup.a + it.setup.lineup.b }
+            .flatMap { it.setup.players }
+            .filterNot { it.id == self.value.id }
+            .distinctBy { it.id }
 
     override fun addGuest(name: String): Player {
         val trimmed = name.trim()

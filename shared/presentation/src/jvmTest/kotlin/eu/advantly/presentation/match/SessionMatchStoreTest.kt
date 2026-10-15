@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
@@ -118,6 +119,32 @@ class SessionMatchStoreTest {
     }
 
     private fun Rig.watchScoredMatch() = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
+
+    @Test
+    fun recentPlayersReadMatchHistoryWithSportPriorityAndDeduplication() {
+        val rig = Rig(watchOnline = false)
+        val phone = rig.phone
+        val older = phone.setupFor(tennis)
+        phone.start(older)
+        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.dismiss())
+        rig.settle()
+        val newer = phone.setupFor(badminton15)
+        phone.start(newer)
+        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.dismiss())
+        rig.settle()
+        phone.addGuest("Noch nie gespielt")
+        assertEquals(listOf(older.players.last(), newer.players.last()), phone.recentPlayers(Sport.TENNIS))
+        assertEquals(listOf(newer.players.last(), older.players.last()), phone.recentPlayers(Sport.BADMINTON))
+        phone.start(older)
+        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.dismiss())
+        assertEquals(2, phone.recentPlayers(Sport.TENNIS).size, "Wiederholte Besetzung erscheint nur einmal")
+        phone.close()
+        rig.phoneSession.close()
+        rig.watch.close()
+    }
 
     @Test
     fun watchIsOfferedOnlyWhileConnected() {

@@ -382,4 +382,14 @@
     <string name="waiting_title">Waiting for your watch …</string>
     <string name="waiting_text">The match was sent to your watch. Open Advantly on the watch to score there.</string>
     <string name="count_on_phone">Score on this phone instead</string>
+    <string name="wizard_choose_player">Choose player</string>
+    <string name="wizard_new_player">Create new player</string>
+    <string name="wizard_player_actions">Player: %1$s</string>
+    <string name="wizard_change_place">Swap or move to a place</string>
+    <string name="wizard_remove_player">Remove player</string>
+    <string name="wizard_choose_place">Choose destination</string>
+    <string name="wizard_place">%1$s, place %2$d: %3$s</string>
+    <string name="wizard_drag_hint">Hold a player to drag. Tap to swap or remove.</string>
+    <string name="wizard_empty_suggestions">No recent players yet. Create a player to get started.</string>
+    <string name="wizard_place_action">Choose a player or destination</string>
 </resources>

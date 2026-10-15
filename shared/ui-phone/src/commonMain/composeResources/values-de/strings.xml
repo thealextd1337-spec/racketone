@@ -382,4 +382,14 @@
     <string name="waiting_title">Warte auf Uhr …</string>
     <string name="waiting_text">Das Match ist an deine Uhr gesendet. Öffne Advantly auf der Uhr, um dort zu zählen.</string>
     <string name="count_on_phone">Doch am Handy zählen</string>
+    <string name="wizard_choose_player">Spieler auswählen</string>
+    <string name="wizard_new_player">Neuen Spieler anlegen</string>
+    <string name="wizard_player_actions">Spieler: %1$s</string>
+    <string name="wizard_change_place">Platz tauschen / verschieben</string>
+    <string name="wizard_remove_player">Spieler entfernen</string>
+    <string name="wizard_choose_place">Zielplatz auswählen</string>
+    <string name="wizard_place">%1$s, Platz %2$d: %3$s</string>
+    <string name="wizard_drag_hint">Spieler zum Ziehen gedrückt halten. Antippen zum Tauschen oder Entfernen.</string>
+    <string name="wizard_empty_suggestions">Noch keine letzten Mitspieler. Lege einen Spieler an.</string>
+    <string name="wizard_place_action">Spieler oder Zielplatz auswählen</string>
 </resources>
