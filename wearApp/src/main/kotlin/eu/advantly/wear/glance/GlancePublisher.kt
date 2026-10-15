@@ -22,21 +22,26 @@ class GlancePublisher(
     private val holder: WearSessions.Holder,
 ) : SessionListener {
     private val handler = Handler(Looper.getMainLooper())
-    private val throttle = GlanceUpdateThrottle()
+    private val restoredState = GlanceStateStorage.decode(holder.prefs.glanceSentState)
+    private val throttle = GlanceUpdateThrottle(initialState = restoredState)
+    private var initialized = false
+    private val directoryRefresh = GlanceDirectoryRefresh()
     private val directory =
         WatchDirectory(holder.data, System::currentTimeMillis) {
             PlayerId(RandomIdGenerator().newUuid7(System.currentTimeMillis()).value)
         }
     private var setup: WatchSetup? = null
-    private var setupKey: Pair<Long, String?>? = null
     private var names: Map<PlayerId, String?> = emptyMap()
     private var selfIds: Set<PlayerId> = emptySet()
     private val update = Runnable { requestUpdate() }
 
+    init {
+        // Prozessweiter Publisher: die Registrierung lebt genauso lange wie LocalData und die Session.
+        holder.data.observeDirectoryChanges(directoryRefresh::invalidate)
+    }
+
     override fun onStateChanged(state: SessionState) {
-        val key = state.dataRevision to state.match?.id?.value
-        if (setupKey != key) {
-            setupKey = key
+        if (directoryRefresh.shouldRefresh(state)) {
             setup = directory.lastSetup()
             val assignments = state.match?.let { holder.data.assignments(it.id) }.orEmpty()
             val ids =
@@ -51,6 +56,10 @@ class GlancePublisher(
             selfIds = ids.filter(directory::isSelf).toSet()
         }
         snapshot = GlanceModel.derive(state, setup, names::get, selfIds::contains)
+        if (!initialized) {
+            initialized = true
+            if (restoredState == null) holder.prefs.glanceSentState = GlanceStateStorage.encode(snapshot)
+        }
         handler.removeCallbacks(update)
         when (val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())) {
             null -> Unit
@@ -60,11 +69,12 @@ class GlancePublisher(
     }
 
     private fun requestUpdate() {
-        throttle.sent(snapshot, SystemClock.elapsedRealtime())
         TileService.getUpdater(context).requestUpdate(MatchTileService::class.java)
         ComplicationDataSourceUpdateRequester
             .create(context, ComponentName(context, MatchComplicationService::class.java))
             .requestUpdateAll()
+        throttle.sent(snapshot, SystemClock.elapsedRealtime())
+        holder.prefs.glanceSentState = GlanceStateStorage.encode(snapshot)
     }
 
     companion object {

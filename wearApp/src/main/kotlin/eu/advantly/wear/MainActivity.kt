@@ -16,7 +16,6 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
@@ -39,6 +38,7 @@ import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.glance.GlanceAction
+import eu.advantly.wear.glance.GlanceIntentConsumption
 import eu.advantly.wear.glance.GlanceLaunch
 import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
@@ -88,6 +88,7 @@ class WatchViewModel(
  */
 class MainActivity : ComponentActivity() {
     private val glanceLaunch = mutableIntStateOf(0)
+    private var glanceConsumption = GlanceIntentConsumption()
     private val isAmbient = mutableStateOf(false)
     private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val toast = mutableStateOf<WatchToast?>(null)
@@ -148,6 +149,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Ein restauriertes Task-Intent darf nie erneut einen Schnellstart auslösen.
+        glanceConsumption = GlanceIntentConsumption(consumed = savedInstanceState != null)
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
         holder = WearSessions.get(this)
@@ -188,24 +191,24 @@ class MainActivity : ComponentActivity() {
                     controller.tick()
                 }
             }
-            key(glanceLaunch.intValue) {
-                WearApp(
-                    state = state,
-                    workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
-                    permissions = permissions.value,
-                    heartRate = shownTelemetry.value.first,
-                    isAmbient = ambient,
-                    powerSave = powerSave.value,
-                    toast = toast.value,
-                    actions = actions,
-                )
-            }
+            WearApp(
+                state = state,
+                workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
+                permissions = permissions.value,
+                heartRate = shownTelemetry.value.first,
+                isAmbient = ambient,
+                powerSave = powerSave.value,
+                toast = toast.value,
+                actions = actions,
+                glanceLaunch = glanceLaunch.intValue,
+            )
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+        outState.putBoolean(KEY_GLANCE_CONSUMED, glanceConsumption.consumed)
     }
 
     override fun onStart() {
@@ -249,12 +252,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
     }
 
     /** Erst aus der sichtbaren Activity starten; Extra verbrauchen, bevor Session/Rechte-Dialoge reagieren. */
     private fun consumeGlanceAction() {
-        val value = intent.getStringExtra(GlanceLaunch.EXTRA_ACTION) ?: return
+        val value = glanceConsumption.consume(intent.getStringExtra(GlanceLaunch.EXTRA_ACTION)) ?: return
         intent.removeExtra(GlanceLaunch.EXTRA_ACTION)
         // Eine bereits offene Steuerseite beim externen Einstieg wieder auf die Score-Seite setzen.
         glanceLaunch.intValue++
@@ -501,6 +505,7 @@ class MainActivity : ComponentActivity() {
         }
 
     private companion object {
+        const val KEY_GLANCE_CONSUMED = "glance_consumed"
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val TICK_MS = 1_000L
     }

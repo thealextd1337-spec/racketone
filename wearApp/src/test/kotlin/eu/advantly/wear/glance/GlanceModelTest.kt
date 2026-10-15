@@ -43,6 +43,15 @@ class GlanceModelTest {
     }
 
     @Test
+    fun storedSnapshotPreservesSetupScoreServerNamesAndRole() {
+        start()
+        h.watch.recordPoint(Side.B)
+        val snapshot = derive()
+        assertEquals(snapshot, GlanceStateStorage.decode(GlanceStateStorage.encode(snapshot)))
+        assertEquals(GlanceState(), GlanceStateStorage.decode(GlanceStateStorage.encode(GlanceState())))
+    }
+
+    @Test
     fun scoreUndoAndServerFollowSession() {
         start()
         h.watch.recordPoint(Side.A)

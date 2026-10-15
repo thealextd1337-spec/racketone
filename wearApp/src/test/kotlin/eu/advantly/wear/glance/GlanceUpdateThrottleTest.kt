@@ -22,11 +22,39 @@ class GlanceUpdateThrottleTest {
         )
 
     @Test
-    fun firstUpdateIsImmediateAndEqualValuesDoNotUpdate() {
+    fun firstStateIsOnlyBaselineAndEqualValuesDoNotUpdate() {
         val state = state()
-        assertEquals(0L, throttle.delayFor(state, 100))
-        throttle.sent(state, 100)
+        assertNull(throttle.delayFor(state, 100))
         assertNull(throttle.delayFor(state.copy(), 5_100))
+        assertEquals(0L, throttle.delayFor(state("15:0"), 5_100))
+    }
+
+    @Test
+    fun repeatedBackgroundProcessStartsDoNotRequestUpdates() {
+        val stored = GlanceStateStorage.encode(state())
+        repeat(5) {
+            val restarted = GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(stored))
+            assertNull(restarted.delayFor(state(), 100))
+        }
+    }
+
+    @Test
+    fun restartRecoversLostTrailingUpdateButDoesNotRepeatIt() {
+        val stored = GlanceStateStorage.encode(state())
+        val latest = state("30:0")
+        val restarted = GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(stored))
+        assertEquals(0L, restarted.delayFor(latest, 100))
+        restarted.sent(latest, 100)
+        val nextProcess = GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(GlanceStateStorage.encode(latest)))
+        assertNull(nextProcess.delayFor(latest, 0))
+    }
+
+    @Test
+    fun corruptOrMissingStorageCreatesBaseline() {
+        listOf(null, "broken", "{\"live\":42}").forEach { value ->
+            assertNull(GlanceStateStorage.decode(value))
+            assertNull(GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(value)).delayFor(state(), 0))
+        }
     }
 
     @Test

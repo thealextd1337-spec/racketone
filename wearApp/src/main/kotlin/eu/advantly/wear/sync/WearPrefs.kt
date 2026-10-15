@@ -13,6 +13,11 @@ class WearPrefs(
 ) : WatchPrefs {
     private val prefs: SharedPreferences = context.getSharedPreferences("wear_prefs", Context.MODE_PRIVATE)
 
+    /** Letzter angeforderter Tile-/Complication-Zustand; verhindert Updates allein durch Prozessstarts. */
+    var glanceSentState: String?
+        get() = prefs.getString(KEY_GLANCE_SENT, null)
+        set(value) = prefs.edit { putString(KEY_GLANCE_SENT, value) }
+
     override var workoutEnabled: Boolean
         get() = prefs.getBoolean(KEY_WORKOUT, true)
         set(value) = prefs.edit { putBoolean(KEY_WORKOUT, value) }
@@ -49,6 +54,7 @@ class WearPrefs(
         set(value) = prefs.edit { putBoolean(KEY_NOTIFICATIONS_ASKED, value) }
 
     private companion object {
+        const val KEY_GLANCE_SENT = "glance_sent_state"
         const val KEY_WORKOUT = "workout_enabled"
         const val KEY_OPEN = "open_match"
         const val KEY_WORKOUT_HANDLED = "workout_handled_match"

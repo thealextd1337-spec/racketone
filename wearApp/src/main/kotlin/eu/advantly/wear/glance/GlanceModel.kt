@@ -7,13 +7,17 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.SessionState
 import eu.advantly.wear.match.WatchSetup
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /** Kleine, unveränderliche Lesesicht. Kein DB-Zugriff und kein Event-Replay in den Provider-Callbacks. */
+@Serializable
 data class GlanceState(
     val live: GlanceMatch? = null,
     val last: GlanceSetup? = null,
 )
 
+@Serializable
 data class GlancePlayer(
     val name: String?,
     val isSelf: Boolean,
@@ -21,11 +25,13 @@ data class GlancePlayer(
     val index: Int,
 )
 
+@Serializable
 data class GlanceSetup(
     val format: MatchFormat,
     val players: List<GlancePlayer>,
 )
 
+@Serializable
 data class GlanceMatch(
     val sets: String,
     val games: String?,
@@ -84,19 +90,25 @@ object GlanceModel {
 /** Führende Aktualisierung plus nachlaufende letzte Änderung; gleiche Werte erzeugen keine Wakeups. */
 class GlanceUpdateThrottle(
     private val intervalMs: Long = 5_000,
+    initialState: GlanceState? = null,
 ) {
     init {
         require(intervalMs > 0)
     }
 
     private var lastSentAt: Long? = null
-    private var sent: GlanceState? = null
+    private var sent: GlanceState? = initialState
 
     /** `null`: unverändert; sonst verbleibende Wartezeit. Zeit kommt monoton vom Aufrufer. */
     fun delayFor(
         state: GlanceState,
         nowMs: Long,
     ): Long? {
+        // Ohne gespeicherten Zustand nur die Baseline setzen: ein Prozessstart ist keine Änderung.
+        if (sent == null) {
+            sent(state, nowMs)
+            return null
+        }
         if (state == sent) return null
         val last = lastSentAt ?: return 0
         return (intervalMs - (nowMs - last).coerceAtLeast(0)).coerceAtLeast(0)
@@ -108,6 +120,31 @@ class GlanceUpdateThrottle(
     ) {
         sent = state
         lastSentAt = nowMs
+    }
+}
+
+/** Persistierter Vergleichswert, unabhängig von Locale und Layout; alte/defekte Werte sind eine neue Baseline. */
+object GlanceStateStorage {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun encode(state: GlanceState): String = json.encodeToString(GlanceState.serializer(), state)
+
+    fun decode(value: String?): GlanceState? =
+        value?.let { runCatching { json.decodeFromString(GlanceState.serializer(), it) }.getOrNull() }
+}
+
+/** Der Verbrauch gehört zur Activity-Instanz und wird vor Nebenwirkungen im Saved State gesichert. */
+class GlanceIntentConsumption(
+    var consumed: Boolean = false,
+) {
+    fun consume(value: String?): String? {
+        if (consumed || value == null) return null
+        consumed = true
+        return value
+    }
+
+    fun onNewIntent() {
+        consumed = false
     }
 }
 
