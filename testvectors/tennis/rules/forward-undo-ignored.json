@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "GV-TEN-RULE-FORWARD-UNDO-IGNORED",
+  "title": "Regel-Szenario forward-undo-ignored (generiert)",
+  "description": "Undo mit Ziel, das in der Ordnung später steht, wird übersprungen (02 §7.3 Schritt 2) Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.",
+  "sources": ["Advantly 02-scoring-regeln.md §6–§9; Regel-Tabellen-Tests in core-scoring/commonTest"],
+  "config": {"formatVersion":1,"presetId":"TENNIS_SINGLES_BO3","sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},"set":{"gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},"decidingSet":null,"matchTiebreak":null},
+  "lineup": {"A":["A1"],"B":["B1"],"firstServer":"A1"},
+  "events": [
+    {"id":"u","lamport":1,"deviceId":"phone","parentId":null,"wallClockMs":10000,"type":"Undo","target":"x"},
+    {"id":"x","lamport":2,"deviceId":"watch","parentId":null,"wallClockMs":12000,"type":"PointWon","side":"A"},
+    {"id":"y","lamport":3,"deviceId":"watch","parentId":"x","wallClockMs":20000,"type":"Undo","target":"x"}
+  ],
+  "expect": [
+    {"afterEvent":0,"label":"Start","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":0,"B":0},"display":{"A":"0","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"0-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":[],"ignoredEvents":[],"continuation":null}},
+    {"afterEvent":1,"label":"nach u","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":0,"B":0},"display":{"A":"0","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"0-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["UNDONE"],"ignoredEvents":[],"continuation":null}},
+    {"afterEvent":3,"label":"nach y","state":{"status":"IN_PROGRESS","pending":null,"result":null,"setsWon":{"A":0,"B":0},"sets":[],"current":{"setIndex":0,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":0,"B":0},"display":{"A":"0","B":"0"},"callout":null,"deuceCount":0,"decidingPoint":false},"serve":{"side":"A","player":"A1","court":"RIGHT","serverNumber":null,"receiver":"B1","servesRemaining":null},"scoreCall":"0-0","positions":null,"ends":{"A":"END_1","B":"END_2"},"statusFlags":[],"effects":["UNDONE"],"ignoredEvents":["u"],"continuation":null}}
+  ]
+}
