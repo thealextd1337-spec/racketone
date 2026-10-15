@@ -119,6 +119,45 @@ class SessionMatchStoreTest {
 
     private fun Rig.watchScoredMatch() = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
 
+    /** Versionsunterschied (Protokoll 1 ↔ 2) wird sichtbar: „Bitte Uhr aktualisieren“ bzw. „dieses Gerät aktualisieren“. */
+    @Test
+    fun protocolVersionMismatchIsReported() {
+        val rig = Rig()
+        assertNull(rig.phone.updateRequired.value)
+        val old = ReliableDeviceLink(rig.network.transport("old-watch"), rig.scheduler).apply { start() }
+        rig.settle()
+        old.send(
+            "phone",
+            eu.advantly.sync.protocol.SyncCodec
+                .encode(
+                    eu.advantly.sync.protocol
+                        .Hello(DeviceId("old"), PeerKind.WATCH, minV = 1, v = 1),
+                ),
+        )
+        rig.settle()
+        assertEquals(UpdateRequired.OTHER_DEVICE, rig.phone.updateRequired.value)
+        rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.THIS_PHONE))
+        assertEquals(
+            UpdateRequired.OTHER_DEVICE,
+            rig.phone.active.value
+                ?.sync
+                ?.updateRequired,
+        )
+        val future = ReliableDeviceLink(rig.network.transport("future"), rig.scheduler).apply { start() }
+        rig.offline("old-watch")
+        rig.settle()
+        future.send(
+            "phone",
+            eu.advantly.sync.protocol.SyncCodec
+                .encode(
+                    eu.advantly.sync.protocol
+                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 3, v = 3),
+                ),
+        )
+        rig.settle()
+        assertEquals(UpdateRequired.THIS_DEVICE, rig.phone.updateRequired.value)
+    }
+
     /** Neue Kommandos (Feldtest 2026-10-15) laufen über die Session; auf dem Anzeige-Gerät wirken sie nicht. */
     @Test
     fun operationCommandsGoThroughTheSession() {

@@ -60,7 +60,12 @@ Diese Notiz beschreibt, was die UI-Pakete (Handy, Wear OS, Apple Watch) nutzen. 
 
 ## 5. Hinweise für die UI-Pakete
 
-- **Wizard** (`presentation/wizard/MatchWizard`, in W2-A nicht geändert): „Games pro Satz“ 1–6 (und 8/10) über `Presets.withGamesPerSet`, „Nur Tiebreak“ über die neuen Presets, Schalter „Aufschlag-Statistik erfassen“ → `MatchMeta.serveStats`.
+- **Wizard** (`presentation/wizard/MatchWizard` + `WizardModel`, in W2-A nicht geändert – übernimmt das UI-Paket). Es fehlt:
+  1. „Games pro Satz“ für Tennis/Padel: Auswahl **1, 2, 3, 4, 5, 6** (Tennis zusätzlich 8, 10), Format über `Presets.withGamesPerSet(format, n)` statt eigener `gamesToWin`/`tiebreakAt`-Logik. Hinweistext für n = 1: Ein Satz braucht 2 Games Vorsprung, bei 1:1 Tiebreak → Satz 2:0 oder 2:1 (K17, vom Orchestrator bestätigt).
+  2. „Nur Tiebreak (bis 7)“ und „Nur Champions-Tiebreak (bis 10)“ (Padel: „Nur Super-Tiebreak“) als Option im Schritt „Games pro Satz“ bzw. „Satzanzahl“ → Presets `TENNIS_TIEBREAK_ONLY_7/10`, `PADEL_TIEBREAK_ONLY_7/10`; Satzanzahl und Games pro Satz sind dann ausgeblendet.
+  3. Schalter „Aufschlag-Statistik erfassen“ (nur Tennis/Padel, Default an) → `MatchMeta.serveStats`; bei anderen Sportarten nicht anzeigen.
+  4. Preset-Anzeigenamen DE/EN für die vier neuen Presets.
+- **Aufschlägerwahl Game 1 in Satz ≥ 2:** Auch ein Spieler des anderen Teams ist wählbar (bewusste Freizeitregel, vom Orchestrator bestätigt); die UI darf das Team, das nach Regel eröffnet, als Vorschlag zuerst zeigen (`serverChoice.side`).
 - **Watch:** Die Uhr ist meist Zähler. Aufschlägerwahl und „Punkt abziehen“ sind auf der Uhr sinnvoll; die Aufschlag-Leiste nur, wenn das UI-Paket sie vorsieht (02 §11.2 empfiehlt sie am Handy). Swift-Facade (watchOS, ohne SKIE): `ServerChoice`/`LastPoint` als einfache Klassen bzw. Felder durchreichen.
-- **Wire-Kompatibilität:** Neue Events (`ServerChosen`, `nextSetKind = TIEBREAK_7/MATCH_TIEBREAK_10`, `PointDetail` ohne `kind`) kann ein Gerät mit älterem App-Stand nicht lesen; Uhr und Handy müssen gemeinsam aktualisiert werden (offene Frage: Protokollversion anheben, siehe Bericht W2-A). Alte Logs bleiben vollständig lesbar.
+- **Versionsunterschied:** Die Sync-Protokollversion ist jetzt 2 (`minV` 2, 01 §4.3). Ein Gerät mit älterem App-Stand ist inkompatibel; die Geräte tauschen dann nichts aus. Anzeige: `LiveMatchPort.updateRequired` (auch ohne Match) bzw. `LiveMatchSnapshot.sync.updateRequired` – `OTHER_DEVICE` → „Bitte Advantly auf der Uhr aktualisieren“ / „Please update Advantly on your watch“ (bzw. Handy), `THIS_DEVICE` → „Bitte Advantly auf diesem Gerät aktualisieren“ / „Please update Advantly on this device“. Session: `SyncStatus.versionMismatch` (`PEER_TOO_OLD`/`PEER_TOO_NEW`). Alte Logs bleiben vollständig lesbar.
 - `InputKind` für verworfene Eingaben: `ServerChosen` erscheint als `CORRECTION`.

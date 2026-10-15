@@ -127,7 +127,15 @@ data class SyncStatus(
     val pendingToPeers: Int,
     val lastEventReceivedAtMs: Long?,
     val lastSyncAtMs: Long?,
-)
+) {
+    /**
+     * Versionsunterschied zu einer erreichbaren Gegenstelle (Hello/`negotiate`, Protokoll 2 seit W2-A): `PEER_TOO_OLD` =
+     * die Gegenstelle (z. B. Uhr) muss aktualisiert werden, `PEER_TOO_NEW` = dieses Gerät. Solange er besteht, tauschen
+     * beide nichts aus. `null` = kein Unterschied bekannt.
+     */
+    val versionMismatch: CompatibilityStatus?
+        get() = peers.firstNotNullOfOrNull { it.compatibility?.takeIf { status -> status != CompatibilityStatus.COMPATIBLE } }
+}
 
 /**
  * Gegenstelle des Geräte-Links.

@@ -108,6 +108,8 @@ class SessionMatchStore(
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+    private val updateRequiredFlow = MutableStateFlow<UpdateRequired?>(null)
+    override val updateRequired: StateFlow<UpdateRequired?> = updateRequiredFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
 
     // Zustand für Revision und „Stand vor X s“
@@ -377,9 +379,17 @@ class SessionMatchStore(
         lastState = state
         trackScorerContact(state)
         updateWatchStatus(state)
+        updateRequiredFlow.value = updateRequiredOf(state)
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }
+
+    private fun updateRequiredOf(state: SessionState): UpdateRequired? =
+        when (state.sync.versionMismatch) {
+            CompatibilityStatus.PEER_TOO_OLD -> UpdateRequired.OTHER_DEVICE
+            CompatibilityStatus.PEER_TOO_NEW -> UpdateRequired.THIS_DEVICE
+            else -> null
+        }
 
     /**
      * Letzter Kontakt zum Zähler, monoton gemessen. Beim Öffnen eines Matches aus dem gemerkten Wert (Wanduhr, übersteht
@@ -488,6 +498,7 @@ class SessionMatchStore(
                     lastEventReceivedAtMs = sync.lastEventReceivedAtMs,
                     lastScorerContactMono = if (m.isScorer) null else contactMono,
                     withoutScorerSinceMono = if (m.isScorer) null else withoutScorerSinceMono,
+                    updateRequired = updateRequiredOf(state),
                 ),
             absorbedTaps = m.absorbedTaps.size,
             waitingForScorer = waitingForScorer(m, state),

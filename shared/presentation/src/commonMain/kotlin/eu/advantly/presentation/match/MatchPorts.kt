@@ -68,6 +68,18 @@ enum class LiveRole {
     DISPLAY,
 }
 
+/**
+ * Gekoppeltes Gerät mit anderer Protokollversion (Hello/`negotiate`, seit W2-A Protokoll 2): Die Geräte tauschen nichts
+ * aus, bis aktualisiert ist. UI: „Bitte Uhr/Handy aktualisieren“.
+ */
+enum class UpdateRequired {
+    /** Das andere Gerät (meist die Uhr) hat einen älteren App-Stand. */
+    OTHER_DEVICE,
+
+    /** Dieses Gerät hat einen älteren App-Stand als das gekoppelte. */
+    THIS_DEVICE,
+}
+
 /** Art des zählenden Geräts (Anzeige „Es zählt: Uhr von …“). */
 enum class DeviceKind { PHONE, WATCH, OTHER }
 
@@ -196,6 +208,7 @@ data class LastPointInfo(
  *   `null` = unbekannt – die UI zeigt dann „Stand unbekannt“ statt eines erfundenen Alters
  * @property withoutScorerSinceMono monotone Zeit, seit der dieses Gerät das Match ohne Zähler-Kontakt beobachtet;
  *   Untergrenze für das Übernahmeangebot, wenn der letzte Kontakt unbekannt ist
+ * @property updateRequired Versionsunterschied zu einem gekoppelten Gerät (siehe [UpdateRequired]), sonst `null`
  */
 data class SyncInfo(
     val peers: Int,
@@ -204,6 +217,7 @@ data class SyncInfo(
     val lastEventReceivedAtMs: Long? = null,
     val lastScorerContactMono: Long? = null,
     val withoutScorerSinceMono: Long? = null,
+    val updateRequired: UpdateRequired? = null,
 ) {
     /** Millisekunden seit dem letzten Kontakt zum Zähler (nie negativ), `null` = unbekannt. */
     fun staleForMs(nowMono: Long): Long? = lastScorerContactMono?.let { (nowMono - it).coerceAtLeast(0) }
@@ -237,6 +251,12 @@ interface LiveMatchPort {
 
     /** Stand der eigenen Uhr für „Wer zählt?“ (auch ohne Live-Verbindung, reagiert auf Änderungen). */
     val watchStatus: StateFlow<WatchStatus>
+
+    /**
+     * Versionsunterschied zu einem gekoppelten Gerät, auch ohne aktives Match (z. B. Schritt „Wer zählt?“); `null` = keiner.
+     * Die In-Memory-Implementierung liefert immer `null`.
+     */
+    val updateRequired: StateFlow<UpdateRequired?>
 
     /** Stand der Uhr sofort neu prüfen (Schritt „Wer zählt?“, App im Vordergrund, „Erneut prüfen“). */
     fun refreshWatchStatus()

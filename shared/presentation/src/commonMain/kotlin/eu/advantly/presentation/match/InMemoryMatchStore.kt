@@ -93,6 +93,9 @@ class InMemoryMatchStore(
     private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
 
+    /** Ein Gerät: nie ein Versionsunterschied. */
+    override val updateRequired: StateFlow<UpdateRequired?> = MutableStateFlow<UpdateRequired?>(null).asStateFlow()
+
     /** Anzahl der Neuabfragen ([refreshWatchStatus]) – für Tests. */
     var watchRefreshes: Int = 0
         private set
