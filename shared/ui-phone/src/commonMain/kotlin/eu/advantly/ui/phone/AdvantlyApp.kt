@@ -12,19 +12,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.app_name
 import eu.advantly.ui.phone.resources.app_tagline
 import eu.advantly.ui.phone.resources.app_version
 import org.jetbrains.compose.resources.stringResource
 
-/** Wurzel-Composable der Phone-App (Android, iOS, Desktop-Preview). Platzhalter bis Welle 1. */
+/** Wurzel-Composable der Phone-App. Platzhalter bis Welle 1 (Spike S4 startet direkt in [eu.advantly.ui.phone.live.LiveScoreSpikeApp]). */
 @Composable
 fun AdvantlyApp(
     versionName: String,
     modifier: Modifier = Modifier,
 ) {
-    MaterialTheme {
+    AdvantlyTheme {
         Surface(modifier = modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier.padding(24.dp),
