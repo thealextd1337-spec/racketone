@@ -54,7 +54,7 @@ class ExerciseOwnershipTest {
 
     @Test
     fun reattachWithoutCapabilitiesIsAnErrorNotActive() {
-        val result = ExerciseOwnership.onReattach(SpikeSport.TENNIS, capabilities = null, permissions = WorkoutPermissions.ALL)
+        val result = ExerciseOwnership.onReattach(WorkoutSport.TENNIS, capabilities = null, permissions = WorkoutPermissions.ALL)
         assertEquals(ReattachResult.CapabilitiesUnavailable, result)
     }
 
@@ -66,7 +66,7 @@ class ExerciseOwnershipTest {
 
                 override fun supportedMetrics(type: WatchExerciseType) = setOf(WorkoutMetric.HEART_RATE_BPM)
             }
-        val result = ExerciseOwnership.onReattach(SpikeSport.TABLE_TENNIS, caps, WorkoutPermissions.ALL)
+        val result = ExerciseOwnership.onReattach(WorkoutSport.TABLE_TENNIS, caps, WorkoutPermissions.ALL)
         assertTrue(result is ReattachResult.Active)
         val selection = (result as ReattachResult.Active).selection!!
         assertEquals(WatchExerciseType.TENNIS, selection.type)

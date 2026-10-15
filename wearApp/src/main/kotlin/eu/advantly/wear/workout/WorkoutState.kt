@@ -30,11 +30,11 @@ enum class WorkoutError {
     INTERNAL,
 }
 
-/** Live-Zustand, den der [WorkoutService] (bzw. [CountOnlySession]) schreibt und die UI liest. */
+/** Live-Zustand, den der [WorkoutService] schreibt und die UI liest. */
 data class WorkoutUiState(
     val phase: WorkoutPhase = WorkoutPhase.IDLE,
     val selection: ExerciseSelection? = null,
-    /** Rückfall ohne Workout/FGS – keine Laufzeitgarantie. */
+    /** Match läuft ohne Workout, weil Puls- und Aktivitätsrecht fehlen – keine Laufzeitgarantie (Hinweis in der UI). */
     val countOnly: Boolean = false,
     val heartRateBpm: Int? = null,
     val caloriesKcal: Double? = null,
@@ -47,7 +47,7 @@ data class WorkoutUiState(
     val errorDetail: String? = null,
 )
 
-/** Prozessweiter Halter des Live-Zustands (für den Spike genügt ein Singleton statt Binding). */
+/** Prozessweiter Halter des Live-Zustands (Service und Activity im selben Prozess, kein Binding nötig). */
 object WorkoutStateHolder {
     private val mutable = MutableStateFlow(WorkoutUiState())
     val state: StateFlow<WorkoutUiState> = mutable.asStateFlow()

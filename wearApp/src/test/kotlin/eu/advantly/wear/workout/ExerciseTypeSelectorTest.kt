@@ -28,7 +28,7 @@ class ExerciseTypeSelectorTest {
                     WatchExerciseType.WORKOUT to all,
                 ),
             )
-        val selection = ExerciseTypeSelector.select(SpikeSport.BADMINTON, caps)!!
+        val selection = ExerciseTypeSelector.select(WorkoutSport.BADMINTON, caps)!!
         assertEquals(WatchExerciseType.BADMINTON, selection.type)
         assertFalse(selection.isFallback)
         // DataTypes aus den BADMINTON-Capabilities, nicht aus TENNIS (05 §0.1)
@@ -44,17 +44,17 @@ class ExerciseTypeSelectorTest {
                     WatchExerciseType.WORKOUT to all,
                 ),
             )
-        val selection = ExerciseTypeSelector.select(SpikeSport.TABLE_TENNIS, caps)!!
+        val selection = ExerciseTypeSelector.select(WorkoutSport.TABLE_TENNIS, caps)!!
         assertEquals(WatchExerciseType.TENNIS, selection.type)
         assertTrue(selection.isFallback)
-        assertEquals(SpikeSport.TABLE_TENNIS, selection.sport)
+        assertEquals(WorkoutSport.TABLE_TENNIS, selection.sport)
         assertEquals(setOf(WorkoutMetric.HEART_RATE_BPM, WorkoutMetric.STEPS), selection.metrics)
     }
 
     @Test
     fun fallsBackToWorkoutWhenNeitherNativeNorTennis() {
         val caps = FakeCapabilities(mapOf(WatchExerciseType.WORKOUT to setOf(WorkoutMetric.HEART_RATE_BPM)))
-        SpikeSport.entries.forEach { sport ->
+        WorkoutSport.entries.forEach { sport ->
             val selection = ExerciseTypeSelector.select(sport, caps)!!
             assertEquals(WatchExerciseType.WORKOUT, selection.type)
             assertTrue(selection.isFallback)
@@ -65,7 +65,7 @@ class ExerciseTypeSelectorTest {
     @Test
     fun tennisIsNativeForTennis() {
         val caps = FakeCapabilities(mapOf(WatchExerciseType.TENNIS to all, WatchExerciseType.BADMINTON to all))
-        val selection = ExerciseTypeSelector.select(SpikeSport.TENNIS, caps)!!
+        val selection = ExerciseTypeSelector.select(WorkoutSport.TENNIS, caps)!!
         assertEquals(WatchExerciseType.TENNIS, selection.type)
         assertFalse(selection.isFallback)
         assertEquals(all, selection.metrics)
@@ -74,12 +74,12 @@ class ExerciseTypeSelectorTest {
     @Test
     fun tennisNeverFallsBackToBadminton() {
         val caps = FakeCapabilities(mapOf(WatchExerciseType.BADMINTON to all))
-        assertNull(ExerciseTypeSelector.select(SpikeSport.TENNIS, caps))
+        assertNull(ExerciseTypeSelector.select(WorkoutSport.TENNIS, caps))
     }
 
     @Test
     fun noSupportedTypeYieldsNull() {
-        assertNull(ExerciseTypeSelector.select(SpikeSport.BADMINTON, FakeCapabilities(emptyMap())))
+        assertNull(ExerciseTypeSelector.select(WorkoutSport.BADMINTON, FakeCapabilities(emptyMap())))
     }
 
     @Test
@@ -92,7 +92,7 @@ class ExerciseTypeSelectorTest {
                     WatchExerciseType.TENNIS to all,
                 ),
             )
-        val selection = ExerciseTypeSelector.select(SpikeSport.TABLE_TENNIS, caps)!!
+        val selection = ExerciseTypeSelector.select(WorkoutSport.TABLE_TENNIS, caps)!!
         assertEquals(WatchExerciseType.TABLE_TENNIS, selection.type)
         assertEquals(setOf(WorkoutMetric.CALORIES_TOTAL), selection.metrics)
     }
@@ -101,13 +101,13 @@ class ExerciseTypeSelectorTest {
     fun candidateOrderMatchesSpec() {
         assertEquals(
             listOf(WatchExerciseType.BADMINTON, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT),
-            ExerciseTypeSelector.candidates(SpikeSport.BADMINTON),
+            ExerciseTypeSelector.candidates(WorkoutSport.BADMINTON),
         )
         assertEquals(
             listOf(WatchExerciseType.TABLE_TENNIS, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT),
-            ExerciseTypeSelector.candidates(SpikeSport.TABLE_TENNIS),
+            ExerciseTypeSelector.candidates(WorkoutSport.TABLE_TENNIS),
         )
-        assertEquals(listOf(WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT), ExerciseTypeSelector.candidates(SpikeSport.TENNIS))
+        assertEquals(listOf(WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT), ExerciseTypeSelector.candidates(WorkoutSport.TENNIS))
     }
 
     @Test
@@ -129,7 +129,7 @@ class ExerciseTypeSelectorTest {
             assertEquals(
                 "heartRate=$hr activity=$ar",
                 expected,
-                ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, permissions)!!.metrics,
+                ExerciseTypeSelector.select(WorkoutSport.TENNIS, caps, permissions)!!.metrics,
             )
         }
     }
@@ -138,7 +138,7 @@ class ExerciseTypeSelectorTest {
     fun caloriesNeverRequestedWithHeartRateOnly() {
         val onlyHeartRate = WorkoutPermissions(heartRate = true, activityRecognition = false, notifications = true)
         val caps = FakeCapabilities(mapOf(WatchExerciseType.BADMINTON to setOf(WorkoutMetric.CALORIES_TOTAL, WorkoutMetric.HEART_RATE_BPM)))
-        val metrics = ExerciseTypeSelector.select(SpikeSport.BADMINTON, caps, onlyHeartRate)!!.metrics
+        val metrics = ExerciseTypeSelector.select(WorkoutSport.BADMINTON, caps, onlyHeartRate)!!.metrics
         assertFalse(WorkoutMetric.CALORIES_TOTAL in metrics)
         assertEquals(setOf(WorkoutMetric.HEART_RATE_BPM), metrics)
     }
