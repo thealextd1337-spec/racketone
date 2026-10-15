@@ -22,6 +22,7 @@ jobs:
       pull-requests: read
     outputs:
       apple: ${{ steps.filter.outputs.apple }}
+      supabase: ${{ steps.filter.outputs.supabase }}
     steps:
       - uses: actions/checkout@v7
       - id: filter
@@ -38,6 +39,9 @@ jobs:
               - 'gradle.properties'
               - '.github/workflows/ci.yml'
               - '.github/scripts/**'
+            supabase:
+              - 'supabase/**'
+              - '.github/workflows/ci.yml'
 
   gradle-check:
     name: Gradle check + Android/Wear-APKs (ubuntu)
@@ -338,3 +342,25 @@ jobs:
             **/build/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # P2-Backend (Spike): Migrationen + pgTAP-RLS-Tests gegen den lokalen Supabase-Stack (Docker auf ubuntu).
+  # Nur bei Änderungen unter supabase/ (oder an dieser Datei). Befehle wie lokal, siehe supabase/README.md.
+  supabase-db:
+    name: Supabase – Migrationen + pgTAP (ubuntu)
+    needs: changes
+    if: needs.changes.outputs.supabase == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0
+      # Nur Datenbank, Auth und Realtime (realtime.messages + Policies); übrige Dienste werden nicht gebraucht
+      - name: Lokalen Stack starten (wendet alle Migrationen an)
+        run: supabase start -x storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: pgTAP-Tests (RLS, RPCs)
+        run: supabase test db
+      - name: Stack stoppen
+        if: always()
+        run: supabase stop --no-backup
