@@ -139,7 +139,7 @@ class MatchWizard(
         }
     }
 
-    /** Belegt den nächsten freien Slot (Gegner zuerst, dann Partner) mit [player]; schon gesetzte Spieler: No-op. */
+    /** Belegt mit [player] den ersten freien Slot in der Reihenfolge B0, A0, A1, B1; gesetzte Spieler: No-op. */
     fun pickPlayer(player: Player) {
         if (input.players.any { it.id == player.id }) return
         val slot =
@@ -166,11 +166,12 @@ class MatchWizard(
         update { PlayerSelection.remove(it, PlayerPlace(side, index), players.self.value.id) }
     }
 
-    /** Vorschläge: in diesem Assistenten angelegt, dann zuletzt gemeinsam gespielt. */
+    /** Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. */
     fun playerSuggestions(): List<Player> =
         PlayerSelection.suggestions(
             createdPlayers,
             recentPlayers,
+            guests.value,
             input,
             players.self.value.id,
         )

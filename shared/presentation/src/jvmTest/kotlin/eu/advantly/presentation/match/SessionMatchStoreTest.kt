@@ -3,6 +3,10 @@ package eu.advantly.presentation.match
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.EndReason
@@ -11,6 +15,7 @@ import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.data.LocalData
+import eu.advantly.data.ScoreSummary
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.device.link.CompanionState
@@ -21,6 +26,7 @@ import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
+import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.sync.protocol.PeerKind
 import java.io.File
 import java.util.Properties
@@ -144,6 +150,60 @@ class SessionMatchStoreTest {
         phone.close()
         rig.phoneSession.close()
         rig.watch.close()
+    }
+
+    @Test
+    fun recentPlayersIncludeOwnerAliasesButNeverSuggestOwnerOrBlankNames() {
+        val data = createInMemoryJvmLocalData()
+        val self = data.players.ensureSelf("Alex", 0) { PlayerId("self") }
+        val alias = PlayerId("old-watch-self")
+        val guest = data.players.addGuest(PlayerId("guest"), "Sam", 1)
+        val blank = data.players.addGuest(PlayerId("blank"), "  ", 1)
+        data.players.addGuest(alias, "Alex auf der Uhr", 1)
+        assertTrue(data.addSelfAliases(listOf(alias)))
+        val lineups =
+            listOf(
+                Lineup(listOf(alias), listOf(guest.id), alias),
+                Lineup(listOf(self.id), listOf(alias), self.id),
+                Lineup(listOf(alias), listOf(blank.id), alias),
+                Lineup(listOf(alias), listOf(PlayerId("unknown")), alias),
+                Lineup(listOf(guest.id), listOf(blank.id), guest.id),
+            )
+        lineups.forEachIndexed { index, lineup ->
+            val id = MatchId("alias-match-$index")
+            data.matches.insertIfAbsent(id, tennis, lineup, MatchMeta(), index.toLong())
+            data.matches.updateProgress(id, MatchStatus.FINISHED, ScoreSummary.EMPTY, index.toLong())
+        }
+        val rig = Rig(phoneData = data, watchOnline = false)
+        try {
+            assertEquals(listOf(guest.toPlayer()), rig.phone.recentPlayers(Sport.TENNIS))
+            assertEquals(listOf(guest.toPlayer()), rig.phone.guests.value)
+        } finally {
+            rig.phone.close()
+            rig.phoneSession.close()
+            rig.watch.close()
+        }
+    }
+
+    @Test
+    fun guestFallbackKeepsLastUsedOrderAndOmitsBlankProfiles() {
+        val data = createInMemoryJvmLocalData()
+        val older = data.players.addGuest(PlayerId("older"), "Zoe", 1)
+        val newer = data.players.addGuest(PlayerId("newer"), "Aaron", 2)
+        val unused = data.players.addGuest(PlayerId("unused"), "Kim", 3)
+        data.players.addGuest(PlayerId("blank"), "", 4)
+        data.players.markUsed(listOf(older.id), 100)
+        data.players.markUsed(listOf(newer.id), 200)
+        val rig = Rig(phoneData = data, watchOnline = false)
+        try {
+            val wizard = MatchWizard(rig.phone)
+            wizard.selectSport(Sport.TENNIS)
+            assertEquals(listOf(newer.toPlayer(), older.toPlayer(), unused.toPlayer()), wizard.playerSuggestions())
+        } finally {
+            rig.phone.close()
+            rig.phoneSession.close()
+            rig.watch.close()
+        }
     }
 
     @Test

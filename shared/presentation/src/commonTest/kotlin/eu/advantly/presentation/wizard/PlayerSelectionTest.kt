@@ -29,9 +29,14 @@ class PlayerSelectionTest {
 
     @Test
     fun suggestionsPreferCreatedAndExcludeAssignedSelfAndDuplicateIdsButNotNames() {
+        val unused = Player(PlayerId("unused"), "Kim")
         val empty = input.copy(teamA = listOf(self, null), teamB = listOf(null, null))
-        assertEquals(listOf(c, a, b), PlayerSelection.suggestions(listOf(c, a, c), listOf(self, b, a), empty, self.id))
-        assertEquals(listOf(c), PlayerSelection.suggestions(listOf(a, c), listOf(b, c), input, self.id))
+        assertEquals(listOf(c, a, b), PlayerSelection.suggestions(listOf(c, a, c), listOf(self, b, a), listOf(b, c, self), empty, self.id))
+        assertEquals(
+            listOf(c, a, b, unused),
+            PlayerSelection.suggestions(listOf(c), listOf(a, b), listOf(b, unused, self, c), empty, self.id),
+        )
+        assertEquals(listOf(c), PlayerSelection.suggestions(listOf(a, c), listOf(b, c), listOf(a, b), input, self.id))
     }
 
     @Test
@@ -55,6 +60,16 @@ class PlayerSelectionTest {
         val singles = WizardInput(teamA = listOf(self), teamB = listOf(a))
         assertEquals(singles, PlayerSelection.exchange(singles, b0, a1, self.id))
         assertEquals(singles, PlayerSelection.exchange(singles, a0, b0, self.id))
+    }
+
+    @Test
+    fun validTargetsExcludeSinglesDeadEndsEmptySourcesAndOpponentsMovingSelf() {
+        val singles = WizardInput(teamA = listOf(self), teamB = listOf(a))
+        assertTrue(PlayerSelection.validTargets(singles, a0, self.id).isEmpty())
+        assertTrue(PlayerSelection.validTargets(singles, b0, self.id).isEmpty())
+        assertTrue(PlayerSelection.validTargets(input, b1, self.id).isEmpty())
+        assertEquals(listOf(a1), PlayerSelection.validTargets(input, a0, self.id))
+        assertEquals(listOf(a1, b1), PlayerSelection.validTargets(input, b0, self.id))
     }
 
     @Test
@@ -85,7 +100,7 @@ class PlayerSelectionTest {
         assertFalse(wizard.state.value.canContinue)
         wizard.reset()
         wizard.selectSport(Sport.PADEL)
-        assertTrue(wizard.playerSuggestions().isEmpty(), "Unbenutzte Gäste sind keine letzten Mitspieler")
+        assertEquals(listOf(added), wizard.playerSuggestions(), "Unbenutzte Gäste bleiben nach einem Neustart des Assistenten erreichbar")
     }
 
     @Test
@@ -117,15 +132,15 @@ class PlayerSelectionTest {
         store.start(badminton)
         store.endMatch(EndReason.ABANDONED)
         store.dismiss()
-        store.addGuest("Unbenutzt")
+        val unused = store.addGuest("Unbenutzt")
         val tennisGuest = tennis.players.last()
         val badmintonGuest = badminton.players.last()
         assertEquals(listOf(tennisGuest, badmintonGuest), store.recentPlayers(Sport.TENNIS))
         assertEquals(listOf(badmintonGuest, tennisGuest), store.recentPlayers(Sport.BADMINTON))
         val wizard = MatchWizard(store)
         wizard.selectSport(Sport.TENNIS)
-        assertEquals(listOf(tennisGuest, badmintonGuest), wizard.playerSuggestions())
+        assertEquals(listOf(tennisGuest, badmintonGuest, unused), wizard.playerSuggestions())
         wizard.assignPlayer(b0, tennisGuest)
-        assertEquals(listOf(badmintonGuest), wizard.playerSuggestions())
+        assertEquals(listOf(badmintonGuest, unused), wizard.playerSuggestions())
     }
 }

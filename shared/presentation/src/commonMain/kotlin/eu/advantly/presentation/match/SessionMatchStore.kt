@@ -303,14 +303,16 @@ class SessionMatchStore(
 
     // --- PlayersPort ------------------------------------------------------------------------------
 
-    /** Je 100 sportbezogene und allgemeine Matches; nutzt die bestehende Historienabfrage ohne Schemaänderung. */
-    override fun recentPlayers(sport: Sport): List<Player> =
-        (data.matches.history(sport = sport, limit = 100) + data.matches.history(limit = 100))
+    /** Je 100 sportbezogene und allgemeine Besetzungen; dekodiert nur die benötigten Spieler-IDs. */
+    override fun recentPlayers(sport: Sport): List<Player> {
+        val mine = aliases + self.value.id
+        return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
+            .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
+            .flatMap { playersOf(it) }
+            .filterNot { it.id in mine }
+            .filter { it.displayName.isNotBlank() }
             .distinctBy { it.id }
-            .filter { self.value.id in it.lineup.a + it.lineup.b }
-            .flatMap { playersOf(it.lineup) }
-            .filterNot { it.id == self.value.id }
-            .distinctBy { it.id }
+    }
 
     override fun addGuest(name: String): Player {
         val trimmed = name.trim()
@@ -536,7 +538,7 @@ class SessionMatchStore(
     private fun loadGuests(): List<Player> =
         data.players
             .all()
-            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases }
+            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases && it.displayName.isNotBlank() }
             .map { it.toPlayer() }
 
     /** Anzeigename je Spieler-ID; Aliase des Besitzers (z. B. alter Uhr-Self) tragen den Namen des Besitzers. */

@@ -15,15 +15,23 @@ object PlayerSelection {
     fun suggestions(
         created: List<Player>,
         recent: List<Player>,
+        guests: List<Player>,
         input: WizardInput,
         selfId: PlayerId,
     ): List<Player> {
         val assigned = input.players.map { it.id }.toSet() + selfId
-        return (created + recent).distinctBy { it.id }.filterNot { it.id in assigned }
+        return (created + recent + guests).distinctBy { it.id }.filterNot { it.id in assigned }
     }
 
     fun places(input: WizardInput): List<PlayerPlace> =
         Side.entries.flatMap { side -> input.team(side).indices.map { PlayerPlace(side, it) } }
+
+    /** Erlaubte Ziele für Ziehen und Tipp-Auswahl; ohne Ziele gibt es keine Platzwechselaktion. */
+    fun validTargets(
+        input: WizardInput,
+        from: PlayerPlace,
+        selfId: PlayerId,
+    ): List<PlayerPlace> = places(input).filter { to -> exchange(input, from, to, selfId) != input }
 
     fun assign(
         input: WizardInput,
