@@ -821,11 +821,13 @@ swapReceivingPair():                                               // Entscheidu
 
 ## 7. Event-Typen
 
+**Rollenregel (Single-Scorer, §7.5):** `PointWon`, `Undo`, `ContinueDecision`, `Correction`, `Paused`, `Resumed`, `MatchEnded` und `PointDetailSet` wirken nur, wenn ihr `deviceId` der an ihrer Position gültige Zähler ist; sonst stehen sie in `ignoredEvents` und `rejectedByRole`.
+
 Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `lamport`, `wallClockMs`, `parentId`, Ordnung `(lamport, deviceId, id)`). Diese Spezifikation definiert die **Payloads** und ihre Wirkung. Die mit „neu“ markierten Payloads ergänzen 01-architektur.
 
 | Payload | Felder | Wirkung | Gültig wenn (sonst → `ignoredEvents`) | UI-Undo-Ziel |
 |---|---|---|---|---|
-| `MatchCreated` | `config: MatchFormat`, `lineup`, `meta` | Genesis, erstes Event im Log | genau einmal | nein |
+| `MatchCreated` | `config: MatchFormat`, `lineup`, `meta`, `scorerDeviceId?` (neu) | Genesis, erstes Event im Log; legt den Zähler fest (§7.5). Fehlt `scorerDeviceId`, zählt das Gerät der Genesis (`deviceId`). | genau einmal | nein |
 | `PointWon` | `side: A\|B`, `detail?: PointDetail` | Ballwechsel gewonnen (§6) | `status ∈ {IN_PROGRESS, PAUSED}`. Bei `PAUSED` wird implizit `Resumed` ausgeführt. | **ja** |
 | `Undo` | `target: EventId` | Ziel-Event wird unwirksam | Ziel steht in der deterministischen Ordnung vor dem Undo; späteres Ziel oder Selbstreferenz → ignoriert (§7.3). Unbekanntes oder bereits unwirksames Ziel ist ein No-op. | (Redo = Undo auf Undo) |
 | `ContinueDecision` | `anotherSet: bool`, `nextSetKind?: REGULAR\|MATCH_TIEBREAK` (Default `REGULAR`) | Antwort auf „Noch ein Satz?“ | `status = AWAITING_DECISION`. `MATCH_TIEBREAK` nur, wenn `config.matchTiebreak ≠ null`. | **ja** |
@@ -833,6 +835,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 | `MatchEnded` | `reason: RETIRED\|WALKOVER\|ABANDONED`, `side?` (die aufgebende bzw. nicht angetretene Side) | Match endet vorzeitig | `status ≠ FINISHED`. `WALKOVER` nur ohne wirksames `PointWon`. `side` ist Pflicht außer bei `ABANDONED`. | **ja** |
 | `Paused` (neu) | – | Unterbrechung (Regen, Verletzung, Licht) | `status = IN_PROGRESS` | nein |
 | `Resumed` (neu) | – | Fortsetzung | `status = PAUSED` | nein |
+| `ScorerChanged` (neu) | `scorerDeviceId` | „Zählen übernehmen“: ab seiner Position in der Ordnung zählt `scorerDeviceId` (§7.5) | immer; unterliegt selbst keiner Rollenprüfung | nein (Undo darauf ist ungültig, Rückgabe = erneutes `ScorerChanged`) |
 | `PointDetailSet` (neu, P3) | `target: EventId` (ein `PointWon`), `detail: PointDetail?` | Detail nachträglich setzen/ändern (`null` = löschen). Ohne Wirkung auf den Score. | Ziel ist ein wirksames `PointWon` | nein (eigenes Undo per Event-ID möglich) |
 
 ### 7.1 `Correction`-Varianten
@@ -855,10 +858,11 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 ### 7.3 Effektive Events und Fold (normativ)
 
 1. Ordnen nach `(lamport, deviceId, id)` (01-architektur). Bitgleiche Wiederholungen derselben Event-ID MÜSSEN als Duplikate entfernt werden (No-op). „Bitgleich“ bedeutet hier strukturelle Gleichheit sämtlicher Event-Felder: `id`, `matchId`, `deviceId`, `deviceSeq`, `lamport`, `wallClockMs`, `parentId` und `payload` (einschließlich aller Payload-Felder), entsprechend der Kotlin-`data class`-Gleichheit; die serialisierte Bytefolge ist nicht maßgeblich. Bei abweichenden Kopien derselben ID MÜSSEN alle Kopien vom Fold ausgeschlossen werden; ihre ID MUSS je einmal in `state.ignoredEvents` und `EngineState.rejectedEvents` stehen. Die aktuelle Engine verwendet bei gleichen Ordnungsschlüsseln zusätzlich `toString()` als Tie-Break für die Ablage abweichender Kopien. Dieser plattformabhängige Tie-Break ist **nicht normativ** und betrifft nur verworfene Kopien, die nicht gefaltet werden. Eine abweichende Kopie der Genesis-ID (`MatchCreated`) MUSS das vollständige Log ungültig machen; `replay`/`fold` und die inkrementelle Anwendung mit gespeicherter Genesis werfen `IllegalArgumentException` (Klarstellung 2026-10-15).
-2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. Ein Undo DARF nur auf Events wirken, die in der deterministischen Ordnung vor ihm stehen. Zeigt ein **wirksames** Undo auf ein späteres Event oder sich selbst, MUSS seine ID in `ignoredEvents` stehen. Ist das ungültige Undo selbst durch ein späteres wirksames Undo unwirksam, DARF seine ID deshalb NICHT in `ignoredEvents` stehen. Ein unbekanntes Ziel bleibt ein No-op; das gilt auch für die Genesis-ID, da die Genesis nicht im zu analysierenden Event-Log enthalten ist. Zurückgewiesene ID-Kollisionen DÜRFEN kein Undo auslösen. `Undo`-Events selbst gehen nicht in den Score-Fold ein (Klarstellung 2026-10-15).
+1a. **Rollenprüfung (§7.5):** Vor der Wirksamkeit wird vorwärts der jeweils gültige Zähler bestimmt. Rollenwidrige Steuer-/Zähl-Events sind unwirksam: Sie gehen nicht in den Fold ein, wirken nicht als Undo, sind keine Doppel-Tap- oder Widerspruchspartner und stehen in Fold-Reihenfolge in `ignoredEvents` und `rejectedByRole` (Effekt `IGNORED`). Ein Undo auf ein rollenwidriges Event ist ein No-op.
+2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. Ein Undo DARF nur auf Events wirken, die in der deterministischen Ordnung vor ihm stehen. Zeigt ein **wirksames** Undo auf ein späteres Event oder sich selbst, MUSS seine ID in `ignoredEvents` stehen. Ist das ungültige Undo selbst durch ein späteres wirksames Undo unwirksam, DARF seine ID deshalb NICHT in `ignoredEvents` stehen. Ein Undo auf ein `ScorerChanged` ist ungültig und MUSS in `ignoredEvents` stehen (die Rolle wird nur durch ein neues `ScorerChanged` zurückgegeben). Ein unbekanntes Ziel bleibt ein No-op; das gilt auch für die Genesis-ID, da die Genesis nicht im zu analysierenden Event-Log enthalten ist. Zurückgewiesene ID-Kollisionen DÜRFEN kein Undo auslösen. `Undo`-Events selbst gehen nicht in den Score-Fold ein (Klarstellung 2026-10-15).
 3. Der Fold startet mit `initial(config, lineup')`, wobei `lineup'` die rückwirkende `Correction(INITIAL_SERVER)` berücksichtigt. Danach werden die wirksamen Events in Ordnung angewendet.
 4. Ein wirksames Event, dessen Vorbedingung (Tabelle §7) nicht erfüllt ist, wird **übersprungen**. Seine `id` wird an `state.ignoredEvents` angehängt. Das ist kein Fehler: Die Situation kann nach Merges oder Undo mitten im Log entstehen. Die UI DARF solche Events nicht erzeugen.
-5. `effects` beschreibt die Folgen des letzten im Fold berücksichtigten Events: bei wirksamem, nicht ungültigem `Undo` = `["UNDONE"]` (auch beim No-op), bei übersprungenem Event = `["IGNORED"]`, bei leerem Log = `[]`. Durch Undo unwirksame Events verändern die Effekte nicht. Gültige `PointDetailSet`, gültige `Correction(INITIAL_SERVER)` und absorbierte Doppel-Taps MÜSSEN `effects = []` liefern (Klarstellung 2026-10-15).
+5. `effects` beschreibt die Folgen des letzten im Fold berücksichtigten Events: bei wirksamem, nicht ungültigem `Undo` = `["UNDONE"]` (auch beim No-op), bei übersprungenem Event = `["IGNORED"]`, bei leerem Log = `[]`. Durch Undo unwirksame Events verändern die Effekte nicht. Gültige `PointDetailSet`, gültige `Correction(INITIAL_SERVER)` und absorbierte Doppel-Taps MÜSSEN `effects = []` liefern (Klarstellung 2026-10-15). `ScorerChanged` liefert `effects = ["SCORER_CHANGED"]`.
 6. Doppel-Tap-Erkennung und Ermittlung der Widerspruchspaare (01-architektur §4.4) MÜSSEN **vor** dem Fold auf dem geordneten Log erfolgen; nur zurückgewiesene IDs werden aus den Kandidaten entfernt. Auch durch Undo unwirksame Events MÜSSEN als Partner berücksichtigt werden. `PointWon` mit gleichem, nicht-null `parentId`, gleicher Side und einem absoluten `wallClockMs`-Abstand **≤ 5000 ms (inklusive)** gelten als Doppel-Tap: Der in der Ordnung erste, nicht selbst absorbierte Tap gilt als Partner; spätere passende Taps MÜSSEN absorbiert werden, auch wenn dieser Partner durch Undo unwirksam ist. Events mit `parentId = null` DÜRFEN NICHT absorbiert werden und bilden keine Widerspruchspaare. Widerspruchspaare entstehen bei gleichem, nicht-null `parentId` und verschiedenen Sides, ohne Zeitfenster. Erst nach diesen Erkennungen MÜSSEN die Paare anhand von Undo-Wirksamkeit und Absorption in aktiv und aufgelöst eingeteilt werden. Absorbierte Taps DÜRFEN NICHT in `ignoredEvents` stehen. `EngineState.conflicts` MUSS nur aktive Widerspruchspaare enthalten (kein Partner durch Undo unwirksam oder absorbiert); aufgelöste Paare MÜSSEN in `resolvedConflicts` stehen. Diese Einteilung erfolgt in der Log-Analyse vor der Prüfung der Fold-Vorbedingungen (Klarstellung 2026-10-15).
 
 **UI-Undo** (Taste/Wischgeste) MUSS `Undo(target)` auf das letzte wirksam angewendete Event vom Typ `PointWon`, `ContinueDecision`, `Correction` oder `MatchEnded` erzeugen. Ignorierte Events DÜRFEN nie UI-Undo-Ziel sein. Für die Zieltypen hat dieser Abschnitt Vorrang vor 01 §3.2 (Klarstellung 2026-10-15). Mehrfaches Drücken geht schrittweise zurück, auch über Spiel-, Satz- und Matchgrenzen.
@@ -875,6 +879,19 @@ Die Event-Typen bleiben gleich, nur die Wirkung ist sportspezifisch. Grundsatz b
 | `SERVER` (`player`, neu optional `receiver`) | `S = side(player)`. Doppel: steht `player` nicht im Feld `court(p[S])`, wird `pos[S]` getauscht. Ab dann gilt §6.8.3. | `gameFirst` wird so gesetzt, dass `serveSide() = side(player)`. Doppel: neuer Zyklus mit `c[slot mod 4] = player` und `c[(slot+1) mod 4] = receiver`. Ohne `receiver` bleibt der bisherige Rückschläger, falls er zur Gegenseite gehört, sonst `order[other][0]`. Die übrigen zwei Plätze bekommen die Partner. | `status ∈ {IN_PROGRESS, PAUSED}` |
 | `SERVING_ORDER` (`side`, `players[]`) | Neue Startaufstellung `order[side]` (Index 0 = bei Satzbeginn rechts), wird sofort auf `pos[side]` angewendet | Aufschlagseite: `players[0]` = Erstaufschläger. Rückschlagseite **nur im 1. Satz**: `players[0]` = Erst-Rückschläger. Ab Satz 2 ist die Rückschlagfolge durch 2.13.4 festgelegt, das Event wird übersprungen (`ignoredEvents`). Der Zyklus wird nach §6.9.3 neu gebildet. | Im laufenden Satz wurde noch kein Ballwechsel gespielt |
 | `RECEIVE_POSITIONS` (`side`, `rightPlayer`) | Doppel: `rightPlayer` steht ab sofort im rechten Feld (`pos[side]` ggf. tauschen), Law 12 | nicht anwendbar → übersprungen (stattdessen `SERVER` mit `receiver`) | Badminton-Doppel, `status ∈ {IN_PROGRESS, PAUSED}` |
+
+### 7.5 Single-Scorer: Zähler und Übergabe (normativ, Entscheidung 2026-10-15)
+
+Pro Match zählt genau **ein Gerät** (der Zähler). Standard ist die Uhr des Spielers; alternativ zählt ein Handy im Director-Modus (eine externe Person). Alle anderen Geräte zeigen nur an. Die Regel ist eine reine Funktion der Event-Menge, alle Geräte kommen zum selben Ergebnis.
+
+1. **Startzähler:** `MatchCreated.scorerDeviceId`, fehlt es, das `deviceId` der Genesis. Ohne Genesis (Testvektoren, `fold(config, lineup, events)`) ist der Startzähler ein Parameter; Testvektoren tragen dafür das optionale Feld `scorer`. Fehlt auch dieser, gibt es **keinen** Startzähler: Bis zum ersten `ScorerChanged` wirken die Events aller Geräte (Kompatibilität mit den Vektoren vor dieser Entscheidung).
+2. **Übergabe:** `ScorerChanged(scorerDeviceId)` darf von jedem Gerät kommen (P1: eigene Geräte, ab P2 prüft die Cloud die Berechtigung). Es wirkt ab seiner Position in der deterministischen Ordnung. Bei mehreren gilt für jede Position das in der Ordnung letzte vorangehende. Gleichzeitige Übernahmen entscheidet damit die Ordnung `(lamport, deviceId, id)`.
+3. **Rollenprüfung:** Ein Steuer-/Zähl-Event (`PointWon`, `Undo`, `ContinueDecision`, `Correction`, `Paused`, `Resumed`, `MatchEnded`, `PointDetailSet`) ist nur wirksam, wenn sein `deviceId` der an seiner Position gültige Zähler ist (§7.3 Schritt 1a). Sonst steht seine ID in `ignoredEvents` und `rejectedByRole`.
+4. **Offline-Altzähler:** Zählt der bisherige Zähler ohne Verbindung weiter, sind seine Events, die in der Ordnung **nach** dem `ScorerChanged` stehen, unwirksam. Die UI meldet sie über `rejectedByRole` („Zählen wurde übernommen – N Eingaben nicht übernommen“). Events, die davor geordnet sind, zählen weiter.
+5. **Undo und Übergabe:** Der neue Zähler darf auch Events des vorherigen Zählers rückgängig machen (das UI-Undo-Ziel ist geräteunabhängig). Undo auf `ScorerChanged` ist ungültig (§7.3 Schritt 2).
+6. **Doppel-Taps** (§7.3 Schritt 6) bleiben als Schutz innerhalb eines Geräts erhalten; Partner sind nur rollenkonforme Events.
+
+Testvektoren: TV-TEN-003 (Übergabe mitten im Satz), TV-TEN-004 (Altzähler offline), TV-PAD-003 (Director-Handy).
 
 ---
 
@@ -907,6 +924,8 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 | `effects` | array | siehe 8.3 |
 | `ignoredEvents` | array | IDs übersprungener Events in Fold-Reihenfolge |
 | `continuation` | object? | §5.2 (in Testvektoren schema 1 noch nicht geprüft) |
+| `scorerDeviceId` | string? | Zähler am Ende des Logs (§7.5); `null` nur ohne Startzähler und ohne `ScorerChanged` |
+| `rejectedByRole` | array | IDs rollenwidriger Steuer-/Zähl-Events in Fold-Reihenfolge (§7.5); jede steht auch in `ignoredEvents` |
 
 Zusätzlich liefert `ScoringEngine.replay`/`apply`/`applyAll` die folgenden Log-Hinweise in **`EngineState`**, neben dessen Feld `state: MatchState`. Sie sind keine zusätzlichen Schlüssel des kanonischen `MatchState`-Exports (Klarstellung 2026-10-15):
 
@@ -953,7 +972,7 @@ Watch-Anzeige (Hinweis-Pill, 04-ux): `callout ∈ {DECIDING_POINT, STAR_POINT}` 
 ### 8.3 `effects` (Übergänge durch das letzte Event, für Haptik und Toasts)
 
 Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
-`RESUMED, POINT, SECOND_SERVER, SIDE_OUT, GAME_WON, SET_WON, MATCH_WON, MATCH_DRAWN, MATCH_ENDED, CHANGE_ENDS, RECEIVE_ORDER_SWAPPED, TIEBREAK_STARTED, SET_STARTED, ASK_ANOTHER_SET, PAUSED, UNDONE, IGNORED`
+`RESUMED, POINT, SECOND_SERVER, SIDE_OUT, GAME_WON, SET_WON, MATCH_WON, MATCH_DRAWN, MATCH_ENDED, CHANGE_ENDS, RECEIVE_ORDER_SWAPPED, TIEBREAK_STARTED, SET_STARTED, ASK_ANOTHER_SET, PAUSED, UNDONE, IGNORED, SCORER_CHANGED`
 (`RECEIVE_ORDER_SWAPPED` neu, Verallgemeinerung B/TT)
 
 | Effekt | Auslöser |
@@ -971,6 +990,7 @@ Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
 | `ASK_ANOTHER_SET` | OPEN: Satzende-Frage |
 | `PAUSED` / `RESUMED` | Unterbrechung |
 | `UNDONE` / `IGNORED` | §7.3 |
+| `SCORER_CHANGED` | `ScorerChanged`: ein anderes Gerät zählt ab jetzt (§7.5) |
 
 ### 8.4 Anzeige Badminton und Tischtennis (Watch und Handy)
 
@@ -1110,6 +1130,7 @@ Alle folgenden Auslegungen sind **entschieden** und gegen die implementierte Eng
 | K10 | Nur bitgleiche ID-Wiederholungen sind No-ops; abweichende Kopien zurückweisen, Genesis-Kollision macht Log ungültig | §7.3, §8 |
 | K11 | Aktive Konflikte in `conflicts`, aufgelöste in `resolvedConflicts` (`EngineState`) | §7.3, §8 |
 | K12 | Nachgelieferte Events als Batch an `ScoringEngine.applyAll` übergeben | §7.3 |
+| K13 | **Single-Scorer (Produktentscheidung 2026-10-15):** pro Match zählt genau ein Gerät; `MatchCreated.scorerDeviceId`, Übergabe per `ScorerChanged`, rollenwidrige Events → `ignoredEvents` + `rejectedByRole`; ersetzt das gleichwertige Zählen aller Geräte (01 §4.2) | §7, §7.5, §8 |
 
 ### 12.2 Nutzerentscheidungen
 

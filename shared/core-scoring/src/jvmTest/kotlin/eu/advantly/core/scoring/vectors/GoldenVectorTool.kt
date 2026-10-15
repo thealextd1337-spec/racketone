@@ -1,5 +1,6 @@
 package eu.advantly.core.scoring.vectors
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.End
 import eu.advantly.core.model.Lineup
@@ -66,6 +67,7 @@ object GoldenVectors {
             Effect.ASK_ANOTHER_SET,
             Effect.UNDONE,
             Effect.IGNORED,
+            Effect.SCORER_CHANGED,
         )
 
     /** Wann ein Checkpoint geschrieben wird. */
@@ -199,6 +201,7 @@ object GoldenVectors {
             events = events,
             explicitEnvelope = explicit,
             policy = Policy(every = 5, markers = true),
+            scorer = scenario.scorer,
         )
     }
 
@@ -245,9 +248,10 @@ object GoldenVectors {
         events: List<ScoreEvent>,
         explicitEnvelope: Boolean,
         policy: Policy,
+        scorer: DeviceId? = null,
     ): String {
         val checkpointIndices = sortedSetOf(0, events.size)
-        var engine = ScoringEngine.replay(format, lineup, emptyList())
+        var engine = ScoringEngine.replay(format, lineup, emptyList(), scorer)
         events.forEachIndexed { i, event ->
             engine = ScoringEngine.apply(engine, event)
             val marker = policy.markers && engine.state.effects.any { it in markerEffects }
@@ -262,13 +266,14 @@ object GoldenVectors {
         sb.append("  \"sources\": [${str(source)}],\n")
         sb.append("  \"config\": ${compact(vectorJson.encodeToJsonElement(MatchFormat.serializer(), format))},\n")
         sb.append("  \"lineup\": ${compact(vectorJson.encodeToJsonElement(Lineup.serializer(), lineup))},\n")
+        if (scorer != null) sb.append("  \"scorer\": ${str(scorer.value)},\n")
         sb.append("  \"events\": [\n")
         sb.append(events.joinToString(",\n") { "    " + compact(eventJson(it, explicitEnvelope)) })
         sb.append("\n  ],\n")
         sb.append("  \"expect\": [\n")
         sb.append(
             checkpointIndices.joinToString(",\n") { n ->
-                val state = ScoringEngine.fold(format, lineup, events.subList(0, n))
+                val state = ScoringEngine.fold(format, lineup, events.subList(0, n), scorer)
                 val cp =
                     buildJsonObject {
                         put("afterEvent", n)

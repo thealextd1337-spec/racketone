@@ -1,5 +1,6 @@
 package eu.advantly.core.scoring
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.End
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.PlayerId
@@ -27,6 +28,8 @@ data class MatchState(
     val effects: List<Effect>,
     val ignoredEvents: List<EventId>,
     val continuation: Continuation?,
+    val scorerDeviceId: DeviceId?,
+    val rejectedByRole: List<EventId>,
 )
 
 /** Wertepaar je Side, JSON `{"A": …, "B": …}`. */
@@ -232,6 +235,9 @@ enum class Effect {
     PAUSED,
     UNDONE,
     IGNORED,
+
+    /** `ScorerChanged`: ein anderes Gerät zählt ab jetzt (02 §7.5). */
+    SCORER_CHANGED,
 }
 
 /** Wer den nächsten Satz eröffnen würde (02 §5.2 `state.continuation`). */

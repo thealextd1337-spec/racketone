@@ -1,0 +1,180 @@
+{
+  "schema": 1,
+  "id": "TV-TEN-004",
+  "title": "Altzähler zählt offline weiter",
+  "description": "Die Uhr zählt offline weiter (w3, w4), während das Handy übernimmt (p1) und zählt (p2). Events des alten Zählers, die in der Ordnung nach dem ScorerChanged stehen, werden ignoriert und in rejectedByRole gemeldet. Array = Eingabereihenfolge (erst kommen die Uhr-Events an).",
+  "sources": [
+    "Advantly 02-scoring-regeln.md §7.5 (Single-Scorer, Entscheidung K13)",
+    "Advantly 01-architektur.md §4.4"
+  ],
+  "config": {
+    "formatVersion": 1,
+    "presetId": "TENNIS_SINGLES_BO3",
+    "sport": "TENNIS",
+    "discipline": "SINGLES",
+    "match": {
+      "mode": "BEST_OF",
+      "bestOf": 3
+    },
+    "game": {
+      "deuceMode": "ADVANTAGE"
+    },
+    "set": {
+      "gamesToWin": 6,
+      "tiebreakAt": 6,
+      "tiebreak": {
+        "pointsToWin": 7,
+        "winBy": 2,
+        "endChange": {
+          "first": 6,
+          "every": 6
+        }
+      }
+    },
+    "decidingSet": null,
+    "matchTiebreak": null
+  },
+  "lineup": {
+    "A": [
+      "A1"
+    ],
+    "B": [
+      "B1"
+    ],
+    "firstServer": "A1"
+  },
+  "scorer": "watch",
+  "events": [
+    {
+      "id": "e1",
+      "lamport": 1,
+      "deviceId": "watch",
+      "parentId": null,
+      "wallClockMs": 10000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e2",
+      "lamport": 2,
+      "deviceId": "watch",
+      "parentId": "e1",
+      "wallClockMs": 20000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "w3",
+      "lamport": 3,
+      "deviceId": "watch",
+      "parentId": "e2",
+      "wallClockMs": 30000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "w4",
+      "lamport": 4,
+      "deviceId": "watch",
+      "parentId": "w3",
+      "wallClockMs": 40000,
+      "type": "PointWon",
+      "side": "B"
+    },
+    {
+      "id": "p1",
+      "lamport": 3,
+      "deviceId": "phone",
+      "parentId": "e2",
+      "wallClockMs": 31000,
+      "type": "ScorerChanged",
+      "scorerDeviceId": "phone"
+    },
+    {
+      "id": "p2",
+      "lamport": 4,
+      "deviceId": "phone",
+      "parentId": "p1",
+      "wallClockMs": 41000,
+      "type": "PointWon",
+      "side": "B"
+    }
+  ],
+  "expect": [
+    {
+      "afterEvent": 2,
+      "label": "30:0",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "watch"
+      }
+    },
+    {
+      "afterEvent": 4,
+      "label": "Uhr offline: 40:15",
+      "state": {
+        "current": {
+          "display": {
+            "A": "40",
+            "B": "15"
+          }
+        },
+        "scorerDeviceId": "watch",
+        "rejectedByRole": []
+      }
+    },
+    {
+      "afterEvent": 5,
+      "label": "Übernahme kommt an: w3 und w4 nachträglich ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "phone",
+        "rejectedByRole": [
+          "w3",
+          "w4"
+        ],
+        "ignoredEvents": [
+          "w3",
+          "w4"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 6,
+      "label": "30:15 vom Handy",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "15"
+          }
+        },
+        "scorerDeviceId": "phone",
+        "rejectedByRole": [
+          "w3",
+          "w4"
+        ],
+        "ignoredEvents": [
+          "w3",
+          "w4"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    }
+  ]
+}

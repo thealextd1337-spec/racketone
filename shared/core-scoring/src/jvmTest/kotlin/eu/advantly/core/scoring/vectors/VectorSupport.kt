@@ -39,6 +39,7 @@ data class TestVector(
     val lineup: Lineup,
     val events: List<ScoreEvent>,
     val checkpoints: List<Checkpoint>,
+    val scorer: DeviceId? = null,
 )
 
 /** Checkpoint: Teilzustand nach den ersten [afterEvent] Events. */
@@ -147,7 +148,8 @@ object VectorIo {
                     state = cp.getValue("state").jsonObject,
                 )
             }
-        return TestVector(file, root.getValue("id").jsonPrimitive.content, format, lineup, events, checkpoints)
+        val scorer = root["scorer"]?.jsonPrimitive?.contentOrNull?.let { DeviceId(it) }
+        return TestVector(file, root.getValue("id").jsonPrimitive.content, format, lineup, events, checkpoints, scorer)
     }
 
     /** Kanonische JSON-Form des Zustands (02 §8). */
@@ -159,7 +161,7 @@ object VectorIo {
             val diffs =
                 runCatching {
                     require(cp.afterEvent in 0..vector.events.size) { "afterEvent ${cp.afterEvent} außerhalb des Logs" }
-                    val state = ScoringEngine.fold(vector.format, vector.lineup, vector.events.subList(0, cp.afterEvent))
+                    val state = ScoringEngine.fold(vector.format, vector.lineup, vector.events.subList(0, cp.afterEvent), vector.scorer)
                     PartialMatch.diff(cp.state, canonical(state))
                 }.getOrElse { listOf("Ausnahme: $it") }
             if (diffs.isEmpty()) null else CheckpointFailure(vector.id, cp.afterEvent, cp.label, diffs)

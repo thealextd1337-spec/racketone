@@ -37,13 +37,28 @@ data class ScoreEvent(
 @Serializable
 sealed interface EventPayload
 
-/** Genesis: erstes Event im Log, legt Format, Besetzung und Metadaten fest. */
+/**
+ * Genesis: erstes Event im Log, legt Format, Besetzung, Metadaten und den Zähler fest.
+ *
+ * @property scorerDeviceId Gerät, das zählt (Single-Scorer, 02 §7.5). Fehlt es (Alt-Logs), zählt das Gerät der Genesis.
+ */
 @Serializable
 @SerialName("MatchCreated")
 data class MatchCreated(
     val config: MatchFormat,
     val lineup: Lineup,
     val meta: MatchMeta = MatchMeta(),
+    val scorerDeviceId: DeviceId? = null,
+) : EventPayload
+
+/**
+ * Zählerwechsel („Zählen übernehmen“, 02 §7.5): Ab seiner Position in der Ordnung zählt [scorerDeviceId]. Darf von
+ * jedem Gerät kommen und unterliegt selbst keiner Rollenprüfung; Undo darauf ist ungültig (Rückgabe = erneut übernehmen).
+ */
+@Serializable
+@SerialName("ScorerChanged")
+data class ScorerChanged(
+    val scorerDeviceId: DeviceId,
 ) : EventPayload
 
 /** Side [side] hat den Ballwechsel gewonnen – das einzige Zähl-Event. */

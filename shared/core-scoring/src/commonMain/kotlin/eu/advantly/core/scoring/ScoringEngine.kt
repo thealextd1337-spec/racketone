@@ -1,5 +1,6 @@
 package eu.advantly.core.scoring
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
@@ -17,6 +18,7 @@ import eu.advantly.core.model.MatchFormat
  * @property resolvedConflicts frühere Widersprüche, die inzwischen (z. B. per Undo) aufgelöst sind
  * @property rejectedEvents IDs mit abweichenden Kopien; keine Kopie geht in den Fold ein (stehen in `ignoredEvents`)
  * @property genesis die `MatchCreated`-Genesis, falls über [ScoringEngine.replay] mit vollständigem Log erzeugt
+ * @property initialScorer Zähler zu Matchbeginn (Genesis bzw. Parameter), `null` = keine Rollenprüfung (02 §7.5)
  */
 class EngineState internal constructor(
     val format: MatchFormat,
@@ -31,7 +33,11 @@ class EngineState internal constructor(
     val genesis: ScoreEvent?,
     internal val core: Core,
     internal val appliedPoints: Set<EventId>,
-)
+    val initialScorer: DeviceId? = null,
+) {
+    /** Anzahl wirksam angewendeter Ballwechsel (`PointWon`). */
+    val pointsPlayed: Int get() = appliedPoints.size
+}
 
 /**
  * Ein wirksames `PointWon` mit dem Zustand davor und danach – Basis der Statistik (02 §11.1).
@@ -65,7 +71,8 @@ object ScoringEngine {
     ): MatchState = fold(format, lineup, emptyList())
 
     /**
-     * Fold über [events] (ohne Genesis; Format und Besetzung kommen als Parameter). Die Events dürfen in beliebiger
+     * Fold über [events] (ohne Genesis; Format, Besetzung und Zähler kommen als Parameter; [scorer] `null` = keine
+     * Rollenprüfung bis zum ersten `ScorerChanged`, 02 §7.5). Die Events dürfen in beliebiger
      * Reihenfolge und mit Duplikaten vorliegen; maßgeblich ist [EventOrdering].
      *
      * @throws IllegalArgumentException wenn Format oder Lineup ungültig sind ([MatchFormatValidator], [LineupValidator])
@@ -74,7 +81,8 @@ object ScoringEngine {
         format: MatchFormat,
         lineup: Lineup,
         events: Collection<ScoreEvent>,
-    ): MatchState = replay(format, lineup, events).state
+        scorer: DeviceId? = null,
+    ): MatchState = replay(format, lineup, events, scorer).state
 
     /** Fold über ein vollständiges Log; die in Ordnung erste [MatchCreated] ist die Genesis. */
     fun fold(log: Collection<ScoreEvent>): MatchState = replay(log).state
@@ -84,7 +92,8 @@ object ScoringEngine {
         format: MatchFormat,
         lineup: Lineup,
         events: Collection<ScoreEvent>,
-    ): EngineState = Replay.run(format, lineup, events, null)
+        scorer: DeviceId? = null,
+    ): EngineState = Replay.run(format, lineup, events, null, scorer = scorer)
 
     /**
      * Wie [fold] über ein vollständiges Log mit Genesis. Die Genesis ist die in Ordnung erste [MatchCreated].
@@ -101,7 +110,8 @@ object ScoringEngine {
             "Genesis-ID ${genesis.id} kollidiert mit einem abweichenden Event – Log ungültig"
         }
         val created = genesis.payload as MatchCreated
-        return Replay.run(created.config, created.lineup, ordered.filter { it != genesis }, null, genesis)
+        val scorer = created.scorerDeviceId ?: genesis.deviceId
+        return Replay.run(created.config, created.lineup, ordered.filter { it != genesis }, null, genesis, scorer)
     }
 
     /**
@@ -146,17 +156,20 @@ object ScoringEngine {
         val core = state.core.copy()
         var undoTarget = state.undoTarget
         var last = state.events.lastOrNull()
+        val scorer = state.state.scorerDeviceId
         for (event in fresh) {
             val payload = event.payload
             val fastPath =
                 (last == null || EventOrdering.compare(event, last) > 0) &&
                     payload !is Undo &&
+                    payload !is ScorerChanged &&
+                    (scorer == null || !EventLog.isScorerOnly(payload) || event.deviceId == scorer) &&
                     payload !is MatchCreated &&
                     !(payload is Correction && payload.kind == CorrectionKind.INITIAL_SERVER) &&
                     event.id !in ids &&
                     event.id !in undoTargets &&
                     !(payload is PointWon && event.parentId != null && event.parentId in pointParents)
-            if (!fastPath) return Replay.run(state.format, state.lineup, state.events + fresh, null, genesis)
+            if (!fastPath) return Replay.run(state.format, state.lineup, state.events + fresh, null, genesis, state.initialScorer)
             val ok = core.step(event) { it in applied }
             if (ok && payload is PointWon) applied += event.id
             if (ok && Replay.isUndoTargetType(payload)) undoTarget = event.id
@@ -168,7 +181,7 @@ object ScoringEngine {
             format = state.format,
             lineup = state.lineup,
             events = state.events + fresh,
-            state = core.export(),
+            state = core.export(scorer, state.state.rejectedByRole),
             undoTarget = undoTarget,
             absorbedEvents = state.absorbedEvents,
             conflicts = state.conflicts,
@@ -177,6 +190,7 @@ object ScoringEngine {
             genesis = genesis,
             core = core,
             appliedPoints = applied,
+            initialScorer = state.initialScorer,
         )
     }
 
@@ -205,6 +219,7 @@ internal object Replay {
         events: Collection<ScoreEvent>,
         onPoint: ((ScoreEvent, MatchState, MatchState) -> Unit)?,
         genesis: ScoreEvent? = null,
+        scorer: DeviceId? = null,
     ): EngineState {
         val formatErrors = MatchFormatValidator.validate(format).errors
         require(formatErrors.isEmpty()) { "Ungültiges MatchFormat: ${formatErrors.joinToString { it.message }}" }
@@ -212,8 +227,8 @@ internal object Replay {
         require(lineupErrors.isEmpty()) { "Ungültiges Lineup: ${lineupErrors.joinToString()}" }
 
         val raw = EventLog.distinctOrdered(events)
-        val log = EventLog.analyze(raw)
-        val excluded = log.undone + log.rejected
+        val log = EventLog.analyze(raw, scorer)
+        val excluded = log.undone + log.rejected + log.roleRejected
         // Schritt 3: rückwirkende Correction(INITIAL_SERVER) – das letzte wirksame gilt
         val initialServer =
             log.ordered
@@ -229,11 +244,22 @@ internal object Replay {
         val core = Core.initial(format, effectiveLineup)
         var undoTarget: EventId? = null
         val appliedPoints = HashSet<EventId>()
+        val rejectedByRole = mutableListOf<EventId>()
         for (event in log.ordered) {
             val payload = event.payload
             when {
                 event.id in log.rejected -> {
                     core.markIgnored(event.id)
+                }
+
+                event.id in log.roleRejected -> {
+                    // Rollenregel (02 §7.5): Eingabe eines Geräts, das an dieser Position nicht zählt
+                    core.markIgnored(event.id)
+                    rejectedByRole += event.id
+                }
+
+                payload is ScorerChanged -> {
+                    core.effects = setOf(Effect.SCORER_CHANGED)
                 }
 
                 event.id in log.undone -> {
@@ -261,7 +287,7 @@ internal object Replay {
             format = format,
             lineup = lineup,
             events = raw,
-            state = core.export(),
+            state = core.export(log.scorer, rejectedByRole),
             undoTarget = undoTarget,
             absorbedEvents = log.ordered.filter { it.id in log.absorbed }.map { it.id },
             conflicts = log.activeConflicts,
@@ -270,6 +296,7 @@ internal object Replay {
             genesis = genesis,
             core = core,
             appliedPoints = appliedPoints,
+            initialScorer = scorer,
         )
     }
 }
