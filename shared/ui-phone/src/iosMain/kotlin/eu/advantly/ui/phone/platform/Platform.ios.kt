@@ -137,9 +137,12 @@ actual fun formatMonth(
     year: Int,
     month: Int,
 ): String {
+    val parser = platform.Foundation.NSDateFormatter()
+    parser.locale = platform.Foundation.NSLocale(localeIdentifier = "en_US_POSIX")
+    parser.calendar = platform.Foundation.NSCalendar(calendarIdentifier = platform.Foundation.NSCalendarIdentifierGregorian)
+    parser.dateFormat = "yyyy-MM-dd"
+    val date = parser.dateFromString("$year-${month.toString().padStart(2, '0')}-01") ?: return ""
     val formatter = platform.Foundation.NSDateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd"
-    val date = formatter.dateFromString("$year-${month.toString().padStart(2, '0')}-01") ?: return ""
     formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
     return formatter.stringFromDate(date)
 }

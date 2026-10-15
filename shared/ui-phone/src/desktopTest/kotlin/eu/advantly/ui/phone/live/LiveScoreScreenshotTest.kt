@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
@@ -22,9 +23,12 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Discipline
@@ -66,6 +70,30 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class LiveScoreScreenshotTest {
     private val outDir = File("build/reports/screenshots").apply { mkdirs() }
+
+    @Test
+    fun customHeaderAt200PercentStaysOnOneLine() =
+        capture(
+            "live-custom-header-small-fontscale-2-de",
+            Locale.GERMANY,
+            liveModel(Presets.TENNIS_SINGLES_BO3.format().copy(presetId = null), "AAB"),
+            widthDp = 360,
+            heightDp = 640,
+            fontScale = 2f,
+            interact = {
+                val layouts = mutableListOf<TextLayoutResult>()
+                onNodeWithTag("set_table_header").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val layout = layouts.single()
+                assertTrue(
+                    layout.layoutInput.text.text
+                        .contains("BENUTZERDEFINIERT"),
+                )
+                assertEquals(1, layout.lineCount)
+                assertEquals(2f, layout.layoutInput.density.fontScale)
+                assertEquals(false, layout.layoutInput.softWrap)
+                assertEquals(TextOverflow.Ellipsis, layout.layoutInput.overflow)
+            },
+        )
 
     private fun capture(
         name: String,

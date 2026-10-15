@@ -4,8 +4,10 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -14,6 +16,7 @@ import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.data.LocalData
 import eu.advantly.data.ScoreSummary
@@ -29,6 +32,8 @@ import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.sync.protocol.PeerKind
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 import java.io.File
 import java.util.Properties
 import kotlin.random.Random
@@ -105,6 +110,141 @@ private class Rig(
         store.active.value
             ?.matchId
             ?.let { data.events.count(it.value) } ?: 0
+}
+
+/** Header aus der Datenbank und Detail-Replay müssen für jede Sportart denselben Vertrag erfüllen. */
+@RunWith(Parameterized::class)
+class SessionMatchSummaryEqualityTest(
+    private val format: MatchFormat,
+    private val ending: ResultReason,
+) {
+    @Test
+    fun headerSummaryEqualsReplaySummary() {
+        val rig = Rig(watchOnline = false)
+        val phone = rig.phone
+        try {
+            val id = phone.start(phone.setupFor(format), StartOptions(ScorerOption.THIS_PHONE))
+            if (format.sport == Sport.PICKLEBALL) {
+                // Side-Out: Ein gewonnener Return wechselt den Aufschlag, zählt aber keinen Punkt.
+                assertTrue(phone.recordPoint(Side.B))
+                assertEquals(
+                    SidePair(0, 0),
+                    phone.active.value!!
+                        .state.current!!
+                        .points,
+                )
+            }
+            when (ending) {
+                ResultReason.COMPLETED -> {
+                    if (format.sport.isTennisLike && format.decidingSet == null) {
+                        phone.play("AAAABBBB".repeat(6) + "A".repeat(7))
+                        assertEquals(
+                            SidePair(7, 0),
+                            phone.active.value!!
+                                .state.sets
+                                .single()
+                                .tiebreak,
+                        )
+                    } else {
+                        winSet(phone, Side.A)
+                    }
+                    if (format.decidingSet != null) winSet(phone, Side.B)
+                    winSet(phone, Side.A)
+                }
+
+                ResultReason.STOPPED -> {
+                    winSet(phone, Side.A)
+                    assertTrue(phone.continueDecision(anotherSet = true))
+                    winSet(phone, Side.B)
+                    assertTrue(phone.continueDecision(anotherSet = true))
+                    assertTrue(phone.endMatch(EndReason.STOPPED))
+                }
+
+                ResultReason.ABANDONED, ResultReason.RETIRED -> {
+                    winSet(phone, Side.A)
+                    phone.play("AAAB")
+                    val reason = if (ending == ResultReason.ABANDONED) EndReason.ABANDONED else EndReason.RETIRED
+                    assertTrue(phone.endMatch(reason, if (ending == ResultReason.RETIRED) Side.A else null))
+                }
+
+                else -> {
+                    error("Nicht Teil dieser Testmatrix: $ending")
+                }
+            }
+            val header = phone.matches.value.single { it.matchId == id }
+            val replay = assertNotNull(phone.record(id))
+            assertEquals(MatchStatus.FINISHED, replay.finalState.status)
+            assertEquals(ending, header.result.reason)
+            if (ending == ResultReason.STOPPED) {
+                assertEquals(SidePair(1, 1), header.setsWon)
+                assertNull(header.result.winner)
+            }
+            if (ending == ResultReason.RETIRED) assertEquals(Side.B, header.result.winner)
+            if (format.decidingSet != null && ending == ResultReason.COMPLETED) {
+                assertEquals(SetKind.MATCH_TIEBREAK, header.sets.last().kind)
+                assertEquals(SidePair(10, 0), header.sets.last().tiebreak)
+            }
+            assertEquals(header, replay.summary)
+            assertTrue(phone.dismiss())
+            assertEquals(header, phone.matches.value.single { it.matchId == id })
+            assertEquals(header, assertNotNull(phone.record(id)).summary)
+        } finally {
+            phone.close()
+            rig.phoneSession.close()
+            rig.watch.close()
+        }
+    }
+
+    private fun winSet(
+        phone: SessionMatchStore,
+        side: Side,
+    ) {
+        val count =
+            phone.active.value!!
+                .state.sets.size
+        repeat(100) {
+            if (phone.active.value!!
+                    .state.sets.size > count
+            ) {
+                return
+            }
+            phone.active.value!!.state.serverChoice?.takeIf { it.chosen == null }?.let {
+                assertTrue(phone.chooseServer(it.players.first()))
+            }
+            assertTrue(phone.recordPoint(side))
+        }
+        error("Satz nicht innerhalb von 100 Ballwechseln beendet")
+    }
+
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{index}: {0} / {1}")
+        fun scenarios(): List<Array<Any>> {
+            val formats =
+                listOf(
+                    Presets.TENNIS_SINGLES_BO3.format(),
+                    Presets.PADEL_GOLDEN_BO3.format(),
+                    Presets.PICKLEBALL_DOUBLES_BO3_11.format(),
+                    Presets.BADMINTON_SINGLES_BO3_21.format(),
+                    Presets.TABLE_TENNIS_SINGLES_BO3.format(),
+                )
+            val endings = listOf(ResultReason.COMPLETED, ResultReason.STOPPED, ResultReason.ABANDONED, ResultReason.RETIRED)
+            return formats.flatMap { format ->
+                endings.map { ending ->
+                    val scenarioFormat =
+                        if (ending == ResultReason.STOPPED) {
+                            format.copy(presetId = null, match = MatchSettings.OPEN)
+                        } else {
+                            format
+                        }
+                    arrayOf<Any>(scenarioFormat, ending)
+                }
+            } +
+                listOf(Presets.TENNIS_BO3_MTB10.format(), Presets.PADEL_GOLDEN_STB.format()).map {
+                    arrayOf<Any>(it, ResultReason.COMPLETED)
+                }
+        }
+    }
 }
 
 /** Session-Adapter (W1-I): Rollen, Übernahme, Persistenz, Löschen, Vertrag der Ports. */
