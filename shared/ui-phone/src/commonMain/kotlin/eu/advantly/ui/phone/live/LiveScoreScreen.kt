@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,9 +47,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -59,10 +62,12 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.presentation.live.LiveOperationRules
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.formatLabel
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.pointText
@@ -107,6 +112,9 @@ import eu.advantly.ui.phone.resources.latency_source_synthetic
 import eu.advantly.ui.phone.resources.latency_stats
 import eu.advantly.ui.phone.resources.latency_toggle
 import eu.advantly.ui.phone.resources.live_no_match
+import eu.advantly.ui.phone.resources.live_point_removed
+import eu.advantly.ui.phone.resources.live_remove_point_them
+import eu.advantly.ui.phone.resources.live_remove_point_us
 import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_serve_line
 import eu.advantly.ui.phone.resources.live_team_them
@@ -186,6 +194,13 @@ fun LiveScoreScreen(
         controller.frameStats = frameStats
         onDispose { controller.frameStats = null }
     }
+    val requiredUpdate by controller.port.updateRequired.collectAsState()
+    LaunchedEffect(controller.servePromptId) {
+        controller.servePromptId?.let { id ->
+            delay(6_000)
+            controller.dismissServePrompt(id)
+        }
+    }
     val scope = rememberCoroutineScope()
     val tracker = controller.tracker
 
@@ -212,7 +227,10 @@ fun LiveScoreScreen(
     ) {
         val snapshot = controller.snapshot
         if (snapshot == null) {
-            NoMatch(onMinimize)
+            Column {
+                UpdateRequiredBanner(requiredUpdate)
+                NoMatch(onMinimize)
+            }
             return@Box
         }
         var dialog by remember { mutableStateOf<LiveDialog?>(null) }
@@ -254,6 +272,7 @@ fun LiveScoreScreen(
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
                     Header(controller, snapshot, now, onMinimize)
+                    UpdateRequiredBanner(snapshot.sync.updateRequired ?: requiredUpdate)
                     if (display) {
                         // Übernahmeangebot ersetzt den Anzeige-Banner (gleicher Platz) – kostet den Flächen keine Höhe
                         val staleOffer = snapshot.sync.offersTakeOver(now) && snapshot.state.status != MatchStatus.FINISHED
@@ -390,8 +409,15 @@ private fun Notices(
     val display = !snapshot.isScorer
     val rejected = controller.rejectedNotice
     val setEnd = display && snapshot.state.status == MatchStatus.AWAITING_DECISION
-    if (rejected == null && !setEnd) return
+    val operations =
+        snapshot.isScorer &&
+            (snapshot.state.serverChoice != null || controller.servePromptId != null)
+    if (rejected == null && !setEnd && !operations) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        ServerChoiceBar(controller, snapshot)
+        if (snapshot.state.status == MatchStatus.IN_PROGRESS || snapshot.state.status == MatchStatus.PAUSED) {
+            ServeInfoBar(controller, snapshot)
+        }
         rejected?.let { count -> RejectedNotice(count, onView = onViewRejected, onDismiss = controller::acknowledgeRejected) }
         if (setEnd) {
             Text(
@@ -424,14 +450,18 @@ private fun PanelsWithSnackbar(
             AbsorbedNotice(id, onTimeout = { controller.dismissAbsorbedNotice(id) }, Modifier.align(Alignment.Center))
         }
         // Nach Rollenverlust kein „Wiederholen“ mehr (Review W1-I #5)
-        controller.undoNotice?.takeIf { snapshot.isScorer }?.let { notice ->
-            UndoSnackbar(
-                notice = notice,
-                onRedo = controller::redo,
-                onTimeout = { controller.dismissUndoNotice(notice.id) },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(Spacing.s),
-            )
-        }
+        controller.undoNotice
+            ?.takeIf {
+                snapshot.isScorer && snapshot.state.status != MatchStatus.AWAITING_DECISION &&
+                    snapshot.state.status != MatchStatus.FINISHED
+            }?.let { notice ->
+                UndoSnackbar(
+                    notice = notice,
+                    onRedo = controller::redo,
+                    onTimeout = { controller.dismissUndoNotice(notice.id) },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(Spacing.s),
+                )
+            }
     }
 }
 
@@ -542,6 +572,7 @@ private fun Panels(
                     points.getValue(Side.B),
                 ) + " " + serving,
             undoLabel = undoLabel,
+            removeLabel = stringResource(if (side == Side.A) Res.string.live_remove_point_us else Res.string.live_remove_point_them),
         )
     }
     val usContent = content(Side.A)
@@ -566,6 +597,8 @@ private fun Panels(
             onSwipeDown = { controller.undo(it) },
             modifier = panelModifier.onGloballyPositioned { controller.panelBounds[side] = it.boundsInWindow() },
             interactive = interactive,
+            canRemovePoint = LiveOperationRules.canRemove(snapshot, side),
+            onRemovePoint = { controller.removeLastPointOf(side) },
         )
     }
 
@@ -804,7 +837,7 @@ private fun MoreMenu(
 
 /** Undo-Snackbar „Rückgängig: 30:15 → 15:15“ + „Wiederholen“ (04 §5.6). */
 @Composable
-private fun UndoSnackbar(
+internal fun UndoSnackbar(
     notice: UndoNotice,
     onRedo: () -> Unit,
     onTimeout: () -> Unit,
@@ -819,15 +852,20 @@ private fun UndoSnackbar(
         notice.before.current?.games != notice.after.current?.games ||
             notice.before.sets != notice.after.sets
     val text =
-        stringResource(
-            Res.string.undo_snackbar,
-            scoreSummary(notice.before, withGames),
-            scoreSummary(notice.after, withGames),
-        )
+        if (notice.pointRemoved) {
+            stringResource(Res.string.live_point_removed)
+        } else {
+            stringResource(
+                Res.string.undo_snackbar,
+                scoreSummary(notice.before, withGames),
+                scoreSummary(notice.after, withGames),
+            )
+        }
     Row(
         modifier =
             modifier
                 .testTag("undo_snackbar")
+                .semantics { liveRegion = LiveRegionMode.Polite }
                 .fillMaxWidth()
                 .background(colors.surface2, Radii.cardShape)
                 .border(1.dp, colors.line, Radii.cardShape)
@@ -850,7 +888,7 @@ private fun UndoSnackbar(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = stringResource(Res.string.action_redo),
+                text = stringResource(if (notice.pointRemoved) Res.string.action_undo else Res.string.action_redo),
                 style = AdvantlyTheme.typography.label.copy(fontWeight = FontWeight.Bold),
                 color = colors.brand,
             )

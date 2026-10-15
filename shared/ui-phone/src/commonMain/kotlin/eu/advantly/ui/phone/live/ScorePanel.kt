@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -100,6 +101,7 @@ internal data class ScorePanelContent(
     val serveColor: Color,
     val a11yDescription: String,
     val undoLabel: String,
+    val removeLabel: String = undoLabel,
 )
 
 /**
@@ -121,12 +123,15 @@ internal fun ScorePanel(
     onSwipeDown: (eventUptimeMillis: Long?) -> Unit,
     modifier: Modifier = Modifier,
     interactive: Boolean = true,
+    canRemovePoint: Boolean = false,
+    onRemovePoint: () -> Unit = {},
 ) {
     val colors = AdvantlyTheme.colors
     val teamColor = if (content.side == Side.A) colors.teamUs else colors.teamThem
     val tint = if (content.side == Side.A) colors.teamUsTint else colors.teamThemTint
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
+    val currentOnRemove by rememberUpdatedState(onRemovePoint)
     var pressed by remember { mutableStateOf(false) }
 
     // Neues Animatable pro Punkt, mit Startwert > 0: Der Blitz ist damit schon im ERSTEN Frame nach dem Tap
@@ -156,9 +161,17 @@ internal fun ScorePanel(
                     liveRegion = LiveRegionMode.Polite
                     if (interactive) {
                         role = Role.Button
-                        onClick {
-                            currentOnTap(null)
-                            true
+                        if (enabled) {
+                            onClick {
+                                currentOnTap(null)
+                                true
+                            }
+                        }
+                        if (canRemovePoint) {
+                            onLongClick(label = content.removeLabel) {
+                                currentOnRemove()
+                                true
+                            }
                         }
                         customActions =
                             listOf(
@@ -168,8 +181,8 @@ internal fun ScorePanel(
                                 },
                             )
                     }
-                }.pointerInput(enabled, interactive) {
-                    if (!enabled || !interactive) return@pointerInput
+                }.pointerInput(enabled, interactive, canRemovePoint) {
+                    if ((!enabled && !canRemovePoint) || !interactive) return@pointerInput
                     val swipeMin = 72.dp.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -177,9 +190,31 @@ internal fun ScorePanel(
                         var multiTouch = false
                         var moved = false
                         var up: PointerInputChange? = null
+                        var longPressHandled = false
                         try {
                             while (true) {
-                                val event = awaitPointerEvent()
+                                val event =
+                                    if (!moved && !multiTouch && !longPressHandled) {
+                                        val remaining =
+                                            (
+                                                viewConfiguration.longPressTimeoutMillis -
+                                                    (
+                                                        currentEvent.changes
+                                                            .firstOrNull { it.id == down.id }
+                                                            ?.uptimeMillis
+                                                            ?.minus(down.uptimeMillis) ?: 0L
+                                                    )
+                                            ).coerceAtLeast(1L)
+                                        withTimeoutOrNull(remaining) { awaitPointerEvent() }
+                                    } else {
+                                        awaitPointerEvent()
+                                    }
+                                if (event == null) {
+                                    longPressHandled = true
+                                    pressed = false
+                                    if (canRemovePoint) currentOnRemove()
+                                    continue
+                                }
                                 if (event.changes.count { it.pressed } > 1) multiTouch = true
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
@@ -195,9 +230,9 @@ internal fun ScorePanel(
                         val release = up ?: return@awaitEachGesture
                         val delta = release.position - down.position
                         when {
-                            multiTouch -> Unit
-                            !moved -> currentOnTap(release.uptimeMillis)
-                            delta.y > swipeMin && delta.y > abs(delta.x) * 1.5f -> currentOnSwipeDown(release.uptimeMillis)
+                            multiTouch || longPressHandled -> Unit
+                            !moved && enabled -> currentOnTap(release.uptimeMillis)
+                            enabled && delta.y > swipeMin && delta.y > abs(delta.x) * 1.5f -> currentOnSwipeDown(release.uptimeMillis)
                         }
                     }
                 },

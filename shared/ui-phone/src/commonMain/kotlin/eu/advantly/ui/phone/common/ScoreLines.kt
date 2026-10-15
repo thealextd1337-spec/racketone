@@ -39,11 +39,25 @@ fun resultLine(
     result: MatchResult?,
     setsWon: SidePair<Int>,
 ): String {
-    val parts = sets.mapNotNull { set -> setRecordPair(set)?.let { scorePair(it) } }.toMutableList()
+    val parts =
+        sets
+            .mapNotNull { set ->
+                setRecordPair(set)?.let {
+                    if (set.kind ==
+                        SetKind.MATCH_TIEBREAK
+                    ) {
+                        "[${scorePair(it)}]"
+                    } else {
+                        scorePair(it)
+                    }
+                }
+            }.toMutableList()
     if (interrupted != null) {
         val games = interrupted.games
         val points = scorePair(displayText(interrupted.display.a), displayText(interrupted.display.b))
-        if (games != null) {
+        if (interrupted.setKind == SetKind.MATCH_TIEBREAK) {
+            parts += "[$points]"
+        } else if (games != null) {
             parts += scorePair(games)
             if (interrupted.points.a + interrupted.points.b > 0) parts += "($points)"
         } else {
@@ -66,10 +80,16 @@ fun stateScore(
     sport: Sport,
 ): String {
     val columns = LiveScoreRules.setColumns(state)
-    val done = columns.filter { !it.isCurrent }.map { scorePair(it.values) }
-    val current = columns.firstOrNull { it.isCurrent }?.let { "(" + scorePair(it.values) + ")" }
+    val done =
+        state.sets.mapNotNull { set ->
+            setRecordPair(set)?.let { if (set.kind == SetKind.MATCH_TIEBREAK) "[${scorePair(it)}]" else scorePair(it) }
+        }
+    val current =
+        columns.firstOrNull { it.isCurrent }?.let {
+            if (it.isTiebreakSet) "[${scorePair(it.values)}]" else "(${scorePair(it.values)})"
+        }
     val points =
-        if (sport.isTennisLike && state.current != null) {
+        if (sport.isTennisLike && state.current != null && state.current?.setKind != SetKind.MATCH_TIEBREAK) {
             scorePair(
                 pointText(LiveScoreRules.pointLabel(state, Side.A)),
                 pointText(LiveScoreRules.pointLabel(state, Side.B)),

@@ -82,6 +82,7 @@ import eu.advantly.ui.phone.resources.result_stat_set_points
 import eu.advantly.ui.phone.resources.result_stat_set_points_pickleball
 import eu.advantly.ui.phone.resources.result_stat_streak
 import eu.advantly.ui.phone.resources.result_title
+import eu.advantly.ui.phone.resources.stats_not_recorded
 import eu.advantly.ui.phone.resources.wizard_indoor
 import eu.advantly.ui.phone.resources.wizard_outdoor
 import eu.advantly.ui.phone.wizard.surfaceName
@@ -169,6 +170,7 @@ fun ResultScreen(
             }
             SectionTitle(stringResource(Res.string.result_section_compare))
             Comparison(record, stats)
+            ServeStatistics(record.summary.setup, stats)
             AdvantlyButton(
                 text = stringResource(Res.string.result_play_again),
                 primary = true,
@@ -282,7 +284,8 @@ private fun ratioRow(
 ): CompareRow = CompareRow(label, ratio.map { _, r -> r.won.toDouble() }, SidePair(ratioText(ratio.a), ratioText(ratio.b)))
 
 @Composable
-private fun ratioText(r: Ratio): String = r.percent?.let { p -> stringResource(Res.string.result_ratio, r.won, r.total, p) } ?: "–"
+internal fun ratioText(r: Ratio): String =
+    r.percent?.let { p -> stringResource(Res.string.result_ratio, r.won, r.total, p) } ?: stringResource(Res.string.stats_not_recorded)
 
 @Composable
 private fun CompareBar(row: CompareRow) {

@@ -111,6 +111,78 @@ class LiveScoreScreenshotTest {
         navigator.push(Overlay.Live)
     }
 
+    @Test
+    fun doublesServerChoice() =
+        capture(
+            "w2-server-choice-de",
+            Locale.GERMANY,
+            liveModel(Presets.PADEL_GOLDEN_BO3.format(), ""),
+        )
+
+    @Test
+    fun serveInfoWithLargeText() =
+        capture(
+            "w2-serve-info-en-200",
+            Locale.US,
+            liveModel(Presets.TENNIS_SINGLES_BO3.format(), ""),
+            fontScale = 2f,
+            interact = { model ->
+                onNodeWithTag("panel_them").performClick()
+                onNodeWithTag("serve_info").performScrollTo()
+            },
+        )
+
+    @Test
+    fun tiebreakOnlyResult() =
+        capture(
+            "w2-tiebreak-result-top-de",
+            Locale.GERMANY,
+            testModel().apply {
+                startWith(Presets.TENNIS_TIEBREAK_ONLY_7.format())
+                live.play("ABABABABABAA")
+                val id =
+                    live.active.value!!
+                        .lastPoint!!
+                        .id
+                live.setServeInfo(id, eu.advantly.core.scoring.ServeOutcome.FIRST_SERVE_IN)
+                navigator.push(Overlay.Result(live.active.value!!.matchId))
+            },
+        )
+
+    @Test
+    fun tiebreakOnlyResultAndServeStats() =
+        capture(
+            "w2-tiebreak-result-de",
+            Locale.GERMANY,
+            testModel().apply {
+                startWith(Presets.TENNIS_TIEBREAK_ONLY_7.format())
+                live.play("ABABABABABAA")
+                val id =
+                    live.active.value!!
+                        .lastPoint!!
+                        .id
+                live.setServeInfo(id, eu.advantly.core.scoring.ServeOutcome.FIRST_SERVE_IN)
+                navigator.push(Overlay.Result(live.active.value!!.matchId))
+            },
+            interact = { onNodeWithTag("serve_statistics").performScrollTo() },
+        )
+
+    @Test
+    fun wizardTiebreakOnlyAdvanced() =
+        capture(
+            "w2-wizard-tiebreak-de",
+            Locale.GERMANY,
+            testModel().apply {
+                onPlay()
+                wizard.selectSport(Sport.TENNIS)
+                wizard.selectSurface(null)
+                wizard.addGuest("Jonas")
+                wizard.next()
+                wizard.toggleAdvanced()
+                wizard.setTennisMatch(eu.advantly.presentation.wizard.TennisMatchChoice.TIEBREAK_10)
+            },
+        )
+
     // --- Tabs ---
 
     @Test

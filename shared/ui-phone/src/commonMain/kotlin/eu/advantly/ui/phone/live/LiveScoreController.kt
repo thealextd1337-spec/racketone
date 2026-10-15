@@ -6,11 +6,15 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchState
+import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.presentation.live.HapticCue
+import eu.advantly.presentation.live.LiveOperationRules
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.LiveSettings
 import eu.advantly.presentation.match.LiveMatchPort
@@ -31,6 +35,7 @@ data class UndoNotice(
     val id: Int,
     val before: MatchState,
     val after: MatchState,
+    val pointRemoved: Boolean = false,
 )
 
 /** Richtung der Ziffern-Animation: vorwärts (Punkt) oder rückwärts (Undo). */
@@ -131,6 +136,52 @@ class LiveScoreController(
     /** Fensterkoordinaten (px) der Tap-Flächen – nur für den Desktop-Benchmark (AWT-Klicks). */
     val panelBounds = mutableMapOf<Side, Rect>()
 
+    var servePromptId: EventId? by mutableStateOf(null)
+        private set
+
+    fun dismissServePrompt(id: EventId) {
+        if (servePromptId == id) servePromptId = null
+    }
+
+    fun removeLastPointOf(side: Side): Boolean {
+        val before = snapshot ?: return false
+        if (!LiveOperationRules.canRemove(before, side) || !port.removeLastPointOf(side)) return false
+        haptics.perform(HapticCue.Undo)
+        val after = port.active.value ?: return false
+        servePromptId = null
+        apply(after, ScoreDirection.Backward, null, monotonicNanos(), InputClockSource.Handler)
+        undoNotice = UndoNotice(++noticeIds, before.state, after.state, pointRemoved = true)
+        return true
+    }
+
+    fun chooseServer(player: PlayerId): Boolean {
+        val current = snapshot ?: return false
+        if (!current.isScorer || player !in
+            current.state.serverChoice
+                ?.players
+                .orEmpty()
+        ) {
+            return false
+        }
+        return command { port.chooseServer(player) }
+    }
+
+    fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean {
+        val current = snapshot ?: return false
+        if (current.lastPoint?.id != pointId || LiveOperationRules.serveOptions(current).isEmpty()) return false
+        if (value != null && value !in LiveOperationRules.serveOptions(current)) return false
+        return command { port.setServeInfo(pointId, value) }
+    }
+
+    fun startNextSet(kind: NextSetKind): Boolean {
+        val current = snapshot ?: return false
+        if (!current.isScorer || kind !in current.nextSetOptions) return false
+        return command { port.startNextSet(kind) }
+    }
+
     private var lastPointAtNanos = Long.MIN_VALUE
     private var noticeIds = 0
 
@@ -154,6 +205,9 @@ class LiveScoreController(
         val previous = snapshot
         if (next != null && previous != null && next.matchId == previous.matchId && next.absorbedTaps > previous.absorbedTaps) {
             absorbedNotice = ++noticeIds
+        }
+        if (next?.matchId != previous?.matchId || next?.isScorer != true || next.lastPoint?.id != servePromptId) {
+            servePromptId = null
         }
         snapshot = next
     }
@@ -206,9 +260,11 @@ class LiveScoreController(
         val after = port.active.value
         after?.let { haptics.perform(LiveScoreRules.cueFor(it.state, side)) }
         apply(after, ScoreDirection.Forward, side, t0, source)
+        servePromptId = after?.lastPoint?.id?.takeIf { LiveOperationRules.serveOptions(after).isNotEmpty() }
     }
 
     fun undo(eventUptimeMillis: Long? = null) {
+        servePromptId = null
         val (t0, source) = inputTime(eventUptimeMillis)
         val before = snapshot?.state
         if (!port.undo()) {

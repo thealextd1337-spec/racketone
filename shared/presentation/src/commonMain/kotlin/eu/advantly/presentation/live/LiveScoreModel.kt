@@ -89,6 +89,7 @@ data class SetColumn(
     val tiebreakLoserPoints: Int?,
     val winner: Side?,
     val isCurrent: Boolean,
+    val isTiebreakSet: Boolean = false,
 )
 
 /** Reine Ableitungen für den Live-Screen aus dem kanonischen Zustand (02 §8). */
@@ -117,7 +118,7 @@ object LiveScoreRules {
                     }
 
                     SetKind.MATCH_TIEBREAK -> {
-                        SetColumn(set.tiebreak ?: set.points ?: SidePair(0, 0), null, set.winner, isCurrent = false)
+                        SetColumn(set.tiebreak ?: set.points ?: SidePair(0, 0), null, set.winner, isCurrent = false, isTiebreakSet = true)
                     }
 
                     SetKind.PB_GAME, SetKind.RALLY_GAME -> {
@@ -127,8 +128,8 @@ object LiveScoreRules {
             }
         // Bei vorzeitigem Ende ist `current` eingefroren und bleibt als letzte Spalte sichtbar (02 §9.2/§9.22)
         val current = state.current ?: return done
-        val values = current.games ?: current.points
-        return done + SetColumn(values, null, null, isCurrent = true)
+        val values = if (current.setKind == SetKind.MATCH_TIEBREAK) current.points else current.games ?: current.points
+        return done + SetColumn(values, null, null, isCurrent = true, isTiebreakSet = current.setKind == SetKind.MATCH_TIEBREAK)
     }
 
     /** Hinweis nach Vorrang (02 §8.2 „Watch-Anzeige“, §8.4; Handy zeigt zusätzlich den Spielball). */

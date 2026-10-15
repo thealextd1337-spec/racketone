@@ -191,7 +191,17 @@ class MatchWizard(
         }
 
     /** Games pro Satz; der Tiebreak folgt automatisch (n:n, 02 §5.1 „abhängige Defaults“). */
-    fun setGamesPerSet(games: Int) = update { it.copy(gamesPerSet = games, tiebreakAt = TiebreakAtChoice.AT_GAMES) }
+    fun setGamesPerSet(games: Int) {
+        if (games !in mutableState.value.options.gamesPerSet) return
+        update { it.copy(gamesPerSet = games, tiebreakAt = TiebreakAtChoice.AT_GAMES) }
+    }
+
+    fun setTennisMatch(choice: TennisMatchChoice) {
+        if (input.sport?.isTennisLike != true) return
+        update { it.copy(tennisMatch = choice) }
+    }
+
+    fun setServeStats(enabled: Boolean) = update { it.copy(serveStats = enabled) }
 
     fun setTiebreakAt(choice: TiebreakAtChoice) = update { it.copy(tiebreakAt = choice) }
 
@@ -320,7 +330,13 @@ class MatchWizard(
                 MatchSetup(
                     format = format.copy(presetId = presetId),
                     lineup = lineup,
-                    meta = MatchMeta(surface = input.surface, environment = input.environment, mixed = input.mixed),
+                    meta =
+                        MatchMeta(
+                            surface = input.surface,
+                            environment = input.environment,
+                            mixed = input.mixed,
+                            serveStats = input.serveStats,
+                        ),
                     players = input.players,
                 )
             } else {
@@ -372,7 +388,7 @@ class MatchWizard(
                 Sport.TENNIS -> {
                     EMPTY_OPTIONS.copy(
                         sets = bestOf(1, 3, 5) + SetsChoice.Open,
-                        gamesPerSet = listOf(4, 6, 8, 10),
+                        gamesPerSet = (1..6).toList() + listOf(8, 10),
                         deuceModes = listOf(DeuceMode.ADVANTAGE, DeuceMode.DECIDING_POINT),
                         decidingSets = DecidingSetChoice.entries,
                         tiebreakAt = TiebreakAtChoice.entries,
@@ -383,7 +399,7 @@ class MatchWizard(
                 Sport.PADEL -> {
                     EMPTY_OPTIONS.copy(
                         sets = bestOf(1, 3) + SetsChoice.Open,
-                        gamesPerSet = listOf(4, 6),
+                        gamesPerSet = (1..6).toList(),
                         deuceModes = listOf(DeuceMode.DECIDING_POINT, DeuceMode.STAR_POINT, DeuceMode.ADVANTAGE),
                         decidingSets = listOf(DecidingSetChoice.NORMAL, DecidingSetChoice.MATCH_TIEBREAK, DecidingSetChoice.ADVANTAGE_SET),
                         disciplineSelectable = false,
@@ -418,6 +434,16 @@ class MatchWizard(
         /** Baut das Format aus den Eingaben; `null`, solange eine Pflichtauswahl fehlt. */
         fun buildFormat(input: WizardInput): MatchFormat? {
             val sport = input.sport ?: return null
+            if (sport.isTennisLike && input.tennisMatch != TennisMatchChoice.REGULAR) {
+                val preset =
+                    when {
+                        sport == Sport.TENNIS && input.tennisMatch == TennisMatchChoice.TIEBREAK_7 -> Presets.TENNIS_TIEBREAK_ONLY_7
+                        sport == Sport.TENNIS -> Presets.TENNIS_TIEBREAK_ONLY_10
+                        input.tennisMatch == TennisMatchChoice.TIEBREAK_7 -> Presets.PADEL_TIEBREAK_ONLY_7
+                        else -> Presets.PADEL_TIEBREAK_ONLY_10
+                    }
+                return preset.format(input.discipline)
+            }
             val sets = input.sets ?: return null
             val d = input.discipline
             return when (sport) {
@@ -461,7 +487,7 @@ class MatchWizard(
             sport: Sport,
             input: WizardInput,
             sets: SetsChoice,
-        ): MatchFormat {
+        ): MatchFormat? {
             val games = input.gamesPerSet
             val tiebreakAt =
                 when (input.tiebreakAt) {
@@ -469,7 +495,8 @@ class MatchWizard(
                     TiebreakAtChoice.AT_GAMES_MINUS_ONE -> games - 1
                     TiebreakAtChoice.NONE -> null
                 }
-            val set = RegularSet(games, tiebreakAt, TiebreakFormat.TB7)
+            if (games !in optionsFor(sport).gamesPerSet) return null
+            val set = RegularSet(6, 6, TiebreakFormat.TB7)
             val open = sets == SetsChoice.Open
             val decidingSet: SetFormat? =
                 if (open) {
@@ -492,7 +519,8 @@ class MatchWizard(
                 decidingSet = decidingSet,
                 // Offen: „Match-Tiebreak“ wird im Satzende-Dialog angeboten (02 §5.2)
                 matchTiebreak = if (open) MatchTiebreakFormat.MTB10 else null,
-            )
+            ).let { Presets.withGamesPerSet(it, games) }
+                .let { it.copy(set = it.set?.copy(tiebreakAt = tiebreakAt)) }
         }
 
         private fun buildLineup(
@@ -508,7 +536,8 @@ class MatchWizard(
         /** Erkennt ein Preset aus 02 §4 mit identischem Format (nur Anzeige/Statistik). */
         fun recognizePreset(format: MatchFormat): String? {
             val plain = format.copy(presetId = null)
-            return Presets.all
+            val candidates = listOfNotNull(format.presetId?.let(Presets::byId)) + Presets.all
+            return candidates
                 .firstOrNull { p ->
                     p.sport == format.sport && format.discipline in p.disciplines &&
                         p.format(format.discipline).copy(presetId = null) == plain

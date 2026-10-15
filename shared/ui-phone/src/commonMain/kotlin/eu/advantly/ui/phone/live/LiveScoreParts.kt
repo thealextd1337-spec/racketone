@@ -269,7 +269,7 @@ private fun SetRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = value.toString(),
+                        text = if (column.isTiebreakSet) "[$value]" else value.toString(),
                         style = AdvantlyTheme.typography.scoreS.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
                         color = if (outdoor) Color.White else colors.text,
                         modifier = Modifier.testTag("current_$tagSuffix"),
@@ -280,7 +280,7 @@ private fun SetRow(
                 val tiebreak = column.tiebreakLoserPoints?.takeIf { !won }
                 Row(Modifier.widthIn(min = 30.dp).testTag("set_${index}_$tagSuffix"), horizontalArrangement = Arrangement.Center) {
                     Text(
-                        text = value.toString(),
+                        text = if (column.isTiebreakSet) "[$value]" else value.toString(),
                         style = AdvantlyTheme.typography.scoreS.copy(fontWeight = if (won) FontWeight.Bold else FontWeight.Medium),
                         color = if (won || outdoor) colors.text else colors.text2,
                         textAlign = TextAlign.Center,

@@ -54,6 +54,7 @@ import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.wizard.DecidingSetChoice
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.SetsChoice
+import eu.advantly.presentation.wizard.TennisMatchChoice
 import eu.advantly.presentation.wizard.TiebreakAtChoice
 import eu.advantly.presentation.wizard.WizardStep
 import eu.advantly.presentation.wizard.WizardUiState
@@ -75,6 +76,7 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
+import eu.advantly.ui.phone.resources.setup_one_game_hint
 import eu.advantly.ui.phone.resources.wizard_add_guest
 import eu.advantly.ui.phone.resources.wizard_add_guest_hint
 import eu.advantly.ui.phone.resources.wizard_advanced
@@ -527,33 +529,29 @@ private fun FormatStep(
     val accent = sportColor(sport)
     StepTitle(stringResource(Res.string.wizard_title_format))
 
-    SectionTitle(stringResource(setsTitle(sport)))
-    SegmentedChoice(
-        options = options.sets,
-        selected = input.sets,
-        label = { setsLabel(it, sport) },
-        onSelect = wizard::setSets,
-        tagPrefix = "sets",
-        accent = accent,
-    )
-    if (input.sets == null) {
-        Text(
-            stringResource(Res.string.wizard_sets_required),
-            style = AdvantlyTheme.typography.caption,
-            color = AdvantlyTheme.colors.hint,
-            modifier = Modifier.padding(top = Spacing.xs).testTag("sets_required"),
-        )
-    }
-    if (options.gamesPerSet.isNotEmpty()) {
-        SectionTitle(stringResource(gamesTitle()))
+    if (input.tennisMatch == TennisMatchChoice.REGULAR || !sport.isTennisLike) {
+        SectionTitle(stringResource(setsTitle(sport)))
         SegmentedChoice(
-            options = options.gamesPerSet,
-            selected = input.gamesPerSet,
-            label = { gamesLabel(it) },
-            onSelect = wizard::setGamesPerSet,
-            tagPrefix = "games",
+            options = options.sets,
+            selected = input.sets,
+            label = { setsLabel(it, sport) },
+            onSelect = wizard::setSets,
+            tagPrefix = "sets",
             accent = accent,
         )
+        if (input.sets == null) {
+            Text(
+                stringResource(Res.string.wizard_sets_required),
+                style = AdvantlyTheme.typography.caption,
+                color = AdvantlyTheme.colors.hint,
+                modifier = Modifier.padding(top = Spacing.xs).testTag("sets_required"),
+            )
+        }
+    }
+    if (options.gamesPerSet.isNotEmpty() && input.tennisMatch == TennisMatchChoice.REGULAR) {
+        SectionTitle(stringResource(gamesTitle()))
+        GamesPerSetChoices(wizard, state)
+        if (input.gamesPerSet == 1) RuleHint(Res.string.setup_one_game_hint)
     }
     if (options.points.isNotEmpty()) {
         SectionTitle(stringResource(pointsTitle(sport)))
@@ -578,7 +576,7 @@ private fun FormatStep(
         )
         RuleHint(pickleballScoringHint())
     }
-    if (sport == Sport.PADEL && options.deuceModes.isNotEmpty()) {
+    if (sport == Sport.PADEL && input.tennisMatch == TennisMatchChoice.REGULAR && options.deuceModes.isNotEmpty()) {
         DeuceChoice(wizard, state, accent)
     }
 
@@ -663,6 +661,10 @@ private fun AdvancedSection(
     }
     if (!input.advancedExpanded) return
     Column(Modifier.testTag("advanced_content")) {
+        if (sport.isTennisLike) {
+            TennisFormatChoices(wizard, state)
+            if (input.tennisMatch != TennisMatchChoice.REGULAR) return@Column
+        }
         when (sport) {
             Sport.TENNIS -> {
                 DeuceChoice(wizard, state, accent)
@@ -736,7 +738,11 @@ private fun TennisLikeAdvanced(
     if (options.tiebreakAt.isNotEmpty()) {
         SectionTitle(stringResource(tiebreakTitle()))
         SegmentedChoice(
-            options = options.tiebreakAt,
+            options =
+                options.tiebreakAt.filter {
+                    input.gamesPerSet > 1 ||
+                        it != eu.advantly.presentation.wizard.TiebreakAtChoice.AT_GAMES_MINUS_ONE
+                },
             selected = input.tiebreakAt,
             label = { tiebreakLabel(it, input.gamesPerSet) },
             onSelect = wizard::setTiebreakAt,
