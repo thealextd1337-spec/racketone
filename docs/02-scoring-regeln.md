@@ -1051,6 +1051,7 @@ Begriffe: DE „Satz“, „Satzball“, „Matchball“, „Verlängerung“ in
 | `courtPace` | 1–5, `null` | optional, ITF-Kategorie, für Fortgeschrittene |
 | `mixed` | bool | Mixed-Doppel: steuert nur UI-Hinweise (9.11) |
 | `venue` | string? | Freitext |
+| `watchWorkout` | bool, Default `true` | „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Ergänzung 2026-10-15): Die Uhr des Besitzers startet beim Match eine Workout-Session, unabhängig davon, wer zählt. Fehlt das Feld (ältere Daten/Geräte), gilt `true`; der Default wird nicht serialisiert. Keine Regelwirkung. |
 
 Abweichung zum Backend-Entwurf (03, `surface ... 'indoor_hard','indoor_other'`): Empfehlung `surface` + `environment` getrennt, siehe §12.
 

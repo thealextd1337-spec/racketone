@@ -1,45 +1,55 @@
 package eu.advantly.ui.phone.live
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Density
-import eu.advantly.core.model.DeviceId
+import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Environment
-import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
-import eu.advantly.presentation.match.ConflictInfo
-import eu.advantly.presentation.match.DeviceKind
-import eu.advantly.presentation.match.ForkBranch
-import eu.advantly.presentation.match.ForkInfo
-import eu.advantly.presentation.match.SyncInfo
-import eu.advantly.presentation.match.SyncState
+import eu.advantly.device.link.CompanionState
+import eu.advantly.device.link.testing.FakeCompanionDetector
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.AdvantlyApp
+import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.common.LocalSafeInsets
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
-import eu.advantly.ui.phone.fakeSyncModel
+import eu.advantly.ui.phone.play
 import eu.advantly.ui.phone.preview.DemoData
+import eu.advantly.ui.phone.setupFor
 import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
+import java.awt.image.BufferedImage
 import java.io.File
 import java.util.Locale
 import javax.imageio.ImageIO
@@ -76,7 +86,14 @@ class LiveScoreScreenshotTest {
                 waitForIdle()
                 interact(model)
                 waitForIdle()
-                val image = onRoot().captureToImage().toAwtImage()
+                // Dialoge (AlertDialog) liegen in eigenen Wurzeln: alle Ebenen übereinander zeichnen
+                val roots = onAllNodes(isRoot())
+                val layers = roots.fetchSemanticsNodes().indices.map { roots[it].captureToImage().toAwtImage() }
+                val image = BufferedImage(layers.first().width, layers.first().height, BufferedImage.TYPE_INT_ARGB)
+                image.createGraphics().apply {
+                    layers.forEach { drawImage(it, 0, 0, null) }
+                    dispose()
+                }
                 ImageIO.write(image, "png", File(outDir, "$name.png"))
             }
         } finally {
@@ -216,6 +233,66 @@ class LiveScoreScreenshotTest {
             interact = { onNodeWithTag("advanced_content").performScrollTo() },
         )
 
+    // --- Edge-to-Edge: simulierte Status-/Navigationsleiste (halbtransparent eingezeichnet) ---
+
+    private val withSystemBars: @Composable (AdvantlyAppModel) -> Unit = { model ->
+        CompositionLocalProvider(LocalSafeInsets provides WindowInsets(0.dp, 52.dp, 0.dp, 24.dp)) {
+            Box(Modifier.fillMaxSize()) {
+                AdvantlyApp(model = model, darkTheme = true)
+                Box(Modifier.fillMaxWidth().height(52.dp).background(Color.Magenta.copy(alpha = 0.35f)))
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .background(Color.Magenta.copy(alpha = 0.35f)),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun wizardPlayersDoublesWithSystemBars() =
+        capture(
+            "insets-wizard-3-players-de",
+            Locale.GERMANY,
+            testModel().apply {
+                onPlay()
+                wizard.selectSport(Sport.PADEL)
+                wizard.addGuest("Jonas")
+            },
+            content = withSystemBars,
+        )
+
+    @Test
+    fun liveWithSystemBars() =
+        capture(
+            "insets-live-de",
+            Locale.GERMANY,
+            liveModel(Presets.TENNIS_SINGLES_BO3.format(), "AAB"),
+            content = withSystemBars,
+        )
+
+    /** Review W1-I Runde 2: 360 × 640 dp, 200 % Schrift, Systemleisten, Anzeige ohne Verbindung. */
+    @Test
+    fun liveDisplayStaleSmallScreenWithSystemBars() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAB")
+        rig.model.navigator.push(Overlay.Live)
+        val goOffline: androidx.compose.ui.test.ComposeUiTest.(AdvantlyAppModel) -> Unit = {
+            runOnIdle {
+                rig.offline()
+                rig.settle(42_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+        }
+        capture("insets-live-display-stale-small-fontscale-2-de", Locale.GERMANY, rig.model, 360, 640, 2f, goOffline, withSystemBars)
+    }
+
+    @Test
+    fun homeWithSystemBars() = capture("insets-home-en", Locale.US, testModel().apply { DemoData.seed(this) }, content = withSystemBars)
+
     // --- Live, alle Sportarten ---
 
     @Test
@@ -328,46 +405,141 @@ class LiveScoreScreenshotTest {
             onNodeWithTag("menu_end_match").performClick()
         })
 
-    // --- Review-Runde 1: Sync, Konflikt, Verzweigung, Aufgabe, Profil ---
-
-    private fun previewState(points: String) =
-        testModel()
-            .apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), points) }
-            .live.active.value!!
-            .state
+    // --- Single-Scorer (W1-I): Wer zählt?, Anzeige, Staleness, Übernahme, abgelehnte Eingaben ---
 
     @Test
-    fun liveSyncConflictBanner() {
-        val (model, fake) = fakeSyncModel()
-        model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAB")
-        fake.update {
-            sync = SyncInfo(SyncState.CONNECTED, 1)
-            conflicts = listOf(ConflictInfo("c1", EventId("a"), EventId("b")))
+    fun wizardWhoScores() {
+        val rig = SessionRig()
+        rig.model.apply {
+            onPlay()
+            wizard.selectSport(Sport.TENNIS)
+            wizard.selectSurface(Surface.HARD)
+            wizard.addGuest("Jonas")
+            wizard.next()
+            wizard.next()
         }
-        model.controller.sync(model.live.active.value)
-        model.navigator.push(Overlay.Live)
-        capture("live-sync-conflict-de", Locale.GERMANY, model)
+        capture("wizard-5-scorer-de", Locale.GERMANY, rig.model)
     }
 
     @Test
-    fun liveForkDialog() {
-        val (model, fake) = fakeSyncModel()
-        model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAAA")
-        fake.update {
-            sync = SyncInfo(SyncState.CONFLICT, 1)
-            forks =
-                listOf(
-                    ForkInfo(
-                        "f1",
-                        ForkBranch(DeviceId("watch"), DeviceKind.WATCH, previewState("AAAAAA")),
-                        ForkBranch(DeviceId("phone"), DeviceKind.PHONE, previewState("AAAABB")),
-                        previewState("AAAAAABB"),
-                    ),
-                )
+    fun wizardWatchNotInstalled() {
+        val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
+        rig.model.apply {
+            onPlay()
+            wizard.selectSport(Sport.TENNIS)
+            wizard.selectSurface(Surface.HARD)
+            wizard.addGuest("Jonas")
+            wizard.next()
+            wizard.next()
         }
-        model.controller.sync(model.live.active.value)
-        model.navigator.push(Overlay.Live)
-        capture("sheet-fork-en", Locale.US, model)
+        capture("wizard-5-scorer-not-installed-de", Locale.GERMANY, rig.model)
+    }
+
+    @Test
+    fun liveWaitingForTheWatch() {
+        val rig = SessionRig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+        rig.store.start(rig.model.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.MY_WATCH))
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-waiting-for-watch-en", Locale.US, rig.model)
+    }
+
+    @Test
+    fun liveDisplayWhileTheWatchScores() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAAA" + "BBBB" + "AAB")
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-display-de", Locale.GERMANY, rig.model)
+    }
+
+    @Test
+    fun liveDisplayStaleOffersTakeOver() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAB")
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-display-stale-en", Locale.US, rig.model, interact = {
+            runOnIdle {
+                rig.offline()
+                rig.settle(42_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+        })
+    }
+
+    /** Review W1-I #2: kleines Display (360 × 640 dp) mit 200 % Schrift – Hinweis, Stand und Flächen sichtbar. */
+    @Test
+    fun liveDisplayStaleSmallScreenFontScale200Percent() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAB")
+        rig.model.navigator.push(Overlay.Live)
+        val goOffline: androidx.compose.ui.test.ComposeUiTest.(AdvantlyAppModel) -> Unit = {
+            runOnIdle {
+                rig.offline()
+                rig.settle(42_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+        }
+        capture("live-display-stale-small-fontscale-2-de", Locale.GERMANY, rig.model, 360, 640, 2f, goOffline)
+    }
+
+    @Test
+    fun rejectedInputsSheet() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.offline()
+        rig.settle(31_000)
+        rig.store.takeOverScoring()
+        rig.watchPlays("AAB")
+        rig.online()
+        rig.settle()
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("sheet-rejected-inputs-de", Locale.GERMANY, rig.model, interact = { onNodeWithTag("rejected_view").performClick() })
+    }
+
+    @Test
+    fun abandonWhileTheWatchScores() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAAAB")
+        capture("dialog-abandon-watch-en", Locale.US, rig.model, interact = {
+            runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
+        })
+    }
+
+    @Test
+    fun takeOverConfirmation() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AB")
+        rig.model.navigator.push(Overlay.Live)
+        capture("dialog-takeover-de", Locale.GERMANY, rig.model, interact = { onNodeWithTag("takeover_button").performClick() })
+    }
+
+    @Test
+    fun rejectedInputsAfterTakeOver() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.offline()
+        rig.settle(31_000)
+        rig.store.takeOverScoring()
+        rig.store.play("B")
+        rig.watchPlays("AAA")
+        rig.online()
+        rig.settle()
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-rejected-inputs-de", Locale.GERMANY, rig.model)
+    }
+
+    @Test
+    fun quickStartWhoScores() {
+        val rig = SessionRig()
+        rig.store.saveFavorite(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()))
+        capture("dialog-quickstart-scorer-en", Locale.US, rig.model, interact = { onNodeWithTag("quick_fav_0").performClick() })
     }
 
     @Test
@@ -379,7 +551,15 @@ class LiveScoreScreenshotTest {
     }
 
     @Test
-    fun profileLegalLinks() = capture("app-profile-de", Locale.GERMANY, testModel().apply { navigator.tab = AppTab.Profile })
+    fun profileWithGuestsAndLegalLinks() =
+        capture(
+            "app-profile-de",
+            Locale.GERMANY,
+            testModel().apply {
+                DemoData.seed(this)
+                navigator.tab = AppTab.Profile
+            },
+        )
 
     @Test
     fun barlowCondensedDigitsAreTabular() =

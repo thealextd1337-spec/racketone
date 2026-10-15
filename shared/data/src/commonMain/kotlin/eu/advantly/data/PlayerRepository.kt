@@ -90,6 +90,35 @@ class PlayerRepository internal constructor(
         }
     }
 
+    /**
+     * Macht [owner] zum Self-Player (Uhr übernimmt die Identität des Handys, W1-I). Der bisherige Self bleibt als
+     * Gast-Zeile erhalten (Alias-Verwaltung: [LocalData.adoptSelf]). Gleiche ID: nur der Name wird übernommen.
+     * Liefert den bisherigen Self, falls er ersetzt wurde, sonst `null`.
+     */
+    fun adoptSelf(
+        owner: Player,
+        nowMs: Long,
+    ): LocalPlayer? =
+        queries.transactionWithResult {
+            val current = self()
+            if (current?.id == owner.id) {
+                if (owner.displayName.isNotBlank() &&
+                    owner.displayName != current.displayName
+                ) {
+                    queries.rename(owner.displayName, owner.id.value)
+                }
+                return@transactionWithResult null
+            }
+            current?.let { queries.updateKind(PlayerKind.GUEST.name, it.id.value) }
+            if (get(owner.id) == null) {
+                queries.insertOrIgnore(owner.id.value, owner.displayName, PlayerKind.SELF.name, nowMs, null)
+            } else {
+                queries.updateKind(PlayerKind.SELF.name, owner.id.value)
+                queries.rename(owner.displayName, owner.id.value)
+            }
+            current
+        }
+
     fun get(id: PlayerId): LocalPlayer? = queries.selectById(id.value).executeAsOneOrNull()?.toLocal()
 
     /** Self zuerst, dann zuletzt verwendete Gäste. */

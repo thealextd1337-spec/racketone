@@ -26,22 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEventDispatcherOwner
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import eu.advantly.core.model.DeviceId
-import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
-import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
-import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
-import eu.advantly.presentation.match.ConflictInfo
-import eu.advantly.presentation.match.DeviceKind
-import eu.advantly.presentation.match.ForkBranch
-import eu.advantly.presentation.match.ForkChoice
-import eu.advantly.presentation.match.ForkInfo
 import eu.advantly.presentation.match.SyncInfo
-import eu.advantly.presentation.match.SyncState
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.fakeSyncModel
 import eu.advantly.ui.phone.preview.DemoData
@@ -80,16 +70,6 @@ class ReviewRound1UiTest {
     }
 
     private fun ComposeUiTest.click(tag: String) = onNodeWithTag(tag).performClick()
-
-    /** Zustand eines anderen Logs (Vorschau eines Zweigs). */
-    private fun preview(
-        preset: Preset,
-        points: String,
-    ): MatchState =
-        testModel()
-            .apply { startWith(preset.format(), points) }
-            .live.active.value!!
-            .state
 
     // 1 – Neuer Start bei laufendem Match nur nach Bestätigung
     @Test
@@ -187,60 +167,35 @@ class ReviewRound1UiTest {
             assertEquals(score, sets)
         }
 
-    // 4 – Sync-Pill, Konflikt-Banner mit 1-Tap-Undo, absorbierte Taps, Verzweigungs-Dialog
+    // 4 – Sync-Pill am Zähler (Single-Scorer: kein Konflikt-Banner, kein Verzweigungs-Dialog), absorbierte Taps,
+    //     „N Eingaben nicht übernommen“
     @Test
-    fun syncPillConflictBannerAndAbsorbedNotice() =
+    fun scorerSyncPillAbsorbedAndRejectedNotices() =
         runComposeUiTest {
             val (model, fake) = fakeSyncModel()
             model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AB")
             model.navigator.push(Overlay.Live)
             showApp(model)
-            val local = onNodeWithTag("sync_pill").fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
-            assertTrue(local == "Nur lokal" || local == "Local only", local)
 
-            runOnIdle {
-                fake.update {
-                    sync = SyncInfo(SyncState.CONNECTED, 1)
-                    conflicts = listOf(ConflictInfo("c1", EventId("a"), EventId("b")))
-                }
-            }
-            val connected = onNodeWithTag("sync_pill").fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
-            assertTrue(connected == "Uhr verbunden" || connected == "Watch connected", connected)
-            onNodeWithTag("conflict_banner").assertExists()
-            click("conflict_undo_them")
+            fun pill() = onNodeWithTag("sync_pill").fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+            assertTrue(pill() == "Nur lokal" || pill() == "Local only", pill())
+
+            runOnIdle { fake.update { sync = SyncInfo(peers = 1, scorerConnected = true, pendingToPeers = 3) } }
+            assertTrue(pill() == "3 ausstehend" || pill() == "3 pending", pill())
+            runOnIdle { fake.update { sync = SyncInfo(peers = 1, scorerConnected = true, pendingToPeers = 0) } }
+            assertTrue(pill() == "Synchron" || pill() == "In sync", pill())
             onNodeWithTag("conflict_banner").assertDoesNotExist()
-            assertEquals(listOf(Side.B), fake.undoneConflictSides)
 
             runOnIdle { fake.update { absorbedTaps = 1 } }
             onNodeWithTag("absorbed_notice").assertExists()
-        }
 
-    @Test
-    fun forkDialogResolvesWithChosenBranch() =
-        runComposeUiTest {
-            val (model, fake) = fakeSyncModel()
-            model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAAA")
-            fake.update {
-                sync = SyncInfo(SyncState.CONFLICT, 1)
-                forks =
-                    listOf(
-                        ForkInfo(
-                            forkId = "f1",
-                            branchA = ForkBranch(DeviceId("watch"), DeviceKind.WATCH, preview(Presets.TENNIS_SINGLES_BO3, "AAAAAA")),
-                            branchB = ForkBranch(DeviceId("phone"), DeviceKind.PHONE, preview(Presets.TENNIS_SINGLES_BO3, "AAAABB")),
-                            mergedPreview = preview(Presets.TENNIS_SINGLES_BO3, "AAAAAABB"),
-                        ),
-                    )
-            }
-            model.controller.sync(model.live.active.value)
-            model.navigator.push(Overlay.Live)
-            showApp(model)
-            onNodeWithTag("fork_sheet").assertExists()
-            onNodeWithTag("panel_us").assertDoesNotExist()
-            onNodeWithTag("fork_branch_a").performScrollTo().performClick()
-            assertEquals(listOf("f1" to ForkChoice.BRANCH_A), fake.resolved)
-            onNodeWithTag("fork_sheet").assertDoesNotExist()
-            onNodeWithTag("panel_us").assertExists()
+            runOnIdle { fake.update { rejectedByRole = 2 } }
+            onNodeWithTag("rejected_notice").assertExists()
+            click("rejected_ok")
+            onNodeWithTag("rejected_notice").assertDoesNotExist()
+            // weitere abgelehnte Eingaben zeigen den Hinweis erneut
+            runOnIdle { fake.update { rejectedByRole = 3 } }
+            onNodeWithTag("rejected_notice").assertExists()
         }
 
     // 5 – Modale Sheets: Hintergrund und Tabs nicht erreichbar

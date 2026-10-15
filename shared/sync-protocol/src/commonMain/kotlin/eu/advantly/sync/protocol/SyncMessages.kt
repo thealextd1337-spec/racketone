@@ -95,6 +95,11 @@ data class Events(
  * @property match Kopf des Matches oder `null` (nur Spieler/Favoriten)
  * @property players Anzeigenamen der Spieler aus Lineup und Favoriten
  * @property favorites Favoriten-Lineups („Wie letztes Mal“, Schnellstart auf der Uhr)
+ * @property self eigener Spieler des Absenders („Ich“). Das Handy ist Identitätsquelle: Eine Uhr übernimmt den `self`
+ *   eines Handys als ihren eigenen Spieler; ein Handy merkt sich den `self` anderer eigener Geräte als Alias (W1-I).
+ *   `null` bei älteren Absendern.
+ * @property selfAliases frühere bzw. bekannte andere IDs desselben Besitzers (z. B. der Uhr-eigene Spieler vor der
+ *   Übernahme) – Matches mit diesen IDs zeigen den Besitzer, keinen Gast
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -103,6 +108,8 @@ data class MatchMetaMessage(
     val match: MatchHeader? = null,
     val players: List<Player> = emptyList(),
     val favorites: List<FavoriteLineup> = emptyList(),
+    val self: Player? = null,
+    val selfAliases: List<PlayerId> = emptyList(),
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
 ) : SyncMessage
 

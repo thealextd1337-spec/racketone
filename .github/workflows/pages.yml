@@ -22,16 +22,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Platzhalter im Impressum verhindern
         run: |
           if grep -rn '{{' site/; then
             echo "::error::Platzhalter in site/ gefunden – Impressum/Datenschutz zuerst ausfüllen."
             exit 1
           fi
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
+          include-hidden-files: true # v5 lässt Dotfiles sonst weg (site/.nojekyll)
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

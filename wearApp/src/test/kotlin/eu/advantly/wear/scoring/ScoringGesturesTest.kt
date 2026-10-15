@@ -1,5 +1,6 @@
 package eu.advantly.wear.scoring
 
+import eu.advantly.core.model.Side
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -9,10 +10,10 @@ class ScoringGesturesTest {
 
     @Test
     fun topHalfIsUsBottomHalfIsThem() {
-        assertEquals(Side.US, TapZones.classify(200f, height))
-        assertEquals(Side.US, TapZones.classify(449f, height))
-        assertEquals(Side.THEM, TapZones.classify(551f, height))
-        assertEquals(Side.THEM, TapZones.classify(990f, height))
+        assertEquals(Side.A, TapZones.classify(200f, height))
+        assertEquals(Side.A, TapZones.classify(449f, height))
+        assertEquals(Side.B, TapZones.classify(551f, height))
+        assertEquals(Side.B, TapZones.classify(990f, height))
     }
 
     @Test
@@ -31,8 +32,9 @@ class ScoringGesturesTest {
     }
 
     @Test
-    fun longPressIsNotATap() {
+    fun holdBelowOneSecondIsNothingAndAboveIsLongPress() {
         assertEquals(ScoringGesture.NONE, classify(dx = 0f, dy = 0f, duration = 900))
+        assertEquals(ScoringGesture.LONG_PRESS, classify(dx = 2f, dy = 0f, duration = 1_000))
     }
 
     @Test

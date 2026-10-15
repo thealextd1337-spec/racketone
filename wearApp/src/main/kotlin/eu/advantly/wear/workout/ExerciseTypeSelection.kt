@@ -1,7 +1,27 @@
 package eu.advantly.wear.workout
 
-/** Sportarten, die der Spike zur Auswahl anbietet (Padel/Pickleball laufen wie Tennis, 05 E3). */
-enum class SpikeSport { TENNIS, BADMINTON, TABLE_TENNIS }
+import eu.advantly.core.model.Sport
+
+/**
+ * Workout-Sportart der Uhr: Padel und Pickleball haben in Health Services keinen eigenen Typ und laufen wie Tennis
+ * (05 E3); Badminton und Tischtennis haben native Typen mit Fallback (05 §0.1).
+ */
+enum class WorkoutSport {
+    TENNIS,
+    BADMINTON,
+    TABLE_TENNIS,
+    ;
+
+    companion object {
+        /** Abbildung der Match-Sportart auf die Workout-Sportart. */
+        fun of(sport: Sport): WorkoutSport =
+            when (sport) {
+                Sport.TENNIS, Sport.PADEL, Sport.PICKLEBALL -> TENNIS
+                Sport.BADMINTON -> BADMINTON
+                Sport.TABLE_TENNIS -> TABLE_TENNIS
+            }
+    }
+}
 
 /**
  * Die für uns relevanten Health-Services-`ExerciseType`s, plattformunabhängig gespiegelt,
@@ -60,7 +80,7 @@ data class WorkoutPermissions(
 
 /** Ergebnis der Typwahl: tatsächlich verwendeter Typ, ob es ein Fallback ist, und die anzufordernden Messgrößen. */
 data class ExerciseSelection(
-    val sport: SpikeSport,
+    val sport: WorkoutSport,
     val type: WatchExerciseType,
     val isFallback: Boolean,
     val metrics: Set<WorkoutMetric>,
@@ -80,16 +100,16 @@ object ExerciseTypeSelector {
     val WANTED_METRICS: Set<WorkoutMetric> = WorkoutMetric.entries.toSet()
 
     /** Reihenfolge der Kandidaten je Sportart. */
-    fun candidates(sport: SpikeSport): List<WatchExerciseType> =
+    fun candidates(sport: WorkoutSport): List<WatchExerciseType> =
         when (sport) {
-            SpikeSport.TENNIS -> listOf(WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
-            SpikeSport.BADMINTON -> listOf(WatchExerciseType.BADMINTON, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
-            SpikeSport.TABLE_TENNIS -> listOf(WatchExerciseType.TABLE_TENNIS, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
+            WorkoutSport.TENNIS -> listOf(WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
+            WorkoutSport.BADMINTON -> listOf(WatchExerciseType.BADMINTON, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
+            WorkoutSport.TABLE_TENNIS -> listOf(WatchExerciseType.TABLE_TENNIS, WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT)
         }
 
     /** Liefert `null`, wenn das Gerät keinen der Kandidaten unterstützt (dann zählen ohne Workout/Puls). */
     fun select(
-        sport: SpikeSport,
+        sport: WorkoutSport,
         capabilities: ExerciseCapabilitiesView,
         permissions: WorkoutPermissions = WorkoutPermissions.ALL,
     ): ExerciseSelection? {

@@ -4,33 +4,28 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
-import eu.advantly.presentation.match.ConflictInfo
-import eu.advantly.presentation.match.ForkChoice
-import eu.advantly.presentation.match.ForkInfo
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.SyncInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Test-Fake: delegiert das Zählen an einen echten [LiveMatchPort] (In-Memory-Engine) und legt Sync-Status,
- * Widersprüche, absorbierte Taps und Verzweigungen darüber – so, wie sie später die Session liefert.
+ * absorbierte Taps und abgelehnte Eingaben darüber – so, wie sie die Session liefert. Mehrgeräte-Abläufe (Anzeige,
+ * Übernahme) testen `SingleScorerUiTest` und `SessionRig` mit der echten Session.
  */
 class FakeSyncPort(
     private val base: LiveMatchPort,
 ) : LiveMatchPort by base {
     var sync: SyncInfo = SyncInfo.LOCAL_ONLY
-    var conflicts: List<ConflictInfo> = emptyList()
     var absorbedTaps: Int = 0
-    var forks: List<ForkInfo> = emptyList()
+    var rejectedByRole: Int = 0
 
     /** Nein-Antworten erzwingen (z. B. Engine lehnt `MatchEnded` ab). */
     var rejectEndMatch = false
-
-    val resolved = mutableListOf<Pair<String, ForkChoice>>()
-    val undoneConflictSides = mutableListOf<Side>()
 
     private val flow = MutableStateFlow<LiveMatchSnapshot?>(null)
     override val active: StateFlow<LiveMatchSnapshot?> get() = flow
@@ -40,9 +35,8 @@ class FakeSyncPort(
             base.active.value?.let {
                 it.copy(
                     sync = sync,
-                    conflicts = conflicts,
                     absorbedTaps = absorbedTaps,
-                    openForks = forks,
+                    rejectedByRoleCount = rejectedByRole,
                     revision = it.revision + revisionBump,
                 )
             }
@@ -59,7 +53,10 @@ class FakeSyncPort(
 
     private inline fun <T> after(result: T): T = result.also { refresh() }
 
-    override fun start(setup: MatchSetup): MatchId = after(base.start(setup))
+    override fun start(
+        setup: MatchSetup,
+        options: StartOptions,
+    ): MatchId = after(base.start(setup, options))
 
     override fun recordPoint(side: Side): Boolean = after(base.recordPoint(side))
 
@@ -89,31 +86,4 @@ class FakeSyncPort(
     override fun createFollowUp(): MatchId? = after(base.createFollowUp())
 
     override fun dismiss(): Boolean = after(base.dismiss())
-
-    override fun resolveFork(
-        forkId: String,
-        keep: ForkChoice,
-    ): Boolean {
-        if (forks.none { it.forkId == forkId }) return false
-        resolved += forkId to keep
-        update { forks = forks.filterNot { it.forkId == forkId } }
-        return true
-    }
-
-    override fun dismissConflict(conflictId: String): Boolean {
-        if (conflicts.none { it.id == conflictId }) return false
-        update { conflicts = conflicts.filterNot { it.id == conflictId } }
-        return true
-    }
-
-    override fun undoConflictPoint(
-        conflictId: String,
-        side: Side,
-    ): Boolean {
-        if (conflicts.none { it.id == conflictId }) return false
-        undoneConflictSides += side
-        base.undo()
-        update { conflicts = conflicts.filterNot { it.id == conflictId } }
-        return true
-    }
 }

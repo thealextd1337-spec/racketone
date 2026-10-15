@@ -107,6 +107,11 @@ des arm64-Slices, Lauf auf echter Uhr.
 
 ## Feldtest Ping-Pong Phone ↔ Wear OS (Android)
 
+> **Stand W1-I (2026-10-15):** Auf dem Handy ist der Ping-Pong-Screen ersetzt durch eine reine **Anzeige des
+> Session-Links** (Launcher „Advantly Link-Debug“: Zustand, Gegenstellen, ausstehend, letzter Abgleich, Link-Zähler).
+> Ein eigener zweiter Link hätte Nachrichten und Acks der Match-Session gestört. Die Ping-Pong-Messung unten ist damit
+> nur noch mit älteren Builds möglich; der Ersatz ist der Feldtest „Sofort-Sync Uhr → Handy“ weiter unten.
+
 ### Vorbereitung
 1. **Beide APKs aus derselben Build-Umgebung** (gleicher Debug-Keystore `~/.android/debug.keystore`): Die Data Layer verbindet nur Apps mit
    gleicher `applicationId` (`eu.advantly`) **und** gleicher Signatur. Am einfachsten beide aus einem Lauf:
@@ -139,6 +144,24 @@ Notieren je Gerätepaar: Gesendet, Bestätigt, Pongs, Verloren, Wiederholungen, 
 |---|---|---|---|---|---|---|
 | Pixel ↔ Pixel Watch | 2 | | | | | |
 | Pixel ↔ Galaxy Watch | 2 | | | | | |
+
+## Feldtest Sofort-Sync Uhr → Handy, auch ohne laufende App (Android, W1-I)
+
+Prüft das Sofort-Backup (00 „Sync Zähler → Handy“): Das Handy speichert Events der zählenden Uhr auch, wenn keine
+Activity läuft – die Session startet im `Application`-Scope, Nachrichten weckt der manifestregistrierte
+`PhoneSyncListenerService` (Pfade `/advantly/link…`). Vorbereitung wie oben (gleiche Signatur, beide Debug-APKs).
+
+| # | Test | Erwartung |
+|---|---|---|
+| 1 | Handy-App öffnen, Match mit „Meine Uhr“ starten, 3 Punkte an der Uhr | Handy zeigt „Anzeige · Es zählt: Uhr von …“, Stand live |
+| 2 | Handy-App in den Hintergrund (Home), 5 Punkte an der Uhr, App wieder öffnen | Stand sofort aktuell, keine Lücke |
+| 3 | Handy-App per „Zuletzt verwendet“ wegwischen, 5 Punkte an der Uhr, ~10 s warten, dann **Flugmodus am Handy**, App öffnen | Stand enthält alle Punkte (gespeichert, bevor das Handy offline ging) |
+| 4 | App in den Hintergrund, `adb shell am kill eu.advantly` (Prozess beendet wie bei Speicherdruck), 3 Punkte an der Uhr, `adb shell pidof eu.advantly` | Prozess läuft wieder (vom Service gestartet); App öffnen → Stand vollständig |
+| 5 | Wie 3, aber Uhr währenddessen außer Reichweite, dann zurück | Uhr zeigt „N ausstehend“, nach Rückkehr „synchron“; Handy vollständig |
+| 6 | „Advantly Link-Debug“ öffnen | Zustand „Verbunden“, Ausstehend 0, Zähler steigen bei Punkten (nur Anzeige, kein eigener Link) |
+
+Hinweis: Nicht `am force-stop` verwenden – danach stellt Android der App bis zum nächsten manuellen Start **keine**
+Service-Starts zu (Systemregel „stopped state“); das ist erwartet und kein Fehler.
 
 ## Apple-Teil – ausstehend bis Apple-Account
 - Code steht: `WatchConnectivityTransport` (Kotlin), `LinkDebugView` in iOS-App (Tab „Link-Debug“, nur DEBUG) und Watch-App
