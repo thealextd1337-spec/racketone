@@ -9,6 +9,8 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.CorrectionKind
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
@@ -17,10 +19,13 @@ import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
+import eu.advantly.match.session.PeerInfo
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ThreadGuard
 import eu.advantly.match.session.WallClock
+import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.random.Random
@@ -203,6 +208,8 @@ class WatchScoringTest {
         val broken = WatchScoring({ error("disk I/O error") })
         assertFalse(broken.isAvailable())
         assertNull(broken.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true))
+        assertEquals("STORE_READ", broken.lastError())
+        assertNull(broken.startConfiguredMatch("TENNIS_OPEN", true, false, 0, true, "bea", "", "", "SELF"))
         assertEquals("STORE_READ", broken.lastError())
         assertNull(broken.restore())
         assertEquals("STORE_READ", broken.lastError())
@@ -658,6 +665,286 @@ class WatchScoringTest {
         val second = assertNotNull(rig.watchSession.state.value.match)
         val fresh = second.lineup.a.drop(1) + second.lineup.b
         assertTrue(fresh.none { it in slots })
+    }
+
+    @Test
+    fun removeSidePointAcrossSetBoundaryAndRedo() {
+        val rig = Rig()
+        rig.watch.startConfiguredMatch("TENNIS_OPEN", false, false, 1, true, "", "", "", "SELF")
+        val end = assertNotNull(rig.points("A".repeat(8)))
+        assertTrue(end.pendingDecision)
+        assertTrue(end.canRemovePointA)
+        assertFalse(end.canRemovePointB)
+        assertNull(rig.watch.removeLastPointOf(false))
+        val next = assertNotNull(rig.watch.startNextSet("REGULAR"))
+        assertEquals(1, next.setIndex)
+        rig.points("B")
+        val removed = assertNotNull(rig.watch.removeLastPointOf(true))
+        assertEquals(0, removed.setIndex)
+        assertEquals("40", removed.pointsA)
+        assertEquals("15", removed.pointsB)
+        assertTrue(removed.canRedo)
+        val restored = assertNotNull(rig.watch.redo())
+        assertEquals(1, restored.setIndex)
+        assertEquals("15", restored.pointsB)
+    }
+
+    @Test
+    fun serveInfoValidationUpdatesAndDeletionPreserveRedo() {
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_OPEN", false, true, false)
+        val us = assertNotNull(rig.watch.point(true))
+        assertTrue(us.serveInfoEnabled)
+        assertEquals("A", us.lastPointSide)
+        assertEquals("A", us.lastPointServingSide)
+        assertFalse(us.doubleFaultAllowed)
+        assertTrue(us.lastPointId.isNotEmpty())
+        assertEquals(us.server, us.lastPointServer)
+        assertNull(rig.watch.setServeInfo(us.lastPointId, "DOUBLE_FAULT"))
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertEquals("FIRST_SERVE_IN", assertNotNull(rig.watch.setServeInfo(us.lastPointId, "FIRST_SERVE_IN")).lastPointServe)
+        val them = assertNotNull(rig.watch.point(false))
+        assertTrue(them.doubleFaultAllowed)
+        assertEquals("DOUBLE_FAULT", assertNotNull(rig.watch.setServeInfo(them.lastPointId, "DOUBLE_FAULT")).lastPointServe)
+        rig.watch.undo()
+        assertTrue(assertNotNull(rig.watch.snapshot()).canRedo)
+        assertTrue(assertNotNull(rig.watch.setServeInfo(us.lastPointId, "SECOND_SERVE_IN")).canRedo)
+        assertEquals("", assertNotNull(rig.watch.setServeInfo(us.lastPointId, "")).lastPointServe)
+        assertNotNull(rig.watch.redo())
+        assertNull(rig.watch.setServeInfo("missing", "FIRST_SERVE_IN"))
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertNull(rig.watch.setServeInfo(us.lastPointId, "bad-code"))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+    }
+
+    @Test
+    fun setupChoiceIsNotAskedAgainButCorrectionReopensItAfterRestart() {
+        val rig = Rig()
+        val start = assertNotNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 1, true, "", "", "", "PARTNER"))
+        assertEquals(1, start.serverChoiceGame)
+        assertEquals(4, start.serverChoicePlayers.size)
+        assertEquals("", start.serverChoiceChosen)
+        assertFalse(start.serverChoicePrompt)
+        assertEquals(2, start.serverNo)
+        assertTrue(
+            rig.watchData.events
+                .eventsFor(start.matchId)
+                .none { it.type == "ServerChosen" },
+        )
+        val initialOther = start.serverChoicePlayers.first { it.side == "B" }
+        assertTrue(rig.watchSession.correct(Correction(CorrectionKind.SERVER, player = PlayerId(initialOther.id))))
+        assertFalse(assertNotNull(rig.watch.snapshot()).serverChoicePrompt)
+        // Erst eine ausdrückliche Wahl im offenen Fenster wird nach Korrektur erneut erfragt.
+        rig.watch.chooseServer(start.server)
+        val other = start.serverChoicePlayers.first { it.side == "B" }
+        assertTrue(rig.watchSession.correct(Correction(CorrectionKind.SERVER, player = PlayerId(other.id))))
+        val corrected = assertNotNull(rig.watch.snapshot())
+        assertEquals("", corrected.serverChoiceChosen)
+        assertTrue(corrected.serverChoicePrompt)
+        rig.restartWatch()
+        val restored = assertNotNull(rig.watch.restore())
+        assertTrue(restored.serverChoicePrompt)
+        val chosen = assertNotNull(rig.watch.chooseServer(other.id))
+        assertEquals(other.id, chosen.serverChoiceChosen)
+        assertFalse(chosen.serverChoicePrompt)
+        assertEquals(chosen.eventCount, assertNotNull(rig.watch.chooseServer(other.id)).eventCount)
+        rig.points("AAAA")
+        val second = assertNotNull(rig.watch.snapshot())
+        assertEquals(2, second.serverChoiceGame)
+        assertEquals(2, second.serverChoicePlayers.size)
+        assertTrue(second.serverChoicePrompt)
+        assertTrue(second.serverChoicePlayers.all { it.side == second.serverChoiceSide })
+        rig.points("AAAA")
+        val next = assertNotNull(rig.watch.startNextSet("REGULAR"))
+        assertEquals(1, next.serverChoiceGame)
+        assertTrue(next.serverChoicePrompt)
+        assertEquals(4, next.serverChoicePlayers.size)
+    }
+
+    @Test
+    fun nextSetOptionsAreSportSpecificAndTiebreaksHaveBracketData() {
+        for ((kind, points) in listOf("TIEBREAK_7" to 7, "MATCH_TIEBREAK_10" to 10)) {
+            val rig = Rig()
+            rig.watch.startConfiguredMatch("PADEL_OPEN", true, false, 1, true, "", "", "", "SELF")
+            val end = assertNotNull(rig.points("A".repeat(8)))
+            assertEquals(listOf("REGULAR", "TIEBREAK_7", "MATCH_TIEBREAK_10"), end.nextSetOptions)
+            assertEquals("MATCH_TIEBREAK", assertNotNull(rig.watch.startNextSet(kind)).setKind)
+            val tb = assertNotNull(rig.points("B".repeat(points)))
+            assertEquals(listOf("REGULAR", "MATCH_TIEBREAK"), tb.setKinds)
+            assertEquals(points, tb.setScoresB.last())
+            assertTrue(assertNotNull(rig.watch.end()).matchFinished)
+        }
+        val rig = Rig()
+        rig.watch.startMatch("TABLE_TENNIS_OPEN", false, true, false)
+        val end = assertNotNull(rig.points("A".repeat(11)))
+        assertEquals(listOf("REGULAR"), end.nextSetOptions)
+        assertNull(rig.watch.startNextSet("TIEBREAK_7"))
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertNull(rig.watch.startNextSet("nonsense"))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+    }
+
+    @Test
+    fun configuredSetupUsesRecentPeopleAndFreshPlaceholdersAndRepeatsInOneCall() {
+        val rig = Rig()
+        val data = rig.watchData
+        data.players.addGuest(PlayerId("bea"), "Bea", 1)
+        data.players.addGuest(PlayerId("caro"), "Caro", 2)
+        data.settings.put("players.recentRemote", "caro,bea,caro")
+        assertEquals(listOf("caro", "bea"), rig.watch.recentPeople().map { it.id })
+        val first = assertNotNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 3, false, "bea", "caro", "", "PARTNER"))
+        val match = assertNotNull(rig.watchSession.state.value.match)
+        assertEquals(3, match.format.set?.gamesToWin)
+        assertEquals(3, match.format.set?.tiebreakAt)
+        assertEquals("bea", match.lineup.firstServer.value)
+        assertTrue(data.isPlaceholder(match.lineup.b[1]))
+        assertFalse(first.serveInfoEnabled)
+        val point = assertNotNull(rig.watch.point(true))
+        assertNull(rig.watch.setServeInfo(point.lastPointId, "FIRST_SERVE_IN"))
+        val last = assertNotNull(rig.watch.lastSetup())
+        assertEquals(3, last.gamesPerSet)
+        assertFalse(last.serveStats)
+        rig.watch.close()
+        rig.restartWatch()
+        val repeated = assertNotNull(rig.watch.startLastMatch(false))
+        val next = assertNotNull(rig.watchSession.state.value.match)
+        assertEquals(match.format, next.format)
+        assertEquals(match.lineup.a, next.lineup.a)
+        assertEquals(match.lineup.b.first(), next.lineup.b.first())
+        assertEquals("bea", next.lineup.firstServer.value)
+        assertTrue(next.lineup.b[1] != match.lineup.b[1])
+        assertFalse(repeated.serveInfoEnabled)
+        // Ein neues Setup übernimmt keine Personen stillschweigend aus dem letzten Match.
+        rig.watch.close()
+        rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 6, true, "", "", "", "SELF")
+        val blank = assertNotNull(rig.watchSession.state.value.match)
+        assertTrue((blank.lineup.a.drop(1) + blank.lineup.b).all(data::isPlaceholder))
+        assertEquals(listOf("caro", "bea"), rig.watch.recentPeople().map { it.id })
+    }
+
+    @Test
+    fun configuredSetupRejectsInvalidOptionsWithoutCreatingAMatch() {
+        val rig = Rig()
+        rig.watchData.players.addGuest(PlayerId("bea"), "Bea", 1)
+        rig.watchData.settings.put("players.recentRemote", "bea")
+        assertNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 3, true, "bea", "bea", "", "SELF"))
+        assertNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 3, true, "missing", "", "", "SELF"))
+        assertNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", false, false, 3, true, "", "", "", "PARTNER"))
+        assertNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", false, false, 7, true, "", "", "", "SELF"))
+        assertNull(rig.watch.startConfiguredMatch("TENNIS_TIEBREAK_ONLY_7", false, false, 6, true, "", "", "", "SELF"))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+        assertFalse(rig.watch.hasActiveMatch())
+        for (sport in listOf("TENNIS", "PADEL")) {
+            for (points in listOf(7, 10)) {
+                val snap =
+                    assertNotNull(
+                        rig.watch.startConfiguredMatch(
+                            "${sport}_TIEBREAK_ONLY_$points",
+                            sport == "PADEL",
+                            false,
+                            0,
+                            true,
+                            "",
+                            "",
+                            "",
+                            "SELF",
+                        ),
+                    )
+                assertEquals("MATCH_TIEBREAK", snap.setKind)
+                assertEquals(1, snap.bestOf)
+                assertTrue(assertNotNull(rig.points("A".repeat(points))).matchFinished)
+                rig.watch.close()
+            }
+        }
+    }
+
+    @Test
+    fun operationFieldsAndRemovalFollowOwnerPerspectiveAndRole() {
+        val rig = Rig()
+        val owner =
+            rig.watchData.players
+                .ensureSelf("Alex", 0) { PlayerId("owner") }
+                .id
+        rig.watchSession.create(Presets.TENNIS_OPEN.format(), Lineup(listOf(PlayerId("bea")), listOf(owner), PlayerId("bea")))
+        val point = assertNotNull(rig.watch.point(true))
+        assertTrue(point.perspectiveSwapped)
+        assertEquals("A", point.lastPointSide)
+        assertEquals("B", point.lastPointServingSide)
+        assertTrue(point.doubleFaultAllowed)
+        assertTrue(point.canRemovePointA)
+        assertFalse(point.canRemovePointB)
+        assertEquals("0", assertNotNull(rig.watch.removeLastPointOf(true)).pointsA)
+        rig.watchSession.create(
+            Presets.TENNIS_OPEN.format(),
+            Lineup(listOf(owner), listOf(PlayerId("bea")), owner),
+            scorer = ScorerChoice.Device(DeviceId("phone")),
+        )
+        assertNull(rig.watch.removeLastPointOf(true))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertNull(rig.watch.chooseServer("bea"))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertNull(rig.watch.setServeInfo("point", "FIRST_SERVE_IN"))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertFalse(assertNotNull(rig.watch.snapshot()).canRemovePointA)
+    }
+
+    @Test
+    fun unchangedGamesKeepShortSetPresetAndItsThreeAllTiebreak() {
+        for (games in listOf(0, 4)) {
+            val rig = Rig()
+            val preset = Presets.TENNIS_SHORT_SETS_3ALL
+            assertNotNull(rig.watch.startConfiguredMatch(preset.id, false, false, games, true, "", "", "", "SELF"))
+            assertEquals(
+                preset.format(Discipline.SINGLES),
+                rig.watchSession.state.value.match
+                    ?.format,
+            )
+            assertEquals(
+                3,
+                rig.watchSession.state.value.match
+                    ?.format
+                    ?.set
+                    ?.tiebreakAt,
+            )
+            rig.watch.close()
+            rig.watch.startLastMatch(false)
+            assertEquals(
+                preset.format(Discipline.SINGLES),
+                rig.watchSession.state.value.match
+                    ?.format,
+            )
+        }
+    }
+
+    @Test
+    fun versionMismatchReachesFacadeWithoutAnOpenMatch() {
+        for ((version, expected) in listOf(1 to "OTHER_DEVICE", 99 to "THIS_DEVICE")) {
+            val rig = Rig()
+            val peer = ReliableDeviceLink(rig.network.transport("incompatible"), rig.scheduler).apply { start() }
+            rig.settle()
+            peer.send("watch", SyncCodec.encode(Hello(DeviceId("peer"), PeerKind.PHONE, minV = version, v = version)))
+            rig.settle()
+            assertNull(rig.watch.snapshot())
+            assertEquals(expected, rig.watch.updateRequired())
+            peer.stop()
+        }
+    }
+
+    @Test
+    fun versionMismatchHasFlatUpdateCodesWithAndWithoutMatch() {
+        val rig = Rig()
+        val sync = rig.watchSession.state.value.sync
+        assertEquals("", rig.watch.updateRequired())
+        for ((compatibility, code) in listOf(
+            CompatibilityStatus.PEER_TOO_OLD to "OTHER_DEVICE",
+            CompatibilityStatus.PEER_TOO_NEW to "THIS_DEVICE",
+        )) {
+            val mismatch = sync.copy(peers = listOf(PeerInfo("phone", DeviceId("phone"), PeerKind.PHONE, compatibility)))
+            assertEquals(code, updateCode(mismatch))
+            rig.watch.startMatch("TENNIS_OPEN", false, true, false)
+            val match = assertNotNull(rig.watchSession.state.value.match)
+            assertEquals(code, buildSnapshot(match, mismatch, 0).updateRequired)
+        }
     }
 
     private fun phoneDataOf(rig: Rig): LocalData = rig.phoneData

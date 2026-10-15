@@ -2,11 +2,13 @@ package eu.advantly.umbrella.watch
 
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchMode
+import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
@@ -18,12 +20,17 @@ import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
 import eu.advantly.data.freshPlaceholders
+import eu.advantly.data.recentPeople
+import eu.advantly.data.toScoreEventOrNull
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.IdGenerator
 import eu.advantly.match.session.MatchSession
@@ -36,6 +43,7 @@ import eu.advantly.match.session.SyncIndicator
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.match.session.SystemWallClock
 import eu.advantly.match.session.WallClock
+import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.SyncCodec
 
 /**
@@ -85,6 +93,7 @@ class WatchScoring internal constructor(
     private var current: SessionState? = null
     private var lastOpenId: String? = null
     private var scorerLostAtMs: Long = 0
+    private var openingChoiceCache: Pair<Pair<MatchId, Int>, Boolean>? = null
 
     private val sessionListener = SessionListener { state -> onState(state) }
 
@@ -101,9 +110,11 @@ class WatchScoring internal constructor(
      * - `STORE_WRITE`: Speichern/Senden fehlgeschlagen – Zustand unverändert, derselbe Befehl kann wiederholt werden
      * - `STORE_READ`: Datenbank nicht lesbar (z. B. veraltetes Schema) – Zeiger auf das Match bleibt erhalten
      * - `LOG_INVALID`: gemerktes Match nicht (mehr) vorhanden oder nicht auswertbar – Zeiger wird verworfen
-     * - `INVALID_INPUT`: unbekanntes Preset, falsche Disziplin oder ungültiges Format
+     * - `INVALID_INPUT`: unbekanntes Preset, falsche Disziplin/Formatoption, unzulässige/doppelte Setup-Person,
+     *   leerer Spieler-/Punkt-Schlüssel oder unbekannter Aufschlag-/Satzart-Code
      * - `NOT_SCORER`: dieses Gerät ist Anzeige, ein anderes Gerät zählt
-     * - `NOT_ALLOWED`: Befehl passt nicht zum Zustand (z. B. Punkt im Satzende-Dialog, nichts rückgängig zu machen)
+     * - `NOT_ALLOWED`: Befehl passt nicht zum Zustand (kein Punkt zum Abziehen, geschlossenes Wahlfenster,
+     *   Punkt im Satzende-Dialog, nichts rückgängig zu machen, unzulässiger Doppelfehler oder Statistik ausgeschaltet)
      * - `NO_MATCH`: kein Match geöffnet
      * - `THREAD_VIOLATION`: Aufruf außerhalb des Session-/Main-Threads; Programmierfehler, kein Speicherfehler
      */
@@ -158,9 +169,109 @@ class WatchScoring internal constructor(
     /** Letzte Auswahl für „Wie letztes Mal“ oder `null`. */
     fun lastSetup(): WatchMatchSetup? {
         val parts = setting(KEY_LAST_SETUP)?.split(';') ?: return null
-        if (parts.size != 3) return null
+        if (parts.size != 3 && parts.size != 5) return null
         val preset = Presets.byId(parts[0]) ?: return null
-        return WatchMatchSetup(preset.id, preset.sport.name, parts[1] == "1", parts[2] == "1")
+        return WatchMatchSetup(
+            preset.id,
+            preset.sport.name,
+            parts[1] == "1",
+            parts[2] == "1",
+            parts.getOrNull(3)?.toIntOrNull() ?: 0,
+            parts.getOrNull(4) != "0",
+        )
+    }
+
+    /** Zuletzt gespielte Personen: Handy-Verzeichnis zuerst, lokale Historie danach; keine Platzhalter/Self. */
+    fun recentPeople(): List<WatchPlayer> {
+        error = ""
+        val b = backend() ?: return emptyList()
+        return call(STORE_READ) {
+            val remote =
+                b.data.settings
+                    .get("players.recentRemote")
+                    .orEmpty()
+                    .split(',')
+                    .filter { it.isNotBlank() }
+            (remote.mapNotNull { b.data.players.get(PlayerId(it)) } + b.data.recentPeople())
+                .filterNot { b.data.isSelf(it.id) || b.data.isPlaceholder(it.id) }
+                .distinctBy { it.id }
+                .take(24)
+                .map { WatchPlayer(it.id.value, it.displayName, "", 0, false) }
+        }.orEmpty()
+    }
+
+    /** Versionshinweis auch ohne offenes Match: THIS_DEVICE / OTHER_DEVICE / leer (kompatibel oder unbekannt). */
+    fun updateRequired(): String {
+        backend() ?: return ""
+        return updateCode(current?.sync)
+    }
+
+    /**
+     * Neues Setup mit expliziten Plätzen. Leere Personen-IDs sind frische Platzhalter (F20), niemals neue Gäste.
+     * [gamesPerSet] = 0 behält das Preset, sonst 1…6 (Tennis zusätzlich 8/10); bei Nur-Tiebreak nur 0.
+     * [firstServerSlot] = SELF / PARTNER / OPPONENT_1 / OPPONENT_2; unbesetzte Plätze sind ebenfalls wählbar.
+     * Unbekannte/mehrfach belegte Personen, Einzel mit Doppelplätzen oder ungültige Optionen → INVALID_INPUT, kein Match.
+     */
+    fun startConfiguredMatch(
+        presetId: String,
+        doubles: Boolean,
+        watchWorkout: Boolean,
+        gamesPerSet: Int,
+        serveStats: Boolean,
+        partnerId: String,
+        opponent1Id: String,
+        opponent2Id: String,
+        firstServerSlot: String,
+    ): WatchScoreSnapshot? {
+        error = ""
+        val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
+        val discipline = if (doubles) Discipline.DOUBLES else Discipline.SINGLES
+        if (discipline !in preset.disciplines) return fail(INVALID_INPUT)
+        val format = configuredFormat(preset.format(discipline), gamesPerSet) ?: return fail(INVALID_INPUT)
+        if (!doubles && (partnerId.isNotEmpty() || opponent2Id.isNotEmpty())) return fail(INVALID_INPUT)
+        val selected = listOf(partnerId, opponent1Id, opponent2Id).filter { it.isNotEmpty() }
+        if (selected.distinct().size != selected.size) return fail(INVALID_INPUT)
+        val b = backend() ?: return fail(STORE_READ)
+        if (selected.isNotEmpty()) {
+            val people = recentPeople()
+            if (error.isNotEmpty()) return null
+            if (selected.any { id -> people.none { it.id == id } }) return fail(INVALID_INPUT)
+        }
+        val slots = if (doubles) listOf("SELF", "PARTNER", "OPPONENT_1", "OPPONENT_2") else listOf("SELF", "OPPONENT_1")
+        if (firstServerSlot !in slots) return fail(INVALID_INPUT)
+        val lineup =
+            call {
+                val now = clock.nowMs()
+                val self =
+                    b.data.players
+                        .ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }
+                        .id
+
+                fun person(id: String) = if (id.isEmpty()) Placeholders.id(ids.newUuid7(now).value) else PlayerId(id)
+                val a = listOf(self) + if (doubles) listOf(person(partnerId)) else emptyList()
+                val opponents = listOf(person(opponent1Id)) + if (doubles) listOf(person(opponent2Id)) else emptyList()
+                val people = (a + opponents)
+                Lineup(a, opponents, people[slots.indexOf(firstServerSlot)])
+            } ?: return null
+        val weServeFirst = firstServerSlot == "SELF" || firstServerSlot == "PARTNER"
+        val result = begin(format, weServeFirst, ScorerChoice.ThisDevice, watchWorkout, serveStats, lineup) ?: return null
+        putSetting(
+            KEY_LAST_SETUP,
+            listOf(preset.id, flag(doubles), flag(weServeFirst), gamesPerSet.toString(), flag(serveStats)).joinToString(";"),
+        )
+        return result
+    }
+
+    /** Ein Tipp: letzte Formatoptionen und Besetzung erneut verwenden; unbesetzte Plätze bekommen frische IDs. */
+    fun startLastMatch(watchWorkout: Boolean): WatchScoreSnapshot? {
+        error = ""
+        val last = lastSetup() ?: return fail(INVALID_INPUT)
+        val preset = Presets.byId(last.presetId) ?: return fail(INVALID_INPUT)
+        val discipline = if (last.doubles) Discipline.DOUBLES else Discipline.SINGLES
+        val format = configuredFormat(preset.format(discipline), last.gamesPerSet) ?: return fail(INVALID_INPUT)
+        val b = backend() ?: return fail(STORE_READ)
+        val lineup = call { lineupFor(b.data, format, last.weServeFirst, preserveFirstServer = true) } ?: return null
+        return begin(format, last.weServeFirst, ScorerChoice.ThisDevice, watchWorkout, last.serveStats, lineup)
     }
 
     // --- Lebenszyklus ---------------------------------------------------------------------------------------------
@@ -269,6 +380,33 @@ class WatchScoring internal constructor(
             val us = usSide(m)
             session.recordPoint(if (sideA) us else us.other)
         }
+
+    /** Letzten wirksamen Punkt dieser Besitzer-Seite abziehen; NOT_ALLOWED ohne Punkt, NOT_SCORER als Anzeige. */
+    fun removeLastPointOf(sideA: Boolean): WatchScoreSnapshot? =
+        command { session, m -> session.removeLastPointOf(if (sideA) usSide(m) else usSide(m).other) }
+
+    /** Aufschlag-Info setzen/ändern/löschen (value = leer); unbekannter Code/ID leer → INVALID_INPUT, sonst Session-Prüfung. */
+    fun setServeInfo(
+        pointId: String,
+        value: String,
+    ): WatchScoreSnapshot? {
+        if (pointId.isBlank() || (value.isNotEmpty() && ServeOutcome.entries.none { it.name == value })) {
+            return fail(INVALID_INPUT)
+        }
+        return command { session, _ -> session.setServeInfo(EventId(pointId), ServeOutcome.entries.firstOrNull { it.name == value }) }
+    }
+
+    /** Spieler-ID aus serverChoicePlayers; leer → INVALID_INPUT, außerhalb des Wahlfensters → NOT_ALLOWED. */
+    fun chooseServer(playerId: String): WatchScoreSnapshot? {
+        if (playerId.isBlank()) return fail(INVALID_INPUT)
+        return command { session, _ -> session.chooseServer(PlayerId(playerId)) }
+    }
+
+    /** Satzart aus nextSetOptions; unbekannter Code → INVALID_INPUT, nicht angebotene Art → NOT_ALLOWED. */
+    fun startNextSet(kind: String): WatchScoreSnapshot? {
+        val option = NextSetKind.entries.firstOrNull { it.name == kind } ?: return fail(INVALID_INPUT)
+        return command { session, m -> option in m.nextSetOptions && session.startNextSet(option) }
+    }
 
     /** Macht das letzte wirksame Zähl-Event rückgängig (auch über Satz- und Matchende hinweg). */
     fun undo(): WatchScoreSnapshot? = command { session, m -> m.canUndo && session.undo() }
@@ -399,7 +537,58 @@ class WatchScoring internal constructor(
             } catch (e: Exception) {
                 null
             } ?: sync.pendingToPeers
-        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending, current?.droppedInputs?.count ?: 0)
+        var players = emptyList<WatchPlayer>()
+        var prompt = false
+        val data = backend?.data
+        val us = usSide(match)
+        val choice = match.serverChoice
+        if (data != null && choice != null) {
+            try {
+                players =
+                    choice.players.map { id ->
+                        val side = match.lineup.sideOf(id)!!
+                        WatchPlayer(
+                            id.value,
+                            data.players
+                                .get(id)
+                                ?.displayName
+                                .orEmpty()
+                                .takeUnless { data.isPlaceholder(id) }
+                                .orEmpty(),
+                            if (side == us) "A" else "B",
+                            match.lineup.players(side).indexOf(id) + 1,
+                            data.isSelf(id),
+                        )
+                    }
+                // Nach Korrektur aufgehobene Wahl auch im ersten Satz erneut anbieten; aus dem Log rekonstruieren.
+                val opening = choice.game == 1 && match.state.sets.isEmpty()
+                val made = opening && choice.chosen == null && openingChoiceMade(match, data)
+                prompt = match.isScorer && choice.chosen == null && (!opening || made)
+            } catch (e: Exception) {
+                // Optionales Personenverzeichnis darf den vorhandenen Spielstand nicht verschwinden lassen.
+            }
+        }
+        return buildSnapshot(match, sync, scorerLostAtMs, us, pending, current?.droppedInputs?.count ?: 0, players, prompt)
+    }
+
+    private fun openingChoiceMade(
+        match: ActiveMatch,
+        data: LocalData,
+    ): Boolean {
+        val key = match.id to match.eventCount
+        openingChoiceCache?.takeIf { it.first == key }?.let { return it.second }
+        val made =
+            data.events
+                .eventsFor(match.id.value)
+                .filter { it.type == "ServerChosen" }
+                .mapNotNull { it.toScoreEventOrNull() }
+                .any { event ->
+                    val chosen = event.payload as? ServerChosen
+                    chosen?.set == match.state.current?.setIndex &&
+                        event.id !in match.state.ignoredEvents && event.id !in match.state.rejectedByRole
+                }
+        openingChoiceCache = key to made
+        return made
     }
 
     private fun begin(
@@ -407,16 +596,18 @@ class WatchScoring internal constructor(
         weServeFirst: Boolean,
         scorer: ScorerChoice,
         watchWorkout: Boolean,
+        serveStats: Boolean = true,
+        selectedLineup: Lineup? = null,
     ): WatchScoreSnapshot? {
         val b = backend() ?: return fail(STORE_READ)
         val lineup =
             try {
-                lineupFor(b.data, format, weServeFirst)
+                selectedLineup ?: lineupFor(b.data, format, weServeFirst)
             } catch (e: Exception) {
                 return fail(STORE_WRITE)
             }
         try {
-            b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout), scorer)
+            b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout, serveStats = serveStats), scorer)
         } catch (e: SessionThreadViolation) {
             return fail(THREAD_VIOLATION)
         } catch (e: IllegalArgumentException) {
@@ -441,14 +632,17 @@ class WatchScoring internal constructor(
     }
 
     /** Führt [block] aus; SQLite-/Treiber-Ausnahmen dürfen nie über die Swift-Grenze laufen (→ `null`). */
-    private fun <T> call(block: () -> T): T? =
+    private fun <T> call(
+        errorCode: String = STORE_WRITE,
+        block: () -> T,
+    ): T? =
         try {
             block()
         } catch (e: SessionThreadViolation) {
             error = THREAD_VIOLATION
             null
         } catch (e: Exception) {
-            error = STORE_WRITE
+            error = errorCode
             null
         }
 
@@ -461,6 +655,7 @@ class WatchScoring internal constructor(
         data: LocalData,
         format: MatchFormat,
         weServeFirst: Boolean,
+        preserveFirstServer: Boolean = false,
     ): Lineup {
         val now = clock.nowMs()
         // jedes Mal frisch: nach dem ersten Hello kann die Session den Self des iPhones übernommen haben
@@ -476,7 +671,9 @@ class WatchScoring internal constructor(
                 val partner = (2..size).map { Placeholders.id(ids.newUuid7(now).value) }
                 (listOf(self) + partner) to (1..size).map { Placeholders.id(ids.newUuid7(now).value) }
             }
-        return data.freshPlaceholders(Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())) {
+        val lastServer = last?.firstServer?.let { if (data.isSelf(it)) self else it }
+        val first = lastServer?.takeIf { preserveFirstServer && it in a + b } ?: if (weServeFirst) a.first() else b.first()
+        return data.freshPlaceholders(Lineup(a, b, firstServer = first)) {
             PlayerId(ids.newUuid7(now).value)
         }
     }
@@ -538,6 +735,15 @@ class WatchScoring internal constructor(
                 openMode = format.match.mode == MatchMode.OPEN,
                 bestOf = format.match.bestOf ?: 0,
                 isDefault = isDefault,
+                gamesPerSet = format.set?.gamesToWin ?: 0,
+                tiebreakOnly =
+                    if (format.match.bestOf == 1 &&
+                        format.decidingSet is MatchTiebreakFormat
+                    ) {
+                        (format.decidingSet as? MatchTiebreakFormat)?.pointsToWin ?: 0
+                    } else {
+                        0
+                    },
             )
         }
     }
@@ -562,6 +768,8 @@ class WatchPreset(
     val openMode: Boolean,
     val bestOf: Int,
     val isDefault: Boolean,
+    val gamesPerSet: Int,
+    val tiebreakOnly: Int,
 )
 
 /** Letzte Auswahl für „Wie letztes Mal“. */
@@ -570,6 +778,17 @@ class WatchMatchSetup(
     val sport: String,
     val doubles: Boolean,
     val weServeFirst: Boolean,
+    val gamesPerSet: Int = 0,
+    val serveStats: Boolean = true,
+)
+
+/** Person oder stabiler Platz im Wahlfenster; leerer Name = lokalisierten Platznamen in Swift verwenden. */
+class WatchPlayer(
+    val id: String,
+    val displayName: String,
+    val side: String,
+    val number: Int,
+    val isSelf: Boolean,
 )
 
 /**
@@ -631,6 +850,22 @@ class WatchMatchSetup(
  *   ersten `Hello` übergibt es per `ScorerChanged` an diese Uhr; bis dahin zählt niemand
  * @property watchWorkout Wunsch „Workout auf meiner Uhr mitlaufen lassen“ aus `MatchMeta.watchWorkout`
  * @property perspectiveSwapped der Besitzer steht in der Engine auf Side B; die Facade hat die Seiten gedreht
+ * @property lastPointId letzter wirksamer Ballwechsel, leer ohne Punkt; Ziel für setServeInfo (auch nach Satzende)
+ * @property lastPointSide Gewinner des letzten Punkts aus Besitzerperspektive (A/B/leer)
+ * @property lastPointServingSide Aufschlagseite vor dem letzten Punkt (A/B/leer)
+ * @property lastPointServer stabile Spieler-/Platz-ID des Aufschlägers vor diesem Punkt (sonst leer)
+ * @property lastPointServe FIRST_SERVE_IN / SECOND_SERVE_IN / DOUBLE_FAULT / leer (= unbekannt)
+ * @property serveInfoEnabled Tennis/Padel und MatchMeta.serveStats; die UI begrenzt zusätzlich auf Zähler und aktive Anzeige
+ * @property doubleFaultAllowed der letzte Punkt ging an die Rückschlagseite
+ * @property canRemovePointA Zähler und wirksamer Punkt von uns vorhanden (B entsprechend für Gegner)
+ * @property serverChoiceGame 1/2 im offenen Wahlfenster, sonst 0; nicht blockierend
+ * @property serverChoiceSide Vorschlag für die Aufschlagseite (A/B/leer); Game 1 erlaubt auch das andere Team
+ * @property serverChoiceChosen gewählte Spieler-ID oder leer; eine Korrektur kann sie wieder aufheben
+ * @property serverChoicePlayers flache Optionen mit Namen, Besitzer-Seite und stabiler Teamnummer
+ * @property serverChoicePrompt noch zu fragen; Setup-Wahl in Game 1/Satz 1 wird nicht wiederholt, nach Korrektur schon
+ * @property nextSetOptions REGULAR / TIEBREAK_7 / MATCH_TIEBREAK_10, nur bei AWAITING_DECISION
+ * @property updateRequired THIS_DEVICE (Uhr aktualisieren), OTHER_DEVICE (Handy aktualisieren) oder leer
+ * @property setKinds Art je abgeschlossenem Satz, insbesondere MATCH_TIEBREAK für die Klammer-Anzeige [7:5]
  */
 class WatchScoreSnapshot(
     val matchId: String,
@@ -699,6 +934,23 @@ class WatchScoreSnapshot(
     val watchWorkout: Boolean,
     val perspectiveSwapped: Boolean,
     val droppedInputs: Int = 0,
+    val lastPointId: String = "",
+    val lastPointSide: String = "",
+    val lastPointServingSide: String = "",
+    val lastPointServer: String = "",
+    val lastPointServe: String = "",
+    val serveInfoEnabled: Boolean = false,
+    val doubleFaultAllowed: Boolean = false,
+    val canRemovePointA: Boolean = false,
+    val canRemovePointB: Boolean = false,
+    val serverChoiceGame: Int = 0,
+    val serverChoiceSide: String = "",
+    val serverChoiceChosen: String = "",
+    val serverChoicePlayers: List<WatchPlayer> = emptyList(),
+    val serverChoicePrompt: Boolean = false,
+    val nextSetOptions: List<String> = emptyList(),
+    val updateRequired: String = "",
+    val setKinds: List<String> = emptyList(),
 )
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
@@ -748,6 +1000,8 @@ internal fun buildSnapshot(
     us: Side = Side.A,
     pendingToPeers: Int = sync.pendingToPeers,
     droppedInputs: Int = 0,
+    serverChoicePlayers: List<WatchPlayer> = emptyList(),
+    serverChoicePrompt: Boolean = false,
 ): WatchScoreSnapshot {
     val them = us.other
 
@@ -866,5 +1120,70 @@ internal fun buildSnapshot(
         watchWorkout = match.meta.watchWorkout,
         perspectiveSwapped = us == Side.B,
         droppedInputs = droppedInputs,
+        lastPointId =
+            match.lastPoint
+                ?.id
+                ?.value
+                .orEmpty(),
+        lastPointSide =
+            match.lastPoint
+                ?.side
+                ?.let(::code)
+                .orEmpty(),
+        lastPointServingSide =
+            match.lastPoint
+                ?.servingSide
+                ?.let(::code)
+                .orEmpty(),
+        lastPointServer =
+            match.lastPoint
+                ?.server
+                ?.value
+                .orEmpty(),
+        lastPointServe =
+            match.lastPoint
+                ?.serve
+                ?.name
+                .orEmpty(),
+        serveInfoEnabled = match.serveInfoEnabled,
+        doubleFaultAllowed = match.lastPoint?.doubleFaultAllowed == true,
+        canRemovePointA = match.canRemovePoint[us],
+        canRemovePointB = match.canRemovePoint[them],
+        serverChoiceGame = match.serverChoice?.game ?: 0,
+        serverChoiceSide =
+            match.serverChoice
+                ?.side
+                ?.let(::code)
+                .orEmpty(),
+        serverChoiceChosen =
+            match.serverChoice
+                ?.chosen
+                ?.value
+                .orEmpty(),
+        serverChoicePlayers = serverChoicePlayers,
+        serverChoicePrompt = serverChoicePrompt,
+        nextSetOptions = match.nextSetOptions.map { it.name },
+        updateRequired = updateCode(sync),
+        setKinds = sets.map { it.kind.name },
     )
 }
+
+/** Setup verändert nur die vorhandenen Presets; keine eigene Games-/Tiebreak-Regel in der Facade. */
+private fun configuredFormat(
+    format: MatchFormat,
+    games: Int,
+): MatchFormat? {
+    if (games == 0) return format
+    val tennisLike = format.sport == Sport.TENNIS || format.sport == Sport.PADEL
+    val onlyTiebreak = format.match.bestOf == 1 && format.decidingSet is MatchTiebreakFormat
+    if (!tennisLike || onlyTiebreak || (games !in 1..6 && !(format.sport == Sport.TENNIS && games in listOf(8, 10)))) return null
+    if (games == format.set?.gamesToWin) return format
+    return Presets.withGamesPerSet(format, games)
+}
+
+internal fun updateCode(sync: SyncStatus?): String =
+    when (sync?.versionMismatch) {
+        CompatibilityStatus.PEER_TOO_OLD -> "OTHER_DEVICE"
+        CompatibilityStatus.PEER_TOO_NEW -> "THIS_DEVICE"
+        CompatibilityStatus.COMPATIBLE, null -> ""
+    }

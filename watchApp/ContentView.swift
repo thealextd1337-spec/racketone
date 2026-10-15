@@ -5,6 +5,8 @@ import SwiftUI
 /// Ein laufendes Match wird nach dem App-Start aus dem Event-Log fortgesetzt.
 struct ContentView: View {
     @ObservedObject private var model = ScoringModel.shared
+    @Environment(\.isLuminanceReduced) private var dimmed
+    @Environment(\.scenePhase) private var scenePhase
     /// `onAppear` an der Group feuert bei jedem Wechsel des Inhalts erneut – Startlogik nur einmal je Prozess
     @State private var launched = false
     #if DEBUG
@@ -25,6 +27,13 @@ struct ContentView: View {
             } else {
                 StartView(model: model, debugInfo: debugInfo)
             }
+        }
+        .allowsHitTesting(!dimmed && scenePhase == .active)
+        .onChange(of: dimmed) { _, reduced in
+            if reduced { model.dismissServeBar() } else { model.didWake() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { model.dismissServeBar() }
         }
         .onAppear {
             guard !launched else { return }

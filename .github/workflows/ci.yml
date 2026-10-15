@@ -255,7 +255,7 @@ jobs:
             echo "::warning::Keine Metadata.appintents im Watch-Bundle – Action-Taste-Intents nicht registriert?"
           fi
       # W1-E: Watch-App je Etappe neu starten (nur Debug-Build): -advantlyDemoStage <etappe> baut den Zustand direkt
-      # (start, scoring, setend, matchend, display = Anzeige-Modus, ein anderes Gerät zählt)
+      # (start, scoring, servebar = Aufschlag-Leiste, setend, matchend, display = Anzeige-Modus, ein anderes Gerät zählt)
       # auf (offenes Tennis-Match) und bleibt dort; erst nach dem Marker "ADVANTLY_DEMO stage=<etappe> ready" aus dem
       # Log DIESES Starts wird fotografiert. EN und DE; eine fehlende Etappe (nach einem zweiten Versuch) lässt den Step
       # scheitern. Bilder + Logs im Artefakt watch-simulator-w1e, Marker im Summary.
@@ -295,7 +295,7 @@ jobs:
           for lang in en de; do
             locale=en_US
             if [ "$lang" = de ]; then locale=de_DE; fi
-            for stage in start scoring setend matchend display; do
+            for stage in start scoring servebar setend matchend display; do
               if ! shoot "$stage" "$lang" "$locale" 1 && ! shoot "$stage" "$lang" "$locale" 2; then
                 echo "::error::W1-E-Demo ($lang): Etappe $stage nicht erreicht"
                 missing="$missing $stage-$lang"
