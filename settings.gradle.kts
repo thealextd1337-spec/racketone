@@ -41,6 +41,8 @@ include(":shared:data")
 include(":shared:entitlements")
 // Match-Session: Orchestrierung Engine + Store + Geräte-Sync (ohne UI/DI)
 include(":shared:match-session")
+// Cloud-Sync (P2): Wire-DTOs, Ports, Outbox-Logik – Schnittstellenentwurf, noch von keinem Modul verwendet
+include(":shared:cloud-sync")
 // Präsentation
 include(":shared:presentation")
 include(":shared:ui-phone")
