@@ -16,6 +16,7 @@ Stand: 2026-10-15
 | Sync Zähler → Handy | Die zählende Uhr sendet **jedes Event sofort** ans gekoppelte Handy (Ack + Retry); ohne Verbindung lokal puffern und bei Wiederverbindung **sofort** nachliefern. Das Handy speichert alles dauerhaft (Backup, Grundlage für Übergabe und Cloud). Zähler zeigt „synchron / N ausstehend“, Anzeige-Geräte „Stand vor X s“ (Entscheidung 2026-10-15) |
 | Visitor & Zähler-Wahl (P2) | Visitor müssen **Freunde** sein, **keine Zustimmung** der Mitspieler. Ist der gewählte Zähler offline: **nie blockieren** – Starter zählt, automatische Übergabe bei Annahme (2026-10-15) |
 | Aliase | Jeder Nutzer bestimmt seinen **eigenen öffentlichen Alias**. **Keine privaten Spitznamen** für andere Nutzer; nur **Dummy-/Gastspieler** ohne App benennt der Anleger frei (2026-10-15) |
+| Dummyspieler zuweisen | Mitspieler ohne App werden als **Dummy-/Gastspieler** angelegt (gemischt mit App-Nutzern möglich, z. B. 2 + 2 im Doppel). Der **Erfasser** kann einen Dummy später einem echten Account (**Freund**) zuweisen, sobald die Person die App hat; die Zuweisung wirkt **sofort** für alle bisherigen Matches mit diesem Dummy, die Person wird benachrichtigt und kann mit **„War ich nicht“** widersprechen (löst die Verknüpfung) (2026-10-15) |
 | iOS-Builds | Cloud-CI (macOS-Runner) + TestFlight, Entwicklung unter Windows |
 | Vorgehen | Phasenweise: P1 Scoring offline (Handy + Wear OS + Apple Watch) → P2 Accounts/Freunde/Sync → P3 Statistik & Health → P4 Garmin |
 | Sprache | Deutsch + Englisch ab Start |

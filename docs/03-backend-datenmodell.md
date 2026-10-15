@@ -658,7 +658,7 @@ create table ops.revenuecat_events (
 create table ops.notification_outbox (
   id          bigint generated always as identity primary key,
   profile_id  uuid not null references public.profiles(id) on delete cascade,
-  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done | scorer_assigned | visitor_invited
+  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done | player_assigned | player_assignment_rejected | scorer_assigned | visitor_invited
   payload     jsonb not null,              -- nur IDs + Titel-Keys, keine Gesundheitsdaten
   created_at  timestamptz not null default now(),
   sent_at     timestamptz,
@@ -1127,7 +1127,8 @@ sequenceDiagram
 Regeln:
 - Token: 128 Bit zufällig, **einmalig**, 14 Tage gültig, widerrufbar; DB speichert nur `sha256`.
 - **Rückgängig machen:** Der Besitzer des Gasts kann einen Claim **14 Tage** lang zurücksetzen („Das ist nicht Max“) → `profile_id = null`, Teilnehmer und Statistik werden zurückgenommen. Schützt gegen weitergeleitete Links.
-- **Gast ist bereits Freund mit Account** (häufig nach P1): Besitzer stellt `player_link_request` („Dieser Gast ist Max“), Max bestätigt in der App → gleicher Ablauf wie Claim, ohne Link.
+- **Zuweisung durch den Erfasser (entschieden 2026-10-15):** Ist Max bereits **Freund** mit Account, weist der Besitzer des Dummys direkt zu (RPC `assign_player(player_id, profile_id)`, prüft Freundschaft `accepted` und Besitz `created_by`). Die Verknüpfung wirkt **sofort** wie ein Claim (`players.profile_id`, `match_participants.profile_id` für alle Matches des Dummys, `stat_key`), `assigned_at`/`assigned_by` werden gesetzt. Max erhält eine Benachrichtigung (`kind = 'player_assigned'`) und kann jederzeit **„War ich nicht“** wählen (RPC `reject_player_assignment`) → Verknüpfung, Teilnehmer und Statistik werden zurückgenommen, Besitzer wird benachrichtigt; eine erneute Zuweisung desselben Dummys an Max ist danach gesperrt. Keine vorherige Bestätigung nötig (ersetzt den früheren `player_link_request` mit Bestätigung).
+- Typischer Fall: Doppel mit 2 App-Nutzern + 2 Dummys; jeder Dummy kann später unabhängig zugewiesen werden.
 - **Mehrere Gast-Einträge derselben Person** bei verschiedenen Besitzern: Jeder Besitzer lädt separat ein bzw. stellt einen Link-Request. Keine automatische „Ist das du?“-Erkennung (Datenschutz, Fehlzuordnungen).
 - Konflikt: Max war im selben Match bereits mit Account eingetragen → Claim für dieses Match wird abgelehnt (Unique-Index `match_participants_profile_once`), restliche Matches werden übernommen; Meldung an Besitzer.
 - **Freundes-Einladung** (`kind = 'friend'`) für Personen ohne Gast-Eintrag: gleicher Link-Mechanismus, Ergebnis ist nur die Freundschaft.
