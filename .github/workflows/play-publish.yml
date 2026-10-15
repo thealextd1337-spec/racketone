@@ -1,0 +1,233 @@
+name: Google Play veröffentlichen (Phone + Wear)
+
+# Einrichtung und Grenzen: docs/release/veroeffentlichungsplan.md §6.
+# Bewusst kein automatischer Tag-Trigger: ein Tag allein gibt keinen Release frei.
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Zieltrack (alpha = geschlossener Pilot)
+        type: choice
+        options: [internal, alpha, production]
+        default: internal
+      rollout_percent:
+        description: Prozent (Tests 100; erster Produktionsrelease 100)
+        type: choice
+        options: ["5", "20", "50", "100"]
+        default: "100"
+      operation:
+        description: Neue AABs hochladen oder getestete versionCodes übernehmen
+        type: choice
+        options: [upload, promote]
+        default: upload
+      source_track:
+        description: Quelltrack bei promote (Ziel muss ein anderer sein)
+        type: choice
+        options: [internal, alpha]
+        default: internal
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advantly-play-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Signieren und veröffentlichen
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: android-release
+    env:
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_OPT_OUT_USAGE: "1"
+      TRACK: ${{ inputs.track }}
+      ROLLOUT_PERCENT: ${{ inputs.rollout_percent }}
+      OPERATION: ${{ inputs.operation }}
+      SOURCE_TRACK: ${{ inputs.source_track }}
+      PHONE_CLOSED_TRACK: ${{ vars.PLAY_PHONE_CLOSED_TRACK || 'alpha' }}
+      WEAR_CLOSED_TRACK: ${{ vars.PLAY_WEAR_CLOSED_TRACK || 'wear:alpha' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Version und Release-Notes prüfen
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, tomllib
+          properties = dict(re.findall(r'^(advantly\.(?:versionName|buildNumber))=(.+)$', pathlib.Path('gradle.properties').read_text(), re.M))
+          version = properties['advantly.versionName']
+          build = int(properties['advantly.buildNumber'])
+          assert re.fullmatch(r'\d+\.\d+\.\d+', version), 'versionName muss SemVer x.y.z sein'
+          assert 1 <= build <= 200_000_000
+          ref = os.environ['GITHUB_REF']
+          assert ref == 'refs/heads/main' or ref == f'refs/tags/v{version}', 'Nur main oder passender Release-Tag'
+          assert os.environ['TRACK'] in ('internal', 'alpha', 'production')
+          assert os.environ['OPERATION'] in ('upload', 'promote')
+          assert os.environ['SOURCE_TRACK'] in ('internal', 'alpha')
+          percent = int(os.environ['ROLLOUT_PERCENT'])
+          assert percent in (5, 20, 50, 100)
+          assert os.environ['TRACK'] == 'production' or percent == 100, 'Testtracks benötigen 100 %'
+          if os.environ['OPERATION'] == 'promote':
+              assert os.environ['TRACK'] != os.environ['SOURCE_TRACK'], 'Quelle und Ziel sind gleich'
+          for locale in ('de-DE', 'en-US'):
+              notes = pathlib.Path(f'docs/release/notes/{version}/{locale}.txt').read_text(encoding='utf-8').strip()
+              assert 0 < len(notes) <= 500, f'{locale}: 1–500 Zeichen erforderlich'
+          versions = tomllib.loads(pathlib.Path('gradle/libs.versions.toml').read_text())['versions']
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f"VERSION_NAME={version}\nBUILD_NUMBER={build}\nFASTLANE_VERSION={versions['fastlane']}\nRUBY_VERSION={versions['ruby']}\n")
+          PY
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+      - name: fastlane installieren
+        run: gem install fastlane --version "$FASTLANE_VERSION" --no-document
+      - name: Tests und Lint
+        run: ./gradlew check --no-configuration-cache
+      - name: Zugangsdaten im temporären Verzeichnis bereitstellen
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ADVANTLY_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_KEY_PASSWORD }}
+          PLAY_JSON: ${{ secrets.ADVANTLY_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD PLAY_JSON; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Secret fehlt: $name (Einrichtung siehe Veröffentlichungsplan §6)."
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/advantly-upload.jks"
+          printf '%s' "$PLAY_JSON" > "$RUNNER_TEMP/advantly-play.json"
+          echo "ADVANTLY_UPLOAD_KEYSTORE=$RUNNER_TEMP/advantly-upload.jks" >> "$GITHUB_ENV"
+          echo "PLAY_JSON_FILE=$RUNNER_TEMP/advantly-play.json" >> "$GITHUB_ENV"
+      - name: Signierte AABs bauen
+        if: inputs.operation == 'upload'
+        env:
+          ADVANTLY_UPLOAD_STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
+          ADVANTLY_UPLOAD_KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
+          ADVANTLY_UPLOAD_KEY_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew bundleAllRelease --no-configuration-cache
+      - name: Beide Signaturen prüfen
+        if: inputs.operation == 'upload'
+        run: |
+          set -euo pipefail
+          expected=$(keytool -list -keystore "$ADVANTLY_UPLOAD_KEYSTORE" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" -v | awk '/SHA256:/ {print $2; exit}')
+          test -n "$expected"
+          for aab in androidApp/build/outputs/bundle/release/androidApp-release.aab wearApp/build/outputs/bundle/release/wearApp-release.aab; do
+            jarsigner -verify "$aab" | grep -q 'jar verified'
+            actual=$(keytool -printcert -jarfile "$aab" | awk '/SHA256:/ {print $2; exit}')
+            test "$actual" = "$expected"
+          done
+        env:
+          STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
+      - name: AABs und Mappings sichern
+        if: inputs.operation == 'upload'
+        uses: actions/upload-artifact@v7
+        with:
+          name: advantly-play-${{ env.VERSION_NAME }}-${{ env.BUILD_NUMBER }}
+          path: |
+            androidApp/build/outputs/bundle/release/*.aab
+            wearApp/build/outputs/bundle/release/*.aab
+            androidApp/build/outputs/mapping/release/mapping.txt
+            wearApp/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Phone und Wear mit supply veröffentlichen
+        run: |
+          ruby - <<'RUBY'
+          require 'fastlane'
+          require 'supply'
+          require 'google/apis/androidpublisher_v3'
+          require 'googleauth'
+          require 'fileutils'
+          package = 'eu.advantly'
+          service = Google::Apis::AndroidpublisherV3::AndroidPublisherService.new
+          File.open(ENV.fetch('PLAY_JSON_FILE')) do |file|
+            service.authorization = Google::Auth::ServiceAccountCredentials.make_creds(
+              json_key_io: file, scope: 'https://www.googleapis.com/auth/androidpublisher')
+          end
+          edit = service.insert_edit(package, Google::Apis::AndroidpublisherV3::AppEdit.new)
+          begin
+            tracks = service.list_edit_tracks(package, edit.id).tracks || []
+            bundles = service.list_edit_bundles(package, edit.id).bundles || []
+          ensure
+            service.delete_edit(package, edit.id)
+          end
+          names = tracks.map(&:track)
+          resolve = lambda do |kind, wear|
+            candidates = case kind
+            when 'internal' then wear ? ['wear:internal', 'wear:qa'] : ['internal', 'qa']
+            when 'alpha' then [ENV.fetch(wear ? 'WEAR_CLOSED_TRACK' : 'PHONE_CLOSED_TRACK')]
+            when 'production' then [wear ? 'wear:production' : 'production']
+            else abort 'Unbekannter Track'
+            end
+            candidates.find { |name| names.include?(name) } || abort("Track fehlt: #{candidates.join(' / ')}; zuerst in der Console einrichten")
+          end
+          build = Integer(ENV.fetch('BUILD_NUMBER'))
+          percent = Integer(ENV.fetch('ROLLOUT_PERCENT'))
+          promoting = ENV.fetch('OPERATION') == 'promote'
+          # Vor beiden Änderungen alle Tracks und versionCodes prüfen.
+          jobs = [[false, 'androidApp', build * 10 + 1], [true, 'wearApp', build * 10 + 2]].map do |wear, mod, code|
+            target = resolve.call(ENV.fetch('TRACK'), wear)
+            current = tracks.find { |track| track.track == target }
+            if ENV.fetch('TRACK') == 'production' && percent < 100
+              abort "#{target}: erster Produktionsrelease muss 100 % sein" unless (current.releases || []).any? { |release| release.status == 'completed' }
+            end
+            abort "#{target}: laufenden Rollout zuerst in der Console abschließen/anhalten" if (current.releases || []).any? { |release| release.status == 'inProgress' }
+            source = promoting ? resolve.call(ENV.fetch('SOURCE_TRACK'), wear) : nil
+            if promoting
+              release = (tracks.find { |track| track.track == source }.releases || []).find do |item|
+                item.status == 'completed' && (item.version_codes || []).map(&:to_i).include?(code)
+              end
+              abort "#{source}: getesteter versionCode #{code} fehlt" unless release
+              abort "#{source}: Quellrelease muss ausschließlich versionCode #{code} enthalten" unless release.version_codes.map(&:to_i) == [code]
+            elsif bundles.any? { |bundle| bundle.version_code.to_i == code }
+              abort "versionCode #{code} schon vorhanden: promote nutzen oder Teilfehler in der Console beheben"
+            end
+            [mod, code, target, source]
+          end
+          jobs.each do |mod, code, target, source|
+            metadata = File.join(ENV.fetch('RUNNER_TEMP'), "play-metadata-#{code}")
+            ['de-DE', 'en-US'].each do |locale|
+              directory = File.join(metadata, locale, 'changelogs')
+              FileUtils.mkdir_p(directory)
+              FileUtils.cp("docs/release/notes/#{ENV.fetch('VERSION_NAME')}/#{locale}.txt", File.join(directory, "#{code}.txt"))
+            end
+            config = {
+              package_name: package, json_key: ENV.fetch('PLAY_JSON_FILE'),
+              metadata_path: metadata, version_code: code,
+              track: source || target, release_status: percent < 100 ? 'inProgress' : 'completed',
+              skip_upload_apk: true, skip_upload_metadata: true, skip_upload_images: true,
+              skip_upload_screenshots: true, skip_upload_changelogs: false,
+              changes_not_sent_for_review: false, rescue_changes_not_sent_for_review: false
+            }
+            if promoting
+              config.merge!(skip_upload_aab: true, track_promote_to: target,
+                track_promote_release_status: percent < 100 ? 'inProgress' : 'completed')
+            else
+              config[:aab] = "#{mod}/build/outputs/bundle/release/#{mod}-release.aab"
+            end
+            config[:rollout] = percent / 100.0 if percent < 100
+            Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options, config)
+            Supply::Uploader.new.perform_upload
+            File.open(ENV.fetch('GITHUB_STEP_SUMMARY'), 'a') do |summary|
+              summary.puts "#{target}: #{ENV.fetch('VERSION_NAME')} (#{code}), #{percent} %, #{ENV.fetch('OPERATION')} erfolgreich übergeben. Play-Prüfung separat kontrollieren."
+            end
+          end
+          RUBY
+      - name: Temporäre Schlüssel und Metadaten entfernen
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/advantly-upload.jks" "$RUNNER_TEMP/advantly-play.json"
+          rm -rf "$RUNNER_TEMP"/play-metadata-*

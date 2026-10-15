@@ -8,13 +8,13 @@ Menüpfade beziehen sich auf die deutschsprachige Console. Wenn ein Menüpunkt a
 1. App anlegen (§1) → 2. Upload-Key und AABs (§2, §3) → 3. Wear OS als Formfaktor (§4) → 4. Interner Test (§5)
 → 5. App-Inhalte und Erklärungen (§6) → 6. Store-Eintrag (§7) → 7. Geschlossener Test mit ≥ 12 Testern über 14 Tage (§8) → 8. Produktion.
 
-> **Wichtig zum aktuellen Stand:** Der Release-Build der Phone-App zeigt derzeit nur einen Platzhalter (Name, Slogan, Version),
-> die Wear-App ist noch der Spike-S5-Stand. Für den **internen Test** reicht das. Den **geschlossenen Test** erst starten, wenn
-> W1-C (Phone-App) und W1-E (Watch-App) gemergt sind. Geschlossene Tests durchlaufen die Play-Prüfung, und die 14 Tage sollen
-> mit der echten App laufen.
+> **Stand 15.10.2026:** Engine, Session/Sync, Phone-Assistent, Live-Score, Verlauf und Datenschutzlinks sind auf `main`.
+> Die Integration Phone ↔ Session und Wear ↔ Session sowie die Feldtests stehen noch aus. Danach zunächst intern über Play
+> installieren, den **geschlossenen Pilot** erst nach dem Android-P1-Teilgate starten. Gates, Zeitplan und Produktionsentscheidung:
+> [Veröffentlichungsplan](veroeffentlichungsplan.md). Geschlossene Tests durchlaufen die Play-Prüfung; die 14 Tage mit der echten App testen.
 >
 > **Freigabekriterium vor dem ersten Upload, auch für den internen Test:** Die Datenschutzerklärung muss in Handy- **und** Uhr-App
-> erreichbar sein (§6.1). Das ist derzeit noch offen und wird in einem anderen Arbeitspaket umgesetzt.
+> erreichbar sein (§6.1). Die Links sind umgesetzt; vor Upload in beiden tatsächlichen Release-Builds prüfen.
 
 ---
 
@@ -69,7 +69,7 @@ advantly.signing.file=H:/dev/keys/advantly-upload.properties
 Alternativ (CI) die Umgebungsvariablen `ADVANTLY_UPLOAD_KEYSTORE`, `ADVANTLY_UPLOAD_STORE_PASSWORD`, `ADVANTLY_UPLOAD_KEY_ALIAS`, `ADVANTLY_UPLOAD_KEY_PASSWORD` setzen.
 Ohne beides baut `release` **unsigniert**. Ist eine Konfiguration nur teilweise gesetzt, bricht der Build mit einer Meldung ab.
 
-1. [ ] `advantly.buildNumber` in `gradle.properties` erhöhen. Jeder Upload braucht einen neuen versionCode, auch im internen Test. Der erste Upload darf mit `1` laufen.
+1. [ ] `advantly.buildNumber` in `gradle.properties` für neue Binary-Uploads erhöhen, auch im internen Test. Der erste Upload darf mit `1` laufen; Promotion desselben vorhandenen Artefakts erhöht nichts ([Versionsführung](veroeffentlichungsplan.md#versionen-und-tags)).
 2. [ ] `gradlew.bat bundleAllRelease`
 3. [ ] Ergebnis:
    - Phone: `androidApp\build\outputs\bundle\release\androidApp-release.aab` (versionCode `buildNumber*10+1`, minSdk 28, targetSdk 36)
@@ -96,14 +96,14 @@ Laut Play-Hilfe und Wear-Doku [P2][P3]. Das sind zwei getrennte Schritte zu vers
 **4a. Formfaktor einrichten (jetzt, vor dem ersten Wear-Upload):**
 1. [ ] **Testen und veröffentlichen → Erweiterte Einstellungen → Formfaktoren → Formfaktor hinzufügen → Wear OS**.
 2. [ ] **Eigenen Release-Track für Wear OS verwenden** auswählen. Wear-AABs laufen dann über eigene Tracks („Wear OS only“), getrennt vom Smartphone-Track.
-3. [ ] Im Store-Eintrag mindestens **einen Wear-OS-Screenshot** hochladen [P3]: quadratisch, nur die App-UI, ohne Uhrengehäuse oder Maske.
+3. [ ] Im Store-Eintrag mindestens **einen Wear-OS-Screenshot** hochladen [P3]: quadratisch, mindestens 384 × 384 Pixel, nur die App-UI, ohne Uhrengehäuse, Transparenz oder Maske ([Assetregeln](https://support.google.com/googleplay/android-developer/answer/9866151)).
    Aufnehmen kannst du ihn z. B. mit `adb -s <uhr> exec-out screencap -p > wear.png`.
 4. [ ] Den Wear-AAB in einen Test-Track des Wear-Formfaktors hochladen (interner Test, §5).
 
 **4b. Wear-OS-Opt-in (später, erst im geschlossenen Test, §8):**
 5. [ ] Das Opt-in setzt einen Release im **geschlossenen** Test-Track voraus. Wörtlich: „Once you have a release in your closed testing track, you can opt in to Wear OS and agree to the review policy“ [P3].
    Dann **Erweiterte Einstellungen → Wear OS → Opt-in für Wear OS und Zustimmung zur Überprüfungsrichtlinie**. Danach prüft Google die Uhr-App gegen die Wear-OS-Qualitätsrichtlinien [P3].
-   Häufiger Ablehnungsgrund: **„Wear OS“ muss im Store-Eintrag vorkommen** (in §7 enthalten).
+   „Wear OS“ im Store-Text als verständliche Plattformangabe beibehalten (§7); die ausdrückliche Erwähnungspflicht wurde laut [Qualitätsrichtlinie/History](https://developer.android.com/docs/quality-guidelines/wear-app-quality) am 12.03.2026 entfernt. Der alte Hinweis in [P3] ist insoweit überholt.
 
 Technische Voraussetzungen (erfüllt): gleiches Package `eu.advantly`, eindeutige versionCodes je Formfaktor (…1/…2), `uses-feature android.hardware.type.watch` ohne `required=false`, Standalone-Metadaten [P3].
 Ziel-API: Seit 31.08.2026 brauchen neue Phone-Apps targetSdk ≥ 36, Wear-Apps ≥ 35 [P4]. Wir liegen bei 36/36.
@@ -214,7 +214,7 @@ Einordnung für Phase 1:
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
 
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
-Alle Apps auf Play müssen sie ausfüllen, auch für interne und geschlossene Tests [P10].
+Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch für geschlossene/offene Tests [P10]. Vor dem Pilot abschließen und bereits intern vorbereiten; die Quelle nennt interne Tests nicht ausdrücklich.
 Die Kategorie „Aktivität und Fitness“ umfasst ausdrücklich „tracking body vitals related to fitness (like heart rate)“ [P10].
 - [ ] Auswählen: **Gesundheit und Fitness → Aktivität und Fitness**. **Nicht** „Medizinisch“ und nicht „Medizinprodukt“.
 - [ ] Beschreibung (DE/EN, falls ein Feld kommt):
@@ -245,7 +245,7 @@ Typ `health` ist für Fitness-Apps gedacht, z. B. „an exercise app that tracks
 
 **Wachstum → Store-Präsenz → Haupt-Store-Eintrag.** Die Texte entsprechen der Website (Slogan „Jeder Punkt zählt. Am Handgelenk.“)
 und der Positionierung aus 06 §6 („gleichwertig auf Handy und Uhr“, „offline-fest“). Sie enthalten **keine Gesundheits- oder Leistungsversprechen**.
-Erwähnt ist nur, was es in Phase 1 gibt. Sportarten und Funktionen vor dem geschlossenen Test mit dem tatsächlichen Stand von W1-C/W1-E abgleichen.
+Erwähnt ist nur, was es in Phase 1 gibt. Sportarten und Funktionen vor dem geschlossenen Test mit dem tatsächlichen Android-P1-Integrationsstand aus PLAN abgleichen.
 
 | | Deutsch (de-DE, Standard) | Englisch (en-US) |
 |---|---|---|
@@ -256,7 +256,7 @@ Erwähnt ist nur, was es in Phase 1 gibt. Sportarten und Funktionen vor dem gesc
 ```
 Jeder Punkt zählt. Am Handgelenk.
 
-Advantly zählt dein Tennis-, Padel-, Pickleball-, Badminton- oder Tischtennis-Match – auf deiner Wear-OS-Uhr und deinem Android-Handy, gleichwertig und auch ohne Netz.
+Advantly zählt dein Tennis-, Padel-, Pickleball-, Badminton- oder Tischtennis-Match – auf deiner Wear-OS-Uhr oder deinem Android-Handy, auch ohne Netz. Ein Gerät zählt, die anderen zeigen den Stand.
 
 GEBAUT FÜR DEN PLATZ
 • Große Tap-Flächen und Vibration statt Hinsehen: eigenes Muster für „Wir“ und „Gegner“
@@ -268,7 +268,7 @@ ALLE REGELN, KORREKT
 Tiebreak, Match-Tiebreak, No-Ad, Golden und Star Point, Side-Out- und Rally-Scoring, Verlängerung im Badminton, Aufschlagwechsel im Tischtennis – Einzel und Doppel, inklusive Aufschlagreihenfolge.
 
 UHR UND HANDY
-Zähle auf der Uhr, auf dem Handy oder auf beiden gleichzeitig. Die Uhr-App funktioniert auch ohne Handy (Wear OS, Pixel Watch und Galaxy Watch ab Wear OS 5).
+Zähle auf der Uhr oder am Handy im Director-Modus. Genau ein Gerät zählt und führt Undo aus; weitere Geräte zeigen den Stand. Mit bestätigter Übergabe wechselst du das Zähler-Gerät. Die Uhr-App funktioniert auch ohne Handy (Wear OS, Pixel Watch und Galaxy Watch ab Wear OS 5).
 
 PULS IM BLICK
 Auf der Uhr siehst du während des Matches deine aktuelle Herzfrequenz. Advantly ist kein Medizinprodukt; die Anzeige dient nur deiner Information.
@@ -295,7 +295,7 @@ EVERY RULE, DONE RIGHT
 Tiebreak, match tiebreak, no-ad, golden and star point, side-out and rally scoring, extended games in badminton, service changes in table tennis – singles and doubles, including serving order.
 
 WATCH AND PHONE
-Score on your watch, on your phone or on both at once. The watch app also works without your phone (Wear OS, Pixel Watch and Galaxy Watch on Wear OS 5 or later).
+Score on your watch or on your phone in Director mode. One device keeps score and handles undo; other devices display the score. A confirmed handover changes the scoring device. The watch app also works without your phone (Wear OS, Pixel Watch and Galaxy Watch on Wear OS 5 or later).
 
 HEART RATE AT A GLANCE
 During the match your watch shows your current heart rate. Advantly is not a medical device; the display is for your information only.
@@ -327,8 +327,9 @@ Schritte:
 4. [ ] 14 Tage laufen lassen und Feedback sammeln (Test-Feedback-Kanal: E-Mail `alxpro@cakamper.at`).
 5. [ ] **Produktionszugriff beantragen.** Erst danach ist ein öffentlicher Release möglich.
 
-Offen bzw. beim Ausfüllen prüfen: Die Hilfe nennt keine eigene Regel je Formfaktor [P12]. Wahrscheinlich zählt die App insgesamt.
-Sicherer ist es trotzdem, Phone- **und** Wear-Track mit derselben Testerliste laufen zu lassen.
+Die Hilfe nennt keine zusätzliche Mindestzahl von zwölf Uhren [P12]. Phone- **und** Wear-Track mit derselben Testerliste laufen lassen und Geräteabdeckung gesondert nachweisen; maßgeblich ist der Produktionszugang im Dashboard.
+
+**Produktion:** Empfehlung nach P3-Gates, zuerst DACH. Der allererste Produktionsrelease ist **nicht prozentual staffelbar**; Prozentrollouts gelten erst für Updates ([Google-Regel](https://support.google.com/googleplay/android-developer/answer/6346149)). Gates und Staffelung: [Veröffentlichungsplan §2](veroeffentlichungsplan.md#2-stufen-und-gates).
 
 ## 9. CI: signierte AABs per GitHub Actions (vorbereitet)
 
@@ -354,8 +355,10 @@ Die Secrets sind **noch nicht angelegt**. Ohne sie bricht der Workflow sofort mi
 Das Repo ist öffentlich. Secrets sehen nur Workflows dieses Repos, nicht Forks oder Pull Requests aus Forks.
 Den Workflow starten können nur Personen mit Schreibrechten. Der Keystore wird nach dem Lauf vom Runner gelöscht.
 
+Optionaler API-Upload/Promotion beider Formfaktoren: `.github/workflows/play-publish.yml`. Service-Account, zusätzliche Secrets, Track-IDs und Versionsführung stehen im [Veröffentlichungsplan §6](veroeffentlichungsplan.md#6-upload-automatisierung-und-versionsführung); diese Checkliste bleibt der manuelle Uploadweg.
+
 ## 10. Vor jedem weiteren Upload
-- [ ] `advantly.buildNumber` erhöhen (Phone …1 und Wear …2 steigen automatisch mit)
+- [ ] Für neue Binary-Uploads `advantly.buildNumber` erhöhen (Phone …1 und Wear …2 steigen automatisch mit); bei Promotion desselben Artefakts unverändert lassen
 - [ ] `gradlew.bat check bundleAllRelease`
 - [ ] Ändern sich Berechtigungen, Datenflüsse oder Health-Typen: §6.6–6.8 und `site/app-datenschutz.html` / `site/en/app-privacy.html` anpassen (Kommentare „ÜBERARBEITEN vor Phase 2/3“).
 

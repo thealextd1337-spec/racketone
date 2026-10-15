@@ -1,0 +1,210 @@
+# Google Play: Veröffentlichungsplan für Advantly
+
+Stand und Webprüfung: **15. Oktober 2026**. Gilt für das private österreichische Entwicklerkonto und die bereits angelegte App `eu.advantly`, mit Android-Handy und Wear OS. Regeln sind mit offiziellen Quellen verlinkt; Zeitbudgets, Qualitätsziele und Reihenfolge sind unsere Release-Entscheidungen. Vor jeder Freigabe die Hinweise der Console erneut prüfen.
+
+**Empfehlung:** Nach den Android-Integrations-Merges sofort intern über Play installieren, danach mit einem P1-Pilot echte Zuverlässigkeit nachweisen. **Reguläre Produktion erst nach P3**, einschließlich der Android-relevanten Gates P1/P2/P3. P2 erweitert zuerst die Datenschutz- und Sync-Risiken; P3 liefert Statistik/Health als geplantes V1-Paket. Einen öffentlichen P1-Offline-Scorer könnten wir technisch früher veröffentlichen, empfehlen ihn aber derzeit nicht: Die Positionierung aus [06 §9](../06-marktanalyse.md) braucht belegte Zuverlässigkeit und der kleine Pilot bringt vorher mehr Erkenntnis als eine breite Veröffentlichung. Eine bewusste P1-Produktion wäre eine neue Scope-Entscheidung samt angepassten Store-Versprechen, kein automatischer nächster Schritt.
+
+**Wichtige Google-Grenze:** Der allererste Produktionsrelease lässt sich **nicht nach Prozenten staffeln**. Er erreicht 100 % in den ausgewählten Ländern. Wir starten deshalb geografisch begrenzt in DACH; 5 → 20 → 50 → 100 % gelten für **Folgeupdates**. [Gestaffelte Rollouts](https://support.google.com/googleplay/android-developer/answer/6346149?hl=en), [Release einführen](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en).
+
+Die Bedienungsanleitung bleibt [play-console.md](play-console.md): §2–5 Signing/Formfaktor/interner Upload, §6 Erklärungen, §7 Store-Eintrag, §8 Pilot/Produktionszugriff. Dieses Dokument entscheidet **wann, warum und mit welchem Nachweis**, statt die Console-Schritte zu wiederholen. Maßgeblich für Features bleibt [PLAN §4](../PLAN.md#4-phasen-und-meilensteine).
+
+## 1. Ausgangslage und Release-Verantwortung
+
+- Auf `main`: Engine, Session/Sync, Handy-Assistent, Live-Score, Verlauf und Datenschutzlinks. Noch kein Nachweis für eine fertige Ende-zu-Ende-Integration oder bestandene Gerätetests.
+- Abwarten: Handy ↔ Session mit Single-Scorer/Director/Anzeige sowie Wear ↔ Session. Apple Watch läuft parallel; ohne Apple-Konto bleiben echte Apple-Tests separat offen.
+- **Du bist Release-Verantwortlicher:** Geräte testen, Testpersonen betreuen, Erklärungen bestätigen, Fragebogen beantworten, Länder/Prozente wählen und Go/No-Go dokumentieren. Keine E-Mail-Adressen oder Testprotokolle mit personenbezogenen Daten ins öffentliche Repo.
+- **Automatisiert:** `check`, signierte AABs, Versions-/Notes-Prüfung, Upload bzw. Promotion und Artefakte. Google entscheidet unabhängig über Kontozugang, Review und Wear-Freigabe; ein grüner Actions-Lauf ist keine Store-Zulassung.
+- Release-Protokoll je Kandidat: Commit, versionName/buildNumber, beide versionCodes, Geräte/OS, anonymisierte Testergebnisse, offene Fehler, Pre-Launch-/Vitals-Befund, Freigabe und Datum. Personenbezug bleibt außerhalb des Repos.
+
+## 2. Stufen und Gates
+
+### A. Interner Test: unmittelbar nach den Integrations-Merges
+
+**Einstieg:** Beide Android-Integrationen gemergt, `check` grün, AABs signiert, Datenschutzerklärung auf Handy **und** Uhr erreichbar und mit aktuellem Verhalten vereinbar. Falls zunächst nur die Handy-Integration fertig ist, Phone intern vorziehen; gemeinsamer Phone/Wear-Test beginnt mit der Wear-Integration. Signing/Play-Installation gemäß Checkliste §2–5; auf beiden Geräten dieselbe Play-App-Signatur verwenden.
+
+**Zweck:** Play-Installation und Play-Updates auf Pixel-Handy, Pixel Watch und Galaxy Watch statt adb-Seitenladen. Debug-Installation gegebenenfalls vorher sichern/entfernen; Signaturwechsel nicht als Update oder Migrationstest werten. Keine Testdaten verlieren, ohne zuvor den Sicherungsweg zu prüfen.
+
+**Dauer:** 2–5 aktive Testtage nach Verfügbarkeit beider Builds, plus Review-Puffer. Google erlaubt bis zu 100 interne Tester; interne Updates erscheinen meist schnell, der erste vollständig konfigurierte Release und Einreichungen nach Ablehnung können vorab geprüft werden. [Interner Test](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en), [Prüfzeiten](https://support.google.com/googleplay/android-developer/answer/9859654?hl=en).
+
+**Ausgangsgate für den Pilot:** Android-Anteil von P1-A/B/C/D/F, echte Zählerrolle/Undo/Übergabe, persistenter Verlauf; kein Platzhalter- oder Spike-Build als Pilot. P0-S3/S5 auf beiden Uhren prüfen. Zehn echte Matches verteilt über alle fünf Sportarten; jeweils Pixel-Handy mit Pixel Watch und mit Galaxy Watch einschließen. Flugmodus, Display aus, Prozessneustart, Wiederverbinden, verspätete Events des alten Zählers und bestätigte Übergabe hin/zurück testen. **0 verlorene/verdoppelte Punkte**, korrektes Ergebnis und unveränderte Historie nach Update. Uhr **<15 % Akku pro Stunde**; mindestens 30 Minuten Display aus, zusätzlich eine volle Session je Uhr. Workout beginnt/endet genau einmal, keine unbeabsichtigte Aufzeichnung, keine blockierte Punkteingabe bei abgelehnter Sensorberechtigung. Workout-/Akku-Ergebnisse je Gerät dokumentieren.
+
+Das ist ein **Android-Teilgate**, kein bestandenes Gesamt-P1: Ultra-/Apple-Nachweise aus PLAN bleiben offen. Ein Android-Release darf dadurch nicht unzutreffend als Apple-validiert gelten. Die gesonderte Android-Freigabe muss im Release-Protokoll stehen.
+
+**Aktion:** Du installierst/testest und gibst den Pilot frei; CI baut und lädt hoch. Start/Erklärungen in der Console bleiben deine Aufgabe.
+
+### B. Geschlossener Test „Pilot“: reale Nutzung statt Wartefrist
+
+**Einstieg:** Gate A bestanden, Store-Assets DE/EN und Checkliste §6/7 fertig, Phone- und Wear-Pilottracks angelegt, gleiche Testerliste in beiden, Opt-in-Links bereit. Ziel **12–20 echte Racketsport-Spieler**, möglichst 15–20 Zusagen als Ausfallpuffer; Pixel- und Galaxy-Watch-Nutzer sowie Handy-Director und alle fünf Sportarten abdecken. Auswahl folgt [06 §9](../06-marktanalyse.md), kein Testertausch allein zur Kontofreischaltung.
+
+**Google-Regel:** Bei privaten Konten, die **nach dem 13.11.2023** erstellt wurden, müssen mindestens **12 Tester jeweils während der unmittelbar vor Antragstellung liegenden 14 Tage ununterbrochen opted-in** sein. E-Mail auf der Liste allein, interner Test oder bloßer Linkversand zählen nicht. Austritt/Wiedereintritt unterbricht die Frist dieses Testers; andere durchgehend angemeldete Tester verlieren ihre Zeit dadurch nicht. Nicht alle müssen gleichzeitig beginnen: Maßgeblich ist, dass beim Antrag mindestens zwölf ihre volle Frist erfüllen. [Testanforderungen](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en).
+
+Installation und wiederholte Nutzung organisieren: mehrere volle Sessions, mindestens ein Reconnect/Undo-Test und eine Rückmeldung pro Pilot. Google veröffentlicht hier **keine tägliche Öffnungsquote**; aktive Beteiligung und Feedback müssen im Antrag dennoch plausibel sein. Vierzehn Tage mit inaktiven Schein-Testern sind kein verlässliches Freigabekonzept. Updates im Pilot sind möglich; entscheidend ist das fortlaufende Personen-Opt-in. Während der letzten 14 Tage vor dem Antrag mindestens zwölf Teilnehmer halten; bei größerem zeitlichem Abstand vor Produktion den aktiven Pilot weiterführen. Die Hilfe nennt keine zusätzliche Mindestzahl von zwölf Uhren: dieselben Personen für beide Tracks einladen und die Watch-Abdeckung gesondert nachweisen. [Testanforderungen](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en).
+
+**Dauer:** 14 volle Tage ab erfüllter Opt-in-Gruppe, praktisch **3–4 Wochen** inklusive erster Review, Rekrutierung und Nachtests. Nach Erfüllung Produktionszugang beantragen, auch wenn die öffentliche Veröffentlichung erst P3 folgt. Google prüft den Antrag gewöhnlich innerhalb von sieben Tagen, gelegentlich länger; Ablehnung kann weitere Tests verlangen. [Produktionsantrag](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en).
+
+**Du beantwortest den Fragebogen:** Wie rekrutiert, wie beteiligt, welche Funktionen genutzt, welches Feedback auf welchem Weg erhoben; Zielgruppe/Nutzen und erwartete Installationen; konkrete Änderungen aus dem Test und warum produktionsreif. Belege wahrheitsgemäß aus anonymisierten Testnotizen, keine Antwortvorlage mit erfundenen Zahlen. Zugangsgenehmigung und Release-Review sind zwei getrennte Gates. Kontodatum/aktuellen Dashboard-Status prüfen; wir planen konservativ mit dieser Pflicht.
+
+**Qualität:** 0 bekannte Datenverluste, 0 reproduzierbare Crash-/ANR-Blocker, Android-P1-Feldgate bestanden, keine offenen kritischen Pre-Launch-Befunde. Bei kleinen Zahlen bedeutet fehlendes Vitals-Signal nicht „100 % crash-free“; Testpersonen ausdrücklich nach Abstürzen/Hängern fragen. Stabile Akku-/Workout-Ergebnisse auf beiden Uhren. Du koordinierst und beantragst; CI liefert Kandidaten und Tests, Google zählt Opt-ins und prüft.
+
+### C. Produktion: nach P3 und erneuter Kandidatenfreigabe
+
+**Einstieg:** Produktionszugriff genehmigt; Android-Gates P1/P2/P3 nachgewiesen. RLS/Account-Löschung/Export und ländergerechte Registrierung aus P2, Einwilligungen/Health-/DSFA-/Datenschutzerklärungen und Pulsqualität aus P3 vollständig. Apple-Teile der Gesamtgates bleiben gesondert markiert und dürfen Android nicht fälschlich mitvalidieren. Frischer Android-Matrix-Test mit dem **exakten Produktionskandidaten**, mindestens sieben stabile Pilottage nach der letzten relevanten Änderung; Pilot nicht seit P1 als erledigt behandeln. Markenprüfung gemäß PLAN K5 abschließen. Paywall bleibt frühestens nach P3 ein eigenes Vorhaben; 3,99 €/Monat bzw. 29,99 €/Jahr sind Testhypothesen aus 06, keine Startpreise im Listing.
+
+**Qualitätsziel des Teams:** Keine offenen kritischen Fehler, kein Datenverlust; bei belastbaren Play-Daten wahrgenommene Crash-Rate **<0,5 %** (entspricht >99,5 % ohne wahrgenommenen Crash auf Tagesnutzerbasis), ANR **<0,2 %**, keine problematischen Gerätemodelle. Bei wenigen Nutzern ersetzen mindestens 20 protokollierte vollständige Sessions des aktuellen Kandidaten samt Update-/Reconnect-Tests und gezielter Rückfrage den fehlenden Statistiknachweis; ein Fehler führt zum Nachtest, nicht zum Wegmitteln. Akku-/Workout-Gate A erneut bei Änderungen an Session, FGS oder Sensorik. Diese Ziele sind strenger als Googles Sichtbarkeitsschwellen (§8).
+
+**Erstveröffentlichung:** 100 % in **AT/DE/CH**, Phone und Wear getrennt freigeben und nach beiden Reviews zusammen bewerben. Kein 5-%-Start für die neue App. Erste Woche täglich kontrollieren, frühestens nach sieben stabilen Tagen Länder ausweiten. [Erster Rollout](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en).
+
+**Folgeupdates:** 5 % für mindestens 48 h → 20 % für mindestens 48 h → 50 % für mindestens 72 h → 100 %; nach 100 % weitere sieben Tage beobachten. Bei kleinem Nutzerstamm je Stufe mindestens zehn bestätigte reale Sessions/gezielte Pilotnachtests statt Freigabe allein nach Zeit. Prozente erhöhen sich nicht automatisch; du entscheidest nach jeder Stufe für beide Formfaktoren. Der Workflow startet einen Rollout, seine Erhöhung erfolgt in der Console am vorhandenen Release, **ohne Neu-Upload/versionCode-Bump**. [Rollout-Verhalten](https://support.google.com/googleplay/android-developer/answer/6346149?hl=en).
+
+**Sofort halten:** Ein verlorener/doppelter Punkt, falscher aktiver Zähler, kaputte Migration, Privacy-/Berechtigungsproblem, Workout läuft nach Matchende weiter, reproduzierbarer Crash/ANR oder deutliche Akkuverschlechterung bzw. Überschreiten des Teamziels. Weitere Auslieferung im betroffenen Track stoppen, bei Protokoll-/Migrationsfehlern beide Formfaktoren; bereits installierte Builds bleiben installiert. Beim ersten 100-%-Release fehlt ein vorheriger Produktionsbuild als Rückfall: bei schwerem Fehler Verfügbarkeit über die Console stoppen/zurückziehen und Hotfix vorbereiten, keinen automatischen Downgrade versprechen. [Rollout-Halt](https://support.google.com/googleplay/android-developer/answer/6346149?hl=en), [API-Rückfallgrenzen](https://developers.google.com/android-publisher/tracks).
+
+### D. Länder: DACH → EU → weltweit
+
+1. **DACH (AT/DE/CH):** räumlich/sprachlich erreichbare Pilotgruppe, Support auf Deutsch, Anbieter AT. Die Schweiz gehört zum Startmarkt, nicht zur späteren EU-Erweiterung. Englisch liegt bereits vollständig vor. Closed-Test-Länder und Produktion sowie Wear-Länder jeweils separat prüfen; interne Tests eignen sich auch außerhalb der gewählten Produktionsländer. [Länderverfügbarkeit](https://support.google.com/googleplay/android-developer/answer/7550024?hl=en), [Formfaktor-Tracks](https://support.google.com/googleplay/android-developer/answer/13295490?hl=en).
+2. **Weitere EU-Länder:** nach mindestens zwei stabilen DACH-Wochen, DE/EN-Support tragfähig, lokalisierte Pflichtinformationen und Datenschutz-/Altersprüfung je Zielland abgeschlossen. Keine automatische Gleichsetzung „EU = 14+“: Produktminimum ist 14, die bestehende Entscheidung verlangt bei Registrierung AT 14/DE 16 und eine Länderabfrage ab P2. Konkrete Einwilligungsgrundlagen und weitere Länder vor Ausweitung prüfen. Art. 8 regelt Einwilligung bei Diensten der Informationsgesellschaft, keine pauschale App-Nutzungsgrenze. [DSGVO Art. 8](https://eur-lex.europa.eu/legal-content/DE-EN-FR/TXT/?uri=CELEX%3A32016R0679), [österreichisches DSG §4](https://www.ris.bka.gv.at/eli/bgbl/i/1999/165/A2P4/NOR40212006).
+3. **Weltweit:** frühestens nach weiteren 2–4 stabilen EU-Wochen, nur einzeln geprüfte Länder mit tragfähigem EN-Support, Alters-/Datenschutz- und Vertriebsanforderungen. Kein ungeprüftes „alle Länder“. DE/EN ersetzt keine lokale Pflichtenprüfung; unbekannte Märkte bleiben zunächst ausgeschlossen. Ländererweiterung ist ein eigenes Go/No-Go und kein Prozentrollout. Länder eines laufenden gestaffelten Updates lassen sich nicht wieder entfernen. [Rollout-Länder](https://support.google.com/googleplay/android-developer/answer/6346149?hl=en).
+
+## 3. Relativer Zeitplan und kritischer Pfad
+
+Keine Kalenderversprechen: **M** = beide Android-Integrationen auf `main`, **Q1** = Android-P1-Teilgate, **Q3** = Android-P2/P3-Teilgates und alle Produktionsunterlagen fertig.
+
+- **Vor M, parallel:** Testeradressen privat sammeln, Signing/Console-Checkliste vorbereiten, Store-Motive auswählen, FGS-Video und Gerätetestplan vorbereiten. Konto-/Geräteverifikation und eventuelle Dashboard-Auflagen erledigen. Noch keine 14-Tage-Frist behaupten.
+- **M bis M + 2–5 Testtage:** interne Play-Installation und Feldtests. Review kann den Start verschieben; internen Sofortzugang nicht garantieren.
+- **Ab Q1:** Pilot einreichen, für die Review mindestens **eine Woche Puffer** planen. Google nennt Stunden bis sieben Tage, im Einzelfall länger. Neue Änderungen während einer Prüfung können deren Beginn zurücksetzen. [Prüfung](https://support.google.com/googleplay/android-developer/answer/9859654?hl=en).
+- **T = zwölfte durchgehend angemeldete Person bei verfügbarem Pilot:** frühestens **T + 14 volle Tage** Antrag. Antragprüfung weitere etwa sieben Tage, bei Rückfragen länger; keine parallele automatische Produktionsfreigabe.
+- **Während P2/P3:** Pilot offen halten, neue Datenflüsse deklarieren, Feature-Gates testen. Diese Entwicklungszeit ist derzeit nicht geschätzt und wird nicht in die vier Pilotwochen hineinfingiert.
+- **Ab Q3:** mindestens sieben stabile Kandidatentage, finale Wear-/Phone-Reviews plus mindestens eine Woche Review-Puffer einplanen. Bereits genehmigte Artefakte möglichst promoten. Öffentlichen Termin erst nach Freigabe beider Formfaktoren kommunizieren; eine erneute Prüfung bleibt möglich.
+- **Launch + 1/2 Wochen:** DACH beobachten, EU-Entscheidung; spätere Updates über die Prozentstufen aus §2C. Ablehnung/Blocker verschiebt den Pfad bis zur Behebung, nicht die Qualitätsziele.
+
+## 4. Wear OS: eigener Freigabepfad
+
+Ein Play-Eintrag, gleiches `applicationId eu.advantly`, gleiche App-Signatur, unterschiedliche versionCodes. **Eigene Wear-Tracks**, Testpersonen und Länder gesondert verwalten; Phone-Upload schaltet Wear nicht frei. Durchführung: Checkliste §4/5/8. [Formfaktor-Tracks](https://support.google.com/googleplay/android-developer/answer/13295490?hl=en), [Packaging](https://developer.android.com/training/wearables/packaging).
+
+Nach Release im **geschlossenen Wear-Test** Wear-Opt-in und Review-Policy bestätigen (Checkliste §4b). Opt-in nicht erst am Launch-Tag einplanen. Vor Freigabe auf kleinen und großen runden Displays, Pixel Watch und Galaxy Watch prüfen: keine abgeschnittenen Inhalte, lesbare Ziffern, sichere Bedienflächen, Resume/Offline, Ambient/Ongoing Activity, korrektes Starten/Beenden und Berechtigungsablehnung. Ein Wear-Artefakt in Prüfung kann auch Änderungen am gemeinsamen Listing blockieren. „Wear OS“ bleibt ein hilfreicher Begriff im Text; die explizite Erwähnungspflicht wurde laut aktueller Qualitätsrichtlinie am 12.03.2026 entfernt, auch wenn Packaging noch den alten Hinweis enthält. [Wear-Qualität und Änderungshistorie](https://developer.android.com/docs/quality-guidelines/wear-app-quality).
+
+**Review-Abhängigkeit schon im Pilot:** Aktuelle ExerciseClient-Session/lokale Pulsanzeige wahrheitsgemäß in **Health apps → Activity and fitness** erklären; „Health erst P3“ meint Health Connect, Speichern/Sync/Statistik, nicht eine Befreiung heutiger Sensorfunktionen. Die Erklärung ist spätestens für closed/open/production Pflicht. Intern früh vorbereiten. [Health-Erklärung](https://support.google.com/googleplay/android-developer/answer/14738291?hl=en).
+
+Für `FOREGROUND_SERVICE_HEALTH` bei targetSdk ≥34 sind Funktion, Unterbrechungsfolgen, Anwendungsfall und **Video-Link** erforderlich. Video vom echten Watch-Ablauf aufnehmen: Nutzerstart/Berechtigung → laufende Session → Display aus/an → Ongoing Activity → Matchende/Dienstende. Kein Health-Connect-Video vortäuschen, solange nicht vorhanden; Sensorzweck und reine Punkteingabe sauber beschreiben. Ablauf/Einträge stehen in Checkliste §6.7/6.8. Vor P3 neue Einwilligungen, Datenarten und Datenschutzerklärung einplanen. [FGS-Anforderungen](https://support.google.com/googleplay/android-developer/answer/13392821?hl=en).
+
+## 5. Store-Assets und Gestaltung
+
+**Aufgabe für den Asset-Durchlauf, keine fertigen Bilddateien in diesem Paket:** Die vorhandene UI zeigen und den Nutzen „ein Zähler, verlässlicher Stand, Uhr oder Handy“ belegen. Keine Cloud/Freunde/Health-Charts vor ihrer tatsächlichen Freigabe. Keine Werbeaussage „kein Punkt geht verloren“, bevor die Feldgates vorliegen. Textentwurf bleibt Checkliste §7; vor P2/P3 neu abgleichen.
+
+**Formatvorgaben:** Icon **512×512**, Feature-Grafik **1024×500**; Phone mindestens zwei Bilder als Teamstandard, maximal acht je Gerätetyp; JPEG/24-Bit-PNG ohne Alpha, Seiten 320–3840 px, längste höchstens doppelte kürzeste Seite. Ziel: **sechs Phone-Bilder 1080×1920 pro Sprache** (vier reale 9:16-Screens erfüllen die zusätzlichen Empfehlungsformat-Vorgaben). Wear: mindestens eins, maximal acht, **1:1 ≥384×384**; Ziel vier Bilder **454×454**, aktuelle runde UI in einer **quadratischen opaken Datei**, ohne Gehäuse, Rundmaske, Transparenz oder Zusatztext. „Rund“ beschreibt das Layout, nicht die Dateiform. Optional ein YouTube-Previewvideo, kein Ersatz für Bilder. [Google-Assetregeln](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en). Icon als 32-Bit-PNG ohne vorgezeichnete Rundung exportieren. [Icon-Spezifikation](https://developer.android.com/distribute/google-play/resources/icon-design-specifications).
+
+**Look:** [04 §5](../04-ux-design.md#5-designsystem): `#0B0C0F`, Orange `#FF6A1A`, Gegner-Blau `#5B9BFF`; Live schwarz/weiß, Barlow Condensed für tabellarische Scores, Inter für Texte. Sportakzente nur begleitend: Tennis Gelbgrün, Padel Cyan, Pickleball Pink, Badminton Violett, Tischtennis Smaragd. Feature-Grafik mit Orange als Fläche und einem klaren Score-Motiv; Fokus mittig, nicht eine zweite übergroße Icon-Kopie. Keine Badge-/Preis-/Rankingversprechen. Phone-Bildüberschriften maximal 4–6 Wörter als eigene Gestaltungsregel; Wear bleibt reine UI.
+
+**Phone-Reihenfolge DE/EN, je sechs Bilder:**
+
+1. Live-Tennis: „Jeder Punkt zählt“ / “Every point counts”. Vorlage `live-tennis-breakpoint-de` bzw. `live-tennis-setpoint-en`.
+2. Rollenmodell: „Ein Gerät zählt“ / “One device keeps score”. Neuer Screenshot nach Integration: Director-Handy plus klarer Anzeige-Zustand als zweites Motiv; kein Bild mit zwei gleichzeitig zählenden Geräten. Für sechs Bilder den Anzeige-Zustand bei Bedarf statt Bild 4 verwenden.
+3. Sport-/Matchstart: „Dein Spiel. Deine Regeln.“ / “Your match. Your rules.” Vorlagen `wizard-1-sport-de`, `wizard-3-players-de`, `wizard-4-format-tabletennis-en`.
+4. Doppel/Sonderregeln: „Für fünf Racketsportarten“ / “For five racket sports”. `live-pickleball-de`, `live-padel-golden-en`, `live-badminton-doubles-de` oder `live-tabletennis-en`; Auswahl so treffen, dass die ganze Galerie Sportvielfalt zeigt.
+5. Ergebnis/Undo: „Korrigieren und weiterspielen“ / “Undo and keep playing”. `live-undo-de` oder `app-result-de` als reproduzierbare Basis.
+6. Historie/Schnellstart: „Deine Matches im Verlauf“ / “Your match history”. `app-history-en`, alternativ `app-home-de` für Schnellstart.
+
+**Wear-Reihenfolge, je vier Bilder DE/EN:** Watch-Kurzstart → Live als Zähler → Anzeige mit Zähler-/Sync-Status → Matchabschluss oder tatsächlich vorhandene Tile. Aufnahmen erst aus integrierter Wear-App. Falls ein Motiv fehlt, nicht simulieren: vorhandene Motive verwenden und nach Merge ergänzen. Berechtigungsdialoge, Debug-Overlay und Phone-Freunde-Platzhalter sind keine Store-Motive. FGS-Nachweisvideo getrennt vom optionalen Marketingvideo halten.
+
+**Text:** DE `de-DE`, EN `en-US`, jeweils manuell geprüft. Titel ≤30, Kurzbeschreibung ≤80, Langbeschreibung ≤4000 Zeichen; keine Stichwortliste aller Sportarten im Titel. Nutzen/Single-Scorer zuerst, unterstützte Sportarten und Offline-Grenzen danach. [Textgrenzen](https://support.google.com/googleplay/android-developer/answer/9859152?hl=en). Release-Notes je Sprache ≤500 Zeichen (Vorlage §7). [Notes-Grenze](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en).
+
+**Automatisierungsvorschlag für den nächsten Asset-Auftrag:**
+
+1. `gradlew.bat :shared:ui-phone:desktopTest --rerun-tasks` erzeugt `shared/ui-phone/build/reports/screenshots/`. `LiveScoreScreenshotTest` rendert aktuell **824×1784** (412×892 dp bei Dichte 2), und einzelne Motive existieren erst in einer Sprache. Das sind QA-Dateien, noch keine uploadfertigen Store-Bilder: Ihr Verhältnis >2:1 verletzt die allgemeine Play-Grenze.
+2. Für eine eigene Store-Testsuite dieselben deterministischen Daten/Screen-Composables wiederverwenden, je Motiv **beide Locales** rendern, nach Integration Sessionzustände statt veralteter Konflikt-Demos. 360×640 dp bei Dichte 3 ergibt unverzerrte 1080×1920-Exports; alternativ opake 9:16-Canvas mit proportional eingepasster echter UI. Keine Bilder auf ein anderes Verhältnis strecken. Export nach Build-Verzeichnis, nicht automatisch ins Repo.
+3. Emulator-/Instrumentierungstests für Android-spezifische Ränder/Systemleisten und Wear-Rundlayout ergänzen: feste Uhrzeit/Testdaten/Locale/Schriftgröße, echtes 454×454-Wear-Profil; auch kleines Runddisplay prüfen. Desktop kann weder Wear-UI noch echte Data-Layer-Funktion belegen. Aufnahmen des jeweiligen signierten Kandidaten auf echten Geräten visuell gegenprüfen.
+4. Separater manueller Asset-CI-Job: rendern → Format-/Alpha-/Locale-/Dateinamencheck → nach `de-DE|en-US/phone|wear/01-…png` sortieren → Vorschauartefakt zur Sichtprüfung. Erst nach Freigabe optional supply-Assetupload. **Der hier angelegte Publish-Workflow verändert keine Store-Grafiken oder Beschreibungen.**
+
+## 6. Upload-Automatisierung und Versionsführung
+
+### Entscheidung: fastlane supply
+
+**Empfohlen:** `fastlane supply` aus GitHub Actions, vorhandenes Gradle-`bundleAllRelease` weiterverwenden. supply kann AABs, lokalisierte Notes und Track-Promotion; später auch im iOS-Release-Umfeld nutzbar. Es braucht Ruby, entkoppelt aber Play-Zugriff vom KMP-Build. Gradle Play Publisher wäre eine gute reine Android-Alternative, würde hier zwei App-Plugin-Konfigurationen und Metadatenpfade ergänzen; für diesen kleinen Release-Pfad überwiegt die Wiederverwendung von supply. [supply-Dokumentation](https://docs.fastlane.tools/actions/supply/), [Gradle Play Publisher](https://github.com/Triple-T/gradle-play-publisher).
+
+Vor erster supply-Nutzung mindestens einen Build manuell hochladen, Signing aktivieren und Console-Einrichtung abschließen (Checkliste). Keine API kann unvollständige Konto-/Policy-Erklärungen ersetzen. fastlane-Version und Ruby-Linie liegen gemäß Projektkonvention in `gradle/libs.versions.toml`; gewählte fastlane-Version ist im [RubyGems-Release](https://rubygems.org/gems/fastlane/versions/2.241.0) nachgewiesen.
+
+### Einmalige Einrichtung durch dich – keine Schlüssel in diesem Arbeitspaket
+
+1. **Google Cloud Console:** eigenes bestehendes oder neues Projekt für Advantly wählen; **Google Play Android Developer API** (`androidpublisher.googleapis.com`) aktivieren. Projekt-Verknüpfung mit Play ist nach aktueller Google-Anleitung nicht mehr erforderlich. [Google-API-Einrichtung](https://developers.google.com/android-publisher/getting_started).
+2. **IAM & Verwaltung → Dienstkonten:** Konto z. B. `advantly-play-publisher` anlegen. Für das reine Publishing keine Projektrolle Owner/Editor vergeben; die Play-Berechtigungen kommen aus der Play Console. Das menschliche Einrichtungskonto braucht die Rechte zum Erstellen des Dienstkontos/Schlüssels.
+3. **Play Console → Nutzer und Berechtigungen → Nutzer einladen:** Dienstkonto-E-Mail eintragen, **nur App Advantly** zuweisen. App-Informationen lesen und **Apps für Test-Tracks veröffentlichen** gewähren. Testpersonen-/Track-Verwaltung nur, falls das Konto solche Einstellungen tatsächlich ändern soll; dieser Workflow verwaltet keine Tester. Keine Finanz-, Bestell-, Abo-, Bewertungsantwort- oder Admin-Rechte. Für Produktionsjobs zusätzlich die vorhandene App-Berechtigung **„Release to production, exclude devices and use Play app signing“** erforderlich; diese bündelt mehr als nur Upload und wird erst vor Produktion ergänzt. [Berechtigungen](https://support.google.com/googleplay/android-developer/answer/9844686?hl=en).
+4. **Cloud → Dienstkonto → Schlüssel:** erst wenn du die Automatisierung aktivierst, einen JSON-Schlüssel erzeugen und direkt in den Passwortmanager/GitHub-Secret übernehmen; nie im Checkout, Log oder Artefakt ablegen. Bei organisationsseitigem Schlüsselverbot später Workload Identity Federation nutzen; die Vorlage setzt ausdrücklich einen Service-Account-JSON-Schlüssel voraus. [Dienstkontoschlüssel](https://cloud.google.com/iam/docs/creating-managing-service-account-keys).
+5. **GitHub → Environment `android-release`:** existierende Signing-Secrets aus Checkliste §9 wiederverwenden, neues Secret `ADVANTLY_PLAY_SERVICE_ACCOUNT_JSON` = vollständiger JSON-Inhalt. Environment auf `main` beschränken, Release-Tags nur explizit zusätzlich erlauben; optional manueller Environment-Reviewer. Keine dieser Einstellungen wird durch eine YAML-Datei eingerichtet. Secrets nur vertrauenswürdigen Release-Commits zugänglich machen. [GitHub-Secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions), [Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/managing-environments-for-deployment).
+6. **Tracks einmalig prüfen/anlegen:** Console-Anzeigename „Pilot“ und API-ID können abweichen. `alpha` / `wear:alpha` in beiden Formfaktoren konfigurieren oder Environment-Variablen `PLAY_PHONE_CLOSED_TRACK` / `PLAY_WEAR_CLOSED_TRACK` mit den tatsächlichen IDs setzen. Die API-Doku nennt intern `qa` / `wear:qa`, supply nennt `internal`: Workflow liest zuerst `edits.tracks.list` und akzeptiert nur vorhandene interne Kandidaten. Produktionsziele sind `production` / `wear:production`. Es wird kein neuer Track stillschweigend angelegt. [API-Tracks](https://developers.google.com/android-publisher/tracks), [Track-Abfrage](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks/list).
+7. Erster manueller Workflow-Lauf auf `main`: `track=internal`, `operation=upload`, `rollout_percent=100`. Notes, beide Tracks und Gerätestore-Installation prüfen. Danach `operation=promote`, Quelle `internal`, Ziel `alpha`; erst nach allen Gates Quelle `alpha`, Ziel `production`. Bei Ablehnung Berechtigungen/Policy im Dashboard korrigieren, nicht Blind-Retries mit erweiterten Rechten starten.
+
+**Dokumentierte Secrets (nur Namen, hier nicht angelegt):**
+
+- `ADVANTLY_UPLOAD_KEYSTORE_BASE64`
+- `ADVANTLY_UPLOAD_STORE_PASSWORD`
+- `ADVANTLY_UPLOAD_KEY_ALIAS`
+- `ADVANTLY_UPLOAD_KEY_PASSWORD`
+- `ADVANTLY_PLAY_SERVICE_ACCOUNT_JSON`
+
+### Verhalten von `.github/workflows/play-publish.yml`
+
+Nur **`workflow_dispatch`**, bewusst noch kein `push.tags: [v*]`. Eingaben `track` (`internal`, `alpha`, `production`), `rollout_percent` (5/20/50/100), `operation` (`upload`/`promote`) und Quelle (`internal`/`alpha`). Ein späterer Tag-Trigger dürfte standardmäßig nur intern starten und müsste dieselben Gates behalten. Bestehender `android-release.yml` bleibt der manuelle Build-/Downloadweg.
+
+Der Workflow prüft `main` bzw. passenden `v<versionName>`-Tag, Notes und `check`, stellt Schlüssel nur unter `$RUNNER_TEMP` bereit und baut bei `upload` **beide signierten AABs** mit JDK 21/Gradle. Beide Zertifikate müssen dem Upload-Key entsprechen. AABs/Mappings bleiben sieben Tage als Artefakt, Schlüssel werden immer entfernt; kein Configuration Cache für Jobs mit Signing-Daten. Fehlende Secrets brechen den Lauf ab. Es werden keine Secrets angelegt oder im Repo gespeichert.
+
+Vor Mutation liest er beide Tracks und bereits vorhandene Bundles. Beide versionCodes werden geprüft; pro Formfaktor eigener supply-Aufruf mit Notes für `de-DE`/`en-US`, ohne Listing-/Screenshot-Upload. Testtracks erhalten `completed` mit 100 %, Produktion bei <100 % `inProgress` mit `userFraction=Prozent/100`, sonst `completed` **ohne** `userFraction`. Ein erster Produktionsstart <100 % und vorhandene laufende Rollouts werden abgefangen; nach einem Halt kann ein neuer Hotfix-Kandidat folgen. **Achtung:** `completed` beschreibt den Auslieferungsumfang, nicht Googles Review-Abschluss. [API-Releasezustände](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks).
+
+`promote` baut/lädt **keine** AABs neu: Es übernimmt exakt die in `gradle.properties` bezeichneten versionCodes aus einem abgeschlossenen Quellrelease. So bleibt der getestete Kandidat erhalten. Gates, Länder, Produktionszugang, Wear-Opt-in, Store-Erklärungen und Auswertung sind vor dem manuellen Start deine Verantwortung; der Job kann sie nicht belegen. Er sendet Änderungen zur Prüfung, soweit der Kontostatus es erlaubt; bei Draft-App/Review-Fehlern bleibt die Console maßgeblich, kein automatisches Umstellen auf einen ungeprüften Entwurf. Kontozugriff/API-Lauf wurde in diesem Arbeitspaket **nicht** durchgeführt.
+
+**Teilfehlerrisiko:** Phone und Wear sind zwei nacheinander commitete API-Edits, keine atomare Veröffentlichung. Wenn Phone erfolgreich ist und Wear scheitert, keine neue Gesamtversion blind starten: tatsächliche Bundles/Tracks prüfen, fehlende Zuweisung/Notes in der Console fertigstellen oder aus dem vorhandenen Testrelease übernehmen; bei Fehlern am veröffentlichten Teil gegebenenfalls dessen Auslieferung halten. Der Vorabcheck verhindert den üblichen Doppel-Upload bei Wiederholung; bereits installierte Versionen bleiben bestehen. Während eines Jobs keine parallelen Console-Änderungen oder anderen Publishing-Jobs durchführen; Actions-Concurrency schützt nur diesen Workflow.
+
+### Versionen und Tags
+
+Du oder der Integrations-Orchestrator erhöht **vor einem neuen Binary-Kandidaten** `advantly.buildNumber` im Root-`gradle.properties` per Commit; kein heimlicher CI-Bump, keine Ableitung aus `github.run_number`. Vorher höchste in Play verwendete Nummer über **alle** Formfaktoren prüfen. `versionCode = buildNumber*10+1` Phone / `+2` Wear; `advantly.versionName` bleibt gemeinsame SemVer-Version für Android/Apple. Ein Code darf nicht für ein anderes Binary wiederverwendet werden. [Android-Versionierung](https://developer.android.com/studio/publish/versioning).
+
+Interne Kandidaten dürfen denselben `versionName` bei steigender buildNumber haben. `v0.1.0` bzw. später `v1.0.0` bezeichnet **einen** ausgewählten Release-Commit; den Tag nicht bei jedem internen Kandidaten neu vergeben/verschieben. Promotion, Prozentänderung und erneute Zuweisung desselben bereits hochgeladenen Artefakts erhöhen nichts. Hotfix: neue Patch-Version und höhere buildNumber. Neue Notes-Verzeichnisse vor Upload anlegen; die Dateien `notes/0.1.0/` gehören nur zum ersten integrierten internen Kandidaten.
+
+## 7. Release-Notes: Vorlage und erster interner Test
+
+Quelle pro Sprache: `docs/release/notes/<version>/de-DE.txt` und `en-US.txt`, UTF-8, Klartext, **je höchstens 500 Zeichen**. Kein XML-Locale-Wrapper in diesen Dateien: supply setzt die Sprache über das Verzeichnis. [Release-Notes](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en).
+
+**DE-Vorlage:**
+
+```text
+<Version>: <wichtigste Änderung für Spieler>.
+• <sichtbare Verbesserung>
+• <behobener Fehler und Auswirkung>
+Test: <ein konkreter Ablauf, bei Test-Releases>.
+Bekannt: <relevante Einschränkung, falls vorhanden>.
+```
+
+**EN template:**
+
+```text
+<Version>: <main improvement for players>.
+• <visible improvement>
+• <fixed issue and its effect>
+Test: <one concrete flow, for test releases>.
+Known: <relevant limitation, if any>.
+```
+
+Erste Notes liegen unter [notes/0.1.0/de-DE.txt](notes/0.1.0/de-DE.txt) / [en-US.txt](notes/0.1.0/en-US.txt): Assistent, fünf Sportarten, Verlauf, Single-Scorer/Director/Anzeige, Testauftrag für Offline/Übergabe. Sie setzen die geplanten Android-Integrations-Merges voraus und müssen vor Upload am tatsächlichen Build bestätigt werden. Keine Cloud-/Health-Connect-/Abo-Versprechen.
+
+## 8. Nach dem Launch: Qualität und Betrieb
+
+**Täglich während Rollouts und erster Launch-Woche**, danach mindestens wöchentlich: Android Vitals nach Version und Gerätemodell, Policy-/Review-Status und Support prüfen. Googles aktuelle Schwellen für schlechtes Verhalten: wahrgenommene Crash-Rate gesamt **1,09 %**, je Phone-Modell **8 %**, je Watch-Modell **4 %**; ANR gesamt **0,47 %**, je Phone-Modell **8 %**, je Watch-Modell **5 %**. Die Raten beziehen sich auf tägliche aktive Nutzer, nicht Sessions. Google betrachtet die letzten 28 Tage; Überschreitungen können Sichtbarkeit einschränken. Das sind Obergrenzen, nicht unsere Ziele. Vitals benötigt ausreichende, zustimmende Play-Nutzung; leere Berichte sind kein Beweis. Teamgates siehe §2. [Android Vitals, Stand 09.10.2026](https://developer.android.com/google/play/vitals).
+
+**Kein Drittanbieter-Tracking:** In P1 kein Crashlytics/Analytics-SDK; Crash-/ANR-Beobachtung ausschließlich über Play Vitals plus freiwilliges Testerfeedback. Das vermeidet zusätzliche App-Datenübermittlung, Einwilligungs- und Betriebsaufwand. P1 Data safety **„keine Daten erhoben/geteilt“** nur nach Prüfung beider Release-Binaries/Datenflüsse gemäß Checkliste §6.6: lokale Verarbeitung und ausschließlich entsprechend geschützter eigener Gerätesync, keine Entwickler-Telemetrie. Vitals wird von Play/System gemäß Nutzereinstellung erfasst. Ab P2 mit Konto/Cloud **muss die Angabe geändert werden**; sie gilt gerade nicht unverändert für den empfohlenen P3-Launch. P3 ergänzt tatsächliche Health-Datenflüsse. [Data-safety-Definitionen](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en).
+
+**Pre-Launch-Report:** Nach Testuploads vorhandene Stability-/Performance-/Accessibility-/Security-Befunde sichten und reproduzierbare Blocker beheben. Ab P2 Prüfern einen funktionierenden Loginweg in „App-Zugriff“ hinterlegen, Zugangsdaten nur in der Console. Ein grüner Report ersetzt keine Watch-/Bluetooth-/Outdoor-Feldtests; fehlender Report ist kein bestandenes Gate. [Pre-Launch-Reports](https://google.play/business/pre-launchreports/).
+
+**Bewertungen:** Du beantwortest neue sachliche Rückmeldungen möglichst binnen zwei Werktagen in DE/EN: Problem anerkennen, Geräte-/Versionsangaben über Support erfragen, konkrete Abhilfe nennen. Keine persönlichen Match-/Kontodaten öffentlich abfragen und keine Bewertung als Voraussetzung für Hilfe verlangen. [Google-Antwortrichtlinien](https://support.google.com/googleplay/android-developer/answer/138230?hl=en).
+
+**Hotfix:** Betroffenen Rollout sofort halten (§2C) → Fehler reproduzieren → eng begrenzter Fix → Patch/buildNumber erhöhen → `check` → interner Play-Test des exakten Builds auf betroffenem Gerät und Kontrollgerät, insbesondere Datenmigration/Resume → getestete Artefakte weiterreichen. Mindestens ein vollständiges Match und der Fehlerablauf müssen passen; bei Datenverlust zusätzlich Persistenz-/Update-Nachweis. Schnelle Veröffentlichung kann nötig sein, Play-Review lässt sich aber nicht garantieren oder überspringen. Kein Zurücksetzen bereits installierter Datenbankversionen. Normale Updates anfangs alle **2–4 Wochen**, sicherheits-/datenkritische Fixes sofort; keine automatische Hochstufung am Wochenende ohne Betreuung.
+
+## 9. iOS-Ausblick
+
+App Store und TestFlight erst mit Apple-Developer-Account und eigener Signing-/Review-Einrichtung; bis dahin bleibt Apple CI-/Simulatorarbeit mit offenen Realgerätegates. Wiederverwendbar sind Release-Gates, KMP-Logik/Testdaten, DE/EN-Texte, Bildmotive, Notes, Versionsquelle und fastlane-Erfahrung. Geräteformate, Datenschutzangaben, Altersprüfung, HealthKit-Einwilligungen, Zertifikate und Store-Regeln müssen für Apple separat geprüft werden; Android-/Wear-Freigaben gelten dort nicht.
+
+## 10. Was du als Nächstes tust
+
+1. Konto-Erstellungsdatum, Dashboard-Auflagen und bestehende Play-/Signing-Einrichtung prüfen; Testeradressen privat weiter sammeln (Ziel 15–20 Zusagen).
+2. Android-Integrations-Merges abwarten; danach beide Datenschutzlinks/Release-AABs prüfen und **intern über Play** auf Pixel-Handy, Pixel Watch und Galaxy Watch installieren.
+3. Zehn echte Matches, Rollenwechsel/Offline/Update sowie Akku/Workout protokollieren; Android-P1-Teilgate ausdrücklich freigeben, Apple-Gates offen markieren.
+4. DE/EN-Store-Assets und Health-/FGS-Nachweise fertigstellen; Phone-/Wear-Pilot und Wear-Opt-in einrichten. Mindestens zwölf echte Teilnehmer 14 Tage durchgehend opted-in halten, Feedback sammeln und Zugang beantragen.
+5. Optional die fünf dokumentierten GitHub-Secrets und den minimal berechtigten Dienstaccount selbst einrichten; ersten manuellen `internal`-Workflow prüfen. Ohne diese Einrichtung bleibt der manuelle Uploadweg.
+6. P2/P3 einschließlich Datenschutz/Länderabfrage und realer Android-Qualität abschließen; exakten Kandidaten erneut pilotieren, beide Reviews abwarten und Produktion in DACH freigeben. Folgeupdates staffeln; EU/weltweit jeweils bewusst entscheiden.
