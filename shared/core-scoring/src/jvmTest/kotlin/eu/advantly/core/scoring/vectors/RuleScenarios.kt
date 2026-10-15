@@ -205,6 +205,28 @@ object RuleScenarios {
                 point(Side.A)
                 undo()
             },
+            s(
+                Sport.TENNIS,
+                "stopped-as-it-stands",
+                "Beenden, wie es steht (STOPPED, 02 §9.27): Spiele, dann Punkte, Gleichstand ohne Sieger, Sätze vor Spielen",
+                tennis,
+            ) {
+                win(Side.A)
+                send(MatchEnded(EndReason.STOPPED))
+                undo()
+                win(Side.B)
+                point(Side.B)
+                send(MatchEnded(EndReason.STOPPED))
+                undo()
+                point(Side.A)
+                send(MatchEnded(EndReason.STOPPED, Side.B))
+                undo()
+                points("AAA")
+                win(Side.A, 4)
+                win(Side.B, 2)
+                send(MatchEnded(EndReason.STOPPED))
+                point(Side.A)
+            },
             s(Sport.TENNIS, "undo-across-set", "Undo des Satzballs stellt Satz, Seiten und Aufschlag wieder her; Redo", tennis) {
                 win(Side.A, 5)
                 win(Side.B)

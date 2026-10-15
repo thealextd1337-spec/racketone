@@ -81,9 +81,12 @@ enum class ResultReason {
     RETIRED,
     WALKOVER,
     ABANDONED,
+
+    /** „Beenden, wie es steht“ (`MatchEnded(STOPPED)`, 02 §9.27): Ergebnis mit aktuellem Stand, Sieger ggf. `null`. */
+    STOPPED,
 }
 
-/** Ergebnis; `winner = null` bei `DRAW` und `ABANDONED`. */
+/** Ergebnis; `winner = null` bei `DRAW`, `ABANDONED` und `STOPPED` mit Gleichstand. */
 @Serializable
 data class MatchResult(
     val winner: Side?,

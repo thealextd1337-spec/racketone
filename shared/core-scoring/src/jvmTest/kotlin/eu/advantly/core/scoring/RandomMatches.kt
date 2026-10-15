@@ -216,7 +216,7 @@ object RandomMatches {
 
             else -> {
                 MatchEnded(
-                    EndReason.entries[random.nextInt(EndReason.entries.size)],
+                    LEGACY_END_REASONS[random.nextInt(LEGACY_END_REASONS.size)],
                     if (random.nextInt(5) == 0) {
                         null
                     } else if (random.nextBoolean()) {
@@ -229,3 +229,9 @@ object RandomMatches {
         }
     }
 }
+
+/**
+ * Feste Auswahl der Endgründe für Zufallsmatches: `STOPPED` (02 §9.27) deckt `StopRulesTest` und das Regel-Szenario
+ * `stopped-as-it-stands` ab. Die Liste bleibt fix, damit die deterministischen Zufalls-Vektoren unverändert bleiben.
+ */
+private val LEGACY_END_REASONS = listOf(EndReason.RETIRED, EndReason.WALKOVER, EndReason.ABANDONED)
