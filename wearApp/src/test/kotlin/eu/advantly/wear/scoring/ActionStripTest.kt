@@ -1,48 +1,61 @@
 package eu.advantly.wear.scoring
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActionStripTest {
-    private val w = 400f
-    private val h = 400f
+    /** Pixel Watch 3 (41 mm): 384 px bei 2 px/dp = 192 dp. */
+    private val density = 2f
+    private val size = 384f
+    private val g = ActionStrip.geometry(size, size, density)
 
     @Test
-    fun stripCoversTheMiddleBandAndStaysBelowTheTopDeadZone() {
-        // das ganze nicht zählende Mittelband liegt im Streifen, nur schmale Ränder der Hälften kommen dazu
-        assertTrue(ActionStrip.TOP <= 0.5f - TapZones.MIDDLE_BAND / 2)
-        assertTrue(ActionStrip.BOTTOM >= 0.5f + TapZones.MIDDLE_BAND / 2)
-        assertTrue(ActionStrip.TOP > TapZones.TOP_DEAD_ZONE)
-        assertTrue("Ränder der Hälften bleiben schmal", ActionStrip.HEIGHT <= 0.2f)
-        assertEquals("mittig", 0.5f, (ActionStrip.TOP + ActionStrip.BOTTOM) / 2, 0.0001f)
+    fun touchZoneIsAtLeast48dpOnSmallRoundDisplays() {
+        assertEquals(48f * density, g.height, 0.01f)
+        assertTrue("sichtbar etwas flacher als die Trefferzone", g.visualHeight < g.height && g.visualHeight >= 32f * density)
+        assertEquals("mittig", size / 2, (g.top + g.bottom) / 2, 0.01f)
+        // großes Display: Anteil der Höhe statt der Mindesthöhe
+        val big = ActionStrip.geometry(1_000f, 1_000f, 2f)
+        assertEquals(160f, big.height, 0.01f)
     }
 
     @Test
-    fun containsOnlyTheStripArea() {
-        assertTrue(ActionStrip.contains(200f, 200f, w, h))
-        assertTrue(ActionStrip.contains(30f, 170f, w, h))
-        assertFalse("über dem Streifen (Wir)", ActionStrip.contains(200f, 160f, w, h))
-        assertFalse("unter dem Streifen (Gegner)", ActionStrip.contains(200f, 240f, w, h))
-        assertFalse("Rand links", ActionStrip.contains(10f, 200f, w, h))
-        assertFalse("Rand rechts", ActionStrip.contains(390f, 200f, w, h))
-        assertFalse(ActionStrip.contains(200f, 200f, 0f, 0f))
+    fun stripAndGuardCoverTheMiddleBandAndStayBelowTheTopDeadZone() {
+        val bandTop = size * (0.5f - TapZones.MIDDLE_BAND / 2)
+        val bandBottom = size * (0.5f + TapZones.MIDDLE_BAND / 2)
+        assertTrue(g.top <= bandTop && g.bottom >= bandBottom)
+        assertTrue(g.top - g.guard > size * TapZones.TOP_DEAD_ZONE)
+    }
+
+    @Test
+    fun hitSeparatesStripGuardAndScoringAreas() {
+        val x = size / 2
+        assertEquals(StripHit.STRIP, ActionStrip.hit(x, size / 2, g))
+        assertEquals(StripHit.STRIP, ActionStrip.hit(x, g.top, g))
+        assertEquals(StripHit.STRIP, ActionStrip.hit(x, g.bottom, g))
+        assertEquals("knapp über der Leiste zählt nicht", StripHit.GUARD, ActionStrip.hit(x, g.top - 1f, g))
+        assertEquals("knapp unter der Leiste zählt nicht", StripHit.GUARD, ActionStrip.hit(x, g.bottom + g.guard, g))
+        assertEquals(StripHit.OUTSIDE, ActionStrip.hit(x, g.top - g.guard - 1f, g))
+        assertEquals(StripHit.OUTSIDE, ActionStrip.hit(x, g.bottom + g.guard + 1f, g))
+        assertEquals("seitlich neben der Leiste: Schutz", StripHit.GUARD, ActionStrip.hit(5f, size / 2, g))
+        // was die Leiste beim Aufsetzen nicht trifft, liegt auf den Zählflächen der Hälften
+        val aboveGuard = g.top - g.guard - 1f
+        assertEquals(eu.advantly.core.model.Side.A, TapZones.classify(aboveGuard, size))
     }
 
     @Test
     fun segmentsSplitTheStripEvenly() {
-        val left = w * ActionStrip.SIDE_MARGIN
-        val segment = w * ActionStrip.WIDTH / 3
-        assertEquals(0, ActionStrip.segment(left + 1f, w, 3))
-        assertEquals(0, ActionStrip.segment(left + segment - 1f, w, 3))
-        assertEquals(1, ActionStrip.segment(200f, w, 3))
-        assertEquals(2, ActionStrip.segment(left + 2 * segment + 1f, w, 3))
-        assertEquals("rechter Rand gehört zum letzten Segment", 2, ActionStrip.segment(w - left, w, 3))
-        assertEquals(0, ActionStrip.segment(199f, w, 2))
-        assertEquals(1, ActionStrip.segment(201f, w, 2))
-        assertNull(ActionStrip.segment(5f, w, 3))
-        assertNull(ActionStrip.segment(200f, w, 0))
+        val third = g.width / 3
+        assertEquals(0, ActionStrip.segment(g.left + 1f, g, 3))
+        assertEquals(0, ActionStrip.segment(g.left + third - 1f, g, 3))
+        assertEquals(1, ActionStrip.segment(size / 2, g, 3))
+        assertEquals(2, ActionStrip.segment(g.left + 2 * third + 1f, g, 3))
+        assertEquals("rechter Rand gehört zum letzten Segment", 2, ActionStrip.segment(g.right, g, 3))
+        assertEquals(0, ActionStrip.segment(size / 2 - 1f, g, 2))
+        assertEquals(1, ActionStrip.segment(size / 2 + 1f, g, 2))
+        assertNull(ActionStrip.segment(5f, g, 3))
+        assertNull(ActionStrip.segment(size / 2, g, 0))
     }
 }

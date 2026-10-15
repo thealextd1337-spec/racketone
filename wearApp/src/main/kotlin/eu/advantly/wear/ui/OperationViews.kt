@@ -41,6 +41,7 @@ import eu.advantly.wear.live.OperationRules
 import eu.advantly.wear.live.ServeBarUi
 import eu.advantly.wear.live.StripAction
 import eu.advantly.wear.scoring.ActionStrip
+import eu.advantly.wear.scoring.StripGeometry
 
 /** Aktionen der W2-Bedienung (Punkt abziehen, Aufschlag-Leiste, Aufschlägerwahl, Satzende-Optionen). */
 interface OperationActions {
@@ -59,8 +60,8 @@ interface OperationActions {
  * Inhalt der Aktionsleiste ([ActionStrip]) über dem Mittelband des Scores. Die Taps verteilt der Gesten-Handler des
  * Score-Screens (Segmente über [ActionStrip.segment]); hier nur Darstellung und TalkBack-Aktionen.
  *
- * @param width Breite des Displays (die Leiste nimmt [ActionStrip.WIDTH] davon)
- * @param height Höhe des Displays (die Leiste nimmt [ActionStrip.HEIGHT] davon)
+ * @param width Breite der Trefferzone ([StripGeometry.width])
+ * @param height Höhe der sichtbaren Leiste ([StripGeometry.visualHeight]); die Trefferzone ist etwas höher
  */
 @Composable
 fun ActionStripContent(
@@ -71,7 +72,7 @@ fun ActionStripContent(
     actions: LiveActions,
     modifier: Modifier = Modifier,
 ) {
-    val strip = modifier.size(width * ActionStrip.WIDTH, height * ActionStrip.HEIGHT)
+    val strip = modifier.size(width, height)
     when (action) {
         is StripAction.Serve -> ServeBar(action.bar, actions, strip)
         StripAction.UndoRemoval -> UndoRemovalStrip(actions, strip)
@@ -236,17 +237,17 @@ private val PILL = RoundedCornerShape(50)
 private val SegmentGray = Color(0xFF2A2F38)
 private val CHIP = 44.dp
 
-/** Tap auf die Aktionsleiste an [x] (px) bei Displaybreite [width]: Segment der Aufschlag-Leiste, Redo bzw. Auswahl öffnen. */
+/** Tap auf die Aktionsleiste an [x] (px): Segment der Aufschlag-Leiste, Redo bzw. Auswahl öffnen. */
 fun onStripTap(
     action: StripAction,
     x: Float,
-    width: Float,
+    geometry: StripGeometry,
     actions: LiveActions,
 ) {
     when (action) {
         is StripAction.Serve -> {
             ActionStrip
-                .segment(x, width, action.bar.options.size)
+                .segment(x, geometry, action.bar.options.size)
                 ?.let { OperationRules.serveOption(action.bar, it) }
                 ?.let { actions.setServe(it) }
         }

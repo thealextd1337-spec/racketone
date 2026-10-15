@@ -58,10 +58,11 @@ import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
 import eu.advantly.wear.live.OperationRules
 import eu.advantly.wear.live.SyncUi
+import eu.advantly.wear.live.TouchDecision
+import eu.advantly.wear.live.TouchRouting
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.scoring.ActionStrip
 import eu.advantly.wear.scoring.GestureClassifier
-import eu.advantly.wear.scoring.ScoringGesture
 import eu.advantly.wear.scoring.TapGuard
 import eu.advantly.wear.scoring.TapZones
 import eu.advantly.wear.workout.WorkoutPhase
@@ -215,6 +216,9 @@ private fun ScorePage(
                     if (isAmbient) return@pointerInput // Handgelenk unten = Eingaben aus (04 §4.3.3 Punkt 4)
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // Ziel beim Aufsetzen festlegen: wer auf der Aktionsleiste beginnt, zählt und zieht nie ab
+                        val stripGeometry = ActionStrip.geometry(size.width.toFloat(), size.height.toFloat(), density)
+                        val target = TouchRouting.target(currentStrip, ActionStrip.hit(down.position.x, down.position.y, stripGeometry))
                         var last = down.position
                         var endTime = down.uptimeMillis
                         var multiTouch = false
@@ -235,42 +239,45 @@ private fun ScorePage(
                                 touchSlopPx = touchSlop,
                                 swipeThresholdPx = swipeThreshold,
                             )
-                        val isScorer = currentLive.role == LiveRole.SCORER
-                        val width = size.width.toFloat()
-                        val height = size.height.toFloat()
-                        when (gesture) {
-                            ScoringGesture.TAP -> {
-                                val stripAction = currentStrip
-                                if (stripAction != null && ActionStrip.contains(down.position.x, down.position.y, width, height)) {
-                                    onStripTap(stripAction, down.position.x, width, currentActions)
-                                } else if (isScorer) {
-                                    TapZones.classify(down.position.y, height)?.let { side ->
-                                        if (currentActions.point(side)) {
-                                            flashSide = side
-                                            flashKey++
-                                        }
-                                    }
+                        val decision =
+                            TouchRouting.decide(
+                                target = target,
+                                gesture = gesture,
+                                stripNow = currentStrip,
+                                locked = currentLive.locked,
+                                scorer = currentLive.role == LiveRole.SCORER,
+                            )
+                        val half = TapZones.classify(down.position.y, size.height.toFloat())
+                        when (decision) {
+                            TouchDecision.Point -> {
+                                if (half != null && currentActions.point(half)) {
+                                    flashSide = half
+                                    flashKey++
                                 }
                             }
 
-                            // Halten: entsperren bzw. (Zähler) letzten Punkt dieser Hälfte abziehen
-                            ScoringGesture.LONG_PRESS -> {
-                                if (currentLive.locked) {
-                                    currentActions.unlock()
-                                } else if (isScorer) {
-                                    TapZones.classify(down.position.y, height)?.let { currentActions.removePoint(it) }
-                                }
+                            // Halten (1 s, ausgelöst beim Loslassen): letzten Punkt dieser Hälfte abziehen
+                            TouchDecision.RemovePoint -> {
+                                half?.let { currentActions.removePoint(it) }
                             }
 
-                            ScoringGesture.SWIPE_DOWN -> {
-                                if (isScorer) currentActions.undo()
+                            TouchDecision.Unlock -> {
+                                currentActions.unlock()
                             }
 
-                            ScoringGesture.SWIPE_LEFT -> {
-                                if (!currentLive.locked) currentOpenControls()
+                            TouchDecision.Undo -> {
+                                currentActions.undo()
                             }
 
-                            ScoringGesture.NONE -> {
+                            TouchDecision.OpenControls -> {
+                                currentOpenControls()
+                            }
+
+                            is TouchDecision.Strip -> {
+                                onStripTap(decision.action, down.position.x, stripGeometry, currentActions)
+                            }
+
+                            TouchDecision.None -> {
                                 Unit
                             }
                         }
@@ -341,7 +348,13 @@ private fun ScorePage(
                 }
             }
         }
-        if (strip != null) ActionStripContent(strip, live, maxWidth, maxHeight, actions, Modifier.align(Alignment.Center))
+        if (strip != null) {
+            val density = LocalDensity.current
+            val geometry = with(density) { ActionStrip.geometry(maxWidth.toPx(), maxHeight.toPx(), density.density) }
+            val stripWidth = with(density) { geometry.width.toDp() }
+            val stripHeight = with(density) { geometry.visualHeight.toDp() }
+            ActionStripContent(strip, live, stripWidth, stripHeight, actions, Modifier.align(Alignment.Center))
+        }
         TopStatus(live, isAmbient, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * TOP_STATUS_FRACTION))
         BottomLine(live, heartRate, isAmbient, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * 0.04f))
     }

@@ -5,6 +5,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
@@ -231,6 +232,22 @@ class WatchControllerOperationTest {
         assertEquals(LiveRole.DISPLAY, live.role)
         assertNull(live.overlay)
         assertNull(live.serverChoice)
+    }
+
+    @Test
+    fun liftedChoiceInTheFirstGameIsAskedAgain() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        val partner = live.teams.a[1]
+        assertFalse(live.serverChoice!!.prompt)
+        assertTrue(c.chooseServer(partner.id))
+        assertEquals(partner.id, live.serverChoice?.chosen)
+        // Korrektur der Reihenfolge hebt die Wahl auf (Engine, Review R1) → Hinweis erscheint wieder
+        assertTrue(h.watch.correct(Correction.servingOrder(Side.A, listOf(live.teams.a[0].id, partner.id))))
+        assertNull(live.serverChoice?.chosen)
+        assertTrue("aufgehobene Wahl wird wieder erfragt", live.serverChoice!!.prompt)
+        assertTrue(c.chooseServer(partner.id))
+        assertEquals(partner.id, live.serve?.server?.id)
+        assertFalse(live.serverChoice!!.prompt)
     }
 
     @Test

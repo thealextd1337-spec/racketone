@@ -121,6 +121,31 @@ class OperationRulesTest {
     }
 
     @Test
+    fun trackerRemembersChoicesPerWindowSoALiftedChoiceIsAskedAgain() {
+        val s = session()
+        val tracker = ServerChoiceTracker()
+        s.create(Presets.TENNIS_DOUBLES_MTB10.format(Discipline.DOUBLES), doubles)
+        assertFalse(tracker.update(s.state.value.match))
+        assertTrue(s.chooseServer(partner))
+        assertTrue(tracker.update(s.state.value.match))
+        assertTrue(
+            s.correct(
+                eu.advantly.core.scoring.Correction
+                    .servingOrder(Side.A, listOf(me, partner)),
+            ),
+        )
+        val lifted = s.state.value.match!!
+        assertNull(lifted.serverChoice?.chosen)
+        val made = tracker.update(lifted)
+        assertTrue("im selben Fenster schon gewählt", made)
+        assertTrue(OperationRules.serverChoice(lifted, ::player, made)!!.prompt)
+        assertFalse("ohne Wahl im Fenster: Start hat entschieden", OperationRules.serverChoice(lifted, ::player)!!.prompt)
+        repeat(4) { s.recordPoint(Side.A) } // neues Fenster (Game 2)
+        assertFalse(tracker.update(s.state.value.match))
+        assertFalse(tracker.update(null))
+    }
+
+    @Test
     fun serverChoiceIsOnlyForTheScorerInDoubles() {
         val s = session()
         s.create(Presets.TENNIS_SINGLES_BO3.format(), singles)

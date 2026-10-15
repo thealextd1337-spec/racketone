@@ -70,6 +70,9 @@ class WatchController(
     /** Sichtbarkeit der Aufschlag-Leiste nach dem Punkt (monoton über [elapsed]). */
     private val serveBar = ServeBarTimer()
 
+    /** Wahlfenster, in denen schon gewählt war (Hinweis nach aufgehobener Wahl). */
+    private val serverChoices = ServerChoiceTracker()
+
     /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
     private var disconnectedSince: Long? = null
 
@@ -569,6 +572,7 @@ class WatchController(
                     locked = locked,
                     overlay = overlay,
                     serveBarPoint = serveBar.visiblePoint(elapsed()),
+                    choiceMadeInWindow = serverChoices.update(match),
                 ),
             )
         }

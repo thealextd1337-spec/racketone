@@ -1,55 +1,108 @@
 package eu.advantly.wear.scoring
 
+import kotlin.math.max
+
 /**
- * Aktionsleiste des Scoring-Screens (W2 „Bedienung“): ein waagerechter Streifen um das Mittelband (das ohnehin nicht
- * zählt, [TapZones.MIDDLE_BAND]). Er liegt zwischen den Ziffern beider Hälften und ist auf runden Displays an dieser
- * Stelle am breitesten. Nur solange dort eine Aktion angeboten wird (Aufschlag-Leiste nach dem Punkt, „Rückgängig“ nach
- * „Punkt abziehen“, Hinweis „Aufschläger wählen“), gehen Taps im Streifen an die Aktion statt an [TapZones]; sonst
- * bleibt alles wie bisher.
+ * Lage der Aktionsleiste in px (aus [ActionStrip.geometry]).
  *
- * Reine Geometrie in Bruchteilen von Breite/Höhe (JVM-getestet); die Composables nutzen dieselben Werte.
+ * @property top Oberkante der Trefferzone
+ * @property bottom Unterkante der Trefferzone (`bottom - top` ≥ [ActionStrip.MIN_TOUCH_DP])
+ * @property left linker Rand der Trefferzone
+ * @property right rechter Rand der Trefferzone
+ * @property guard Schutzstreifen ober- und unterhalb: Berührungen dort lösen weder Leiste noch Punkt aus
+ * @property visualHeight Höhe der sichtbaren Leiste (mittig in der Trefferzone, etwas kleiner, damit die Ziffern frei
+ *   bleiben – die Trefferzone ist größer als die Darstellung, wie bei Material-Mindestflächen üblich)
+ */
+data class StripGeometry(
+    val top: Float,
+    val bottom: Float,
+    val left: Float,
+    val right: Float,
+    val guard: Float,
+    val visualHeight: Float,
+) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+}
+
+/** Wo eine Berührung bei sichtbarer Aktionsleiste beginnt. */
+enum class StripHit {
+    /** In der Trefferzone der Leiste: nur die Leistenaktion, nie zählen oder abziehen. */
+    STRIP,
+
+    /** Im Schutzstreifen um die Leiste (bzw. seitlich daneben): ignoriert – weder Leiste noch Punkt. */
+    GUARD,
+
+    /** Außerhalb: normale Zählflächen ([TapZones]). */
+    OUTSIDE,
+}
+
+/**
+ * Aktionsleiste des Scoring-Screens (W2 „Bedienung“): ein waagerechter Streifen mittig über dem Mittelband (das ohnehin
+ * nicht zählt, [TapZones.MIDDLE_BAND]), zwischen den Ziffern beider Hälften – auf runden Displays dort am breitesten.
+ * Nur solange dort eine Aktion angeboten wird (Aufschlag-Leiste nach dem Punkt, „Rückgängig“ nach „Punkt abziehen“,
+ * Hinweis „Aufschläger wählen“), gilt diese Geometrie; sonst bleibt alles wie bisher.
+ *
+ * Trefferzone mindestens [MIN_TOUCH_DP] hoch (04 §1: Mindestfläche 48 dp), darum ein Schutzstreifen von [GUARD_DP], in dem
+ * eine Berührung gar nichts tut – knapp daneben zählt also kein Punkt. Reine Geometrie (JVM-getestet); Darstellung und
+ * Trefferprüfung nutzen dieselbe Funktion.
  */
 object ActionStrip {
-    /** Oberkante (Anteil der Höhe): knapp unter den Ziffern der oberen Hälfte. */
-    const val TOP = 0.42f
+    /** Mindesthöhe der Trefferzone. */
+    const val MIN_TOUCH_DP = 48f
 
-    /** Unterkante (Anteil der Höhe): knapp über den Ziffern der unteren Hälfte. */
-    const val BOTTOM = 0.58f
+    /** Schutzstreifen ober- und unterhalb der Trefferzone. */
+    const val GUARD_DP = 6f
+
+    /** Die sichtbare Leiste ist je Seite so viel flacher als die Trefferzone. */
+    const val VISUAL_INSET_DP = 6f
+
+    /** Anteil der Höhe, den die Trefferzone mindestens hat (große Displays). */
+    const val MIN_HEIGHT_FRACTION = 0.16f
 
     /** Seitenrand links und rechts (Anteil der Breite); innerhalb davon liegen die Segmente. */
     const val SIDE_MARGIN = 0.06f
 
-    /** Höhe des Streifens als Anteil der Displayhöhe. */
-    const val HEIGHT = BOTTOM - TOP
-
-    /** Breite des Streifens als Anteil der Displaybreite. */
-    const val WIDTH = 1f - 2 * SIDE_MARGIN
-
-    /** Liegt ([x], [y]) im Streifen? Einheiten wie [width]/[height] (px). */
-    fun contains(
-        x: Float,
-        y: Float,
+    /** Geometrie für ein Display von [width] × [height] px bei [density] px/dp. */
+    fun geometry(
         width: Float,
         height: Float,
-    ): Boolean {
-        if (width <= 0f || height <= 0f) return false
-        val relX = x / width
-        val relY = y / height
-        return relY in TOP..BOTTOM && relX in SIDE_MARGIN..(1f - SIDE_MARGIN)
+        density: Float,
+    ): StripGeometry {
+        val touch = max(MIN_TOUCH_DP * density, height * MIN_HEIGHT_FRACTION)
+        val top = (height - touch) / 2
+        return StripGeometry(
+            top = top,
+            bottom = top + touch,
+            left = width * SIDE_MARGIN,
+            right = width * (1 - SIDE_MARGIN),
+            guard = GUARD_DP * density,
+            visualHeight = touch - 2 * VISUAL_INSET_DP * density,
+        )
     }
 
+    /** Wohin gehört eine Berührung, die bei ([x], [y]) beginnt? */
+    fun hit(
+        x: Float,
+        y: Float,
+        g: StripGeometry,
+    ): StripHit =
+        when {
+            y in g.top..g.bottom && x in g.left..g.right -> StripHit.STRIP
+            y in (g.top - g.guard)..(g.bottom + g.guard) -> StripHit.GUARD
+            else -> StripHit.OUTSIDE
+        }
+
     /**
-     * Segment (0 until [count]) unter [x] bei [count] gleich breiten Segmenten im Streifen. Taps auf Lücken zählen zum
-     * nächstgelegenen Segment (große Trefferflächen); außerhalb des Streifens `null`.
+     * Segment (0 until [count]) unter [x] bei [count] gleich breiten Segmenten der Leiste. Lücken zählen zum
+     * nächstgelegenen Segment (große Trefferflächen); außerhalb `null`.
      */
     fun segment(
         x: Float,
-        width: Float,
+        g: StripGeometry,
         count: Int,
     ): Int? {
-        if (width <= 0f || count <= 0) return null
-        val rel = (x / width - SIDE_MARGIN) / WIDTH
-        if (rel < 0f || rel > 1f) return null
-        return (rel * count).toInt().coerceIn(0, count - 1)
+        if (g.width <= 0f || count <= 0 || x < g.left || x > g.right) return null
+        return ((x - g.left) / g.width * count).toInt().coerceIn(0, count - 1)
     }
 }

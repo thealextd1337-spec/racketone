@@ -1,6 +1,7 @@
 package eu.advantly.wear.live
 
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ServeOutcome
@@ -8,6 +9,8 @@ import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.wear.scoring.ScoringGesture
+import eu.advantly.wear.scoring.StripHit
 
 // Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md): Aufschlag-Leiste, Aufschlägerwahl im Doppel,
 // Aktionsleiste im Mittelband und Versionshinweis – reine Modelle und Regeln ohne Android (JVM-getestet).
@@ -32,7 +35,8 @@ data class ServeBarUi(
  * @property players wählbare Spieler in der Reihenfolge der Engine
  * @property chosen in diesem Fenster bereits gewählter Spieler, sonst `null`
  * @property prompt Hinweis „Aufschlag wählen“ im Mittelband zeigen: Wahl offen und nicht schon beim Start getroffen
- *   (Game 1 des ersten Satzes legt der Start-Assistent über den Erstaufschläger fest)
+ *   (Game 1 des ersten Satzes legt der Start-Assistent über den Erstaufschläger fest – es sei denn, in diesem Fenster
+ *   wurde schon gewählt und eine Korrektur hat die Wahl wieder aufgehoben)
  */
 data class ServerChoiceUi(
     val game: Int,
@@ -41,6 +45,27 @@ data class ServerChoiceUi(
     val chosen: PlayerId?,
     val prompt: Boolean,
 )
+
+/**
+ * Merkt sich, in welchem Wahlfenster (Match, Satz, Game 1/2) schon ein Aufschläger gewählt war. Hebt eine Korrektur die
+ * Wahl auf (Engine: `chosen = null`, 02 §6.5.5), unterscheidet sich das so von der beim Start erledigten Wahl.
+ */
+class ServerChoiceTracker {
+    private var seen: Triple<MatchId, Int, Int>? = null
+
+    /** Nach jeder Zustandsänderung aufrufen; liefert, ob im aktuellen Fenster schon gewählt wurde. */
+    fun update(match: ActiveMatch?): Boolean {
+        val key = match?.let(::windowOf) ?: return false
+        if (match.serverChoice?.chosen != null) seen = key
+        return seen == key
+    }
+
+    private fun windowOf(match: ActiveMatch): Triple<MatchId, Int, Int>? {
+        val choice = match.serverChoice ?: return null
+        val set = match.state.current?.setIndex ?: return null
+        return Triple(match.id, set, choice.game)
+    }
+}
 
 /**
  * Sichtbarkeit der Aufschlag-Leiste: erscheint nach jedem auf dieser Uhr gezählten Punkt für [VISIBLE_MILLIS], nach einer
@@ -112,17 +137,22 @@ object OperationRules {
         return ServeBarUi(last.id, options, last.serve)
     }
 
-    /** Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. */
+    /**
+     * Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. [choiceMadeInWindow] = in genau
+     * diesem Fenster wurde schon gewählt (siehe [ServerChoiceTracker]) – dann ist `chosen = null` eine aufgehobene Wahl
+     * und wird wieder erfragt, auch in Game 1 des ersten Satzes.
+     */
     fun serverChoice(
         match: ActiveMatch,
         player: (PlayerId) -> PlayerUi?,
+        choiceMadeInWindow: Boolean = false,
     ): ServerChoiceUi? {
         if (!match.isScorer) return null
         val choice = match.serverChoice ?: return null
         val players = choice.players.mapNotNull(player)
         if (players.isEmpty()) return null
         // Game 1 des ersten Satzes hat der Start (Erstaufschläger im Assistenten) schon entschieden
-        val decidedAtStart = choice.game == 1 && match.state.sets.isEmpty()
+        val decidedAtStart = choice.game == 1 && match.state.sets.isEmpty() && !choiceMadeInWindow
         return ServerChoiceUi(choice.game, choice.side, players, choice.chosen, prompt = choice.chosen == null && !decidedAtStart)
     }
 
@@ -156,5 +186,123 @@ object OperationRules {
             CompatibilityStatus.PEER_TOO_OLD -> UpdateRequired.OTHER_DEVICE
             CompatibilityStatus.PEER_TOO_NEW -> UpdateRequired.THIS_DEVICE
             CompatibilityStatus.COMPATIBLE, null -> null
+        }
+}
+
+/** Ziel einer Berührung – festgelegt beim Aufsetzen (Down), nicht erst beim Loslassen. */
+sealed interface TouchTarget {
+    /** Begann auf der Aktionsleiste mit dieser Aktion: darf nie zählen oder abziehen. */
+    data class Strip(
+        val action: StripAction,
+    ) : TouchTarget
+
+    /** Begann im Schutzstreifen der Leiste: nur Navigation (Wischen zur Steuerung). */
+    data object Guard : TouchTarget
+
+    /** Begann auf den Zählflächen: wie bisher. */
+    data object Score : TouchTarget
+}
+
+/** Was eine abgeschlossene Geste auslöst. */
+sealed interface TouchDecision {
+    /** Punkt für die Hälfte unter dem Aufsetzpunkt ([eu.advantly.wear.scoring.TapZones]). */
+    data object Point : TouchDecision
+
+    /** Letzten Punkt der Hälfte unter dem Aufsetzpunkt abziehen. */
+    data object RemovePoint : TouchDecision
+
+    data object Unlock : TouchDecision
+
+    data object Undo : TouchDecision
+
+    data object OpenControls : TouchDecision
+
+    /** Leistenaktion ausführen (Segment über den Aufsetzpunkt). */
+    data class Strip(
+        val action: StripAction,
+    ) : TouchDecision
+
+    data object None : TouchDecision
+}
+
+/**
+ * Gesten des Score-Screens als reine Funktion (JVM-getestet): Das Ziel steht beim Aufsetzen fest; eine Berührung, die auf
+ * der Leiste oder ihrem Schutzstreifen beginnt, zählt und zieht nie ab. Ist die Leiste beim Loslassen weg oder gehört
+ * sie zu einem anderen Punkt, wird die Eingabe verworfen – kein Rückfall aufs Zählen.
+ */
+object TouchRouting {
+    fun target(
+        strip: StripAction?,
+        hit: StripHit,
+    ): TouchTarget =
+        when {
+            strip == null || hit == StripHit.OUTSIDE -> TouchTarget.Score
+            hit == StripHit.STRIP -> TouchTarget.Strip(strip)
+            else -> TouchTarget.Guard
+        }
+
+    fun decide(
+        target: TouchTarget,
+        gesture: ScoringGesture,
+        stripNow: StripAction?,
+        locked: Boolean,
+        scorer: Boolean,
+    ): TouchDecision {
+        if (gesture == ScoringGesture.SWIPE_LEFT) return if (locked) TouchDecision.None else TouchDecision.OpenControls
+        return when (target) {
+            is TouchTarget.Strip -> {
+                if (gesture == ScoringGesture.TAP) {
+                    stillShown(target.action, stripNow)?.let { TouchDecision.Strip(it) } ?: TouchDecision.None
+                } else {
+                    TouchDecision.None
+                }
+            }
+
+            TouchTarget.Guard -> {
+                TouchDecision.None
+            }
+
+            TouchTarget.Score -> {
+                when (gesture) {
+                    ScoringGesture.TAP -> {
+                        if (scorer) TouchDecision.Point else TouchDecision.None
+                    }
+
+                    ScoringGesture.LONG_PRESS -> {
+                        if (locked) {
+                            TouchDecision.Unlock
+                        } else if (scorer) {
+                            TouchDecision.RemovePoint
+                        } else {
+                            TouchDecision.None
+                        }
+                    }
+
+                    ScoringGesture.SWIPE_DOWN -> {
+                        if (scorer) TouchDecision.Undo else TouchDecision.None
+                    }
+
+                    ScoringGesture.SWIPE_LEFT, ScoringGesture.NONE -> {
+                        TouchDecision.None
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Die beim Aufsetzen getroffene Leiste, sofern sie beim Loslassen noch steht – die Aufschlag-Leiste nur für denselben
+     * Punkt (die aktuelle Fassung, z. B. mit neuer Markierung); sonst `null`.
+     */
+    fun stillShown(
+        atDown: StripAction,
+        now: StripAction?,
+    ): StripAction? =
+        when {
+            now == null -> null
+            atDown is StripAction.Serve && now is StripAction.Serve && atDown.bar.pointId == now.bar.pointId -> now
+            atDown is StripAction.Serve || now is StripAction.Serve -> null
+            atDown == now -> now
+            else -> null
         }
 }
