@@ -250,12 +250,12 @@ jobs:
           else
             echo "::warning::Keine Metadata.appintents im Watch-Bundle – Action-Taste-Intents nicht registriert?"
           fi
-      # W1-E: Watch-App mit -advantlyDemo starten (nur Debug-Build): spielt ein offenes Tennis-Match durch und
-      # druckt ADVANTLY_DEMO stage=start|scoring|setend|matchend|done; je Etappe ein Screenshot, EN und DE.
-      # Informativ (Simulator-Start kann flaky sein); Ergebnis im Summary, Bilder im Artefakt watch-simulator-w1e.
+      # W1-E: Watch-App je Etappe neu starten (nur Debug-Build): -advantlyDemoStage <etappe> baut den Zustand direkt
+      # auf (offenes Tennis-Match) und bleibt dort; erst nach dem Marker "ADVANTLY_DEMO stage=<etappe> ready" aus dem
+      # Log DIESES Starts wird fotografiert. EN und DE; eine fehlende Etappe (nach einem zweiten Versuch) lässt den Step
+      # scheitern. Bilder + Logs im Artefakt watch-simulator-w1e, Marker im Summary.
       - name: watchOS-Demo im Simulator + Screenshots (W1-E)
-        continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 20
         env:
           WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
         run: |
@@ -265,42 +265,50 @@ jobs:
           xcrun simctl boot "$WATCHOS_SIM" 2>/dev/null || true
           perl -e 'alarm shift; exec @ARGV' 300 xcrun simctl bootstatus "$WATCHOS_SIM" -b
           xcrun simctl install "$WATCHOS_SIM" "$app"
-          run_demo() {
-            lang=$1
-            log="$out/demo-$lang.log"
+          missing=""
+          # $1 Etappe, $2 Sprache, $3 Locale, $4 Versuch; Rückgabe 0, wenn der Screenshot steht
+          shoot() {
+            log="$out/$1-$2-try$4.log"
             xcrun simctl launch --console-pty --terminate-running-process "$WATCHOS_SIM" eu.advantly.watchkitapp \
-              -advantlyDemo tennis -AppleLanguages "($lang)" -AppleLocale "$2" > "$log" 2>&1 &
+              -advantlyDemoStage "$1" -advantlyDemo tennis -AppleLanguages "($2)" -AppleLocale "$3" > "$log" 2>&1 &
             pid=$!
-            for stage in start scoring setend matchend; do
-              for _ in $(seq 1 60); do
-                grep -q -e "ADVANTLY_DEMO stage=$stage" -e "ADVANTLY_DEMO stage=error" "$log" && break
-                sleep 1
-              done
-              if grep -q "ADVANTLY_DEMO stage=$stage" "$log"; then
-                sleep 1
-                xcrun simctl io "$WATCHOS_SIM" screenshot "$out/$stage-$lang.png"
-              else
-                echo "::warning::W1-E-Demo ($lang): Etappe $stage nicht erreicht"
-              fi
+            ok=1
+            for _ in $(seq 1 90); do
+              if grep -q "ADVANTLY_DEMO stage=$1 ready" "$log"; then ok=0; break; fi
+              if grep -q "ADVANTLY_DEMO stage=error" "$log"; then break; fi
+              sleep 1
             done
-            for _ in $(seq 1 30); do grep -q "ADVANTLY_DEMO stage=done" "$log" && break; sleep 1; done
+            if [ "$ok" -eq 0 ]; then
+              sleep 1
+              xcrun simctl io "$WATCHOS_SIM" screenshot "$out/$1-$2.png" || ok=1
+            fi
+            grep ADVANTLY_ "$log" || true
             kill "$pid" 2>/dev/null || true
             xcrun simctl terminate "$WATCHOS_SIM" eu.advantly.watchkitapp 2>/dev/null || true
-            grep ADVANTLY_ "$log" || true
+            return "$ok"
           }
-          run_demo en en_US
-          run_demo de de_DE
+          for lang in en de; do
+            locale=en_US
+            if [ "$lang" = de ]; then locale=de_DE; fi
+            for stage in start scoring setend matchend; do
+              if ! shoot "$stage" "$lang" "$locale" 1 && ! shoot "$stage" "$lang" "$locale" 2; then
+                echo "::error::W1-E-Demo ($lang): Etappe $stage nicht erreicht"
+                missing="$missing $stage-$lang"
+              fi
+            done
+          done
           {
             echo "### watchOS-Demo (W1-E)"
             echo
             echo '```'
-            grep -h ADVANTLY_DEMO "$out"/demo-*.log || echo "keine ADVANTLY_DEMO-Zeilen"
+            grep -h "ADVANTLY_DEMO" "$out"/*.log || echo "keine ADVANTLY_DEMO-Zeilen"
             echo '```'
             for png in "$out"/*.png; do
               if [ -f "$png" ]; then echo "- $(basename "$png")"; fi
             done
+            if [ -n "$missing" ]; then echo "Fehlende Etappen:$missing"; fi
           } >> "$GITHUB_STEP_SUMMARY"
-          ls "$out"/*.png
+          test -z "$missing"
       - name: Watch-Screenshots + Logs hochladen (W1-E)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
