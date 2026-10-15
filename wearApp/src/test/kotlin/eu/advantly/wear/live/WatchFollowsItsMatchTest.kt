@@ -105,5 +105,52 @@ class WatchFollowsItsMatchTest {
         )
     }
 
+    /** Review W3-M #5: Online-Wechsel verlustfrei – die Uhr übergibt ihr altes Match nach ihrer letzten Eingabe. */
+    @Test
+    fun onlineSwitchKeepsTheWatchPoints() {
+        val first = h.phone.create(format, singles, scorer = ScorerChoice.MyWatch)
+        h.settle()
+        assertTrue(c.point(Side.A))
+        h.phone.create(format, singles, scorer = ScorerChoice.MyWatch)
+        // Zuweisung noch unterwegs: die Uhr zählt im alten Match weiter
+        assertTrue(h.watch.recordPoint(Side.A))
+        h.settle()
+        val old =
+            h.phone.state.value
+                .match(first)!!
+        assertEquals(0, old.rejectedByRoleCount)
+        assertEquals(
+            "30",
+            old.state.current!!
+                .display.a,
+        )
+        assertTrue(old.isScorer)
+    }
+
+    /** Review W3-M #5: Offline bestätigte Übernahme – die Uhr meldet nach der Wiederverbindung verworfene Eingaben. */
+    @Test
+    fun offlineTakeOverShowsDiscardedInputsOnTheWatch() {
+        val first = h.phone.create(format, singles, scorer = ScorerChoice.MyWatch)
+        h.settle()
+        assertTrue(c.point(Side.A))
+        h.settle()
+        h.offline("watch")
+        h.settle()
+        val second = h.phone.create(format, singles, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
+        assertTrue(c.point(Side.A))
+        h.scheduler.advanceBy(700)
+        assertTrue(c.point(Side.B))
+        h.online("watch")
+        h.settle(5_000)
+        assertEquals(second, live.matchId)
+        assertEquals(
+            2,
+            h.phone.state.value
+                .match(first)!!
+                .rejectedByRoleCount,
+        )
+        assertTrue(h.toasts.any { it == WatchToast.InputsRejected(2) })
+    }
+
     private fun singlesPadel() = Lineup(listOf(PlayerId("me"), PlayerId("ann")), listOf(PlayerId("bea"), PlayerId("cid")), PlayerId("me"))
 }

@@ -10,6 +10,7 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.DroppedInputs
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
@@ -87,6 +88,9 @@ class WatchController(
     private var seenMatch: MatchId? = null
     private var seenScorer: Boolean? = null
     private var seenRejected = 0
+
+    /** Zuletzt gemeldeter Hinweis „Eingaben in einem nicht mehr offenen Match verworfen“ (nach Übernahme durchs Handy). */
+    private var seenDropped: DroppedInputs? = null
     private var closingLocally = false
     private var started = false
 
@@ -506,6 +510,11 @@ class WatchController(
                 emit(WatchEffect.Toast(WatchToast.InputsRejected(match.rejectedByRoleCount)))
             }
             seenRejected = match.rejectedByRoleCount
+        }
+        // Nach der Wiederverbindung: verworfene Eingaben im früheren Uhr-Match sichtbar melden (Review W3-M #5)
+        state.droppedInputs?.let { dropped ->
+            if (dropped != seenDropped && dropped.matchId != match?.id) emit(WatchEffect.Toast(WatchToast.InputsRejected(dropped.count)))
+            seenDropped = dropped
         }
         // Auswahl „Wer schlägt auf?“ schließt, sobald das Fenster zu ist (Punkt, Undo, Rollenwechsel)
         if (overlay == LiveOverlay.SERVER_CHOICE && (match?.isScorer != true || match.serverChoice == null)) overlay = null

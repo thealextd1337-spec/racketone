@@ -292,7 +292,10 @@ class WatchScoring internal constructor(
             error = ""
             return snapshot()
         }
-        return command { session, _ -> session.endMatch() }
+        // Satzende-Dialog: reguläres „Nein“ (die Session bricht sonst ohne Wertung ab, Review W3-M #2)
+        return command { session, match ->
+            if (match.state.status == MatchStatus.AWAITING_DECISION) session.continueDecision(anotherSet = false) else session.endMatch()
+        }
     }
 
     /**
