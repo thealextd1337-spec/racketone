@@ -14,6 +14,7 @@ import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.presentation.live.PointLabel
+import eu.advantly.presentation.match.LocalDay
 import eu.advantly.wear.WatchHarness
 import eu.advantly.wear.match.FormatChoice
 import org.junit.Assert.assertEquals
@@ -28,7 +29,8 @@ import org.junit.Test
  * Aufschlägerwahl im Doppel, Satzende-Optionen und Setup (Games pro Satz, Nur Tiebreak, Aufschlag-Statistik).
  */
 class WatchControllerOperationTest {
-    private val h = WatchHarness()
+    private val today = LocalDay(2026, 10, 15)
+    private val h = WatchHarness(today)
     private val c = h.controller
 
     private val live: LiveUi get() = assertNotNull("kein Live-Screen", c.state.value.live).let { c.state.value.live!! }
@@ -245,6 +247,15 @@ class WatchControllerOperationTest {
         assertTrue(h.watch.correct(Correction.servingOrder(Side.A, listOf(live.teams.a[0].id, partner.id))))
         assertNull(live.serverChoice?.chosen)
         assertTrue("aufgehobene Wahl wird wieder erfragt", live.serverChoice!!.prompt)
+        // neuer Controller (Prozessverlust/Activity neu): Zustand aus dem Event-Log, Hinweis bleibt
+        val fresh = WatchController(h.watch, h.directory, h.prefs, h.clock::nowMs, h.scheduler::nowMs, h.scheduler::nowMs, { today })
+        fresh.start()
+        assertTrue(
+            fresh.state.value.live!!
+                .serverChoice!!
+                .prompt,
+        )
+        fresh.dispose()
         assertTrue(c.chooseServer(partner.id))
         assertEquals(partner.id, live.serve?.server?.id)
         assertFalse(live.serverChoice!!.prompt)

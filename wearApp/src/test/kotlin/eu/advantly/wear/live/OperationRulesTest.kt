@@ -4,11 +4,15 @@ import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
+import eu.advantly.data.LocalData
+import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -36,10 +40,14 @@ class OperationRulesTest {
     private val singles = Lineup(listOf(me), listOf(o1), me)
     private val doubles = Lineup(listOf(me, partner), listOf(o1, o2), me)
 
-    private fun session(): MatchSession =
+    private fun session(data: LocalData = testLocalData()): MatchSession =
         MatchSessions
-            .create(testLocalData(), link = null, scheduler = ManualScheduler(), kind = PeerKind.WATCH, clock = { 1_760_000_000_000L })
+            .create(data, link = null, scheduler = ManualScheduler(), kind = PeerKind.WATCH, clock = { 1_760_000_000_000L })
             .also { it.start() }
+
+    /** `ServerChosen` aus dem gespeicherten Log, wie `WatchDirectory.serverChosen`. */
+    private fun chosenFrom(data: LocalData): (MatchId) -> List<Pair<EventId, ServerChosen>> =
+        { id -> data.events.scoreEvents(id).mapNotNull { e -> (e.payload as? ServerChosen)?.let { e.id to it } } }
 
     private fun sync(compatibility: CompatibilityStatus? = CompatibilityStatus.COMPATIBLE) =
         SyncStatus(
@@ -121,13 +129,13 @@ class OperationRulesTest {
     }
 
     @Test
-    fun trackerRemembersChoicesPerWindowSoALiftedChoiceIsAskedAgain() {
-        val s = session()
-        val tracker = ServerChoiceTracker()
+    fun liftedOpeningChoiceIsRebuiltFromTheEventLog() {
+        val data = testLocalData()
+        val s = session(data)
         s.create(Presets.TENNIS_DOUBLES_MTB10.format(Discipline.DOUBLES), doubles)
-        assertFalse(tracker.update(s.state.value.match))
+        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
         assertTrue(s.chooseServer(partner))
-        assertTrue(tracker.update(s.state.value.match))
+        assertFalse("Wahl wirksam – nichts zu fragen", OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
         assertTrue(
             s.correct(
                 eu.advantly.core.scoring.Correction
@@ -136,13 +144,30 @@ class OperationRulesTest {
         )
         val lifted = s.state.value.match!!
         assertNull(lifted.serverChoice?.chosen)
-        val made = tracker.update(lifted)
-        assertTrue("im selben Fenster schon gewählt", made)
+        // frischer Check (z. B. nach Prozessverlust): nur das gespeicherte Log zählt
+        val made = OpeningChoiceCheck(chosenFrom(data)).choiceMade(lifted)
+        assertTrue("im Eröffnungsfenster schon gewählt", made)
         assertTrue(OperationRules.serverChoice(lifted, ::player, made)!!.prompt)
         assertFalse("ohne Wahl im Fenster: Start hat entschieden", OperationRules.serverChoice(lifted, ::player)!!.prompt)
-        repeat(4) { s.recordPoint(Side.A) } // neues Fenster (Game 2)
-        assertFalse(tracker.update(s.state.value.match))
-        assertFalse(tracker.update(null))
+        repeat(4) { s.recordPoint(Side.A) } // Game 2: kein Eröffnungsfenster mehr
+        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
+        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(null))
+    }
+
+    @Test
+    fun ignoredChoicesDoNotCount() {
+        val s = session()
+        s.create(Presets.TENNIS_DOUBLES_MTB10.format(Discipline.DOUBLES), doubles)
+        val state =
+            s.state.value.match!!
+                .state
+        val valid = EventId("v") to ServerChosen(0, Side.A, partner)
+        assertTrue(OperationRules.choiceMadeInSet(listOf(valid), 0, state))
+        assertFalse("anderer Satz", OperationRules.choiceMadeInSet(listOf(valid), 1, state))
+        val ignored = state.copy(ignoredEvents = listOf(EventId("v")))
+        assertFalse(OperationRules.choiceMadeInSet(listOf(valid), 0, ignored))
+        val rejected = state.copy(rejectedByRole = listOf(EventId("v")))
+        assertFalse(OperationRules.choiceMadeInSet(listOf(valid), 0, rejected))
     }
 
     @Test

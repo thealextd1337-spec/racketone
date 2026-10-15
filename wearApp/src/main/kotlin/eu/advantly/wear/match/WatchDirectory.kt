@@ -1,8 +1,12 @@
 package eu.advantly.wear.match
 
+import eu.advantly.core.model.EventId
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
+import eu.advantly.data.toScoreEventOrNull
 
 /** Gast-Slots eines Uhr-Matches; je Slot ein stabiler Gast-Spieler pro Installation (keine Gast-Flut). */
 enum class GuestSlot { PARTNER, OPPONENT_1, OPPONENT_2 }
@@ -67,11 +71,20 @@ class WatchDirectory(
             .filter { it.isFinished }
             .take(limit)
 
+    /** Alle gespeicherten `ServerChosen` des Matches (nur diese Event-Art wird dekodiert). */
+    fun serverChosen(matchId: MatchId): List<Pair<EventId, ServerChosen>> =
+        data.events
+            .eventsFor(matchId.value)
+            .filter { it.type == SERVER_CHOSEN }
+            .mapNotNull { it.toScoreEventOrNull() }
+            .mapNotNull { event -> (event.payload as? ServerChosen)?.let { event.id to it } }
+
     /** Nicht beendetes, gespeichertes Match zum Fortsetzen (z. B. nach Neustart), zuletzt geändertes zuerst. */
     fun resumable(): MatchRecord? = data.matches.active().firstOrNull()
 
     private companion object {
         const val GUEST_KEY_PREFIX = "wear.guest."
+        const val SERVER_CHOSEN = "ServerChosen"
         const val RECENT_SCAN = 30L
         const val RESULTS = 5
     }

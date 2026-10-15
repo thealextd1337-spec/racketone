@@ -4,7 +4,9 @@ import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.presentation.match.UpdateRequired
@@ -47,23 +49,26 @@ data class ServerChoiceUi(
 )
 
 /**
- * Merkt sich, in welchem Wahlfenster (Match, Satz, Game 1/2) schon ein Aufschläger gewählt war. Hebt eine Korrektur die
- * Wahl auf (Engine: `chosen = null`, 02 §6.5.5), unterscheidet sich das so von der beim Start erledigten Wahl.
+ * Wurde im Eröffnungsfenster (Game 1 des ersten Satzes) schon ein Aufschläger gewählt? Hebt eine Korrektur diese Wahl
+ * wieder auf (Engine: `chosen = null`, 02 §6.5.5), ist das nicht mehr die beim Start erledigte Wahl – der Hinweis
+ * erscheint wieder. Rekonstruiert aus dem gespeicherten Event-Log ([chosenEvents]: wirksame und unwirksame
+ * `ServerChosen` des Matches), damit es auch nach Prozessverlust bzw. neuer Activity stimmt. Gelesen wird nur in genau
+ * diesem Fenster und nur, wenn sich die Zahl der Events geändert hat.
  */
-class ServerChoiceTracker {
-    private var seen: Triple<MatchId, Int, Int>? = null
+class OpeningChoiceCheck(
+    private val chosenEvents: (MatchId) -> List<Pair<EventId, ServerChosen>>,
+) {
+    private var cache: Pair<Pair<MatchId, Int>, Boolean>? = null
 
-    /** Nach jeder Zustandsänderung aufrufen; liefert, ob im aktuellen Fenster schon gewählt wurde. */
-    fun update(match: ActiveMatch?): Boolean {
-        val key = match?.let(::windowOf) ?: return false
-        if (match.serverChoice?.chosen != null) seen = key
-        return seen == key
-    }
-
-    private fun windowOf(match: ActiveMatch): Triple<MatchId, Int, Int>? {
-        val choice = match.serverChoice ?: return null
-        val set = match.state.current?.setIndex ?: return null
-        return Triple(match.id, set, choice.game)
+    fun choiceMade(match: ActiveMatch?): Boolean {
+        val choice = match?.serverChoice ?: return false
+        if (choice.game != 1 || match.state.sets.isNotEmpty() || choice.chosen != null) return false
+        val set = match.state.current?.setIndex ?: return false
+        val key = match.id to match.eventCount
+        cache?.takeIf { it.first == key }?.let { return it.second }
+        val made = OperationRules.choiceMadeInSet(chosenEvents(match.id), set, match.state)
+        cache = key to made
+        return made
     }
 }
 
@@ -138,9 +143,9 @@ object OperationRules {
     }
 
     /**
-     * Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. [choiceMadeInWindow] = in genau
-     * diesem Fenster wurde schon gewählt (siehe [ServerChoiceTracker]) – dann ist `chosen = null` eine aufgehobene Wahl
-     * und wird wieder erfragt, auch in Game 1 des ersten Satzes.
+     * Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. [choiceMadeInWindow] = im
+     * Eröffnungsfenster wurde schon gewählt (siehe [OpeningChoiceCheck]) – dann ist `chosen = null` eine aufgehobene
+     * Wahl und wird wieder erfragt, auch in Game 1 des ersten Satzes.
      */
     fun serverChoice(
         match: ActiveMatch,
@@ -170,6 +175,13 @@ object OperationRules {
         if (live.serverChoice?.prompt == true) return StripAction.ChooseServer
         return null
     }
+
+    /** Gab es in Satz [set] eine Aufschlägerwahl, die die Engine angenommen hat (nicht ignoriert, nicht rollenfremd)? */
+    fun choiceMadeInSet(
+        chosen: List<Pair<EventId, ServerChosen>>,
+        set: Int,
+        state: MatchState,
+    ): Boolean = chosen.any { (id, event) -> event.set == set && id !in state.ignoredEvents && id !in state.rejectedByRole }
 
     /** Segment [index] der Aufschlag-Leiste → Wert. */
     fun serveOption(

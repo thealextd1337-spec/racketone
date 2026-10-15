@@ -15,10 +15,41 @@ class ActionStripTest {
     fun touchZoneIsAtLeast48dpOnSmallRoundDisplays() {
         assertEquals(48f * density, g.height, 0.01f)
         assertTrue("sichtbar etwas flacher als die Trefferzone", g.visualHeight < g.height && g.visualHeight >= 32f * density)
-        assertEquals("mittig", size / 2, (g.top + g.bottom) / 2, 0.01f)
-        // großes Display: Anteil der Höhe statt der Mindesthöhe
+        // großes Display: Anteil der Höhe statt der Mindesthöhe, mittig
         val big = ActionStrip.geometry(1_000f, 1_000f, 2f)
         assertEquals(160f, big.height, 0.01f)
+        assertEquals("mittig", 500f, (big.top + big.bottom) / 2, 0.01f)
+    }
+
+    /** Leiste und beide Zählflächen je ≥ 48 dp: Pixel Watch 3 (192/208 dp), Galaxy Watch (≈ 225 dp), große Displays. */
+    @Test
+    fun stripAndBothScoringAreasKeep48dp() {
+        for (dp in listOf(192f, 198f, 208f, 225f, 260f, 450f)) {
+            for (d in listOf(1.5f, 2f, 2.625f)) {
+                val px = dp * d
+                val geo = ActionStrip.geometry(px, px, d)
+                val min = 48f * d - 0.01f
+                assertTrue("$dp dp: Leiste ${geo.height / d}", geo.height >= min)
+                assertTrue("$dp dp: Wir ${geo.usArea / d}", geo.usArea >= min)
+                assertTrue("$dp dp: Gegner ${geo.themArea / d}", geo.themArea >= min)
+                assertTrue("Schutz bleibt", geo.guard >= ActionStrip.GUARD_DP * d - 0.01f)
+                // Zählflächen passen zu TapZones: oberhalb des Schutzes Wir, unterhalb Gegner
+                assertEquals(eu.advantly.core.model.Side.A, TapZones.classify(geo.top - geo.guard - 0.5f, px))
+                assertEquals(eu.advantly.core.model.Side.B, TapZones.classify(geo.bottom + geo.guard + 0.5f, px))
+                assertEquals(px * TapZones.TOP_DEAD_ZONE + geo.usArea, geo.top - geo.guard, 0.01f)
+                assertEquals(px, geo.bottom + geo.guard + geo.themArea, 0.01f)
+            }
+        }
+        // 192 dp: Leiste rückt nach unten, damit „Wir“ trotz oberer Totzone 48 dp behält
+        assertEquals(48f * density, g.usArea, 0.01f)
+        assertTrue(g.top > (size - g.height) / 2)
+    }
+
+    @Test
+    fun tinyDisplaysKeepBothScoringAreasAndShrinkTheStrip() {
+        val geo = ActionStrip.geometry(160f, 160f, 1f)
+        assertTrue(geo.usArea >= 47.99f && geo.themArea >= 47.99f)
+        assertTrue(geo.height < 48f && geo.height > 40f)
     }
 
     @Test
