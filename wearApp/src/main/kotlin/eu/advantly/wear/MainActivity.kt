@@ -16,6 +16,8 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -30,11 +32,14 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
+import eu.advantly.wear.glance.GlanceAction
+import eu.advantly.wear.glance.GlanceLaunch
 import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
 import eu.advantly.wear.live.WatchEffect
@@ -82,6 +87,7 @@ class WatchViewModel(
  * Vordergrund, 05 §2.2). Die Logik steckt im JVM-getesteten [WatchController].
  */
 class MainActivity : ComponentActivity() {
+    private val glanceLaunch = mutableIntStateOf(0)
     private val isAmbient = mutableStateOf(false)
     private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val toast = mutableStateOf<WatchToast?>(null)
@@ -182,16 +188,18 @@ class MainActivity : ComponentActivity() {
                     controller.tick()
                 }
             }
-            WearApp(
-                state = state,
-                workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
-                permissions = permissions.value,
-                heartRate = shownTelemetry.value.first,
-                isAmbient = ambient,
-                powerSave = powerSave.value,
-                toast = toast.value,
-                actions = actions,
-            )
+            key(glanceLaunch.intValue) {
+                WearApp(
+                    state = state,
+                    workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
+                    permissions = permissions.value,
+                    heartRate = shownTelemetry.value.first,
+                    isAmbient = ambient,
+                    powerSave = powerSave.value,
+                    toast = toast.value,
+                    actions = actions,
+                )
+            }
         }
     }
 
@@ -222,6 +230,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         UiVisibility.resumed = true
+        consumeGlanceAction()
         MatchNotifier.cancel(this)
         permissions.value = Permissions.current(this) // Rechte können in den Einstellungen geändert worden sein
         holder.session.syncNow()
@@ -235,6 +244,32 @@ class MainActivity : ComponentActivity() {
         UiVisibility.resumed = false
         DiagnosticLog.log("ACTIVITY_PAUSE")
         super.onPause()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
+    }
+
+    /** Erst aus der sichtbaren Activity starten; Extra verbrauchen, bevor Session/Rechte-Dialoge reagieren. */
+    private fun consumeGlanceAction() {
+        val value = intent.getStringExtra(GlanceLaunch.EXTRA_ACTION) ?: return
+        intent.removeExtra(GlanceLaunch.EXTRA_ACTION)
+        // Eine bereits offene Steuerseite beim externen Einstieg wieder auf die Score-Seite setzen.
+        glanceLaunch.intValue++
+        val status =
+            holder.session.state.value.match
+                ?.state
+                ?.status
+        val action = GlanceLaunch.resolve(value, status)
+        // Das Ergebnis bleibt gespeichert; ein Schnellstart nach Matchende darf direkt beginnen.
+        if (status == MatchStatus.FINISHED && action != GlanceAction.OPEN) controller.close()
+        when (action) {
+            GlanceAction.REPEAT -> if (!controller.repeatLast()) controller.newMatch()
+            GlanceAction.NEW -> controller.newMatch()
+            GlanceAction.OPEN -> controller.tick()
+        }
     }
 
     override fun onStop() {

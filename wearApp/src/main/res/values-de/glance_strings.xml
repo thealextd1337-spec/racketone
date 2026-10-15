@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="glance_tile_label">Schnellstart</string>
+    <string name="glance_tile_description">Letzte Besetzung wiederholen oder Spielstand des Uhr-Matches öffnen</string>
+    <string name="glance_complication_label">Spielstand</string>
+    <string name="glance_open">Live-Spielstand öffnen</string>
+    <string name="glance_open_app">Advantly öffnen</string>
+    <string name="glance_start">Start</string>
+    <string name="glance_sets">Sätze %1$s</string>
+    <string name="glance_games">Games %1$s</string>
+    <string name="glance_points">Punkte %1$s</string>
+    <string name="glance_serve">Aufschlag: %1$s</string>
+    <string name="glance_display">Anzeige</string>
+    <string name="glance_paused">Pausiert</string>
+    <string name="glance_decision">Satz beendet</string>
+    <string name="glance_games_to" tools:ignore="PluralsCandidate">%1$d Games/Satz</string>
+    <string name="glance_points_to" tools:ignore="PluralsCandidate">Bis %1$d Punkte</string>
+</resources>

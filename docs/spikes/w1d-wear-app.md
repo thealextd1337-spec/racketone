@@ -215,7 +215,8 @@ Weitere Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine H
 - **Spieler „Du“:** Die Uhr übernimmt beim ersten Kontakt die Identität des Handys. Matches, die die Uhr vorher ohne
   Handy angelegt hat, zeigen dich trotzdem als „Du“ (frühere Uhr-Identität ist als Alias bekannt).
 - **Energiesparmodus** kann das Wecken der Uhr verzögern oder verhindern; die App zeigt dann nur einen Hinweis.
-- **Tile** „Schnellstart“ ist noch nicht enthalten.
+- **Tile/Komplikation:** Update-Anfragen sind gedrosselt und das System bestimmt den tatsächlichen Zustellzeitpunkt;
+  sie ersetzen keine Echtzeit-Live-Ansicht. Siehe Abschnitt 9 für den Feldtest.
 
 ## 8. Flüchtige Live-Telemetrie (W2, F19)
 
@@ -285,3 +286,42 @@ Exercise-Zustand (z. B. `USER_PAUSED`/`AUTO_PAUSED`), sendet die Uhr keine Telem
    auf Geräten ohne `STEPS_TOTAL` den dokumentierten Delta-Fallback prüfen.
 7. Sensorqualität, Auto-/Nutzer-Pause, echte Hintergrundzustellung, große Schrift auf runden 192-dp-Displays sowie
    Wakeups und Akkuverbrauch bleiben auf Pixel Watch und Galaxy Watch zu prüfen.
+
+## 9. Tile und Komplikation (P1-D)
+
+Das Tile **Schnellstart** bietet ohne laufendes Uhr-Match „Wie letztes Mal“ mit Sport, Format und Besetzung sowie
+„Neues Match“. Ohne bisheriges Setup erscheint nur „Neues Match“. Mit laufendem Match zeigt es Sätze, gegebenenfalls
+Games, Punkte, konkreten Aufschläger und die Rolle **Zähler/Anzeige**; auch Pause und Satzende bleiben erkennbar.
+Tippen führt ins laufende Match. Die Komplikation unterstützt **SHORT_TEXT** (Punkte, bei langen Ständen Games/Sätze)
+und **LONG_TEXT** (Sätze/Games/Punkte); ohne Match dient sie als App-Einstieg. Alle Aktionen öffnen die Activity.
+Ein inzwischen laufendes Match hat Vorrang vor einem veralteten „Wie letztes Mal“-Tipp; Rotation und Rückkehr aus
+Rechte-Dialogen wiederholen den Startauftrag nicht. Ein Workout startet weiterhin ausschließlich im Vordergrund.
+
+`glance/GlancePublisher` hört auf die vorhandene `MatchSession`, liest Setup/Spielernamen bei Datenänderungen und
+hält eine kleine unveränderliche RAM-Lesesicht. Sie wird beim Prozessstart aus Session/DB wiederhergestellt.
+Die Provider-Callbacks lesen nur diese Lesesicht: kein Event-Replay, kein Sync und keine Workout-Arbeit im Request.
+Änderungen fordern über `TileService.getUpdater(...).requestUpdate` und den Complication-UpdateRequester eine
+Aktualisierung an: zuerst sofort, danach höchstens alle **5 Sekunden**, mit nachlaufendem neuesten Stand. Undo zurück
+zum bereits angezeigten Wert verwirft eine überflüssige Anfrage. Die tatsächliche Darstellung/Zustellung bestimmt
+Wear OS; es gibt kein periodisches Polling und keine Hintergrund-Startberechtigung für Workouts.
+
+Versionen im Katalog, geprüft am 15.10.2026: [Tiles 1.6.2](https://developer.android.com/jetpack/androidx/releases/wear-tiles),
+[ProtoLayout 1.4.2](https://developer.android.com/jetpack/androidx/releases/wear-protolayout),
+[Complication Data Source 1.3.0](https://developer.android.com/jetpack/androidx/releases/wear-watchface).
+DE/EN-Texte und lokalisierte Tile-Auswahlbilder liegen in `res/`; vollständige Beschreibungen bleiben für TalkBack
+erhalten, auch wenn lange Namen in der sichtbaren Tile-Zeile gekürzt werden. JVM-Tests sichern Ableitung,
+Rollenwechsel, Undo, Satzgrenzen, Drosselung, Intent-Auswahl und Texte samt Ressourcen-Parität ab.
+
+**Feldtest auf Pixel Watch und Galaxy Watch:**
+
+1. Tile hinzufügen, ohne Historie „Neues Match“ öffnen. Ein Match beenden und schließen, dann „Wie letztes Mal“
+   prüfen: Sport, Format und Besetzung stimmen, genau ein Match startet. Workout an/aus und verweigerte Rechte prüfen.
+2. In beiden Rollen Punkte, Undo, Game-/Satzwechsel, Pause und Satzende prüfen. Mehrere Änderungen in fünf Sekunden:
+   nach der Drosselung erscheint der letzte Stand; Systemverzögerung protokollieren. Tippen öffnet die Live-Ansicht.
+3. Einen alten Schnellstart sichtbar lassen, während das Handy ein Uhr-Match zuweist; Tippen muss dieses Match öffnen.
+   Display drehen/Activity neu erstellen und Rechte-Dialog schließen: kein zweiter Start.
+4. Komplikation in SHORT_TEXT- und LONG_TEXT-Slots hinzufügen, Vorschau, laufenden Stand, Rollenwechsel, Matchende
+   und App-Einstieg prüfen. Telefon-Director-Matches anderer Plätze dürfen nie erscheinen.
+5. Prozess neu starten (kein Force-Stop), Flugmodus, Display aus/Ambient und Energiesparmodus prüfen. RAM-Zustand
+   rekonstruiert sich aus der DB; echte Zustellung, Akku/Wakeups, TalkBack, DE/EN, große Schrift und runde 192-dp-Displays
+   benötigen den Gerätetest. Ein Android-Force-Stop sperrt Hintergrundzustellung bis zum nächsten manuellen App-Start.
