@@ -1272,7 +1272,7 @@ class MatchSession(
             SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs),
             dataRevision,
             matches,
-            watchAssignment?.matchId?.takeIf { config.parallelMatches },
+            watchAssignment?.matchId,
         )
     }
 

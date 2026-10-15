@@ -603,10 +603,18 @@ class WatchController(
                 val recognized = SetupCatalog.recognize(s.format, day)
                 SetupSummary(s.format.sport, s.format.discipline, recognized?.choice, s.format, recognized?.gamesPerSet)
             }
+        // Mit Zuweisung des Handys (F22) bietet die Uhr nur ihr Uhr-Match an, nie die Director-Matches der Nachbarplätze
+        val assigned = session.state.value.watchMatchId
         val resume =
-            directory.resumable()?.let { r ->
-                ResumeUi(r.id, r.sport, LiveModel.setsText(r.score))
-            }
+            (
+                if (assigned != null) {
+                    session.data.matches
+                        .get(assigned)
+                        ?.takeIf { !it.isFinished }
+                } else {
+                    directory.resumable()
+                }
+            )?.let { r -> ResumeUi(r.id, r.sport, LiveModel.setsText(r.score)) }
         val recent =
             directory.recentResults().map { r ->
                 ResultUi(r.id, r.sport, LiveModel.setsText(r.score), r.score.winner, r.score.reason)

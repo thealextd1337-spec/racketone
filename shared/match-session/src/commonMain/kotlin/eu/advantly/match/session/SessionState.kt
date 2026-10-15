@@ -25,8 +25,8 @@ import eu.advantly.sync.protocol.PeerKind
  * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des fokussierten Matches ändern (Löschung,
  *   Match-Kopf/-Stand eines anderen Matches, Spieler, Favoriten, Identität) – Signal für Listen-UIs (Verlauf), neu zu laden
  * @property matches alle offenen Matches (fokussiertes eingeschlossen), nach Erstellzeit; Uhren: höchstens eines (F22)
- * @property watchMatchId nur am Handy: das Uhr-Match – das offene Match, das die eigene Uhr zählt bzw. anzeigt
- *   (01 §4.9); `null` = die Uhr ist frei
+ * @property watchMatchId Handy: das Uhr-Match – das Match, das die eigene Uhr zählt bzw. anzeigt (01 §4.9), `null` = die
+ *   Uhr ist frei. Uhr: das ihr vom Handy zugewiesene Match (dem sie folgt), `null` = keine Zuweisung bekannt
  */
 data class SessionState(
     val match: ActiveMatch?,
