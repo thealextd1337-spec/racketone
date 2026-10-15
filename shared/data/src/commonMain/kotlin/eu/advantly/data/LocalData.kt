@@ -1,5 +1,6 @@
 package eu.advantly.data
 
+import app.cash.sqldelight.Query
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Placeholders
@@ -25,6 +26,27 @@ class LocalData(
     val players: PlayerRepository = PlayerRepository(database.playerQueries)
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
+    private val identityListeners = mutableSetOf<() -> Unit>()
+
+    /**
+     * Invalidierung der Eingaben für kompakte Verzeichnisansichten, ohne Abfrage oder Event-Replay im Callback.
+     * Favoriten und reine Session-/Sync-Statuswechsel lösen keine Invalidierung aus. Rückgabe entfernt die Registrierung.
+     */
+    fun observeDirectoryChanges(onChanged: () -> Unit): () -> Unit {
+        val queries =
+            listOf(
+                database.matchHeaderQueries.recent(1),
+                database.matchAssignmentQueries.forMatch(""),
+                database.playerQueries.selectAll(),
+            )
+        val listener = Query.Listener(onChanged)
+        queries.forEach { it.addListener(listener) }
+        identityListeners.add(onChanged)
+        return {
+            queries.forEach { it.removeListener(listener) }
+            identityListeners.remove(onChanged)
+        }
+    }
 
     init {
         if (settings.get("assignments.projectionVersion") != "2") {
@@ -163,6 +185,7 @@ class LocalData(
         val next = current + ids.filter { it != self && it.value.isNotBlank() && ',' !in it.value }
         if (next == current) return false
         settings.put(SELF_ALIASES_KEY, next.joinToString(",") { it.value })
+        identityListeners.toList().forEach { it() }
         return true
     }
 

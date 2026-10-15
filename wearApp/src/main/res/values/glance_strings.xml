@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="glance_tile_label">Quick start</string>
+    <string name="glance_tile_description">Repeat your last setup or open the watch match score</string>
+    <string name="glance_complication_label">Match score</string>
+    <string name="glance_open">Open live score</string>
+    <string name="glance_open_app">Open Advantly</string>
+    <string name="glance_app_short">Open</string>
+    <string name="glance_app_action">Open app</string>
+    <string name="glance_paused_short">Paused</string>
+    <string name="glance_decision_short">Set end</string>
+    <string name="glance_sets">Sets %1$s</string>
+    <string name="glance_games">Games %1$s</string>
+    <string name="glance_points">Points %1$s</string>
+    <string name="glance_serve">Serve: %1$s</string>
+    <string name="glance_display">Display</string>
+    <string name="glance_paused">Paused</string>
+    <string name="glance_decision">Set finished</string>
+    <string name="glance_games_to" tools:ignore="PluralsCandidate">%1$d games/set</string>
+    <string name="glance_points_to" tools:ignore="PluralsCandidate">To %1$d points</string>
+</resources>

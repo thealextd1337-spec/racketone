@@ -7,6 +7,7 @@ import android.os.Process
 import eu.advantly.match.session.SessionListener
 import eu.advantly.wear.diagnostics.DiagLine
 import eu.advantly.wear.diagnostics.DiagnosticLog
+import eu.advantly.wear.glance.GlancePublisher
 import eu.advantly.wear.sync.MatchNotifier
 import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.workout.SessionStore
@@ -39,6 +40,7 @@ class AdvantlyWearApplication : Application() {
         logExitReasons(store)
 
         val holder = WearSessions.get(this)
+        holder.session.addListener(GlancePublisher(this, holder))
         val workoutStore = SessionStore(this)
         holder.session.addListener(MatchNotifier(this))
         holder.session.addListener(

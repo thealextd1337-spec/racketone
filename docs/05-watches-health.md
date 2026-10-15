@@ -203,7 +203,7 @@ Das Watch-Face-Format ist für uns irrelevant.
 
 ### 2.6 Tiles, Complications, Schnellstart
 
-- **Tile** „Neues Match“ mit drei Buttons (Tennis/Padel/Pickleball, nach Nutzung sortiert) plus „Letztes Setup wiederholen“. Läuft ein Match, zeigt das Tile den Spielstand. Mit Wear OS 7 heißen Tiles „**Wear Widgets**“ (2×1/2×2) [Q20]. Wir bauen auf ProtoLayout bzw. Tiles und migrieren, sobald die API stabil ist.
+- **Tile** mit zwei Schnellstart-Buttons: „Wie letztes Mal“ (letztes Format und letzte Besetzung) und „Neues Match“ (Sportwahl im Uhr-Wizard). Ohne vorheriges Match erscheint nur „Neues Match“. Läuft ein Match, zeigt das Tile den Spielstand. Mit Wear OS 7 heißen Tiles „**Wear Widgets**“ (2×1/2×2) [Q20]. Wir bauen auf ProtoLayout bzw. Tiles und migrieren, sobald die API stabil ist.
 - **Complication** (`ComplicationDataSourceService`): `SHORT_TEXT` mit dem Spielstand während des Matches, sonst ein App-Shortcut.
 - Die **Ongoing Activity** sorgt für die Rückkehr ins laufende Match (siehe 2.2).
 
