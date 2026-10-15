@@ -88,4 +88,30 @@ class ScorerStepTest {
         assertEquals(ScorerOption.THIS_PHONE, w.state.value.startOptions.scorer)
         assertFalse(w.state.value.input.watchAvailable)
     }
+
+    /** F22: Zählt die Uhr schon ein anderes Match, ist „Meine Uhr“ nicht mehr Standard, aber bewusst wählbar (Wechsel). */
+    @Test
+    fun busyWatchIsNotTheDefaultButCanBeChosen() {
+        watch.value = WatchStatus.AVAILABLE
+        var busy = true
+        val w =
+            MatchWizard(
+                store,
+                today = { LocalDay(2026, 10, 15) },
+                random = Random(1),
+                watchStatus = watch,
+                watchBusy = { busy },
+            )
+        w.selectSport(Sport.TENNIS)
+        w.addGuest("Gast")
+        while (w.state.value.step != WizardStep.SCORER) assertTrue(w.next())
+        assertTrue(w.state.value.input.watchBusy)
+        assertEquals(ScorerOption.THIS_PHONE, w.state.value.startOptions.scorer)
+        w.setScorer(ScorerOption.MY_WATCH)
+        assertEquals(ScorerOption.MY_WATCH, w.state.value.startOptions.scorer, "Uhr-Match wechseln")
+        busy = false
+        w.setScorer(ScorerOption.THIS_PHONE)
+        w.refreshWatchStatus()
+        assertFalse(w.state.value.input.watchBusy)
+    }
 }

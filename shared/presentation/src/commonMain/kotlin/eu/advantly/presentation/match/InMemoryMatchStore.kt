@@ -44,7 +44,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * (`MatchCreated` + Events) über der echten [ScoringEngine]; Zeit und IDs kommen aus [clock] und [ids].
  *
  * Für Tests und Previews (die Apps nutzen `SessionMatchStore`): keine Persistenz (Prozesstod verliert alles), kein
- * Sync, ein Gerät – es zählt immer selbst ([LiveRole.SCORER]), auch wenn „Meine Uhr“ gewählt wird.
+ * Sync, ein Gerät – es zählt immer selbst ([LiveRole.SCORER]), auch wenn „Meine Uhr“ gewählt wird. Mehrere Matches
+ * können parallel offen sein (F22); ein Uhr-Match gibt es hier nicht.
  * Nur vom UI-Thread benutzen.
  *
  * @param selfName Anzeigename des Besitzers (leer = UI zeigt „Du“)
@@ -75,7 +76,11 @@ class InMemoryMatchStore(
     private val entries = LinkedHashMap<MatchId, Entry>()
     private var activeId: MatchId? = null
 
+    /** Offene Matches in Startreihenfolge (laufende und beendete, noch nicht geschlossene). */
+    private val openIds = LinkedHashSet<MatchId>()
+
     private val activeFlow = MutableStateFlow<LiveMatchSnapshot?>(null)
+    private val openFlow = MutableStateFlow<List<LiveMatchSnapshot>>(emptyList())
     private val historyFlow = MutableStateFlow<List<MatchSummary>>(emptyList())
     private val selfFlow = MutableStateFlow(Player(PlayerId(ids.newId().value), selfName))
     private val guestsFlow = MutableStateFlow<List<Player>>(emptyList())
@@ -83,6 +88,7 @@ class InMemoryMatchStore(
     private val lastSetupFlow = MutableStateFlow<MatchSetup?>(null)
 
     override val active: StateFlow<LiveMatchSnapshot?> = activeFlow.asStateFlow()
+    override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val matches: StateFlow<List<MatchSummary>> = historyFlow.asStateFlow()
     override val self: StateFlow<Player> = selfFlow.asStateFlow()
     override val guests: StateFlow<List<Player>> = guestsFlow.asStateFlow()
@@ -127,9 +133,6 @@ class InMemoryMatchStore(
         val missing = (setup.lineup.a + setup.lineup.b).filter { setup.player(it) == null }
         require(missing.isEmpty()) { "Spieler ohne Namen: $missing" }
 
-        current()?.let { previous ->
-            if (previous.engine.state.status != MatchStatus.FINISHED) append(previous, MatchEnded(EndReason.ABANDONED))
-        }
         val id = MatchId.of(ids.newId())
         val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
         val genesis =
@@ -145,6 +148,7 @@ class InMemoryMatchStore(
             )
         val entry = Entry(id, setup.copy(meta = meta), genesis, ScoringEngine.replay(listOf(genesis)))
         entries[id] = entry
+        openIds += id
         activeId = id
         lastSetupFlow.value = setup.copy(previousMatchId = null)
         rememberGuests(setup)
@@ -220,14 +224,37 @@ class InMemoryMatchStore(
 
     private fun serveInfoEnabled(e: Entry): Boolean = e.setup.format.sport.isTennisLike && e.setup.meta.serveStats
 
+    override fun select(matchId: MatchId): Boolean {
+        if (matchId !in openIds) return false
+        activeId = matchId
+        publish()
+        return true
+    }
+
     override fun endMatch(
         reason: EndReason,
         side: Side?,
     ): Boolean =
         command(clearRedo = true) { e ->
             if (e.engine.state.status == MatchStatus.FINISHED) return@command false
-            if ((reason == EndReason.ABANDONED) != (side == null)) return@command false
+            val sideless = reason == EndReason.ABANDONED || reason == EndReason.STOPPED
+            if (sideless != (side == null)) return@command false
             append(e, MatchEnded(reason, side))
+        }
+
+    /** Wie die Session: im Satzende-Dialog regulär (`ContinueDecision(false)`), sonst `MatchEnded(STOPPED)`. */
+    override fun stopMatch(): Boolean =
+        command(clearRedo = true) { e ->
+            when (e.engine.state.status) {
+                MatchStatus.FINISHED -> false
+                MatchStatus.AWAITING_DECISION -> append(e, ContinueDecision(anotherSet = false))
+                else -> append(e, MatchEnded(EndReason.STOPPED))
+            }
+        }
+
+    override fun abandonMatch(): Boolean =
+        command(clearRedo = true) { e ->
+            e.engine.state.status != MatchStatus.FINISHED && append(e, MatchEnded(EndReason.ABANDONED))
         }
 
     override fun correctServer(
@@ -276,6 +303,7 @@ class InMemoryMatchStore(
             )
         val id = start(setup, StartOptions())
         previous.followUp = id
+        openIds -= previous.id // Folge-Match ersetzt das beendete Vor-Match in der Liste (wie die Session)
         publish()
         return id
     }
@@ -289,9 +317,21 @@ class InMemoryMatchStore(
     override fun dismiss(): Boolean {
         val entry = current() ?: return false
         if (entry.engine.state.status != MatchStatus.FINISHED) return false
-        activeId = null
+        close(entry.id)
         publish()
         return true
+    }
+
+    /** Schließt [id]; war es aktiv, rückt das jüngste offene Match nach (laufende vor beendeten, wie die Session). */
+    private fun close(id: MatchId) {
+        openIds -= id
+        if (activeId != id) return
+        activeId =
+            openIds
+                .mapNotNull(entries::get)
+                .maxWithOrNull(
+                    compareBy<Entry> { it.engine.state.status != MatchStatus.FINISHED }.thenBy { it.genesis.wallClockMs },
+                )?.id
     }
 
     // --- MatchHistoryPort ---
@@ -304,8 +344,8 @@ class InMemoryMatchStore(
     override fun delete(matchId: MatchId): Boolean {
         val entry = entries[matchId] ?: return false
         if (entry.engine.state.status != MatchStatus.FINISHED) return false
-        // Aktives (beendetes) Match zuerst schließen, dann löschen (Vertrag MatchHistoryPort.delete)
-        if (activeId == matchId) dismiss()
+        // Offenes (beendetes) Match zuerst schließen, dann löschen (Vertrag MatchHistoryPort.delete)
+        close(matchId)
         entries.remove(matchId)
         publish()
         return true
@@ -447,42 +487,43 @@ class InMemoryMatchStore(
     }
 
     private fun publish() {
-        activeFlow.value =
-            current()?.let { e ->
-                LiveMatchSnapshot(
-                    matchId = e.id,
-                    setup = e.setup,
-                    state = e.engine.state,
-                    canUndo = e.engine.undoTarget != null,
-                    canRedo = e.redo.isNotEmpty(),
-                    startedAtMs = e.genesis.wallClockMs,
-                    finishedAtMs = e.finishedAtMs,
-                    followUpMatchId = e.followUp,
-                    revision = e.revision,
-                    pointsPlayed = pointsPlayed(e),
-                    role = LiveRole.SCORER,
-                    scorerName = selfFlow.value.displayName,
-                    scorerKind = DeviceKind.PHONE,
-                    sync = SyncInfo.LOCAL_ONLY,
-                    absorbedTaps = e.engine.absorbedEvents.size,
-                    lastPoint =
-                        e.engine.lastPoint?.let {
-                            LastPointInfo(it.id, it.side, it.servingSide, it.server, it.detail?.serve, it.side != it.servingSide)
-                        },
-                    serveInfoEnabled = serveInfoEnabled(e),
-                    canRemovePoint = SidePair.of { ScoringEngine.lastEffectivePointOf(e.engine, it) != null },
-                    nextSetOptions =
-                        if (e.engine.state.status == MatchStatus.AWAITING_DECISION) {
-                            ScoringEngine.nextSetOptions(e.setup.format)
-                        } else {
-                            emptyList()
-                        },
-                )
-            }
+        activeFlow.value = current()?.let(::snapshot)
+        openFlow.value = openIds.mapNotNull(entries::get).map(::snapshot)
         historyFlow.value =
             entries.values
                 .filter { it.engine.state.status == MatchStatus.FINISHED }
                 .sortedByDescending { it.finishedAtMs }
                 .map(::summary)
     }
+
+    private fun snapshot(e: Entry): LiveMatchSnapshot =
+        LiveMatchSnapshot(
+            matchId = e.id,
+            setup = e.setup,
+            state = e.engine.state,
+            canUndo = e.engine.undoTarget != null,
+            canRedo = e.redo.isNotEmpty(),
+            startedAtMs = e.genesis.wallClockMs,
+            finishedAtMs = e.finishedAtMs,
+            followUpMatchId = e.followUp,
+            revision = e.revision,
+            pointsPlayed = pointsPlayed(e),
+            role = LiveRole.SCORER,
+            scorerName = selfFlow.value.displayName,
+            scorerKind = DeviceKind.PHONE,
+            sync = SyncInfo.LOCAL_ONLY,
+            absorbedTaps = e.engine.absorbedEvents.size,
+            lastPoint =
+                e.engine.lastPoint?.let {
+                    LastPointInfo(it.id, it.side, it.servingSide, it.server, it.detail?.serve, it.side != it.servingSide)
+                },
+            serveInfoEnabled = serveInfoEnabled(e),
+            canRemovePoint = SidePair.of { ScoringEngine.lastEffectivePointOf(e.engine, it) != null },
+            nextSetOptions =
+                if (e.engine.state.status == MatchStatus.AWAITING_DECISION) {
+                    ScoringEngine.nextSetOptions(e.setup.format)
+                } else {
+                    emptyList()
+                },
+        )
 }

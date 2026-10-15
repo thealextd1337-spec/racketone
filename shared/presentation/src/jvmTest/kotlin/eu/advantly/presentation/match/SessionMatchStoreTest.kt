@@ -10,6 +10,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
@@ -158,7 +159,7 @@ class SessionMatchStoreTest {
             eu.advantly.sync.protocol.SyncCodec
                 .encode(
                     eu.advantly.sync.protocol
-                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 3, v = 3),
+                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 4, v = 4),
                 ),
         )
         rig.settle()
@@ -550,18 +551,23 @@ class SessionMatchStoreTest {
     }
 
     @Test
-    fun startingWhileTheWatchScoresAbandonsTheOldMatchEverywhere() {
+    fun startingWithMyWatchWhileTheWatchScoresHandsTheOldMatchToThePhone() {
         val rig = Rig()
         val old = rig.watchScoredMatch()
         rig.watch.recordPoint(Side.A)
         rig.settle()
         val next = rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH))
         rig.settle()
-        assertEquals(
-            MatchStatus.FINISHED,
-            rig.phoneSession.data.matches
-                .get(old)!!
-                .status,
+        val oldSnapshot =
+            rig.phone.openMatches.value
+                .single { it.matchId == old }
+        assertEquals(MatchStatus.IN_PROGRESS, oldSnapshot.state.status, "F22: läuft weiter")
+        assertEquals(LiveRole.SCORER, oldSnapshot.role, "Handy zählt das alte Match als Director")
+        assertFalse(oldSnapshot.onWatch)
+        assertTrue(
+            rig.phone.openMatches.value
+                .single { it.matchId == next }
+                .onWatch,
         )
         assertEquals(
             next,
@@ -909,5 +915,110 @@ class SessionMatchStoreTest {
         phone.removeFavorite("unbekannt")
         phone.removeFavorite(favorite.id)
         assertTrue(phone.favorites.value.isEmpty())
+    }
+
+    /** F22: Übersicht aller offenen Matches, Wechsel der Live-Ansicht, Kennzeichnung des Uhr-Matches. */
+    @Test
+    fun parallelMatchesAreListedAndSelectable() {
+        val rig = Rig()
+        val phone = rig.phone
+        val onWatch = rig.watchScoredMatch()
+        val court2 = phone.start(phone.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE))
+        rig.settle()
+        assertEquals(listOf(onWatch, court2), phone.openMatches.value.map { it.matchId })
+        assertEquals(court2, phone.active.value!!.matchId)
+        assertEquals(listOf(true, false), phone.openMatches.value.map { it.onWatch })
+        assertTrue(
+            phone.openMatches.value
+                .first()
+                .watchScores,
+            "Uhr ist belegt",
+        )
+        phone.play("AA")
+        assertTrue(rig.watch.recordPoint(Side.B))
+        rig.settle()
+        assertEquals(
+            onWatch,
+            rig.watch.state.value.match
+                ?.id,
+            "Uhr bleibt bei ihrem Match",
+        )
+        assertTrue(phone.select(onWatch))
+        val shown = phone.active.value!!
+        assertEquals(LiveRole.DISPLAY, shown.role)
+        assertEquals(
+            1,
+            shown.state.current!!
+                .points.b,
+        )
+        assertTrue(shown.sync.scorerConnected)
+        assertEquals(
+            2,
+            phone.openMatches.value
+                .last()
+                .state.current!!
+                .points.a,
+            "Nachbarplatz unverändert",
+        )
+        assertFalse(phone.select(MatchId("unbekannt")))
+        assertFalse(phone.recordPoint(Side.A), "Uhr-Match zählt nur die Uhr")
+    }
+
+    /** F21: Beenden/Abbrechen am Handy – als Anzeige mit vorheriger Übernahme; die Uhr zeigt das Ende. */
+    @Test
+    fun stopAndAbandonFromThePhone() {
+        val rig = Rig()
+        val phone = rig.phone
+        val onWatch = rig.watchScoredMatch()
+        assertTrue(rig.watch.recordPoint(Side.A))
+        rig.settle()
+        assertFalse(phone.endMatch(EndReason.STOPPED), "endMatch bleibt dem Zähler vorbehalten")
+        assertTrue(phone.stopMatch())
+        rig.settle()
+        assertEquals(
+            MatchResult(Side.A, ResultReason.STOPPED),
+            phone.active.value!!
+                .state.result,
+        )
+        val onTheWatch = rig.watch.state.value.match!!
+        assertEquals(MatchStatus.FINISHED, onTheWatch.state.status, "Uhr zeigt das Ende")
+        assertEquals(ResultReason.STOPPED, onTheWatch.state.result!!.reason)
+        assertFalse(phone.stopMatch(), "schon beendet")
+        assertTrue(phone.dismiss())
+        val director = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.THIS_PHONE))
+        phone.play("B")
+        assertTrue(phone.abandonMatch())
+        assertTrue(phone.dismiss())
+        val history = phone.matches.value
+        assertEquals(setOf(onWatch, director), history.map { it.matchId }.toSet())
+        assertEquals(listOf(onWatch), history.filter { it.isRated }.map { it.matchId }, "Abgebrochen zählt nicht")
+        assertTrue(phone.delete(director), "abgebrochenes Match lässt sich löschen")
+    }
+
+    /** F22: Nach einem Neustart sind alle laufenden Matches wieder offen, das Uhr-Match bleibt gekennzeichnet. */
+    @Test
+    fun restartReopensAllRunningMatches() {
+        val file = File.createTempFile("advantly-parallel", ".db").also { files += it }
+        file.delete()
+        val rig = Rig(phoneData = fileData(file))
+        val onWatch = rig.watchScoredMatch()
+        val court2 = rig.phone.start(rig.phone.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE))
+        rig.settle(1_000)
+        rig.phone.play("A")
+        rig.restartPhone(fileData(file))
+        val after = rig.phone
+        assertEquals(listOf(onWatch, court2), after.openMatches.value.map { it.matchId })
+        assertEquals(court2, after.active.value!!.matchId, "zuletzt geändertes im Fokus")
+        assertTrue(
+            after.openMatches.value
+                .first()
+                .onWatch,
+        )
+        assertEquals(
+            1,
+            after.active.value!!
+                .state.current!!
+                .points.a,
+        )
     }
 }

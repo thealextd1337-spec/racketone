@@ -47,6 +47,8 @@ import kotlin.random.Random
  * @param watchStatus Stand der eigenen Uhr (`LiveMatchPort.watchStatus`); die UI meldet Änderungen über
  *   [setWatchStatus], damit der Standard „Meine Uhr“ nachzieht
  * @param refreshWatch fragt den Stand der Uhr neu ab (`LiveMatchPort.refreshWatchStatus`)
+ * @param watchBusy zählt die eigene Uhr gerade ein anderes laufendes Match? (F22, aus `LiveMatchPort.openMatches`);
+ *   gelesen beim Anlegen und bei jedem [refreshWatchStatus]
  */
 class MatchWizard(
     private val players: PlayersPort,
@@ -54,6 +56,7 @@ class MatchWizard(
     private val random: Random = Random.Default,
     val watchStatus: StateFlow<WatchStatus> = MutableStateFlow(WatchStatus.UNKNOWN),
     private val refreshWatch: () -> Unit = {},
+    private val watchBusy: () -> Boolean = { false },
 ) {
     private val createdPlayers = mutableListOf<Player>()
 
@@ -292,7 +295,7 @@ class MatchWizard(
 
     // --- Schritt 5: Wer zählt? ---
 
-    /** Zähler wählen; „Meine Uhr“ nur, wenn eine Uhr verbunden ist (sonst No-op). */
+    /** Zähler wählen; „Meine Uhr“ nur, wenn eine Uhr verfügbar ist (sonst No-op) – auch wenn sie belegt ist (F22). */
     fun setScorer(option: ScorerOption) {
         if (option == ScorerOption.MY_WATCH && !input.watchAvailable) return
         update { it.copy(scorer = option) }
@@ -312,6 +315,12 @@ class MatchWizard(
     fun refreshWatchStatus() {
         refreshWatch()
         setWatchStatus(watchStatus.value)
+        setWatchBusy(watchBusy())
+    }
+
+    /** Die Uhr ist durch ein anderes laufendes Match belegt bzw. wieder frei (F22). */
+    fun setWatchBusy(busy: Boolean) {
+        if (input.watchBusy != busy) update { it.copy(watchBusy = busy) }
     }
 
     // --- Navigation ---
@@ -345,7 +354,7 @@ class MatchWizard(
     // --- intern ---
 
     private fun initialInput(): WizardInput =
-        WizardInput(teamA = listOf(players.self.value), teamB = listOf(null), watchStatus = watchStatus.value)
+        WizardInput(teamA = listOf(players.self.value), teamB = listOf(null), watchStatus = watchStatus.value, watchBusy = watchBusy())
 
     private fun setSlot(
         side: Side,

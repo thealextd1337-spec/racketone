@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
+import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
@@ -145,6 +146,7 @@ data class StartOptions(
  *   für die Anzeige; erfassen kann nur der Zähler)
  * @property canRemovePoint je Seite: „Letzten Punkt abziehen“ möglich ([LiveMatchPort.removeLastPointOf])
  * @property nextSetOptions bei `AWAITING_DECISION` die Satzarten für [LiveMatchPort.startNextSet], sonst leer
+ * @property onWatch dieses Match ist das Uhr-Match: die eigene Uhr zählt bzw. zeigt es (F22, höchstens eines der offenen)
  *
  * Die offene Aufschlägerwahl im Doppel steht im Engine-Zustand: `state.serverChoice` (02 §6.5.5).
  */
@@ -170,8 +172,15 @@ data class LiveMatchSnapshot(
     val serveInfoEnabled: Boolean = false,
     val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
     val nextSetOptions: List<NextSetKind> = emptyList(),
+    val onWatch: Boolean = false,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
+
+    /** Läuft noch (nicht beendet). */
+    val isRunning: Boolean get() = state.status != MatchStatus.FINISHED
+
+    /** Die eigene Uhr zählt dieses laufende Match (sie ist damit nicht frei für ein neues, F22). */
+    val watchScores: Boolean get() = onWatch && isRunning && !isScorer && scorerKind == DeviceKind.WATCH
 
     /** Aufschlägerwahl offen und noch nicht getroffen (Hinweis „Wer schlägt auf?“, blockiert das Zählen nicht). */
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
@@ -241,10 +250,22 @@ data class SyncInfo(
     }
 }
 
-/** Live-Zählen des aktiven Matches. Es gibt höchstens ein aktives Match pro Gerät. */
+/**
+ * Live-Zählen. Ein Handy kann mehrere Matches parallel offen haben (F22, 01 §4.9); eines davon ist **aktiv** (Live-Ansicht,
+ * Ziel aller Kommandos), höchstens eines ist das Uhr-Match ([LiveMatchSnapshot.onWatch]).
+ */
 interface LiveMatchPort {
     /** Aktives Match (läuft, wartet auf Entscheidung oder ist beendet, aber noch nicht geschlossen); `null` = keins. */
     val active: StateFlow<LiveMatchSnapshot?>
+
+    /**
+     * Alle offenen Matches (laufende und beendete, noch nicht geschlossene) nach Startzeit, das aktive eingeschlossen
+     * (Übersicht am Start, schneller Wechsel der Live-Ansicht).
+     */
+    val openMatches: StateFlow<List<LiveMatchSnapshot>>
+
+    /** Live-Ansicht auf das offene Match [matchId] wechseln (wird aktiv). `false`, wenn es nicht offen ist. */
+    fun select(matchId: MatchId): Boolean
 
     /** Die eigene Uhr kann als Zähler gewählt werden (= [watchStatus] ist `AVAILABLE`); `false` = nur Director. */
     val watchAvailable: StateFlow<Boolean>
@@ -262,8 +283,8 @@ interface LiveMatchPort {
     fun refreshWatchStatus()
 
     /**
-     * Legt ein Match an und macht es aktiv. Ein noch nicht beendetes aktives Match wird vorher mit
-     * `MatchEnded(ABANDONED)` abgeschlossen (die UI fragt vorher nach).
+     * Legt ein Match an und macht es aktiv. Laufende Matches bleiben offen und laufen weiter (F22). Zählt mit „Meine Uhr“
+     * künftig die Uhr dieses Match, übernimmt das Handy ihr bisheriges laufendes Match (Director).
      *
      * @param options wer zählt (ohne verfügbare Uhr immer dieses Handy) und Workout-Wunsch
      * @throws IllegalArgumentException wenn Format oder Lineup ungültig sind (`MatchFormatValidator`, `LineupValidator`)
@@ -316,11 +337,27 @@ interface LiveMatchPort {
         value: ServeOutcome?,
     ): Boolean
 
-    /** Vorzeitiges Ende (02 §7 `MatchEnded`): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED` `null`. */
+    /**
+     * Vorzeitiges Ende (02 §7 `MatchEnded`, nur Zähler): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED`
+     * und `STOPPED` `null`.
+     */
     fun endMatch(
         reason: EndReason,
         side: Side? = null,
     ): Boolean
+
+    /**
+     * „Beenden“ (F21): Das Ergebnis gilt, wie es steht (`MatchEnded(STOPPED)`, 02 §9.27; im Satzende-Dialog die reguläre
+     * Antwort `ContinueDecision(false)`). Zählt ein anderes Gerät, übernimmt dieses vorher (`ScorerChanged`) – die UI
+     * erklärt das in der Bestätigung. `false` für ein beendetes oder fehlendes Match.
+     */
+    fun stopMatch(): Boolean
+
+    /**
+     * „Abbrechen“ (F21): ohne Wertung (`MatchEnded(ABANDONED)`, 02 §9.9) – bleibt im Verlauf „Abgebrochen“, zählt nicht in
+     * Siege/Statistik. Zählt ein anderes Gerät, übernimmt dieses vorher. `false` für ein beendetes oder fehlendes Match.
+     */
+    fun abandonMatch(): Boolean
 
     /** Aufschläger korrigieren: [retroactive] = `Correction(INITIAL_SERVER)` (ab Beginn), sonst `Correction(SERVER)` (ab jetzt). */
     fun correctServer(
