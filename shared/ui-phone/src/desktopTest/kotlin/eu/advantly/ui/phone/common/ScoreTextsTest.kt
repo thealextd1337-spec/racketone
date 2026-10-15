@@ -18,6 +18,61 @@ import kotlin.test.Test
 @OptIn(ExperimentalTestApi::class)
 class ScoreTextsTest {
     @Test
+    fun customTiebreakDescriptionOnlyDescribesThePlayedFormat() {
+        val previous = Locale.getDefault()
+        val descriptions =
+            listOf(
+                Locale.GERMANY to "Best of 1 · Match-Tiebreak bis 10 · 2 Punkte Vorsprung",
+                Locale.US to "Best of 1 · Match tiebreak to 10 · Win by 2",
+            )
+        try {
+            for ((locale, expected) in descriptions) {
+                Locale.setDefault(locale)
+                runComposeUiTest {
+                    setContent {
+                        AdvantlyTheme(darkTheme = true) {
+                            Text(
+                                formatDescription(Presets.TENNIS_TIEBREAK_ONLY_10.format().copy(presetId = null)),
+                                Modifier.testTag("custom_tb"),
+                            )
+                        }
+                    }
+                    onNodeWithTag("custom_tb").assertTextEquals(expected)
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun regularSetTiebreakKeepsGamesAndTiebreakPointsInBothLanguages() {
+        val previous = Locale.getDefault()
+        try {
+            for ((locale, expected) in listOf(Locale.GERMANY to "7:6 (7:5)", Locale.US to "7–6 (7–5)")) {
+                Locale.setDefault(locale)
+                runComposeUiTest {
+                    val model =
+                        testModel().apply {
+                            startWith(Presets.TENNIS_ONE_SET.format(), "AAAABBBB".repeat(6) + "AB".repeat(5) + "AA")
+                        }
+                    val state =
+                        model.live.active.value!!
+                            .state
+                    setContent {
+                        AdvantlyTheme(darkTheme = true) {
+                            Text(resultLine(state.sets, state.current, state.result, state.setsWon), Modifier.testTag("regular_tb"))
+                        }
+                    }
+                    onNodeWithTag("regular_tb").assertTextEquals(expected)
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
     fun completedTiebreakHasBracketsInResultAndState() {
         val previous = Locale.getDefault()
         try {

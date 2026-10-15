@@ -13,6 +13,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.live.LiveSettings
@@ -28,6 +29,7 @@ import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.ui.phone.live.LiveScoreController
 
@@ -46,6 +48,10 @@ sealed interface Overlay {
     data object Wizard : Overlay
 
     data object Live : Overlay
+
+    data class PlayerHistory(
+        val playerId: PlayerId,
+    ) : Overlay
 
     data class Result(
         val matchId: MatchId,
@@ -99,6 +105,7 @@ class AdvantlyAppModel(
         )
     val controller = LiveScoreController(live, settings, clock = clock, monotonic = monotonic)
     val navigator = AppNavigator()
+    val statistics = MatchStatisticsCache()
 
     /** Läuft ein Match (nicht beendet)? Dann führen „Spielen“ und Schnellstart zum Live-Score. */
     val hasRunningMatch: Boolean

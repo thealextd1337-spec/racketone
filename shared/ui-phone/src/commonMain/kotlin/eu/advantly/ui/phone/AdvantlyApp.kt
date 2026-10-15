@@ -38,6 +38,8 @@ import eu.advantly.ui.phone.common.PlaceholderAssignments
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.history.HeadToHeadLinks
+import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
 import eu.advantly.ui.phone.home.HomeScreen
 import eu.advantly.ui.phone.live.LiveScoreScreen
@@ -131,6 +133,8 @@ fun AdvantlyApp(
                             record =
                                 history.firstOrNull { it.matchId == top.matchId }?.let { model.history.record(it.matchId) }
                                     ?: model.history.record(top.matchId),
+                            statisticsCache = model.statistics,
+                            headToHead = { setup -> HeadToHeadLinks(setup) { navigator.push(Overlay.PlayerHistory(it)) } },
                             playerAssignments = {
                                 PlaceholderAssignments(
                                     it.summary.matchId,
@@ -145,6 +149,20 @@ fun AdvantlyApp(
                                 model.history.delete(top.matchId)
                                 navigator.pop()
                             },
+                        )
+                    }
+
+                    is Overlay.PlayerHistory -> {
+                        HeadToHeadScreen(
+                            top.playerId,
+                            model.history,
+                            { navigator.pop() },
+                            model::openResult,
+                            fallbackName =
+                                model.players.guests.value
+                                    .firstOrNull { it.id == top.playerId }
+                                    ?.displayName
+                                    .orEmpty(),
                         )
                     }
 
@@ -171,10 +189,23 @@ private fun TabLayer(
     Column(Modifier.fillMaxSize().safeContentPadding()) {
         Box(Modifier.weight(1f)) {
             when (navigator.tab) {
-                AppTab.Home, AppTab.Play -> HomeScreen(model, clock = model.clock)
-                AppTab.History -> HistoryScreen(model.history, onOpen = model::openResult)
-                AppTab.Friends -> ComingSoonScreen(AppTab.Friends, versionName)
-                AppTab.Profile -> ComingSoonScreen(AppTab.Profile, versionName, players = model.players)
+                AppTab.Home, AppTab.Play -> {
+                    HomeScreen(model, clock = model.clock)
+                }
+
+                AppTab.History -> {
+                    HistoryScreen(model.history, onOpen = model::openResult)
+                }
+
+                AppTab.Friends -> {
+                    ComingSoonScreen(AppTab.Friends, versionName)
+                }
+
+                AppTab.Profile -> {
+                    ComingSoonScreen(AppTab.Profile, versionName, players = model.players, onPlayerHistory = {
+                        navigator.push(Overlay.PlayerHistory(it))
+                    })
+                }
             }
         }
         active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }, more = open.size - 1) }

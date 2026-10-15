@@ -11,10 +11,12 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.Density
@@ -55,7 +57,12 @@ class AppFlowTest {
         return model
     }
 
-    private fun ComposeUiTest.click(tag: String) = onNodeWithTag(tag).performScrollTo().performClick()
+    private fun ComposeUiTest.click(tag: String) {
+        if (onAllNodesWithTag("history").fetchSemanticsNodes().isNotEmpty()) {
+            onNodeWithTag("history").performScrollToNode(hasTestTag(tag))
+        }
+        onNodeWithTag(tag).performScrollTo().performClick()
+    }
 
     private fun ComposeUiTest.click(
         tag: String,
@@ -360,7 +367,10 @@ class AppFlowTest {
             val model = testModel().apply { DemoData.seed(this) }
             showApp(model)
             click("tab_history", scroll = false)
-            assertEquals(3, onAllNodesWithTag("result_badge", useUnmergedTree = true).fetchSemanticsNodes().size)
+            repeat(3) { index ->
+                onNodeWithTag("history").performScrollToNode(hasTestTag("history_item_$index"))
+                onNodeWithTag("history_item_$index").assertExists()
+            }
             click("filter_BADMINTON")
             onNodeWithTag("history_item_0").assertExists()
             onNodeWithTag("history_item_1").assertDoesNotExist()
@@ -396,7 +406,10 @@ class AppFlowTest {
             onNodeWithTag("history").assertExists()
             assertEquals(2, model.history.matches.value.size)
             assertNull(model.history.record(deleted))
-            assertEquals(2, onAllNodesWithTag("result_badge", useUnmergedTree = true).fetchSemanticsNodes().size)
+            repeat(2) { index ->
+                onNodeWithTag("history").performScrollToNode(hasTestTag("history_item_$index"))
+                onNodeWithTag("history_item_$index").assertExists()
+            }
         }
 
     @Test

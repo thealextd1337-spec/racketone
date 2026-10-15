@@ -110,7 +110,7 @@ fun TabBar(
                         style = AdvantlyTheme.typography.caption.copy(fontSize = 11.sp),
                         color = if (isSelected) colors.text else colors.text2,
                         textAlign = TextAlign.Center,
-                        maxLines = 1,
+                        maxLines = 2,
                     )
                 }
             }
@@ -188,6 +188,7 @@ fun ComingSoonScreen(
     versionName: String,
     modifier: Modifier = Modifier,
     players: PlayersPort? = null,
+    onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -210,7 +211,7 @@ fun ComingSoonScreen(
             style = AdvantlyTheme.typography.body,
             color = colors.text2,
         )
-        if (tab == AppTab.Profile && players != null) GuestList(players)
+        if (tab == AppTab.Profile && players != null) GuestList(players, onPlayerHistory)
         if (tab == AppTab.Profile) {
             // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
             val openLink = rememberSafeLinkOpener()

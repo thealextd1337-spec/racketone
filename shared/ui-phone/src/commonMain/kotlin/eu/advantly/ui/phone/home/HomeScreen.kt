@@ -40,6 +40,7 @@ import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.StatTile
 import eu.advantly.ui.phone.common.durationText
+import eu.advantly.ui.phone.common.formatDescription
 import eu.advantly.ui.phone.common.formatLabel
 import eu.advantly.ui.phone.common.sportColor
 import eu.advantly.ui.phone.common.sportName
@@ -222,6 +223,9 @@ private fun QuickStartCard(
                 style = AdvantlyTheme.typography.caption,
                 color = AdvantlyTheme.colors.text2,
             )
+            if (setup.format.presetId == null) {
+                Text(formatDescription(setup.format), style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
+            }
         }
         trailing()
     }
