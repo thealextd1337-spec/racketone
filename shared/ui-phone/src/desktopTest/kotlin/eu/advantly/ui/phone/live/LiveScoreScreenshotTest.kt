@@ -581,14 +581,28 @@ class LiveScoreScreenshotTest {
         capture("sheet-rejected-inputs-de", Locale.GERMANY, rig.model, interact = { onNodeWithTag("rejected_view").performClick() })
     }
 
+    /** F21: Beenden auf dem Anzeige-Gerät (Uhr zählt) – Sheet mit Übernahme-Hinweis. */
     @Test
-    fun abandonWhileTheWatchScores() {
+    fun endWhileTheWatchScores() {
         val rig = SessionRig()
         rig.startWatchScoredTennis()
         rig.watchPlays("AAAAB")
-        capture("dialog-abandon-watch-en", Locale.US, rig.model, interact = {
-            runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
-        })
+        rig.model.navigator.push(Overlay.Live)
+        capture("sheet-display-end-de", Locale.GERMANY, rig.model, interact = { onNodeWithTag("display_end_button").performClick() })
+    }
+
+    /** F22: Übersicht mit zwei parallelen Matches (eines auf der Uhr) und Match-Leiste im Live-Screen. */
+    @Test
+    fun parallelMatches() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAAAB")
+        rig.store.start(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE))
+        rig.settle()
+        capture("home-parallel-de", Locale.GERMANY, rig.model)
+        rig.model.controller.sync(rig.store.active.value)
+        rig.model.navigator.push(Overlay.Live)
+        capture("live-parallel-en", Locale.US, rig.model)
     }
 
     @Test

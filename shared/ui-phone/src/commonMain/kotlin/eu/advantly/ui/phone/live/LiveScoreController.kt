@@ -307,6 +307,12 @@ class LiveScoreController(
         side: Side?,
     ) = command { port.endMatch(reason, side) }
 
+    /** „Beenden – Ergebnis gilt“ (F21, bestätigt im Dialog); als Anzeige übernimmt das Handy vorher. */
+    fun stopMatch(): Boolean = command { port.stopMatch() }
+
+    /** „Abbrechen (ohne Wertung)“ (F21, bestätigt im Dialog); als Anzeige übernimmt das Handy vorher. */
+    fun abandonMatch(): Boolean = command { port.abandonMatch() }
+
     fun correctServer(
         player: PlayerId,
         retroactive: Boolean,

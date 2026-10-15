@@ -38,6 +38,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.MatchRecord
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.isRated
 import eu.advantly.presentation.stats.MatchStatistics
 import eu.advantly.presentation.stats.MatchStats
 import eu.advantly.presentation.stats.Ratio
@@ -68,6 +69,7 @@ import eu.advantly.ui.phone.resources.result_delete_title
 import eu.advantly.ui.phone.resources.result_duration
 import eu.advantly.ui.phone.resources.result_followup_of
 import eu.advantly.ui.phone.resources.result_not_found
+import eu.advantly.ui.phone.resources.result_not_rated
 import eu.advantly.ui.phone.resources.result_play_again
 import eu.advantly.ui.phone.resources.result_points_total
 import eu.advantly.ui.phone.resources.result_ratio
@@ -208,6 +210,15 @@ private fun Hero(record: MatchRecord) {
             ResultBadge(summary)
         }
         Text(formatDateTime(summary.startedAtMs), style = AdvantlyTheme.typography.caption, color = colors.text2)
+        if (!summary.isRated) {
+            // F21: bleibt mit Stand im Verlauf (löschbar), zählt aber nicht für Siege und Statistik
+            Text(
+                stringResource(Res.string.result_not_rated),
+                style = AdvantlyTheme.typography.label,
+                color = colors.text2,
+                modifier = Modifier.testTag("result_not_rated"),
+            )
+        }
         for (side in Side.entries) {
             val winner = summary.result.winner == side
             Text(

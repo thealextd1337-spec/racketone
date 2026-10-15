@@ -235,11 +235,11 @@
     <string name="dialog_show_result">Show result</string>
     <string name="match_end_retired_suffix">ret.</string>
     <string name="match_end_walkover_suffix">w/o</string>
-    <string name="end_title">End the match early?</string>
+    <string name="end_title">End the match</string>
     <string name="end_retired">%1$s retires</string>
     <string name="end_walkover">%1$s did not play</string>
     <string name="end_abandon">Abandon (no result)</string>
-    <string name="end_abandon_hint">An abandoned match keeps its score but has no winner.</string>
+    <string name="end_abandon_hint">Stays in your history as “Abandoned” with its score, but does not count for wins or statistics.</string>
     <string name="correct_server_title">Who is serving?</string>
     <string name="correct_server_from_start">Corrects the server from the start of the match – points stay, statistics follow.</string>
     <string name="correct_server_from_now">Corrects the server from now on – points already played stay.</string>
@@ -257,7 +257,7 @@
     <string name="result_win">Win</string>
     <string name="result_loss">Loss</string>
     <string name="result_draw">Draw</string>
-    <string name="result_abandoned">No result</string>
+    <string name="result_abandoned">Abandoned</string>
     <string name="result_followup_of">Follow-up of a previous match in the same line-up</string>
     <string name="result_duration">Duration</string>
     <string name="result_points_total">Points played</string>
@@ -295,10 +295,6 @@
     <string name="latency_benchmark_running">Auto benchmark running …</string>
 
     <!-- Review-Runde 1: Start-Bestätigung, Sync, Rechtliches -->
-    <string name="abandon_title">Abandon the running match?</string>
-    <string name="abandon_text">The running match ends without a result and the new one starts.</string>
-    <string name="abandon_confirm">Abandon and start</string>
-    <string name="abandon_keep">Keep playing</string>
     <string name="end_failed">That did not work – the score has changed. Please choose again.</string>
     <string name="sync_local">Local only</string>
     <string name="absorbed_notice">Duplicate tap merged</string>
@@ -371,8 +367,6 @@
     <string name="device_watch">Watch</string>
     <string name="device_phone">Phone</string>
     <string name="device_other">Other device</string>
-    <string name="abandon_current_score">Current score: %1$s</string>
-    <string name="abandon_scoring_elsewhere">Currently scoring: %1$s. That match will be ended without a result on all devices.</string>
 
     <!-- W1-I: Uhr ohne Live-Verbindung -->
     <string name="wizard_scorer_no_watch">No watch paired with this phone.</string>
@@ -425,4 +419,29 @@
     <string name="live_telemetry_heart_rate">Heart rate: %1$s bpm</string>
     <string name="live_telemetry_steps">Steps: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <string name="home_open_matches">Running matches (%1$d)</string>
+    <string name="home_new_match_parallel">Start another court – running matches keep going.</string>
+    <string name="open_match_watch_scores">Your watch scores</string>
+    <string name="open_match_watch_shows">Shown on your watch</string>
+    <string name="open_match_phone_scores">This phone scores</string>
+    <string name="open_match_scored_by">Scoring: %1$s</string>
+    <string name="mini_scorebar_more">+%1$d more</string>
+    <string name="live_switch_a11y">Switch to match: %1$s</string>
+    <string name="live_on_watch">On your watch</string>
+    <string name="end_stop">End – result stands</string>
+    <string name="end_stop_hint">The current score counts as the result: %1$s</string>
+    <string name="end_display_action">End…</string>
+    <string name="end_display_title">End this match?</string>
+    <string name="end_takeover_note">Currently scoring: %1$s. This phone takes over scoring first and then ends the match; the watch shows the end.</string>
+    <string name="end_confirm_stop_title">End the match?</string>
+    <string name="end_confirm_stop_text">Result: %1$s – %2$s. It counts as it stands.</string>
+    <string name="end_confirm_stop">End match</string>
+    <string name="end_confirm_abandon_title">Abandon the match?</string>
+    <string name="end_confirm_abandon">Abandon</string>
+    <string name="end_back">Back</string>
+    <string name="match_end_stopped_suffix">stopped</string>
+    <string name="history_abandoned_note">Abandoned matches do not count.</string>
+    <string name="result_not_rated">Abandoned – does not count for wins or statistics.</string>
+    <string name="wizard_scorer_watch_busy">Your watch is scoring %1$s. Choosing it moves the watch to this match – this phone keeps scoring the other one.</string>
+    <string name="end_keep_playing">Keep playing</string>
 </resources>

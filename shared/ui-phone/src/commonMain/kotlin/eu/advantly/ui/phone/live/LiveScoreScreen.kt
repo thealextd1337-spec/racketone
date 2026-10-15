@@ -98,6 +98,7 @@ import eu.advantly.ui.phone.resources.action_outdoor
 import eu.advantly.ui.phone.resources.action_redo
 import eu.advantly.ui.phone.resources.action_undo
 import eu.advantly.ui.phone.resources.display_set_end
+import eu.advantly.ui.phone.resources.end_display_action
 import eu.advantly.ui.phone.resources.latency_benchmark_running
 import eu.advantly.ui.phone.resources.latency_counters
 import eu.advantly.ui.phone.resources.latency_frames
@@ -231,8 +232,22 @@ fun LiveScoreScreen(
         var dialog by remember { mutableStateOf<LiveDialog?>(null) }
         var takeOverDialog by remember { mutableStateOf(false) }
         var rejectedSheet by remember { mutableStateOf(false) }
+        var displayEnd by remember { mutableStateOf(false) }
         val display = !snapshot.isScorer
-        LaunchedEffect(display) { if (!display) takeOverDialog = false }
+        LaunchedEffect(display) {
+            if (!display) {
+                takeOverDialog = false
+                displayEnd = false
+            }
+        }
+        // Wechsel zu einem anderen Match schließt offene Dialoge des vorigen
+        LaunchedEffect(snapshot.matchId) {
+            dialog = null
+            takeOverDialog = false
+            rejectedSheet = false
+            displayEnd = false
+        }
+        val openMatches by controller.port.openMatches.collectAsState()
         val now = rememberNow(controller.monotonic, ticking = display)
         val status = snapshot.state.status
         LaunchedEffect(controller.servePromptId, status) {
@@ -245,13 +260,15 @@ fun LiveScoreScreen(
         }
         val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
         val userDialog = dialog.takeIf { running && !display }
+        val displayEndOpen = displayEnd && display && status != MatchStatus.FINISHED
         // Satzende-Frage nur am Zähler (04 §3.3); die Anzeige zeigt stattdessen einen Hinweis über den Flächen
         val sheet = status == MatchStatus.FINISHED || (status == MatchStatus.AWAITING_DECISION && !display)
-        val modal = sheet || userDialog != null || rejectedSheet
+        val modal = sheet || userDialog != null || rejectedSheet || displayEndOpen
         // System-Zurück schließt zuerst einen vom Nutzer geöffneten Dialog (nicht den Live-Screen)
-        BackHandler(enabled = userDialog != null || rejectedSheet) {
+        BackHandler(enabled = userDialog != null || rejectedSheet || displayEndOpen) {
             dialog = null
             rejectedSheet = false
+            displayEnd = false
         }
         BoxWithConstraints(
             Modifier
@@ -275,8 +292,16 @@ fun LiveScoreScreen(
             val info: @Composable (Modifier) -> Unit = { infoModifier ->
                 Column(infoModifier) {
                     Header(controller, snapshot, now, onMinimize)
+                    MatchSwitcher(
+                        matches = openMatches,
+                        activeId = snapshot.matchId,
+                        outdoor = controller.outdoorContrast,
+                        onSelect = { controller.port.select(it.matchId) },
+                        modifier = Modifier.padding(top = Spacing.xs),
+                    )
                     UpdateRequiredBanner(snapshot.sync.updateRequired ?: requiredUpdate)
-                    LiveWorkoutTelemetry(snapshot.matchId, snapshot.setup.meta.watchWorkout, controller.outdoorContrast)
+                    // Puls/Schritte gehören zum Uhr-Match (F22): nur dort abonnieren und anzeigen
+                    LiveWorkoutTelemetry(snapshot.matchId, snapshot.setup.meta.watchWorkout && snapshot.onWatch, controller.outdoorContrast)
                     if (display) {
                         // Übernahmeangebot ersetzt den Anzeige-Banner (gleicher Platz) – kostet den Flächen keine Höhe
                         val staleOffer = snapshot.sync.offersTakeOver(now) && snapshot.state.status != MatchStatus.FINISHED
@@ -309,7 +334,7 @@ fun LiveScoreScreen(
             }
             val footer: @Composable (Modifier) -> Unit = { footerModifier ->
                 if (display) {
-                    DisplayFooter(controller, snapshot, onTakeOver = { takeOverDialog = true }, footerModifier)
+                    DisplayFooter(controller, snapshot, onTakeOver = { takeOverDialog = true }, { displayEnd = true }, footerModifier)
                 } else {
                     Footer(controller, snapshot, debugTools, onBenchmarkNewMatch, { dialog = it }, footerModifier)
                 }
@@ -358,7 +383,7 @@ fun LiveScoreScreen(
             }
 
             display -> {
-                Unit
+                if (displayEndOpen) DisplayEndSheet(controller, snapshot, onClose = { displayEnd = false })
             }
 
             else -> {
@@ -726,12 +751,16 @@ private fun Footer(
     }
 }
 
-/** Fußleiste des Anzeige-Geräts: „Zählen übernehmen“ (mit Bestätigung) und Outdoor-Kontrast – kein Undo/Mehr. */
+/**
+ * Fußleiste des Anzeige-Geräts: „Zählen übernehmen“ (mit Bestätigung), „Beenden …“ (F21, mit Übernahme und Bestätigung)
+ * und Outdoor-Kontrast – kein Undo/Mehr.
+ */
 @Composable
 private fun DisplayFooter(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
     onTakeOver: () -> Unit,
+    onEnd: () -> Unit,
     modifier: Modifier,
 ) {
     val outdoor = controller.outdoorContrast
@@ -749,6 +778,14 @@ private fun DisplayFooter(
             enabled = !finished,
             emphasized = true,
             modifier = Modifier.testTag("takeover_button"),
+        )
+        FooterButton(
+            icon = AdvantlyIcons.Close,
+            label = stringResource(Res.string.end_display_action),
+            onClick = onEnd,
+            outdoor = outdoor,
+            enabled = !finished,
+            modifier = Modifier.testTag("display_end_button"),
         )
         FooterButton(
             icon = AdvantlyIcons.Sun,

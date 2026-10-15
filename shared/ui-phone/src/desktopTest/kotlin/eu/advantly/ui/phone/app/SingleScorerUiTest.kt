@@ -344,20 +344,97 @@ class SingleScorerUiTest {
             onNodeWithTag("redo_button").assertDoesNotExist()
         }
 
-    /** Review W1-I #10: Neues Match, während die Uhr zählt → Dialog nennt Zähler und Stand. */
+    /** F22: Neues Match, während die Uhr zählt – beide laufen, die Übersicht kennzeichnet das Uhr-Match. */
     @Test
-    fun abandonDialogNamesTheScorerAndTheScore() =
+    fun parallelMatchKeepsTheWatchMatchRunning() =
         runComposeUiTest {
             val rig = SessionRig()
-            rig.startWatchScoredTennis()
+            val onWatch = rig.startWatchScoredTennis()
             rig.watchPlays("AA")
             showApp(rig.model)
             runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
-            onNodeWithTag("abandon_dialog").assertExists()
-            val scorer = onNodeWithTag("abandon_scorer").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
-            assertTrue(scorer.contains("Uhr von Alex") || scorer.contains("Alex’s watch"), scorer)
-            val score = onNodeWithTag("abandon_score").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
-            assertTrue(score.contains("30"), score)
+            rig.settle()
+            onNodeWithTag("live_sport_chip").assertExists()
+            onNodeWithTag("switch_match_watch_0", useUnmergedTree = true).assertExists()
+            onNodeWithTag("live_minimize").performClick()
+            onNodeWithTag("mini_scorebar_more", useUnmergedTree = true).assertExists()
+            val role = onNodeWithTag("resume_card").fetchSemanticsNode().config.toString()
+            assertTrue(role.contains("Deine Uhr zählt") || role.contains("Your watch scores"), role)
+            click("resume_card")
+            assertEquals(
+                onWatch,
+                rig.store.active.value!!
+                    .matchId,
+            )
+            onNodeWithTag("display_banner").assertExists()
+            assertEquals(
+                onWatch,
+                rig.watch.state.value.match
+                    ?.id,
+                "Uhr bleibt bei ihrem Match",
+            )
+        }
+
+    /** F21: Am Handy (Anzeige) beenden – Übernahme erklärt, bestätigt, die Uhr zeigt das Ende. */
+    @Test
+    fun displayEndsTheWatchMatchAfterConfirmation() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.watchPlays("AAB")
+            rig.model.navigator.push(eu.advantly.ui.phone.app.Overlay.Live)
+            showApp(rig.model)
+            onNodeWithTag("display_end_button").performClick()
+            onNodeWithTag("end_takeover_note").assertExists()
+            click("end_stop")
+            val text = onNodeWithTag("end_confirm_text").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue(text.contains("30") && (text.contains("gewonnen") || text.contains("won")), text)
+            onNodeWithTag("end_confirm_back").performClick()
+            assertEquals(
+                LiveRole.DISPLAY,
+                rig.store.active.value!!
+                    .role,
+                "Zurück ändert nichts",
+            )
+            click("end_stop")
+            onNodeWithTag("end_confirm").performClick()
+            rig.settle()
+            onNodeWithTag("match_end_sheet").assertExists()
+            val onTheWatch = rig.watch.state.value.match!!
+            assertEquals(eu.advantly.core.scoring.ResultReason.STOPPED, onTheWatch.state.result!!.reason)
+        }
+
+    /** F21: Abbrechen am Zähler – bleibt im Verlauf „Abgebrochen“, zählt nicht in die Bilanz, lässt sich löschen. */
+    @Test
+    fun abandonedMatchStaysInHistoryWithoutCounting() =
+        runComposeUiTest {
+            val rig = SessionRig(watchOnline = false)
+            val id = rig.store.start(rig.model.setupFor(Presets.TENNIS_SINGLES_BO3.format()), StartOptions(ScorerOption.THIS_PHONE))
+            rig.model.controller.sync(rig.store.active.value)
+            rig.model.navigator.push(eu.advantly.ui.phone.app.Overlay.Live)
+            showApp(rig.model)
+            onNodeWithTag("panel_us").performClick()
+            onNodeWithTag("more_button").performClick()
+            onNodeWithTag("menu_end_match").performClick()
+            click("end_abandon")
+            onNodeWithTag("end_confirm").performClick()
+            click("show_result")
+            onNodeWithTag("result_not_rated").assertExists()
+            onNodeWithTag("result_delete").performClick()
+            onNodeWithTag("delete_dialog").assertExists()
+            onNodeWithTag("delete_cancel").performClick()
+            onNodeWithTag("top_back").performClick()
+            onNodeWithTag("tab_history").performClick()
+            val record = onNodeWithTag("history_record").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
+            assertTrue(record.startsWith("0"), record)
+            onNodeWithTag("history_abandoned_note").assertExists()
+            assertEquals(
+                eu.advantly.core.scoring.ResultReason.ABANDONED,
+                rig.store
+                    .record(id)!!
+                    .finalState.result!!
+                    .reason,
+            )
         }
 
     /** Review W1-I #10: Der Debug-Auto-Benchmark bricht kein echtes laufendes Match ab. */

@@ -328,16 +328,29 @@ class AppFlowTest {
             assertEquals(last.lineup, started.setup.lineup)
             assertNull(started.setup.previousMatchId)
 
-            // Laufendes Match: Schnellstart ist ausgeblendet, „Spielen“ führt zum Live-Score
+            // Laufendes Match (F22): Schnellstart bleibt sichtbar und startet ein weiteres Match parallel
             click("live_minimize", scroll = false)
-            onNodeWithTag("quick_last").assertDoesNotExist()
-            runOnIdle { model.live.endMatch(EndReason.ABANDONED) }
-            runOnIdle { model.live.dismiss() }
+            onNodeWithTag("quick_last").assertExists()
             click("quick_fav_0")
             assertEquals(
                 Sport.PADEL,
                 model.live.active.value!!
                     .setup.sport,
+            )
+            assertEquals(
+                listOf(
+                    started.matchId,
+                    model.live.active.value!!
+                        .matchId,
+                ),
+                model.live.openMatches.value
+                    .map { it.matchId },
+            )
+            assertEquals(
+                MatchStatus.IN_PROGRESS,
+                model.live.openMatches.value
+                    .first()
+                    .state.status,
             )
         }
 

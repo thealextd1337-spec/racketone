@@ -22,12 +22,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.wizard_scorer_no_watch
 import eu.advantly.ui.phone.resources.wizard_scorer_not_installed
@@ -35,6 +37,7 @@ import eu.advantly.ui.phone.resources.wizard_scorer_phone
 import eu.advantly.ui.phone.resources.wizard_scorer_phone_sub
 import eu.advantly.ui.phone.resources.wizard_scorer_recheck
 import eu.advantly.ui.phone.resources.wizard_scorer_watch
+import eu.advantly.ui.phone.resources.wizard_scorer_watch_busy
 import eu.advantly.ui.phone.resources.wizard_scorer_watch_none
 import eu.advantly.ui.phone.resources.wizard_scorer_watch_sub
 import eu.advantly.ui.phone.resources.wizard_watch_workout
@@ -46,7 +49,8 @@ import org.jetbrains.compose.resources.stringResource
  * „Wer zählt?“ (04 §3.1, P1): „Meine Uhr“ (Standard, wenn eine Uhr verbunden ist; sonst gesperrt mit Hinweis) oder
  * „Dieses Handy (Director)“, darunter „Workout auf meiner Uhr mitlaufen lassen“. Genutzt im Assistenten und in der
  * Bestätigung beim Schnellstart. Ist die Uhr nicht wählbar, steht dort warum (keine Uhr gekoppelt, App nicht
- * installiert) und „Erneut prüfen“ ([onRecheck]).
+ * installiert) und „Erneut prüfen“ ([onRecheck]). Zählt die Uhr schon ein anderes laufendes Match ([busyMatch], F22),
+ * erklärt die Karte, dass die Uhr bei dieser Wahl zum neuen Match wechselt und das Handy das andere weiterzählt.
  */
 @Composable
 internal fun ScorerChooser(
@@ -57,6 +61,7 @@ internal fun ScorerChooser(
     onWatchWorkout: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onRecheck: (() -> Unit)? = null,
+    busyMatch: LiveMatchSnapshot? = null,
 ) {
     val watchAvailable = watchStatus == WatchStatus.AVAILABLE
     Column(modifier.fillMaxWidth()) {
@@ -65,20 +70,27 @@ internal fun ScorerChooser(
                 option = ScorerOption.MY_WATCH,
                 title = Res.string.wizard_scorer_watch,
                 subtitle =
-                    when (watchStatus) {
-                        WatchStatus.AVAILABLE -> Res.string.wizard_scorer_watch_sub
-                        WatchStatus.NO_WATCH -> Res.string.wizard_scorer_no_watch
-                        WatchStatus.APP_NOT_INSTALLED -> Res.string.wizard_scorer_not_installed
-                        WatchStatus.UNKNOWN -> Res.string.wizard_scorer_watch_none
+                    if (watchAvailable && busyMatch != null) {
+                        stringResource(Res.string.wizard_scorer_watch_busy, matchLabel(busyMatch))
+                    } else {
+                        stringResource(
+                            when (watchStatus) {
+                                WatchStatus.AVAILABLE -> Res.string.wizard_scorer_watch_sub
+                                WatchStatus.NO_WATCH -> Res.string.wizard_scorer_no_watch
+                                WatchStatus.APP_NOT_INSTALLED -> Res.string.wizard_scorer_not_installed
+                                WatchStatus.UNKNOWN -> Res.string.wizard_scorer_watch_none
+                            },
+                        )
                     },
                 selected = selected == ScorerOption.MY_WATCH,
                 enabled = watchAvailable,
                 onSelect = onSelect,
+                subtitleTag = if (watchAvailable && busyMatch != null) "scorer_watch_busy" else null,
             )
             ScorerOptionCard(
                 option = ScorerOption.THIS_PHONE,
                 title = Res.string.wizard_scorer_phone,
-                subtitle = Res.string.wizard_scorer_phone_sub,
+                subtitle = stringResource(Res.string.wizard_scorer_phone_sub),
                 selected = selected == ScorerOption.THIS_PHONE,
                 enabled = true,
                 onSelect = onSelect,
@@ -116,10 +128,11 @@ internal fun ScorerChooser(
 private fun ScorerOptionCard(
     option: ScorerOption,
     title: StringResource,
-    subtitle: StringResource,
+    subtitle: String,
     selected: Boolean,
     enabled: Boolean,
     onSelect: (ScorerOption) -> Unit,
+    subtitleTag: String? = null,
 ) {
     val colors = AdvantlyTheme.colors
     Row(
@@ -143,7 +156,12 @@ private fun ScorerOptionCard(
         )
         Column(Modifier.weight(1f)) {
             Text(stringResource(title), style = AdvantlyTheme.typography.label, color = if (enabled) colors.text else colors.text3)
-            Text(stringResource(subtitle), style = AdvantlyTheme.typography.caption, color = colors.text2)
+            Text(
+                subtitle,
+                style = AdvantlyTheme.typography.caption,
+                color = colors.text2,
+                modifier = if (subtitleTag != null) Modifier.testTag(subtitleTag) else Modifier,
+            )
         }
     }
 }

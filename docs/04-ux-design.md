@@ -74,9 +74,9 @@ Fünf Ziele in der Bottom-Navigation, die Mitte ist die Primäraktion (Sport-App
 
 | Tab | DE / EN | Inhalt |
 |---|---|---|
-| 1 | **Start** / Home | Laufendes Match (Resume-Karte), Schnellstart-Presets & „Zuletzt gespielt“, Bestätigungs-Inbox (Matches, die Freunde mit dir eingetragen haben), Wochenbilanz |
+| 1 | **Start** / Home | Laufende Matches (je eine Resume-Karte, F22: mehrere Plätze, Uhr-Match mit Uhr-Symbol), Schnellstart-Presets & „Zuletzt gespielt“, Bestätigungs-Inbox (Matches, die Freunde mit dir eingetragen haben), Wochenbilanz |
 | 2 | **Verlauf** / History | Match-Historie (Filter Sport, Gegner, Belag, Zeitraum), Match-Detail = Statistik, Auswertungen über Zeit |
-| 3 | **Spielen** / Play (+) | Startet den Match-Wizard (Modal/Fullscreen). Bei laufendem Match: springt zum Live-Score |
+| 3 | **Spielen** / Play (+) | Startet den Match-Wizard (Modal/Fullscreen) – auch während Matches laufen (F22, sie laufen weiter); zu laufenden Matches führen Resume-Karten und Mini-Scorebar |
 | 4 | **Freunde** / Friends | Segmente *Feed · Freunde · Anfragen*; Freund-Profil mit Head-to-Head |
 | 5 | **Profil** / Profile | Eigene Statistiken, Geräte (Uhren), Einstellungen, Konto, später Abo |
 
@@ -215,6 +215,10 @@ Details zum Satzende-Dialog:
 - Der Dialog am zählenden Handy bietet zusätzlich „Besetzung ändern…“ (Textlink) – auf der Uhr bewusst weggelassen.
 - Wird nichts gewählt, bleibt der Dialog stehen (Match pausiert, Workout läuft weiter).
 
+**Beenden/Abbrechen am Handy (F21, W3-M):** „Mehr → Match beenden“ (Zähler) bzw. „Beenden …“ in der Fußleiste (Anzeige) öffnet ein Sheet mit **„Beenden – Ergebnis gilt“** (Stand wird Ergebnis, `STOPPED`, Sieger nach Sätzen → Spielen → Punkten, Vorschau „Ergebnis: 6:4 (2:1) 30:15 – Match gewonnen“), Aufgabe/nicht angetreten (nur Zähler) und **„Abbrechen (ohne Wertung)“** („Bleibt im Verlauf als ‚Abgebrochen‘ mit Stand, zählt aber nicht für Siege und Statistik“). Beenden und Abbrechen brauchen eine Bestätigung; die Schließen-Aktion heißt „Weiterspielen“ (nicht „Abbrechen“, Verwechslungsgefahr). Zählt ein anderes Gerät (z. B. die Uhr), erklärt das Sheet: „Dieses Handy übernimmt zuerst das Zählen und beendet dann das Match; die Uhr zeigt das Ende.“ Abgebrochene Matches tragen im Verlauf das Badge „Abgebrochen“, die Bilanz zählt sie nicht („Abgebrochene Matches zählen nicht.“), H8 zeigt den Hinweis und erlaubt Löschen.
+
+**Mehrere Matches parallel (F22, W3-M):** Start zeigt jede offene Partie als Karte (Teams, Stand, „Deine Uhr zählt“ / „Dieses Handy zählt · Auf deiner Uhr“ / „Es zählt: …“, Uhr-Symbol am Uhr-Match). Im Live-Screen wechselt eine Chip-Leiste unter dem Kopf zwischen den offenen Matches (Uhr-Symbol am Uhr-Match), die Mini-Scorebar zeigt „+N weitere“. Im Schritt „Wer zählt?“ ist „Meine Uhr“ nicht mehr Standard, wenn die Uhr schon ein anderes laufendes Match zählt; die Karte erklärt dann: „Deine Uhr zählt gerade … Wählst du sie, wechselt die Uhr zu diesem Match – das andere zählt dieses Handy weiter.“
+
 ### 3.4 Onboarding & Konto
 
 ```mermaid
@@ -253,7 +257,7 @@ Die Bestätigung schützt die Head-to-Head-Bilanz vor einseitigen Einträgen und
 
 | # | Screen | Inhalte | Interaktionen |
 |---|---|---|---|
-| H1 | **Start** | Begrüßung, Resume-Karte (falls Match läuft), „Revanche“-Presets (Sport-Icon, Gegner, Format), Inbox-Karte „2 Matches bestätigen“, Wochenbilanz (Matches, Siege, Spielzeit) | Tap Preset → Zusammenfassung → Start; Long-Press Preset → bearbeiten/löschen |
+| H1 | **Start** | Begrüßung, Resume-Karten aller offenen Matches (F22), „Revanche“-Presets (Sport-Icon, Gegner, Format), Inbox-Karte „2 Matches bestätigen“, Wochenbilanz (Matches, Siege, Spielzeit) | Tap Preset → Zusammenfassung → Start; Long-Press Preset → bearbeiten/löschen |
 | H2 | **Wizard 1 – Sportart** | 3 große Sportkarten (Icon, Name, Akzentfarbe, Kurzinfo „zuletzt vor 3 Tagen“), Zeile „Zuletzt gespielt“ | Tap = Auswahl + automatisch weiter (kein extra „Weiter“) |
 | H3 | **Wizard 2 – Belag** (nur Tennis) | Sand, Hartplatz, Rasen, Teppich/Kunstrasen; Schalter Halle/Draußen | Tap = Auswahl + weiter; „Überspringen“ |
 | H4 | **Wizard 3 – Spieler** | Segment Einzel/Doppel; Team-Slots „Wir“ (Du + ggf. Partner) und „Gegner“; Freundesliste mit Suche & „Zuletzt“; „+ Gast“ (nur Name) | Tap Freund füllt nächsten freien Slot; Slot antippen = leeren; Drag zwischen Teams (Doppel) |

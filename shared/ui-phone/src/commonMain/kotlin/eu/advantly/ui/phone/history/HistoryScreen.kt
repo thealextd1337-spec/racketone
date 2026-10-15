@@ -30,9 +30,10 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
-import eu.advantly.core.scoring.ResultReason
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSummary
+import eu.advantly.presentation.match.isDraw
+import eu.advantly.presentation.match.isRated
 import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.durationText
@@ -44,6 +45,7 @@ import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.platform.formatDateTime
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.history_abandoned_note
 import eu.advantly.ui.phone.resources.history_all
 import eu.advantly.ui.phone.resources.history_empty
 import eu.advantly.ui.phone.resources.history_empty_filtered
@@ -90,12 +92,22 @@ fun HistoryScreen(
             }
         }
         if (shown.isNotEmpty()) {
+            // Abgebrochene Matches bleiben in der Liste, zählen aber nicht in die Bilanz (F21)
+            val rated = shown.filter { it.isRated }
             Text(
-                stringResource(Res.string.history_record, shown.count { it.result.winner == Side.A }, shown.size),
+                stringResource(Res.string.history_record, rated.count { it.result.winner == Side.A }, rated.size),
                 style = AdvantlyTheme.typography.label,
                 color = AdvantlyTheme.colors.text2,
                 modifier = Modifier.padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.m).testTag("history_record"),
             )
+            if (rated.size < shown.size) {
+                Text(
+                    stringResource(Res.string.history_abandoned_note),
+                    style = AdvantlyTheme.typography.caption,
+                    color = AdvantlyTheme.colors.text2,
+                    modifier = Modifier.padding(horizontal = Spacing.screenEdgeCompact).testTag("history_abandoned_note"),
+                )
+            }
         }
         if (shown.isEmpty()) {
             Text(
@@ -163,7 +175,7 @@ fun ResultBadge(
     val colors = AdvantlyTheme.colors
     val (text, color) =
         when {
-            match.result.reason == ResultReason.DRAW -> stringResource(Res.string.result_draw) to colors.text2
+            match.result.isDraw -> stringResource(Res.string.result_draw) to colors.text2
             match.result.winner == null -> stringResource(Res.string.result_abandoned) to colors.text2
             match.result.winner == Side.A -> stringResource(Res.string.result_win) to colors.success
             else -> stringResource(Res.string.result_loss) to colors.danger

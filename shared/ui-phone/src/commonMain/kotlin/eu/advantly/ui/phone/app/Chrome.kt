@@ -48,6 +48,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.live.WatchMark
 import eu.advantly.ui.phone.live.compactScore
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_close
@@ -60,6 +61,7 @@ import eu.advantly.ui.phone.resources.link_copy
 import eu.advantly.ui.phone.resources.link_failed_text
 import eu.advantly.ui.phone.resources.link_failed_title
 import eu.advantly.ui.phone.resources.mini_scorebar_a11y
+import eu.advantly.ui.phone.resources.mini_scorebar_more
 import eu.advantly.ui.phone.resources.privacy_url
 import eu.advantly.ui.phone.resources.profile_imprint
 import eu.advantly.ui.phone.resources.profile_legal
@@ -140,6 +142,7 @@ fun MiniScoreBar(
     snapshot: LiveMatchSnapshot,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    more: Int = 0,
 ) {
     val colors = AdvantlyTheme.colors
     val teams = teamName(snapshot.setup, Side.A) + " – " + teamName(snapshot.setup, Side.B)
@@ -161,6 +164,15 @@ fun MiniScoreBar(
         Column(Modifier.weight(1f)) {
             Text(teams, style = AdvantlyTheme.typography.label, color = colors.text, maxLines = 1)
             Text(score, style = AdvantlyTheme.typography.scoreS, color = colors.text, modifier = Modifier.testTag("mini_scorebar_score"))
+        }
+        if (snapshot.onWatch) WatchMark(outdoor = false)
+        if (more > 0) {
+            Text(
+                stringResource(Res.string.mini_scorebar_more, more),
+                style = AdvantlyTheme.typography.caption,
+                color = colors.text2,
+                modifier = Modifier.testTag("mini_scorebar_more"),
+            )
         }
         Icon(AdvantlyIcons.ChevronRight, contentDescription = null, tint = colors.text2)
     }

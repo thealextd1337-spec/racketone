@@ -47,6 +47,7 @@ import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.isDraw
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.resultLine
@@ -69,8 +70,6 @@ import eu.advantly.ui.phone.resources.dialog_set_lost
 import eu.advantly.ui.phone.resources.dialog_set_won
 import eu.advantly.ui.phone.resources.dialog_show_result
 import eu.advantly.ui.phone.resources.dialog_yes
-import eu.advantly.ui.phone.resources.end_abandon
-import eu.advantly.ui.phone.resources.end_abandon_hint
 import eu.advantly.ui.phone.resources.end_failed
 import eu.advantly.ui.phone.resources.end_retired
 import eu.advantly.ui.phone.resources.end_title
@@ -242,7 +241,7 @@ internal fun BoxScope.MatchEndSheet(
     val title =
         stringResource(
             when {
-                result.reason == ResultReason.DRAW -> Res.string.hint_match_drawn
+                result.isDraw -> Res.string.hint_match_drawn
                 result.winner == null -> Res.string.hint_match_abandoned
                 result.winner == Side.A -> Res.string.hint_match_won
                 else -> Res.string.hint_match_lost
@@ -295,9 +294,9 @@ internal fun BoxScope.MatchEndSheet(
 }
 
 /**
- * Bestätigung für vorzeitiges Ende (04 Prinzip 4): Aufgabe Wir/Gegner bzw. – solange kein Ballwechsel wirksam
- * gespielt wurde – „nicht angetreten“ (02 §9.8), Abbruch ohne Wertung. Das Sheet schließt nur, wenn die Engine das
- * Ende annimmt; sonst bleibt es mit Fehlerhinweis offen.
+ * Matchende am Zähler (F21, 04 Prinzip 4): „Beenden – Ergebnis gilt“, Aufgabe Wir/Gegner bzw. – solange kein Ballwechsel
+ * wirksam gespielt wurde – „nicht angetreten“ (02 §9.8) und „Abbrechen (ohne Wertung)“; Beenden und Abbrechen mit
+ * Bestätigung. Das Sheet schließt nur, wenn die Engine das Ende annimmt; sonst bleibt es mit Fehlerhinweis offen.
  */
 @Composable
 internal fun BoxScope.EndMatchSheet(
@@ -305,31 +304,19 @@ internal fun BoxScope.EndMatchSheet(
     snapshot: LiveMatchSnapshot,
     onClose: () -> Unit,
 ) {
-    val title = stringResource(Res.string.end_title)
     // Ballwechsel statt Score: Bei Pickleball Side-Out bleibt der Stand nach einem Rückschlag-Ballwechsel 0:0
     val noRallies = snapshot.pointsPlayed == 0
     var failed by remember { mutableStateOf(false) }
-    val end = { reason: EndReason, side: Side? ->
-        if (controller.endMatch(reason, side)) onClose() else failed = true
-    }
-    LiveSheet(title = title, tag = "end_match_sheet") {
-        SheetQuestion(title)
+    EndChoicesSheet(controller, snapshot, title = stringResource(Res.string.end_title), tag = "end_match_sheet", onClose = onClose) {
         for (side in Side.entries) {
             val reason = if (noRallies) EndReason.WALKOVER else EndReason.RETIRED
             SheetButton(
                 stringResource(if (noRallies) Res.string.end_walkover else Res.string.end_retired, teamName(snapshot.setup, side)),
                 primary = false,
-                onClick = { end(reason, side) },
+                onClick = { if (controller.endMatch(reason, side)) onClose() else failed = true },
                 modifier = Modifier.fillMaxWidth().testTag(if (side == Side.A) "end_retire_us" else "end_retire_them"),
             )
         }
-        SheetButton(
-            stringResource(Res.string.end_abandon),
-            primary = false,
-            onClick = { end(EndReason.ABANDONED, null) },
-            modifier = Modifier.fillMaxWidth().testTag("end_abandon"),
-        )
-        Text(stringResource(Res.string.end_abandon_hint), style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
         if (failed) {
             Text(
                 stringResource(Res.string.end_failed),
@@ -338,14 +325,19 @@ internal fun BoxScope.EndMatchSheet(
                 modifier = Modifier.testTag("end_failed").semantics { liveRegion = LiveRegionMode.Assertive },
             )
         }
-        SheetButton(
-            stringResource(Res.string.action_cancel),
-            primary = true,
-            onClick = onClose,
-            modifier = Modifier.fillMaxWidth().testTag("end_cancel"),
-        )
     }
 }
+
+/**
+ * Matchende auf dem Anzeige-Gerät (F21): Ein anderes Gerät (z. B. die Uhr) zählt – das Sheet erklärt, dass dieses Handy
+ * vorher das Zählen übernimmt, und bietet „Beenden – Ergebnis gilt“ und „Abbrechen (ohne Wertung)“ mit Bestätigung.
+ */
+@Composable
+internal fun BoxScope.DisplayEndSheet(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    onClose: () -> Unit,
+) = EndChoicesSheet(controller, snapshot, title = displayEndTitle(), tag = "display_end_sheet", onClose = onClose)
 
 /**
  * Aufschläger korrigieren (02 §9.4): im ersten Spiel bzw. ersten Satz „ab Beginn“ (rückwirkend,

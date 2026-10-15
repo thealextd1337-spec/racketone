@@ -71,9 +71,9 @@ class ReviewRound1UiTest {
 
     private fun ComposeUiTest.click(tag: String) = onNodeWithTag(tag).performClick()
 
-    // 1 – Neuer Start bei laufendem Match nur nach Bestätigung
+    // 1 – Neuer Start bei laufendem Match: seit F22 parallel, das laufende Match läuft weiter (kein Abbruch)
     @Test
-    fun playAgainWhileMatchRunsAsksBeforeAbandoning() =
+    fun playAgainWhileMatchRunsStartsAParallelMatch() =
         runComposeUiTest {
             val model = testModel().apply { DemoData.seed(this) }
             model.startWith(Presets.TENNIS_SINGLES_BO3.format(), "AB")
@@ -84,34 +84,23 @@ class ReviewRound1UiTest {
             click("tab_history")
             onNodeWithTag("history_item_0").performClick()
             onNodeWithTag("result_play_again").performScrollTo().performClick()
-            onNodeWithTag("abandon_dialog").assertExists()
-            click("abandon_cancel")
-            onNodeWithTag("abandon_dialog").assertDoesNotExist()
-            assertEquals(
-                running,
-                model.live.active.value!!
-                    .matchId,
-            )
-            assertEquals(
-                MatchStatus.IN_PROGRESS,
-                model.live.active.value!!
-                    .state.status,
-            )
-
-            onNodeWithTag("result_play_again").performScrollTo().performClick()
-            click("abandon_confirm")
             assertNotEquals(
                 running,
                 model.live.active.value!!
                     .matchId,
             )
             onNodeWithTag("live_sport_chip").assertExists()
+            val first =
+                model.live.openMatches.value
+                    .single { it.matchId == running }
+            assertEquals(MatchStatus.IN_PROGRESS, first.state.status, "läuft weiter")
+            // schneller Wechsel zurück über die Match-Leiste im Live-Screen
+            onNodeWithTag("match_switcher").assertExists()
+            click("switch_match_0")
             assertEquals(
-                ResultReason.ABANDONED,
-                model.history
-                    .record(running)!!
-                    .finalState.result!!
-                    .reason,
+                running,
+                model.live.active.value!!
+                    .matchId,
             )
         }
 

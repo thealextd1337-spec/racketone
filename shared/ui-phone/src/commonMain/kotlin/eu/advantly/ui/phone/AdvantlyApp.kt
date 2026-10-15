@@ -2,7 +2,6 @@ package eu.advantly.ui.phone
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,19 +35,10 @@ import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
-import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.history.HistoryScreen
 import eu.advantly.ui.phone.home.HomeScreen
 import eu.advantly.ui.phone.live.LiveScoreScreen
-import eu.advantly.ui.phone.live.compactScore
-import eu.advantly.ui.phone.live.scorerDevice
 import eu.advantly.ui.phone.resources.Res
-import eu.advantly.ui.phone.resources.abandon_confirm
-import eu.advantly.ui.phone.resources.abandon_current_score
-import eu.advantly.ui.phone.resources.abandon_keep
-import eu.advantly.ui.phone.resources.abandon_scoring_elsewhere
-import eu.advantly.ui.phone.resources.abandon_text
-import eu.advantly.ui.phone.resources.abandon_title
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_title_scorer
@@ -103,7 +93,12 @@ fun AdvantlyApp(
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             UpdateRequiredBanner(updateRequired)
-                            WizardScreen(model.wizard, onClose = { navigator.pop() }, onStart = model::finishWizard)
+                            WizardScreen(
+                                model.wizard,
+                                onClose = { navigator.pop() },
+                                onStart = model::finishWizard,
+                                busyMatch = model.watchMatch(),
+                            )
                         }
                     }
 
@@ -138,7 +133,6 @@ fun AdvantlyApp(
                     }
                 }
                 model.pendingScorerChoice?.let { ScorerDialog(model) }
-                model.pendingStart?.let { AbandonDialog(model) }
             }
         }
     }
@@ -151,6 +145,7 @@ private fun TabLayer(
     versionName: String,
 ) {
     val active by model.live.active.collectAsState()
+    val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
     Column(Modifier.fillMaxSize().safeContentPadding()) {
         Box(Modifier.weight(1f)) {
@@ -161,7 +156,7 @@ private fun TabLayer(
                 AppTab.Profile -> ComingSoonScreen(AppTab.Profile, versionName, players = model.players)
             }
         }
-        active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }) }
+        active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }, more = open.size - 1) }
         TabBar(
             selected = navigator.tab,
             onSelect = { tab -> if (tab == AppTab.Play) model.onPlay() else navigator.tab = tab },
@@ -175,7 +170,9 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
     val watchStatus by model.live.watchStatus.collectAsState()
     val watchAvailable = watchStatus == WatchStatus.AVAILABLE
     LaunchedEffect(Unit) { model.live.refreshWatchStatus() }
-    var scorer by remember { mutableStateOf(if (watchAvailable) ScorerOption.MY_WATCH else ScorerOption.THIS_PHONE) }
+    val busy = model.watchMatch()
+    // Zählt die Uhr schon ein anderes Match, ist „Dieses Handy“ der Standard (F22); „Meine Uhr“ wechselt das Uhr-Match
+    var scorer by remember { mutableStateOf(if (watchAvailable && busy == null) ScorerOption.MY_WATCH else ScorerOption.THIS_PHONE) }
     var workout by remember { mutableStateOf(true) }
     val effective = if (watchAvailable) scorer else ScorerOption.THIS_PHONE
     AlertDialog(
@@ -189,6 +186,7 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
                 onSelect = { scorer = it },
                 onWatchWorkout = { workout = it },
                 onRecheck = model.live::refreshWatchStatus,
+                busyMatch = busy,
             )
         },
         confirmButton = {
@@ -203,44 +201,5 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
             }
         },
         modifier = Modifier.testTag("scorer_dialog"),
-    )
-}
-
-/** Bestätigung, bevor ein laufendes Match für einen neuen Start abgebrochen wird (Review W1-C, Punkt 1). */
-@Composable
-private fun AbandonDialog(model: AdvantlyAppModel) {
-    AlertDialog(
-        onDismissRequest = model::cancelPendingStart,
-        title = { Text(stringResource(Res.string.abandon_title)) },
-        text = {
-            // Was abgebrochen wird: aktueller Stand und – zählt ein anderes Gerät – welches (Review W1-I #10)
-            val running = model.live.active.value
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
-                Text(stringResource(Res.string.abandon_text))
-                if (running != null) {
-                    Text(
-                        stringResource(Res.string.abandon_current_score, compactScore(running)),
-                        modifier = Modifier.testTag("abandon_score"),
-                    )
-                    if (!running.isScorer) {
-                        Text(
-                            stringResource(Res.string.abandon_scoring_elsewhere, scorerDevice(running)),
-                            modifier = Modifier.testTag("abandon_scorer"),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = model::confirmPendingStart, modifier = Modifier.testTag("abandon_confirm")) {
-                Text(stringResource(Res.string.abandon_confirm), color = AdvantlyTheme.colors.danger)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = model::cancelPendingStart, modifier = Modifier.testTag("abandon_cancel")) {
-                Text(stringResource(Res.string.abandon_keep))
-            }
-        },
-        modifier = Modifier.testTag("abandon_dialog"),
     )
 }
