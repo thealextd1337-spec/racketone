@@ -225,11 +225,19 @@ class WorkoutService : Service() {
                     RecoveryAction.REATTACH -> {
                         // Exercise lief in Health Services weiter – nur Callback neu anmelden.
                         val caps = loadCapabilities()
-                        val selection = caps?.let { ExerciseTypeSelector.select(store.sport, it, Permissions.current(this@WorkoutService)) }
-                        registerCallback()
-                        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = selection) }
-                        DiagnosticLog.log("EXERCISE_REATTACHED")
-                        startTicker()
+                        when (val result = ExerciseOwnership.onReattach(store.sport, caps, Permissions.current(this@WorkoutService))) {
+                            ReattachResult.CapabilitiesUnavailable -> {
+                                DiagnosticLog.log("EXERCISE_REATTACH_FAILED", "reason" to "capabilities")
+                                WorkoutStateHolder.fail(WorkoutError.CAPABILITIES)
+                            }
+
+                            is ReattachResult.Active -> {
+                                registerCallback()
+                                WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = result.selection) }
+                                DiagnosticLog.log("EXERCISE_REATTACHED")
+                                startTicker()
+                            }
+                        }
                     }
 
                     RecoveryAction.RESTART -> {
@@ -732,10 +740,16 @@ class WorkoutService : Service() {
         private const val END_CONFIRM_POLLS = 6
         private const val END_CONFIRM_POLL_MILLIS = 500L
 
-        // Alle Aufrufe kommen aus der sichtbaren Activity (Hintergrundstarts von FGS sind eingeschränkt, 05 §2.2).
-        // Bewusst startService statt startForegroundService: Der Service ruft startForeground selbst auf, solange die App
-        // im Vordergrund ist. So gibt es keine Pflicht zum startForeground – ein abgebrochener Start (fehlende Rechte)
-        // führt nicht zum Absturz „did not then call startForeground“.
+        /**
+         * Startet eine Session. Alle Aufrufe kommen aus der **sichtbaren** Activity (Hintergrundstarts von FGS sind
+         * eingeschränkt, 05 §2.2).
+         *
+         * Bewusst `startService` statt des von der Android-Doku für Foreground Services empfohlenen
+         * `startForegroundService`: Der Service ruft `startForeground` sofort selbst auf, solange die App im Vordergrund
+         * ist (für API 34–36 zulässig). `startForegroundService` würde die App mit „did not then call startForeground“
+         * abstürzen lassen, wenn der Start abbricht (z. B. `SecurityException` bei fehlenden Rechten) und der Service
+         * sich vorher beendet. Gilt ebenso für [stop], [recover] und [replaceOther].
+         */
         fun start(
             context: Context,
             sport: SpikeSport,

@@ -25,7 +25,7 @@ interface ExerciseCapabilitiesView {
 }
 
 /**
- * Gewährte Laufzeitrechte, soweit sie das Workout betreffen. Puls braucht das Puls-/Sensorrecht, Schritte das
+ * Gewährte Laufzeitrechte, soweit sie das Workout betreffen. Puls braucht das Puls-/Sensorrecht, Schritte und Kalorien das
  * Aktivitätsrecht. Der Foreground Service vom Typ `health` setzt (Android 14+) eines der beiden voraus.
  */
 data class WorkoutPermissions(
@@ -45,8 +45,12 @@ data class WorkoutPermissions(
                     add(WorkoutMetric.HEART_RATE_BPM)
                     add(WorkoutMetric.HEART_RATE_BPM_STATS)
                 }
-                if (activityRecognition) add(WorkoutMetric.STEPS)
-                if (canRunHealthService) add(WorkoutMetric.CALORIES_TOTAL)
+                // Kalorien und Schritte verlangen laut Health-Services-Doku ACTIVITY_RECOGNITION
+                // (https://developer.android.com/health-and-fitness/health-services/permissions).
+                if (activityRecognition) {
+                    add(WorkoutMetric.STEPS)
+                    add(WorkoutMetric.CALORIES_TOTAL)
+                }
             }
 
     companion object {

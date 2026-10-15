@@ -30,6 +30,17 @@ enum class TrackedStatus {
 /** Was nach einem Prozess-/Service-Neustart mit einer als aktiv markierten Session passiert. */
 enum class RecoveryAction { REATTACH, RESTART, ASK_USER, RETRY_OR_FAIL }
 
+/** Ergebnis beim Wiederanbinden an eine eigene, weiterlaufende Exercise. */
+sealed interface ReattachResult {
+    /** Weiterzählen; [selection] ist `null`, wenn das Gerät keinen passenden Typ kennt (wie beim Start). */
+    data class Active(
+        val selection: ExerciseSelection?,
+    ) : ReattachResult
+
+    /** Capabilities nach allen Wiederholungen nicht abrufbar → Fehlerzustand mit „Erneut versuchen“. */
+    data object CapabilitiesUnavailable : ReattachResult
+}
+
 /** Was beim Start einer neuen Session passiert. */
 enum class StartAction { START, ASK_USER, RETRY_OR_FAIL }
 
@@ -45,6 +56,18 @@ object ExerciseOwnership {
             TrackedStatus.NONE -> RecoveryAction.RESTART
             TrackedStatus.OTHER_APP -> RecoveryAction.ASK_USER
             TrackedStatus.FAILED -> RecoveryAction.RETRY_OR_FAIL
+        }
+
+    /** [capabilities] `null` heißt: Abfrage endgültig fehlgeschlagen – dann nicht stillschweigend `ACTIVE` setzen. */
+    fun onReattach(
+        sport: SpikeSport,
+        capabilities: ExerciseCapabilitiesView?,
+        permissions: WorkoutPermissions,
+    ): ReattachResult =
+        if (capabilities == null) {
+            ReattachResult.CapabilitiesUnavailable
+        } else {
+            ReattachResult.Active(ExerciseTypeSelector.select(sport, capabilities, permissions))
         }
 
     fun onStart(

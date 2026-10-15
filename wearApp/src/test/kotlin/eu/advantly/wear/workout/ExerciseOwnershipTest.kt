@@ -51,4 +51,25 @@ class ExerciseOwnershipTest {
         assertTrue(ExerciseOwnership.needsEnd(TrackedStatus.OWNED))
         assertTrue(ExerciseOwnership.needsEnd(TrackedStatus.FAILED))
     }
+
+    @Test
+    fun reattachWithoutCapabilitiesIsAnErrorNotActive() {
+        val result = ExerciseOwnership.onReattach(SpikeSport.TENNIS, capabilities = null, permissions = WorkoutPermissions.ALL)
+        assertEquals(ReattachResult.CapabilitiesUnavailable, result)
+    }
+
+    @Test
+    fun reattachWithCapabilitiesSelectsTypeAsOnStart() {
+        val caps =
+            object : ExerciseCapabilitiesView {
+                override val supportedTypes = setOf(WatchExerciseType.TENNIS)
+
+                override fun supportedMetrics(type: WatchExerciseType) = setOf(WorkoutMetric.HEART_RATE_BPM)
+            }
+        val result = ExerciseOwnership.onReattach(SpikeSport.TABLE_TENNIS, caps, WorkoutPermissions.ALL)
+        assertTrue(result is ReattachResult.Active)
+        val selection = (result as ReattachResult.Active).selection!!
+        assertEquals(WatchExerciseType.TENNIS, selection.type)
+        assertTrue(selection.isFallback)
+    }
 }

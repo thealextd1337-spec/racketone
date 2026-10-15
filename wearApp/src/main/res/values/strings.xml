@@ -38,7 +38,7 @@
     <string name="count_only_label">Count only</string>
     <string name="hint_no_health">Without heart rate and activity permission: count only, the watch may close the app in the background</string>
     <string name="hint_no_heart_rate">Without heart rate permission: workout without heart rate</string>
-    <string name="hint_no_activity">Without activity permission: no steps</string>
+    <string name="hint_no_activity">Without activity permission: no steps or calories</string>
     <string name="hint_no_notifications">Without notifications: no icon on the watch face</string>
     <string name="conflict_title">Another app is recording a workout</string>
     <string name="conflict_text">Replace it with this match? The other workout will be ended.</string>

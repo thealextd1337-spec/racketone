@@ -32,7 +32,7 @@
     <string name="count_only_label">Nur Zählen</string>
     <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: nur Zählen, die Uhr kann die App im Hintergrund beenden</string>
     <string name="hint_no_heart_rate">Ohne Pulsrecht: Workout ohne Puls</string>
-    <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte</string>
+    <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte und Kalorien</string>
     <string name="hint_no_notifications">Ohne Benachrichtigungen: kein Symbol auf dem Zifferblatt</string>
     <string name="conflict_title">Eine andere App zeichnet ein Training auf</string>
     <string name="conflict_text">Durch dieses Match ersetzen? Das andere Training wird beendet.</string>

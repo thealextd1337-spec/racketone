@@ -111,18 +111,36 @@ class ExerciseTypeSelectorTest {
     }
 
     @Test
-    fun metricsAreFilteredByGrantedPermissions() {
+    fun metricsFollowPermissionMatrix() {
+        // Matrix nur Puls / nur Aktivität / beide / keins. Kalorien und Schritte brauchen ACTIVITY_RECOGNITION.
         val caps = FakeCapabilities(mapOf(WatchExerciseType.TENNIS to all))
-        val noHeartRate = WorkoutPermissions(heartRate = false, activityRecognition = true, notifications = true)
-        assertEquals(
-            setOf(WorkoutMetric.STEPS, WorkoutMetric.CALORIES_TOTAL),
-            ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, noHeartRate)!!.metrics,
-        )
-        val noActivity = WorkoutPermissions(heartRate = true, activityRecognition = false, notifications = false)
-        assertEquals(
-            setOf(WorkoutMetric.HEART_RATE_BPM, WorkoutMetric.HEART_RATE_BPM_STATS, WorkoutMetric.CALORIES_TOTAL),
-            ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, noActivity)!!.metrics,
-        )
+        val heartRate = setOf(WorkoutMetric.HEART_RATE_BPM, WorkoutMetric.HEART_RATE_BPM_STATS)
+        val activity = setOf(WorkoutMetric.STEPS, WorkoutMetric.CALORIES_TOTAL)
+        val cases =
+            listOf(
+                Triple(true, false, heartRate),
+                Triple(false, true, activity),
+                Triple(true, true, heartRate + activity),
+                Triple(false, false, emptySet()),
+            )
+        cases.forEach { (hr, ar, expected) ->
+            val permissions = WorkoutPermissions(heartRate = hr, activityRecognition = ar, notifications = true)
+            assertEquals("heartRate=$hr activity=$ar", expected, permissions.allowedMetrics)
+            assertEquals(
+                "heartRate=$hr activity=$ar",
+                expected,
+                ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, permissions)!!.metrics,
+            )
+        }
+    }
+
+    @Test
+    fun caloriesNeverRequestedWithHeartRateOnly() {
+        val onlyHeartRate = WorkoutPermissions(heartRate = true, activityRecognition = false, notifications = true)
+        val caps = FakeCapabilities(mapOf(WatchExerciseType.BADMINTON to setOf(WorkoutMetric.CALORIES_TOTAL, WorkoutMetric.HEART_RATE_BPM)))
+        val metrics = ExerciseTypeSelector.select(SpikeSport.BADMINTON, caps, onlyHeartRate)!!.metrics
+        assertFalse(WorkoutMetric.CALORIES_TOTAL in metrics)
+        assertEquals(setOf(WorkoutMetric.HEART_RATE_BPM), metrics)
     }
 
     @Test
