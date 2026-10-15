@@ -1,6 +1,6 @@
 -- Struktur und Rechte: RLS überall, keine anon-Rechte, Event-Log nicht direkt schreibbar, keine Health-Tabellen.
 begin;
-select plan(19);
+select plan(20);
 
 select is_empty($$
   select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -92,6 +92,14 @@ select is_empty($$
   where table_schema = 'public' and privilege_type = 'TRUNCATE'
     and grantee in ('anon', 'authenticated', 'service_role')
 $$, 'kein TRUNCATE für API-Rollen (Wartung nur als Owner mit Sperre vorab)');
+
+-- Default-Privileges: auch eine künftig angelegte Tabelle bekommt kein TRUNCATE für service_role.
+create table public.zz_default_priv_probe (id int);
+select is_empty($$
+  select grantee from information_schema.role_table_grants
+  where table_schema = 'public' and table_name = 'zz_default_priv_probe' and privilege_type = 'TRUNCATE'
+    and grantee in ('anon', 'authenticated', 'service_role')
+$$, 'neue Tabellen erhalten über Default-Privileges kein TRUNCATE für API-Rollen');
 
 select * from finish();
 rollback;

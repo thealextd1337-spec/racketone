@@ -91,4 +91,6 @@ revoke execute on function public.admin_purge_due_accounts(interval) from authen
 alter default privileges in schema public revoke execute on functions from public;
 alter default privileges in schema public revoke all on functions from anon, authenticated;
 alter default privileges in schema public revoke all on tables from anon, authenticated;
+-- Neue Tabellen bekämen über Supabase-Default-Privileges sonst wieder TRUNCATE für service_role (Review P2 R4).
+alter default privileges in schema public revoke truncate on tables from service_role;
 alter default privileges in schema public revoke all on sequences from anon, authenticated;
