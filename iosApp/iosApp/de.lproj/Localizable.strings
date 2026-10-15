@@ -1,0 +1,19 @@
+/* Link-Debug (Spike S3, nur DEBUG) – iOS-Host-Texte */
+"link.debug.open" = "Link-Debug";
+"link.state.CONNECTED" = "Verbunden";
+"link.state.DISCONNECTED" = "Getrennt";
+"link.state.UNAVAILABLE" = "Nicht verfügbar";
+"link.send10" = "10 Pings";
+"link.stop" = "Stopp";
+"link.reset" = "Zurücksetzen";
+"link.sent %@" = "Gesendet: %@";
+"link.pongs %@" = "Pongs: %@";
+"link.answered %@" = "Beantwortet: %@";
+"link.queued %@" = "In Queue: %@";
+"link.lost %@" = "Verloren: %@";
+"link.retries %@" = "Wiederholungen: %@";
+"link.rtt %@ %@" = "RTT p50/p95: %1$@ / %2$@";
+"link.nopeer" = "Noch keine Gegenstelle – ist die andere App offen?";
+"tab.app" = "App";
+"tab.linkdebug" = "Link-Debug";
+"link.send100" = "100 Pings";

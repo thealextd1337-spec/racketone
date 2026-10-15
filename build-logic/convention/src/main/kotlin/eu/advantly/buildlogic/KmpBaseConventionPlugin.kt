@@ -23,6 +23,7 @@ class KmpBaseConventionPlugin : Plugin<Project> {
                 sourceSets.getByName("commonTest").dependencies {
                     implementation(kotlin("test"))
                 }
+                linkSystemSqlite()
             }
             configureAppleSimulatorTests()
         }

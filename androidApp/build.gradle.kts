@@ -9,4 +9,7 @@ android {
 
 dependencies {
     implementation(projects.shared.uiPhone)
+    // Nur Debug-APK: Link-Debug-Screen (Spike S3, src/debug). device-link kommt transitiv über ui-phone → presentation.
+    debugImplementation(libs.compose.foundation)
+    debugImplementation(libs.compose.material3)
 }
