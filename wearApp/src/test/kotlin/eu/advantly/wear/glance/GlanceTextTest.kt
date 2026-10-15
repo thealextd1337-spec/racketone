@@ -57,6 +57,37 @@ class GlanceTextTest {
     }
 
     @Test
+    fun smallRoundTileKeepsSetsAndGamesOnSeparateLinesInBothLanguages() {
+        listOf(en, de).forEach { strings ->
+            val copy = GlanceText.render(GlanceState(live = live), strings)
+            listOf(1f, 1.3f).forEach { scale ->
+                val metrics = TileLayoutMetrics(192, 192, true, scale)
+                val visible = copy.tileLines.take(metrics.liveLines)
+                assertEquals(3, visible.size)
+                assertEquals(strings.get(GlanceLabel.SETS, "1:0"), visible[0])
+                assertEquals(strings.get(GlanceLabel.GAMES, "3:2"), visible[1])
+                assertEquals(strings.get(GlanceLabel.SERVE, "Bea"), visible[2])
+                assertTrue(copy.description.contains(strings.get(GlanceLabel.POINTS, "30:15")))
+            }
+        }
+    }
+
+    @Test
+    fun tileStatusIsExplicitAndTakesPriorityOverScoreDetails() {
+        listOf(en, de).forEach { strings ->
+            listOf(MatchStatus.PAUSED, MatchStatus.AWAITING_DECISION).forEach { status ->
+                val copy = GlanceText.render(GlanceState(live = live.copy(status = status)), strings)
+                val label = if (status == MatchStatus.PAUSED) GlanceLabel.PAUSED else GlanceLabel.DECISION
+                assertEquals(strings.get(label), copy.status)
+                val visible = (listOfNotNull(copy.status) + copy.tileLines).distinct().take(3)
+                assertEquals(copy.status, visible.first())
+                assertEquals(strings.get(GlanceLabel.SETS, "1:0"), visible[1])
+                assertEquals(strings.get(GlanceLabel.GAMES, "3:2"), visible[2])
+            }
+        }
+    }
+
+    @Test
     fun selfAndNeutralDoublesPlayersAreLocalized() {
         val setup =
             GlanceSetup(

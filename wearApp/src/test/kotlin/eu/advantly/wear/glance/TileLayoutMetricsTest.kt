@@ -1,5 +1,6 @@
 package eu.advantly.wear.glance
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,6 +19,25 @@ class TileLayoutMetricsTest {
                     TileLayoutMetrics.LINE_HEIGHT * scale
             assertTrue("live overflow at $scale", liveHeight <= metrics.contentHeight)
         }
+    }
+
+    @Test
+    fun setupUsesEveryLineThatFitsUpToThree() {
+        listOf(192, 240, 300).forEach { size ->
+            listOf(false, true).forEach { round ->
+                listOf(1f, 1.3f).forEach { scale ->
+                    val metrics = TileLayoutMetrics(size, size, round, scale)
+                    assertTrue(metrics.idleHeight() <= metrics.contentHeight)
+                    if (metrics.setupLines < 3) {
+                        assertTrue(metrics.idleHeight(setupLines = metrics.setupLines + 1) > metrics.contentHeight)
+                    }
+                }
+            }
+        }
+        assertEquals(2, TileLayoutMetrics(192, 192, true, 1f).setupLines)
+        assertEquals(0, TileLayoutMetrics(192, 192, true, 1.3f).setupLines)
+        assertEquals(3, TileLayoutMetrics(240, 240, true, 1f).setupLines)
+        assertEquals(3, TileLayoutMetrics(192, 192, false, 1f).setupLines)
     }
 
     @Test

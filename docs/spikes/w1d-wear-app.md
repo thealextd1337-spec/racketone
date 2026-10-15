@@ -290,8 +290,10 @@ Exercise-Zustand (z. B. `USER_PAUSED`/`AUTO_PAUSED`), sendet die Uhr keine Telem
 ## 9. Tile und Komplikation (P1-D)
 
 Das Tile **Schnellstart** bietet ohne laufendes Uhr-Match „Wie letztes Mal“ mit Sport, Format und Besetzung sowie
-„Neues Match“. Ohne bisheriges Setup erscheint nur „Neues Match“. Mit laufendem Match zeigt es Sätze, gegebenenfalls
-Games, Punkte, konkreten Aufschläger und die Rolle **Zähler/Anzeige**; auch Pause und Satzende bleiben erkennbar.
+„Neues Match“. Die Setup-Details erscheinen je nach Displaygröße und Schriftskalierung in bis zu drei Zeilen.
+Ohne bisheriges Setup erscheint nur „Neues Match“. Mit laufendem Match zeigt es den großen Spielstand und die
+Rolle **Zähler/Anzeige**. Zusätzliche Live-Zeilen zeigen Sätze und Games getrennt sowie den konkreten Aufschläger,
+soweit das Zeilenbudget reicht. Pause und Satzende haben dabei Vorrang. Die TalkBack-Beschreibung bleibt vollständig.
 Tippen führt ins laufende Match. Die Komplikation unterstützt **SHORT_TEXT** (Punkte, bei langen Ständen Games/Sätze)
 und **LONG_TEXT** (Sätze/Games/Punkte); ohne Match dient sie als App-Einstieg. Alle Aktionen öffnen die Activity.
 Ein inzwischen laufendes Match hat Vorrang vor einem veralteten „Wie letztes Mal“-Tipp; Rotation und Rückkehr aus

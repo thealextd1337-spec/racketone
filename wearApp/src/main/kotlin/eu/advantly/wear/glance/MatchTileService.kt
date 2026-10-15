@@ -35,9 +35,7 @@ class MatchTileService : TileService() {
                 if (live == null) {
                     copy.lines.take(metrics.setupLines)
                 } else {
-                    val scoreLines = copy.lines.drop(1 + (if (live.games == null) 0 else 1) + (if (live.points == null) 0 else 1))
-                    val summary = copy.lines.take(if (live.games == null) 1 else 2).joinToString(" · ")
-                    (listOfNotNull(copy.shortTitle?.let { copy.lines.last() }) + summary + scoreLines).distinct().take(metrics.liveLines)
+                    (listOfNotNull(copy.status) + copy.tileLines).distinct().take(metrics.liveLines)
                 }
             val content =
                 LayoutElementBuilders.Column

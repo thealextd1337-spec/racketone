@@ -133,7 +133,7 @@ object GlanceStateStorage {
         value?.let { runCatching { json.decodeFromString(GlanceState.serializer(), it) }.getOrNull() }
 }
 
-/** Der Verbrauch gehört zur Activity-Instanz und wird vor Nebenwirkungen im Saved State gesichert. */
+/** Der Verbrauch gehört zur Activity-Instanz; restaurierte Instanzen haben das Intent bereits verbraucht. */
 class GlanceIntentConsumption(
     var consumed: Boolean = false,
 ) {

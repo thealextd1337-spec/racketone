@@ -57,6 +57,8 @@ data class GlanceCopy(
     val longText: String,
     val shortTitle: String? = null,
     val score: String? = null,
+    val status: String? = null,
+    val tileLines: List<String> = emptyList(),
 )
 
 /** Reine Zusammenstellung aller Provider-Texte, inklusive ungekürzter TalkBack-Beschreibung. */
@@ -97,6 +99,8 @@ object GlanceText {
                 (listOfNotNull(status) + lines.take(3)).distinct().joinToString(" · "),
                 shortTitle,
                 live.points ?: live.games ?: live.sets,
+                status = status,
+                tileLines = listOfNotNull(sets, games, serve),
             )
         }
         val last = state.last

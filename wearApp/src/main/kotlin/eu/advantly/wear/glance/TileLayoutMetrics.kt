@@ -18,7 +18,7 @@ class TileLayoutMetrics(
     val contentHeight = if (round) safeSide else height - 16f
     private val detailHeight get() = DETAIL_SIZE * LINE_HEIGHT * scale
     val titleLines = if (idleHeight(2, 0) <= contentHeight) 2 else 1
-    val setupLines = if (idleHeight(titleLines, 1) <= contentHeight) 1 else 0
+    val setupLines = (0..3).last { idleHeight(titleLines, it) <= contentHeight }
     val liveLines =
         floor((contentHeight - 12f - (SCORE_SIZE + DETAIL_SIZE) * LINE_HEIGHT * scale) / detailHeight)
             .toInt()

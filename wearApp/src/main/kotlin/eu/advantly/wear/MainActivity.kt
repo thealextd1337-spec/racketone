@@ -88,7 +88,7 @@ class WatchViewModel(
  */
 class MainActivity : ComponentActivity() {
     private val glanceLaunch = mutableIntStateOf(0)
-    private var glanceConsumption = GlanceIntentConsumption()
+    private lateinit var glanceConsumption: GlanceIntentConsumption
     private val isAmbient = mutableStateOf(false)
     private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val toast = mutableStateOf<WatchToast?>(null)
@@ -208,7 +208,6 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
-        outState.putBoolean(KEY_GLANCE_CONSUMED, glanceConsumption.consumed)
     }
 
     override fun onStart() {
@@ -505,7 +504,6 @@ class MainActivity : ComponentActivity() {
         }
 
     private companion object {
-        const val KEY_GLANCE_CONSUMED = "glance_consumed"
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val TICK_MS = 1_000L
     }
