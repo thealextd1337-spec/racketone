@@ -185,7 +185,7 @@ UX-Regeln zur Synchronität:
 
 **Visitor (P2):** Benannte Zuschauer-Accounts öffnen ein freigegebenes Match aus ihrer Live-Liste/Einladung. Sie sehen Stand, Sätze, Hinweise, Zähler und Verbindungsstatus sowie nach Ende das Ergebnis. Keine Tap-Flächen, kein Undo, kein Übernehmen, keine Match-Steuerung, keine Health-Daten. Zugriff bis Widerruf gemäß noch festzulegender Verwaltung (PLAN F16); öffentlicher Live-Link bleibt später.
 
-**Visitor-Regeln (entschieden, F16):** Nur **Freunde** können als Visitor benannt werden; Mitspieler müssen nicht zustimmen. **Namen & Aliase (F18):** Überall, wo Personen erscheinen (Spieler-Slots, Live, Verlauf, Feed, Visitor-Ansicht), wird der Anzeigename so aufgelöst: privater Spitzname (nur eigene Ansicht) → öffentlicher Alias → Profil-/Gastname. Bearbeiten: Profil → „Mein Alias“; bei Freund/Gast → „Spitzname vergeben“.
+**Visitor-Regeln (entschieden, F16):** Nur **Freunde** können als Visitor benannt werden; Mitspieler müssen nicht zustimmen. **Namen & Aliase (F18):** Überall, wo Personen erscheinen (Spieler-Slots, Live, Verlauf, Feed, Visitor-Ansicht), wird der Anzeigename so aufgelöst: öffentlicher Alias → Profilname; bei Dummy-/Gastspielern der vom Anleger vergebene Name. Bearbeiten: Profil → „Mein Alias“; bei Dummy-/Gastspielern → „Umbenennen“ (nur der Anleger). Keine privaten Spitznamen für Nutzer mit App.
 
 ### 3.3 Satzende & Matchende
 
