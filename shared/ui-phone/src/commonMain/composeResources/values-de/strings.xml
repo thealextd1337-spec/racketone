@@ -232,7 +232,6 @@
     <string name="result_followup_hint">Startet ein verknüpftes Match im Modus Offen – dieses Ergebnis bleibt, wie es ist.</string>
     <string name="dialog_yes">Ja</string>
     <string name="dialog_no_finish">Nein, beenden</string>
-    <string name="dialog_match_tiebreak">Match-Tiebreak</string>
     <string name="dialog_show_result">Ergebnis ansehen</string>
     <string name="match_end_retired_suffix">Aufg.</string>
     <string name="match_end_walkover_suffix">kampflos</string>
@@ -412,4 +411,5 @@
     <string name="update_required_watch">Bitte Advantly auf der Uhr aktualisieren</string>
     <string name="update_required_this_device">Bitte Advantly auf diesem Gerät aktualisieren</string>
     <string name="fmt_summary_one_game">1 Game</string>
+    <string name="live_restore_point">Wiederherstellen</string>
 </resources>

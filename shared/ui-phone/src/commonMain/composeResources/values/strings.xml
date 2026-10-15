@@ -232,7 +232,6 @@
     <string name="result_followup_hint">Starts a linked match in open mode – this result stays as it is.</string>
     <string name="dialog_yes">Yes</string>
     <string name="dialog_no_finish">No, finish</string>
-    <string name="dialog_match_tiebreak">Match tiebreak</string>
     <string name="dialog_show_result">Show result</string>
     <string name="match_end_retired_suffix">ret.</string>
     <string name="match_end_walkover_suffix">w/o</string>
@@ -412,4 +411,5 @@
     <string name="update_required_watch">Please update Advantly on your watch</string>
     <string name="update_required_this_device">Please update Advantly on this device</string>
     <string name="fmt_summary_one_game">1 game</string>
+    <string name="live_restore_point">Restore</string>
 </resources>

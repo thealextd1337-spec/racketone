@@ -76,4 +76,16 @@ class PhoneFormatTest {
             assertTrue(wizard.state.value.input.serveStats)
         }
     }
+
+    @Test
+    fun changingSportResetsTiebreakOnlyChoice() {
+        val wizard = MatchWizard(testStore())
+        for (sport in Sport.entries) {
+            wizard.selectSport(Sport.TENNIS)
+            wizard.setTennisMatch(TennisMatchChoice.TIEBREAK_10)
+            wizard.selectSport(sport)
+            assertEquals(TennisMatchChoice.REGULAR, wizard.state.value.input.tennisMatch)
+            assertTrue(wizard.state.value.input.serveStats)
+        }
+    }
 }

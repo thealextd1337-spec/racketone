@@ -3,13 +3,20 @@ package eu.advantly.ui.phone.live
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -20,6 +27,7 @@ import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetKind
+import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveRole
 import eu.advantly.presentation.match.UpdateRequired
@@ -28,10 +36,18 @@ import eu.advantly.presentation.wizard.TennisMatchChoice
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.latency.InputClockSource
+import eu.advantly.ui.phone.platform.Haptics
 import eu.advantly.ui.phone.play
+import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.dialog_no_finish
+import eu.advantly.ui.phone.resources.dialog_yes
+import eu.advantly.ui.phone.resources.live_restore_point
 import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -52,7 +68,7 @@ class LiveOperationsUiTest {
         runComposeUiTest {
             val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), "ABB") }
             show(model)
-            onNodeWithTag("panel_us").performTouchInput { longClick() }
+            onNodeWithTag("panel_us").performTouchInput { longClick(durationMillis = 1_100) }
             runOnIdle {
                 assertEquals(
                     0,
@@ -68,7 +84,7 @@ class LiveOperationsUiTest {
                 )
                 assertTrue(model.controller.undoNotice!!.pointRemoved)
             }
-            onNodeWithTag("redo_button").performClick()
+            onNodeWithTag("redo_button").assertTextEquals(getString(Res.string.live_restore_point)).performClick()
             runOnIdle {
                 assertEquals(
                     1,
@@ -87,6 +103,11 @@ class LiveOperationsUiTest {
             onNodeWithTag("panel_us").performClick()
             onNodeWithTag("serve_DOUBLE_FAULT").assertDoesNotExist()
             onNodeWithTag("serve_FIRST_SERVE_IN").performScrollTo().performClick().assertIsSelected()
+            assertEquals(Role.RadioButton, onNodeWithTag("serve_FIRST_SERVE_IN").fetchSemanticsNode().config[SemanticsProperties.Role])
+            assertEquals(
+                LiveRegionMode.Polite,
+                onNodeWithTag("serve_info_title", useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.LiveRegion],
+            )
             runOnIdle {
                 assertEquals(
                     ServeOutcome.FIRST_SERVE_IN,
@@ -131,7 +152,7 @@ class LiveOperationsUiTest {
                 model.controller.dismissServePrompt(first)
                 assertNotNull(model.controller.servePromptId)
             }
-            mainClock.advanceTimeBy(6_100)
+            mainClock.advanceTimeBy(10_100)
             waitForIdle()
             onNodeWithTag("serve_info").assertDoesNotExist()
         }
@@ -212,6 +233,8 @@ class LiveOperationsUiTest {
             model.controller.sync(model.live.active.value)
             show(model)
             onNodeWithTag("panel_us").performClick()
+            mainClock.advanceTimeBy(11_000)
+            waitForIdle()
             onNodeWithTag("serve_info").assertExists()
             onNodeWithTag("serve_FIRST_SERVE_IN").performClick()
             onNodeWithTag("decision_yes").assertExists()
@@ -288,10 +311,11 @@ class LiveOperationsUiTest {
             model.wizard.next()
             setContent { Box(Modifier.size(412.dp, 892.dp)) { AdvantlyApp(model = model, darkTheme = true) } }
             onNodeWithTag("games_0").assertExists()
-            onNodeWithTag("advanced_toggle").performScrollTo().performClick()
+            onNodeWithTag("advanced_content").assertDoesNotExist()
             onNodeWithTag("match_kind_TIEBREAK_7").performScrollTo().performClick()
             onNodeWithTag("games_0").assertDoesNotExist()
             onNodeWithTag("sets_0").assertDoesNotExist()
+            onNodeWithTag("advanced_toggle").performScrollTo().performClick()
             onNodeWithTag("toggle_serve_stats").performScrollTo().performClick()
             runOnIdle {
                 assertEquals(TennisMatchChoice.TIEBREAK_7, model.wizard.state.value.input.tennisMatch)
@@ -301,5 +325,156 @@ class LiveOperationsUiTest {
                         .meta.serveStats,
                 )
             }
+        }
+
+    @Test
+    fun holdingWithoutRemovablePointCountsOnRelease() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
+            show(model)
+            onNodeWithTag("panel_us").performTouchInput { longClick(durationMillis = 1_200) }
+            runOnIdle {
+                assertEquals(
+                    1,
+                    model.live.active.value!!
+                        .pointsPlayed,
+                )
+            }
+        }
+
+    @Test
+    fun holdingForLessThanOneSecondCountsInsteadOfRemoving() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), "A") }
+            show(model)
+            onNodeWithTag("panel_us").performTouchInput { longClick(durationMillis = 900) }
+            runOnIdle {
+                assertEquals(
+                    2,
+                    model.live.active.value!!
+                        .pointsPlayed,
+                )
+            }
+        }
+
+    @Test
+    fun talkBackLongClickRemovesPoint() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), "AB") }
+            show(model)
+            onNodeWithTag("panel_us").performSemanticsAction(SemanticsActions.OnLongClick)
+            runOnIdle {
+                assertEquals(
+                    0,
+                    model.live.active.value!!
+                        .state.current!!
+                        .points.a,
+                )
+                assertEquals(
+                    1,
+                    model.live.active.value!!
+                        .state.current!!
+                        .points.b,
+                )
+            }
+        }
+
+    @Test
+    fun servePromptAndItsTimeoutKeepBothPanelBoundsStable() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format()) }
+            show(model)
+            val us = onNodeWithTag("panel_us").getBoundsInRoot()
+            val them = onNodeWithTag("panel_them").getBoundsInRoot()
+            onNodeWithTag("panel_us").performClick()
+            onNodeWithTag("serve_info").assertExists()
+            assertEquals(us, onNodeWithTag("panel_us").getBoundsInRoot())
+            assertEquals(them, onNodeWithTag("panel_them").getBoundsInRoot())
+            mainClock.advanceTimeBy(9_000)
+            waitForIdle()
+            onNodeWithTag("serve_info").assertExists()
+            mainClock.advanceTimeBy(1_100)
+            waitForIdle()
+            onNodeWithTag("serve_info").assertDoesNotExist()
+            assertEquals(us, onNodeWithTag("panel_us").getBoundsInRoot())
+            assertEquals(them, onNodeWithTag("panel_them").getBoundsInRoot())
+        }
+
+    @Test
+    fun nonTennisSetEndUsesYesAndNoFinish() {
+        for ((sport, points) in listOf(Sport.BADMINTON to 15, Sport.TABLE_TENNIS to 11, Sport.PICKLEBALL to 11)) {
+            runComposeUiTest {
+                val model = testModel()
+                model.wizard.selectSport(sport)
+                model.wizard.setSets(SetsChoice.Open)
+                model.wizard.setPoints(points)
+                repeat(model.wizard.state.value.input.discipline.playersPerSide * 2 - 1) { model.wizard.addGuest("Guest $it") }
+                model.live.start(model.wizard.finish()!!)
+                model.live.play("A".repeat(points))
+                model.controller.sync(model.live.active.value)
+                show(model)
+                onNodeWithTag("set_end_sheet").assertExists()
+                onNodeWithTag("decision_yes").assertTextEquals(getString(Res.string.dialog_yes)).performScrollTo().performClick()
+                onNodeWithTag("set_end_sheet").assertDoesNotExist()
+                runOnIdle {
+                    var rallies = 0
+                    while (model.live.active.value!!
+                            .nextSetOptions
+                            .isEmpty()
+                    ) {
+                        check(++rallies <= 40)
+                        assertTrue(model.live.recordPoint(Side.A))
+                    }
+                    model.controller.sync(model.live.active.value)
+                }
+                onNodeWithTag("decision_no").assertTextEquals(getString(Res.string.dialog_no_finish)).performScrollTo().performClick()
+                onNodeWithTag("match_end_sheet").assertExists()
+            }
+        }
+    }
+
+    @Test
+    fun serveMetadataKeepsRestoreAndAddsNoLatencyInput() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format(), "AAAAB") }
+            val controller = model.controller
+            assertTrue(controller.removeLastPointOf(Side.B))
+            val notice = controller.undoNotice
+            controller.resetMeasurements()
+            val current = controller.snapshot!!
+            assertTrue(
+                controller.chooseServer(
+                    current.state.serverChoice!!
+                        .players
+                        .last(),
+                ),
+            )
+            assertEquals(notice, controller.undoNotice)
+            assertTrue(controller.setServeInfo(current.lastPoint!!.id, ServeOutcome.FIRST_SERVE_IN))
+            assertEquals(notice, controller.undoNotice)
+            controller.tracker.onDrawn(controller.generation, Long.MAX_VALUE / 2)
+            controller.tracker.onNextFrame(Long.MAX_VALUE / 2 + 1)
+            assertEquals(0, controller.tracker.summary(InputClockSource.Handler).samples)
+            controller.redo()
+            assertEquals(5, controller.snapshot!!.pointsPlayed)
+        }
+
+    @Test
+    fun failedRemovalHasRejectedHaptic() {
+        val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
+        val cues = mutableListOf<HapticCue>()
+        model.controller.haptics = Haptics { cues += it }
+        assertFalse(model.controller.removeLastPointOf(Side.A))
+        assertEquals(listOf(HapticCue.Rejected), cues)
+    }
+
+    @Test
+    fun autoBenchmarkDoesNotOpenServePrompts() =
+        runBlocking {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
+            model.controller.debounceEnabled = false
+            model.controller.runAutoBenchmark({ true }, points = 4, intervalMillis = 1)
+            assertEquals(4, model.controller.countedPoints)
+            assertNull(model.controller.servePromptId)
         }
 }

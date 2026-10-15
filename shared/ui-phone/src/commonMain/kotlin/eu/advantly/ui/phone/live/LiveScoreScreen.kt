@@ -115,6 +115,7 @@ import eu.advantly.ui.phone.resources.live_no_match
 import eu.advantly.ui.phone.resources.live_point_removed
 import eu.advantly.ui.phone.resources.live_remove_point_them
 import eu.advantly.ui.phone.resources.live_remove_point_us
+import eu.advantly.ui.phone.resources.live_restore_point
 import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_serve_line
 import eu.advantly.ui.phone.resources.live_team_them
@@ -195,12 +196,6 @@ fun LiveScoreScreen(
         onDispose { controller.frameStats = null }
     }
     val requiredUpdate by controller.port.updateRequired.collectAsState()
-    LaunchedEffect(controller.servePromptId) {
-        controller.servePromptId?.let { id ->
-            delay(6_000)
-            controller.dismissServePrompt(id)
-        }
-    }
     val scope = rememberCoroutineScope()
     val tracker = controller.tracker
 
@@ -240,6 +235,14 @@ fun LiveScoreScreen(
         LaunchedEffect(display) { if (!display) takeOverDialog = false }
         val now = rememberNow(controller.monotonic, ticking = display)
         val status = snapshot.state.status
+        LaunchedEffect(controller.servePromptId, status) {
+            if (status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED) {
+                controller.servePromptId?.let { id ->
+                    delay(10_000)
+                    controller.dismissServePrompt(id)
+                }
+            }
+        }
         val running = status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED
         val userDialog = dialog.takeIf { running && !display }
         // Satzende-Frage nur am Zähler (04 §3.3); die Anzeige zeigt stattdessen einen Hinweis über den Flächen
@@ -300,6 +303,7 @@ fun LiveScoreScreen(
                         outdoor = controller.outdoorContrast,
                         modifier = Modifier.padding(top = Spacing.s),
                     )
+                    LiveOperationsSlot(controller, snapshot)
                 }
             }
             val footer: @Composable (Modifier) -> Unit = { footerModifier ->
@@ -409,15 +413,8 @@ private fun Notices(
     val display = !snapshot.isScorer
     val rejected = controller.rejectedNotice
     val setEnd = display && snapshot.state.status == MatchStatus.AWAITING_DECISION
-    val operations =
-        snapshot.isScorer &&
-            (snapshot.state.serverChoice != null || controller.servePromptId != null)
-    if (rejected == null && !setEnd && !operations) return
+    if (rejected == null && !setEnd) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        ServerChoiceBar(controller, snapshot)
-        if (snapshot.state.status == MatchStatus.IN_PROGRESS || snapshot.state.status == MatchStatus.PAUSED) {
-            ServeInfoBar(controller, snapshot)
-        }
         rejected?.let { count -> RejectedNotice(count, onView = onViewRejected, onDismiss = controller::acknowledgeRejected) }
         if (setEnd) {
             Text(
@@ -888,7 +885,7 @@ internal fun UndoSnackbar(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = stringResource(if (notice.pointRemoved) Res.string.action_undo else Res.string.action_redo),
+                text = stringResource(if (notice.pointRemoved) Res.string.live_restore_point else Res.string.action_redo),
                 style = AdvantlyTheme.typography.label.copy(fontWeight = FontWeight.Bold),
                 color = colors.brand,
             )

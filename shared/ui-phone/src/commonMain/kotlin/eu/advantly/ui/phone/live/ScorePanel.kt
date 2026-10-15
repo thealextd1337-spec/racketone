@@ -7,6 +7,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -85,6 +88,9 @@ private val MIN_DIGIT_HEIGHT = 24.dp
 /** Aufblitzen der Fläche (04 §5.6 Score-Panel). */
 private const val FLASH_MILLIS = 120
 private const val FLASH_ALPHA = 0.24f
+
+/** Gleiche bewusste Haltegeste wie auf der Uhr. */
+private const val REMOVE_HOLD_MILLIS = 1_000L
 
 /** Inhalt eines Score-Panels. */
 internal data class ScorePanelContent(
@@ -132,7 +138,13 @@ internal fun ScorePanel(
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
     val currentOnRemove by rememberUpdatedState(onRemovePoint)
+    val currentCanRemove by rememberUpdatedState(canRemovePoint)
     var pressed by remember { mutableStateOf(false) }
+    val holdProgress = remember { Animatable(0f) }
+    LaunchedEffect(pressed, canRemovePoint) {
+        holdProgress.snapTo(0f)
+        if (pressed && canRemovePoint) holdProgress.animateTo(1f, tween(REMOVE_HOLD_MILLIS.toInt(), easing = LinearEasing))
+    }
 
     // Neues Animatable pro Punkt, mit Startwert > 0: Der Blitz ist damit schon im ERSTEN Frame nach dem Tap
     // sichtbar (wichtig für die Tap→Frame-Messung), danach klingt er in 120 ms ab.
@@ -156,6 +168,14 @@ internal fun ScorePanel(
                     drawContent()
                     val alpha = flash.value
                     if (alpha > 0f) drawRect(Color.White.copy(alpha = alpha))
+                    if (holdProgress.value > 0f) {
+                        val height = 3.dp.toPx()
+                        drawRect(
+                            teamColor.copy(alpha = 0.65f),
+                            topLeft = Offset(0f, size.height - height),
+                            size = Size(size.width * holdProgress.value, height),
+                        )
+                    }
                 }.semantics(mergeDescendants = true) {
                     contentDescription = content.a11yDescription
                     liveRegion = LiveRegionMode.Polite
@@ -181,8 +201,8 @@ internal fun ScorePanel(
                                 },
                             )
                     }
-                }.pointerInput(enabled, interactive, canRemovePoint) {
-                    if ((!enabled && !canRemovePoint) || !interactive) return@pointerInput
+                }.pointerInput(enabled, interactive) {
+                    if (!interactive) return@pointerInput
                     val swipeMin = 72.dp.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -194,10 +214,10 @@ internal fun ScorePanel(
                         try {
                             while (true) {
                                 val event =
-                                    if (!moved && !multiTouch && !longPressHandled) {
+                                    if (currentCanRemove && !moved && !multiTouch && !longPressHandled) {
                                         val remaining =
                                             (
-                                                viewConfiguration.longPressTimeoutMillis -
+                                                REMOVE_HOLD_MILLIS -
                                                     (
                                                         currentEvent.changes
                                                             .firstOrNull { it.id == down.id }
@@ -210,14 +230,17 @@ internal fun ScorePanel(
                                         awaitPointerEvent()
                                     }
                                 if (event == null) {
-                                    longPressHandled = true
-                                    pressed = false
-                                    if (canRemovePoint) currentOnRemove()
+                                    if (currentCanRemove) {
+                                        longPressHandled = true
+                                        pressed = false
+                                        currentOnRemove()
+                                    }
                                     continue
                                 }
                                 if (event.changes.count { it.pressed } > 1) multiTouch = true
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                                if (moved || multiTouch) pressed = false
                                 if (!change.pressed) {
                                     change.consume()
                                     up = change

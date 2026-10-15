@@ -77,6 +77,7 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.setup_one_game_hint
+import eu.advantly.ui.phone.resources.setup_serve_stats
 import eu.advantly.ui.phone.resources.wizard_add_guest
 import eu.advantly.ui.phone.resources.wizard_add_guest_hint
 import eu.advantly.ui.phone.resources.wizard_advanced
@@ -118,6 +119,7 @@ import eu.advantly.ui.phone.resources.wizard_title_sport
 import eu.advantly.ui.phone.resources.wizard_title_surface
 import eu.advantly.ui.phone.resources.wizard_title_venue
 import eu.advantly.ui.phone.resources.wizard_you
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -528,6 +530,7 @@ private fun FormatStep(
     val options = state.options
     val accent = sportColor(sport)
     StepTitle(stringResource(Res.string.wizard_title_format))
+    if (sport.isTennisLike) TennisFormatChoices(wizard, state)
 
     if (input.tennisMatch == TennisMatchChoice.REGULAR || !sport.isTennisLike) {
         SectionTitle(stringResource(setsTitle(sport)))
@@ -618,7 +621,7 @@ private fun DeuceChoice(
 }
 
 @Composable
-private fun RuleHint(text: org.jetbrains.compose.resources.StringResource) {
+private fun RuleHint(text: StringResource) {
     Text(
         stringResource(text),
         style = AdvantlyTheme.typography.caption,
@@ -662,7 +665,13 @@ private fun AdvancedSection(
     if (!input.advancedExpanded) return
     Column(Modifier.testTag("advanced_content")) {
         if (sport.isTennisLike) {
-            TennisFormatChoices(wizard, state)
+            ToggleRow(
+                title = stringResource(Res.string.setup_serve_stats),
+                subtitle = null,
+                checked = state.input.serveStats,
+                onChange = wizard::setServeStats,
+                tag = "toggle_serve_stats",
+            )
             if (input.tennisMatch != TennisMatchChoice.REGULAR) return@Column
         }
         when (sport) {
@@ -741,7 +750,7 @@ private fun TennisLikeAdvanced(
             options =
                 options.tiebreakAt.filter {
                     input.gamesPerSet > 1 ||
-                        it != eu.advantly.presentation.wizard.TiebreakAtChoice.AT_GAMES_MINUS_ONE
+                        it != TiebreakAtChoice.AT_GAMES_MINUS_ONE
                 },
             selected = input.tiebreakAt,
             label = { tiebreakLabel(it, input.gamesPerSet) },

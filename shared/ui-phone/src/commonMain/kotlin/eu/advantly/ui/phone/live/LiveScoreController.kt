@@ -144,8 +144,11 @@ class LiveScoreController(
     }
 
     fun removeLastPointOf(side: Side): Boolean {
-        val before = snapshot ?: return false
-        if (!LiveOperationRules.canRemove(before, side) || !port.removeLastPointOf(side)) return false
+        val before = snapshot
+        if (before == null || !LiveOperationRules.canRemove(before, side) || !port.removeLastPointOf(side)) {
+            haptics.perform(HapticCue.Rejected)
+            return false
+        }
         haptics.perform(HapticCue.Undo)
         val after = port.active.value ?: return false
         servePromptId = null
@@ -163,7 +166,7 @@ class LiveScoreController(
         ) {
             return false
         }
-        return command { port.chooseServer(player) }
+        return metadataCommand { port.chooseServer(player) }
     }
 
     fun setServeInfo(
@@ -173,7 +176,7 @@ class LiveScoreController(
         val current = snapshot ?: return false
         if (current.lastPoint?.id != pointId || LiveOperationRules.serveOptions(current).isEmpty()) return false
         if (value != null && value !in LiveOperationRules.serveOptions(current)) return false
-        return command { port.setServeInfo(pointId, value) }
+        return metadataCommand { port.setServeInfo(pointId, value) }
     }
 
     fun startNextSet(kind: NextSetKind): Boolean {
@@ -260,7 +263,10 @@ class LiveScoreController(
         val after = port.active.value
         after?.let { haptics.perform(LiveScoreRules.cueFor(it.state, side)) }
         apply(after, ScoreDirection.Forward, side, t0, source)
-        servePromptId = after?.lastPoint?.id?.takeIf { LiveOperationRules.serveOptions(after).isNotEmpty() }
+        servePromptId =
+            after?.lastPoint?.id?.takeIf {
+                source != InputClockSource.Synthetic && LiveOperationRules.serveOptions(after).isNotEmpty()
+            }
     }
 
     fun undo(eventUptimeMillis: Long? = null) {
@@ -310,6 +316,18 @@ class LiveScoreController(
 
     /** Folge-Match in gleicher Besetzung; `true`, wenn es angelegt wurde. */
     fun createFollowUp(): Boolean = command { port.createFollowUp() != null }
+
+    /** Metadaten lassen Undo/Redo und die Messung der Zähleingaben unberührt. */
+    private inline fun metadataCommand(block: () -> Boolean): Boolean {
+        val ok = block()
+        if (ok) {
+            updateSnapshot(port.active.value)
+            generation++
+        } else {
+            haptics.perform(HapticCue.Rejected)
+        }
+        return ok
+    }
 
     private inline fun command(block: () -> Boolean): Boolean {
         val ok = block()

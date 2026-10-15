@@ -64,6 +64,7 @@ import eu.advantly.ui.phone.resources.correct_server_from_start
 import eu.advantly.ui.phone.resources.correct_server_title
 import eu.advantly.ui.phone.resources.dialog_another_match
 import eu.advantly.ui.phone.resources.dialog_another_set
+import eu.advantly.ui.phone.resources.dialog_no_finish
 import eu.advantly.ui.phone.resources.dialog_set_lost
 import eu.advantly.ui.phone.resources.dialog_set_won
 import eu.advantly.ui.phone.resources.dialog_show_result
@@ -199,10 +200,10 @@ internal fun BoxScope.SetEndSheet(
             SheetBigScore(setScore(snapshot, sets.lastIndex))
         }
         SheetQuestion(question)
-        ServeInfoBar(controller, snapshot)
+        ServeInfoBar(controller, snapshot, persistent = true)
         snapshot.nextSetOptions.forEach { kind ->
             SheetButton(
-                nextSetLabel(kind),
+                nextSetLabel(kind, singleOption = snapshot.nextSetOptions.size == 1),
                 primary = kind == NextSetKind.REGULAR,
                 onClick = { controller.startNextSet(kind) },
                 modifier =
@@ -216,7 +217,7 @@ internal fun BoxScope.SetEndSheet(
             )
         }
         SheetButton(
-            stringResource(Res.string.set_end_finish),
+            stringResource(if (snapshot.nextSetOptions.size == 1) Res.string.dialog_no_finish else Res.string.set_end_finish),
             primary = false,
             onClick = { controller.continueDecision(anotherSet = false) },
             modifier = Modifier.fillMaxWidth().testTag("decision_no"),
@@ -262,7 +263,7 @@ internal fun BoxScope.MatchEndSheet(
             modifier = Modifier.testTag("match_end_title"),
         )
         SheetBigScore(resultLine(state.sets, state.current, result, state.setsWon))
-        ServeInfoBar(controller, snapshot)
+        ServeInfoBar(controller, snapshot, persistent = true)
         if (canFollowUp) {
             SheetQuestion(stringResource(Res.string.dialog_another_match))
             Text(stringResource(Res.string.result_followup_hint), style = AdvantlyTheme.typography.body, color = AdvantlyTheme.colors.text2)

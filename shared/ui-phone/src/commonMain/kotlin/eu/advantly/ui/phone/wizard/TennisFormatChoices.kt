@@ -9,13 +9,11 @@ import eu.advantly.presentation.wizard.TennisMatchChoice
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SectionTitle
-import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.set_end_regular
 import eu.advantly.ui.phone.resources.setup_match_kind
 import eu.advantly.ui.phone.resources.setup_padel_tiebreak_only_10
-import eu.advantly.ui.phone.resources.setup_serve_stats
 import eu.advantly.ui.phone.resources.setup_tiebreak_only_10
 import eu.advantly.ui.phone.resources.setup_tiebreak_only_7
 import org.jetbrains.compose.resources.stringResource
@@ -59,13 +57,6 @@ internal fun TennisFormatChoices(
             )
         }
     }
-    ToggleRow(
-        title = stringResource(Res.string.setup_serve_stats),
-        subtitle = null,
-        checked = state.input.serveStats,
-        onChange = wizard::setServeStats,
-        tag = "toggle_serve_stats",
-    )
 }
 
 @Composable

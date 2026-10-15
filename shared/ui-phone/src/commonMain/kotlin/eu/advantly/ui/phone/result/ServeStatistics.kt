@@ -41,7 +41,12 @@ internal fun ServeStatistics(
     SectionTitle(stringResource(Res.string.stats_serve_title))
     Column(Modifier.testTag("serve_statistics"), verticalArrangement = Arrangement.spacedBy(Spacing.l)) {
         Side.entries.forEach { side ->
-            ServeStatsGroup(teamName(setup, side), stats.serve[side], "serve_team_${side.name}")
+            ServeStatsGroup(
+                teamName(setup, side),
+                stats.serve[side],
+                "serve_team_${side.name}",
+                showServicePoints = setup.format.discipline == Discipline.DOUBLES,
+            )
         }
         if (setup.format.discipline == Discipline.DOUBLES) {
             stats.servers.forEach { server ->
@@ -56,10 +61,11 @@ private fun ServeStatsGroup(
     name: String,
     stats: ServeStats,
     tag: String,
+    showServicePoints: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth().testTag(tag), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Text(name, style = AdvantlyTheme.typography.label, color = AdvantlyTheme.colors.text)
-        ServeStatRow(Res.string.result_stat_serve_points, ratioText(stats.servicePoints))
+        if (showServicePoints) ServeStatRow(Res.string.result_stat_serve_points, ratioText(stats.servicePoints))
         ServeStatRow(Res.string.stats_service_games, ratioText(stats.serviceGames))
         ServeStatRow(Res.string.stats_first_serve_pct, ratioText(stats.firstServeIn))
         ServeStatRow(Res.string.stats_first_serve_won, ratioText(stats.firstServeWon))
