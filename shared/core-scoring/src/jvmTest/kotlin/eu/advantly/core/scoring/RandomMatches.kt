@@ -24,7 +24,8 @@ data class RandomMatch(
 
 /**
  * Erzeugt plausible, aber bewusst „schmutzige“ Historien: überwiegend Punkte, dazu UI-Undos, Redo, Undo mittlerer
- * Events, Pausen, Korrekturen, Satzende-Antworten und ungültige Events (→ `ignoredEvents`).
+ * Events, Pausen, Korrekturen, Aufschlägerwahl, Aufschlag-Info, Satzende-Antworten (auch Tiebreak-Sätze) und ungültige
+ * Events (→ `ignoredEvents`).
  *
  * Mehrere Geräte (1–3) zählen jeweils auf **ihrem** Stand (eigene Lamport-Uhr, `parentId` = eigener Log-Kopf) und
  * synchronisieren nur gelegentlich. Dadurch entstehen verzweigte Historien mit gemeinsamen Eltern, gleiche Lamports
@@ -139,7 +140,14 @@ object RandomMatches {
             state.status == MatchStatus.AWAITING_DECISION && r < 85 -> {
                 ContinueDecision(
                     anotherSet = random.nextInt(10) < 7,
-                    nextSetKind = if (random.nextInt(4) == 0) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR,
+                    nextSetKind =
+                        if (random.nextInt(4) ==
+                            0
+                        ) {
+                            NextSetKind.entries[random.nextInt(NextSetKind.entries.size)]
+                        } else {
+                            NextSetKind.REGULAR
+                        },
                 )
             }
 
@@ -168,9 +176,16 @@ object RandomMatches {
             }
 
             r < 95 -> {
-                when (random.nextInt(4)) {
+                when (random.nextInt(5)) {
                     0 -> {
                         Correction.initialServer(players.random(random))
+                    }
+
+                    4 -> {
+                        // Aufschlägerwahl (§6.5.5): meist für den laufenden Satz, gelegentlich veraltet bzw. ungültig
+                        val player = players.random(random)
+                        val side = if (random.nextInt(8) == 0) Side.entries.random(random) else checkNotNull(lineup.sideOf(player))
+                        ServerChosen((state.current?.setIndex ?: state.sets.size) - random.nextInt(2), side, player)
                     }
 
                     1 -> {
@@ -190,7 +205,13 @@ object RandomMatches {
             }
 
             r < 97 && known.isNotEmpty() -> {
-                PointDetailSet(known[random.nextInt(known.size)].id, PointDetail(PointDetailKind.WINNER))
+                val detail =
+                    when (random.nextInt(3)) {
+                        0 -> PointDetail(PointDetailKind.WINNER)
+                        1 -> PointDetail(serve = ServeOutcome.entries[random.nextInt(ServeOutcome.entries.size)])
+                        else -> null
+                    }
+                PointDetailSet(known[random.nextInt(known.size)].id, detail)
             }
 
             else -> {

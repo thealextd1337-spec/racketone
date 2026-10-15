@@ -1,5 +1,6 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -8,6 +9,7 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
@@ -17,12 +19,15 @@ import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
@@ -104,6 +109,8 @@ class SessionMatchStore(
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+    private val updateRequiredFlow = MutableStateFlow<UpdateRequired?>(null)
+    override val updateRequired: StateFlow<UpdateRequired?> = updateRequiredFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
 
     // Zustand für Revision und „Stand vor X s“
@@ -202,6 +209,17 @@ class SessionMatchStore(
         matchTiebreak: Boolean,
     ): Boolean = session.continueDecision(anotherSet, matchTiebreak)
 
+    override fun startNextSet(kind: NextSetKind): Boolean = session.startNextSet(kind)
+
+    override fun removeLastPointOf(side: Side): Boolean = session.removeLastPointOf(side)
+
+    override fun chooseServer(player: PlayerId): Boolean = session.chooseServer(player)
+
+    override fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean = session.setServeInfo(pointId, value)
+
     override fun endMatch(
         reason: EndReason,
         side: Side?,
@@ -261,7 +279,7 @@ class SessionMatchStore(
                         is PointWon -> InputKind.POINT to payload.side
                         is Undo -> InputKind.UNDO to null
                         is ContinueDecision -> InputKind.SET_DECISION to null
-                        is Correction -> InputKind.CORRECTION to null
+                        is Correction, is ServerChosen -> InputKind.CORRECTION to null
                         Paused -> InputKind.PAUSE to null
                         Resumed -> InputKind.RESUME to null
                         is MatchEnded -> InputKind.END to payload.side
@@ -301,6 +319,17 @@ class SessionMatchStore(
     }
 
     // --- PlayersPort ------------------------------------------------------------------------------
+
+    /** Je 100 sportbezogene und allgemeine Besetzungen; dekodiert nur die benötigten Spieler-IDs. */
+    override fun recentPlayers(sport: Sport): List<Player> {
+        val mine = aliases + self.value.id
+        return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
+            .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
+            .flatMap { playersOf(it) }
+            .filterNot { it.id in mine }
+            .filter { it.displayName.isNotBlank() }
+            .distinctBy { it.id }
+    }
 
     override fun addGuest(name: String): Player {
         val trimmed = name.trim()
@@ -362,9 +391,17 @@ class SessionMatchStore(
         lastState = state
         trackScorerContact(state)
         updateWatchStatus(state)
+        updateRequiredFlow.value = updateRequiredOf(state)
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }
+
+    private fun updateRequiredOf(state: SessionState): UpdateRequired? =
+        when (state.sync.versionMismatch) {
+            CompatibilityStatus.PEER_TOO_OLD -> UpdateRequired.OTHER_DEVICE
+            CompatibilityStatus.PEER_TOO_NEW -> UpdateRequired.THIS_DEVICE
+            else -> null
+        }
 
     /**
      * Letzter Kontakt zum Zähler, monoton gemessen. Beim Öffnen eines Matches aus dem gemerkten Wert (Wanduhr, übersteht
@@ -460,6 +497,11 @@ class SessionMatchStore(
             scorerName = selfFlow.value.displayName,
             scorerKind = if (m.scorerDeviceId == MatchSession.PENDING_WATCH) DeviceKind.WATCH else m.scorerKind.toDeviceKind(m.isScorer),
             rejectedByRoleCount = m.rejectedByRoleCount,
+            lastPoint =
+                m.lastPoint?.let { LastPointInfo(it.id, it.side, it.servingSide, it.server, it.serve, it.doubleFaultAllowed) },
+            serveInfoEnabled = m.serveInfoEnabled,
+            canRemovePoint = m.canRemovePoint,
+            nextSetOptions = m.nextSetOptions,
             sync =
                 SyncInfo(
                     peers = sync.peers.count { it.compatibility == CompatibilityStatus.COMPATIBLE },
@@ -468,6 +510,7 @@ class SessionMatchStore(
                     lastEventReceivedAtMs = sync.lastEventReceivedAtMs,
                     lastScorerContactMono = if (m.isScorer) null else contactMono,
                     withoutScorerSinceMono = if (m.isScorer) null else withoutScorerSinceMono,
+                    updateRequired = updateRequiredOf(state),
                 ),
             absorbedTaps = m.absorbedTaps.size,
             waitingForScorer = waitingForScorer(m, state),
@@ -526,7 +569,7 @@ class SessionMatchStore(
     private fun loadGuests(): List<Player> =
         data.players
             .all()
-            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases }
+            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases && it.displayName.isNotBlank() }
             .map { it.toPlayer() }
 
     /** Anzeigename je Spieler-ID; Aliase des Besitzers (z. B. alter Uhr-Self) tragen den Namen des Besitzers. */

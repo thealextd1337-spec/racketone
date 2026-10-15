@@ -186,18 +186,74 @@ class MultiDeviceSyncTest {
         cluster.assertConverged()
     }
 
+    /**
+     * Gerät mit Protokoll 1 (App-Stand W1) gegen Protokoll 2 (W2-A): sichtbar als „Gegenstelle zu alt“ gemeldet, seine
+     * Nachrichten werden nicht übernommen und es bekommt keine – kein halb-synchroner Zustand.
+     */
+    @Test
+    fun version1PeerIsReportedTooOldAndNotSynced() {
+        val cluster = Cluster("watch" to PeerKind.WATCH)
+        val received = mutableListOf<ByteArray>()
+        val old =
+            ReliableDeviceLink(cluster.network.transport("old"), cluster.scheduler).apply {
+                setListener(
+                    object : eu.advantly.device.link.DeviceLinkListener {
+                        override fun onMessage(
+                            peer: String,
+                            messageId: String,
+                            payload: ByteArray,
+                        ) {
+                            received += payload
+                        }
+
+                        override fun onStateChanged(
+                            state: LinkState,
+                            peers: List<String>,
+                        ) = Unit
+                    },
+                )
+                start()
+            }
+        cluster.settle()
+        old.send("watch", SyncCodec.encode(Hello(DeviceId("old-phone"), PeerKind.PHONE, minV = 1, v = 1)))
+        cluster.settle()
+        val sync =
+            cluster["watch"]
+                .session.state.value.sync
+        assertEquals(CompatibilityStatus.PEER_TOO_OLD, sync.peers.single { it.peer == "old" }.compatibility)
+        assertEquals(CompatibilityStatus.PEER_TOO_OLD, sync.versionMismatch)
+        assertEquals(SyncIndicator.LOCAL_ONLY, sync.indicator)
+
+        // Events im alten Format werden nicht übernommen
+        val phoneData = testLocalData()
+        val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("old-phone"), PeerKind.PHONE), cluster.clock)
+        val id = phone.create(format, SINGLES)
+        val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":2", "\"v\":1")
+        old.send("watch", v1.encodeToByteArray())
+        cluster.settle()
+        assertNull(cluster["watch"].data.matches.get(id))
+        // nach dem Hello schickt die Uhr dem alten Gerät nichts außer ihrem eigenen Hello (das jedes Gerät lesen kann)
+        val types = received.map { SyncCodec.decode(it) }.filterIsInstance<eu.advantly.sync.protocol.DecodeResult.Ok>().map { it.message }
+        assertTrue(types.none { it is Events }, "keine Events an ein inkompatibles Gerät")
+    }
+
     @Test
     fun incompatiblePeerIsIgnored() {
         val cluster = Cluster("watch" to PeerKind.WATCH)
         val lab = ReliableDeviceLink(cluster.network.transport("lab"), cluster.scheduler).apply { start() }
         cluster.settle()
-        lab.send("watch", SyncCodec.encode(Hello(DeviceId("future"), PeerKind.PHONE, minV = 2, v = 2)))
+        lab.send("watch", SyncCodec.encode(Hello(DeviceId("future"), PeerKind.PHONE, minV = 3, v = 3)))
         cluster.settle()
         val peer =
             cluster["watch"]
                 .session.state.value.sync.peers
                 .single { it.peer == "lab" }
         assertEquals(CompatibilityStatus.PEER_TOO_NEW, peer.compatibility)
+        assertEquals(
+            CompatibilityStatus.PEER_TOO_NEW,
+            cluster["watch"]
+                .session.state.value.sync.versionMismatch,
+        )
         assertEquals(
             SyncIndicator.LOCAL_ONLY,
             cluster["watch"]

@@ -50,6 +50,7 @@ object Presets {
 
     private val TB7 = TiebreakFormat.TB7
     private val MTB10 = MatchTiebreakFormat.MTB10
+    private val MTB7 = MatchTiebreakFormat.MTB7
 
     private fun set(
         games: Int,
@@ -130,6 +131,34 @@ object Presets {
     val TENNIS_ONE_SET = tennisLike("TENNIS_ONE_SET", Sport.TENNIS, BOTH, MatchSettings.bestOf(1), DeuceMode.ADVANTAGE, set(6, 6))
     val TENNIS_MATCH_TB_ONLY =
         tennisLike("TENNIS_MATCH_TB_ONLY", Sport.TENNIS, BOTH, MatchSettings.bestOf(1), DeuceMode.ADVANTAGE, set(6, 6), decidingSet = MTB10)
+
+    /**
+     * „Nur Tiebreak“ (02 §4.1, Entscheidung 2026-10-15): Das Match ist ein einziger Tiebreak bis 7 (2 Vorsprung,
+     * Wechsel alle 6 Punkte). Modelliert als Best of 1 mit `decidingSet = MATCH_TIEBREAK` – ohne neues Format-Feld,
+     * damit auch ältere Geräte das Match falten können.
+     */
+    val TENNIS_TIEBREAK_ONLY_7 =
+        tennisLike(
+            "TENNIS_TIEBREAK_ONLY_7",
+            Sport.TENNIS,
+            BOTH,
+            MatchSettings.bestOf(1),
+            DeuceMode.ADVANTAGE,
+            set(6, 6),
+            decidingSet = MTB7,
+        )
+
+    /** „Nur Champions-Tiebreak“ bis 10 (wie [TENNIS_MATCH_TB_ONLY], eigene ID für den Wizard). */
+    val TENNIS_TIEBREAK_ONLY_10 =
+        tennisLike(
+            "TENNIS_TIEBREAK_ONLY_10",
+            Sport.TENNIS,
+            BOTH,
+            MatchSettings.bestOf(1),
+            DeuceMode.ADVANTAGE,
+            set(6, 6),
+            decidingSet = MTB10,
+        )
     val TENNIS_OPEN =
         tennisLike("TENNIS_OPEN", Sport.TENNIS, BOTH, MatchSettings.OPEN, DeuceMode.ADVANTAGE, set(6, 6), matchTiebreak = MTB10)
 
@@ -172,6 +201,80 @@ object Presets {
         )
     val PADEL_OPEN =
         tennisLike("PADEL_OPEN", Sport.PADEL, DOUBLES, MatchSettings.OPEN, DeuceMode.STAR_POINT, set(6, 6), matchTiebreak = MTB10)
+
+    /** Padel „Nur Tiebreak“ bis 7 (wie [TENNIS_TIEBREAK_ONLY_7]). */
+    val PADEL_TIEBREAK_ONLY_7 =
+        tennisLike(
+            "PADEL_TIEBREAK_ONLY_7",
+            Sport.PADEL,
+            DOUBLES,
+            MatchSettings.bestOf(1),
+            DeuceMode.DECIDING_POINT,
+            set(6, 6),
+            decidingSet = MTB7,
+        )
+
+    /** Padel „Nur Super-Tiebreak“ bis 10 (wie [TENNIS_TIEBREAK_ONLY_10]). */
+    val PADEL_TIEBREAK_ONLY_10 =
+        tennisLike(
+            "PADEL_TIEBREAK_ONLY_10",
+            Sport.PADEL,
+            DOUBLES,
+            MatchSettings.bestOf(1),
+            DeuceMode.DECIDING_POINT,
+            set(6, 6),
+            decidingSet = MTB10,
+        )
+
+    /**
+     * „Games pro Satz“ frei 1…12 (Wizard: 1–6, 8, 10; 02 §5.1, Entscheidung 2026-10-15) für Tennis/Padel: `set.gamesToWin = n`
+     * und `set.tiebreakAt = n` (Tiebreak bei n:n für **alle** n ≥ 1, z. B. 1 Game: 2:0 oder Tiebreak bei 1:1 → 2:1).
+     * Ein regulärer Entscheidungssatz wird mitgezogen (ein Vorteilssatz bleibt ohne Tiebreak), ein Match-Tiebreak bleibt.
+     * `presetId` wird neu bestimmt ([recognize]): unverändert, wenn das Ergebnis noch genau dem Preset entspricht, sonst
+     * das exakt passende Preset oder `null` (benutzerdefiniert) – nie ein irreführender Formatname.
+     */
+    fun withGamesPerSet(
+        format: MatchFormat,
+        games: Int,
+    ): MatchFormat {
+        require(format.sport.isTennisLike) { "Games pro Satz gibt es nur bei Tennis/Padel" }
+        require(games in 1..12) { "Games pro Satz: 1…12" }
+        val set = checkNotNull(format.set)
+        val deciding =
+            when (val ds = format.decidingSet) {
+                is RegularSet -> ds.copy(gamesToWin = games, tiebreakAt = ds.tiebreakAt?.let { games })
+                else -> ds
+            }
+        val changed = format.copy(set = set.copy(gamesToWin = games, tiebreakAt = games), decidingSet = deciding)
+        return changed.copy(presetId = recognize(changed))
+    }
+
+    /**
+     * Strukturell gleiche Presets: Alias → bevorzugte ID. `TENNIS_MATCH_TB_ONLY` (W1) ist dasselbe Format wie
+     * `TENNIS_TIEBREAK_ONLY_10`; bestehende Matches behalten ihre ID, neu erkannt wird die bevorzugte.
+     */
+    val aliases: Map<String, String> = mapOf("TENNIS_MATCH_TB_ONLY" to "TENNIS_TIEBREAK_ONLY_10")
+
+    /**
+     * Preset-ID zu einem Format (nur Anzeige/Statistik, 02 §4), eindeutig:
+     * 1. Trägt [format] eine `presetId`, deren Preset (für diese Disziplin) genau dieses Format hat, bleibt sie – auch ein Alias.
+     * 2. Sonst das erste exakt passende Preset in [all], Aliase ausgenommen (→ bevorzugte ID).
+     * 3. Sonst `null` (benutzerdefiniertes Format).
+     * Verglichen wird das Format ohne `presetId`.
+     */
+    fun recognize(format: MatchFormat): String? {
+        val plain = format.copy(presetId = null)
+
+        fun matches(preset: Preset) =
+            preset.sport == format.sport &&
+                format.discipline in preset.disciplines &&
+                preset.format(format.discipline).copy(presetId = null) == plain
+        format.presetId
+            ?.let(::byId)
+            ?.takeIf(::matches)
+            ?.let { return it.id }
+        return all.firstOrNull { it.id !in aliases && matches(it) }?.id
+    }
 
     // --- 4.3 Pickleball ---
     private fun pickleball(
@@ -329,6 +432,8 @@ object Presets {
             TENNIS_PRO_SET_10,
             TENNIS_ONE_SET,
             TENNIS_MATCH_TB_ONLY,
+            TENNIS_TIEBREAK_ONLY_7,
+            TENNIS_TIEBREAK_ONLY_10,
             TENNIS_OPEN,
             PADEL_PREMIER_2026,
             PADEL_GOLDEN_BO3,
@@ -337,6 +442,8 @@ object Presets {
             PADEL_ADV_FINAL_NO_TB,
             PADEL_MINI_SETS,
             PADEL_OPEN,
+            PADEL_TIEBREAK_ONLY_7,
+            PADEL_TIEBREAK_ONLY_10,
             PICKLEBALL_DOUBLES_11_SIDEOUT,
             PICKLEBALL_DOUBLES_BO3_11,
             PICKLEBALL_DOUBLES_15,

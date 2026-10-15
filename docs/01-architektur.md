@@ -291,6 +291,15 @@ Regeln:
 3. **Anti-Entropy bei jedem (Wieder-)Verbinden und alle 30 s während eines aktiven Matches**: `Summary` austauschen, fehlende `deviceSeq`-Bereiche nachsenden. Damit ist Zustellung garantiert, unabhängig von der Zuverlässigkeit des Transports.
 4. Hub-Weiterleitung: Das Handy leitet Events zwischen Uhr(en) und Cloud weiter (z. B. Garmin + iPhone + Cloud-Zuschauer).
 
+**Protokollversionen (Ergänzung 2026-10-15, W2-A):** Jede Nachricht trägt `v`, `Hello` zusätzlich `minV` (älteste lesbare Version). Zwei Geräte sind kompatibel, wenn sich ihre Bereiche `[minV, v]` überlappen (`ProtocolVersion.negotiate`); sonst meldet jedes die Gegenstelle als `PEER_TOO_OLD` bzw. `PEER_TOO_NEW`, beide tauschen außer `Hello` nichts mehr aus, und die App zeigt „Bitte Uhr/Handy aktualisieren“ (`SyncStatus.versionMismatch`, Port `LiveMatchPort.updateRequired`). `Hello` wird unabhängig von `v` gelesen, damit auch das ältere Gerät den Unterschied erkennt.
+
+| Version | Stand | Inhalt | `minV` |
+|---|---|---|---|
+| 1 | W1 | Events bis Single-Scorer | 1 |
+| 2 | W2-A | zusätzlich `ServerChosen`, `nextSetKind = TIEBREAK_7 \| MATCH_TIEBREAK_10`, `PointDetail` ohne `kind` (02 §7) | **2** |
+
+Begründung `minV = 2`: Event-Inhalte lassen sich nicht in eine ältere Version „herunterschreiben“. Ein Gerät mit Version 1 würde Nachrichten mit den neuen Inhalten verwerfen und die übrigen übernehmen – ein halb-synchroner Zustand mit falschem Spielstand, den die Anti-Entropie nie auflöst. Deshalb sind 1 und 2 bewusst inkompatibel; Uhr und Handy müssen gemeinsam aktualisiert werden. Alte Logs (gespeicherte Events) bleiben lesbar, die Engine faltet sie unverändert.
+
 ### 4.4 Single-Scorer: Zähler, Anzeige und Übergabe
 
 Normativ in 02 §7.5. Kurzfassung:

@@ -12,6 +12,9 @@ kotlin {
             implementation(libs.lifecycle.runtime.compose)
             implementation(libs.compose.ui.backhandler)
         }
+        androidMain.dependencies {
+            implementation(libs.play.services.wearable)
+        }
         named("desktopMain") {
             dependencies {
                 implementation(compose.desktop.currentOs)

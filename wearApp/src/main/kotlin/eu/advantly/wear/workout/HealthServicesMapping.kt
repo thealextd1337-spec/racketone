@@ -20,6 +20,7 @@ object HealthServicesMapping {
             WorkoutMetric.HEART_RATE_BPM_STATS -> DataType.HEART_RATE_BPM_STATS
             WorkoutMetric.CALORIES_TOTAL -> DataType.CALORIES_TOTAL
             WorkoutMetric.STEPS -> DataType.STEPS
+            WorkoutMetric.STEPS_TOTAL -> DataType.STEPS_TOTAL
         }
 
     /** Echte Capabilities des Geräts als [ExerciseCapabilitiesView]. */

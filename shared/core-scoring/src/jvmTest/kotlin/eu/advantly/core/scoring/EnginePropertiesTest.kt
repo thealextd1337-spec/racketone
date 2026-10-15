@@ -20,7 +20,7 @@ import kotlin.test.assertTrue
 
 /**
  * Engine-Invarianten mit Kotest Property (01 §8), fester Seed. Jede Iteration erzeugt ein zufälliges Match über alle
- * 45 Presets ([RandomMatches]) mit Undo-Ketten, Korrekturen, Pausen, Satzende-Antworten und ungültigen Events.
+ * 49 Presets ([RandomMatches]) mit Undo-Ketten, Korrekturen, Pausen, Satzende-Antworten und ungültigen Events.
  */
 @OptIn(ExperimentalKotest::class)
 class EnginePropertiesTest {
@@ -128,6 +128,54 @@ class EnginePropertiesTest {
                     FlagLevel.GAME_POINT -> assertTrue(!setWon, "Spielball")
                     null -> assertTrue(!setWon, "ohne Flag darf der Satz nicht enden ($side, $state)")
                 }
+            }
+        }
+
+    /** „Punkt einer Seite abziehen“ (02 §7.3): Undo auf den letzten wirksamen Punkt ≡ Fold ohne diesen Punkt. */
+    @Test
+    fun removingLastPointOfSideEqualsFoldWithoutIt() {
+        runBlocking {
+            checkAll(config, presetArb, Arb.long(), lengthArb) { preset, seed, length ->
+                val m = RandomMatches.generate(preset, seed, length, deviceCount = 1)
+                for (side in Side.entries) {
+                    val target = ScoringEngine.lastEffectivePointOf(m.incremental, side) ?: continue
+                    val event = m.events.single { it.id == target }
+                    assertEquals(PointWon(side), (event.payload as PointWon).copy(detail = null))
+                    val last = EventLog.ordered(m.events).last()
+                    val undo = last.copy(id = EventId("remove"), lamport = last.lamport + 1, parentId = last.id, payload = Undo(target))
+                    val removed = ScoringEngine.fold(m.format, m.lineup, m.events + undo)
+                    val without = ScoringEngine.fold(m.format, m.lineup, m.events - event)
+                    assertEquals(without.copy(effects = emptyList()), removed.copy(effects = emptyList()))
+                }
+            }
+        }
+    }
+
+    /** Eine offene Aufschlägerwahl (02 §6.5.5) ist für jeden angebotenen Spieler gültig, und er schlägt danach auf. */
+    @Test
+    fun offeredServerChoicesAreValidAndTakeEffect() =
+        property { m ->
+            val choice = m.incremental.state.serverChoice ?: return@property
+            val setIndex = checkNotNull(m.incremental.state.current).setIndex
+            for (player in choice.players) {
+                val side = checkNotNull(m.lineup.sideOf(player))
+                val probe =
+                    ScoreEvent(EventId("probe"), MatchId("m"), DeviceId("probe"), 1, 10_000, 0, null, ServerChosen(setIndex, side, player))
+                val next = ScoringEngine.apply(m.incremental, probe).state
+                assertTrue(EventId("probe") !in next.ignoredEvents, "$choice → $player")
+                assertEquals(player, next.serve?.player)
+                assertEquals(player, next.serverChoice?.chosen)
+            }
+        }
+
+    /** Review R1: `serverChoice.chosen` ist nie veraltet – entweder `null` oder der tatsächlich nächste Aufschläger. */
+    @Test
+    fun chosenServerIsAlwaysTheEffectiveServer() =
+        property { m ->
+            for (n in listOf(m.events.size / 4, m.events.size / 2, 3 * m.events.size / 4, m.events.size)) {
+                val state = ScoringEngine.fold(m.format, m.lineup, m.events.subList(0, n))
+                val chosen = state.serverChoice?.chosen ?: continue
+                assertEquals(state.serve?.player, chosen, "${state.serverChoice}")
             }
         }
 

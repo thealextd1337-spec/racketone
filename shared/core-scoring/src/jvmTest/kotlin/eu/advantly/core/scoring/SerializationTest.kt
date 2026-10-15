@@ -88,6 +88,72 @@ class SerializationTest {
         assertEquals(ContinueDecision(true, NextSetKind.REGULAR), decoded)
     }
 
+    /** Neue Payloads und Felder (Entscheidung 2026-10-15): Wire-Form und Lesbarkeit alter Logs. */
+    @Test
+    fun operationPayloadsWireFormAndOldLogs() {
+        fun enc(payload: EventPayload) = vectorJson.encodeToString(EventPayload.serializer(), payload)
+        assertEquals(
+            """{"type":"ServerChosen","set":1,"side":"B","player":"B2"}""",
+            enc(ServerChosen(1, eu.advantly.core.model.Side.B, p("B2"))),
+        )
+        assertEquals(
+            """{"type":"PointDetailSet","target":"e3","detail":{"serve":"DOUBLE_FAULT"}}""",
+            enc(
+                PointDetailSet(
+                    eu.advantly.core.model
+                        .EventId("e3"),
+                    PointDetail(serve = ServeOutcome.DOUBLE_FAULT),
+                ),
+            ),
+        )
+        assertEquals(
+            """{"type":"ContinueDecision","anotherSet":true,"nextSetKind":"TIEBREAK_7"}""",
+            enc(ContinueDecision(true, NextSetKind.TIEBREAK_7)),
+        )
+        // alte Logs: PointDetail mit Pflicht-kind, ContinueDecision mit MATCH_TIEBREAK bleiben lesbar
+        val old = """{"type":"PointWon","side":"A","detail":{"kind":"ACE","secondServe":true}}"""
+        assertEquals(
+            PointWon(eu.advantly.core.model.Side.A, PointDetail(PointDetailKind.ACE, secondServe = true)),
+            vectorJson.decodeFromString(EventPayload.serializer(), old),
+        )
+        assertEquals(
+            ContinueDecision(true, NextSetKind.MATCH_TIEBREAK),
+            vectorJson.decodeFromString(
+                EventPayload.serializer(),
+                """{"type":"ContinueDecision","anotherSet":true,"nextSetKind":"MATCH_TIEBREAK"}""",
+            ),
+        )
+        // MatchMeta.serveStats: Default true, wird nicht geschrieben; fehlt das Feld, gilt true
+        val meta =
+            eu.advantly.core.model
+                .MatchMeta()
+        assertEquals(
+            "{}",
+            vectorJson.encodeToString(
+                eu.advantly.core.model.MatchMeta
+                    .serializer(),
+                meta,
+            ),
+        )
+        assertEquals(
+            true,
+            vectorJson
+                .decodeFromString(
+                    eu.advantly.core.model.MatchMeta
+                        .serializer(),
+                    "{}",
+                ).serveStats,
+        )
+        assertEquals(
+            """{"serveStats":false}""",
+            vectorJson.encodeToString(
+                eu.advantly.core.model.MatchMeta
+                    .serializer(),
+                meta.copy(serveStats = false),
+            ),
+        )
+    }
+
     @Test
     fun canonicalStateHasAllKeysWithExplicitNulls() {
         val state = ScoringEngine.initial(Presets.TENNIS_SINGLES_BO3.format(), lineupFor(eu.advantly.core.model.Discipline.SINGLES))
@@ -110,6 +176,7 @@ class SerializationTest {
                 "continuation",
                 "scorerDeviceId",
                 "rejectedByRole",
+                "serverChoice",
             ),
             obj.keys.toList(),
         )

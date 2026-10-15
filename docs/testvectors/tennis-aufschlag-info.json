@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "TV-TEN-006",
+  "title": "Tennis: Aufschlag-Info je Punkt (PointDetailSet), ungültiger Doppelfehler, letztes gilt",
+  "description": "Einzel, Best of 3. Prüft die Fold-Regeln für PointDetail.serve (02 §7.2, §7.3): Aufschlag-Info ohne Wirkung auf den Score (effects = []), DOUBLE_FAULT nur für einen Punkt der Rückschlagseite (sonst ignoredEvents), Überschreiben, unbekanntes bzw. unwirksames Ziel. Ein PointWon mit widersprüchlichem Detail zählt trotzdem.",
+  "sources": ["Advantly 02-scoring-regeln.md §7.2, §7.3 (Entscheidung 2026-10-15)"],
+  "config": {"formatVersion": 1, "presetId": "TENNIS_SINGLES_BO3", "sport": "TENNIS", "discipline": "SINGLES", "match": {"mode": "BEST_OF", "bestOf": 3}, "game": {"deuceMode": "ADVANTAGE"}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": null},
+  "lineup": {"A": ["A1"], "B": ["B1"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "PointWon", "side": "A"},
+    {"id": "e2", "type": "PointDetailSet", "target": "e1", "detail": {"serve": "FIRST_SERVE_IN"}},
+    {"id": "e3", "type": "PointDetailSet", "target": "e1", "detail": {"serve": "DOUBLE_FAULT"}},
+    {"id": "e4", "type": "PointWon", "side": "B"},
+    {"id": "e5", "type": "PointDetailSet", "target": "e4", "detail": {"serve": "DOUBLE_FAULT"}},
+    {"id": "e6", "type": "PointDetailSet", "target": "e4", "detail": {"serve": "SECOND_SERVE_IN"}},
+    {"id": "e7", "type": "PointWon", "side": "A", "detail": {"serve": "DOUBLE_FAULT"}},
+    {"id": "e8", "type": "PointDetailSet", "target": "e99", "detail": {"serve": "FIRST_SERVE_IN"}},
+    {"id": "e9", "type": "Undo", "target": "e4"},
+    {"id": "e10", "type": "PointDetailSet", "target": "e4", "detail": {"serve": "FIRST_SERVE_IN"}}
+  ],
+  "expect": [
+    {"afterEvent": 2, "label": "1. Aufschlag erfasst – ohne Score-Wirkung", "state": {"current": {"points": {"A": 1, "B": 0}}, "effects": [], "ignoredEvents": []}},
+    {"afterEvent": 3, "label": "Doppelfehler bei Punkt des Aufschlägers – übersprungen", "state": {"current": {"points": {"A": 1, "B": 0}}, "effects": ["IGNORED"], "ignoredEvents": ["e3"]}},
+    {"afterEvent": 5, "label": "Doppelfehler bei Punkt des Rückschlägers – gültig", "state": {"current": {"points": {"A": 1, "B": 1}}, "effects": [], "ignoredEvents": ["e3"]}},
+    {"afterEvent": 6, "label": "überschrieben mit 2. Aufschlag", "state": {"effects": [], "ignoredEvents": ["e3"]}},
+    {"afterEvent": 7, "label": "Punkt mit widersprüchlichem Detail zählt", "state": {"current": {"points": {"A": 2, "B": 1}, "display": {"A": "30", "B": "15"}}, "effects": ["POINT"], "ignoredEvents": ["e3"]}},
+    {"afterEvent": 8, "label": "unbekanntes Ziel", "state": {"effects": ["IGNORED"], "ignoredEvents": ["e3", "e8"]}},
+    {"afterEvent": 9, "label": "Undo des Ziels: e5/e6 nachträglich übersprungen", "state": {"current": {"points": {"A": 2, "B": 0}}, "effects": ["UNDONE"], "ignoredEvents": ["e3", "e5", "e6", "e8"]}},
+    {"afterEvent": 10, "label": "Ziel unwirksam", "state": {"effects": ["IGNORED"], "ignoredEvents": ["e3", "e5", "e6", "e8", "e10"]}}
+  ]
+}

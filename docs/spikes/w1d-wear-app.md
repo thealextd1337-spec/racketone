@@ -11,8 +11,8 @@ Die Wear-OS-App zählt jetzt echte Matches mit der gemeinsamen Engine und synchr
   ans Handy; ohne Verbindung puffert die Uhr und liefert beim Wiederverbinden sofort nach.
 - **Handy zählt (Director)**: Die Uhr zeigt denselben Stand als **Anzeige** – ohne Tap-Flächen, mit „Stand vor X s“ und
   „Zählen übernehmen“.
-- **Workout**: Läuft auf der eigenen Uhr, solange dort ein Match offen ist – egal ob die Uhr zählt oder anzeigt. Puls wird
-  nur angezeigt, **nicht gespeichert** (Health erst P3).
+- **Workout**: Läuft auf der eigenen Uhr, solange dort ein Match offen ist – egal ob die Uhr zählt oder anzeigt. Puls und Schritte werden auf der Zählseite und auf dem eigenen Handy
+  nur live angezeigt, **nicht gespeichert** (Health erst P3).
 
 Diese Anleitung gilt für den gemeinsamen Stand **nach** dem Merge der Uhr-App (W1-D) und der Handy-Anbindung an die
 Match-Session. Bezeichnungen der Handy-Bildschirme können leicht abweichen; gemeint sind immer der Start-Assistent
@@ -190,7 +190,7 @@ Bitte je Szenario das Ergebnis in die Tabelle (Abschnitt 5) eintragen.
 
 ## 6. Logs bei Problemen
 
-Debug-Build: Diagnose-Log der Uhr (nur Debug, enthält Pulswerte – danach löschen):
+Debug-Build: Diagnose-Log der Uhr (nur Debug, seit W2 ohne Puls-, Schritt-, Kalorien- oder Pulsstatistikwerte):
 
 ```powershell
 & $adb -s 192.168.x.y:PORT pull /sdcard/Android/data/eu.advantly/files/diag/s5-diag.log .
@@ -216,3 +216,72 @@ Weitere Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine H
   Handy angelegt hat, zeigen dich trotzdem als „Du“ (frühere Uhr-Identität ist als Alias bekannt).
 - **Energiesparmodus** kann das Wecken der Uhr verzögern oder verhindern; die App zeigt dann nur einen Hinweis.
 - **Tile** „Schnellstart“ ist noch nicht enthalten.
+
+## 8. Flüchtige Live-Telemetrie (W2, F19)
+
+Puls und Schritte des laufenden Matches erscheinen gemeinsam unten auf der Wear-Zählseite (ohne Messwert „—“).
+Ohne aktive Exercise bleibt die Zeile ausgeblendet; Ambient zeigt beide Werte gedimmt und höchstens einmal pro Minute neu.
+Die mindestens 12-sp-Schrift und das Schritt-Icon stehen etwas höher innerhalb der runden Displaykontur;
+große Systemschrift darf die Werte kürzen (Ellipsis), TalkBack liest weiterhin beide vollständigen Werte.
+Die bestehende Priorität für Übernahmeangebot bzw. abgelehnte Eingaben in der unteren Zeile bleibt bestehen.
+
+Die Uhr sendet nur bei `watchWorkout = true`, aktiver Exercise und einem frischen Abo des kompatiblen eigenen Handys.
+Solange die Live-Komposition am Handy sichtbar und die Activity im Vordergrund (`RESUMED`) ist, sendet sie sofort und
+alle 20 Sekunden `/advantly/telemetry/subscribe` mit `v` und `matchId`. Ohne kompatible WATCH-Gegenstelle kein Abo.
+Die Uhr akzeptiert es nur für ihr offenes Workout-Match von ihrer bekannten PHONE-Gegenstelle; beim Keepalive prüft
+sie per Capability auch `isNearby`. Der Versand ist nur bis einschließlich 30 Sekunden nach lokalem Abo-Empfang
+erlaubt. Nach Verlassen der Live-Ansicht oder App-Hintergrund endet der Keepalive; spätestens nach dieser Restlaufzeit
+endet der Versand. Kein dauerhafter Sensor-Weckverkehr an ein Handy ohne Anzeige. Ein trotzdem eintreffender
+Telemetrie-Weckruf darf keine Session kalt starten (`AndroidMatchSessions.current()`); Event-/Queue-Empfang startet
+die Session weiterhin bei Bedarf und sichert die Match-Events auch ohne Activity.
+Der separate Data-Layer-Message-Pfad `/advantly/telemetry/live` transportiert ein kleines JSON-Payload mit `v = 1`,
+`matchId`, optional `heartRateBpm` und `steps`. Er verwendet weder den zuverlässigen Event-Kanal noch DataItems,
+Ack/Retry oder eine Offline-Queue. Versand höchstens alle fünf Sekunden bei frischen Exercise-Updates, auch bei
+unveränderten Werten als Lebenszeichen; nur direkt zum nahen gekoppelten Handy, ohne Cloud-Weiterleitung.
+Es gibt genau eine Versanddrossel. Beide Telemetrie-Nachrichten haben einen unterstützten Versionsbereich;
+die Version wird nur bei inkompatiblen Änderungen erhöht, additive Felder sind in derselben Version möglich.
+Fehlgeschlagene Sendungen werden verworfen, beim Wiederverbinden wird nur der aktuelle Wert gesendet.
+
+Das Handy akzeptiert Nachrichten nur von einer bekannten kompatiblen Uhr des eigenen Gerätepaars für das offene Match
+mit aktiviertem Workout. Ein einzelner RAM-Halter versorgt den Live-Baustein (Zähler und Anzeige); Match-ID und Ablauf
+werden vor der Anzeige geprüft. Ohne Wert für dieses Match bleibt die Zeile ganz ausgeblendet, ebenso ohne kompatiblen
+WATCH-Peer und auf iOS. Nach 30 Sekunden ohne Nachricht werden die Gesundheitswerte verworfen. Nur Match-ID und
+Empfangszeit bleiben bis zwei Minuten nach dem letzten Wert im RAM, um kurz „—“ als Stale-Hinweis zu zeigen; danach
+verschwindet die Zeile. Prozessneustart beginnt ohne Werte. Kein Match-Event, keine DB-Spalte, keine Datei und kein Cloud-Sync enthalten die
+Messwerte. Auch das Debug-Diagnoselog schreibt keine Puls-, Schritt-, Kalorien- oder Pulsstatistikwerte; der Versand
+meldet höchstens `TELEMETRY_SENT`. `toString()` der Messwert-DTOs ist redigiert. Dauerhafte Health-Speicherung und
+Sichtbarkeits-/Teilen-Optionen bleiben Phase 3 bzw. P2/P3 gemäß F19 vorbehalten.
+
+**Schritte pro Match:** Eine reine RAM-Baseline (`MatchStepCounter.stepsAtMatchStart`) zieht den Exercise-Stand beim
+Match-Wechsel ab: Ein Folge-Match beginnt bei null, auch wenn dieselbe Exercise weiterläuft. Bevorzugt wird der
+kumulative [Health-Services-Typ `STEPS_TOTAL`](https://developer.android.com/reference/kotlin/androidx/health/services/client/data/DataType#STEPS_TOTAL()).
+Er verhindert eine eigene Delta-Summe und Doppelzählung wiederholter Totals. Nur wenn der gewählte Exercise-Typ
+`STEPS_TOTAL` nicht anbietet, wird `STEPS` summiert; bereits verarbeitete Intervalle werden anhand ihrer Endzeit verworfen.
+Nach Prozessverlust ist die Match-Baseline absichtlich verloren (keine Health-Persistenz). Beim Wiederanbinden an eine
+laufende Exercise dient deren erster Total-Wert als neue Baseline: konservativer Neustart bei null statt Übernahme
+von Schritten früherer Matches. Im Delta-Fallback gilt derselbe Neustart; Schritte während der Prozesslücke fehlen.
+Ein exakter durchgehender Match-Zähler über Prozessverlust und frühere Match-Wechsel ist ohne gespeicherte Baseline
+nicht rekonstruierbar und bleibt eine dokumentierte P1-Grenze.
+
+**Pausen:** Auto-Pause ist in der Exercise-Konfiguration deaktiviert. Die Nutzer-Pause im Match hält die Scoring-Zeit an,
+pausiert aber die Exercise nicht; Puls und Schritte laufen weiter. Meldet Health Services dennoch einen nicht aktiven
+Exercise-Zustand (z. B. `USER_PAUSED`/`AUTO_PAUSED`), sendet die Uhr keine Telemetrie; das Handy verwirft Werte nach
+30 Sekunden. Bei wieder aktiver Exercise und frischem Abo kommen nur aktuelle Werte, ohne Nachlieferung.
+
+**Zusätzlicher Feldtest (Pixel Watch und Galaxy Watch):**
+
+1. Workout aktivieren, Match starten, beide Live-Seiten öffnen: Puls + Schritte erscheinen, Schritte steigen beim Gehen.
+2. Fehlende Sensorrechte/-werte prüfen: „—“ für nicht verfügbare Werte, ohne Workout keine Wear-Zeile/kein Versand.
+3. Always-on/Handgelenk unten prüfen: gedimmte Zeile, Änderungen höchstens einmal pro Minute, kein abgeschnittener Text
+   auf kleinen runden Displays; auch DE/EN und große Schrift prüfen.
+4. Verbindung trennen: bei weiter bekanntem kompatiblem Peer nach etwa 30 Sekunden „—“, spätestens nach zwei Minuten
+   ausgeblendet; bei verschwundenem WATCH-Peer sofort ausgeblendet. Nach Wiederverbinden nur aktuelle Werte, keine
+   Nachlieferung; auch Director-Modus und Wechsel auf ein anderes Match testen.
+5. Handy-Live-Ansicht verlassen/App in den Hintergrund: nach spätestens 30 Sekunden kein Telemetrie-Versand mehr.
+   Ohne Anzeige und nach Phone-Prozessneustart darf Telemetrie keine DB/Session starten; Match-Events müssen weiter
+   sofort gesichert werden. Live-Ansicht erneut öffnen: Zeile erst mit aktuellem Wert sichtbar.
+6. Workout beenden bzw. Match mit `watchWorkout = false` starten: kein Versand. Folge-Match bei weiterlaufender Exercise:
+   Schritte beginnen bei null. Wear-Prozess während Exercise beenden und wiederanbinden: konservative neue Baseline;
+   auf Geräten ohne `STEPS_TOTAL` den dokumentierten Delta-Fallback prüfen.
+7. Sensorqualität, Auto-/Nutzer-Pause, echte Hintergrundzustellung, große Schrift auf runden 192-dp-Displays sowie
+   Wakeups und Akkuverbrauch bleiben auf Pixel Watch und Galaxy Watch zu prüfen.

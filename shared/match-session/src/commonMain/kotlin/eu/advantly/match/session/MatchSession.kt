@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchSettings
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
@@ -20,11 +21,16 @@ import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PointDetailRules
+import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AppendResult
 import eu.advantly.data.FavoriteLineup
@@ -337,20 +343,99 @@ class MatchSession(
 
     /**
      * Antwort auf „Noch ein Satz?“ (02 §5.2, nur bei `AWAITING_DECISION`). [matchTiebreak] = nächster Satz als
-     * Match-Tiebreak (nur wenn das Format einen kennt).
+     * Match-Tiebreak nach `config.matchTiebreak` (nur wenn das Format einen kennt). Neue UIs nutzen [startNextSet].
      */
     fun continueDecision(
         anotherSet: Boolean,
         matchTiebreak: Boolean = false,
     ): Boolean {
         checkThread()
+        if (!anotherSet) {
+            if (matchTiebreak) return false
+            val m = scoringMatch() ?: return false
+            if (m.status != MatchStatus.AWAITING_DECISION) return false
+            m.redo.clear()
+            emit(m, listOf(ContinueDecision(anotherSet = false)))
+            return true
+        }
+        return startNextSet(if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR)
+    }
+
+    /**
+     * „Noch ein Satz?“ → weiter mit einem Satz der Art [kind] (02 §5.2, Entscheidung 2026-10-15): normaler Satz,
+     * Tiebreak bis 7 oder Champions-Tiebreak bis 10 (Tennis/Padel, siehe `ScoringEngine.nextSetOptions`); „beenden“ ist
+     * [endMatch]. Entspricht das gewählte Tiebreak-Format genau `config.matchTiebreak`, schreibt die Session die ältere
+     * Wire-Form `MATCH_TIEBREAK`, damit auch Geräte mit älterem App-Stand das Event falten können.
+     * `false` außerhalb von `AWAITING_DECISION`, auf Anzeige-Geräten oder für eine nicht angebotene Art.
+     */
+    fun startNextSet(kind: NextSetKind): Boolean {
+        checkThread()
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.AWAITING_DECISION) return false
-        if (matchTiebreak && (!anotherSet || m.record.format.matchTiebreak == null)) return false
+        val decision = ScoringEngine.nextSetDecision(m.record.format, kind) ?: return false
         m.redo.clear()
-        emit(m, listOf(ContinueDecision(anotherSet, if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR)))
+        emit(m, listOf(decision))
         return true
     }
+
+    /**
+     * „Letzten Punkt von [side] abziehen“ (02 §7.3, Entscheidung 2026-10-15): `Undo` auf den letzten wirksamen Punkt
+     * dieser Seite ([ScoringEngine.lastEffectivePointOf]), auch wenn danach schon Punkte der Gegenseite oder ein neuer
+     * Satz gezählt wurden; der Fold rechnet alles danach neu. Das Undo kommt auf den Redo-Stapel: [redo] stellt den Punkt
+     * wieder her. `false` ohne wirksamen Punkt dieser Seite oder auf Anzeige-Geräten.
+     */
+    fun removeLastPointOf(side: Side): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        val target = ScoringEngine.lastEffectivePointOf(m.engine, side) ?: return false
+        val undo = emit(m, listOf(Undo(target))).single()
+        m.redo.addLast(undo.id)
+        publish()
+        return true
+    }
+
+    /**
+     * Aufschlägerwahl im Doppel (02 §6.5.5, Tennis/Padel): [player] muss in `state.serverChoice.players` stehen (Game 1:
+     * alle vier, Game 2: das andere Team). Erzeugt `ServerChosen` für den laufenden Satz; eine erneute Wahl im selben
+     * Fenster überschreibt. Lässt den Redo-Stapel unberührt (kein UI-Undo-Ziel). `false` ohne offene Wahl, für einen nicht
+     * wählbaren Spieler oder auf Anzeige-Geräten; die gleiche Wahl noch einmal ist ein No-op (`true`).
+     */
+    fun chooseServer(player: PlayerId): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        val state = m.engine.state
+        val choice = state.serverChoice ?: return false
+        val setIndex = state.current?.setIndex ?: return false
+        val side = m.record.lineup.sideOf(player) ?: return false
+        if (player !in choice.players) return false
+        if (choice.chosen == player) return true
+        emit(m, listOf(ServerChosen(setIndex, side, player)))
+        return true
+    }
+
+    /**
+     * Aufschlag-Info für den Punkt [pointId] setzen, ändern oder löschen (`null`) – 02 §7.2, Entscheidung 2026-10-15.
+     * Nur Tennis/Padel mit `meta.serveStats`, nur für wirksame Punkte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den
+     * Punkt gewonnen hat. Übrige Detailfelder bleiben erhalten (widersprüchliche ältere Angaben `secondServe` bzw.
+     * `kind = DOUBLE_FAULT` werden ersetzt). Schreibt `PointDetailSet` (letztes gilt); unverändert = No-op (`true`).
+     * Lässt den Redo-Stapel unberührt.
+     */
+    fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        if (!serveInfoEnabled(m)) return false
+        val point = m.engine.point(pointId) ?: return false
+        if (value == ServeOutcome.DOUBLE_FAULT && point.side == point.servingSide) return false
+        val detail = PointDetailRules.withServe(point.detail, value)
+        if (detail == point.detail) return true
+        emit(m, listOf(PointDetailSet(pointId, detail)))
+        return true
+    }
+
+    private fun serveInfoEnabled(m: OpenMatch): Boolean = m.record.format.sport.isTennisLike && m.record.meta.serveStats
 
     /** Korrektur von Aufschläger, Reihenfolge oder Positionen (02 §7.1/§7.4); ungültige überspringt die Engine. */
     fun correct(correction: Correction): Boolean {
@@ -923,6 +1008,14 @@ class MatchSession(
             conflicts = engine.conflicts,
             absorbedTaps = engine.absorbedEvents,
             eventCount = engine.events.size + 1,
+            lastPoint =
+                engine.lastPoint?.let {
+                    LastPoint(it.id, it.side, it.servingSide, it.server, it.detail?.serve, doubleFaultAllowed = it.side != it.servingSide)
+                },
+            serveInfoEnabled = serveInfoEnabled(m),
+            canRemovePoint = SidePair.of { isScorer && ScoringEngine.lastEffectivePointOf(engine, it) != null },
+            nextSetOptions =
+                if (engine.state.status == MatchStatus.AWAITING_DECISION) ScoringEngine.nextSetOptions(m.record.format) else emptyList(),
         )
     }
 

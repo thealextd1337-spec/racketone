@@ -18,7 +18,7 @@ import java.util.concurrent.Executors
  * Geschrieben wird auf einem eigenen Thread; jede Zeile wird sofort geflusht, damit bei einem Prozess-Kill
  * nichts Wesentliches verloren geht.
  *
- * **Nur in Debug-Builds aktiv** ([ENABLED] = `BuildConfig.DEBUG`): Das Log enthält Pulswerte (Art.-9-Daten, 05 §6.3).
+ * **Nur in Debug-Builds aktiv** ([ENABLED] = `BuildConfig.DEBUG`): Das Log enthält keine Workout-Messwerte.
  * In Release-Builds wird weder eine Datei angelegt noch nach Logcat geschrieben; R8 entfernt die Aufrufe.
  * Das Verzeichnis ist vom Cloud-Backup und Gerätetransfer ausgeschlossen (`res/xml/data_extraction_rules.xml`).
  */
@@ -56,7 +56,7 @@ object DiagnosticLog {
         executor.execute { append(listOf(line)) }
     }
 
-    /** Mehrere Zeilen am Stück (z. B. ein Batch Puls-Samples) mit einem Flush. */
+    /** Mehrere Diagnosezeilen am Stück mit einem Flush. */
     fun logAll(lines: List<Pair<String, Map<String, Any?>>>) {
         if (!ENABLED || lines.isEmpty()) return
         val now = System.currentTimeMillis()

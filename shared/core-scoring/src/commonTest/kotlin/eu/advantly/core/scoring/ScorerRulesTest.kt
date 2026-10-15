@@ -44,6 +44,21 @@ class ScorerRulesTest {
         assertEquals(SidePair(2, 0), unrestricted.current?.points)
     }
 
+    /** Neue Eingaben (Entscheidung 2026-10-15) unterliegen derselben Rollenprüfung: nur der Zähler. */
+    @Test
+    fun serverChoiceAndServeInfoOnlyFromScorer() {
+        val doubles = Presets.TENNIS_BO3_MTB10.format(eu.advantly.core.model.Discipline.DOUBLES)
+        val log =
+            listOf(
+                ev("c", 1, phone, ServerChosen(0, Side.A, p("A2"))),
+                ev("a", 2, watch, PointWon(Side.B)),
+                ev("d", 3, phone, PointDetailSet(EventId("a"), PointDetail(serve = ServeOutcome.DOUBLE_FAULT))),
+            )
+        val state = ScoringEngine.fold(doubles, lineupFor(doubles.discipline), log, watch)
+        assertEquals(listOf(EventId("c"), EventId("d")), state.rejectedByRole)
+        assertEquals(p("A1"), state.serve?.player, "Wahl des Nicht-Zählers wirkt nicht")
+    }
+
     @Test
     fun scorerChangedActsFromItsPositionAndBlocksTheOldScorer() {
         val log =

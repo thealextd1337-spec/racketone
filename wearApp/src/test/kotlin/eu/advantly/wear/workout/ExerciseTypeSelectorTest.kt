@@ -68,7 +68,7 @@ class ExerciseTypeSelectorTest {
         val selection = ExerciseTypeSelector.select(WorkoutSport.TENNIS, caps)!!
         assertEquals(WatchExerciseType.TENNIS, selection.type)
         assertFalse(selection.isFallback)
-        assertEquals(all, selection.metrics)
+        assertEquals(all - WorkoutMetric.STEPS, selection.metrics)
     }
 
     @Test
@@ -115,7 +115,7 @@ class ExerciseTypeSelectorTest {
         // Matrix nur Puls / nur Aktivität / beide / keins. Kalorien und Schritte brauchen ACTIVITY_RECOGNITION.
         val caps = FakeCapabilities(mapOf(WatchExerciseType.TENNIS to all))
         val heartRate = setOf(WorkoutMetric.HEART_RATE_BPM, WorkoutMetric.HEART_RATE_BPM_STATS)
-        val activity = setOf(WorkoutMetric.STEPS, WorkoutMetric.CALORIES_TOTAL)
+        val activity = setOf(WorkoutMetric.STEPS, WorkoutMetric.STEPS_TOTAL, WorkoutMetric.CALORIES_TOTAL)
         val cases =
             listOf(
                 Triple(true, false, heartRate),
@@ -128,7 +128,7 @@ class ExerciseTypeSelectorTest {
             assertEquals("heartRate=$hr activity=$ar", expected, permissions.allowedMetrics)
             assertEquals(
                 "heartRate=$hr activity=$ar",
-                expected,
+                if (WorkoutMetric.STEPS_TOTAL in expected) expected - WorkoutMetric.STEPS else expected,
                 ExerciseTypeSelector.select(WorkoutSport.TENNIS, caps, permissions)!!.metrics,
             )
         }

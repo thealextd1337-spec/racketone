@@ -13,7 +13,9 @@ import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +66,18 @@ enum class LiveRole {
 
     /** Ein anderes Gerät zählt; dieses zeigt nur an (kein Zählen, kein Undo, 04 §4.1 H6a). */
     DISPLAY,
+}
+
+/**
+ * Gekoppeltes Gerät mit anderer Protokollversion (Hello/`negotiate`, seit W2-A Protokoll 2): Die Geräte tauschen nichts
+ * aus, bis aktualisiert ist. UI: „Bitte Uhr/Handy aktualisieren“.
+ */
+enum class UpdateRequired {
+    /** Das andere Gerät (meist die Uhr) hat einen älteren App-Stand. */
+    OTHER_DEVICE,
+
+    /** Dieses Gerät hat einen älteren App-Stand als das gekoppelte. */
+    THIS_DEVICE,
 }
 
 /** Art des zählenden Geräts (Anzeige „Es zählt: Uhr von …“). */
@@ -126,6 +140,13 @@ data class StartOptions(
  * @property absorbedTaps Anzahl als Doppel-Tap zusammengeführter Eingaben (01 §4.4); steigt sie, zeigt die UI einen Hinweis
  * @property waitingForScorer das Match ist an die Uhr gesendet, sie hat sich dafür aber noch nicht gemeldet (keine
  *   Verbindung, noch keine Eingabe) – UI: „Warte auf Uhr …“ mit „Doch am Handy zählen“
+ * @property lastPoint zuletzt wirksam gezählter Ballwechsel – Ziel der Aufschlag-Leiste ([LiveMatchPort.setServeInfo])
+ * @property serveInfoEnabled Aufschlag-Leiste anbieten: Tennis/Padel und `meta.serveStats` (gilt auch auf Anzeige-Geräten
+ *   für die Anzeige; erfassen kann nur der Zähler)
+ * @property canRemovePoint je Seite: „Letzten Punkt abziehen“ möglich ([LiveMatchPort.removeLastPointOf])
+ * @property nextSetOptions bei `AWAITING_DECISION` die Satzarten für [LiveMatchPort.startNextSet], sonst leer
+ *
+ * Die offene Aufschlägerwahl im Doppel steht im Engine-Zustand: `state.serverChoice` (02 §6.5.5).
  */
 data class LiveMatchSnapshot(
     val matchId: MatchId,
@@ -145,9 +166,34 @@ data class LiveMatchSnapshot(
     val sync: SyncInfo = SyncInfo.LOCAL_ONLY,
     val absorbedTaps: Int = 0,
     val waitingForScorer: Boolean = false,
+    val lastPoint: LastPointInfo? = null,
+    val serveInfoEnabled: Boolean = false,
+    val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
+    val nextSetOptions: List<NextSetKind> = emptyList(),
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
+
+    /** Aufschlägerwahl offen und noch nicht getroffen (Hinweis „Wer schlägt auf?“, blockiert das Zählen nicht). */
+    val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
 }
+
+/**
+ * Der zuletzt gezählte Ballwechsel für die Aufschlag-Leiste (Feldtest 2026-10-15).
+ *
+ * @property side Gewinner
+ * @property servingSide aufschlagende Side vor dem Punkt
+ * @property server Aufschläger (Doppel: nach Wahl bzw. Rotation)
+ * @property serve erfasste Aufschlag-Info oder `null`
+ * @property doubleFaultAllowed „Doppelfehler“ wählbar (Rückschlagseite hat gewonnen)
+ */
+data class LastPointInfo(
+    val id: EventId,
+    val side: Side,
+    val servingSide: Side,
+    val server: PlayerId,
+    val serve: ServeOutcome?,
+    val doubleFaultAllowed: Boolean,
+)
 
 /**
  * Verbindungszustand für die Sync-Pill (04 §3.2, Entscheidung „Sync Zähler → Handy“): Zähler zeigen „synchron /
@@ -162,6 +208,7 @@ data class LiveMatchSnapshot(
  *   `null` = unbekannt – die UI zeigt dann „Stand unbekannt“ statt eines erfundenen Alters
  * @property withoutScorerSinceMono monotone Zeit, seit der dieses Gerät das Match ohne Zähler-Kontakt beobachtet;
  *   Untergrenze für das Übernahmeangebot, wenn der letzte Kontakt unbekannt ist
+ * @property updateRequired Versionsunterschied zu einem gekoppelten Gerät (siehe [UpdateRequired]), sonst `null`
  */
 data class SyncInfo(
     val peers: Int,
@@ -170,6 +217,7 @@ data class SyncInfo(
     val lastEventReceivedAtMs: Long? = null,
     val lastScorerContactMono: Long? = null,
     val withoutScorerSinceMono: Long? = null,
+    val updateRequired: UpdateRequired? = null,
 ) {
     /** Millisekunden seit dem letzten Kontakt zum Zähler (nie negativ), `null` = unbekannt. */
     fun staleForMs(nowMono: Long): Long? = lastScorerContactMono?.let { (nowMono - it).coerceAtLeast(0) }
@@ -204,6 +252,12 @@ interface LiveMatchPort {
     /** Stand der eigenen Uhr für „Wer zählt?“ (auch ohne Live-Verbindung, reagiert auf Änderungen). */
     val watchStatus: StateFlow<WatchStatus>
 
+    /**
+     * Versionsunterschied zu einem gekoppelten Gerät, auch ohne aktives Match (z. B. Schritt „Wer zählt?“); `null` = keiner.
+     * Die In-Memory-Implementierung liefert immer `null`.
+     */
+    val updateRequired: StateFlow<UpdateRequired?>
+
     /** Stand der Uhr sofort neu prüfen (Schritt „Wer zählt?“, App im Vordergrund, „Erneut prüfen“). */
     fun refreshWatchStatus()
 
@@ -236,6 +290,30 @@ interface LiveMatchPort {
     fun continueDecision(
         anotherSet: Boolean,
         matchTiebreak: Boolean = false,
+    ): Boolean
+
+    /**
+     * „Noch ein Satz?“ → weiter mit [kind] aus [LiveMatchSnapshot.nextSetOptions] (normaler Satz, Tiebreak bis 7,
+     * Champions-Tiebreak bis 10; 02 §5.2). „Beenden“ bleibt `continueDecision(false)` bzw. [endMatch]. Nur Zähler.
+     */
+    fun startNextSet(kind: NextSetKind): Boolean
+
+    /**
+     * „Letzten Punkt von [side] abziehen“ (02 §7.3): Undo auf den letzten wirksamen Punkt dieser Seite, auch über
+     * Satzgrenzen; [redo] stellt ihn wieder her. `false` ohne Punkt der Seite. Nur Zähler.
+     */
+    fun removeLastPointOf(side: Side): Boolean
+
+    /** Aufschlägerwahl im Doppel (02 §6.5.5): [player] aus `state.serverChoice.players`. Nur Zähler. */
+    fun chooseServer(player: PlayerId): Boolean
+
+    /**
+     * Aufschlag-Info für den Punkt [pointId] setzen/ändern/löschen (`null`), 02 §7.2: nur bei
+     * [LiveMatchSnapshot.serveInfoEnabled], `DOUBLE_FAULT` nur für Punkte der Rückschlagseite. Nur Zähler.
+     */
+    fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
     ): Boolean
 
     /** Vorzeitiges Ende (02 §7 `MatchEnded`): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED` `null`. */
@@ -357,6 +435,9 @@ interface PlayersPort {
 
     /** Angelegte Gäste (nur Name, später mit Konten verknüpfbar), zuletzt verwendete zuerst. */
     val guests: StateFlow<List<Player>>
+
+    /** Mitspieler aus den letzten Matches, eigene Sportart zuerst; ohne Besitzer und Duplikate. */
+    fun recentPlayers(sport: Sport): List<Player>
 
     /** Favoriten-Besetzungen für den Schnellstart. */
     val favorites: StateFlow<List<FavoriteLineup>>

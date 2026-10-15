@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "TV-TEN-009",
+  "title": "Tennis: Match nur aus einem Tiebreak bis 7",
+  "description": "Preset TENNIS_TIEBREAK_ONLY_7 (Best of 1, decidingSet = MATCH_TIEBREAK bis 7, 02 §4.1). Prüft Aufschlagfolge 1-2-2 mit Seite, Seitenwechsel alle 6 Punkte, 2 Punkte Vorsprung (7:7 geht weiter), Matchball und Protokoll [9:7] ohne Seitenwechsel am Ende.",
+  "sources": ["ITF Rules of Tennis 2026, Appendix VI 3 (Match-Tiebreak bis 7)", "Advantly 02-scoring-regeln.md §4.1, §6.2 (Entscheidung 2026-10-15)"],
+  "config": {"formatVersion": 1, "presetId": "TENNIS_TIEBREAK_ONLY_7", "sport": "TENNIS", "discipline": "SINGLES", "match": {"mode": "BEST_OF", "bestOf": 1}, "game": {"deuceMode": "ADVANTAGE"}, "set": {"gamesToWin": 6, "tiebreakAt": 6, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": {"kind": "MATCH_TIEBREAK", "pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}, "matchTiebreak": null},
+  "lineup": {"A": ["A1"], "B": ["B1"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "PointWon", "side": "A"},
+    {"id": "e2", "type": "PointWon", "side": "B"},
+    {"id": "e3", "type": "PointWon", "side": "A"},
+    {"id": "e4", "type": "PointWon", "side": "B"},
+    {"id": "e5", "type": "PointWon", "side": "A"},
+    {"id": "e6", "type": "PointWon", "side": "B"},
+    {"id": "e7", "type": "PointWon", "side": "A"},
+    {"id": "e8", "type": "PointWon", "side": "B"},
+    {"id": "e9", "type": "PointWon", "side": "A"},
+    {"id": "e10", "type": "PointWon", "side": "B"},
+    {"id": "e11", "type": "PointWon", "side": "A"},
+    {"id": "e12", "type": "PointWon", "side": "B"},
+    {"id": "e13", "type": "PointWon", "side": "A"},
+    {"id": "e14", "type": "PointWon", "side": "B"},
+    {"id": "e15", "type": "PointWon", "side": "A"},
+    {"id": "e16", "type": "PointWon", "side": "A"}
+  ],
+  "expect": [
+    {"afterEvent": 0, "label": "Start: Tiebreak-Satz", "state": {"status": "IN_PROGRESS", "current": {"setIndex": 0, "setKind": "MATCH_TIEBREAK", "gameKind": "MATCH_TIEBREAK", "games": {"A": 0, "B": 0}, "points": {"A": 0, "B": 0}, "display": {"A": "0", "B": "0"}, "decidingPoint": false}, "serve": {"side": "A", "player": "A1", "court": "RIGHT"}, "scoreCall": "0-0", "serverChoice": null}},
+    {"afterEvent": 1, "label": "Punkt 2 und 3 schlägt B auf", "state": {"serve": {"side": "B", "player": "B1", "court": "LEFT"}, "scoreCall": "0-1"}},
+    {"afterEvent": 6, "label": "3:3 – Seitenwechsel", "state": {"effects": ["POINT", "CHANGE_ENDS"], "ends": {"A": "END_2", "B": "END_1"}, "serve": {"side": "B", "court": "RIGHT"}}},
+    {"afterEvent": 12, "label": "6:6 – Seitenwechsel, kein Matchball", "state": {"effects": ["POINT", "CHANGE_ENDS"], "ends": {"A": "END_1", "B": "END_2"}, "statusFlags": []}},
+    {"afterEvent": 13, "label": "7:6 – Matchball A", "state": {"current": {"points": {"A": 7, "B": 6}}, "serve": {"side": "B"}, "scoreCall": "6-7", "statusFlags": [{"side": "A", "level": "MATCH_POINT", "count": 1, "breakPoint": false}]}},
+    {"afterEvent": 14, "label": "7:7 – weiter", "state": {"status": "IN_PROGRESS", "statusFlags": []}},
+    {"afterEvent": 16, "label": "9:7 – Match A, Protokoll [9:7]", "state": {"status": "FINISHED", "result": {"winner": "A", "reason": "COMPLETED"}, "sets": [{"kind": "MATCH_TIEBREAK", "games": {"A": 1, "B": 0}, "tiebreak": {"A": 9, "B": 7}, "points": null, "winner": "A"}], "setsWon": {"A": 1, "B": 0}, "current": null, "serve": null, "effects": ["POINT", "GAME_WON", "SET_WON", "MATCH_WON"], "ends": {"A": "END_1", "B": "END_2"}}}
+  ]
+}

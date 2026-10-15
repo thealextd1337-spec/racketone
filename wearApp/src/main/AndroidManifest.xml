@@ -59,6 +59,13 @@
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
                 <data
                     android:host="*"
+                    android:path="/advantly/telemetry/subscribe"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
                     android:path="/advantly/link/v1"
                     android:scheme="wear" />
             </intent-filter>

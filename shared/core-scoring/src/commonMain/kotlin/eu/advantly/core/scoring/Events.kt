@@ -76,11 +76,23 @@ data class Undo(
     val target: EventId,
 ) : EventPayload
 
-/** Art des nächsten Satzes im Satzende-Dialog (OPEN). */
+/**
+ * Art des nächsten Satzes im Satzende-Dialog (OPEN, 02 §5.2). [TIEBREAK_7] und [MATCH_TIEBREAK_10] sind neu
+ * (Entscheidung 2026-10-15) und gelten nur für Tennis/Padel; das JSON-Feld bleibt `nextSetKind` (abwärtskompatibel).
+ */
 @Serializable
 enum class NextSetKind {
+    /** Normaler Satz (bisheriger Default). */
     REGULAR,
+
+    /** Match-Tiebreak nach `config.matchTiebreak` (nur, wenn das Format einen kennt) – bisherige Wire-Form. */
     MATCH_TIEBREAK,
+
+    /** Tiebreak bis 7 (2 Vorsprung, Wechsel alle 6 Punkte) als eigener Satz, unabhängig von `config.matchTiebreak`. */
+    TIEBREAK_7,
+
+    /** Champions-Tiebreak bis 10 (2 Vorsprung, Wechsel alle 6 Punkte) als eigener Satz, unabhängig von `config.matchTiebreak`. */
+    MATCH_TIEBREAK_10,
 }
 
 /** Antwort auf „Noch ein Satz?“ (nur bei `AWAITING_DECISION`). */
@@ -154,6 +166,28 @@ data class Correction(
     }
 }
 
+/**
+ * Wahl des Aufschlägers im Doppel (Tennis/Padel, 02 §6.5.5, Entscheidung 2026-10-15): legt die teaminterne
+ * Aufschlagreihenfolge von [side] für den Satz [set] fest ([player] schlägt das erste Aufschlagspiel des Teams auf).
+ *
+ * - Vor dem ersten Ballwechsel des Satzes („Game 1“) darf jeder der vier Spieler gewählt werden; gehört er zur
+ *   anderen Side, eröffnet diese den Satz.
+ * - Danach nur für die Side, die im Satz noch nicht aufgeschlagen hat („Game 2“).
+ * - Ungültig (→ `ignoredEvents`): andere Sportart, Einzel, [set] ≠ laufender Satz, [player] nicht in [side], kein
+ *   laufender Satz bzw. Status nicht `IN_PROGRESS`/`PAUSED`.
+ *
+ * Kein UI-Undo-Ziel; eine erneute Wahl im selben Fenster überschreibt (letzte gilt).
+ *
+ * @property set 0-basierter Satzindex (`current.setIndex`), schützt vor veralteten Wahlen nach Undo/Merge
+ */
+@Serializable
+@SerialName("ServerChosen")
+data class ServerChosen(
+    val set: Int,
+    val side: Side,
+    val player: PlayerId,
+) : EventPayload
+
 /** Grund eines vorzeitigen Matchendes (02 §7 `MatchEnded`). */
 @Serializable
 enum class EndReason {
@@ -202,13 +236,32 @@ enum class PointDetailKind {
     SERVICE_FAULT,
 }
 
+/** Aufschlag-Info eines Punktes (Tennis/Padel, 02 §7.2, Entscheidung 2026-10-15). */
+@Serializable
+enum class ServeOutcome {
+    /** Der 1. Aufschlag war gut. */
+    FIRST_SERVE_IN,
+
+    /** Der 1. Aufschlag war ein Fehler, der 2. gut. */
+    SECOND_SERVE_IN,
+
+    /** Beide Aufschläge waren Fehler – nur zulässig, wenn die Rückschlagseite den Punkt gewonnen hat. */
+    DOUBLE_FAULT,
+}
+
 /**
  * Optionales Punkt-Detail (02 §7.2, P3). Inkonsistente Details verwirft nur die Statistik
  * ([PointDetailRules.isConsistent]); der Score bleibt unberührt.
+ *
+ * @property kind Art des Punktendes; seit 2026-10-15 optional (ein Detail darf nur die Aufschlag-Info tragen). Alte
+ *   Logs enthalten es immer.
+ * @property serve Aufschlag-Info (nur Tennis/Padel); `null` = unbekannt. Ein `PointDetailSet` mit `DOUBLE_FAULT` auf
+ *   einen Punkt der aufschlagenden Side ist ungültig (`ignoredEvents`, 02 §7.3).
  */
 @Serializable
 data class PointDetail(
-    val kind: PointDetailKind,
+    val kind: PointDetailKind? = null,
     val by: PlayerId? = null,
     val secondServe: Boolean? = null,
+    val serve: ServeOutcome? = null,
 )

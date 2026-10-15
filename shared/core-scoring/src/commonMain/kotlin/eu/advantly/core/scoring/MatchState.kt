@@ -30,6 +30,7 @@ data class MatchState(
     val continuation: Continuation?,
     val scorerDeviceId: DeviceId?,
     val rejectedByRole: List<EventId>,
+    val serverChoice: ServerChoice?,
 )
 
 /** Wertepaar je Side, JSON `{"A": …, "B": …}`. */
@@ -239,6 +240,25 @@ enum class Effect {
     /** `ScorerChanged`: ein anderes Gerät zählt ab jetzt (02 §7.5). */
     SCORER_CHANGED,
 }
+
+/**
+ * Offene Aufschläger-Wahl im Doppel (Tennis/Padel, 02 §6.5.5, §8 `serverChoice`). Blockiert das Zählen nicht: Wird
+ * ohne Wahl weitergezählt, gilt die bisherige Reihenfolge.
+ *
+ * @property game 1 = vor dem ersten Ballwechsel des Satzes (Wahl aus allen vier Spielern), 2 = vor dem ersten
+ *   Aufschlag des anderen Teams (Wahl aus dessen zwei Spielern)
+ * @property side Side, die nach aktuellem Stand aufschlägt (bei `game = 1` der Default; eine Wahl aus dem anderen
+ *   Team wechselt die eröffnende Side)
+ * @property players wählbare Spieler (bei `game = 1` erst die Spieler von [side], dann die des anderen Teams)
+ * @property chosen bereits in diesem Fenster gewählter Spieler, sonst `null` („Wahl erwartet“)
+ */
+@Serializable
+data class ServerChoice(
+    val game: Int,
+    val side: Side,
+    val players: List<PlayerId>,
+    val chosen: PlayerId?,
+)
 
 /** Wer den nächsten Satz eröffnen würde (02 §5.2 `state.continuation`). */
 @Serializable

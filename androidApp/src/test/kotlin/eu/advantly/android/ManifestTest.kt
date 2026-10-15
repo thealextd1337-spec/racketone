@@ -1,6 +1,8 @@
 package eu.advantly.android
 
 import eu.advantly.device.link.WearDataLayerTransport
+import eu.advantly.sync.protocol.LiveTelemetry
+import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,14 +44,50 @@ class ManifestTest {
         assertEquals("true", service.getAttributeNS(android, "exported"))
         val filters = service.getElementsByTagName("intent-filter").let { n -> (0 until n.length).map { n.item(it) as Element } }
 
-        fun prefixFor(action: String): String {
-            val filter =
-                filters.single { f ->
+        fun pathsFor(action: String): List<Element> =
+            filters
+                .filter { f ->
                     (f.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name") == action
+                }.map { it.getElementsByTagName("data").item(0) as Element }
+
+        val messages = pathsFor("com.google.android.gms.wearable.MESSAGE_RECEIVED")
+        val dataItems = pathsFor("com.google.android.gms.wearable.DATA_CHANGED")
+        assertTrue(
+            messages.any {
+                it.getAttributeNS(android, "pathPrefix").let { prefix ->
+                    prefix.isNotEmpty() &&
+                        WearDataLayerTransport.MESSAGE_PATH.startsWith(prefix)
                 }
-            return (filter.getElementsByTagName("data").item(0) as Element).getAttributeNS(android, "pathPrefix")
-        }
-        assertTrue(WearDataLayerTransport.MESSAGE_PATH.startsWith(prefixFor("com.google.android.gms.wearable.MESSAGE_RECEIVED")))
-        assertTrue(WearDataLayerTransport.QUEUE_PREFIX.startsWith(prefixFor("com.google.android.gms.wearable.DATA_CHANGED")))
+            },
+        )
+        assertEquals("/advantly/telemetry/live", LiveTelemetry.MESSAGE_PATH)
+        assertEquals("/advantly/telemetry/subscribe", LiveTelemetrySubscription.MESSAGE_PATH)
+        assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveTelemetry.MESSAGE_PATH })
+        assertTrue(dataItems.all { it.getAttributeNS(android, "pathPrefix") == WearDataLayerTransport.QUEUE_PREFIX })
+    }
+
+    @Test
+    fun watchListenerCoversExactSubscriptionPath() {
+        val wearManifest =
+            DocumentBuilderFactory
+                .newInstance()
+                .apply { isNamespaceAware = true }
+                .newDocumentBuilder()
+                .parse(File("../wearApp/src/main/AndroidManifest.xml"))
+        val nodes = wearManifest.getElementsByTagName("service")
+        val service =
+            (0 until nodes.length)
+                .map { nodes.item(it) as Element }
+                .single { it.getAttributeNS(android, "name") == ".sync.SyncListenerService" }
+        val filters = service.getElementsByTagName("intent-filter")
+        val paths =
+            (0 until filters.length)
+                .map { filters.item(it) as Element }
+                .filter {
+                    (it.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name") ==
+                        "com.google.android.gms.wearable.MESSAGE_RECEIVED"
+                }.map { (it.getElementsByTagName("data").item(0) as Element).getAttributeNS(android, "path") }
+        assertTrue(paths.contains(LiveTelemetrySubscription.MESSAGE_PATH))
+        assertTrue(paths.contains(WearDataLayerTransport.MESSAGE_PATH))
     }
 }
