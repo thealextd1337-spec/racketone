@@ -34,9 +34,10 @@ Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 ```
 shared/core-model      pure  IDs, Sport, Spieler, Team, Lineup
 shared/core-scoring    pure  Events, RuleSets, Reducer, Undo, Merge        → core-model
-shared/sync-protocol   pure  Wire-DTOs, JSON-Codec, Anti-Entropy           → core-scoring
+shared/sync-protocol   pure  Wire-DTOs, JSON-Codec, Anti-Entropy, Forks    → core-scoring
 shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
+shared/match-session         Session: Tap→Event→Store→Engine, Sync, Fork   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
 shared/presentation          ViewModels + UI-State (kein watchOS)          → data, device-link, entitlements
 shared/ui-phone              CMP-Screens (android, ios, jvm("desktop"))    → presentation
