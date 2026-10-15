@@ -14,6 +14,10 @@ struct SetEndView: View {
         let won = snap.setWinners.last == "A"
         ScrollView {
             VStack(spacing: 8) {
+                UpdateRequiredLabel(code: snap.updateRequired)
+                if OperationStrip.hasServe(model, snap) || model.banner == .pointRemoved {
+                    OperationStrip(model: model, snap: snap)
+                }
                 Text(loc("setend.title %@ %@", String(setNumber), lastSetScore))
                     .font(.headline)
                     .monospacedDigit()
@@ -40,38 +44,42 @@ struct SetEndView: View {
 
     @ViewBuilder
     private var decisionButtons: some View {
-        Button {
-            model.decide(anotherSet: true, matchTiebreak: false)
-        } label: {
-            Text("setend.yes").frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(Brand.us)
-        .accessibilityIdentifier("setend.yes")
-        if snap.offerMatchTiebreak {
+        ForEach(snap.nextSetOptions, id: \.self) { kind in
             Button {
-                model.decide(anotherSet: true, matchTiebreak: true)
+                model.startNextSet(kind)
             } label: {
-                Text("setend.matchTiebreak").frame(maxWidth: .infinity)
+                Text(LocalizedStringKey(optionKey(kind))).frame(maxWidth: .infinity, minHeight: 44)
             }
+            .tint(kind == "REGULAR" ? Brand.us : Color.gray)
+            .accessibilityIdentifier(kind == "REGULAR" ? "setend.yes" : "nextset-" + kind)
         }
         Button {
-            model.decide(anotherSet: false, matchTiebreak: false)
+            model.endMatch()
         } label: {
-            Text("setend.no").frame(maxWidth: .infinity)
+            Text(LocalizedStringKey(tennisLike ? "setend.finish" : "setend.no"))
+                .frame(maxWidth: .infinity, minHeight: 44)
         }
         Button(action: model.undo) {
-            Label("action.undo", systemImage: "arrow.uturn.backward")
-                .font(.footnote)
+            Label("action.undo", systemImage: "arrow.uturn.backward").font(.footnote)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Brand.text2)
-        .padding(.top, 4)
+        .disabled(!snap.canUndo)
+        RemovePointButtons(model: model, snap: snap)
+    }
+
+    private var tennisLike: Bool { snap.sport == "TENNIS" || snap.sport == "PADEL" }
+
+    private func optionKey(_ kind: String) -> String {
+        switch kind {
+        case "TIEBREAK_7": return "setend.tiebreak7"
+        case "MATCH_TIEBREAK_10": return snap.sport == "PADEL" ? "setend.super10" : "setend.champions10"
+        default: return tennisLike ? "setend.regular" : "setend.yes"
+        }
     }
 
     private var lastSetScore: String {
         guard let a = snap.setScoresA.last, let b = snap.setScoresB.last else { return "" }
-        return ScoreText.pair(a.int32Value, b.int32Value)
+        let score = ScoreText.pair(a.int32Value, b.int32Value)
+        return snap.setKinds.last == "MATCH_TIEBREAK" ? "[" + score + "]" : score
     }
 }
 
@@ -83,6 +91,10 @@ struct MatchEndView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
+                UpdateRequiredLabel(code: snap.updateRequired)
+                if OperationStrip.hasServe(model, snap) || model.banner == .pointRemoved {
+                    OperationStrip(model: model, snap: snap)
+                }
                 SportLabel(sport: snap.sport) {
                     Text(LocalizedStringKey(resultKey))
                         .font(.title3.weight(.bold))
@@ -94,6 +106,11 @@ struct MatchEndView: View {
                         .monospacedDigit()
                         .lineLimit(2)
                         .minimumScaleFactor(0.6)
+                }
+                if !snap.pointsA.isEmpty {
+                    Text(ScoreText.short(snap))
+                        .font(.headline)
+                        .monospacedDigit()
                 }
                 Button {
                     model.closeMatch()
@@ -109,6 +126,8 @@ struct MatchEndView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Brand.text2)
+                    .disabled(!snap.canUndo)
+                    RemovePointButtons(model: model, snap: snap)
                 }
             }
         }
@@ -118,6 +137,7 @@ struct MatchEndView: View {
     private var resultKey: String {
         switch snap.resultReason {
         case "DRAW": return "matchend.draw"
+        case "STOPPED" where snap.winner.isEmpty: return "matchend.draw"
         case "ABANDONED": return "matchend.abandoned"
         default:
             if snap.winner.isEmpty { return "matchend.abandoned" }

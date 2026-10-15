@@ -37,30 +37,90 @@ struct MatchPagerView: View {
 /// **Anzeige** (ein anderes Gerät zählt, 04 §4.2 W3): gleiche Darstellung ohne Tap-Flächen, ohne Wisch-Undo und
 /// Undo-Button, deutlich „Anzeige · [Gerät] zählt“, „Stand vor X s“; nach > 30 s ohne Zähler das Angebot
 /// „Zählen übernehmen“ (mit Bestätigung).
+/// Ein Ziel je Berührung, bestimmt beim Aufsetzen. Das Mittelband bleibt bis zum Loslassen nicht-zählend,
+/// auch wenn die Aufschlag-Leiste zwischenzeitlich verschwindet. Ein langer Druck zieht erst beim Loslassen ab.
+private enum ScoreTouchTarget {
+    case half(sideA: Bool, canRemove: Bool)
+    case ignored
+}
+
 struct ScorePage: View {
     @ObservedObject var model: ScoringModel
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @Environment(\.isLuminanceReduced) private var dimmed
+    @Environment(\.scenePhase) private var scenePhase
     @State private var confirmTakeOver = false
+    @State private var chooseServer = false
+    @State private var target: ScoreTouchTarget?
+    @State private var touchMatchId = ""
+    @State private var touchStart = Date.distantPast
+    @State private var furthestTravel: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let height = geo.size.height
+            let deadTop = height * 0.12
+            let action = !dimmed && OperationStrip.hasAction(model, snap)
+            let middle = action ? max(44, height * 0.16) : height * 0.16
+            let guardHeight: CGFloat = action ? 4 : 0
+            let halfHeight = (height - deadTop - middle - 2 * guardHeight) / 2
+            let middleTop = deadTop + halfHeight
             VStack(spacing: 0) {
                 StatusStrip(snap: snap, dimmed: dimmed)
-                    .frame(height: height * 0.12)
+                    .frame(height: deadTop)
                     .allowsHitTesting(false)
-                half(sideA: true)
-                    .frame(height: height * 0.36)
-                MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
-                    .frame(height: height * 0.16)
-                half(sideA: false)
-                    .frame(height: height * 0.36)
+                half(sideA: true).frame(height: halfHeight)
+                Color.clear.frame(height: guardHeight)
+                if action {
+                    OperationStrip(model: model, snap: snap) { chooseServer = true }
+                        .frame(height: middle)
+                        .padding(.horizontal, 6)
+                } else {
+                    MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
+                        .frame(height: middle)
+                }
+                Color.clear.frame(height: guardHeight)
+                half(sideA: false).frame(height: halfHeight)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { value in
+                        if target == nil {
+                            touchStart = value.time
+                            touchMatchId = snap.matchId
+                            furthestTravel = 0
+                            let y = value.startLocation.y
+                            if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
+                                target = .half(sideA: true, canRemove: snap.canRemovePointA)
+                            } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleTop + middle + 2 * guardHeight {
+                                target = .half(sideA: false, canRemove: snap.canRemovePointB)
+                            } else {
+                                target = .ignored
+                            }
+                        }
+                        furthestTravel = max(furthestTravel, max(abs(value.translation.width), abs(value.translation.height)))
+                    }
+                    .onEnded { value in
+                        defer { target = nil }
+                        guard let target, snap.matchId == touchMatchId, snap.isScorer, !dimmed, scenePhase == .active else { return }
+                        guard case let .half(sideA, canRemove) = target else { return }
+                        let dy = value.translation.height
+                        if dy > 40 && abs(value.translation.width) < dy {
+                            model.undo()
+                        } else if furthestTravel < 14 && abs(value.translation.width) < 14 && abs(dy) < 14 {
+                            if value.time.timeIntervalSince(touchStart) >= 1 {
+                                if canRemove { model.removePoint(sideA: sideA) }
+                            } else {
+                                model.tap(sideA: sideA)
+                            }
+                        }
+                    }
+            )
             .overlay {
-                if let banner = model.banner, !dimmed {
-                    BannerView(banner: banner)
+                if let banner = model.banner, banner != .pointRemoved, !dimmed {
+                    BannerView(banner: banner).allowsHitTesting(false)
                 } else if !snap.isScorer && !dimmed {
                     TakeOverOffer(snap: snap) { confirmTakeOver = true }
                 }
@@ -69,43 +129,37 @@ struct ScorePage: View {
         .ignoresSafeArea()
         .background(Color.black)
         .onChange(of: dimmed) { _, isDimmed in
-            if !isDimmed { model.didWake() }
+            if target != nil { target = .ignored }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30).onEnded { value in
-                let dy = value.translation.height
-                if snap.isScorer && !dimmed && dy > 40 && abs(value.translation.width) < dy {
-                    model.undo()
-                }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                if target != nil { target = .ignored }
+                model.dismissServeBar()
             }
-        )
+        }
+        .onChange(of: snap.isScorer) { _, _ in
+            if target != nil { target = .ignored }
+        }
+        .sheet(isPresented: $chooseServer) {
+            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
+        }
         .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
     }
 
     @ViewBuilder
     private func half(sideA: Bool) -> some View {
-        let team = TeamHalf(
-            sideA: sideA,
-            snap: snap,
-            flash: model.flashSideA == sideA,
-            dimmed: dimmed
-        )
-        if snap.isScorer {
+        let team = TeamHalf(sideA: sideA, snap: snap, flash: model.flashSideA == sideA, dimmed: dimmed)
+        if snap.isScorer && !dimmed {
             team
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if !dimmed { model.tap(sideA: sideA) }
-                }
-                .allowsHitTesting(!dimmed)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(Text(LocalizedStringKey(sideA ? "a11y.pointUs" : "a11y.pointThem")))
                 .accessibilityAction { model.tap(sideA: sideA) }
+                .accessibilityAction(named: Text(LocalizedStringKey(sideA ? "action.removeUs" : "action.removeThem"))) {
+                    model.removePoint(sideA: sideA)
+                }
         } else {
-            // Anzeige: reine Darstellung, Stand als Text für VoiceOver
-            team
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.updatesFrequently)
+            team.accessibilityElement(children: .combine).accessibilityAddTraits(.updatesFrequently)
         }
     }
 }
@@ -118,7 +172,9 @@ struct StatusStrip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if snap.isScorer {
+            if !snap.updateRequired.isEmpty {
+                Text(LocalizedStringKey(snap.updateRequired == "THIS_DEVICE" ? "sync.updateWatch.short" : "sync.updatePhone.short"))
+            } else if snap.isScorer {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .bold))
                 Text(scorerText)
@@ -477,6 +533,7 @@ struct BannerView: View {
     private var text: String {
         switch banner {
         case let .undo(from, to): return loc("banner.undo %@ %@", from, to)
+        case .pointRemoved: return loc("banner.pointRemoved")
         case .changeEnds: return loc("banner.changeEnds")
         case .receiveOrderSwapped: return loc("banner.receiveOrder")
         case .healthUnavailable: return loc("banner.health")
@@ -495,6 +552,7 @@ struct ControlsPage: View {
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @State private var confirmEnd = false
+    @State private var chooseServer = false
     @State private var confirmTakeOver = false
 
     var body: some View {
@@ -519,6 +577,9 @@ struct ControlsPage: View {
                 }
             }
         }
+        .sheet(isPresented: $chooseServer) {
+            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
+        }
         .alert("controls.end.confirm", isPresented: $confirmEnd) {
             Button("controls.end", role: .destructive) { model.endMatch() }
             Button("common.cancel", role: .cancel) {}
@@ -528,6 +589,14 @@ struct ControlsPage: View {
 
     @ViewBuilder
     private var scorerControls: some View {
+        UpdateRequiredLabel(code: snap.updateRequired)
+        RemovePointButtons(model: model, snap: snap)
+        if model.banner == .pointRemoved && snap.canRedo {
+            Button("action.undo", action: model.redoRemoval)
+        }
+        if snap.serverChoiceGame > 0 {
+            Button("serve.choose") { chooseServer = true }
+        }
         Button(action: model.undo) {
             Label("action.undo", systemImage: "arrow.uturn.backward")
                 .frame(maxWidth: .infinity)
@@ -565,6 +634,7 @@ struct ControlsPage: View {
 
     @ViewBuilder
     private var displayControls: some View {
+        UpdateRequiredLabel(code: snap.updateRequired)
         VStack(spacing: 2) {
             Text("role.display")
                 .font(.headline)
