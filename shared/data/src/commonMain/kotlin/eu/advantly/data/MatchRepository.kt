@@ -192,6 +192,12 @@ class MatchRepository internal constructor(
         offset: Long = 0,
     ): List<MatchRecord> = queries.history(sport?.name, fromMs, toMs, limit, offset).executeAsList().map { it.toRecord() }
 
+    /** Neueste Besetzungen für Mitspieler-Vorschläge, ohne Format, Metadaten und Ergebnis zu dekodieren. */
+    fun recentLineups(
+        sport: Sport? = null,
+        limit: Long = 100,
+    ): List<Lineup> = queries.recentLineups(sport?.name, limit).executeAsList().map { DataJson.decodeFromString(Lineup.serializer(), it) }
+
     /** Nicht beendete Matches, zuletzt geändertes zuerst (Resume-Karte). */
     fun active(): List<MatchRecord> = queries.active().executeAsList().map { it.toRecord() }
 

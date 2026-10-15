@@ -7,13 +7,16 @@ import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.MidGameEndChange
 import eu.advantly.core.model.PickleballScoring
+import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.presentation.wizard.DecidingSetChoice
+import eu.advantly.presentation.wizard.PlayerPlace
 import eu.advantly.presentation.wizard.SetsChoice
 import eu.advantly.presentation.wizard.TiebreakAtChoice
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.formatLabel
+import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.sportName
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.fmt_deciding_adv_set
@@ -87,6 +90,11 @@ import eu.advantly.ui.phone.resources.surface_grass_desc
 import eu.advantly.ui.phone.resources.surface_hard
 import eu.advantly.ui.phone.resources.surface_hard_desc
 import eu.advantly.ui.phone.resources.surface_other
+import eu.advantly.ui.phone.resources.wizard_empty_slot
+import eu.advantly.ui.phone.resources.wizard_place
+import eu.advantly.ui.phone.resources.wizard_team_them
+import eu.advantly.ui.phone.resources.wizard_team_us
+import eu.advantly.ui.phone.resources.wizard_you
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -316,4 +324,32 @@ internal fun formatSummary(state: WizardUiState): String {
         }
     }
     return parts.joinToString(" · ")
+}
+
+/** Platz und Besetzung gemeinsam für Touch, TalkBack und VoiceOver benennen. */
+@Composable
+internal fun placeLabel(
+    state: WizardUiState,
+    place: PlayerPlace,
+): String =
+    stringResource(
+        Res.string.wizard_place,
+        stringResource(if (place.side == Side.A) Res.string.wizard_team_us else Res.string.wizard_team_them),
+        place.index + 1,
+        playerSlotName(state, place),
+    )
+
+@Composable
+internal fun playerSlotName(
+    state: WizardUiState,
+    place: PlayerPlace,
+): String {
+    val player = state.input.team(place.side).getOrNull(place.index)
+    val name =
+        when {
+            player == null -> stringResource(Res.string.wizard_empty_slot)
+            player.id == state.selfId -> stringResource(Res.string.wizard_you, playerName(player))
+            else -> playerName(player)
+        }
+    return name
 }

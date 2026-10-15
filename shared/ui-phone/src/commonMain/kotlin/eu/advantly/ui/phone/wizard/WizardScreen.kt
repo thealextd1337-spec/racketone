@@ -16,20 +16,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,33 +31,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
-import eu.advantly.core.model.DeuceMode
-import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Environment
-import eu.advantly.core.model.MidGameEndChange
-import eu.advantly.core.model.PickleballScoring
-import eu.advantly.core.model.Player
-import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.presentation.match.ScorerOption
-import eu.advantly.presentation.wizard.DecidingSetChoice
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.SetsChoice
-import eu.advantly.presentation.wizard.TiebreakAtChoice
 import eu.advantly.presentation.wizard.WizardStep
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.AdvantlyButton
-import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.SegmentedChoice
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.TopBar
-import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.common.sportColor
 import eu.advantly.ui.phone.common.sportName
@@ -75,47 +56,27 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
-import eu.advantly.ui.phone.resources.wizard_add_guest
-import eu.advantly.ui.phone.resources.wizard_add_guest_hint
 import eu.advantly.ui.phone.resources.wizard_advanced
-import eu.advantly.ui.phone.resources.wizard_coin_toss
 import eu.advantly.ui.phone.resources.wizard_continue
-import eu.advantly.ui.phone.resources.wizard_doubles
-import eu.advantly.ui.phone.resources.wizard_empty_slot
 import eu.advantly.ui.phone.resources.wizard_environment
-import eu.advantly.ui.phone.resources.wizard_first_server
 import eu.advantly.ui.phone.resources.wizard_format_invalid
-import eu.advantly.ui.phone.resources.wizard_guests
 import eu.advantly.ui.phone.resources.wizard_indoor
-import eu.advantly.ui.phone.resources.wizard_mixed
-import eu.advantly.ui.phone.resources.wizard_mixed_hint
 import eu.advantly.ui.phone.resources.wizard_outdoor
-import eu.advantly.ui.phone.resources.wizard_partner
 import eu.advantly.ui.phone.resources.wizard_save_favorite
 import eu.advantly.ui.phone.resources.wizard_save_favorite_hint
 import eu.advantly.ui.phone.resources.wizard_scorer_phone
 import eu.advantly.ui.phone.resources.wizard_scorer_watch
 import eu.advantly.ui.phone.resources.wizard_sets_required
-import eu.advantly.ui.phone.resources.wizard_singles
 import eu.advantly.ui.phone.resources.wizard_skip
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_step_of
 import eu.advantly.ui.phone.resources.wizard_summary
 import eu.advantly.ui.phone.resources.wizard_summary_scorer
-import eu.advantly.ui.phone.resources.wizard_swap_order
-import eu.advantly.ui.phone.resources.wizard_team_order_hint_badminton
-import eu.advantly.ui.phone.resources.wizard_team_order_hint_pickleball
-import eu.advantly.ui.phone.resources.wizard_team_order_hint_tabletennis
-import eu.advantly.ui.phone.resources.wizard_team_order_hint_tennis
-import eu.advantly.ui.phone.resources.wizard_team_them
-import eu.advantly.ui.phone.resources.wizard_team_us
 import eu.advantly.ui.phone.resources.wizard_title_format
-import eu.advantly.ui.phone.resources.wizard_title_players
 import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.resources.wizard_title_sport
 import eu.advantly.ui.phone.resources.wizard_title_surface
 import eu.advantly.ui.phone.resources.wizard_title_venue
-import eu.advantly.ui.phone.resources.wizard_you
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -188,7 +149,7 @@ private fun Progress(state: WizardUiState) {
 }
 
 @Composable
-private fun StepTitle(text: String) {
+internal fun StepTitle(text: String) {
     Text(
         text,
         style = AdvantlyTheme.typography.headline,
@@ -294,224 +255,6 @@ private fun SurfaceTile(
         }
         if (selected) Icon(AdvantlyIcons.Check, contentDescription = null, tint = colors.brand)
     }
-}
-
-// --- H4 Spieler ---
-
-@Composable
-private fun PlayersStep(
-    wizard: MatchWizard,
-    state: WizardUiState,
-) {
-    val input = state.input
-    val sport = input.sport ?: return
-    StepTitle(stringResource(Res.string.wizard_title_players))
-    if (state.options.disciplineSelectable) {
-        SegmentedChoice(
-            options = listOf(Discipline.SINGLES, Discipline.DOUBLES),
-            selected = input.discipline,
-            label = { stringResource(if (it == Discipline.SINGLES) Res.string.wizard_singles else Res.string.wizard_doubles) },
-            onSelect = wizard::setDiscipline,
-            tagPrefix = "discipline",
-        )
-    }
-    val doubles = input.discipline == Discipline.DOUBLES
-    for (side in Side.entries) {
-        TeamBlock(wizard, state, side, doubles)
-    }
-    if (doubles) {
-        Text(
-            stringResource(teamOrderHint(sport)),
-            style = AdvantlyTheme.typography.caption,
-            color = AdvantlyTheme.colors.text2,
-            modifier = Modifier.padding(top = Spacing.xs),
-        )
-        if (state.options.mixedSelectable) {
-            ToggleRow(
-                title = stringResource(Res.string.wizard_mixed),
-                subtitle = stringResource(Res.string.wizard_mixed_hint),
-                checked = input.mixed,
-                onChange = wizard::setMixed,
-                tag = "toggle_mixed",
-            )
-        }
-    }
-    GuestPicker(wizard, state)
-    if (state.playersComplete) FirstServerPicker(wizard, state)
-}
-
-@Composable
-private fun TeamBlock(
-    wizard: MatchWizard,
-    state: WizardUiState,
-    side: Side,
-    doubles: Boolean,
-) {
-    val colors = AdvantlyTheme.colors
-    val teamColor = if (side == Side.A) colors.teamUs else colors.teamThem
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SectionTitle(stringResource(if (side == Side.A) Res.string.wizard_team_us else Res.string.wizard_team_them), Modifier.weight(1f))
-        if (doubles) {
-            val label = stringResource(Res.string.wizard_swap_order)
-            Box(
-                Modifier
-                    .testTag("swap_${side.name}")
-                    .size(Spacing.minTouchTarget)
-                    .clickable(role = Role.Button) { wizard.swapOrder(side) }
-                    .semantics { contentDescription = label },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(AdvantlyIcons.SwapVert, contentDescription = null, tint = colors.text2)
-            }
-        }
-    }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(colors.surface, Radii.cardShape)
-            .border(width = 1.5.dp, color = teamColor.copy(alpha = 0.6f), shape = Radii.cardShape)
-            .padding(Spacing.xs),
-    ) {
-        state.input.team(side).forEachIndexed { index, player ->
-            PlayerSlot(
-                player = player,
-                isSelf = side == Side.A && index == 0,
-                isPartner = side == Side.A && index == 1,
-                teamColor = teamColor,
-                tag = "slot_${side.name}_$index",
-                onClear = { wizard.clearSlot(side, index) },
-            )
-        }
-    }
-}
-
-/** Spieler-Slot (04 §5.6): Initialen + Name; leer = „+“. Antippen leert ihn (außer dem eigenen). */
-@Composable
-private fun PlayerSlot(
-    player: Player?,
-    isSelf: Boolean,
-    isPartner: Boolean,
-    teamColor: Color,
-    tag: String,
-    onClear: () -> Unit,
-) {
-    val colors = AdvantlyTheme.colors
-    val plainName = playerName(player)
-    val name =
-        when {
-            player == null -> stringResource(Res.string.wizard_empty_slot)
-            isSelf -> stringResource(Res.string.wizard_you, plainName)
-            else -> plainName
-        }
-    Row(
-        Modifier
-            .testTag(tag)
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .clickable(enabled = player != null && !isSelf, role = Role.Button, onClick = onClear)
-            .padding(horizontal = Spacing.m),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.m),
-    ) {
-        Box(
-            Modifier.size(36.dp).background(if (player == null) colors.surface2 else teamColor, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (player == null) "+" else plainName.take(1).uppercase(),
-                style = AdvantlyTheme.typography.label,
-                color = if (player == null) colors.text2 else colors.onBrand,
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Text(name, style = AdvantlyTheme.typography.label, color = if (player == null) colors.text2 else colors.text)
-            if (isPartner && player != null) {
-                Text(stringResource(Res.string.wizard_partner), style = AdvantlyTheme.typography.caption, color = colors.text2)
-            }
-        }
-        if (player != null && !isSelf) Icon(AdvantlyIcons.Close, contentDescription = null, tint = colors.text3)
-    }
-}
-
-/** Gäste: zuletzt verwendete als Chips, neue per Name (nur Name, später verknüpfbar). */
-@Composable
-private fun GuestPicker(
-    wizard: MatchWizard,
-    state: WizardUiState,
-) {
-    if (state.playersComplete) return
-    var name by rememberSaveable { mutableStateOf("") }
-    val players by wizard.guests.collectAsState()
-    SectionTitle(stringResource(Res.string.wizard_guests))
-    val inLineup =
-        state.input.players
-            .map { it.id }
-            .toSet()
-    players.filter { it.id !in inLineup }.take(MAX_GUEST_CHIPS).chunked(2).forEach { row ->
-        Row(Modifier.padding(bottom = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            row.forEach { guest ->
-                ChoiceChip(
-                    text = playerName(guest),
-                    selected = false,
-                    onClick = { wizard.pickPlayer(guest) },
-                    tag = "guest_${guest.displayName}",
-                )
-            }
-        }
-    }
-    val add = {
-        wizard.addGuest(name)
-        name = ""
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text(stringResource(Res.string.wizard_add_guest_hint)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { add() }),
-            modifier = Modifier.weight(1f).testTag("guest_name_input"),
-        )
-        AdvantlyButton(
-            text = stringResource(Res.string.wizard_add_guest),
-            primary = false,
-            enabled = name.isNotBlank(),
-            onClick = add,
-            modifier = Modifier.testTag("guest_add"),
-        )
-    }
-}
-
-private const val MAX_GUEST_CHIPS = 6
-
-/** Erster Aufschlag: Chips je Spieler + Münzwurf (02 §5.1: Default „Ich“). */
-@Composable
-private fun FirstServerPicker(
-    wizard: MatchWizard,
-    state: WizardUiState,
-) {
-    SectionTitle(stringResource(Res.string.wizard_first_server))
-    val current = state.setup?.lineup?.firstServer ?: state.selfId
-    val all = state.input.players
-    all.chunked(2).forEach { row ->
-        Row(Modifier.padding(bottom = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            row.forEach { player ->
-                ChoiceChip(
-                    text = playerName(player),
-                    selected = player.id == current,
-                    onClick = { wizard.setFirstServer(player.id) },
-                    tag = "server_${player.id.value}",
-                )
-            }
-        }
-    }
-    ChoiceChip(
-        text = stringResource(Res.string.wizard_coin_toss),
-        selected = false,
-        onClick = { wizard.coinToss() },
-        tag = "coin_toss",
-    )
 }
 
 // --- H5 Format ---
@@ -842,12 +585,3 @@ private fun Footer(
         }
     }
 }
-
-/** Bedeutung der Reihenfolge im Doppel je Sportart (02 §3.3). */
-private fun teamOrderHint(sport: Sport) =
-    when (sport) {
-        Sport.TENNIS, Sport.PADEL -> Res.string.wizard_team_order_hint_tennis
-        Sport.BADMINTON -> Res.string.wizard_team_order_hint_badminton
-        Sport.PICKLEBALL -> Res.string.wizard_team_order_hint_pickleball
-        Sport.TABLE_TENNIS -> Res.string.wizard_team_order_hint_tabletennis
-    }
