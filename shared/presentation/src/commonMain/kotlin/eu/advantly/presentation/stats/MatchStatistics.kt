@@ -34,6 +34,8 @@ data class Ratio(
  * @property servicePoints Punkte bei eigenem Aufschlag gewonnen / gespielt
  * @property returnPoints Punkte bei gegnerischem Aufschlag gewonnen / gespielt
  * @property breakPoints Breakbälle verwertet / erspielt (Tennis/Padel; jede Chance zählt einzeln)
+ * @property breakPointsSaved Breakbälle abgewehrt / zugelassen (Tennis/Padel)
+ * @property progression wirksamer Ballwechsel-/Spielverlauf mit Break-Markern
  * @property setPoints Satzbälle verwertet / erspielt (Pickleball: Spielbälle)
  * @property decidingPoints Entscheidungspunkte (Golden/Star/No-Ad bzw. Deckel) gewonnen / gespielt
  * @property games gewonnene Spiele (nur Tennis/Padel, ohne Match-Tiebreak), sonst `null`
@@ -56,6 +58,8 @@ data class MatchStats(
     val serve: SidePair<ServeStats> = SidePair(ServeStats.EMPTY, ServeStats.EMPTY),
     val servers: List<PlayerServeStats> = emptyList(),
     val serveInfoRecorded: Boolean = false,
+    val breakPointsSaved: SidePair<Ratio> = SidePair(Ratio(0, 0), Ratio(0, 0)),
+    val progression: List<GameProgress> = emptyList(),
 ) {
     val totalPoints: Int get() = pointsWon.a + pointsWon.b
 }
@@ -112,6 +116,11 @@ object MatchStatistics {
             setPoints = flagged(points) { it.level == FlagLevel.SET_POINT || it.level == FlagLevel.MATCH_POINT },
             decidingPoints =
                 ratio(points, { p, _ -> p.before.current?.decidingPoint == true }) { p, side -> p.point.side == side },
+            breakPointsSaved =
+                ratio(points, { p, side ->
+                    p.before.statusFlags.any { it.side == side.other && it.breakPoint }
+                }) { p, side -> p.point.side == side },
+            progression = matchProgression(points),
             longestStreak = streaks(points),
             games = games(record, created.config.sport.isTennisLike),
             netDurationMs = netDuration(record),

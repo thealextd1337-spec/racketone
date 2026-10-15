@@ -446,6 +446,8 @@ data class MatchSummary(
     val startedAtMs: Long,
     val finishedAtMs: Long,
     val interruptedSet: CurrentSet? = null,
+    /** Revision des gespeicherten Logs; unabh?ngig vom Endzeitpunkt (Undo, Zuweisung). */
+    val updatedAtMs: Long = finishedAtMs,
 ) {
     val durationMs: Long get() = (finishedAtMs - startedAtMs).coerceAtLeast(0)
 }

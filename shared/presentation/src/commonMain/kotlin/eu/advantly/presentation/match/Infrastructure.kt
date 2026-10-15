@@ -57,3 +57,6 @@ data class LocalDay(
 
 /** Heutiges Datum in der lokalen Zeitzone des Geräts. */
 expect fun systemLocalDay(): LocalDay
+
+/** Lokales Kalenderdatum eines gespeicherten Match-Zeitpunkts. */
+expect fun localDayAt(epochMs: Long): LocalDay

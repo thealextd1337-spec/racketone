@@ -98,7 +98,8 @@ class SessionMatchStore(
     override val ownerAliases: StateFlow<Set<PlayerId>> = aliasesFlow.asStateFlow()
 
     private val players = HashMap<PlayerId, Player>()
-    private val summaries = HashMap<MatchId, Pair<Long, MatchSummary>>()
+    private val summaries = HashMap<MatchId, Triple<Long, Long, MatchSummary>>()
+    private val records = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
     private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
     private val selfFlow = MutableStateFlow(ensureSelf())
@@ -347,6 +348,18 @@ class SessionMatchStore(
 
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
+        val cached =
+            records[matchId]
+                ?.takeIf {
+                    it.first == header.updatedAtMs &&
+                        it.second.events.size
+                            .toLong() == data.events.count(matchId.value)
+                }?.second
+        if (cached != null) {
+            // Namen und Identitätszuweisungen können sich ohne neues Score-Event ändern.
+            val setup = setupOf(header)
+            return if (cached.summary.setup == setup) cached else cached.copy(summary = cached.summary.copy(setup = setup))
+        }
         val engine =
             try {
                 ScoringEngine.replay(data.events.scoreEvents(matchId))
@@ -364,7 +377,11 @@ class SessionMatchStore(
                         it.payload !is PlayerAssigned
                     }?.wallClockMs,
             )
-        return MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
+        val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
+        records.remove(matchId)
+        records[matchId] = header.updatedAtMs to record
+        if (records.size > 8) records.remove(records.keys.first())
+        return record
     }
 
     override fun delete(matchId: MatchId): Boolean {
@@ -375,6 +392,7 @@ class SessionMatchStore(
         session.deleteMatch(matchId)
         data.settings.remove(contactKey(matchId))
         summaries.remove(matchId)
+        records.remove(matchId)
         finishedAt.remove(matchId)
         refreshStored()
         return true
@@ -711,7 +729,10 @@ class SessionMatchStore(
     }
 
     private fun cachedSummary(header: StoredMatch): MatchSummary? {
-        summaries[header.id]?.let { (updatedAt, summary) -> if (updatedAt == header.updatedAtMs) return summary }
+        val eventCount = data.events.count(header.id.value)
+        summaries[header.id]?.let { (updatedAt, count, summary) ->
+            if (updatedAt == header.updatedAtMs && count == eventCount) return summary
+        }
         val engine =
             try {
                 ScoringEngine.replay(data.events.scoreEvents(header.id))
@@ -729,7 +750,7 @@ class SessionMatchStore(
                         it.payload !is PlayerAssigned
                     }?.wallClockMs,
             )
-        summaries[header.id] = header.updatedAtMs to summary
+        summaries[header.id] = Triple(header.updatedAtMs, eventCount, summary)
         return summary
     }
 
@@ -748,6 +769,7 @@ class SessionMatchStore(
             startedAtMs = startedAtMs,
             finishedAtMs = lastEventAtMs ?: startedAtMs,
             interruptedSet = state.current.takeIf { state.status == MatchStatus.FINISHED },
+            updatedAtMs = header.updatedAtMs,
         )
 
     // --- Favoriten (Format + Besetzung, JSON in den Settings) ----------------------------------------
@@ -780,7 +802,7 @@ class SessionMatchStore(
             }.map { FavoriteLineup(it.id, MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup))) }
 
     private companion object {
-        const val DEFAULT_HISTORY_LIMIT = 200L
+        const val DEFAULT_HISTORY_LIMIT = Long.MAX_VALUE
 
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
