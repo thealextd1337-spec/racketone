@@ -1,46 +1,183 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="wear_version">Version %1$s</string>
 
-    <!-- Spike S5: Workout-Laufzeit -->
-    <string name="setup_title">Workout-Test (S5)</string>
+    <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>
+    <string name="sport_padel">Padel</string>
+    <string name="sport_pickleball">Pickleball</string>
     <string name="sport_badminton">Badminton</string>
     <string name="sport_table_tennis">Tischtennis</string>
-    <string name="exercise_type_workout">Training</string>
-    <string name="exercise_type_native">Uhr-Typ: %1$s (nativ)</string>
-    <string name="exercise_type_fallback">Uhr-Typ: %1$s (Ersatz)</string>
-    <string name="exercise_type_unsupported">Kein Trainingstyp unterstützt – Zählen ohne Puls</string>
-    <string name="exercise_type_loading">Prüfe Fähigkeiten der Uhr…</string>
-    <string name="action_start">Match starten</string>
-    <string name="permission_rationale">Für den Feldtest werden Puls und Schritte aufgezeichnet. Die Daten bleiben auf der Uhr.</string>
-    <string name="gesture_hint">Tippen oben: Wir · unten: Gegner · nach unten wischen: Rückgängig · nach links: Menü</string>
+
+    <!-- Startliste (W1) -->
+    <string name="home_new_match">Neues Match</string>
+    <string name="home_repeat_last">Wie letztes Mal</string>
+    <string name="home_resume">Match fortsetzen</string>
+    <string name="home_recent">Letzte Ergebnisse</string>
+    <string name="home_no_matches">Noch keine Matches</string>
+    <string name="workout_toggle">Workout mitlaufen lassen</string>
+    <string name="workout_toggle_hint">Live-Puls, hält die App wach</string>
+    <string name="result_won">Gewonnen</string>
+    <string name="result_lost">Verloren</string>
+    <string name="result_drawn">Unentschieden</string>
+    <string name="result_abandoned">Abgebrochen</string>
+
+    <!-- Kurz-Wizard (W2) -->
+    <string name="setup_sport_title">Sportart</string>
+    <string name="setup_discipline_title">Einzel oder Doppel?</string>
+    <string name="discipline_singles">Einzel</string>
+    <string name="discipline_doubles">Doppel</string>
+    <string name="setup_format_title">Format</string>
+    <string name="setup_format_required">Satzanzahl wählen</string>
+    <string name="setup_default">Standard</string>
+    <string name="setup_server_title">Wer schlägt zuerst auf?</string>
+    <string name="setup_server_hint">Tippen startet das Match</string>
+    <string name="format_best_of">Best of %1$d</string>
+    <string name="format_open_sets">Offen (Satz für Satz)</string>
+    <string name="format_open_games">Offen (Spiel für Spiel)</string>
+    <string name="format_tennis_mtb">Best of 3 · Match-Tiebreak</string>
+    <string name="format_one_set">1 Satz</string>
+    <string name="format_short_sets">Kurzsätze bis 4</string>
+    <string name="format_padel_golden">Best of 3 · Golden Point</string>
+    <string name="format_padel_star">Best of 3 · Star Point</string>
+    <string name="format_padel_golden_stb">Golden Point · Super-Tiebreak</string>
+    <string name="format_pickleball_one">1 Spiel bis %1$d</string>
+    <string name="format_pickleball_bo3">Best of 3 bis %1$d</string>
+    <string name="format_pickleball_rally">Rally-Zählweise bis %1$d</string>
+    <string name="format_badminton_bo3" tools:ignore="PluralsCandidate">Best of 3 · %1$d Punkte</string>
+    <string name="format_badminton_one" tools:ignore="PluralsCandidate">1 Satz · %1$d Punkte</string>
+    <string name="format_table_tennis">Best of %1$d (%2$d Gewinnsätze)</string>
+
+    <!-- Live-Score (W3) -->
     <string name="label_us">WIR</string>
     <string name="label_them">GEGNER</string>
+    <string name="player_you">Du</string>
+    <string name="player_partner">Partner</string>
+    <string name="player_opponent">Gegner</string>
+    <string name="player_opponent_1">Gegner 1</string>
+    <string name="player_opponent_2">Gegner 2</string>
+    <string name="role_view">ANZEIGE</string>
+    <string name="role_scorer_short">Zähler</string>
+    <string name="device_phone">Handy</string>
+    <string name="device_watch">andere Uhr</string>
+    <string name="device_other">anderes Gerät</string>
+    <string name="scoring_by">Es zählt: %1$s</string>
+    <string name="sync_synced">Synchron</string>
+    <plurals name="sync_pending">
+        <item quantity="one">%1$d ausstehend</item>
+        <item quantity="other">%1$d ausstehend</item>
+    </plurals>
+    <string name="sync_local">Nur lokal</string>
+    <string name="sync_live">Live</string>
+    <string name="sync_ago_seconds">vor %1$d s</string>
+    <string name="sync_ago_minutes">vor %1$d min</string>
+    <string name="sync_no_contact">Kein Kontakt</string>
+    <string name="sync_last_update">Stand %1$s</string>
+    <string name="take_over_offer">Zählen übernehmen</string>
+    <plurals name="rejected_inputs">
+        <item quantity="one">%1$d Eingabe nicht übernommen</item>
+        <item quantity="other">%1$d Eingaben nicht übernommen</item>
+    </plurals>
+    <string name="locked_label">Gesperrt · halten zum Entsperren</string>
+
+    <!-- Hinweis-Pill (04 §4.3.1, 02 §8.2/§8.4) -->
+    <string name="hint_match_point">Matchball</string>
+    <plurals name="hint_match_points">
+        <item quantity="one">%1$d Matchball</item>
+        <item quantity="other">%1$d Matchbälle</item>
+    </plurals>
+    <string name="hint_set_point">Satzball</string>
+    <plurals name="hint_set_points">
+        <item quantity="one">%1$d Satzball</item>
+        <item quantity="other">%1$d Satzbälle</item>
+    </plurals>
+    <string name="hint_break_point">Breakball</string>
+    <plurals name="hint_break_points">
+        <item quantity="one">%1$d Breakball</item>
+        <item quantity="other">%1$d Breakbälle</item>
+    </plurals>
+    <string name="hint_golden_point">Golden Point</string>
+    <string name="hint_deciding_point">Entscheidungspunkt</string>
+    <string name="hint_star_point">Star Point</string>
+    <string name="hint_deuce">Einstand</string>
+    <string name="hint_extension">Verlängerung</string>
+    <string name="hint_tiebreak">Tiebreak</string>
+    <string name="hint_match_tiebreak">Match-Tiebreak</string>
+    <string name="hint_change_ends">Seitenwechsel</string>
+    <string name="hint_receive_swap">Rückschlag tauschen</string>
+    <string name="hint_side_out">Side-Out</string>
+    <string name="hint_second_server">2. Aufschläger</string>
+    <string name="hint_interval">Pause bis 60 s</string>
+    <string name="hint_paused">Pause</string>
+
+    <!-- Toasts -->
     <string name="undo_toast">Rückgängig: %1$s → %2$s</string>
+    <string name="redo_toast">Wiederholt</string>
     <string name="nothing_to_undo">Nichts rückgängig zu machen</string>
-    <string name="workout_starting">Workout startet…</string>
+    <string name="toast_locked">Gesperrt – halten zum Entsperren</string>
+    <string name="toast_unlocked">Entsperrt</string>
+    <string name="toast_now_scorer">Du zählst jetzt</string>
+    <string name="toast_other_scores">Jetzt zählt: %1$s</string>
+    <string name="toast_match_removed">Match wurde gelöscht</string>
+    <string name="toast_start_failed">Match konnte nicht starten</string>
+
+    <!-- Steuerseite (W4) -->
     <string name="controls_title">Steuerung</string>
+    <string name="action_back_to_score">Zum Spielstand</string>
+    <string name="action_undo">Rückgängig</string>
+    <string name="action_redo">Wiederholen</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume_play">Fortsetzen</string>
+    <string name="action_lock">Sperren</string>
     <string name="action_end_match">Match beenden</string>
-    <string name="action_resume">Weiter zählen</string>
-    <string name="log_path">Log: %1$s</string>
+    <string name="action_take_over">Übernehmen</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_confirm_end">Beenden</string>
+    <string name="action_retry">Erneut versuchen</string>
+    <string name="action_replace">Ersetzen</string>
+    <string name="action_without_workout">Ohne Workout</string>
+    <string name="action_yes">Ja</string>
+    <string name="action_no_end">Nein, beenden</string>
+    <string name="action_match_tiebreak">Match-Tiebreak</string>
+    <string name="action_done">Fertig</string>
+    <string name="action_follow_up">Noch einer?</string>
     <string name="stats_line">%1$s kcal · %2$s Schritte</string>
-    <string name="error_title">Workout fehlgeschlagen</string>
-    <string name="notification_channel_workout">Laufendes Match</string>
-    <string name="notification_title">Advantly-Match</string>
-    <string name="notification_text">Tippen, um weiterzuzählen</string>
-    <string name="count_only_label">Nur Zählen</string>
-    <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: nur Zählen, die Uhr kann die App im Hintergrund beenden</string>
+    <string name="workout_starting">Workout startet…</string>
+    <string name="workout_running">Workout läuft</string>
+    <string name="workout_off">Ohne Workout</string>
+    <string name="count_only_label">Ohne Workout: die Uhr kann die App beenden</string>
+
+    <!-- Dialoge (W6/W7) -->
+    <string name="confirm_take_over_title">Auf dieser Uhr zählen?</string>
+    <string name="confirm_take_over_text">Bisher zählt: %1$s. Danach zeigt es nur noch an.</string>
+    <string name="confirm_end_title">Match beenden?</string>
+    <string name="confirm_end_text">Das Match endet ohne Wertung.</string>
+    <string name="unit_set">Satz %1$d</string>
+    <string name="unit_game">Spiel %1$d</string>
+    <string name="decision_won">gewonnen</string>
+    <string name="decision_lost">verloren</string>
+    <string name="dialog_another_set">Noch ein Satz?</string>
+    <string name="dialog_another_game">Noch ein Spiel?</string>
+    <string name="decision_waiting">%1$s entscheidet</string>
+    <string name="finished_title">Match beendet</string>
+
+    <!-- TalkBack (04 §8) -->
+    <string name="a11y_point_us">Punkt für Wir</string>
+    <string name="a11y_point_them">Punkt für Gegner</string>
+    <string name="a11y_score">Stand %1$s zu %2$s</string>
+    <string name="a11y_serving_us">Aufschlag Wir</string>
+    <string name="a11y_serving_them">Aufschlag Gegner</string>
+    <string name="a11y_view_only">Anzeige, %1$s</string>
+
+    <!-- Workout / Health (05 §2) -->
+    <string name="permission_rationale">Der Puls wird während des Matches live angezeigt und nicht gespeichert.</string>
+    <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: kein Workout, die Uhr kann die App im Hintergrund beenden</string>
     <string name="hint_no_heart_rate">Ohne Pulsrecht: Workout ohne Puls</string>
     <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte und Kalorien</string>
-    <string name="hint_no_notifications">Ohne Benachrichtigungen: kein Symbol auf dem Zifferblatt</string>
+    <string name="hint_no_notifications">Ohne Benachrichtigungen: kein Symbol auf dem Zifferblatt und kein Hinweis auf Handy-Matches</string>
     <string name="conflict_title">Eine andere App zeichnet ein Training auf</string>
     <string name="conflict_text">Durch dieses Match ersetzen? Das andere Training wird beendet.</string>
-    <string name="action_replace">Ersetzen</string>
-    <string name="action_cancel">Abbrechen</string>
-    <string name="action_retry">Erneut versuchen</string>
-    <string name="confirm_end_title">Match beenden?</string>
-    <string name="action_confirm_end">Beenden</string>
+    <string name="error_title">Workout fehlgeschlagen</string>
     <string name="error_permissions">Berechtigungen fehlen</string>
     <string name="error_capabilities">Fähigkeiten der Uhr nicht abrufbar</string>
     <string name="error_status_query">Trainingsstatus nicht abrufbar</string>
@@ -50,4 +187,13 @@
     <string name="error_external_end">Training wurde vom System oder einer anderen App beendet</string>
     <string name="error_foreground">Hintergrunddienst konnte nicht starten</string>
     <string name="error_internal">Unerwarteter Fehler</string>
+
+    <!-- Benachrichtigungen -->
+    <string name="notification_channel_workout">Laufendes Match</string>
+    <string name="notification_title">Advantly-Match</string>
+    <string name="notification_text">Tippen, um weiterzuzählen</string>
+    <string name="notification_channel_match">Neue Matches</string>
+    <string name="notification_match_title">Match läuft</string>
+    <string name="notification_match_scorer">Diese Uhr zählt – tippen zum Öffnen</string>
+    <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
 </resources>

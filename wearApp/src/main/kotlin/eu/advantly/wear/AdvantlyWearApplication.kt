@@ -4,14 +4,22 @@ import android.app.ActivityManager
 import android.app.Application
 import android.content.ComponentCallbacks2
 import android.os.Process
+import eu.advantly.match.session.SessionListener
 import eu.advantly.wear.diagnostics.DiagLine
 import eu.advantly.wear.diagnostics.DiagnosticLog
+import eu.advantly.wear.sync.MatchNotifier
+import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.workout.SessionStore
+import eu.advantly.wear.workout.WorkoutAction
+import eu.advantly.wear.workout.WorkoutCoordinator
+import eu.advantly.wear.workout.WorkoutInputs
+import eu.advantly.wear.workout.WorkoutService
+import eu.advantly.wear.workout.WorkoutStateHolder
 
 /**
- * Application der Wear-App. Für Spike S5: protokolliert jeden Prozessstart und – falls dabei noch eine Session als
- * aktiv markiert ist – einen **unerwarteten Neustart** (Prozess wurde während des Matches beendet).
- * Zusätzlich werden die vom System gemeldeten Gründe früherer Prozessenden (`ApplicationExitInfo`) geloggt.
+ * Application der Wear-App: startet die prozessweite Match-Session (auch bei Weckruf durch den Sync-Dienst), meldet
+ * neue Matches vom Handy per Benachrichtigung und beendet das Workout, sobald kein Match mehr offen ist (z. B. am Handy
+ * gelöscht). Diagnose (nur Debug): Prozessstarts, unerwartete Neustarts während eines Workouts, frühere Prozessenden.
  */
 class AdvantlyWearApplication : Application() {
     override fun onCreate() {
@@ -29,6 +37,25 @@ class AdvantlyWearApplication : Application() {
             DiagnosticLog.log("PROCESS_RESTART_DURING_SESSION", "sessionId" to store.sessionId)
         }
         logExitReasons(store)
+
+        val holder = WearSessions.get(this)
+        holder.session.addListener(MatchNotifier(this))
+        holder.session.addListener(
+            SessionListener { state ->
+                val match = state.match
+                val inputs =
+                    WorkoutInputs(
+                        enabled = holder.prefs.workoutEnabled,
+                        matchId = match?.id,
+                        sport = match?.format?.sport,
+                        phase = WorkoutStateHolder.state.value.phase,
+                        handledMatchId = holder.prefs.workoutHandledMatchId,
+                    )
+                // Start nur aus der sichtbaren Activity (FGS-Startverbot im Hintergrund); Stoppen geht immer
+                if (WorkoutCoordinator.decide(inputs) == WorkoutAction.Stop) WorkoutService.stop(this)
+                if (match == null && WorkoutStateHolder.state.value.countOnly) WorkoutStateHolder.reset()
+            },
+        )
     }
 
     private fun logExitReasons(store: SessionStore) {

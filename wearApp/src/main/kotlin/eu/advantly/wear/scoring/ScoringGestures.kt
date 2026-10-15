@@ -1,9 +1,10 @@
 package eu.advantly.wear.scoring
 
+import eu.advantly.core.model.Side
 import kotlin.math.abs
 
 /**
- * Tap-Zonen des Scoring-Screens nach 04 §4.3.2/§4.3.3: obere Hälfte = Wir, untere = Gegner,
+ * Tap-Zonen des Scoring-Screens nach 04 §4.3.2/§4.3.3: obere Hälfte = Wir (Side A), untere = Gegner (Side B),
  * oberste [TOP_DEAD_ZONE] (System-Wischgesten) und das Mittelband [MIDDLE_BAND] um die Grenze sind nicht scorend.
  */
 object TapZones {
@@ -21,20 +22,21 @@ object TapZones {
         val bandEnd = 0.5f + MIDDLE_BAND / 2
         return when {
             rel < TOP_DEAD_ZONE -> null
-            rel < bandStart -> Side.US
+            rel < bandStart -> Side.A
             rel <= bandEnd -> null
-            rel <= 1f -> Side.THEM
+            rel <= 1f -> Side.B
             else -> null
         }
     }
 }
 
 /** Ergebnis einer abgeschlossenen Ein-Finger-Geste auf dem Scoring-Screen. */
-enum class ScoringGesture { TAP, SWIPE_DOWN, SWIPE_LEFT, NONE }
+enum class ScoringGesture { TAP, LONG_PRESS, SWIPE_DOWN, SWIPE_LEFT, NONE }
 
 /**
  * Klassifiziert eine Geste aus Gesamtverschiebung und Dauer. Wischen nach unten = Undo,
  * Wischen nach links = Steuerseite (rechts ist System-Back, 04 §4.3.2). Tap gilt erst beim Loslassen.
+ * Langes Halten ([longPressMillis]) entsperrt die Touch-Sperre (04 §4.3.2 „Sperre“), sonst passiert nichts.
  */
 object GestureClassifier {
     fun classify(
@@ -44,16 +46,21 @@ object GestureClassifier {
         touchSlopPx: Float,
         swipeThresholdPx: Float,
         maxTapMillis: Long = 500,
+        longPressMillis: Long = LONG_PRESS_MILLIS,
     ): ScoringGesture {
         val isTapDistance = abs(dx) <= touchSlopPx && abs(dy) <= touchSlopPx
         return when {
             isTapDistance && durationMillis <= maxTapMillis -> ScoringGesture.TAP
+            isTapDistance && durationMillis >= longPressMillis -> ScoringGesture.LONG_PRESS
             isTapDistance -> ScoringGesture.NONE
             dy >= swipeThresholdPx && abs(dy) > abs(dx) * DIRECTION_RATIO -> ScoringGesture.SWIPE_DOWN
             dx <= -swipeThresholdPx && abs(dx) > abs(dy) * DIRECTION_RATIO -> ScoringGesture.SWIPE_LEFT
             else -> ScoringGesture.NONE
         }
     }
+
+    /** Entsperren: 1 s gedrückt halten (wie am Handy, 04 H6). */
+    const val LONG_PRESS_MILLIS = 1_000L
 
     /** Hauptrichtung muss deutlich überwiegen, sonst ist die Geste mehrdeutig und wird ignoriert. */
     private const val DIRECTION_RATIO = 1.5f

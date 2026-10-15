@@ -3,7 +3,7 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
-    <!-- Spike S5 / 05 §2.2, §6.2: Puls. Wear OS 6 (API 36) ersetzt BODY_SENSORS durch health.READ_HEART_RATE. -->
+    <!-- 05 §2.2, §6.2: Live-Puls im Workout (keine Speicherung in P1). Wear OS 6 (API 36) ersetzt BODY_SENSORS durch health.READ_HEART_RATE. -->
     <uses-permission
         android:name="android.permission.BODY_SENSORS"
         android:maxSdkVersion="35" />
@@ -49,6 +49,34 @@
             android:name=".workout.WorkoutService"
             android:exported="false"
             android:foregroundServiceType="health" />
+
+        <!-- Hintergrund-Empfang (Wear Data Layer): Matches/Events/Löschmarkierungen vom Handy, auch wenn die App nicht
+             läuft. Pfade wie WearDataLayerTransport (MESSAGE_PATH, QUEUE_PREFIX, CAPABILITY). -->
+        <service
+            android:name=".sync.SyncListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/advantly/link/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/advantly/link/q"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED" />
+                <data
+                    android:host="*"
+                    android:path="/advantly_device_link"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -60,7 +60,7 @@ object ExerciseOwnership {
 
     /** [capabilities] `null` heißt: Abfrage endgültig fehlgeschlagen – dann nicht stillschweigend `ACTIVE` setzen. */
     fun onReattach(
-        sport: SpikeSport,
+        sport: WorkoutSport,
         capabilities: ExerciseCapabilitiesView?,
         permissions: WorkoutPermissions,
     ): ReattachResult =
