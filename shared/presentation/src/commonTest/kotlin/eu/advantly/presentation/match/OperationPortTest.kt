@@ -1,9 +1,16 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.PointDetail
+import eu.advantly.core.scoring.PointDetailKind
+import eu.advantly.core.scoring.PointDetailRules
+import eu.advantly.core.scoring.PointDetailSet
+import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
@@ -111,6 +118,40 @@ class OperationPortTest {
         assertEquals(Ratio(0, 0), tomStats.secondServeWon)
         assertNull(tomStats.secondServeWon.percent, "nicht erfasst → „—“")
         assertTrue(me != jonas)
+    }
+
+    /** Review R1: Doppelfehler auf einen Punkt mit `kind = WINNER` zählt in der Statistik (Doppelfehler und 2.-Aufschlag-Nenner). */
+    @Test
+    fun doubleFaultOnWinnerPointIsCounted() {
+        val store = testStore()
+        val setup = store.setupFor(Presets.TENNIS_SINGLES_BO3.format())
+        val id = store.start(setup)
+        store.play("B")
+        val base = assertNotNull(store.record(id))
+        val pointEvent = base.events.last()
+        // Rückschläger-Punkt trägt bereits ein Winner-Detail (z. B. am Handy nachgetragen)
+        val winner = PointDetail(PointDetailKind.WINNER, setup.lineup.b.single())
+        val withWinner = pointEvent.copy(payload = PointWon(Side.B, winner))
+        for (detail in listOf(
+            PointDetailRules.withServe(winner, ServeOutcome.DOUBLE_FAULT), // Aufschlag-Leiste (bereinigt)
+            winner.copy(serve = ServeOutcome.DOUBLE_FAULT), // älterer Erzeuger ohne Bereinigung (Vorrangregel)
+        )) {
+            val set =
+                pointEvent.copy(
+                    id = EventId("detail"),
+                    lamport = pointEvent.lamport + 1,
+                    deviceSeq = pointEvent.deviceSeq + 1,
+                    parentId = pointEvent.id,
+                    payload = PointDetailSet(pointEvent.id, detail),
+                )
+            val events = base.events.dropLast(1) + withWinner + set
+            val record = base.copy(events = events, finalState = ScoringEngine.replay(events).state)
+            assertEquals(emptyList(), record.finalState.ignoredEvents, "$detail")
+            val stats = MatchStatistics.compute(record)
+            assertEquals(1, stats.serve.a.doubleFaults, "$detail")
+            assertEquals(Ratio(0, 1), stats.serve.a.secondServeWon, "$detail")
+            assertEquals(Ratio(0, 1), stats.serve.a.firstServeIn, "$detail")
+        }
     }
 
     @Test
