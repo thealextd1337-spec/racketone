@@ -39,7 +39,7 @@ import java.util.concurrent.Executors
  */
 object FieldTestRecorder {
     /** Feldtest-Modus überhaupt verfügbar (nur Debug). */
-    val AVAILABLE: Boolean = BuildConfig.DEBUG
+    val AVAILABLE: Boolean = DebugToolsGate.available(BuildConfig.DEBUG)
 
     const val FILE_NAME = "fieldtest.jsonl"
     private const val TAG = "AdvantlyFieldTest"
@@ -105,7 +105,7 @@ object FieldTestRecorder {
         if (isEnabled(context)) start("process_start")
     }
 
-    fun isEnabled(context: Context): Boolean = AVAILABLE && prefs(context).getBoolean(KEY_ENABLED, false)
+    fun isEnabled(context: Context): Boolean = DebugToolsGate.recording(AVAILABLE) { prefs(context).getBoolean(KEY_ENABLED, false) }
 
     /** Schalter des Startbildschirms (nur Debug). */
     fun setEnabled(

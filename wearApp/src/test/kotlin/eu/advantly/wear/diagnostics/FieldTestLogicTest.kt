@@ -104,8 +104,25 @@ class FieldTestLogicTest {
     }
 
     @Test
+    fun releaseGateDisablesToolsAndNeverReadsTheSwitch() {
+        assertFalse(DebugToolsGate.available(debugBuild = false))
+        var read = false
+        assertFalse(
+            DebugToolsGate.recording(debugBuild = false) {
+                read = true
+                true
+            },
+        )
+        assertFalse("Release darf den Schalter nicht lesen", read)
+        assertTrue(DebugToolsGate.available(debugBuild = true))
+        assertTrue(DebugToolsGate.recording(debugBuild = true) { true })
+        assertFalse(DebugToolsGate.recording(debugBuild = true) { false }) // Standard aus
+    }
+
+    @Test
     fun fieldTestModeIsDebugOnly() {
         assertEquals(BuildConfig.DEBUG, FieldTestRecorder.AVAILABLE)
+        assertEquals(BuildConfig.DEBUG, DiagnosticLog.ENABLED)
         if (!FieldTestRecorder.AVAILABLE) assertNull(FieldTestRecorder.path)
     }
 

@@ -24,7 +24,7 @@ import java.util.concurrent.Executors
  */
 object DiagnosticLog {
     /** Schalter für das gesamte Diagnose-Log (Datei **und** Logcat). */
-    val ENABLED: Boolean = BuildConfig.DEBUG
+    val ENABLED: Boolean = DebugToolsGate.available(BuildConfig.DEBUG)
 
     private const val TAG = "AdvantlyS5"
     const val FILE_NAME = "s5-diag.log"
