@@ -10,3 +10,6 @@ fun createInMemoryJvmDriver(): SqlDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_
 
 /** [EventStore] auf einer frischen In-Memory-Datenbank (JVM). */
 fun createInMemoryJvmEventStore(): EventStore = SqlDelightEventStore(createInMemoryJvmDriver())
+
+/** [LocalData] auf einer frischen In-Memory-Datenbank (JVM-Tests, Desktop-Preview). */
+fun createInMemoryJvmLocalData(): LocalData = LocalData(createInMemoryJvmDriver())

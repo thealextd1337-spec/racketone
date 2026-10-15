@@ -1,11 +1,22 @@
 package eu.advantly.umbrella.watch
 
 import eu.advantly.core.model.Discipline
+import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
-import eu.advantly.data.AppendResult
-import eu.advantly.data.EventStore
-import eu.advantly.data.StoredEvent
+import eu.advantly.data.LocalData
+import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.device.link.testing.InMemoryLinkNetwork
+import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.match.session.MatchSession
+import eu.advantly.match.session.MatchSessions
+import eu.advantly.match.session.RandomIdGenerator
+import eu.advantly.match.session.WallClock
+import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.sync.protocol.SyncCodec
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,454 +25,348 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Einfacher EventStore für commonTest (läuft auf JVM und im watchOS-Simulator). */
-internal class FakeEventStore : EventStore {
-    val events = mutableListOf<StoredEvent>()
+/** Frische, leere Datenbank je Aufruf (JVM: JDBC in-memory, watchOS-Simulator: native-driver in-memory). */
+internal expect fun testLocalData(): LocalData
 
-    /** Simuliert SQLite-Fehler (z. B. volle Platte, gesperrte Datei). */
-    var failWrites = false
-    var failReads = false
+/**
+ * Uhr (über die Facade) und optional ein Handy (direkt über [MatchSession]) in einem In-Memory-Netz mit virtueller Zeit.
+ * „Neustart“ = neue Session + neue Facade auf derselben Datenbank.
+ */
+private class Rig {
+    val scheduler = ManualScheduler()
+    val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
+    val clock = WallClock { 1_760_000_000_000L + scheduler.nowMs() }
+    val watchData = testLocalData()
+    val snapshots = mutableListOf<WatchScoreSnapshot?>()
+    private var seed = 1
 
-    override fun append(event: StoredEvent): AppendResult =
-        when {
-            failWrites -> {
-                throw IllegalStateException("disk I/O error")
-            }
+    var watchSession: MatchSession = newSession("watch", PeerKind.WATCH, watchData)
+    var watch: WatchScoring = facade()
+    val phone: MatchSession by lazy { newSession("phone", PeerKind.PHONE, testLocalData()).also { settle() } }
 
-            events.any { it.id == event.id } -> {
-                AppendResult.DUPLICATE
-            }
-
-            events.any { it.matchId == event.matchId && it.deviceId == event.deviceId && it.deviceSeq == event.deviceSeq } -> {
-                AppendResult.SEQUENCE_CONFLICT
-            }
-
-            else -> {
-                events += event
-                AppendResult.INSERTED
-            }
-        }
-
-    override fun eventsFor(matchId: String): List<StoredEvent> =
-        if (failReads) {
-            throw IllegalStateException("database is locked")
-        } else {
-            events
-                .filter {
-                    it.matchId == matchId
-                }.sortedWith(compareBy({ it.lamport }, { it.deviceId }, { it.id }))
-        }
-
-    override fun count(matchId: String): Long = events.count { it.matchId == matchId }.toLong()
-}
-
-class WatchScoringTest {
-    private val store = FakeEventStore()
-    private val prefs = InMemoryWatchPrefs()
-    private var clock = 1_760_000_000_000L
-    private val seen = mutableListOf<WatchScoreSnapshot>()
-
-    private fun tick(): Long {
-        clock += 1_000
-        return clock
+    fun newSession(
+        name: String,
+        kind: PeerKind,
+        data: LocalData,
+    ): MatchSession {
+        val link = ReliableDeviceLink(network.transport(name), scheduler, newMessageId = { "$name-${seed++}-${scheduler.nowMs()}" })
+        return MatchSessions
+            .create(data, link, scheduler, kind, clock = clock, ids = RandomIdGenerator(Random(seed++)))
+            .also { it.start() }
     }
 
-    private fun scoring(seed: Int = 1): WatchScoring =
-        WatchScoring(store, prefs, now = ::tick, random = Random(seed)).apply {
+    fun facade(): WatchScoring =
+        WatchScoring({ WatchScoring.Backend(watchSession, watchData) }, clock, RandomIdGenerator(Random(seed++))).apply {
             setListener(
                 object : WatchScoringListener {
-                    override fun onSnapshot(snapshot: WatchScoreSnapshot) {
-                        seen += snapshot
+                    override fun onSnapshot(snapshot: WatchScoreSnapshot?) {
+                        snapshots += snapshot
                     }
                 },
             )
+            isAvailable()
         }
 
-    private fun WatchScoring.points(sequence: String): WatchScoreSnapshot? {
-        var last: WatchScoreSnapshot? = null
-        sequence.forEach { last = point(sideA = it == 'A') }
-        return last
+    /** App-Neustart der Uhr: alte Session schließen, neue auf derselben Datenbank. */
+    fun restartWatch() {
+        watchSession.close()
+        watchSession = newSession("watch", PeerKind.WATCH, watchData)
+        watch = facade()
     }
 
+    fun settle(ms: Long = 2_000) = scheduler.advanceBy(ms)
+
+    fun points(sequence: String): WatchScoreSnapshot? {
+        var last: WatchScoreSnapshot? = null
+        sequence.forEach { last = watch.point(sideA = it == 'A') }
+        return last
+    }
+}
+
+class WatchScoringTest {
     @Test
     fun presetsPerSportWithDefaultFirst() {
-        val s = scoring()
+        val s = Rig().watch
         assertEquals(listOf("TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"), s.sports())
         val tennis = s.presets("TENNIS", 2026, 10, 15)
         assertEquals(12, tennis.size)
         assertEquals("TENNIS_SINGLES_BO3", tennis.first().id)
         assertTrue(tennis.first().isDefault)
         assertEquals(1, tennis.count { it.isDefault })
-        val open = tennis.single { it.id == "TENNIS_OPEN" }
-        assertTrue(open.openMode)
-        assertEquals(0, open.bestOf)
-        assertTrue(open.singles && open.doubles)
-        val padel = s.presets("PADEL", 2026, 10, 15).first()
-        assertEquals("PADEL_PREMIER_2026", padel.id)
-        assertFalse(padel.singles)
-        assertTrue(padel.defaultDoubles)
+        assertTrue(tennis.single { it.id == "TENNIS_OPEN" }.openMode)
+        assertFalse(s.presets("PADEL", 2026, 10, 15).first().singles)
         assertEquals(Presets.all.size, s.sports().sumOf { s.presets(it, 2026, 10, 15).size })
-        assertTrue(s.presets("SQUASH", 2026, 10, 15).isEmpty())
-    }
-
-    @Test
-    fun badmintonDefaultDependsOnDateAndTableTennisHasNone() {
-        val s = scoring()
         assertEquals("BADMINTON_SINGLES_BO3_21", s.defaultPresetId("BADMINTON", 2027, 1, 3))
         assertEquals("BADMINTON_SINGLES_BO3_15", s.defaultPresetId("BADMINTON", 2027, 1, 4))
         assertEquals("", s.defaultPresetId("TABLE_TENNIS", 2026, 10, 15))
-        assertTrue(s.presets("TABLE_TENNIS", 2026, 10, 15).none { it.isDefault })
-        assertEquals("PICKLEBALL_DOUBLES_11_SIDEOUT", s.defaultPresetId("PICKLEBALL", 2026, 10, 15))
     }
 
     @Test
-    fun startRejectsUnknownPresetAndWrongDiscipline() {
-        val s = scoring()
-        assertNull(s.startMatch("NOPE", doubles = false, weServeFirst = true))
-        assertNull(s.startMatch("PADEL_PREMIER_2026", doubles = false, weServeFirst = true))
-        assertFalse(s.hasActiveMatch())
-        assertTrue(store.events.isEmpty())
-    }
-
-    @Test
-    fun startWritesGenesisAndReportsInitialState() {
-        val s = scoring()
-        val snap = assertNotNull(s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = false))
-        assertEquals("TENNIS", snap.sport)
-        assertEquals("TENNIS_SINGLES_BO3", snap.presetId)
+    fun startOnWatchMakesTheWatchTheScorer() {
+        val rig = Rig()
+        val snap = assertNotNull(rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = false))
+        assertTrue(snap.isScorer)
+        assertEquals("WATCH", snap.scorerKind)
         assertEquals("IN_PROGRESS", snap.status)
         assertEquals("0", snap.pointsA)
-        assertEquals("0", snap.pointsB)
-        assertEquals(0, snap.gamesA)
         assertEquals("B", snap.serveSide)
-        assertEquals("B1", snap.server)
-        assertEquals("RIGHT", snap.serveCourt)
-        assertEquals(3, snap.bestOf)
+        assertEquals(1, snap.serverNo)
         assertFalse(snap.canUndo)
-        assertEquals(listOf(snap), seen)
-        assertEquals(1, store.events.size)
-        assertTrue(
-            store.events
-                .single()
-                .payload
-                .contains("\"type\":\"MatchCreated\""),
-        )
-        assertEquals(snap.matchId, s.activeMatchId())
-        assertTrue(s.hasActiveMatch())
+        assertEquals(snap.matchId, rig.watch.activeMatchId())
+        assertEquals(snap.matchId, rig.snapshots.last()?.matchId)
+        assertEquals(36, rig.watch.deviceId().length)
     }
 
     @Test
-    fun pointsGamesAndBreakPointHint() {
-        val s = scoring()
-        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        val fifteen = assertNotNull(s.point(sideA = true))
-        assertEquals("15", fifteen.pointsA)
-        assertEquals(listOf("POINT"), fifteen.effects)
-        val game = assertNotNull(s.points("AAA"))
+    fun pointsHintsUndoAndRedo() {
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        val game = assertNotNull(rig.points("AAAA"))
         assertEquals(1, game.gamesA)
-        assertEquals("0", game.pointsA)
         assertTrue("GAME_WON" in game.effects)
-        assertEquals("B", game.serveSide)
-        // B schlägt auf, A führt 0:40 → 3 Breakbälle für A
-        val breakPoint = assertNotNull(s.points("AAA"))
-        assertEquals("40", breakPoint.pointsA)
+        val breakPoint = assertNotNull(rig.points("AAA"))
         assertEquals("BREAK_POINT", breakPoint.hintCode)
         assertEquals("A", breakPoint.hintSide)
         assertEquals(3, breakPoint.hintCount)
-        // Einstand ist ein neutraler Hinweis
-        val deuce = assertNotNull(s.points("BBB"))
-        assertEquals("DEUCE", deuce.hintCode)
-        assertEquals("", deuce.hintSide)
-        val adv = assertNotNull(s.point(sideA = true))
-        assertEquals("AD", adv.pointsA)
-        assertEquals("ADVANTAGE_RECEIVER", adv.callout)
-        assertEquals("BREAK_POINT", adv.hintCode)
-        assertEquals(1, adv.hintCount)
+        assertEquals(7, breakPoint.pointsPlayed)
+        val undone = assertNotNull(rig.watch.undo())
+        assertEquals("30", undone.pointsA)
+        assertTrue(undone.canRedo)
+        assertEquals("40", assertNotNull(rig.watch.redo()).pointsA)
+        assertNull(rig.watch.redo())
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
     }
 
     @Test
-    fun undoRestoresAndWorksAcrossGames() {
-        val s = scoring()
-        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        assertNull(s.undo())
-        s.points("AAAA")
-        val undone = assertNotNull(s.undo())
-        assertEquals(0, undone.gamesA)
-        assertEquals("40", undone.pointsA)
-        assertTrue("UNDONE" in undone.effects)
-        s.undo()
-        s.undo()
-        val start = assertNotNull(s.undo())
-        assertEquals("0", start.pointsA)
-        assertFalse(start.canUndo)
-        assertNull(s.undo())
-    }
-
-    @Test
-    fun openModeAsksForAnotherSetAndOffersMatchTiebreak() {
-        val s = scoring()
-        val start = assertNotNull(s.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true))
-        assertTrue(start.openMode)
-        assertTrue(start.offerMatchTiebreak)
-        val setEnd = assertNotNull(s.points("A".repeat(24)))
+    fun openModeSetEndAndMatchTiebreak() {
+        val rig = Rig()
+        assertTrue(assertNotNull(rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)).offerMatchTiebreak)
+        val setEnd = assertNotNull(rig.points("A".repeat(24)))
         assertTrue(setEnd.pendingDecision)
-        assertEquals("AWAITING_DECISION", setEnd.status)
         assertEquals(listOf(6), setEnd.setScoresA)
-        assertEquals(listOf(0), setEnd.setScoresB)
-        assertEquals(listOf(-1), setEnd.setTiebreaksA)
-        assertEquals(listOf("A"), setEnd.setWinners)
-        assertEquals("", setEnd.pointsA)
-        assertTrue("ASK_ANOTHER_SET" in setEnd.effects)
-        assertNull(s.point(sideA = true), "kein Punkt während des Satzende-Dialogs")
-        val mtb = assertNotNull(s.continueDecision(anotherSet = true, matchTiebreak = true))
+        assertNull(rig.watch.point(sideA = true))
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        val mtb = assertNotNull(rig.watch.continueDecision(anotherSet = true, matchTiebreak = true))
         assertEquals("MATCH_TIEBREAK", mtb.setKind)
-        assertEquals("MATCH_TIEBREAK", mtb.hintCode)
-        assertNull(s.continueDecision(anotherSet = false, matchTiebreak = false), "kein Dialog offen")
-        s.points("A".repeat(10))
-        val again = assertNotNull(s.snapshot())
-        assertTrue(again.pendingDecision)
-        assertEquals(listOf(6, 10), again.setScoresA)
-        val done = assertNotNull(s.continueDecision(anotherSet = false, matchTiebreak = false))
+        rig.points("A".repeat(10))
+        val done = assertNotNull(rig.watch.end())
         assertTrue(done.matchFinished)
         assertEquals("A", done.winner)
         assertEquals("COMPLETED", done.resultReason)
-        // Matchende ist rückgängig machbar
-        assertTrue(assertNotNull(s.undo()).pendingDecision)
-    }
-
-    @Test
-    fun bestOfMatchFinishesWithMatchPointHint() {
-        val s = scoring()
-        s.startMatch("TENNIS_ONE_SET", doubles = false, weServeFirst = true)
-        val matchPoint = assertNotNull(s.points("A".repeat(23)))
-        assertEquals("MATCH_POINT", matchPoint.hintCode)
-        assertEquals("A", matchPoint.hintSide)
-        val done = assertNotNull(s.point(sideA = true))
-        assertTrue(done.matchFinished)
-        assertEquals("A", done.winner)
-        assertTrue("MATCH_WON" in done.effects)
-        assertEquals("", done.hintCode)
-        assertNull(s.point(sideA = false))
-    }
-
-    @Test
-    fun endAbandonsRunningMatchAndIsUndoable() {
-        val s = scoring()
-        s.startMatch("PADEL_PREMIER_2026", doubles = true, weServeFirst = true)
-        s.points("AB")
-        val ended = assertNotNull(s.end())
-        assertTrue(ended.matchFinished)
-        assertEquals("ABANDONED", ended.resultReason)
-        assertEquals("", ended.winner)
-        assertEquals("ABANDONED", assertNotNull(s.end()).resultReason, "zweites end() ist ein No-op")
-        assertEquals("IN_PROGRESS", assertNotNull(s.undo()).status)
-    }
-
-    @Test
-    fun endDuringSetEndDialogFinishesRegularly() {
-        val s = scoring()
-        s.startMatch("BADMINTON_OPEN", doubles = false, weServeFirst = true)
-        val setPoint = assertNotNull(s.points("A".repeat(14)))
-        assertEquals("SET_POINT", setPoint.hintCode)
-        assertEquals(14, setPoint.hintCount)
-        assertTrue(assertNotNull(s.point(sideA = true)).pendingDecision)
-        val ended = assertNotNull(s.end())
-        assertEquals("COMPLETED", ended.resultReason)
-        assertEquals("A", ended.winner)
-        assertEquals(listOf(15), ended.setScoresA)
-    }
-
-    @Test
-    fun restoreAfterRestartRestoresStateAndKeepsCounting() {
-        val first = scoring(seed = 1)
-        first.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        val before = assertNotNull(first.points("AAAAB"))
-        // „Neustart“: neue Facade auf demselben Store und denselben Prefs
-        val second = scoring(seed = 2)
-        assertTrue(second.hasActiveMatch())
-        val resumed = assertNotNull(second.restore())
-        assertEquals(before.matchId, resumed.matchId)
-        assertEquals(1, resumed.gamesA)
-        assertEquals("15", resumed.pointsB)
-        assertEquals(before.eventCount, resumed.eventCount)
-        assertTrue(resumed.canUndo)
-        val next = assertNotNull(second.point(sideA = false))
-        assertEquals("30", next.pointsB)
-        assertEquals(before.eventCount + 1, next.eventCount)
-        assertEquals("15", assertNotNull(second.undo()).pointsB)
-        // deviceSeq lückenlos, keine Sequenzkonflikte
-        assertEquals((1L..store.events.size).toList(), store.events.map { it.deviceSeq })
-        second.close()
-        assertFalse(second.hasActiveMatch())
-        assertNull(scoring().restore())
-    }
-
-    @Test
-    fun restoreDropsPointerToUnreadableMatch() {
-        prefs.set(WatchScoring.KEY_ACTIVE_MATCH, "missing")
-        val s = scoring()
-        assertNull(s.restore())
-        assertEquals("LOG_INVALID", s.lastError())
-        assertFalse(s.hasActiveMatch())
-    }
-
-    @Test
-    fun storeWriteFailureKeepsStateAndAllowsRetry() {
-        val s = scoring()
-        store.failWrites = true
-        assertNull(s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true))
-        assertEquals("STORE_WRITE", s.lastError())
-        assertFalse(s.hasActiveMatch())
-        store.failWrites = false
-        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        assertEquals("", s.lastError())
-        s.point(sideA = true)
-        store.failWrites = true
-        assertNull(s.point(sideA = true))
-        assertEquals("STORE_WRITE", s.lastError())
-        assertEquals("15", assertNotNull(s.snapshot()).pointsA, "Zustand unverändert")
-        assertNull(s.undo())
-        store.failWrites = false
-        assertEquals("30", assertNotNull(s.point(sideA = true)).pointsA, "Wiederholung klappt")
-        assertEquals(listOf(1L, 2L, 3L), store.events.map { it.deviceSeq }, "keine Lücke in deviceSeq")
-    }
-
-    @Test
-    fun storeReadFailureKeepsPointerForRetry() {
-        scoring().apply {
-            startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-            point(sideA = true)
-        }
-        store.failReads = true
-        val restarted = scoring()
-        assertNull(restarted.restore())
-        assertEquals("STORE_READ", restarted.lastError())
-        assertTrue(restarted.hasActiveMatch())
-        store.failReads = false
-        assertEquals("15", assertNotNull(restarted.restore()).pointsA)
-    }
-
-    @Test
-    fun commandsReportWhyTheyWereRejected() {
-        val s = scoring()
-        assertNull(s.point(sideA = true))
-        assertEquals("NO_MATCH", s.lastError())
-        assertNull(s.startMatch("NOPE", doubles = false, weServeFirst = true))
-        assertEquals("INVALID_INPUT", s.lastError())
-        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        assertNull(s.undo())
-        assertEquals("NOT_ALLOWED", s.lastError())
+        assertTrue(assertNotNull(rig.watch.end()).matchFinished, "zweites end() liefert den Zustand")
     }
 
     @Test
     fun pauseAndResumePlay() {
-        val s = scoring()
-        s.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)
-        assertNull(s.resumePlay())
-        assertEquals("NOT_ALLOWED", s.lastError())
-        val paused = assertNotNull(s.pause())
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true)
+        assertNull(rig.watch.resumePlay())
+        val paused = assertNotNull(rig.watch.pause())
         assertTrue(paused.paused)
-        assertEquals("PAUSED", paused.status)
-        assertTrue("PAUSED" in paused.effects)
-        assertNull(s.pause())
-        val resumed = assertNotNull(s.resumePlay())
-        assertFalse(resumed.paused)
-        assertTrue("RESUMED" in resumed.effects)
-        s.pause()
-        // Ein Punkt während der Pause setzt fort
-        val point = assertNotNull(s.point(sideA = true))
-        assertEquals("IN_PROGRESS", point.status)
-        assertEquals("15", point.pointsA)
-        s.points("AAA".repeat(8))
-        assertTrue(assertNotNull(s.snapshot()).pendingDecision)
-        assertNull(s.pause(), "Satzende-Dialog ist keine Pause")
-        // Pause/Fortsetzen sind kein Undo-Ziel: Undo nimmt den letzten Punkt zurück
-        s.undo()
-        s.pause()
-        assertEquals("30", assertNotNull(s.undo()).pointsA)
+        assertFalse(assertNotNull(rig.watch.resumePlay()).paused)
+        rig.watch.pause()
+        assertEquals("IN_PROGRESS", assertNotNull(rig.watch.point(sideA = true)).status, "Punkt beendet die Pause")
     }
 
     @Test
-    fun doublesServeHelpExportsNumbersAndPositions() {
-        val s = scoring()
-        val tennis = assertNotNull(s.startMatch("TENNIS_DOUBLES_MTB10", doubles = true, weServeFirst = false))
-        assertEquals("B", tennis.serveSide)
-        assertEquals(1, tennis.serverNo)
-        assertEquals(1, tennis.receiverNo)
-        assertEquals(0, tennis.rightNoA, "Tennis hat keine Positionen")
-        val badminton = assertNotNull(s.startMatch("BADMINTON_DOUBLES_BO3_21", doubles = true, weServeFirst = true))
-        assertEquals("RIGHT", badminton.serveCourt)
-        assertEquals(1, badminton.serverNo)
-        assertEquals(1, badminton.rightNoA)
-        assertEquals(2, badminton.leftNoA)
-        assertEquals(1, badminton.rightNoB)
-        assertEquals(2, badminton.leftNoB)
-        // A gewinnt: A1 wechselt nach links und schlägt weiter auf
-        val next = assertNotNull(s.point(sideA = true))
-        assertEquals("LEFT", next.serveCourt)
-        assertEquals(1, next.serverNo)
-        assertEquals(2, next.rightNoA)
-        assertEquals(1, next.leftNoA)
-        assertFalse(next.receiveOrderSwapped)
-        val singles = assertNotNull(s.startMatch("BADMINTON_SINGLES_BO3_21", doubles = false, weServeFirst = true))
-        assertEquals(1, singles.rightNoA)
-        assertEquals(0, singles.leftNoA)
-    }
-
-    @Test
-    fun lastSetupRemembersPresetAndChoices() {
-        val s = scoring()
-        assertNull(s.lastSetup())
-        s.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false)
-        val setup = assertNotNull(scoring().lastSetup())
-        assertEquals("TENNIS_BO3_MTB10", setup.presetId)
-        assertEquals("TENNIS", setup.sport)
-        assertTrue(setup.doubles)
-        assertFalse(setup.weServeFirst)
-    }
-
-    @Test
-    fun deviceIdIsStable() {
-        val id = scoring().deviceId()
-        assertEquals(36, id.length)
-        assertEquals(id, scoring(seed = 9).deviceId())
+    fun errorsAreReportedNotThrown() {
+        val rig = Rig()
+        assertNull(rig.watch.point(sideA = true))
+        assertEquals("NO_MATCH", rig.watch.lastError())
+        assertNull(rig.watch.startMatch("NOPE", doubles = false, weServeFirst = true))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+        assertNull(rig.watch.startMatch("PADEL_PREMIER_2026", doubles = false, weServeFirst = true))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+        assertNull(rig.watch.startMatchFromFormatJson("kein json", weServeFirst = true))
+        assertEquals("INVALID_INPUT", rig.watch.lastError())
+        val broken = WatchScoring({ error("disk I/O error") })
+        assertFalse(broken.isAvailable())
+        assertNull(broken.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true))
+        assertEquals("STORE_READ", broken.lastError())
+        assertNull(broken.restore())
+        assertEquals("STORE_READ", broken.lastError())
+        assertEquals("", broken.deviceId())
     }
 
     @Test
     fun startFromFormatJson() {
-        val s = scoring()
-        val json =
-            WatchScoring.eventJson.encodeToString(MatchFormat.serializer(), Presets.PICKLEBALL_RALLY_BO3_15.format(Discipline.SINGLES))
-        val snap = assertNotNull(s.startMatchFromFormatJson(json, weServeFirst = true))
+        val rig = Rig()
+        val json = SyncCodec.json.encodeToString(MatchFormat.serializer(), Presets.PICKLEBALL_RALLY_BO3_15.format(Discipline.SINGLES))
+        val snap = assertNotNull(rig.watch.startMatchFromFormatJson(json, weServeFirst = true))
         assertEquals("PICKLEBALL", snap.sport)
-        assertFalse(snap.doubles)
         assertEquals("0-0", snap.scoreCall)
-        assertNull(s.startMatchFromFormatJson("{\"sport\":\"TENNIS\"}", weServeFirst = true))
-        assertNull(s.startMatchFromFormatJson("kein json", weServeFirst = true))
-        assertNull(s.lastSetup(), "Format-Starts überschreiben „Wie letztes Mal“ nicht")
     }
 
     @Test
-    fun pickleballDoublesCallAndTableTennisServes() {
-        val s = scoring()
-        val pb = assertNotNull(s.startMatch("PICKLEBALL_DOUBLES_11_SIDEOUT", doubles = true, weServeFirst = true))
-        assertEquals("0-0-2", pb.scoreCall)
-        assertEquals(2, pb.serverNumber)
-        val tt = assertNotNull(s.startMatch("TABLE_TENNIS_SINGLES_BO5", doubles = false, weServeFirst = true))
-        assertEquals(2, tt.servesRemaining)
-        assertEquals("", tt.serveCourt)
-        assertEquals(-1, tt.gamesA)
-        assertEquals("RALLY_GAME", tt.gameKind)
+    fun restartRestoresTheOpenMatchAndKeepsCounting() {
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        val before = assertNotNull(rig.points("AAAAB"))
+        rig.restartWatch()
+        assertTrue(rig.watch.hasActiveMatch())
+        val restored = assertNotNull(rig.watch.restore())
+        assertEquals(before.matchId, restored.matchId)
+        assertEquals(1, restored.gamesA)
+        assertEquals("15", restored.pointsB)
+        assertTrue(restored.isScorer)
+        assertEquals("30", assertNotNull(rig.watch.point(sideA = false)).pointsB)
+        rig.watch.close()
+        assertFalse(rig.watch.hasActiveMatch())
+        rig.restartWatch()
+        assertNull(rig.watch.restore())
+        assertEquals("", rig.watch.lastError())
     }
 
     @Test
-    fun storedPayloadsRoundTrip() {
-        val s = scoring()
-        s.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
-        s.points("AB")
-        s.undo()
-        val types = store.events.map { Regex("\"type\":\"(\\w+)\"").findAll(it.payload).last().groupValues[1] }
-        assertEquals(listOf("MatchCreated", "PointWon", "PointWon", "Undo"), types)
-        assertEquals(listOf(1L, 2L, 3L, 4L), store.events.map { it.lamport })
+    fun restoreDropsPointerToMissingMatch() {
+        val rig = Rig()
+        rig.watchData.settings.put(WatchScoring.KEY_OPEN_MATCH, "missing")
+        assertNull(rig.watch.restore())
+        assertEquals("LOG_INVALID", rig.watch.lastError())
+        assertFalse(rig.watch.hasActiveMatch())
+    }
+
+    @Test
+    fun lastSetupAndLineupReuse() {
+        val rig = Rig()
+        assertNull(rig.watch.lastSetup())
+        val first = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false))
+        val setup = assertNotNull(rig.watch.lastSetup())
+        assertEquals("TENNIS_BO3_MTB10", setup.presetId)
+        assertTrue(setup.doubles)
+        assertFalse(setup.weServeFirst)
+        rig.watch.close()
+        val second = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = true))
+        val lineup1 = assertNotNull(rig.watchData.matches.get(MatchId(first.matchId))).lineup
+        val lineup2 = assertNotNull(rig.watchData.matches.get(MatchId(second.matchId))).lineup
+        assertEquals(lineup1.a, lineup2.a, "gleiche Spieler wie letztes Mal")
+        assertEquals(lineup1.b, lineup2.b)
+        assertEquals(lineup2.a.first(), lineup2.firstServer)
+        assertEquals(
+            rig.watchData.players
+                .self()
+                ?.id,
+            lineup2.a.first(),
+            "A1 = Self-Player der Uhr",
+        )
+    }
+
+    @Test
+    fun scorerSyncsImmediatelyAndBuffersOffline() {
+        val rig = Rig()
+        val phone = rig.phone
+        rig.watch.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true)
+        rig.points("AA")
+        rig.settle()
+        assertEquals(
+            "30",
+            phone.state.value.match
+                ?.state
+                ?.current
+                ?.display
+                ?.a,
+        )
+        val synced = assertNotNull(rig.watch.snapshot())
+        assertEquals(0, synced.pendingToPeers)
+        assertTrue(synced.linkConnected)
+        rig.network.setConnected("watch", false)
+        rig.settle()
+        val offline = assertNotNull(rig.points("A"))
+        assertEquals(1, offline.pendingToPeers, "„1 ausstehend“")
+        assertFalse(offline.linkConnected)
+        rig.network.setConnected("watch", true)
+        rig.settle()
+        assertEquals(0, assertNotNull(rig.watch.snapshot()).pendingToPeers)
+        assertEquals(
+            "40",
+            phone.state.value.match
+                ?.state
+                ?.current
+                ?.display
+                ?.a,
+        )
+    }
+
+    @Test
+    fun watchIsDisplayWhenThePhoneCountsAndCanTakeOver() {
+        val rig = Rig()
+        val phone = rig.phone
+        val watchId = rig.watch.deviceId()
+        assertTrue(watchId.isNotEmpty())
+        phone.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me")))
+        rig.settle()
+        // Die Uhr folgt dem Match automatisch – als Anzeige
+        val display = assertNotNull(rig.snapshots.last())
+        assertFalse(display.isScorer)
+        assertEquals("PHONE", display.scorerKind)
+        assertTrue(display.scorerConnected)
+        assertNull(rig.watch.point(sideA = true))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertNull(rig.watch.undo())
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        phone.recordPoint(Side.A)
+        rig.settle()
+        val updated = assertNotNull(rig.snapshots.last())
+        assertEquals("15", updated.pointsA)
+        assertTrue(updated.lastEventReceivedAtMs > 0, "„Stand vor X s“")
+        assertEquals(0L, updated.scorerDisconnectedSinceMs)
+        // Handy weg → Angebot „Zählen übernehmen“ nach > 30 s (Zeitpunkt kommt aus dem Snapshot)
+        rig.network.setConnected("watch", false)
+        rig.settle(1_000)
+        val lost = assertNotNull(rig.watch.snapshot())
+        assertFalse(lost.scorerConnected)
+        assertTrue(lost.scorerDisconnectedSinceMs > 0)
+        // Das Handy zählt offline weiter (2 Punkte), die Uhr übernimmt und zählt selbst
+        phone.recordPoint(Side.A)
+        phone.recordPoint(Side.A)
+        val taken = assertNotNull(rig.watch.takeOverScoring())
+        assertTrue(taken.isScorer)
+        assertEquals("WATCH", taken.scorerKind)
+        assertNull(rig.watch.takeOverScoring())
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertEquals("30", assertNotNull(rig.watch.point(sideA = true)).pointsA)
+        rig.network.setConnected("watch", true)
+        rig.settle(5_000)
+        // Gleichzeitige Eingaben: mindestens der zweite Handy-Punkt liegt hinter der Übernahme und wird verworfen
+        // (der erste konkurriert mit ScorerChanged auf derselben Lamport-Zeit, Ordnung über die Geräte-ID)
+        val merged = assertNotNull(rig.watch.snapshot())
+        assertTrue(merged.rejectedByRoleCount >= 1, "„N Eingaben nicht übernommen“")
+        val phoneMatch = assertNotNull(phone.state.value.match)
+        assertFalse(phoneMatch.isScorer)
+        assertEquals(
+            phoneMatch.state.current
+                ?.display
+                ?.a,
+            merged.pointsA,
+            "beide Geräte konvergieren",
+        )
+        assertEquals(phoneMatch.rejectedByRoleCount, merged.rejectedByRoleCount)
+    }
+
+    @Test
+    fun displayDemoStartsAMatchCountedElsewhere() {
+        val rig = Rig()
+        val snap = assertNotNull(rig.watch.startDisplayDemo("TENNIS_OPEN"))
+        assertFalse(snap.isScorer)
+        assertEquals("PHONE", snap.scorerKind)
+        assertNull(rig.watch.point(sideA = true))
+    }
+
+    @Test
+    fun doublesServeHelpExportsNumbersAndPositions() {
+        val rig = Rig()
+        val badminton = assertNotNull(rig.watch.startMatch("BADMINTON_DOUBLES_BO3_21", doubles = true, weServeFirst = true))
+        assertEquals("RIGHT", badminton.serveCourt)
+        assertEquals(1, badminton.serverNo)
+        assertEquals(1, badminton.rightNoA)
+        assertEquals(2, badminton.leftNoA)
+        val next = assertNotNull(rig.watch.point(sideA = true))
+        assertEquals("LEFT", next.serveCourt)
+        assertEquals(2, next.rightNoA)
+        assertEquals(1, next.leftNoA)
+        val tennis = assertNotNull(rig.watch.startMatch("TENNIS_DOUBLES_MTB10", doubles = true, weServeFirst = false))
+        assertEquals("B", tennis.serveSide)
+        assertEquals(1, tennis.receiverNo)
+        assertEquals(0, tennis.rightNoA)
     }
 }

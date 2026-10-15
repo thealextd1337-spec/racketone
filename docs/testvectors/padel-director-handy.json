@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "id": "TV-PAD-003",
+  "title": "Director-Handy zählt, Uhr-Eingaben ignoriert",
+  "description": "Director-Modus: Eine externe Person zählt am Handy. Punkt, Undo und Pause von der Uhr eines Spielers sind wirkungslos und stehen in rejectedByRole.",
+  "sources": [
+    "Advantly 02-scoring-regeln.md §7.5 (Single-Scorer, Entscheidung K13)",
+    "Advantly 01-architektur.md §4.4"
+  ],
+  "config": {
+    "formatVersion": 1,
+    "presetId": "PADEL_PREMIER_2026",
+    "sport": "PADEL",
+    "discipline": "DOUBLES",
+    "match": {
+      "mode": "BEST_OF",
+      "bestOf": 3
+    },
+    "game": {
+      "deuceMode": "STAR_POINT",
+      "maxAdvantages": 2
+    },
+    "set": {
+      "gamesToWin": 6,
+      "tiebreakAt": 6,
+      "tiebreak": {
+        "pointsToWin": 7,
+        "winBy": 2,
+        "endChange": {
+          "first": 6,
+          "every": 6
+        }
+      }
+    },
+    "decidingSet": null,
+    "matchTiebreak": null
+  },
+  "lineup": {
+    "A": [
+      "A1",
+      "A2"
+    ],
+    "B": [
+      "B1",
+      "B2"
+    ],
+    "firstServer": "A1"
+  },
+  "scorer": "phone",
+  "events": [
+    {
+      "id": "e1",
+      "lamport": 1,
+      "deviceId": "phone",
+      "parentId": null,
+      "wallClockMs": 10000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e2",
+      "lamport": 2,
+      "deviceId": "watch",
+      "parentId": "e1",
+      "wallClockMs": 11000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e3",
+      "lamport": 3,
+      "deviceId": "phone",
+      "parentId": "e2",
+      "wallClockMs": 20000,
+      "type": "PointWon",
+      "side": "B"
+    },
+    {
+      "id": "e4",
+      "lamport": 4,
+      "deviceId": "watch",
+      "parentId": "e3",
+      "wallClockMs": 21000,
+      "type": "Undo",
+      "target": "e3"
+    },
+    {
+      "id": "e5",
+      "lamport": 5,
+      "deviceId": "phone",
+      "parentId": "e4",
+      "wallClockMs": 30000,
+      "type": "PointWon",
+      "side": "A"
+    },
+    {
+      "id": "e6",
+      "lamport": 6,
+      "deviceId": "watch",
+      "parentId": "e5",
+      "wallClockMs": 31000,
+      "type": "Paused"
+    }
+  ],
+  "expect": [
+    {
+      "afterEvent": 0,
+      "label": "Start: Handy zählt",
+      "state": {
+        "current": {
+          "display": {
+            "A": "0",
+            "B": "0"
+          }
+        },
+        "scorerDeviceId": "phone"
+      }
+    },
+    {
+      "afterEvent": 2,
+      "label": "Uhr-Punkt ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "15",
+            "B": "0"
+          }
+        },
+        "rejectedByRole": [
+          "e2"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 4,
+      "label": "Uhr-Undo ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "15",
+            "B": "15"
+          }
+        },
+        "rejectedByRole": [
+          "e2",
+          "e4"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    },
+    {
+      "afterEvent": 6,
+      "label": "Uhr-Pause ignoriert",
+      "state": {
+        "current": {
+          "display": {
+            "A": "30",
+            "B": "15"
+          }
+        },
+        "status": "IN_PROGRESS",
+        "rejectedByRole": [
+          "e2",
+          "e4",
+          "e6"
+        ],
+        "ignoredEvents": [
+          "e2",
+          "e4",
+          "e6"
+        ],
+        "effects": [
+          "IGNORED"
+        ]
+      }
+    }
+  ]
+}

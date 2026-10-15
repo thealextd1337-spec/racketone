@@ -15,10 +15,10 @@
 | E4 | Apple Watch | **SwiftUI** + schlankes KMP-XCFramework `RacketWatchKit` (nur Engine, Protokoll, lokaler Store) | Kein CMP für watchOS; Framework klein halten |
 | E5 | Wear OS UI | **Compose for Wear OS (Material 3)**, Logik aus `shared` | Offizieller Weg, Kotlin-nativ |
 | E6 | Scoring-Engine | **Event Sourcing**, `state = fold(events)`, Undo = Kompensations-Event, pure Kotlin, Integer-only | Deterministisch, merge-fähig, portierbar nach Monkey C |
-| E7 | Uhr↔Handy-Konflikte | **Merge statt Autorität**: Event-Log als grow-only Set + deterministische Ordnung + Fork-Erkennung | Echte Gleichwertigkeit, Offline-Zählen auf jedem Gerät |
+| E7 | Uhr↔Handy-Konflikte | **Single-Scorer** (ersetzt „Merge statt Autorität“, 2026-10-15): pro Match zählt genau ein Gerät (Standard: Uhr des Spielers, alternativ Director-Handy), alle anderen zeigen an; Übergabe per `ScorerChanged` (§4.4) | Keine Forks, eindeutige Eingabe; Event-Log + deterministische Ordnung bleiben |
 | E8 | Topologie | **Stern**: Handy = Hub/Gateway (nicht Autorität). Wear OS darf zusätzlich direkt in die Cloud | Apple Watch und Garmin haben keinen sinnvollen eigenen Cloud-Zugang |
 | E9 | Lokale DB | **SQLDelight 2.4.x** (System-SQLite auf Apple) | Klein auf watchOS, SQL-first, kein KSP |
-| E10 | Cloud-Sync | **Outbox + idempotenter Upsert** unveränderlicher Events; LWW nur für veränderliche Stammdaten | Events können nicht kollidieren; Konflikte nur auf Match-Ebene (Fork) |
+| E10 | Cloud-Sync | **Outbox + idempotenter Upsert** unveränderlicher Events; LWW nur für veränderliche Stammdaten | Events können nicht kollidieren; die Zählerrolle (Single-Scorer, §4.4) regelt, wessen Eingaben wirken |
 | E11 | DI | **Koin 4.2.x** in den Apps; Watch-Framework ohne DI-Framework | Leichtgewichtig, keine Codegen-Abhängigkeit |
 | E12 | CI/CD | **GitHub Actions** für alles (ubuntu für Android/Wear/Garmin/Tests, macOS für iOS/watchOS) + **fastlane match** + App-Store-Connect-API-Key; **Codemagic** als Plan B | Eine Pipeline, versioniert im Repo; Codemagic nur falls macOS-Kosten/Signing hakt |
 | E13 | Xcode-Projekt | **XcodeGen** (`project.yml`), `.xcodeproj` wird nur in CI generiert | Auf Windows editierbar, keine Merge-Konflikte im pbxproj |
@@ -64,7 +64,7 @@ racketone/
 ├─ build-logic/                       # Gradle Convention Plugins (kmp-library, android-app, compose, test)
 ├─ shared/
 │  ├─ core-model/                     # IDs (UUIDv7), Sport, Spieler, Team, Lineup, Side – pure Kotlin
-│  ├─ core-scoring/                   # Events, RuleSets (Tennis/Padel/Pickleball), Reducer, Undo, Merge/Fork – pure Kotlin
+│  ├─ core-scoring/                   # Events, RuleSets (Tennis/Padel/Pickleball), Reducer, Undo, Zählerrolle – pure Kotlin
 │  ├─ sync-protocol/                  # Wire-DTOs, Codec (JSON), Anti-Entropy (Versionsvektor), SyncSession-Logik
 │  ├─ device-link/                    # Transport Uhr<->Handy: commonMain-Interface, androidMain (Wear Data Layer), appleMain (WatchConnectivity)
 │  ├─ device-link-garmin/             # P4: Connect IQ Mobile SDK (Android direkt, iOS via Swift-Glue)
@@ -175,7 +175,7 @@ data class ScoreEvent(
     val deviceSeq: Long,        // 1..n je (matchId, deviceId) – lückenlos, Basis für Anti-Entropy
     val lamport: Long,          // max(lokal, zuletzt gesehen) + 1
     val wallClockMs: Long,      // nur Anzeige/Statistik, NIE für die Ordnung
-    val parentId: EventId?,     // Log-Kopf, den das Gerät beim Tap gesehen hat (Fork-Erkennung)
+    val parentId: EventId?,     // Log-Kopf, den das Gerät beim Tap gesehen hat (Doppel-Tap-Erkennung)
     val payload: EventPayload,
 )
 
@@ -193,7 +193,7 @@ sealed interface EventPayload {
 
 **Effektive Events**: Rückwärts über das geordnete Log; ein Event ist wirksam, wenn es von keinem *wirksamen* `Undo` referenziert wird. Undo auf ein bereits rückgängig gemachtes Event ist ein No-op (idempotent).
 
-**UI-Undo**: Der Undo-Button erzeugt `Undo(target = letztes wirksames PointWon/ContinueDecision)` – das Ziel ist eine konkrete Event-ID, daher auch bei parallelen Taps eindeutig.
+**UI-Undo**: Der Undo-Button erzeugt `Undo(target = letztes wirksam angewendetes PointWon/ContinueDecision/Correction/MatchEnded)` – das Ziel ist eine konkrete Event-ID, daher auch bei parallelen Taps eindeutig. Ignorierte Events sind nie UI-Undo-Ziel; maßgeblich ist [02 §7.3](02-scoring-regeln.md#73-effektive-events-und-fold-normativ).
 
 ### 3.3 Regelwerke (`RuleSet`)
 
@@ -221,13 +221,13 @@ interface RuleSet {
 ### 3.5 Warum Event Sourcing (statt Zustands-Sync)
 
 - Undo beliebig tief, auch geräteübergreifend, ohne Sonderlogik.
-- Geräte-Sync wird zum Mengen-Merge (CRDT-artig) – keine Zustands-Konflikte.
+- Geräte-Sync wird zum Mengen-Abgleich (CRDT-artig) – keine Zustands-Konflikte; wer zählt, regelt die Zählerrolle (§4.4).
 - Statistik (P3) ergibt sich aus dem Log (Punktverläufe, Breakbälle, Momentum).
 - Paritätstests mit Garmin: Events rein, Zustand raus – ideal für Testvektoren.
 
 ---
 
-## 4. Geräte-Sync Uhr ↔ Handy (gleichwertiges Zählen)
+## 4. Geräte-Sync Uhr ↔ Handy (ein Zähler, alle zeigen an)
 
 ### 4.1 Topologie
 
@@ -249,10 +249,21 @@ graph LR
   WO -.->|"standalone WLAN/LTE, P2+"| SB
 ```
 
-- **Handy = Hub und Cloud-Gateway, aber nicht Autorität.** Jedes Gerät hält das vollständige Event-Log des aktiven Matches und berechnet den Zustand selbst.
+- **Ein Zähler, sonst Anzeige (Single-Scorer, 2026-10-15):** Pro Match zählt genau ein Gerät – Standard die Uhr des Spielers, alternativ ein Handy im Director-Modus (eine externe Person zählt). Alle anderen Geräte zeigen nur an. „Zählen übernehmen“ (mit Bestätigung in der UI) überträgt die Rolle (§4.4). Ab P2 kann der Zähler ein anderer Nutzer sein; Zuschauer-Accounts sehen nur zu.
+- **Handy = Hub und Cloud-Gateway.** Jedes Gerät hält das vollständige Event-Log des aktiven Matches und berechnet den Zustand selbst; Events fließen vom Zähler über das Handy zu allen Anzeigen.
+
+```mermaid
+graph LR
+  Z["Zähler (Uhr oder Director-Handy)"] -->|"Events"| H["Handy (Hub)"]
+  H -->|"Events"| A1["Anzeige: Handy/Uhr"]
+  H -->|"Outbox, P2"| C[("Cloud")]
+  A1 -.->|"ScorerChanged: Zählen übernehmen"| H
+```
 - Plattformgrenze: **iPhone ↔ Wear OS gibt es nicht** (Wear OS 3+ koppelt nicht mit iPhones). Gemischte Kombinationen synchronisieren nur über die Cloud (P2).
 
-### 4.2 Entscheidung: Merge statt Handy-Autorität
+### 4.2 Entscheidung: Merge statt Handy-Autorität (ersetzt)
+
+> **Ersetzt durch Single-Scorer (Produktentscheidung 2026-10-15, 02 §7.5, §12.1 K13).** Gleichwertiges Zählen auf mehreren Geräten erzeugte Forks, deren Erkennung aus dem Log nicht eindeutig ist und deren Auflösung die Nutzer belastet. Der folgende Abschnitt bleibt als Begründungshistorie stehen.
 
 | Kriterium | Handy als Autorität (Sequencer) | **Merge (gewählt)** |
 |---|---|---|
@@ -280,19 +291,21 @@ Regeln:
 3. **Anti-Entropy bei jedem (Wieder-)Verbinden und alle 30 s während eines aktiven Matches**: `Summary` austauschen, fehlende `deviceSeq`-Bereiche nachsenden. Damit ist Zustellung garantiert, unabhängig von der Zuverlässigkeit des Transports.
 4. Hub-Weiterleitung: Das Handy leitet Events zwischen Uhr(en) und Cloud weiter (z. B. Garmin + iPhone + Cloud-Zuschauer).
 
-### 4.4 Konfliktauflösung bei gleichzeitigen Taps und Offline-Phasen
+### 4.4 Single-Scorer: Zähler, Anzeige und Übergabe
 
-Grundlage: `parentId` (welchen Log-Kopf hat das Gerät beim Tap gesehen).
+Normativ in 02 §7.5. Kurzfassung:
 
-| Fall | Erkennung | Auflösung |
-|---|---|---|
-| **Fast-Forward** | nur eine Seite hat neue Events seit gemeinsamem Kopf | einfach übernehmen (Normalfall, auch nach Funkloch, wenn nur ein Gerät gezählt hat) |
-| **Doppel-Tap** (beide tippen denselben Ballwechsel) | je 1 `PointWon` mit gleichem `parentId`, **gleiche Seite**, `wallClock`-Abstand ≤ 5 s | automatisch dedupliziert: das in Ordnung erste gilt, das zweite wird im Reducer als „absorbiert“ markiert (kein Undo-Event nötig, deterministische Regel) |
-| **Widerspruch** | gleiches `parentId`, **unterschiedliche Seiten** | beide bleiben im Log und werden in Ordnung angewendet; Zustand bekommt `conflict`; alle Geräte zeigen Banner „Gleichzeitig Punkt für A und B – korrigieren?“ mit 1-Tap-Undo |
-| **Fork** (beide Geräte haben offline mehrere Punkte gezählt) | zwei Zweige mit je ≥ 1 Event (nicht Doppel-Tap) ab gemeinsamem Vorfahr | Zählen geht weiter (vorläufig gemergt); Handy zeigt Auflösungsdialog: „Version Uhr (A:B)“ / „Version Handy (C:D)“ / „Beide zusammenführen“. Auswahl erzeugt `Undo`-Events für den verworfenen Zweig – Log bleibt append-only |
-| **Undo parallel zu Punkt** | Undo referenziert konkrete Event-ID | keine Kollision; idempotent |
+| Fall | Regel |
+|---|---|
+| **Matchbeginn** | `MatchCreated.scorerDeviceId` = gewählter Zähler (Standard: Uhr des Spielers; Director-Modus: ein Handy). Fehlt das Feld, zählt das Gerät der Genesis. |
+| **Eingaben von Anzeige-Geräten** | Die Session erzeugt dort keine Zähl-Events. Kommen trotzdem welche an (alte App, Race), sind sie unwirksam: `ignoredEvents` + `rejectedByRole`. |
+| **Zählen übernehmen** | Jedes Gerät darf `ScorerChanged(eigene deviceId)` erzeugen (UI mit Bestätigung; P1: eigene Geräte, ab P2 prüft die Cloud). Gilt ab seiner Position in der Ordnung `(lamport, deviceId, id)`. |
+| **Gleichzeitige Übernahmen** | Die in der Ordnung letzte Übernahme gilt für alle späteren Positionen – deterministisch auf allen Geräten. |
+| **Altzähler offline** | Zählt der bisherige Zähler ohne Verbindung weiter, sind seine nach der Übernahme geordneten Events unwirksam. Die UI meldet sie („Zählen wurde übernommen – N Eingaben nicht übernommen“). |
+| **Undo** | Der Zähler darf jedes wirksame Event rückgängig machen, auch Punkte des Vorgängers. Undo auf `ScorerChanged` ist ungültig (Rückgabe = erneutes Übernehmen). |
+| **Doppel-Tap** | bleibt nur als Schutz innerhalb eines Geräts (gleicher Kopf, gleiche Seite, ≤ 5 s → absorbiert). |
 
-Damit gibt es keinen Fall, in dem ein Gerät blockiert oder Daten verliert; mehrdeutige Fälle werden sichtbar gemacht statt still „falsch“ entschieden.
+Ein Fork-Dialog entfällt: Weil nur ein Gerät zählt, gibt es keine konkurrierenden Zweige. Synchronisation (Anti-Entropie, §4.3) bleibt nötig, damit alle Anzeigen und der nächste Zähler das vollständige Log haben.
 
 ### 4.5 Ablauf bei Verbindungsabriss
 
@@ -310,7 +323,7 @@ sequenceDiagram
   W->>H: Hello + Summary W:3, H:0
   H->>W: Summary W:1, H:0
   W->>H: Events e2, e3
-  H->>H: Merge, Fork-Pruefung (kein Fork)
+  H->>H: Merge (Events der Uhr = Zaehler)
   H->>C: Outbox-Upload e2, e3
 ```
 
@@ -333,7 +346,7 @@ sequenceDiagram
 
 **Garmin (Connect IQ Mobile SDK, P4)**
 - Uhr: `Communications.transmit` / `registerForPhoneAppMessages`; Handy: Mobile SDK (`sendMessage`, `registerForAppEvents`). Android läuft über die Garmin-Connect-App; iOS-SDK als Framework ([Mobile SDK for iOS](https://developer.garmin.com/connect-iq/core-topics/mobile-sdk-for-ios)).
-- Kompaktes Nachrichtenformat (Arrays statt Maps, Event = `[seq, lamport, parentSeqRef, type, side]`), da Nachrichten klein und Latenzen im Sekundenbereich sind. Gleiche Merge-Regeln.
+- Kompaktes Nachrichtenformat (Arrays statt Maps, Event = `[seq, lamport, parentSeqRef, type, side]`), da Nachrichten klein und Latenzen im Sekundenbereich sind. Gleiche Regeln (Single-Scorer, §4.4).
 
 ### 4.7 Kann die Uhr standalone zählen?
 
@@ -372,7 +385,7 @@ Fallback Apple Watch: Falls der SQLDelight-native-driver kein `watchosDeviceArm6
 ```mermaid
 graph TD
   VM["ViewModel / SwiftUI-Store"] --> REPO["MatchRepository"]
-  REPO --> ENG["core-scoring: fold + merge"]
+  REPO --> ENG["core-scoring: fold"]
   REPO --> ES["EventStore (SQLDelight)"]
   REPO --> LINK["DeviceSyncService (device-link)"]
   REPO --> CSW["CloudSyncWorker (cloud-sync, P2)"]
@@ -388,7 +401,7 @@ graph TD
 - **Push**: Batch-Upload aller `match_event` mit `uploaded = false` via `upsert ... on conflict (id) do nothing` → idempotent, Retry-sicher. Erfolgreich → `uploaded = true`. Auslöser: Event-Insert (debounced 2 s), App-Start, Netzwerk-Wechsel; Android via WorkManager, iOS via `BGTaskScheduler` + Vordergrund.
 - **Pull**: je sichtbarem Match bzw. je Nutzer über einen monotonen Server-Cursor (`server_seq bigserial`), nicht über Zeitstempel. Supabase Realtime (Postgres Changes) nur für **live laufende Matches** (Zuschauer/Mitspieler) – sonst Polling bei App-Start.
 - **Konflikte**:
-  - Events: unveränderlich → keine Konflikte; Forks über Geräte werden mit denselben Regeln wie §4.4 aufgelöst (Cloud ist nur ein weiterer Peer).
+  - Events: unveränderlich → keine Konflikte; Rollen (Zähler) gelten wie §4.4 (Cloud ist nur ein weiterer Peer).
   - Veränderliche Daten (Profil, Matchname, Notizen, Freundschaften): **Last-Writer-Wins pro Feld** mit serverseitigem `updated_at` (Trigger); Freundschaften sind serverautoritativ (Einladung/Annahme).
 - **Identität**: P1 erzeugt eine lokale `profile_id` (UUIDv7). P2: Supabase **anonymous sign-in** beim ersten Sync, später Verknüpfung mit E-Mail/Apple/Google → lokale Daten werden ohne Migration übernommen (`owner_profile_id` = Auth-User). Details liefert das Backend-Dokument.
 - **Statistik-Ableitungen** (P3) werden clientseitig aus Events berechnet; ein serverseitiger Aggregat-Job ist optional (Backend-Entscheidung).
@@ -458,8 +471,8 @@ iOS + watchOS: TestFlight (interne Tester sofort). Android + Wear: Play Console 
 | Ebene | Werkzeug | Läuft wo | Inhalt |
 |---|---|---|---|
 | Engine-Unit | `kotlin.test` in `commonTest` | lokal (jvm), CI alle Targets | Regel-Tabellen je Sport (Tiebreak, Star Point, Pickleball Side-Out, Seitenwechsel, Aufschlagrotation) |
-| Engine-Property | Kotest Property | jvm | Invarianten: Undo(Punkt) ≡ ohne Punkt; Merge kommutativ/assoziativ/idempotent; beliebige Zustellreihenfolge → gleicher Zustand; Spielstand nie negativ |
-| Sync-Simulation | eigenes In-Memory-Netz | jvm | 2–3 virtuelle Geräte, zufällige Partitionen/Verzögerungen/Duplikate → Konvergenz; Fork- und Doppel-Tap-Szenarien |
+| Engine-Property | Kotest Property | jvm | Invarianten: Undo(Punkt) ≡ ohne Punkt; Abgleich kommutativ/assoziativ/idempotent; Eingaben von Nicht-Zählern wirkungslos; beliebige Zustellreihenfolge → gleicher Zustand; Spielstand nie negativ |
+| Sync-Simulation | eigenes In-Memory-Netz | jvm | 2–3 virtuelle Geräte, zufällige Partitionen/Verzögerungen/Duplikate → Konvergenz; Zählerübergabe (online/offline/gleichzeitig), alle Zustellreihenfolgen kleiner Szenarien |
 | Golden Testvektoren | Generator in `core-scoring` (jvmTest-Task) | CI | siehe 8.1 |
 | Daten | SQLDelight JVM-Treiber | jvm | Migrationen (`verifyMigrations`), Outbox-Verhalten |
 | Phone-UI | CMP `runComposeUiTest` + Screenshot-Tests (Roborazzi) | jvm/Android | Scoring-Screen-Zustände, DE/EN, große Schrift |
@@ -508,7 +521,7 @@ iOS + watchOS: TestFlight (interne Tester sofort). Android + Wear: Play Console 
 | Garmin-Speicherlimits (je Gerät, teils nur ~128 KB für Watch-Apps auf älteren Modellen) | Absturz/OOM | Mindest-API-Level festlegen (nur neuere Geräte), Integer-Arrays statt Objekten, nur aktives Match im RAM, Log-Kompaktierung (Snapshot + Rest-Events) |
 | Garmin-Simulator in Linux-CI (xvfb) / Login-Pflicht des SDK-Managers | Flaky CI | Community-CLI pinnen, Garmin-Account-Secrets, notfalls Garmin-Tests nur manuell + Vektoren |
 | Monkey-C-Port weicht ab | falscher Spielstand auf Garmin | Testvektoren als harte CI-Schranke |
-| Doppelzählung bei parallelem Zählen | falscher Spielstand | Dedup-Regel + sichtbarer Konflikt/Fork-Dialog, Sync-Simulationstests |
+| Doppelzählung bei parallelem Zählen | falscher Spielstand | Single-Scorer (nur ein Gerät zählt, §4.4), Dedup-Regel innerhalb eines Geräts, Sync-Simulationstests |
 | Wear OS ↔ iPhone nicht koppelbar | Nutzer mit iPhone + Wear-Uhr | Nur Cloud-Sync (P2) und Wear-Standalone; in Store-Texten klar kommunizieren |
 | Workout-Session schon in P1 | HealthKit-Review, Berechtigungsdialog | Klar begründeter Usage-Text; ohne Berechtigung Fallback „Bildschirm aktiv halten“-Hinweis |
 

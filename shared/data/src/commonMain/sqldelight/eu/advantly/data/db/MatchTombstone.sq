@@ -1,0 +1,15 @@
+-- Dauerhafte Löschmarkierungen (Tombstones): Ein gelöschtes Match taucht durch keinen Abgleich wieder auf.
+-- P1: repliziert an die eigenen gekoppelten Geräte. P2 (geteilte Matches): Löschen betrifft nur die eigene Sicht.
+CREATE TABLE match_tombstone (
+    match_id TEXT NOT NULL PRIMARY KEY,
+    deleted_at_ms INTEGER NOT NULL
+);
+
+insertOrIgnore:
+INSERT OR IGNORE INTO match_tombstone (match_id, deleted_at_ms) VALUES (?, ?);
+
+countById:
+SELECT count(*) FROM match_tombstone WHERE match_id = ?;
+
+selectAll:
+SELECT match_id, deleted_at_ms FROM match_tombstone ORDER BY deleted_at_ms, match_id;

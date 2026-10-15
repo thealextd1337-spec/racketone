@@ -108,6 +108,8 @@ class SerializationTest {
                 "effects",
                 "ignoredEvents",
                 "continuation",
+                "scorerDeviceId",
+                "rejectedByRole",
             ),
             obj.keys.toList(),
         )

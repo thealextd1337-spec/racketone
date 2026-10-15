@@ -1,0 +1,46 @@
+-- Favoriten-Lineups („Wie letztes Mal“, Schnellstart auf der Uhr). id ist aus Sport, Disziplin und Besetzung
+-- abgeleitet und damit auf allen Geräten gleich (idempotenter Abgleich über MatchMeta).
+CREATE TABLE lineup_favorite (
+    id TEXT NOT NULL PRIMARY KEY,
+    sport TEXT NOT NULL,
+    discipline TEXT NOT NULL,
+    -- JSON-Listen der Spieler-IDs je Side
+    side_a TEXT NOT NULL,
+    side_b TEXT NOT NULL,
+    name TEXT,
+    last_used_at_ms INTEGER NOT NULL,
+    use_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX lineup_favorite_recent ON lineup_favorite (sport, last_used_at_ms);
+
+insertOrIgnore:
+INSERT OR IGNORE INTO lineup_favorite (id, sport, discipline, side_a, side_b, name, last_used_at_ms, use_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+touch:
+UPDATE lineup_favorite
+SET last_used_at_ms = max(last_used_at_ms, :nowMs), use_count = use_count + 1
+WHERE id = :id;
+
+merge:
+UPDATE lineup_favorite
+SET name = coalesce(:name, name),
+    last_used_at_ms = max(last_used_at_ms, :lastUsedAtMs),
+    use_count = max(use_count, :useCount)
+WHERE id = :id;
+
+rename:
+UPDATE lineup_favorite SET name = ? WHERE id = ?;
+
+selectById:
+SELECT * FROM lineup_favorite WHERE id = ?;
+
+selectRecent:
+SELECT * FROM lineup_favorite
+WHERE (:sport IS NULL OR sport = :sport)
+ORDER BY last_used_at_ms DESC, use_count DESC, id
+LIMIT :limit;
+
+deleteById:
+DELETE FROM lineup_favorite WHERE id = ?;

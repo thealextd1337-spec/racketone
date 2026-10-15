@@ -170,7 +170,7 @@ object MatchFormatValidator {
                 }
 
                 else -> {
-                    Unit
+                    // Für andere Sportarten gelten keine zusätzlichen Rally-Bindungen.
                 }
             }
             if (r.receiverSwapAtMidGameEndChange && sport != Sport.TABLE_TENNIS) {

@@ -23,6 +23,7 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.Undo
 import eu.advantly.core.scoring.lineupFor
 import eu.advantly.core.scoring.p
@@ -39,6 +40,7 @@ class RuleScenario(
     val lineup: Lineup = lineupFor(format.discipline),
     val script: (MatchDriver.() -> Unit)? = null,
     val events: List<ScoreEvent>? = null,
+    val scorer: DeviceId? = null,
 )
 
 /** Katalog der Szenarien – spiegelt die Regel-Tabellen-Tests aus `commonTest` (TennisRulesTest usw.). */
@@ -245,7 +247,62 @@ object RuleScenarios {
                         ev("y", 3, "watch", "x", 20_000, Undo(EventId("x"))),
                     ),
             ),
+            // --- Single-Scorer (02 §7.5) ---
+            RuleScenario(
+                Sport.TENNIS,
+                "scorer-handover-mid-set",
+                "Zählerübergabe mitten im Satz: Eingaben des Nicht-Zählers werden ignoriert (rejectedByRole), " +
+                    "Undo auf ScorerChanged ist ungültig",
+                tennis,
+                scorer = DeviceId("watch"),
+                events =
+                    listOf(
+                        ev("e1", 1, "watch", null, 10_000, PointWon(Side.A)),
+                        ev("e2", 2, "watch", "e1", 20_000, PointWon(Side.A)),
+                        ev("e3", 3, "phone", "e2", 25_000, PointWon(Side.B)),
+                        ev("e4", 4, "phone", "e3", 30_000, ScorerChanged(DeviceId("phone"))),
+                        ev("e5", 5, "phone", "e4", 40_000, PointWon(Side.B)),
+                        ev("e6", 6, "watch", "e5", 45_000, PointWon(Side.A)),
+                        ev("e7", 7, "watch", "e6", 46_000, Undo(EventId("e5"))),
+                        ev("e8", 8, "phone", "e7", 50_000, Undo(EventId("e5"))),
+                        ev("e9", 9, "watch", "e8", 60_000, ScorerChanged(DeviceId("watch"))),
+                        ev("e10", 10, "watch", "e9", 70_000, PointWon(Side.A)),
+                        ev("e11", 11, "watch", "e10", 71_000, Undo(EventId("e9"))),
+                    ),
+            ),
+            RuleScenario(
+                Sport.TENNIS,
+                "scorer-offline-old-scorer",
+                "Altzähler zählt offline weiter: seine nach dem ScorerChanged geordneten Events werden ignoriert",
+                tennis,
+                scorer = DeviceId("watch"),
+                events =
+                    listOf(
+                        ev("e1", 1, "watch", null, 10_000, PointWon(Side.A)),
+                        ev("e2", 2, "watch", "e1", 20_000, PointWon(Side.A)),
+                        ev("w3", 3, "watch", "e2", 30_000, PointWon(Side.A)),
+                        ev("w4", 4, "watch", "w3", 40_000, PointWon(Side.B)),
+                        ev("p1", 3, "phone", "e2", 31_000, ScorerChanged(DeviceId("phone"))),
+                        ev("p2", 4, "phone", "p1", 41_000, PointWon(Side.B)),
+                    ),
+            ),
             // --- Padel ---
+            RuleScenario(
+                Sport.PADEL,
+                "director-phone-scorer",
+                "Director-Modus: das Handy zählt, Eingaben der Uhr (Punkt, Undo, Pause) werden ignoriert",
+                Presets.PADEL_PREMIER_2026.format(),
+                scorer = DeviceId("phone"),
+                events =
+                    listOf(
+                        ev("e1", 1, "phone", null, 10_000, PointWon(Side.A)),
+                        ev("e2", 2, "watch", "e1", 11_000, PointWon(Side.A)),
+                        ev("e3", 3, "phone", "e2", 20_000, PointWon(Side.B)),
+                        ev("e4", 4, "watch", "e3", 21_000, Undo(EventId("e3"))),
+                        ev("e5", 5, "phone", "e4", 30_000, PointWon(Side.A)),
+                        ev("e6", 6, "watch", "e5", 31_000, Paused),
+                    ),
+            ),
             s(
                 Sport.PADEL,
                 "star-point",

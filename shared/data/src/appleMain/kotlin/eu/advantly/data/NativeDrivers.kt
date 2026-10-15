@@ -30,3 +30,6 @@ fun createNativeDriver(
 
 /** Datei-basierter [EventStore] (iOS/watchOS: Standard-Datenbankverzeichnis von sqliter). */
 fun createNativeEventStore(name: String = DEFAULT_DATABASE_NAME): EventStore = SqlDelightEventStore(createNativeDriver(name))
+
+/** Datei-basierte [LocalData] (iOS/watchOS; eine Instanz je Prozess verwenden). */
+fun createNativeLocalData(name: String = DEFAULT_DATABASE_NAME): LocalData = LocalData(createNativeDriver(name))

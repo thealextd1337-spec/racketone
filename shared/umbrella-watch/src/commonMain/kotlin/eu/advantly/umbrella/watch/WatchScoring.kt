@@ -2,7 +2,6 @@ package eu.advantly.umbrella.watch
 
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
-import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -10,85 +9,99 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
-import eu.advantly.core.model.Uuid7
 import eu.advantly.core.scoring.Callout
-import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Effect
-import eu.advantly.core.scoring.EndReason
-import eu.advantly.core.scoring.EngineState
-import eu.advantly.core.scoring.EventPayload
 import eu.advantly.core.scoring.FlagLevel
 import eu.advantly.core.scoring.GameKind
-import eu.advantly.core.scoring.MatchCreated
-import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
-import eu.advantly.core.scoring.NextSetKind
-import eu.advantly.core.scoring.Paused
-import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
-import eu.advantly.core.scoring.Resumed
-import eu.advantly.core.scoring.ScoreEvent
-import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.SetKind
-import eu.advantly.core.scoring.Undo
-import eu.advantly.data.AppendResult
-import eu.advantly.data.EventStore
-import eu.advantly.data.StoredEvent
-import kotlinx.serialization.json.Json
-import kotlin.random.Random
+import eu.advantly.data.LocalData
+import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.IdGenerator
+import eu.advantly.match.session.MatchSession
+import eu.advantly.match.session.RandomIdGenerator
+import eu.advantly.match.session.ScorerChoice
+import eu.advantly.match.session.SessionListener
+import eu.advantly.match.session.SessionState
+import eu.advantly.match.session.SyncIndicator
+import eu.advantly.match.session.SyncStatus
+import eu.advantly.match.session.SystemWallClock
+import eu.advantly.match.session.WallClock
+import eu.advantly.sync.protocol.SyncCodec
 
 /**
- * Swift-Facade für das eigenständige Zählen auf der Apple Watch (W1-E). Ohne SKIE (CLAUDE.md Regel 4): an der Grenze nur
- * String/Int/Long/Boolean, Listen und flache Klassen; Fehler werden nie als Exception nach Swift geworfen, sondern als
- * `null`/`false` gemeldet.
+ * Swift-Facade für das Zählen auf der Apple Watch (W1-E) über die gemeinsame [MatchSession] (`shared/match-session`,
+ * Gerätart `WATCH`). Ohne SKIE (CLAUDE.md Regel 4): an der Grenze nur String/Int/Long/Boolean, Listen und flache Klassen;
+ * Fehler laufen nie als Exception nach Swift, sondern als `null`/`false` plus [lastError].
  *
- * - Ein Match lebt ausschließlich im Event-Log ([EventStore], SQLite-Datei `advantly.db`): Genesis `MatchCreated`, danach
- *   `PointWon`/`Undo`/`ContinueDecision`/`MatchEnded`/`Paused`/`Resumed`. Nach einem App-Neustart stellt [restore] den Zustand per Replay wieder her.
- * - Side A = „Wir“ (Besitzer der Uhr), Side B = „Gegner“. Die Engine bleibt neutral (A/B), die Perspektive ist reine Anzeige.
- * - Nicht thread-sicher: Swift ruft alles auf der Main-Queue auf; [WatchScoringListener] wird synchron im selben Aufruf benachrichtigt.
- * - Sync mit dem Handy ist nicht Teil dieser Facade (folgt in der Integration über `sync-protocol`/`device-link`).
+ * - **Single-Scorer** (02 §7.5): Ein auf der Uhr gestartetes Match zählt die Uhr. Hat ein anderes Gerät (z. B. das Handy
+ *   im Director-Modus) den Zähler, ist die Uhr **Anzeige** ([WatchScoreSnapshot.isScorer] = `false`): Zähl-Befehle
+ *   liefern `null` mit `NOT_SCORER`; [takeOverScoring] macht die Uhr nach Bestätigung in der UI zum Zähler.
+ * - **Speicher:** Events, Match-Köpfe und Einstellungen liegen in der gemeinsamen [LocalData] (`advantly.db`, Schema aus
+ *   `shared/data`). Das geöffnete Match wird gemerkt und nach einem App-Neustart mit [restore] wieder geöffnet.
+ *   **Dev-Daten-Reset:** Das Schema hat sich mit PR #13 ohne Migration geändert (Schema-Version bleibt 1). Eine Uhr- oder
+ *   Simulator-Installation aus der Zeit davor kann `advantly.db` nicht lesen → [isAvailable] = `false`, alle Befehle
+ *   `STORE_READ`; Abhilfe: Watch-App löschen und neu installieren (Simulator: `xcrun simctl uninstall`).
+ * - **Sync:** Die Session sendet jedes Event sofort an das gekoppelte iPhone (WatchConnectivity aus `device-link`),
+ *   puffert offline und liefert bei Wiederverbindung nach; der Snapshot trägt den Sync-Status.
+ * - Side A = „Wir“ (Besitzer der Uhr), Side B = „Gegner“ – reine Anzeige-Perspektive.
+ * - Nur auf der Main-Queue aufrufen; [WatchScoringListener] wird synchron auf der Main-Queue benachrichtigt (auch bei
+ *   Änderungen durch das Handy).
  *
  * Swift: `let scoring = AdvantlyWatch.shared.scoring(); scoring.startMatch(presetId: "TENNIS_SINGLES_BO3", doubles: false, weServeFirst: true)`.
  */
 class WatchScoring internal constructor(
-    private val store: EventStore,
-    private val prefs: WatchPrefs,
-    private val now: () -> Long = ::platformNowMs,
-    private val random: Random = Random.Default,
+    private val open: () -> Backend,
+    private val clock: WallClock = SystemWallClock,
+    private val ids: IdGenerator = RandomIdGenerator(),
 ) {
-    private var listener: WatchScoringListener? = null
-    private var active: ActiveMatch? = null
-    private var error: String = ""
-
-    private class ActiveMatch(
-        val matchId: MatchId,
-        var engine: EngineState,
-        var nextDeviceSeq: Long,
-        var lamport: Long,
-        val startedAtMs: Long,
+    /** Session und Datenbank; die Fabrik läuft beim ersten Zugriff (Fehler → [isAvailable] = `false`). */
+    internal class Backend(
+        val session: MatchSession,
+        val data: LocalData,
     )
 
-    /** Ein Listener; `null` meldet ab. Wird nach jedem erfolgreichen Befehl mit dem neuen Zustand aufgerufen. */
+    private var listener: WatchScoringListener? = null
+    private var error: String = ""
+    private var backend: Backend? = null
+    private var openFailed = false
+    private var current: SessionState? = null
+    private var lastOpenId: String? = null
+    private var scorerLostAtMs: Long = 0
+
+    private val sessionListener = SessionListener { state -> onState(state) }
+
+    /** `false`, wenn Datenbank oder Session nicht geöffnet werden konnten (siehe Dev-Daten-Reset oben). */
+    fun isAvailable(): Boolean = backend() != null
+
+    /** Ein Listener; `null` meldet ab. Bekommt jeden neuen Zustand, `null` = kein Match offen (Startliste). */
     fun setListener(listener: WatchScoringListener?) {
         this.listener = listener
     }
 
     /**
-     * Grund, warum der letzte Befehl `null` geliefert hat, sonst `""` (wird bei jedem Befehl zurückgesetzt):
-     * - `STORE_WRITE`: Event konnte nicht gespeichert werden – Zustand unverändert, derselbe Befehl kann wiederholt werden
-     * - `STORE_READ`: Log nicht lesbar (z. B. SQLite-Fehler) – Zeiger auf das Match bleibt, [restore] später erneut
-     * - `LOG_INVALID`: Log vorhanden, aber nicht auswertbar – Match wird verworfen
+     * Grund, warum der letzte Befehl `null`/`false` geliefert hat, sonst `""` (wird bei jedem Befehl zurückgesetzt):
+     * - `STORE_WRITE`: Speichern/Senden fehlgeschlagen – Zustand unverändert, derselbe Befehl kann wiederholt werden
+     * - `STORE_READ`: Datenbank nicht lesbar (z. B. veraltetes Schema) – Zeiger auf das Match bleibt erhalten
+     * - `LOG_INVALID`: gemerktes Match nicht (mehr) vorhanden oder nicht auswertbar – Zeiger wird verworfen
      * - `INVALID_INPUT`: unbekanntes Preset, falsche Disziplin oder ungültiges Format
+     * - `NOT_SCORER`: dieses Gerät ist Anzeige, ein anderes Gerät zählt
      * - `NOT_ALLOWED`: Befehl passt nicht zum Zustand (z. B. Punkt im Satzende-Dialog, nichts rückgängig zu machen)
      * - `NO_MATCH`: kein Match geöffnet
      */
     fun lastError(): String = error
 
-    /** Stabile Installations-ID der Uhr (UUIDv7, beim ersten Aufruf erzeugt und gespeichert). */
-    fun deviceId(): String = prefs.get(KEY_DEVICE_ID) ?: newUuid().value.also { prefs.set(KEY_DEVICE_ID, it) }
+    /** Stabile Installations-ID der Uhr (UUIDv7 aus der Session), `""` ohne Datenbank. */
+    fun deviceId(): String =
+        backend()
+            ?.session
+            ?.deviceId
+            ?.value
+            .orEmpty()
 
     // --- Auswahl (Start-Screen) -----------------------------------------------------------------------------------
 
@@ -130,7 +143,7 @@ class WatchScoring internal constructor(
 
     /** Letzte Auswahl für „Wie letztes Mal“ oder `null`. */
     fun lastSetup(): WatchMatchSetup? {
-        val parts = prefs.get(KEY_LAST_SETUP)?.split(';') ?: return null
+        val parts = setting(KEY_LAST_SETUP)?.split(';') ?: return null
         if (parts.size != 3) return null
         val preset = Presets.byId(parts[0]) ?: return null
         return WatchMatchSetup(preset.id, preset.sport.name, parts[1] == "1", parts[2] == "1")
@@ -139,10 +152,11 @@ class WatchScoring internal constructor(
     // --- Lebenszyklus ---------------------------------------------------------------------------------------------
 
     /**
-     * Startet ein neues Match aus einem Preset. Lineup: Einzel `A1` vs. `B1`, Doppel `A1,A2` vs. `B1,B2`; [weServeFirst]
-     * wählt `A1` bzw. `B1` als Erstaufschläger. Ein noch laufendes Match wird damit verlassen (es bleibt im Log).
+     * Startet ein neues Match aus einem Preset; **die Uhr zählt** (Standard). Besetzung: A = Self-Player der Uhr (+ Partner),
+     * B = Gegner; bei „Wie letztes Mal“ derselben Sportart/Disziplin dieselben Spieler-IDs wie zuletzt.
+     * [weServeFirst] wählt den Erstaufschläger (A bzw. B, jeweils Nummer 1).
      *
-     * @return Zustand nach dem Start oder `null` (unbekanntes Preset, Disziplin nicht erlaubt, Speicherfehler)
+     * @return Zustand nach dem Start oder `null` (`INVALID_INPUT`, `STORE_WRITE`, `STORE_READ`)
      */
     fun startMatch(
         presetId: String,
@@ -153,14 +167,14 @@ class WatchScoring internal constructor(
         val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
         val discipline = if (doubles) Discipline.DOUBLES else Discipline.SINGLES
         if (discipline !in preset.disciplines) return fail(INVALID_INPUT)
-        val snapshot = begin(preset.format(discipline), weServeFirst) ?: return null
-        prefs.set(KEY_LAST_SETUP, listOf(preset.id, flag(doubles), flag(weServeFirst)).joinToString(";"))
+        val snapshot = begin(preset.format(discipline), weServeFirst, ScorerChoice.ThisDevice) ?: return null
+        putSetting(KEY_LAST_SETUP, listOf(preset.id, flag(doubles), flag(weServeFirst)).joinToString(";"))
         return snapshot
     }
 
     /**
-     * Startet ein Match aus einem `MatchFormat`-JSON (02 §3.2), z. B. vom Handy-Wizard. Die Disziplin steht im Format.
-     * Ungültiges JSON oder Format → `null`.
+     * Startet ein Match aus einem `MatchFormat`-JSON (02 §3.2), z. B. vom Handy-Wizard; die Uhr zählt.
+     * Ungültiges JSON oder Format → `null` (`INVALID_INPUT`).
      */
     fun startMatchFromFormatJson(
         formatJson: String,
@@ -169,278 +183,279 @@ class WatchScoring internal constructor(
         error = ""
         val format =
             try {
-                eventJson.decodeFromString(MatchFormat.serializer(), formatJson)
+                SyncCodec.json.decodeFromString(MatchFormat.serializer(), formatJson)
             } catch (e: IllegalArgumentException) {
                 // SerializationException ist eine IllegalArgumentException
                 return fail(INVALID_INPUT)
             }
         if (MatchFormatValidator.validate(format).errors.isNotEmpty()) return fail(INVALID_INPUT)
-        return begin(format, weServeFirst)
+        return begin(format, weServeFirst, ScorerChoice.ThisDevice)
     }
 
     /**
-     * Stellt das zuletzt geöffnete Match nach einem App-Neustart wieder her (Replay des Event-Logs).
-     * `null`, wenn es keines gibt (`""`), der Store nicht lesbar ist (`STORE_READ`, Zeiger bleibt für einen neuen Versuch)
-     * oder das Log nicht auswertbar ist (`LOG_INVALID`, Zeiger wird verworfen).
+     * Öffnet nach einem App-Neustart das zuletzt geöffnete Match wieder (Replay aus dem Event-Log). Ist schon ein Match
+     * offen (z. B. weil die Session einem vom Handy gestarteten Match gefolgt ist), wird dessen Zustand geliefert.
+     * `null` ohne gemerktes Match (`""`), bei `STORE_READ` (Zeiger bleibt) oder `LOG_INVALID` (Zeiger wird verworfen).
      */
     fun restore(): WatchScoreSnapshot? {
         error = ""
-        active?.let { return notify(it) }
-        val matchId = prefs.get(KEY_ACTIVE_MATCH) ?: return null
-        val stored =
+        val b = backend() ?: return fail(STORE_READ)
+        snapshot()?.let { return it }
+        val id = setting(KEY_OPEN_MATCH) ?: return null
+        val ok =
             try {
-                store.eventsFor(matchId)
+                b.session.resume(MatchId(id))
             } catch (e: Exception) {
                 return fail(STORE_READ)
             }
-        val loaded = load(matchId, stored)
-        if (loaded == null) {
-            prefs.set(KEY_ACTIVE_MATCH, null)
+        if (!ok) {
+            removeSetting(KEY_OPEN_MATCH)
             return fail(LOG_INVALID)
         }
-        active = loaded
-        return notify(loaded)
+        return snapshot()
     }
 
-    /** `true`, solange ein Match geöffnet ist (auch beendet, bis [close]). */
-    fun hasActiveMatch(): Boolean = active != null || prefs.get(KEY_ACTIVE_MATCH) != null
+    /** `true`, solange ein Match geöffnet bzw. zum Wiederöffnen gemerkt ist (auch beendet, bis [close]). */
+    fun hasActiveMatch(): Boolean = current?.match != null || setting(KEY_OPEN_MATCH) != null
 
-    /** ID des geöffneten Matches oder `""`. */
-    fun activeMatchId(): String = active?.matchId?.value ?: prefs.get(KEY_ACTIVE_MATCH).orEmpty()
+    /** ID des geöffneten (bzw. gemerkten) Matches oder `""`. */
+    fun activeMatchId(): String = current?.match?.id?.value ?: setting(KEY_OPEN_MATCH).orEmpty()
 
     /** Aktueller Zustand des geöffneten Matches oder `null`. */
-    fun snapshot(): WatchScoreSnapshot? = active?.let { snapshotOf(it) }
+    fun snapshot(): WatchScoreSnapshot? {
+        backend() ?: return null
+        val state = current ?: return null
+        return state.match?.let { buildSnapshot(it, state.sync, scorerLostAtMs) }
+    }
 
-    /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Das Log bleibt erhalten. */
+    /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Es bleibt gespeichert und wird weiter synchronisiert. */
     fun close() {
-        active = null
-        prefs.set(KEY_ACTIVE_MATCH, null)
-    }
-
-    // --- Befehle --------------------------------------------------------------------------------------------------
-
-    /** Punkt für Side A (`true`, „Wir“) bzw. B. Nur im laufenden bzw. pausierten Satz; sonst `null`. */
-    fun point(sideA: Boolean): WatchScoreSnapshot? {
         error = ""
-        val match = active ?: return fail(NO_MATCH)
-        val status = match.engine.state.status
-        if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return fail(NOT_ALLOWED)
-        return emit(match, PointWon(if (sideA) Side.A else Side.B))
+        val b = backend() ?: return
+        call { b.session.closeMatch() }
+        removeSetting(KEY_OPEN_MATCH)
+        lastOpenId = null
     }
 
-    /** Macht das letzte wirksame Zähl-Event rückgängig (auch über Satz- und Matchende hinweg). `null`, wenn nichts da ist. */
-    fun undo(): WatchScoreSnapshot? {
-        error = ""
-        val match = active ?: return fail(NO_MATCH)
-        val target = match.engine.undoTarget ?: return fail(NOT_ALLOWED)
-        return emit(match, Undo(target))
-    }
+    // --- Befehle (nur der Zähler) ---------------------------------------------------------------------------------
+
+    /** Punkt für Side A (`true`, „Wir“) bzw. B. Nur im laufenden bzw. pausierten Satz. */
+    fun point(sideA: Boolean): WatchScoreSnapshot? =
+        command { session, m ->
+            val status = m.state.status
+            if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return@command false
+            session.recordPoint(if (sideA) Side.A else Side.B)
+        }
+
+    /** Macht das letzte wirksame Zähl-Event rückgängig (auch über Satz- und Matchende hinweg). */
+    fun undo(): WatchScoreSnapshot? = command { session, m -> m.canUndo && session.undo() }
+
+    /** Stellt das zuletzt auf dieser Uhr rückgängig gemachte Event wieder her. */
+    fun redo(): WatchScoreSnapshot? = command { session, m -> m.canRedo && session.redo() }
 
     /**
      * Antwort auf „Noch ein Satz?“ (nur bei `pendingDecision`). [matchTiebreak] wählt einen Match-Tiebreak statt eines
-     * regulären Satzes, sofern das Format ihn anbietet ([WatchScoreSnapshot.offerMatchTiebreak]).
+     * regulären Satzes, sofern das Format ihn anbietet ([WatchScoreSnapshot.offerMatchTiebreak]); sonst regulär.
      */
     fun continueDecision(
         anotherSet: Boolean,
         matchTiebreak: Boolean,
-    ): WatchScoreSnapshot? {
-        error = ""
-        val match = active ?: return fail(NO_MATCH)
-        if (match.engine.state.status != MatchStatus.AWAITING_DECISION) return fail(NOT_ALLOWED)
-        val kind =
-            if (anotherSet && matchTiebreak && match.engine.format.matchTiebreak != null) {
-                NextSetKind.MATCH_TIEBREAK
-            } else {
-                NextSetKind.REGULAR
-            }
-        return emit(match, ContinueDecision(anotherSet, kind))
-    }
+    ): WatchScoreSnapshot? =
+        command { session, m ->
+            if (m.state.status != MatchStatus.AWAITING_DECISION) return@command false
+            session.continueDecision(anotherSet, anotherSet && matchTiebreak && m.format.matchTiebreak != null)
+        }
 
     /**
      * Beendet das Match: beim offenen Satzende-Dialog wie „Nein“ (reguläres Ergebnis), sonst vorzeitig (`ABANDONED`).
      * Bereits beendet → aktueller Zustand. Rückgängig machbar über [undo].
      */
     fun end(): WatchScoreSnapshot? {
-        error = ""
-        val match = active ?: return fail(NO_MATCH)
-        return when (match.engine.state.status) {
-            MatchStatus.FINISHED -> notify(match)
-            MatchStatus.AWAITING_DECISION -> emit(match, ContinueDecision(anotherSet = false))
-            else -> emit(match, MatchEnded(EndReason.ABANDONED))
+        val m = current?.match
+        if (m != null && m.isScorer && m.state.status == MatchStatus.FINISHED) {
+            error = ""
+            return snapshot()
         }
+        return command { session, _ -> session.endMatch() }
     }
 
     /**
      * Unterbrechung (Regen, Verletzung; 02 §7 `Paused`) ohne Wirkung auf den Score, nur im laufenden Satz. Die Uhr
      * pausiert dazu die Workout-Session. Seitenwechsel und Satzende-Dialog sind **keine** Pause.
      */
-    fun pause(): WatchScoreSnapshot? {
-        error = ""
-        val match = active ?: return fail(NO_MATCH)
-        if (match.engine.state.status != MatchStatus.IN_PROGRESS) return fail(NOT_ALLOWED)
-        return emit(match, Paused)
-    }
+    fun pause(): WatchScoreSnapshot? = command { session, m -> m.state.status == MatchStatus.IN_PROGRESS && session.pause() }
 
     /** Fortsetzung nach [pause]. Ein Punkt während der Pause setzt ebenfalls fort (Engine-Regel). */
-    fun resumePlay(): WatchScoreSnapshot? {
+    fun resumePlay(): WatchScoreSnapshot? = command { session, m -> m.state.status == MatchStatus.PAUSED && session.resumePlay() }
+
+    /**
+     * „Zählen übernehmen“ (02 §7.5, nach Bestätigung in der UI): die Uhr wird Zähler (`ScorerChanged`). Eingaben des
+     * bisherigen Zählers, die danach noch ankommen, verwirft die Engine (`rejectedByRoleCount`).
+     * `null`, wenn kein Match offen ist, es beendet ist (`NOT_ALLOWED`) oder die Uhr schon zählt (`NOT_ALLOWED`).
+     */
+    fun takeOverScoring(): WatchScoreSnapshot? {
         error = ""
-        val match = active ?: return fail(NO_MATCH)
-        if (match.engine.state.status != MatchStatus.PAUSED) return fail(NOT_ALLOWED)
-        return emit(match, Resumed)
+        val b = backend() ?: return fail(STORE_READ)
+        val m = current?.match ?: return fail(NO_MATCH)
+        if (m.isScorer || m.state.status == MatchStatus.FINISHED) return fail(NOT_ALLOWED)
+        val ok = call { b.session.takeOverScoring() } ?: return fail(STORE_WRITE)
+        return if (ok) snapshot() else fail(NOT_ALLOWED)
+    }
+
+    /** Stößt sofort einen Abgleich mit dem iPhone an (z. B. App wieder im Vordergrund). */
+    fun syncNow() {
+        val b = backend() ?: return
+        call { b.session.syncNow() }
+    }
+
+    /**
+     * Nur für CI-Screenshots (Debug-Demo, Etappe „display“): legt ein Match an, das ein anderes Gerät (Handy) zählt –
+     * die Uhr ist damit Anzeige. Nicht für die App-Logik gedacht.
+     */
+    fun startDisplayDemo(presetId: String): WatchScoreSnapshot? {
+        error = ""
+        val b = backend() ?: return fail(STORE_READ)
+        val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
+        // Session-interner Schlüssel der Gerätart, damit die Anzeige „zählt: Handy“ zeigt
+        call { b.data.settings.put("session.peerKind.$DEMO_SCORER", "PHONE") }
+        return begin(preset.format(), weServeFirst = true, scorer = ScorerChoice.Device(DeviceId(DEMO_SCORER)))
     }
 
     // --- intern ---------------------------------------------------------------------------------------------------
 
+    private fun backend(): Backend? {
+        backend?.let { return it }
+        if (openFailed) return null
+        return try {
+            open().also {
+                backend = it
+                it.session.addListener(sessionListener)
+            }
+        } catch (e: Exception) {
+            openFailed = true
+            null
+        }
+    }
+
+    private fun onState(state: SessionState) {
+        current = state
+        val match = state.match
+        val now = clock.nowMs()
+        // Seit wann ist der fremde Zähler nicht erreichbar? (Anzeige: Angebot „Zählen übernehmen“ nach > 30 s)
+        scorerLostAtMs =
+            when {
+                match == null || match.isScorer || state.sync.scorerConnected -> 0
+                scorerLostAtMs == 0L -> now
+                else -> scorerLostAtMs
+            }
+        // geöffnetes Match für den Neustart merken; verschwindet es (geschlossen, remote gelöscht), Zeiger entfernen
+        val id = match?.id?.value
+        if (id != null && id != lastOpenId) putSetting(KEY_OPEN_MATCH, id)
+        if (id == null && lastOpenId != null) removeSetting(KEY_OPEN_MATCH)
+        lastOpenId = id
+        listener?.onSnapshot(match?.let { buildSnapshot(it, state.sync, scorerLostAtMs) })
+    }
+
     private fun begin(
         format: MatchFormat,
         weServeFirst: Boolean,
+        scorer: ScorerChoice,
     ): WatchScoreSnapshot? {
-        val lineup = lineupFor(format.discipline, weServeFirst)
-        val time = now()
-        val matchId = MatchId(newUuid(time).value)
-        val genesis =
-            ScoreEvent(
-                id = EventId(newUuid(time).value),
-                matchId = matchId,
-                deviceId = DeviceId(deviceId()),
-                deviceSeq = 1,
-                lamport = 1,
-                wallClockMs = time,
-                parentId = null,
-                payload = MatchCreated(format, lineup),
-            )
-        val engine =
+        val b = backend() ?: return fail(STORE_READ)
+        val lineup =
             try {
-                ScoringEngine.replay(listOf(genesis))
-            } catch (e: IllegalArgumentException) {
-                return fail(INVALID_INPUT)
+                lineupFor(b.data, format, weServeFirst)
+            } catch (e: Exception) {
+                return fail(STORE_WRITE)
             }
-        if (!append(genesis)) return fail(STORE_WRITE)
-        val match = ActiveMatch(matchId, engine, nextDeviceSeq = 2, lamport = 1, startedAtMs = time)
-        active = match
-        prefs.set(KEY_ACTIVE_MATCH, matchId.value)
-        return notify(match)
-    }
-
-    private fun emit(
-        match: ActiveMatch,
-        payload: EventPayload,
-    ): WatchScoreSnapshot? {
-        val time = now()
-        val event =
-            ScoreEvent(
-                id = EventId(newUuid(time).value),
-                matchId = match.matchId,
-                deviceId = DeviceId(deviceId()),
-                deviceSeq = match.nextDeviceSeq,
-                lamport = match.lamport + 1,
-                wallClockMs = time,
-                parentId =
-                    match.engine.events
-                        .lastOrNull()
-                        ?.id ?: match.engine.genesis?.id,
-                payload = payload,
-            )
-        // Erst speichern, dann anwenden: Was die Anzeige zeigt, überlebt jeden Absturz. Schlägt das Speichern fehl,
-        // bleibt der Zustand (inkl. deviceSeq/lamport) unverändert – derselbe Befehl kann wiederholt werden.
-        if (!append(event)) return fail(STORE_WRITE)
-        match.nextDeviceSeq += 1
-        match.lamport = event.lamport
-        match.engine =
-            try {
-                ScoringEngine.apply(match.engine, event)
-            } catch (e: IllegalArgumentException) {
-                // Bei eigenen Events nicht zu erwarten; das Event steht im Log und wirkt beim nächsten Replay
-                return fail(LOG_INVALID)
-            }
-        return notify(match)
-    }
-
-    /** `true`, wenn neu gespeichert. SQLite-/Treiber-Ausnahmen dürfen nie über die Swift-Grenze laufen. */
-    private fun append(event: ScoreEvent): Boolean =
         try {
-            store.append(event.toStored()) == AppendResult.INSERTED
+            b.session.create(format, lineup, scorer = scorer)
+        } catch (e: IllegalArgumentException) {
+            return fail(INVALID_INPUT)
         } catch (e: Exception) {
-            false
+            return fail(STORE_WRITE)
         }
+        return snapshot()
+    }
+
+    /**
+     * Gemeinsamer Ablauf der Zähl-Befehle: Rolle prüfen, Session-Befehl ausführen (Ausnahmen abfangen), neuen Zustand
+     * liefern. [action] gibt `false` zurück, wenn der Befehl nicht zum Zustand passt.
+     */
+    private fun command(action: (MatchSession, ActiveMatch) -> Boolean): WatchScoreSnapshot? {
+        error = ""
+        val b = backend() ?: return fail(STORE_READ)
+        val m = current?.match ?: return fail(NO_MATCH)
+        if (!m.isScorer) return fail(NOT_SCORER)
+        val ok = call { action(b.session, m) } ?: return fail(STORE_WRITE)
+        return if (ok) snapshot() else fail(NOT_ALLOWED)
+    }
+
+    /** Führt [block] aus; SQLite-/Treiber-Ausnahmen dürfen nie über die Swift-Grenze laufen (→ `null`). */
+    private fun <T> call(block: () -> T): T? =
+        try {
+            block()
+        } catch (e: Exception) {
+            null
+        }
+
+    /**
+     * Besetzung: A = Self-Player der Uhr (+ Partner), B = Gegner. Gab es diese Sportart/Disziplin schon mit dem
+     * Self-Player auf Side A, werden dieselben Spieler-IDs wiederverwendet (Statistik bleibt zusammen).
+     */
+    private fun lineupFor(
+        data: LocalData,
+        format: MatchFormat,
+        weServeFirst: Boolean,
+    ): Lineup {
+        val now = clock.nowMs()
+        val self = data.players.ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }.id
+        val size = format.discipline.playersPerSide
+        val last = data.matches.lastLineup(format.sport, format.discipline)
+        val (a, b) =
+            if (last != null && last.a.firstOrNull() == self && last.a.size == size && last.b.size == size) {
+                last.a to last.b
+            } else {
+                val partner = (2..size).map { PlayerId(ids.newUuid7(now).value) }
+                (listOf(self) + partner) to (1..size).map { PlayerId(ids.newUuid7(now).value) }
+            }
+        return Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())
+    }
 
     private fun fail(code: String): WatchScoreSnapshot? {
         error = code
         return null
     }
 
-    private fun load(
-        matchId: String,
-        stored: List<StoredEvent>,
-    ): ActiveMatch? {
-        if (stored.isEmpty()) return null
-        return try {
-            val log = stored.map { eventJson.decodeFromString(ScoreEvent.serializer(), it.payload) }
-            val engine = ScoringEngine.replay(log)
-            val genesis = engine.genesis ?: return null
-            val own = deviceId()
-            ActiveMatch(
-                matchId = MatchId(matchId),
-                engine = engine,
-                nextDeviceSeq = (stored.filter { it.deviceId == own }.maxOfOrNull { it.deviceSeq } ?: 0) + 1,
-                lamport = stored.maxOf { it.lamport },
-                startedAtMs = genesis.wallClockMs,
-            )
-        } catch (e: IllegalArgumentException) {
-            null
-        }
+    private fun setting(key: String): String? = backend()?.let { b -> call { b.data.settings.get(key) } }
+
+    private fun putSetting(
+        key: String,
+        value: String,
+    ) {
+        backend()?.let { b -> call { b.data.settings.put(key, value) } }
     }
 
-    private fun notify(match: ActiveMatch): WatchScoreSnapshot {
-        val snapshot = snapshotOf(match)
-        listener?.onSnapshot(snapshot)
-        return snapshot
+    private fun removeSetting(key: String) {
+        backend()?.let { b -> call { b.data.settings.remove(key) } }
     }
-
-    private fun newUuid(time: Long = now()): Uuid7 = Uuid7.fromParts(time.coerceIn(0, (1L shl 48) - 1), random.nextInt(), random.nextLong())
 
     internal companion object {
-        const val KEY_ACTIVE_MATCH = "advantly.watch.activeMatchId"
-        const val KEY_DEVICE_ID = "advantly.watch.deviceId"
-        const val KEY_LAST_SETUP = "advantly.watch.lastSetup"
+        const val KEY_OPEN_MATCH = "watch.openMatchId"
+        const val KEY_LAST_SETUP = "watch.lastSetup"
+        const val DEMO_SCORER = "demo-phone"
 
         const val STORE_WRITE = "STORE_WRITE"
         const val STORE_READ = "STORE_READ"
         const val LOG_INVALID = "LOG_INVALID"
         const val INVALID_INPUT = "INVALID_INPUT"
+        const val NOT_SCORER = "NOT_SCORER"
         const val NOT_ALLOWED = "NOT_ALLOWED"
         const val NO_MATCH = "NO_MATCH"
-
-        /** Payload-Format im lokalen Store: das ganze [ScoreEvent] als JSON (Diskriminator `type`, wie die Testvektoren). */
-        val eventJson: Json =
-            Json {
-                ignoreUnknownKeys = true
-                explicitNulls = true
-                encodeDefaults = false
-            }
 
         private fun flag(value: Boolean) = if (value) "1" else "0"
 
         private fun sportOf(name: String): Sport? = Sport.entries.firstOrNull { it.name == name }
-
-        fun lineupFor(
-            discipline: Discipline,
-            weServeFirst: Boolean,
-        ): Lineup {
-            val a = (1..discipline.playersPerSide).map { PlayerId("A$it") }
-            val b = (1..discipline.playersPerSide).map { PlayerId("B$it") }
-            return Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())
-        }
-
-        private fun ScoreEvent.toStored() =
-            StoredEvent(
-                id = id.value,
-                matchId = matchId.value,
-                deviceId = deviceId.value,
-                deviceSeq = deviceSeq,
-                lamport = lamport,
-                payload = eventJson.encodeToString(ScoreEvent.serializer(), this),
-            )
 
         private fun Preset.toWatchPreset(isDefault: Boolean): WatchPreset {
             val format = format()
@@ -456,13 +471,11 @@ class WatchScoring internal constructor(
             )
         }
     }
-
-    private fun snapshotOf(match: ActiveMatch): WatchScoreSnapshot = buildSnapshot(match.matchId.value, match.engine, match.startedAtMs)
 }
 
-/** Callback statt Flow (CLAUDE.md Regel 4). */
+/** Callback statt Flow (CLAUDE.md Regel 4). `null` = kein Match offen (Startliste). */
 interface WatchScoringListener {
-    fun onSnapshot(snapshot: WatchScoreSnapshot)
+    fun onSnapshot(snapshot: WatchScoreSnapshot?)
 }
 
 /**
@@ -522,8 +535,21 @@ class WatchMatchSetup(
  * @property callout `DEUCE`, `ADVANTAGE_SERVER`, `ADVANTAGE_RECEIVER`, `DECIDING_POINT`, `STAR_POINT` oder `""`
  * @property deuceCount Nummer des Einstands (Star Point „Einstand 2“), sonst `0`
  * @property effects Übergänge durch das letzte Event (02 §8.3, Namen) – für Haptik und Toasts
- * @property canUndo es gibt ein Ziel für [WatchScoring.undo]
+ * @property canUndo die Uhr zählt und es gibt ein Ziel für [WatchScoring.undo]
+ * @property canRedo die Uhr zählt und das zuletzt hier rückgängig gemachte Event lässt sich wiederherstellen
+ * @property eventCount Anzahl der Events inkl. Genesis
  * @property startedAtMs Wanduhrzeit des Matchstarts (Dauer-Anzeige)
+ * @property isScorer die Uhr zählt (02 §7.5); sonst ist sie Anzeige (keine Tap-Flächen, kein Undo)
+ * @property scorerKind Art des zählenden Geräts: `WATCH`, `PHONE`, `OTHER` oder `""` (unbekannt)
+ * @property rejectedByRoleCount Eingaben von Nicht-Zählern, die die Engine verworfen hat („N Eingaben nicht übernommen“)
+ * @property pointsPlayed wirksam gezählte Ballwechsel
+ * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
+ * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
+ * @property pendingToPeers Events, die noch keine Gegenstelle bestätigt hat (0 = „synchron“, sonst „N ausstehend“)
+ * @property lastEventReceivedAtMs Wanduhrzeit des zuletzt empfangenen Events (Anzeige: „Stand vor X s“), sonst `0`
+ * @property lastSyncAtMs Wanduhrzeit des letzten Abgleichs mit einer Gegenstelle, sonst `0`
+ * @property scorerDisconnectedSinceMs Anzeige: seit wann der Zähler nicht erreichbar ist (nach > 30 s Angebot
+ *   „Zählen übernehmen“), sonst `0`
  */
 class WatchScoreSnapshot(
     val matchId: String,
@@ -575,8 +601,19 @@ class WatchScoreSnapshot(
     val effects: List<String>,
     val changeEnds: Boolean,
     val canUndo: Boolean,
+    val canRedo: Boolean,
     val eventCount: Int,
     val startedAtMs: Long,
+    val isScorer: Boolean,
+    val scorerKind: String,
+    val rejectedByRoleCount: Int,
+    val pointsPlayed: Int,
+    val linkConnected: Boolean,
+    val scorerConnected: Boolean,
+    val pendingToPeers: Int,
+    val lastEventReceivedAtMs: Long,
+    val lastSyncAtMs: Long,
+    val scorerDisconnectedSinceMs: Long,
 )
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
@@ -620,12 +657,13 @@ internal fun hintOf(state: MatchState): WatchHint? {
 }
 
 internal fun buildSnapshot(
-    matchId: String,
-    engine: EngineState,
-    startedAtMs: Long,
+    match: ActiveMatch,
+    sync: SyncStatus,
+    scorerDisconnectedSinceMs: Long,
 ): WatchScoreSnapshot {
-    val state = engine.state
-    val format = engine.format
+    val state = match.state
+    val format = match.format
+    val lineup = match.lineup
     val current = state.current
     val serve = state.serve
     val hint = hintOf(state)
@@ -651,12 +689,12 @@ internal fun buildSnapshot(
     // Nummer im Team laut Besetzung (stabile Identität, unabhängig von der Aufschlagreihenfolge der Engine)
     fun numberOf(player: PlayerId?): Int {
         if (player == null) return 0
-        val side = engine.lineup.sideOf(player) ?: return 0
-        return engine.lineup.players(side).indexOf(player) + 1
+        val side = lineup.sideOf(player) ?: return 0
+        return lineup.players(side).indexOf(player) + 1
     }
     val positions = state.positions
     return WatchScoreSnapshot(
-        matchId = matchId,
+        matchId = match.id.value,
         sport = format.sport.name,
         presetId = format.presetId.orEmpty(),
         doubles = format.discipline == Discipline.DOUBLES,
@@ -712,8 +750,19 @@ internal fun buildSnapshot(
         deuceCount = current?.deuceCount ?: 0,
         effects = state.effects.map { it.name },
         changeEnds = Effect.CHANGE_ENDS in state.effects,
-        canUndo = engine.undoTarget != null,
-        eventCount = engine.events.size,
-        startedAtMs = startedAtMs,
+        canUndo = match.canUndo,
+        canRedo = match.canRedo,
+        eventCount = match.eventCount,
+        startedAtMs = match.createdAtMs,
+        isScorer = match.isScorer,
+        scorerKind = match.scorerKind?.name.orEmpty(),
+        rejectedByRoleCount = match.rejectedByRoleCount,
+        pointsPlayed = match.pointsPlayed,
+        linkConnected = sync.indicator != SyncIndicator.LOCAL_ONLY,
+        scorerConnected = sync.scorerConnected,
+        pendingToPeers = sync.pendingToPeers,
+        lastEventReceivedAtMs = sync.lastEventReceivedAtMs ?: 0,
+        lastSyncAtMs = sync.lastSyncAtMs ?: 0,
+        scorerDisconnectedSinceMs = scorerDisconnectedSinceMs,
     )
 }
