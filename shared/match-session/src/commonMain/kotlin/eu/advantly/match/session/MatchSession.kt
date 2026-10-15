@@ -81,11 +81,14 @@ import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
  * **Threading:** Alle öffentlichen Aufrufe und Callbacks laufen auf dem Thread des [scheduler]; [threadGuard] erzwingt
  * das (Android: Main-Looper, Apple: Main-Queue, Tests: `ManualScheduler`).
  *
+ * @param data lokale Datenbank dieses Geräts; öffentlich, damit UI-Adapter (Historie, Spieler, Favoriten) dieselbe
+ *   Instanz nutzen statt eine zweite Verbindung auf dieselbe Datei zu öffnen. Nur lesen bzw. Spieler/Favoriten/
+ *   Settings schreiben – Events und Match-Köpfe ändert ausschließlich die Session. Nur auf dem Scheduler-Thread.
  * @param link Geräte-Link oder `null` (Standalone, nur lokal zählen)
  */
 @Suppress("TooManyFunctions")
 class MatchSession(
-    private val data: LocalData,
+    val data: LocalData,
     private val link: DeviceLink?,
     private val scheduler: LinkScheduler,
     val config: SessionConfig,
