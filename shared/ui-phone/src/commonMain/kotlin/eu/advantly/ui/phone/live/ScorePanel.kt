@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,6 +58,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
@@ -68,6 +71,12 @@ import kotlin.math.abs
 
 /** Dauer der Ziffern-Roll-Animation (04 §5.7). */
 private const val ROLL_MILLIS = 150
+
+/** Höchstanteil der Panelhöhe für die Label-Zeile; den Rest bekommt immer die Ziffer. */
+private const val LABEL_MAX_FRACTION = 0.4f
+
+/** Unter dieser Panelhöhe zeigt die Label-Zeile nur das Nötigste (kein Aufschlag-Text, wenig Abstand). */
+private val COMPACT_PANEL_HEIGHT = 200.dp
 
 /** Kleinste Ziffernhöhe des Stands. */
 private val MIN_DIGIT_HEIGHT = 24.dp
@@ -195,15 +204,17 @@ internal fun ScorePanel(
     ) {
         val textColor = if (outdoor) Color.White else teamColor
         val secondary = if (outdoor) Color.White else colors.text2
-        val labelRow: @Composable () -> Unit = {
+        val labelRow: @Composable (compact: Boolean, maxHeight: Dp) -> Unit = { compact, labelMaxHeight ->
             // Team-Label + Name links, Aufschlag rechts in EINER Zeile: bei großer Schrift kürzt der Name (Ellipse),
-            // statt mit dem Aufschlag-Hinweis zu überlappen.
+            // statt mit dem Aufschlag-Hinweis zu überlappen. Höhe gedeckelt – die Ziffer hat Vorrang.
             Row(
                 modifier =
                     Modifier
                         .testTag("${tag}_label")
                         .fillMaxWidth()
-                        .padding(horizontal = Spacing.l, vertical = Spacing.m),
+                        .heightIn(max = labelMaxHeight)
+                        .clipToBounds()
+                        .padding(horizontal = Spacing.l, vertical = if (compact) Spacing.xs else Spacing.m),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -223,14 +234,17 @@ internal fun ScorePanel(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.size(12.dp).background(content.serveColor, CircleShape))
-                        Text(
-                            text = content.serveLabel,
-                            style = AdvantlyTheme.typography.caption,
-                            color = secondary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
+                        // Flache Fläche: nur der Aufschlag-Punkt (Text steckt auch in der Bedienhilfe-Beschreibung)
+                        if (!compact) {
+                            Text(
+                                text = content.serveLabel,
+                                style = AdvantlyTheme.typography.caption,
+                                color = secondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
                         content.serveCourt?.let { court ->
                             Text(
                                 text = court,
@@ -246,35 +260,40 @@ internal fun ScorePanel(
             }
         }
 
-        // Label-Zeile oben (Wir) bzw. unten (Gegner); die Ziffer bekommt nur den RESTLICHEN Platz und kann die
-        // Labels damit auch bei 200 % Schrift oder sehr flachen Flächen nicht überdecken.
-        Column(Modifier.fillMaxSize()) {
-            if (content.side == Side.A) labelRow()
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
-                // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
-                val density = LocalDensity.current
-                // Untergrenze: auch eine sehr flache Fläche (kleines Display, 200 % Schrift) zeigt den Stand lesbar
-                val digitHeight = min(min(maxHeight * 0.9f, maxWidth * 0.42f), 132.dp).coerceAtLeast(MIN_DIGIT_HEIGHT)
-                val fontSize = (digitHeight.value / density.fontScale).sp
-                val animate = !outdoor
-                AnimatedContent(
-                    targetState = content.pointText,
-                    transitionSpec = { scoreTransition(animate, reduceMotion, direction) },
-                    contentAlignment = Alignment.Center,
-                    label = "score-roll",
-                ) { text ->
-                    Text(
-                        text = text,
-                        modifier = Modifier.testTag(if (content.side == Side.A) "score_us" else "score_them"),
-                        style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
+        // Label-Zeile oben (Wir) bzw. unten (Gegner). Die Ziffer hat Vorrang: Die Labels bekommen höchstens
+        // LABEL_MAX_FRACTION der Panelhöhe (gekürzt/abgeschnitten), die Ziffer immer den Rest – auch bei 200 % Schrift
+        // auf kleinen Displays mit Systemleisten (Review W1-I Runde 2). Überdecken können sich beide nicht.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val compact = maxHeight < COMPACT_PANEL_HEIGHT
+            val labelMax = maxHeight * LABEL_MAX_FRACTION
+            Column(Modifier.fillMaxSize()) {
+                if (content.side == Side.A) labelRow(compact, labelMax)
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    // Score XL: 96–120 pt laut 04 §5.4, an die Fläche angepasst und bewusst NICHT mit der Schriftskalierung
+                    // vergrößert („Live-Screen skaliert Labels, nicht die ohnehin maximalen Ziffern“).
+                    val density = LocalDensity.current
+                    // Untergrenze: auch eine sehr flache Fläche (kleines Display, 200 % Schrift) zeigt den Stand lesbar
+                    val digitHeight = min(min(maxHeight * 0.9f, maxWidth * 0.42f), 132.dp).coerceAtLeast(MIN_DIGIT_HEIGHT)
+                    val fontSize = (digitHeight.value / density.fontScale).sp
+                    val animate = !outdoor
+                    AnimatedContent(
+                        targetState = content.pointText,
+                        transitionSpec = { scoreTransition(animate, reduceMotion, direction) },
+                        contentAlignment = Alignment.Center,
+                        label = "score-roll",
+                    ) { text ->
+                        Text(
+                            text = text,
+                            modifier = Modifier.testTag(if (content.side == Side.A) "score_us" else "score_them"),
+                            style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
+                    }
                 }
+                if (content.side == Side.B) labelRow(compact, labelMax)
             }
-            if (content.side == Side.B) labelRow()
         }
     }
 }

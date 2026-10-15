@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -16,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Presets
 import eu.advantly.ui.phone.AdvantlyApp
+import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.common.LocalSafeInsets
 import eu.advantly.ui.phone.preview.DemoData
 import eu.advantly.ui.phone.startWith
@@ -121,7 +123,63 @@ class WindowInsetsUiTest {
             assertBelowStatusBar("top_back")
         }
 
+    /** Kleines Display, 200 % Schrift, Systemleisten: Ziffer + Labels beider Flächen ohne Überlappung, Ziffer lesbar. */
+    private fun ComposeUiTest.assertScoresVisibleOnSmallScreen(
+        model: AdvantlyAppModel,
+        interact: ComposeUiTest.() -> Unit = {},
+    ) {
+        setContent {
+            CompositionLocalProvider(
+                LocalDensity provides Density(1f, 2f),
+                LocalSafeInsets provides WindowInsets(0.dp, STATUS_BAR.dp, 0.dp, NAV_BAR.dp),
+            ) {
+                Box(Modifier.size(360.dp, 640.dp)) { AdvantlyApp(model = model, darkTheme = true) }
+            }
+        }
+        waitForIdle()
+        interact()
+        for ((panel, score) in listOf("panel_us" to "score_us", "panel_them" to "score_them")) {
+            val panelBounds = onNodeWithTag(panel).fetchSemanticsNode().boundsInRoot
+            val digit = onNodeWithTag(score, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val label = onNodeWithTag("${panel}_label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue(digit.height >= MIN_DIGIT, "$score nur ${digit.height} hoch")
+            assertTrue(digit.top >= panelBounds.top && digit.bottom <= panelBounds.bottom, "$score ragt aus $panel: $digit / $panelBounds")
+            val overlap = minOf(digit.bottom, label.bottom) - maxOf(digit.top, label.top)
+            assertTrue(overlap <= 0f, "$score überlappt Label: $digit / $label")
+        }
+    }
+
+    /** Review W1-I Runde 2 (Reproducer combined-insets-200): Anzeige-Modus, Verbindung weg, 360 × 640, 200 %. */
+    @Test
+    fun displayScoreStaysVisibleOnSmallScreenWithLargeFontAndBars() =
+        runComposeUiTest {
+            val rig = SessionRig()
+            rig.startWatchScoredTennis()
+            rig.watchPlays("AAB")
+            rig.model.navigator.push(Overlay.Live)
+            assertScoresVisibleOnSmallScreen(rig.model) {
+                runOnIdle {
+                    rig.offline()
+                    rig.settle(42_000)
+                }
+                mainClock.advanceTimeBy(1_100)
+                onNodeWithTag("stale_hint").assertExists()
+            }
+            onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("30")
+        }
+
+    @Test
+    fun scorerScoreStaysVisibleOnSmallScreenWithLargeFontAndBars() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), "AAB") }
+            model.navigator.push(Overlay.Live)
+            assertScoresVisibleOnSmallScreen(model)
+        }
+
     companion object {
+        /** Mindesthöhe der Ziffer (dp) – lesbar aus Armlänge. */
+        const val MIN_DIGIT = 30f
+
         /** Pixel-ähnliche Werte in dp. */
         const val STATUS_BAR = 52
         const val NAV_BAR = 24

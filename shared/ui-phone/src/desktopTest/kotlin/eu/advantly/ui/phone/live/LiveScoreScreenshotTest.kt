@@ -271,6 +271,23 @@ class LiveScoreScreenshotTest {
             content = withSystemBars,
         )
 
+    /** Review W1-I Runde 2: 360 × 640 dp, 200 % Schrift, Systemleisten, Anzeige ohne Verbindung. */
+    @Test
+    fun liveDisplayStaleSmallScreenWithSystemBars() {
+        val rig = SessionRig()
+        rig.startWatchScoredTennis()
+        rig.watchPlays("AAB")
+        rig.model.navigator.push(Overlay.Live)
+        val goOffline: androidx.compose.ui.test.ComposeUiTest.(AdvantlyAppModel) -> Unit = {
+            runOnIdle {
+                rig.offline()
+                rig.settle(42_000)
+            }
+            mainClock.advanceTimeBy(1_100)
+        }
+        capture("insets-live-display-stale-small-fontscale-2-de", Locale.GERMANY, rig.model, 360, 640, 2f, goOffline, withSystemBars)
+    }
+
     @Test
     fun homeWithSystemBars() = capture("insets-home-en", Locale.US, testModel().apply { DemoData.seed(this) }, content = withSystemBars)
 
