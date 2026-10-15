@@ -120,6 +120,9 @@ class MatchSession(
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
+
+    /** Besitzer-Angaben aus `MatchMeta`, die vor dem `Hello` der Gegenstelle kamen (Art noch unbekannt). */
+    private val earlyOwners = HashMap<String, MatchMetaMessage>()
     private var started = false
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
@@ -174,6 +177,7 @@ class MatchSession(
         hellos.clear()
         compatibility.clear()
         helloSent.clear()
+        earlyOwners.clear()
         publish()
     }
 
@@ -490,7 +494,12 @@ class MatchSession(
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
         data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
-        if (!result.isCompatible) return
+        if (!result.isCompatible) {
+            earlyOwners.remove(peer)
+            return
+        }
+        // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
+        earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
         if (peer !in helloSent) sendHello(peer)
         sendDeleted(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
@@ -592,16 +601,24 @@ class MatchSession(
         peer: String,
         message: MatchMetaMessage,
     ) {
-        data.addSelfAliases(message.selfAliases)
+        if (data.addSelfAliases(message.selfAliases)) dataRevision++
         val owner = message.self ?: return
         val senderKind = hellos[peer]?.kind
+        if (senderKind == null) {
+            // Art der Gegenstelle noch unbekannt (Hello steht aus) → puffern, im Hello verarbeiten
+            earlyOwners[peer] = message
+            return
+        }
         when {
             config.kind != PeerKind.PHONE && senderKind == PeerKind.PHONE -> {
-                if (data.adoptSelf(owner, clock.nowMs())) send(peer, metaMessage(open?.record))
+                if (data.adoptSelf(owner, clock.nowMs())) {
+                    dataRevision++
+                    send(peer, metaMessage(open?.record))
+                }
             }
 
             config.kind == PeerKind.PHONE -> {
-                data.addSelfAliases(listOf(owner.id))
+                if (data.addSelfAliases(listOf(owner.id))) dataRevision++
             }
         }
     }
@@ -663,11 +680,12 @@ class MatchSession(
 
     private fun peersChanged(peers: List<String>) {
         checkThread()
-        val gone = (hellos.keys + helloSent + compatibility.keys) - peers.toSet()
+        val gone = (hellos.keys + helloSent + compatibility.keys + earlyOwners.keys) - peers.toSet()
         gone.forEach {
             hellos.remove(it)
             compatibility.remove(it)
             helloSent.remove(it)
+            earlyOwners.remove(it)
         }
         if (started) {
             peers.filter { it !in helloSent }.forEach { peer ->
