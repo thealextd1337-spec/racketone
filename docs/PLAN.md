@@ -163,15 +163,16 @@ So arbeitet das Agenten-Team ab P0 zusammen:
 | F10 | Sportfarben | Pickleball Pink · **Badminton Violett #A78BFA** · **Tischtennis Smaragd #34D399** (wie auf der Website) |
 | F11 | Vorteil-Anzeige im Deutschen | „AD“ |
 | F12 | Matches standardmäßig mit Freunden teilen? | Nein, Abfrage im Onboarding |
-| F13 | Mindestalter | 16 (Jugendmodus später) |
+| F13 | Mindestalter | **Entschieden 2026-10-15: Mindestalter 14 (AT)**; Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (03 §8.2). |
 | F14 | Ass/Doppelfehler erfassen | ab P3, optional |
 
 **Rollenmodell – entschieden am 2026-10-15:** Single-Scorer, Director, Anzeige, bestätigte Übergabe sowie Zähler-Wahl und Visitor-Accounts ab P2 (K1).
 
 | # | Noch offene Ausgestaltung | Vorschlag |
 |---|---|---|
-| F15 | Wie wird die Übernahme bei nicht erreichbarem bisherigem Zähler bestätigt und welcher Stand ist dabei verfügbar? | Bestätigung am Zielgerät; Verfügbarkeitsgrenzen und Rückmeldung mit 01/02 abstimmen, kein stiller automatischer Wechsel. |
-| F16 | Wer darf Visitor benennen/widerrufen und wie lange bleibt das Ergebnis sichtbar? | Ersteller verwaltet benannte Accounts; Zugriff bis Widerruf, öffentlicher Link bleibt später. |
+| F15 | Wie wird die Übernahme bei nicht erreichbarem bisherigem Zähler bestätigt und welcher Stand ist dabei verfügbar? Wie werden veraltete Anzeige, langer Ausfall und ignorierte Eingaben dargestellt? | Bestätigung am Zielgerät; Vorschlag: „Stand vor X s“, nach > 30 s ohne Verbindung Hinweis + Angebot „Zählen übernehmen“ mit Bestätigung für berechtigte Anzeige-Geräte, auch Uhren. Schwelle, Wiederholung des Hinweises und Verhalten bei langem Ausfall noch abstimmen; kein stiller automatischer Wechsel. Altgerät: Engine meldet ignorierte Eingaben → „N Eingaben nicht übernommen“, mit einsehbarer Liste; Umfang und Aufbewahrung offen. Gleichzeitige Übernahmen werden deterministisch geordnet: Das in der Ordnung letzte `ScorerChanged` gilt (Details in 02); Verfügbarkeitsgrenzen und Rückmeldung mit 01/02 abstimmen. |
+| F16 | Wer darf Visitor benennen/widerrufen und wie lange bleibt das Ergebnis sichtbar? Müssen Mitspieler der Freigabe zustimmen oder sehen Visitor nur Teamnamen? Müssen Visitor Freunde sein? Wie greifen Blockierungen? | Vorschlag: Ersteller verwaltet benannte Accounts; Zugriff bis Widerruf, öffentlicher Link bleibt später. Teilnehmerbezogene Sichtbarkeit gemäß 03 E6, Default aus, auch für Visitor berücksichtigen; Zustimmung, Namensumfang, Freundschaftspflicht und Blockierlogik vor P2 entscheiden. |
+| F17 | Wie startet ein Match offline, wenn die in P2 gewählte Zähler-Person nicht antwortet bzw. die Bereitstellung nicht bestätigt? | Vorschlag: Warten/Abbrechen oder ausdrücklich auf eigene Uhr/eigenes Handy wechseln und diese Zähler-Wahl bestätigen; kein automatischer Start mit unbestätigter fremder Zähler-Zuweisung. Timeout und spätere Zustellung vor P2 klären (04 §3.1). |
 
 Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05 §9.
 

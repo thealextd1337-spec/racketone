@@ -391,7 +391,7 @@ create table public.user_blocks (
 create table public.matches (
   id                uuid primary key,                       -- Client-UUIDv7
   created_by        uuid not null references public.profiles(id),
-  sport             text not null check (sport in ('tennis','padel','pickleball')),
+  sport             text not null check (sport in ('tennis','padel','pickleball','badminton','table_tennis')),
   discipline        text not null check (discipline in ('singles','doubles')),
   surface           text check (surface in ('clay','hard','grass','carpet','artificial_grass',
                                             'indoor_hard','indoor_other')),
@@ -658,7 +658,7 @@ create table ops.revenuecat_events (
 create table ops.notification_outbox (
   id          bigint generated always as identity primary key,
   profile_id  uuid not null references public.profiles(id) on delete cascade,
-  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done
+  kind        text not null,               -- match_shared | friend_request | friend_accepted | claim_done | scorer_assigned | visitor_invited
   payload     jsonb not null,              -- nur IDs + Titel-Keys, keine Gesundheitsdaten
   created_at  timestamptz not null default now(),
   sent_at     timestamptz,
@@ -963,7 +963,7 @@ Initialstand und Reconnect über eine ebenso autorisierte `get_visitor_live_stat
 ### 5.1 Clientseite
 - Lokale Datenbank (SQLDelight) spiegelt die syncbaren Tabellen + eine **Outbox** (`pending_ops`) mit Ops in Reihenfolge.
 - Jede Entität und jedes Event bekommt beim Erzeugen eine **UUIDv7**; Events zusätzlich **Lamport-Zähler** (pro Match, pro Gerät: `lamport = max(eigener, max_gesehener) + 1`) und `device_id`.
-- Sync-Trigger: App-Start, Netz wieder da, Match beendet, alle 10 s während Live-Match mit aktivem Zuschauer-Modus, manueller Pull-to-Refresh.
+- Sync-Trigger: App-Start, Netz wieder da, Match beendet, alle 10 s während Live-Match mit aktiver Anzeige/Visitor, manueller Pull-to-Refresh.
 
 ### 5.2 Upload: `sync_push` (idempotent, transaktional)
 
@@ -1248,7 +1248,7 @@ $$;
 - **Health-Einwilligung** erst beim ersten Aktivieren von „Gesundheitsdaten erfassen“ (nicht im Onboarding gebündelt), eigener Screen mit: welche Daten, wozu, wer sieht sie (Default nur ich), Widerruf jederzeit, Löschung bei Widerruf.
 - Zusätzlich die **Plattform-Berechtigungen** (HealthKit, Health Connect, Garmin) – sie ersetzen die DSGVO-Einwilligung nicht.
 - Jede Einwilligung/jeder Widerruf ist eine neue Zeile in `consents` mit Textversion; bei neuer Textversion erneut einholen, wenn sich Zweck/Empfänger ändern.
-- **Mindestalter 16** (Nutzungsbedingungen + Abfrage bei Registrierung), weil Art.-9-Einwilligungen und Art. 8 DSGVO (Deutschland: 16) sonst Eltern-Einwilligung erfordern würden.
+- **Mindestalter 14 (AT), entschieden 2026-10-15:** Anbieter in Österreich; Art. 8 DSGVO i. V. m. § 4 Abs. 4 DSG. Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (Nutzungsbedingungen und Altersprüfung je Land). Die ausdrückliche Art.-9-Einwilligung für Health bleibt separat erforderlich, ab P3.
 - **Plattformregeln:** Apple HealthKit (Guideline 5.1.3): keine Nutzung für Werbung/Data-Mining, keine Weitergabe an Dritte ohne Zustimmung, Zweckangabe in der App und Datenschutzerklärung. Google Health Connect: Berechtigungsdeklaration und „Limited Use“-Richtlinie. Beides deckt sich mit unserem Design (keine Werbung, keine Analyse-SDKs auf Health-Daten).
 
 ### 8.3 Betroffenenrechte
@@ -1307,7 +1307,7 @@ Kaskaden im Detail:
 7. Drittlandübermittlung (USA): EU-US Data Privacy Framework/SCC je Anbieter.
 8. Speicherdauern (8.1), Backups 7 Tage.
 9. Betroffenenrechte inkl. In-App-Export und -Löschung, Beschwerderecht bei Aufsichtsbehörde.
-10. Mindestalter 16.
+10. Mindestalter 14 (AT); Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen.
 11. Keine automatisierte Entscheidungsfindung/Profiling im Sinne Art. 22.
 
 ### 8.5 Organisatorisches
@@ -1470,7 +1470,7 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 |---|---|---|
 | O1 | Sollen Matches standardmäßig mit Freunden geteilt werden (`share_matches_default`)? | **Aus** (Privacy by Default), mit einmaliger Abfrage im Onboarding. |
 | O2 | Health-Sichtbarkeit für Mitspieler/Freunde überhaupt in P3 anbieten oder erst später? | Erst „nur ich“; Teilen in P3.1, weil zweite Einwilligung + mehr Tests. |
-| O3 | Mindestalter 16 akzeptabel (Jugendspieler im Verein fallen raus)? | Ja für Start; Jugendmodus (ohne Health, Eltern-Einwilligung) später. |
+| O3 | Mindestalter | **Entschieden 2026-10-15: Mindestalter 14 (AT)**; Deutschland: 16 → Länderabfrage bei Registrierung vor P2 einplanen (8.2). |
 | O4 | Gibt es bereits Domain + Firma/Verantwortlichen für Impressum, DPA-Abschluss und Store-Konten? | Domain `advantly.eu` (o. Ä.) früh sichern – nötig für Universal/App Links und E-Mail. |
 | O5 | Sign-in-with-Apple-Token-Widerruf bei Löschung: Authorization-Code serverseitig speichern (zusätzliche Edge Function beim ersten Login)? | Ja, in P2 einplanen (App-Review-Thema). |
 | O6 | Datenschutzbeauftragter/DSFA: extern beauftragen oder selbst mit Vorlage? | DSFA selbst (DSK-Vorlage), DSB-Pflicht vor P3 prüfen lassen. |

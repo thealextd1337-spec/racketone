@@ -134,7 +134,7 @@ Schritte: Sport → (nur Tennis: Belag) → Spieler → Format → **Wer zählt?
 flowchart TD
   S0(["Spielen (+) oder Start-Tab"]) --> Q{"Preset / Zuletzt gespielt gewählt?"}
   Q -- "Ja" --> SUM["Zusammenfassung prüfen"]
-  Q -- "Nein" --> S1["1 Sportart: Tennis / Padel / Pickleball"]
+  Q -- "Nein" --> S1["1 Sportart: Tennis / Padel / Pickleball / Badminton / Tischtennis"]
   S1 --> T{"Tennis?"}
   T -- "Ja" --> S2["2 Belag: Sand / Hart / Rasen / Teppich + Halle/Draußen"]
   T -- "Nein" --> S3
@@ -143,7 +143,8 @@ flowchart TD
   S4 --> SRV["Erster Aufschlag: Wir / Gegner / Münzwurf"]
   SRV --> SUM
   SUM --> WHO["Wer zählt? P1: Meine Uhr / Dieses Handy (Director)"]
-  WHO --> PRE{"Als Preset speichern?"}
+  WHO --> WORK["Workout auf meiner Uhr mitlaufen lassen (Standard an, auch Director)"]
+  WORK --> PRE{"Als Preset speichern?"}
   PRE --> START(["Match starten"])
   START --> W{"Uhr verbunden?"}
   W -- "Ja" --> BOTH["Ein Zähler, übrige Geräte: Anzeige"]
@@ -153,6 +154,10 @@ flowchart TD
 **Watch-Kurz-Wizard** (ohne Handy): Sport (Liste) → Einzel/Doppel → Format-Preset (3–4 Vorschläge je Sport, z. B. „Best of 3 · MTB“, „1 Satz bis 6“, „Pickleball 11 · Side-Out“) → Start. Gegner werden als „Gegner“ angelegt und später am Handy zugeordnet.
 
 **Zähler-Auswahl:** P1 bietet „Meine Uhr“ (Standard: Uhr des startenden Spielers) und „Dieses Handy (Director)“. Ohne verfügbare Uhr ist nur das Handy wählbar. Im Director-Modus zählt die außenstehende Person am Handy, die Spieler-Uhren zeigen nur an. Ab P2 folgt eine Personen-Auswahl: ich, Mitspieler/Freund mit Account oder externe Person/Director mit Account; anschließend konkretes Zähler-Gerät bestätigen. Das Match wird dessen Gerät per Cloud zugestellt; erst nach bestätigter Bereitstellung startet es. Spieler und Zähler sind getrennte Rollen. Watch-Start setzt die eigene Uhr als Zähler; Presets vergeben keine dauerhaften Zählrechte.
+
+**Offline-Start ab P2:** Antwortet die gewählte Zähler-Person nicht, bleibt der Start unbestätigt. Offene Frage F17 in PLAN: Wartezeit, Abbruch bzw. ausdrücklich bestätigter Wechsel auf ein eigenes Gerät und Umgang mit späterer Zustellung.
+
+**Workout-Option:** Im Startdialog steht unabhängig von der Zähler-Wahl „Workout auf meiner Uhr mitlaufen lassen“ (Standard an), auch im Director-Modus. Die Option startet nur die eigene Uhr und ordnet einem außenstehenden Director kein Spieler-Workout zu. In P1/P2 hält die Session die App wach und zeigt Live-Puls; am Ende wird sie verworfen (`discardWorkout`, kein Health-Connect-Write). Persistenz und Health-Einwilligungen folgen ab P3; nötige Systemberechtigungen für Session/Sensor werden zuvor separat erklärt (05 E2/E5).
 
 ### 3.2 Live-Scoring & Synchronisation
 
@@ -171,6 +176,8 @@ sequenceDiagram
 
 UX-Regeln zur Synchronität:
 - **Sync-Pill bleibt:** Verbindung **zum Zähler**, mit Name/Gerät. Zustände: „Mit Zähler verbunden“, „Verbindung zum Zähler unterbrochen – letzter Stand …“, „Wird abgeglichen“. Am Zähler selbst: „Zähler · Anzeigen verbunden“ bzw. „Zähler · nur lokal“. Bei Abbruch wechselt kein Gerät automatisch die Rolle.
+- **Vorschlag bei Verbindungsverlust:** Anzeige zeigt fortlaufend „Stand vor X s“ seit dem letzten bestätigten Abgleich. Nach > 30 s ohne Verbindung erscheint ein Hinweis mit „Zählen übernehmen“ und Bestätigung für berechtigte Anzeige-Geräte, auch Anzeige-Uhren; Visitor sehen nur den Hinweis. Bei langem Ausfall bleiben letzter Stand, Staleness und Verbindungsstatus sichtbar, ohne automatische Rollenänderung; bei Wiederverbindung wird abgeglichen. Schwelle, Hinweis-Wiederholung und weitere Details bleiben in PLAN F15 offen.
+- **Rückmeldung nach Übernahme:** Meldet die Engine ignorierte Eingaben des alten Zählers, zeigt das Altgerät „N Eingaben nicht übernommen“ mit Aktion „Eingaben ansehen“. Gleichzeitige Übernahme-Versuche werden deterministisch geordnet; das in der Ordnung letzte `ScorerChanged` gilt (Details in 02). Darstellung und Aufbewahrung der einsehbaren Eingaben: PLAN F15.
 - **Kein Fork-Dialog, kein Konflikt-Banner und keine Aktion „Beide zusammenführen“.** Geräteübergreifende Doppel-Tap-Konflikte entfallen: Nur das aktive Gerät erzeugt wirksame Zähl-/Undo-Events. Die Engine ignoriert Events nicht aktiver Zähler deterministisch; Rollenwechsel und Replikationsdetails siehe [02](02-scoring-regeln.md) und [01](01-architektur.md).
 - **Perspektive:** Spieler-Geräte zeigen das eigene Team als „Wir“; der Director und Visitor sehen neutrale Teamnamen (A/B). Die Engine speichert neutrale Team-IDs.
 
@@ -190,7 +197,7 @@ flowchart TD
   D1 -- "Nein" --> END["Match beenden"]
   D2 -- "Ja (Zusatzsatz)" --> NS
   D2 -- "Nein" --> END
-  END --> SAVE["Speichern + Health-Workout schreiben"]
+  END --> SAVE["Match speichern; P1/P2: Workout verwerfen; ab P3: mit Einwilligung Health-Workout schreiben"]
   SAVE --> STAT["Uhr: Kurzbilanz / Handy: Statistik"]
   STAT --> SH{"Mit Mitspielern teilen?"}
   SH -- "Ja" --> INV["Freunde erhalten Match in Inbox zur Bestätigung"]
@@ -477,7 +484,7 @@ Erweiterung (optional, später/Plus): Punkt-Details per Long-Press (Ass, Doppelf
 ### 7.1 Onboarding (max. 4 Screens bis zum ersten Match)
 
 1. **Willkommen** – Icon, „Zählen. Spielen. Vergleichen.“, Buttons „Los geht’s“ / „Ich habe ein Konto“.
-2. **Deine Sportarten** – Mehrfachauswahl Tennis/Padel/Pickleball (steuert Presets & Reihenfolge).
+2. **Deine Sportarten** – Mehrfachauswahl Tennis/Padel/Pickleball/Badminton/Tischtennis (steuert Presets & Reihenfolge).
 3. **Konto** – Mit Apple / Mit Google / E-Mail · „Später“ (lokal zählen geht ohne Konto; Freunde/Sync brauchen eins).
 4. **Uhr** – erkannt: „Apple Watch gefunden – App installieren“ / Wear OS: Install-Prompt / Garmin: Link zum Connect IQ Store. Überspringbar.
 
@@ -487,9 +494,9 @@ Danach direkt Start-Tab mit großer Karte „Erstes Match starten“.
 
 | Berechtigung | Zeitpunkt | Vorab-Screen (Kern-Text) | Bei Ablehnung |
 |---|---|---|---|
-| Gesundheitsdaten (HealthKit / Health Connect: Puls, aktive Energie, Schritte; Workouts schreiben) | Erstes Match mit Uhr **oder** erster Aufruf der Fitness-Statistik | „Damit wir Puls, Kalorien und Schritte zu deinem Match zeigen und es als Training in Apple Health / Health Connect speichern. Daten bleiben auf deinem Gerät, bis du teilst.“ | Statistik ohne Fitness-Teil, dezenter Hinweis mit Link zu Einstellungen |
+| Gesundheitsdaten ab P3 (HealthKit / Health Connect: Puls, aktive Energie, Schritte; Workouts schreiben) | Ab P3: erstes Aktivieren der Health-Erfassung **oder** erster Aufruf der Fitness-Statistik | „Damit wir Puls, Kalorien und Schritte zu deinem Match zeigen und es als Training in Apple Health / Health Connect speichern. Daten bleiben auf deinem Gerät, bis du teilst.“ | Statistik ohne Fitness-Teil, dezenter Hinweis mit Link zu Einstellungen |
 | Benachrichtigungen | Nach erstem Freund **oder** erstem geteilten Match | „Wir sagen dir Bescheid, wenn Freunde ein Match mit dir bestätigen wollen.“ | Inbox-Badge in der App genügt |
-| Workout/Sensor auf der Uhr | Erster Start auf der Uhr | Kurztext auf der Uhr, Rest am Handy | Zählen ohne Puls |
+| Workout/Sensor auf der Uhr | Erster Start auf der Uhr, bereits P1 | „Hält die App während des Matches wach und zeigt deinen Puls. Bis P3 wird das Workout danach verworfen.“ Systemberechtigungen separat von den Health-Einwilligungen ab P3 erklären. | Zählen ohne Puls, Hinweis auf mögliche Hintergrundgrenzen |
 | Kontakte | **nicht** anfordern – Einladungen per Link/QR/Benutzername | – | – |
 | Standort | nicht in v1 (später evtl. Platz-Erkennung) | – | – |
 
@@ -497,7 +504,7 @@ Pre-Permission-Screens immer mit „Später“; Systemdialog erst nach „Erlaub
 
 ### 7.3 Paywall-Platzhalter (Freemium später)
 
-- Produktname-Platzhalter **„RacketOne Plus“**.
+- Produktname **„Advantly Pro“**.
 - **Nie** während eines Matches oder auf der Uhr anzeigen. Zählen, Basis-Statistik, Freunde, H2H-Bilanz bleiben kostenlos.
 - Kandidaten für Plus: erweiterte Statistik (Momentum-Details, Trends über Zeit), unbegrenzter Verlauf, Export (CSV/PDF), Punkt-Details, eigene Presets > 3, Themes/Zifferblatt-Komplikationen.
 - Gestaltung: Sheet mit Nutzenliste (3–4 Punkte), Plan-Auswahl (Monat/Jahr, Jahres-Ersparnis), Testzeitraum-Hinweis, „Käufe wiederherstellen“, AGB/Datenschutz – eindeutig schließbar (X oben). Trigger: Tap auf gesperrtes Feature (Schloss-Symbol), nie Pop-up beim App-Start.
@@ -558,7 +565,7 @@ Pre-Permission-Screens immer mit „Später“; Systemdialog erst nach „Erlaub
 
 `docs/mockups/index.html` – eine selbsttragende Datei (nur Google Fonts extern, mit System-Fallback). Enthält:
 
-- **Globale Umschalter:** Sportart (Tennis/Padel/Pickleball – Akzentfarbe und Format-Screen passen sich an), Sprache DE/EN (ausgewählte Texte), Outdoor-Kontrast.
+- **Globale Umschalter:** Sportart (Tennis/Padel/Pickleball/Badminton/Tischtennis – Akzentfarbe und Format-Screen passen sich an), Sprache DE/EN (ausgewählte Texte), Outdoor-Kontrast.
 - **Match erstellen:** Start, Sportauswahl, Belag, Spieler, Format (Handy) + Watch-Schnellstart (Apple Watch).
 - **Live:** Handy-Live-Score, Wear OS rund, Apple Watch eckig, Garmin MIP rund (mit klickbaren Tasten), Always-On-Variante – **alle live gekoppelt**: Ziel laut Rollenentscheidung ist ein aktives Zähler-Gerät, dessen Punkte auf allen erscheinen. Undo per Button, Wischen nach unten (Uhren) oder BACK (Garmin) ausschließlich am Zähler. Sperre am Handy (1 s halten zum Entsperren). „Demo“-Knöpfe springen zu Satzball/Matchball.
 - **Satzende:** Dialog auf Uhr (rund/eckig) und Handy-Sheet; erscheint auch automatisch im Live-Teil.
