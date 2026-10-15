@@ -86,6 +86,27 @@ class OperationSessionTest {
         cluster.assertConverged()
     }
 
+    /** Review R1: Nach einer Korrektur ist die alte Wahl aufgehoben; dieselbe Wahl erneut schreibt ein Event und wirkt. */
+    @Test
+    fun chooseServerAgainAfterCorrectionTakesEffect() {
+        val (_, phone, _) = cluster()
+        phone.session.create(Presets.PADEL_GOLDEN_BO3.format(), doubles)
+        assertTrue(phone.session.chooseServer(PlayerId("max")))
+        assertTrue(
+            phone.session.correct(
+                eu.advantly.core.scoring.Correction
+                    .servingOrder(Side.A, listOf(PlayerId("me"), PlayerId("max"))),
+            ),
+        )
+        assertEquals(PlayerId("me"), phone.score.serve?.player)
+        assertTrue(phone.match.awaitingServerChoice, "Wahl aufgehoben")
+        val before = phone.data.events.count(phone.match.id.value)
+        assertTrue(phone.session.chooseServer(PlayerId("max")))
+        assertEquals(before + 1, phone.data.events.count(phone.match.id.value), "kein No-op")
+        assertEquals(PlayerId("max"), phone.score.serve?.player)
+        assertEquals(PlayerId("max"), phone.match.serverChoice?.chosen)
+    }
+
     @Test
     fun serveInfoBarSetsAndOverwritesTheLastPoint() {
         val (cluster, phone, watch) = cluster()

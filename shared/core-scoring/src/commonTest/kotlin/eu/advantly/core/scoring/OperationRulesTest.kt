@@ -131,6 +131,36 @@ class OperationRulesTest {
         assertTrue(m.events[m.events.size - 2].id in m.state.ignoredEvents)
     }
 
+    /** Review R1: Eine Korrektur, die den gewählten Aufschläger ändert, hebt die Wahl auf; erneut wählen setzt ihn wieder ein. */
+    @Test
+    fun correctionAfterServerChoiceClearsTheStaleChoice() {
+        val m = MatchDriver(Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES))
+        m.send(ServerChosen(0, Side.A, p("A2")))
+        m.send(Correction.servingOrder(Side.A, listOf(p("A1"), p("A2"))))
+        assertEquals(p("A1"), m.srv.player)
+        assertEquals(ServerChoice(1, Side.A, listOf(p("A1"), p("A2"), p("B1"), p("B2")), null), m.state.serverChoice)
+        m.send(ServerChosen(0, Side.A, p("A2")))
+        assertEquals(p("A2"), m.srv.player)
+        assertEquals(p("A2"), m.state.serverChoice?.chosen)
+        // Correction(SERVER) auf denselben Spieler lässt die Wahl stehen, auf einen anderen hebt sie auf
+        m.send(Correction.server(p("A2")))
+        assertEquals(p("A2"), m.state.serverChoice?.chosen)
+        m.send(Correction.server(p("B1")))
+        assertEquals(ServerChoice(1, Side.B, listOf(p("B1"), p("B2"), p("A2"), p("A1")), null), m.state.serverChoice)
+
+        // Game 2: Wahl von B2, danach SERVING_ORDER [B1, B2] → Wahl aufgehoben
+        val g = MatchDriver(Presets.PADEL_GOLDEN_BO3.format()).winGames(Side.A, 1)
+        g.send(ServerChosen(0, Side.B, p("B2")))
+        g.send(Correction.servingOrder(Side.B, listOf(p("B1"), p("B2"))))
+        assertEquals(p("B1"), g.srv.player)
+        assertEquals(ServerChoice(2, Side.B, listOf(p("B1"), p("B2")), null), g.state.serverChoice)
+        // Wahl während Game 1 (Fenster noch nicht offen) bleibt erhalten, solange sie wirksam ist
+        val early = MatchDriver(Presets.PADEL_GOLDEN_BO3.format()).points("A")
+        early.send(ServerChosen(0, Side.B, p("B2")))
+        early.points("AAA")
+        assertEquals(ServerChoice(2, Side.B, listOf(p("B2"), p("B1")), p("B2")), early.state.serverChoice)
+    }
+
     @Test
     fun serverChoiceInTiebreakOnlyMatch() {
         val m = MatchDriver(Presets.TENNIS_TIEBREAK_ONLY_7.format(Discipline.DOUBLES))
@@ -239,9 +269,11 @@ class OperationRulesTest {
                 Row(PointDetail(serve = ServeOutcome.DOUBLE_FAULT), Side.B, ServeOutcome.DOUBLE_FAULT),
                 Row(PointDetail(PointDetailKind.DOUBLE_FAULT), Side.B, ServeOutcome.DOUBLE_FAULT),
                 Row(PointDetail(PointDetailKind.WINNER, secondServe = false), Side.A, ServeOutcome.FIRST_SERVE_IN),
-                Row(PointDetail(PointDetailKind.DOUBLE_FAULT, serve = ServeOutcome.FIRST_SERVE_IN), Side.B, null),
-                Row(PointDetail(secondServe = true, serve = ServeOutcome.FIRST_SERVE_IN), Side.A, null),
-                Row(PointDetail(PointDetailKind.ACE, serve = ServeOutcome.DOUBLE_FAULT), Side.B, null),
+                // Vorrangregel: serve gilt vor widersprechenden älteren Angaben (wie im Fold)
+                Row(PointDetail(PointDetailKind.DOUBLE_FAULT, serve = ServeOutcome.FIRST_SERVE_IN), Side.B, ServeOutcome.FIRST_SERVE_IN),
+                Row(PointDetail(secondServe = true, serve = ServeOutcome.FIRST_SERVE_IN), Side.A, ServeOutcome.FIRST_SERVE_IN),
+                Row(PointDetail(PointDetailKind.WINNER, p("B1"), serve = ServeOutcome.DOUBLE_FAULT), Side.B, ServeOutcome.DOUBLE_FAULT),
+                Row(PointDetail(PointDetailKind.WINNER, serve = ServeOutcome.DOUBLE_FAULT), Side.A, null),
             )
         for (row in rows) {
             assertEquals(
@@ -251,6 +283,31 @@ class OperationRulesTest {
             )
         }
         assertNull(PointDetailRules.serveOutcome(rows[1].detail, Side.A, Side.A, eu.advantly.core.model.Sport.PICKLEBALL))
+    }
+
+    /** Review R1: Doppelfehler auf einen Punkt mit `kind = WINNER` bleibt in der Statistik (bereinigt + Vorrang). */
+    @Test
+    fun doubleFaultOverWinnerIsCleanedAndCounted() {
+        val winner = PointDetail(PointDetailKind.WINNER, p("B1"))
+        assertEquals(
+            PointDetail(PointDetailKind.DOUBLE_FAULT, serve = ServeOutcome.DOUBLE_FAULT),
+            PointDetailRules.withServe(winner, ServeOutcome.DOUBLE_FAULT),
+        )
+        assertEquals(
+            PointDetail(serve = ServeOutcome.SECOND_SERVE_IN),
+            PointDetailRules.withServe(
+                PointDetail(PointDetailKind.DOUBLE_FAULT, serve = ServeOutcome.DOUBLE_FAULT),
+                ServeOutcome.SECOND_SERVE_IN,
+            ),
+        )
+        assertNull(PointDetailRules.withServe(PointDetail(serve = ServeOutcome.FIRST_SERVE_IN), null))
+
+        val m = MatchDriver(Presets.TENNIS_SINGLES_BO3.format())
+        val point = m.send(PointWon(Side.B, winner))
+        m.send(PointDetailSet(point, PointDetail(PointDetailKind.WINNER, p("B1"), serve = ServeOutcome.DOUBLE_FAULT)))
+        assertEquals(emptyList(), m.state.ignoredEvents, "Fold akzeptiert")
+        val history = ScoringEngine.pointHistory(m.format, m.lineup, m.events, null)
+        assertEquals(ServeOutcome.DOUBLE_FAULT, history.single().serve, "Statistik zählt den Doppelfehler (gleiche Vorrangregel)")
     }
 
     // --- 4. Games pro Satz 1–6 (§5.1) --------------------------------------------------------------------------------
