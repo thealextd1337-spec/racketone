@@ -35,6 +35,7 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -226,19 +227,19 @@ class SessionMatchStoreTest {
         val phone = rig.phone
         val older = phone.setupFor(tennis)
         phone.start(older)
-        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.endMatch(EndReason.STOPPED))
         assertTrue(phone.dismiss())
         rig.settle()
         val newer = phone.setupFor(badminton15)
         phone.start(newer)
-        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.endMatch(EndReason.STOPPED))
         assertTrue(phone.dismiss())
         rig.settle()
         phone.addGuest("Noch nie gespielt")
         assertEquals(listOf(older.players.last(), newer.players.last()), phone.recentPlayers(Sport.TENNIS))
         assertEquals(listOf(newer.players.last(), older.players.last()), phone.recentPlayers(Sport.BADMINTON))
         phone.start(older)
-        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertTrue(phone.endMatch(EndReason.STOPPED))
         assertTrue(phone.dismiss())
         assertEquals(2, phone.recentPlayers(Sport.TENNIS).size, "Wiederholte Besetzung erscheint nur einmal")
         phone.close()
@@ -993,6 +994,68 @@ class SessionMatchStoreTest {
         assertEquals(setOf(onWatch, director), history.map { it.matchId }.toSet())
         assertEquals(listOf(onWatch), history.filter { it.isRated }.map { it.matchId }, "Abgebrochen zählt nicht")
         assertTrue(phone.delete(director), "abgebrochenes Match lässt sich löschen")
+    }
+
+    /** Review W3-M #3: Ein 13 h altes laufendes Director-Match bleibt nach dem Neustart erreichbar (ohne Auto-Fokus). */
+    @Test
+    fun oldRunningMatchStaysReachableAfterRestart() {
+        val file = File.createTempFile("advantly-old", ".db").also { files += it }
+        file.delete()
+        val rig = Rig(phoneData = fileData(file), watchOnline = false)
+        val old = rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.THIS_PHONE))
+        rig.phone.play("A")
+        rig.settle(13L * 60 * 60 * 1000)
+        rig.restartPhone(fileData(file))
+        val after = rig.phone
+        assertNull(after.active.value, "älter als 12 h: kein Auto-Fokus")
+        assertEquals(listOf(old), after.openMatches.value.map { it.matchId }, "aber erreichbar")
+        assertTrue(after.select(old))
+        assertTrue(after.abandonMatch())
+        assertTrue(after.dismiss())
+        assertTrue(after.delete(old))
+        assertTrue(after.openMatches.value.isEmpty())
+    }
+
+    /** Review W3-M #8: Abgebrochene Matches erscheinen nicht in „Wie letztes Mal“ und „zuletzt gespielt“. */
+    @Test
+    fun abandonedMatchesAreNotSuggested() {
+        val rig = Rig()
+        val phone = rig.phone
+        val rated = phone.setupFor(tennis)
+        phone.start(rated, StartOptions(ScorerOption.THIS_PHONE))
+        assertTrue(phone.stopMatch())
+        assertTrue(phone.dismiss())
+        val abandoned = phone.setupFor(badminton15)
+        phone.start(abandoned, StartOptions(ScorerOption.THIS_PHONE))
+        assertTrue(phone.abandonMatch())
+        assertTrue(phone.dismiss())
+        assertEquals(tennis, phone.lastSetup.value?.format, "„Wie letztes Mal“ überspringt den Abbruch")
+        assertTrue(phone.recentPlayers(Sport.BADMINTON).none { it.id == abandoned.players.last().id })
+        assertTrue(phone.recentPlayers(Sport.TENNIS).any { it.id == rated.players.last().id })
+    }
+
+    /** Review W3-M #5: Wechsel des Uhr-Matches bei nicht erreichbarer Uhr nur mit Bestätigung. */
+    @Test
+    fun offlineWatchSwitchNeedsConfirmation() {
+        val rig = Rig(companion = FakeCompanionDetector(CompanionState.APP_INSTALLED))
+        val onWatch = rig.watchScoredMatch()
+        assertTrue(rig.watch.recordPoint(Side.A))
+        rig.settle()
+        assertNull(rig.phone.watchTakeOverNeeded(), "Uhr erreichbar: verlustfreie Übergabe ohne Rückfrage")
+        rig.offline("watch")
+        rig.settle()
+        assertEquals(onWatch, rig.phone.watchTakeOverNeeded()?.matchId)
+        assertFailsWith<IllegalStateException> { rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)) }
+        val next = rig.phone.start(rig.phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH, takeOverWatchMatch = true))
+        val old =
+            rig.phone.openMatches.value
+                .single { it.matchId == onWatch }
+        assertEquals(LiveRole.SCORER, old.role, "Handy übernimmt das alte Uhr-Match")
+        assertTrue(
+            rig.phone.openMatches.value
+                .single { it.matchId == next }
+                .onWatch,
+        )
     }
 
     /** F22: Nach einem Neustart sind alle laufenden Matches wieder offen, das Uhr-Match bleibt gekennzeichnet. */

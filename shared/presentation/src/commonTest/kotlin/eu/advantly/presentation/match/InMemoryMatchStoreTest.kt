@@ -253,6 +253,31 @@ class InMemoryMatchStoreTest {
     }
 
     @Test
+    fun abandonedMatchIsNotLikeLastTime() {
+        val store = testStore()
+        val rated = store.setupFor(tennisBo3)
+        store.start(rated)
+        assertTrue(store.stopMatch())
+        store.start(store.setupFor(Presets.PADEL_GOLDEN_BO3.format()))
+        assertTrue(store.abandonMatch())
+        assertEquals(tennisBo3, store.lastSetup.value?.format)
+        assertTrue(store.recentPlayers(eu.advantly.core.model.Sport.PADEL).none { it.displayName == "Mia" })
+    }
+
+    @Test
+    fun abandonDuringTheSetEndQuestionIsNotRated() {
+        val store = testStore()
+        store.start(store.setupFor(Presets.TENNIS_OPEN.format()))
+        store.play("AAAA".repeat(6))
+        assertTrue(store.abandonMatch())
+        assertEquals(
+            MatchResult(null, ResultReason.ABANDONED),
+            store.active.value!!
+                .state.result,
+        )
+    }
+
+    @Test
     fun stopAtTheSetEndQuestionIsTheRegularEnd() {
         val store = testStore()
         store.start(store.setupFor(Presets.TENNIS_OPEN.format()))

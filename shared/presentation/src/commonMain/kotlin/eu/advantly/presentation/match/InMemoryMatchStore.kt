@@ -224,6 +224,9 @@ class InMemoryMatchStore(
 
     private fun serveInfoEnabled(e: Entry): Boolean = e.setup.format.sport.isTennisLike && e.setup.meta.serveStats
 
+    /** Ein Gerät: nie eine Uhr, die übernommen werden müsste. */
+    override fun watchTakeOverNeeded(): LiveMatchSnapshot? = null
+
     override fun select(matchId: MatchId): Boolean {
         if (matchId !in openIds) return false
         activeId = matchId
@@ -254,8 +257,20 @@ class InMemoryMatchStore(
 
     override fun abandonMatch(): Boolean =
         command(clearRedo = true) { e ->
-            e.engine.state.status != MatchStatus.FINISHED && append(e, MatchEnded(EndReason.ABANDONED))
+            val ok = e.engine.state.status != MatchStatus.FINISHED && append(e, MatchEnded(EndReason.ABANDONED))
+            // „Wie letztes Mal“ zeigt kein abgebrochenes Match (F21)
+            if (ok) lastSetupFlow.value = lastRatedSetup()
+            ok
         }
+
+    private fun lastRatedSetup(): MatchSetup? =
+        entries.values
+            .filter {
+                it.engine.state.result
+                    ?.reason != ResultReason.ABANDONED
+            }.maxByOrNull { it.genesis.wallClockMs }
+            ?.setup
+            ?.copy(previousMatchId = null)
 
     override fun correctServer(
         player: PlayerId,
@@ -357,7 +372,10 @@ class InMemoryMatchStore(
         entries.values
             .sortedByDescending { it.genesis.wallClockMs }
             .sortedBy { it.setup.format.sport != sport }
-            .filter { self.value.id in it.setup.lineup.a + it.setup.lineup.b }
+            .filter {
+                it.engine.state.result
+                    ?.reason != ResultReason.ABANDONED
+            }.filter { self.value.id in it.setup.lineup.a + it.setup.lineup.b }
             .flatMap { it.setup.players }
             .filterNot { it.id == self.value.id }
             .distinctBy { it.id }

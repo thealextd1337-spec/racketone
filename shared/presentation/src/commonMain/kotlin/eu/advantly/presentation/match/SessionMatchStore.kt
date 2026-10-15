@@ -67,8 +67,9 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * Matches, Spieler, Identität); Engine-Zusammenfassungen beendeter Matches sind je `updatedAt` zwischengespeichert.
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
- * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter alle noch laufenden Matches der letzten 12 h
- * wieder, das jüngste im Fokus.
+ * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
+ * zum Fortsetzen, Beenden, Abbrechen, Löschen); in den Fokus kommt nur das zuletzt geänderte und nur, wenn es höchstens
+ * 12 h alt ist.
  * „Stand vor X s“ misst er monoton ([monotonic]); den letzten Kontakt zum Zähler merkt er sich je Match in den Settings,
  * damit das Alter einen Neustart übersteht. Ohne gemerkten Kontakt ist es unbekannt (nicht 0).
  *
@@ -195,8 +196,12 @@ class SessionMatchStore(
                 ScorerOption.THIS_PHONE -> ScorerChoice.ThisDevice
             }
         // Workout-Wunsch als Metadatum am Match (MatchMeta.watchWorkout) – geht mit Genesis und Match-Kopf an die Uhr
-        return session.create(setup.format, setup.lineup, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
+        return session.create(setup.format, setup.lineup, meta, scorer, takeOverWatchMatch = options.takeOverWatchMatch)
     }
+
+    override fun watchTakeOverNeeded(): LiveMatchSnapshot? =
+        session.watchMatchNeedingTakeOver()?.let { id -> openFlow.value.firstOrNull { it.matchId == id } }
 
     override fun recordPoint(side: Side): Boolean = session.recordPoint(side)
 
@@ -394,14 +399,15 @@ class SessionMatchStore(
 
     private fun current(): ActiveMatch? = session.state.value.match
 
-    /** Alle laufenden Matches der letzten [RESUME_WINDOW_MS] öffnen; das zuletzt geänderte bekommt den Fokus. */
+    /**
+     * Alle laufenden Matches öffnen (Review W3-M #3: auch ältere bleiben erreichbar); den Fokus bekommt nur das zuletzt
+     * geänderte, wenn es höchstens [RESUME_WINDOW_MS] alt ist.
+     */
     private fun resumeRecentMatches() {
         val now = clock.nowMs()
-        data.matches
-            .active()
-            .filter { now - it.updatedAtMs <= RESUME_WINDOW_MS }
-            .reversed()
-            .forEach { session.resume(it.id) }
+        val running = data.matches.active()
+        running.reversed().forEach { session.openInBackground(it.id) }
+        running.firstOrNull()?.takeIf { now - it.updatedAtMs <= RESUME_WINDOW_MS }?.let { session.resume(it.id) }
     }
 
     private fun onSessionState(state: SessionState) {
@@ -615,10 +621,11 @@ class SessionMatchStore(
         list.filter { data.players.get(it.id) == null }.forEach { data.players.addGuest(it.id, it.displayName, now) }
     }
 
+    /** „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung war (F21). */
     private fun loadLastSetup(): MatchSetup? =
         data.matches
-            .history(limit = 1)
-            .firstOrNull()
+            .history(limit = LAST_SETUP_SCAN)
+            .firstOrNull { it.score.reason != ResultReason.ABANDONED }
             ?.let { MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup)) }
 
     private fun loadHistory(): List<MatchSummary> {
@@ -690,6 +697,7 @@ class SessionMatchStore(
 
     private companion object {
         const val DEFAULT_HISTORY_LIMIT = 200L
+        const val LAST_SETUP_SCAN = 20L
 
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000

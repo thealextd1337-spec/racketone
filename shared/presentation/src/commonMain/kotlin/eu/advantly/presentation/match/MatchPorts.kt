@@ -115,10 +115,13 @@ enum class ScorerOption {
  * Start-Optionen, die nicht zum Setup gehören – Presets und Favoriten vergeben keine Zählrechte (04 §3.1).
  *
  * @property watchWorkout „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, unabhängig vom Zähler)
+ * @property takeOverWatchMatch bestätigt: Die nicht erreichbare Uhr zählt noch ein anderes Match
+ *   ([LiveMatchPort.watchTakeOverNeeded]) – das Handy übernimmt es sofort, spätere Uhr-Eingaben dort werden verworfen
  */
 data class StartOptions(
     val scorer: ScorerOption = ScorerOption.THIS_PHONE,
     val watchWorkout: Boolean = true,
+    val takeOverWatchMatch: Boolean = false,
 )
 
 /**
@@ -267,6 +270,14 @@ interface LiveMatchPort {
     /** Live-Ansicht auf das offene Match [matchId] wechseln (wird aktiv). `false`, wenn es nicht offen ist. */
     fun select(matchId: MatchId): Boolean
 
+    /**
+     * Würde ein neues Match mit „Meine Uhr“ jetzt eine **bestätigte Übernahme** brauchen? Das ist das laufende Uhr-Match,
+     * das die Uhr selbst zählt, während sie nicht erreichbar ist (Review W3-M #5): Ohne Bestätigung („Das Handy übernimmt
+     * …, spätere Uhr-Eingaben dort werden verworfen“, [StartOptions.takeOverWatchMatch]) startet [start] dann nicht.
+     * `null` = Wechsel ohne Rückfrage (die erreichbare Uhr gibt ihr Match selbst verlustfrei ab).
+     */
+    fun watchTakeOverNeeded(): LiveMatchSnapshot?
+
     /** Die eigene Uhr kann als Zähler gewählt werden (= [watchStatus] ist `AVAILABLE`); `false` = nur Director. */
     val watchAvailable: StateFlow<Boolean>
 
@@ -284,10 +295,11 @@ interface LiveMatchPort {
 
     /**
      * Legt ein Match an und macht es aktiv. Laufende Matches bleiben offen und laufen weiter (F22). Zählt mit „Meine Uhr“
-     * künftig die Uhr dieses Match, übernimmt das Handy ihr bisheriges laufendes Match (Director).
+     * künftig die Uhr dieses Match, gibt sie ihr bisheriges laufendes Match geordnet ans Handy ab (Director).
      *
      * @param options wer zählt (ohne verfügbare Uhr immer dieses Handy) und Workout-Wunsch
      * @throws IllegalArgumentException wenn Format oder Lineup ungültig sind (`MatchFormatValidator`, `LineupValidator`)
+     * @throws IllegalStateException wenn [watchTakeOverNeeded] eine Bestätigung verlangt und sie in [options] fehlt
      */
     fun start(
         setup: MatchSetup,
