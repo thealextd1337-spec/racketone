@@ -142,7 +142,6 @@
     <string name="action_without_workout">Ohne Workout</string>
     <string name="action_yes">Ja</string>
     <string name="action_no_end">Nein, beenden</string>
-    <string name="action_match_tiebreak">Match-Tiebreak</string>
     <string name="action_done">Fertig</string>
     <string name="action_follow_up">Noch einer?</string>
     <string name="stats_line">%1$s kcal · %2$s Schritte</string>
@@ -172,6 +171,45 @@
     <string name="dialog_another_game">Noch ein Spiel?</string>
     <string name="decision_waiting">%1$s entscheidet</string>
     <string name="finished_title">Match beendet</string>
+
+    <!-- Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md) -->
+    <string name="setup_tiebreak_only_7">Nur Tiebreak (bis 7)</string>
+    <string name="setup_tiebreak_only_10">Nur Champions-Tiebreak (bis 10)</string>
+    <string name="setup_padel_tiebreak_only_10">Nur Super-Tiebreak (bis 10)</string>
+    <string name="setup_games_per_set">Games pro Satz</string>
+    <string name="setup_games_one_hint">1 Game: 2 Vorsprung, bei 1:1 Tiebreak</string>
+    <plurals name="games_per_set_value">
+        <item quantity="one">%1$d Game</item>
+        <item quantity="other">%1$d Games</item>
+    </plurals>
+    <string name="setup_serve_stats">Aufschlag-Statistik erfassen</string>
+    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1. · 2. · DF</string>
+    <string name="live_remove_point_us">Letzten Punkt von uns abziehen</string>
+    <string name="live_remove_point_them">Letzten Punkt der Gegner abziehen</string>
+    <string name="live_point_removed">Punkt abgezogen</string>
+    <string name="toast_nothing_to_remove">Kein Punkt zum Abziehen</string>
+    <string name="serve_bar_title">Aufschlag beim letzten Punkt</string>
+    <string name="serve_first_in">1. Aufschlag</string>
+    <string name="serve_second_in">2. Aufschlag</string>
+    <string name="serve_double_fault">Doppelfehler</string>
+    <string name="serve_first_short">1.</string>
+    <string name="serve_second_short">2.</string>
+    <string name="serve_double_fault_short">DF</string>
+    <string name="server_choice_title_game1">Wer schlägt auf?</string>
+    <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
+    <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>
+    <string name="server_choice_hint">Später wählen – es gilt die bisherige Reihenfolge</string>
+    <string name="server_choice_prompt">Aufschlag wählen</string>
+    <string name="action_later">Später</string>
+    <string name="set_end_regular">Normaler Satz</string>
+    <string name="set_end_tiebreak_7">Tiebreak bis 7</string>
+    <string name="set_end_champions_10">Champions-Tiebreak bis 10</string>
+    <string name="set_end_super_10">Super-Tiebreak bis 10</string>
+    <string name="set_end_finish">Match beenden</string>
+    <string name="update_other_device">Bitte Advantly auf dem Handy aktualisieren</string>
+    <string name="update_this_device">Bitte Advantly auf dieser Uhr aktualisieren</string>
+    <string name="update_other_device_short">Handy-App aktualisieren</string>
+    <string name="update_this_device_short">Uhr-App aktualisieren</string>
 
     <!-- TalkBack (04 §8) -->
     <string name="a11y_point_us">Punkt für Wir</string>

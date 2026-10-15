@@ -7,6 +7,8 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
@@ -55,11 +57,21 @@ class WatchController(
         val sport: Sport? = null,
         val discipline: Discipline? = null,
         val format: FormatChoice? = null,
+        /** Gewählte Games pro Satz; `null` = Standard des Formats. */
+        val gamesPerSet: Int? = null,
+        /** „Aufschlag-Statistik erfassen“ (Tennis/Padel, Default an). */
+        val serveStats: Boolean = true,
     )
 
     private var draft: Draft? = null
     private var overlay: LiveOverlay? = null
     private var locked = false
+
+    /** Sichtbarkeit der Aufschlag-Leiste nach dem Punkt (monoton über [elapsed]). */
+    private val serveBar = ServeBarTimer()
+
+    /** Eröffnungswahl schon getroffen? (Hinweis nach aufgehobener Wahl; aus dem Event-Log, übersteht Neustarts) */
+    private val openingChoice = OpeningChoiceCheck(directory::serverChosen)
 
     /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
     private var disconnectedSince: Long? = null
@@ -105,7 +117,12 @@ class WatchController(
     fun tick() = publish()
 
     /** Display wieder aktiv (Ambient → interaktiv): kurze Sperre gegen den Aufweck-Tap (04 §4.3.3 Punkt 4). */
-    fun onWake() = tapGuard.onWake(uptime())
+    fun onWake() {
+        tapGuard.onWake(uptime())
+        // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei
+        serveBar.dismiss()
+        publish()
+    }
 
     // --- Startliste -------------------------------------------------------------------------------
 
@@ -151,7 +168,24 @@ class WatchController(
     fun selectFormat(choice: FormatChoice) {
         val d = draft ?: return
         if (choice.sport != d.sport) return
-        draft = d.copy(step = SetupStep.SERVER, format = choice)
+        draft = d.copy(step = SetupStep.SERVER, format = choice, gamesPerSet = null)
+        publish()
+    }
+
+    /** „Games pro Satz“ im letzten Schritt (Tennis/Padel 1–6, nicht bei „Nur Tiebreak“). */
+    fun selectGamesPerSet(games: Int) {
+        val d = draft ?: return
+        val choice = d.format ?: return
+        if (games !in SetupCatalog.gamesOptions(choice)) return
+        draft = d.copy(gamesPerSet = games)
+        publish()
+    }
+
+    /** Schalter „Aufschlag-Statistik erfassen“ (nur Tennis/Padel). */
+    fun setServeStats(enabled: Boolean) {
+        val d = draft ?: return
+        if (d.sport?.let(SetupCatalog::serveStatsAvailable) != true) return
+        draft = d.copy(serveStats = enabled)
         publish()
     }
 
@@ -169,9 +203,9 @@ class WatchController(
         val choice = d.format ?: return false
         val setup =
             WatchSetup(
-                format = SetupCatalog.format(choice, discipline, today()),
+                format = SetupCatalog.format(choice, discipline, today(), d.gamesPerSet),
                 lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(), server, serverIndex),
-                meta = SetupCatalog.meta(sport).copy(watchWorkout = prefs.workoutEnabled),
+                meta = SetupCatalog.meta(sport, d.serveStats).copy(watchWorkout = prefs.workoutEnabled),
             )
         return start(setup)
     }
@@ -223,10 +257,81 @@ class WatchController(
             return false
         }
         val after = session.state.value.match ?: return true
+        // Aufschlag-Leiste für genau diesen Punkt (ersetzt die des vorigen Punktes)
+        after.lastPoint?.takeIf { after.serveInfoEnabled }?.let { serveBar.onPoint(it.id, elapsed()) }
+        publish()
         val hint = mutableState.value.live?.hint
         val attention = hint != null && hint.kind in ATTENTION_HINTS && hint != before
         emit(WatchEffect.Haptic(hapticFor(LiveScoreRules.cueFor(after.state, side)), attention))
         return true
+    }
+
+    /**
+     * Long-Press auf eine Hälfte: letzten Punkt dieser Seite abziehen (02 §7.3 K14, auch über Satzgrenzen). Kurze
+     * Haptik und Hinweis „Punkt abgezogen · Rückgängig“ – „Rückgängig“ (Aktionsleiste) ist Redo.
+     */
+    fun removePoint(side: Side): Boolean {
+        val live = mutableState.value.live ?: return false
+        if (!live.isScorer || live.overlay != null) return false
+        if (locked) {
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+            emit(WatchEffect.Toast(WatchToast.Locked))
+            return false
+        }
+        if (!live.canRemovePoint[side]) {
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+            emit(WatchEffect.Toast(WatchToast.NothingToRemove))
+            return false
+        }
+        serveBar.dismiss()
+        if (!session.removeLastPointOf(side)) {
+            publish()
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+            return false
+        }
+        emit(WatchEffect.Haptic(WatchHaptic.UNDO))
+        emit(WatchEffect.Toast(WatchToast.PointRemoved(side)))
+        return true
+    }
+
+    /** Aufschlag-Leiste: Wert für den letzten Punkt setzen bzw. ändern (nur solange die Leiste sichtbar ist). */
+    fun setServe(outcome: ServeOutcome): Boolean {
+        val live = mutableState.value.live ?: return false
+        val bar = live.serveBar ?: return false
+        if (locked || outcome !in bar.options) return false
+        if (!session.setServeInfo(bar.pointId, outcome)) {
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+            return false
+        }
+        serveBar.onChosen(elapsed())
+        emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
+        publish()
+        return true
+    }
+
+    /** Hinweis „Aufschlag wählen“ antippen → Auswahl (nur Zähler, offene Wahl). */
+    fun openServerChoice() {
+        val live = mutableState.value.live ?: return
+        if (!live.isScorer || live.serverChoice == null || locked) return
+        setOverlay(LiveOverlay.SERVER_CHOICE)
+    }
+
+    /** Aufschläger wählen (02 §6.5.5): nur Spieler aus `serverChoice.players`; schließt die Auswahl. */
+    fun chooseServer(player: PlayerId): Boolean {
+        val choice = mutableState.value.live?.serverChoice ?: return false
+        if (choice.players.none { it.id == player }) return false
+        overlay = null
+        val chosen = session.chooseServer(player)
+        if (chosen) emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
+        publish()
+        return chosen
+    }
+
+    /** Satzende „Noch ein Satz?“: weiter mit [kind] aus `nextSetOptions` (normal, Tiebreak 7, Champions-Tiebreak 10). */
+    fun startNextSet(kind: NextSetKind): Boolean {
+        val decision = mutableState.value.live?.decision ?: return false
+        if (kind !in decision.options) return false
+        return session.startNextSet(kind)
     }
 
     /** Wischen nach unten bzw. Button „Rückgängig“. */
@@ -236,6 +341,7 @@ class WatchController(
         val before =
             session.state.value.match
                 ?.state ?: return false
+        serveBar.dismiss()
         if (!session.undo()) {
             emit(WatchEffect.Toast(WatchToast.NothingToUndo))
             return false
@@ -248,6 +354,7 @@ class WatchController(
         return true
     }
 
+    /** Wiederholen – auch „Rückgängig“ nach „Punkt abziehen“ (gleicher Redo-Stapel, W2-Vertrag §1). */
     fun redo(): Boolean {
         if (mutableState.value.live?.isScorer != true || locked) return false
         if (!session.redo()) return false
@@ -382,6 +489,7 @@ class WatchController(
             overlay = null
             locked = false
             disconnectedSince = null
+            serveBar.dismiss()
             if (match != null) draft = null // ein vom Handy gestartetes Match übernimmt den Bildschirm
         } else if (match != null) {
             if (seenScorer != match.isScorer) {
@@ -399,6 +507,8 @@ class WatchController(
             }
             seenRejected = match.rejectedByRoleCount
         }
+        // Auswahl „Wer schlägt auf?“ schließt, sobald das Fenster zu ist (Punkt, Undo, Rollenwechsel)
+        if (overlay == LiveOverlay.SERVER_CHOICE && (match?.isScorer != true || match.serverChoice == null)) overlay = null
         trackConnection(match, state)
         publish()
     }
@@ -461,12 +571,15 @@ class WatchController(
                     disconnectedForMs = disconnectedSince?.let { elapsed() - it },
                     locked = locked,
                     overlay = overlay,
+                    serveBarPoint = serveBar.visiblePoint(elapsed()),
+                    choiceMadeInWindow = openingChoice.choiceMade(match),
                 ),
             )
         }
         val d = draft ?: return homeScreen()
         val sport = d.sport
         val day = today()
+        val gamesOptions = d.format?.let(SetupCatalog::gamesOptions).orEmpty()
         return WatchScreen.Setup(
             step = d.step,
             sport = sport,
@@ -476,6 +589,10 @@ class WatchController(
             defaultFormat = sport?.let { SetupCatalog.defaultFormat(it, day) },
             format = d.format,
             workoutEnabled = prefs.workoutEnabled,
+            gamesOptions = gamesOptions,
+            gamesPerSet = if (gamesOptions.isEmpty()) null else d.gamesPerSet ?: d.format?.let(SetupCatalog::defaultGames),
+            serveStatsAvailable = sport?.let(SetupCatalog::serveStatsAvailable) == true,
+            serveStats = d.serveStats,
         )
     }
 
@@ -483,7 +600,8 @@ class WatchController(
         val day = today()
         val last =
             directory.lastSetup()?.let { s ->
-                SetupSummary(s.format.sport, s.format.discipline, SetupCatalog.choiceFor(s.format, day), s.format)
+                val recognized = SetupCatalog.recognize(s.format, day)
+                SetupSummary(s.format.sport, s.format.discipline, recognized?.choice, s.format, recognized?.gamesPerSet)
             }
         val resume =
             directory.resumable()?.let { r ->
@@ -496,7 +614,8 @@ class WatchController(
         val phoneConnected =
             session.state.value.sync.peers
                 .any { it.kind == PeerKind.PHONE && it.compatibility == CompatibilityStatus.COMPATIBLE }
-        return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled, phoneConnected)
+        val updateRequired = OperationRules.updateRequired(session.state.value.sync)
+        return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled, phoneConnected, updateRequired)
     }
 
     private fun nameOf(id: PlayerId): String? = directory.displayName(id)

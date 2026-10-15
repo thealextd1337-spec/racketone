@@ -1,5 +1,6 @@
 package eu.advantly.wear.live
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
@@ -9,6 +10,7 @@ import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.ServeCourt
 import eu.advantly.core.scoring.SetKind
@@ -22,6 +24,7 @@ import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.live.SetColumn
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 
@@ -89,7 +92,8 @@ data class DecisionUi(
     val setNumber: Int,
     val score: SidePair<Int>,
     val winner: Side,
-    val offerMatchTiebreak: Boolean,
+    /** Wählbare Satzarten (`nextSetOptions`): Tennis/Padel normaler Satz, Tiebreak bis 7, Champions-Tiebreak bis 10. */
+    val options: List<NextSetKind>,
 )
 
 /** Matchende (04 W7). */
@@ -111,6 +115,9 @@ enum class LiveOverlay {
 
     /** Aufschläger bzw. Aufstellung korrigieren (02 §7.1/§7.4). */
     CORRECT_SERVER,
+
+    /** „Wer schlägt auf?“ im Doppel (02 §6.5.5), nicht blockierend: „Später“ schließt. */
+    SERVER_CHOICE,
 }
 
 /** Positionstausch einer Side im Doppel (02 §7.1 `RECEIVE_POSITIONS`, §7.4; Tischtennis: Rückschläger tauschen). */
@@ -163,6 +170,14 @@ data class LiveUi(
     val overlay: LiveOverlay?,
     /** Nur Zähler bei laufendem Match, sonst `null`. */
     val corrections: CorrectionsUi?,
+    /** Je Seite: „Letzten Punkt abziehen“ möglich (Zähler und die Seite hat einen Punkt, W2-Vertrag §2). */
+    val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
+    /** Aufschlag-Leiste nach dem Punkt, solange sichtbar (nur Zähler mit Aufschlag-Statistik). */
+    val serveBar: ServeBarUi? = null,
+    /** Offene Aufschlägerwahl im Doppel (nur Zähler). */
+    val serverChoice: ServerChoiceUi? = null,
+    /** Versionsunterschied zum Handy: „Bitte Handy/Uhr aktualisieren“. */
+    val updateRequired: UpdateRequired? = null,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 }
@@ -188,6 +203,8 @@ object LiveModel {
         locked: Boolean = false,
         overlay: LiveOverlay? = null,
         isSelf: (PlayerId) -> Boolean = { false },
+        serveBarPoint: EventId? = null,
+        choiceMadeInWindow: Boolean = false,
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
@@ -244,6 +261,10 @@ object LiveModel {
             locked = locked && role == LiveRole.SCORER,
             overlay = overlay,
             corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,
+            canRemovePoint = match.canRemovePoint,
+            serveBar = OperationRules.serveBar(match, serveBarPoint),
+            serverChoice = OperationRules.serverChoice(match, ::player, choiceMadeInWindow),
+            updateRequired = OperationRules.updateRequired(sync),
         )
     }
 
@@ -359,7 +380,8 @@ object LiveModel {
                 SetKind.MATCH_TIEBREAK -> last.tiebreak ?: last.points
                 SetKind.PB_GAME, SetKind.RALLY_GAME -> last.points
             } ?: SidePair(0, 0)
-        return DecisionUi(state.sets.size, score, last.winner, offerMatchTiebreak = match.format.matchTiebreak != null)
+        val options = match.nextSetOptions.ifEmpty { listOf(NextSetKind.REGULAR) }
+        return DecisionUi(state.sets.size, score, last.winner, options)
     }
 
     private fun finishedUi(match: ActiveMatch): FinishedUi {

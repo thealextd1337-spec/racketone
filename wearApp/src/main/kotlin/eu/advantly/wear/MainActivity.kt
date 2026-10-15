@@ -30,6 +30,8 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -37,6 +39,7 @@ import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
 import eu.advantly.wear.live.WatchEffect
 import eu.advantly.wear.live.WatchToast
+import eu.advantly.wear.live.displayMillis
 import eu.advantly.wear.match.FormatChoice
 import eu.advantly.wear.match.GuestSlot
 import eu.advantly.wear.match.WatchDirectory
@@ -285,7 +288,7 @@ class MainActivity : ComponentActivity() {
             is WatchEffect.Toast -> {
                 toast.value = effect.toast
                 handler.removeCallbacks(clearToast)
-                handler.postDelayed(clearToast, TOAST_MS)
+                handler.postDelayed(clearToast, effect.toast.displayMillis)
             }
         }
     }
@@ -449,10 +452,25 @@ class MainActivity : ComponentActivity() {
             override fun replaceOtherWorkout() = WorkoutService.replaceOther(this@MainActivity)
 
             override fun skipWorkout() = WorkoutService.stop(this@MainActivity)
+
+            // --- Bedienung W2 ---
+
+            override fun selectGamesPerSet(games: Int) = controller.selectGamesPerSet(games)
+
+            override fun setServeStats(enabled: Boolean) = controller.setServeStats(enabled)
+
+            override fun removePoint(side: Side): Boolean = !isAmbient.value && controller.removePoint(side)
+
+            override fun setServe(outcome: ServeOutcome): Boolean = !isAmbient.value && controller.setServe(outcome)
+
+            override fun openServerChoice() = controller.openServerChoice()
+
+            override fun chooseServer(player: PlayerId): Boolean = controller.chooseServer(player)
+
+            override fun startNextSet(kind: NextSetKind): Boolean = controller.startNextSet(kind)
         }
 
     private companion object {
-        const val TOAST_MS = 3_000L
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val TICK_MS = 1_000L
     }

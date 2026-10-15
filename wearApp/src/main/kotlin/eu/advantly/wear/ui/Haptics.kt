@@ -87,6 +87,11 @@ class Haptics(
             WatchHaptic.REJECTED -> {
                 emptyList<Pair<Int, Int>>() to longArrayOf(0, REJECT_MS)
             }
+
+            // kurzer, leiser Tick: Auswahl übernommen (Aufschlag-Info, Aufschläger) – klar anders als ein Punkt
+            WatchHaptic.CONFIRM -> {
+                listOf(PRIMITIVE_TICK to 0) to longArrayOf(0, 20)
+            }
         }
 
     private companion object {

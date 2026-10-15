@@ -7,6 +7,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.match.FormatChoice
 
@@ -20,6 +21,8 @@ sealed interface WatchScreen {
         val workoutEnabled: Boolean,
         /** Handy live verbunden und kompatibel (Feldtest: Status auf dem Startbildschirm). */
         val phoneConnected: Boolean = false,
+        /** Handy erreichbar, aber andere Protokollversion: „Bitte Handy/Uhr aktualisieren“ (W2-Vertrag §5). */
+        val updateRequired: UpdateRequired? = null,
     ) : WatchScreen
 
     /** Kurz-Wizard (04 W2): Sport → Einzel/Doppel → Format → Erstaufschläger (= Start). */
@@ -33,6 +36,14 @@ sealed interface WatchScreen {
         val defaultFormat: FormatChoice?,
         val format: FormatChoice?,
         val workoutEnabled: Boolean,
+        /** Wählbare „Games pro Satz“ zum gewählten Format (Tennis/Padel 1–6, sonst und bei „Nur Tiebreak“ leer). */
+        val gamesOptions: List<Int> = emptyList(),
+        /** Wirksame Games pro Satz (Auswahl oder Standard des Formats), `null` ohne Auswahlmöglichkeit. */
+        val gamesPerSet: Int? = null,
+        /** Schalter „Aufschlag-Statistik erfassen“ anbieten (nur Tennis/Padel). */
+        val serveStatsAvailable: Boolean = false,
+        /** Stand des Schalters (Default an, W2-Vertrag §1). */
+        val serveStats: Boolean = true,
     ) : WatchScreen
 
     /** Live-Score bzw. Anzeige (04 W3). */
@@ -49,6 +60,8 @@ data class SetupSummary(
     val discipline: Discipline,
     val choice: FormatChoice?,
     val format: MatchFormat,
+    /** Vom Standard des Vorschlags abweichende Games pro Satz, sonst `null`. */
+    val gamesPerSet: Int? = null,
 )
 
 /** Fortsetzbares Match (Resume-Karte). */
@@ -87,6 +100,9 @@ enum class WatchHaptic {
 
     /** Gesperrt-Tap / abgelehnte Eingabe. */
     REJECTED,
+
+    /** Kurze Bestätigung einer Auswahl (Aufschlag-Info, Aufschläger). */
+    CONFIRM,
 }
 
 /** Kurzmeldungen (Mittelband, 3 s). */
@@ -124,7 +140,19 @@ sealed interface WatchToast {
     data object MatchRemoved : WatchToast
 
     data object StartFailed : WatchToast
+
+    /** „Punkt abgezogen“ mit „Rückgängig“ (Redo über die Aktionsleiste). */
+    data class PointRemoved(
+        val side: Side,
+    ) : WatchToast
+
+    /** Long-Press auf eine Seite ohne Punkt. */
+    data object NothingToRemove : WatchToast
 }
+
+/** Anzeigedauer im Mittelband: „Punkt abgezogen · Rückgängig“ bleibt länger stehen, damit Zeit zum Antippen bleibt. */
+val WatchToast.displayMillis: Long
+    get() = if (this is WatchToast.PointRemoved) 5_000L else 3_000L
 
 /** Einmalige Effekte (Haptik, Toast) – die Activity spielt sie ab. */
 sealed interface WatchEffect {
