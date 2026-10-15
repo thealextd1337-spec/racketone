@@ -381,3 +381,36 @@
 
 /* Link-Debug (Spike S3, nur DEBUG) */
 "link.nopeer" = "Noch keine Gegenstelle – ist die andere App offen?";
+
+/* Hinweis TT-Doppel: Rückschlagreihenfolge wechselt (Effekt RECEIVE_ORDER_SWAPPED) */
+"banner.receiveOrder" = "⇄ Rückschlag-Reihenfolge wechseln";
+
+/* Hinweis: Event nicht gespeichert (SQLite-Fehler) */
+"banner.storeError" = "Nicht gespeichert – bitte erneut tippen";
+
+/* Mittelband: Match unterbrochen */
+"status.paused" = "Pause";
+
+/* Steuerseite: Match unterbrechen */
+"controls.pause" = "Unterbrechen";
+
+/* Steuerseite: Match fortsetzen */
+"controls.resume" = "Fortsetzen";
+
+/* Bedienhilfe: Feldpositionen im Doppel (links, rechts) */
+"a11y.positions %@ %@" = "Spieler %1$@ links, Spieler %2$@ rechts";
+
+/* Bedienhilfe: Aufschläger → Rückschläger im Doppel */
+"a11y.serveFromTo %@ %@" = "Spieler %1$@ schlägt auf Spieler %2$@ auf";
+
+/* Action + Seitentaste (PauseWorkoutIntent) */
+"intent.pause.title" = "Match unterbrechen";
+
+/* Action + Seitentaste (ResumeWorkoutIntent) */
+"intent.resume.title" = "Match fortsetzen";
+
+/* Schnellstart-Fehler: kein Match gestartet */
+"intent.error.startFailed" = "Das Match konnte nicht gestartet werden.";
+
+/* Schnellstart-Fehler: keine Workout-Session (HealthKit) */
+"intent.error.workout" = "Match gestartet, aber ohne Training – Health-Zugriff prüfen.";

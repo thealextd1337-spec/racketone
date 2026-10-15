@@ -5,6 +5,8 @@ import SwiftUI
 /// Ein laufendes Match wird nach dem App-Start aus dem Event-Log fortgesetzt.
 struct ContentView: View {
     @ObservedObject private var model = ScoringModel.shared
+    /// `onAppear` an der Group feuert bei jedem Wechsel des Inhalts erneut – Startlogik nur einmal je Prozess
+    @State private var launched = false
     #if DEBUG
     /// Ergebnis des Store-Smoke-Tests (Spike S1), -1 = nicht gelaufen.
     @State private var storeCount: Int64 = -1
@@ -25,6 +27,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            guard !launched else { return }
+            launched = true
             #if DEBUG
             // vor dem Fortsetzen: der Demo-Modus schaltet die Workout-Session ab
             DemoRunner.runIfRequested(model: model)

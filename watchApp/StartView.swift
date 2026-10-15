@@ -12,7 +12,9 @@ struct StartView: View {
             List {
                 if let last = model.lastSetup {
                     Section {
-                        Button(action: model.startLast) {
+                        Button {
+                            model.startLast()
+                        } label: {
                             SportLabel(sport: last.sport) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("start.lastTime").font(.headline)

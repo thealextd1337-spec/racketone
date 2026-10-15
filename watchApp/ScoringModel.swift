@@ -26,7 +26,10 @@ enum ActionButtonMode: String, CaseIterable {
 enum Banner: Equatable {
     case undo(from: String, to: String)
     case changeEnds
+    case receiveOrderSwapped
     case healthUnavailable
+    /// Event nicht gespeichert (SQLite-Fehler) – Zustand unverändert, nochmal tippen
+    case storeError
 }
 
 /// Zustand der Watch-App. Alle Zähl-Logik liegt in Kotlin (`WatchScoring`); Swift übernimmt nur Gesten,
@@ -70,6 +73,9 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         }
         workout.onRunning = { [weak self] in self?.donateActionIntent() }
         workout.onRecoveryFailed = { [weak self] in self?.syncWorkout() }
+        workout.onSystemPauseChange = { [weak self] paused in
+            if paused { self?.pauseMatch() } else { self?.resumeMatch() }
+        }
     }
 
     // MARK: WatchScoringListener
@@ -79,22 +85,50 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         syncWorkout()
     }
 
-    /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende).
+    /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist
+    /// pausiert, solange das Match unterbrochen ist.
     private func syncWorkout() {
         guard let snap = snapshot else { return }
         if snap.matchFinished || !workoutEnabled {
             workout.end()
         } else {
-            workout.ensureRunning(matchId: snap.matchId, sport: snap.sport, presetId: snap.presetId, doubles: snap.doubles)
+            workout.ensureRunning(
+                matchId: snap.matchId,
+                sport: snap.sport,
+                presetId: snap.presetId,
+                doubles: snap.doubles,
+                paused: snap.paused
+            )
         }
+    }
+
+    /// Nach jedem erfolgreichen Befehl (Punkt, Undo, Satzende-Antwort, Pause …): Hinweise und Haptik aus den Effekten.
+    private func afterCommand(_ snap: WatchScoreSnapshot) {
+        if snap.changeEnds {
+            show(.changeEnds)
+            Haptics.after(0.7, .start)
+        } else if snap.receiveOrderSwapped {
+            show(.receiveOrderSwapped)
+            Haptics.after(0.7, .start)
+        }
+    }
+
+    /// Befehl abgelehnt: Speicherfehler sichtbar machen, sonst nur Ablehnungs-Haptik.
+    private func rejected() {
+        let error = scoring.lastError()
+        if error == "STORE_WRITE" || error == "STORE_READ" {
+            print("ADVANTLY_STORE error=\(error)")
+            show(.storeError)
+        }
+        Haptics.rejected()
     }
 
     // MARK: Start
 
     /// Nach App-Start: laufendes Match aus dem Event-Log fortsetzen.
     func resumeIfNeeded() {
-        if snapshot == nil {
-            _ = scoring.resume()
+        if snapshot == nil, scoring.restore() == nil, !scoring.lastError().isEmpty {
+            print("ADVANTLY_STORE restore=\(scoring.lastError())")
         }
     }
 
@@ -114,7 +148,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     @discardableResult
     func start(presetId: String, doubles: Bool, weServeFirst: Bool) -> Bool {
         guard scoring.startMatch(presetId: presetId, doubles: doubles, weServeFirst: weServeFirst) != nil else {
-            Haptics.rejected()
+            rejected()
             return false
         }
         lastSetup = scoring.lastSetup()
@@ -123,22 +157,23 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         return true
     }
 
-    func startLast() {
-        guard let last = lastSetup else { return }
-        start(presetId: last.presetId, doubles: last.doubles, weServeFirst: last.weServeFirst)
+    @discardableResult
+    func startLast() -> Bool {
+        guard let last = lastSetup else { return false }
+        return start(presetId: last.presetId, doubles: last.doubles, weServeFirst: last.weServeFirst)
     }
 
     /// Schnellstart über die Action-Taste (StartWorkoutIntent): letzte Auswahl dieser Sportart, sonst Default-Preset.
-    func quickStart(sport: String) {
-        if let snap = snapshot, !snap.matchFinished { return }
+    /// `true`, wenn ein Match läuft (neu gestartet oder schon offen).
+    func quickStart(sport: String) -> Bool {
+        if let snap = snapshot, !snap.matchFinished { return true }
         if snapshot != nil { closeMatch() }
         if let last = lastSetup, last.sport == sport {
-            startLast()
-            return
+            return startLast()
         }
         let presets = presets(for: sport)
-        guard let preset = presets.first(where: { $0.isDefault }) ?? presets.first else { return }
-        start(presetId: preset.id, doubles: preset.defaultDoubles, weServeFirst: true)
+        guard let preset = presets.first(where: { $0.isDefault }) ?? presets.first else { return false }
+        return start(presetId: preset.id, doubles: preset.defaultDoubles, weServeFirst: true)
     }
 
     // MARK: Zählen
@@ -153,16 +188,14 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
             return
         }
         guard let after = scoring.point(sideA: sideA) else {
-            Haptics.rejected()
+            rejected()
             return
         }
         lockedUntil = now.addingTimeInterval(Self.lockInterval)
         flashSideA = sideA
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.flashSideA = nil }
         Haptics.feedback(after: after, us: sideA, previousHint: before.hintCode)
-        if after.changeEnds {
-            show(.changeEnds)
-        }
+        afterCommand(after)
     }
 
     var isLocked: Bool { Date() < lockedUntil }
@@ -174,24 +207,51 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     func undo() {
         guard let before = snapshot, let after = scoring.undo() else {
-            Haptics.rejected()
+            rejected()
             return
         }
         Haptics.undo()
         show(.undo(from: ScoreText.short(before), to: ScoreText.short(after)))
+        afterCommand(after)
     }
 
     func decide(anotherSet: Bool, matchTiebreak: Bool) {
-        guard scoring.continueDecision(anotherSet: anotherSet, matchTiebreak: matchTiebreak) != nil else {
-            Haptics.rejected()
+        guard let after = scoring.continueDecision(anotherSet: anotherSet, matchTiebreak: matchTiebreak) else {
+            rejected()
             return
         }
         Haptics.play(anotherSet ? .start : .stop)
+        afterCommand(after)
     }
 
     func endMatch() {
-        guard scoring.end() != nil else { return }
+        guard let after = scoring.end() else {
+            rejected()
+            return
+        }
         Haptics.play(.stop)
+        afterCommand(after)
+    }
+
+    /// Unterbrechung (Regen, Verletzung): Match `Paused`, Workout pausiert. Kein Effekt auf den Score.
+    func pauseMatch() {
+        guard let snap = snapshot, snap.status == "IN_PROGRESS" else { return }
+        guard let after = scoring.pause() else {
+            rejected()
+            return
+        }
+        Haptics.play(.stop)
+        afterCommand(after)
+    }
+
+    func resumeMatch() {
+        guard let snap = snapshot, snap.paused else { return }
+        guard let after = scoring.resumePlay() else {
+            rejected()
+            return
+        }
+        Haptics.play(.start)
+        afterCommand(after)
     }
 
     /// Matchende-Ansicht verlassen bzw. Match aus der Anzeige nehmen (das Log bleibt).
@@ -205,6 +265,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     // MARK: Action-Taste
 
+    /// Einziger Einstieg für die Action-Taste: welcher Intent auch gespendet war, es gilt die aktuelle Einstellung
+    /// („Aus“ = nichts tun).
     func handleActionButton() {
         switch actionButtonMode {
         case .undo: undo()
@@ -214,7 +276,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func donateActionIntent() {
-        guard snapshot != nil else { return }
+        guard snapshot != nil, actionButtonMode != .off else { return }
         ActionIntents.donate(actionButtonMode)
     }
 

@@ -17,7 +17,7 @@ enum Haptics {
     static func undo() { play(.directionDown) }
 
     /// Rückmeldung nach einem Punkt: Wir = 1 Klick, Gegner = 2 Klicks; Game/Satz/Match eigene Muster;
-    /// Seitenwechsel = `.start`; neuer Break-/Satz-/Matchball = Aufmerksamkeits-Impuls zu Beginn des nächsten Punktes.
+    /// neuer Break-/Satz-/Matchball = Aufmerksamkeits-Impuls zu Beginn des nächsten Punktes.
     static func feedback(after snap: WatchScoreSnapshot, us: Bool, previousHint: String) {
         let effects = Set(snap.effects)
         if effects.contains("SET_WON") || effects.contains("MATCH_WON") || effects.contains("MATCH_DRAWN") {
@@ -35,10 +35,8 @@ enum Haptics {
             play(.click)
             after(0.12, .click)
         }
-        if effects.contains("CHANGE_ENDS") {
-            after(0.7, .start)
-        }
         let attention: Set<String> = ["BREAK_POINT", "SET_POINT", "MATCH_POINT"]
+        // Seitenwechsel (`.start`) meldet ScoringModel.afterCommand für alle Befehle
         if attention.contains(snap.hintCode) && snap.hintCode != previousHint {
             after(1.0, .notification)
         }

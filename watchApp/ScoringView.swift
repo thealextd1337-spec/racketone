@@ -122,9 +122,16 @@ struct TeamHalf: View {
                     Text(LocalizedStringKey(sideA ? "team.us" : "team.them"))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(color)
+                    if let positions {
+                        Text(positions)
+                            .font(.system(size: 11, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Brand.text2)
+                            .accessibilityLabel(Text(positionsA11y))
+                    }
                     Spacer(minLength: 2)
                     if serving {
-                        ServeIndicator(snap: snap, color: color, dimmed: dimmed)
+                        ServeIndicator(snap: snap, sideA: sideA, dimmed: dimmed)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -141,16 +148,31 @@ struct TeamHalf: View {
         }
         .padding(.horizontal, 4)
     }
+
+    /// Doppel mit Feldpositionen (Pickleball, Badminton, 02 §8 `positions`): „L2 R1“ = wer links/rechts steht.
+    private var positions: String? {
+        let right = sideA ? snap.rightNoA : snap.rightNoB
+        let left = sideA ? snap.leftNoA : snap.leftNoB
+        guard snap.doubles, right > 0, left > 0 else { return nil }
+        return loc("serve.court.LEFT") + String(left) + " " + loc("serve.court.RIGHT") + String(right)
+    }
+
+    private var positionsA11y: String {
+        let right = sideA ? snap.rightNoA : snap.rightNoB
+        let left = sideA ? snap.leftNoA : snap.leftNoB
+        return loc("a11y.positions %@ %@", String(left), String(right))
+    }
 }
 
-/// Aufschlag: gefüllter Ball-Punkt + Feld („R“/„L“), Tischtennis: verbleibende Aufschläge als Punkte,
-/// Pickleball-Doppel: Aufschlägernummer.
+/// Aufschlag: gefüllter Ball-Punkt + Feld („R“/„L“); Tischtennis: verbleibende Aufschläge als Punkte.
+/// Doppel: Aufschläger → Rückschläger als Spielernummern in Teamfarben („2 → 1“, 02 §8.4).
 struct ServeIndicator: View {
     let snap: WatchScoreSnapshot
-    let color: Color
+    let sideA: Bool
     let dimmed: Bool
 
     var body: some View {
+        let color = Brand.team(sideA: sideA)
         HStack(spacing: 3) {
             if snap.sport == "TABLE_TENNIS" {
                 ForEach(0..<max(Int(snap.servesRemaining), 1), id: \.self) { _ in ball }
@@ -161,15 +183,27 @@ struct ServeIndicator: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(color)
                 }
-                if snap.serverNumber > 0 {
-                    Text(String(snap.serverNumber))
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(color)
+            }
+            if snap.doubles && snap.serverNo > 0 {
+                Text(String(snap.serverNo))
+                    .foregroundStyle(color)
+                if snap.receiverNo > 0 {
+                    Text(verbatim: "→")
+                        .foregroundStyle(Brand.text2)
+                    Text(String(snap.receiverNo))
+                        .foregroundStyle(Brand.team(sideA: !sideA))
                 }
             }
         }
+        .font(.system(size: 11, weight: .bold))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("a11y.serving"))
+        .accessibilityLabel(Text(a11y))
+    }
+
+    private var a11y: String {
+        guard snap.doubles && snap.serverNo > 0 else { return loc("a11y.serving") }
+        let receiver = snap.receiverNo > 0 ? String(snap.receiverNo) : "?"
+        return loc("a11y.serveFromTo %@ %@", String(snap.serverNo), receiver)
     }
 
     private var ball: some View {
@@ -205,10 +239,18 @@ struct MiddleBand: View {
                 .minimumScaleFactor(0.6)
                 .foregroundStyle(Color.white.opacity(dimmed ? 0.65 : 1))
             Spacer(minLength: 2)
-            if !snap.hintCode.isEmpty {
+            if snap.paused {
+                Text("status.paused")
+                    .font(.system(size: 11, weight: .bold))
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .foregroundStyle(Color.white)
+                    .overlay(Capsule().stroke(Color.white.opacity(0.7), lineWidth: 1.5))
+            } else if !snap.hintCode.isEmpty {
                 HintPill(snap: snap, dimmed: dimmed)
-            } else if workout.heartRate > 0 {
-                Label(String(workout.heartRate), systemImage: "heart.fill")
+            } else if heartRate > 0 {
+                Label(String(heartRate), systemImage: "heart.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .labelStyle(.titleAndIcon)
                     .foregroundStyle(Color.red.opacity(dimmed ? 0.65 : 1))
@@ -216,6 +258,9 @@ struct MiddleBand: View {
         }
         .padding(.horizontal, 6)
     }
+
+    /// Always-on: Puls höchstens minütlich (04 §4.3.6)
+    private var heartRate: Int { dimmed ? workout.heartRateAmbient : workout.heartRate }
 
     /// Tennis/Padel: frühere Sätze grau + laufende Games; Pickleball: Ansage „4-2-1“; Badminton/TT: Satzstand.
     private var summary: Text {
@@ -286,7 +331,9 @@ struct BannerView: View {
         switch banner {
         case let .undo(from, to): return loc("banner.undo %@ %@", from, to)
         case .changeEnds: return loc("banner.changeEnds")
+        case .receiveOrderSwapped: return loc("banner.receiveOrder")
         case .healthUnavailable: return loc("banner.health")
+        case .storeError: return loc("banner.storeError")
         }
     }
 }
@@ -306,6 +353,17 @@ struct ControlsPage: View {
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(!snap.canUndo)
+                // Unterbrechung (Regen, Verletzung) – pausiert auch das Workout; Seitenwechsel ist keine Pause
+                Button {
+                    if snap.paused { model.resumeMatch() } else { model.pauseMatch() }
+                } label: {
+                    Label(
+                        LocalizedStringKey(snap.paused ? "controls.resume" : "controls.pause"),
+                        systemImage: snap.paused ? "play.fill" : "pause.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(!snap.paused && snap.status != "IN_PROGRESS")
                 // Echte Water Lock nur während des Workouts (05 §1.7); entsperren über die Krone
                 Button {
                     WKInterfaceDevice.current().enableWaterLock()
@@ -313,7 +371,7 @@ struct ControlsPage: View {
                     Label("controls.waterLock", systemImage: "drop.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(workout.state != .running)
+                .disabled(workout.state != .running && workout.state != .paused)
                 Button {
                     model.actionButtonMode = model.actionButtonMode.next
                 } label: {
@@ -351,7 +409,9 @@ struct FitnessPage: View {
             HStack(spacing: 6) {
                 Image(systemName: "heart.fill")
                     .foregroundStyle(Color.red)
-                Text(workout.heartRate > 0 ? String(workout.heartRate) : "--")
+                // Always-on: höchstens minütlich aktualisiert (04 §4.3.6)
+                let bpm = dimmed ? workout.heartRateAmbient : workout.heartRate
+                Text(bpm > 0 ? String(bpm) : "--")
                     .font(.system(size: 44, weight: .bold, design: .rounded))
                     .monospacedDigit()
             }

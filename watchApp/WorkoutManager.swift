@@ -5,13 +5,18 @@ import HealthKit
 /// abgesenktem Handgelenk im Vordergrund (Always-on). Ohne HealthKit-Berechtigung/-Entitlement zählt die App trotzdem,
 /// nur ohne Puls und ohne Hintergrund-Garantie (Hinweis in der UI).
 ///
-/// P1: Puls wird nur angezeigt; das Workout wird am Ende verworfen, nicht in Apple Health gespeichert
-/// (Speichern und Statistik kommen in P3 → `saveToHealth`).
+/// - Eine Unterbrechung des Matches (`Paused`) pausiert die Session, `Resumed` setzt sie fort; Seitenwechsel und
+///   Satzende-Dialog sind keine Workout-Pause.
+/// - Jede asynchrone Antwort (Berechtigung, Recovery) ist an eine Generation gebunden: Kommt sie nach `end()` oder
+///   nach dem Start eines anderen Matches an, wird sie verworfen – eine dabei wiederhergestellte Session wird beendet.
+/// - P1: Puls wird nur angezeigt; das Workout wird am Ende verworfen, nicht in Apple Health gespeichert
+///   (Speichern und Statistik kommen in P3 → `saveToHealth`).
 final class WorkoutManager: NSObject, ObservableObject {
     enum State {
         case idle
         case starting
         case running
+        case paused
         /// Keine Health-Daten, keine Berechtigung oder kein Entitlement (z. B. unsignierter Simulator-Build)
         case unavailable
     }
@@ -21,24 +26,42 @@ final class WorkoutManager: NSObject, ObservableObject {
     @Published private(set) var state: State = .idle
     /// Schläge pro Minute, 0 = noch kein Wert
     @Published private(set) var heartRate: Int = 0
+    /// Puls für Always-on: höchstens einmal pro Minute aktualisiert (04 §4.3.6)
+    @Published private(set) var heartRateAmbient: Int = 0
 
-    /// Wird einmal gemeldet, wenn die Session nicht starten kann (UI zeigt den Hinweis).
+    /// Wird gemeldet, wenn die Session nicht starten kann (UI zeigt den Hinweis).
     var onUnavailable: (() -> Void)?
     /// Session läuft (z. B. um den Action-Button-Intent zu spenden).
     var onRunning: (() -> Void)?
-    /// Recovery fand keine Session – der Aufrufer startet ggf. eine neue.
+    /// Recovery fand keine (brauchbare) Session – der Aufrufer startet ggf. eine neue.
     var onRecoveryFailed: (() -> Void)?
+    /// Das System hat die Session selbst pausiert (`true`) bzw. fortgesetzt – das Match zieht nach.
+    var onSystemPauseChange: ((Bool) -> Void)?
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private(set) var matchId: String?
+    /// Gewünschter Zustand laut Match (Paused/Resumed)
+    private var wantsPaused = false
+    /// Zählt bei jedem Start/Ende/Recovery hoch; asynchrone Antworten älterer Generationen werden verworfen.
+    private var generation = 0
+    private var ambientUpdatedAt = Date.distantPast
+    /// Von uns angefragter Übergang (pause/resume), damit er nicht als System-Pause gedeutet wird
+    private var requested: HKWorkoutSessionState?
 
-    /// Startet die Session für das Match, falls sie nicht schon dafür läuft. Idempotent.
-    func ensureRunning(matchId: String, sport: String, presetId: String, doubles: Bool) {
+    /// Startet die Session für das Match, falls sie nicht schon dafür läuft, und setzt Pause/Fortsetzen durch. Idempotent.
+    func ensureRunning(matchId: String, sport: String, presetId: String, doubles: Bool, paused: Bool) {
+        wantsPaused = paused
         if state == .unavailable { return }
-        if self.matchId == matchId && (state == .starting || state == .running) { return }
-        if session != nil { end() }
+        if self.matchId == matchId && (state == .starting || state == .running || state == .paused) {
+            applyPause()
+            return
+        }
+        end()
+        wantsPaused = paused
+        generation += 1
+        let current = generation
         self.matchId = matchId
         guard HKHealthStore.isHealthDataAvailable() else {
             markUnavailable("HealthKit nicht verfügbar")
@@ -52,7 +75,7 @@ final class WorkoutManager: NSObject, ObservableObject {
         }
         store.requestAuthorization(toShare: share, read: read) { [weak self] success, error in
             DispatchQueue.main.async {
-                guard let self, self.matchId == matchId, self.state == .starting else { return }
+                guard let self, self.generation == current else { return }
                 if !success || error != nil {
                     self.markUnavailable(error?.localizedDescription ?? "keine Berechtigung")
                     return
@@ -62,39 +85,60 @@ final class WorkoutManager: NSObject, ObservableObject {
         }
     }
 
-    /// Beendet die Session (Matchende oder Schließen). Ohne laufende Session ein No-op.
+    /// Beendet die Session (Matchende oder Schließen). Ohne laufende Session ein No-op; offene Antworten verfallen.
     func end() {
+        generation += 1
         heartRate = 0
+        heartRateAmbient = 0
         matchId = nil
+        wantsPaused = false
         if state != .unavailable { state = .idle }
-        guard let session, let builder else {
-            self.session = nil
-            self.builder = nil
-            return
-        }
+        let session = self.session
+        let builder = self.builder
         self.session = nil
         self.builder = nil
-        session.end()
-        builder.endCollection(withEnd: Date()) { _, _ in
-            if WorkoutManager.saveToHealth {
-                builder.finishWorkout { _, _ in }
-            } else {
-                builder.discardWorkout()
-            }
+        requested = nil
+        if let session {
+            Self.finish(session: session, builder: builder)
         }
     }
 
-    /// Absturz-Recovery (05 §1.2): vom System über `handleActiveWorkoutRecovery()` angestoßen.
-    /// Bis die Antwort da ist, gilt die Session als „starting“, damit `ensureRunning` keine zweite startet.
+    /// Wartet (für den Schnellstart-Intent), bis der Start entschieden ist: `.running`/`.paused` oder `.unavailable`.
+    @MainActor
+    func waitUntilSettled(timeout: TimeInterval = 15) async -> State {
+        let deadline = Date().addingTimeInterval(timeout)
+        while state == .starting && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return state
+    }
+
+    /// Absturz-Recovery (05 §1.2): vom System über `handleActiveWorkoutRecovery()` angestoßen. Bis die Antwort da ist,
+    /// gilt die Session als „starting“, damit `ensureRunning` keine zweite startet. Übernimmt den tatsächlichen
+    /// Sessionstatus; beendete oder überholte Sessions werden beendet und verworfen.
     func recover(matchId: String) {
-        guard session == nil, state != .unavailable else { return }
+        guard !matchId.isEmpty, session == nil, state != .unavailable else {
+            // Kein Match (mehr) offen oder schon eine Session: eine wiederhergestellte Session nur noch abräumen
+            store.recoverActiveWorkoutSession { session, _ in
+                DispatchQueue.main.async {
+                    if let session, session !== self.session { Self.finish(session: session, builder: session.associatedWorkoutBuilder()) }
+                }
+            }
+            return
+        }
+        generation += 1
+        let current = generation
         self.matchId = matchId
         state = .starting
         store.recoverActiveWorkoutSession { [weak self] session, _ in
             DispatchQueue.main.async {
-                guard let self, self.session == nil else { return }
-                guard let session else {
-                    // Nichts wiederherzustellen → normal neu starten lassen
+                guard let self, self.generation == current, self.matchId == matchId, self.session == nil else {
+                    // überholt (end() oder anderes Match dazwischen)
+                    if let session { Self.finish(session: session, builder: session.associatedWorkoutBuilder()) }
+                    return
+                }
+                guard let session, session.state == .running || session.state == .paused else {
+                    if let session { Self.finish(session: session, builder: session.associatedWorkoutBuilder()) }
                     self.state = .idle
                     self.matchId = nil
                     self.onRecoveryFailed?()
@@ -106,9 +150,9 @@ final class WorkoutManager: NSObject, ObservableObject {
                 builder.delegate = self
                 self.session = session
                 self.builder = builder
-                self.matchId = matchId.isEmpty ? nil : matchId
-                self.state = .running
+                self.state = session.state == .paused ? .paused : .running
                 self.onRunning?()
+                self.applyPause()
             }
         }
     }
@@ -131,17 +175,47 @@ final class WorkoutManager: NSObject, ObservableObject {
             builder.addMetadata(Self.metadata(matchId: matchId, sport: sport, presetId: presetId, doubles: doubles)) { _, _ in }
             state = .running
             onRunning?()
+            applyPause()
         } catch {
             markUnavailable(error.localizedDescription)
         }
     }
 
+    /// Setzt den gewünschten Pausenzustand des Matches an der Session durch.
+    private func applyPause() {
+        guard let session else { return }
+        guard requested == nil else { return } // Antwort abwarten, danach wird erneut abgeglichen
+        if wantsPaused && session.state == .running {
+            requested = .paused
+            session.pause()
+        } else if !wantsPaused && session.state == .paused {
+            requested = .running
+            session.resume()
+        }
+    }
+
     private func markUnavailable(_ reason: String) {
         print("ADVANTLY_WORKOUT unavailable reason=\(reason)")
+        generation += 1
+        if let session {
+            Self.finish(session: session, builder: builder)
+        }
         session = nil
         builder = nil
         state = .unavailable
         onUnavailable?()
+    }
+
+    private static func finish(session: HKWorkoutSession, builder: HKLiveWorkoutBuilder?) {
+        session.end()
+        guard let builder else { return }
+        builder.endCollection(withEnd: Date()) { _, _ in
+            if WorkoutManager.saveToHealth {
+                builder.finishWorkout { _, _ in }
+            } else {
+                builder.discardWorkout()
+            }
+        }
     }
 
     /// 05 §1.1/§0.1: Padel hat keinen eigenen Typ → `.tennis` plus Metadaten; Badminton/Tischtennis nativ.
@@ -179,7 +253,39 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
         didChangeTo toState: HKWorkoutSessionState,
         from fromState: HKWorkoutSessionState,
         date: Date
-    ) {}
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, workoutSession === self.session else { return }
+            if let requested = self.requested, requested == toState {
+                // eigener Übergang: Zustand übernehmen und mit dem aktuellen Wunsch abgleichen
+                self.requested = nil
+                self.state = toState == .paused ? .paused : .running
+                self.applyPause()
+                return
+            }
+            switch toState {
+            case .running:
+                self.state = .running
+                // vom System fortgesetzt (paused → running), obwohl das Match pausiert ist → Match fortsetzen.
+                // Der erste Start (notStarted/prepared → running) zählt nicht; applyPause() setzt dann die Pause durch.
+                if fromState == .paused && self.wantsPaused {
+                    self.wantsPaused = false
+                    self.onSystemPauseChange?(false)
+                } else {
+                    self.applyPause()
+                }
+            case .paused:
+                self.state = .paused
+                // vom System pausiert (z. B. Action + Seitentaste) → Match pausieren
+                if fromState == .running && !self.wantsPaused {
+                    self.wantsPaused = true
+                    self.onSystemPauseChange?(true)
+                }
+            default:
+                break
+            }
+        }
+    }
 
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
         DispatchQueue.main.async { [weak self] in
@@ -197,9 +303,15 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
               collectedTypes.contains(type),
               let quantity = workoutBuilder.statistics(for: type)?.mostRecentQuantity()
         else { return }
-        let bpm = quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute()))
+        let bpm = Int(quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute())).rounded())
         DispatchQueue.main.async { [weak self] in
-            self?.heartRate = Int(bpm.rounded())
+            guard let self, workoutBuilder === self.builder else { return }
+            self.heartRate = bpm
+            let now = Date()
+            if self.heartRateAmbient == 0 || now.timeIntervalSince(self.ambientUpdatedAt) >= 60 {
+                self.heartRateAmbient = bpm
+                self.ambientUpdatedAt = now
+            }
         }
     }
 }
