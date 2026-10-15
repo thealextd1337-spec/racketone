@@ -25,6 +25,7 @@ import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ThreadGuard
 import eu.advantly.match.session.WallClock
 import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.random.Random
@@ -207,6 +208,8 @@ class WatchScoringTest {
         val broken = WatchScoring({ error("disk I/O error") })
         assertFalse(broken.isAvailable())
         assertNull(broken.startMatch("TENNIS_SINGLES_BO3", doubles = false, weServeFirst = true, watchWorkout = true))
+        assertEquals("STORE_READ", broken.lastError())
+        assertNull(broken.startConfiguredMatch("TENNIS_OPEN", true, false, 0, true, "bea", "", "", "SELF"))
         assertEquals("STORE_READ", broken.lastError())
         assertNull(broken.restore())
         assertEquals("STORE_READ", broken.lastError())
@@ -720,8 +723,19 @@ class WatchScoringTest {
         val start = assertNotNull(rig.watch.startConfiguredMatch("TENNIS_OPEN", true, false, 1, true, "", "", "", "PARTNER"))
         assertEquals(1, start.serverChoiceGame)
         assertEquals(4, start.serverChoicePlayers.size)
-        assertEquals(start.server, start.serverChoiceChosen)
+        assertEquals("", start.serverChoiceChosen)
         assertFalse(start.serverChoicePrompt)
+        assertEquals(2, start.serverNo)
+        assertTrue(
+            rig.watchData.events
+                .eventsFor(start.matchId)
+                .none { it.type == "ServerChosen" },
+        )
+        val initialOther = start.serverChoicePlayers.first { it.side == "B" }
+        assertTrue(rig.watchSession.correct(Correction(CorrectionKind.SERVER, player = PlayerId(initialOther.id))))
+        assertFalse(assertNotNull(rig.watch.snapshot()).serverChoicePrompt)
+        // Erst eine ausdrückliche Wahl im offenen Fenster wird nach Korrektur erneut erfragt.
+        rig.watch.chooseServer(start.server)
         val other = start.serverChoicePlayers.first { it.side == "B" }
         assertTrue(rig.watchSession.correct(Correction(CorrectionKind.SERVER, player = PlayerId(other.id))))
         val corrected = assertNotNull(rig.watch.snapshot())
@@ -872,6 +886,48 @@ class WatchScoringTest {
         assertNull(rig.watch.setServeInfo("point", "FIRST_SERVE_IN"))
         assertEquals("NOT_SCORER", rig.watch.lastError())
         assertFalse(assertNotNull(rig.watch.snapshot()).canRemovePointA)
+    }
+
+    @Test
+    fun unchangedGamesKeepShortSetPresetAndItsThreeAllTiebreak() {
+        for (games in listOf(0, 4)) {
+            val rig = Rig()
+            val preset = Presets.TENNIS_SHORT_SETS_3ALL
+            assertNotNull(rig.watch.startConfiguredMatch(preset.id, false, false, games, true, "", "", "", "SELF"))
+            assertEquals(
+                preset.format(Discipline.SINGLES),
+                rig.watchSession.state.value.match
+                    ?.format,
+            )
+            assertEquals(
+                3,
+                rig.watchSession.state.value.match
+                    ?.format
+                    ?.set
+                    ?.tiebreakAt,
+            )
+            rig.watch.close()
+            rig.watch.startLastMatch(false)
+            assertEquals(
+                preset.format(Discipline.SINGLES),
+                rig.watchSession.state.value.match
+                    ?.format,
+            )
+        }
+    }
+
+    @Test
+    fun versionMismatchReachesFacadeWithoutAnOpenMatch() {
+        for ((version, expected) in listOf(1 to "OTHER_DEVICE", 99 to "THIS_DEVICE")) {
+            val rig = Rig()
+            val peer = ReliableDeviceLink(rig.network.transport("incompatible"), rig.scheduler).apply { start() }
+            rig.settle()
+            peer.send("watch", SyncCodec.encode(Hello(DeviceId("peer"), PeerKind.PHONE, minV = version, v = version)))
+            rig.settle()
+            assertNull(rig.watch.snapshot())
+            assertEquals(expected, rig.watch.updateRequired())
+            peer.stop()
+        }
     }
 
     @Test

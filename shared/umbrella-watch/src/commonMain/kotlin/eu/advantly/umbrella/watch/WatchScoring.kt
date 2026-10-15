@@ -93,6 +93,7 @@ class WatchScoring internal constructor(
     private var current: SessionState? = null
     private var lastOpenId: String? = null
     private var scorerLostAtMs: Long = 0
+    private var openingChoiceCache: Pair<Pair<MatchId, Int>, Boolean>? = null
 
     private val sessionListener = SessionListener { state -> onState(state) }
 
@@ -184,7 +185,7 @@ class WatchScoring internal constructor(
     fun recentPeople(): List<WatchPlayer> {
         error = ""
         val b = backend() ?: return emptyList()
-        return call {
+        return call(STORE_READ) {
             val remote =
                 b.data.settings
                     .get("players.recentRemote")
@@ -229,12 +230,15 @@ class WatchScoring internal constructor(
         val format = configuredFormat(preset.format(discipline), gamesPerSet) ?: return fail(INVALID_INPUT)
         if (!doubles && (partnerId.isNotEmpty() || opponent2Id.isNotEmpty())) return fail(INVALID_INPUT)
         val selected = listOf(partnerId, opponent1Id, opponent2Id).filter { it.isNotEmpty() }
-        if (selected.distinct().size != selected.size || selected.any { id -> recentPeople().none { it.id == id } }) {
-            return fail(INVALID_INPUT)
+        if (selected.distinct().size != selected.size) return fail(INVALID_INPUT)
+        val b = backend() ?: return fail(STORE_READ)
+        if (selected.isNotEmpty()) {
+            val people = recentPeople()
+            if (error.isNotEmpty()) return null
+            if (selected.any { id -> people.none { it.id == id } }) return fail(INVALID_INPUT)
         }
         val slots = if (doubles) listOf("SELF", "PARTNER", "OPPONENT_1", "OPPONENT_2") else listOf("SELF", "OPPONENT_1")
         if (firstServerSlot !in slots) return fail(INVALID_INPUT)
-        val b = backend() ?: return fail(STORE_READ)
         val lineup =
             call {
                 val now = clock.nowMs()
@@ -558,23 +562,33 @@ class WatchScoring internal constructor(
                     }
                 // Nach Korrektur aufgehobene Wahl auch im ersten Satz erneut anbieten; aus dem Log rekonstruieren.
                 val opening = choice.game == 1 && match.state.sets.isEmpty()
-                val made =
-                    opening &&
-                        data.events
-                            .eventsFor(match.id.value)
-                            .filter { it.type == "ServerChosen" }
-                            .mapNotNull { it.toScoreEventOrNull() }
-                            .any { event ->
-                                val chosen = event.payload as? ServerChosen
-                                chosen?.set == match.state.current?.setIndex &&
-                                    event.id !in match.state.ignoredEvents && event.id !in match.state.rejectedByRole
-                            }
+                val made = opening && choice.chosen == null && openingChoiceMade(match, data)
                 prompt = match.isScorer && choice.chosen == null && (!opening || made)
             } catch (e: Exception) {
                 // Optionales Personenverzeichnis darf den vorhandenen Spielstand nicht verschwinden lassen.
             }
         }
         return buildSnapshot(match, sync, scorerLostAtMs, us, pending, current?.droppedInputs?.count ?: 0, players, prompt)
+    }
+
+    private fun openingChoiceMade(
+        match: ActiveMatch,
+        data: LocalData,
+    ): Boolean {
+        val key = match.id to match.eventCount
+        openingChoiceCache?.takeIf { it.first == key }?.let { return it.second }
+        val made =
+            data.events
+                .eventsFor(match.id.value)
+                .filter { it.type == "ServerChosen" }
+                .mapNotNull { it.toScoreEventOrNull() }
+                .any { event ->
+                    val chosen = event.payload as? ServerChosen
+                    chosen?.set == match.state.current?.setIndex &&
+                        event.id !in match.state.ignoredEvents && event.id !in match.state.rejectedByRole
+                }
+        openingChoiceCache = key to made
+        return made
     }
 
     private fun begin(
@@ -594,10 +608,6 @@ class WatchScoring internal constructor(
             }
         try {
             b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout, serveStats = serveStats), scorer)
-            // Setup-Wahl als solche merken: nach Aufhebung durch eine Korrektur wird erneut gefragt.
-            if (scorer == ScorerChoice.ThisDevice && format.discipline == Discipline.DOUBLES && format.sport.isTennisLike) {
-                b.session.chooseServer(lineup.firstServer)
-            }
         } catch (e: SessionThreadViolation) {
             return fail(THREAD_VIOLATION)
         } catch (e: IllegalArgumentException) {
@@ -622,14 +632,17 @@ class WatchScoring internal constructor(
     }
 
     /** Führt [block] aus; SQLite-/Treiber-Ausnahmen dürfen nie über die Swift-Grenze laufen (→ `null`). */
-    private fun <T> call(block: () -> T): T? =
+    private fun <T> call(
+        errorCode: String = STORE_WRITE,
+        block: () -> T,
+    ): T? =
         try {
             block()
         } catch (e: SessionThreadViolation) {
             error = THREAD_VIOLATION
             null
         } catch (e: Exception) {
-            error = STORE_WRITE
+            error = errorCode
             null
         }
 
@@ -1164,6 +1177,7 @@ private fun configuredFormat(
     val tennisLike = format.sport == Sport.TENNIS || format.sport == Sport.PADEL
     val onlyTiebreak = format.match.bestOf == 1 && format.decidingSet is MatchTiebreakFormat
     if (!tennisLike || onlyTiebreak || (games !in 1..6 && !(format.sport == Sport.TENNIS && games in listOf(8, 10)))) return null
+    if (games == format.set?.gamesToWin) return format
     return Presets.withGamesPerSet(format, games)
 }
 
