@@ -20,6 +20,9 @@ Stand: 2026-10-15
 | Telemetrie-Sichtbarkeit (P2/P3) | Jeder Nutzer entscheidet selbst über seine Telemetrie (Puls, Schritte, Kalorien): **„Teilen“** (in der gemeinsamen Match-Auswertung für Mitspieler/Freunde/Visitor sichtbar), **„Nur für mich“** (Standard; erfasst, nur in der eigenen App sichtbar) oder **„Gar nicht“** (keine Erfassung). In P1: Puls + Schritte live auf der Zähl-Seite der eigenen Uhr und live auf dem eigenen Handy, ohne Speicherung (2026-10-15) |
 | iOS-Builds | Cloud-CI (macOS-Runner) + TestFlight, Entwicklung unter Windows |
 | Vorgehen | Phasenweise: P1 Scoring offline (Handy + Wear OS + Apple Watch) → P2 Accounts/Freunde/Sync → P3 Statistik & Health → P4 Garmin |
+| Uhr-Spieler | Uhr-Matches: Auswahl der zuletzt gespielten Spieler, sonst neutrale **Platzhalter** (nicht gespeichert, nicht in Vorschlägen), am Handy nachträglich zuweisbar (F20, 2026-10-15) |
+| Beenden/Abbrechen | Am Handy: **Beenden** = Ergebnis gilt wie es steht; **Abbrechen** = bleibt im Verlauf „Abgebrochen“, ohne Wertung (F21, 2026-10-15) |
+| Parallel/Turnier | Mehrere Matches parallel am Handy, höchstens eines auf der eigenen Uhr; **Turnierdirektor-Modus in P2** (F22, 2026-10-15) |
 | Sprache | Deutsch + Englisch ab Start |
 | Website | **advantly.eu** live (GitHub Pages, `site/`), ohne Verweise auf GitHub/Entwicklung |
 | Monetarisierung | Freemium/Abo später – Architektur vorbereiten |
