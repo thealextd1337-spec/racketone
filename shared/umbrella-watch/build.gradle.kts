@@ -34,6 +34,8 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.shared.data)
             implementation(projects.shared.deviceLink)
+            // WatchScoring speichert Events als JSON (ScoreEvent-Serializer aus core-scoring)
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }
