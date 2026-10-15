@@ -1,6 +1,6 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
-// XCFramework "AdvantlyWatchKit" für die watchOS-App: nur Engine, Protokoll, lokaler Store, Transport.
+// XCFramework "AdvantlyWatchKit" für die watchOS-App: Engine, Protokoll, lokaler Store, Transport, Match-Session.
 // KEIN Ktor, supabase-kt, Compose oder Koin (Größenbudget < 8 MB pro Slice, siehe 01 §2.3).
 // Abhängigkeiten an der Grenze: SQLDelight-native-driver (System-SQLite → App linkt -lsqlite3) und
 // WatchConnectivity (→ App linkt -framework WatchConnectivity), siehe iosApp/project.yml.
@@ -34,6 +34,9 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.shared.data)
             implementation(projects.shared.deviceLink)
+            // Zählen/Anzeigen über die gemeinsame Session (bringt kotlinx-coroutines-core für StateFlow mit –
+            // Größe je Slice misst die CI, Budget 8 MB)
+            implementation(projects.shared.matchSession)
         }
     }
 }

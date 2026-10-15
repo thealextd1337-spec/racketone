@@ -1,0 +1,5 @@
+/* HealthKit lesen: Puls während des Matches (nur Anzeige) */
+"NSHealthShareUsageDescription" = "Advantly shows your heart rate on the watch while you play.";
+
+/* HealthKit schreiben: Workout-Session als Laufzeit-Anker (App bleibt am Handgelenk aktiv) */
+"NSHealthUpdateUsageDescription" = "Advantly runs your match as a workout so the app stays active on your wrist.";

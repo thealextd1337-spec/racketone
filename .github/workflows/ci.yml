@@ -96,6 +96,9 @@ jobs:
           key: konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
       - name: Xcode-Version
         run: xcodebuild -version
+      # W1-E: Watch-App-Strings EN/DE paritätisch, alle in Swift verwendeten Schlüssel + Presets/Hinweis-Codes vorhanden
+      - name: watchOS-Strings DE/EN prüfen (W1-E)
+        run: python3 .github/scripts/check_watch_strings.py
       - name: Simulatoren wählen
         id: sim
         run: python3 .github/scripts/pick_simulators.py >> "$GITHUB_OUTPUT"
@@ -233,6 +236,88 @@ jobs:
           xcrun simctl terminate "$WATCHOS_SIM" eu.advantly.watchkitapp 2>/dev/null || true
           tail -n 40 smoke.log
           python3 .github/scripts/watch_metrics.py smoke smoke.log
+      # W1-E: Info.plist der Watch-App (Workout-Hintergrundmodus, HealthKit-Texte DE/EN) und AppIntents-Metadaten
+      - name: Watch-App-Bundle prüfen (W1-E)
+        run: |
+          app=build/DerivedData/Build/Products/Debug-watchsimulator/AdvantlyWatch.app
+          plutil -extract WKBackgroundModes json -o - "$app/Info.plist" | grep -q workout-processing
+          plutil -extract WKRunsIndependentlyOfCompanionApp raw -o - "$app/Info.plist" | grep -q true
+          plutil -extract NSHealthShareUsageDescription raw -o - "$app/Info.plist"
+          plutil -extract NSHealthUpdateUsageDescription raw -o - "$app/Info.plist"
+          for lang in en de; do test -f "$app/$lang.lproj/InfoPlist.strings"; done
+          if [ -d "$app/Metadata.appintents" ]; then
+            echo "AppIntents-Metadaten: $(ls "$app/Metadata.appintents" | tr '\n' ' ')"
+          else
+            echo "::warning::Keine Metadata.appintents im Watch-Bundle – Action-Taste-Intents nicht registriert?"
+          fi
+      # W1-E: Watch-App je Etappe neu starten (nur Debug-Build): -advantlyDemoStage <etappe> baut den Zustand direkt
+      # (start, scoring, setend, matchend, display = Anzeige-Modus, ein anderes Gerät zählt)
+      # auf (offenes Tennis-Match) und bleibt dort; erst nach dem Marker "ADVANTLY_DEMO stage=<etappe> ready" aus dem
+      # Log DIESES Starts wird fotografiert. EN und DE; eine fehlende Etappe (nach einem zweiten Versuch) lässt den Step
+      # scheitern. Bilder + Logs im Artefakt watch-simulator-w1e, Marker im Summary.
+      - name: watchOS-Demo im Simulator + Screenshots (W1-E)
+        timeout-minutes: 20
+        env:
+          WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
+        run: |
+          app=build/DerivedData/Build/Products/Debug-watchsimulator/AdvantlyWatch.app
+          out="$PWD/build/watch-w1e"
+          mkdir -p "$out"
+          xcrun simctl boot "$WATCHOS_SIM" 2>/dev/null || true
+          perl -e 'alarm shift; exec @ARGV' 300 xcrun simctl bootstatus "$WATCHOS_SIM" -b
+          xcrun simctl install "$WATCHOS_SIM" "$app"
+          missing=""
+          # $1 Etappe, $2 Sprache, $3 Locale, $4 Versuch; Rückgabe 0, wenn der Screenshot steht
+          shoot() {
+            log="$out/$1-$2-try$4.log"
+            xcrun simctl launch --console-pty --terminate-running-process "$WATCHOS_SIM" eu.advantly.watchkitapp \
+              -advantlyDemoStage "$1" -advantlyDemo tennis -AppleLanguages "($2)" -AppleLocale "$3" > "$log" 2>&1 &
+            pid=$!
+            ok=1
+            for _ in $(seq 1 90); do
+              if grep -q "ADVANTLY_DEMO stage=$1 ready" "$log"; then ok=0; break; fi
+              if grep -q "ADVANTLY_DEMO stage=error" "$log"; then break; fi
+              sleep 1
+            done
+            if [ "$ok" -eq 0 ]; then
+              sleep 1
+              xcrun simctl io "$WATCHOS_SIM" screenshot "$out/$1-$2.png" || ok=1
+            fi
+            grep ADVANTLY_ "$log" || true
+            kill "$pid" 2>/dev/null || true
+            xcrun simctl terminate "$WATCHOS_SIM" eu.advantly.watchkitapp 2>/dev/null || true
+            return "$ok"
+          }
+          for lang in en de; do
+            locale=en_US
+            if [ "$lang" = de ]; then locale=de_DE; fi
+            for stage in start scoring setend matchend display; do
+              if ! shoot "$stage" "$lang" "$locale" 1 && ! shoot "$stage" "$lang" "$locale" 2; then
+                echo "::error::W1-E-Demo ($lang): Etappe $stage nicht erreicht"
+                missing="$missing $stage-$lang"
+              fi
+            done
+          done
+          {
+            echo "### watchOS-Demo (W1-E)"
+            echo
+            echo '```'
+            grep -h "ADVANTLY_DEMO" "$out"/*.log || echo "keine ADVANTLY_DEMO-Zeilen"
+            echo '```'
+            for png in "$out"/*.png; do
+              if [ -f "$png" ]; then echo "- $(basename "$png")"; fi
+            done
+            if [ -n "$missing" ]; then echo "Fehlende Etappen:$missing"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          test -z "$missing"
+      - name: Watch-Screenshots + Logs hochladen (W1-E)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: watch-simulator-w1e
+          path: build/watch-w1e/
+          if-no-files-found: warn
+          retention-days: 14
       # Spike S1: kaltstart-relevante Größe mit Release-Kotlin. project.yml verweist fest auf debug/ → das
       # Release-XCFramework für diese Messung dorthin kopieren (letzter Build-Schritt, informativ).
       - name: Größe gelinkte Watch-App (Release, Gerät)

@@ -68,6 +68,24 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 
 **Rollenentscheidung 2026-10-15:** Jede Spieler-Uhr kann ihre eigene Workout-Session unabhängig von der Zähler-Rolle führen; Startoption „Workout auf meiner Uhr mitlaufen lassen“, Standard an, auch im Director-Modus (04 §3.1). In P1/P2 hält die Session die App wach und zeigt den eigenen Puls auch als Anzeige oder nach Übergabe weiter; am Ende `discardWorkout`, keine Health-Persistenz und kein Health-Connect-Write. Belastungserfassung mit Persistenz und Health-Einwilligungen folgt ab P3. Ein Rollenwechsel startet/beendet kein Workout. Außenstehender Director und Visitor erhalten dadurch keine Health-Daten oder Spieler-Workout-Zuordnung. Dies gilt ebenso für Wear OS und ab P4 Garmin.
 
+**Apple-Watch-Umsetzung (W1-E, Review Runde 2):** Als Anzeige pausieren/fortsetzen Systemtasten und Workout-Intents
+nur das lokale Workout, ohne `Paused`/`Resumed`-Match-Events. Eingehende Match-Snapshots überschreiben diese lokale
+Pause nicht. Als Zähler folgt das Workout der Match-Pause. Ein bewusst abgewähltes Workout ist beim Schnellstart
+kein Intent-Fehler. Nach einem Workout-Fehler erfolgt ein neuer Versuch beim nächsten Match oder nach Aus-/Einschalten
+von „Workout auf meiner Uhr“; normale Sync-Snapshots wiederholen keine fehlgeschlagenen Starts.
+
+**Watch-Facade:** `WatchScoring.lastError()` unterscheidet `THREAD_VIOLATION` (Aufruf außerhalb des Scheduler-/Main-Threads,
+Programmierfehler) von `STORE_WRITE`/`STORE_READ` (Speichern/Lesen fehlgeschlagen). `server`/`receiver` sind Spieler-UUIDs,
+keine Team-/Slot-Codes. `WatchScoreSnapshot.pendingToPeers` zählt nur unbestätigte Events des offenen Matches;
+`MatchSession.sync.pendingToPeers` bleibt der Rückstand über alle Matches. Die Anzeige wertet neue Match-Events für
+Seitenwechsel-/Rückschlagtausch-Hinweise aus, ohne Wiederholung durch reine Sync-/Ack-Snapshots. Auch der Satzende-Dialog
+bietet nach > 30 s ohne Zählerverbindung die bestätigte Übernahme an.
+
+**CI-Demo:** `startDisplayDemo` ist nur mit Debug-Kotlin-Binary und explizitem `-advantlyDemoStage` freigegeben
+([Kotlin `Platform.isDebugBinary`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.native/-platform/)); Swift ruft
+es ausschließlich in `#if DEBUG` auf. Ohne Freigabe liefert die Facade `NOT_ALLOWED`, bevor sie die Datenbank öffnet.
+Die vorhandene Screenshot-Etappe in `.github/workflows/ci.yml` setzt diesen Parameter bereits.
+
 - **HKWorkoutSession + HKLiveWorkoutBuilder auf der Uhr** [Q3]: Die aktivierte Session läuft, solange das Match läuft. In P1/P2 dient sie nur dem Wachhalten und der Live-Pulsanzeige; am Ende Session beenden und `discardWorkout` statt Speicherung. Erst ab P3 mit Health-Einwilligung sammelt der Builder auch die zu persistierenden Belastungsdaten (`heartRate`, `activeEnergyBurned`, `basalEnergyBurned`) über `HKLiveWorkoutDataSource` und speichert ein `HKWorkout` in Apple Health.
 - **Hintergrund:** Eine aktive Workout-Session ist der offizielle Weg, wie eine Watch-App bei abgesenktem Handgelenk weiterläuft (Background Mode `workout-processing` in der Info.plist der Watch-App). Andere Mechanismen wie `WKExtendedRuntimeSession` sind für Sport nicht vorgesehen. → **Entscheidung E2: Die Workout-Session gibt es schon in P1.** Nötige Systemberechtigungen für Session und Live-Puls werden in P1 erklärt und abgefragt; die Health-Einwilligungen für Persistenz, Sync und Teilen folgen erst ab P3. Lehnt der Nutzer die Systemberechtigung ab, zählt die App trotzdem, kann aber in den Hintergrund fallen; das UI weist darauf hin.
 - **Sätze als Segmente ab P3:** An jeder Satzgrenze rufen wir `builder.addWorkoutEvents([HKWorkoutEvent(type: .segment, …)])` auf, für Seitenwechsel optional `.marker`. So sieht man die Satzgrenzen auch in Apple Fitness und kann später per Health-Abfrage pro Satz auswerten.

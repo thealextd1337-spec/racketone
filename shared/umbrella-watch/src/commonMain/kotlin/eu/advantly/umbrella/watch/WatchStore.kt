@@ -31,7 +31,10 @@ class WatchStore internal constructor(
      * Erwartet: immer 1 – auch nach Neustarts (Datei bleibt, `append` ist idempotent).
      */
     fun smokeCheck(): Long {
-        append(id = SMOKE_EVENT_ID, matchId = SMOKE_MATCH_ID, deviceId = "watch", deviceSeq = 1, lamport = 1, payload = "{}")
+        // confirmed = true: zählt nicht als Sync-Rückstand und wird nie an das iPhone gesendet
+        events.append(
+            StoredEvent(SMOKE_EVENT_ID, SMOKE_MATCH_ID, "watch", deviceSeq = 1, lamport = 1, payload = "{}", confirmed = true),
+        )
         return count(SMOKE_MATCH_ID)
     }
 
