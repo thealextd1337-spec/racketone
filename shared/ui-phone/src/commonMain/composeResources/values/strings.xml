@@ -93,7 +93,6 @@
     <string name="wizard_team_order_hint_tabletennis">Top player serves or receives first in the first game.</string>
     <string name="wizard_mixed">Mixed doubles</string>
     <string name="wizard_mixed_hint">Only used for hints, no effect on the rules.</string>
-    <string name="wizard_guests">Guests</string>
     <string name="wizard_add_guest_hint">Guest name</string>
     <string name="wizard_add_guest">Add</string>
     <string name="wizard_first_server">First serve</string>

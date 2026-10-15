@@ -93,7 +93,6 @@
     <string name="wizard_team_order_hint_tabletennis">Oben steht, wer im 1. Satz zuerst aufschlägt bzw. annimmt.</string>
     <string name="wizard_mixed">Mixed-Doppel</string>
     <string name="wizard_mixed_hint">Nur für Hinweise, keine Wirkung auf die Regeln.</string>
-    <string name="wizard_guests">Gäste</string>
     <string name="wizard_add_guest_hint">Name des Gasts</string>
     <string name="wizard_add_guest">Anlegen</string>
     <string name="wizard_first_server">Erster Aufschlag</string>

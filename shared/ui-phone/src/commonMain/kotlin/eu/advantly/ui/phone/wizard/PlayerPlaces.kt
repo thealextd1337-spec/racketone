@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,6 +35,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -46,6 +50,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import eu.advantly.core.model.Side
@@ -265,18 +271,24 @@ internal fun PlayerPlaces(
                         modifier = Modifier.fillMaxWidth().testTag("player_create"),
                     )
                 } else {
+                    val focus = remember { FocusRequester() }
+                    val add = { if (name.isNotBlank() && wizard.addGuestAt(name, place) != null) selected = null }
                     OutlinedTextField(
                         name,
                         onValueChange = { name = it },
                         singleLine = true,
                         label = { Text(stringResource(Res.string.wizard_add_guest_hint)) },
-                        modifier = Modifier.fillMaxWidth().testTag("picker_name"),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { add() }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("picker_name"),
                     )
+                    // Feld sofort fokussieren: ein Tipp weniger pro neuem Spieler
+                    LaunchedEffect(Unit) { focus.requestFocus() }
                     AdvantlyButton(
                         stringResource(Res.string.wizard_add_guest),
                         primary = true,
                         enabled = name.isNotBlank(),
-                        onClick = { if (wizard.addGuestAt(name, place) != null) selected = null },
+                        onClick = add,
                         modifier = Modifier.fillMaxWidth().testTag("picker_add"),
                     )
                 }
