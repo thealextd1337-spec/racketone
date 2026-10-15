@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runde 1 (PR #40) eingearbeitet |
+| **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1 und 2 (PR #40) eingearbeitet |
 | **Status** | Planung + lauffähiger Backend-Spike (`supabase/`) + Schnittstellenentwurf (`shared/cloud-sync`) |
 | **Grundlage** | [PLAN](PLAN.md) (P2, Gate P2, F13–F29), [00](00-entscheidungen.md), [01](01-architektur.md) §4–5, [02](02-scoring-regeln.md) §7, [03](03-backend-datenmodell.md) (§13 = Abgleich mit dem Spike), [Veröffentlichungsplan](release/veroeffentlichungsplan.md) |
 | **Gilt bei Widerspruch** | PLAN.md vor diesem Dokument; dieses Dokument vor 03 für alles, was der Spike konkret festlegt |
@@ -19,10 +19,11 @@ wo du von meiner Empfehlung abgewichen bist.**
   Matches (Freunde sofort verknüpft, „War ich nicht“), Dummy-Zuweisung, Zähler-Wahl beim Start mit Cloud-Zustellung
   (F17), Visitor-Live (nur lesen, bis Widerruf), Telemetrie-Sichtbarkeit (nur Einstellung), Löschung/Export,
   Entitlements vorbereitet, Turnierdirektor-Grundgerüst, Wear OS standalone.
-- **Spike-Ergebnis:** Das P2-Datenmodell steht als 11 Migrationen mit RLS und 33 RPCs. **258 pgTAP-Prüfungen in
+- **Spike-Ergebnis:** Das P2-Datenmodell steht als 11 Migrationen mit RLS und 33 RPCs. **275 pgTAP-Prüfungen in
   11 Dateien** decken die RLS-Matrix ab (Fremde, Feed-Leser, Teilnehmer, Zähler, Director, Visitor, gelöschter
-  Account, Turnierhelfer) sowie den Wire-Vertrag. Der CI-Job mit echtem Supabase-Stack lief in Review-Runde 1 grün
-  (211 Prüfungen); die Fixes aus der Runde sind lokal gegen Postgres 17 geprüft und warten auf den nächsten CI-Lauf.
+  Account, Turnierhelfer) sowie Wire-Vertrag und Sperr-Reihenfolge. Der CI-Job mit echtem Supabase-Stack lief in
+  Review-Runde 1 und 2 grün; die Fixes aus Runde 2 sind lokal gegen Postgres 17 geprüft (inkl. Deadlock-Nachstellung
+  mit zwei Verbindungen) und warten auf den nächsten CI-Lauf.
 - **Client:** neues, noch nicht verdrahtetes Modul `shared/cloud-sync` mit Wire-DTOs (gegen echte RPC-Antworten als
   Fixtures getestet), Ports und reiner Outbox-Logik – 15 JVM-Tests.
 - **Reihenfolge:** P2-1 Fundament (Backend härten, Auth/Onboarding, Outbox-Upload, Datenschutz-Grundlagen) →
@@ -75,7 +76,7 @@ Größe: S ≤ 2 Tage, M ≤ 1 Woche, L > 1 Woche (Agentenarbeit inkl. Review-Ru
 | ID | Paket | Inhalt | Ergebnis / Abnahme | Abh. | Größe |
 |---|---|---|---|---|---|
 | **P2-A** | Backend-Fundament | Spike härten: Rate-Limits (Suche, Einladungen), Aufräumjob für `onboarding`-Leichen, `db lint` in CI, Last-/Performance-Prüfung (`sync_pull` mit 500 Matches, Durchsatz der serialisierten Versionsvergabe), Spaltenrechte prüfen, `staging`-Projekt in **eu-central-1** (Free, F28), DPA, Deploy-Workflow | Migrationen auf staging, pgTAP grün in CI, Advisor ohne Befund; Abnahmekriterien §5.4 erfüllt | – | M |
-| **P2-B** | Cloud-Sync Client | `shared/cloud-sync` implementieren (supabase-kt 3.8.x, nur Handy + Wear): `CloudBackend`, Outbox-Adapter über neue Primitive in `shared/data` (Migration 2.sqm: `match_event.cloud_state`, `cloud_cursor`), Worker (WorkManager, BGTask), Pull + Vollabgleich bei `visibilityEpoch`, Event-Download + Wasserstand, Redaktion übernehmen (§5.7), Contract-Tests gegen lokale Supabase | Abbruch-/Wiederholungs-Tests ohne Doppelungen; Director-Matches haben Cloud-Backup | A, C | L |
+| **P2-B** | Cloud-Sync Client | `shared/cloud-sync` implementieren (supabase-kt 3.8.x, nur Handy + Wear): `CloudBackend`, Outbox-Adapter über neue Primitive in `shared/data` (Migration 2.sqm: `match_event.cloud_state`, `cloud_cursor`), Worker (WorkManager, BGTask), Pull + Vollabgleich bei `visibilityEpoch` inkl. Zugriffswechsel `member → feed` (§5.4), Event-Download + Wasserstand, Redaktions-Mechanismus bis auf die Uhr (§5.7), Contract-Tests gegen lokale Supabase | Abbruch-/Wiederholungs-Tests ohne Doppelungen; Director-Matches haben Cloud-Backup | A, C | L |
 | **P2-C** | Auth + Onboarding | Google (Credential Manager / iOS SDK) und E-Mail-Code über EU-Anbieter mit AVV; Apple sobald Developer-Account (iOS nativ, Android OAuth mit Secret-Rotation alle 6 Monate); **Account-Linking** (gleiche E-Mail über mehrere Anbieter, manuelles Verknüpfen in den Einstellungen); **Altersgate vor Kontoanlage** (Ticket + Auth-Hook, §8); Alias/Benutzername; Übernahme lokaler P1-Daten | Neues Konto auf Pixel; Unter-Grenze-Fall erzeugt keinen Auth-Nutzer; lokale P1-Matches nach Login auf zweitem Gerät | A | M |
 | **P2-D** | Profile & Freunde | Suche (exakt), Freundescode, QR (kurzlebig) und Link (`advantly.eu/i/…`, App Links/Universal Links), Anfragen, Blockieren, Profil „Mein Alias“ | Freundschaft per QR in < 10 s, Blockieren wirkt beidseitig | C | M |
 | **P2-E** | Geteilte Matches (F23) | Freunde als Mitspieler sofort verknüpft (`linked`), Mitteilung „[Alias] hat dich als Mitspieler eingetragen“ mit **„War ich nicht“** (löst + sperrt je Match), „mit Freunden teilen“ je Teilnehmer (Standard aus), Feed (bereinigt), „aus meiner Liste ausblenden“, Löschen geteilter Matches = nur eigene Sicht | Zwei Accounts sehen dasselbe Doppel sofort; Widerspruch synchron | B, D | M |
@@ -189,12 +190,25 @@ Projektionsergebnisse: `applied`, `stale`, `ahead_of_events`, `forbidden`, `inva
 - **Commit-geordneter Cursor (umgesetzt):** Versionen werden unter einer exklusiven Transaktionssperre vergeben
   (gehalten bis Commit), `sync_pull` liest unter der geteilten Sperre → alle Anweisungen sehen denselben Stand, keine
   später committete kleinere Version kann übersprungen werden; Cursor = höchste vergebene Version.
+- **Einheitliche Sperr-Reihenfolge (umgesetzt, Review R2):** Jeder Schreibweg nimmt diese Sperre **zuerst** – RPCs als
+  erste Anweisung (`private.require_active()` bzw. `private.lock_sync()`), direkte Schreibrechte, Kaskaden und
+  Trigger über einen BEFORE-STATEMENT-Trigger `zz_lock_sync` auf jeder Tabelle in `public`. Strukturtest 010 prüft das
+  statisch (Trigger überall, keine RPC sperrt Zeilen vor der Versionssperre). Der gemeldete Deadlock
+  (`revoke_match_visitor` gegen `sync_push`, `40P01`) ist lokal mit zwei Verbindungen nachgestellt: ohne Fix tritt er
+  auf, mit Fix nicht (20 Runden).
   **Abnahmekriterium P2-A:** Lasttest mit parallelen Uploads (kein übersprungenes Match, Wartezeiten < 200 ms bei
   Pilotlast); sonst Umstieg auf einen commit-geordneten Änderungsstrom (z. B. `pg_snapshot_xmin`-Grenze).
 - **Sichtbarkeitsänderungen (umgesetzt):** `visibilityEpoch` steigt bei Freundschaft/Entfreunden/Blockieren (beide),
   Entzug von Teilnahme/Rolle/Turnierhelfer, „nicht mehr teilen“ eines Freundes und Lösch-Antrag eines Freundes (auch
   wenn die **andere** Person handelt). Abweichung → Vollabgleich ab Cursor 0, nicht mehr gelieferte Cloud-Matches
   lokal entfernen (lokale, noch nicht hochgeladene bleiben).
+- **Zugriffsklasse je Match:** `sync_pull` liefert `access` (`member` | `feed`). Der Client speichert sie je Match.
+  Wechselt sie im Vollabgleich von `member` auf `feed` (Rolle entzogen, „War ich nicht“, Helfer entfernt, Match bleibt
+  aber über einen teilenden Freund sichtbar), löscht er **alle gespeicherten Mitgliedsdaten** dieses Matches: Event-Log,
+  Rollen, Live-Stand, Teilnehmer-Details, Realtime-Abo – und schickt dafür eine Zugriffs-Löschmarkierung an seine
+  Replikate (Uhr; wie `Deleted`, aber ohne die Cloud-Kopie anzufassen). Übrig bleibt nur die bereinigte Feed-Sicht.
+  Verschwindet ein Match ganz, gilt dasselbe für alle Daten. Im Spike geprüft: Wechsel auf `feed` mit leeren Rollen,
+  ohne Live-Stand und ohne Events (Test 050).
 - Events je Match über `pull_match_events(matchId, afterServerSeq)` (nur Mitglieder); danach
   `match_event_watermarks` mit dem lokalen Stand vergleichen, bei Abweichung ab 0 nachladen.
 - Realtime ergänzt nur (Live-Screen offen); verpasste Nachrichten holt der Pull.
@@ -238,7 +252,20 @@ Namen in allen Events, deren `player.id` eine Self-ID oder die Profil-ID der Per
 setzt `redacted_at` und erhöht `redactionEpoch` der betroffenen Matches. Clients laden diese Matches neu und
 **überschreiben ihre lokale Kopie** (inkl. Uhren-Replikate über die Anti-Entropie). Der Name hat keine Wirkung auf
 Score oder Zuweisung, deshalb ist die Ausnahme von „bitgleich“ (02 §7.3) unschädlich; Re-Uploads alter Kopien gelten
-als Duplikat. Export liefert nur noch die redigierte Fassung. **Folgearbeit (P2-B/Engine):** `PlayerAssigned` ab
+als Duplikat. Export liefert nur noch die redigierte Fassung.
+
+**Weitergabe an lokale Replikate (P2-B, Review R2):** Anti-Entropie erkennt nur fehlende Sequenzen, und der
+EventStore behandelt eine bekannte ID als Duplikat – eine Redaktion käme so nie an. Deshalb ein eigener Mechanismus:
+1. **Redaktionsmarker** je Match: `redactionEpoch` (Cloud) bzw. lokal gespeicherte Epoche; Abweichung → Handy lädt die
+   Events des Matches neu und erhält je redigiertem Event `redacted = true` mit der neuen Payload.
+2. **Autorisiertes Überschreiben:** neue Store-Operation `EventStore.applyRedaction(eventId, payload)` – nur für Events
+   mit `redacted = true` aus der Cloud, nur gleiche ID/Typ/Ordnung, nur Klarnamen-Felder; danach Projektionen
+   neu aufbauen (`rebuildAllAssignments`, Personenverzeichnis, `recentPlayers`).
+3. **Weitergabe Handy → Uhr:** neue Wire-Nachricht `Redacted(matchId, epoch, events)` (Protokoll 4); `Summary` trägt
+   je Match die Redaktions-Epoche, damit eine zeitweise offline Uhr beim nächsten `Hello` nachzieht. Die Uhr wendet
+   nur Redaktionen ihres Handys an (gekoppeltes Gerät, gleiches Konto).
+4. **Abnahme G8:** vollständig synchronisierte Uhr, die während der Löschung offline ist, zeigt nach dem
+   Wiederverbinden keinen Klarnamen mehr (auch nicht in Verlauf, Vorschlägen oder Wiederholungs-Match). **Folgearbeit (P2-B/Engine):** `PlayerAssigned` ab
 Protokoll 4 ohne Klarnamen (Name nur über die Personen-Referenz/Tabelle) – dann entfällt die Ausnahme für neue Logs.
 
 ### 5.8 Realtime: versionierte Kanäle
@@ -318,8 +345,9 @@ dem Login; ein anonymer RPC stellt bei bestandener Prüfung ein kurzlebiges **Al
 angewandte Grenze, kein Geburtsdatum); der Supabase-Auth-Hook `before_user_created` lehnt jede Kontoanlage ohne gültiges
 Ticket ab. `complete_onboarding` prüft im Spike bereits serverseitig; Ticket + Hook sind **Abnahmekriterium P2-C**
 (im Spike noch nicht umgesetzt, Signup ist lokal offen). Für Anbieter-Logins, bei denen sich keine Metadaten
-mitgeben lassen, wird das Ticket über die Gerätebindung zugeordnet – Detail in P2-C, sonst Fallback: Konto entsteht,
-bleibt ohne Onboarding funktionslos und wird nach 24 h gelöscht (dokumentierte Abweichung).
+mitgeben lassen, wird das Ticket über die Gerätebindung zugeordnet – Detail in P2-C. Gelingt das für einen Anbieter
+nicht, wird dieser Anbieter **nicht** freigeschaltet. Eine Ausnahme „Konto entsteht, bleibt funktionslos und wird
+gelöscht“ ist **nicht freigegeben** und müsste dir ausdrücklich erneut zur Entscheidung vorgelegt werden.
 
 **Begründung der Selbstauskunft (F24, risikobasiert):** Die EDPB-Leitlinien 05/2020 zur Einwilligung (Rn. 132 ff.)
 verlangen „angemessene Anstrengungen“ unter Berücksichtigung der verfügbaren Technik und des Risikos; die
@@ -367,7 +395,7 @@ Sync, RLS besonders), CI grün vor Merge.
 
 | Risiko | Gegenmaßnahme |
 |---|---|
-| RLS-Lücke legt fremde Matches/Profile offen | pgTAP-Matrix je Rolle (258 Prüfungen), Basistabellen nur für Mitglieder, Least-Privilege-Grants mit Strukturtest, Review jedes SQL-PRs durch zweites Modell |
+| RLS-Lücke legt fremde Matches/Profile offen | pgTAP-Matrix je Rolle (275 Prüfungen), Basistabellen nur für Mitglieder, Least-Privilege-Grants mit Strukturtest, Review jedes SQL-PRs durch zweites Modell |
 | Doppelte oder fehlende Events nach Abbrüchen | Idempotenz über Event-ID (Vergleich aller Felder, auch parallel), Outbox-Status am Event, Wasserstand, Chaos-Tests |
 | Serialisierte Versionsvergabe bremst bei Last | Kurze Transaktionen, Lasttest in P2-A; Plan B commit-geordneter Änderungsstrom |
 | Widerrufene Personen hören auf alten Realtime-Kanälen mit | Versionierte Kanäle, Senden nur auf aktuelle Version; Gate-Test G6 |
@@ -390,8 +418,10 @@ Sync, RLS besonders), CI grün vor Merge.
 2. `shared/cloud-sync`: `WireFixturesTest` + Contract-Tests gegen lokale Supabase (P2-B).
 3. Sync-Chaos-Test (JVM): Abbrüche vor/nach Commit, doppelte Uploads, vertauschte Batches, Download-Lücken,
    Sichtbarkeitswechsel → Endzustand = Fold aller sichtbaren Events, keine Doppelungen, keine Reste.
-4. Parallel-Test gegen lokale Supabase (zwei Verbindungen): gleiche Event-ID mit abweichendem Inhalt → genau ein
-   `accepted`, ein `id_conflict`; Cursor überspringt bei parallelen Uploads nichts.
+4. Parallel-Tests gegen lokale Supabase (zwei Verbindungen): gleiche Event-ID mit abweichendem Inhalt → genau ein
+   `accepted`, ein `id_conflict`; Cursor überspringt bei parallelen Uploads nichts; **kein Deadlock** bei
+   gleichzeitigen Schreibwegen (Widerruf/„War ich nicht“/Löschung/Freundschaft gegen `sync_push` auf demselben Match,
+   Erwartung: Warten statt `40P01`); echter Lasttest der Versionssperre (P2-A).
 5. `./gradlew check`, Android-Lint, Apple-CI wie bisher.
 
 **Manuell (du, mit QA-Skripten):**
@@ -404,7 +434,8 @@ Sync, RLS besonders), CI grün vor Merge.
 | G5 | Übergabe zurück, Altgerät zählt offline weiter | Eingaben des Altgeräts unwirksam + „N Eingaben nicht übernommen“ |
 | G6 | Visitor schaut live zu; Widerruf **während** der Kanal offen ist; Entfreunden | Stand < 2 s; nach Widerruf sofort keine Daten mehr (nur `rotate`) |
 | G7 | Dummy einem Freund zuweisen → „War ich nicht“ | sofort sichtbar / sofort weg, erneute Zuweisung gesperrt |
-| G8 | Konto löschen, Abbruch; erneut löschen, Job nach Frist (staging verkürzt) | geteiltes Match bleibt beim Mitspieler mit „Gelöschter Spieler“, auch in Zuweisungs-Events und auf seiner Uhr |
+| G8 | Konto löschen, Abbruch; erneut löschen, Job nach Frist (staging verkürzt); die vollständig synchronisierte Uhr des Mitspielers ist währenddessen offline | geteiltes Match bleibt beim Mitspieler mit „Gelöschter Spieler“ – in Zuweisungs-Events, Verlauf, Vorschlägen und nach dem Wiederverbinden auch auf seiner Uhr |
+| G13 | Mitspieler/Zähler verliert die Mitgliedschaft, Match bleibt über einen teilenden Freund im Feed | Events, Rollen und Live-Stand verschwinden lokal und auf der Uhr, nur die Feed-Karte bleibt |
 | G9 | Export anfordern | ZIP mit eigenen Daten, keine fremden Profil-/Geräte-IDs |
 | G10 | Wear OS ohne Handy (WLAN): Match zählen; danach Logout am Handy | landet in der Cloud; Uhr-Sitzung danach gesperrt |
 | G11 | Turnier mit 3 Plätzen, 2 Helfern; einen Helfer entfernen | Übersicht live; entfernter Helfer empfängt nichts mehr |
@@ -448,8 +479,8 @@ Entschieden am 15.10.2026; in [00](00-entscheidungen.md) und [PLAN](PLAN.md) §7
 
 | Was | Wo | Ergebnis |
 |---|---|---|
-| Migrationen + 11 pgTAP-Dateien (258 Prüfungen) | lokal, **Postgres 17.10** + pgTAP 1.3.3 + Supabase-Nachbau | alle grün |
-| Echter Supabase-Stack (`supabase start` + `supabase test db`) | CI | Runde 1 grün (211 Prüfungen, 1:56 min); Fixes warten auf den nächsten Lauf |
+| Migrationen + 11 pgTAP-Dateien (275 Prüfungen) | lokal, **Postgres 17.10** + pgTAP 1.3.3 + Supabase-Nachbau | alle grün |
+| Echter Supabase-Stack (`supabase start` + `supabase test db`) | CI | Runde 1 und 2 grün; Fixes aus Runde 2 warten auf den nächsten Lauf |
 | `shared/cloud-sync` (15 Tests, ktlint) | lokal, `./gradlew check` | grün |
 | Parallelität (zwei Verbindungen), Realtime-Zustellung an echte Clients, Edge Functions, Auth-Hook | – | Gate-Tests §11 bzw. P2-A/B/C |
 
@@ -472,3 +503,14 @@ Entschieden am 15.10.2026; in [00](00-entscheidungen.md) und [PLAN](PLAN.md) §7
 | m | F13 „kein Konto“ | präzisiert + Hook-Gate als Abnahmekriterium (§8), Hinweis in `config.toml` | – |
 | m | Export-Whitelist | explizite Felder, keine fremden Profil-/Geräte-IDs | 080 |
 | m | F17 kausaler Abgleich | Ablauf §5.6, G4 | – |
+
+**Review-Runde 2 (PR #40) – Umsetzung:**
+
+| # | Befund | Umsetzung | Nachweis |
+|---|---|---|---|
+| 1 | Deadlock `40P01` (Zeilensperre vor Versionssperre) | Versionssperre zuerst in allen Schreibwegen: `private.lock_sync()`/`require_active()` als erste Anweisung, Statement-Trigger `zz_lock_sync` auf allen Tabellen | 010 (statisch); lokal mit zwei Verbindungen nachgestellt; Gate §11.4 |
+| 2 | Export enthält fremde Geräte-IDs | Payload-Whitelist je Eventtyp (`private.export_payload`) | 080 |
+| 3 | Redaktion erreicht Uhren/Replikate nicht | Mechanismus geplant (§5.7: Marker, autorisiertes Überschreiben, Protokoll 4, Summary-Epoche), G8 erweitert | Plan P2-B |
+| 4 | Wechsel `member → feed` lässt Mitgliedsdaten liegen | `access` je Match als Signal, Löschung lokal + Replikate (§5.4), G13 | 050 (Signal), Plan P2-B |
+| 5 | Kein `rotate` beim Entfernen eines Helfers | `rotate` auf alten `tournament:`-Kanal | 090 |
+| 6 | Fallback „Konto entsteht“ widerspricht F24 | als nicht freigegebene Ausnahme markiert (§8) | – |
