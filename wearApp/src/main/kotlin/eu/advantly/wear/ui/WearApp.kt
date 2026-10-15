@@ -23,13 +23,14 @@ fun WearApp(
     permissions: WorkoutPermissions,
     heartRate: Int?,
     isAmbient: Boolean,
+    powerSave: Boolean,
     toast: WatchToast?,
     actions: WatchActions,
 ) {
     MaterialTheme {
         AppScaffold {
             when (val screen = state.screen) {
-                is WatchScreen.Home -> HomeScreen(screen, permissions, actions)
+                is WatchScreen.Home -> HomeScreen(screen, permissions, powerSave, actions)
                 is WatchScreen.Setup -> SetupScreen(screen, actions)
                 is WatchScreen.Live -> LiveScreen(screen.live, workout, heartRate, isAmbient, toast, actions)
             }

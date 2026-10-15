@@ -1,8 +1,13 @@
 package eu.advantly.wear
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
@@ -77,6 +83,14 @@ class MainActivity : ComponentActivity() {
     private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val toast = mutableStateOf<WatchToast?>(null)
     private val heartRate = mutableStateOf<Int?>(null)
+    private val powerSave = mutableStateOf(false)
+    private val powerSaveReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) = updatePowerSave()
+        }
     private val heartRateThrottle = HeartRateThrottle()
     private val handler = Handler(Looper.getMainLooper())
     private val clearToast = Runnable { toast.value = null }
@@ -171,6 +185,7 @@ class MainActivity : ComponentActivity() {
                 permissions = permissions.value,
                 heartRate = heartRate.value,
                 isAmbient = ambient,
+                powerSave = powerSave.value,
                 toast = toast.value,
                 actions = actions,
             )
@@ -185,6 +200,20 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         controller.effects = ::onEffect
+        updatePowerSave()
+        ContextCompat.registerReceiver(
+            this,
+            powerSaveReceiver,
+            IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    /** Energiesparmodus kann die Verbindung zum Handy unterbrechen (Feldtest) → Hinweis auf der Startliste. */
+    private fun updatePowerSave() {
+        val saving = getSystemService(PowerManager::class.java)?.isPowerSaveMode == true
+        if (saving != powerSave.value) DiagnosticLog.log("POWER_SAVE", "on" to saving)
+        powerSave.value = saving
     }
 
     override fun onResume() {
@@ -206,6 +235,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        runCatching { unregisterReceiver(powerSaveReceiver) }
         controller.effects = null
         super.onStop()
     }
@@ -271,7 +301,8 @@ class MainActivity : ComponentActivity() {
         val match = holder.session.state.value.match
         val inputs =
             WorkoutInputs(
-                enabled = holder.prefs.workoutEnabled,
+                // Handy-Matches: Wahl im Handy-Assistenten; Uhr-Matches: Uhr-Einstellung (beides in MatchMeta.watchWorkout)
+                enabled = WorkoutCoordinator.enabled(match?.meta, holder.prefs.workoutEnabled),
                 matchId = match?.id,
                 sport = match?.format?.sport,
                 phase = WorkoutStateHolder.state.value.phase,

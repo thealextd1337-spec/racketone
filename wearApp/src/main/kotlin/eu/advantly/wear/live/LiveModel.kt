@@ -79,6 +79,8 @@ data class PlayerUi(
     val side: Side,
     val index: Int,
     val name: String?,
+    /** Besitzer der Uhr (auch über einen Alias, z. B. Handy-Identität) – Anzeige „Du“. */
+    val isSelf: Boolean = false,
 )
 
 /** Satzende-Dialog (02 §5.2, Modus Offen). */
@@ -185,14 +187,15 @@ object LiveModel {
         disconnectedForMs: Long?,
         locked: Boolean = false,
         overlay: LiveOverlay? = null,
+        isSelf: (PlayerId) -> Boolean = { false },
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
-        val teams = SidePair.of { side -> match.lineup.players(side).mapIndexed { i, id -> PlayerUi(id, side, i, names(id)) } }
+        val teams = SidePair.of { side -> match.lineup.players(side).mapIndexed { i, id -> PlayerUi(id, side, i, names(id), isSelf(id)) } }
 
         fun player(id: PlayerId?): PlayerUi? {
             val side = id?.let { match.lineup.sideOf(it) } ?: return null
-            return PlayerUi(id, side, match.lineup.players(side).indexOf(id), names(id))
+            return PlayerUi(id, side, match.lineup.players(side).indexOf(id), names(id), isSelf(id))
         }
         val doubles = match.lineup.a.size > 1
         val serve =

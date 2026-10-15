@@ -138,7 +138,7 @@ fun pointText(label: PointLabel): String =
 fun playerName(
     player: PlayerUi,
     doubles: Boolean,
-): String = player.name ?: defaultPlayerName(player.side, player.index, doubles)
+): String = if (player.isSelf) stringResource(R.string.player_you) else player.name ?: defaultPlayerName(player.side, player.index, doubles)
 
 /** Standardbezeichnung eines Slots („Du“, „Partner“, „Gegner 1/2“). */
 @Composable

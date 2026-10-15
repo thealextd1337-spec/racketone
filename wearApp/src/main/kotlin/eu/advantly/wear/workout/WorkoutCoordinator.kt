@@ -1,6 +1,7 @@
 package eu.advantly.wear.workout
 
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Sport
 
 /** Eingaben für die Entscheidung, ob das Workout zum Match laufen soll. */
@@ -36,6 +37,15 @@ sealed interface WorkoutAction {
  * (keine Speicherung, Health erst P3).
  */
 object WorkoutCoordinator {
+    /**
+     * Soll für das offene Match ein Workout laufen? Handy-Matches tragen die Wahl des Handy-Assistenten, Uhr-Matches die
+     * Uhr-Einstellung – beides in `MatchMeta.watchWorkout` (Default `true`). Ohne Match gilt die Uhr-Einstellung.
+     */
+    fun enabled(
+        meta: MatchMeta?,
+        watchSetting: Boolean,
+    ): Boolean = meta?.watchWorkout ?: watchSetting
+
     fun decide(inputs: WorkoutInputs): WorkoutAction {
         val matchId = inputs.matchId
         if (matchId == null) {

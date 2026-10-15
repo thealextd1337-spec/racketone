@@ -18,6 +18,8 @@ sealed interface WatchScreen {
         val last: SetupSummary?,
         val recent: List<ResultUi>,
         val workoutEnabled: Boolean,
+        /** Handy live verbunden und kompatibel (Feldtest: Status auf dem Startbildschirm). */
+        val phoneConnected: Boolean = false,
     ) : WatchScreen
 
     /** Kurz-Wizard (04 W2): Sport → Einzel/Doppel → Format → Erstaufschläger (= Start). */

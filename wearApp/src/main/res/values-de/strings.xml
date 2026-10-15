@@ -22,6 +22,10 @@
     <string name="result_drawn">Unentschieden</string>
     <string name="result_abandoned">Abgebrochen</string>
 
+    <string name="home_phone_connected">Mit Handy verbunden</string>
+    <string name="home_phone_disconnected">Handy nicht verbunden</string>
+    <string name="power_save_hint">Energiesparmodus kann die Verbindung zum Handy unterbrechen</string>
+
     <!-- Kurz-Wizard (W2) -->
     <string name="setup_sport_title">Sportart</string>
     <string name="setup_discipline_title">Einzel oder Doppel?</string>

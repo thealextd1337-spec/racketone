@@ -22,7 +22,7 @@ mit „Wer zählt?“, der Live-Screen und der Verlauf.
 
 | Wo | Was |
 |---|---|
-| Startliste | „Wie letztes Mal“ (gleiche Besetzung und Format), Schalter **Workout mitlaufen lassen** (Standard an), letzte Ergebnisse, unten **Neues Match** |
+| Startliste | Verbindungsstatus („Mit Handy verbunden“ / „Handy nicht verbunden“), bei aktivem Energiesparmodus der Hinweis „Energiesparmodus kann die Verbindung zum Handy unterbrechen“, „Wie letztes Mal“ (gleiche Besetzung und Format), Schalter **Workout mitlaufen lassen** (Standard an, gilt für auf der Uhr gestartete Matches), letzte Ergebnisse, unten **Neues Match** |
 | Neues Match | Sportart → Einzel/Doppel (Padel immer Doppel) → Format → „Wer schlägt zuerst auf?“ (**Tippen startet**; im Doppel wählst du den konkreten Spieler: Du, Partner, Gegner 1, Gegner 2). Tischtennis hat bewusst keine vorausgewählte Satzanzahl. Badminton schlägt bis 03.01.2027 „3 × 21“ vor, danach „3 × 15“. Nach rechts wischen = einen Schritt zurück |
 | Score (Zähler) | Obere Hälfte (orange) = Punkt **Wir** (1 Vibration), untere Hälfte (blau) = **Gegner** (2 Vibrationen). Nach jedem Punkt 0,6 s Sperre gegen Doppeltipps. **Nach unten wischen** = Rückgängig („Rückgängig: 30:15 → 15:15“). **Nach links wischen** = Steuerung |
 | Score (Anzeige) | Gleiche Darstellung, oben „ANZEIGE · Es zählt: Handy“ bzw. „ANZEIGE · Stand vor 42 s“. Tippen zählt nicht. Nach > 30 s ohne Verbindung unten **Zählen übernehmen** |
@@ -112,8 +112,13 @@ Bitte je Szenario das Ergebnis in die Tabelle (Abschnitt 5) eintragen.
    Wischen nach unten macht nichts. Workout startet trotzdem (Symbol auf dem Zifferblatt, Puls unten).
 4. Am Handy 5 Punkte zählen: Die Uhr zeigt sie ohne Verzögerung, auch bei gesenktem Handgelenk (Always-on).
 5. Variante **„Meine Uhr zählt“**: Am Handy ein Match mit **Wer zählt? → Meine Uhr** starten, während die Uhr-App **nicht**
-   geöffnet ist. Erwartung: Auf der Uhr erscheint die Benachrichtigung „Match läuft – Diese Uhr zählt – tippen zum
-   Öffnen“; nach dem Tipp zeigt die Uhr den Zähler-Screen (Tap-Flächen aktiv).
+   geöffnet ist (Seitentaste, App aus den Zuletzt-Apps entfernen). Erwartung: Die Uhr wird geweckt, meldet sich beim
+   Handy und übernimmt das Zählen; auf der Uhr erscheint „Match läuft – Diese Uhr zählt – tippen zum Öffnen“, nach dem
+   Tipp zeigt sie den Zähler-Screen (Tap-Flächen aktiv). Am Handy wechselt die Anzeige von „Warte auf Uhr“ auf die Uhr.
+6. Dasselbe mit **Energiesparmodus** auf der Uhr: Die Startliste zeigt den Hinweis. Kommt das Match nicht oder deutlich
+   verspätet an, bitte Zeit notieren und Diag-Log ziehen (Abschnitt 6).
+7. **Workout-Option vom Handy:** Match am Handy mit „Workout auf meiner Uhr“ **aus** starten → die Uhr zeigt das Match,
+   startet aber kein Workout (Steuerung: „Ohne Workout“). Mit „an“ startet es, sobald die Uhr-App sichtbar ist.
 
 ### T3 – Flugmodus der Uhr mitten im Satz (Sofort-Nachlieferung)
 
@@ -193,7 +198,11 @@ Debug-Build: Diagnose-Log der Uhr (nur Debug, enthält Pulswerte – danach lös
 & $adb -s 192.168.x.y:PORT shell rm -r /sdcard/Android/data/eu.advantly/files/diag
 ```
 
-Relevante Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine Handy-Nachricht geweckt; `settled`
+Verbindungs-Diagnose (nur Debug, ohne Gesundheitsdaten): `LINK_STATE`, `PEER_UP`/`PEER_DOWN`, `PEER_HELLO`
+(Gerät, Art, Kompatibilität), `LINK_TRAFFIC` (gesendet, Wiederholungen, bestätigt, in Queue, empfangen, Duplikate),
+`LINK_ERROR`, `SYNC_PENDING`, `SYNC_SERVICE_MESSAGE`/`_QUEUE`/`_CAPABILITY` (Weckruf durch das Handy), `POWER_SAVE`.
+
+Weitere Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine Handy-Nachricht geweckt; `settled`
 = Abgleich vor dem Einfrieren abgeschlossen), `MATCH_RESUME_AFTER_RESTART`, `SESSION_START`/`SESSION_END` (Workout),
 `SESSION_RECOVER_END` (Workout nach Neustart beendet, weil kein Match mehr offen war), `SERVICE_START_REJECTED`.
 
@@ -203,8 +212,7 @@ Relevante Einträge: `SESSION_STARTED`, `SYNC_SERVICE_WAKE` (Uhr wurde für eine
   Akku-Optimierung für Advantly abschalten und notieren.
 - **Hintergrundempfang:** Wird die Uhr-App durch eine Handy-Nachricht geweckt, bleibt sie nur kurz aktiv. Das Workout
   startet aus Systemgründen erst, wenn die App sichtbar ist (Benachrichtigung antippen).
-- **„Workout mitlaufen lassen“** ist eine Einstellung der Uhr; die Option im Start-Assistenten des Handys wird in P1 noch
-  nicht an die Uhr übertragen.
-- **Spieler „Du“:** Uhr und Handy haben je einen eigenen Spieler „ich“. Ein auf der Uhr gestartetes Match zeigt dich am
-  Handy daher als Spieler ohne Namen; die Zuordnung kommt mit Accounts (P2).
+- **Spieler „Du“:** Die Uhr übernimmt beim ersten Kontakt die Identität des Handys. Matches, die die Uhr vorher ohne
+  Handy angelegt hat, zeigen dich trotzdem als „Du“ (frühere Uhr-Identität ist als Alias bekannt).
+- **Energiesparmodus** kann das Wecken der Uhr verzögern oder verhindern; die App zeigt dann nur einen Hinweis.
 - **Tile** „Schnellstart“ ist noch nicht enthalten.

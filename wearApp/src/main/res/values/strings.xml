@@ -25,6 +25,10 @@
     <string name="result_drawn">Draw</string>
     <string name="result_abandoned">Abandoned</string>
 
+    <string name="home_phone_connected">Connected to phone</string>
+    <string name="home_phone_disconnected">Phone not connected</string>
+    <string name="power_save_hint">Battery saver can interrupt the connection to the phone</string>
+
     <!-- Kurz-Wizard (W2) -->
     <string name="setup_sport_title">Sport</string>
     <string name="setup_discipline_title">Singles or doubles?</string>

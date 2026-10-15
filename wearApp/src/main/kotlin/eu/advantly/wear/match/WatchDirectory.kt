@@ -21,8 +21,15 @@ class WatchDirectory(
     private val newId: () -> PlayerId,
     private val guestName: (GuestSlot) -> String,
 ) {
-    /** Eigener Spieler (Side A, „Wir“). Leerer Name: Anzeige „Du“ (wie am Handy, W1-C). */
+    /**
+     * Eigener Spieler (Side A, „Wir“) – bei **jedem** neuen Match frisch gelesen: Nach dem ersten `Hello` übernimmt die
+     * Session die Identität des Handys (`LocalData.adoptSelf`, match-session README „Identität“). Ohne Handy legt die
+     * Uhr einen eigenen Self an (leerer Name, Anzeige „Du“), der später Alias wird.
+     */
     fun self(): PlayerId = data.players.ensureSelf(displayName = "", nowMs = nowMs(), newId = newId).id
+
+    /** [id] ist der Besitzer (aktueller Self oder ein früherer Self/Alias) – Anzeige „Du“. */
+    fun isSelf(id: PlayerId): Boolean = data.isSelf(id)
 
     /** Stabiler Gast für [slot]; wird beim ersten Aufruf angelegt und danach wiederverwendet. */
     fun guest(slot: GuestSlot): PlayerId {

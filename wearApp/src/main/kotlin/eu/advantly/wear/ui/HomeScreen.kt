@@ -41,6 +41,7 @@ interface HomeActions {
 fun HomeScreen(
     home: WatchScreen.Home,
     permissions: WorkoutPermissions,
+    powerSave: Boolean,
     actions: HomeActions,
 ) {
     val listState = rememberScalingLazyListState()
@@ -52,6 +53,25 @@ fun HomeScreen(
     ) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
             item { ListHeader { Text(stringResource(R.string.app_name)) } }
+            item {
+                // Verbindungsstatus zum Handy (Feldtest Pixel Watch 3)
+                Text(
+                    stringResource(if (home.phoneConnected) R.string.home_phone_connected else R.string.home_phone_disconnected),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (home.phoneConnected) MaterialTheme.colorScheme.onSurface else HintAmber,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (powerSave) {
+                item {
+                    Text(
+                        stringResource(R.string.power_save_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = HintAmber,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
             home.resume?.let { resume ->
                 item {
                     Button(

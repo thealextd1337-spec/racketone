@@ -45,7 +45,7 @@ class AdvantlyWearApplication : Application() {
                 val match = state.match
                 val inputs =
                     WorkoutInputs(
-                        enabled = holder.prefs.workoutEnabled,
+                        enabled = WorkoutCoordinator.enabled(match?.meta, holder.prefs.workoutEnabled),
                         matchId = match?.id,
                         sport = match?.format?.sport,
                         phase = WorkoutStateHolder.state.value.phase,

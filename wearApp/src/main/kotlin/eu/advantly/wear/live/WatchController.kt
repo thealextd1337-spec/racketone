@@ -15,6 +15,8 @@ import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.match.LocalDay
+import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.match.FormatChoice
 import eu.advantly.wear.match.SetupCatalog
 import eu.advantly.wear.match.WatchDirectory
@@ -110,7 +112,8 @@ class WatchController(
     /** „Wie letztes Mal“: gleiche Besetzung, gleiches Format, diese Uhr zählt. */
     fun repeatLast(): Boolean {
         val last = directory.lastSetup() ?: return false
-        return start(last)
+        // Workout-Wunsch kommt immer aus der aktuellen Uhr-Einstellung (MatchMeta.watchWorkout)
+        return start(last.copy(meta = last.meta.copy(watchWorkout = prefs.workoutEnabled)))
     }
 
     fun resume(matchId: MatchId): Boolean = session.resume(matchId)
@@ -163,7 +166,7 @@ class WatchController(
             WatchSetup(
                 format = SetupCatalog.format(choice, discipline, today()),
                 lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(), server, serverIndex),
-                meta = SetupCatalog.meta(sport),
+                meta = SetupCatalog.meta(sport).copy(watchWorkout = prefs.workoutEnabled),
             )
         return start(setup)
     }
@@ -431,6 +434,7 @@ class WatchController(
                     match = match,
                     sync = sessionState.sync,
                     names = ::nameOf,
+                    isSelf = directory::isSelf,
                     contactAgoMs = lastContactAt?.let { elapsed() - it },
                     disconnectedForMs = disconnectedSince?.let { elapsed() - it },
                     locked = locked,
@@ -467,7 +471,10 @@ class WatchController(
             directory.recentResults().map { r ->
                 ResultUi(r.id, r.sport, LiveModel.setsText(r.score), r.score.winner, r.score.reason)
             }
-        return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled)
+        val phoneConnected =
+            session.state.value.sync.peers
+                .any { it.kind == PeerKind.PHONE && it.compatibility == CompatibilityStatus.COMPATIBLE }
+        return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled, phoneConnected)
     }
 
     private fun nameOf(id: PlayerId): String? = directory.displayName(id)
