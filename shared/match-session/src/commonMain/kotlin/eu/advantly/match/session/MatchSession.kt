@@ -39,6 +39,8 @@ import eu.advantly.device.link.DeviceLink
 import eu.advantly.device.link.DeviceLinkListener
 import eu.advantly.device.link.LinkScheduler
 import eu.advantly.device.link.LinkState
+import eu.advantly.device.link.SendCallback
+import eu.advantly.device.link.SendFailure
 import eu.advantly.sync.protocol.AntiEntropy
 import eu.advantly.sync.protocol.Compatibility
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -114,6 +116,10 @@ class MatchSession(
     private var started = false
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
+    private var lastEventReceivedAtMs: Long? = null
+
+    /** Von einer Gegenstelle bestätigte Events je Match (Ack einer `Events`-Nachricht oder deren `Summary`). */
+    private val confirmed = HashMap<MatchId, MutableSet<DeviceSeq>>()
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -482,6 +488,7 @@ class MatchSession(
         for ((key, remote) in summary.matches) {
             val matchId = MatchId(key)
             val local = sequences(matchId)
+            confirm(matchId, local.filter { it.seq <= remote[it.deviceId] })
             val ranges = AntiEntropy.missingRanges(local, remote)
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
             if (AntiEntropy.isBehind(VersionVector.fromSequences(local), remote)) behind += matchId
@@ -498,8 +505,10 @@ class MatchSession(
         val matchId = message.matchId
         val valid = message.events.filter { AntiEntropy.isPlausible(it, matchId) }
         val results = data.events.appendAll(valid.map { it.toStoredEvent() })
+        confirm(matchId, valid.map { DeviceSeq(it.deviceId, it.deviceSeq) }) // der Absender hat sie
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
         if (inserted.isEmpty()) return matchId
+        lastEventReceivedAtMs = clock.nowMs()
         inserted.firstOrNull { it.payload is MatchCreated }?.let { ensureHeader(it) }
         val m = open
         if (m != null && m.id == matchId) {
@@ -585,7 +594,14 @@ class MatchSession(
             compatibility.remove(it)
             helloSent.remove(it)
         }
-        if (started) peers.filter { it !in helloSent }.forEach { sendHello(it) }
+        if (started) {
+            peers.filter { it !in helloSent }.forEach { peer ->
+                // sofort abgleichen (nicht erst im 30-s-Takt): Hello, eigener Stand, unbestätigte Events direkt nachschieben
+                sendHello(peer)
+                send(peer, summaryOf(summaryMatches(), reply = false))
+                open?.let { m -> sendEvents(peer, m.id, unconfirmed(m.id)) }
+            }
+        }
         publish()
     }
 
@@ -613,6 +629,21 @@ class MatchSession(
         targets().forEach { send(it, message) }
     }
 
+    /** Events, die noch keine Gegenstelle bestätigt hat (Offline-Puffer des Zählers), in Ordnung. */
+    private fun unconfirmed(matchId: MatchId): List<ScoreEvent> {
+        val done = confirmed[matchId].orEmpty()
+        return data.events
+            .scoreEvents(matchId)
+            .filter { DeviceSeq(it.deviceId, it.deviceSeq) !in done }
+    }
+
+    private fun confirm(
+        matchId: MatchId,
+        sequences: Collection<DeviceSeq>,
+    ) {
+        if (sequences.isNotEmpty()) confirmed.getOrPut(matchId) { HashSet() } += sequences
+    }
+
     private fun broadcastMeta() {
         if (targets().isNotEmpty()) broadcast(metaMessage())
     }
@@ -622,8 +653,28 @@ class MatchSession(
         message: SyncMessage,
     ) {
         if (!started) return
-        link?.send(peer, SyncCodec.encode(message))
+        val callback = (message as? Events)?.takeIf { it.events.isNotEmpty() }?.let { ackCallback(it) }
+        link?.send(peer, SyncCodec.encode(message), callback)
     }
+
+    /** Ack einer `Events`-Nachricht (ReliableDeviceLink, Scheduler-Thread) → Events gelten als bei der Gegenstelle. */
+    private fun ackCallback(message: Events): SendCallback =
+        object : SendCallback {
+            override fun onAcked(
+                messageId: String,
+                attempts: Int,
+                latencyMs: Long,
+            ) {
+                confirm(message.matchId, message.events.map { DeviceSeq(it.deviceId, it.deviceSeq) })
+                publish()
+            }
+
+            override fun onFailed(
+                messageId: String,
+                attempts: Int,
+                reason: SendFailure,
+            ) = Unit
+        }
 
     /** Erreichbare Gegenstellen, die nicht als inkompatibel bekannt sind. */
     private fun targets(): List<String> = link?.peers.orEmpty().filter { compatibility[it]?.isCompatible != false }
@@ -711,7 +762,8 @@ class MatchSession(
             }
         val scorerConnected =
             match != null && (match.isScorer || (started && compatiblePeers.any { it.deviceId == match.scorerDeviceId }))
-        return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, lastSyncAtMs))
+        val pending = open?.let { m -> sequences(m.id).count { it !in confirmed[m.id].orEmpty() } } ?: 0
+        return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs))
     }
 
     private fun activeMatch(m: OpenMatch): ActiveMatch {

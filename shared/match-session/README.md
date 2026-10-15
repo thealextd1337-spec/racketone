@@ -77,6 +77,19 @@ session.deleteMatch(matchId)         // schließt ein offenes Match vorher
 
 Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalData(), link = null, scheduler, PeerKind.PHONE)`.
 
+## Sofort-Sync Zähler → Handy (Nutzeranforderung 2026-10-15)
+
+- **Live:** Jedes Event des Zählers geht direkt nach dem Tap an alle erreichbaren Gegenstellen – kein Sammeln, kein
+  Debounce. `ReliableDeviceLink` sorgt für Ack und Wiederholung.
+- **Offline:** Events bleiben lokal gespeichert (Puffer = Event-Store). Taucht eine Gegenstelle wieder auf, sendet die
+  Session **sofort** `Hello`, ihren `Summary` und alle unbestätigten Events des offenen Matches – nicht erst im 30-s-Takt.
+- **Handy = Hub/Backup:** Jedes empfangene Event wird sofort persistiert (Grundlage für Übergabe und später Cloud).
+- **Anzeige:** `SyncStatus.pendingToPeers` auf dem Zähler (0 = „synchron“, sonst „N ausstehend“; bestätigt durch Ack
+  oder `Summary` der Gegenstelle). `SyncStatus.lastEventReceivedAtMs` auf dem Handy („Stand vor X s“, zusammen mit
+  `scorerConnected`).
+- Tests: `ImmediateSyncTest` (Event nach einer Einweg-Latenz persistiert, Ack nach einer Runde; Offline-Puffer nach
+  Wiederverbindung in < 200 ms virtueller Zeit vollständig beim Handy).
+
 ## Regeln und Garantien
 
 - **Ein Thread:** alle öffentlichen Aufrufe auf dem Thread des `LinkScheduler`; `ThreadGuard` erzwingt das

@@ -68,6 +68,10 @@ enum class SyncIndicator {
  * @property link Zustand des Geräte-Links (`UNAVAILABLE` auch ohne Link, z. B. Standalone)
  * @property peers live erreichbare Gegenstellen
  * @property scorerConnected dieses Gerät zählt selbst oder der Zähler ist eine verbundene, kompatible Gegenstelle
+ * @property pendingToPeers Events des offenen Matches, die noch keine Gegenstelle bestätigt hat (Zähler: 0 = „synchron“,
+ *   sonst „N ausstehend“). Bestätigung = Ack der `Events`-Nachricht oder `Summary` der Gegenstelle; nur im Speicher,
+ *   nach einem Neustart klärt der erste Abgleich den Stand.
+ * @property lastEventReceivedAtMs Wanduhrzeit, zu der zuletzt ein neues Event empfangen wurde (Anzeige: „Stand vor X s“)
  * @property lastSyncAtMs Wanduhrzeit des letzten empfangenen Abgleichs (Summary/Events), sonst `null`
  */
 data class SyncStatus(
@@ -75,6 +79,8 @@ data class SyncStatus(
     val peers: List<PeerInfo>,
     val indicator: SyncIndicator,
     val scorerConnected: Boolean,
+    val pendingToPeers: Int,
+    val lastEventReceivedAtMs: Long?,
     val lastSyncAtMs: Long?,
 )
 
