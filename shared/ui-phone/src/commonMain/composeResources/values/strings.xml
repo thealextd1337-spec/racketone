@@ -447,4 +447,18 @@
     <string name="watch_takeover_title">Watch not reachable</string>
     <string name="watch_takeover_text">Your watch is still scoring %1$s and is not reachable. This phone takes over that match; inputs your watch makes there afterwards are discarded.</string>
     <string name="watch_takeover_confirm">Take over and start</string>
+    <string name="player_partner">Partner</string>
+    <string name="player_opponent_1">Opponent 1</string>
+    <string name="player_opponent_2">Opponent 2</string>
+    <string name="assign_player">Assign %1$s</string>
+    <string name="assign_player_name">Name</string>
+    <string name="assign_new_player">Create and assign guest</string>
+    <string name="assign_failed">This match is no longer available. Please reopen it.</string>
+    <string name="assign_change">Change %1$s</string>
+    <string name="assign_remove">Remove assignment</string>
+    <string name="player_opponent">Opponent</string>
+    <string name="assign_failed_owner">Only the creator can assign players.</string>
+    <string name="assign_failed_slot">This position cannot be assigned.</string>
+    <string name="assign_failed_person">This player is no longer available. Please choose again.</string>
+    <string name="assign_failed_occupied">This player already occupies another position.</string>
 </resources>

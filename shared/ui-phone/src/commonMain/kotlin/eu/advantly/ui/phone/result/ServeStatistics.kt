@@ -50,7 +50,7 @@ internal fun ServeStatistics(
         }
         if (setup.format.discipline == Discipline.DOUBLES) {
             stats.servers.forEach { server ->
-                ServeStatsGroup(playerName(setup.player(server.player)), server.stats, "serve_player_${server.player.value}")
+                ServeStatsGroup(playerName(setup, server.player), server.stats, "serve_player_${server.player.value}")
             }
         }
     }

@@ -7,13 +7,28 @@ import eu.advantly.data.db.MatchEventQueries
 /** [EventStore] auf SQLDelight. Der [driver] muss das Schema von [AdvantlyDatabase] bereits angelegt haben. */
 class SqlDelightEventStore internal constructor(
     private val queries: MatchEventQueries,
+    private val identitiesChanged: (String) -> Unit = {},
 ) : EventStore {
     constructor(driver: SqlDriver) : this(AdvantlyDatabase(driver).matchEventQueries)
 
-    override fun append(event: StoredEvent): AppendResult = queries.transactionWithResult { insert(event) }
+    override fun append(event: StoredEvent): AppendResult = appendAll(listOf(event)).single()
 
     override fun appendAll(events: List<StoredEvent>): List<AppendResult> =
-        if (events.isEmpty()) emptyList() else queries.transactionWithResult { events.map { insert(it) } }
+        if (events.isEmpty()) {
+            emptyList()
+        } else {
+            queries.transactionWithResult {
+                val results = events.map { insert(it) }
+                events
+                    .zip(results)
+                    .filter { (event, result) ->
+                        result == AppendResult.INSERTED && event.type in setOf("MatchCreated", "PlayerAssigned")
+                    }.map { it.first.matchId }
+                    .distinct()
+                    .forEach(identitiesChanged)
+                results
+            }
+        }
 
     private fun insert(event: StoredEvent): AppendResult =
         when {

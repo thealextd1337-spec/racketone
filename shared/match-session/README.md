@@ -30,7 +30,7 @@ sequenceDiagram
 
   Note over Z,H: Verbindung (wieder) da oder alle 30 s im aktiven Match
   H->>Z: Hello (deviceId, kind, v, minV)
-  Z->>H: Hello + Summary {matchId: {deviceId: Wasserstand}} + MatchMeta
+  Z->>H: Hello + Summary {matchId: {deviceId: Wasserstand}} + MatchMetaMessage
   H->>Z: Events (fehlende deviceSeq-Bereiche)
   H->>Z: Summary(reply=true), falls H etwas fehlt
   Z->>H: Events (Rest)
@@ -93,7 +93,7 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
   Debounce. `ReliableDeviceLink` sorgt für Ack und Wiederholung.
 - **Offline:** Events bleiben lokal gespeichert; jedes Event trägt im Store das Flag `confirmed` (eine Gegenstelle hat
   es: Ack, `Summary` oder von dort empfangen). Taucht eine Gegenstelle wieder auf, sendet die Session **sofort**
-  `Hello`, Löschmarkierungen, ihren `Summary` und den gesamten Rückstand **aller** Matches (je Match `MatchMeta` +
+  `Hello`, Löschmarkierungen, ihren `Summary` und den gesamten Rückstand **aller** Matches (je Match `MatchMetaMessage` +
   Events in Teilen) – nicht erst im 30-s-Takt. Der Takt läuft weiter, solange ein Match aktiv ist oder Rückstand besteht.
 - **Handy = Hub/Backup:** Jedes empfangene Event wird sofort persistiert (Grundlage für Übergabe und später Cloud).
 - **Anzeige:** `SyncStatus.pendingToPeers` = persistenter Rückstand über alle Matches (0 = „synchron“, sonst
@@ -104,10 +104,10 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 
 ## Identität des Besitzers über eigene Geräte (W1-I)
 
-- **Das Handy ist Identitätsquelle.** Jede Session schickt im `MatchMeta` ihren eigenen Spieler (`self`) und bekannte
+- **Das Handy ist Identitätsquelle.** Jede Session schickt im `MatchMetaMessage` ihren eigenen Spieler (`self`) und bekannte
   frühere IDs desselben Besitzers (`selfAliases`).
 - **Uhr** (Session mit `kind != PHONE`), Nachricht von einem Handy: `LocalData.adoptSelf` – der Self des Handys wird
-  der eigene Self der Uhr (ID + Name), der bisherige Uhr-Self wird Alias und geht sofort per `MatchMeta` ans Handy.
+  der eigene Self der Uhr (ID + Name), der bisherige Uhr-Self wird Alias und geht sofort per `MatchMetaMessage` ans Handy.
 - **Handy:** merkt sich `self`/`selfAliases` anderer eigener Geräte als Aliase (`LocalData.selfAliases()`,
   `isSelf(id)`). Matches, die die Uhr mit ihrem alten Self angelegt hat, zeigen den Besitzer – keinen Gast
   (Phone-Adapter `SessionMatchStore`).
@@ -130,7 +130,7 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 ## `dataRevision` und `MatchMeta.watchWorkout`
 
 - `SessionState.dataRevision` steigt bei Änderungen außerhalb des offenen Matches (empfangene/eigene Löschung,
-  Kopf/Stand anderer Matches, Spieler/Favoriten/Identität per `MatchMeta`). Listen-UIs (Verlauf) laden dann neu.
+  Kopf/Stand anderer Matches, Spieler/Favoriten/Identität per `MatchMetaMessage`). Listen-UIs (Verlauf) laden dann neu.
 - `MatchMeta.watchWorkout` (Default `true`, 02 §10): Wunsch „Workout auf meiner Uhr mitlaufen lassen“; kommt mit
   Genesis und Match-Kopf auf die Uhr. Die Uhr-Apps lesen es aus `ActiveMatch.meta`.
 
@@ -161,7 +161,7 @@ Normativ in 01 §4.9. Kurz:
 - `deleteMatch(id)` löscht Kopf und Events und legt eine **dauerhafte Löschmarkierung** (`match_tombstone`) an.
 - Die Markierung geht sofort per `Deleted` an die gekoppelten Geräte und bei jedem `Hello` erneut vollständig; dort wird
   das Match ebenfalls gelöscht und ein dort offenes Match geschlossen.
-- Empfang, Abgleich (`Summary`), `MatchMeta` und Auto-Follow ignorieren gelöschte Matches dauerhaft; wer noch Events
+- Empfang, Abgleich (`Summary`), `MatchMetaMessage` und Auto-Follow ignorieren gelöschte Matches dauerhaft; wer noch Events
   dazu sendet, bekommt die Löschung zurück.
 - **P2 (geteilte Matches):** Löschen entfernt dann nur die eigene Sicht; die Markierung darf nicht an fremde Teilnehmer
   repliziert werden (Cloud-Modell klären).
@@ -196,3 +196,34 @@ Normativ in 01 §4.9. Kurz:
 | `Summary` „maxDeviceSeq“ | höchste Sequenz | **lückenloser Wasserstand** | außer der Reihe angekommene Events dürfen keine Lücke verdecken |
 | `Events` in Teilen | – | Feld `more` nur als Hinweis | Fold ist reihenfolgeunabhängig; Puffern bis zum letzten Teil hatte Events dauerhaft ungefaltet gelassen (Review-Befund 1) |
 | `sync-protocol` | nur `kotlinx-serialization-core` | zusätzlich `kotlinx-serialization-json` | Wire-Codec braucht JSON (01 §4.3), CLAUDE.md Regel 1 angepasst |
+
+
+## F20: Uhr-Spieler, neutrale Plätze und Zuweisung
+
+- `MatchMetaMessage` liefert vom Handy `recentPlayers`: maximal 24 verschiedene Personen aus den jüngsten 100 Matches,
+  einschließlich aufgelöster Zuweisungen, ohne Self/Aliase/Platzhalter. Der Austausch erfolgt auch ohne aktives Match
+  bei Hello, erneutem Verbinden und `syncNow`; keine neue Nachrichtenart. Namen bleiben in der lokalen Spieler-DB,
+  die Verzeichnisreihenfolge im Setting `players.recentRemote` (`null` = kein Update, leere Liste = Verzeichnis leeren).
+  Die Uhr ergänzt offline gespielte lokale Besetzungen.
+- Neue Uhr-Platzhalter haben nur reservierte `placeholder:`-IDs. Migrierte alte Uhr-Gäste behalten ihre ursprüngliche
+  ID als `PLACEHOLDER`-Zeile unter Beibehaltung des Namens; `placeholderIds` in `MatchMetaMessage` repliziert diese Klassifizierung zum Handy.
+  Die Migration nutzt `wear.guest.*` plus unveränderte DE/EN-Standardnamen. Ein am Handy bereits umbenannter
+  Gast wird nicht umklassifiziert: sein echter Name korrigiert die Uhr zurück zu `GUEST`. Veraltete Slot-Schlüssel
+  werden auch bei umbenannten Gästen entfernt.
+- `canAssignPlayer(matchId)` prüft Ersteller-Self/Aliase aus der Genesis; `assignPlayer(matchId, slot, playerId)` wirkt
+  auch auf geschlossene/beendete Matches und ohne Zählrecht. `PlayerAssigned` enthält die wirkliche Person samt Name,
+  damit auch reine Events-Nachlieferung genügt (`legacySlot = true` kennzeichnet alte Platz-IDs).
+  `assignedBy` enthält die aktuelle Self-ID, `creatorAlias` bei Bedarf die Genesis-Ersteller-ID aus den eigenen Aliasen.
+  P1 vertraut dabei dem gekoppelten Geräteverbund; P2 muss Akteur und Alias gegen den Account prüfen. Letzte gültige Zuweisung in Eventordnung gewinnt; die vorherige Person wird frei.
+  `playerId = null` entfernt die Zuweisung; gleiche Wiederholung ist idempotent. `dataRevision` aktualisiert Verlauf und Personenlisten. Keine Änderung an Match-Auswahl/Lebenszyklus.
+- Die Engine behält ursprüngliche Platz-IDs; `PlayerAssignments`/`LocalData.assignments` projizieren Personen daneben
+  (02 §7.6). Anzeige und Statistik lösen sie auf; Wiederholung/Folge-Match verwendet echte Personen-IDs
+  und frische IDs für unbesetzte Plätze. Die SQL-Projektion `match_assignment` wird atomar beim Insert/Empfang
+  aktualisiert. Lesen spielt keine Logs ab; `recentLineups` bleibt die schlanke Verzeichnisquelle. Schema 1 → 2
+  erhält Daten per `1.sqm` mit geprüftem Schema-1-Abbild (`verifyMigrations`). Erster Start und
+  `LocalData.rebuildAllAssignments()` bauen die Projektion nur aus Identitäts-Events neu auf.
+- Wire-Version **3**, `minV = 3`: ältere Decoder kennen das neue Event nicht. Uhr und Handy gemeinsam aktualisieren;
+  gespeicherte ältere Logs bleiben lesbar. Die Apple-Watch-Facade erzeugt ebenfalls neutrale `placeholder:`-IDs; Swift muss diese nicht kennen. F20-Bedienoberflächen auf watchOS bleiben außerhalb dieses Pakets.
+- Tests: `PlayerAssignmentsTest`, `PlaceholderMigrationTest`, `PlaceholderSyncTest`, `PlaceholderPresentationTest`,
+  `PlaceholderCodecTest`, `PlayerChoiceTest`, `PlaceholderAssignmentsUiTest`; vorhandene Golden-Vektoren müssen
+  driftfrei bleiben. Hardware: rundes Display (klein/groß), Rotary, lange Namen, echtes Data-Layer-Reconnect/Neustart.

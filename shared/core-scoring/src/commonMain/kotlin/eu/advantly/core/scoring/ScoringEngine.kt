@@ -224,6 +224,7 @@ object ScoringEngine {
                 (last == null || EventOrdering.compare(event, last) > 0) &&
                     payload !is Undo &&
                     payload !is ScorerChanged &&
+                    payload !is PlayerAssigned &&
                     (scorer == null || !EventLog.isScorerOnly(payload) || event.deviceId == scorer) &&
                     payload !is MatchCreated &&
                     !(payload is Correction && payload.kind == CorrectionKind.INITIAL_SERVER) &&
@@ -432,6 +433,11 @@ internal object Replay {
                     // Rollenregel (02 §7.5): Eingabe eines Geräts, das an dieser Position nicht zählt
                     core.markIgnored(event.id)
                     rejectedByRole += event.id
+                }
+
+                // Identitätsprojektion; selbst Effekte und Undo-Ziel bleiben gleich.
+                payload is PlayerAssigned -> {
+                    Unit
                 }
 
                 payload is ScorerChanged -> {

@@ -181,6 +181,7 @@ fun LiveScoreScreen(
     onBenchmarkNewMatch: (() -> Boolean)? = null,
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
+    playerAssignments: @Composable (eu.advantly.presentation.match.LiveMatchSnapshot) -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     DisposableEffect(haptics) {
@@ -330,6 +331,7 @@ fun LiveScoreScreen(
                         modifier = Modifier.padding(top = Spacing.s),
                     )
                     LiveOperationsSlot(controller, snapshot)
+                    playerAssignments(snapshot)
                 }
             }
             val footer: @Composable (Modifier) -> Unit = { footerModifier ->
@@ -561,7 +563,7 @@ private fun Panels(
     val themName = stringResource(Res.string.live_team_them_name)
     val points = Side.entries.associateWith { pointText(LiveScoreRules.pointLabel(state, it)) }
     val serve = state.serve
-    val serverName = serve?.let { playerName(setup.player(it.player)) }
+    val serverName = serve?.let { playerName(setup, it.player) }
     val serving = serve?.let { stringResource(Res.string.a11y_serving, if (it.side == Side.A) usName else themName) }.orEmpty()
     val undoLabel = stringResource(Res.string.action_undo)
     val serveWord = stringResource(Res.string.live_serve)
@@ -662,7 +664,7 @@ private fun HintBand(
 ) {
     val setup = snapshot.setup
     val serve = snapshot.state.serve
-    val receiverName = serve?.receiver?.let { playerName(setup.player(it)) }
+    val receiverName = serve?.receiver?.let { playerName(setup, it) }
     val line =
         when {
             setup.sport == Sport.PICKLEBALL -> {

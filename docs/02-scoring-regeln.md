@@ -884,6 +884,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 | `ScorerChanged` (neu) | `scorerDeviceId` | „Zählen übernehmen“: ab seiner Position in der Ordnung zählt `scorerDeviceId` (§7.5) | immer; unterliegt selbst keiner Rollenprüfung | nein (Undo darauf ist ungültig, Rückgabe = erneutes `ScorerChanged`) |
 | `PointDetailSet` (neu, P3) | `target: EventId` (ein `PointWon`), `detail: PointDetail?` | Detail nachträglich setzen/ändern (`null` = löschen), das letzte gültige gilt. Ohne Wirkung auf den Score. | Ziel ist ein wirksames `PointWon`; trägt `detail.serve` eine Aufschlag-Info, nur Tennis/Padel, und `DOUBLE_FAULT` nur, wenn das Ziel an die Rückschlagseite ging (Ergänzung 2026-10-15, K19) | nein (eigenes Undo per Event-ID möglich) |
 | `ServerChosen` (neu 2026-10-15) | `set: int` (Satzindex), `side`, `player` | Aufschlägerwahl im Doppel, legt `order[side]` für den Satz fest (§6.5.5) | Tennis/Padel-Doppel, laufender Satz mit Index `set`, `status ∈ {IN_PROGRESS, PAUSED}`, `player` gehört zu `side`, Fenster nach §6.5.5 | nein (neu wählen) |
+| `PlayerAssigned` (F20) | `slot`, `player?`, `assignedBy`, `legacySlot?`, `creatorAlias?` | Personenzuweisung/-korrektur neben dem Score-Fold (§7.6); `null` gibt frei | Ersteller im gekoppelten Geräteverbund; ursprünglicher Platzhalter, Person nicht doppelt besetzt | nein (neu zuweisen) |
 
 ### 7.1 `Correction`-Varianten
 
@@ -911,7 +912,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 
 1. Ordnen nach `(lamport, deviceId, id)` (01-architektur). Bitgleiche Wiederholungen derselben Event-ID MÜSSEN als Duplikate entfernt werden (No-op). „Bitgleich“ bedeutet hier strukturelle Gleichheit sämtlicher Event-Felder: `id`, `matchId`, `deviceId`, `deviceSeq`, `lamport`, `wallClockMs`, `parentId` und `payload` (einschließlich aller Payload-Felder), entsprechend der Kotlin-`data class`-Gleichheit; die serialisierte Bytefolge ist nicht maßgeblich. Bei abweichenden Kopien derselben ID MÜSSEN alle Kopien vom Fold ausgeschlossen werden; ihre ID MUSS je einmal in `state.ignoredEvents` und `EngineState.rejectedEvents` stehen. Die aktuelle Engine verwendet bei gleichen Ordnungsschlüsseln zusätzlich `toString()` als Tie-Break für die Ablage abweichender Kopien. Dieser plattformabhängige Tie-Break ist **nicht normativ** und betrifft nur verworfene Kopien, die nicht gefaltet werden. Eine abweichende Kopie der Genesis-ID (`MatchCreated`) MUSS das vollständige Log ungültig machen; `replay`/`fold` und die inkrementelle Anwendung mit gespeicherter Genesis werfen `IllegalArgumentException` (Klarstellung 2026-10-15).
 1a. **Rollenprüfung (§7.5):** Vor der Wirksamkeit wird vorwärts der jeweils gültige Zähler bestimmt. Rollenwidrige Steuer-/Zähl-Events sind unwirksam: Sie gehen nicht in den Fold ein, wirken nicht als Undo, sind keine Doppel-Tap- oder Widerspruchspartner und stehen in Fold-Reihenfolge in `ignoredEvents` und `rejectedByRole` (Effekt `IGNORED`). Ein Undo auf ein rollenwidriges Event ist ein No-op.
-2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. Ein Undo DARF nur auf Events wirken, die in der deterministischen Ordnung vor ihm stehen. Zeigt ein **wirksames** Undo auf ein späteres Event oder sich selbst, MUSS seine ID in `ignoredEvents` stehen. Ist das ungültige Undo selbst durch ein späteres wirksames Undo unwirksam, DARF seine ID deshalb NICHT in `ignoredEvents` stehen. Ein Undo auf ein `ScorerChanged` ist ungültig und MUSS in `ignoredEvents` stehen (die Rolle wird nur durch ein neues `ScorerChanged` zurückgegeben). Ein unbekanntes Ziel bleibt ein No-op; das gilt auch für die Genesis-ID, da die Genesis nicht im zu analysierenden Event-Log enthalten ist. Zurückgewiesene ID-Kollisionen DÜRFEN kein Undo auslösen. `Undo`-Events selbst gehen nicht in den Score-Fold ein (Klarstellung 2026-10-15).
+2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. Ein Undo DARF nur auf Events wirken, die in der deterministischen Ordnung vor ihm stehen. Zeigt ein **wirksames** Undo auf ein späteres Event oder sich selbst, MUSS seine ID in `ignoredEvents` stehen. Ist das ungültige Undo selbst durch ein späteres wirksames Undo unwirksam, DARF seine ID deshalb NICHT in `ignoredEvents` stehen. Ein Undo auf ein `ScorerChanged` oder `PlayerAssigned` ist ungültig und MUSS in `ignoredEvents` stehen (die Rolle wird nur durch ein neues `ScorerChanged` zurückgegeben). Ein unbekanntes Ziel bleibt ein No-op; das gilt auch für die Genesis-ID, da die Genesis nicht im zu analysierenden Event-Log enthalten ist. Zurückgewiesene ID-Kollisionen DÜRFEN kein Undo auslösen. `Undo`-Events selbst gehen nicht in den Score-Fold ein (Klarstellung 2026-10-15).
 3. Der Fold startet mit `initial(config, lineup')`, wobei `lineup'` die rückwirkende `Correction(INITIAL_SERVER)` berücksichtigt. Danach werden die wirksamen Events in Ordnung angewendet.
 4. Ein wirksames Event, dessen Vorbedingung (Tabelle §7) nicht erfüllt ist, wird **übersprungen**. Seine `id` wird an `state.ignoredEvents` angehängt. Das ist kein Fehler: Die Situation kann nach Merges oder Undo mitten im Log entstehen. Die UI DARF solche Events nicht erzeugen.
 5. `effects` beschreibt die Folgen des letzten im Fold berücksichtigten Events: bei wirksamem, nicht ungültigem `Undo` = `["UNDONE"]` (auch beim No-op), bei übersprungenem Event = `["IGNORED"]`, bei leerem Log = `[]`. Durch Undo unwirksame Events verändern die Effekte nicht. Gültige `PointDetailSet`, gültige `Correction(INITIAL_SERVER)` und absorbierte Doppel-Taps MÜSSEN `effects = []` liefern (Klarstellung 2026-10-15). Ebenso ein gültiges `ServerChosen` (Ergänzung 2026-10-15). `ScorerChanged` liefert `effects = ["SCORER_CHANGED"]`.
@@ -948,6 +949,49 @@ Pro Match zählt genau **ein Gerät** (der Zähler). Standard ist die Uhr des Sp
 Testvektoren: TV-TEN-003 (Übergabe mitten im Satz), TV-TEN-004 (Altzähler offline), TV-PAD-003 (Director-Handy).
 
 ---
+
+### 7.6 Uhr-Platzhalter und Personenzuweisung (F20, normativ)
+
+- **Platz ist keine Person:** Ungewählte Uhr-Plätze erhalten eindeutige `placeholder:`-IDs ohne Gastzeile. Rotation,
+  Rückschläger und Korrekturen behalten diese ID für die ganze Matchdauer. Die Anzeige benennt Plätze nach der Seite
+  des Besitzers (Self/Aliase): „Partner“, im Einzel „Gegner“, im Doppel „Gegner 1/2“ (DE/EN). Platzhalter erscheinen
+  nicht in Personenlisten, Favoriten und Statistiken je Person; Teamstatistiken bleiben vollständig.
+- **Ersteller und Vertrauen:** Neue `MatchCreated.createdBy` enthalten immer eine durch `ensureSelf` angelegte Self-ID;
+  bei alten Logs ohne das Feld gilt `lineup.A[0]`. Eigene Geräte desselben Besitzers dürfen über Self/Aliase zuweisen.
+  `PlayerAssigned.assignedBy` ist die aktuelle Self-ID des sendenden Geräts. Falls der Genesis-Ersteller ein früherer
+  Self-Alias ist, enthält `creatorAlias` dessen ID. Der Empfänger akzeptiert diesen Bezug auf den Genesis-Ersteller.
+  Das ist in P1 eine Behauptung innerhalb des gekoppelten Geräteverbunds, kein Account- oder kryptografischer Nachweis.
+  P2 muss Akteur und Alias-Bezug gegen den authentifizierten Account prüfen.
+- **Zuweisung und Korrektur:** `PlayerAssigned(slot, player: {id, displayName} | null, assignedBy, legacySlot = false,
+  creatorAlias = null)` ist ein append-only Metadaten-Event im selben Match-Log mit dessen Ordnung, Ack/Retry und
+  Anti-Entropie. Der Ersteller darf während und nach dem Match, auch bei geschlossenem Match und ohne Zählrecht,
+  Personen zuweisen, ändern und mit `player = null` entfernen. Die UI bietet „Max ändern“ und „Zuweisung entfernen“.
+- **Determinismus:** `PlayerAssignments.resolve` projiziert neben dem Score-Fold. Die **letzte gültige Zuweisung in
+  Eventordnung** `(lamport, deviceId, id)` gewinnt. Eine Korrektur gibt die vorherige Person frei; sie kann danach
+  auf einem anderen Platz zugewiesen werden. Entfernen gibt den Platz frei. Gleiche lokale Wiederholung schreibt
+  kein Event, erneut empfangene IDs sind No-ops. Abweichende Kopien einer Event-ID sind ausgeschlossen. Das Ziel muss
+  ein ursprünglicher Platzhalter sein; Person weder Platzhalter noch auf einem anderen Platz besetzt. Ungültige
+  Events verändern auch die bisherige Zuweisung nicht. Der kanonische Score samt Effekten bleibt unverändert.
+  `PlayerAssigned` ist kein Undo-Ziel; Korrektur erfolgt durch ein neues Zuweisungs-Event.
+- **Legacy-Konvergenz:** Alte Slots werden anhand der lokalen DB als Platzhalter erkannt. Diese lokale Menge kann
+  bis zum Metadaten-Abgleich verschieden sein. Neue Zuweisungen eines Legacy-Slots tragen deshalb `legacySlot = true`:
+  Die reine Projektion kennt den Platz dann auch bei reiner Event-Nachlieferung ohne die lokale Tabelle.
+  Ältere Zuweisungs-Events ohne Kennzeichen konvergieren nach dem Abgleich der lokalen Platzhaltermenge.
+- **Persistenz und Anzeige:** `match_assignment(match_id, slot_id, player_json)` materialisiert die Projektion, einschließlich leerer zuweisbarer Plätze (`player_json = null`), in
+  derselben Transaktion wie der Event-Insert. Ein Batch aktualisiert nur betroffene Matches; ungeordneter Empfang
+  wird in Eventordnung projiziert. Wiederherstellung liest nur `MatchCreated`/`PlayerAssigned` über den Typindex,
+  keine Score-Events. Snapshots, Personenverzeichnis und `recentLineups` lesen diese höchstens vier Zuordnungen;
+  Score-Zusammenfassungen bleiben nach `updatedAtMs` gecacht. Schema 1 → 2 wird mit `1.sqm` migriert und gegen das
+  gespeicherte Schema-1-Abbild mittels `verifyMigrations` geprüft. Beim ersten Öffnen wird die Projektion aufgebaut;
+  `rebuildAllAssignments` erlaubt die Wiederherstellung aus dem Log.
+- **Wirkung:** Namen und Personenstatistiken lösen Platz-ID → Person auf. Aufschlagpunkte bleiben am stabilen Platz.
+  Matchdauer und Ende berücksichtigen keine Zuweisungs-Events. Wiederholungs-/Folge-Matches übernehmen aufgelöste
+  Personen und erhalten für noch unbesetzte Plätze frische IDs, einschließlich Aufschlag-/Annahmeverweisen.
+- **Migration:** Nur `wear.guest.*` plus unveränderte DE/EN-Standardnamen kennzeichnen alte Uhr-Slots. Die Migration
+  bewahrt Namen und Logs; veraltete Schlüssel werden auch bei umbenannten Gästen entfernt. Das Handy übernimmt die
+  Klassifizierung nur bei fehlender Zeile, Standardnamen oder bereits erkanntem Platzhalter. Ein echter lokaler
+  Name wie „Max“ bleibt erhalten und korrigiert die Uhr zurück zu `GUEST`; ein alter Standardname hebt die Markierung
+  nicht auf. Neue Legacy-Zuweisungen gelten je Match. F18/P2 (Dummy → Account) bleibt ein eigener Vorgang.
 
 ## 8. Zustandsmodell (kanonische Form)
 

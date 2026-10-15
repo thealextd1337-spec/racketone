@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchSettings
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
@@ -21,6 +22,7 @@ import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
@@ -38,6 +40,10 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredSequence
+import eu.advantly.data.assignments
+import eu.advantly.data.freshPlaceholders
+import eu.advantly.data.recentPeople
+import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.data.toScoreEventOrNull
 import eu.advantly.data.toStoredEvent
@@ -200,6 +206,7 @@ class MatchSession(
     fun start() {
         checkThread()
         if (started) return
+        data.migrateWatchPlaceholders()
         started = true
         link?.setListener(linkListener)
         link?.start()
@@ -387,10 +394,68 @@ class MatchSession(
         val previous = m.record
         val format = previous.format.copy(match = MatchSettings.OPEN, decidingSet = null)
         val next = m.engine.state.continuation
-        val lineup = if (next != null) previous.lineup.copy(firstServer = next.player) else previous.lineup
+        val resolved = data.resolvedLineup(previous)
+        val nextPlayer = next?.player?.let { data.assignments(previous.id)[it]?.id ?: it }
+        val lineup = if (nextPlayer != null) resolved.copy(firstServer = nextPlayer) else resolved
+        val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
         // Folge-Match des Uhr-Matches bleibt auf der Uhr (gleicher Zähler)
         val onWatch = watchAssignment?.matchId == previous.id || watchIsFree()
-        return createMatch(format, lineup, previous.meta, m.scorer ?: deviceId, previous = previous.id, assignToWatch = onWatch)
+        return createMatch(format, fresh, previous.meta, m.scorer ?: deviceId, previous = previous.id, assignToWatch = onWatch)
+    }
+
+    /** Erstellerprüfung unabhängig von Zähler und Matchstatus; P1: eigene Geräte desselben Besitzers. */
+    fun canAssignPlayer(matchId: MatchId): Boolean {
+        checkThread()
+        val creator = data.matchCreator(matchId) ?: return false
+        return data.isSelf(creator)
+    }
+
+    fun assignmentFailure(
+        matchId: MatchId,
+        slot: PlayerId,
+        playerId: PlayerId?,
+    ): PlayerAssignmentFailure? {
+        checkThread()
+        val record = data.matches.get(matchId) ?: return PlayerAssignmentFailure.MATCH_UNAVAILABLE
+        if (!canAssignPlayer(matchId)) return PlayerAssignmentFailure.NOT_OWNER
+        if (!data.isMatchPlaceholder(matchId, slot) || record.lineup.sideOf(slot) == null) return PlayerAssignmentFailure.INVALID_SLOT
+        val assigned = data.assignments(matchId)
+        if (assigned[slot]?.id == playerId || playerId == null) return null
+        val player = data.players.get(playerId) ?: return PlayerAssignmentFailure.INVALID_PLAYER
+        if (data.isPlaceholder(playerId) || player.displayName.isBlank()) return PlayerAssignmentFailure.INVALID_PLAYER
+        val occupied = data.resolvedLineup(record).let { it.a + it.b } - listOfNotNull(assigned[slot]?.id)
+        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return PlayerAssignmentFailure.OCCUPIED
+        return null
+    }
+
+    /** Letzte gültige Zuweisung gewinnt; null gibt den Platz frei. Identische Wiederholung ist ein No-op. */
+    fun assignPlayer(
+        matchId: MatchId,
+        slot: PlayerId,
+        playerId: PlayerId?,
+    ): Boolean {
+        checkThread()
+        if (assignmentFailure(matchId, slot, playerId) != null) return false
+        val assigned = data.assignments(matchId)
+        if (assigned[slot]?.id == playerId) return true
+        val player = playerId?.let { data.players.get(it)?.toPlayer() ?: return false }
+        // F22: jedes offene Match (nicht nur das fokussierte), sonst eine Arbeitskopie aus dem Log
+        val m = opened[matchId] ?: detached(matchId) ?: return false
+        val actor = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }.id
+        val creator = data.matchCreator(matchId)
+        emit(
+            m,
+            listOf(
+                PlayerAssigned(
+                    slot,
+                    player,
+                    actor,
+                    legacySlot = !Placeholders.isPlaceholder(slot),
+                    creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
+                ),
+            ),
+        )
+        return true
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
@@ -632,6 +697,7 @@ class MatchSession(
     fun syncNow() {
         checkThread()
         sendSummaries()
+        if (started) broadcastMeta(primaryRecord())
     }
 
     // --- Lokale Events ----------------------------------------------------------------------------
@@ -654,13 +720,16 @@ class MatchSession(
         ScoringEngine.replay(format, lineup, emptyList()) // prüft Format und Lineup
         val now = clock.nowMs()
         val matchId = MatchId.of(ids.newUuid7(now))
-        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer)
+        val owner = data.players.ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }.id
+        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer, createdBy = owner)
         val genesis = ScoreEvent(EventId.of(ids.newUuid7(now)), matchId, deviceId, 1, 1, now, null, created)
         data.transaction {
             data.events.append(genesis.toStoredEvent())
             data.matches.insertIfAbsent(matchId, format, lineup, meta, now, previous)
             data.players.markUsed(lineup.a + lineup.b, now)
-            data.favorites.recordUse(format.sport, format.discipline, lineup.a, lineup.b, now)
+            if ((lineup.a + lineup.b).none(data::isPlaceholder)) {
+                data.favorites.recordUse(format.sport, format.discipline, lineup.a, lineup.b, now)
+            }
         }
         openMatch(matchId, focus = true)
         // Ein Folge-Match ersetzt sein beendetes Vor-Match in der Liste (wie auf der Uhr)
@@ -690,6 +759,7 @@ class MatchSession(
         data.events.appendAll(events.map { it.toStoredEvent() })
         devicesIn(m.id) += deviceId.value
         m.engine = ScoringEngine.applyAll(m.engine, events)
+        if (payloads.any { it is PlayerAssigned }) reconcilePeople(m.id)
         persistProgress(m)
         broadcast(Events(m.id, events))
         maybeFollow(null)
@@ -1063,6 +1133,7 @@ class MatchSession(
         genesis?.let { adoptWatchStartedMatch(it) }
         // eine Übergabe der Uhr kann ein Match ohne Uhr-Eingaben mit Uhr-Zähler hinterlassen
         if (inserted.any { it.payload is ScorerChanged }) reconcileWatchScorers()
+        if (inserted.any { it.payload is PlayerAssigned || it.payload is MatchCreated }) reconcilePeople(matchId)
         val forward = Events(matchId, inserted, message.more)
         targets().filter { it != peer }.forEach { send(it, forward) }
         return matchId
@@ -1073,8 +1144,35 @@ class MatchSession(
         message: MatchMetaMessage,
     ): MatchId? {
         val now = clock.nowMs()
-        message.players.forEach { data.players.upsertRemote(it, now) }
-        message.favorites.forEach { data.favorites.merge(it.toLocal()) }
+        val corrections =
+            (message.placeholderIds + message.players.filter { it.isPlaceholder }.map { it.id })
+                .distinct()
+                .filterNot(data.players::canMarkPlaceholder)
+                .mapNotNull {
+                    data.players
+                        .get(it)
+                        ?.toPlayer()
+                        ?.copy(isPlaceholder = false)
+                }
+        if (config.kind == PeerKind.PHONE) corrections.forEach { data.players.upsertRemote(it, now) }
+        message.placeholderIds.filter(data.players::canMarkPlaceholder).forEach {
+            if (!data.isPlaceholder(it)) {
+                data.players.markPlaceholder(it, now)
+                data.rebuildAssignmentsForSlot(it)
+            }
+        }
+        val protectedIds = corrections.map { it.id }.toSet()
+        (message.players + message.recentPlayers.orEmpty())
+            .filterNot { it.id in protectedIds }
+            .forEach { data.players.upsertRemote(it, now) }
+        if (corrections.isNotEmpty() && config.kind == PeerKind.PHONE) send(peer, MatchMetaMessage(players = corrections))
+        message.recentPlayers?.let { people ->
+            data.settings.put(
+                "players.recentRemote",
+                people.joinToString(",") { it.id.value },
+            )
+        }
+        message.favorites.filter { (it.a + it.b).none(data::isPlaceholder) }.forEach { data.favorites.merge(it.toLocal()) }
         dataRevision++
         adoptOwnerIdentity(peer, message)
         val header = message.match
@@ -1124,6 +1222,15 @@ class MatchSession(
                 if (data.addSelfAliases(listOf(owner.id))) dataRevision++
             }
         }
+    }
+
+    private fun reconcilePeople(matchId: MatchId) {
+        val at = data.matches.get(matchId)?.createdAtMs ?: return
+        data.assignments(matchId).values.forEach {
+            data.players.upsertRemote(it, clock.nowMs())
+            data.players.markUsed(listOf(it.id), at)
+        }
+        dataRevision++
     }
 
     /** Status/Ergebnis eines nicht offenen Matches aus seinem Log neu berechnen. */
@@ -1502,12 +1609,14 @@ class MatchSession(
             .sortedWith(EventOrdering)
 
     private fun metaMessage(record: MatchRecord?): MatchMetaMessage {
-        val favorites = data.favorites.recent(limit = FAVORITES_IN_META)
+        val favorites = data.favorites.recent(limit = FAVORITES_IN_META).filter { (it.a + it.b).none(data::isPlaceholder) }
         val lineupPlayers = record?.lineup?.let { it.a + it.b }.orEmpty()
         val playerIds = (lineupPlayers + favorites.flatMap { it.a + it.b }).distinct()
         return MatchMetaMessage(
             match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
-            players = playerIds.mapNotNull { data.players.get(it)?.toPlayer() },
+            players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() },
+            placeholderIds = data.players.placeholderIds().toList(),
+            recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() } else null,
             favorites = favorites.map { it.toWire() },
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),

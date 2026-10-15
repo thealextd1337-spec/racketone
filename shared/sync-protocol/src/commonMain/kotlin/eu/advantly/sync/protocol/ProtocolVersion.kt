@@ -18,13 +18,17 @@ package eu.advantly.sync.protocol
  *   die Uhr-Zuweisung `MatchMeta.watchMatch` für mehrere parallele Matches am Handy (01 §4.3, F21/F22). Ein Gerät mit
  *   Version 2 kann `STOPPED` nicht dekodieren und würde dem falschen Match folgen.
  *
- * **Warum [MIN_SUPPORTED] = [CURRENT]:** Events lassen sich nicht in Version 1 „herunterschreiben“ – ein Log, das die neuen
- * Inhalte enthält, käme bei einem Gerät mit Version 1 nur teilweise an (es verwirft die unlesbaren `Events`-Nachrichten
- * still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand mit falschem Spielstand. Deshalb
- * sind aufeinanderfolgende Versionen mit neuen Event-Inhalten **nicht** kompatibel (1/2 wie 2/3): Über `Hello` meldet das neue Gerät die Gegenstelle als `PEER_TOO_OLD`, das alte
- * das neue als `PEER_TOO_NEW` (beide prüfen die Überlappung der Bereiche); beide tauschen danach nichts mehr aus, und
- * die UI zeigt „Bitte Uhr/Handy aktualisieren“. Hello wird unabhängig von `v` gelesen, daher erkennt auch ein Gerät mit
- * Version 1 den Unterschied.
+ *   Gemeinsam mit W3-S (F20, 2026-10-15): `PlayerAssigned`, Ersteller-ID und Platzhalter-Kennzeichnung; auch dieses Event
+ *   kann Version 2 nicht dekodieren. Keine verlustbehaftete Rückübersetzung; gespeicherte Logs der Versionen 1/2 bleiben
+ *   lesbar.
+ *
+ * **Warum [MIN_SUPPORTED] = [CURRENT]:** Events lassen sich nicht in eine ältere Version „herunterschreiben“ – ein Log,
+ * das die neuen Inhalte enthält, käme bei einem älteren Gerät nur teilweise an (es verwirft die unlesbaren
+ * `Events`-Nachrichten still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand mit falschem
+ * Spielstand. Deshalb sind aufeinanderfolgende Versionen mit neuen Event-Inhalten **nicht** kompatibel (1/2 wie 2/3):
+ * Über `Hello` meldet das neue Gerät die Gegenstelle als `PEER_TOO_OLD`, das alte das neue als `PEER_TOO_NEW` (beide
+ * prüfen die Überlappung der Bereiche); beide tauschen danach nichts mehr aus, und die UI zeigt „Bitte Uhr/Handy
+ * aktualisieren“. Hello wird unabhängig von `v` gelesen, daher erkennt auch ein älteres Gerät den Unterschied.
  */
 object ProtocolVersion {
     /** Version, die dieses Gerät spricht und schreibt. */

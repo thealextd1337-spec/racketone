@@ -102,6 +102,7 @@ fun ResultScreen(
     onPlayAgain: (MatchSetup) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    playerAssignments: @Composable (MatchRecord) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     Column(
@@ -166,6 +167,7 @@ fun ResultScreen(
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
             Hero(record)
+            playerAssignments(record)
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.result_duration), Modifier.weight(1f))
                 StatTile(stats.totalPoints.toString(), stringResource(Res.string.result_points_total), Modifier.weight(1f))

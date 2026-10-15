@@ -260,8 +260,9 @@ class WatchScoringTest {
         val second = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = true, watchWorkout = true))
         val lineup1 = assertNotNull(rig.watchData.matches.get(MatchId(first.matchId))).lineup
         val lineup2 = assertNotNull(rig.watchData.matches.get(MatchId(second.matchId))).lineup
-        assertEquals(lineup1.a, lineup2.a, "gleiche Spieler wie letztes Mal")
-        assertEquals(lineup1.b, lineup2.b)
+        assertEquals(lineup1.a.first(), lineup2.a.first())
+        assertTrue((lineup2.a.drop(1) + lineup2.b).all(rig.watchData::isPlaceholder))
+        assertTrue((lineup2.a.drop(1) + lineup2.b).none { it in lineup1.a + lineup1.b })
         assertEquals(lineup2.a.first(), lineup2.firstServer)
         assertEquals(
             rig.watchData.players
@@ -618,6 +619,24 @@ class WatchScoringTest {
         val won = assertNotNull(rig.watch.snapshot())
         assertEquals("STOPPED", won.resultReason)
         assertEquals("A", won.winner)
+    }
+
+    @Test
+    fun unselectedAppleWatchPlacesAreAssignableAndFreshOnRepeat() {
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false, watchWorkout = false)
+        val first = assertNotNull(rig.watchSession.state.value.match)
+        val slots = first.lineup.a.drop(1) + first.lineup.b
+        assertTrue(slots.all(rig.watchData::isPlaceholder))
+        rig.settle()
+        val bea = rig.phoneData.players.addGuest(PlayerId("bea-assigned"), "Bea", 1)
+        assertTrue(rig.phone.assignPlayer(first.id, slots.first(), bea.id))
+        rig.settle()
+        rig.watch.close()
+        rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false, watchWorkout = false)
+        val second = assertNotNull(rig.watchSession.state.value.match)
+        val fresh = second.lineup.a.drop(1) + second.lineup.b
+        assertTrue(fresh.none { it in slots })
     }
 
     private fun phoneDataOf(rig: Rig): LocalData = rig.phoneData

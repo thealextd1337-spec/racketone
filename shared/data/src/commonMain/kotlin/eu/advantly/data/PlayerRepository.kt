@@ -1,5 +1,6 @@
 package eu.advantly.data
 
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.data.db.PlayerQueries
@@ -12,6 +13,9 @@ enum class PlayerKind {
 
     /** Gast bzw. Mitspieler ohne Account (auch von einem anderen Gerät übernommen). */
     GUEST,
+
+    /** Nur für migrierte Uhr-Slots; niemals in Personenlisten. */
+    PLACEHOLDER,
 }
 
 /** Lokal bekannter Spieler. Regeln referenzieren nur [id]; [displayName] ist reine Anzeige. */
@@ -23,7 +27,7 @@ data class LocalPlayer(
     val lastUsedAtMs: Long?,
 ) {
     /** Anzeigeform für Lineup/Sync. */
-    fun toPlayer(): Player = Player(id, displayName)
+    fun toPlayer(): Player = Player(id, displayName, isPlaceholder = kind == PlayerKind.PLACEHOLDER)
 }
 
 /** Lokale Spieler: Self-Player, Gäste, von anderen Geräten übernommene Namen (P1 ohne Account). */
@@ -57,6 +61,7 @@ class PlayerRepository internal constructor(
         nowMs: Long,
     ): LocalPlayer =
         queries.transactionWithResult {
+            require(!Placeholders.isPlaceholder(id)) { "Ein Platzhalter ist kein Gast" }
             queries.insertOrIgnore(id.value, displayName, PlayerKind.GUEST.name, nowMs, null)
             checkNotNull(get(id))
         }
@@ -70,7 +75,17 @@ class PlayerRepository internal constructor(
         nowMs: Long,
     ) {
         queries.transaction {
+            if (Placeholders.isPlaceholder(player.id)) return@transaction
+            if (player.isPlaceholder) {
+                if (canMarkPlaceholder(player.id)) markPlaceholder(player.id, nowMs)
+                return@transaction
+            }
             val existing = get(player.id)
+            if (existing?.kind == PlayerKind.PLACEHOLDER && !isDefaultSlotName(player.displayName) && player.displayName.isNotBlank()) {
+                queries.updateKind(PlayerKind.GUEST.name, player.id.value)
+                queries.rename(player.displayName, player.id.value)
+                return@transaction
+            }
             when {
                 existing == null -> {
                     queries.insertOrIgnore(player.id.value, player.displayName, PlayerKind.GUEST.name, nowMs, null)
@@ -121,8 +136,41 @@ class PlayerRepository internal constructor(
 
     fun get(id: PlayerId): LocalPlayer? = queries.selectById(id.value).executeAsOneOrNull()?.toLocal()
 
+    /** Kennzeichnung alter Uhr-Gäste ohne Namensverlust; echte Namen können sie zurückkorrigieren. */
+    fun markPlaceholder(
+        id: PlayerId,
+        nowMs: Long,
+    ) {
+        if (Placeholders.isPlaceholder(id) || get(id)?.kind == PlayerKind.SELF) return
+        queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
+        queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
+    }
+
+    fun canMarkPlaceholder(id: PlayerId): Boolean =
+        get(id).let {
+            it == null || (
+                it.kind != PlayerKind.SELF &&
+                    (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
+            )
+        }
+
+    private fun isDefaultSlotName(name: String) =
+        name in setOf("Partner", "Gegner", "Opponent", "Gegner 1", "Opponent 1", "Gegner 2", "Opponent 2")
+
+    fun placeholderIds(): Set<PlayerId> =
+        queries
+            .placeholderIds()
+            .executeAsList()
+            .map(::PlayerId)
+            .toSet()
+
     /** Self zuerst, dann zuletzt verwendete Gäste. */
-    fun all(): List<LocalPlayer> = queries.selectAll().executeAsList().map { it.toLocal() }
+    fun all(): List<LocalPlayer> =
+        queries
+            .selectAll()
+            .executeAsList()
+            .filter { it.kind != PlayerKind.PLACEHOLDER.name }
+            .map { it.toLocal() }
 
     fun rename(
         id: PlayerId,
@@ -136,14 +184,15 @@ class PlayerRepository internal constructor(
         ids: Collection<PlayerId>,
         nowMs: Long,
     ) {
-        if (ids.isNotEmpty()) queries.markUsed(nowMs, ids.map { it.value })
+        val people = ids.filter { get(it)?.kind != PlayerKind.PLACEHOLDER && !Placeholders.isPlaceholder(it) }
+        if (people.isNotEmpty()) queries.markUsed(nowMs, people.map { it.value })
     }
 
     /** Löscht einen Gast; der Self-Player bleibt. Liefert `true`, wenn gelöscht. */
     fun deleteGuest(id: PlayerId): Boolean =
         queries.transactionWithResult {
             val existing = get(id) ?: return@transactionWithResult false
-            if (existing.kind == PlayerKind.SELF) return@transactionWithResult false
+            if (existing.kind != PlayerKind.GUEST) return@transactionWithResult false
             queries.deleteGuest(id.value)
             true
         }

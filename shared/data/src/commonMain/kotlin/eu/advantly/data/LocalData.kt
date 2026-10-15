@@ -2,8 +2,11 @@ package eu.advantly.data
 
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.PlayerAssignments
 import eu.advantly.data.db.AdvantlyDatabase
 
 /**
@@ -17,12 +20,83 @@ class LocalData(
     driver: SqlDriver,
 ) {
     private val database = AdvantlyDatabase(driver)
-
-    val events: EventStore = SqlDelightEventStore(database.matchEventQueries)
-    val matches: MatchRepository = MatchRepository(database.matchHeaderQueries, database.matchTombstoneQueries)
+    val events: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
+    val matches: MatchRepository = MatchRepository(database.matchHeaderQueries, database.matchTombstoneQueries, ::assignmentIds)
     val players: PlayerRepository = PlayerRepository(database.playerQueries)
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
+
+    init {
+        if (settings.get("assignments.projectionVersion") != "2") {
+            rebuildAllAssignments()
+            settings.put("assignments.projectionVersion", "2")
+        }
+    }
+
+    /** Wiederherstellung aus Identitäts-Events; Score-Events werden nicht gelesen. */
+    fun rebuildAllAssignments() {
+        transaction {
+            database.matchAssignmentQueries.clearAll()
+            database.matchEventQueries
+                .assignmentMatches()
+                .executeAsList()
+                .forEach { rebuildAssignments(MatchId(it)) }
+        }
+    }
+
+    fun rebuildAssignmentsForSlot(slot: PlayerId) {
+        database.matchEventQueries
+            .assignmentMatchesForSlot(slot.value)
+            .executeAsList()
+            .forEach { rebuildAssignments(MatchId(it)) }
+    }
+
+    private fun identityEvents(id: MatchId) =
+        database.matchEventQueries
+            .identityEvents(id.value) { eventId, match, device, seq, lamport, at, parent, type, payload ->
+                StoredEvent(eventId, match, device, seq, lamport, payload, at, parent, type)
+            }.executeAsList()
+            .mapNotNull { it.toScoreEventOrNull() }
+
+    fun matchCreator(id: MatchId): PlayerId? =
+        identityEvents(id)
+            .firstOrNull {
+                it.payload is MatchCreated
+            }?.let {
+                val created = it.payload as MatchCreated
+                created.createdBy ?: created.lineup.a.first()
+            }
+
+    fun rebuildAssignments(id: MatchId) {
+        transaction {
+            val projection = PlayerAssignments.project(identityEvents(id), players.placeholderIds())
+            database.matchAssignmentQueries.clearMatch(id.value)
+            projection.slots.forEach { slot ->
+                val player = projection.people[slot]
+                database.matchAssignmentQueries.put(id.value, slot.value, player?.let { DataJson.encodeToString(Player.serializer(), it) })
+            }
+        }
+    }
+
+    private fun storedProjection(id: MatchId): Map<PlayerId, Player?> =
+        database.matchAssignmentQueries
+            .forMatch(id.value) { slot, json ->
+                PlayerId(slot) to json?.let { DataJson.decodeFromString(Player.serializer(), it) }
+            }.executeAsList()
+            .toMap()
+
+    internal fun storedAssignments(id: MatchId): Map<PlayerId, Player> =
+        storedProjection(id).mapNotNull { (slot, player) -> player?.let { slot to it } }.toMap()
+
+    fun isMatchPlaceholder(
+        matchId: MatchId,
+        slot: PlayerId,
+    ): Boolean = isPlaceholder(slot) || database.matchAssignmentQueries.hasSlot(matchId.value, slot.value).executeAsOne() > 0
+
+    private fun assignmentIds(id: MatchId) =
+        storedProjection(id).mapValues { (slot, player) ->
+            player?.id ?: if (Placeholders.isPlaceholder(slot)) slot else Placeholders.id(slot.value)
+        }
 
     /** Führt [block] in einer Transaktion aus (alles oder nichts). */
     fun <T> transaction(block: () -> T): T = database.transactionWithResult { block() }
@@ -39,8 +113,33 @@ class LocalData(
             matches.markDeleted(id, deletedAtMs)
             events.deleteMatch(id.value)
             matches.delete(id)
+            database.matchAssignmentQueries.clearMatch(id.value)
         }
     }
+
+    /** F20: nur die durch wear.guest.* belegten Slots mit unveränderten DE/EN-Standardnamen migrieren. */
+    fun migrateWatchPlaceholders() {
+        val names =
+            mapOf(
+                "PARTNER" to setOf("Partner"),
+                "OPPONENT_1" to setOf("Gegner", "Opponent", "Gegner 1", "Opponent 1"),
+                "OPPONENT_2" to setOf("Gegner 2", "Opponent 2"),
+            )
+        transaction {
+            names.forEach { (slot, defaults) ->
+                val key = "wear.guest.$slot"
+                val id = settings.get(key)?.let(::PlayerId) ?: return@forEach
+                val player = players.get(id)
+                if (player == null || player.displayName in defaults || player.kind == PlayerKind.PLACEHOLDER) {
+                    players.markPlaceholder(id, player?.createdAtMs ?: 0)
+                    rebuildAssignmentsForSlot(id)
+                }
+                settings.remove(key)
+            }
+        }
+    }
+
+    fun isPlaceholder(id: PlayerId): Boolean = Placeholders.isPlaceholder(id) || players.get(id)?.kind == PlayerKind.PLACEHOLDER
 
     // --- Identität des Besitzers über eigene Geräte (W1-I) -----------------------------------------------
 
@@ -88,10 +187,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /**
-         * Schema-Version der lokalen Datenbank. Vor dem ersten Release ändert sich das Schema ohne Migration
-         * (Version bleibt 1, Entwicklungsgeräte: App-Daten löschen). Ab Release: `.sqm`-Migrationen, Version steigt.
-         */
-        const val SCHEMA_VERSION: Long = 1
+        /** Schema 2: materialisierte Personenzuweisungen; 1.sqm erhält bestehende Daten. */
+        const val SCHEMA_VERSION: Long = 2
     }
 }

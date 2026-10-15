@@ -146,6 +146,13 @@ class LocalDataTest {
             updatedAtMs = 4_000,
         )
         assertEquals(listOf(singles), data.matches.recentLineups(Sport.TENNIS))
+        // auch das Personenverzeichnis (W3-S) kennt Personen nur aus gewerteten Matches
+        val zoe = Lineup(listOf(PlayerId("me")), listOf(PlayerId("zoe")), PlayerId("me"))
+        data.matches.insertIfAbsent(MatchId("t3"), tennis, zoe, MatchMeta(), createdAtMs = 5_000)
+        data.players.addGuest(PlayerId("zoe"), "Zoe", 1)
+        assertTrue(data.recentPeople().any { it.id == PlayerId("zoe") })
+        data.matches.updateProgress(MatchId("t3"), MatchStatus.FINISHED, ScoreSummary(reason = ResultReason.ABANDONED), updatedAtMs = 6_000)
+        assertTrue(data.recentPeople().none { it.id == PlayerId("zoe") })
     }
 
     @Test
@@ -257,7 +264,10 @@ class LocalDataTest {
         assertTrue(data.settings.getBoolean("b", false))
         assertEquals(Long.MAX_VALUE, data.settings.getLong("l", 0))
         assertEquals(7, data.settings.getLong("missing", 7))
-        assertEquals(mapOf("b" to "true", "device.id" to "id-1", "k" to "w", "l" to Long.MAX_VALUE.toString()), data.settings.all())
+        assertEquals(
+            mapOf("b" to "true", "device.id" to "id-1", "k" to "w", "l" to Long.MAX_VALUE.toString()),
+            data.settings.all() - "assignments.projectionVersion",
+        )
         data.settings.remove("k")
         assertNull(data.settings.get("k"))
     }

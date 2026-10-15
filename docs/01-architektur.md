@@ -283,7 +283,7 @@ Nachrichten (JSON via kotlinx-serialization, Feld `v` = Protokollversion):
 | `Hello` | deviceId, Protokollversion, aktive matchIds | Verbindungsaufbau, Versionsprüfung |
 | `Summary` | matchId → Versionsvektor `{deviceId: maxDeviceSeq}` | Anti-Entropy: „was habe ich?“ |
 | `Events` | Liste `ScoreEvent` | Live-Push einzelner Taps und Nachlieferung |
-| `MatchMeta` | Match-Kopf (Lineup, Config) + Favoriten-Lineups | Uhr kann Match starten/fortsetzen |
+| `MatchMetaMessage` | Match-Kopf (Lineup, Config) + Favoriten-Lineups | Uhr kann Match starten/fortsetzen |
 
 Regeln:
 1. **Live**: Jeder lokale Tap → Event speichern → sofort `Events([e])` an alle erreichbaren Peers.
@@ -297,9 +297,13 @@ Regeln:
 |---|---|---|---|
 | 1 | W1 | Events bis Single-Scorer | 1 |
 | 2 | W2-A | zusätzlich `ServerChosen`, `nextSetKind = TIEBREAK_7 \| MATCH_TIEBREAK_10`, `PointDetail` ohne `kind` (02 §7) | **2** |
-| 3 | W3-M | zusätzlich `MatchEnded.reason = STOPPED` („Beenden, wie es steht“, 02 §9.27) und `MatchMeta.watchMatch` (Uhr-Zuweisung bei mehreren parallelen Matches, §4.9) | **3** |
+| 3 | W3-S + W3-M | zusätzlich `PlayerAssigned`, `createdBy`, Platzhalter-Kennzeichnung und kleines Personenverzeichnis in `MatchMetaMessage` (W3-S, F20) sowie `MatchEnded.reason = STOPPED` („Beenden, wie es steht“, 02 §9.27) und `MatchMeta.watchMatch` (Uhr-Zuweisung bei mehreren parallelen Matches, §4.9) (W3-M, F21/F22) | **3** |
 
-Begründung `minV = v` (erst 2, seit W3-M 3): Event-Inhalte lassen sich nicht in eine ältere Version „herunterschreiben“. Ein Gerät mit Version 1 würde Nachrichten mit den neuen Inhalten verwerfen und die übrigen übernehmen – ein halb-synchroner Zustand mit falschem Spielstand, den die Anti-Entropie nie auflöst. Deshalb sind 1 und 2 bzw. 2 und 3 bewusst inkompatibel; Uhr und Handy müssen gemeinsam aktualisiert werden (beide Apps erscheinen mit derselben Versionsnummer). Alte Logs (gespeicherte Events) bleiben lesbar, die Engine faltet sie unverändert.
+**Aktuell: `CURRENT = MIN_SUPPORTED = 3`.** Version 2 versteht `PlayerAssigned` und `STOPPED` nicht; deshalb sind auch 2 und 3
+bewusst inkompatibel. Die Versionsprüfung und der Aktualisierungshinweis bleiben unverändert. Gespeicherte alte Logs
+werden weiterhin gelesen, ohne Genesis oder Score umzuschreiben.
+
+Begründung `minV = v`: Event-Inhalte lassen sich nicht in eine ältere Version „herunterschreiben“. Ein Gerät mit Version 1 würde Nachrichten mit den neuen Inhalten verwerfen und die übrigen übernehmen – ein halb-synchroner Zustand mit falschem Spielstand, den die Anti-Entropie nie auflöst. Deshalb sind 1 und 2 bzw. 2 und 3 bewusst inkompatibel; Uhr und Handy müssen gemeinsam aktualisiert werden (beide Apps erscheinen mit derselben Versionsnummer). Alte Logs (gespeicherte Events) bleiben lesbar, die Engine faltet sie unverändert.
 
 ### 4.4 Single-Scorer: Zähler, Anzeige und Übergabe
 

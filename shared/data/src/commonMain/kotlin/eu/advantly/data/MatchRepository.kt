@@ -5,6 +5,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.CurrentSet
@@ -123,6 +124,7 @@ data class MatchTombstone(
 class MatchRepository internal constructor(
     private val queries: MatchHeaderQueries,
     private val tombstones: MatchTombstoneQueries,
+    private val assignments: (MatchId) -> Map<PlayerId, PlayerId>,
 ) {
     /**
      * Legt den Kopf an, falls [id] noch unbekannt ist (idempotent – Genesis und `MatchMeta` können beide zuerst
@@ -196,7 +198,19 @@ class MatchRepository internal constructor(
     fun recentLineups(
         sport: Sport? = null,
         limit: Long = 100,
-    ): List<Lineup> = queries.recentLineups(sport?.name, limit).executeAsList().map { DataJson.decodeFromString(Lineup.serializer(), it) }
+    ): List<Lineup> =
+        queries.recentLineups(sport?.name, limit).executeAsList().map { row ->
+            val lineup = DataJson.decodeFromString(Lineup.serializer(), row.lineup_json)
+            val assigned = assignments(MatchId(row.id))
+
+            fun person(id: PlayerId) = assigned[id] ?: id
+            lineup.copy(
+                a = lineup.a.map(::person),
+                b = lineup.b.map(::person),
+                firstServer = person(lineup.firstServer),
+                receiveRight = lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
+            )
+        }
 
     /** Nicht beendete Matches, zuletzt geändertes zuerst (Resume-Karte). */
     fun active(): List<MatchRecord> = queries.active().executeAsList().map { it.toRecord() }
@@ -216,7 +230,19 @@ class MatchRepository internal constructor(
             .lastOfSport(sport.name, discipline?.name)
             .executeAsOneOrNull()
             ?.toRecord()
-            ?.lineup
+            ?.let { record ->
+                val assigned = assignments(record.id)
+
+                fun person(id: PlayerId) = assigned[id] ?: id
+                record.lineup.let { lineup ->
+                    lineup.copy(
+                        a = lineup.a.map(::person),
+                        b = lineup.b.map(::person),
+                        firstServer = person(lineup.firstServer),
+                        receiveRight = lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
+                    )
+                }
+            }
 
     /** `true`, wenn [id] gelöscht wurde (dauerhafte Löschmarkierung). */
     fun isDeleted(id: MatchId): Boolean = tombstones.countById(id.value).executeAsOne() > 0

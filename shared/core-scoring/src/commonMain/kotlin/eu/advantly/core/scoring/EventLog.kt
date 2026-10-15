@@ -129,7 +129,8 @@ object EventLog {
     /**
      * 02 §7.3 Schritt 2: Das geordnete Log wird rückwärts durchlaufen; ein Event ist unwirksam, wenn ein *wirksames*
      * `Undo` auf seine `id` zeigt. Ein `Undo` wirkt nur auf Events, die in der Ordnung **vor** ihm stehen; zeigt es auf
-     * ein späteres Event (oder sich selbst), ist es ungültig und wird übersprungen. Ein unbekanntes Ziel ist ein No-op.
+     * ein späteres Event (oder sich selbst), ist es ungültig und wird übersprungen. Rollenwechsel und Personenzuweisung
+     * sind ebenfalls keine Undo-Ziele; ihre Korrektur erfolgt durch ein neues Metadaten-Event. Ein unbekanntes Ziel ist ein No-op.
      */
     private fun effectiveness(
         ordered: List<ScoreEvent>,
@@ -144,7 +145,14 @@ object EventLog {
             if (event.id in undone || event.id in rejected) continue
             val payload = event.payload as? Undo ?: continue
             val target = position[payload.target] ?: continue
-            if (target >= i || ordered[target].payload is ScorerChanged) invalid += event.id else undone += payload.target
+            if (target >= i ||
+                (ordered[target].payload is ScorerChanged || ordered[target].payload is PlayerAssigned)
+            ) {
+                invalid += event.id
+            } else {
+                undone +=
+                    payload.target
+            }
         }
         return undone to invalid
     }

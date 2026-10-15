@@ -447,4 +447,18 @@
     <string name="watch_takeover_title">Uhr nicht erreichbar</string>
     <string name="watch_takeover_text">Deine Uhr zählt noch %1$s und ist nicht erreichbar. Dieses Handy übernimmt dieses Match; Eingaben, die die Uhr danach dort noch macht, werden verworfen.</string>
     <string name="watch_takeover_confirm">Übernehmen und starten</string>
+    <string name="player_partner">Partner</string>
+    <string name="player_opponent_1">Gegner 1</string>
+    <string name="player_opponent_2">Gegner 2</string>
+    <string name="assign_player">%1$s zuweisen</string>
+    <string name="assign_player_name">Name</string>
+    <string name="assign_new_player">Gast anlegen und zuweisen</string>
+    <string name="assign_failed">Das Match ist nicht mehr verfügbar. Bitte öffne es erneut.</string>
+    <string name="assign_change">%1$s ändern</string>
+    <string name="assign_remove">Zuweisung entfernen</string>
+    <string name="player_opponent">Gegner</string>
+    <string name="assign_failed_owner">Nur der Ersteller darf Personen zuweisen.</string>
+    <string name="assign_failed_slot">Dieser Platz kann nicht zugewiesen werden.</string>
+    <string name="assign_failed_person">Diese Person ist nicht mehr verfügbar. Bitte wähle erneut.</string>
+    <string name="assign_failed_occupied">Diese Person spielt bereits auf einem anderen Platz.</string>
 </resources>

@@ -1,5 +1,5 @@
 package eu.advantly.presentation.wizard
-
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
@@ -20,7 +20,10 @@ object PlayerSelection {
         selfId: PlayerId,
     ): List<Player> {
         val assigned = input.players.map { it.id }.toSet() + selfId
-        return (created + recent + guests).distinctBy { it.id }.filterNot { it.id in assigned }
+        return (created + recent + guests).distinctBy { it.id }.filterNot {
+            it.id in assigned || it.isPlaceholder ||
+                Placeholders.isPlaceholder(it.id)
+        }
     }
 
     fun places(input: WizardInput): List<PlayerPlace> =

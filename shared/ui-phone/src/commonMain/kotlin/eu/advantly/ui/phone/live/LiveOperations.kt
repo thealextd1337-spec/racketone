@@ -97,7 +97,7 @@ internal fun ServerChoiceBar(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             choice.players.forEach { player ->
                 ChoiceChip(
-                    text = playerName(snapshot.setup.player(player)),
+                    text = playerName(snapshot.setup, player),
                     selected = choice.chosen == player,
                     onClick = { controller.chooseServer(player) },
                     tag = "choose_server_${player.value}",
@@ -165,7 +165,7 @@ internal fun ServeInfoBar(
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         Text(
-            stringResource(Res.string.serve_point_title, playerName(snapshot.setup.player(point.server))),
+            stringResource(Res.string.serve_point_title, playerName(snapshot.setup, point.server)),
             modifier = Modifier.testTag("serve_info_title").semantics { liveRegion = LiveRegionMode.Polite },
             style = AdvantlyTheme.typography.caption,
             color = AdvantlyTheme.colors.text2,

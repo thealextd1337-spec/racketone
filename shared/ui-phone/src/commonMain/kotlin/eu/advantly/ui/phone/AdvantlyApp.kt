@@ -32,7 +32,9 @@ import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
+import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
+import eu.advantly.ui.phone.common.PlaceholderAssignments
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -72,6 +74,7 @@ fun AdvantlyApp(
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
     val self by model.players.self.collectAsState()
+    val aliases by model.players.ownerAliases.collectAsState()
     val updateRequired by model.live.updateRequired.collectAsState()
     val navigator = model.navigator
     if (autoBenchmark) {
@@ -83,7 +86,7 @@ fun AdvantlyApp(
         model.live.refreshWatchStatus()
         onPauseOrDispose {}
     }
-    CompositionLocalProvider(LocalSelfId provides self.id) {
+    CompositionLocalProvider(LocalSelfId provides self.id, LocalSelfAliases provides aliases) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
@@ -111,6 +114,7 @@ fun AdvantlyApp(
                         AdvantlyTheme(darkTheme = true) {
                             LiveScoreScreen(
                                 controller = model.controller,
+                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players) },
                                 debugTools = debugTools,
                                 onMinimize = { navigator.pop() },
                                 onShowResult = model::openResult,
@@ -122,8 +126,19 @@ fun AdvantlyApp(
                     }
 
                     is Overlay.Result -> {
+                        val history by model.history.matches.collectAsState()
                         ResultScreen(
-                            record = model.history.record(top.matchId),
+                            record =
+                                history.firstOrNull { it.matchId == top.matchId }?.let { model.history.record(it.matchId) }
+                                    ?: model.history.record(top.matchId),
+                            playerAssignments = {
+                                PlaceholderAssignments(
+                                    it.summary.matchId,
+                                    it.summary.setup,
+                                    model.history,
+                                    model.players,
+                                )
+                            },
                             onBack = { navigator.pop() },
                             onPlayAgain = { model.startMatch(it) },
                             onDelete = {
