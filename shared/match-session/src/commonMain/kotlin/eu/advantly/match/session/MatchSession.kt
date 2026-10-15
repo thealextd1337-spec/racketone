@@ -169,8 +169,12 @@ class MatchSession(
      */
     private var droppedInputs: DroppedInputs? = loadDroppedNotice()
 
-    /** Matches, die schon einmal an eine Uhr gesendet wurden (Cache der Settings `session.sentToWatch.*`). */
-    private val sentToWatchCache = HashSet<MatchId>()
+    /**
+     * Matches, die nachweislich noch nie an eine Uhr gesendet wurden (Cache der Settings `session.neverSentToWatch.*`).
+     * Konservativ (Review W3-M R3 #1): Nur hier neu angelegte Matches tragen den Merker; Bestandsdaten von vor dem Update
+     * gelten damit als „möglicherweise gesendet“ und werden nie ohne Rückfrage übernommen.
+     */
+    private val neverSentCache = HashMap<MatchId, Boolean>()
     private val listeners = mutableListOf<SessionListener>()
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
@@ -383,6 +387,12 @@ class MatchSession(
             broadcastMeta(target.record)
             // bisher nicht an die Uhr repliziert: das ganze Log jetzt nachschieben (idempotent beim Empfänger)
             targets().forEach { sendEvents(it, matchId, data.events.scoreEvents(matchId)) }
+            reconcileWatchScorers()
+        } else {
+            // dasselbe Ziel ausdrücklich bestätigt (z. B. war es nur implizit zugewiesen): neue Generation, damit die Uhr
+            // es auch gegen ein inzwischen offline gestartetes eigenes Match annimmt (Review W3-M R3 #2)
+            assignWatch(matchId, explicit = true)
+            broadcastMeta(target.record)
             reconcileWatchScorers()
         }
         if (watchScores && !isWatchDevice(target.scorer)) emit(target, listOf(ScorerChanged(myWatch())))
@@ -756,6 +766,7 @@ class MatchSession(
                 data.favorites.recordUse(format.sport, format.discipline, lineup.a, lineup.b, now)
             }
         }
+        markNeverSentToWatch(matchId)
         openMatch(matchId, focus = true)
         // Ein Folge-Match ersetzt sein beendetes Vor-Match in der Liste (wie auf der Uhr)
         if (previous != null) opened.remove(previous)
@@ -893,19 +904,25 @@ class MatchSession(
         if (scorer == PENDING_WATCH) return false
         // Review W3-M R2 #1: eine unbestätigte Genesis beweist nichts (Ack unterwegs, Trennung vor dem Ack) –
         // verlustfrei sofort übernehmen darf das Handy nur, wenn es das Match nie an eine Uhr gesendet hat
-        return scorer.value in devicesIn(m.id) || sentToWatch(m.id)
+        return scorer.value in devicesIn(m.id) || !neverSentToWatch(m.id)
     }
 
-    /** Wurde [matchId] je an eine Uhr gesendet (Sendeversuch, persistent)? */
-    private fun sentToWatch(matchId: MatchId): Boolean =
-        matchId in sentToWatchCache ||
-            (data.settings.get(SENT_TO_WATCH_PREFIX + matchId.value) != null).also {
-                if (it) sentToWatchCache += matchId
-            }
+    /** [matchId] wurde hier angelegt und noch nie an eine Uhr gesendet (fehlender Merker = möglicherweise gesendet). */
+    private fun neverSentToWatch(matchId: MatchId): Boolean =
+        neverSentCache.getOrPut(matchId) { data.settings.get(NEVER_SENT_TO_WATCH_PREFIX + matchId.value) != null }
 
+    /** Neues, hier angelegtes Match: nachweislich noch nie an eine Uhr gesendet. */
+    private fun markNeverSentToWatch(matchId: MatchId) {
+        if (!config.parallelMatches) return
+        data.settings.put(NEVER_SENT_TO_WATCH_PREFIX + matchId.value, "1")
+        neverSentCache[matchId] = true
+    }
+
+    /** Erster Sendeversuch an eine Uhr: der Merker „nie gesendet“ fällt dauerhaft weg. */
     private fun markSentToWatch(matchId: MatchId) {
-        if (!config.parallelMatches || !sentToWatchCache.add(matchId)) return
-        data.settings.put(SENT_TO_WATCH_PREFIX + matchId.value, "1")
+        if (!config.parallelMatches || !neverSentToWatch(matchId)) return
+        data.settings.remove(NEVER_SENT_TO_WATCH_PREFIX + matchId.value)
+        neverSentCache[matchId] = false
     }
 
     /** [device] ist eine verbundene, kompatible Gegenstelle. */
@@ -983,7 +1000,8 @@ class MatchSession(
         explicit: Boolean = false,
     ) {
         val current = watchAssignment
-        if (current != null && current.matchId == matchId && (current.explicit || !explicit)) return
+        // implizit: gleiche Zuweisung ist ein No-op; ausdrücklich: immer neue Generation (Review W3-M R3 #2)
+        if (current != null && current.matchId == matchId && !explicit) return
         val at = maxOf(clock.nowMs(), (current?.assignedAtMs ?: 0) + 1)
         storeAssignment(WatchAssignment(matchId, at, explicit))
     }
@@ -1815,8 +1833,8 @@ class MatchSession(
         /** Settings: noch nicht quittierter Hinweis „matchId|Anzahl“ (Uhr). */
         private const val DROPPED_NOTICE_KEY = "session.droppedNotice"
 
-        /** Settings: Match wurde je an eine Uhr gesendet (Handy). */
-        private const val SENT_TO_WATCH_PREFIX = "session.sentToWatch."
+        /** Settings: hier angelegtes Match wurde noch nie an eine Uhr gesendet (Handy); fehlt = möglicherweise gesendet. */
+        private const val NEVER_SENT_TO_WATCH_PREFIX = "session.neverSentToWatch."
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"

@@ -314,6 +314,86 @@ class ParallelMatchesTest {
         )
     }
 
+    /** Review R3 #1: Upgrade mit bestehendem Match ohne Merker – gilt als möglicherweise gesendet, Wechsel nur mit Rückfrage. */
+    @Test
+    fun upgradeWithAnExistingMatchStillAsksBeforeTakingOver() {
+        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        cluster.settle() // Genesis zugestellt und bestätigt
+        cluster.offline("watch")
+        cluster.settle()
+        watch.points("AA")
+        // Stand von vor dem Merker: Einstellungen ohne „nie gesendet“-Einträge, Neustart der Session
+        val device = cluster["phone"]
+        device.data.settings
+            .all()
+            .keys
+            .filter { it.startsWith("session.neverSentToWatch.") }
+            .forEach(device.data.settings::remove)
+        device.session.close()
+        device.session =
+            MatchSession(
+                device.data,
+                ReliableDeviceLink(cluster.network.transport("phone-neu"), cluster.scheduler),
+                cluster.scheduler,
+                SessionConfig(DeviceId("phone"), PeerKind.PHONE),
+                cluster.clock,
+                RandomIdGenerator(Random(77)),
+            ).also { it.start() }
+        assertTrue(phone.resume(a))
+        assertEquals(a, phone.watchMatchNeedingTakeOver(), "Bestandsmatch: Rückfrage statt stiller Übernahme")
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+    }
+
+    /** Review R3 #1: Ein hier angelegtes, nie gesendetes Match übernimmt das Handy weiter ohne Rückfrage. */
+    @Test
+    fun neverSentMatchIsTakenOverWithoutAsking() {
+        cluster.offline("watch")
+        cluster.settle()
+        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // Uhr offline: nie gesendet
+        assertNull(phone.watchMatchNeedingTakeOver())
+        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        assertTrue(
+            phone.state.value
+                .match(a)!!
+                .isScorer,
+            "verlustfrei sofort übernommen",
+        )
+    }
+
+    /** Review R3 #2: Ausdrücklicher Auftrag für dasselbe, bisher implizite Ziel gewinnt gegen einen Offline-Start der Uhr. */
+    @Test
+    fun explicitConfirmationOfTheSameTargetBeatsAnOfflineWatchStart() {
+        val a = phone.create(format, SINGLES) // Director bei freier Uhr: implizit zugewiesen
+        cluster.settle()
+        cluster.offline("watch")
+        cluster.settle()
+        val w = watch.create(format, SINGLES) // Uhr startet offline ein eigenes Match
+        assertTrue(watch.recordPoint(Side.A))
+        cluster.settle(1_000)
+        assertTrue(phone.assignToWatch(a, watchScores = true))
+        cluster.online("watch")
+        cluster.settle(65_000)
+        assertEquals(a, phone.state.value.watchMatchId, "ausdrücklicher Auftrag bleibt")
+        assertEquals(
+            a,
+            watch.state.value.match
+                ?.id,
+        )
+        val watchScored =
+            phone.state.value.matches
+                .filter { it.state.status != MatchStatus.FINISHED && it.scorerDeviceId == DeviceId("watch") }
+                .map { it.id }
+        assertEquals(listOf(a), watchScored)
+        val onPhone = phone.state.value.match(w)!!
+        assertTrue(onPhone.isScorer, "W geordnet ans Handy")
+        assertEquals(
+            "15",
+            onPhone.state.current!!
+                .display.a,
+            "Uhr-Punkt in W bleibt",
+        )
+    }
+
     /** Review R2 #3: Vor dem Hello gehen keine Matchdaten an eine unbekannte Gegenstelle. */
     @Test
     fun unidentifiedPeersGetNoMatchData() {
