@@ -1,0 +1,17 @@
+-- Einfache Einstellungen (Key-Value), z. B. Geräte-ID, offene Fork-Hinweise, Anzeigeoptionen.
+CREATE TABLE setting (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+selectValue:
+SELECT value FROM setting WHERE key = ?;
+
+put:
+INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?);
+
+remove:
+DELETE FROM setting WHERE key = ?;
+
+selectAll:
+SELECT key, value FROM setting ORDER BY key;

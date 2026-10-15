@@ -1,22 +1,27 @@
--- Event-Log eines Matches (append-only). Minimal-Schema aus Spike S1; die volle Spalte-Liste
--- (wall_clock_ms, parent_id, type, uploaded) folgt mit core-scoring/sync-protocol (01 §5.1).
--- Vor dem ersten Release darf sich das Schema noch ohne Migration ändern.
+-- Event-Log aller Matches (append-only, 01 §5.1). Ordnung (lamport, device_id, id) wie 01 §3.2.
+-- Die Spalte uploaded (Outbox) kommt mit dem Cloud-Sync in P2. Vor dem ersten Release ändert sich das Schema
+-- ohne Migration (Schema-Version siehe LocalData.SCHEMA_VERSION).
 CREATE TABLE match_event (
     id TEXT NOT NULL PRIMARY KEY,
     match_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
     device_seq INTEGER NOT NULL,
     lamport INTEGER NOT NULL,
+    wall_clock_ms INTEGER NOT NULL DEFAULT 0,
+    parent_id TEXT,
+    -- Payload-Typ (z. B. PointWon) für Abfragen ohne JSON-Parsing
+    type TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL,
     UNIQUE (match_id, device_id, device_seq)
 );
 
--- Deckt eventsForMatch inkl. Sortierung (lamport, device_id, id) ab – 01 §3.2
+-- Deckt eventsForMatch inkl. Sortierung (lamport, device_id, id) ab – 01 §3.2.
+-- Bereichsabfragen je Gerät (Anti-Entropie) nutzen den UNIQUE-Index (match_id, device_id, device_seq).
 CREATE INDEX match_event_order ON match_event (match_id, lamport, device_id, id);
 
 insert:
-INSERT INTO match_event (id, match_id, device_id, device_seq, lamport, payload)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO match_event (id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 countById:
 SELECT count(*) FROM match_event WHERE id = ?;
@@ -25,10 +30,28 @@ countBySequence:
 SELECT count(*) FROM match_event WHERE match_id = ? AND device_id = ? AND device_seq = ?;
 
 eventsForMatch:
-SELECT id, match_id, device_id, device_seq, lamport, payload
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
 FROM match_event
 WHERE match_id = ?
 ORDER BY lamport, device_id, id;
 
+eventsInRange:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
+FROM match_event
+WHERE match_id = ? AND device_id = ? AND device_seq BETWEEN ? AND ?
+ORDER BY lamport, device_id, id;
+
+sequencesForMatch:
+SELECT device_id, device_seq FROM match_event WHERE match_id = ? ORDER BY device_id, device_seq;
+
+maxLamport:
+SELECT coalesce(max(lamport), 0) FROM match_event WHERE match_id = ?;
+
+maxDeviceSeq:
+SELECT coalesce(max(device_seq), 0) FROM match_event WHERE match_id = ? AND device_id = ?;
+
 countForMatch:
 SELECT count(*) FROM match_event WHERE match_id = ?;
+
+deleteForMatch:
+DELETE FROM match_event WHERE match_id = ?;

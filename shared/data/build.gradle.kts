@@ -1,7 +1,9 @@
-// Lokale Datenhaltung: SQLDelight (System-SQLite auf Apple), EventStore; später Repositories, Outbox.
+// Lokale Datenhaltung: SQLDelight (System-SQLite auf Apple), EventStore, Repositories (Match-Kopf, Spieler,
+// Favoriten-Lineups, Settings); später Outbox (P2).
 // Treiber: android-driver (Android), sqlite-driver/JDBC (JVM-Tests, Desktop-Preview), native-driver (iOS + watchOS).
 plugins {
     alias(libs.plugins.advantly.kmp.library)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.sqldelight)
 }
 
@@ -10,6 +12,8 @@ kotlin {
         commonMain.dependencies {
             api(projects.shared.coreScoring)
             api(libs.sqldelight.runtime)
+            // JSON-Spalten (MatchFormat, Lineup, Event-Payloads) – gleiche Form wie auf dem Draht (sync-protocol)
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmMain.dependencies {
             implementation(libs.sqldelight.sqlite.driver)

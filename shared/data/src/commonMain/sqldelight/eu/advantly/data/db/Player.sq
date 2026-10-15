@@ -1,0 +1,31 @@
+-- Lokale Spieler (P1 ohne Account): genau ein SELF (stabile lokale UUID), sonst Gäste bzw. von anderen Geräten
+-- übernommene Spieler. P2 verknüpft SELF mit dem Profil.
+CREATE TABLE player (
+    id TEXT NOT NULL PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    -- SELF | GUEST
+    kind TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    last_used_at_ms INTEGER
+);
+
+insertOrIgnore:
+INSERT OR IGNORE INTO player (id, display_name, kind, created_at_ms, last_used_at_ms) VALUES (?, ?, ?, ?, ?);
+
+selectSelf:
+SELECT * FROM player WHERE kind = 'SELF' ORDER BY created_at_ms, id LIMIT 1;
+
+selectById:
+SELECT * FROM player WHERE id = ?;
+
+selectAll:
+SELECT * FROM player ORDER BY kind DESC, coalesce(last_used_at_ms, 0) DESC, display_name, id;
+
+rename:
+UPDATE player SET display_name = ? WHERE id = ?;
+
+markUsed:
+UPDATE player SET last_used_at_ms = max(coalesce(last_used_at_ms, 0), :nowMs) WHERE id IN :ids;
+
+deleteGuest:
+DELETE FROM player WHERE id = ? AND kind != 'SELF';
