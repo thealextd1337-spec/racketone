@@ -1,11 +1,341 @@
-/* Begrüßung auf dem Startscreen der Uhr */
-"watch.greeting" = "Hello Advantly";
+/* Store-Smoke-Test (Debug-Zeile auf der Startliste) */
+"watch.store %@" = "Event store: %@ event(s)";
 
-/* Zeigt das Engine-Modul aus AdvantlyWatchKit (Platzhalter) */
+/* Engine-Modul aus AdvantlyWatchKit (Debug-Zeile) */
 "watch.engine %@" = "Engine: %@";
 
-/* Zeigt das Ergebnis des Store-Smoke-Tests (erwartet 1) */
-"watch.store %@" = "Event store: %@ event(s)";
+/* Startliste */
+"start.lastTime" = "Same as last time";
+
+/* Startliste */
+"start.newMatch" = "New match";
+
+/* Preset-Liste: Standard-Format der Sportart */
+"start.default" = "Default";
+
+/* Setup */
+"setup.singles" = "Singles";
+
+/* Setup */
+"setup.doubles" = "Doubles";
+
+/* Setup */
+"setup.whoServes" = "Who serves first?";
+
+/* Setup */
+"setup.weServe" = "We serve";
+
+/* Setup */
+"setup.theyServe" = "They serve";
+
+/* Sportart */
+"sport.TENNIS" = "Tennis";
+
+/* Sportart */
+"sport.PADEL" = "Padel";
+
+/* Sportart */
+"sport.PICKLEBALL" = "Pickleball";
+
+/* Sportart */
+"sport.BADMINTON" = "Badminton";
+
+/* Sportart */
+"sport.TABLE_TENNIS" = "Table tennis";
+
+/* Team-Label oben (Uhr-Besitzer) */
+"team.us" = "US";
+
+/* Team-Label unten */
+"team.them" = "THEM";
+
+/* Aufschlagfeld rechts (Kurzform) */
+"serve.court.RIGHT" = "R";
+
+/* Aufschlagfeld links (Kurzform) */
+"serve.court.LEFT" = "L";
+
+/* Trenner in Spielständen (DE 6:4, EN 6–4) */
+"score.separator" = "–";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DECIDING_POINT" = "Golden pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DECIDING_POINT_RALLY" = "Deciding pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.STAR_POINT" = "Star pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.MATCH_POINT" = "Match pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.SET_POINT" = "Set pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.SET_POINT_PB" = "Game pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.BREAK_POINT" = "Break pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DEUCE" = "Deuce";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DEUCE_RALLY" = "Deuce";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.TIEBREAK" = "Tiebreak";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.MATCH_TIEBREAK" = "Match TB";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.MATCH_POINT.n %@" = "%@ match pts";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.SET_POINT.n %@" = "%@ set pts";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.SET_POINT_PB.n %@" = "%@ game pts";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.BREAK_POINT.n %@" = "%@ break pts";
+
+/* Rückgängig (Button, Bedienhilfe) */
+"action.undo" = "Undo";
+
+/* Hinweis nach Undo: alter → neuer Stand */
+"banner.undo %@ %@" = "Undo: %1$@ → %2$@";
+
+/* Hinweis Seitenwechsel */
+"banner.changeEnds" = "⇄ Change ends";
+
+/* Hinweis ohne HealthKit */
+"banner.health" = "Counting without Health – no heart rate";
+
+/* Bedienhilfe: obere Hälfte */
+"a11y.pointUs" = "Point for us";
+
+/* Bedienhilfe: untere Hälfte */
+"a11y.pointThem" = "Point for them";
+
+/* Bedienhilfe: Aufschlag-Indikator */
+"a11y.serving" = "Serving";
+
+/* Steuerseite */
+"controls.waterLock" = "Water lock";
+
+/* Steuerseite: Belegung der Action-Taste (Ultra) */
+"controls.actionButton" = "Action button";
+
+/* Steuerseite: Action-Taste = Rückgängig */
+"controls.actionButton.undo" = "Undo";
+
+/* Steuerseite: Action-Taste = Punkt für uns */
+"controls.actionButton.pointUs" = "Point for us";
+
+/* Steuerseite: Action-Taste aus */
+"controls.actionButton.off" = "Off";
+
+/* Steuerseite */
+"controls.end" = "End match";
+
+/* Rückfrage Match beenden */
+"controls.end.confirm" = "End the match now?";
+
+/* Allgemein */
+"common.cancel" = "Cancel";
+
+/* Fitness-Seite */
+"fitness.heartRate" = "Heart rate";
+
+/* Fitness-Seite ohne HealthKit */
+"fitness.noHealth" = "No Health access: counting only. The app may pause when your wrist is down.";
+
+/* Satzende-Dialog: Satznummer und Stand */
+"setend.title %@ %@" = "Set %1$@ · %2$@";
+
+/* Satzende-Dialog */
+"setend.won" = "won";
+
+/* Satzende-Dialog */
+"setend.lost" = "lost";
+
+/* Satzende-Dialog */
+"setend.question" = "Another set?";
+
+/* Satzende-Dialog (Primäraktion) */
+"setend.yes" = "Yes";
+
+/* Satzende-Dialog: Match-Tiebreak statt Satz */
+"setend.matchTiebreak" = "Match tiebreak";
+
+/* Satzende-Dialog */
+"setend.no" = "No, end match";
+
+/* Matchende */
+"matchend.won" = "Won";
+
+/* Matchende */
+"matchend.lost" = "Lost";
+
+/* Matchende */
+"matchend.draw" = "Draw";
+
+/* Matchende */
+"matchend.abandoned" = "Ended early";
+
+/* Matchende */
+"matchend.done" = "Done";
+
+/* Action-Taste (AppIntent) */
+"intent.undo.title" = "Undo last point";
+
+/* Action-Taste (AppIntent) */
+"intent.pointUs.title" = "Point for us";
+
+/* Action-Taste: Schnellstart (StartWorkoutIntent) */
+"intent.start.title" = "Start match";
+
+/* Action-Taste: Parameter Sportart */
+"intent.sport.type" = "Sport";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SINGLES_BO3" = "Best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SINGLES_BO5_FS10" = "Best of 5, final-set TB 10";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_BO3_MTB10" = "Best of 3 + match TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_DOUBLES_MTB10" = "Doubles No-Ad + match TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_BO3_ADV_FINAL" = "Best of 3, advantage final set";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SHORT_SETS" = "Short sets to 4";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SHORT_SETS_3ALL" = "Short sets, TB at 3–3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_PRO_SET_8" = "Pro set to 8";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_PRO_SET_10" = "Pro set to 10";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_ONE_SET" = "One set";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_MATCH_TB_ONLY" = "Match tiebreak only";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_OPEN" = "Open (set by set)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_PREMIER_2026" = "Premier (Star Point)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_GOLDEN_BO3" = "Golden Point";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_GOLDEN_STB" = "Golden Point + super TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_ADVANTAGE_BO3" = "Classic (advantage)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_ADV_FINAL_NO_TB" = "3rd set without TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_MINI_SETS" = "Mini sets to 4";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_OPEN" = "Open (set by set)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_11_SIDEOUT" = "Doubles to 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_BO3_11" = "Doubles, best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_15" = "Doubles to 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_21" = "Doubles to 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_SINGLES_11_SIDEOUT" = "Singles to 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_SINGLES_BO3_11" = "Singles, best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_RALLY_21" = "Doubles rally to 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_RALLY_BO3_15" = "Rally, best of 3 to 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_RALLY_7_WEATHER" = "Rally to 7 (weather)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_TEAM_WIN_BY_1" = "Team play, win by 1";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_OPEN" = "Open (game by game)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_SINGLES_BO3_15" = "Singles 3×15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_DOUBLES_BO3_15" = "Doubles 3×15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_SINGLES_BO3_21" = "Singles 3×21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_DOUBLES_BO3_21" = "Doubles 3×21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_1GAME_21" = "One game to 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_1GAME_15" = "One game to 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_BO5_11" = "Best of 5 to 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_OPEN" = "Open (game by game)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO5" = "Singles, best of 5";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO7" = "Singles, best of 7";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO3" = "Singles, best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_DOUBLES_BO5" = "Doubles, best of 5";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_DOUBLES_BO3" = "Doubles, best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_LEISURE_21" = "To 21 (old scoring)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_OPEN" = "Open (game by game)";
 
 /* Link-Debug (Spike S3, nur DEBUG) */
 "link.debug.open" = "Link debug";

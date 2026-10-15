@@ -1,0 +1,262 @@
+import AdvantlyWatchKit
+import Foundation
+import SwiftUI
+
+/// Was die Action-Taste (Ultra) im Match tut – Feature-Flag nach 05 §1.7 (Default: Rückgängig).
+/// Risiko R2 (Intent-Spende seit watchOS 26.5 fehlerhaft): der Undo-Button auf dem Display bleibt immer.
+enum ActionButtonMode: String, CaseIterable {
+    case undo
+    case pointUs
+    case off
+
+    static let key = "advantly.watch.actionButton"
+
+    static var stored: ActionButtonMode {
+        get { ActionButtonMode(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .undo }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+    }
+
+    var next: ActionButtonMode {
+        let all = ActionButtonMode.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
+    }
+}
+
+/// Kurzer Hinweis über dem Scoring-Screen (3 s).
+enum Banner: Equatable {
+    case undo(from: String, to: String)
+    case changeEnds
+    case healthUnavailable
+}
+
+/// Zustand der Watch-App. Alle Zähl-Logik liegt in Kotlin (`WatchScoring`); Swift übernimmt nur Gesten,
+/// Sperrzeit, Haptik, Workout-Session und Anzeige. Alles läuft auf der Main-Queue.
+final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
+    static let shared = ScoringModel()
+
+    /// Sperrzeit nach jedem Punkt für beide Flächen (04 §4.3.3, Entprellung).
+    static let lockInterval: TimeInterval = 0.6
+
+    let scoring = AdvantlyWatch.shared.scoring()
+    let workout = WorkoutManager()
+
+    @Published private(set) var snapshot: WatchScoreSnapshot?
+    @Published private(set) var lockedUntil = Date.distantPast
+    /// Kurzes Aufleuchten der getippten Hälfte (120 ms)
+    @Published private(set) var flashSideA: Bool?
+    @Published private(set) var banner: Banner?
+    @Published private(set) var lastSetup: WatchMatchSetup?
+    @Published var actionButtonMode = ActionButtonMode.stored {
+        didSet {
+            ActionButtonMode.stored = actionButtonMode
+            donateActionIntent()
+        }
+    }
+
+    /// Workout-Session an das Match koppeln. Der CI-Demo-Modus schaltet sie ab, damit kein HealthKit-Dialog
+    /// die Screenshots verdeckt.
+    var workoutEnabled = true
+
+    private var bannerWork: DispatchWorkItem?
+    /// Nach dem Aufwecken (Always-on → aktiv) zählen Taps 300 ms lang still nicht (04 §4.3.3 Punkt 4).
+    private var silentUntil = Date.distantPast
+
+    override private init() {
+        super.init()
+        scoring.setListener(listener: self)
+        lastSetup = scoring.lastSetup()
+        workout.onUnavailable = { [weak self] in
+            if self?.snapshot != nil { self?.show(.healthUnavailable) }
+        }
+        workout.onRunning = { [weak self] in self?.donateActionIntent() }
+        workout.onRecoveryFailed = { [weak self] in self?.syncWorkout() }
+    }
+
+    // MARK: WatchScoringListener
+
+    func onSnapshot(snapshot: WatchScoreSnapshot) {
+        self.snapshot = snapshot
+        syncWorkout()
+    }
+
+    /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende).
+    private func syncWorkout() {
+        guard let snap = snapshot else { return }
+        if snap.matchFinished || !workoutEnabled {
+            workout.end()
+        } else {
+            workout.ensureRunning(matchId: snap.matchId, sport: snap.sport, presetId: snap.presetId, doubles: snap.doubles)
+        }
+    }
+
+    // MARK: Start
+
+    /// Nach App-Start: laufendes Match aus dem Event-Log fortsetzen.
+    func resumeIfNeeded() {
+        if snapshot == nil {
+            _ = scoring.resume()
+        }
+    }
+
+    var sports: [String] { scoring.sports() }
+
+    /// Presets der Sportart, Default zuerst (Badminton-Default nach heutigem Datum).
+    func presets(for sport: String) -> [WatchPreset] {
+        let today = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return scoring.presets(
+            sport: sport,
+            year: Int32(today.year ?? 2026),
+            month: Int32(today.month ?? 1),
+            day: Int32(today.day ?? 1)
+        )
+    }
+
+    @discardableResult
+    func start(presetId: String, doubles: Bool, weServeFirst: Bool) -> Bool {
+        guard scoring.startMatch(presetId: presetId, doubles: doubles, weServeFirst: weServeFirst) != nil else {
+            Haptics.rejected()
+            return false
+        }
+        lastSetup = scoring.lastSetup()
+        lockedUntil = .distantPast
+        Haptics.play(.start)
+        return true
+    }
+
+    func startLast() {
+        guard let last = lastSetup else { return }
+        start(presetId: last.presetId, doubles: last.doubles, weServeFirst: last.weServeFirst)
+    }
+
+    /// Schnellstart über die Action-Taste (StartWorkoutIntent): letzte Auswahl dieser Sportart, sonst Default-Preset.
+    func quickStart(sport: String) {
+        if let snap = snapshot, !snap.matchFinished { return }
+        if snapshot != nil { closeMatch() }
+        if let last = lastSetup, last.sport == sport {
+            startLast()
+            return
+        }
+        let presets = presets(for: sport)
+        guard let preset = presets.first(where: { $0.isDefault }) ?? presets.first else { return }
+        start(presetId: preset.id, doubles: preset.defaultDoubles, weServeFirst: true)
+    }
+
+    // MARK: Zählen
+
+    /// Tap auf eine Hälfte. `force` umgeht die Sperrzeit (nur Demo-Modus).
+    func tap(sideA: Bool, force: Bool = false) {
+        guard let before = snapshot, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
+        let now = Date()
+        if !force && now < silentUntil { return }
+        if !force && now < lockedUntil {
+            Haptics.rejected()
+            return
+        }
+        guard let after = scoring.point(sideA: sideA) else {
+            Haptics.rejected()
+            return
+        }
+        lockedUntil = now.addingTimeInterval(Self.lockInterval)
+        flashSideA = sideA
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.flashSideA = nil }
+        Haptics.feedback(after: after, us: sideA, previousHint: before.hintCode)
+        if after.changeEnds {
+            show(.changeEnds)
+        }
+    }
+
+    var isLocked: Bool { Date() < lockedUntil }
+
+    /// Display wurde aus dem Always-on-Zustand geweckt: der Aufweck-Tap soll nicht zählen.
+    func didWake() {
+        silentUntil = Date().addingTimeInterval(0.3)
+    }
+
+    func undo() {
+        guard let before = snapshot, let after = scoring.undo() else {
+            Haptics.rejected()
+            return
+        }
+        Haptics.undo()
+        show(.undo(from: ScoreText.short(before), to: ScoreText.short(after)))
+    }
+
+    func decide(anotherSet: Bool, matchTiebreak: Bool) {
+        guard scoring.continueDecision(anotherSet: anotherSet, matchTiebreak: matchTiebreak) != nil else {
+            Haptics.rejected()
+            return
+        }
+        Haptics.play(anotherSet ? .start : .stop)
+    }
+
+    func endMatch() {
+        guard scoring.end() != nil else { return }
+        Haptics.play(.stop)
+    }
+
+    /// Matchende-Ansicht verlassen bzw. Match aus der Anzeige nehmen (das Log bleibt).
+    func closeMatch() {
+        scoring.close()
+        snapshot = nil
+        banner = nil
+        workout.end()
+        lastSetup = scoring.lastSetup()
+    }
+
+    // MARK: Action-Taste
+
+    func handleActionButton() {
+        switch actionButtonMode {
+        case .undo: undo()
+        case .pointUs: tap(sideA: true)
+        case .off: break
+        }
+    }
+
+    func donateActionIntent() {
+        guard snapshot != nil else { return }
+        ActionIntents.donate(actionButtonMode)
+    }
+
+    // MARK: Hinweise
+
+    func show(_ banner: Banner) {
+        bannerWork?.cancel()
+        self.banner = banner
+        let work = DispatchWorkItem { [weak self] in self?.banner = nil }
+        bannerWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+}
+
+/// Kurztexte für Spielstände (DE „6:4“, EN „6–4“, 04 §9.1).
+enum ScoreText {
+    static var separator: String { loc("score.separator") }
+
+    static func pair(_ a: String, _ b: String) -> String { a + separator + b }
+
+    static func pair(_ a: Int32, _ b: Int32) -> String { pair(String(a), String(b)) }
+
+    /// Abgeschlossene Sätze aus Sicht „Wir“, z. B. „6:4 3:6“; Satz-Tiebreak des Verlierers in Klammern.
+    static func sets(_ s: WatchScoreSnapshot) -> String {
+        s.setScoresA.indices.map { i -> String in
+            let a = s.setScoresA[i].int32Value
+            let b = s.setScoresB[i].int32Value
+            let tbA = s.setTiebreaksA[i].int32Value
+            let tbB = s.setTiebreaksB[i].int32Value
+            if tbA >= 0 && tbB >= 0 {
+                return pair(a, b) + "(\(min(tbA, tbB)))"
+            }
+            return pair(a, b)
+        }.joined(separator: " ")
+    }
+
+    /// Stand für den Undo-Hinweis, z. B. „3:2 30:15“.
+    static func short(_ s: WatchScoreSnapshot) -> String {
+        if s.pointsA.isEmpty {
+            return sets(s)
+        }
+        let points = pair(s.pointsA, s.pointsB)
+        return s.gamesA >= 0 ? pair(s.gamesA, s.gamesB) + " " + points : points
+    }
+}
