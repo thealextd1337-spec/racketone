@@ -12,15 +12,20 @@ import eu.advantly.core.model.StartEnds
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Effect
 import eu.advantly.core.scoring.EngineState
+import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.MatchDriver
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.RandomMatches
+import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.Undo
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -30,17 +35,23 @@ import kotlin.random.Random
 import kotlin.system.exitProcess
 
 /**
- * Generator der Golden-Testvektoren (01 §8.1): je Preset aus 02 §4 ein kanonischer Beispiel-Vektor unter
- * `testvectors/<sport>/<preset>.json`. Die Eventfolge ist pseudozufällig mit festem Seed je Preset-ID
- * (deterministisch), enthält einzelne UI-Undos und – im OPEN-Modus – Satzende-Entscheidungen. Checkpoints enthalten
- * den **vollständigen** kanonischen Zustand an markanten Stellen (Satzende, Seitenwechsel, Undo …).
+ * Generator der Golden-Testvektoren (01 §8.1) unter `testvectors/<sport>/`:
  *
- * Aufruf über Gradle: `generateTestVectors` (schreibt) bzw. `checkTestVectorDrift` (vergleicht, schlägt bei Drift fehl).
+ * - `presets/` – je Preset **und** Disziplin ein kanonischer Beispiel-Vektor (Pseudozufall mit festem Seed, UI-Undos,
+ *   im OPEN-Modus Satzende-Antworten),
+ * - `rules/` – Export der Regel-Tabellen-Szenarien ([RuleScenarios]),
+ * - `random/` – [RANDOM_PER_SPORT] Zufallsmatches je Sportart mit festem Seed, inkl. verzweigter Historien mehrerer
+ *   Geräte (explizite Hülle `lamport`/`deviceId`/`parentId`/`wallClockMs`), Doppel-Taps, Undo-Ketten und Korrekturen.
+ *
+ * Checkpoints enthalten den **vollständigen** kanonischen Zustand. Aufruf über Gradle: `generateTestVectors` (schreibt)
+ * bzw. `checkTestVectorDrift` (vergleicht, schlägt bei Drift fehl; hängt an `check`).
  */
 object GoldenVectors {
+    /** Zufallsmatches je Sportart. 01 §8.1 nennt ~200; wegen der Repo-Größe vorerst 20 (Konstante, jederzeit erhöhbar). */
+    const val RANDOM_PER_SPORT = 20
+
     private const val MAX_POINTS = 600
     private const val UNDO_EVERY = 37
-    private const val REGULAR_CHECKPOINT_EVERY = 25
 
     private val markerEffects =
         setOf(
@@ -57,11 +68,42 @@ object GoldenVectors {
             Effect.IGNORED,
         )
 
-    /** Relativer Pfad (mit `/`) → Dateiinhalt, sortiert. */
-    fun generateAll(): Map<String, String> =
-        Presets.all.associate { preset -> "${sportDir(preset.sport)}/${preset.id.lowercase()}.json" to render(preset) }.toSortedMap()
+    /** Wann ein Checkpoint geschrieben wird. */
+    private class Policy(
+        val every: Int,
+        val markers: Boolean,
+    )
 
-    private fun sportDir(sport: Sport): String = sport.name.lowercase().replace('_', '-')
+    /** Relativer Pfad (mit `/`) → Dateiinhalt, sortiert. */
+    fun generateAll(): Map<String, String> {
+        val files = sortedMapOf<String, String>()
+        for (preset in Presets.all) {
+            for (d in preset.disciplines) {
+                val name = "${preset.id.lowercase()}-${d.name.lowercase()}"
+                files["${dir(preset.sport)}/presets/$name.json"] = presetVector(preset, d)
+            }
+        }
+        for (scenario in RuleScenarios.all()) {
+            files["${dir(scenario.sport)}/rules/${scenario.name}.json"] = scenarioVector(scenario)
+        }
+        for (sport in Sport.entries) {
+            repeat(RANDOM_PER_SPORT) { i ->
+                files["${dir(sport)}/random/random-${(i + 1).toString().padStart(3, '0')}.json"] = randomVector(sport, i)
+            }
+        }
+        return files
+    }
+
+    private fun dir(sport: Sport): String = sport.name.lowercase().replace('_', '-')
+
+    private fun tag(sport: Sport): String =
+        when (sport) {
+            Sport.TENNIS -> "TEN"
+            Sport.PADEL -> "PAD"
+            Sport.PICKLEBALL -> "PB"
+            Sport.BADMINTON -> "BAD"
+            Sport.TABLE_TENNIS -> "TT"
+        }
 
     private fun lineupFor(discipline: Discipline): Lineup =
         if (discipline == Discipline.SINGLES) {
@@ -75,40 +117,41 @@ object GoldenVectors {
             )
         }
 
-    /** Erzeugt Eventfolge und Checkpoints für [preset] (Default-Disziplin). */
-    fun script(preset: Preset): Triple<MatchFormat, Lineup, List<Pair<String, EventPayload>>> {
-        val format = preset.format()
-        val lineup = lineupFor(format.discipline)
-        val random = Random(preset.id.hashCode().toLong())
-        val payloads = mutableListOf<Pair<String, EventPayload>>()
+    // --- presets/ -------------------------------------------------------------------------------------------------
+
+    /** Eventfolge für [preset] in Disziplin [discipline]: Punkte (58 % A), alle [UNDO_EVERY] Punkte ein UI-Undo. */
+    private fun presetScript(
+        preset: Preset,
+        discipline: Discipline,
+    ): Triple<MatchFormat, Lineup, List<EventPayload>> {
+        val format = preset.format(discipline)
+        val lineup = lineupFor(discipline)
+        val random = Random("${preset.id}/$discipline".hashCode().toLong())
+        val payloads = mutableListOf<EventPayload>()
         var engine: EngineState = ScoringEngine.replay(format, lineup, emptyList())
         var decisions = 0
         var points = 0
 
         fun push(payload: EventPayload) {
-            val id = "e${payloads.size + 1}"
-            val event = VectorIo.envelope(payloads.size, id, payloads.lastOrNull()?.first, payload)
-            payloads += id to payload
-            engine = ScoringEngine.apply(engine, event)
+            val i = payloads.size
+            payloads += payload
+            engine = ScoringEngine.apply(engine, VectorIo.envelope(i, "e${i + 1}", if (i == 0) null else "e$i", payload))
         }
         while (engine.state.status != MatchStatus.FINISHED && points < MAX_POINTS) {
-            when (engine.state.status) {
-                MatchStatus.AWAITING_DECISION -> {
-                    decisions += 1
-                    when {
-                        decisions >= 3 -> push(ContinueDecision(anotherSet = false))
-                        decisions == 2 && format.matchTiebreak != null -> push(ContinueDecision(true, NextSetKind.MATCH_TIEBREAK))
-                        else -> push(ContinueDecision(true))
-                    }
+            if (engine.state.status == MatchStatus.AWAITING_DECISION) {
+                decisions += 1
+                when {
+                    decisions >= 3 -> push(ContinueDecision(anotherSet = false))
+                    decisions == 2 && format.matchTiebreak != null -> push(ContinueDecision(true, NextSetKind.MATCH_TIEBREAK))
+                    else -> push(ContinueDecision(true))
                 }
-
-                else -> {
-                    points += 1
-                    if (points % UNDO_EVERY == 0 && engine.undoTarget != null) {
-                        push(Undo(checkNotNull(engine.undoTarget)))
-                    } else {
-                        push(PointWon(if (random.nextInt(100) < 58) Side.A else Side.B))
-                    }
+            } else {
+                points += 1
+                val target = engine.undoTarget
+                if (points % UNDO_EVERY == 0 && target != null) {
+                    push(Undo(target))
+                } else {
+                    push(PointWon(if (random.nextInt(100) < 58) Side.A else Side.B))
                 }
             }
         }
@@ -117,37 +160,110 @@ object GoldenVectors {
         return Triple(format, lineup, payloads)
     }
 
-    fun render(preset: Preset): String {
-        val (format, lineup, payloads) = script(preset)
-        val events = payloads.mapIndexed { i, (id, p) -> VectorIo.envelope(i, id, payloads.getOrNull(i - 1)?.first, p) }
+    private fun presetVector(
+        preset: Preset,
+        discipline: Discipline,
+    ): String {
+        val (format, lineup, payloads) = presetScript(preset, discipline)
+        return render(
+            id = "GV-${preset.id}-${discipline.name}",
+            title = "Golden-Vektor ${preset.id} (${discipline.name}, generiert)",
+            description =
+                "Aus der Kotlin-Engine generierter kanonischer Beispiel-Vektor für das Preset ${preset.id} in ${discipline.name} " +
+                    "(Pseudozufall mit festem Seed, einzelne UI-Undos).",
+            source = "Advantly 02-scoring-regeln.md §4 (Preset ${preset.id}), §6–§8",
+            format = format,
+            lineup = lineup,
+            events = synthetic(payloads),
+            explicitEnvelope = false,
+            policy = Policy(every = 25, markers = true),
+        )
+    }
+
+    // --- rules/ ---------------------------------------------------------------------------------------------------
+
+    private fun scenarioVector(scenario: RuleScenario): String {
+        val explicit = scenario.events != null
+        val events =
+            scenario.events?.let { EventLog.distinctOrdered(it) }
+                ?: MatchDriver(scenario.format, scenario.lineup).apply { checkNotNull(scenario.script)(this) }.events.let { evs ->
+                    synthetic(evs.map { it.payload })
+                }
+        return render(
+            id = "GV-${tag(scenario.sport)}-RULE-${scenario.name.uppercase()}",
+            title = "Regel-Szenario ${scenario.name} (generiert)",
+            description = scenario.description,
+            source = "Advantly 02-scoring-regeln.md §6–§9; Regel-Tabellen-Tests in core-scoring/commonTest",
+            format = scenario.format,
+            lineup = scenario.lineup,
+            events = events,
+            explicitEnvelope = explicit,
+            policy = Policy(every = 5, markers = true),
+        )
+    }
+
+    // --- random/ --------------------------------------------------------------------------------------------------
+
+    private fun randomVector(
+        sport: Sport,
+        index: Int,
+    ): String {
+        val presets = Presets.all.filter { it.sport == sport }
+        val preset = presets[index % presets.size]
+        val seed = "$sport/random/$index".hashCode().toLong()
+        val length = 40 + Random(seed).nextInt(100)
+        val match = RandomMatches.generate(Presets.all.indexOf(preset), seed, length, deviceCount = 1 + index % 3)
+        return render(
+            id = "GV-${tag(sport)}-RANDOM-${(index + 1).toString().padStart(3, '0')}",
+            title = "Zufallsmatch ${index + 1} ${preset.id} mit ${match.devices} Gerät(en) (generiert)",
+            description =
+                "Deterministisches Zufallsmatch (Seed aus Sportart und Nummer): verzweigte Historien mehrerer Geräte mit gemeinsamen " +
+                    "Eltern, gleichen Lamports, Doppel-Taps, Undo-Ketten, Korrekturen und ungültigen Events. Events in kanonischer " +
+                    "Ordnung mit expliziter Hülle (lamport, deviceId, parentId, wallClockMs).",
+            source = "Advantly 01-architektur.md §4.4, §8.1; 02-scoring-regeln.md §7.3",
+            format = match.format,
+            lineup = match.lineup,
+            events = EventLog.distinctOrdered(match.events),
+            explicitEnvelope = true,
+            policy = Policy(every = 30, markers = false),
+        )
+    }
+
+    // --- Ausgabe --------------------------------------------------------------------------------------------------
+
+    private fun synthetic(payloads: List<EventPayload>): List<ScoreEvent> =
+        payloads.mapIndexed { i, p -> VectorIo.envelope(i, "e${i + 1}", if (i == 0) null else "e$i", p) }
+
+    @Suppress("LongParameterList")
+    private fun render(
+        id: String,
+        title: String,
+        description: String,
+        source: String,
+        format: MatchFormat,
+        lineup: Lineup,
+        events: List<ScoreEvent>,
+        explicitEnvelope: Boolean,
+        policy: Policy,
+    ): String {
         val checkpointIndices = sortedSetOf(0, events.size)
         var engine = ScoringEngine.replay(format, lineup, emptyList())
         events.forEachIndexed { i, event ->
             engine = ScoringEngine.apply(engine, event)
-            if (engine.state.effects.any { it in markerEffects } || (i + 1) % REGULAR_CHECKPOINT_EVERY == 0) checkpointIndices += i + 1
+            val marker = policy.markers && engine.state.effects.any { it in markerEffects }
+            if (marker || (i + 1) % policy.every == 0) checkpointIndices += i + 1
         }
         val sb = StringBuilder()
         sb.append("{\n")
         sb.append("  \"schema\": 1,\n")
-        sb.append("  \"id\": ${str("GV-${preset.id}")},\n")
-        sb.append("  \"title\": ${str("Golden-Vektor ${preset.id} (generiert)")},\n")
-        sb.append(
-            "  \"description\": ${str(
-                "Aus der Kotlin-Engine generierter kanonischer Beispiel-Vektor für das Preset ${preset.id} " +
-                    "(Pseudozufall mit festem Seed, einzelne UI-Undos). Checkpoints enthalten den vollständigen Zustand. " +
-                    "Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.",
-            )},\n",
-        )
-        sb.append("  \"sources\": [${str("Advantly 02-scoring-regeln.md §4 (Preset ${preset.id}), §6–§8")}],\n")
+        sb.append("  \"id\": ${str(id)},\n")
+        sb.append("  \"title\": ${str(title)},\n")
+        sb.append("  \"description\": ${str("$description Nicht von Hand ändern: gradlew :shared:core-scoring:generateTestVectors.")},\n")
+        sb.append("  \"sources\": [${str(source)}],\n")
         sb.append("  \"config\": ${compact(vectorJson.encodeToJsonElement(MatchFormat.serializer(), format))},\n")
         sb.append("  \"lineup\": ${compact(vectorJson.encodeToJsonElement(Lineup.serializer(), lineup))},\n")
         sb.append("  \"events\": [\n")
-        sb.append(
-            payloads.joinToString(",\n") { (id, p) ->
-                val body = vectorJson.encodeToJsonElement(EventPayload.serializer(), p) as JsonObject
-                "    " + compact(JsonObject(mapOf("id" to JsonPrimitive(id)) + body))
-            },
-        )
+        sb.append(events.joinToString(",\n") { "    " + compact(eventJson(it, explicitEnvelope)) })
         sb.append("\n  ],\n")
         sb.append("  \"expect\": [\n")
         sb.append(
@@ -156,7 +272,7 @@ object GoldenVectors {
                 val cp =
                     buildJsonObject {
                         put("afterEvent", n)
-                        put("label", if (n == 0) "Start" else "nach ${payloads[n - 1].first}")
+                        put("label", if (n == 0) "Start" else "nach ${events[n - 1].id.value}")
                         put("state", VectorIo.canonical(state))
                     }
                 "    " + compact(cp)
@@ -165,6 +281,21 @@ object GoldenVectors {
         sb.append("\n  ]\n")
         sb.append("}\n")
         return sb.toString()
+    }
+
+    private fun eventJson(
+        event: ScoreEvent,
+        explicitEnvelope: Boolean,
+    ): JsonObject {
+        val body = vectorJson.encodeToJsonElement(EventPayload.serializer(), event.payload) as JsonObject
+        val head = linkedMapOf<String, JsonElement>("id" to JsonPrimitive(event.id.value))
+        if (explicitEnvelope) {
+            head["lamport"] = JsonPrimitive(event.lamport)
+            head["deviceId"] = JsonPrimitive(event.deviceId.value)
+            head["parentId"] = event.parentId?.let { JsonPrimitive(it.value) } ?: JsonNull
+            head["wallClockMs"] = JsonPrimitive(event.wallClockMs)
+        }
+        return JsonObject(head + body)
     }
 
     private fun compact(element: JsonElement): String = vectorJson.encodeToString(JsonElement.serializer(), element)
@@ -186,6 +317,7 @@ fun main(args: Array<String>) {
     when (mode) {
         "generate" -> {
             (existing.keys - generated.keys).forEach { File(dir, it).delete() }
+            dir.walkBottomUp().filter { it.isDirectory && it != dir && it.listFiles().isNullOrEmpty() }.forEach { it.delete() }
             generated.forEach { (path, content) ->
                 val file = File(dir, path)
                 file.parentFile.mkdirs()

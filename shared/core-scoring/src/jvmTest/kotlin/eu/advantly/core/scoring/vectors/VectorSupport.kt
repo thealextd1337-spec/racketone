@@ -15,10 +15,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import java.io.File
 
 /** JSON-Einstellungen für Testvektoren (Schema 1): Diskriminator `type`, explizite `null`, keine unbekannten Felder. */
@@ -77,6 +79,9 @@ object RepoPaths {
 }
 
 object VectorIo {
+    /** Optionale Hüllenfelder eines Events (fehlen sie, gilt die synthetische Hülle aus README §1.1). */
+    val ENVELOPE_KEYS = setOf("id", "lamport", "deviceId", "parentId", "wallClockMs")
+
     private val matchId = MatchId("tv-match")
     private val device = DeviceId("tv")
 
@@ -107,17 +112,31 @@ object VectorIo {
         val events =
             rawEvents.mapIndexed { index, obj ->
                 val id = obj.getValue("id").jsonPrimitive.content
-                val payload = vectorJson.decodeFromJsonElement(EventPayload.serializer(), JsonObject(obj - "id"))
-                envelope(
-                    index,
-                    id,
-                    rawEvents
-                        .getOrNull(index - 1)
-                        ?.getValue("id")
-                        ?.jsonPrimitive
-                        ?.content,
-                    payload,
-                )
+                val payload = vectorJson.decodeFromJsonElement(EventPayload.serializer(), JsonObject(obj - ENVELOPE_KEYS))
+                if ("lamport" in obj) {
+                    // Erweiterung (Golden-Vektoren mit mehreren Geräten): explizite Hülle statt synthetischer
+                    ScoreEvent(
+                        id = EventId(id),
+                        matchId = matchId,
+                        deviceId = DeviceId(obj.getValue("deviceId").jsonPrimitive.content),
+                        deviceSeq = index + 1L,
+                        lamport = obj.getValue("lamport").jsonPrimitive.long,
+                        wallClockMs = obj.getValue("wallClockMs").jsonPrimitive.long,
+                        parentId = obj["parentId"]?.jsonPrimitive?.contentOrNull?.let { EventId(it) },
+                        payload = payload,
+                    )
+                } else {
+                    envelope(
+                        index,
+                        id,
+                        rawEvents
+                            .getOrNull(index - 1)
+                            ?.getValue("id")
+                            ?.jsonPrimitive
+                            ?.content,
+                        payload,
+                    )
+                }
             }
         val checkpoints =
             root.getValue("expect").jsonArray.map {

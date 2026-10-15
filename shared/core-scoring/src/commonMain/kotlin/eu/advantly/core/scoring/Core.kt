@@ -119,7 +119,7 @@ internal class Core private constructor(
     // =================================================================================================================
 
     /** Wendet ein wirksames Event an; ist seine Vorbedingung verletzt, landet es in [ignored] (02 §7.3 Schritt 4). */
-    fun step(event: ScoreEvent) {
+    fun step(event: ScoreEvent): Boolean {
         effects = emptySet()
         val applied =
             when (val payload = event.payload) {
@@ -133,10 +133,14 @@ internal class Core private constructor(
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
             }
-        if (!applied) {
-            ignored = ignored + event.id
-            effects = setOf(Effect.IGNORED)
-        }
+        if (!applied) markIgnored(event.id)
+        return applied
+    }
+
+    /** Übersprungenes Event: `id` an `ignoredEvents` anhängen, Effekt `IGNORED` (02 §7.3 Schritte 4–5). */
+    fun markIgnored(id: EventId) {
+        ignored = ignored + id
+        effects = setOf(Effect.IGNORED)
     }
 
     private fun onPointWon(

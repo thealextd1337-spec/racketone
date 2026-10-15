@@ -47,11 +47,11 @@ class EnginePropertiesTest {
     @Test
     fun undoOfLastEventEqualsStateWithoutEvent() =
         property { m ->
-            val last = m.events.lastOrNull() ?: return@property
+            val last = EventLog.ordered(m.events).lastOrNull() ?: return@property
             if (last.payload is Undo) return@property
-            val undo = last.copy(id = EventId("undo"), lamport = last.lamport + 1, payload = Undo(last.id))
+            val undo = last.copy(id = EventId("undo"), lamport = last.lamport + 1, parentId = last.id, payload = Undo(last.id))
             val withUndo = ScoringEngine.fold(m.format, m.lineup, m.events + undo)
-            val without = ScoringEngine.fold(m.format, m.lineup, m.events.dropLast(1))
+            val without = ScoringEngine.fold(m.format, m.lineup, m.events - last)
             assertEquals(without.withoutEffects(), withUndo.withoutEffects())
             assertEquals(listOf(Effect.UNDONE), withUndo.effects)
         }
@@ -68,6 +68,28 @@ class EnginePropertiesTest {
             var engine = ScoringEngine.replay(m.format, m.lineup, emptyList())
             shuffled.forEach { engine = ScoringEngine.apply(engine, it) }
             assertEquals(expected, engine.state)
+        }
+
+    @Test
+    fun mergeIsCommutativeAssociativeAndIdempotent() =
+        property { m ->
+            val expected = m.incremental.state
+            val random = Random(m.events.size * 31L + m.devices)
+            // drei überlappende Teilmengen, wie sie verschiedene Geräte nach Funklöchern halten
+            val parts = List(3) { m.events.filter { random.nextInt(3) != 0 } }
+            val rest = m.events - parts.flatten().toSet()
+            val sets = listOf(parts[0] + rest, parts[1], parts[2])
+            for (order in listOf(listOf(0, 1, 2), listOf(2, 1, 0), listOf(1, 0, 2))) {
+                var engine = ScoringEngine.replay(m.format, m.lineup, emptyList())
+                order.forEach { idx -> sets[idx].shuffled(random).forEach { engine = ScoringEngine.apply(engine, it) } }
+                assertEquals(expected, engine.state, "Merge-Reihenfolge $order")
+            }
+            val left = ScoringEngine.replay(m.format, m.lineup, sets[0] + sets[1])
+            val assocLeft = sets[2].fold(left) { acc, e -> ScoringEngine.apply(acc, e) }
+            val right = ScoringEngine.replay(m.format, m.lineup, sets[1] + sets[2])
+            val assocRight = sets[0].fold(right) { acc, e -> ScoringEngine.apply(acc, e) }
+            assertEquals(assocLeft.state, assocRight.state)
+            assertEquals(expected, ScoringEngine.fold(m.format, m.lineup, sets.flatten()))
         }
 
     @Test
@@ -93,7 +115,7 @@ class EnginePropertiesTest {
                         deviceSeq = 1,
                         lamport = 10_000,
                         wallClockMs = 0,
-                        parentId = m.events.lastOrNull()?.id,
+                        parentId = null,
                         payload = PointWon(side),
                     )
                 val next = ScoringEngine.apply(m.incremental, probe).state

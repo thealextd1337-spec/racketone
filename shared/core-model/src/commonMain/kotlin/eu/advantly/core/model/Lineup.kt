@@ -24,7 +24,8 @@ data class Team(
  *
  * - [a]/[b] (`A`/`B`): Spieler-IDs je Side; die Reihenfolge ist die Aufschlag- bzw. Startaufstellung des Teams.
  * - [firstServer]: eröffnet das Match. Steht er nicht an Index 0 seines Teams, dreht die Engine das Team-Array um.
- * - [receiveRight]: Tennis/Padel-Doppel – wer auf der rechten Seite returniert (Default Index 0).
+ * - [receiveRight]: Tennis/Padel-Doppel – wer auf der rechten Seite returniert. Default ist Index 0 des **hier
+ *   übergebenen** Arrays, also vor dem Umdrehen des aufschlagenden Teams durch [firstServer] (Auslegung von 02 §3.3).
  * - [startEnds]: Startende von A (Default `END_1`), B steht gegenüber.
  */
 @OptIn(ExperimentalSerializationApi::class)

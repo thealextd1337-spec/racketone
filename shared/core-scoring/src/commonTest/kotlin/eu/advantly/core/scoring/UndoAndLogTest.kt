@@ -144,6 +144,82 @@ class UndoAndLogTest {
     }
 
     @Test
+    fun ignoredEventIsNeverUndoTarget() {
+        // Review-Gegenprobe: OPEN-Satzball, danach unzulässiges PointWon während AWAITING_DECISION
+        val m = MatchDriver(Presets.TENNIS_OPEN.format())
+        repeat(5) { m.points("AAAA") }
+        m.points("AAA")
+        val setBall = m.point(Side.A)
+        assertEquals(MatchStatus.AWAITING_DECISION, m.state.status)
+        val ignoredPoint = m.point(Side.B)
+        assertEquals(listOf(ignoredPoint), m.state.ignoredEvents)
+        assertEquals(setBall, m.engineState.undoTarget, "apply")
+        assertEquals(setBall, ScoringEngine.replay(m.format, m.lineup, m.events).undoTarget, "fold")
+        m.send(Correction.server(p("B1")))
+        assertEquals(setBall, m.engineState.undoTarget, "auch übersprungene Korrekturen sind kein Ziel")
+    }
+
+    @Test
+    fun undoPointingForwardIsIgnoredInFoldAndApply() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val lineup = lineupFor(format.discipline)
+        val undo = ev("u", 1, Undo(EventId("p")))
+        val point = ev("p", 2, PointWon(Side.A))
+        val folded = ScoringEngine.fold(format, lineup, listOf(undo, point))
+        assertEquals(SidePair(1, 0), checkNotNull(folded.current).points)
+        assertEquals(listOf(EventId("u")), folded.ignoredEvents)
+        for (delivery in listOf(listOf(undo, point), listOf(point, undo))) {
+            var engine = ScoringEngine.replay(format, lineup, emptyList())
+            delivery.forEach { engine = ScoringEngine.apply(engine, it) }
+            assertEquals(folded, engine.state, "Zustellung ${delivery.map { it.id }}")
+        }
+        // Undo mit Ziel davor wirkt normal, auch wenn es vor dem Ziel zugestellt wird
+        val laterUndo = ev("u2", 3, Undo(EventId("p")))
+        var engine = ScoringEngine.replay(format, lineup, emptyList())
+        listOf(laterUndo, point).forEach { engine = ScoringEngine.apply(engine, it) }
+        assertEquals(ScoringEngine.fold(format, lineup, listOf(point, laterUndo)), engine.state)
+        assertEquals(SidePair(0, 0), checkNotNull(engine.state.current).points)
+    }
+
+    @Test
+    fun divergentCopiesOfAnIdAreRejectedDeterministically() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val lineup = lineupFor(format.discipline)
+        val first = ev("e1", 1, PointWon(Side.A))
+        val copyA = ev("x", 2, PointWon(Side.A))
+        val copyB = ev("x", 2, PointWon(Side.B))
+        val ab = ScoringEngine.replay(format, lineup, listOf(first, copyA, copyB))
+        val ba = ScoringEngine.replay(format, lineup, listOf(first, copyB, copyA))
+        assertEquals(ab.state, ba.state)
+        assertEquals(SidePair(1, 0), checkNotNull(ab.state.current).points)
+        assertEquals(listOf(EventId("x")), ab.state.ignoredEvents)
+        assertEquals(listOf(EventId("x")), ab.rejectedEvents)
+        // gleiche id, anderer Lamport: apply muss wie fold zurückweisen statt No-op
+        val shifted = copyA.copy(lamport = 7)
+        var engine = ScoringEngine.replay(format, lineup, emptyList())
+        listOf(first, copyA, shifted).forEach { engine = ScoringEngine.apply(engine, it) }
+        assertEquals(ScoringEngine.fold(format, lineup, listOf(first, copyA, shifted)), engine.state)
+        assertEquals(listOf(EventId("x")), engine.state.ignoredEvents)
+        // bitgleiche Wiederholung bleibt ein No-op
+        assertEquals(SidePair(2, 0), checkNotNull(ScoringEngine.fold(format, lineup, listOf(first, copyA, copyA)).current).points)
+    }
+
+    @Test
+    fun undoResolvesConflict() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val lineup = lineupFor(format.discipline)
+        val a = ev("a", 2, PointWon(Side.A), device = "watch", parent = "g")
+        val b = ev("b", 2, PointWon(Side.B), device = "phone", parent = "g")
+        val undo = ev("u", 3, Undo(EventId("b")), device = "phone", parent = "a")
+        val resolved = ScoringEngine.replay(format, lineup, listOf(a, b, undo))
+        assertEquals(emptyList(), resolved.conflicts)
+        assertEquals(listOf(TapConflict(EventId("b"), EventId("a"))), resolved.resolvedConflicts)
+        var engine = ScoringEngine.replay(format, lineup, emptyList())
+        listOf(a, b, undo).forEach { engine = ScoringEngine.apply(engine, it) }
+        assertEquals(emptyList(), engine.conflicts)
+    }
+
+    @Test
     fun foldOverFullLogWithGenesis() {
         val format = Presets.PICKLEBALL_DOUBLES_11_SIDEOUT.format()
         val lineup = lineupFor(format.discipline)
