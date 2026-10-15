@@ -2,8 +2,10 @@ import AdvantlyWatchKit
 import SwiftUI
 
 struct ContentView: View {
-    /// Ergebnis des Store-Smoke-Tests beim Start (Spike S1): erwartet immer 1.
+    #if DEBUG
+    /// Ergebnis des Store-Smoke-Tests (Spike S1), -1 = nicht gelaufen.
     @State private var storeCount: Int64 = -1
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -15,24 +17,32 @@ struct ContentView: View {
                     Text("watch.engine \(AdvantlyWatch.shared.engineModule())")
                         .font(.footnote)
                         .multilineTextAlignment(.center)
-                    Text("watch.store \(String(storeCount))")
-                        .font(.footnote)
                     #if DEBUG
+                    if storeCount >= 0 {
+                        Text("watch.store \(String(storeCount))")
+                            .font(.footnote)
+                    }
                     NavigationLink("link.debug.open") { LinkDebugView() }
                     #endif
                 }
                 .padding()
             }
         }
-        .onAppear(perform: runStoreSmoke)
+        #if DEBUG
+        .onAppear(perform: runStoreSmokeIfRequested)
+        #endif
     }
 
-    /// Öffnet den SQLDelight-Store (native-driver, Datei advantly.db) und schreibt idempotent ein Smoke-Event.
-    /// Die CI startet die App im Simulator und sucht die Zeile `ADVANTLY_SMOKE` in der Konsole.
-    private func runStoreSmoke() {
+    #if DEBUG
+    /// Nur Debug-Build UND Startparameter `-advantlySmoke` (setzt die CI beim `simctl launch`): öffnet den
+    /// SQLDelight-Store (native-driver, Datei advantly.db), schreibt idempotent ein Smoke-Event und druckt die
+    /// Zeile `ADVANTLY_SMOKE`, die die CI in der Konsole sucht. Release-Builds und normale Starts schreiben nichts.
+    private func runStoreSmokeIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-advantlySmoke") else { return }
         let count = AdvantlyWatch.shared.store().smokeCheck()
         storeCount = count
         print("ADVANTLY_SMOKE eventstore=ok count=\(count)")
         fflush(stdout)
     }
+    #endif
 }

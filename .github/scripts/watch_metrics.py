@@ -47,10 +47,19 @@ def thin_size(binary, arch, all_archs):
         return os.path.getsize(out)
 
 
+def over_budget(what, size):
+    """Deutlich sichtbar: Tabellenzelle + GitHub-Annotation (gelbe Warnung im Lauf)."""
+    print(f"::warning title=Watch-Größenbudget überschritten::{what}: {mb(size)} > 8 MB (01 §2.3)")
+    return f"⚠️ **ÜBER BUDGET** ({mb(size)} > 8 MB)"
+
+
 def frameworks(paths):
-    emit("### Kotlin-XCFrameworks – Binary je Slice/Architektur")
-    emit("| XCFramework | Slice | Arch | Größe | Budget 8 MB |")
-    emit("|---|---|---|---|---|")
+    emit("### A) Statisches Kotlin-Archiv je Slice/Architektur (NICHT die App-Größe)")
+    emit("Binary in `<Name>.framework` des XCFrameworks – statische Bibliothek inkl. Bitcode-freier Objektdateien und")
+    emit("Metadaten. Der Anteil im gelinkten App-Binary ist kleiner (Dead-Strip), siehe Abschnitt B.")
+    emit("")
+    emit("| XCFramework | Konfiguration | Slice | Arch | Archivgröße | Budget 8 MB |")
+    emit("|---|---|---|---|---|---|")
     for xcf in paths:
         name = os.path.basename(xcf).removesuffix(".xcframework")
         config = os.path.basename(os.path.dirname(xcf))
@@ -62,29 +71,37 @@ def frameworks(paths):
             binary_archs = archs(binary)
             for arch in binary_archs:
                 size = thin_size(binary, arch, binary_archs)
-                verdict = "✅" if size < BUDGET_BYTES else "⚠️ über Budget"
-                emit(f"| {name} ({config}) | {slice_name} | {arch} | {mb(size)} | {verdict} |")
-    emit("")
-    emit("_Statische Frameworks: Archivgröße inkl. Metadaten – der Anteil im gelinkten App-Binary ist kleiner (Dead-Strip)._")
+                verdict = "✅" if size < BUDGET_BYTES else over_budget(f"{name} {config} {arch} (Archiv)", size)
+                emit(f"| {name} | {config} | {slice_name} | {arch} | {mb(size)} | {verdict} |")
     emit("")
 
 
 def executable(label, binary):
-    emit(f"### Gelinktes Executable: {label}")
+    emit(f"### B) Gelinktes App-Executable: {label} (kaltstart-relevant)")
     if not os.path.isfile(binary):
         emit(f"❌ nicht gefunden: `{binary}`")
         sys.exit(1)
-    emit("| Arch | Datei (thin) | __TEXT | __DATA | Budget 8 MB (Datei) |")
-    emit("|---|---|---|---|---|")
-    binary_archs = archs(binary)
-    for arch in binary_archs:
-        size = thin_size(binary, arch, binary_archs)
-        # `size -arch X file` → Kopfzeile + "__TEXT __DATA __OBJC others dec hex"
-        lines = run("size", "-arch", arch, binary).splitlines()
-        values = re.split(r"\s+", lines[-1].strip())
-        text, data = int(values[0]), int(values[1])
-        verdict = "✅" if size < BUDGET_BYTES else "⚠️ über Budget"
-        emit(f"| {arch} | {mb(size)} | {mb(text)} | {mb(data)} | {verdict} |")
+    # Debug-Builds mit ENABLE_DEBUG_DYLIB=YES legen den Code in <App>.debug.dylib – mitmessen
+    parts = [binary] + sorted(glob.glob(os.path.join(os.path.dirname(binary), "*.debug.dylib")))
+    emit("| Datei | Arch | Größe (thin) | __TEXT | __DATA | Budget 8 MB |")
+    emit("|---|---|---|---|---|---|")
+    totals = {}
+    for part in parts:
+        part_archs = archs(part)
+        for arch in part_archs:
+            size = thin_size(part, arch, part_archs)
+            # `size -arch X file` → Kopfzeile + "__TEXT __DATA __OBJC others dec hex"
+            lines = run("size", "-arch", arch, part).splitlines()
+            values = re.split(r"\s+", lines[-1].strip())
+            text, data = int(values[0]), int(values[1])
+            totals[arch] = totals.get(arch, 0) + size
+            emit(f"| {os.path.basename(part)} | {arch} | {mb(size)} | {mb(text)} | {mb(data)} | |")
+    for arch, size in totals.items():
+        verdict = "✅" if size < BUDGET_BYTES else over_budget(f"{label} {arch}", size)
+        emit(f"| **Summe** | {arch} | **{mb(size)}** | | | {verdict} |")
+    if len(parts) > 1:
+        emit("")
+        emit("_Hinweis: `*.debug.dylib` gefunden und mitgezählt (ENABLE_DEBUG_DYLIB)._")
     emit("")
 
 

@@ -165,7 +165,10 @@ jobs:
           -destination 'generic/platform=watchOS'
           -derivedDataPath build/DerivedData
           ARCHS="arm64_32 arm64" ONLY_ACTIVE_ARCH=NO
+          ENABLE_DEBUG_DYLIB=NO
           CODE_SIGNING_ALLOWED=NO
+      # ENABLE_DEBUG_DYLIB=NO: sonst läge der App-Code in AdvantlyWatch.debug.dylib statt im Executable;
+      # das Skript misst eine evtl. vorhandene *.debug.dylib trotzdem mit
       - name: Größe gelinkte Watch-App (Debug, Gerät)
         run: >-
           python3 .github/scripts/watch_metrics.py executable "AdvantlyWatch (Debug-Kotlin, Gerät)"
@@ -189,7 +192,8 @@ jobs:
           xcrun simctl boot "$WATCHOS_SIM" 2>/dev/null || true
           xcrun simctl bootstatus "$WATCHOS_SIM" -b
           xcrun simctl install "$WATCHOS_SIM" "$app"
-          xcrun simctl launch --console-pty --terminate-running-process "$WATCHOS_SIM" eu.advantly.watchkitapp > smoke.log 2>&1 &
+          # -advantlySmoke: ContentView schreibt nur mit diesem Startparameter (und nur im Debug-Build) ins Store
+          xcrun simctl launch --console-pty --terminate-running-process "$WATCHOS_SIM" eu.advantly.watchkitapp -advantlySmoke > smoke.log 2>&1 &
           pid=$!
           for _ in $(seq 1 45); do grep -q ADVANTLY_SMOKE smoke.log && break; sleep 2; done
           kill "$pid" 2>/dev/null || true
@@ -204,7 +208,7 @@ jobs:
           xcf=shared/umbrella-watch/build/XCFrameworks
           rm -rf "$xcf/debug/AdvantlyWatchKit.xcframework"
           cp -R "$xcf/release/AdvantlyWatchKit.xcframework" "$xcf/debug/AdvantlyWatchKit.xcframework"
-          xcodebuild build -project iosApp/Advantly.xcodeproj -scheme AdvantlyWatch -configuration Release -destination 'generic/platform=watchOS' -derivedDataPath build/DerivedData ARCHS="arm64_32 arm64" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO
+          xcodebuild build -project iosApp/Advantly.xcodeproj -scheme AdvantlyWatch -configuration Release -destination 'generic/platform=watchOS' -derivedDataPath build/DerivedData ARCHS="arm64_32 arm64" ONLY_ACTIVE_ARCH=NO ENABLE_DEBUG_DYLIB=NO CODE_SIGNING_ALLOWED=NO
           python3 .github/scripts/watch_metrics.py executable "AdvantlyWatch (Release-Kotlin, Gerät)" build/DerivedData/Build/Products/Release-watchos/AdvantlyWatch.app/AdvantlyWatch
       - name: Berichte hochladen
         if: always()

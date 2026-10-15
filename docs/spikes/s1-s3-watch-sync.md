@@ -40,7 +40,18 @@ Stand: 2026-10-15 · Branch `w0/s1s3-watch-sync` · Bezug: [01 §2.3, §4, §5.1
 
 ### Transport-Design (`shared/device-link`)
 - `LinkTransport` (unzuverlässig, je Plattform) → `ReliableDeviceLink` (common): **Ack, Timeout mit Backoff (1,5 s → max. 8 s),
-  5 Versuche, Dedup per Nachrichten-ID** (128 Bit Zufall, je Gegenstelle die letzten 2048 IDs), sofortige Wiederholung beim Wiederverbinden.
+  5 Versuche**, sofortige Wiederholung beim Wiederverbinden.
+- **Dedup ist best effort und bewusst begrenzt:** Nachrichten-ID = 128 Bit Zufall; der Empfänger merkt sich je Gegenstelle nur die
+  letzten 2048 IDs, nur im RAM. Ältere IDs und alles vor einem App-Neustart sind vergessen → eine späte Wiederholung wird erneut
+  ausgeliefert (**at-least-once**, per Test belegt: Verdrängung und Neustart). Die **Exactly-once-Wirkung** entsteht im Event-Log:
+  Events tragen eine global eindeutige ID, `EventStore.append` ist darüber idempotent (`AppendResult.DUPLICATE`). Jeder Empfänger
+  muss Nachrichten deshalb idempotent verarbeiten.
+- **Persistente Queue sicher annehmen (Wear):** Ein DataItem wird erst gelöscht, wenn der Link den Frame verarbeitet hat
+  (`onConsumed`). Asynchrone Ergebnisse sind an die Start-Generation gebunden (`WearQueueInbox`): Ein verspätetes
+  `getDataItems` nach `stop()` wird ignoriert, das Item bleibt für den nächsten Start liegen.
+- **WatchConnectivity-Kanalwahl als reine Funktion** (`wcRoute`/`wcFallbackAfterLiveError`, getestet): `transferUserInfo` nur
+  auf aktivierter Session mit installierter Gegen-App; nach einem asynchronen `sendMessageData`-Fehler wird der Zustand neu
+  gelesen (iOS-Uhrenwechsel). Sonst `FAILED` → der Ack-Timer wiederholt kontrolliert, nach der Re-Aktivierung sofort.
 - **Queue-Fallback:** ist die Gegenseite nicht live erreichbar, geht der Frame in die OS-Warteschlange (Wear: dringendes `DataItem`,
   Apple: `transferUserInfo`); danach keine Live-Wiederholungen mehr, Ack bis 15 min.
 - Keine Coroutines, kein Flow: `LinkScheduler` (Android Main-Looper, Apple Main-Queue, Tests `ManualScheduler` mit virtueller Zeit).
@@ -49,8 +60,10 @@ Stand: 2026-10-15 · Branch `w0/s1s3-watch-sync` · Bezug: [01 §2.3, §4, §5.1
 ## Ergebnisse lokal (Windows)
 - `gradlew.bat check` grün, beide APKs (Debug + Release) bauen.
 - JVM-/Android-Host-Tests: `data` 7 (Idempotenz, Sequenzkonflikt, Ordnung `(lamport, deviceId, id)`, Unicode/Long-Grenzen),
-  `device-link` 25 (Frame-Codec, Backoff, Ack, Retry bei verlorenem DATA bzw. Ack, Netz-Duplikate, Aufgeben nach 5 Versuchen,
-  Queue + Wiederverbinden, Statuswechsel, 200 Nachrichten bei 30 % Verlust → alle genau einmal), Facades `umbrella-watch` 3, `umbrella-ios` 1.
+  `device-link` 34 + 5 Android-Host (Frame-Codec, Backoff, Ack, Retry bei verlorenem DATA bzw. Ack, Netz-Duplikate, Aufgeben nach
+  5 Versuchen, Queue + Wiederverbinden, Statuswechsel, 200 Nachrichten bei 30 % Verlust, Dedup-Verdrängung und Neustart,
+  `onConsumed` nie nach `stop()`, WatchConnectivity-Routing, Wear-Inbox `start → stop → verspätetes getDataItems`,
+  Ping-Pong-Reset ignoriert alte Acks/Fehler), Facades `umbrella-watch` 3, `umbrella-ios` 1.
 - klib-Kompilierung aller Apple-Targets für `data`, `device-link`, `umbrella-watch`, `umbrella-ios`.
 
 ## Was erst die macOS-CI beweist (Job „apple“, Ergebnisse im Job-Summary)
@@ -62,8 +75,8 @@ Stand: 2026-10-15 · Branch `w0/s1s3-watch-sync` · Bezug: [01 §2.3, §4, §5.1
 | `assembleAdvantlyWatchKit{Debug,Release}XCFramework` | Linken aller Slices inkl. `watchosDeviceArm64` | _⏳_ |
 | „Framework-Größen (Summary)“ | Größe je Slice/Arch, Budget 8 MB | siehe Tabelle |
 | „watchOS-App für Gerät bauen (arm64_32 + arm64, unsigniert)“ | echte Uhren-Architekturen linken mit SQLite + WatchConnectivity | _⏳_ |
-| „Größe gelinkte Watch-App (Debug/Release, Gerät)“ | kaltstart-relevante Größe (`__TEXT`/`__DATA` je Arch) | siehe Tabelle |
-| „watchOS-App-Smoke im Simulator“ | App startet, `WatchStore.smokeCheck()` schreibt in die SQLite-Datei → `ADVANTLY_SMOKE eventstore=ok count=1` | _⏳_ |
+| „Größe gelinkte Watch-App (Debug/Release, Gerät)“ | kaltstart-relevante Größe (`__TEXT`/`__DATA` je Arch), gebaut mit `ENABLE_DEBUG_DYLIB=NO`; eine evtl. `*.debug.dylib` wird mitgezählt. Über 8 MB → `::warning` im Lauf | siehe Tabelle |
+| „watchOS-App-Smoke im Simulator“ | App startet mit `-advantlySmoke`, `WatchStore.smokeCheck()` schreibt in die SQLite-Datei → `ADVANTLY_SMOKE eventstore=ok count=1` (nur Debug-Build + Startparameter; Release schreibt nie) | _⏳_ |
 | iOS-/watchOS-Simulator-Build | Swift-Debug-Views (`LinkDebugView`) kompilieren gegen die Kotlin-API | _⏳_ |
 
 **Größen (aus dem CI-Summary eintragen):**
@@ -126,5 +139,5 @@ Notieren je Gerätepaar: Gesendet, Bestätigt, Pongs, Verloren, Wiederholungen, 
 - Wear: Empfang nur bei offener Activity; der produktive Sync braucht einen `WearableListenerService` (P1).
 - DataItem-Queue: unzugestellte Items bleiben liegen, bis die Gegen-App läuft; Anti-Entropie (01 §4.3) bleibt die eigentliche Garantie.
 - WatchConnectivity: ein Delegate pro Prozess – keine zweite Stelle (Swift, Bibliothek) darf `WCSession.delegate` setzen.
-- Dedup-Gedächtnis ist flüchtig (2048 IDs je Gegenstelle, nur im RAM): nach App-Neustart kann eine späte Wiederholung erneut ausgeliefert
-  werden – unkritisch, weil `EventStore.append` idempotent ist.
+- Dedup-Gedächtnis ist begrenzt und flüchtig (2048 IDs je Gegenstelle, nur im RAM): at-least-once. Unkritisch, solange jede
+  Verarbeitung idempotent ist (`EventStore.append` über die Event-ID) – darauf muss `sync-protocol` achten.
