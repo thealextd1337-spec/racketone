@@ -23,6 +23,9 @@ jetbrains-navigationevent = "1.1.0"
 skie = "0.10.15"
 ktlint-gradle = "14.2.0"
 ktlint = "1.8.0"
+# --- Release-Werkzeuge (play-publish.yml; kein Bestandteil der App) ---
+fastlane = "2.241.0"
+ruby = "3.3"
 
 # --- Bibliotheken ---
 kotlinx-serialization = "1.11.0"

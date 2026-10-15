@@ -67,6 +67,8 @@ graph TB
 
 Jede Phase endet mit einem **Quality Gate**. Erst wenn es bestanden ist, beginnt die nächste Phase.
 
+Für den Google-Play-Pfad werden Android-Teilgates gesondert abgenommen, solange Apple-Account/Realtests fehlen: Nach bestandenem Android-Teilgate darf der Android-Pfad weitergehen; das plattformübergreifende Gesamtgate und der Apple-Release bleiben offen. Das Release-Protokoll muss diese Abgrenzung und die fehlenden Apple-Nachweise ausdrücklich nennen ([Veröffentlichungsplan](release/veroeffentlichungsplan.md)).
+
 ### P0 – Fundament & Spikes
 > **Stand 2026-10-15:** Apple-Tests auf echten Geräten sind **zurückgestellt**, bis ein Apple-Developer-Account existiert. Apple-Code wird trotzdem geschrieben und in der macOS-CI (unsigniert, Simulator) gebaut und getestet. Die Scoring-Engine (P1-A) ist vorgezogen und läuft parallel zu den Spikes.
 
@@ -82,7 +84,12 @@ Jede Phase endet mit einem **Quality Gate**. Erst wenn es bestanden ist, beginnt
 
 **Gate P0:** Alle Spikes grün oder mit dokumentiertem Plan B (z. B. SwiftUI fürs iPhone, JSON-Store auf der Watch).
 
+**Release-Stufe:** Console-/Signing-Vorbereitung; nach den Android-Integrations-Merges interner Play-Test gemäß [Veröffentlichungsplan](release/veroeffentlichungsplan.md), keine öffentliche Freigabe aus einem Spike.
+
 ### P1 – Zählen offline: Handy + Wear OS + Apple Watch
+
+**Release-Stufe:** Interner Play-Test, danach geschlossener Pilot (mindestens 12 Tester × 14 Tage durchgehend opted-in für neue private Konten). Android-Teilgate separat dokumentieren, solange Apple-Realtests fehlen; Gesamt-P1 bleibt dann offen. Entschieden am 15.10.2026: Öffentliche Produktion erst nach P3, um Zuverlässigkeit und das geplante V1-Paket vor breiter Veröffentlichung nachzuweisen; Details und Gates im [Veröffentlichungsplan](release/veroeffentlichungsplan.md).
+
 | Arbeitspaket | Abhängig von |
 |---|---|
 | **A** `core-scoring`: alle Presets aus 02, Event-Reducer, Zustand inkl. Break-/Satz-/Matchball, Testvektor-Generator (≥ 150 Vektoren), Property-Tests | – (blockiert alle anderen) |
@@ -95,14 +102,23 @@ Jede Phase endet mit einem **Quality Gate**. Erst wenn es bestanden ist, beginnt
 **Gate P1:** 10 echte Matches über alle fünf Sportarten auf Ultra, Pixel Watch, Galaxy Watch und Handys. Dabei gehen **0 Punkte verloren**, auch bei Flugmodus mitten im Satz. Übergabe Uhr → Handy und zurück mit Bestätigung testen, einschließlich Ausfall der bisherigen Zähler-Uhr, Wiederverbinden und verspäteten Events des alten Geräts: Danach zählt ausschließlich das neue Gerät, alle anderen bleiben Anzeige ohne Undo. Deterministische Rollenprüfung gemäß 02 und Dedup bleiben Pflicht; gleichzeitige Eingaben zweier gültiger Zähler entfallen durch Single-Scorer. Akku < 15 %/h auf der Uhr. Alle Testvektoren grün.
 
 ### P2 – Accounts, Freunde, Cloud-Sync
+
+**Release-Stufe:** Geschlossenen Pilot fortführen/erweitern; vor Konto-/Cloud-Freigabe Länder-/Altersabfrage (AT 14, DE 16 gemäß F13), Datenschutz, Data safety, Löschung und Export prüfen. Noch keine reguläre Produktion; neue Datenflüsse zuerst im Pilot validieren ([Release-Pfad](release/veroeffentlichungsplan.md)).
+
 Supabase (Frankfurt), Login mit Apple/Google/E-Mail-Code, Profile, Spieler und Dummy-Zuweisung (durch Erfasser, mit Widerspruch) bzw. Gäste-Claim per Link, Freundschaften (Suche, QR, Einladungslink), Upload der Events über die Outbox, geteilte Matches mit Bestätigung, Push-Benachrichtigungen, Zähler-Wahl beim Start (Mitspieler/Freund mit Account oder externer Director) mit Cloud-Zustellung an dessen Gerät, benannte Visitor-Accounts für Live-Stand und Ergebnis (Realtime, ohne Zählen/Health), Account-Löschung und Export, Entitlements vorbereitet. Wear OS synchronisiert standalone.
 **Gate P2:** pgTAP-RLS-Tests grün. Zwei echte Accounts mit gemischten Geräten (iPhone + Ultra / Android + Galaxy Watch) spielen ein Doppel, und beide sehen das Match. Sync verträgt Abbrüche und Wiederholungen ohne Doppelungen. Zähler-Wahl und Übergabe funktionieren accountübergreifend; Visitor-RLS erlaubt nur Live-Lesen und Ergebnis, keine Schreibaktionen und keine Health-Daten.
 
 ### P3 – Statistik & Health
+
+**Release-Stufe:** Produktionsstart ausschließlich nach P3 und bestandenem Android-P1/P2/P3-Teilgate, stabilem Kandidatenpilot, Produktionszugang und Phone-/Wear-Review: zuerst DACH. Erster Release mit 100 % in den gewählten Ländern (Google erlaubt hier keine Prozentstaffelung); Folgeupdates 5 → 20 → 50 → 100 %, danach EU/weltweit nach eigenen Gates. Apple-Veröffentlichung separat nach Account und Realtests ([Release-Pfad](release/veroeffentlichungsplan.md)).
+
 Puls (5-s-Raster), Kalorien, Schritte und Dauer von der Uhr. Drei getrennte Einwilligungen: messen, synchronisieren, teilen. Schreiben nach Apple Health und Health Connect, ohne Schritte (vermeidet doppelte Zählung). Statistik-Screens: Momentum, Satzverlauf, H2H, Puls pro Satz. Optionale Punktdetails (Ass, Doppelfehler) per Long-Press. Datenschutz-Folgenabschätzung (DSFA) und Datenschutzerklärung.
-**Gate P3:** Puls-Qualität auf Ultra, Pixel und Galaxy validiert. Store-Review-Texte fertig. Danach sind **Closed Beta und Store-Release** möglich.
+**Gate P3:** Puls-Qualität auf Ultra, Pixel und Galaxy validiert. Store-Review-Texte fertig. Danach ist der **Store-Release** möglich; der geschlossene Android-Pilot beginnt bereits in P1 und wird mit den neuen Features erneut validiert.
 
 ### P4 – Garmin
+
+**Release-Stufe:** Google-Play-Produktion weiter pflegen; Garmin als eigener Beta-/Store-Pfad erst nach P4-Gate. Android-Updates behalten die Rollout- und Hotfix-Gates aus dem [Veröffentlichungsplan](release/veroeffentlichungsplan.md).
+
 Monkey-C-Port der Engine gegen die Testvektoren, App für Gerätewelle 1, Companion-Anbindung über das Connect IQ Mobile SDK, Beta mit echten Garmin-Nutzern.
 **Gate P4:** 100 % Testvektor-Parität, Simulator-Matrix grün, mindestens 3 externe Tester.
 
@@ -185,3 +201,4 @@ Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05
 3. Du: Feldtests S5 (Wear-Workout) und S3 (Ping-Pong Handy ↔ Uhr), S4 auf dem Pixel-Handy – Anleitungen unter `docs/spikes/`.
 4. Später: Apple Developer Program anlegen → S2 (TestFlight) und Apple-Feldtests nachholen.
 5. Optional: GitHub-Repo in `advantly` umbenennen; On Court Pro selbst ausprobieren.
+6. **Google-Play-Release-Pfad:** Android-Integrationen mergen → intern auf eigenen Geräten über Play installieren → P1-Pilot mit ≥12 Testern über 14 Tage → Produktionszugang beantragen → P2/P3 im Pilot validieren → DACH-Produktion, danach gestaffelte Updates. Entscheidungen, Zuständigkeiten, Assets und Upload-CI: [Veröffentlichungsplan](release/veroeffentlichungsplan.md); Console-Bedienschritte: [Checkliste](release/play-console.md).
