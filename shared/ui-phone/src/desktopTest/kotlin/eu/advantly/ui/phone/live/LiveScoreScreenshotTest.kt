@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -120,17 +122,24 @@ class LiveScoreScreenshotTest {
         )
 
     @Test
-    fun serveInfoWithLargeText() =
-        capture(
-            "w2-serve-info-en-200",
-            Locale.US,
-            liveModel(Presets.TENNIS_SINGLES_BO3.format(), ""),
-            fontScale = 2f,
-            interact = { model ->
-                onNodeWithTag("panel_them").performClick()
-                onNodeWithTag("serve_info").performScrollTo()
-            },
-        )
+    fun serveInfoWithLargeText() {
+        for ((language, locale) in listOf("en" to Locale.US, "de" to Locale.GERMANY)) {
+            capture(
+                "w2-serve-info-$language-200",
+                locale,
+                liveModel(Presets.TENNIS_SINGLES_BO3.format(), ""),
+                fontScale = 2f,
+                interact = {
+                    onNodeWithTag("panel_them").performClick()
+                    waitForIdle()
+                    val chip = onNodeWithTag("serve_DOUBLE_FAULT")
+                    val full = chip.getUnclippedBoundsInRoot()
+                    val visible = chip.getBoundsInRoot()
+                    assertEquals(full.bottom - full.top, visible.bottom - visible.top)
+                },
+            )
+        }
+    }
 
     @Test
     fun tiebreakOnlyResult() =

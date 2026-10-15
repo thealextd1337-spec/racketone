@@ -8,19 +8,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
@@ -112,11 +120,14 @@ internal fun LiveOperationsSlot(
     controller: LiveScoreController,
     snapshot: LiveMatchSnapshot,
 ) {
-    if (!snapshot.isScorer || (!snapshot.serveInfoEnabled && snapshot.state.serverChoice == null)) return
+    val reservesServerChoice =
+        snapshot.setup.sport in listOf(Sport.TENNIS, Sport.PADEL) && snapshot.setup.format.discipline == Discipline.DOUBLES
+    if (!snapshot.isScorer || (!snapshot.serveInfoEnabled && !reservesServerChoice)) return
+    val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.6f)
     Column(
         Modifier
             .fillMaxWidth()
-            .height(112.dp)
+            .height(112.dp * fontScale)
             .testTag("live_operations_slot")
             .verticalScroll(rememberScrollState()),
     ) {
@@ -137,6 +148,14 @@ internal fun ServeInfoBar(
     val options = LiveOperationRules.serveOptions(snapshot)
     val point = snapshot.lastPoint ?: return
     if (options.isEmpty() || (!persistent && controller.servePromptId != point.id)) return
+    val lastOption = remember { BringIntoViewRequester() }
+    val fontScale = LocalDensity.current.fontScale
+    LaunchedEffect(point.id, fontScale, persistent) {
+        if (!persistent && fontScale > 1f) {
+            withFrameNanos { }
+            lastOption.bringIntoView()
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -165,6 +184,7 @@ internal fun ServeInfoBar(
                     selected = point.serve == option,
                     onClick = { controller.setServeInfo(point.id, option.takeUnless { it == point.serve }) },
                     tag = "serve_${option.name}",
+                    modifier = if (option == options.last()) Modifier.bringIntoViewRequester(lastOption) else Modifier,
                     role = Role.RadioButton,
                 )
             }

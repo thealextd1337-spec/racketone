@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -239,7 +240,9 @@ class LiveOperationsUiTest {
             onNodeWithTag("serve_FIRST_SERVE_IN").performClick()
             onNodeWithTag("decision_yes").assertExists()
             onNodeWithTag("decision_match_tiebreak").assertExists()
+            runOnIdle { assertNotNull(model.controller.servePromptId) }
             onNodeWithTag("decision_tiebreak_7").performClick()
+            onNodeWithTag("serve_info").assertDoesNotExist()
             runOnIdle {
                 assertEquals(
                     SetKind.MATCH_TIEBREAK,
@@ -247,6 +250,7 @@ class LiveOperationsUiTest {
                         .state.current!!
                         .setKind,
                 )
+                assertNull(model.controller.servePromptId)
                 assertFalse(model.controller.startNextSet(NextSetKind.REGULAR))
             }
         }
@@ -458,6 +462,58 @@ class LiveOperationsUiTest {
             controller.redo()
             assertEquals(5, controller.snapshot!!.pointsPlayed)
         }
+
+    @Test
+    fun metadataChangesDoNotReplayTheLastPointFlash() {
+        val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format(), "AAA") }
+        val controller = model.controller
+        controller.debounceEnabled = false
+        controller.onTap(Side.A, null)
+        assertEquals(Side.A, controller.flashSide)
+        val choice = assertNotNull(controller.snapshot!!.state.serverChoice)
+        assertTrue(controller.chooseServer(choice.players.last()))
+        assertNull(controller.flashSide)
+        assertEquals(4, controller.snapshot!!.pointsPlayed)
+        controller.onTap(Side.B, null)
+        assertEquals(Side.B, controller.flashSide)
+        assertTrue(controller.setServeInfo(controller.snapshot!!.lastPoint!!.id, ServeOutcome.SECOND_SERVE_IN))
+        assertNull(controller.flashSide)
+        assertEquals(5, controller.snapshot!!.pointsPlayed)
+    }
+
+    @Test
+    fun doublesWithoutServeStatsKeepOperationsSpaceAcrossChoiceWindows() {
+        for (format in listOf(Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES), Presets.PADEL_GOLDEN_BO3.format())) {
+            runComposeUiTest {
+                val model = testModel().apply { startWith(format, meta = MatchMeta(serveStats = false)) }
+                show(model)
+                val slot = onNodeWithTag("live_operations_slot").getBoundsInRoot()
+                val us = onNodeWithTag("panel_us").getBoundsInRoot()
+                val them = onNodeWithTag("panel_them").getBoundsInRoot()
+                onNodeWithTag("panel_us").performClick()
+                onNodeWithTag("server_choice").assertDoesNotExist()
+                assertEquals(slot, onNodeWithTag("live_operations_slot").getBoundsInRoot())
+                assertEquals(us.top, onNodeWithTag("panel_us").getBoundsInRoot().top)
+                assertEquals(them.bottom, onNodeWithTag("panel_them").getBoundsInRoot().bottom)
+                runOnIdle {
+                    model.live.play("AAA")
+                    model.controller.sync(model.live.active.value)
+                }
+                onNodeWithTag("server_choice").assertExists()
+                assertEquals(slot, onNodeWithTag("live_operations_slot").getBoundsInRoot())
+                assertEquals(us.top, onNodeWithTag("panel_us").getBoundsInRoot().top)
+                assertEquals(them.bottom, onNodeWithTag("panel_them").getBoundsInRoot().bottom)
+                runOnIdle {
+                    model.live.play("A".repeat(20))
+                    model.controller.sync(model.live.active.value)
+                }
+                onNodeWithTag("server_choice").assertExists()
+                assertEquals(slot, onNodeWithTag("live_operations_slot").getBoundsInRoot())
+                assertEquals(us.top, onNodeWithTag("panel_us").getBoundsInRoot().top)
+                assertEquals(them.bottom, onNodeWithTag("panel_them").getBoundsInRoot().bottom)
+            }
+        }
+    }
 
     @Test
     fun failedRemovalHasRejectedHaptic() {

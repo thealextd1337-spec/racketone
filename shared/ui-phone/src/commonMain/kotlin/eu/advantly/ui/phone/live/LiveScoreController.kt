@@ -182,7 +182,9 @@ class LiveScoreController(
     fun startNextSet(kind: NextSetKind): Boolean {
         val current = snapshot ?: return false
         if (!current.isScorer || kind !in current.nextSetOptions) return false
-        return command { port.startNextSet(kind) }
+        val started = command { port.startNextSet(kind) }
+        if (started) servePromptId = null
+        return started
     }
 
     private var lastPointAtNanos = Long.MIN_VALUE
@@ -322,6 +324,7 @@ class LiveScoreController(
         val ok = block()
         if (ok) {
             updateSnapshot(port.active.value)
+            flashSide = null
             generation++
         } else {
             haptics.perform(HapticCue.Rejected)
