@@ -40,6 +40,7 @@ import eu.advantly.device.link.DeviceLink
 import eu.advantly.device.link.DeviceLinkListener
 import eu.advantly.device.link.LinkScheduler
 import eu.advantly.device.link.LinkState
+import eu.advantly.device.link.LinkStats
 import eu.advantly.device.link.SendCallback
 import eu.advantly.device.link.SendFailure
 import eu.advantly.sync.protocol.AntiEntropy
@@ -123,6 +124,7 @@ class MatchSession(
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
     private var lastEventReceivedAtMs: Long? = null
+    private var dataRevision = 0L
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -142,6 +144,9 @@ class MatchSession(
 
     /** Aktueller Zustand (Match, Rolle, Sync-Status). */
     val state: StateFlow<SessionState> = mutableState.asStateFlow()
+
+    /** Zähler des Geräte-Links (Diagnose-Anzeige), `null` ohne Link. */
+    val linkStats: LinkStats? get() = link?.stats
 
     // --- Lebenszyklus ---------------------------------------------------------------------------
 
@@ -226,6 +231,7 @@ class MatchSession(
         if (open?.id == matchId) open = null
         val now = clock.nowMs()
         data.deleteMatch(matchId, now)
+        dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
         publish()
     }
@@ -465,7 +471,7 @@ class MatchSession(
                     is Hello -> onHello(peer, message).let { null }
                     is Summary -> onSummary(peer, message).let { null }
                     is Events -> onEvents(peer, message)
-                    is MatchMetaMessage -> onMatchMeta(message)
+                    is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
                 }
             } catch (e: IllegalArgumentException) {
@@ -525,6 +531,7 @@ class MatchSession(
             if (open?.id == tombstone.matchId) open = null
             data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
         }
+        dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
     }
@@ -560,15 +567,43 @@ class MatchSession(
         return matchId
     }
 
-    private fun onMatchMeta(message: MatchMetaMessage): MatchId? {
+    private fun onMatchMeta(
+        peer: String,
+        message: MatchMetaMessage,
+    ): MatchId? {
         val now = clock.nowMs()
         message.players.forEach { data.players.upsertRemote(it, now) }
         message.favorites.forEach { data.favorites.merge(it.toLocal()) }
+        dataRevision++
+        adoptOwnerIdentity(peer, message)
         val header = message.match ?: return null
         data.matches.insertIfAbsent(header.matchId, header.format, header.lineup, header.meta, header.createdAtMs, header.previousMatchId)
         val m = open
         if (m != null && m.id == header.matchId) data.matches.get(m.id)?.let { m.record = it }
         return header.matchId
+    }
+
+    /**
+     * Identität des Besitzers über eigene Geräte (W1-I): Das Handy ist Identitätsquelle. Eine Uhr übernimmt den `self`
+     * eines Handys (ihr bisheriger Self wird Alias und geht sofort zurück ans Handy); ein Handy merkt sich den `self`
+     * anderer eigener Geräte als Alias. Aliase des Absenders werden immer übernommen.
+     */
+    private fun adoptOwnerIdentity(
+        peer: String,
+        message: MatchMetaMessage,
+    ) {
+        data.addSelfAliases(message.selfAliases)
+        val owner = message.self ?: return
+        val senderKind = hellos[peer]?.kind
+        when {
+            config.kind != PeerKind.PHONE && senderKind == PeerKind.PHONE -> {
+                if (data.adoptSelf(owner, clock.nowMs())) send(peer, metaMessage(open?.record))
+            }
+
+            config.kind == PeerKind.PHONE -> {
+                data.addSelfAliases(listOf(owner.id))
+            }
+        }
     }
 
     /** Status/Ergebnis eines nicht offenen Matches aus seinem Log neu berechnen. */
@@ -582,6 +617,7 @@ class MatchSession(
                 return
             }
         data.matches.updateProgress(matchId, state.status, ScoreSummary.of(state), clock.nowMs())
+        dataRevision++
     }
 
     /**
@@ -622,7 +658,7 @@ class MatchSession(
 
     private fun ensureHeader(genesis: ScoreEvent) {
         val created = genesis.payload as MatchCreated
-        data.matches.insertIfAbsent(genesis.matchId, created.config, created.lineup, created.meta, genesis.wallClockMs)
+        if (data.matches.insertIfAbsent(genesis.matchId, created.config, created.lineup, created.meta, genesis.wallClockMs)) dataRevision++
     }
 
     private fun peersChanged(peers: List<String>) {
@@ -776,6 +812,8 @@ class MatchSession(
             match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
             players = playerIds.mapNotNull { data.players.get(it)?.toPlayer() },
             favorites = favorites.map { it.toWire() },
+            self = data.players.self()?.toPlayer(),
+            selfAliases = data.selfAliases().toList(),
         )
     }
 
@@ -805,7 +843,11 @@ class MatchSession(
         val scorerConnected =
             match != null && (match.isScorer || (started && compatiblePeers.any { it.deviceId == match.scorerDeviceId }))
         val pending = data.events.unconfirmedCount().toInt()
-        return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs))
+        return SessionState(
+            match,
+            SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs),
+            dataRevision,
+        )
     }
 
     private fun activeMatch(m: OpenMatch): ActiveMatch {
@@ -839,6 +881,12 @@ class MatchSession(
         val analysis = EventLog.analyze(m.engine.events, m.engine.initialScorer)
         val undo = analysis.ordered.firstOrNull { it.id == top }?.payload as? Undo ?: return null
         return top.takeIf { it !in analysis.undone && it !in analysis.roleRejected && undo.target in analysis.undone }
+    }
+
+    /** Art des Geräts [device] (dieses, eine Gegenstelle aus einem `Hello` oder `null`), z. B. für „Eingaben ansehen“. */
+    fun peerKind(device: DeviceId): PeerKind? {
+        checkThread()
+        return kindOf(device)
     }
 
     private fun kindOf(device: DeviceId): PeerKind? =

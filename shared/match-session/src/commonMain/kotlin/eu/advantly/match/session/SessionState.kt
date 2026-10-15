@@ -16,10 +16,13 @@ import eu.advantly.sync.protocol.PeerKind
  * Gesamtzustand einer [MatchSession] – genau das, was eine UI zum Rendern braucht.
  *
  * @property match offenes Match oder `null` (Startbildschirm)
+ * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des offenen Matches ändern (Löschung,
+ *   Match-Kopf/-Stand eines anderen Matches, Spieler, Favoriten, Identität) – Signal für Listen-UIs (Verlauf), neu zu laden
  */
 data class SessionState(
     val match: ActiveMatch?,
     val sync: SyncStatus,
+    val dataRevision: Long = 0,
 )
 
 /**
