@@ -54,13 +54,14 @@ class MatchComplicationService : ComplicationDataSourceService() {
             ComplicationType.SHORT_TEXT -> {
                 ShortTextComplicationData
                     .Builder(plain(copy.shortText), description)
+                    .apply { copy.shortTitle?.let { setTitle(plain(it)) } }
                     .setTapAction(tap)
                     .build()
             }
 
             ComplicationType.LONG_TEXT -> {
                 LongTextComplicationData
-                    .Builder(plain(if (state.live == null) getString(R.string.glance_open_app) else copy.longText), description)
+                    .Builder(plain(copy.longText), description)
                     .setTitle(plain(getString(R.string.app_name)))
                     .setTapAction(tap)
                     .build()

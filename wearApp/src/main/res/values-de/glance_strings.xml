@@ -5,7 +5,10 @@
     <string name="glance_complication_label">Spielstand</string>
     <string name="glance_open">Live-Spielstand öffnen</string>
     <string name="glance_open_app">Advantly öffnen</string>
-    <string name="glance_start">Start</string>
+    <string name="glance_app_short">Öffnen</string>
+    <string name="glance_app_action">App öffnen</string>
+    <string name="glance_paused_short">Pause</string>
+    <string name="glance_decision_short">Satz</string>
     <string name="glance_sets">Sätze %1$s</string>
     <string name="glance_games">Games %1$s</string>
     <string name="glance_points">Punkte %1$s</string>

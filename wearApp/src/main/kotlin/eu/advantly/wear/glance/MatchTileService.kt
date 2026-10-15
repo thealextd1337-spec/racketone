@@ -3,9 +3,12 @@ package eu.advantly.wear.glance
 import androidx.concurrent.futures.CallbackToFutureAdapter
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
+import androidx.wear.protolayout.DeviceParametersBuilders.SCREEN_SHAPE_ROUND
+import androidx.wear.protolayout.DimensionBuilders.WrappedDimensionProp
 import androidx.wear.protolayout.DimensionBuilders.dp
 import androidx.wear.protolayout.DimensionBuilders.expand
 import androidx.wear.protolayout.DimensionBuilders.sp
+import androidx.wear.protolayout.DimensionBuilders.wrap
 import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.ModifiersBuilders
 import androidx.wear.protolayout.ResourceBuilders
@@ -24,19 +27,35 @@ class MatchTileService : TileService() {
         CallbackToFutureAdapter.getFuture { result ->
             val state = GlancePublisher.snapshot
             val copy = GlanceText.render(state, AndroidGlanceStrings(this))
+            val device = requestParams.deviceConfiguration
+            val metrics =
+                TileLayoutMetrics(device.screenWidthDp, device.screenHeightDp, device.screenShape == SCREEN_SHAPE_ROUND, device.fontScale)
+            val live = state.live
+            val lines =
+                if (live == null) {
+                    copy.lines.take(metrics.setupLines)
+                } else {
+                    val scoreLines = copy.lines.drop(1 + (if (live.games == null) 0 else 1) + (if (live.points == null) 0 else 1))
+                    val summary = copy.lines.take(if (live.games == null) 1 else 2).joinToString(" · ")
+                    (listOfNotNull(copy.shortTitle?.let { copy.lines.last() }) + summary + scoreLines).distinct().take(metrics.liveLines)
+                }
             val content =
                 LayoutElementBuilders.Column
                     .Builder()
-                    .setWidth(expand())
+                    .setWidth(dp(metrics.contentWidth))
+                    .setHeight(wrap())
                     .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-                    .addContent(text(getString(R.string.app_name), 14f))
                     .addContent(
-                        LayoutElementBuilders.Spacer
-                            .Builder()
-                            .setHeight(dp(6f))
-                            .build(),
-                    ).addContent(button(copy.title, copy.lines, copy.primary, copy.description))
-            if (state.live == null && copy.primary == GlanceAction.REPEAT) {
+                        button(
+                            copy.score ?: copy.title,
+                            lines,
+                            copy.primary,
+                            copy.description,
+                            metrics,
+                            role = copy.title.takeIf { live != null },
+                        ),
+                    )
+            if (live == null && copy.primary == GlanceAction.REPEAT) {
                 content.addContent(
                     LayoutElementBuilders.Spacer
                         .Builder()
@@ -49,6 +68,7 @@ class MatchTileService : TileService() {
                         emptyList(),
                         GlanceAction.NEW,
                         getString(R.string.home_new_match),
+                        metrics,
                     ),
                 )
             }
@@ -60,12 +80,7 @@ class MatchTileService : TileService() {
                     .setModifiers(
                         ModifiersBuilders.Modifiers
                             .Builder()
-                            .setPadding(
-                                ModifiersBuilders.Padding
-                                    .Builder()
-                                    .setAll(dp(18f))
-                                    .build(),
-                            ).setBackground(
+                            .setBackground(
                                 ModifiersBuilders.Background
                                     .Builder()
                                     .setColor(argb(BACKGROUND))
@@ -112,6 +127,8 @@ class MatchTileService : TileService() {
         lines: List<String>,
         action: GlanceAction,
         description: String,
+        metrics: TileLayoutMetrics,
+        role: String? = null,
     ): LayoutElementBuilders.Box {
         val launch =
             ActionBuilders.LaunchAction
@@ -133,22 +150,21 @@ class MatchTileService : TileService() {
             LayoutElementBuilders.Column
                 .Builder()
                 .setWidth(expand())
-                .addContent(text(title, 16f))
-        lines.forEach { column.addContent(text(it, 12f)) }
+                .setHeight(wrap())
+                .addContent(
+                    text(
+                        title,
+                        if (role == null) TileLayoutMetrics.TITLE_SIZE else TileLayoutMetrics.SCORE_SIZE,
+                        if (role == null) metrics.titleLines else 1,
+                    ),
+                )
+        if (role != null) column.addContent(text(role, TileLayoutMetrics.DETAIL_SIZE))
+        lines.forEach { column.addContent(text(it, TileLayoutMetrics.DETAIL_SIZE)) }
         return LayoutElementBuilders.Box
             .Builder()
             .setWidth(expand())
-            .setHeight(
-                dp(
-                    if (lines.isEmpty()) {
-                        48f
-                    } else if (action == GlanceAction.OPEN) {
-                        124f
-                    } else {
-                        80f
-                    },
-                ),
-            ).setModifiers(
+            .setHeight(WrappedDimensionProp.Builder().setMinimumSize(dp(48f)).build())
+            .setModifiers(
                 ModifiersBuilders.Modifiers
                     .Builder()
                     .setClickable(
@@ -161,6 +177,7 @@ class MatchTileService : TileService() {
                         ModifiersBuilders.Semantics
                             .Builder()
                             .setContentDescription(description)
+                            .setRole(ModifiersBuilders.SEMANTICS_ROLE_BUTTON)
                             .build(),
                     ).setPadding(
                         ModifiersBuilders.Padding
@@ -185,11 +202,13 @@ class MatchTileService : TileService() {
     private fun text(
         value: String,
         size: Float,
+        maxLines: Int = 1,
     ): LayoutElementBuilders.Text =
         LayoutElementBuilders.Text
             .Builder()
             .setText(value)
-            .setMaxLines(1)
+            .setMaxLines(maxLines)
+            .setLineHeight(sp(size * TileLayoutMetrics.LINE_HEIGHT))
             .setOverflow(LayoutElementBuilders.TEXT_OVERFLOW_ELLIPSIZE)
             .setFontStyle(
                 LayoutElementBuilders.FontStyle

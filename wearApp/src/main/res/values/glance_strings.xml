@@ -5,7 +5,10 @@
     <string name="glance_complication_label">Match score</string>
     <string name="glance_open">Open live score</string>
     <string name="glance_open_app">Open Advantly</string>
-    <string name="glance_start">Start</string>
+    <string name="glance_app_short">Open</string>
+    <string name="glance_app_action">Open app</string>
+    <string name="glance_paused_short">Paused</string>
+    <string name="glance_decision_short">Set end</string>
     <string name="glance_sets">Sets %1$s</string>
     <string name="glance_games">Games %1$s</string>
     <string name="glance_points">Points %1$s</string>

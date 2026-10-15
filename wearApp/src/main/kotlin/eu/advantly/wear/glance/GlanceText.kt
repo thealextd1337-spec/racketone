@@ -9,7 +9,10 @@ import eu.advantly.core.scoring.MatchStatus
 /** Schlüssel statt UI-Literale: die Android-Bindung lädt DE/EN aus den Ressourcen. */
 enum class GlanceLabel {
     APP,
-    START,
+    APP_SHORT,
+    APP_ACTION,
+    PAUSED_SHORT,
+    DECISION_SHORT,
     REPEAT,
     NEW,
     OPEN,
@@ -52,6 +55,8 @@ data class GlanceCopy(
     val description: String,
     val shortText: String,
     val longText: String,
+    val shortTitle: String? = null,
+    val score: String? = null,
 )
 
 /** Reine Zusammenstellung aller Provider-Texte, inklusive ungekürzter TalkBack-Beschreibung. */
@@ -77,7 +82,22 @@ object GlanceText {
             val description = (listOf(role) + lines + strings.get(GlanceLabel.OPEN)).joinToString(". ")
             // SHORT_TEXT: maximal sieben Zeichen; lange Rally-Stände fallen auf Games/Sätze zurück.
             val short = listOfNotNull(live.points, live.games, live.sets).firstOrNull { it.length <= 7 } ?: "–"
-            return GlanceCopy(role, lines, GlanceAction.OPEN, description, short, lines.take(3).joinToString(" · "))
+            val shortTitle =
+                when (live.status) {
+                    MatchStatus.PAUSED -> strings.get(GlanceLabel.PAUSED_SHORT)
+                    MatchStatus.AWAITING_DECISION -> strings.get(GlanceLabel.DECISION_SHORT)
+                    else -> null
+                }
+            return GlanceCopy(
+                role,
+                lines,
+                GlanceAction.OPEN,
+                description,
+                short,
+                (listOfNotNull(status) + lines.take(3)).distinct().joinToString(" · "),
+                shortTitle,
+                live.points ?: live.games ?: live.sets,
+            )
         }
         val last = state.last
         val title = strings.get(if (last == null) GlanceLabel.NEW else GlanceLabel.REPEAT)
@@ -87,8 +107,8 @@ object GlanceText {
             lines,
             if (last == null) GlanceAction.NEW else GlanceAction.REPEAT,
             (listOf(title) + lines).joinToString(". "),
-            strings.get(GlanceLabel.START),
-            strings.get(GlanceLabel.NEW),
+            strings.get(GlanceLabel.APP_SHORT),
+            strings.get(GlanceLabel.APP_ACTION),
         )
     }
 

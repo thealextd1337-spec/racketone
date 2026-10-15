@@ -14,7 +14,10 @@ class AndroidGlanceStrings(
     private fun resource(label: GlanceLabel): Int =
         when (label) {
             GlanceLabel.APP -> R.string.app_name
-            GlanceLabel.START -> R.string.glance_start
+            GlanceLabel.APP_SHORT -> R.string.glance_app_short
+            GlanceLabel.APP_ACTION -> R.string.glance_app_action
+            GlanceLabel.PAUSED_SHORT -> R.string.glance_paused_short
+            GlanceLabel.DECISION_SHORT -> R.string.glance_decision_short
             GlanceLabel.REPEAT -> R.string.home_repeat_last
             GlanceLabel.NEW -> R.string.home_new_match
             GlanceLabel.OPEN -> R.string.glance_open

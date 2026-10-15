@@ -23,7 +23,11 @@ class GlanceTextTest {
         val copy = GlanceText.render(GlanceState(), en)
         assertEquals("New match", copy.title)
         assertEquals(GlanceAction.NEW, copy.primary)
-        assertEquals("Start", copy.shortText)
+        assertEquals("Open", copy.shortText)
+        assertEquals("Open app", copy.longText)
+        val german = GlanceText.render(GlanceState(), de)
+        assertEquals("Öffnen", german.shortText)
+        assertEquals("App öffnen", german.longText)
         assertTrue(copy.lines.isEmpty())
     }
 
@@ -44,6 +48,7 @@ class GlanceTextTest {
         assertEquals("Anzeige", copy.title)
         assertEquals(listOf("Sätze 1:0", "Games 3:2", "Punkte 30:15", "Aufschlag: Bea"), copy.lines)
         assertEquals("30:15", copy.shortText)
+        assertEquals("30:15", copy.score)
         assertEquals("Sätze 1:0 · Games 3:2 · Punkte 30:15", copy.longText)
         assertTrue(copy.description.contains("Anzeige"))
         assertTrue(copy.description.contains("Aufschlag: Bea"))
@@ -82,6 +87,11 @@ class GlanceTextTest {
         val paused = GlanceText.render(GlanceState(live = live.copy(status = MatchStatus.PAUSED, scorer = true)), en)
         assertEquals(en.get(GlanceLabel.SCORER), paused.title)
         assertTrue(paused.lines.contains("Paused"))
+        assertEquals("Paused", paused.shortTitle)
+        assertTrue(paused.longText.startsWith("Paused · "))
+        val germanPaused = GlanceText.render(GlanceState(live = live.copy(status = MatchStatus.PAUSED)), de)
+        assertEquals("Pause", germanPaused.shortTitle)
+        assertTrue(germanPaused.longText.startsWith("Pausiert · "))
         val decision =
             GlanceText.render(
                 GlanceState(
@@ -97,6 +107,8 @@ class GlanceTextTest {
             )
         assertEquals(listOf("Sätze 1:0", "Satz beendet"), decision.lines)
         assertEquals("1:0", decision.shortText)
+        assertEquals("Satz", decision.shortTitle)
+        assertTrue(decision.longText.startsWith("Satz beendet · "))
     }
 
     @Test
