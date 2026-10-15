@@ -207,8 +207,16 @@ $$;
 
 create or replace function private.staff_access_change()
 returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_epoch bigint;
 begin
-  update public.tournaments set access_epoch = access_epoch + 1 where id = old.tournament_id;
+  update public.tournaments set access_epoch = access_epoch + 1 where id = old.tournament_id
+  returning access_epoch into v_epoch;
+  if v_epoch is not null then
+    -- alter Turnier-Kanal bekommt nur noch den inhaltslosen Hinweis „rotate“ (Review P2 R2 #5)
+    perform private.realtime_send('{}'::jsonb, 'rotate',
+                                  'tournament:' || old.tournament_id::text || ':' || (v_epoch - 1)::text);
+  end if;
   perform private.bump_access_epoch(array(select m.id from public.matches m where m.tournament_id = old.tournament_id));
   perform private.bump_visibility(array[old.profile_id]);
   return null;
@@ -329,3 +337,17 @@ create policy invites_select_own on public.invites for select to authenticated
   using (created_by = (select auth.uid()));
 create policy entitlements_select_own on public.entitlements for select to authenticated
   using (profile_id = (select auth.uid()));
+
+-- Einheitliche Sperr-Reihenfolge auch für direkte Schreibrechte und Kaskaden: Versionssperre vor den Zeilensperren
+-- jeder schreibenden Anweisung (BEFORE STATEMENT läuft vor dem Sperren der Zeilen). Gilt für alle Tabellen in public.
+do $$
+declare
+  v_table text;
+begin
+  for v_table in select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                 where n.nspname = 'public' and c.relkind = 'r' order by 1 loop
+    execute format('create trigger zz_lock_sync before insert or update or delete on public.%I '
+                   'for each statement execute function private.lock_sync_statement()', v_table);
+  end loop;
+end;
+$$;

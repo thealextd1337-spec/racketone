@@ -23,7 +23,7 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…0800_rpc_konto_export.sql` | Löschung mit Karenz, Anonymisierung (Trigger), Löschjob, Export |
 | `migrations/…0900_turnier.sql` | Turnierhelfer, Live-Übersicht (F22) |
 | `migrations/…0990_rechte.sql` | Least-Privilege-Grants (zuletzt) |
-| `tests/database/*.test.sql` | pgTAP (258 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
+| `tests/database/*.test.sql` | pgTAP (275 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 
 ## Lokal ausführen (Docker nötig)
@@ -70,7 +70,8 @@ Job **„Supabase – Migrationen + pgTAP (ubuntu)“** in `.github/workflows/ci
    Breaking Changes versionieren (`sync_push_v2`).
 2. **Jede neue Tabelle in `public`**: RLS aktivieren, Policies schreiben, Grants **explizit** setzen – die
    Default-Privileges sind bewusst entzogen (`…0990_rechte.sql`). Test 010 schlägt sonst fehl.
-3. RPCs: `security definer` + `set search_path = ''` + voll qualifizierte Namen; Berechtigung im Funktionskörper
+3. RPCs: `security definer` + `set search_path = ''` + voll qualifizierte Namen; **erste Anweisung jedes Schreibwegs ist
+   `private.require_active()` oder `private.lock_sync()`** (Versionssperre vor Zeilensperren, sonst Deadlocks); Berechtigung im Funktionskörper
    prüfen; `grant execute … to authenticated` nur für gewollte RPCs. Helfer gehören ins Schema `private`.
 4. Fehler über `private.fail('<grund>')` (SQLSTATE P0001) bzw. `private.fail('<grund>', '42501')` – der Grund ist
    ein stabiler Schlüssel für Clients und Tests.

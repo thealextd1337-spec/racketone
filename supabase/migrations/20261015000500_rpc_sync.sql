@@ -488,8 +488,7 @@ begin
   if jsonb_array_length(coalesce(p -> 'events', '[]'::jsonb)) > 500 then
     perform private.fail('batch_too_large');
   end if;
-  -- Versionen dieses Uploads in Commit-Reihenfolge (siehe private.touch_row), vor allen Zeilensperren
-  perform pg_advisory_xact_lock(private.sync_lock_key());
+  -- (Versionssperre hält bereits private.require_active() – vor allen Zeilensperren)
 
   for v_item in select value from jsonb_array_elements(coalesce(p -> 'devices', '[]'::jsonb)) loop
     begin

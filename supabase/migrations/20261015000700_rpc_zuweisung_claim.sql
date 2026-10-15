@@ -101,6 +101,7 @@ begin
   if v_uid is null or not private.has_profile(v_uid) then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.lock_sync();
   select * into v_p from public.players p where p.id = p_player_id;
   if not found or v_p.kind <> 'guest' or v_p.profile_id is distinct from v_uid then
     perform private.fail('not_assigned_to_you');

@@ -156,6 +156,7 @@ begin
   if v_uid is null then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.lock_sync();
   update public.match_visitors v
      set revoked_at = now()
    where v.match_id = p_match_id and v.profile_id = p_profile_id and v.revoked_at is null

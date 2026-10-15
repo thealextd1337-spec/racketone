@@ -14,6 +14,7 @@ begin
   if v_uid is null or not private.has_profile(v_uid) then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.lock_sync();
   update public.profiles set status = 'deletion_requested' where id = v_uid;
   update public.profile_settings set deletion_requested_at = now(), updated_at = now() where profile_id = v_uid;
   update public.devices set push_token = null, push_provider = null where profile_id = v_uid;
@@ -37,6 +38,7 @@ as $$
 declare
   v_uid uuid := auth.uid();
 begin
+  perform private.lock_sync();
   update public.profiles set status = 'active' where id = v_uid and status = 'deletion_requested';
   if not found then
     perform private.fail('no_deletion_pending');
@@ -128,6 +130,7 @@ language sql
 security definer
 set search_path = ''
 as $$
+  select private.lock_sync();
   delete from auth.users where id = p_profile;
 $$;
 
@@ -142,6 +145,7 @@ declare
   v_id    uuid;
   v_count integer := 0;
 begin
+  perform private.lock_sync();
   for v_id in
     select s.profile_id from public.profile_settings s
     join public.profiles p on p.id = s.profile_id
@@ -152,6 +156,31 @@ begin
   end loop;
   return v_count;
 end;
+$$;
+
+-- Payload eines eigenen Events für den Export, Whitelist je Eventtyp (Review P2 R2 #2): fachliche Werte bleiben, alle
+-- Personen- und Geräte-Referenzen (Lineup-/Spieler-IDs, scorerDeviceId, Klarnamen anderer, createdBy) entfallen.
+create or replace function private.export_payload(p_type text, p_payload jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_strip_nulls(case p_type
+    when 'MatchCreated' then jsonb_build_object('type', p_type, 'config', p_payload -> 'config', 'meta', p_payload -> 'meta')
+    when 'PointWon' then jsonb_build_object('type', p_type, 'side', p_payload -> 'side',
+                                            'detail', (p_payload -> 'detail') - 'by')
+    when 'Undo' then jsonb_build_object('type', p_type, 'target', p_payload -> 'target')
+    when 'ContinueDecision' then jsonb_build_object('type', p_type, 'anotherSet', p_payload -> 'anotherSet',
+                                                    'nextSetKind', p_payload -> 'nextSetKind')
+    when 'Correction' then jsonb_build_object('type', p_type, 'kind', p_payload -> 'kind', 'side', p_payload -> 'side',
+                                              'serverNumber', p_payload -> 'serverNumber')
+    when 'MatchEnded' then jsonb_build_object('type', p_type, 'reason', p_payload -> 'reason', 'side', p_payload -> 'side')
+    when 'PointDetailSet' then jsonb_build_object('type', p_type, 'target', p_payload -> 'target',
+                                                  'detail', (p_payload -> 'detail') - 'by')
+    when 'ServerChosen' then jsonb_build_object('type', p_type, 'set', p_payload -> 'set', 'side', p_payload -> 'side')
+    else jsonb_build_object('type', p_type)   -- Paused, Resumed, ScorerChanged, PlayerAssigned: nur der Typ
+  end);
 $$;
 
 -- Export eigener Daten als JSON (Art. 15/20). Später erzeugt die Edge Function daraus ZIP (JSON + CSV).
@@ -210,7 +239,8 @@ begin
                    'events', (select coalesce(jsonb_agg(case when e.author_id = v_uid
                                  then jsonb_build_object('id', e.id, 'deviceId', e.device_id, 'deviceSeq', e.device_seq,
                                                          'lamport', e.lamport, 'wallClockMs', e.wall_clock_ms,
-                                                         'parentId', e.parent_id, 'type', e.type, 'payload', e.payload,
+                                                         'parentId', e.parent_id, 'type', e.type,
+                                                         'payload', private.export_payload(e.type, e.payload),
                                                          'mine', true)
                                  else jsonb_build_object('id', e.id, 'lamport', e.lamport, 'wallClockMs', e.wall_clock_ms,
                                                          'type', e.type, 'mine', false) end

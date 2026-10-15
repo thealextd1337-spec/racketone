@@ -32,6 +32,31 @@ as $$
   select 7341029101::bigint;   -- fester Schlüssel „advantly sync“
 $$;
 
+-- Einheitliche Sperr-Reihenfolge (Review P2 R2 #1, Deadlock 40P01): JEDER Schreibweg nimmt die Versionssperre ZUERST,
+-- vor allen Zeilensperren – RPCs als erste Anweisung (über private.require_active() oder private.lock_sync()),
+-- direkte Schreibrechte über einen BEFORE-STATEMENT-Trigger auf jeder Tabelle in public (läuft vor dem Sperren der
+-- Zeilen). touch_row/Access-Trigger nehmen sie dann nur erneut (in derselben Transaktion ohne Wartezeit).
+-- Prüfung: Strukturtest 010 (statisch) + Gate-Test mit zwei Verbindungen (docs/p2-plan.md §11).
+create or replace function private.lock_sync()
+returns void
+language sql
+set search_path = ''
+as $$
+  select pg_advisory_xact_lock(private.sync_lock_key());
+$$;
+
+create or replace function private.lock_sync_statement()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform private.lock_sync();
+  return null;
+end;
+$$;
+
 -- Setzt server_version/updated_at bei jedem Insert/Update einer syncbaren Zeile.
 create or replace function private.touch_row()
 returns trigger
@@ -40,7 +65,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  perform pg_advisory_xact_lock(private.sync_lock_key());
+  perform private.lock_sync();
   new.server_version := nextval('private.sync_version_seq');
   new.updated_at := now();
   return new;

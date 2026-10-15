@@ -17,8 +17,8 @@ begin
   if not private.is_active(v_uid) then
     perform private.fail('profile_not_active', '42501');
   end if;
-  -- Versionssperre vor allen Zeilensperren der RPC (Commit-Reihenfolge der Versionen, siehe private.touch_row)
-  perform pg_advisory_xact_lock(private.sync_lock_key());
+  -- Versionssperre vor allen Zeilensperren der RPC (einheitliche Sperr-Reihenfolge, siehe private.lock_sync)
+  perform private.lock_sync();
   return v_uid;
 end;
 $$;
@@ -47,6 +47,7 @@ begin
   if v_uid is null then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.lock_sync();
   select p.status into v_status from public.profiles p where p.id = v_uid for update;
   if v_status is null then
     perform private.fail('profile_missing');

@@ -1,7 +1,7 @@
 -- F17 Zähler-Wahl + Single-Scorer-Regeln über Accounts: Einladung, Annahme, Übergabe (ScorerChanged),
 -- Widerruf, verspätete Events des früheren Zählers.
 begin;
-select plan(24);
+select plan(31);
 
 select tests.world();
 
@@ -105,6 +105,26 @@ select is(current_setting('tests.proj')::jsonb -> 'matches' -> 0 ->> 'result', '
           'Kopf bleibt beim Ersteller');
 select is(current_setting('tests.proj')::jsonb -> 'matches' -> 0 ->> 'projection', 'applied',
           'Projektion (Stand für Anzeige/Visitor) darf der zählende Director liefern');
+
+-- Zugriffsklassenwechsel member → feed (Review P2 R2 #4): vera ist Freundin von alice, alice teilt das Match.
+select tests.authenticate_as('alice');
+select lives_ok($$ select public.set_my_participation('a2000000-0000-7000-8000-000000000001', true, null) $$, 'alice teilt mit Freunden');
+select lives_ok($$ select public.invite_scorer('a2000000-0000-7000-8000-000000000001', tests.uid('vera')) $$, 'vera als Zählerin eingeladen');
+select tests.authenticate_as('vera');
+select is((select m ->> 'access' from jsonb_array_elements(public.sync_pull(0) -> 'matches') m
+           where m ->> 'id' = 'a2000000-0000-7000-8000-000000000001'), 'member', 'eingeladene Zählerin ist Mitglied');
+select set_config('tests.vera_epoch', public.sync_pull(0) ->> 'visibilityEpoch', true);
+select tests.authenticate_as('alice');
+select lives_ok($$ select public.revoke_scorer('a2000000-0000-7000-8000-000000000001', tests.uid('vera')) $$, 'Rolle entzogen');
+select tests.authenticate_as('vera');
+select ok((public.sync_pull(0) ->> 'visibilityEpoch')::bigint > current_setting('tests.vera_epoch')::bigint,
+          'Entzug löst Vollabgleich aus');
+select is((select m ->> 'access' || '/' || jsonb_array_length(m -> 'roles')::text || '/' || coalesce(m ->> 'liveState', 'null')
+           from jsonb_array_elements(public.sync_pull(0) -> 'matches') m
+           where m ->> 'id' = 'a2000000-0000-7000-8000-000000000001'),
+          'feed/0/null', 'Vollabgleich meldet access = feed (Client löscht gespeicherte Mitgliedsdaten)');
+select is_empty($$ select 1 from public.pull_match_events('a2000000-0000-7000-8000-000000000001') $$,
+                'nach Wechsel zu feed keine Events mehr');
 
 select * from finish();
 rollback;

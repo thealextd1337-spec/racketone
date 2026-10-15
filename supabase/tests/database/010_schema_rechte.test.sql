@@ -1,6 +1,6 @@
 -- Struktur und Rechte: RLS überall, keine anon-Rechte, Event-Log nicht direkt schreibbar, keine Health-Tabellen.
 begin;
-select plan(13);
+select plan(17);
 
 select is_empty($$
   select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -58,6 +58,32 @@ select ok(exists (select 1 from pg_policies where schemaname = 'realtime' and ta
 select results_eq($$ select country, min_age::int from public.country_age_rules where country in ('AT', 'DE') order by 1 $$,
                   $$ values ('AT'::text, 14), ('DE'::text, 16) $$,
                   'F13: Mindestalter AT 14, DE 16');
+
+-- Einheitliche Sperr-Reihenfolge (Review P2 R2 #1): Versionssperre vor allen Zeilensperren.
+select is_empty($$
+  select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind = 'r'
+    and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'zz_lock_sync')
+$$, 'jede Tabelle in public nimmt die Versionssperre vor den Zeilensperren (Statement-Trigger)');
+select is_empty($$
+  select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.prosecdef
+    and p.proname not in ('find_profile', 'sync_pull', 'get_visitor_match', 'my_visitor_matches', 'export_my_data',
+                          'tournament_overview')
+    and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
+$$, 'jede schreibende RPC nimmt die Versionssperre');
+select is_empty($$
+  select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.prosecdef and strpos(lower(p.prosrc), 'for update') > 0
+    and strpos(lower(p.prosrc), 'for update') < least(
+          nullif(strpos(p.prosrc, 'private.require_active()'), 0),
+          nullif(strpos(p.prosrc, 'private.lock_sync()'), 0))
+$$, 'RPCs sperren Zeilen erst nach der Versionssperre');
+select is_empty($$
+  select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.prosecdef and strpos(lower(p.prosrc), 'for update') > 0
+    and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
+$$, 'keine RPC sperrt Zeilen ohne Versionssperre');
 
 select * from finish();
 rollback;
