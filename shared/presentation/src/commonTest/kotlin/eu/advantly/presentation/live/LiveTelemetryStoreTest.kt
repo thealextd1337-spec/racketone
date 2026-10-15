@@ -5,7 +5,9 @@ import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.sync.protocol.LiveTelemetry
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LiveTelemetryStoreTest {
     private var now = 0L
@@ -52,5 +54,24 @@ class LiveTelemetryStoreTest {
         assertNull(store.forMatch(match, true))
         assertEquals(other, store.forMatch(other.matchId, true))
         assertNull(LiveTelemetryStore().state.value)
+    }
+
+    @Test
+    fun staleMarkerKeepsOnlyMatchAndTimeForTwoMinutes() {
+        assertFalse(store.recentlyReceived(match))
+        store.receive(LiveTelemetry(1, match))
+        assertFalse(store.recentlyReceived(match))
+        store.receive(sample)
+        now = 30_000
+        store.expire()
+        assertNull(store.state.value)
+        assertTrue(store.recentlyReceived(match))
+        assertFalse(store.recentlyReceived(MatchId("other")))
+        now = 119_999
+        assertTrue(store.recentlyReceived(match))
+        now = 120_000
+        store.expire()
+        assertFalse(store.recentlyReceived(match))
+        assertNull(store.recent.value)
     }
 }

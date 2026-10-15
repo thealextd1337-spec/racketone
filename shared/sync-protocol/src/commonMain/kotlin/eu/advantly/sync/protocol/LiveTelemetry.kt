@@ -12,8 +12,13 @@ data class LiveTelemetry(
     val heartRateBpm: Int? = null,
     val steps: Long? = null,
 ) {
+    override fun toString(): String = "LiveTelemetry(<redacted>)"
+
     companion object {
-        const val VERSION: Int = 1
+        /** Nur bei inkompatiblen Änderungen erhöhen; additive Felder bleiben in derselben Version. */
+        const val CURRENT_VERSION: Int = 1
+        const val MIN_VERSION: Int = 1
+        const val VERSION: Int = CURRENT_VERSION
         const val MESSAGE_PATH: String = "/advantly/telemetry/live"
     }
 }
@@ -29,7 +34,7 @@ object LiveTelemetryCodec {
         if (bytes.size > MAX_BYTES) return null
         return try {
             json.decodeFromString(LiveTelemetry.serializer(), bytes.decodeToString()).takeIf {
-                it.v == LiveTelemetry.VERSION && it.matchId.value.isNotBlank() &&
+                it.v in LiveTelemetry.MIN_VERSION..LiveTelemetry.CURRENT_VERSION && it.matchId.value.isNotBlank() &&
                     (it.heartRateBpm == null || it.heartRateBpm > 0) && (it.steps == null || it.steps >= 0)
             }
         } catch (_: IllegalArgumentException) {

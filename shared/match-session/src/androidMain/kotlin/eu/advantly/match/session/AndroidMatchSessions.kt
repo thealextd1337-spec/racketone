@@ -14,6 +14,9 @@ import eu.advantly.sync.protocol.PeerKind
 object AndroidMatchSessions {
     private var instance: MatchSession? = null
 
+    /** Nur nachsehen, niemals Datenbank/Link für flüchtige Telemetrie starten. Auf dem Main-Thread aufrufen. */
+    fun current(): MatchSession? = instance
+
     /** Liefert die gestartete Session; beim ersten Aufruf werden Datenbank, Link und Session angelegt. */
     fun get(
         context: Context,

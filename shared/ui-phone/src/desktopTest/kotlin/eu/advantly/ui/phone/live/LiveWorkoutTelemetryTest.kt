@@ -40,10 +40,9 @@ class LiveWorkoutTelemetryTest {
                 var now = 0L
                 val source = LiveTelemetryStore(MonotonicClock { now })
                 setContent {
-                    AdvantlyTheme(darkTheme = true) { LiveWorkoutTelemetry(match, true, false, source) }
+                    AdvantlyTheme(darkTheme = true) { LiveWorkoutTelemetry(match, true, false, source, compatibleWatch = true) }
                 }
-                onNodeWithTag("live_telemetry_heart_rate").assertTextEquals("Heart rate: — bpm")
-                onNodeWithTag("live_telemetry_steps").assertTextEquals("Steps: —")
+                onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
                 runOnIdle { source.receive(LiveTelemetry(1, match, 142, 1234)) }
                 onNodeWithTag("live_telemetry_heart_rate").assertTextEquals("Heart rate: 142 bpm")
                 onNodeWithTag("live_telemetry_steps").assertTextEquals("Steps: 1234")
@@ -55,9 +54,13 @@ class LiveWorkoutTelemetryTest {
                     source.expire()
                 }
                 onNodeWithTag("live_telemetry_steps").assertTextEquals("Steps: —")
+                runOnIdle {
+                    now = 120_000
+                    source.expire()
+                }
+                onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
                 runOnIdle { source.receive(LiveTelemetry(1, MatchId("other"), 180, 999)) }
-                onNodeWithTag("live_telemetry_heart_rate").assertTextEquals("Heart rate: — bpm")
-                onNodeWithTag("live_telemetry_steps").assertTextEquals("Steps: —")
+                onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
             } finally {
                 Locale.setDefault(previous)
             }
@@ -67,6 +70,14 @@ class LiveWorkoutTelemetryTest {
     fun disabledWorkoutHidesTelemetry() =
         runDesktopComposeUiTest(width = 412, height = 120) {
             setContent { AdvantlyTheme(darkTheme = true) { LiveWorkoutTelemetry(match, false, false) } }
+            onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
+        }
+
+    @Test
+    fun noCompatibleWatchHidesEvenFreshTelemetry() =
+        runDesktopComposeUiTest(width = 412, height = 120) {
+            val source = LiveTelemetryStore().apply { receive(LiveTelemetry(1, match, 142, 12)) }
+            setContent { AdvantlyTheme { LiveWorkoutTelemetry(match, true, false, source, compatibleWatch = false) } }
             onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
         }
 
@@ -81,7 +92,7 @@ class LiveWorkoutTelemetryTest {
                     CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
                         AdvantlyTheme(darkTheme = true) {
                             Box(Modifier.fillMaxSize().background(AdvantlyTheme.colors.liveBackground).padding(12.dp)) {
-                                LiveWorkoutTelemetry(match, true, true, source)
+                                LiveWorkoutTelemetry(match, true, true, source, compatibleWatch = true)
                             }
                         }
                     }

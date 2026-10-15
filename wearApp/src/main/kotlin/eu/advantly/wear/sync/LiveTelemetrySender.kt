@@ -3,60 +3,95 @@ package eu.advantly.wear.sync
 import android.content.Context
 import android.os.SystemClock
 import com.google.android.gms.wearable.Wearable
+import eu.advantly.core.model.MatchId
 import eu.advantly.match.session.MatchSession
-import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.live.LiveTelemetryGate
+import eu.advantly.presentation.live.ReceivedTelemetrySubscription
 import eu.advantly.sync.protocol.LiveTelemetry
 import eu.advantly.sync.protocol.LiveTelemetryCodec
+import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.diagnostics.DiagnosticLog
-import eu.advantly.wear.diagnostics.PeriodicTrigger
 import eu.advantly.wear.live.LiveTelemetryPublisher
-import eu.advantly.wear.live.telemetryActive
-import eu.advantly.wear.workout.WorkoutStateHolder
 import eu.advantly.wear.workout.WorkoutUiState
 
-/** Nur direkte Nachrichten an das eigene erreichbare Handy; niemals DataItems, Ack/Retry oder Offline-Queue. */
+/** Port für direkte Messages; keine Queue und keine Wiederholung. */
+fun interface TelemetryMessageClient {
+    fun send(
+        nodeId: String,
+        path: String,
+        payload: ByteArray,
+    )
+}
+
+/** RAM-Abo des eigenen Handys; Annahme und Alter werden unabhängig vom Versand geprüft. Main-Thread. */
+class LiveTelemetrySubscriptions {
+    private var current: ReceivedTelemetrySubscription? = null
+
+    fun receive(
+        value: LiveTelemetrySubscription,
+        nodeId: String,
+        state: SessionState,
+        nowMs: Long,
+    ) {
+        if (value.v !in LiveTelemetrySubscription.MIN_VERSION..LiveTelemetrySubscription.CURRENT_VERSION ||
+            state.match?.id != value.matchId || state.match?.meta?.watchWorkout != true ||
+            !LiveTelemetryGate.compatiblePeer(state.sync.peers, nodeId, PeerKind.PHONE)
+        ) {
+            return
+        }
+        current = ReceivedTelemetrySubscription(value.matchId, nodeId, nowMs)
+    }
+
+    fun isFresh(
+        matchId: MatchId,
+        phoneNodeId: String,
+        nowMs: Long,
+    ): Boolean = current?.isFresh(matchId, phoneNodeId, nowMs) == true
+
+    companion object {
+        val Watch = LiveTelemetrySubscriptions()
+    }
+}
+
+/** Peers kommen aus dem Capability-gepflegten Session-State; kein NodeClient-IPC pro Sensorupdate. */
 class LiveTelemetrySender(
-    context: Context,
-    private val session: MatchSession,
+    private val state: () -> SessionState,
+    private val messages: TelemetryMessageClient,
+    private val subscriptions: LiveTelemetrySubscriptions,
+    private val nowMs: () -> Long,
 ) {
-    private val nodeClient = Wearable.getNodeClient(context.applicationContext)
-    private val messageClient = Wearable.getMessageClient(context.applicationContext)
+    constructor(context: Context, session: MatchSession) : this(
+        state = { session.state.value },
+        messages = androidMessages(context),
+        subscriptions = LiveTelemetrySubscriptions.Watch,
+        nowMs = SystemClock::elapsedRealtime,
+    )
+
     private val publisher = LiveTelemetryPublisher()
-    private val discoveryThrottle = PeriodicTrigger(LiveTelemetryPublisher.INTERVAL_MS)
-    private var exerciseActive = false
 
     fun onUpdate(
         workout: WorkoutUiState,
         exerciseActive: Boolean,
     ) {
-        this.exerciseActive = exerciseActive
-        val state = session.state.value
-        val match = state.match ?: return
-        if (!exerciseActive || !workout.telemetryActive || !match.meta.watchWorkout) return
+        val current = state()
+        val match = current.match ?: return
         val phone =
-            state.sync.peers.singleOrNull { it.kind == PeerKind.PHONE && it.compatibility == CompatibilityStatus.COMPATIBLE } ?: return
-        val requestedAtMs = SystemClock.elapsedRealtime()
-        if (!discoveryThrottle.shouldFire(requestedAtMs)) return
-        nodeClient.connectedNodes.addOnSuccessListener { nodes ->
-            val nowMs = SystemClock.elapsedRealtime()
-            // Veraltete Abfragen verwerfen; nach der Abfrage nur die jetzt aktuellen Werte lesen, nichts puffern.
-            if (nowMs - requestedAtMs >= LiveTelemetryPublisher.INTERVAL_MS) return@addOnSuccessListener
-            val current = session.state.value
-            if (current.match?.id != match.id || current.sync.peers.none { it == phone }) return@addOnSuccessListener
-            val payload =
-                publisher.next(
-                    current.match?.id,
-                    current.match?.meta?.watchWorkout == true,
-                    this.exerciseActive,
-                    nodes.any { it.id == phone.peer && it.isNearby },
-                    WorkoutStateHolder.state.value,
-                    nowMs,
-                ) ?: return@addOnSuccessListener
-            messageClient
-                .sendMessage(phone.peer, LiveTelemetry.MESSAGE_PATH, LiveTelemetryCodec.encode(payload))
-                .addOnSuccessListener { DiagnosticLog.log("TELEMETRY_SENT") }
-            // Fehlschlag absichtlich verwerfen; die nächste frische Exercise-Aktualisierung entscheidet neu.
-        }
+            current.sync.peers.singleOrNull {
+                LiveTelemetryGate.compatiblePeer(current.sync.peers, it.peer, PeerKind.PHONE)
+            } ?: return
+        val now = nowMs()
+        if (!subscriptions.isFresh(match.id, phone.peer, now)) return
+        val payload = publisher.next(match.id, match.meta.watchWorkout, exerciseActive, true, workout, now) ?: return
+        messages.send(phone.peer, LiveTelemetry.MESSAGE_PATH, LiveTelemetryCodec.encode(payload))
+    }
+}
+
+private fun androidMessages(context: Context): TelemetryMessageClient {
+    val client = Wearable.getMessageClient(context.applicationContext)
+    return TelemetryMessageClient { nodeId, path, payload ->
+        client.sendMessage(nodeId, path, payload).addOnSuccessListener { DiagnosticLog.log("TELEMETRY_SENT") }
+        // Fehlschlag verwerfen; ausschließlich das nächste frische Exercise-Update entscheidet neu.
     }
 }

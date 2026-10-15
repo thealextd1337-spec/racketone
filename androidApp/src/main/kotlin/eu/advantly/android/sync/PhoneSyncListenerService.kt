@@ -11,8 +11,8 @@ import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.presentation.live.LiveTelemetryGate
 import eu.advantly.presentation.live.LiveTelemetryStore
-import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.LiveTelemetry
 import eu.advantly.sync.protocol.LiveTelemetryCodec
 import eu.advantly.sync.protocol.PeerKind
@@ -46,14 +46,18 @@ class PhoneSyncListenerService : WearableListenerService() {
         if (event.path == LiveTelemetry.MESSAGE_PATH) {
             val payload = LiveTelemetryCodec.decode(event.data) ?: return
             onMainAndWait {
-                val state = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE).state.value
-                val ownWatch =
-                    state.sync.peers.any {
-                        it.peer == event.sourceNodeId && it.kind == PeerKind.WATCH && it.compatibility == CompatibilityStatus.COMPATIBLE
-                    }
-                if (ownWatch && state.match?.id == payload.matchId && state.match?.meta?.watchWorkout == true) {
+                val state = AndroidMatchSessions.current()?.state?.value ?: return@onMainAndWait
+                if (LiveTelemetryGate.accept(
+                        payload,
+                        event.sourceNodeId,
+                        state.match?.id,
+                        state.match?.meta?.watchWorkout == true,
+                        state.sync.peers,
+                    )
+                ) {
                     LiveTelemetryStore.Phone.receive(payload)
                     main.removeCallbacks(expireTelemetry)
+                    // Handler nutzt uptime: Tiefschlaf kann das Aufräumen verschieben; Lesen prüft elapsedRealtime.
                     main.postDelayed(expireTelemetry, LiveTelemetryStore.STALE_AFTER_MS)
                 }
             }
