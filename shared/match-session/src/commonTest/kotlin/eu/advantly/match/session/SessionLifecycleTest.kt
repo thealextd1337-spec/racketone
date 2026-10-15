@@ -33,6 +33,15 @@ class SessionLifecycleTest {
         return session to data
     }
 
+    /** UI-Adapter (Phone-App) lesen Historie/Spieler aus derselben Datenbank wie die Session (W1-I). */
+    @Test
+    fun sessionExposesItsOwnLocalData() {
+        val (session, data) = standalone()
+        assertTrue(session.data === data)
+        val id = session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        assertNotNull(session.data.matches.get(id))
+    }
+
     @Test
     fun standaloneSessionCountsLocally() {
         val (session, data) = standalone()

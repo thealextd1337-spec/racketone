@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -66,7 +67,7 @@ class AppFlowTest {
         click("guest_add")
     }
 
-    /** Assistent über die UI: Sportart → (Belag/Umgebung) → Spieler (Gäste per Name) → Format → Start. */
+    /** Assistent über die UI: Sportart → (Belag/Umgebung) → Spieler (Gäste per Name) → Format → Wer zählt? → Start. */
     private fun ComposeUiTest.runWizard(
         sport: Sport,
         doubles: Boolean,
@@ -86,6 +87,10 @@ class AppFlowTest {
         names.forEach { addGuest(it) }
         click("wizard_next", scroll = false)
         beforeStart()
+        click("wizard_next", scroll = false)
+        // ohne Uhr zählt dieses Handy (Director), „Meine Uhr“ ist gesperrt
+        onNodeWithTag("scorer_THIS_PHONE").assertIsSelected()
+        onNodeWithTag("scorer_MY_WATCH").assertIsNotEnabled()
         onNodeWithTag("wizard_start").assertIsEnabled().performClick()
         onNodeWithTag("live_sport_chip").assertExists()
         onNodeWithTag("panel_us").performClick()
@@ -158,7 +163,7 @@ class AppFlowTest {
             val model = showApp()
             runWizard(Sport.TABLE_TENNIS, doubles = true) {
                 onNodeWithTag("sets_required").assertExists()
-                onNodeWithTag("wizard_start").assertIsNotEnabled()
+                onNodeWithTag("wizard_next").assertIsNotEnabled()
                 click("sets_1")
             }
             val format =

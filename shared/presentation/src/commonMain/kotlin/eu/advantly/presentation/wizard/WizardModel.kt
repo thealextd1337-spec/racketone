@@ -14,6 +14,9 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.FormatValidation
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.ScorerOption
+import eu.advantly.presentation.match.StartOptions
+import eu.advantly.presentation.match.WatchStatus
 
 /** Schritte des Match-Assistenten (04 §3.1, 02 §5.1). */
 enum class WizardStep {
@@ -23,6 +26,9 @@ enum class WizardStep {
     SURFACE,
     PLAYERS,
     FORMAT,
+
+    /** „Wer zählt?“ (04 §3.1): Meine Uhr / Dieses Handy (Director) + Workout-Option, danach Start. */
+    SCORER,
 }
 
 /** Satzanzahl: Best of n oder „Offen“ (Satz für Satz, 02 §5.2). */
@@ -92,12 +98,25 @@ data class WizardInput(
     val pickleballMidGame: MidGameEndChange = MidGameEndChange.DECIDING_GAME_ONLY,
     val advancedExpanded: Boolean = false,
     val saveAsFavorite: Boolean = false,
+    /** Gewählter Zähler; `null` = Standard (Meine Uhr, wenn eine verbunden ist, sonst dieses Handy). */
+    val scorer: ScorerOption? = null,
+    /** „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, auch im Director-Modus, 04 §3.1). */
+    val watchWorkout: Boolean = true,
+    /** Stand der eigenen Uhr; nur `AVAILABLE` macht „Meine Uhr“ wählbar (sonst Hinweis, warum nicht). */
+    val watchStatus: WatchStatus = WatchStatus.UNKNOWN,
     /** Nutzer hat den Einstand selbst gewählt (dann kein automatischer No-Ad-Vorschlag, 02 §5.1). */
     internal val deuceTouched: Boolean = false,
     /** Nutzer hat den Pickleball-Seitenwechsel selbst gewählt (sonst Freizeit-Default je Modus, U4). */
     internal val midGameTouched: Boolean = false,
 ) {
     fun team(side: Side): List<Player?> = if (side == Side.A) teamA else teamB
+
+    /** Die eigene Uhr ist als Zähler wählbar. */
+    val watchAvailable: Boolean get() = watchStatus == WatchStatus.AVAILABLE
+
+    /** Tatsächlicher Zähler: ohne verbundene Uhr immer dieses Handy, sonst die Wahl (Standard: Meine Uhr). */
+    val effectiveScorer: ScorerOption
+        get() = if (!watchAvailable) ScorerOption.THIS_PHONE else scorer ?: ScorerOption.MY_WATCH
 
     /** Alle belegten Slots. */
     val players: List<Player> get() = (teamA + teamB).filterNotNull()
@@ -155,9 +174,12 @@ data class WizardUiState(
                 WizardStep.SPORT -> input.sport != null
                 WizardStep.SURFACE -> true
                 WizardStep.PLAYERS -> playersComplete
-                WizardStep.FORMAT -> canStart
+                WizardStep.FORMAT, WizardStep.SCORER -> canStart
             }
 
     /** Match kann gestartet werden: Format und Lineup gültig. */
     val canStart: Boolean get() = setup != null
+
+    /** Zähler und Workout-Wunsch für `LiveMatchPort.start`. */
+    val startOptions: StartOptions get() = StartOptions(input.effectiveScorer, input.watchWorkout)
 }

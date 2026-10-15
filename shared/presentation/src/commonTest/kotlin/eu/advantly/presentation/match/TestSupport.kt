@@ -17,16 +17,16 @@ class StepClock(
 }
 
 /** Deterministische IDs (fortlaufender Zähler in den Zufallsbits). */
-class CountingIds : IdFactory {
-    private var n = 0L
-
+class CountingIds(
+    private var n: Long = 0,
+) : IdFactory {
     override fun newId(): Uuid7 = Uuid7.fromParts(1_760_000_000_000, 0, ++n)
 }
 
 fun testStore(selfName: String = "Alex"): InMemoryMatchStore = InMemoryMatchStore(StepClock(), CountingIds(), selfName = selfName)
 
 /** Setup mit dem eigenen Spieler (A) gegen Gäste (B); Doppel mit Partner. */
-fun InMemoryMatchStore.setupFor(
+fun PlayersPort.setupFor(
     format: MatchFormat,
     firstServerSide: Side = Side.A,
 ): MatchSetup {

@@ -46,6 +46,25 @@ class SyncCodecTest {
                 favorites = listOf(FavoriteLineup("fav", Sport.TENNIS, Discipline.SINGLES, listOf(PlayerId("A1")), listOf(PlayerId("B1")))),
             ),
         )
+        // W1-I: Identität des Besitzers und Workout-Wunsch
+        roundTrip(
+            MatchMetaMessage(
+                MatchHeader(MATCH, FORMAT, LINEUP, MatchMeta(watchWorkout = false), createdAtMs = 1),
+                self = Player(PlayerId("A1"), "Alex"),
+                selfAliases = listOf(PlayerId("watch-self")),
+            ),
+        )
+    }
+
+    /** Ältere Absender kennen `self`/`selfAliases`/`watchWorkout` nicht: Defaults greifen, Standard wird nicht gesendet. */
+    @Test
+    fun ownerIdentityAndWorkoutAreOptionalOnTheWire() {
+        val old = """{"type":"MatchMeta","match":null,"players":[],"v":1}"""
+        val decoded = (SyncCodec.decode(old.encodeToByteArray()) as DecodeResult.Ok).message as MatchMetaMessage
+        assertEquals(null, decoded.self)
+        assertEquals(emptyList(), decoded.selfAliases)
+        val json = SyncCodec.encodeToString(MatchMetaMessage(MatchHeader(MATCH, FORMAT, LINEUP, MatchMeta(), createdAtMs = 1)))
+        assertTrue("watchWorkout" !in json && "selfAliases" !in json, json)
     }
 
     @Test

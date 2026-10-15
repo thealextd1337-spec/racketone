@@ -6,15 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -50,6 +47,7 @@ import eu.advantly.ui.phone.common.SportBadge
 import eu.advantly.ui.phone.common.StatTile
 import eu.advantly.ui.phone.common.TopBar
 import eu.advantly.ui.phone.common.durationText
+import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.common.sportName
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -107,7 +105,7 @@ fun ResultScreen(
         modifier
             .fillMaxSize()
             .background(AdvantlyTheme.colors.bg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .safeContentPadding()
             .testTag("result"),
     ) {
         TopBar(stringResource(Res.string.result_title), onBack, stringResource(Res.string.action_back)) {
