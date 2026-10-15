@@ -35,6 +35,8 @@ sqldelight {
     databases {
         create("AdvantlyDatabase") {
             packageName.set("eu.advantly.data.db")
+            schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
+            verifyMigrations.set(true)
         }
     }
 }

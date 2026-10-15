@@ -18,6 +18,7 @@ import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /*
@@ -36,11 +37,16 @@ import kotlinx.coroutines.flow.StateFlow
  * - Alle Methoden werden nur vom UI-Thread aufgerufen.
  */
 
+private val noOwnerAliases: StateFlow<Set<PlayerId>> = MutableStateFlow(emptySet())
+
+typealias PlayerAssignmentFailure = eu.advantly.match.session.PlayerAssignmentFailure
+
 /**
  * Alles, was vor dem ersten Punkt feststeht: Genesis `MatchCreated(config, lineup, meta)` plus Anzeigenamen.
  *
  * @property players alle Spieler aus [lineup] mit Anzeigenamen (der eigene Spieler darf einen leeren Namen haben,
  *   die UI zeigt dann „Du“)
+ * @property assignedPlayers ursprüngliche Platz-ID → zugewiesene Person; Score und Rotation behalten die Platz-ID
  * @property previousMatchId verknüpftes Vor-Match bei „Noch einer in gleicher Besetzung?“ (02 §5.2)
  */
 data class MatchSetup(
@@ -49,11 +55,13 @@ data class MatchSetup(
     val meta: MatchMeta = MatchMeta(),
     val players: List<Player>,
     val previousMatchId: MatchId? = null,
+    val assignedPlayers: Map<PlayerId, Player> = emptyMap(),
 ) {
     val sport: Sport get() = format.sport
 
     /** Spieler zur ID oder `null`. */
-    fun player(id: PlayerId): Player? = players.firstOrNull { it.id == id }
+    fun player(id: PlayerId): Player? =
+        assignedPlayers[id]?.copy(id = id) ?: players.firstOrNull { it.id == id } ?: assignedPlayers.values.firstOrNull { it.id == id }
 
     /** Spieler der Side [side] in Lineup-Reihenfolge. */
     fun team(side: Side): List<Player> = lineup.players(side).mapNotNull(::player)
@@ -403,6 +411,21 @@ data class MatchRecord(
 
 /** Match-Historie (Verlauf, H9) und Match-Details (H8). */
 interface MatchHistoryPort {
+    /** F20: Ersteller darf Personen auch nach Matchende zuweisen; unabhängig von der Zählerrolle. */
+    fun canAssignPlayer(matchId: MatchId): Boolean = false
+
+    fun assignmentFailure(
+        matchId: MatchId,
+        slot: PlayerId,
+        player: PlayerId?,
+    ): PlayerAssignmentFailure? = null
+
+    fun assignPlayer(
+        matchId: MatchId,
+        slot: PlayerId,
+        player: PlayerId?,
+    ): Boolean = false
+
     /** Beendete Matches, neueste zuerst. Ein per Undo wieder geöffnetes Match verschwindet, bis es erneut endet. */
     val matches: StateFlow<List<MatchSummary>>
 
@@ -430,6 +453,8 @@ data class FavoriteLineup(
 
 /** Spieler und Schnellstart: eigener Spieler, Gäste, Favoriten und „Wie letztes Mal“. */
 interface PlayersPort {
+    val ownerAliases: StateFlow<Set<PlayerId>> get() = noOwnerAliases
+
     /** Der Geräte-Besitzer (Side A, „Du“). Leerer Name = noch kein Profil. */
     val self: StateFlow<Player>
 

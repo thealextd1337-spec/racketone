@@ -59,7 +59,7 @@ class SyncCodecTest {
     /** Ältere Absender kennen `self`/`selfAliases`/`watchWorkout` nicht: Defaults greifen, Standard wird nicht gesendet. */
     @Test
     fun ownerIdentityAndWorkoutAreOptionalOnTheWire() {
-        val old = """{"type":"MatchMeta","match":null,"players":[],"v":2}"""
+        val old = """{"type":"MatchMeta","match":null,"players":[],"v":3}"""
         val decoded = (SyncCodec.decode(old.encodeToByteArray()) as DecodeResult.Ok).message as MatchMetaMessage
         assertEquals(null, decoded.self)
         assertEquals(emptyList(), decoded.selfAliases)
@@ -70,24 +70,24 @@ class SyncCodecTest {
     @Test
     fun wireFormatHasTypeVersionAndPlainVectors() {
         val json = SyncCodec.encodeToString(Summary(mapOf("m1" to VersionVector.of(mapOf(DeviceId("watch") to 3L)))))
-        assertEquals("""{"type":"Summary","matches":{"m1":{"watch":3}},"v":2}""", json)
+        assertEquals("""{"type":"Summary","matches":{"m1":{"watch":3}},"v":3}""", json)
         val events = SyncCodec.encodeToString(Events(MATCH, listOf(point("e1", "phone", 1, 1, null, Side.B))))
         assertTrue(""""payload":{"type":"PointWon","side":"B"}""" in events, events)
         val hello = SyncCodec.encodeToString(Hello(DeviceId("d"), PeerKind.PHONE))
-        assertTrue(""""v":2""" in hello && """"minV":2""" in hello, hello)
+        assertTrue(""""v":3""" in hello && """"minV":3""" in hello, hello)
     }
 
     @Test
     fun unknownFieldsAreIgnored() {
-        val decoded = SyncCodec.decode("""{"type":"Hello","v":2,"deviceId":"d","kind":"PHONE","future":{"x":1}}""")
+        val decoded = SyncCodec.decode("""{"type":"Hello","v":3,"deviceId":"d","kind":"PHONE","future":{"x":1}}""")
         assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.PHONE)), decoded)
     }
 
     @Test
     fun unsupportedVersionIsReportedButHelloIsAlwaysRead() {
-        assertEquals(DecodeResult.Unsupported(3, "Summary"), SyncCodec.decode("""{"type":"Summary","v":3,"matches":{}}"""))
-        val hello = SyncCodec.decode("""{"type":"Hello","v":3,"minV":3,"deviceId":"d","kind":"WATCH","newField":true}""")
-        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 3, v = 3)), hello)
+        assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode("""{"type":"Summary","v":4,"matches":{}}"""))
+        val hello = SyncCodec.decode("""{"type":"Hello","v":4,"minV":4,"deviceId":"d","kind":"WATCH","newField":true}""")
+        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 4, v = 4)), hello)
     }
 
     /** Gerät mit Protokoll 1 (W1): sein Hello wird gelesen, alle anderen Nachrichten nicht mehr (kein Halb-Sync). */
@@ -110,12 +110,12 @@ class SyncCodecTest {
             "nicht json",
             "[]",
             """{"type":"Summary"}""",
-            """{"type":"Unbekannt","v":2}""",
-            """{"type":"Events","v":2,"matchId":"m1","events":[{"id":"x"}]}""",
+            """{"type":"Unbekannt","v":3}""",
+            """{"type":"Events","v":3,"matchId":"m1","events":[{"id":"x"}]}""",
             """{"type":"Events","v":"eins"}""",
         ).forEach { assertIs<DecodeResult.Malformed>(SyncCodec.decode(it), it) }
         assertIs<DecodeResult.Malformed>(SyncCodec.decode(byteArrayOf(0xAD.toByte(), 1, 2, 0, 0)))
-        assertIs<DecodeResult.Ok>(SyncCodec.decode("""{"type":"Summary","v":2,"matches":{"m1":{}}}"""))
+        assertIs<DecodeResult.Ok>(SyncCodec.decode("""{"type":"Summary","v":3,"matches":{"m1":{}}}"""))
     }
 
     @Test

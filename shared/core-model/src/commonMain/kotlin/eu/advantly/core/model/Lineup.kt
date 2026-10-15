@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 data class Player(
     val id: PlayerId,
     val displayName: String,
+    val isPlaceholder: Boolean = false,
 )
 
 /** Team einer Side: ein Spieler (Einzel) oder zwei (Doppel). */

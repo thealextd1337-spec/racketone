@@ -59,7 +59,7 @@ class WatchHarness(
     val prefs = FakePrefs()
     val effects = mutableListOf<WatchEffect>()
     private val ids = PlayerIds()
-    val directory = WatchDirectory(watchData, clock::nowMs, ids::next) { slot -> slot.name.lowercase() }
+    val directory = WatchDirectory(watchData, clock::nowMs, ids::next)
     val controller =
         WatchController(
             session = watch,

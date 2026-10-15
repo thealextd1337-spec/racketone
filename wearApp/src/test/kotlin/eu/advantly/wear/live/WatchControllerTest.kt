@@ -360,7 +360,9 @@ class WatchControllerTest {
         val second = h.watch.state.value.match!!
         assertTrue(second.id != first.id)
         assertEquals(first.format, second.format)
-        assertEquals(first.lineup, second.lineup)
+        assertEquals(first.lineup.a.first(), second.lineup.a.first())
+        assertTrue((second.lineup.a.drop(1) + second.lineup.b).all(h.watchData::isPlaceholder))
+        assertTrue((second.lineup.a.drop(1) + second.lineup.b).none { it in first.lineup.a + first.lineup.b })
         assertTrue(second.isScorer)
     }
 

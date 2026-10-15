@@ -1,6 +1,5 @@
 -- Event-Log aller Matches (append-only, 01 §5.1). Ordnung (lamport, device_id, id) wie 01 §3.2.
--- Die Spalte uploaded (Outbox) kommt mit dem Cloud-Sync in P2. Vor dem ersten Release ändert sich das Schema
--- ohne Migration (Schema-Version siehe LocalData.SCHEMA_VERSION).
+-- Die Spalte uploaded (Outbox) kommt mit dem Cloud-Sync in P2. Schema-Migrationen siehe 1.sqm.
 CREATE TABLE match_event (
     id TEXT NOT NULL PRIMARY KEY,
     match_id TEXT NOT NULL,
@@ -78,3 +77,16 @@ ORDER BY lamport, device_id, id;
 
 deleteForMatch:
 DELETE FROM match_event WHERE match_id = ?;
+
+CREATE INDEX match_event_type ON match_event (type, match_id);
+
+identityEvents:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
+FROM match_event WHERE match_id = ? AND type IN ('MatchCreated', 'PlayerAssigned')
+ORDER BY lamport, device_id, id;
+
+assignmentMatches:
+SELECT DISTINCT match_id FROM match_event WHERE type = 'PlayerAssigned';
+
+assignmentMatchesForSlot:
+SELECT DISTINCT match_id FROM match_event WHERE type = 'PlayerAssigned' AND instr(payload, :slot) > 0;

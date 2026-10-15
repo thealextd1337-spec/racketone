@@ -425,4 +425,18 @@
     <string name="live_telemetry_heart_rate">Puls: %1$s bpm</string>
     <string name="live_telemetry_steps">Schritte: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <string name="player_partner">Partner</string>
+    <string name="player_opponent_1">Gegner 1</string>
+    <string name="player_opponent_2">Gegner 2</string>
+    <string name="assign_player">%1$s zuweisen</string>
+    <string name="assign_player_name">Name</string>
+    <string name="assign_new_player">Gast anlegen und zuweisen</string>
+    <string name="assign_failed">Das Match ist nicht mehr verfügbar. Bitte öffne es erneut.</string>
+    <string name="assign_change">%1$s ändern</string>
+    <string name="assign_remove">Zuweisung entfernen</string>
+    <string name="player_opponent">Gegner</string>
+    <string name="assign_failed_owner">Nur der Ersteller darf Personen zuweisen.</string>
+    <string name="assign_failed_slot">Dieser Platz kann nicht zugewiesen werden.</string>
+    <string name="assign_failed_person">Diese Person ist nicht mehr verfügbar. Bitte wähle erneut.</string>
+    <string name="assign_failed_occupied">Diese Person spielt bereits auf einem anderen Platz.</string>
 </resources>

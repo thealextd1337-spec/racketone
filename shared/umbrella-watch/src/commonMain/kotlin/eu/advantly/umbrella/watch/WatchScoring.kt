@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchMode
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -21,6 +22,7 @@ import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
+import eu.advantly.data.freshPlaceholders
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.IdGenerator
 import eu.advantly.match.session.MatchSession
@@ -462,10 +464,12 @@ class WatchScoring internal constructor(
                 // dieselben Mitspieler wie zuletzt; ein alter Uhr-Self (jetzt Alias) wird durch den aktuellen ersetzt
                 ours.map { if (data.isSelf(it)) self else it } to if (ours == last.a) last.b else last.a
             } else {
-                val partner = (2..size).map { PlayerId(ids.newUuid7(now).value) }
-                (listOf(self) + partner) to (1..size).map { PlayerId(ids.newUuid7(now).value) }
+                val partner = (2..size).map { Placeholders.id(ids.newUuid7(now).value) }
+                (listOf(self) + partner) to (1..size).map { Placeholders.id(ids.newUuid7(now).value) }
             }
-        return Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())
+        return data.freshPlaceholders(Lineup(a, b, firstServer = if (weServeFirst) a.first() else b.first())) {
+            PlayerId(ids.newUuid7(now).value)
+        }
     }
 
     /**

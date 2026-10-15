@@ -44,6 +44,8 @@ sealed interface WatchScreen {
         val serveStatsAvailable: Boolean = false,
         /** Stand des Schalters (Default an, W2-Vertrag §1). */
         val serveStats: Boolean = true,
+        val recentPlayers: List<eu.advantly.core.model.Player> = emptyList(),
+        val selectedPlayers: Map<eu.advantly.wear.match.PlayerSlot, eu.advantly.core.model.PlayerId> = emptyMap(),
     ) : WatchScreen
 
     /** Live-Score bzw. Anzeige (04 W3). */

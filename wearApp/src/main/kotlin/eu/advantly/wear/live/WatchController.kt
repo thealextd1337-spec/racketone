@@ -9,6 +9,7 @@ import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
@@ -20,6 +21,7 @@ import eu.advantly.presentation.match.LocalDay
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.match.FormatChoice
+import eu.advantly.wear.match.PlayerSlot
 import eu.advantly.wear.match.SetupCatalog
 import eu.advantly.wear.match.WatchDirectory
 import eu.advantly.wear.match.WatchSetup
@@ -61,6 +63,7 @@ class WatchController(
         val gamesPerSet: Int? = null,
         /** „Aufschlag-Statistik erfassen“ (Tennis/Padel, Default an). */
         val serveStats: Boolean = true,
+        val selectedPlayers: Map<PlayerSlot, PlayerId> = emptyMap(),
     )
 
     private var draft: Draft? = null
@@ -161,7 +164,19 @@ class WatchController(
     fun selectDiscipline(discipline: Discipline) {
         val d = draft ?: return
         if (d.sport == null || discipline !in SetupCatalog.disciplines(d.sport)) return
-        draft = d.copy(step = SetupStep.FORMAT, discipline = discipline)
+        draft =
+            d.copy(
+                step = SetupStep.FORMAT,
+                discipline = discipline,
+                selectedPlayers =
+                    if (discipline ==
+                        Discipline.SINGLES
+                    ) {
+                        d.selectedPlayers.filterKeys { it == PlayerSlot.OPPONENT_1 }
+                    } else {
+                        d.selectedPlayers
+                    },
+            )
         publish()
     }
 
@@ -169,6 +184,17 @@ class WatchController(
         val d = draft ?: return
         if (choice.sport != d.sport) return
         draft = d.copy(step = SetupStep.SERVER, format = choice, gamesPerSet = null)
+        publish()
+    }
+
+    fun selectPlayer(
+        slot: PlayerSlot,
+        player: PlayerId?,
+    ) {
+        val d = draft ?: return
+        if (d.discipline == null || (d.discipline == Discipline.SINGLES && slot != PlayerSlot.OPPONENT_1)) return
+        if (player != null && (directory.recentPlayers().none { it.id == player } || player in d.selectedPlayers.values)) return
+        draft = d.copy(selectedPlayers = d.selectedPlayers - slot + if (player == null) emptyMap() else mapOf(slot to player))
         publish()
     }
 
@@ -204,7 +230,7 @@ class WatchController(
         val setup =
             WatchSetup(
                 format = SetupCatalog.format(choice, discipline, today(), d.gamesPerSet),
-                lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(), server, serverIndex),
+                lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(d.selectedPlayers), server, serverIndex),
                 meta = SetupCatalog.meta(sport, d.serveStats).copy(watchWorkout = prefs.workoutEnabled),
             )
         return start(setup)
@@ -593,6 +619,8 @@ class WatchController(
             gamesPerSet = if (gamesOptions.isEmpty()) null else d.gamesPerSet ?: d.format?.let(SetupCatalog::defaultGames),
             serveStatsAvailable = sport?.let(SetupCatalog::serveStatsAvailable) == true,
             serveStats = d.serveStats,
+            recentPlayers = directory.recentPlayers(),
+            selectedPlayers = d.selectedPlayers,
         )
     }
 
@@ -618,7 +646,10 @@ class WatchController(
         return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled, phoneConnected, updateRequired)
     }
 
-    private fun nameOf(id: PlayerId): String? = directory.displayName(id)
+    private fun nameOf(id: PlayerId): String? =
+        session.state.value.match
+            ?.id
+            ?.let { session.data.assignments(it)[id]?.displayName } ?: directory.displayName(id)
 
     private fun emit(effect: WatchEffect) {
         effects?.invoke(effect)

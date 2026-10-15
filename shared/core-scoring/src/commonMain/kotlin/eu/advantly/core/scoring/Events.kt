@@ -6,6 +6,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import kotlinx.serialization.SerialName
@@ -40,6 +41,7 @@ sealed interface EventPayload
 /**
  * Genesis: erstes Event im Log, legt Format, Besetzung, Metadaten und den Zähler fest.
  *
+ * @property createdBy Ersteller-Self für Personen-Zuweisungen, unabhängig von Lineup und Zähler; Alt-Logs: A[0].
  * @property scorerDeviceId Gerät, das zählt (Single-Scorer, 02 §7.5). Fehlt es (Alt-Logs), zählt das Gerät der Genesis.
  */
 @Serializable
@@ -49,6 +51,7 @@ data class MatchCreated(
     val lineup: Lineup,
     val meta: MatchMeta = MatchMeta(),
     val scorerDeviceId: DeviceId? = null,
+    val createdBy: PlayerId? = null,
 ) : EventPayload
 
 /**
@@ -265,3 +268,14 @@ data class PointDetail(
     val secondServe: Boolean? = null,
     val serve: ServeOutcome? = null,
 )
+
+/** Personenzuweisung eines unbesetzten Platzes (F20). Keine Zähloperation; nicht rückgängig machbar. */
+@Serializable
+@SerialName("PlayerAssigned")
+data class PlayerAssigned(
+    val slot: PlayerId,
+    val player: Player?,
+    val assignedBy: PlayerId,
+    val legacySlot: Boolean = false,
+    val creatorAlias: PlayerId? = null,
+) : EventPayload

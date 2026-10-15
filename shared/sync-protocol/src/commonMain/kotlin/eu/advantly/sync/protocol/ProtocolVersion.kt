@@ -15,20 +15,16 @@ package eu.advantly.sync.protocol
  * - **2** (W2-A, 2026-10-15): neue Event-Inhalte `ServerChosen`, `ContinueDecision.nextSetKind = TIEBREAK_7 |
  *   MATCH_TIEBREAK_10` und `PointDetail` ohne `kind` (02 §7). Ein Gerät mit Version 1 kann sie nicht dekodieren.
  *
- * **Warum [MIN_SUPPORTED] = 2:** Events lassen sich nicht in Version 1 „herunterschreiben“ – ein Log, das die neuen
- * Inhalte enthält, käme bei einem Gerät mit Version 1 nur teilweise an (es verwirft die unlesbaren `Events`-Nachrichten
- * still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand mit falschem Spielstand. Deshalb
- * sind 1 und 2 **nicht** kompatibel: Über `Hello` meldet das neue Gerät die Gegenstelle als `PEER_TOO_OLD`, das alte
- * das neue als `PEER_TOO_NEW` (beide prüfen die Überlappung der Bereiche); beide tauschen danach nichts mehr aus, und
- * die UI zeigt „Bitte Uhr/Handy aktualisieren“. Hello wird unabhängig von `v` gelesen, daher erkennt auch ein Gerät mit
- * Version 1 den Unterschied.
+ * - **3** (F20, 2026-10-15): `PlayerAssigned`, Ersteller-ID und Platzhalter-Kennzeichnung. Version 2 kann das
+ *   neue Event nicht dekodieren. Deshalb CURRENT = MIN_SUPPORTED = 3, keine verlustbehaftete Rückübersetzung.
+ *   Beide Geräte müssen aktualisiert sein; gespeicherte Logs der Versionen 1/2 bleiben lesbar.
  */
 object ProtocolVersion {
     /** Version, die dieses Gerät spricht und schreibt. */
-    const val CURRENT: Int = 2
+    const val CURRENT: Int = 3
 
     /** Älteste Version, die dieses Gerät noch lesen kann. */
-    const val MIN_SUPPORTED: Int = 2
+    const val MIN_SUPPORTED: Int = 3
 
     /** `true`, wenn eine Nachricht mit Version [v] gelesen werden darf. */
     fun accepts(v: Int): Boolean = v in MIN_SUPPORTED..CURRENT

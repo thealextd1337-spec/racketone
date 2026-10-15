@@ -71,7 +71,7 @@ data class RecognizedFormat(
     val gamesPerSet: Int?,
 )
 
-/** Spieler-Slots eines Uhr-Matches: Side A = ich (+ Partner), Side B = Gegner (04 §3.1: „Gegner werden als Gegner angelegt“). */
+/** Plätze eines Uhr-Matches (F20): Side A = ich (+ Partner), Side B = Gegner; Person oder neutraler Platzhalter. */
 data class LineupPlayers(
     val self: PlayerId,
     val partner: PlayerId,

@@ -41,7 +41,7 @@ import eu.advantly.wear.live.WatchEffect
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.live.displayMillis
 import eu.advantly.wear.match.FormatChoice
-import eu.advantly.wear.match.GuestSlot
+import eu.advantly.wear.match.PlayerSlot
 import eu.advantly.wear.match.WatchDirectory
 import eu.advantly.wear.sync.MatchNotifier
 import eu.advantly.wear.sync.UiVisibility
@@ -252,21 +252,11 @@ class MainActivity : ComponentActivity() {
     private fun createController(): WatchController {
         val h = WearSessions.get(this)
         val ids = RandomIdGenerator()
-        val app = applicationContext
         val directory =
             WatchDirectory(
                 data = h.data,
                 nowMs = System::currentTimeMillis,
                 newId = { PlayerId(ids.newUuid7(System.currentTimeMillis()).value) },
-                guestName = { slot ->
-                    app.getString(
-                        when (slot) {
-                            GuestSlot.PARTNER -> R.string.player_partner
-                            GuestSlot.OPPONENT_1 -> R.string.player_opponent_1
-                            GuestSlot.OPPONENT_2 -> R.string.player_opponent_2
-                        },
-                    )
-                },
             )
         return WatchController(
             session = h.session,
@@ -394,6 +384,11 @@ class MainActivity : ComponentActivity() {
             override fun resume(matchId: MatchId): Boolean = controller.resume(matchId)
 
             override fun setWorkoutEnabled(enabled: Boolean) = controller.setWorkoutEnabled(enabled)
+
+            override fun selectPlayer(
+                slot: PlayerSlot,
+                player: eu.advantly.core.model.PlayerId?,
+            ) = controller.selectPlayer(slot, player)
 
             override fun selectSport(sport: Sport) = controller.selectSport(sport)
 
