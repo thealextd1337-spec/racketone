@@ -175,6 +175,7 @@ private fun ScalingLazyListScope.serverStep(
     actions: SetupActions,
     choosePlayer: (PlayerSlot) -> Unit,
 ) {
+    playerChoices(setup, choosePlayer)
     item { ListHeader { Text(stringResource(R.string.setup_server_title), textAlign = TextAlign.Center) } }
     // Doppel: konkreter Erstaufschläger (bestimmt Rotation bzw. Badminton-Feld, 02 §3.3); Einzel: Wir/Gegner
     val doubles = setup.discipline == Discipline.DOUBLES
@@ -206,7 +207,6 @@ private fun ScalingLazyListScope.serverStep(
     item {
         Text(stringResource(R.string.setup_server_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
     }
-    playerChoices(setup, choosePlayer)
     matchOptions(setup, actions)
     item {
         SwitchButton(
@@ -253,7 +253,7 @@ private fun ScalingLazyListScope.matchOptions(
     }
 }
 
-/** Optionale Spielerwahl unter den Startknöpfen. Jede Person ist ein eigenes Element der Rotary-Liste. */
+/** Optionale Spielerwahl vor den Startknöpfen. Jede Person ist ein eigenes Element der Rotary-Liste. */
 private fun ScalingLazyListScope.playerChoices(
     setup: WatchScreen.Setup,
     choose: (PlayerSlot) -> Unit,
@@ -264,7 +264,7 @@ private fun ScalingLazyListScope.playerChoices(
             Button(
                 onClick = { choose(slot) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(slotName(slot)) },
+                label = { Text(slotName(slot, setup.discipline == Discipline.DOUBLES)) },
                 secondaryLabel = {
                     Text(
                         setup.recentPlayers.firstOrNull { it.id == setup.selectedPlayers[slot] }?.displayName
@@ -282,7 +282,7 @@ private fun ScalingLazyListScope.playerPicker(
     slot: PlayerSlot,
     close: () -> Unit,
 ) {
-    item { ListHeader { Text(slotName(slot)) } }
+    item { ListHeader { Text(slotName(slot, setup.discipline == Discipline.DOUBLES)) } }
     item {
         Button(
             onClick = {
@@ -309,11 +309,14 @@ private fun ScalingLazyListScope.playerPicker(
 }
 
 @Composable
-private fun slotName(slot: PlayerSlot): String =
+private fun slotName(
+    slot: PlayerSlot,
+    doubles: Boolean,
+): String =
     stringResource(
         when (slot) {
             PlayerSlot.PARTNER -> R.string.player_partner
-            PlayerSlot.OPPONENT_1 -> R.string.player_opponent_1
+            PlayerSlot.OPPONENT_1 -> if (doubles) R.string.player_opponent_1 else R.string.player_opponent
             PlayerSlot.OPPONENT_2 -> R.string.player_opponent_2
         },
     )

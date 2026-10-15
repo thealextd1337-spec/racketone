@@ -33,6 +33,7 @@ import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
 import eu.advantly.data.assignments
+import eu.advantly.data.freshPlaceholders
 import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.CompanionDetector
@@ -90,6 +91,8 @@ class SessionMatchStore(
 ) : MatchStore {
     private val data: LocalData = session.data
     private var aliases: Set<PlayerId> = emptySet()
+    private val aliasesFlow = MutableStateFlow<Set<PlayerId>>(emptySet())
+    override val ownerAliases: StateFlow<Set<PlayerId>> = aliasesFlow.asStateFlow()
 
     private val players = HashMap<PlayerId, Player>()
     private val summaries = HashMap<MatchId, Pair<Long, MatchSummary>>()
@@ -209,7 +212,8 @@ class SessionMatchStore(
                 receiveRight = setup.lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
             )
         rememberPlayers(assigned.values.toList())
-        return session.create(setup.format, lineup, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
+        val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newId().value) }
+        return session.create(setup.format, fresh, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
     }
 
     override fun recordPoint(side: Side): Boolean = session.recordPoint(side)
@@ -309,10 +313,16 @@ class SessionMatchStore(
 
     override fun canAssignPlayer(matchId: MatchId): Boolean = session.canAssignPlayer(matchId)
 
+    override fun assignmentFailure(
+        matchId: MatchId,
+        slot: PlayerId,
+        player: PlayerId?,
+    ): PlayerAssignmentFailure? = session.assignmentFailure(matchId, slot, player)
+
     override fun assignPlayer(
         matchId: MatchId,
         slot: PlayerId,
-        player: PlayerId,
+        player: PlayerId?,
     ): Boolean = session.assignPlayer(matchId, slot, player)
 
     override fun record(matchId: MatchId): MatchRecord? {
@@ -354,8 +364,7 @@ class SessionMatchStore(
     /** Je 100 sportbezogene und allgemeine Matches; Zuweisungen lösen die ursprünglichen Platz-IDs auf. */
     override fun recentPlayers(sport: Sport): List<Player> {
         val mine = aliases + self.value.id
-        return (data.matches.history(sport = sport, limit = 100) + data.matches.history(limit = 100))
-            .map(data::resolvedLineup)
+        return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
             .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
             .flatMap { playersOf(it) }
             .filterNot { it.id in mine || it.isPlaceholder }
@@ -507,7 +516,7 @@ class SessionMatchStore(
         val sync = state.sync
         return LiveMatchSnapshot(
             matchId = m.id,
-            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup), m.previousMatchId, data.assignments(m.id)),
+            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, data.assignments(m.id)),
             state = m.state,
             canUndo = m.canUndo,
             canRedo = m.canRedo,
@@ -586,8 +595,8 @@ class SessionMatchStore(
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
     private fun refreshStored() {
         players.clear()
-        summaries.clear()
         aliases = data.selfAliases()
+        aliasesFlow.value = aliases
         guestsFlow.value = loadGuests()
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
@@ -622,9 +631,22 @@ class SessionMatchStore(
         }
 
     private fun setupOf(record: StoredMatch): MatchSetup =
-        MatchSetup(record.format, record.lineup, record.meta, playersOf(record.lineup), record.previousMatchId, data.assignments(record.id))
+        MatchSetup(
+            record.format,
+            record.lineup,
+            record.meta,
+            playersOf(record.lineup, record.id),
+            record.previousMatchId,
+            data.assignments(record.id),
+        )
 
-    private fun playersOf(lineup: Lineup): List<Player> = (lineup.a + lineup.b).distinct().map(::player)
+    private fun playersOf(
+        lineup: Lineup,
+        matchId: MatchId? = null,
+    ): List<Player> =
+        (lineup.a + lineup.b).distinct().map { id ->
+            if (matchId != null && data.isMatchPlaceholder(matchId, id)) Player(id, "", isPlaceholder = true) else player(id)
+        }
 
     /** Spieler aus einem Setup, die die Datenbank noch nicht kennt, als Gäste übernehmen (z. B. aus einem Favoriten). */
     private fun rememberPlayers(list: List<Player>) {
@@ -639,7 +661,10 @@ class SessionMatchStore(
         data.matches
             .history(limit = 1)
             .firstOrNull()
-            ?.let { setupOf(it) }
+            ?.let {
+                val lineup = data.freshPlaceholders(data.resolvedLineup(it)) { PlayerId(ids.newId().value) }
+                MatchSetup(it.format, lineup, it.meta, playersOf(lineup))
+            }
 
     private fun loadHistory(): List<MatchSummary> {
         val headers = data.matches.history(limit = historyLimit)

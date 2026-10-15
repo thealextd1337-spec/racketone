@@ -1,7 +1,9 @@
 package eu.advantly.ui.phone.common
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toAwtImage
@@ -18,10 +20,16 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.app.Overlay
@@ -31,9 +39,43 @@ import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class PlaceholderAssignmentsUiTest {
+    @Test
+    fun placeholderLabelsFollowOwnerAliasOnSideB() {
+        runDesktopComposeUiTest {
+            val owner =
+                PlayerId("canonical-self")
+            val alias =
+                PlayerId("old-watch-self")
+            val partner = Placeholders.id("partner-b")
+            val opponents = listOf(Placeholders.id("a1"), Placeholders.id("a2"))
+            val setup =
+                MatchSetup(
+                    Presets.TENNIS_BO3_MTB10.format().copy(discipline = Discipline.DOUBLES),
+                    Lineup(opponents, listOf(alias, partner), alias),
+                    players =
+                        (opponents + partner).map {
+                            Player(it, "", isPlaceholder = true)
+                        },
+                )
+            setContent {
+                CompositionLocalProvider(LocalSelfId provides owner, LocalSelfAliases provides setOf(alias)) {
+                    Column {
+                        Text(playerName(setup, partner))
+                        Text(playerName(setup, opponents.first()))
+                    }
+                }
+            }
+            // Ressourcen werden aus der aktiven Locale gelesen; beide Seiten müssen verschieden beschriftet sein.
+            val german = Locale.getDefault().language == "de"
+            onNodeWithText("Partner").assertIsDisplayed()
+            onNodeWithText(if (german) "Gegner 1" else "Opponent 1").assertIsDisplayed()
+        }
+    }
+
     @Test
     fun localizedPlaceholderCanBeAssignedDuringWatchScoringAndAfterFinish() {
         val previous = Locale.getDefault()
@@ -53,7 +95,7 @@ class PlaceholderAssignmentsUiTest {
                         }
                     }
                     onNodeWithTag("assign_${slot.value}").performScrollTo().performClick()
-                    onNodeWithText(if (locale.language == "de") "Gegner 1 zuweisen" else "Assign Opponent 1").assertIsDisplayed()
+                    onNodeWithText(if (locale.language == "de") "Gegner zuweisen" else "Assign Opponent").assertIsDisplayed()
                     onNodeWithTag("assign_name").performTextInput("Bea")
                     val out = File("build/reports/screenshots").apply { mkdirs() }
                     val roots = onAllNodes(isRoot())
@@ -83,13 +125,29 @@ class PlaceholderAssignmentsUiTest {
                         )
                         rig.settle()
                     }
+                    onNodeWithTag("assign_${slot.value}").performScrollTo().performClick()
+                    onNodeWithText(if (locale.language == "de") "Bea ändern" else "Change Bea").assertIsDisplayed()
+                    onNodeWithTag("assign_remove").performClick()
+                    runOnIdle {
+                        assertTrue(
+                            rig.store.active.value!!
+                                .setup
+                                .player(slot)!!
+                                .isPlaceholder,
+                        )
+                    }
+                    onNodeWithTag("assign_${slot.value}").performScrollTo().performClick()
+                    val bea =
+                        rig.store.guests.value
+                            .single()
+                    onNodeWithTag("assign_person_${bea.id.value}").performClick()
                     // Ein zweites Match unbesetzt beenden und aus dem Ergebnis einem bestehenden Gast zuweisen.
                     runOnIdle {
-                        rig.watch.endMatch(eu.advantly.core.scoring.EndReason.ABANDONED)
+                        rig.watch.endMatch(EndReason.ABANDONED)
                         rig.settle()
                         rig.watch.closeMatch()
                         val next = rig.watch.create(Presets.BADMINTON_1GAME_15.format(), Lineup(listOf(me), listOf(slot), me))
-                        repeat(15) { rig.watch.recordPoint(eu.advantly.core.model.Side.A) }
+                        repeat(15) { rig.watch.recordPoint(Side.A) }
                         rig.settle()
                         rig.model.openResult(next)
                     }

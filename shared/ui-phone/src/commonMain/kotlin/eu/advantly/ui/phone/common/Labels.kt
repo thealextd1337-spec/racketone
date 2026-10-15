@@ -25,6 +25,7 @@ import eu.advantly.ui.phone.resources.format_open
 import eu.advantly.ui.phone.resources.live_games_and_points
 import eu.advantly.ui.phone.resources.live_score_advantage
 import eu.advantly.ui.phone.resources.live_score_pair
+import eu.advantly.ui.phone.resources.player_opponent
 import eu.advantly.ui.phone.resources.player_opponent_1
 import eu.advantly.ui.phone.resources.player_opponent_2
 import eu.advantly.ui.phone.resources.player_partner
@@ -43,6 +44,7 @@ import org.jetbrains.compose.resources.stringResource
 
 /** ID des eigenen Spielers (für „Du“ statt eines leeren Namens). */
 val LocalSelfId = staticCompositionLocalOf<PlayerId?> { null }
+val LocalSelfAliases = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
 fun sportName(sport: Sport): StringResource =
     when (sport) {
@@ -79,14 +81,20 @@ fun playerName(player: Player?): String {
 @Composable
 fun playerName(
     setup: MatchSetup,
-    id: eu.advantly.core.model.PlayerId,
+    id: PlayerId,
 ): String {
     if (setup.player(id)?.isPlaceholder != true) return playerName(setup.player(id))
     val side = setup.lineup.sideOf(id)
     val index = side?.let { setup.lineup.players(it).indexOf(id) } ?: 0
+    val ownerSide =
+        (setup.lineup.a + setup.lineup.b)
+            .firstOrNull { playerId ->
+                playerId == LocalSelfId.current || playerId in LocalSelfAliases.current
+            }?.let(setup.lineup::sideOf) ?: Side.A
     return stringResource(
         when {
-            side == Side.A -> Res.string.player_partner
+            side == ownerSide -> Res.string.player_partner
+            setup.lineup.b.size == 1 -> Res.string.player_opponent
             index == 1 -> Res.string.player_opponent_2
             else -> Res.string.player_opponent_1
         },

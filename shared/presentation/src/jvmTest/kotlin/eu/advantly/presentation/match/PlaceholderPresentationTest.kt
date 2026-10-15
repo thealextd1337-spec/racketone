@@ -1,13 +1,21 @@
 package eu.advantly.presentation.match
 
 import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.data.createInMemoryJvmLocalData
+import eu.advantly.data.toStoredEvent
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionConfig
@@ -19,6 +27,61 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PlaceholderPresentationTest {
+    @Test
+    fun eventOnlyLegacySlotRemainsEditableAfterReleaseAndNeverBecomesARecentPerson() {
+        val data = createInMemoryJvmLocalData()
+        val owner = data.players.ensureSelf("Alex", 1) { PlayerId("owner") }.id
+        val slot = PlayerId("old-watch-slot")
+        val person = data.players.addGuest(PlayerId("bea"), "Bea", 1).toPlayer()
+        val match = MatchId("legacy-match")
+        val format = Presets.BADMINTON_1GAME_15.format()
+        val lineup = Lineup(listOf(owner), listOf(slot), owner)
+        val genesis =
+            ScoreEvent(
+                EventId("genesis"),
+                match,
+                DeviceId("watch"),
+                1,
+                1,
+                1,
+                null,
+                MatchCreated(format, lineup, createdBy = owner),
+            )
+        val assigned =
+            ScoreEvent(
+                EventId("assigned"),
+                match,
+                DeviceId("watch"),
+                2,
+                2,
+                2,
+                genesis.id,
+                PlayerAssigned(slot, person, owner, legacySlot = true),
+            )
+        data.events.appendAll(listOf(assigned, genesis).map { it.toStoredEvent() })
+        data.matches.insertIfAbsent(match, format, lineup, MatchMeta(), 1)
+        val session = MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE), { 10 })
+        val store = SessionMatchStore(session)
+        assertTrue(store.assignPlayer(match, slot, null))
+        assertTrue(
+            store
+                .record(match)!!
+                .summary.setup
+                .player(slot)!!
+                .isPlaceholder,
+        )
+        assertTrue(store.recentPlayers(Sport.BADMINTON).isEmpty())
+        assertTrue(store.assignPlayer(match, slot, person.id))
+        assertEquals(
+            person.id,
+            store
+                .record(match)!!
+                .summary.setup.assignedPlayers[slot]
+                ?.id,
+        )
+        store.close()
+    }
+
     @Test
     fun assignmentUpdatesLiveHistoryStatisticsRecentsAndRepeatWithoutChangingDuration() {
         val data = createInMemoryJvmLocalData()

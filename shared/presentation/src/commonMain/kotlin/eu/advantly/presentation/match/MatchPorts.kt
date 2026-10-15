@@ -18,6 +18,7 @@ import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /*
@@ -35,6 +36,10 @@ import kotlinx.coroutines.flow.StateFlow
  * - **Single-Scorer (02 §7.5):** Zähl-Kommandos wirken nur auf dem Zähler; auf Anzeige-Geräten liefern sie `false`.
  * - Alle Methoden werden nur vom UI-Thread aufgerufen.
  */
+
+private val noOwnerAliases: StateFlow<Set<PlayerId>> = MutableStateFlow(emptySet())
+
+typealias PlayerAssignmentFailure = eu.advantly.match.session.PlayerAssignmentFailure
 
 /**
  * Alles, was vor dem ersten Punkt feststeht: Genesis `MatchCreated(config, lineup, meta)` plus Anzeigenamen.
@@ -409,10 +414,16 @@ interface MatchHistoryPort {
     /** F20: Ersteller darf Personen auch nach Matchende zuweisen; unabhängig von der Zählerrolle. */
     fun canAssignPlayer(matchId: MatchId): Boolean = false
 
+    fun assignmentFailure(
+        matchId: MatchId,
+        slot: PlayerId,
+        player: PlayerId?,
+    ): PlayerAssignmentFailure? = null
+
     fun assignPlayer(
         matchId: MatchId,
         slot: PlayerId,
-        player: PlayerId,
+        player: PlayerId?,
     ): Boolean = false
 
     /** Beendete Matches, neueste zuerst. Ein per Undo wieder geöffnetes Match verschwindet, bis es erneut endet. */
@@ -442,6 +453,8 @@ data class FavoriteLineup(
 
 /** Spieler und Schnellstart: eigener Spieler, Gäste, Favoriten und „Wie letztes Mal“. */
 interface PlayersPort {
+    val ownerAliases: StateFlow<Set<PlayerId>> get() = noOwnerAliases
+
     /** Der Geräte-Besitzer (Side A, „Du“). Leerer Name = noch kein Profil. */
     val self: StateFlow<Player>
 

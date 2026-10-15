@@ -56,7 +56,13 @@ class PlayerChoiceTest {
                 .all()
                 .any { h.phoneData.isPlaceholder(it.id) },
         )
-        assertEquals(match.lineup, h.directory.lastSetup()!!.lineup)
+        val repeated = h.directory.lastSetup()!!.lineup
+        assertEquals(match.lineup.a[0], repeated.a[0])
+        assertEquals(bea, repeated.b[0])
+        assertTrue(h.watchData.isPlaceholder(repeated.a[1]))
+        assertTrue(h.watchData.isPlaceholder(repeated.b[1]))
+        assertFalse(repeated.a[1] in match.lineup.a)
+        assertFalse(repeated.b[1] in match.lineup.b)
         c.close()
         c.newMatch()
         c.selectSport(Sport.TENNIS)

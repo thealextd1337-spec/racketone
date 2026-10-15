@@ -29,7 +29,7 @@ class WatchDirectoryTest {
         assertNull("eigener Name leer: Anzeige als Du", directory.displayName(self))
         assertNull(directory.displayName(opponent))
         assertEquals(1, data.players.all().size)
-        assertEquals(emptyMap<String, String>(), data.settings.all())
+        assertEquals(emptyMap<String, String>(), data.settings.all() - "assignments.projectionVersion")
     }
 
     @Test
@@ -47,7 +47,9 @@ class WatchDirectoryTest {
         assertNotNull(session.createFollowUp())
         val last = directory.lastSetup()
         assertEquals(format, last?.format)
-        assertEquals(lineup, last?.lineup)
+        assertEquals(lineup.a, last?.lineup?.a)
+        assertNotEquals(lineup.b, last?.lineup?.b)
+        assertEquals(last?.lineup?.b?.first(), last?.lineup?.firstServer)
         assertEquals(1, directory.recentResults().size)
         assertNotNull("Folge-Match läuft", directory.resumable())
     }
