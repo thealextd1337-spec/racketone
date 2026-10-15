@@ -88,7 +88,7 @@ Für den Google-Play-Pfad werden Android-Teilgates gesondert abgenommen, solange
 
 ### P1 – Zählen offline: Handy + Wear OS + Apple Watch
 
-**Release-Stufe:** Interner Play-Test, danach geschlossener Pilot (mindestens 12 Tester × 14 Tage durchgehend opted-in für neue private Konten). Android-Teilgate separat dokumentieren, solange Apple-Realtests fehlen; Gesamt-P1 bleibt dann offen. Empfehlung: Produktion erst nach P3, um Zuverlässigkeit und das geplante V1-Paket vor breiter Veröffentlichung nachzuweisen; Details und Gates im [Veröffentlichungsplan](release/veroeffentlichungsplan.md).
+**Release-Stufe:** Interner Play-Test, danach geschlossener Pilot (mindestens 12 Tester × 14 Tage durchgehend opted-in für neue private Konten). Android-Teilgate separat dokumentieren, solange Apple-Realtests fehlen; Gesamt-P1 bleibt dann offen. Entschieden am 15.10.2026: Öffentliche Produktion erst nach P3, um Zuverlässigkeit und das geplante V1-Paket vor breiter Veröffentlichung nachzuweisen; Details und Gates im [Veröffentlichungsplan](release/veroeffentlichungsplan.md).
 
 | Arbeitspaket | Abhängig von |
 |---|---|
@@ -110,7 +110,7 @@ Supabase (Frankfurt), Login mit Apple/Google/E-Mail-Code, Profile, Spieler und D
 
 ### P3 – Statistik & Health
 
-**Release-Stufe:** Empfohlener Produktionsstart nach bestandenem Android-P1/P2/P3-Teilgate, stabilem Kandidatenpilot, Produktionszugang und Phone-/Wear-Review: zuerst DACH. Erster Release mit 100 % in den gewählten Ländern (Google erlaubt hier keine Prozentstaffelung); Folgeupdates 5 → 20 → 50 → 100 %, danach EU/weltweit nach eigenen Gates. Apple-Veröffentlichung separat nach Account und Realtests ([Release-Pfad](release/veroeffentlichungsplan.md)).
+**Release-Stufe:** Produktionsstart ausschließlich nach P3 und bestandenem Android-P1/P2/P3-Teilgate, stabilem Kandidatenpilot, Produktionszugang und Phone-/Wear-Review: zuerst DACH. Erster Release mit 100 % in den gewählten Ländern (Google erlaubt hier keine Prozentstaffelung); Folgeupdates 5 → 20 → 50 → 100 %, danach EU/weltweit nach eigenen Gates. Apple-Veröffentlichung separat nach Account und Realtests ([Release-Pfad](release/veroeffentlichungsplan.md)).
 
 Puls (5-s-Raster), Kalorien, Schritte und Dauer von der Uhr. Drei getrennte Einwilligungen: messen, synchronisieren, teilen. Schreiben nach Apple Health und Health Connect, ohne Schritte (vermeidet doppelte Zählung). Statistik-Screens: Momentum, Satzverlauf, H2H, Puls pro Satz. Optionale Punktdetails (Ass, Doppelfehler) per Long-Press. Datenschutz-Folgenabschätzung (DSFA) und Datenschutzerklärung.
 **Gate P3:** Puls-Qualität auf Ultra, Pixel und Galaxy validiert. Store-Review-Texte fertig. Danach ist der **Store-Release** möglich; der geschlossene Android-Pilot beginnt bereits in P1 und wird mit den neuen Features erneut validiert.

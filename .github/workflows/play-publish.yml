@@ -38,7 +38,7 @@ jobs:
     name: Signieren und veröffentlichen
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: android-release
+    environment: ${{ inputs.track == 'production' && 'play-production' || 'android-release' }}
     env:
       FASTLANE_SKIP_UPDATE_CHECK: "1"
       FASTLANE_OPT_OUT_USAGE: "1"
@@ -49,7 +49,9 @@ jobs:
       PHONE_CLOSED_TRACK: ${{ vars.PLAY_PHONE_CLOSED_TRACK || 'alpha' }}
       WEAR_CLOSED_TRACK: ${{ vars.PLAY_WEAR_CLOSED_TRACK || 'wear:alpha' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Version und Release-Notes prüfen
         run: |
           python3 - <<'PY'
@@ -60,34 +62,39 @@ jobs:
           assert re.fullmatch(r'\d+\.\d+\.\d+', version), 'versionName muss SemVer x.y.z sein'
           assert 1 <= build <= 200_000_000
           ref = os.environ['GITHUB_REF']
-          assert ref == 'refs/heads/main' or ref == f'refs/tags/v{version}', 'Nur main oder passender Release-Tag'
+          assert ref == 'refs/heads/main', 'Nur main ist freigegeben'
           assert os.environ['TRACK'] in ('internal', 'alpha', 'production')
           assert os.environ['OPERATION'] in ('upload', 'promote')
           assert os.environ['SOURCE_TRACK'] in ('internal', 'alpha')
+          assert os.environ['TRACK'] != 'production' or (os.environ['OPERATION'] == 'promote' and os.environ['SOURCE_TRACK'] == 'alpha'), 'Produktion nur per promote aus alpha'
           percent = int(os.environ['ROLLOUT_PERCENT'])
           assert percent in (5, 20, 50, 100)
           assert os.environ['TRACK'] == 'production' or percent == 100, 'Testtracks benötigen 100 %'
           if os.environ['OPERATION'] == 'promote':
               assert os.environ['TRACK'] != os.environ['SOURCE_TRACK'], 'Quelle und Ziel sind gleich'
+          track = os.environ['TRACK']
           for locale in ('de-DE', 'en-US'):
-              notes = pathlib.Path(f'docs/release/notes/{version}/{locale}.txt').read_text(encoding='utf-8').strip()
+              notes = pathlib.Path(f'docs/release/notes/{version}/{track}/{locale}.txt').read_text(encoding='utf-8').strip()
               assert 0 < len(notes) <= 500, f'{locale}: 1–500 Zeichen erforderlich'
+          assert pathlib.Path('Gemfile.lock').is_file(), 'Gemfile.lock fehlt: siehe Veröffentlichungsplan §6'
           versions = tomllib.loads(pathlib.Path('gradle/libs.versions.toml').read_text())['versions']
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write(f"VERSION_NAME={version}\nBUILD_NUMBER={build}\nFASTLANE_VERSION={versions['fastlane']}\nRUBY_VERSION={versions['ruby']}\n")
           PY
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: true
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
-      - name: fastlane installieren
-        run: gem install fastlane --version "$FASTLANE_VERSION" --no-document
+      - name: Gesperrte Ruby-Abhängigkeiten installieren
+        env:
+          BUNDLE_FROZEN: "true"
+        run: bundle install
       - name: Tests und Lint
         run: ./gradlew check --no-configuration-cache
       - name: Zugangsdaten im temporären Verzeichnis bereitstellen
@@ -108,20 +115,20 @@ jobs:
           umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/advantly-upload.jks"
           printf '%s' "$PLAY_JSON" > "$RUNNER_TEMP/advantly-play.json"
-          echo "ADVANTLY_UPLOAD_KEYSTORE=$RUNNER_TEMP/advantly-upload.jks" >> "$GITHUB_ENV"
-          echo "PLAY_JSON_FILE=$RUNNER_TEMP/advantly-play.json" >> "$GITHUB_ENV"
       - name: Signierte AABs bauen
         if: inputs.operation == 'upload'
         env:
           ADVANTLY_UPLOAD_STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
           ADVANTLY_UPLOAD_KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
           ADVANTLY_UPLOAD_KEY_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_KEY_PASSWORD }}
-        run: ./gradlew bundleAllRelease --no-configuration-cache
+        run: |
+          export ADVANTLY_UPLOAD_KEYSTORE="$RUNNER_TEMP/advantly-upload.jks"
+          ./gradlew bundleAllRelease --no-configuration-cache
       - name: Beide Signaturen prüfen
         if: inputs.operation == 'upload'
         run: |
           set -euo pipefail
-          expected=$(keytool -list -keystore "$ADVANTLY_UPLOAD_KEYSTORE" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" -v | awk '/SHA256:/ {print $2; exit}')
+          expected=$(keytool -list -keystore "$RUNNER_TEMP/advantly-upload.jks" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" -v | awk '/SHA256:/ {print $2; exit}')
           test -n "$expected"
           for aab in androidApp/build/outputs/bundle/release/androidApp-release.aab wearApp/build/outputs/bundle/release/wearApp-release.aab; do
             jarsigner -verify "$aab" | grep -q 'jar verified'
@@ -131,23 +138,30 @@ jobs:
         env:
           STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
-      - name: AABs und Mappings sichern
+      - name: AABs sichern
         if: inputs.operation == 'upload'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: advantly-play-${{ env.VERSION_NAME }}-${{ env.BUILD_NUMBER }}
           path: |
             androidApp/build/outputs/bundle/release/*.aab
             wearApp/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 1
+      - name: Optionale Mappings sichern
+        if: inputs.operation == 'upload'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: advantly-mappings-${{ env.VERSION_NAME }}-${{ env.BUILD_NUMBER }}
+          path: |
             androidApp/build/outputs/mapping/release/mapping.txt
             wearApp/build/outputs/mapping/release/mapping.txt
-          if-no-files-found: error
-          retention-days: 7
+          if-no-files-found: warn
+          retention-days: 1
       - name: Phone und Wear mit supply veröffentlichen
         run: |
-          ruby - <<'RUBY'
-          require 'fastlane'
-          require 'supply'
+          export PLAY_JSON_FILE="$RUNNER_TEMP/advantly-play.json"
+          bundle exec ruby - <<'RUBY'
           require 'google/apis/androidpublisher_v3'
           require 'googleauth'
           require 'fileutils'
@@ -202,7 +216,7 @@ jobs:
             ['de-DE', 'en-US'].each do |locale|
               directory = File.join(metadata, locale, 'changelogs')
               FileUtils.mkdir_p(directory)
-              FileUtils.cp("docs/release/notes/#{ENV.fetch('VERSION_NAME')}/#{locale}.txt", File.join(directory, "#{code}.txt"))
+              FileUtils.cp("docs/release/notes/#{ENV.fetch('VERSION_NAME')}/#{ENV.fetch('TRACK')}/#{locale}.txt", File.join(directory, "#{code}.txt"))
             end
             config = {
               package_name: package, json_key: ENV.fetch('PLAY_JSON_FILE'),
@@ -219,8 +233,9 @@ jobs:
               config[:aab] = "#{mod}/build/outputs/bundle/release/#{mod}-release.aab"
             end
             config[:rollout] = percent / 100.0 if percent < 100
-            Supply.config = FastlaneCore::Configuration.create(Supply::Options.available_options, config)
-            Supply::Uploader.new.perform_upload
+            # Dokumentierte CLI statt interner Supply-Klassen; Argumente ohne Shell.
+            arguments = config.flat_map { |key, value| ["--#{key}", value.to_s] }
+            abort "#{target}: supply fehlgeschlagen" unless system('bundle', 'exec', 'fastlane', 'supply', *arguments)
             File.open(ENV.fetch('GITHUB_STEP_SUMMARY'), 'a') do |summary|
               summary.puts "#{target}: #{ENV.fetch('VERSION_NAME')} (#{code}), #{percent} %, #{ENV.fetch('OPERATION')} erfolgreich übergeben. Play-Prüfung separat kontrollieren."
             end

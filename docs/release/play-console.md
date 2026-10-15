@@ -329,7 +329,7 @@ Schritte:
 
 Die Hilfe nennt keine zusätzliche Mindestzahl von zwölf Uhren [P12]. Phone- **und** Wear-Track mit derselben Testerliste laufen lassen und Geräteabdeckung gesondert nachweisen; maßgeblich ist der Produktionszugang im Dashboard.
 
-**Produktion:** Empfehlung nach P3-Gates, zuerst DACH. Der allererste Produktionsrelease ist **nicht prozentual staffelbar**; Prozentrollouts gelten erst für Updates ([Google-Regel](https://support.google.com/googleplay/android-developer/answer/6346149)). Gates und Staffelung: [Veröffentlichungsplan §2](veroeffentlichungsplan.md#2-stufen-und-gates).
+**Produktion:** Nutzerentscheidung vom 15.10.2026: ausschließlich nach P3-Gates, zuerst DACH. Der allererste Produktionsrelease ist **nicht prozentual staffelbar**; Prozentrollouts gelten erst für Updates ([Google-Regel](https://support.google.com/googleplay/android-developer/answer/6346149)). Gates und Staffelung: [Veröffentlichungsplan §2](veroeffentlichungsplan.md#2-stufen-und-gates).
 
 ## 9. CI: signierte AABs per GitHub Actions (vorbereitet)
 
@@ -338,7 +338,7 @@ prüft die Signatur, schreibt die Zertifikats-SHA-256 ins Job-Summary und lädt 
 Die Secrets sind **noch nicht angelegt**. Ohne sie bricht der Workflow sofort mit einer Meldung ab. Einrichtung:
 
 1. [ ] GitHub → Repo → **Settings → Environments → New environment** `android-release`.
-   Dort **Deployment branches: Selected branches → `main`**, optional **Required reviewers: du selbst**.
+   Dort verpflichtend **Deployment branches and tags: Selected branches and tags → Branch `main`**, keine Tags; optional **Required reviewers: du selbst**.
 2. [ ] Keystore base64-kodieren (PowerShell), ohne Zeilenumbrüche:
    ```powershell
    [Convert]::ToBase64String([IO.File]::ReadAllBytes("H:\dev\keys\advantly-upload.jks")) | Set-Clipboard
@@ -355,11 +355,12 @@ Die Secrets sind **noch nicht angelegt**. Ohne sie bricht der Workflow sofort mi
 Das Repo ist öffentlich. Secrets sehen nur Workflows dieses Repos, nicht Forks oder Pull Requests aus Forks.
 Den Workflow starten können nur Personen mit Schreibrechten. Der Keystore wird nach dem Lauf vom Runner gelöscht.
 
-Optionaler API-Upload/Promotion beider Formfaktoren: `.github/workflows/play-publish.yml`. Service-Account, zusätzliche Secrets, Track-IDs und Versionsführung stehen im [Veröffentlichungsplan §6](veroeffentlichungsplan.md#6-upload-automatisierung-und-versionsführung); diese Checkliste bleibt der manuelle Uploadweg.
+**Play-Publishing:** Der zusätzliche Workflow `play-publish.yml` nutzt für Testtracks `android-release` und für Produktion das separate Environment `play-production`. Dort sind dein Required Review, die Branch-Regel nur `main` und eigene Secrets Pflicht. Produktion nur per Promotion aus `alpha` nach P3. Schrittweise Einrichtung, gesperrte Ruby-Abhängigkeiten und Pflicht-Erstlauf auf `internal`: [Veröffentlichungsplan §6](veroeffentlichungsplan.md#6-upload-automatisierung-und-versionsführung). Publish-Artefakte bleiben nur einen Tag verfügbar; Zieltrack-Notes und „Notes gegen Build geprüft“ sind Pflicht ([§7](veroeffentlichungsplan.md#7-release-notes-vorlage-und-erster-interner-test)).
 
 ## 10. Vor jedem weiteren Upload
 - [ ] Für neue Binary-Uploads `advantly.buildNumber` erhöhen (Phone …1 und Wear …2 steigen automatisch mit); bei Promotion desselben Artefakts unverändert lassen
 - [ ] `gradlew.bat check bundleAllRelease`
+- [ ] Notes gegen Build geprüft (beide Formfaktoren und Sprachen, Zieltrack-Dateien; [Plan §7](veroeffentlichungsplan.md#7-release-notes-vorlage-und-erster-interner-test))
 - [ ] Ändern sich Berechtigungen, Datenflüsse oder Health-Typen: §6.6–6.8 und `site/app-datenschutz.html` / `site/en/app-privacy.html` anpassen (Kommentare „ÜBERARBEITEN vor Phase 2/3“).
 
 ---
