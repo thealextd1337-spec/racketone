@@ -369,6 +369,23 @@ sequenceDiagram
 - **Garmin**: `ActivityRecording`-Session (Racket-Sport + Sub-Sport prüfen).
 - P3 liest aus derselben Session Puls, Kalorien, Schritte.
 
+### 4.9 Mehrere Matches parallel am Handy und das Uhr-Match (F22, W3-M)
+
+Das Handy kann **mehrere Matches gleichzeitig** führen (z. B. Nachbarplätze). Der Single-Scorer gilt weiter **pro Match** (§4.4, 02 §7.5). Die eigene Uhr zählt bzw. zeigt **höchstens eines** davon, das **Uhr-Match**; die übrigen zählt das Handy als Director (ab P2 auch andere Zähler, Turnierdirektor-Modus).
+
+| Baustein | Regel |
+|---|---|
+| **Zustand** (`SessionState`) | `matches` = alle offenen Matches (nach Erstellzeit), `match` = das **fokussierte** (Live-Ansicht; Zähl-Kommandos wirken darauf), `watchMatchId` = Uhr-Match (nur Handy). Uhren halten genau ein Match offen (`SessionConfig.parallelMatches = false`), für sie ist `match` wie bisher „das offene Match“. |
+| **Zuweisung Uhr-Match** (Handy, persistent) | (1) Neues Match mit Zähler „Meine Uhr“ (bzw. eine bekannte Uhr) → wird Uhr-Match. Zählt die Uhr bisher ein anderes laufendes Match, übernimmt das Handy dort vorher per `ScorerChanged` (Director) – die Uhr zählt nie zwei Matches. (2) Neues Director-Match, während die Uhr **frei** ist (kein laufendes Uhr-Match) → Uhr-Match, die Uhr zeigt an (wie vor F22). (3) Ein auf der Uhr gestartetes bzw. von ihr gezähltes neues, laufendes Match → Uhr-Match, sofern es nicht älter ist als ein noch laufendes bisheriges. (4) Folge-Match des Uhr-Matches → Uhr-Match. (5) „Auf der Uhr zeigen/zählen“ (`assignToWatch`) wie (1). (6) Löschen des Uhr-Matches → Uhr frei. |
+| **Wire** | `MatchMeta.watchMatch = {matchId?, assignedAtMs}` (Protokoll 3, §4.3) in jedem `MatchMeta` des Handys, also bei jeder Änderung, beim Anlegen und bei jedem `Hello`. `assignedAtMs` ist die Handy-Wanduhr, streng steigend; die Uhr übernimmt nur jüngere Zuweisungen (verspätete Wiederholungen ändern nichts). |
+| **Uhr folgt nur ihrem Match** | Mit bekannter Zuweisung öffnet die Uhr ausschließlich das zugewiesene Match: Eine **neue** Zuweisung wechselt sofort (auch aus einem laufenden Match, das das Handy vorher übernommen hat); sonst nur, wenn auf der Uhr nichts Laufendes offen ist und das Uhr-Match noch läuft. Events der übrigen Matches speichert die Uhr nur (Backup), sie öffnen nichts. Ohne Zuweisung (älterer Stand) gilt das bisherige Auto-Follow. |
+| **Auto-Follow am Handy** | Ein empfangenes laufendes Match (≤ 24 h alt) kommt in die Liste; fokussiert wird es nur, wenn kein laufendes Match im Fokus ist. Ein Folge-Match ersetzt sein beendetes, fokussiertes Vor-Match. |
+| **Sync pro Match** | Unverändert pro `matchId`: Events, `Summary` (alle offenen + zuletzt geänderte + mit Rückstand), Ack/`confirmed`, Löschmarkierungen und der persistente Rückstand (`pendingToPeers`) gelten für jedes Match einzeln; das Handy bleibt Hub/Backup **aller** Matches, auch die Uhr erhält die Events der Director-Matches (einziges Backup in P1). `Hello.activeMatches` listet alle offenen Matches. |
+| **Telemetrie** | Puls/Schritte der Uhr gehören zum Uhr-Match: Das Handy abonniert sie nur in dessen Live-Ansicht (`LiveTelemetrySubscription.matchId`), die Uhr sendet nur für ihr offenes Match. |
+| **Migration** | Handy ohne gespeicherte Zuweisung (Stand vor F22): Das zuletzt geänderte laufende Match – damals das einzige offene – wird Uhr-Match. Nach einem Neustart öffnet die App alle laufenden Matches der letzten 12 h wieder, das jüngste im Fokus. |
+
+**Matchende am Handy (F21):** „Beenden“ = `MatchEnded(STOPPED)` (Ergebnis gilt, wie es steht, 02 §9.27; im Satzende-Dialog `ContinueDecision(false)`), „Abbrechen“ = `MatchEnded(ABANDONED)` (ohne Wertung). Zählt ein anderes Gerät (z. B. die Uhr), übernimmt das Handy nach Bestätigung zuerst per `ScorerChanged` und beendet dann – beide Events gehen an die Uhr, die das Ende anzeigt.
+
 ---
 
 ## 5. Offline-First-Datenschicht und Cloud-Sync

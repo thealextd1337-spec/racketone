@@ -21,15 +21,31 @@ import eu.advantly.sync.protocol.PeerKind
 /**
  * Gesamtzustand einer [MatchSession] – genau das, was eine UI zum Rendern braucht.
  *
- * @property match offenes Match oder `null` (Startbildschirm)
- * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des offenen Matches ändern (Löschung,
+ * @property match fokussiertes Match (Live-Ansicht; Uhr: ihr einziges offenes) oder `null` (Startbildschirm)
+ * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des fokussierten Matches ändern (Löschung,
  *   Match-Kopf/-Stand eines anderen Matches, Spieler, Favoriten, Identität) – Signal für Listen-UIs (Verlauf), neu zu laden
+ * @property matches alle offenen Matches (fokussiertes eingeschlossen), nach Erstellzeit; Uhren: höchstens eines (F22)
+ * @property watchMatchId nur am Handy: das Uhr-Match – das offene Match, das die eigene Uhr zählt bzw. anzeigt
+ *   (01 §4.9); `null` = die Uhr ist frei
  */
 data class SessionState(
     val match: ActiveMatch?,
     val sync: SyncStatus,
     val dataRevision: Long = 0,
-)
+    val matches: List<ActiveMatch> = listOfNotNull(match),
+    val watchMatchId: MatchId? = null,
+) {
+    /** Offenes Match [id] oder `null`. */
+    fun match(id: MatchId): ActiveMatch? = matches.firstOrNull { it.id == id }
+
+    /**
+     * Ist der Zähler von [match] erreichbar? Dieses Gerät zählt selbst oder der Zähler ist eine verbundene, kompatible
+     * Gegenstelle ([SyncStatus.scorerConnected] gilt nur für das fokussierte Match).
+     */
+    fun scorerConnected(match: ActiveMatch): Boolean =
+        match.isScorer ||
+            sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE && it.deviceId == match.scorerDeviceId }
+}
 
 /**
  * Das offene Match.
