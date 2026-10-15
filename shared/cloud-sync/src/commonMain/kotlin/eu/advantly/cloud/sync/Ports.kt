@@ -7,7 +7,8 @@ import kotlinx.serialization.json.JsonObject
 
 // Schnittstellenentwurf P2 (docs/p2-plan.md §6). Implementierungen folgen in P2-B/C:
 // CloudBackend + CloudAuthPort + LiveChannelPort mit supabase-kt (nur Handy und Wear OS standalone),
-// CloudOutboxStore in shared/data (Spalte cloud_state in match_event, Migration 2.sqm), CloudSyncPort als Worker.
+// CloudOutboxStore als Adapter HIER in cloud-sync über neue Primitive in shared/data (Spalte cloud_state, Cursor-Tabelle,
+// Migration 2.sqm) – data kennt cloud-sync nicht (kein Modulzyklus), CloudSyncPort als Worker.
 
 /** Server-RPCs (PostgREST `rpc/…`). Alle Aufrufe sind idempotent bzw. lesend; Fehler als [CloudException]. */
 interface CloudBackend {
@@ -30,8 +31,8 @@ interface CloudBackend {
     /** `match_event_watermarks`: Wasserstand je Gerät (Lückenprüfung wie die Geräte-Anti-Entropie). */
     suspend fun watermarks(matchId: String): List<EventWatermark>
 
-    /** `get_visitor_match`: bereinigte Live-/Ergebnis-Sicht (Visitor, Turnierübersicht). */
-    suspend fun visitorView(matchId: String): JsonObject
+    /** `get_visitor_match`: bereinigte Live-/Ergebnis-Sicht (Visitor, Mitglieder; nicht Feed). */
+    suspend fun visitorView(matchId: String): VisitorView
 }
 
 /** Fachlicher Fehler eines RPCs: [reason] = stabiler Grund-Schlüssel (`profile_not_active`, `age_below_minimum`, …). */
@@ -83,8 +84,9 @@ interface CloudAuthPort {
 }
 
 /**
- * Lokale Outbox und Cursor (Implementierung in `shared/data`). Grundlage ist das vorhandene Event-Log: Events mit
- * `cloud_state = PENDING` sind ausstehend; Köpfe/Spieler/Geräte werden aus den lokalen Tabellen abgeleitet.
+ * Lokale Outbox und Cursor. Implementierung als Adapter in `cloud-sync` über Primitive von `shared/data`
+ * (`cloud_state` je Event, Cursor-Tabelle) – Abhängigkeit nur cloud-sync → data. Grundlage ist das vorhandene
+ * Event-Log: Events mit `cloud_state = PENDING` sind ausstehend; Köpfe/Spieler/Geräte stammen aus den lokalen Tabellen.
  */
 interface CloudOutboxStore {
     fun pendingEvents(limit: Int): List<StoredEvent>
@@ -100,6 +102,14 @@ interface CloudOutboxStore {
 
     fun apply(update: OutboxUpdate)
 
+    /** Matches, deren Projektion der Server noch nicht übernommen hat (`ahead_of_events`) – nächster Lauf. */
+    fun markProjectionPending(matchIds: Set<String>)
+
+    /** Gespeicherte `visibilityEpoch`; Abweichung → Vollabgleich. */
+    fun visibilityEpoch(): Long
+
+    fun saveVisibilityEpoch(epoch: Long)
+
     fun pullCursor(): Long
 
     fun savePullCursor(cursor: Long)
@@ -113,14 +123,15 @@ interface CloudOutboxStore {
 }
 
 /**
- * Realtime (private Kanäle, 03 E12): `match:<id>` liefert Engine-Events an Mitglieder (Anzeige, Director, Zähler),
- * `match-live:<id>` die bereinigte Live-Sicht (auch Visitor), `tournament:<id>` die Platz-Updates der Turnierleitung.
- * Nur öffnen, solange ein Live-Screen sichtbar ist (Verbindungslimit).
+ * Realtime (private, versionierte Kanäle, 03 E12): `match:<id>:<epoch>` liefert Engine-Events an Mitglieder,
+ * `match-live:<id>:<epoch>` die bereinigte Live-Sicht (auch Visitor), `tournament:<id>:<epoch>` die Platz-Updates.
+ * Auf das Ereignis `rotate` (Rechteänderung) den aktuellen Kanal per RPC holen und neu beitreten; verpasste Daten
+ * holt der Pull. Nur öffnen, solange ein Live-Screen sichtbar ist (Verbindungslimit).
  */
 interface LiveChannelPort {
     fun matchEvents(matchId: String): Flow<PulledEvent>
 
-    fun liveView(matchId: String): Flow<JsonObject>
+    fun liveView(matchId: String): Flow<VisitorView>
 
     fun tournament(tournamentId: String): Flow<JsonObject>
 }

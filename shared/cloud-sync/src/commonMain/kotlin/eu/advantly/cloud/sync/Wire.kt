@@ -31,7 +31,11 @@ data class EventRow(
     val payload: JsonObject,
 )
 
-/** Event aus `pull_match_events` bzw. dem Realtime-Kanal `match:<id>`: Zeile plus Server-Cursor. */
+/**
+ * Event aus `pull_match_events` bzw. dem Realtime-Kanal `match:<id>:<epoch>`: Zeile plus Server-Cursor.
+ * [redacted] = Klarname in der Payload wurde nach einer Kontolöschung ersetzt (Lösch-Ausnahme, docs/p2-plan.md §5.7):
+ * der Client überschreibt seine lokale Kopie dieses Events.
+ */
 @Serializable
 data class PulledEvent(
     val id: String,
@@ -44,6 +48,7 @@ data class PulledEvent(
     val type: String,
     val payload: JsonObject,
     val serverSeq: Long,
+    val redacted: Boolean = false,
 ) {
     fun toRow(): EventRow = EventRow(id, matchId, deviceId, deviceSeq, lamport, wallClockMs, parentId, type, payload)
 }
@@ -146,7 +151,16 @@ data class ItemResult(
     val id: String? = null,
     val result: String,
     val reason: String? = null,
+    /** Nur Matches: `applied` | `stale` | `ahead_of_events` (später erneut senden) | `forbidden` | … */
     val projection: String? = null,
+    /** Nur Matches: Hinweise je Platz (`not_friend`, `link_rejected`, `player_not_owned`, `profile_already_in_match`). */
+    val notes: List<ParticipantNote> = emptyList(),
+)
+
+@Serializable
+data class ParticipantNote(
+    val slotId: String,
+    val note: String,
 )
 
 @Serializable
@@ -186,7 +200,10 @@ data class PulledRole(
 @Serializable
 data class PulledMatch(
     val id: String,
-    val createdBy: String,
+    /** `member` (Basistabellen/Events/Live lesbar) | `feed` (bereinigte Sicht eines Freundes, ohne Events/Rollen/Live). */
+    val access: String,
+    /** Im Feed nur, wenn der Ersteller mein Freund ist. */
+    val createdBy: String? = null,
     val sport: String,
     val discipline: String,
     val format: JsonObject,
@@ -203,6 +220,10 @@ data class PulledMatch(
     val summary: JsonObject? = null,
     val liveState: JsonObject? = null,
     val projectionEventCount: Int = 0,
+    /** Aktuelle Realtime-Kanalversion (nur Mitglieder): `match:<id>:<accessEpoch>`, `match-live:<id>:<accessEpoch>`. */
+    val accessEpoch: Long? = null,
+    /** Steigt bei Redaktion von Event-Payloads → Events neu laden und lokale Kopien überschreiben. */
+    val redactionEpoch: Int = 0,
     val deleted: Boolean = false,
     val serverVersion: Long,
     val participants: List<PulledParticipant> = emptyList(),
@@ -240,4 +261,35 @@ data class PullResponse(
     val friendships: List<PulledFriendship> = emptyList(),
     val cursor: Long,
     val hasMore: Boolean = false,
+    /**
+     * Steigt, wenn sich meine Sichtbarkeit ohne neue Match-Version ändert (Freundschaft, Entzug, Teilen beendet).
+     * Weicht er vom gespeicherten Wert ab: Vollabgleich ab Cursor 0 und nicht mehr gelieferte Cloud-Matches lokal
+     * entfernen (lokale, noch nicht hochgeladene Matches bleiben).
+     */
+    val visibilityEpoch: Long = 0,
+)
+
+/** Bereinigte Sicht aus `get_visitor_match` (Visitor, Turnierübersicht) – nie IDs von Profilen/Geräten. */
+@Serializable
+data class VisitorView(
+    val matchId: String,
+    val sport: String,
+    val discipline: String,
+    val status: String,
+    val resultReason: String? = null,
+    val winner: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    /** Aktueller Kanal `match-live:<id>:<epoch>`; nach dem Ereignis `rotate` neu holen. */
+    val channel: String,
+    val teams: List<VisitorTeamMember> = emptyList(),
+    val live: JsonObject? = null,
+    val result: JsonObject? = null,
+)
+
+@Serializable
+data class VisitorTeamMember(
+    val team: String,
+    val position: Int,
+    val name: String,
 )

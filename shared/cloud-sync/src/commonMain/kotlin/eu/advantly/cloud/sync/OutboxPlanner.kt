@@ -10,6 +10,8 @@ data class OutboxUpdate(
     val rejected: Map<String, String>,
     /** Vorübergehend (keine Antwort, Match-Kopf fehlt noch) → im nächsten Lauf erneut senden. */
     val retry: Set<String>,
+    /** Matches, deren Projektion noch nicht übernommen wurde (`ahead_of_events` oder keine Antwort). */
+    val projectionRetry: Set<String> = emptySet(),
 )
 
 /**
@@ -20,11 +22,16 @@ data class OutboxUpdate(
  *   `(lamport, deviceId, id)` zusammen, Matches in fester Reihenfolge (nach ID) → deterministische Batches;
  * - der Kopf eines Matches reist in jedem Batch mit, der Events dieses Matches enthält (Server legt Events nur zu
  *   bekannten Matches an); Köpfe ohne Events (z. B. nur Projektion) und Geräte/Spieler im ersten Batch;
+ * - die **Projektion** reist nur mit dem Batch, der das letzte ausstehende Event des Matches enthält – sie darf dem
+ *   Event-Log in der Cloud nie vorauslaufen (Server prüft zusätzlich `eventCount` ≤ gespeicherte Events);
  * - Wiederholungen sind gefahrlos: der Server ist idempotent über die Event-ID.
  */
 object OutboxPlanner {
     /** Gründe, bei denen ein erneuter Versuch sinnvoll ist (z. B. Kopf kam im selben Lauf zu spät an). */
     val RETRYABLE_REASONS: Set<String> = setOf("unknown_match")
+
+    /** Projektions-Ergebnisse, bei denen der nächste Lauf es erneut versuchen soll. */
+    val RETRYABLE_PROJECTIONS: Set<String> = setOf("ahead_of_events")
 
     fun plan(
         events: List<StoredEvent>,
@@ -42,6 +49,8 @@ object OutboxPlanner {
         val chunks = ordered.chunked(maxEvents)
         val eventMatches = ordered.mapTo(mutableSetOf()) { it.matchId }
         val headerOnly = headers.filterKeys { it !in eventMatches }.values.sortedBy { it.id }
+        val lastChunkOf = mutableMapOf<String, Int>()
+        chunks.forEachIndexed { index, chunk -> chunk.forEach { lastChunkOf[it.matchId] = index } }
 
         if (chunks.isEmpty()) {
             return if (headerOnly.isEmpty() && devices.isEmpty() && players.isEmpty()) {
@@ -51,7 +60,10 @@ object OutboxPlanner {
             }
         }
         return chunks.mapIndexed { index, chunk ->
-            val chunkHeaders = chunk.map { it.matchId }.distinct().mapNotNull { headers[it] }
+            val chunkHeaders =
+                chunk.map { it.matchId }.distinct().mapNotNull { matchId ->
+                    headers[matchId]?.let { header -> if (lastChunkOf[matchId] == index) header else header.copy(projection = null) }
+                }
             if (index == 0) {
                 PushBatch(devices = devices, players = players, matches = headerOnly + chunkHeaders, events = chunk)
             } else {
@@ -77,6 +89,14 @@ object OutboxPlanner {
                 else -> rejected[event.id] = result.reason ?: result.result
             }
         }
-        return OutboxUpdate(uploaded, rejected, retry)
+        val matchResults = response.matches.filter { it.id != null }.associateBy { it.id }
+        val projectionRetry =
+            sent.matches
+                .filter { it.projection != null }
+                .filter { header ->
+                    val projection = matchResults[header.id]?.projection
+                    projection == null || projection in RETRYABLE_PROJECTIONS
+                }.mapTo(mutableSetOf()) { it.id }
+        return OutboxUpdate(uploaded, rejected, retry, projectionRetry)
     }
 }

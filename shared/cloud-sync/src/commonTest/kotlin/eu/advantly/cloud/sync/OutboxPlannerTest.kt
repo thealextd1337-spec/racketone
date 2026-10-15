@@ -46,6 +46,30 @@ class OutboxPlannerTest {
     }
 
     @Test
+    fun projectionTravelsOnlyWithTheLastChunkOfItsMatch() {
+        val events = (1L..700L).map { event("m1", it) }
+        val head = header("m1").copy(projection = ProjectionDto(status = "in_progress", eventCount = 700))
+        val batches = OutboxPlanner.plan(events, headers = mapOf("m1" to head))
+
+        assertEquals(listOf(null, head.projection), batches.map { it.matches.single().projection })
+    }
+
+    @Test
+    fun projectionAheadOfTheServerIsRetried() {
+        val head = header("m1").copy(projection = ProjectionDto(status = "in_progress", eventCount = 1))
+        val sent = OutboxPlanner.plan(listOf(event("m1", 1)), headers = mapOf("m1" to head)).single()
+        val ahead =
+            OutboxPlanner.evaluate(
+                sent,
+                PushResponse(matches = listOf(ItemResult("m1", "updated", projection = "ahead_of_events"))),
+            )
+        val applied = OutboxPlanner.evaluate(sent, PushResponse(matches = listOf(ItemResult("m1", "updated", projection = "applied"))))
+
+        assertEquals(setOf("m1"), ahead.projectionRetry)
+        assertEquals(emptySet(), applied.projectionRetry)
+    }
+
+    @Test
     fun deduplicatesAndHandlesEmptyOutbox() {
         assertEquals(emptyList(), OutboxPlanner.plan(emptyList()))
         val onlyHeader = OutboxPlanner.plan(emptyList(), headers = mapOf("m1" to header("m1")))
