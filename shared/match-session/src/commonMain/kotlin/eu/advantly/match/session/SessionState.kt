@@ -6,7 +6,13 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchState
+import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChoice
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.TapConflict
 import eu.advantly.device.link.LinkState
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -37,6 +43,11 @@ data class SessionState(
  * @property canRedo das zuletzt auf diesem Gerät rückgängig gemachte Event lässt sich wiederherstellen
  * @property conflicts aktive Widersprüche (nur noch innerhalb eines Geräts möglich, 01 §4.4)
  * @property absorbedTaps als Doppel-Tap zusammengeführte Punkte
+ * @property lastPoint zuletzt wirksam gezählter Ballwechsel – Ziel der Aufschlag-Leiste ([MatchSession.setServeInfo])
+ * @property serveInfoEnabled Aufschlag-Info erfassbar: Tennis/Padel und Match-Option „Aufschlag-Statistik erfassen“
+ * @property canRemovePoint je Seite: dieses Gerät zählt und es gibt einen wirksamen Punkt der Seite
+ *   ([MatchSession.removeLastPointOf])
+ * @property nextSetOptions bei `AWAITING_DECISION` die wählbaren Satzarten für [MatchSession.startNextSet], sonst leer
  */
 data class ActiveMatch(
     val id: MatchId,
@@ -56,6 +67,37 @@ data class ActiveMatch(
     val conflicts: List<TapConflict>,
     val absorbedTaps: List<EventId>,
     val eventCount: Int,
+    val lastPoint: LastPoint? = null,
+    val serveInfoEnabled: Boolean = false,
+    val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
+    val nextSetOptions: List<NextSetKind> = emptyList(),
+) {
+    /**
+     * Offene Aufschlägerwahl im Doppel (02 §6.5.5) aus dem Engine-Zustand: `game` 1/2, Side, wählbare Spieler, bereits
+     * gewählter Spieler. `null` = kein Wahlfenster.
+     */
+    val serverChoice: ServerChoice? get() = state.serverChoice
+
+    /** Eine Aufschlägerwahl ist offen und noch nicht getroffen – die UI fragt (ohne das Zählen zu blockieren). */
+    val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
+}
+
+/**
+ * Der zuletzt gezählte Ballwechsel (für die Aufschlag-Leiste direkt nach dem Punkt).
+ *
+ * @property side Gewinner
+ * @property servingSide aufschlagende Side vor dem Punkt
+ * @property server Aufschläger (im Doppel nach Wahl bzw. Rotation)
+ * @property serve aktuell erfasste Aufschlag-Info oder `null`
+ * @property doubleFaultAllowed „Doppelfehler“ ist wählbar (die Rückschlagseite hat den Punkt gewonnen)
+ */
+data class LastPoint(
+    val id: EventId,
+    val side: Side,
+    val servingSide: Side,
+    val server: PlayerId,
+    val serve: ServeOutcome?,
+    val doubleFaultAllowed: Boolean,
 )
 
 /** Anzeige des Sync-Indikators (04 §3.2): verbunden · nur lokal (wird nachsynchronisiert) · Konflikt. */
