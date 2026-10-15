@@ -1,0 +1,34 @@
+-- Event-Log eines Matches (append-only). Minimal-Schema aus Spike S1; die volle Spalte-Liste
+-- (wall_clock_ms, parent_id, type, uploaded) folgt mit core-scoring/sync-protocol (01 §5.1).
+-- Vor dem ersten Release darf sich das Schema noch ohne Migration ändern.
+CREATE TABLE match_event (
+    id TEXT NOT NULL PRIMARY KEY,
+    match_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    device_seq INTEGER NOT NULL,
+    lamport INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    UNIQUE (match_id, device_id, device_seq)
+);
+
+-- Deckt eventsForMatch inkl. Sortierung (lamport, device_id, id) ab – 01 §3.2
+CREATE INDEX match_event_order ON match_event (match_id, lamport, device_id, id);
+
+insert:
+INSERT INTO match_event (id, match_id, device_id, device_seq, lamport, payload)
+VALUES (?, ?, ?, ?, ?, ?);
+
+countById:
+SELECT count(*) FROM match_event WHERE id = ?;
+
+countBySequence:
+SELECT count(*) FROM match_event WHERE match_id = ? AND device_id = ? AND device_seq = ?;
+
+eventsForMatch:
+SELECT id, match_id, device_id, device_seq, lamport, payload
+FROM match_event
+WHERE match_id = ?
+ORDER BY lamport, device_id, id;
+
+countForMatch:
+SELECT count(*) FROM match_event WHERE match_id = ?;
