@@ -1,6 +1,6 @@
 -- Struktur und Rechte: RLS überall, keine anon-Rechte, Event-Log nicht direkt schreibbar, keine Health-Tabellen.
 begin;
-select plan(17);
+select plan(19);
 
 select is_empty($$
   select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -84,6 +84,14 @@ select is_empty($$
   where n.nspname = 'public' and p.prosecdef and strpos(lower(p.prosrc), 'for update') > 0
     and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
 $$, 'keine RPC sperrt Zeilen ohne Versionssperre');
+
+select ok(exists (select 1 from pg_trigger t where t.tgrelid = 'auth.users'::regclass and t.tgname = 'zz_lock_sync'),
+          'Löschungen auf auth.users nehmen die Versionssperre vor den Auth-Zeilensperren');
+select is_empty($$
+  select table_name, grantee from information_schema.role_table_grants
+  where table_schema = 'public' and privilege_type = 'TRUNCATE'
+    and grantee in ('anon', 'authenticated', 'service_role')
+$$, 'kein TRUNCATE für API-Rollen (Wartung nur als Owner mit Sperre vorab)');
 
 select * from finish();
 rollback;

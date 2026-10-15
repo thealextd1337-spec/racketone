@@ -1,6 +1,6 @@
 -- Account-Löschung (Karenz, Anonymisierung, Kaskaden) und Datenexport.
 begin;
-select plan(34);
+select plan(37);
 
 select tests.world();
 select set_config('tests.alice', tests.uid('alice')::text, true);
@@ -49,6 +49,22 @@ select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build
                         jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
           'accepted', 'Übergabe an bobs Gerät');
 
+select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
+            tests.event('e8000000-0000-7000-8000-000000000005', 'a8000000-0000-7000-8000-000000000001', tests.device('a1'), 5, 'PointWon',
+                        '{"side":"A","detail":null}'),
+            tests.event('e8000000-0000-7000-8000-000000000006', 'a8000000-0000-7000-8000-000000000001', tests.device('a1'), 6, 'PointDetailSet',
+                        '{"target":"e8000000-0000-7000-8000-000000000005","detail":null}'),
+            tests.event('e8000000-0000-7000-8000-000000000007', 'a8000000-0000-7000-8000-000000000001', tests.device('a1'), 7, 'PointDetailSet',
+                        '{"target":"e8000000-0000-7000-8000-000000000005","detail":{"kind":"ACE","by":"x"}}')))), 'events', 2),
+          'accepted', 'Events mit null-Detail und Detail mit Spielerbezug hochgeladen');
+select lives_ok($$ select public.export_my_data() $$, 'Export verträgt null-Details (Regression R3 #2)');
+select is((select jsonb_agg(e -> 'payload' order by e ->> 'id') from jsonb_array_elements(public.export_my_data() -> 'matches') m,
+           jsonb_array_elements(m -> 'events') e where e ->> 'id' in ('e8000000-0000-7000-8000-000000000005',
+                                                                      'e8000000-0000-7000-8000-000000000006',
+                                                                      'e8000000-0000-7000-8000-000000000007')),
+          '[{"type":"PointWon","side":"A"},{"type":"PointDetailSet","target":"e8000000-0000-7000-8000-000000000005"},{"type":"PointDetailSet","target":"e8000000-0000-7000-8000-000000000005","detail":{"kind":"ACE"}}]'::jsonb,
+          'Details ohne Spielerbezug, null-Detail entfällt');
+
 -- Export (vor der Löschung)
 select is(jsonb_array_length(public.export_my_data() -> 'matches'), 3, 'Export enthält alle eigenen/verknüpften Matches');
 select ok((public.export_my_data() -> 'settings') ? 'country' and not ((public.export_my_data() -> 'settings') ? 'profile_id'),
@@ -59,7 +75,7 @@ select is((select e -> 'payload' from jsonb_array_elements(public.export_my_data
            jsonb_array_elements(m -> 'events') e where e ->> 'type' = 'ScorerChanged'),
           '{"type":"ScorerChanged"}'::jsonb, 'Export-Payload je Eventtyp per Whitelist (keine scorerDeviceId)');
 select is((select e -> 'payload' from jsonb_array_elements(public.export_my_data() -> 'matches') m,
-           jsonb_array_elements(m -> 'events') e where e ->> 'type' = 'PointWon' and (e ->> 'mine')::boolean),
+           jsonb_array_elements(m -> 'events') e where e ->> 'id' = 'e8000000-0000-7000-8000-000000000002'),
           '{"type":"PointWon","side":"A"}'::jsonb, 'fachliche Werte bleiben im Export');
 select ok((public.export_my_data() -> 'devices' -> 0) ? 'id' and not ((public.export_my_data() -> 'devices' -> 0) ? 'push_token'),
           'Export ohne Push-Tokens');
@@ -89,7 +105,7 @@ select results_eq($$ select created_by from public.matches where id = 'a8000000-
 select results_eq($$ select display_name, deleted_profile, profile_id is null from public.match_participants
                      where match_id = 'a8000000-0000-7000-8000-000000000001' and slot_id = 's-alice' $$,
                   $$ values ('Gelöschter Spieler'::text, true, true) $$, 'Teilnehmer anonymisiert');
-select is((select count(*)::int from public.match_events where match_id = 'a8000000-0000-7000-8000-000000000001'), 5,
+select is((select count(*)::int from public.match_events where match_id = 'a8000000-0000-7000-8000-000000000001'), 8,
           'Event-Log bleibt für bob vollständig');
 select results_eq($$ select display_name, profile_id is null from public.match_participants
                      where match_id = 'a8000000-0000-7000-8000-000000000003' and slot_id = 's-kim' $$,

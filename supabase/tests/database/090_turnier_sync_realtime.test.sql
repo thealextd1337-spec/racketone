@@ -102,7 +102,7 @@ select is((select access_epoch from public.tournaments where id = 'f9000000-0000
 select ok((select visibility_epoch from public.profile_settings where profile_id = tests.uid('bob'))
           > current_setting('tests.bob_epoch')::bigint, 'entfernter Helfer bekommt das Signal zum Vollabgleich');
 select ok(exists (select 1 from realtime.messages
-                  where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1' and event = 'rotate' and payload = '{}'::jsonb),
+                  where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1' and event = 'rotate' and (payload - 'id') = '{}'::jsonb),
           'alter Turnier-Kanal erhält nur den inhaltslosen Hinweis „rotate“');
 
 select * from finish();

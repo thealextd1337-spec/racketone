@@ -25,7 +25,10 @@ grant update (telemetry_visibility, share_matches_default, locale) on public.pro
 grant delete on public.devices to authenticated;
 grant insert, update, delete on public.tournaments, public.tournament_courts to authenticated;
 
-grant all on all tables in schema public to service_role;
+-- service_role ohne TRUNCATE (Review P2 R3 #1): TRUNCATE nimmt zuerst eine Tabellensperre und umgeht die
+-- Statement-Sperr-Reihenfolge. Wartung nur als Owner mit `select private.lock_sync();` vorab (supabase/README.md).
+grant select, insert, update, delete, references, trigger on all tables in schema public to service_role;
+revoke truncate on all tables in schema public from service_role, authenticated, anon;
 grant all on all tables in schema ops to service_role;
 grant usage, select on all sequences in schema ops to service_role;
 

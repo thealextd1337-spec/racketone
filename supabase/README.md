@@ -23,7 +23,7 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…0800_rpc_konto_export.sql` | Löschung mit Karenz, Anonymisierung (Trigger), Löschjob, Export |
 | `migrations/…0900_turnier.sql` | Turnierhelfer, Live-Übersicht (F22) |
 | `migrations/…0990_rechte.sql` | Least-Privilege-Grants (zuletzt) |
-| `tests/database/*.test.sql` | pgTAP (275 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
+| `tests/database/*.test.sql` | pgTAP (280 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 
 ## Lokal ausführen (Docker nötig)
@@ -75,8 +75,11 @@ Job **„Supabase – Migrationen + pgTAP (ubuntu)“** in `.github/workflows/ci
    prüfen; `grant execute … to authenticated` nur für gewollte RPCs. Helfer gehören ins Schema `private`.
 4. Fehler über `private.fail('<grund>')` (SQLSTATE P0001) bzw. `private.fail('<grund>', '42501')` – der Grund ist
    ein stabiler Schlüssel für Clients und Tests.
-5. Keine Gesundheitsdaten vor P3; Telemetrie nie in `live_state`/`summary` (die Visitor-Sicht filtert per Whitelist).
-6. Tests (`tests/database/NNN_name.test.sql`): `begin; select plan(n); … select * from finish(); rollback;`,
+5. **Betrieb:** Konten nur über `purge_account`/`admin_purge_due_accounts` löschen (kein direktes
+   `auth.admin.deleteUser`); kein TRUNCATE für API-Rollen – Wartung nur als Owner mit `select private.lock_sync();`
+   als erster Anweisung.
+6. Keine Gesundheitsdaten vor P3; Telemetrie nie in `live_state`/`summary` (die Visitor-Sicht filtert per Whitelist).
+7. Tests (`tests/database/NNN_name.test.sql`): `begin; select plan(n); … select * from finish(); rollback;`,
    Nutzer über `tests.create_user()`/`tests.world()`, Rollenwechsel über `tests.authenticate_as()`, zurück mit `reset role;`.
 
 ## Noch nicht enthalten (siehe Plan)

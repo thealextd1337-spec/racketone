@@ -124,6 +124,15 @@ create trigger profiles_anonymize_before_delete
   before delete on public.profiles
   for each row execute function private.anonymize_profile();
 
+-- Auth-Löschwege (Review P2 R3 #1): Ein DELETE auf auth.users sperrt Auth-Zeilen und löst dann über die Kaskade auf
+-- profiles die Versionssperre aus – umgekehrt zu purge_account → Deadlock. Deshalb nimmt jede löschende Anweisung auf
+-- auth.users die Versionssperre per BEFORE-STATEMENT-Trigger vor ihren Zeilensperren. Zusätzlich gilt als Betriebsregel:
+-- Konten werden ausschließlich über private.purge_account / admin_purge_due_accounts gelöscht (Sperre zuerst); die
+-- Edge Function delete-account ruft diesen Weg auf und benutzt kein auth.admin.deleteUser direkt.
+create trigger zz_lock_sync
+  before delete on auth.users
+  for each statement execute function private.lock_sync_statement();
+
 create or replace function private.purge_account(p_profile uuid)
 returns void
 language sql
@@ -158,6 +167,16 @@ begin
 end;
 $$;
 
+-- PointDetail ohne Personenbezug (`by`); JSON-null und Nicht-Objekte → kein Detail (Review P2 R3 #2).
+create or replace function private.export_detail(p_detail jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when jsonb_typeof(p_detail) = 'object' then p_detail - 'by' end;
+$$;
+
 -- Payload eines eigenen Events für den Export, Whitelist je Eventtyp (Review P2 R2 #2): fachliche Werte bleiben, alle
 -- Personen- und Geräte-Referenzen (Lineup-/Spieler-IDs, scorerDeviceId, Klarnamen anderer, createdBy) entfallen.
 create or replace function private.export_payload(p_type text, p_payload jsonb)
@@ -169,7 +188,7 @@ as $$
   select jsonb_strip_nulls(case p_type
     when 'MatchCreated' then jsonb_build_object('type', p_type, 'config', p_payload -> 'config', 'meta', p_payload -> 'meta')
     when 'PointWon' then jsonb_build_object('type', p_type, 'side', p_payload -> 'side',
-                                            'detail', (p_payload -> 'detail') - 'by')
+                                            'detail', private.export_detail(p_payload -> 'detail'))
     when 'Undo' then jsonb_build_object('type', p_type, 'target', p_payload -> 'target')
     when 'ContinueDecision' then jsonb_build_object('type', p_type, 'anotherSet', p_payload -> 'anotherSet',
                                                     'nextSetKind', p_payload -> 'nextSetKind')
@@ -177,7 +196,7 @@ as $$
                                               'serverNumber', p_payload -> 'serverNumber')
     when 'MatchEnded' then jsonb_build_object('type', p_type, 'reason', p_payload -> 'reason', 'side', p_payload -> 'side')
     when 'PointDetailSet' then jsonb_build_object('type', p_type, 'target', p_payload -> 'target',
-                                                  'detail', (p_payload -> 'detail') - 'by')
+                                                  'detail', private.export_detail(p_payload -> 'detail'))
     when 'ServerChosen' then jsonb_build_object('type', p_type, 'set', p_payload -> 'set', 'side', p_payload -> 'side')
     else jsonb_build_object('type', p_type)   -- Paused, Resumed, ScorerChanged, PlayerAssigned: nur der Typ
   end);
