@@ -253,4 +253,7 @@
     <string name="notification_match_title">Match running</string>
     <string name="notification_match_scorer">This watch is scoring – tap to open</string>
     <string name="notification_match_display">Live score from the phone – tap to open</string>
+    <string name="live_workout_telemetry">♥ %1$s</string>
+    <string name="live_workout_telemetry_description">Heart rate: %1$s beats per minute, steps: %2$s</string>
+    <string name="telemetry_unknown">—</string>
 </resources>

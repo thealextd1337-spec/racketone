@@ -45,7 +45,9 @@ data class WorkoutUiState(
     val heartRateAvailability: String? = null,
     val error: WorkoutError? = null,
     val errorDetail: String? = null,
-)
+) {
+    override fun toString(): String = "WorkoutUiState(phase=$phase, telemetry=<redacted>)"
+}
 
 /** Prozessweiter Halter des Live-Zustands (Service und Activity im selben Prozess, kein Binding nötig). */
 object WorkoutStateHolder {

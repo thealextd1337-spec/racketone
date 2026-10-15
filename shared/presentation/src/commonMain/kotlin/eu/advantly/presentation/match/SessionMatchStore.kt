@@ -9,6 +9,7 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
@@ -319,6 +320,17 @@ class SessionMatchStore(
 
     // --- PlayersPort ------------------------------------------------------------------------------
 
+    /** Je 100 sportbezogene und allgemeine Besetzungen; dekodiert nur die benötigten Spieler-IDs. */
+    override fun recentPlayers(sport: Sport): List<Player> {
+        val mine = aliases + self.value.id
+        return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
+            .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
+            .flatMap { playersOf(it) }
+            .filterNot { it.id in mine }
+            .filter { it.displayName.isNotBlank() }
+            .distinctBy { it.id }
+    }
+
     override fun addGuest(name: String): Player {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "Gastname darf nicht leer sein" }
@@ -557,7 +569,7 @@ class SessionMatchStore(
     private fun loadGuests(): List<Player> =
         data.players
             .all()
-            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases }
+            .filter { it.kind == PlayerKind.GUEST && it.id !in aliases && it.displayName.isNotBlank() }
             .map { it.toPlayer() }
 
     /** Anzeigename je Spieler-ID; Aliase des Besitzers (z. B. alter Uhr-Self) tragen den Namen des Besitzers. */

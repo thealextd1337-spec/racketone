@@ -55,6 +55,10 @@ class MatchWizard(
     val watchStatus: StateFlow<WatchStatus> = MutableStateFlow(WatchStatus.UNKNOWN),
     private val refreshWatch: () -> Unit = {},
 ) {
+    private val createdPlayers = mutableListOf<Player>()
+
+    // Einmal beim Sportwechsel laden; Gesten und Recomposition bleiben frei von Datenbankzugriffen.
+    private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
     val state: StateFlow<WizardUiState> = mutableState.asStateFlow()
 
@@ -64,12 +68,17 @@ class MatchWizard(
     val guests: StateFlow<List<Player>> get() = players.guests
 
     /** Setzt den Assistenten auf Schritt 1 zurück. */
-    fun reset() = set(initialInput())
+    fun reset() {
+        createdPlayers.clear()
+        recentPlayers = emptyList()
+        set(initialInput())
+    }
 
     // --- Schritt 1: Sportart ---
 
     /** Wählt [sport] mit Defaults und springt weiter (Tap = Auswahl + weiter, H2). */
     fun selectSport(sport: Sport) {
+        recentPlayers = players.recentPlayers(sport)
         val base = initialInput().copy(sport = sport)
         val withDefaults =
             when (sport) {
@@ -118,14 +127,23 @@ class MatchWizard(
 
     fun setDiscipline(discipline: Discipline) {
         if (input.sport == Sport.PADEL && discipline != Discipline.DOUBLES) return
-        update { it.withDiscipline(discipline) }
+        update {
+            val selfIndex = it.teamA.indexOfFirst { player -> player?.id == players.self.value.id }
+            val base =
+                if (discipline == Discipline.SINGLES && selfIndex > 0) {
+                    PlayerSelection.exchange(it, PlayerPlace(Side.A, selfIndex), PlayerPlace(Side.A, 0), players.self.value.id)
+                } else {
+                    it
+                }
+            base.withDiscipline(discipline)
+        }
     }
 
-    /** Belegt den nächsten freien Slot (Gegner zuerst, dann Partner) mit [player]; schon gesetzte Spieler: No-op. */
+    /** Belegt mit [player] den ersten freien Slot in der Reihenfolge B0, A0, A1, B1; gesetzte Spieler: No-op. */
     fun pickPlayer(player: Player) {
         if (input.players.any { it.id == player.id }) return
         val slot =
-            listOf(Side.B to 0, Side.A to 1, Side.B to 1).firstOrNull { (side, index) ->
+            listOf(Side.B to 0, Side.A to 0, Side.A to 1, Side.B to 1).firstOrNull { (side, index) ->
                 index < input.team(side).size && input.team(side)[index] == null
             } ?: return
         setSlot(slot.first, slot.second, player)
@@ -135,18 +153,50 @@ class MatchWizard(
     fun addGuest(name: String): Player? {
         if (name.isBlank()) return null
         val guest = players.addGuest(name)
+        createdPlayers.add(guest)
         pickPlayer(guest)
         return guest
     }
 
-    /** Leert den Slot (der eigene Slot A0 bleibt belegt). */
+    /** Leert den Slot; der eigene Spieler bleibt auch nach einem Platztausch geschützt. */
     fun clearSlot(
         side: Side,
         index: Int,
     ) {
-        if (side == Side.A && index == 0) return
-        setSlot(side, index, null)
+        update { PlayerSelection.remove(it, PlayerPlace(side, index), players.self.value.id) }
     }
+
+    /** Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. */
+    fun playerSuggestions(): List<Player> =
+        PlayerSelection.suggestions(
+            createdPlayers,
+            recentPlayers,
+            guests.value,
+            input,
+            players.self.value.id,
+        )
+
+    fun assignPlayer(
+        place: PlayerPlace,
+        player: Player,
+    ) = update { PlayerSelection.assign(it, place, player, players.self.value.id) }
+
+    /** Neues Profil gezielt am angetippten freien Platz anlegen. */
+    fun addGuestAt(
+        name: String,
+        place: PlayerPlace,
+    ): Player? {
+        if (name.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
+        val guest = players.addGuest(name)
+        createdPlayers.add(guest)
+        assignPlayer(place, guest)
+        return guest
+    }
+
+    fun exchangePlayers(
+        from: PlayerPlace,
+        to: PlayerPlace,
+    ) = update { PlayerSelection.exchange(it, from, to, players.self.value.id) }
 
     /** Tauscht die Reihenfolge eines Doppel-Teams (Aufschlagreihenfolge bzw. Startaufstellung, 02 §3.3). */
     fun swapOrder(side: Side) =
@@ -505,16 +555,13 @@ class MatchWizard(
             return Lineup(a = a, b = b, firstServer = server)
         }
 
-        /** Erkennt ein Preset aus 02 §4 mit identischem Format (nur Anzeige/Statistik). */
-        fun recognizePreset(format: MatchFormat): String? {
-            val plain = format.copy(presetId = null)
-            return Presets.all
-                .firstOrNull { p ->
-                    p.sport == format.sport && format.discipline in p.disciplines &&
-                        p.format(format.discipline).copy(presetId = null) == plain
-                }?.id
+        /**
+         * Erkennt ein Preset aus 02 §4 mit identischem Format (nur Anzeige/Statistik), eindeutig über
+         * [Presets.recognize]: eine passende vorhandene `presetId` bleibt, sonst das bevorzugte Preset (keine Aliase).
+         */
+        fun recognizePreset(format: MatchFormat): String? =
+            Presets.recognize(format)
                 ?: if (format.sport == Sport.BADMINTON && format.match.mode == MatchMode.OPEN) "BADMINTON_OPEN" else null
-        }
 
         private fun WizardInput.withDiscipline(discipline: Discipline): WizardInput {
             val size = discipline.playersPerSide

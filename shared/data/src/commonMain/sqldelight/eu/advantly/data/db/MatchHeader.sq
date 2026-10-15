@@ -52,6 +52,12 @@ WHERE (:sport IS NULL OR sport = :sport) AND created_at_ms >= :fromMs AND create
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit OFFSET :offset;
 
+recentLineups:
+SELECT lineup_json FROM match_header
+WHERE (:sport IS NULL OR sport = :sport)
+ORDER BY created_at_ms DESC, id DESC
+LIMIT :limit;
+
 active:
 SELECT * FROM match_header WHERE status != 'FINISHED' ORDER BY updated_at_ms DESC, id;
 

@@ -35,7 +35,7 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
-import eu.advantly.wear.live.HeartRateThrottle
+import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
 import eu.advantly.wear.live.WatchEffect
 import eu.advantly.wear.live.WatchToast
@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
     private val isAmbient = mutableStateOf(false)
     private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val toast = mutableStateOf<WatchToast?>(null)
-    private val heartRate = mutableStateOf<Int?>(null)
+    private val shownTelemetry = mutableStateOf<Pair<Int?, Long?>>(null to null)
     private val powerSave = mutableStateOf(false)
     private val powerSaveReceiver =
         object : BroadcastReceiver() {
@@ -94,7 +94,8 @@ class MainActivity : ComponentActivity() {
                 intent: Intent,
             ) = updatePowerSave()
         }
-    private val heartRateThrottle = HeartRateThrottle()
+    private var telemetryThrottle = ValueThrottle<Pair<Int?, Long?>>()
+    private var telemetryMatch: eu.advantly.core.model.MatchId? = null
     private val handler = Handler(Looper.getMainLooper())
     private val clearToast = Runnable { toast.value = null }
     private lateinit var haptics: Haptics
@@ -118,13 +119,13 @@ class MainActivity : ComponentActivity() {
             override fun onUpdateAmbient() {
                 // ≤ 1×/min: Staleness und Puls nachziehen (04 §4.3.6)
                 controller.tick()
-                updateHeartRate()
+                updateTelemetry()
             }
 
             override fun onExitAmbient() {
                 isAmbient.value = false
                 controller.onWake()
-                updateHeartRate()
+                updateTelemetry()
                 DiagnosticLog.log("AMBIENT_EXIT")
             }
         }
@@ -163,8 +164,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 combine(holder.session.state, WorkoutStateHolder.state) { _, workout -> workout }
-                    .collect { workout ->
-                        updateHeartRate(workout.heartRateBpm)
+                    .collect {
+                        updateTelemetry()
                         evaluateWorkout()
                     }
             }
@@ -183,9 +184,9 @@ class MainActivity : ComponentActivity() {
             }
             WearApp(
                 state = state,
-                workout = workout,
+                workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
                 permissions = permissions.value,
-                heartRate = heartRate.value,
+                heartRate = shownTelemetry.value.first,
                 isAmbient = ambient,
                 powerSave = powerSave.value,
                 toast = toast.value,
@@ -292,8 +293,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun updateHeartRate(bpm: Int? = WorkoutStateHolder.state.value.heartRateBpm) {
-        heartRate.value = heartRateThrottle.display(bpm, SystemClock.elapsedRealtime(), isAmbient.value)
+    private fun updateTelemetry() {
+        val match =
+            holder.session.state.value.match
+                ?.id
+        if (match != telemetryMatch) {
+            telemetryMatch = match
+            telemetryThrottle = ValueThrottle()
+        }
+        val workout = WorkoutStateHolder.state.value
+        shownTelemetry.value =
+            telemetryThrottle.display(workout.heartRateBpm to workout.steps, SystemClock.elapsedRealtime(), isAmbient.value)
+                ?: (null to null)
     }
 
     // --- Workout ↔ Match --------------------------------------------------------------------------

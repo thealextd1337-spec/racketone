@@ -230,7 +230,8 @@ object Presets {
      * „Games pro Satz“ frei 1…12 (Wizard: 1–6, 8, 10; 02 §5.1, Entscheidung 2026-10-15) für Tennis/Padel: `set.gamesToWin = n`
      * und `set.tiebreakAt = n` (Tiebreak bei n:n für **alle** n ≥ 1, z. B. 1 Game: 2:0 oder Tiebreak bei 1:1 → 2:1).
      * Ein regulärer Entscheidungssatz wird mitgezogen (ein Vorteilssatz bleibt ohne Tiebreak), ein Match-Tiebreak bleibt.
-     * `presetId` bleibt erhalten (nur Anzeige/Statistik).
+     * `presetId` wird neu bestimmt ([recognize]): unverändert, wenn das Ergebnis noch genau dem Preset entspricht, sonst
+     * das exakt passende Preset oder `null` (benutzerdefiniert) – nie ein irreführender Formatname.
      */
     fun withGamesPerSet(
         format: MatchFormat,
@@ -244,7 +245,35 @@ object Presets {
                 is RegularSet -> ds.copy(gamesToWin = games, tiebreakAt = ds.tiebreakAt?.let { games })
                 else -> ds
             }
-        return format.copy(set = set.copy(gamesToWin = games, tiebreakAt = games), decidingSet = deciding)
+        val changed = format.copy(set = set.copy(gamesToWin = games, tiebreakAt = games), decidingSet = deciding)
+        return changed.copy(presetId = recognize(changed))
+    }
+
+    /**
+     * Strukturell gleiche Presets: Alias → bevorzugte ID. `TENNIS_MATCH_TB_ONLY` (W1) ist dasselbe Format wie
+     * `TENNIS_TIEBREAK_ONLY_10`; bestehende Matches behalten ihre ID, neu erkannt wird die bevorzugte.
+     */
+    val aliases: Map<String, String> = mapOf("TENNIS_MATCH_TB_ONLY" to "TENNIS_TIEBREAK_ONLY_10")
+
+    /**
+     * Preset-ID zu einem Format (nur Anzeige/Statistik, 02 §4), eindeutig:
+     * 1. Trägt [format] eine `presetId`, deren Preset (für diese Disziplin) genau dieses Format hat, bleibt sie – auch ein Alias.
+     * 2. Sonst das erste exakt passende Preset in [all], Aliase ausgenommen (→ bevorzugte ID).
+     * 3. Sonst `null` (benutzerdefiniertes Format).
+     * Verglichen wird das Format ohne `presetId`.
+     */
+    fun recognize(format: MatchFormat): String? {
+        val plain = format.copy(presetId = null)
+
+        fun matches(preset: Preset) =
+            preset.sport == format.sport &&
+                format.discipline in preset.disciplines &&
+                preset.format(format.discipline).copy(presetId = null) == plain
+        format.presetId
+            ?.let(::byId)
+            ?.takeIf(::matches)
+            ?.let { return it.id }
+        return all.firstOrNull { it.id !in aliases && matches(it) }?.id
     }
 
     // --- 4.3 Pickleball ---

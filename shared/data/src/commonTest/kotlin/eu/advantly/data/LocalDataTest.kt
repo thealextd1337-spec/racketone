@@ -129,6 +129,18 @@ class LocalDataTest {
     }
 
     @Test
+    fun recentLineupsFilterSportAndKeepNewestOrderAndLimit() {
+        val newer = Lineup(listOf(PlayerId("max")), listOf(PlayerId("cem")), PlayerId("max"))
+        data.matches.insertIfAbsent(MatchId("t1"), tennis, singles, MatchMeta(), createdAtMs = 1_000)
+        data.matches.insertIfAbsent(MatchId("p1"), padel, doubles, MatchMeta(), createdAtMs = 2_000)
+        data.matches.insertIfAbsent(MatchId("t2"), tennis, newer, MatchMeta(), createdAtMs = 3_000)
+        assertEquals(listOf(newer, doubles, singles), data.matches.recentLineups())
+        assertEquals(listOf(newer, singles), data.matches.recentLineups(Sport.TENNIS))
+        assertEquals(listOf(newer), data.matches.recentLineups(limit = 1))
+        assertTrue(data.matches.recentLineups(Sport.BADMINTON).isEmpty())
+    }
+
+    @Test
     fun followUpsAndLastLineup() {
         data.matches.insertIfAbsent(MatchId("m1"), tennis, singles, MatchMeta(), createdAtMs = 1_000)
         data.matches.insertIfAbsent(MatchId("m2"), padel, doubles, MatchMeta(), createdAtMs = 2_000, previousMatchId = MatchId("m1"))

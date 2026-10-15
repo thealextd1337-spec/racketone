@@ -42,6 +42,7 @@ import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.HeartRateGapDetector
 import eu.advantly.wear.diagnostics.PeriodicTrigger
 import eu.advantly.wear.live.LiveModel
+import eu.advantly.wear.sync.LiveTelemetrySender
 import eu.advantly.wear.sync.WearSessions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -62,8 +63,8 @@ import kotlin.math.roundToInt
  * Foreground Service (Typ `health`) mit Health-Services-`ExerciseClient` und Ongoing Activity (05 §2.1/§2.2, 01 E15).
  * Hält die Zähl-App während des Matches am Leben – auch bei Display aus / Handgelenk unten –, zeigt den Live-Puls und
  * in der Ongoing Activity den Spielstand der Match-Session. Der Puls wird **nicht gespeichert** (P1, Health erst P3);
- * am Ende wird die Exercise beendet und verworfen. Im Debug-Build schreibt der Dienst zusätzlich das Diagnose-Log
- * (aus Spike S5): Lebenszyklus, Puls-Samples, Lücken > 10 s, Akku alle 5 min, Display an/aus.
+ * am Ende wird die Exercise beendet und verworfen. Flüchtige Werte gehen nur live ans eigene Handy.
+ * Das Debug-Diagnoselog enthält Lebenszyklus, Sensor-Lücken, Akku und Displaystatus, keine Messwerte.
  *
  * Robustheit:
  * - Eine **fremde** Exercise wird nie stillschweigend ersetzt ([ExerciseOwnership]); die UI fragt nach ([WorkoutPhase.CONFLICT]).
@@ -98,9 +99,11 @@ class WorkoutService : Service() {
     private var lastState: ExerciseState? = null
     private var hrSampleCount = 0L
     private var hrGapCount = 0L
-    private var stepsTotal = 0L
+    private var stepCounter = MatchStepCounter()
+    private var fallbackStepsTotal = 0L
+    private var lastStepEndMs = -1L
     private var updateCount = 0L
-    private var statsSummary: String? = null
+    private val telemetry by lazy { LiveTelemetrySender(this, WearSessions.get(this).session) }
 
     private val screenReceiver =
         object : BroadcastReceiver() {
@@ -248,6 +251,7 @@ class WorkoutService : Service() {
                             }
 
                             is ReattachResult.Active -> {
+                                stepCounter = MatchStepCounter.recovered()
                                 registerCallback()
                                 WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = result.selection) }
                                 DiagnosticLog.log("EXERCISE_REATTACHED")
@@ -324,6 +328,9 @@ class WorkoutService : Service() {
             "replacedOtherApp" to (status == TrackedStatus.OTHER_APP),
         )
         try {
+            stepCounter = MatchStepCounter()
+            fallbackStepsTotal = 0
+            lastStepEndMs = -1
             exerciseClient.startExercise(config)
         } catch (e: CancellationException) {
             throw e
@@ -410,9 +417,10 @@ class WorkoutService : Service() {
         lastState = null
         hrSampleCount = 0
         hrGapCount = 0
-        stepsTotal = 0
+        stepCounter = MatchStepCounter()
+        fallbackStepsTotal = 0
+        lastStepEndMs = -1
         updateCount = 0
-        statsSummary = null
     }
 
     private fun logPermissions(permissions: WorkoutPermissions) {
@@ -541,8 +549,14 @@ class WorkoutService : Service() {
                 WearSessions
                     .get(this@WorkoutService)
                     .session.state
-                    .map { LiveModel.ongoingText(it.match) }
-                    .distinctUntilChanged()
+                    .map {
+                        val next = stepCounter.forMatch(it.match?.id)
+                        if (next != stepCounter) {
+                            stepCounter = next
+                            WorkoutStateHolder.update { workout -> workout.copy(steps = next.steps) }
+                        }
+                        LiveModel.ongoingText(it.match)
+                    }.distinctUntilChanged()
                     .collect { score ->
                         // Ohne POST_NOTIFICATIONS läuft der Service weiter, nur der Status im Zifferblatt-Chip bleibt stehen.
                         val granted =
@@ -642,24 +656,44 @@ class WorkoutService : Service() {
                         "sec" to gap.durationMillis / 1000.0,
                     )
             }
-            lines += "HR" to mapOf("t" to DiagLine.isoUtc(sampleMillis), "bpm" to point.value.roundToInt())
         }
         hrSampleCount += hrPoints.size
         lines += "EXERCISE_UPDATE" to mapOf("n" to updateCount, "hrSamples" to hrPoints.size, "state" to state.name)
         DiagnosticLog.logAll(lines)
 
         val calories = metrics.getData(DataType.CALORIES_TOTAL)?.total
-        val stepDelta = metrics.getData(DataType.STEPS).sumOf { it.value }
-        stepsTotal += stepDelta
-        metrics.getData(DataType.HEART_RATE_BPM_STATS)?.let {
-            statsSummary = "avg=${it.average.roundToInt()}/min=${it.min.roundToInt()}/max=${it.max.roundToInt()}"
+        stepCounter =
+            stepCounter.forMatch(
+                WearSessions
+                    .get(this)
+                    .session.state.value.match
+                    ?.id,
+            )
+        val totalSteps = metrics.getData(DataType.STEPS_TOTAL)?.total
+        if (totalSteps != null) {
+            stepCounter = stepCounter.withTotal(totalSteps)
+        } else if (WorkoutMetric.STEPS in (
+                WorkoutStateHolder.state.value.selection
+                    ?.metrics ?: emptySet()
+            )
+        ) {
+            // Fallback für Geräte ohne STEPS_TOTAL: Intervalle nur einmal zählen; nach Prozessverlust ab null.
+            val points = metrics.getData(DataType.STEPS).sortedBy { it.endDurationFromBoot }
+            points.forEach { point ->
+                val endMs = point.endDurationFromBoot.toMillis()
+                if (endMs > lastStepEndMs) {
+                    fallbackStepsTotal += point.value
+                    lastStepEndMs = endMs
+                    stepCounter = stepCounter.withTotal(fallbackStepsTotal)
+                }
+            }
         }
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->
             current.copy(
                 heartRateBpm = hrPoints.lastOrNull()?.value?.roundToInt() ?: current.heartRateBpm,
                 caloriesKcal = calories ?: current.caloriesKcal,
-                steps = if (DataType.STEPS in metrics.dataTypes || current.steps != null) stepsTotal else null,
+                steps = stepCounter.steps,
                 activeDurationMillis = checkpoint?.activeDuration?.toMillis() ?: current.activeDurationMillis,
                 durationAnchorElapsedMillis =
                     checkpoint?.let {
@@ -667,6 +701,7 @@ class WorkoutService : Service() {
                     } ?: current.durationAnchorElapsedMillis,
             )
         }
+        telemetry.onUpdate(WorkoutStateHolder.state.value, exerciseActive = state == ExerciseState.ACTIVE)
         maybeLogBattery()
 
         if (state.isEnded && WorkoutStateHolder.state.value.phase != WorkoutPhase.ENDING) {
@@ -714,9 +749,6 @@ class WorkoutService : Service() {
             "hrGaps" to hrGapCount,
             "updates" to updateCount,
             "activeSec" to state.activeDurationMillis / 1000,
-            "kcal" to state.caloriesKcal?.roundToInt(),
-            "steps" to state.steps,
-            "hrStats" to statsSummary,
         )
     }
 

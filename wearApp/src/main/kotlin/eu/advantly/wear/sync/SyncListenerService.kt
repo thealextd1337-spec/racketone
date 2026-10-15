@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.CapabilityInfo
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -12,7 +13,11 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
+import eu.advantly.sync.protocol.LiveTelemetrySubscription
+import eu.advantly.sync.protocol.LiveTelemetrySubscriptionCodec
 import eu.advantly.wear.diagnostics.DiagnosticLog
+import eu.advantly.wear.live.telemetryActive
+import eu.advantly.wear.workout.WorkoutStateHolder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -39,6 +44,25 @@ class SyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
     override fun onMessageReceived(event: MessageEvent) {
+        if (event.path == LiveTelemetrySubscription.MESSAGE_PATH) {
+            // Ohne laufende Exercise wird nie gesendet: Abo verwerfen, ohne IPC oder kalten Session-Aufbau
+            if (!WorkoutStateHolder.state.value.telemetryActive) return
+            val payload = LiveTelemetrySubscriptionCodec.decode(event.data) ?: return
+            val receivedAtMs = SystemClock.elapsedRealtime()
+            // Nur beim Keepalive (~20 s) prüfen, nicht bei jedem Sensorupdate. Cloud-erreichbar allein reicht nicht.
+            if (!isNearby(event.sourceNodeId)) return
+            runOnMain {
+                LiveTelemetrySubscriptions.Watch.receive(
+                    payload,
+                    event.sourceNodeId,
+                    WearSessions
+                        .get(this)
+                        .session.state.value,
+                    receivedAtMs,
+                )
+            }
+            return
+        }
         if (event.path != WearDataLayerTransport.MESSAGE_PATH) return
         DiagnosticLog.log("SYNC_SERVICE_MESSAGE", "node" to event.sourceNodeId, "bytes" to event.data.size)
         val cold =
@@ -52,6 +76,26 @@ class SyncListenerService : WearableListenerService() {
         runOnMain {}
         if (cold == true) awaitSettled()
     }
+
+    private fun isNearby(nodeId: String): Boolean =
+        try {
+            Tasks
+                .await(
+                    Wearable
+                        .getCapabilityClient(
+                            applicationContext,
+                        ).getCapability(WearDataLayerTransport.CAPABILITY, CapabilityClient.FILTER_REACHABLE),
+                    QUEUE_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS,
+                ).nodes
+                .any { it.id == nodeId && it.isNearby }
+        } catch (_: ExecutionException) {
+            false
+        } catch (_: TimeoutException) {
+            false
+        } catch (_: InterruptedException) {
+            false
+        }
 
     override fun onDataChanged(events: DataEventBuffer) {
         // Buffer gilt nur während dieses Aufrufs: Items einfrieren, dann freigeben

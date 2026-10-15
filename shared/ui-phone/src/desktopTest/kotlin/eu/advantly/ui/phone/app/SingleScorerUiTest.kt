@@ -57,6 +57,16 @@ class SingleScorerUiTest {
 
     private fun ComposeUiTest.click(tag: String) = onNodeWithTag(tag).performScrollTo().performClick()
 
+    private fun ComposeUiTest.addGuest(
+        name: String,
+        place: String,
+    ) {
+        click(place)
+        click("player_create")
+        onNodeWithTag("picker_name").performTextInput(name)
+        click("picker_add")
+    }
+
     private fun ComposeUiTest.description(tag: String) =
         onNodeWithTag(tag).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
 
@@ -68,8 +78,7 @@ class SingleScorerUiTest {
             onNodeWithTag("tab_play").performClick()
             click("sport_TENNIS")
             click("surface_CLAY")
-            onNodeWithTag("guest_name_input").performScrollTo().performTextInput("Jonas")
-            click("guest_add")
+            addGuest("Jonas", "slot_B_0")
             onNodeWithTag("wizard_next").performClick()
             onNodeWithTag("wizard_next").performClick()
             // Schritt „Wer zählt?“: Uhr verbunden → Standard „Meine Uhr“, Workout an
@@ -108,9 +117,8 @@ class SingleScorerUiTest {
             showApp(rig.model)
             onNodeWithTag("tab_play").performClick()
             click("sport_PICKLEBALL")
-            listOf("Jonas", "Mia", "Tom").forEach {
-                onNodeWithTag("guest_name_input").performScrollTo().performTextInput(it)
-                click("guest_add")
+            listOf("Jonas", "Mia", "Tom").zip(listOf("slot_B_0", "slot_A_1", "slot_B_1")).forEach { (name, place) ->
+                addGuest(name, place)
             }
             onNodeWithTag("wizard_next").performClick()
             onNodeWithTag("wizard_next").performClick()
@@ -209,9 +217,8 @@ class SingleScorerUiTest {
             showApp(rig.model)
             onNodeWithTag("tab_play").performClick()
             click("sport_PADEL")
-            listOf("Jonas", "Mia", "Tom").forEach {
-                onNodeWithTag("guest_name_input").performScrollTo().performTextInput(it)
-                click("guest_add")
+            listOf("Jonas", "Mia", "Tom").zip(listOf("slot_B_0", "slot_A_1", "slot_B_1")).forEach { (name, place) ->
+                addGuest(name, place)
             }
             onNodeWithTag("wizard_next").performClick()
             val refreshesBefore = rig.companion.refreshes
