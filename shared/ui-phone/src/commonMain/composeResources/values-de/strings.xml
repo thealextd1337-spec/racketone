@@ -275,6 +275,10 @@
     <string name="result_ratio">%1$d/%2$d (%3$d %)</string>
     <string name="result_compare_a11y">%1$s: Wir %2$s, Gegner %3$s</string>
     <string name="result_play_again">Nochmal in gleicher Besetzung</string>
+    <string name="result_delete">Match löschen</string>
+    <string name="result_delete_title">Dieses Match löschen?</string>
+    <string name="result_delete_text">Das Match und alle Punkte werden von diesem Gerät entfernt. Das lässt sich nicht rückgängig machen.</string>
+    <string name="action_delete">Löschen</string>
 
     <!-- Latenz-Overlay (Spike S4, nur Debug) -->
     <string name="latency_input_to_next_frame">Eingabe → nächster Frame-Beginn nach Draw</string>

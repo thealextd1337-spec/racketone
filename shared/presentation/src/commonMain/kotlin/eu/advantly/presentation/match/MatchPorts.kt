@@ -166,6 +166,13 @@ interface MatchHistoryPort {
 
     /** Datensatz zu [matchId] (auch für das aktive Match), `null` wenn unbekannt. */
     fun record(matchId: MatchId): MatchRecord?
+
+    /**
+     * Löscht ein beendetes Match samt Event-Log endgültig von diesem Gerät (Datenschutzerklärung: Nutzer können
+     * Matches löschen). Ist es das aktive (beendete, noch nicht geschlossene) Match, wird es dabei geschlossen.
+     * `false` für unbekannte oder noch laufende Matches.
+     */
+    fun delete(matchId: MatchId): Boolean
 }
 
 /**

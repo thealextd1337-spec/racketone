@@ -352,6 +352,31 @@ class AppFlowTest {
         }
 
     @Test
+    fun deleteMatchFromResultNeedsConfirmation() =
+        runComposeUiTest {
+            val model = testModel().apply { DemoData.seed(this) }
+            showApp(model)
+            click("tab_history", scroll = false)
+            val deleted =
+                model.history.matches.value
+                    .first()
+                    .matchId
+            click("history_item_0")
+            click("result_delete", scroll = false)
+            onNodeWithTag("delete_dialog").assertExists()
+            click("delete_cancel", scroll = false)
+            onNodeWithTag("delete_dialog").assertDoesNotExist()
+            assertEquals(3, model.history.matches.value.size)
+
+            click("result_delete", scroll = false)
+            click("delete_confirm", scroll = false)
+            onNodeWithTag("history").assertExists()
+            assertEquals(2, model.history.matches.value.size)
+            assertNull(model.history.record(deleted))
+            assertEquals(2, onAllNodesWithTag("result_badge", useUnmergedTree = true).fetchSemanticsNodes().size)
+        }
+
+    @Test
     fun friendsAndProfileArePlaceholders() =
         runComposeUiTest {
             showApp()

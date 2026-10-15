@@ -272,6 +272,19 @@ class InMemoryMatchStoreTest {
     }
 
     @Test
+    fun deleteRemovesFinishedMatchesOnly() {
+        val store = testStore()
+        val running = store.start(store.setupFor(tennisBo3))
+        assertFalse(store.delete(running), "laufendes Match lässt sich nicht löschen")
+        assertTrue(store.endMatch(EndReason.ABANDONED))
+        assertTrue(store.delete(running), "beendetes aktives Match wird gelöscht und geschlossen")
+        assertNull(store.active.value)
+        assertNull(store.record(running))
+        assertTrue(store.matches.value.isEmpty())
+        assertFalse(store.delete(running), "zweites Löschen ist ein No-op")
+    }
+
+    @Test
     fun recordContainsGenesisAndAllEvents() {
         val store = testStore()
         val id = store.start(store.setupFor(tennisBo3))

@@ -101,6 +101,10 @@ fun AdvantlyApp(
                             record = model.history.record(top.matchId),
                             onBack = { navigator.pop() },
                             onPlayAgain = model::startMatch,
+                            onDelete = {
+                                model.history.delete(top.matchId)
+                                navigator.pop()
+                            },
                         )
                     }
 

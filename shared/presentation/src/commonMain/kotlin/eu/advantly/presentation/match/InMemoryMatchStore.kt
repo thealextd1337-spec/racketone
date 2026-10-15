@@ -220,6 +220,15 @@ class InMemoryMatchStore(
         return MatchRecord(summary(entry), entry.engine.state, listOf(entry.genesis) + entry.engine.events)
     }
 
+    override fun delete(matchId: MatchId): Boolean {
+        val entry = entries[matchId] ?: return false
+        if (entry.engine.state.status != MatchStatus.FINISHED) return false
+        entries.remove(matchId)
+        if (activeId == matchId) activeId = null
+        publish()
+        return true
+    }
+
     // --- PlayersPort ---
 
     override fun addGuest(name: String): Player {
