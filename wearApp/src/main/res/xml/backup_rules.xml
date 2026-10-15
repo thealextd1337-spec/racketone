@@ -4,4 +4,5 @@
     <exclude domain="file" path="diag/" />
     <exclude domain="external" path="diag/" />
     <exclude domain="sharedpref" path="s5_session.xml" />
+    <exclude domain="sharedpref" path="fieldtest_prefs.xml" />
 </full-backup-content>

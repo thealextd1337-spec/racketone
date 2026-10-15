@@ -47,6 +47,7 @@ androidApp                   Phone-App                                     → u
 wearApp                      Wear-OS-App (minSdk 34)                       → presentation
 iosApp/                      XcodeGen-Projekt + Swift-Host (iOS)           → AdvantlyKit
 watchApp/                    SwiftUI-Quellen der watchOS-App               → AdvantlyWatchKit
+tools/gate-check             JVM-Werkzeug P1-Gate (kein App-Teil)          → data
 ```
 Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `backend/`, `testvectors/`.
 
