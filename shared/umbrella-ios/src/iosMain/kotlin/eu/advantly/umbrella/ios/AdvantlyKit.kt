@@ -1,7 +1,5 @@
 package eu.advantly.umbrella.ios
 
-import eu.advantly.device.link.MainQueueScheduler
-import eu.advantly.device.link.createWatchConnectivityLink
 import eu.advantly.match.session.AppleMatchSessions
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.sync.protocol.PeerKind
@@ -17,9 +15,3 @@ import platform.UIKit.UIViewController
  * Aufruf auf der Main-Queue (SwiftUI `makeUIViewController`).
  */
 fun mainViewController(): UIViewController = advantlyViewController { SessionMatchStore(AppleMatchSessions.shared(PeerKind.PHONE)) }
-
-/** Ping-Pong-Feldtest über WatchConnectivity (Spike S3, nur Debug-UI). Swift: `AdvantlyKitKt.linkDebug()`. */
-fun linkDebug(): LinkDebug {
-    val scheduler = MainQueueScheduler()
-    return LinkDebug(createWatchConnectivityLink(scheduler), scheduler)
-}
