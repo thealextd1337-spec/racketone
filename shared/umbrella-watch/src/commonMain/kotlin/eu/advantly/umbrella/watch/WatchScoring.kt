@@ -377,16 +377,17 @@ class WatchScoring internal constructor(
         match: ActiveMatch,
         sync: SyncStatus,
     ): WatchScoreSnapshot? {
+        // Lesefehler dürfen das offene Match nicht verschwinden lassen: dann gilt der Rückstand der Session
         val pending =
             try {
                 backend
                     ?.data
                     ?.events
                     ?.unconfirmedEvents(match.id.value)
-                    ?.size ?: return fail(STORE_READ)
+                    ?.size
             } catch (e: Exception) {
-                return fail(STORE_READ)
-            }
+                null
+            } ?: sync.pendingToPeers
         return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending)
     }
 

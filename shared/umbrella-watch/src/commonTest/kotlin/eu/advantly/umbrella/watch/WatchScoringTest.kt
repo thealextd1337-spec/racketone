@@ -105,7 +105,7 @@ class WatchScoringTest {
         val s = Rig().watch
         assertEquals(listOf("TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"), s.sports())
         val tennis = s.presets("TENNIS", 2026, 10, 15)
-        assertEquals(12, tennis.size)
+        assertEquals(14, tennis.size)
         assertEquals("TENNIS_SINGLES_BO3", tennis.first().id)
         assertTrue(tennis.first().isDefault)
         assertEquals(1, tennis.count { it.isDefault })
