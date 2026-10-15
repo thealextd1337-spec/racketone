@@ -1,6 +1,6 @@
 # 05 – Watches & Health
 
-Stand: 2026-10-14 · Rolle: Wearables/Health · Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md)
+Stand: 2026-10-15 · Rolle: Wearables/Health · Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md)
 
 Dieses Dokument legt fest, wie RacketOne auf Apple Watch, Wear OS (Pixel Watch, Galaxy Watch) und Garmin läuft, wie Gesundheitsdaten (Puls, Kalorien, Schritte, Dauer) während eines Matches erfasst, dem Match zugeordnet, gespeichert und geteilt werden, und was dafür an Berechtigungen, Store-Prozessen und Tests nötig ist. Quellen stehen als `[Qn]` im Text, die Liste ist am Ende. Was nicht in einer Primärquelle bestätigt werden konnte, ist mit **(unverifiziert)** markiert.
 
@@ -66,6 +66,8 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 
 ### 1.2 Workout-Session & Hintergrundausführung
 
+**Rollenentscheidung 2026-10-15:** Jede Spieler-Uhr führt ihre eigene Workout-Session unabhängig von der Zähler-Rolle. Auch im Anzeige-Modus bei Director-Handy oder nach Übergabe laufen eigener Puls und Belastungsmessung weiter (mit Einwilligung). Ein Rollenwechsel startet/beendet kein Workout. Außenstehender Director und Visitor erhalten dadurch keine Health-Daten oder Spieler-Workout-Zuordnung. Dies gilt ebenso für Wear OS und ab P4 Garmin.
+
 - **HKWorkoutSession + HKLiveWorkoutBuilder auf der Uhr** [Q3]: Die Session läuft, solange das Match läuft. Der Builder sammelt `heartRate`, `activeEnergyBurned` und `basalEnergyBurned` automatisch über `HKLiveWorkoutDataSource` und speichert am Ende ein `HKWorkout` in Apple Health.
 - **Hintergrund:** Eine aktive Workout-Session ist der offizielle Weg, wie eine Watch-App bei abgesenktem Handgelenk weiterläuft (Background Mode `workout-processing` in der Info.plist der Watch-App). Andere Mechanismen wie `WKExtendedRuntimeSession` sind für Sport nicht vorgesehen. → **Entscheidung E2: Die Workout-Session gibt es schon in P1.** Daraus folgt, dass die HealthKit-Berechtigung schon in P1 abgefragt wird. Lehnt der Nutzer ab, zählt die App trotzdem, kann aber in den Hintergrund fallen; das UI weist darauf hin.
 - **Sätze als Segmente:** An jeder Satzgrenze rufen wir `builder.addWorkoutEvents([HKWorkoutEvent(type: .segment, …)])` auf, für Seitenwechsel optional `.marker`. So sieht man die Satzgrenzen auch in Apple Fitness und kann später per Health-Abfrage pro Satz auswerten.
@@ -75,9 +77,9 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 ### 1.3 Spiegeln aufs iPhone (Workout Mirroring, iOS 17+/watchOS 10+)
 
 - Die Uhr ist die **primäre** Session und ruft `session.startMirroringToCompanionDevice()` auf. Das iPhone registriert beim App-Start `HKHealthStore.workoutSessionMirroringStartHandler` und erhält so eine gespiegelte Session, auch wenn die App im Hintergrund ist [Q4]. Das iPhone kann die primäre Session nicht führen [Q4].
-- **Datenkanal:** Mit `sendToRemoteWorkoutSession(data:)` laufen Score-Events in beide Richtungen. Vorteil gegenüber WatchConnectivity: Die iPhone-App wird für die Dauer des Workouts wachgehalten, und Live-Puls und Kalorien kommen über den gespiegelten Builder.
+- **Datenkanal:** Mit `sendToRemoteWorkoutSession(data:)` laufen Score-Events ausschließlich vom aktiven **Zähler zur Anzeige**: Uhr → Handy oder Director-Handy → Uhr. Ack, Abgleich und bestätigte Zählerwechsel nutzen den Kanal ebenfalls; das ist keine parallele Zählfreigabe. Vorteil gegenüber WatchConnectivity: Die iPhone-App wird für die Dauer des Workouts wachgehalten, und Live-Puls und Kalorien kommen über den gespiegelten Builder.
 - **Bekannte Stolpersteine:** Daten erst senden, nachdem `prepare()` bzw. der Start erfolgt ist [Q4]. Laut Entwicklerforum kehren etwa 5 % der `sendToRemoteWorkoutSession`-Aufrufe nie zurück [Q4b]. → **Jedes Event trägt `(deviceId, seq)`**, der Empfänger bestätigt mit Ack, nach Timeout wird erneut gesendet, Duplikate verwirft die Engine.
-- **Start vom iPhone:** `HKHealthStore.startWatchApp(with: HKWorkoutConfiguration)` startet die Watch-App mit der Konfiguration [Q5b]. Damit gilt „Start auf dem Handy“ = „Workout startet auf der Uhr“, im Sinne von „Uhr und Handy gleichwertig“.
+- **Start vom iPhone:** `HKHealthStore.startWatchApp(with: HKWorkoutConfiguration)` startet die Watch-App mit der Konfiguration [Q5b]. Der Workout-Start auf der Spieler-Uhr ist von der Zähler-Auswahl unabhängig: Zählt das Director-Handy, bleibt die Spieler-Uhr Anzeige mit eigenem Workout. Die primäre Workout-Session auf der Uhr macht sie nicht automatisch zum Zähler.
 - **iOS 26:** `HKWorkoutSession` läuft seit iOS 26 auch auf iPhone und iPad [Q5]. Das ist für uns nur als späte Option interessant (iPhone mit Bluetooth-Brustgurt, siehe Kapitel 4), nicht für den Hauptpfad.
 
 ### 1.4 WatchConnectivity
@@ -102,6 +104,8 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 - **Wichtig für das Testgerät:** Ist die „Apple Watch Pro“ eine **Ultra (1. Gen.)**, endet sie bei watchOS 26, und wir brauchen für watchOS 27 den Simulator. Ist es eine Ultra 2/3, laufen beide Versionen. → Offene Frage F1.
 
 ### 1.7 Bedienung: Always-on, Wasser-Sperre, Crown, Ultra-Hardware
+
+Alle Punkt-/Undo-Aktionen einschließlich Hardware-Shortcuts gelten nur am aktiven Zähler-Gerät. Im Anzeige-Modus bleiben sie deaktiviert; eigene Fitness-Anzeige und Workout laufen weiter.
 
 | Thema | Empfehlung |
 |---|---|
@@ -160,7 +164,7 @@ Stand der Apple-Dokumentation im Oktober 2026 [Q1][Q2]:
 | Kanal | Einsatz |
 |---|---|
 | `MessageClient` | Live-Score-Events (klein, geringe Latenz), mit Ack-Message |
-| `DataClient` (DataItem `/match/<id>/state`) | Aktueller Match-Zustand und letzte Sequenznummer. Wird zugestellt, sobald die Verbindung wieder steht (Konflikte löst die Engine anhand des Event-Logs). |
+| `DataClient` (DataItem `/match/<id>/state`) | Aktueller Match-Zustand und letzte Sequenznummer. Wird zugestellt, sobald die Verbindung wieder steht (Rollenwechsel und deterministische Prüfung des aktiven Zählers gemäß 02; keine parallelen Zähleingaben). |
 | `ChannelClient` | Puls-Rohserie und Abschlusspaket nach dem Match |
 | `CapabilityClient` | Prüft, ob die Handy- bzw. Uhr-App installiert ist; sonst Hinweis mit Play-Store-Link |
 
@@ -225,7 +229,7 @@ Aus `Toybox.Activity` [Q24]:
 ### 3.4 Kommunikation mit der Handy-App
 
 - Uhrseitig `Communications.transmit()`, handyseitig das **Connect IQ Mobile SDK** für Android (Maven) bzw. iOS (Framework, URL-Scheme und `LSApplicationQueriesSchemes`) [Q27]. Die Garmin-Connect-App muss installiert sein und läuft als Relais.
-- **Zuverlässigkeit:** Aus Foren sind sporadische `Failure_InternalError` unter iOS und nicht ankommende Nachrichten unter Android bekannt; große Nachrichten sind langsam [Q27b]. → Wir senden nur kleine Events (unter 1 KB) mit Seq und Ack. **Nachrichtenverlust darf das Match nie gefährden:** Die Uhr zählt autark, das Handy ist nur Spiegel. Puls-Serien übertragen wir nach dem Match in Chunks.
+- **Zuverlässigkeit:** Aus Foren sind sporadische `Failure_InternalError` unter iOS und nicht ankommende Nachrichten unter Android bekannt; große Nachrichten sind langsam [Q27b]. → Wir senden nur kleine Events (unter 1 KB) mit Seq und Ack. **Nachrichtenverlust darf das Match nie gefährden:** Ist die Uhr Zähler, zählt sie autark und das Handy zeigt an; im Director-Modus zählt das Handy und die Uhr zeigt an. Wechsel nur durch bestätigte Übergabe gemäß PLAN K1/02. Puls-Serien übertragen wir nach dem Match in Chunks.
 - **Fallback-Datenquelle:** Garmin Connect überträgt Aktivitäten nach Apple Health und Health Connect (Puls, Kalorien, Schritte; keine Trainingslast und kein HRV-Status) [Q31]. Dieselbe Import-Logik wie in Kapitel 4 greift also auch dann, wenn die Live-Verbindung scheitert. Die Garmin Health API (B2B-Cloud) ist für uns derzeit **nicht** nötig.
 
 ### 3.5 Entwicklung unter Windows, Store-Prozess
@@ -389,7 +393,7 @@ Legende: **R** = reales Gerät, **S/E** = Simulator/Emulator, **CI** = macOS-Run
 | # | Risiko | W'keit | Auswirkung | Gegenmaßnahme |
 |---|---|---|---|---|
 | R1 | **watchOS 27: Workouts zeichnen kaum Puls auf** [Q9] | mittel | Statistik leer | Früher Test auf echter Uhr; `quality`-Flag; Feedback an Apple; Statistik degradiert sauber |
-| R2 | **Action-Button-Intent-Spende seit watchOS 26.5 fehlerhaft** [Q8c] | mittel | Undo per Action Button fällt aus | Undo-Button auf dem Display bleibt immer; Feature-Flag |
+| R2 | **Action-Button-Intent-Spende seit watchOS 26.5 fehlerhaft** [Q8c] | mittel | Undo per Action Button fällt aus | Undo-Button auf dem Display des Zähler-Geräts bleibt verfügbar; Feature-Flag |
 | R3 | `sendToRemoteWorkoutSession` ohne Rückmeldung (~5 %) [Q4b] | hoch | verlorene Punkte im Live-Sync | Seq/Ack/Retry; WC-Fallback; Engine dedupliziert |
 | R4 | Galaxy Watch: Sensor-Stopp bei Display aus, aggressives App-Sleeping [Q23b] | mittel | Lücken in der Pulsserie, App beendet | FGS `health` + ExerciseClient; In-App-Anleitung zu den Samsung-Akku-Einstellungen; Test mit Display aus über 30 min |
 | R5 | Hintergrundstart Uhr ↔ Handy (Android) eingeschränkt | hoch | „Start auf dem Handy“ startet die Uhr nicht automatisch | Benachrichtigung mit einem Tipp; als Produktentscheidung kommunizieren |
