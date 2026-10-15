@@ -42,3 +42,11 @@ tasks.register("generateAppleVersionConfig") {
         }
     }
 }
+
+// Play-Release (docs/release/play-console.md): Phone- und Wear-AAB in einem Lauf. Signiert wird mit dem Upload-Key,
+// sofern konfiguriert (Umgebungsvariablen oder advantly.signing.file in local.properties), sonst unsigniert.
+tasks.register("bundleAllRelease") {
+    group = "build"
+    description = "Baut die Release-AABs von androidApp (versionCode …1) und wearApp (…2)."
+    dependsOn(":androidApp:bundleRelease", ":wearApp:bundleRelease")
+}
