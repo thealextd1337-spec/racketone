@@ -234,6 +234,8 @@
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.TENNIS_MATCH_TB_ONLY" = "Nur Match-Tiebreak";
+"preset.TENNIS_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
+"preset.TENNIS_TIEBREAK_ONLY_10" = "Nur Champions-Tiebreak (bis 10)";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.TENNIS_OPEN" = "Offen (Satz für Satz)";
@@ -255,6 +257,8 @@
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.PADEL_MINI_SETS" = "Mini-Sätze bis 4";
+"preset.PADEL_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
+"preset.PADEL_TIEBREAK_ONLY_10" = "Nur Super-Tiebreak (bis 10)";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.PADEL_OPEN" = "Offen (Satz für Satz)";
