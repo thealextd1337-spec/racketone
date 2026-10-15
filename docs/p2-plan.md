@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1 und 2 (PR #40) eingearbeitet |
+| **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1–3 (PR #40) eingearbeitet |
 | **Status** | Planung + lauffähiger Backend-Spike (`supabase/`) + Schnittstellenentwurf (`shared/cloud-sync`) |
 | **Grundlage** | [PLAN](PLAN.md) (P2, Gate P2, F13–F29), [00](00-entscheidungen.md), [01](01-architektur.md) §4–5, [02](02-scoring-regeln.md) §7, [03](03-backend-datenmodell.md) (§13 = Abgleich mit dem Spike), [Veröffentlichungsplan](release/veroeffentlichungsplan.md) |
 | **Gilt bei Widerspruch** | PLAN.md vor diesem Dokument; dieses Dokument vor 03 für alles, was der Spike konkret festlegt |
@@ -19,7 +19,7 @@ wo du von meiner Empfehlung abgewichen bist.**
   Matches (Freunde sofort verknüpft, „War ich nicht“), Dummy-Zuweisung, Zähler-Wahl beim Start mit Cloud-Zustellung
   (F17), Visitor-Live (nur lesen, bis Widerruf), Telemetrie-Sichtbarkeit (nur Einstellung), Löschung/Export,
   Entitlements vorbereitet, Turnierdirektor-Grundgerüst, Wear OS standalone.
-- **Spike-Ergebnis:** Das P2-Datenmodell steht als 11 Migrationen mit RLS und 33 RPCs. **275 pgTAP-Prüfungen in
+- **Spike-Ergebnis:** Das P2-Datenmodell steht als 11 Migrationen mit RLS und 33 RPCs. **280 pgTAP-Prüfungen in
   11 Dateien** decken die RLS-Matrix ab (Fremde, Feed-Leser, Teilnehmer, Zähler, Director, Visitor, gelöschter
   Account, Turnierhelfer) sowie Wire-Vertrag und Sperr-Reihenfolge. Der CI-Job mit echtem Supabase-Stack lief in
   Review-Runde 1 und 2 grün; die Fixes aus Runde 2 sind lokal gegen Postgres 17 geprüft (inkl. Deadlock-Nachstellung
@@ -196,6 +196,13 @@ Projektionsergebnisse: `applied`, `stale`, `ahead_of_events`, `forbidden`, `inva
   statisch (Trigger überall, keine RPC sperrt Zeilen vor der Versionssperre). Der gemeldete Deadlock
   (`revoke_match_visitor` gegen `sync_push`, `40P01`) ist lokal mit zwei Verbindungen nachgestellt: ohne Fix tritt er
   auf, mit Fix nicht (20 Runden).
+- **Auth-Löschwege (Review R3):** `zz_lock_sync` auch als BEFORE-DELETE-Statement-Trigger auf `auth.users` – ein
+  direktes `DELETE FROM auth.users` nimmt die Versionssperre vor den Auth-Zeilensperren (lokal nachgestellt: ohne
+  Trigger `40P01` gegen `purge_account`, mit Trigger 10 Runden ohne Deadlock). **Betriebsregel:** Konten werden nur über
+  `purge_account`/`admin_purge_due_accounts` gelöscht; die Edge Function `delete-account` ruft diesen Weg auf und
+  verwendet `auth.admin.deleteUser` nicht direkt (GoTrue könnte vor dem DELETE andere Auth-Zeilen sperren).
+- **TRUNCATE:** API-Rollen (auch `service_role`) haben kein TRUNCATE (nimmt Tabellensperren vor jedem Trigger).
+  Wartung nur als Owner im Wartungsfenster mit `select private.lock_sync();` als erster Anweisung.
   **Abnahmekriterium P2-A:** Lasttest mit parallelen Uploads (kein übersprungenes Match, Wartezeiten < 200 ms bei
   Pilotlast); sonst Umstieg auf einen commit-geordneten Änderungsstrom (z. B. `pg_snapshot_xmin`-Grenze).
 - **Sichtbarkeitsänderungen (umgesetzt):** `visibilityEpoch` steigt bei Freundschaft/Entfreunden/Blockieren (beide),
@@ -264,6 +271,14 @@ EventStore behandelt eine bekannte ID als Duplikat – eine Redaktion käme so n
 3. **Weitergabe Handy → Uhr:** neue Wire-Nachricht `Redacted(matchId, epoch, events)` (Protokoll 4); `Summary` trägt
    je Match die Redaktions-Epoche, damit eine zeitweise offline Uhr beim nächsten `Hello` nachzieht. Die Uhr wendet
    nur Redaktionen ihres Handys an (gekoppeltes Gerät, gleiches Konto).
+   **Protokollmigration 3 → 4** (Regeln wie 01 §4.3): `CURRENT = MIN_SUPPORTED = 4`, weil eine Uhr mit Protokoll 3
+   `Redacted` nicht versteht und Klarnamen behalten würde – ein halb-redigierter Stand wäre ein Datenschutzfehler, kein
+   Anzeigefehler. Folge: Handy 4 ↔ Uhr 3 sind inkompatibel; beide zeigen „Bitte Uhr/Handy aktualisieren“
+   (`SyncStatus.versionMismatch`) und tauschen außer `Hello` nichts aus; die alte Uhr zählt lokal weiter, ihre Events
+   kommen nach dem Update per Anti-Entropie. Handy- und Uhr-App erscheinen mit derselben Versionsnummer (Phone- und
+   Wear-Track gemeinsam ausrollen). Gespeicherte Logs bleiben lesbar. Tests: Codec-Test für `Redacted`,
+   Versions-Aushandlung 3↔4 (Mischversion → `PEER_TOO_OLD/NEW`, keine Datenübertragung), Redaktion nach Update einer
+   zuvor alten Uhr (Uhr holt per `Summary`-Epoche nach).
 4. **Abnahme G8:** vollständig synchronisierte Uhr, die während der Löschung offline ist, zeigt nach dem
    Wiederverbinden keinen Klarnamen mehr (auch nicht in Verlauf, Vorschlägen oder Wiederholungs-Match). **Folgearbeit (P2-B/Engine):** `PlayerAssigned` ab
 Protokoll 4 ohne Klarnamen (Name nur über die Personen-Referenz/Tabelle) – dann entfällt die Ausnahme für neue Logs.
@@ -395,7 +410,7 @@ Sync, RLS besonders), CI grün vor Merge.
 
 | Risiko | Gegenmaßnahme |
 |---|---|
-| RLS-Lücke legt fremde Matches/Profile offen | pgTAP-Matrix je Rolle (275 Prüfungen), Basistabellen nur für Mitglieder, Least-Privilege-Grants mit Strukturtest, Review jedes SQL-PRs durch zweites Modell |
+| RLS-Lücke legt fremde Matches/Profile offen | pgTAP-Matrix je Rolle (280 Prüfungen), Basistabellen nur für Mitglieder, Least-Privilege-Grants mit Strukturtest, Review jedes SQL-PRs durch zweites Modell |
 | Doppelte oder fehlende Events nach Abbrüchen | Idempotenz über Event-ID (Vergleich aller Felder, auch parallel), Outbox-Status am Event, Wasserstand, Chaos-Tests |
 | Serialisierte Versionsvergabe bremst bei Last | Kurze Transaktionen, Lasttest in P2-A; Plan B commit-geordneter Änderungsstrom |
 | Widerrufene Personen hören auf alten Realtime-Kanälen mit | Versionierte Kanäle, Senden nur auf aktuelle Version; Gate-Test G6 |
@@ -421,7 +436,8 @@ Sync, RLS besonders), CI grün vor Merge.
 4. Parallel-Tests gegen lokale Supabase (zwei Verbindungen): gleiche Event-ID mit abweichendem Inhalt → genau ein
    `accepted`, ein `id_conflict`; Cursor überspringt bei parallelen Uploads nichts; **kein Deadlock** bei
    gleichzeitigen Schreibwegen (Widerruf/„War ich nicht“/Löschung/Freundschaft gegen `sync_push` auf demselben Match,
-   Erwartung: Warten statt `40P01`); echter Lasttest der Versionssperre (P2-A).
+   Erwartung: Warten statt `40P01`), inkl. direktem `DELETE FROM auth.users` gegen `purge_account`; echter
+   Lasttest der Versionssperre (P2-A).
 5. `./gradlew check`, Android-Lint, Apple-CI wie bisher.
 
 **Manuell (du, mit QA-Skripten):**
@@ -434,7 +450,7 @@ Sync, RLS besonders), CI grün vor Merge.
 | G5 | Übergabe zurück, Altgerät zählt offline weiter | Eingaben des Altgeräts unwirksam + „N Eingaben nicht übernommen“ |
 | G6 | Visitor schaut live zu; Widerruf **während** der Kanal offen ist; Entfreunden | Stand < 2 s; nach Widerruf sofort keine Daten mehr (nur `rotate`) |
 | G7 | Dummy einem Freund zuweisen → „War ich nicht“ | sofort sichtbar / sofort weg, erneute Zuweisung gesperrt |
-| G8 | Konto löschen, Abbruch; erneut löschen, Job nach Frist (staging verkürzt); die vollständig synchronisierte Uhr des Mitspielers ist währenddessen offline | geteiltes Match bleibt beim Mitspieler mit „Gelöschter Spieler“ – in Zuweisungs-Events, Verlauf, Vorschlägen und nach dem Wiederverbinden auch auf seiner Uhr |
+| G8 | Konto löschen, Abbruch; erneut löschen, Job nach Frist (staging verkürzt); die vollständig synchronisierte Uhr des Mitspielers ist währenddessen offline. **Voraussetzung:** Handy und Uhr mit Protokoll 4; zusätzlich Fall „Uhr noch Protokoll 3“: Aktualisierungshinweis, nach dem Update redigiert | geteiltes Match bleibt beim Mitspieler mit „Gelöschter Spieler“ – in Zuweisungs-Events, Verlauf, Vorschlägen und nach dem Wiederverbinden auch auf seiner Uhr |
 | G13 | Mitspieler/Zähler verliert die Mitgliedschaft, Match bleibt über einen teilenden Freund im Feed | Events, Rollen und Live-Stand verschwinden lokal und auf der Uhr, nur die Feed-Karte bleibt |
 | G9 | Export anfordern | ZIP mit eigenen Daten, keine fremden Profil-/Geräte-IDs |
 | G10 | Wear OS ohne Handy (WLAN): Match zählen; danach Logout am Handy | landet in der Cloud; Uhr-Sitzung danach gesperrt |
@@ -479,7 +495,7 @@ Entschieden am 15.10.2026; in [00](00-entscheidungen.md) und [PLAN](PLAN.md) §7
 
 | Was | Wo | Ergebnis |
 |---|---|---|
-| Migrationen + 11 pgTAP-Dateien (275 Prüfungen) | lokal, **Postgres 17.10** + pgTAP 1.3.3 + Supabase-Nachbau | alle grün |
+| Migrationen + 11 pgTAP-Dateien (280 Prüfungen) | lokal, **Postgres 17.10** + pgTAP 1.3.3 + Supabase-Nachbau | alle grün |
 | Echter Supabase-Stack (`supabase start` + `supabase test db`) | CI | Runde 1 und 2 grün; Fixes aus Runde 2 warten auf den nächsten Lauf |
 | `shared/cloud-sync` (15 Tests, ktlint) | lokal, `./gradlew check` | grün |
 | Parallelität (zwei Verbindungen), Realtime-Zustellung an echte Clients, Edge Functions, Auth-Hook | – | Gate-Tests §11 bzw. P2-A/B/C |
@@ -514,3 +530,12 @@ Entschieden am 15.10.2026; in [00](00-entscheidungen.md) und [PLAN](PLAN.md) §7
 | 4 | Wechsel `member → feed` lässt Mitgliedsdaten liegen | `access` je Match als Signal, Löschung lokal + Replikate (§5.4), G13 | 050 (Signal), Plan P2-B |
 | 5 | Kein `rotate` beim Entfernen eines Helfers | `rotate` auf alten `tournament:`-Kanal | 090 |
 | 6 | Fallback „Konto entsteht“ widerspricht F24 | als nicht freigegebene Ausnahme markiert (§8) | – |
+
+**Review-Runde 3 (PR #40) – Umsetzung:**
+
+| # | Befund | Umsetzung | Nachweis |
+|---|---|---|---|
+| 1 | Auth-Kaskade deadlockt gegen `purge_account` | BEFORE-DELETE-Statement-Trigger `zz_lock_sync` auf `auth.users`; Löschung nur über `purge_account`; kein TRUNCATE für API-Rollen | 010 (statisch); lokal mit zwei Verbindungen nachgestellt; Gate §11.4 |
+| 2 | Export bricht bei `detail = null` | `private.export_detail` behandelt null/Nicht-Objekte | 080 (Regression) |
+| 3 | Test 090 erwartete leere Payload, Supabase ergänzt Transport-`id` | Prüfung auf fachliche Leerheit (`payload - 'id'`), lokaler Nachbau angeglichen | 090 |
+| 4 | Protokollmigration für `Redacted` offen | 3 → 4 mit `MIN_SUPPORTED = 4`, Update-Verhalten, Mischversionstests, G8-Voraussetzung (§5.7) | Plan |
