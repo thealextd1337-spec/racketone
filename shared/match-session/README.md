@@ -1,15 +1,16 @@
 # `shared/match-session` – Match-Session (Engine + Store + Geräte-Sync)
 
-Orchestriert ein Match auf **einem** Gerät nach dem **Single-Scorer-Modell** (Produktentscheidung 2026-10-15,
+Orchestriert die Matches **eines** Geräts nach dem **Single-Scorer-Modell** (Produktentscheidung 2026-10-15,
 02 §7.5, 01 §4.4): Pro Match zählt genau ein Gerät – Standard die Uhr des Spielers, alternativ ein Handy im
-Director-Modus. Alle anderen Geräte zeigen an und können „Zählen übernehmen“. Ohne Compose, Ktor, Koin – läuft auf
+Director-Modus. Alle anderen Geräte zeigen an und können „Zählen übernehmen“. Das Handy kann **mehrere Matches
+parallel** führen, die eigene Uhr zählt bzw. zeigt höchstens eines davon (F22, 01 §4.9). Ohne Compose, Ktor, Koin – läuft auf
 allen Targets inkl. watchOS. Abhängigkeiten: `core-scoring`, `sync-protocol`, `data`, `device-link`,
 `kotlinx-coroutines` (nur `StateFlow`).
 
 | Baustein | Aufgabe |
 |---|---|
 | `MatchSession` | API für UI/Facades, Event-Erzeugung (nur Zähler), Empfang, Anti-Entropie-Takt, Übergabe |
-| `SessionState` | Zustand für die UI: `ActiveMatch` (Engine-Zustand, Rolle, Undo/Redo, `pointsPlayed`) + `SyncStatus` |
+| `SessionState` | Zustand für die UI: `matches` (alle offenen `ActiveMatch`: Engine-Zustand, Rolle, Undo/Redo, `pointsPlayed`), `match` (fokussiertes), `watchMatchId` (Uhr-Match, Handy) + `SyncStatus` |
 | `MatchSessions` | DI-freie Fabrik + stabile Geräte-ID (`session.deviceId` in den Settings) |
 | `AndroidMatchSessions` / `AppleMatchSessions` | prozessweite Session mit Link (Wear Data Layer / WatchConnectivity), DB, Scheduler und Thread-Prüfung |
 
@@ -58,7 +59,8 @@ val matchId = session.create(
 session.recordPoint(Side.A)          // auf Anzeige-Geräten: false, nichts wird geschrieben
 session.undo(); session.redo()
 session.continueDecision(anotherSet = true)
-session.endMatch()                   // im Dialog: ContinueDecision(false), sonst MatchEnded(ABANDONED)
+session.endMatch(EndReason.STOPPED)  // „Beenden“; im Satzende-Dialog regulär ContinueDecision(false)
+session.endMatch()                   // Abbruch ohne Wertung (MatchEnded(ABANDONED)), auch im Satzende-Dialog
 
 // Auf einem Anzeige-Gerät nach Bestätigung:
 session.takeOverScoring()
@@ -71,8 +73,16 @@ session.state.collect { s ->
 session.addListener { s -> render(s) }
 
 session.createFollowUp()             // nach Best-of: verknüpftes Folge-Match (OPEN, gleicher Zähler)
-session.resume(matchId)              // Resume-Karte
+session.resume(matchId)              // Resume-Karte bzw. Wechsel der Live-Ansicht (fokussiert, öffnet falls nötig)
 session.deleteMatch(matchId)         // schließt ein offenes Match vorher
+
+// Handy, mehrere Matches (F22): weitere Matches anlegen, ohne das laufende zu beenden
+val court2 = session.create(format, lineup2)                        // Director, die Uhr bleibt bei ihrem Match
+session.state.value.matches                                          // alle offenen; .match = fokussiertes
+session.state.value.watchMatchId                                     // Uhr-Match
+session.assignToWatch(court2, watchScores = true)                    // Uhr wechselt (altes Uhr-Match → Handy)
+session.endMatch(EndReason.STOPPED)                                  // „Beenden, wie es steht“ (02 §9.27)
+session.closeMatch(matchId)                                          // beendetes aus der Übersicht nehmen
 ```
 
 Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalData(), link = null, scheduler, PeerKind.PHONE)`.
@@ -124,6 +134,29 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 - `MatchMeta.watchWorkout` (Default `true`, 02 §10): Wunsch „Workout auf meiner Uhr mitlaufen lassen“; kommt mit
   Genesis und Match-Kopf auf die Uhr. Die Uhr-Apps lesen es aus `ActiveMatch.meta`.
 
+## Mehrere Matches und Uhr-Match (F22)
+
+Normativ in 01 §4.9. Kurz:
+
+- **Handy** (`SessionConfig.parallelMatches`, Standard für `PHONE`): beliebig viele offene Matches; Zähl-Kommandos
+  wirken auf das **fokussierte** (`resume(id)` fokussiert). `closeMatch()` schließt das fokussierte, danach rückt das
+  jüngste offene nach (laufende vor beendeten).
+- **Uhr-Match** (`watchMatchId`, persistent in `session.watchMatch`): „Meine Uhr“ beim Anlegen, Director-Match bei freier
+  Uhr, auf der Uhr gestartetes Match, Folge-Match des Uhr-Matches oder `assignToWatch` („Meine Uhr“ und `assignToWatch`
+  sind ausdrücklich und schlagen ältere Uhr-Starts). Wechselt die Uhr, gibt sie ihr altes laufendes Match **selbst** per
+  `ScorerChanged` ans Handy ab (nach ihrer letzten Eingabe, verlustfrei); wurde es nie an eine Uhr gesendet, übernimmt
+  das Handy sofort. Ist sie nicht erreichbar, braucht der Wechsel `takeOverWatchMatch = true`
+  (`watchMatchNeedingTakeOver()`), die Uhr meldet danach `droppedInputs`. Die Uhr zählt nie zwei Matches.
+- **Routing:** Handy → Uhr nur Uhr-Match und Matches mit Events dieser Uhr; Director-Matches nie. `pendingToPeers` und der
+  Takt zählen nur Matches mit Replikationsziel.
+- **Neustart:** `openInBackground(id)` öffnet laufende Matches ohne Fokus (Adapter: alle laufenden, Fokus ≤ 12 h).
+- **Uhr**: genau ein offenes Match; mit Zuweisung (`MatchMeta.watchMatch`) folgt sie nur dem Uhr-Match, Events anderer
+  Matches speichert sie nur (Backup). Ohne Zuweisung gilt das bisherige Auto-Follow.
+- **Migration:** Handy ohne gespeicherte Zuweisung → das zuletzt geänderte laufende Match wird Uhr-Match.
+- Tests: `ParallelMatchesTest` (drei Matches, Uhr in einem, Routing, verlustfreie Online-Übergabe, bestätigte
+  Offline-Übernahme mit Hinweis auf der Uhr, Offline-Rennen in beiden Reihenfolgen und gleicher Millisekunde,
+  Beenden/Abbrechen eines Nicht-Uhr-Matches, Abbruch im Satzende-Dialog, Prozessneustart, Migration, veraltete Zuweisung).
+
 ## Löschen (Löschmarkierungen)
 
 - `deleteMatch(id)` löscht Kopf und Events und legt eine **dauerhafte Löschmarkierung** (`match_tombstone`) an.
@@ -140,7 +173,8 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
   des `LinkScheduler`; `ThreadGuard` erzwingt das (Android: Main-Looper, Apple: `NSThread.isMainThread`), sonst
   `IllegalStateException`.
 - **Rolle:** Zähl-Kommandos (`recordPoint`, `undo`, `redo`, `continueDecision`, `correct`, `pause`, `resumePlay`,
-  `endMatch`) wirken nur auf dem Zähler. Kommen trotzdem Eingaben eines Nicht-Zählers an (z. B. Altzähler offline),
+  `endMatch`) wirken nur auf dem Zähler (des fokussierten Matches). Beenden/Abbrechen eines Matches, das ein anderes
+  Gerät zählt: erst `takeOverScoring()`, dann `endMatch(STOPPED | ABANDONED)` (die Handy-UI fragt vorher nach). Kommen trotzdem Eingaben eines Nicht-Zählers an (z. B. Altzähler offline),
   verwirft sie die Engine deterministisch (`rejectedByRole`, `ActiveMatch.rejectedByRoleCount`).
 - **Redo:** Stapel ist gerätelokal; nur Punkt, `ContinueDecision`, `Correction` und Matchende leeren ihn, Pause/Fortsetzen nicht.
 - **Empfang:** jedes neue Event wird sofort idempotent gespeichert und mit dem Batch seiner Nachricht angewendet
@@ -148,9 +182,11 @@ Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalD
 - **Konvergenz:** Anti-Entropie bei jedem `Hello` und alle 30 s im aktiven Match; Versionsvektor = lückenloser
   Wasserstand je Gerät (`sync-protocol`). Belegt durch `MultiDeviceSyncTest`, `ScorerHandoverTest`,
   `PermutationConvergenceTest` (alle Zustellreihenfolgen kleiner Szenarien) und `RandomizedConvergenceTest`.
-- **Auto-Follow:** nach jeder Zustandsänderung geprüft. Ohne offenes Match folgt die Session dem gerade empfangenen
-  Match; ist das offene beendet, dem Folge-Match bzw. dem jüngsten danach angelegten laufenden Match (Folge-Match
-  zuerst, dann `createdAt`, dann ID).
+- **Auto-Follow:** nach jeder Zustandsänderung geprüft. Handy: empfangene laufende Matches (≤ 24 h) kommen in die Liste,
+  fokussiert nur ohne laufendes Match im Fokus; ein Folge-Match ersetzt sein beendetes, fokussiertes Vor-Match. Uhr mit
+  Zuweisung: nur das Uhr-Match. Uhr ohne Zuweisung (älterer Stand): ohne offenes Match dem gerade empfangenen Match; ist
+  das offene beendet, dem Folge-Match bzw. dem jüngsten danach angelegten laufenden Match (Folge-Match zuerst, dann
+  `createdAt`, dann ID).
 - **Folge-Match:** gleiche Besetzung und gleiches Satzformat, Modus `OPEN`, `decidingSet = null`, Erstaufschläger aus
   `state.continuation`, `previousMatchId` gesetzt, gleicher Zähler (02 §5.2).
 

@@ -194,13 +194,26 @@ data class ServerChosen(
 /** Grund eines vorzeitigen Matchendes (02 §7 `MatchEnded`). */
 @Serializable
 enum class EndReason {
+    /** Aufgabe von `side`; Sieger = Gegenseite. */
     RETIRED,
+
+    /** `side` nicht angetreten (nur ohne wirksamen Ballwechsel); Sieger = Gegenseite. */
     WALKOVER,
+
+    /** Abbruch ohne Wertung: kein Sieger, zählt nicht in Siege/Statistik (02 §9.9, F21). */
     ABANDONED,
+
+    /**
+     * „Beenden, wie es steht“ (02 §9.27, F21, neu in Protokoll 3): Das Ergebnis gilt mit dem aktuellen Stand. Sieger ist
+     * die führende Side nach Sätzen, dann Spielen im laufenden Satz, dann Punkten im laufenden Spiel bzw. Satz; bei
+     * Gleichstand kein Sieger. `side` wird ignoriert.
+     */
+    STOPPED,
 }
 
 /**
- * Match endet vorzeitig. [side] ist die aufgebende bzw. nicht angetretene Side (Pflicht außer bei `ABANDONED`).
+ * Match endet vorzeitig. [side] ist die aufgebende bzw. nicht angetretene Side (Pflicht bei `RETIRED`/`WALKOVER`,
+ * bei `ABANDONED`/`STOPPED` ohne Bedeutung).
  */
 @Serializable
 @SerialName("MatchEnded")

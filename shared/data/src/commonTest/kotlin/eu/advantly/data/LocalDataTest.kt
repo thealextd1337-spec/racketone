@@ -138,6 +138,41 @@ class LocalDataTest {
         assertEquals(listOf(newer, singles), data.matches.recentLineups(Sport.TENNIS))
         assertEquals(listOf(newer), data.matches.recentLineups(limit = 1))
         assertTrue(data.matches.recentLineups(Sport.BADMINTON).isEmpty())
+        // F21: abgebrochene Matches zählen nicht als „zuletzt gespielt“
+        data.matches.updateProgress(
+            MatchId("t2"),
+            MatchStatus.FINISHED,
+            ScoreSummary(reason = ResultReason.ABANDONED),
+            updatedAtMs = 4_000,
+        )
+        assertEquals(listOf(singles), data.matches.recentLineups(Sport.TENNIS))
+        // auch das Personenverzeichnis (W3-S) kennt Personen nur aus gewerteten Matches
+        val zoe = Lineup(listOf(PlayerId("me")), listOf(PlayerId("zoe")), PlayerId("me"))
+        data.matches.insertIfAbsent(MatchId("t3"), tennis, zoe, MatchMeta(), createdAtMs = 5_000)
+        data.players.addGuest(PlayerId("zoe"), "Zoe", 1)
+        assertTrue(data.recentPeople().any { it.id == PlayerId("zoe") })
+        data.matches.updateProgress(MatchId("t3"), MatchStatus.FINISHED, ScoreSummary(reason = ResultReason.ABANDONED), updatedAtMs = 6_000)
+        assertTrue(data.recentPeople().none { it.id == PlayerId("zoe") })
+    }
+
+    @Test
+    fun lastRatedSkipsAnyNumberOfAbandonedMatches() {
+        data.matches.insertIfAbsent(MatchId("rated"), tennis, singles, MatchMeta(), createdAtMs = 1_000)
+        repeat(25) { i ->
+            val id = MatchId("abandoned-$i")
+            data.matches.insertIfAbsent(id, padel, doubles, MatchMeta(), createdAtMs = 2_000L + i)
+            data.matches.updateProgress(id, MatchStatus.FINISHED, ScoreSummary(reason = ResultReason.ABANDONED), updatedAtMs = 3_000)
+        }
+        assertEquals(MatchId("rated"), data.matches.lastRated()?.id)
+    }
+
+    @Test
+    fun unconfirmedCountsPerMatch() {
+        data.events.append(StoredEvent("a1", "m1", "d", 1, 1, "{}"))
+        data.events.append(StoredEvent("a2", "m1", "d", 2, 2, "{}"))
+        data.events.append(StoredEvent("b1", "m2", "d", 1, 1, "{}"))
+        data.events.markConfirmed("m2", listOf(StoredSequence("d", 1)))
+        assertEquals(mapOf("m1" to 2L), data.events.unconfirmedCountByMatch())
     }
 
     @Test

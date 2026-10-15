@@ -222,20 +222,34 @@ internal class Core private constructor(
 
     private fun onMatchEnded(payload: MatchEnded): Boolean {
         if (status == MatchStatus.FINISHED) return false
-        if (payload.reason != EndReason.ABANDONED && payload.side == null) return false
+        val needsSide = payload.reason == EndReason.RETIRED || payload.reason == EndReason.WALKOVER
+        if (needsSide && payload.side == null) return false
         if (payload.reason == EndReason.WALKOVER && pointsApplied > 0) return false
-        val winner = if (payload.reason == EndReason.ABANDONED) null else payload.side?.other
+        val winner =
+            when (payload.reason) {
+                EndReason.RETIRED, EndReason.WALKOVER -> payload.side?.other
+                EndReason.ABANDONED -> null
+                EndReason.STOPPED -> leadingSide()
+            }
         val reason =
             when (payload.reason) {
                 EndReason.RETIRED -> ResultReason.RETIRED
                 EndReason.WALKOVER -> ResultReason.WALKOVER
                 EndReason.ABANDONED -> ResultReason.ABANDONED
+                EndReason.STOPPED -> ResultReason.STOPPED
             }
         finish(winner, reason)
         frozen = inSet
         effects = effects + Effect.MATCH_ENDED
         return true
     }
+
+    /**
+     * Führende Side für „Beenden, wie es steht“ (02 §9.27): erst gewonnene Sätze, dann Spiele im laufenden Satz
+     * (Tennis/Padel), dann Punkte im laufenden Spiel bzw. Satz (Rohpunkte, im Tiebreak die Tiebreak-Punkte); bei
+     * Gleichstand auf allen Stufen `null`. Ohne laufenden Satz (`AWAITING_DECISION`) zählen nur die Sätze.
+     */
+    private fun leadingSide(): Side? = StopRule.winner(setsWon, games.takeIf { inSet && sport.isTennisLike }, points.takeIf { inSet })
 
     private fun finish(
         winner: Side?,

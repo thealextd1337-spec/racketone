@@ -14,6 +14,7 @@ import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.live_score_advantage
 import eu.advantly.ui.phone.resources.match_end_retired_suffix
+import eu.advantly.ui.phone.resources.match_end_stopped_suffix
 import eu.advantly.ui.phone.resources.match_end_walkover_suffix
 import org.jetbrains.compose.resources.stringResource
 
@@ -68,6 +69,7 @@ fun resultLine(
     when (result?.reason) {
         ResultReason.RETIRED -> parts += stringResource(Res.string.match_end_retired_suffix)
         ResultReason.WALKOVER -> parts += stringResource(Res.string.match_end_walkover_suffix)
+        ResultReason.STOPPED -> parts += stringResource(Res.string.match_end_stopped_suffix)
         else -> Unit
     }
     return parts.joinToString(" ")

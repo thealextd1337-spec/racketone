@@ -18,6 +18,7 @@ import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.live.LiveSettings
 import eu.advantly.presentation.match.InMemoryMatchStore
 import eu.advantly.presentation.match.LiveMatchPort
+import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchStore
@@ -29,6 +30,13 @@ import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.ui.phone.live.LiveScoreController
+
+/** Start, der auf die bestätigte Übernahme des Matches der nicht erreichbaren Uhr wartet ([busy]). */
+data class PendingWatchTakeOver(
+    val setup: MatchSetup,
+    val options: StartOptions,
+    val busy: LiveMatchSnapshot,
+)
 
 /** Die fünf Tabs der Bottom-Navigation (04 §2.1); [Play] ist eine Aktion, kein eigener Inhalt. */
 enum class AppTab { Home, History, Play, Friends, Profile }
@@ -66,12 +74,6 @@ class AppNavigator {
     fun pop(): Boolean = stack.removeLastOrNull() != null
 }
 
-/** Start, der auf die Bestätigung „laufendes Match abbrechen?“ wartet. */
-data class PendingStart(
-    val setup: MatchSetup,
-    val options: StartOptions,
-)
-
 /**
  * Wurzel-Zustand der Phone-App: Ports (App: `SessionMatchStore` über der Match-Session, Tests/Previews:
  * [InMemoryMatchStore]), Assistent, Live-Controller und Navigation. Lebt in einem ViewModel und übersteht damit
@@ -88,7 +90,13 @@ class AdvantlyAppModel(
     /** Monotone Uhr für „Stand vor X s“; dieselbe Basis wie `SyncInfo.lastScorerContactMono` des Ports. */
     val monotonic: MonotonicClock = MonotonicClock.System,
 ) {
-    val wizard = MatchWizard(players, watchStatus = live.watchStatus, refreshWatch = live::refreshWatchStatus)
+    val wizard =
+        MatchWizard(
+            players,
+            watchStatus = live.watchStatus,
+            refreshWatch = live::refreshWatchStatus,
+            watchBusy = { watchMatch() != null },
+        )
     val controller = LiveScoreController(live, settings, clock = clock, monotonic = monotonic)
     val navigator = AppNavigator()
 
@@ -100,19 +108,24 @@ class AdvantlyAppModel(
                 ?.status
                 ?.let { it != MatchStatus.FINISHED } == true
 
-    /** Tab „Spielen (+)“: laufendes Match → Live, sonst Assistent (04 §2.1). */
+    /**
+     * Tab „Spielen (+)“ und „Neues Match“: immer der Assistent – laufende Matches laufen weiter (F22, mehrere Plätze);
+     * zu ihnen führen Übersicht und Mini-Scorebar.
+     */
     fun onPlay() {
-        if (live.active.value != null) {
-            navigator.push(Overlay.Live)
-        } else {
-            wizard.reset()
-            navigator.push(Overlay.Wizard)
-        }
+        wizard.reset()
+        navigator.push(Overlay.Wizard)
     }
 
-    /** Wartender Start, solange der Nutzer den Abbruch des laufenden Matches noch nicht bestätigt hat. */
-    var pendingStart: PendingStart? by mutableStateOf(null)
-        private set
+    /** Live-Ansicht eines offenen Matches öffnen (Übersicht am Start, Match-Wechsel im Live-Screen). */
+    fun openMatch(matchId: MatchId) {
+        if (!live.select(matchId)) return
+        controller.sync(live.active.value)
+        if (navigator.top != Overlay.Live) navigator.push(Overlay.Live)
+    }
+
+    /** Das laufende Match, das die eigene Uhr gerade zählt (sie ist dann nicht frei, F22), sonst `null`. */
+    fun watchMatch(): LiveMatchSnapshot? = live.openMatches.value.firstOrNull { it.watchScores }
 
     /** Schnellstart, der noch auf „Wer zählt?“ wartet (nur mit verbundener Uhr, 04 §3.1). */
     var pendingScorerChoice: MatchSetup? by mutableStateOf(null)
@@ -121,8 +134,7 @@ class AdvantlyAppModel(
     /**
      * Einziger Weg zu `live.start` (Assistent, Schnellstart, „Nochmal in gleicher Besetzung“). Ohne [options]
      * (Schnellstart) wird die Zähler-Wahl bestätigt, sobald eine Uhr verbunden ist ([confirmScorerChoice]); ohne Uhr
-     * zählt dieses Handy. Läuft noch ein Match, wird erst nach Bestätigung gestartet ([confirmPendingStart]) – sonst
-     * würde es stillschweigend abgebrochen.
+     * zählt dieses Handy. Laufende Matches bleiben offen (F22) – es wird nichts abgebrochen.
      */
     fun startMatch(
         setup: MatchSetup,
@@ -132,12 +144,7 @@ class AdvantlyAppModel(
             pendingScorerChoice = setup
             return
         }
-        val resolved = options ?: StartOptions(ScorerOption.THIS_PHONE)
-        if (hasRunningMatch) {
-            pendingStart = PendingStart(setup, resolved)
-            return
-        }
-        doStart(setup, resolved)
+        doStart(setup, options ?: StartOptions(ScorerOption.THIS_PHONE))
     }
 
     /** Zähler-Wahl des Schnellstarts bestätigen und starten. */
@@ -151,22 +158,34 @@ class AdvantlyAppModel(
         pendingScorerChoice = null
     }
 
-    /** Laufendes Match abbrechen (`ABANDONED`) und das wartende starten. */
-    fun confirmPendingStart() {
-        val pending = pendingStart ?: return
-        pendingStart = null
-        doStart(pending.setup, pending.options)
+    /**
+     * Start mit „Meine Uhr“, während die nicht erreichbare Uhr noch ein anderes Match zählt (Review W3-M #5): wartet auf
+     * die Bestätigung „Das Handy übernimmt …, spätere Uhr-Eingaben dort werden verworfen“.
+     */
+    var pendingWatchTakeOver: PendingWatchTakeOver? by mutableStateOf(null)
+        private set
+
+    /** Übernahme bestätigt: das Handy übernimmt das alte Uhr-Match, das neue Match startet auf der Uhr. */
+    fun confirmWatchTakeOver() {
+        val pending = pendingWatchTakeOver ?: return
+        pendingWatchTakeOver = null
+        doStart(pending.setup, pending.options.copy(takeOverWatchMatch = true))
     }
 
-    /** Wartenden Start verwerfen; das laufende Match bleibt unverändert. */
-    fun cancelPendingStart() {
-        pendingStart = null
+    fun cancelWatchTakeOver() {
+        pendingWatchTakeOver = null
     }
 
     private fun doStart(
         setup: MatchSetup,
         options: StartOptions,
     ) {
+        if (options.scorer == ScorerOption.MY_WATCH && !options.takeOverWatchMatch) {
+            live.watchTakeOverNeeded()?.let { busy ->
+                pendingWatchTakeOver = PendingWatchTakeOver(setup, options, busy)
+                return
+            }
+        }
         live.start(setup, options)
         controller.sync(live.active.value)
         when (navigator.top) {

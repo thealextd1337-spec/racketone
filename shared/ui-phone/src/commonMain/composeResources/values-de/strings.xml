@@ -235,11 +235,11 @@
     <string name="dialog_show_result">Ergebnis ansehen</string>
     <string name="match_end_retired_suffix">Aufg.</string>
     <string name="match_end_walkover_suffix">kampflos</string>
-    <string name="end_title">Match vorzeitig beenden?</string>
+    <string name="end_title">Match beenden</string>
     <string name="end_retired">%1$s gibt auf</string>
     <string name="end_walkover">%1$s nicht angetreten</string>
     <string name="end_abandon">Abbrechen (ohne Wertung)</string>
-    <string name="end_abandon_hint">Ein abgebrochenes Match behält den Stand, hat aber keinen Sieger.</string>
+    <string name="end_abandon_hint">Bleibt im Verlauf als „Abgebrochen“ mit Stand, zählt aber nicht für Siege und Statistik.</string>
     <string name="correct_server_title">Wer schlägt auf?</string>
     <string name="correct_server_from_start">Korrigiert den Aufschläger ab Matchbeginn – Punkte bleiben, die Statistik zieht mit.</string>
     <string name="correct_server_from_now">Korrigiert den Aufschläger ab jetzt – gespielte Punkte bleiben.</string>
@@ -257,7 +257,7 @@
     <string name="result_win">Sieg</string>
     <string name="result_loss">Niederlage</string>
     <string name="result_draw">Unentschieden</string>
-    <string name="result_abandoned">Ohne Wertung</string>
+    <string name="result_abandoned">Abgebrochen</string>
     <string name="result_followup_of">Folge-Match eines Matches in gleicher Besetzung</string>
     <string name="result_duration">Dauer</string>
     <string name="result_points_total">Gespielte Punkte</string>
@@ -295,10 +295,6 @@
     <string name="latency_benchmark_running">Auto-Benchmark läuft …</string>
 
     <!-- Review-Runde 1: Start-Bestätigung, Sync, Rechtliches -->
-    <string name="abandon_title">Laufendes Match abbrechen?</string>
-    <string name="abandon_text">Das laufende Match wird ohne Wertung beendet und das neue gestartet.</string>
-    <string name="abandon_confirm">Abbrechen und starten</string>
-    <string name="abandon_keep">Weiterspielen</string>
     <string name="end_failed">Das hat nicht geklappt – der Stand hat sich geändert. Bitte erneut wählen.</string>
     <string name="sync_local">Nur lokal</string>
     <string name="absorbed_notice">Doppelte Eingabe zusammengeführt</string>
@@ -371,8 +367,6 @@
     <string name="device_watch">Uhr</string>
     <string name="device_phone">Handy</string>
     <string name="device_other">Anderes Gerät</string>
-    <string name="abandon_current_score">Aktueller Stand: %1$s</string>
-    <string name="abandon_scoring_elsewhere">Bisher zählt: %1$s. Das Match wird auf allen Geräten ohne Wertung beendet.</string>
 
     <!-- W1-I: Uhr ohne Live-Verbindung -->
     <string name="wizard_scorer_no_watch">Keine Uhr mit diesem Handy gekoppelt.</string>
@@ -425,6 +419,34 @@
     <string name="live_telemetry_heart_rate">Puls: %1$s bpm</string>
     <string name="live_telemetry_steps">Schritte: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <string name="home_open_matches">Laufende Matches (%1$d)</string>
+    <string name="home_new_match_parallel">Weiteren Platz starten – laufende Matches laufen weiter.</string>
+    <string name="open_match_watch_scores">Deine Uhr zählt</string>
+    <string name="open_match_watch_shows">Auf deiner Uhr angezeigt</string>
+    <string name="open_match_phone_scores">Dieses Handy zählt</string>
+    <string name="open_match_scored_by">Es zählt: %1$s</string>
+    <string name="mini_scorebar_more">+%1$d weitere</string>
+    <string name="live_switch_a11y">Zu Match wechseln: %1$s</string>
+    <string name="live_on_watch">Auf deiner Uhr</string>
+    <string name="end_stop">Beenden – Ergebnis gilt</string>
+    <string name="end_stop_hint">Der aktuelle Stand gilt als Ergebnis: %1$s</string>
+    <string name="end_display_action">Beenden …</string>
+    <string name="end_display_title">Dieses Match beenden?</string>
+    <string name="end_takeover_note">Bisher zählt: %1$s. Dieses Handy übernimmt zuerst das Zählen und beendet dann das Match; die Uhr zeigt das Ende.</string>
+    <string name="end_confirm_stop_title">Match beenden?</string>
+    <string name="end_confirm_stop_text">Ergebnis: %1$s – %2$s. Es gilt so, wie es steht.</string>
+    <string name="end_confirm_stop">Beenden</string>
+    <string name="end_confirm_abandon_title">Match abbrechen?</string>
+    <string name="end_confirm_abandon">Abbrechen</string>
+    <string name="end_back">Zurück</string>
+    <string name="match_end_stopped_suffix">beendet</string>
+    <string name="history_abandoned_note">Abgebrochene Matches zählen nicht.</string>
+    <string name="result_not_rated">Abgebrochen – zählt nicht für Siege und Statistik.</string>
+    <string name="wizard_scorer_watch_busy">Deine Uhr zählt gerade %1$s. Wählst du sie, wechselt die Uhr zu diesem Match – das andere zählt dieses Handy weiter.</string>
+    <string name="end_keep_playing">Weiterspielen</string>
+    <string name="watch_takeover_title">Uhr nicht erreichbar</string>
+    <string name="watch_takeover_text">Deine Uhr zählt noch %1$s und ist nicht erreichbar. Dieses Handy übernimmt dieses Match; Eingaben, die die Uhr danach dort noch macht, werden verworfen.</string>
+    <string name="watch_takeover_confirm">Übernehmen und starten</string>
     <string name="player_partner">Partner</string>
     <string name="player_opponent_1">Gegner 1</string>
     <string name="player_opponent_2">Gegner 2</string>

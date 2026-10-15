@@ -20,6 +20,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
 import eu.advantly.data.freshPlaceholders
@@ -244,6 +245,11 @@ class WatchScoring internal constructor(
         return state.match?.let { snapshotOf(it, state.sync) }
     }
 
+    /** Hinweis [WatchScoreSnapshot.droppedInputs] wurde angezeigt – erst danach gilt er als gesehen (übersteht sonst Neustarts). */
+    fun acknowledgeDroppedInputs() {
+        call { backend()?.session?.acknowledgeDroppedInputs() }
+    }
+
     /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Es bleibt gespeichert und wird weiter synchronisiert. */
     fun close() {
         error = ""
@@ -293,7 +299,10 @@ class WatchScoring internal constructor(
             error = ""
             return snapshot()
         }
-        return command { session, _ -> session.endMatch() }
+        // Satzende-Dialog: reguläres „Nein“ (die Session bricht sonst ohne Wertung ab, Review W3-M #2)
+        return command { session, match ->
+            if (match.state.status == MatchStatus.AWAITING_DECISION) session.continueDecision(anotherSet = false) else session.endMatch()
+        }
     }
 
     /**
@@ -390,7 +399,7 @@ class WatchScoring internal constructor(
             } catch (e: Exception) {
                 null
             } ?: sync.pendingToPeers
-        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending)
+        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending, current?.droppedInputs?.count ?: 0)
     }
 
     private fun begin(
@@ -571,7 +580,8 @@ class WatchMatchSetup(
  *
  * @property status `IN_PROGRESS`, `PAUSED`, `AWAITING_DECISION` oder `FINISHED`
  * @property winner `A`, `B` oder `""` (offen, Unentschieden, abgebrochen)
- * @property resultReason `COMPLETED`, `DRAW`, `RETIRED`, `WALKOVER`, `ABANDONED` oder `""`
+ * @property resultReason `COMPLETED`, `DRAW`, `RETIRED`, `WALKOVER`, `ABANDONED`, `STOPPED` (am Handy „beendet, wie es
+ *   steht“, mit Sieger) oder `""`; „beendet“ ohne Sieger meldet die Facade als `DRAW` (Swift zeigt „Unentschieden“)
  * @property pointsA Punktanzeige des laufenden Spiels/Satzes (`"0"`, `"15"`, `"AD"`, `"7"` …), `""` ohne laufenden Satz
  * @property gamesA Spiele im laufenden Satz (Tennis/Padel), sonst `-1`
  * @property setKind `REGULAR`, `MATCH_TIEBREAK`, `PB_GAME`, `RALLY_GAME` oder `""`
@@ -606,6 +616,8 @@ class WatchMatchSetup(
  * @property isScorer die Uhr zählt (02 §7.5); sonst ist sie Anzeige (keine Tap-Flächen, kein Undo)
  * @property scorerKind Art des zählenden Geräts: `WATCH`, `PHONE`, `OTHER` oder `""` (unbekannt)
  * @property rejectedByRoleCount Eingaben von Nicht-Zählern, die die Engine verworfen hat („N Eingaben nicht übernommen“)
+ * @property droppedInputs eigene Eingaben in einem **früheren** Uhr-Match, die nach der bestätigten Übernahme durch das
+ *   iPhone verworfen wurden (F22); `0` = kein Hinweis. Nach der Anzeige [WatchScoring.acknowledgeDroppedInputs] aufrufen
  * @property pointsPlayed wirksam gezählte Ballwechsel
  * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
  * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
@@ -686,6 +698,7 @@ class WatchScoreSnapshot(
     val scorerPending: Boolean,
     val watchWorkout: Boolean,
     val perspectiveSwapped: Boolean,
+    val droppedInputs: Int = 0,
 )
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
@@ -734,6 +747,7 @@ internal fun buildSnapshot(
     scorerDisconnectedSinceMs: Long,
     us: Side = Side.A,
     pendingToPeers: Int = sync.pendingToPeers,
+    droppedInputs: Int = 0,
 ): WatchScoreSnapshot {
     val them = us.other
 
@@ -790,7 +804,7 @@ internal fun buildSnapshot(
                 .orEmpty(),
         resultReason =
             state.result
-                ?.reason
+                ?.let { if (it.reason == ResultReason.STOPPED && it.winner == null) ResultReason.DRAW else it.reason }
                 ?.name
                 .orEmpty(),
         pointsA = current?.display?.get(us).orEmpty(),
@@ -851,5 +865,6 @@ internal fun buildSnapshot(
         scorerPending = match.scorerDeviceId == MatchSession.PENDING_WATCH,
         watchWorkout = match.meta.watchWorkout,
         perspectiveSwapped = us == Side.B,
+        droppedInputs = droppedInputs,
     )
 }

@@ -109,6 +109,7 @@ class PhoneIntegrationTest {
         assertFalse(WorkoutCoordinator.enabled(watchMatch.meta, watchSetting = true))
         c.confirmEnd()
         c.close()
+        h.settle() // F22: erst wenn das Handy das Ende kennt, ist die Uhr frei für ein neues Director-Match
         // Vom Handy gestartet: dessen Wahl gilt, unabhängig von der Uhr-Einstellung
         h.phone.create(
             Presets.TENNIS_SINGLES_BO3.format(),

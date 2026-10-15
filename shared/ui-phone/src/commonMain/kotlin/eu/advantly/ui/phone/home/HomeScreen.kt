@@ -33,8 +33,8 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.match.isRated
 import eu.advantly.ui.phone.app.AdvantlyAppModel
-import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.common.AdvantlyCard
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.SportIcon
@@ -48,14 +48,16 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
-import eu.advantly.ui.phone.live.compactScore
+import eu.advantly.ui.phone.live.OpenMatchCardContent
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.home_empty
 import eu.advantly.ui.phone.resources.home_greeting
 import eu.advantly.ui.phone.resources.home_greeting_named
 import eu.advantly.ui.phone.resources.home_like_last_time
 import eu.advantly.ui.phone.resources.home_new_match
+import eu.advantly.ui.phone.resources.home_new_match_parallel
 import eu.advantly.ui.phone.resources.home_new_match_sub
+import eu.advantly.ui.phone.resources.home_open_matches
 import eu.advantly.ui.phone.resources.home_ready
 import eu.advantly.ui.phone.resources.home_remove_favorite
 import eu.advantly.ui.phone.resources.home_resume
@@ -72,8 +74,9 @@ import org.jetbrains.compose.resources.stringResource
 private const val WEEK_MS = 7L * 24 * 60 * 60 * 1000
 
 /**
- * H1 Start (04 §4.1): Begrüßung, Resume-Karte (laufendes Match), „Neues Match“, Schnellstart („Wie letztes Mal“,
- * Favoriten) und Wochenbilanz aus dem Verlauf.
+ * H1 Start (04 §4.1): Begrüßung, Übersicht der offenen Matches (F22: mehrere Plätze, Kennzeichnung des Uhr-Matches),
+ * „Neues Match“ (auch während andere laufen), Schnellstart („Wie letztes Mal“, Favoriten) und Wochenbilanz aus dem
+ * Verlauf (ohne abgebrochene Matches, F21).
  */
 @Composable
 fun HomeScreen(
@@ -82,11 +85,11 @@ fun HomeScreen(
     clock: WallClock = WallClock.System,
 ) {
     val self by model.players.self.collectAsState()
-    val active by model.live.active.collectAsState()
+    val open by model.live.openMatches.collectAsState()
     val last by model.players.lastSetup.collectAsState()
     val favorites by model.players.favorites.collectAsState()
     val history by model.history.matches.collectAsState()
-    val running = active?.state?.status?.let { it != MatchStatus.FINISHED } == true
+    val runningCount = open.count { it.isRunning }
     Column(
         modifier
             .fillMaxSize()
@@ -106,29 +109,31 @@ fun HomeScreen(
             color = AdvantlyTheme.colors.text,
             modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.l).semantics { heading() },
         )
-        active?.let { ResumeCard(it, onClick = { model.navigator.push(Overlay.Live) }) }
-        if (!running) {
-            NewMatchHero(onClick = model::onPlay)
-            if (last != null || favorites.isNotEmpty()) {
-                SectionTitle(stringResource(Res.string.home_section_quick))
-                last?.let { setup ->
-                    QuickStartCard(
-                        setup = setup,
-                        title = stringResource(Res.string.home_like_last_time),
-                        tag = "quick_last",
-                        onStart = { model.startMatch(setup) },
-                    )
-                }
-                if (favorites.isNotEmpty()) SectionTitle(stringResource(Res.string.home_section_favorites))
-                favorites.forEachIndexed { index, favorite ->
-                    FavoriteCard(favorite, index, onStart = { model.startMatch(favorite.setup) }, onRemove = {
-                        model.players.removeFavorite(favorite.id)
-                    })
-                }
+        if (open.size > 1) SectionTitle(stringResource(Res.string.home_open_matches, runningCount))
+        open.forEachIndexed { index, snapshot ->
+            ResumeCard(snapshot, if (index == 0) "resume_card" else "resume_card_$index", onClick = { model.openMatch(snapshot.matchId) })
+        }
+        // Neues Match auch während laufender Matches (F22): sie laufen weiter, nichts wird abgebrochen
+        NewMatchHero(parallel = runningCount > 0, onClick = model::onPlay)
+        if (last != null || favorites.isNotEmpty()) {
+            SectionTitle(stringResource(Res.string.home_section_quick))
+            last?.let { setup ->
+                QuickStartCard(
+                    setup = setup,
+                    title = stringResource(Res.string.home_like_last_time),
+                    tag = "quick_last",
+                    onStart = { model.startMatch(setup) },
+                )
+            }
+            if (favorites.isNotEmpty()) SectionTitle(stringResource(Res.string.home_section_favorites))
+            favorites.forEachIndexed { index, favorite ->
+                FavoriteCard(favorite, index, onStart = { model.startMatch(favorite.setup) }, onRemove = {
+                    model.players.removeFavorite(favorite.id)
+                })
             }
         }
-        WeekSummary(history, clock.nowMs())
-        if (history.isEmpty() && active == null) {
+        WeekSummary(history.filter { it.isRated }, clock.nowMs())
+        if (history.isEmpty() && open.isEmpty()) {
             Text(
                 stringResource(Res.string.home_empty),
                 style = AdvantlyTheme.typography.body,
@@ -139,35 +144,30 @@ fun HomeScreen(
     }
 }
 
+/** Karte eines offenen Matches: Status, Teams, Stand, wer zählt, Uhr-Kennzeichnung; Tipp → Live-Ansicht. */
 @Composable
 private fun ResumeCard(
     snapshot: LiveMatchSnapshot,
+    tag: String,
     onClick: () -> Unit,
 ) {
-    val sport = snapshot.setup.sport
     val finished = snapshot.state.status == MatchStatus.FINISHED
-    AdvantlyCard(Modifier.testTag("resume_card").padding(bottom = Spacing.m), onClick = onClick, border = AdvantlyTheme.colors.brand) {
+    AdvantlyCard(Modifier.testTag(tag).padding(bottom = Spacing.m), onClick = onClick, border = AdvantlyTheme.colors.brand) {
         Text(
             stringResource(if (finished) Res.string.home_resume_finished else Res.string.home_resume).uppercase(),
             style = AdvantlyTheme.typography.overline,
             color = AdvantlyTheme.colors.brand,
         )
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            SportIcon(sport, size = 20.dp)
-            Text(
-                teamName(snapshot.setup, Side.A) + " – " + teamName(snapshot.setup, Side.B),
-                style = AdvantlyTheme.typography.label,
-                color = AdvantlyTheme.colors.text,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Text(compactScore(snapshot), style = AdvantlyTheme.typography.scoreS, color = AdvantlyTheme.colors.text)
+        OpenMatchCardContent(snapshot)
     }
 }
 
-/** Primäraktion „Neues Match“ (Mockup H1 Hero). */
+/** Primäraktion „Neues Match“ (Mockup H1 Hero); [parallel] = weitere Matches laufen (Hinweis „laufen weiter“). */
 @Composable
-private fun NewMatchHero(onClick: () -> Unit) {
+private fun NewMatchHero(
+    parallel: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = AdvantlyTheme.colors
     Column(
         Modifier
@@ -181,7 +181,11 @@ private fun NewMatchHero(onClick: () -> Unit) {
     ) {
         Text(stringResource(Res.string.home_ready).uppercase(), style = AdvantlyTheme.typography.overline, color = colors.onBrand)
         Text(stringResource(Res.string.home_new_match), style = AdvantlyTheme.typography.headline, color = colors.onBrand)
-        Text(stringResource(Res.string.home_new_match_sub), style = AdvantlyTheme.typography.body, color = colors.onBrand)
+        Text(
+            stringResource(if (parallel) Res.string.home_new_match_parallel else Res.string.home_new_match_sub),
+            style = AdvantlyTheme.typography.body,
+            color = colors.onBrand,
+        )
     }
 }
 

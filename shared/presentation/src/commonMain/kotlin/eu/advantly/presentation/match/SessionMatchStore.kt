@@ -70,7 +70,10 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
  * Matches, Spieler, Identität); Engine-Zusammenfassungen beendeter Matches sind je `updatedAt` zwischengespeichert.
  *
- * Nach einem App-Neustart öffnet der Adapter das zuletzt geänderte, noch laufende Match wieder (höchstens 12 h alt).
+ * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
+ * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
+ * zum Fortsetzen, Beenden, Abbrechen, Löschen); in den Fokus kommt nur das zuletzt geänderte und nur, wenn es höchstens
+ * 12 h alt ist.
  * „Stand vor X s“ misst er monoton ([monotonic]); den letzten Kontakt zum Zähler merkt er sich je Match in den Settings,
  * damit das Alter einen Neustart übersteht. Ohne gemerkten Kontakt ist es unbekannt (nicht 0).
  *
@@ -96,7 +99,7 @@ class SessionMatchStore(
 
     private val players = HashMap<PlayerId, Player>()
     private val summaries = HashMap<MatchId, Pair<Long, MatchSummary>>()
-    private var finishedAt: Triple<MatchId, Int, Long?>? = null
+    private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
     private val selfFlow = MutableStateFlow(ensureSelf())
     private val guestsFlow = MutableStateFlow<List<Player>>(emptyList())
@@ -104,6 +107,7 @@ class SessionMatchStore(
     private val lastSetupFlow = MutableStateFlow<MatchSetup?>(null)
     private val historyFlow = MutableStateFlow<List<MatchSummary>>(emptyList())
     private val activeFlow = MutableStateFlow<LiveMatchSnapshot?>(null)
+    private val openFlow = MutableStateFlow<List<LiveMatchSnapshot>>(emptyList())
     private val watchFlow = MutableStateFlow(false)
 
     override val self: StateFlow<Player> = selfFlow.asStateFlow()
@@ -112,6 +116,7 @@ class SessionMatchStore(
     override val lastSetup: StateFlow<MatchSetup?> = lastSetupFlow.asStateFlow()
     override val matches: StateFlow<List<MatchSummary>> = historyFlow.asStateFlow()
     override val active: StateFlow<LiveMatchSnapshot?> = activeFlow.asStateFlow()
+    override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
@@ -131,8 +136,8 @@ class SessionMatchStore(
     private val listener = SessionListener { onSessionState(it) }
 
     init {
-        // App-Neustart: ein kürzlich noch laufendes Match wieder öffnen (Zähler zählt ggf. auf der Uhr weiter)
-        if (session.state.value.match == null) resumeRecentMatch()
+        // App-Neustart: kürzlich noch laufende Matches wieder öffnen (Zähler zählen ggf. auf der Uhr weiter)
+        if (session.state.value.match == null) resumeRecentMatches()
         // addListener liefert sofort den aktuellen Zustand (lädt dabei auch Historie, Spieler und Favoriten)
         session.addListener(listener)
         // Uhr mit installierter App zählt als verfügbar, auch wenn sie gerade nicht verbunden ist (Feldtest W1-I)
@@ -187,12 +192,8 @@ class SessionMatchStore(
         require(missing.isEmpty()) { "Spieler ohne Namen: $missing" }
         rememberPlayers(setup.players)
 
-        // Ein laufendes Match wird abgebrochen (die UI hat nachgefragt). Zählt dort ein anderes Gerät, übernimmt dieses
-        // Handy vorher – sonst bliebe das alte Match auf der Uhr offen und sie folgte dem neuen nie (Auto-Follow).
-        current()?.takeIf { it.state.status != MatchStatus.FINISHED }?.let { running ->
-            if (!running.isScorer) session.takeOverScoring()
-            session.endMatch(EndReason.ABANDONED)
-        }
+        // Laufende Matches bleiben offen (F22). Wechselt die Uhr zu diesem Match („Meine Uhr“), übernimmt die Session ihr
+        // bisheriges laufendes Match als Director – die Uhr zählt nie zwei Matches.
         val scorer =
             when (options.scorer) {
                 // Ohne Live-Verbindung: bekannte Uhr bzw. Platzhalter „Uhr, sobald sie sich meldet“ (Session)
@@ -213,8 +214,12 @@ class SessionMatchStore(
             )
         rememberPlayers(assigned.values.toList())
         val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newId().value) }
-        return session.create(setup.format, fresh, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
+        return session.create(setup.format, fresh, meta, scorer, takeOverWatchMatch = options.takeOverWatchMatch)
     }
+
+    override fun watchTakeOverNeeded(): LiveMatchSnapshot? =
+        session.watchMatchNeedingTakeOver()?.let { id -> openFlow.value.firstOrNull { it.matchId == id } }
 
     override fun recordPoint(side: Side): Boolean = session.recordPoint(side)
 
@@ -238,16 +243,31 @@ class SessionMatchStore(
         value: ServeOutcome?,
     ): Boolean = session.setServeInfo(pointId, value)
 
+    override fun select(matchId: MatchId): Boolean = session.state.value.match(matchId) != null && session.resume(matchId)
+
     override fun endMatch(
         reason: EndReason,
         side: Side?,
     ): Boolean {
         val m = current() ?: return false
         if (!m.isScorer || m.state.status == MatchStatus.FINISHED) return false
-        if ((reason == EndReason.ABANDONED) != (side == null)) return false
+        val sideless = reason == EndReason.ABANDONED || reason == EndReason.STOPPED
+        if (sideless != (side == null)) return false
         // Walkover nur ohne wirksamen Ballwechsel (02 §9.8) – sonst würde die Engine das Event überspringen
         if (reason == EndReason.WALKOVER && m.pointsPlayed > 0) return false
         return session.endMatch(reason, side)
+    }
+
+    override fun stopMatch(): Boolean = finishAsDirector(EndReason.STOPPED)
+
+    override fun abandonMatch(): Boolean = finishAsDirector(EndReason.ABANDONED)
+
+    /** Beenden/Abbrechen (F21) – zählt ein anderes Gerät, übernimmt dieses Handy vorher (`ScorerChanged`). */
+    private fun finishAsDirector(reason: EndReason): Boolean {
+        val m = current() ?: return false
+        if (m.state.status == MatchStatus.FINISHED) return false
+        if (!m.isScorer && !session.takeOverScoring()) return false
+        return session.endMatch(reason)
     }
 
     override fun correctServer(
@@ -350,11 +370,12 @@ class SessionMatchStore(
     override fun delete(matchId: MatchId): Boolean {
         val header = data.matches.get(matchId) ?: return false
         if (!header.isFinished) return false
-        // Aktives (beendetes) Match zuerst schließen (Vertrag), dann löschen; die Löschmarkierung geht an die Uhr
-        if (current()?.id == matchId) session.closeMatch()
+        // Offenes (beendetes) Match zuerst schließen (Vertrag), dann löschen; die Löschmarkierung geht an die Uhr
+        session.closeMatch(matchId)
         session.deleteMatch(matchId)
         data.settings.remove(contactKey(matchId))
         summaries.remove(matchId)
+        finishedAt.remove(matchId)
         refreshStored()
         return true
     }
@@ -419,12 +440,15 @@ class SessionMatchStore(
 
     private fun current(): ActiveMatch? = session.state.value.match
 
-    private fun resumeRecentMatch() {
+    /**
+     * Alle laufenden Matches öffnen (Review W3-M #3: auch ältere bleiben erreichbar); den Fokus bekommt nur das zuletzt
+     * geänderte, wenn es höchstens [RESUME_WINDOW_MS] alt ist.
+     */
+    private fun resumeRecentMatches() {
         val now = clock.nowMs()
-        data.matches
-            .active()
-            .firstOrNull { now - it.updatedAtMs <= RESUME_WINDOW_MS }
-            ?.let { session.resume(it.id) }
+        val running = data.matches.active()
+        running.reversed().forEach { session.openInBackground(it.id) }
+        running.firstOrNull()?.takeIf { now - it.updatedAtMs <= RESUME_WINDOW_MS }?.let { session.resume(it.id) }
     }
 
     private fun onSessionState(state: SessionState) {
@@ -492,9 +516,10 @@ class SessionMatchStore(
         state: SessionState,
     ): Boolean {
         if (previous == null || previous.dataRevision != state.dataRevision) return true
-        val before = previous.match
-        val after = state.match
-        return before?.id != after?.id || before?.state?.status != after?.state?.status
+
+        // anderes Match im Fokus, Matches geöffnet/geschlossen oder ein Status gewechselt (z. B. Nachbarplatz beendet)
+        fun statuses(s: SessionState) = s.matches.map { it.id to it.state.status }
+        return previous.match?.id != state.match?.id || statuses(previous) != statuses(state)
     }
 
     private fun publishActive(state: SessionState) {
@@ -506,14 +531,21 @@ class SessionMatchStore(
                 current != null && current.copy(revision = 0) == next -> current
                 else -> next.copy(revision = ++revision)
             }
+        val active = activeFlow.value
+        openFlow.value = state.matches.map { m -> if (m.id == active?.matchId) active else snapshotOf(m, state) }
     }
 
+    /**
+     * Snapshot für [m]. „Stand vor X s“ und das Übernahmeangebot verfolgt der Adapter nur für das fokussierte Match;
+     * für die übrigen offenen Matches (Übersicht) ist der letzte Kontakt unbekannt.
+     */
     private fun snapshotOf(
         m: ActiveMatch,
         state: SessionState,
     ): LiveMatchSnapshot {
         val finished = m.state.status == MatchStatus.FINISHED
         val sync = state.sync
+        val focused = m.id == state.match?.id
         return LiveMatchSnapshot(
             matchId = m.id,
             setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, data.assignments(m.id)),
@@ -546,15 +578,16 @@ class SessionMatchStore(
             sync =
                 SyncInfo(
                     peers = sync.peers.count { it.compatibility == CompatibilityStatus.COMPATIBLE },
-                    scorerConnected = sync.scorerConnected,
+                    scorerConnected = state.scorerConnected(m),
                     pendingToPeers = sync.pendingToPeers,
                     lastEventReceivedAtMs = sync.lastEventReceivedAtMs,
-                    lastScorerContactMono = if (m.isScorer) null else contactMono,
-                    withoutScorerSinceMono = if (m.isScorer) null else withoutScorerSinceMono,
+                    lastScorerContactMono = if (m.isScorer || !focused) null else contactMono,
+                    withoutScorerSinceMono = if (m.isScorer || !focused) null else withoutScorerSinceMono,
                     updateRequired = updateRequiredOf(state),
                 ),
             absorbedTaps = m.absorbedTaps.size,
-            waitingForScorer = waitingForScorer(m, state),
+            waitingForScorer = waitingForScorer(m, state, focused),
+            onWatch = m.id == state.watchMatchId,
         )
     }
 
@@ -565,23 +598,24 @@ class SessionMatchStore(
     private fun waitingForScorer(
         m: ActiveMatch,
         state: SessionState,
+        focused: Boolean,
     ): Boolean {
-        if (m.isScorer || state.sync.scorerConnected || m.state.status == MatchStatus.FINISHED) return false
-        if (contactMono != null) return false
+        if (m.isScorer || state.scorerConnected(m) || m.state.status == MatchStatus.FINISHED) return false
+        if (focused && contactMono != null) return false
+        if (!focused && data.settings.get(contactKey(m.id)) != null) return false
         val scorer = m.scorerDeviceId ?: return false
         return data.events.sequences(m.id.value).none { it.deviceId == scorer.value }
     }
 
     /** Wanduhr des letzten Events eines beendeten Matches (je Match und Log-Länge zwischengespeichert). */
     private fun finishedAtOf(m: ActiveMatch): Long? {
-        val cached = finishedAt
-        if (cached != null && cached.first == m.id && cached.second == m.eventCount) return cached.third
+        finishedAt[m.id]?.let { (count, at) -> if (count == m.eventCount) return at }
         val at =
             data.events
                 .scoreEvents(m.id)
                 .lastOrNull { it.payload !is PlayerAssigned }
                 ?.wallClockMs
-        finishedAt = Triple(m.id, m.eventCount, at)
+        finishedAt[m.id] = m.eventCount to at
         return at
     }
 
@@ -657,10 +691,10 @@ class SessionMatchStore(
             }.forEach { data.players.addGuest(it.id, it.displayName, now) }
     }
 
+    /** „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung war (F21). */
     private fun loadLastSetup(): MatchSetup? =
         data.matches
-            .history(limit = 1)
-            .firstOrNull()
+            .lastRated()
             ?.let {
                 val lineup = data.freshPlaceholders(data.resolvedLineup(it)) { PlayerId(ids.newId().value) }
                 MatchSetup(it.format, lineup, it.meta, playersOf(lineup))

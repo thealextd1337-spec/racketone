@@ -57,8 +57,10 @@ class RandomIdGenerator(
  * @property deviceId stabile Installations-ID (Teil der Event-Ordnung), siehe [MatchSessions.deviceId]
  * @property kind Art dieses Geräts (Anzeige bei den Gegenstellen)
  * @property antiEntropyIntervalMs Abgleich während eines aktiven Matches (01 §4.3: 30 s)
- * @property summaryMatchLimit so viele zuletzt geänderte Matches stehen zusätzlich zum offenen im `Summary`
- * @property autoFollow ohne offenes (oder mit beendetem) Match ein von einer Gegenstelle gestartetes Match automatisch öffnen
+ * @property summaryMatchLimit so viele zuletzt geänderte Matches stehen zusätzlich zu den offenen im `Summary`
+ * @property autoFollow ein von einer Gegenstelle gestartetes Match automatisch öffnen (Regeln: `MatchSession.maybeFollow`)
+ * @property parallelMatches mehrere Matches gleichzeitig offen halten und das Uhr-Match zuweisen (F22) – Standard nur am
+ *   Handy; Uhren halten genau ein Match offen und folgen der Zuweisung des Handys
  */
 data class SessionConfig(
     val deviceId: DeviceId,
@@ -66,4 +68,5 @@ data class SessionConfig(
     val antiEntropyIntervalMs: Long = AntiEntropy.INTERVAL_MS,
     val summaryMatchLimit: Long = 8,
     val autoFollow: Boolean = true,
+    val parallelMatches: Boolean = kind == PeerKind.PHONE,
 )

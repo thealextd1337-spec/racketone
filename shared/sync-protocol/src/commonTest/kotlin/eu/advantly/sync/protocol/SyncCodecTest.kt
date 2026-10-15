@@ -11,6 +11,9 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.MatchEnded
+import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.Undo
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -56,6 +59,19 @@ class SyncCodecTest {
         )
     }
 
+    /** Uhr-Zuweisung des Handys (F22) und Endgrund STOPPED (02 §9.27) überstehen den Draht. */
+    @Test
+    fun watchAssignmentAndStoppedRoundTrip() {
+        roundTrip(MatchMetaMessage(watchMatch = WatchAssignment(MATCH, assignedAtMs = 42)))
+        roundTrip(MatchMetaMessage(watchMatch = WatchAssignment(null, assignedAtMs = 43)))
+        val stop =
+            ScoreEvent(EventId("s"), MATCH, DeviceId("phone"), 2, 2, 2_000, null, MatchEnded(EndReason.STOPPED))
+        roundTrip(Events(MATCH, listOf(stop)))
+        assertTrue(""""reason":"STOPPED"""" in SyncCodec.encodeToString(Events(MATCH, listOf(stop))))
+        val json = SyncCodec.encodeToString(MatchMetaMessage())
+        assertTrue("watchMatch" !in json, json)
+    }
+
     /** Ältere Absender kennen `self`/`selfAliases`/`watchWorkout` nicht: Defaults greifen, Standard wird nicht gesendet. */
     @Test
     fun ownerIdentityAndWorkoutAreOptionalOnTheWire() {
@@ -88,6 +104,8 @@ class SyncCodecTest {
         assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode("""{"type":"Summary","v":4,"matches":{}}"""))
         val hello = SyncCodec.decode("""{"type":"Hello","v":4,"minV":4,"deviceId":"d","kind":"WATCH","newField":true}""")
         assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 4, v = 4)), hello)
+        // W2-Gerät (Protokoll 2): nur noch sein Hello wird gelesen
+        assertEquals(DecodeResult.Unsupported(2, "Events"), SyncCodec.decode("""{"type":"Events","v":2,"matchId":"m1","events":[]}"""))
     }
 
     /** Gerät mit Protokoll 1 (W1): sein Hello wird gelesen, alle anderen Nachrichten nicht mehr (kein Halb-Sync). */

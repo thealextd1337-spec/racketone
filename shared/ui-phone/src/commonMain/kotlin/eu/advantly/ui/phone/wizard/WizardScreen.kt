@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.SetsChoice
@@ -94,6 +95,7 @@ fun WizardScreen(
     onClose: () -> Unit,
     onStart: () -> Unit,
     modifier: Modifier = Modifier,
+    busyMatch: LiveMatchSnapshot? = null,
 ) {
     val state by wizard.state.collectAsState()
     // Uhr installiert/entfernt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1), reaktiv
@@ -127,7 +129,7 @@ fun WizardScreen(
                 WizardStep.SURFACE -> SurfaceStep(wizard, state)
                 WizardStep.PLAYERS -> PlayersStep(wizard, state)
                 WizardStep.FORMAT -> FormatStep(wizard, state)
-                WizardStep.SCORER -> ScorerStep(wizard, state)
+                WizardStep.SCORER -> ScorerStep(wizard, state, busyMatch)
             }
         }
         Footer(wizard, state, onStart)
@@ -521,6 +523,7 @@ private fun ColumnScope.ReadOnlyRules(lines: List<String>) {
 private fun ScorerStep(
     wizard: MatchWizard,
     state: WizardUiState,
+    busyMatch: LiveMatchSnapshot?,
 ) {
     StepTitle(stringResource(Res.string.wizard_title_scorer))
     ScorerChooser(
@@ -530,6 +533,7 @@ private fun ScorerStep(
         onSelect = wizard::setScorer,
         onWatchWorkout = wizard::setWatchWorkout,
         onRecheck = wizard::refreshWatchStatus,
+        busyMatch = busyMatch.takeIf { state.input.watchBusy },
     )
 }
 

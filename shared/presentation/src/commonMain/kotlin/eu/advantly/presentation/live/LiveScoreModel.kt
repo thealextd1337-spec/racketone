@@ -8,10 +8,10 @@ import eu.advantly.core.scoring.FlagLevel
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
-import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.LiveMatchSnapshot
+import eu.advantly.presentation.match.isDraw
 
 /**
  * Haptik-Ereignisse des Live-Scores (04 §5.8). Die Plattform-Umsetzung (Vibrator-Primitives bzw.
@@ -142,7 +142,7 @@ object LiveScoreRules {
             MatchStatus.FINISHED -> {
                 val result = state.result ?: return null
                 return when {
-                    result.reason == ResultReason.DRAW -> ScoreHint(ScoreHint.Kind.MatchDrawn)
+                    result.isDraw -> ScoreHint(ScoreHint.Kind.MatchDrawn)
                     result.winner == null -> ScoreHint(ScoreHint.Kind.MatchAbandoned)
                     result.winner == Side.A -> ScoreHint(ScoreHint.Kind.MatchWon, Side.A)
                     else -> ScoreHint(ScoreHint.Kind.MatchLost, Side.B)

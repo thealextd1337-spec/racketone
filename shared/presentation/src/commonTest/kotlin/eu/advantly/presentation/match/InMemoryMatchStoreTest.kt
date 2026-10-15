@@ -4,6 +4,7 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.PendingQuestion
 import eu.advantly.core.scoring.Presets
@@ -187,19 +188,110 @@ class InMemoryMatchStoreTest {
         assertEquals(1, store.matches.value.size)
     }
 
+    /** F22: Ein neues Match lässt das laufende offen; Wechsel der Live-Ansicht per `select`. */
     @Test
-    fun startingANewMatchAbandonsTheRunningOne() {
+    fun startingANewMatchKeepsTheRunningOneOpen() {
         val store = testStore()
         val first = store.start(store.setupFor(tennisBo3))
         store.play("A")
         assertFalse(store.dismiss(), "laufendes Match lässt sich nicht schließen")
-        store.start(store.setupFor(tennisBo3))
+        val second = store.start(store.setupFor(Presets.PADEL_GOLDEN_BO3.format()))
+        assertEquals(listOf(first, second), store.openMatches.value.map { it.matchId })
+        assertEquals(second, store.active.value!!.matchId)
         assertEquals(
-            ResultReason.ABANDONED,
-            store
-                .record(first)!!
-                .finalState.result!!
-                .reason,
+            MatchStatus.IN_PROGRESS,
+            store.openMatches.value
+                .first()
+                .state.status,
+        )
+        store.play("BB")
+        assertTrue(store.select(first))
+        assertEquals(
+            1,
+            store.active.value!!
+                .state.current!!
+                .points.a,
+            "Stand des ersten Matches unverändert",
+        )
+        assertFalse(
+            store.select(
+                eu.advantly.core.model
+                    .MatchId("unbekannt"),
+            ),
+        )
+    }
+
+    /** F21: Beenden wertet den Stand, Abbrechen nicht; danach rückt das laufende Match nach. */
+    @Test
+    fun stopAndAbandon() {
+        val store = testStore()
+        val first = store.start(store.setupFor(tennisBo3))
+        store.play("AAAA" + "B")
+        val second = store.start(store.setupFor(tennisBo3))
+        store.play("B")
+        assertTrue(store.stopMatch())
+        assertEquals(
+            MatchResult(Side.B, ResultReason.STOPPED),
+            store.active.value!!
+                .state.result,
+        )
+        assertFalse(store.stopMatch(), "schon beendet")
+        assertFalse(store.abandonMatch())
+        assertTrue(store.dismiss())
+        assertEquals(first, store.active.value!!.matchId, "laufendes Match rückt nach")
+        assertTrue(store.abandonMatch())
+        assertEquals(
+            MatchResult(null, ResultReason.ABANDONED),
+            store.active.value!!
+                .state.result,
+        )
+        assertTrue(store.dismiss())
+        assertNull(store.active.value)
+        val history = store.matches.value
+        assertEquals(setOf(first, second), history.map { it.matchId }.toSet())
+        assertEquals(listOf(second), history.filter { it.isRated }.map { it.matchId }, "Abgebrochen zählt nicht")
+    }
+
+    @Test
+    fun abandonedMatchIsNotLikeLastTime() {
+        val store = testStore()
+        val rated = store.setupFor(tennisBo3)
+        store.start(rated)
+        assertTrue(store.stopMatch())
+        store.start(store.setupFor(Presets.PADEL_GOLDEN_BO3.format()))
+        assertTrue(store.abandonMatch())
+        assertEquals(tennisBo3, store.lastSetup.value?.format)
+        assertTrue(store.recentPlayers(eu.advantly.core.model.Sport.PADEL).none { it.displayName == "Mia" })
+    }
+
+    @Test
+    fun abandonDuringTheSetEndQuestionIsNotRated() {
+        val store = testStore()
+        store.start(store.setupFor(Presets.TENNIS_OPEN.format()))
+        store.play("AAAA".repeat(6))
+        assertTrue(store.abandonMatch())
+        assertEquals(
+            MatchResult(null, ResultReason.ABANDONED),
+            store.active.value!!
+                .state.result,
+        )
+    }
+
+    @Test
+    fun stopAtTheSetEndQuestionIsTheRegularEnd() {
+        val store = testStore()
+        store.start(store.setupFor(Presets.TENNIS_OPEN.format()))
+        store.play("AAAA".repeat(6))
+        assertEquals(
+            MatchStatus.AWAITING_DECISION,
+            store.active.value!!
+                .state.status,
+        )
+        assertTrue(store.stopMatch())
+        assertEquals(
+            MatchResult(Side.A, ResultReason.COMPLETED),
+            store.active.value!!
+                .state.result,
         )
     }
 

@@ -191,7 +191,7 @@ class MultiDeviceSyncTest {
      * Nachrichten werden nicht übernommen und es bekommt keine – kein halb-synchroner Zustand.
      */
     @Test
-    fun version1PeerIsReportedTooOldAndNotSynced() {
+    fun olderProtocolPeerIsReportedTooOldAndNotSynced() {
         val cluster = Cluster("watch" to PeerKind.WATCH)
         val received = mutableListOf<ByteArray>()
         val old =
@@ -215,7 +215,7 @@ class MultiDeviceSyncTest {
                 start()
             }
         cluster.settle()
-        old.send("watch", SyncCodec.encode(Hello(DeviceId("old-phone"), PeerKind.PHONE, minV = 1, v = 1)))
+        old.send("watch", SyncCodec.encode(Hello(DeviceId("old-phone"), PeerKind.PHONE, minV = 2, v = 2)))
         cluster.settle()
         val sync =
             cluster["watch"]
@@ -228,7 +228,7 @@ class MultiDeviceSyncTest {
         val phoneData = testLocalData()
         val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("old-phone"), PeerKind.PHONE), cluster.clock)
         val id = phone.create(format, SINGLES)
-        val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":3", "\"v\":1")
+        val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":3", "\"v\":2")
         old.send("watch", v1.encodeToByteArray())
         cluster.settle()
         assertNull(cluster["watch"].data.matches.get(id))

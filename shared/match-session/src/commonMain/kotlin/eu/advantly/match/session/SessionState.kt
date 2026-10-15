@@ -21,15 +21,34 @@ import eu.advantly.sync.protocol.PeerKind
 /**
  * Gesamtzustand einer [MatchSession] – genau das, was eine UI zum Rendern braucht.
  *
- * @property match offenes Match oder `null` (Startbildschirm)
- * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des offenen Matches ändern (Löschung,
+ * @property match fokussiertes Match (Live-Ansicht; Uhr: ihr einziges offenes) oder `null` (Startbildschirm)
+ * @property dataRevision steigt, wenn sich gespeicherte Daten außerhalb des fokussierten Matches ändern (Löschung,
  *   Match-Kopf/-Stand eines anderen Matches, Spieler, Favoriten, Identität) – Signal für Listen-UIs (Verlauf), neu zu laden
+ * @property matches alle offenen Matches (fokussiertes eingeschlossen), nach Erstellzeit; Uhren: höchstens eines (F22)
+ * @property watchMatchId Handy: das Uhr-Match – das Match, das die eigene Uhr zählt bzw. anzeigt (01 §4.9), `null` = die
+ *   Uhr ist frei. Uhr: das ihr vom Handy zugewiesene Match (dem sie folgt), `null` = keine Zuweisung bekannt
+ * @property droppedInputs Uhr: zuletzt gemeldete verworfene eigene Eingaben in einem nicht mehr offenen Match (z. B. nach
+ *   der bestätigten Übernahme durch das Handy) – UI-Hinweis „N Eingaben nicht übernommen“
  */
 data class SessionState(
     val match: ActiveMatch?,
     val sync: SyncStatus,
     val dataRevision: Long = 0,
-)
+    val matches: List<ActiveMatch> = listOfNotNull(match),
+    val watchMatchId: MatchId? = null,
+    val droppedInputs: DroppedInputs? = null,
+) {
+    /** Offenes Match [id] oder `null`. */
+    fun match(id: MatchId): ActiveMatch? = matches.firstOrNull { it.id == id }
+
+    /**
+     * Ist der Zähler von [match] erreichbar? Dieses Gerät zählt selbst oder der Zähler ist eine verbundene, kompatible
+     * Gegenstelle ([SyncStatus.scorerConnected] gilt nur für das fokussierte Match).
+     */
+    fun scorerConnected(match: ActiveMatch): Boolean =
+        match.isScorer ||
+            sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE && it.deviceId == match.scorerDeviceId }
+}
 
 /**
  * Das offene Match.
@@ -82,8 +101,13 @@ data class ActiveMatch(
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
 }
 
-/**
- * Der zuletzt gezählte Ballwechsel (für die Aufschlag-Leiste direkt nach dem Punkt).
+/** Verworfene eigene Eingaben ([count] insgesamt) im nicht offenen Match [matchId]. */
+data class DroppedInputs(
+    val matchId: MatchId,
+    val count: Int,
+)
+
+/** Der zuletzt gezählte Ballwechsel (für die Aufschlag-Leiste direkt nach dem Punkt).
  *
  * @property side Gewinner
  * @property servingSide aufschlagende Side vor dem Punkt

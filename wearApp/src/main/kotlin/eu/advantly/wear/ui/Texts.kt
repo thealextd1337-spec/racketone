@@ -313,9 +313,13 @@ fun resultText(
 ): String =
     stringResource(
         when {
-            reason == ResultReason.DRAW -> R.string.result_drawn
+            // „Beenden, wie es steht“ bei Gleichstand ist ebenfalls unentschieden (02 §9.27)
+            reason == ResultReason.DRAW || (reason == ResultReason.STOPPED && winner == null) -> R.string.result_drawn
+
             winner == Side.A -> R.string.result_won
+
             winner == Side.B -> R.string.result_lost
+
             else -> R.string.result_abandoned
         },
     )

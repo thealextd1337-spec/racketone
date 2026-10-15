@@ -194,7 +194,7 @@ class MatchRepository internal constructor(
         offset: Long = 0,
     ): List<MatchRecord> = queries.history(sport?.name, fromMs, toMs, limit, offset).executeAsList().map { it.toRecord() }
 
-    /** Neueste Besetzungen für Mitspieler-Vorschläge, ohne Format, Metadaten und Ergebnis zu dekodieren. */
+    /** Neueste Besetzungen für Mitspieler-Vorschläge (ohne abgebrochene Matches), ohne Format/Metadaten zu dekodieren. */
     fun recentLineups(
         sport: Sport? = null,
         limit: Long = 100,
@@ -211,6 +211,9 @@ class MatchRepository internal constructor(
                 receiveRight = lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
             )
         }
+
+    /** Jüngstes Match, das kein Abbruch ohne Wertung ist („Wie letztes Mal“, F21); `null` = keins. */
+    fun lastRated(): MatchRecord? = queries.lastRated().executeAsOneOrNull()?.toRecord()
 
     /** Nicht beendete Matches, zuletzt geändertes zuerst (Resume-Karte). */
     fun active(): List<MatchRecord> = queries.active().executeAsList().map { it.toRecord() }

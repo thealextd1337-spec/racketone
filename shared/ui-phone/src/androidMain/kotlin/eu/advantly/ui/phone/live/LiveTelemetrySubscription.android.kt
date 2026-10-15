@@ -34,7 +34,8 @@ internal actual fun LiveTelemetrySubscription(
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 val current = session.state.value
-                if (current.match?.id != matchId || current.match?.meta?.watchWorkout != true) return@repeatOnLifecycle
+                // nur das Uhr-Match (F22): die Uhr misst nur für ihr eigenes Match
+                if (current.watchMatchId != matchId || current.match(matchId)?.meta?.watchWorkout != true) return@repeatOnLifecycle
                 client.sendMessage(
                     watch.peer,
                     LiveTelemetrySubscription.MESSAGE_PATH,

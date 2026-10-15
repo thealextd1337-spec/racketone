@@ -69,6 +69,9 @@ SELECT count(*) FROM match_event WHERE confirmed = 0;
 unconfirmedMatches:
 SELECT DISTINCT match_id FROM match_event WHERE confirmed = 0 ORDER BY match_id;
 
+unconfirmedCountByMatch:
+SELECT match_id, count(*) AS count FROM match_event WHERE confirmed = 0 GROUP BY match_id;
+
 unconfirmedForMatch:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
 FROM match_event

@@ -541,7 +541,7 @@ Abhängige Defaults bei „Punkte pro Satz“:
 | Sieger | wer die Gewinnsätze erreicht | mehr gewonnene Sätze. Gleichstand → `result.reason = DRAW`, `winner = null` |
 | Nach Matchende | App fragt „Noch ein Satz in gleicher Besetzung?“. „Ja“ erzeugt ein **neues, verknüpftes Match** (`previousMatchId`, gleiche Lineup und Satzformat, `mode = OPEN`). Den Erstaufschläger liefert `state.continuation` (siehe unten). Das ergänzt ein Best-of (z. B. 3. Satz nach 2:0) ohne die Wertung zu verfälschen (wie 01-architektur §3.4). | Match ist beendet |
 
-`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei `reason ∈ {RETIRED, WALKOVER, ABANDONED, DRAW}` MUSS das Feld `null` sein (Klarstellung 2026-10-15). Bei Pickleball zusätzlich der Startaufschläger. Badminton/Tischtennis: nach `rally.nextGameFirstServer` (§6.8.1), `player` = Index 0 der Side. Die handgeschriebenen Testvektoren prüfen das Feld noch nicht; die generierten Golden-Vektoren enthalten es.
+`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei `reason ∈ {RETIRED, WALKOVER, ABANDONED, STOPPED, DRAW}` MUSS das Feld `null` sein (Klarstellung 2026-10-15). Bei Pickleball zusätzlich der Startaufschläger. Badminton/Tischtennis: nach `rally.nextGameFirstServer` (§6.8.1), `player` = Index 0 der Side. Die handgeschriebenen Testvektoren prüfen das Feld noch nicht; die generierten Golden-Vektoren enthalten es.
 
 **Satzende-Dialog „Noch ein Satz?“ (OPEN, Ergänzung 2026-10-15, K18):** Tennis/Padel bieten **normaler Satz** (`nextSetKind = REGULAR`), **Tiebreak bis 7** (`TIEBREAK_7`, Format MTB7), **Champions-Tiebreak bis 10** (`MATCH_TIEBREAK_10`, Format MTB10) und **beenden** (`ContinueDecision(false)`). Pickleball, Badminton und Tischtennis bieten nur normaler Satz / beenden; `TIEBREAK_7`, `MATCH_TIEBREAK_10` und `MATCH_TIEBREAK` sind dort ungültig (`ignoredEvents`). `MATCH_TIEBREAK` bleibt die gültige ältere Wire-Form (Format aus `config.matchTiebreak`, nur wenn gesetzt). Entspricht der gewählte Tiebreak genau `config.matchTiebreak`, SOLL der Erzeuger `MATCH_TIEBREAK` schreiben (gleiche Wirkung, auch für Geräte mit älterem Stand faltbar). Ein Tiebreak-Satz ist ein Satz mit `setKind = MATCH_TIEBREAK`: Er zählt als gewonnener Satz, wird als `{kind: MATCH_TIEBREAK, games: {Sieger: 1, Verlierer: 0}, tiebreak: {A, B}}` protokolliert (Anzeige „[7:5]“ bzw. „[10:8]“, die Punktzahl unterscheidet beide), eröffnet wird er nach §6.5.3, den Folgesatz eröffnet `other(tbFirst)`, und er setzt als ein Spiel (ungerade Summe) den Seitenwechsel für den Start des nächsten Satzes vor (§6.7). Prüffall: TV-TEN-010.
 
@@ -878,7 +878,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 | `Undo` | `target: EventId` | Ziel-Event wird unwirksam | Ziel steht in der deterministischen Ordnung vor dem Undo; späteres Ziel oder Selbstreferenz → ignoriert (§7.3). Unbekanntes oder bereits unwirksames Ziel ist ein No-op. | (Redo = Undo auf Undo) |
 | `ContinueDecision` | `anotherSet: bool`, `nextSetKind?: REGULAR\|MATCH_TIEBREAK\|TIEBREAK_7\|MATCH_TIEBREAK_10` (Default `REGULAR`) | Antwort auf „Noch ein Satz?“ (§5.2) | `status = AWAITING_DECISION`. `MATCH_TIEBREAK` nur, wenn `config.matchTiebreak ≠ null`; `TIEBREAK_7`/`MATCH_TIEBREAK_10` (neu 2026-10-15) nur Tennis/Padel. | **ja** |
 | `Correction` | `kind` + Felder, siehe 7.1 | Aufschläger/Reihenfolge/Positionen korrigieren | siehe 7.1 | **ja** |
-| `MatchEnded` | `reason: RETIRED\|WALKOVER\|ABANDONED`, `side?` (die aufgebende bzw. nicht angetretene Side) | Match endet vorzeitig | `status ≠ FINISHED`. `WALKOVER` nur ohne wirksames `PointWon`. `side` ist Pflicht außer bei `ABANDONED`. | **ja** |
+| `MatchEnded` | `reason: RETIRED\|WALKOVER\|ABANDONED\|STOPPED` (`STOPPED` neu 2026-10-15, Protokoll 3), `side?` (die aufgebende bzw. nicht angetretene Side) | Match endet vorzeitig; Sieger und Grund siehe §9.2, §9.8, §9.9, §9.27 | `status ≠ FINISHED`. `WALKOVER` nur ohne wirksames `PointWon`. `side` ist Pflicht bei `RETIRED`/`WALKOVER`; bei `ABANDONED` und `STOPPED` ohne Bedeutung. | **ja** |
 | `Paused` (neu) | – | Unterbrechung (Regen, Verletzung, Licht) | `status = IN_PROGRESS` | nein |
 | `Resumed` (neu) | – | Fortsetzung | `status = PAUSED` | nein |
 | `ScorerChanged` (neu) | `scorerDeviceId` | „Zählen übernehmen“: ab seiner Position in der Ordnung zählt `scorerDeviceId` (§7.5) | immer; unterliegt selbst keiner Rollenprüfung | nein (Undo darauf ist ungültig, Rückgabe = erneutes `ScorerChanged`) |
@@ -1001,10 +1001,10 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 |---|---|---|
 | `status` | enum | `IN_PROGRESS`, `PAUSED`, `AWAITING_DECISION`, `FINISHED` |
 | `pending` | enum? | `ASK_ANOTHER_SET` bei `AWAITING_DECISION`, sonst `null` |
-| `result` | object? | `{winner: A\|B\|null, reason: COMPLETED\|DRAW\|RETIRED\|WALKOVER\|ABANDONED}`, solange nicht beendet `null` |
+| `result` | object? | `{winner: A\|B\|null, reason: COMPLETED\|DRAW\|RETIRED\|WALKOVER\|ABANDONED\|STOPPED}`, solange nicht beendet `null` |
 | `setsWon` | {A,B} | Gewonnene Sätze (Pickleball: gewonnene Spiele) |
 | `sets` | array | Abgeschlossene Sätze: `{kind: REGULAR\|MATCH_TIEBREAK\|PB_GAME\|RALLY_GAME, games: {A,B}\|null, tiebreak: {A,B}\|null, points: {A,B}\|null, winner}`. `RALLY_GAME` (B/TT): `games = tiebreak = null`, `points` = Endstand (Verallgemeinerung B/TT) |
-| `current` | object? | Laufender Satz/Spiel, `null` bei `AWAITING_DECISION` und bei `FINISHED/COMPLETED`. Bei `RETIRED/WALKOVER/ABANDONED` **eingefroren** (letzter Stand). |
+| `current` | object? | Laufender Satz/Spiel, `null` bei `AWAITING_DECISION` und bei `FINISHED/COMPLETED`. Bei `RETIRED/WALKOVER/ABANDONED/STOPPED` **eingefroren** (letzter Stand). |
 | `current.setIndex` | int | 0-basiert = Anzahl abgeschlossener Sätze |
 | `current.setKind` | enum | `REGULAR`, `MATCH_TIEBREAK`, `PB_GAME`, `RALLY_GAME` (B/TT, Verallgemeinerung B/TT) |
 | `current.gameKind` | enum | `STANDARD`, `TIEBREAK`, `MATCH_TIEBREAK`, `RALLY_GAME` (PB, B, TT) |
@@ -1119,7 +1119,7 @@ Begriffe: DE „Satz“, „Satzball“, „Matchball“, „Verlängerung“ in
 | 9.6 | **Punkt für falsche Side** | Undo und neu eingeben, keine eigene Korrektur-Art. |
 | 9.7 | **Formatfehler (z. B. Tiebreak vergessen, R27f–h)** | v1: keine Formatänderung während des Matches. Workaround: Undo bis vor das betroffene Spiel. Kandidat für später: `Correction(FORMAT)`. |
 | 9.8 | **Walkover** | `MatchEnded(WALKOVER, side)` nur ohne wirksames `PointWon`. Sonst wird das Event übersprungen und die UI bietet `RETIRED` an. |
-| 9.9 | **Abbruch** | `MatchEnded(ABANDONED)`, `winner = null`, `current` eingefroren. Zählt in der Statistik als „ohne Wertung“. |
+| 9.9 | **Abbruch** | `MatchEnded(ABANDONED)`, `winner = null`, `current` eingefroren. Zählt in der Statistik als „ohne Wertung“: Das Match bleibt im Verlauf mit seinem Stand („Abgebrochen“), geht aber **nicht** in Siege, Bilanz, Wochen- und Langzeitstatistik ein und kann gelöscht werden (F21). Alle anderen Gründe (auch `STOPPED`, `DRAW`) werten. |
 | 9.10 | **Gleichstand im OPEN-Modus** | `ContinueDecision(false)` bei gleich vielen Sätzen ergibt `reason = DRAW`. |
 | 9.11 | **Entscheidungspunkt im Mixed** | Engine: `court = RECEIVER_CHOICE`, `receiver = null`. UI-Hinweis „Gleichgeschlechtlicher Spieler returniert“ nur, wenn `meta.mixed = true`. |
 | 9.12 | **Seitenwechsel vergessen** | Für den Score irrelevant (R27b, FIP 5.3, PB 21.B.7). Die Engine-Seiten sind die Soll-Seiten, eine Korrektur gibt es nicht. |
@@ -1137,6 +1137,7 @@ Begriffe: DE „Satz“, „Satzball“, „Matchball“, „Verlängerung“ in
 | 9.24 | **Punkt einer Seite abziehen nach Satzende** (2026-10-15) | Erlaubt (§7.3, K14). Ist der letzte Punkt der Seite ein Satz- oder Matchball, öffnet der Fold den Satz bzw. das Match wieder; schon gezählte Punkte danach zählen im wiedereröffneten Satz, eine Satzende-Antwort oder Aufschlägerwahl für den Folgesatz wird übersprungen. Existiert ein Folgematch (§5.2), warnt die UI wie bei 9.1. |
 | 9.25 | **Aufschlägerwahl vergessen** (2026-10-15) | Kein Blocker: Mit dem nächsten Ballwechsel schließt sich das Fenster, es gilt die bisherige Reihenfolge. Später bemerkt: `Correction(SERVER)` ab jetzt (§9.4 b). |
 | 9.26 | **Aufschlag-Info zu einem später abgezogenen Punkt** (2026-10-15) | Das `PointDetailSet` wird übersprungen, weil sein Ziel unwirksam ist (TV-TEN-006). Redo des Punktes macht es wieder gültig. |
+| 9.27 | **Beenden, wie es steht** (F21, 2026-10-15) | `MatchEnded(STOPPED)`: Das Match endet mit dem aktuellen Stand und **wertet** (anders als `ABANDONED`). `result.reason = STOPPED`, `current` eingefroren, `continuation = null`, Effekt `MATCH_ENDED`, `side` ohne Bedeutung. **Sieger** (normativ, reine Funktion des Zustands vor dem Event): (1) mehr gewonnene Sätze (`setsWon`; Pickleball: Spiele); bei Gleichstand (2) – nur bei laufendem Satz und nur Tennis/Padel – mehr Spiele im laufenden Satz (`current.games`); bei Gleichstand (3) – nur bei laufendem Satz – mehr Rohpunkte im laufenden Spiel bzw. Satz (`current.points`; im Tiebreak die Tiebreak-Punkte, bei Pickleball/Badminton/Tischtennis die Satzpunkte); sonst `winner = null`. Bei `AWAITING_DECISION` (kein laufender Satz) zählen nur die Sätze. Undo des Beendens ist möglich (UI-Undo-Ziel). Die Handy-App erzeugt bei `AWAITING_DECISION` statt `STOPPED` die reguläre Antwort `ContinueDecision(false)`. Beispiele: Tennis 1:0 Sätze, 0:2 Spiele → A; 1:1 Spiele, 0:15 → B; 15:15 → kein Sieger; Badminton 11:10 → A. Prüffälle: TV-TEN-011, Regel-Szenario `stopped-as-it-stands`, `StopRulesTest` (alle fünf Sportarten). |
 
 ---
 
@@ -1229,7 +1230,7 @@ Alle folgenden Auslegungen sind **entschieden** und gegen die implementierte Eng
 | K3 | Default `receiveRight` = Index 0 des ursprünglichen Lineup-Arrays | §3.3 |
 | K4 | Pickleball: kein `SIDE_OUT` am Spielende | §8.3 |
 | K5 | Gültige Details, initiale Aufschlägerkorrektur und absorbierte Taps: `effects = []`; absorbierte Taps nicht ignoriert | §7.3 |
-| K6 | `continuation` MUSS bei `RETIRED`, `WALKOVER`, `ABANDONED`, `DRAW` `null` sein; bei `AWAITING_DECISION` und `FINISHED/COMPLETED` gesetzt | §5.2 |
+| K6 | `continuation` MUSS bei `RETIRED`, `WALKOVER`, `ABANDONED`, `STOPPED`, `DRAW` `null` sein; bei `AWAITING_DECISION` und `FINISHED/COMPLETED` gesetzt | §5.2 |
 | K7 | Undo nur auf frühere Events; spätere Ziele/Selbstreferenz ignorieren; ignorierte Events nie UI-Undo-Ziel | §7.3 |
 | K8 | `endChange.every` fehlt → 6; explizites `null` → nur einmal | §3.1 |
 | K9 | UI-Undo umfasst `Correction` und `MatchEnded`; 02 §7.3 hat Vorrang vor 01 §3.2 | §7.3 |
@@ -1244,6 +1245,7 @@ Alle folgenden Auslegungen sind **entschieden** und gegen die implementierte Eng
 | K18 | **Tiebreak-Sätze im Satzende-Dialog (Feldtest 2026-10-15):** `nextSetKind` um `TIEBREAK_7` und `MATCH_TIEBREAK_10` erweitert (Tennis/Padel, unabhängig von `config.matchTiebreak`); `MATCH_TIEBREAK` bleibt gültige Wire-Form und wird bevorzugt geschrieben, wenn sie dasselbe Format bedeutet; Protokoll als `MATCH_TIEBREAK`-Satz | §5.2, §7 |
 | K19 | **Aufschlag-Info je Punkt (Feldtest 2026-10-15):** `PointDetail.serve`, `kind` optional; `PointDetailSet` mit Aufschlag-Info nur Tennis/Padel, `DOUBLE_FAULT` nur bei Punkt der Rückschlagseite, sonst `ignoredEvents`; letztes gilt; `serve` hat Vorrang vor `kind`/`secondServe` in Fold und Statistik, Erzeuger bereinigen (Review-Runde 1); Option `meta.serveStats` ohne Fold-Wirkung | §7, §7.2, §10 |
 | K20 | **Aufschlag-Statistik (Feldtest 2026-10-15):** Aufschläger je Punkt/Spiel, 1.-Aufschlag-Quote, Punkte nach 1./2. Aufschlag (2. inkl. Doppelfehler), Doppelfehler – je Team und Spieler, nur aus Events; ohne Erfassung „—“ | §11 |
+| K21 | **Beenden/Abbrechen (Feldtest 2026-10-15, F21):** neuer Endgrund `STOPPED` („Ergebnis gilt, wie es steht“, Sieger nach Sätzen → Spielen → Punkten, Gleichstand ohne Sieger); `ABANDONED` bleibt „ohne Wertung“ und geht nicht in Siege/Statistik ein. Neuer Enum-Wert → Protokollversion 3 (01 §4.3) | §7, §9.9, §9.27 |
 
 ### 12.2 Nutzerentscheidungen
 

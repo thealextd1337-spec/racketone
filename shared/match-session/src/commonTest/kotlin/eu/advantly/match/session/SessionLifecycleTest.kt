@@ -130,7 +130,7 @@ class SessionLifecycleTest {
 
         repeat(24) { phone.session.recordPoint(Side.B) }
         cluster.settle()
-        assertTrue(phone.session.endMatch(), "im Dialog = ContinueDecision(false)")
+        assertTrue(phone.session.endMatch(EndReason.STOPPED), "im Dialog = ContinueDecision(false)")
         cluster.settle()
         cluster.assertConverged()
         assertEquals(ResultReason.DRAW, watch.score.result?.reason)

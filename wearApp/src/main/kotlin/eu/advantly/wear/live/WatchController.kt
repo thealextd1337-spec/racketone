@@ -11,6 +11,7 @@ import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.DroppedInputs
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
@@ -90,6 +91,9 @@ class WatchController(
     private var seenMatch: MatchId? = null
     private var seenScorer: Boolean? = null
     private var seenRejected = 0
+
+    /** Zuletzt gemeldeter Hinweis „Eingaben in einem nicht mehr offenen Match verworfen“ (nach Übernahme durchs Handy). */
+    private var seenDropped: DroppedInputs? = null
     private var closingLocally = false
     private var started = false
 
@@ -533,6 +537,13 @@ class WatchController(
             }
             seenRejected = match.rejectedByRoleCount
         }
+        // Nach der Wiederverbindung: verworfene Eingaben im früheren Uhr-Match sichtbar melden (Review W3-M #5)
+        state.droppedInputs?.let { dropped ->
+            if (dropped != seenDropped && dropped.matchId != match?.id) emit(WatchEffect.Toast(WatchToast.InputsRejected(dropped.count)))
+            seenDropped = dropped
+            // angezeigt (bzw. am offenen Match schon sichtbar): erst jetzt als gesehen quittieren (übersteht sonst Neustarts)
+            session.acknowledgeDroppedInputs()
+        }
         // Auswahl „Wer schlägt auf?“ schließt, sobald das Fenster zu ist (Punkt, Undo, Rollenwechsel)
         if (overlay == LiveOverlay.SERVER_CHOICE && (match?.isScorer != true || match.serverChoice == null)) overlay = null
         trackConnection(match, state)
@@ -631,10 +642,18 @@ class WatchController(
                 val recognized = SetupCatalog.recognize(s.format, day)
                 SetupSummary(s.format.sport, s.format.discipline, recognized?.choice, s.format, recognized?.gamesPerSet)
             }
+        // Mit Zuweisung des Handys (F22) bietet die Uhr nur ihr Uhr-Match an, nie die Director-Matches der Nachbarplätze
+        val assigned = session.state.value.watchMatchId
         val resume =
-            directory.resumable()?.let { r ->
-                ResumeUi(r.id, r.sport, LiveModel.setsText(r.score))
-            }
+            (
+                if (assigned != null) {
+                    session.data.matches
+                        .get(assigned)
+                        ?.takeIf { !it.isFinished }
+                } else {
+                    directory.resumable()
+                }
+            )?.let { r -> ResumeUi(r.id, r.sport, LiveModel.setsText(r.score)) }
         val recent =
             directory.recentResults().map { r ->
                 ResultUi(r.id, r.sport, LiveModel.setsText(r.score), r.score.winner, r.score.reason)

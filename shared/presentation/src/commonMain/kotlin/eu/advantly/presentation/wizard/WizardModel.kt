@@ -103,12 +103,17 @@ data class WizardInput(
     val pickleballMidGame: MidGameEndChange = MidGameEndChange.DECIDING_GAME_ONLY,
     val advancedExpanded: Boolean = false,
     val saveAsFavorite: Boolean = false,
-    /** Gewählter Zähler; `null` = Standard (Meine Uhr, wenn eine verbunden ist, sonst dieses Handy). */
+    /** Gewählter Zähler; `null` = Standard (Meine Uhr, wenn sie verfügbar und frei ist, sonst dieses Handy). */
     val scorer: ScorerOption? = null,
     /** „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, auch im Director-Modus, 04 §3.1). */
     val watchWorkout: Boolean = true,
     /** Stand der eigenen Uhr; nur `AVAILABLE` macht „Meine Uhr“ wählbar (sonst Hinweis, warum nicht). */
     val watchStatus: WatchStatus = WatchStatus.UNKNOWN,
+    /**
+     * Die eigene Uhr zählt gerade ein anderes laufendes Match (F22). „Meine Uhr“ bleibt wählbar – das bisherige Uhr-Match
+     * übernimmt dann das Handy (die UI erklärt das) –, ist aber nicht mehr der Standard.
+     */
+    val watchBusy: Boolean = false,
     /** Nutzer hat den Einstand selbst gewählt (dann kein automatischer No-Ad-Vorschlag, 02 §5.1). */
     internal val deuceTouched: Boolean = false,
     /** Nutzer hat den Pickleball-Seitenwechsel selbst gewählt (sonst Freizeit-Default je Modus, U4). */
@@ -119,9 +124,18 @@ data class WizardInput(
     /** Die eigene Uhr ist als Zähler wählbar. */
     val watchAvailable: Boolean get() = watchStatus == WatchStatus.AVAILABLE
 
-    /** Tatsächlicher Zähler: ohne verbundene Uhr immer dieses Handy, sonst die Wahl (Standard: Meine Uhr). */
+    /**
+     * Tatsächlicher Zähler: ohne verfügbare Uhr immer dieses Handy, sonst die Wahl. Standard: Meine Uhr, solange sie frei
+     * ist; zählt sie schon ein anderes Match, dieses Handy (F22).
+     */
     val effectiveScorer: ScorerOption
-        get() = if (!watchAvailable) ScorerOption.THIS_PHONE else scorer ?: ScorerOption.MY_WATCH
+        get() =
+            when {
+                !watchAvailable -> ScorerOption.THIS_PHONE
+                scorer != null -> scorer
+                watchBusy -> ScorerOption.THIS_PHONE
+                else -> ScorerOption.MY_WATCH
+            }
 
     /** Alle belegten Slots. */
     val players: List<Player> get() = (teamA + teamB).filterNotNull()

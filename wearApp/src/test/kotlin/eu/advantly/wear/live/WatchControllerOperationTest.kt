@@ -120,6 +120,7 @@ class WatchControllerOperationTest {
         c.unlock()
         assertTrue(c.confirmEnd())
         c.close()
+        h.settle() // F22: erst wenn das Handy das Ende kennt, ist die Uhr frei für ein neues Director-Match
         h.phone.create(
             Presets.TENNIS_SINGLES_BO3.format(),
             Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me")),
