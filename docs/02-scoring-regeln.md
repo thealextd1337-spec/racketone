@@ -1,6 +1,6 @@
 # 02 – Scoring-Regeln & Engine-Spezifikation
 
-Stand: 2026-10-14 · Status: Entwurf v1.0 zur Abstimmung · Spec-Version für Testvektoren: `schema: 1`, `formatVersion: 1`
+Stand: 2026-10-15 · Status: Entwurf v1.0 zur Abstimmung · Spec-Version für Testvektoren: `schema: 1`, `formatVersion: 1`
 
 Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3 Scoring-Engine](01-architektur.md) · [04 UX](04-ux-design.md) · [Testvektoren](testvectors/README.md)
 
@@ -178,9 +178,9 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 | `set.gamesToWin` | int | 1…12 | 6 | T, P | „Games pro Satz“. Ein Satz ist gewonnen mit ≥ gamesToWin und 2 Spielen Vorsprung oder durch den Tiebreak. |
 | `set.tiebreakAt` | int? | `null` oder ≥ gamesToWin−1 | = gamesToWin | T, P | Spielstand n:n, bei dem der Tiebreak beginnt. `null` = Vorteilssatz ohne Tiebreak. |
 | `set.tiebreak.pointsToWin` | int | ≥ 1 | 7 | T, P | |
-| `set.tiebreak.winBy` | int | `1`, `2` | 2 | T, P | `1` nur für den Short-Set-Tiebreak (bis 5, Entscheidungspunkt bei 4:4). |
+| `set.tiebreak.winBy` | int | `1`, `2` | 2 | T, P | `1` nur für den Short-Set-Tiebreak bis 5: Bei 4:4 entscheidet der nächste Punkt den Satz (kein `decidingPoint`-Flag, §6.2). |
 | `set.tiebreak.endChange.first` | int | ≥ 1 | 6 | T, P | Seitenwechsel nach der Punktsumme `first` … |
-| `set.tiebreak.endChange.every` | int? | ≥ 1 / null | 6 | T, P | … und danach alle `every` Punkte (`null` = nur einmal). ITF-Alternative: `{first:1, every:4}`. Short-Set-TB: `{first:4, every:null}`. |
+| `set.tiebreak.endChange.every` | int? | ≥ 1 / null | 6 | T, P | … und danach alle `every` Punkte. Fehlt das Feld, MUSS Default 6 gelten; explizites `null` MUSS Wechsel nur einmal bei `first` vorsehen (sofern der Tiebreak weiterläuft, §6.2) (Klarstellung 2026-10-15). Gilt für alle `endChange`-Objekte. ITF-Alternative: `{first:1, every:4}`. Short-Set-TB: `{first:4, every:null}`. |
 | `decidingSet` | object? | `null` / Satz-Objekt / Match-Tiebreak-Objekt | null | T, P | Abweichendes Format für den **Entscheidungssatz** bei `BEST_OF` (beide Seiten haben Gewinnsätze−1). `null` = wie `set`. |
 | `decidingSet.kind` | enum | `REGULAR`, `MATCH_TIEBREAK` | `REGULAR` | T, P | `REGULAR` mit eigenen `gamesToWin`/`tiebreakAt`/`tiebreak` (z. B. Final-Set-Tiebreak bis 10 oder Vorteilssatz). `MATCH_TIEBREAK` mit `pointsToWin`, `winBy`, `endChange`. |
 | `matchTiebreak` | object? | Match-Tiebreak-Objekt | null | T, P | Nur für `OPEN`: Format, wenn im Satzende-Dialog „Match-Tiebreak“ gewählt wird. `null` = Option wird nicht angeboten. |
@@ -221,7 +221,7 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://racketone.app/schema/match-format-1.json",
+  "$id": "https://advantly.eu/schemas/match-format-1.json",
   "title": "MatchFormat",
   "type": "object",
   "required": ["formatVersion", "sport", "discipline", "match"],
@@ -284,7 +284,7 @@ Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3
       "required": ["first"],
       "properties": {
         "first": { "type": "integer", "minimum": 1 },
-        "every": { "type": ["integer", "null"], "minimum": 1 }
+        "every": { "type": ["integer", "null"], "minimum": 1, "default": 6 }
       }
     },
     "tiebreak": {
@@ -356,7 +356,7 @@ Das bisherige `if/then/else` für `pickleball` vs. `game`/`set` ist durch das `a
 |---|---|---|
 | `A`, `B` | string[1..2] | Spieler-IDs je Side. **Die Reihenfolge ist die Aufschlagreihenfolge des Teams** (Tennis/Padel: Index 0 schlägt das erste Aufschlagspiel des Teams im Satz auf. Pickleball: Index 0 = Startaufschläger, steht bei geradem Score rechts). |
 | `firstServer` | string | Spieler, der das Match eröffnet. Daraus folgt die aufschlagende Side. Steht er nicht an Index 0 seines Teams, wird das Team-Array umgedreht. |
-| `receiveRight` | {A?: id, B?: id} | Tennis/Padel-Doppel: Wer auf der rechten Seite (Einstandsseite) returniert. Default ist Index 0. Nur für die Anzeige `serve.receiver`. |
+| `receiveRight` | {A?: id, B?: id} | Tennis/Padel-Doppel: Wer auf der rechten Seite (Einstandsseite) returniert. Default MUSS Index 0 des übergebenen Lineup-Arrays sein, vor dessen Umdrehen durch den Erstaufschläger (Klarstellung 2026-10-15). Nur für die Anzeige `serve.receiver`. |
 | `startEnds` | {A: `END_1`/`END_2`} | Startende von A. B steht auf dem anderen Ende. Default `END_1`. |
 
 Metadaten ohne Regelwirkung (Belag, Halle, Ort, Mixed-Kennzeichen) stehen in `MatchCreated.meta` (§10), **nicht** im `MatchFormat`.
@@ -527,7 +527,7 @@ Abhängige Defaults bei „Punkte pro Satz“:
 | Sieger | wer die Gewinnsätze erreicht | mehr gewonnene Sätze. Gleichstand → `result.reason = DRAW`, `winner = null` |
 | Nach Matchende | App fragt „Noch ein Satz in gleicher Besetzung?“. „Ja“ erzeugt ein **neues, verknüpftes Match** (`previousMatchId`, gleiche Lineup und Satzformat, `mode = OPEN`). Den Erstaufschläger liefert `state.continuation` (siehe unten). Das ergänzt ein Best-of (z. B. 3. Satz nach 2:0) ohne die Wertung zu verfälschen (wie 01-architektur §3.4). | Match ist beendet |
 
-`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei Pickleball zusätzlich der Startaufschläger. Badminton/Tischtennis: nach `rally.nextGameFirstServer` (§6.8.1), `player` = Index 0 der Side. Die Testvektoren prüfen das Feld noch nicht.
+`state.continuation` (MUSS bei `AWAITING_DECISION` und bei `FINISHED` mit `reason = COMPLETED` gesetzt sein, sonst `null`): `{side, player}` = wer den nächsten Satz eröffnen würde (Regel §6.5.3). Bei `reason ∈ {RETIRED, WALKOVER, ABANDONED, DRAW}` MUSS das Feld `null` sein (Klarstellung 2026-10-15). Bei Pickleball zusätzlich der Startaufschläger. Badminton/Tischtennis: nach `rally.nextGameFirstServer` (§6.8.1), `player` = Index 0 der Side. Die handgeschriebenen Testvektoren prüfen das Feld noch nicht; die generierten Golden-Vektoren enthalten es.
 
 Ablauf im Satzende-Dialog (OPEN):
 
@@ -566,6 +566,8 @@ on PointWon(X):
 Prüffälle: Golden Point: 3:3 → Entscheidungspunkt → 4:3 gewinnt. Star Point: 3:3 (Einstand 1) → 4:3 (Vorteil 1) → 4:4 (Einstand 2) → 4:5 (Vorteil 2) → 5:5 (Einstand 3 = Star Point) → 6:5 gewinnt. Vorteil: Das Spiel endet nur mit 2 Punkten Abstand.
 
 ### 6.2 Tiebreak und Match-Tiebreak
+
+`decidingPoint` und `RECEIVER_CHOICE` für Tennis/Padel DÜRFEN nur in Standardspielen gelten. Im Tiebreak und Match-Tiebreak MUSS `decidingPoint = false` sein, auch im Short-Set-Tiebreak bei 4:4 mit `winBy = 1`; die Aufschlagseite bleibt rechts/links nach Punktparität (§6.5.4) (Klarstellung 2026-10-15).
 
 ```
 cfg = set.tiebreak | decidingSet (MATCH_TIEBREAK) | matchTiebreak
@@ -825,7 +827,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 |---|---|---|---|---|
 | `MatchCreated` | `config: MatchFormat`, `lineup`, `meta` | Genesis, erstes Event im Log | genau einmal | nein |
 | `PointWon` | `side: A\|B`, `detail?: PointDetail` | Ballwechsel gewonnen (§6) | `status ∈ {IN_PROGRESS, PAUSED}`. Bei `PAUSED` wird implizit `Resumed` ausgeführt. | **ja** |
-| `Undo` | `target: EventId` | Ziel-Event wird unwirksam | immer. Ein bereits unwirksames Ziel ist ein No-op. | (Redo = Undo auf Undo) |
+| `Undo` | `target: EventId` | Ziel-Event wird unwirksam | Ziel steht in der deterministischen Ordnung vor dem Undo; späteres Ziel oder Selbstreferenz → ignoriert (§7.3). Unbekanntes oder bereits unwirksames Ziel ist ein No-op. | (Redo = Undo auf Undo) |
 | `ContinueDecision` | `anotherSet: bool`, `nextSetKind?: REGULAR\|MATCH_TIEBREAK` (Default `REGULAR`) | Antwort auf „Noch ein Satz?“ | `status = AWAITING_DECISION`. `MATCH_TIEBREAK` nur, wenn `config.matchTiebreak ≠ null`. | **ja** |
 | `Correction` | `kind` + Felder, siehe 7.1 | Aufschläger/Reihenfolge/Positionen korrigieren | siehe 7.1 | **ja** |
 | `MatchEnded` | `reason: RETIRED\|WALKOVER\|ABANDONED`, `side?` (die aufgebende bzw. nicht angetretene Side) | Match endet vorzeitig | `status ≠ FINISHED`. `WALKOVER` nur ohne wirksames `PointWon`. `side` ist Pflicht außer bei `ABANDONED`. | **ja** |
@@ -840,7 +842,7 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 | `INITIAL_SERVER` | `player` | **Rückwirkend:** Die Engine faltet das gesamte Log neu, als hätte `lineup.firstServer = player` von Anfang an gegolten. Punkte bleiben, Aufschläger-Zuordnung, Seiten und Statistik ändern sich. Bei mehreren gilt das letzte wirksame. | jederzeit. Die UI bietet es nur im 1. Spiel an (siehe §9.4). |
 | `SERVER` | `player`, `serverNumber?` (PB) | **Ab jetzt:** Aufschläger des laufenden Spiels bzw. Punktes = `player` (wechselt ggf. die Side). Tennis/Padel: `serveIdx[side]` wird so gesetzt, dass `order[side][serveIdx mod len] == player`. Danach geht die Rotation von dort weiter (R27c, FIP 6.9). Im Tiebreak wird der Rotationsanker auf den aktuellen Punktindex gelegt, der 1-2-2-Rhythmus bleibt an `k` gebunden. Pickleball: `S`, `server`, `serverNumber` (Default 1) werden gesetzt. | `status ∈ {IN_PROGRESS, PAUSED}`, `player` gehört zum Lineup |
 | `SERVING_ORDER` | `side`, `players[]` (Permutation) | Neue Teamreihenfolge `order[side]`. Pickleball: `players[0]` = neuer Startaufschläger (21.F.3). | Tennis/Padel: Die Side hat im laufenden Satz noch kein Aufschlagspiel begonnen. Pickleball: Im laufenden Spiel wurde noch kein Ballwechsel gespielt. |
-| `RECEIVE_POSITIONS` | `side`, `rightPlayer` | Neue Rückschlagposition (nur Anzeige von `receiver`) | Tennis/Padel-Doppel. Wird laut R27e/FIP 8.4 erst ab dem nächsten Spiel wirksam, die UI bietet es zwischen den Spielen an. |
+| `RECEIVE_POSITIONS` | `side`, `rightPlayer` | Neue Rückschlagposition (nur Anzeige von `receiver`). Ohne gespielten Punkt im laufenden Spiel MUSS sie sofort wirken, sonst ab dem nächsten Spiel (Klarstellung 2026-10-15). | Tennis/Padel-Doppel, nicht `FINISHED`; `rightPlayer` gehört zur Side. Bei `AWAITING_DECISION` wird sie für das nächste Spiel vorgemerkt. |
 
 ### 7.2 `PointDetail` (optional, P3)
 
@@ -852,14 +854,16 @@ Hülle und Ordnung sind in 01-architektur §3.2 festgelegt (`id`, `deviceId`, `l
 
 ### 7.3 Effektive Events und Fold (normativ)
 
-1. Ordnen nach `(lamport, deviceId, id)` (01-architektur).
-2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. `Undo`-Events selbst gehen nicht in den Fold ein.
+1. Ordnen nach `(lamport, deviceId, id)` (01-architektur). Bitgleiche Wiederholungen derselben Event-ID MÜSSEN als Duplikate entfernt werden (No-op). „Bitgleich“ bedeutet hier strukturelle Gleichheit sämtlicher Event-Felder: `id`, `matchId`, `deviceId`, `deviceSeq`, `lamport`, `wallClockMs`, `parentId` und `payload` (einschließlich aller Payload-Felder), entsprechend der Kotlin-`data class`-Gleichheit; die serialisierte Bytefolge ist nicht maßgeblich. Bei abweichenden Kopien derselben ID MÜSSEN alle Kopien vom Fold ausgeschlossen werden; ihre ID MUSS je einmal in `state.ignoredEvents` und `EngineState.rejectedEvents` stehen. Die aktuelle Engine verwendet bei gleichen Ordnungsschlüsseln zusätzlich `toString()` als Tie-Break für die Ablage abweichender Kopien. Dieser plattformabhängige Tie-Break ist **nicht normativ** und betrifft nur verworfene Kopien, die nicht gefaltet werden. Eine abweichende Kopie der Genesis-ID (`MatchCreated`) MUSS das vollständige Log ungültig machen; `replay`/`fold` und die inkrementelle Anwendung mit gespeicherter Genesis werfen `IllegalArgumentException` (Klarstellung 2026-10-15).
+2. **Wirksamkeit:** Das Log wird rückwärts durchlaufen. Ein Event ist unwirksam, wenn ein *wirksames* `Undo` auf seine `id` zeigt. Ein Undo DARF nur auf Events wirken, die in der deterministischen Ordnung vor ihm stehen. Zeigt ein **wirksames** Undo auf ein späteres Event oder sich selbst, MUSS seine ID in `ignoredEvents` stehen. Ist das ungültige Undo selbst durch ein späteres wirksames Undo unwirksam, DARF seine ID deshalb NICHT in `ignoredEvents` stehen. Ein unbekanntes Ziel bleibt ein No-op; das gilt auch für die Genesis-ID, da die Genesis nicht im zu analysierenden Event-Log enthalten ist. Zurückgewiesene ID-Kollisionen DÜRFEN kein Undo auslösen. `Undo`-Events selbst gehen nicht in den Score-Fold ein (Klarstellung 2026-10-15).
 3. Der Fold startet mit `initial(config, lineup')`, wobei `lineup'` die rückwirkende `Correction(INITIAL_SERVER)` berücksichtigt. Danach werden die wirksamen Events in Ordnung angewendet.
 4. Ein wirksames Event, dessen Vorbedingung (Tabelle §7) nicht erfüllt ist, wird **übersprungen**. Seine `id` wird an `state.ignoredEvents` angehängt. Das ist kein Fehler: Die Situation kann nach Merges oder Undo mitten im Log entstehen. Die UI DARF solche Events nicht erzeugen.
-5. `effects` beschreibt die Folgen **des letzten Events im Log**: bei `Undo` = `["UNDONE"]`, bei übersprungenem Event = `["IGNORED"]`, bei leerem Log = `[]`.
-6. Die Duplikat-Erkennung für Doppel-Taps (01-architektur §4.4) findet **vor** diesem Fold statt und ist nicht Teil dieser Spezifikation.
+5. `effects` beschreibt die Folgen des letzten im Fold berücksichtigten Events: bei wirksamem, nicht ungültigem `Undo` = `["UNDONE"]` (auch beim No-op), bei übersprungenem Event = `["IGNORED"]`, bei leerem Log = `[]`. Durch Undo unwirksame Events verändern die Effekte nicht. Gültige `PointDetailSet`, gültige `Correction(INITIAL_SERVER)` und absorbierte Doppel-Taps MÜSSEN `effects = []` liefern (Klarstellung 2026-10-15).
+6. Doppel-Tap-Erkennung und Ermittlung der Widerspruchspaare (01-architektur §4.4) MÜSSEN **vor** dem Fold auf dem geordneten Log erfolgen; nur zurückgewiesene IDs werden aus den Kandidaten entfernt. Auch durch Undo unwirksame Events MÜSSEN als Partner berücksichtigt werden. `PointWon` mit gleichem, nicht-null `parentId`, gleicher Side und einem absoluten `wallClockMs`-Abstand **≤ 5000 ms (inklusive)** gelten als Doppel-Tap: Der in der Ordnung erste, nicht selbst absorbierte Tap gilt als Partner; spätere passende Taps MÜSSEN absorbiert werden, auch wenn dieser Partner durch Undo unwirksam ist. Events mit `parentId = null` DÜRFEN NICHT absorbiert werden und bilden keine Widerspruchspaare. Widerspruchspaare entstehen bei gleichem, nicht-null `parentId` und verschiedenen Sides, ohne Zeitfenster. Erst nach diesen Erkennungen MÜSSEN die Paare anhand von Undo-Wirksamkeit und Absorption in aktiv und aufgelöst eingeteilt werden. Absorbierte Taps DÜRFEN NICHT in `ignoredEvents` stehen. `EngineState.conflicts` MUSS nur aktive Widerspruchspaare enthalten (kein Partner durch Undo unwirksam oder absorbiert); aufgelöste Paare MÜSSEN in `resolvedConflicts` stehen. Diese Einteilung erfolgt in der Log-Analyse vor der Prüfung der Fold-Vorbedingungen (Klarstellung 2026-10-15).
 
-**UI-Undo** (Taste/Wischgeste) erzeugt `Undo(target)` auf das letzte wirksame Event vom Typ `PointWon`, `ContinueDecision`, `Correction` oder `MatchEnded`. Mehrfaches Drücken geht schrittweise zurück, auch über Spiel-, Satz- und Matchgrenzen.
+**UI-Undo** (Taste/Wischgeste) MUSS `Undo(target)` auf das letzte wirksam angewendete Event vom Typ `PointWon`, `ContinueDecision`, `Correction` oder `MatchEnded` erzeugen. Ignorierte Events DÜRFEN nie UI-Undo-Ziel sein. Für die Zieltypen hat dieser Abschnitt Vorrang vor 01 §3.2 (Klarstellung 2026-10-15). Mehrfaches Drücken geht schrittweise zurück, auch über Spiel-, Satz- und Matchgrenzen.
+
+**Batch-Anwendung:** Der Sync-Layer SOLL nachgelieferte Events gemeinsam mit `ScoringEngine.applyAll(state, events)` übergeben. Der Batch wird gemeinsam eingeordnet und höchstens einmal neu gefaltet; einzelne außer der Ordnung gelieferte `apply`-Aufrufe können wiederholtes Neu-Falten und quadratische Kosten verursachen. Das Ergebnis MUSS dem Fold über `state.events + events` entsprechen (Klarstellung 2026-10-15).
 
 ### 7.4 `Correction` bei Badminton und Tischtennis (Ergänzung B/TT)
 
@@ -894,7 +898,7 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 | `current.display` | {A,B} strings | siehe 8.1 |
 | `current.callout` | enum? | `DEUCE`, `ADVANTAGE_SERVER`, `ADVANTAGE_RECEIVER`, `DECIDING_POINT`, `STAR_POINT`, sonst `null`. **B/TT** (Verallgemeinerung B/TT): `DECIDING_POINT`, wenn `decidingPoint = true`. Sonst `DEUCE` („Verlängerung“), wenn `p[A] = p[B] ≥ pointsToWin − 1` und `winBy = 2`. Sonst `null`. PB: immer `null`. |
 | `current.deuceCount` | int? | Standardspiel: `max(0, min(p[A], p[B]) − 2)` = Nummer des erreichten Einstands (Star Point: „Einstand 1/2/3“). Tiebreak: 0. PB, B, TT: `null`. |
-| `current.decidingPoint` | bool? | Der nächste Punkt entscheidet das Spiel (Golden/No-Ad/Star Point). PB: `null`. **B/TT:** `p[A] = p[B]` und (`cap ≠ null` und `p[A] = cap − 1`, also 29:29 bzw. 20:20) oder (`winBy = 1` und `p[A] = pointsToWin − 1`). Für TT ist das immer `false`. |
+| `current.decidingPoint` | bool? | Standardspiel: Golden/No-Ad/Star Point. Tiebreak/Match-Tiebreak: immer `false`, auch Short-Set-Tiebreak (§6.2, Klarstellung 2026-10-15). PB: `null`. **B/TT:** `p[A] = p[B]` und (`cap ≠ null` und `p[A] = cap − 1`, also 29:29 bzw. 20:20) oder (`winBy = 1` und `p[A] = pointsToWin − 1`). Für TT ist das immer `false`. |
 | `serve` | object? | `{side, player, court: RIGHT\|LEFT\|RECEIVER_CHOICE\|null, serverNumber: 1\|2\|null, receiver: id\|null, servesRemaining: int\|null}`. `null`, wenn `current = null` oder eingefroren. **Verallgemeinerung B/TT:** `court = null` bei Tischtennis. Neuer Schlüssel `servesRemaining` = verbleibende Aufschläge der laufenden Aufschlagfolge inklusive des nächsten (TT: 2 oder 1), bei allen anderen Sportarten `null`. Der Schlüssel ist additiv, bestehende Vektoren prüfen ihn nicht. |
 | `scoreCall` | string? | Tennis/Padel: `"{display[S]}-{display[R]}"` (Aufschläger zuerst, z. B. `"AD-40"`, `"6-5"`). PB siehe §6.6. B/TT: `"{p[S]}-{p[R]}"` (§6.8.1). |
 | `positions` | object? | Pickleball **und Badminton** (Verallgemeinerung B/TT): `{A: {RIGHT, LEFT}, B: {RIGHT, LEFT}}` (Einzel: `LEFT = null`), sonst `null`. Badminton-Doppel: aktuelle Felder laut §6.8.3. |
@@ -903,6 +907,14 @@ Diese Form gilt für die Testvektoren und den Garmin-Abgleich. Interne Datenstru
 | `effects` | array | siehe 8.3 |
 | `ignoredEvents` | array | IDs übersprungener Events in Fold-Reihenfolge |
 | `continuation` | object? | §5.2 (in Testvektoren schema 1 noch nicht geprüft) |
+
+Zusätzlich liefert `ScoringEngine.replay`/`apply`/`applyAll` die folgenden Log-Hinweise in **`EngineState`**, neben dessen Feld `state: MatchState`. Sie sind keine zusätzlichen Schlüssel des kanonischen `MatchState`-Exports (Klarstellung 2026-10-15):
+
+| Feld in `EngineState` | Kotlin-Typ | Inhalt |
+|---|---|---|
+| `rejectedEvents` | `List<EventId>` | IDs mit abweichenden Kopien, je einmal in Log-Ordnung. Keine Kopie wird gefaltet; die IDs stehen auch in `state.ignoredEvents`. |
+| `conflicts` | `List<TapConflict>` | Aktive Widerspruchspaare in Log-Ordnung, nach §7.3 Schritt 6. |
+| `resolvedConflicts` | `List<TapConflict>` | Frühere Widerspruchspaare, von denen mindestens ein Partner durch Undo unwirksam oder absorbiert ist. `TapConflict(first: EventId, second: EventId)` referenziert die beiden Punkt-Events. |
 
 ### 8.1 Punktanzeige
 
@@ -947,7 +959,7 @@ Kanonische Reihenfolge (die Liste ist danach sortiert und ohne Duplikate):
 | Effekt | Auslöser |
 |---|---|
 | `POINT` | Tennis/Padel/B/TT: jedes `PointWon`. PB: Punkt wurde vergeben. |
-| `SECOND_SERVER` / `SIDE_OUT` | PB: Aufschlagwechsel innerhalb des Teams / zur anderen Side. B/TT: `SIDE_OUT` = aufschlagende Side hat gewechselt und der Satz läuft weiter (nicht beim Satzende), `SECOND_SERVER` kommt nicht vor. |
+| `SECOND_SERVER` / `SIDE_OUT` | PB: Aufschlagwechsel innerhalb des Teams / zur anderen Side. Wenn der Ballwechsel das Pickleball-Spiel beendet, DARF kein `SIDE_OUT` gemeldet werden, auch bei gewinnendem Rückschlagpunkt im Rally-Scoring (Klarstellung 2026-10-15). B/TT: `SIDE_OUT` = aufschlagende Side hat gewechselt und der Satz läuft weiter (nicht beim Satzende), `SECOND_SERVER` kommt nicht vor. |
 | `GAME_WON` | Tennis/Padel: Spiel oder Tiebreak gewonnen (nicht bei PB) |
 | `SET_WON` | Satz / Match-Tiebreak / Pickleball-Spiel gewonnen |
 | `MATCH_WON` / `MATCH_DRAWN` | reguläres Matchende / OPEN mit Gleichstand |
@@ -983,7 +995,7 @@ Begriffe: DE „Satz“, „Satzball“, „Matchball“, „Verlängerung“ in
 | 9.1 | **Undo über Spiel-/Satz-/Matchgrenzen** | Das ergibt sich aus dem Fold, es gibt keine Sonderlogik. Undo des Satzballs stellt Spielstand, Aufschläger und Seiten wieder her. Auf `AWAITING_DECISION` folgt wieder `IN_PROGRESS` mit den Flags. Undo nach `ContinueDecision` führt zurück zu `AWAITING_DECISION`, ein weiteres Undo entfernt den Satzball. Undo nach `FINISHED` öffnet das Match wieder. Existiert bereits ein verknüpftes Folgematch (§5.2), warnt die UI. Testvektoren TV-PAD-002, TV-TEN-002. |
 | 9.2 | **Aufgabe** | `MatchEnded(RETIRED, side)`, Sieger = Gegenseite, `current` eingefroren. Anzeige Tennis/Padel z. B. „6:4 2:1 (30:0) Aufg.“. Pickleball-Ergebnismeldung laut 23.A.4: Der Ist-Score des Aufgebenden bleibt, der Gegner bekommt den Siegscore (z. B. 11-7), nicht gespielte Spiele 11-0. Das berechnet nur der Export, der Engine-Zustand bleibt der Ist-Stand. Undo der Aufgabe ist möglich. |
 | 9.3 | **Unterbrechung** | `Paused`/`Resumed` haben keine Score-Wirkung. Ein `PointWon` während `PAUSED` setzt automatisch fort, damit ein vergessenes „Weiter“ das Zählen nicht blockiert. Die Pausenzeit wird aus `wallClockMs` von der Nettospielzeit abgezogen. Mehrtägige Matches sind dasselbe Match. Nach langer Pause (> 20 min) SOLL die UI einen Hinweis zur Prüfung von Aufschläger und Seite zeigen. Watch: 05-watches-health §Pausen. |
-| 9.4 | **Falscher Aufschläger** | (a) Im 1. Spiel bemerkt → UI bietet „Ab Beginn korrigieren“ = `Correction(INITIAL_SERVER)` an. Die Punkte bleiben, die Statistik wird korrekt zugeordnet. (b) Später bemerkt → „Ab jetzt korrigieren“ = `Correction(SERVER)`, bereits gespielte Punkte bleiben (R27c/d, FIP 6.9, PB 5.C.2). (c) Falsche Reihenfolge im Doppel-Team zu Satzbeginn → `Correction(SERVING_ORDER)`. (d) Falscher Rückschläger → `Correction(RECEIVE_POSITIONS)`, ab dem nächsten Spiel. (e) Pickleball falscher Startaufschläger → `Correction(SERVING_ORDER)` vor dem ersten Ballwechsel, sonst `Correction(SERVER)`. |
+| 9.4 | **Falscher Aufschläger** | (a) Im 1. Spiel bemerkt → UI bietet „Ab Beginn korrigieren“ = `Correction(INITIAL_SERVER)` an. Die Punkte bleiben, die Statistik wird korrekt zugeordnet. (b) Später bemerkt → „Ab jetzt korrigieren“ = `Correction(SERVER)`, bereits gespielte Punkte bleiben (R27c/d, FIP 6.9, PB 5.C.2). (c) Falsche Reihenfolge im Doppel-Team zu Satzbeginn → `Correction(SERVING_ORDER)`. (d) Falscher Rückschläger → `Correction(RECEIVE_POSITIONS)`, ohne gespielten Punkt sofort, sonst ab dem nächsten Spiel (§7.1, Klarstellung 2026-10-15). (e) Pickleball falscher Startaufschläger → `Correction(SERVING_ORDER)` vor dem ersten Ballwechsel, sonst `Correction(SERVER)`. |
 | 9.5 | **Satzende-Dialog** | Nur im `OPEN`-Modus (§5.2). Antworten von mehreren Geräten: Die erste wirksame gilt, weitere werden übersprungen (`ignoredEvents`) und die UI zeigt einen Konflikthinweis (01-architektur §3.4). Punkte während des Dialogs werden übersprungen (TV-TEN-002). Uhr: Vollbild mit zwei großen Buttons, kein Auto-Default. Optionaler dritter Button „Match-Tiebreak“, wenn `matchTiebreak ≠ null`. |
 | 9.6 | **Punkt für falsche Side** | Undo und neu eingeben, keine eigene Korrektur-Art. |
 | 9.7 | **Formatfehler (z. B. Tiebreak vergessen, R27f–h)** | v1: keine Formatänderung während des Matches. Workaround: Undo bis vor das betroffene Spiel. Kandidat für später: `Correction(FORMAT)`. |
@@ -1079,6 +1091,27 @@ Basis: Die Engine liefert zu jedem wirksamen `PointWon` den Zustand **vor** dem 
 ---
 
 ## 12. Offene Regel-Entscheidungen (für den Nutzer)
+
+### 12.1 Entschiedene Engine-Klarstellungen
+
+Alle folgenden Auslegungen sind **entschieden** und gegen die implementierte Engine geprüft (Klarstellung 2026-10-15). Die normativen Details stehen in den genannten Abschnitten.
+
+| # | Entscheidung | Abschnitt |
+|---|---|---|
+| K1 | Tennis/Padel: `decidingPoint` und `RECEIVER_CHOICE` nur im Standardspiel, auch Short-Set-Tiebreak immer `false` | §6.2, §6.5.4, §8 |
+| K2 | Rückschlagpositionen ohne gespielten Punkt sofort korrigieren, sonst ab dem nächsten Spiel | §7.1, §9.4 |
+| K3 | Default `receiveRight` = Index 0 des ursprünglichen Lineup-Arrays | §3.3 |
+| K4 | Pickleball: kein `SIDE_OUT` am Spielende | §8.3 |
+| K5 | Gültige Details, initiale Aufschlägerkorrektur und absorbierte Taps: `effects = []`; absorbierte Taps nicht ignoriert | §7.3 |
+| K6 | `continuation` MUSS bei `RETIRED`, `WALKOVER`, `ABANDONED`, `DRAW` `null` sein; bei `AWAITING_DECISION` und `FINISHED/COMPLETED` gesetzt | §5.2 |
+| K7 | Undo nur auf frühere Events; spätere Ziele/Selbstreferenz ignorieren; ignorierte Events nie UI-Undo-Ziel | §7.3 |
+| K8 | `endChange.every` fehlt → 6; explizites `null` → nur einmal | §3.1 |
+| K9 | UI-Undo umfasst `Correction` und `MatchEnded`; 02 §7.3 hat Vorrang vor 01 §3.2 | §7.3 |
+| K10 | Nur bitgleiche ID-Wiederholungen sind No-ops; abweichende Kopien zurückweisen, Genesis-Kollision macht Log ungültig | §7.3, §8 |
+| K11 | Aktive Konflikte in `conflicts`, aufgelöste in `resolvedConflicts` (`EngineState`) | §7.3, §8 |
+| K12 | Nachgelieferte Events als Batch an `ScoringEngine.applyAll` übergeben | §7.3 |
+
+### 12.2 Nutzerentscheidungen
 
 | # | Frage | Vorschlag |
 |---|---|---|
