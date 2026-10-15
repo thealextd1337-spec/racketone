@@ -322,4 +322,7 @@
     <string name="profile_imprint">Imprint</string>
     <string name="privacy_url">https://advantly.eu/en/app-privacy.html</string>
     <string name="imprint_url">https://advantly.eu/impressum.html</string>
+    <string name="link_failed_title">Could not open the link</string>
+    <string name="link_failed_text">No browser was found on this device. You can copy the link and open it elsewhere:</string>
+    <string name="link_copy">Copy link</string>
 </resources>

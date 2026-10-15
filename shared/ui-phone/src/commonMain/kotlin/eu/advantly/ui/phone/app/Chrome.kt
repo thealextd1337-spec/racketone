@@ -12,19 +12,28 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,11 +47,15 @@ import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.live.compactScore
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.app_version
 import eu.advantly.ui.phone.resources.coming_soon
 import eu.advantly.ui.phone.resources.coming_soon_friends
 import eu.advantly.ui.phone.resources.coming_soon_profile
 import eu.advantly.ui.phone.resources.imprint_url
+import eu.advantly.ui.phone.resources.link_copy
+import eu.advantly.ui.phone.resources.link_failed_text
+import eu.advantly.ui.phone.resources.link_failed_title
 import eu.advantly.ui.phone.resources.mini_scorebar_a11y
 import eu.advantly.ui.phone.resources.privacy_url
 import eu.advantly.ui.phone.resources.profile_imprint
@@ -176,7 +189,7 @@ fun ComingSoonScreen(
         )
         if (tab == AppTab.Profile) {
             // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
-            val uriHandler = LocalUriHandler.current
+            val openLink = rememberSafeLinkOpener()
             val privacyUrl = stringResource(Res.string.privacy_url)
             val imprintUrl = stringResource(Res.string.imprint_url)
             Text(
@@ -185,8 +198,8 @@ fun ComingSoonScreen(
                 color = colors.text2,
                 modifier = Modifier.padding(top = Spacing.l).semantics { heading() },
             )
-            LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { uriHandler.openUri(privacyUrl) }
-            LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { uriHandler.openUri(imprintUrl) }
+            LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { openLink(privacyUrl) }
+            LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { openLink(imprintUrl) }
             if (versionName.isNotBlank()) {
                 Text(stringResource(Res.string.app_version, versionName), style = AdvantlyTheme.typography.caption, color = colors.text2)
             }
@@ -215,4 +228,61 @@ private fun LinkRow(
         Text(text, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
         Icon(AdvantlyIcons.ChevronRight, contentDescription = null, tint = colors.text2)
     }
+}
+
+/**
+ * Öffnet einen Link im Browser. Ohne Browser wirft Android eine `IllegalArgumentException` (`AndroidUriHandler`) –
+ * statt abzustürzen zeigt die App dann einen Hinweis mit der URL zum Kopieren.
+ */
+@Composable
+private fun rememberSafeLinkOpener(): (String) -> Unit {
+    val uriHandler = LocalUriHandler.current
+    var failedUrl by remember { mutableStateOf<String?>(null) }
+    failedUrl?.let { url -> LinkFailedDialog(url, onClose = { failedUrl = null }) }
+    return remember(uriHandler) {
+        { url ->
+            try {
+                uriHandler.openUri(url)
+            } catch (e: IllegalArgumentException) {
+                failedUrl = url
+            } catch (e: IllegalStateException) {
+                failedUrl = url
+            }
+        }
+    }
+}
+
+/** Hinweis „Link konnte nicht geöffnet werden“ mit markierbarer URL und „Link kopieren“. */
+@Suppress("DEPRECATION") // LocalClipboardManager: setText ist plattformneutral, LocalClipboard braucht plattformeigene ClipEntry
+@Composable
+private fun LinkFailedDialog(
+    url: String,
+    onClose: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(stringResource(Res.string.link_failed_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                Text(stringResource(Res.string.link_failed_text))
+                SelectionContainer {
+                    Text(url, style = AdvantlyTheme.typography.label, modifier = Modifier.testTag("link_failed_url"))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(url))
+                    onClose()
+                },
+                modifier = Modifier.testTag("link_copy"),
+            ) { Text(stringResource(Res.string.link_copy)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose, modifier = Modifier.testTag("link_close")) { Text(stringResource(Res.string.action_close)) }
+        },
+        modifier = Modifier.testTag("link_failed_dialog"),
+    )
 }

@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -11,11 +13,13 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -284,6 +288,43 @@ class ReviewRound1UiTest {
             onNodeWithTag("end_match_sheet").assertDoesNotExist()
             onNodeWithTag("live_sport_chip").assertExists()
             assertEquals(Overlay.Live, model.navigator.top)
+        }
+
+    // Review-Runde 2: ohne Browser kein Absturz, sondern Hinweis mit kopierbarer URL
+    @Test
+    fun missingBrowserShowsCopyableLink() =
+        runComposeUiTest {
+            val copied = mutableListOf<String>()
+            val clipboard =
+                @Suppress("DEPRECATION")
+                object : ClipboardManager {
+                    override fun getText(): AnnotatedString? = null
+
+                    override fun setText(annotatedString: AnnotatedString) {
+                        copied += annotatedString.text
+                    }
+                }
+            setContent {
+                @Suppress("DEPRECATION")
+                CompositionLocalProvider(
+                    LocalDensity provides Density(1f),
+                    LocalClipboardManager provides clipboard,
+                    LocalUriHandler provides
+                        object : UriHandler {
+                            override fun openUri(uri: String): Unit = throw IllegalArgumentException("Kein Browser: $uri")
+                        },
+                ) {
+                    Box(Modifier.size(412.dp, 892.dp)) { AdvantlyApp(model = testModel(), darkTheme = true) }
+                }
+            }
+            click("tab_profile")
+            click("profile_imprint")
+            onNodeWithTag("link_failed_dialog").assertExists()
+            onNodeWithTag("link_failed_url", useUnmergedTree = true).assertTextEquals("https://advantly.eu/impressum.html")
+            click("link_copy")
+            onNodeWithTag("link_failed_dialog").assertDoesNotExist()
+            assertEquals(listOf("https://advantly.eu/impressum.html"), copied)
+            onNodeWithTag("coming_soon_profile").assertExists()
         }
 
     // Freigabekriterium Play: Datenschutz und Impressum im Profil

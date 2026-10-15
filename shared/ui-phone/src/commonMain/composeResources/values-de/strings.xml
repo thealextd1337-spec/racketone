@@ -322,4 +322,7 @@
     <string name="profile_imprint">Impressum</string>
     <string name="privacy_url">https://advantly.eu/app-datenschutz.html</string>
     <string name="imprint_url">https://advantly.eu/impressum.html</string>
+    <string name="link_failed_title">Link konnte nicht geöffnet werden</string>
+    <string name="link_failed_text">Auf diesem Gerät wurde kein Browser gefunden. Du kannst den Link kopieren und anderswo öffnen:</string>
+    <string name="link_copy">Link kopieren</string>
 </resources>
