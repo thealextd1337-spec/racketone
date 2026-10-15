@@ -25,7 +25,7 @@ class MatchFormatValidatorTest {
 
     @Test
     fun allPresetsAreValidForAllDisciplines() {
-        assertEquals(45, Presets.all.size)
+        assertEquals(49, Presets.all.size)
         assertEquals(
             Presets.all.size,
             Presets.all

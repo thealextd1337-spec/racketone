@@ -39,8 +39,8 @@ class TestVectorRunnerTest {
         val passed = checkpoints - failures.size
         println("Spezifikations-Testvektoren: ${files.size} Vektoren, $passed/$checkpoints Checkpoints grün")
         if (failures.isNotEmpty()) fail("${failures.size} Checkpoints weichen ab:\n" + failures.joinToString("\n"))
-        assertEquals(13, files.size, "Anzahl Spezifikations-Vektoren")
-        assertEquals(154, checkpoints, "Anzahl Checkpoints laut docs/testvectors/README.md")
+        assertEquals(21, files.size, "Anzahl Spezifikations-Vektoren")
+        assertEquals(216, checkpoints, "Anzahl Checkpoints laut docs/testvectors/README.md")
     }
 
     @Test

@@ -70,6 +70,10 @@ internal class Core private constructor(
     var receiveRightNext: SidePair<PlayerId> = receiveRight
     var gamesWonTotal: SidePair<Int> = ZERO
 
+    /** Doppel-Aufschlägerwahl im laufenden Satz (§6.5.5): Wahl vor dem 1. Ballwechsel bzw. des zweiten Teams. */
+    var openingChoice: PlayerId? = null
+    var secondChoice: PlayerId? = null
+
     // --- Pickleball ---
     var pbServer: PlayerId = lineup.a[0]
     var pbServerNumber: Int? = null
@@ -110,6 +114,8 @@ internal class Core private constructor(
             c.receiveRight = receiveRight
             c.receiveRightNext = receiveRightNext
             c.gamesWonTotal = gamesWonTotal
+            c.openingChoice = openingChoice
+            c.secondChoice = secondChoice
             c.pbServer = pbServer
             c.pbServerNumber = pbServerNumber
             c.pos = pos
@@ -123,11 +129,11 @@ internal class Core private constructor(
 
     /**
      * Wendet ein wirksames Event an; ist seine Vorbedingung verletzt, landet es in [ignored] (02 §7.3 Schritt 4).
-     * [isAppliedPoint] beantwortet, ob eine Event-ID ein bereits angewendetes `PointWon` ist (für `PointDetailSet`).
+     * [appliedPoint] liefert zu einer Event-ID das bereits angewendete `PointWon` (für `PointDetailSet`), sonst `null`.
      */
     fun step(
         event: ScoreEvent,
-        isAppliedPoint: (EventId) -> Boolean,
+        appliedPoint: (EventId) -> AppliedPoint?,
     ): Boolean {
         effects = emptySet()
         val applied =
@@ -138,7 +144,8 @@ internal class Core private constructor(
                 is MatchEnded -> onMatchEnded(payload)
                 Paused -> onPaused()
                 Resumed -> onResumed()
-                is PointDetailSet -> isAppliedPoint(payload.target)
+                is PointDetailSet -> onPointDetailSet(payload, appliedPoint(payload.target))
+                is ServerChosen -> onServerChosen(payload)
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
                 is ScorerChanged -> error("ScorerChanged wirkt in der Log-Analyse (02 §7.5)")
@@ -164,6 +171,15 @@ internal class Core private constructor(
         return true
     }
 
+    /** §7.3: Ziel ist ein wirksames `PointWon`; Aufschlag-Info nur Tennis/Padel, Doppelfehler nur für die Rückschlagseite. */
+    private fun onPointDetailSet(
+        payload: PointDetailSet,
+        target: AppliedPoint?,
+    ): Boolean = target != null && PointDetailRules.isAllowedInFold(payload.detail, target.side, target.servingSide, sport)
+
+    /** Aufschlag des nächsten Ballwechsels (für die Punkt-Zuordnung), `null` ohne laufenden Satz. */
+    fun serveNow(): ServeInfo? = if (inSet && !frozen) serveInfo() else null
+
     private fun onPaused(): Boolean {
         if (status != MatchStatus.IN_PROGRESS) return false
         status = MatchStatus.PAUSED
@@ -181,7 +197,13 @@ internal class Core private constructor(
     private fun onContinueDecision(payload: ContinueDecision): Boolean {
         if (status != MatchStatus.AWAITING_DECISION) return false
         if (payload.anotherSet) {
-            if (payload.nextSetKind == NextSetKind.MATCH_TIEBREAK && (format.matchTiebreak == null || !sport.isTennisLike)) return false
+            val allowed =
+                when (payload.nextSetKind) {
+                    NextSetKind.REGULAR -> true
+                    NextSetKind.MATCH_TIEBREAK -> sport.isTennisLike && format.matchTiebreak != null
+                    NextSetKind.TIEBREAK_7, NextSetKind.MATCH_TIEBREAK_10 -> sport.isTennisLike
+                }
+            if (!allowed) return false
             status = MatchStatus.IN_PROGRESS
             startSet(checkNotNull(nextOpener), payload.nextSetKind)
         } else {
@@ -243,6 +265,8 @@ internal class Core private constructor(
         midDone = false
         setOpener = opener
         nextOpener = null
+        openingChoice = null
+        secondChoice = null
         effects = effects + Effect.SET_STARTED
         when {
             sport.isTennisLike -> tpStartSet(opener, kind)
@@ -324,6 +348,8 @@ internal class Core private constructor(
         val sf =
             when {
                 kind == NextSetKind.MATCH_TIEBREAK -> checkNotNull(format.matchTiebreak)
+                kind == NextSetKind.TIEBREAK_7 -> MatchTiebreakFormat.MTB7
+                kind == NextSetKind.MATCH_TIEBREAK_10 -> MatchTiebreakFormat.MTB10
                 isDecidingSet() -> format.decidingSet ?: checkNotNull(format.set)
                 else -> checkNotNull(format.set)
             }
@@ -792,6 +818,36 @@ internal class Core private constructor(
         return true
     }
 
+    /**
+     * §6.5.5 Aufschlägerwahl im Doppel (Tennis/Padel): vor dem ersten Ballwechsel des Satzes jeder der vier Spieler
+     * (ggf. wechselt die eröffnende Side), danach nur die Side, die im Satz noch nicht aufgeschlagen hat.
+     */
+    private fun onServerChosen(c: ServerChosen): Boolean {
+        if (!sport.isTennisLike || !doubles) return false
+        if (!inSet || (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED)) return false
+        if (c.set != sets.size || sideOf(c.player) != c.side) return false
+        val side = c.side
+        if (rallies > 0 && servedInSet[side]) return false
+        if (rallies == 0 && side != tpServeSide()) {
+            // Wahl aus dem anderen Team: diese Side eröffnet den Satz (Standardspiel bzw. Tiebreak-Satz)
+            if (gameKind == GameKind.STANDARD) serving = side else tbFirst = side
+        }
+        order = order.with(side, listOf(c.player) + order[side].filter { it != c.player })
+        serveIdx = serveIdx.with(side, 0)
+        if (rallies == 0) openingChoice = c.player else secondChoice = c.player
+        return true
+    }
+
+    /** Offenes Fenster der Aufschlägerwahl (§8 `serverChoice`), sonst `null`. */
+    private fun serverChoice(): ServerChoice? {
+        if (!sport.isTennisLike || !doubles || !inSet || frozen) return null
+        if (status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return null
+        val next = tpServeSide()
+        if (rallies == 0) return ServerChoice(1, next, order[next] + order[next.other], openingChoice)
+        if (servedInSet[next]) return null
+        return ServerChoice(2, next, order[next], secondChoice?.takeIf { sideOf(it) == next })
+    }
+
     private fun correctServingOrder(c: Correction): Boolean {
         val side = c.side ?: return false
         val players = c.players ?: return false
@@ -879,6 +935,7 @@ internal class Core private constructor(
             continuation = continuation(),
             scorerDeviceId = scorer,
             rejectedByRole = rejectedByRole,
+            serverChoice = serverChoice(),
         )
     }
 

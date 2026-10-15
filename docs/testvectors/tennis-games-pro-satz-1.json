@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "TV-TEN-007",
+  "title": "Tennis: Games pro Satz = 1 – Satz mit 2 Vorsprung oder Tiebreak bei 1:1",
+  "description": "Einzel, Best of 3, gamesToWin = 1, tiebreakAt = 1 (Regel „Tiebreak bei n:n für alle n ≥ 1“, 02 §5.1). 1:0 ist noch kein Satz, 2:0 gewinnt ihn; bei 1:1 folgt der Tiebreak bis 7, der Satz endet 2:1.",
+  "sources": ["Advantly 02-scoring-regeln.md §5.1, §6.3 (Games pro Satz 1–6, Entscheidung 2026-10-15)", "ITF Rules of Tennis 2026, Regel 6, Appendix VI"],
+  "config": {"formatVersion": 1, "presetId": null, "sport": "TENNIS", "discipline": "SINGLES", "match": {"mode": "BEST_OF", "bestOf": 3}, "game": {"deuceMode": "ADVANTAGE"}, "set": {"gamesToWin": 1, "tiebreakAt": 1, "tiebreak": {"pointsToWin": 7, "winBy": 2, "endChange": {"first": 6, "every": 6}}}, "decidingSet": null, "matchTiebreak": null},
+  "lineup": {"A": ["A1"], "B": ["B1"], "firstServer": "A1", "startEnds": {"A": "END_1"}},
+  "events": [
+    {"id": "e1", "type": "PointWon", "side": "A"},
+    {"id": "e2", "type": "PointWon", "side": "A"},
+    {"id": "e3", "type": "PointWon", "side": "A"},
+    {"id": "e4", "type": "PointWon", "side": "A"},
+    {"id": "e5", "type": "PointWon", "side": "A"},
+    {"id": "e6", "type": "PointWon", "side": "A"},
+    {"id": "e7", "type": "PointWon", "side": "A"},
+    {"id": "e8", "type": "PointWon", "side": "A"},
+    {"id": "e9", "type": "PointWon", "side": "A"},
+    {"id": "e10", "type": "PointWon", "side": "A"},
+    {"id": "e11", "type": "PointWon", "side": "A"},
+    {"id": "e12", "type": "PointWon", "side": "A"},
+    {"id": "e13", "type": "PointWon", "side": "B"},
+    {"id": "e14", "type": "PointWon", "side": "B"},
+    {"id": "e15", "type": "PointWon", "side": "B"},
+    {"id": "e16", "type": "PointWon", "side": "B"},
+    {"id": "e17", "type": "PointWon", "side": "A"},
+    {"id": "e18", "type": "PointWon", "side": "A"},
+    {"id": "e19", "type": "PointWon", "side": "A"},
+    {"id": "e20", "type": "PointWon", "side": "A"},
+    {"id": "e21", "type": "PointWon", "side": "A"},
+    {"id": "e22", "type": "PointWon", "side": "A"},
+    {"id": "e23", "type": "PointWon", "side": "A"}
+  ],
+  "expect": [
+    {"afterEvent": 4, "label": "1:0 ist kein Satz; B schlägt auf", "state": {"sets": [], "current": {"setIndex": 0, "gameKind": "STANDARD", "games": {"A": 1, "B": 0}}, "serve": {"side": "B", "player": "B1"}, "statusFlags": [], "effects": ["POINT", "GAME_WON", "CHANGE_ENDS"], "ends": {"A": "END_2", "B": "END_1"}}},
+    {"afterEvent": 7, "label": "0:40 im 2. Spiel – Satzball als Rückschläger", "state": {"statusFlags": [{"side": "A", "level": "SET_POINT", "count": 3, "breakPoint": true}]}},
+    {"afterEvent": 8, "label": "2:0 – Satz A", "state": {"sets": [{"kind": "REGULAR", "games": {"A": 2, "B": 0}, "tiebreak": null, "points": null, "winner": "A"}], "setsWon": {"A": 1, "B": 0}, "current": {"setIndex": 1, "games": {"A": 0, "B": 0}}, "serve": {"side": "A", "player": "A1"}, "effects": ["POINT", "GAME_WON", "SET_WON", "SET_STARTED"], "ends": {"A": "END_2", "B": "END_1"}}},
+    {"afterEvent": 12, "label": "Satz 2: 1:0", "state": {"current": {"setIndex": 1, "games": {"A": 1, "B": 0}}, "ends": {"A": "END_1", "B": "END_2"}}},
+    {"afterEvent": 16, "label": "1:1 – Tiebreak", "state": {"current": {"gameKind": "TIEBREAK", "games": {"A": 1, "B": 1}, "points": {"A": 0, "B": 0}}, "serve": {"side": "A", "player": "A1", "court": "RIGHT"}, "effects": ["POINT", "GAME_WON", "TIEBREAK_STARTED"], "statusFlags": []}},
+    {"afterEvent": 22, "label": "TB 6:0 – Seitenwechsel, Matchball", "state": {"current": {"points": {"A": 6, "B": 0}}, "effects": ["POINT", "CHANGE_ENDS"], "statusFlags": [{"side": "A", "level": "MATCH_POINT", "count": 6, "breakPoint": false}], "ends": {"A": "END_2", "B": "END_1"}}},
+    {"afterEvent": 23, "label": "Satz 2:1 (7:0) – Match", "state": {"status": "FINISHED", "result": {"winner": "A", "reason": "COMPLETED"}, "sets": [{"kind": "REGULAR", "games": {"A": 2, "B": 0}, "tiebreak": null, "points": null, "winner": "A"}, {"kind": "REGULAR", "games": {"A": 2, "B": 1}, "tiebreak": {"A": 7, "B": 0}, "points": null, "winner": "A"}], "setsWon": {"A": 2, "B": 0}, "current": null, "effects": ["POINT", "GAME_WON", "SET_WON", "MATCH_WON"], "ends": {"A": "END_2", "B": "END_1"}}}
+  ]
+}

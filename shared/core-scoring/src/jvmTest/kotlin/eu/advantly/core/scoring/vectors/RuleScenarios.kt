@@ -20,10 +20,16 @@ import eu.advantly.core.scoring.MatchDriver
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PointDetail
+import eu.advantly.core.scoring.PointDetailKind
+import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
+import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.Undo
 import eu.advantly.core.scoring.lineupFor
 import eu.advantly.core.scoring.p
@@ -286,7 +292,82 @@ object RuleScenarios {
                         ev("p2", 4, "phone", "p1", 41_000, PointWon(Side.B)),
                     ),
             ),
+            // --- Bedienung & Statistik (Entscheidung 2026-10-15) ---
+            s(
+                Sport.TENNIS,
+                "remove-last-point-of-side",
+                "Letzten Punkt einer Seite abziehen (Undo auf den letzten wirksamen Punkt) über die Satzgrenze, Redo",
+                tennis,
+            ) {
+                win(Side.A, 6)
+                points("BB")
+                send(Undo(checkNotNull(ScoringEngine.lastEffectivePointOf(engineState, Side.A))))
+                val redo = send(Undo(checkNotNull(ScoringEngine.lastEffectivePointOf(engineState, Side.B))))
+                send(Undo(redo))
+                points("AA")
+            },
+            s(
+                Sport.TENNIS,
+                "doubles-server-choice",
+                "Aufschlägerwahl im Doppel: Game 1 aus allen vier, Game 2 anderes Team, ungültige Wahl, neuer Satz",
+                tennisDoubles,
+            ) {
+                send(ServerChosen(0, Side.B, p("B2")))
+                win(Side.B)
+                send(ServerChosen(0, Side.B, p("B1")))
+                send(ServerChosen(0, Side.A, p("A2")))
+                holdGames(3)
+                win(Side.A, 2)
+                send(ServerChosen(1, Side.A, p("A1")))
+                points("AB")
+            },
+            s(Sport.TENNIS, "serve-info", "Aufschlag-Info je Punkt, ungültiger Doppelfehler, letztes gilt, Ziel unwirksam", tennis) {
+                val first = point(Side.A)
+                send(PointDetailSet(first, PointDetail(serve = ServeOutcome.FIRST_SERVE_IN)))
+                send(PointDetailSet(first, PointDetail(serve = ServeOutcome.DOUBLE_FAULT)))
+                val second = point(Side.B)
+                send(PointDetailSet(second, PointDetail(serve = ServeOutcome.DOUBLE_FAULT)))
+                send(PointDetailSet(second, PointDetail(PointDetailKind.UNFORCED_ERROR, serve = ServeOutcome.SECOND_SERVE_IN)))
+                send(Undo(second))
+                send(PointDetailSet(second, PointDetail(serve = ServeOutcome.FIRST_SERVE_IN)))
+            },
+            s(
+                Sport.TENNIS,
+                "games-per-set-1",
+                "Games pro Satz = 1: 1:0 kein Satz, 2:0 Satz, Tiebreak bei 1:1",
+                Presets.withGamesPerSet(tennis, 1),
+            ) {
+                win(Side.A, 2)
+                win(Side.A)
+                win(Side.B)
+                points("ABABABABA")
+            },
+            s(
+                Sport.TENNIS,
+                "open-tiebreak-sets",
+                "Offener Modus: Tiebreak bis 7 und Champions-Tiebreak bis 10 als Sätze, ungültig bei fehlender Frage",
+                Presets.TENNIS_OPEN.format(),
+            ) {
+                win(Side.A, 6)
+                send(ContinueDecision(true, NextSetKind.TIEBREAK_7))
+                send(ContinueDecision(true, NextSetKind.MATCH_TIEBREAK_10))
+                points("ABABABABABBB")
+                send(ContinueDecision(true, NextSetKind.MATCH_TIEBREAK_10))
+                points("AAAAAAAAAA")
+                send(ContinueDecision(false))
+            },
             // --- Padel ---
+            s(
+                Sport.PADEL,
+                "tiebreak-only-server-choice",
+                "Nur Tiebreak bis 7 im Doppel mit Aufschlägerwahl (erster Punkt / erster Aufschlag des anderen Teams)",
+                Presets.PADEL_TIEBREAK_ONLY_7.format(),
+            ) {
+                send(ServerChosen(0, Side.B, p("B1")))
+                point(Side.A)
+                send(ServerChosen(0, Side.A, p("A2")))
+                points("BABABABABAA")
+            },
             RuleScenario(
                 Sport.PADEL,
                 "director-phone-scorer",

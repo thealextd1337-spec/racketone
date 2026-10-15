@@ -48,4 +48,11 @@ class MetaIndependenceTest {
         assertEquals(withWorkout, withoutWorkout)
         assertEquals(true, MatchMeta().watchWorkout)
     }
+
+    /** „Aufschlag-Statistik erfassen“ steuert nur die UI (02 §10), nicht den Fold. */
+    @Test
+    fun serveStatsOptionDoesNotChangeTheScore() {
+        assertEquals(ScoringEngine.fold(log(MatchMeta())), ScoringEngine.fold(log(MatchMeta(serveStats = false))))
+        assertEquals(true, MatchMeta().serveStats)
+    }
 }
