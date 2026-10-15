@@ -67,14 +67,17 @@ graph TB
 Jede Phase endet mit einem **Quality Gate**. Erst wenn es bestanden ist, beginnt die nächste Phase.
 
 ### P0 – Fundament & Spikes
-| Arbeitspaket | Ergebnis |
-|---|---|
-| Monorepo-Gerüst (Gradle, Module laut [01 §2](01-architektur.md)), Lint, Formatter, `CLAUDE.md`/`AGENTS.md` mit Konventionen | baut auf Windows |
-| **S1** watchOS-Framework (`watchosArm64` + `watchosDeviceArm64`), Größe, App-Store-Upload-Validierung | Go/No-Go für KMP auf der Apple Watch |
-| **S2** CI end-to-end: leere iOS- + Watch-App → TestFlight, nur von Windows aus | Ultra und iPhone bekommen Builds |
-| **S3** WatchConnectivity/Mirroring in Kotlin vs. Swift-Adapter | Entscheidung Sync-Schicht Apple |
-| **S4** CMP-Scoring-Screen auf echtem iPhone: Latenz, Haptik, Look | Go/No-Go CMP auf iOS |
-| **S5** Wear OS: ExerciseClient + Ongoing Activity auf Pixel und Galaxy, 30 min Display aus | Laufzeit- und Akkubasis |
+> **Stand 2026-10-15:** Apple-Tests auf echten Geräten sind **zurückgestellt**, bis ein Apple-Developer-Account existiert. Apple-Code wird trotzdem geschrieben und in der macOS-CI (unsigniert, Simulator) gebaut und getestet. Die Scoring-Engine (P1-A) ist vorgezogen und läuft parallel zu den Spikes.
+
+| Arbeitspaket | Ergebnis | Stand |
+|---|---|---|
+| Monorepo-Gerüst (Gradle, Module laut [01 §2](01-architektur.md)), Lint, Formatter, `CLAUDE.md`/`AGENTS.md` mit Konventionen | baut auf Windows + CI (ubuntu + macOS) | ✅ PR #4 (Welle 0a). Abweichung: kein SKIE im Watch-Framework |
+| **S1** watchOS-Framework: lokale DB (SQLDelight) und Größe pro Slice | Go/No-Go für KMP auf der Apple Watch | 🔄 Welle 0b (CI). App-Store-Upload-Validierung erst mit Apple-Account |
+| **S2** CI → TestFlight | Ultra und iPhone bekommen Builds | ⏸ zurückgestellt (Apple-Account fehlt) |
+| **S3** `device-link`: Wear Data Layer (real testbar) + WatchConnectivity (CI-Build) | Entscheidung Transport-Schicht | 🔄 Welle 0b |
+| **S4** CMP-Scoring-Screen: Latenz, Haptik, Look | Go/No-Go CMP auf iOS | 🔄 Welle 0b – real auf Pixel-Handy, iOS nur Simulator-Screenshot |
+| **S5** Wear OS: ExerciseClient + Ongoing Activity auf Pixel und Galaxy, 30 min Display aus | Laufzeit- und Akkubasis | 🔄 Welle 0b – Feldtest durch dich |
+| **P1-A vorgezogen:** Scoring-Engine für alle 5 Sportarten + Testvektor-Runner | 136/136 Checkpoints grün | 🔄 Welle 0b |
 
 **Gate P0:** Alle Spikes grün oder mit dokumentiertem Plan B (z. B. SwiftUI fürs iPhone, JSON-Store auf der Watch).
 
@@ -166,8 +169,8 @@ Weitere Detailfragen stehen in den Fachdokumenten: 02 §12, 03 §12, 04 §11, 05
 
 ## 8. Nächste Schritte
 
-1. Apple Developer Program anlegen (Privatperson oder Firma, siehe Hinweis im Chat).
-2. ✅ advantly.eu gekauft, Website `site/` · GitHub-Repo in `advantly` umbenennen (GitHub leitet alte URLs weiter).
-3. Du testest On Court Pro selbst auf Ultra und Galaxy Watch (30 min, Notizen genügen).
-4. Erster Commit dieser Planung nach `main` und Push nach GitHub.
-5. Start P0: Gerüst + Spikes S1–S5 parallel durch Agenten in eigenen Worktrees.
+1. ✅ Planung, Website **advantly.eu**, Projektgerüst (Welle 0a) – alles auf `main`.
+2. 🔄 Welle 0b: S1/S3, S4, S5 und Engine (P1-A) parallel in eigenen Worktrees; danach GPT-Review je PR.
+3. Du: Feldtests S5 (Wear-Workout) und S3 (Ping-Pong Handy ↔ Uhr), S4 auf dem Pixel-Handy – Anleitungen unter `docs/spikes/`.
+4. Später: Apple Developer Program anlegen → S2 (TestFlight) und Apple-Feldtests nachholen.
+5. Optional: GitHub-Repo in `advantly` umbenennen; On Court Pro selbst ausprobieren.

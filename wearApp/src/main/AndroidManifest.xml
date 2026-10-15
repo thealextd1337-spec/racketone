@@ -3,7 +3,27 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
+    <!-- Spike S5 / 05 §2.2, §6.2: Puls. Wear OS 6 (API 36) ersetzt BODY_SENSORS durch health.READ_HEART_RATE. -->
+    <uses-permission
+        android:name="android.permission.BODY_SENSORS"
+        android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <!-- Schritte (ExerciseClient) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Foreground Service Typ health + Ongoing-Activity-Benachrichtigung -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Always-on/Ambient (AmbientLifecycleObserver) laut Wear-Doku -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Haptik (04 §5.8) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
+        android:name=".AdvantlyWearApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -12,15 +32,23 @@
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
 
+        <!-- singleTask: Tipp auf die Ongoing Activity führt in dieselbe Instanz zurück. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:taskAffinity="">
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Advantly.Scoring">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".workout.WorkoutService"
+            android:exported="false"
+            android:foregroundServiceType="health" />
     </application>
 
 </manifest>
