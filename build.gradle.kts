@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.android.kmp.library) apply false
     alias(libs.plugins.skie) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.sqldelight) apply false
 }
 
 // Apple-Version aus derselben Quelle wie Android (gradle.properties) ableiten.

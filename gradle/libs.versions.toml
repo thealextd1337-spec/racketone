@@ -1,6 +1,6 @@
 # Einzige Quelle für alle Versionen im Advantly-Monorepo.
 # Kotlin, SKIE und Compose Multiplatform nur gemeinsam anheben (SKIE ist an die Kotlin-Version gebunden).
-# Geprüft gegen Maven Central / Google Maven / Gradle Plugin Portal am 2026-10-14.
+# Geprüft gegen Maven Central / Google Maven / Gradle Plugin Portal am 2026-10-14 (SQLDelight, Wearable: 2026-10-15).
 
 [versions]
 # --- App / SDK ---
@@ -33,6 +33,10 @@ wear-ongoing = "1.1.0"
 androidx-fragment = "1.9.1"
 junit4 = "4.13.2"
 kotest = "6.2.6"
+# SQLDelight 2.4.1 (06.10.2026): native-driver inkl. sqliter/stately auch für watchosDeviceArm64 (Spike S1, geprüft 2026-10-15)
+sqldelight = "2.4.1"
+# Wear Data Layer (MessageClient, DataClient, CapabilityClient) – Google Maven, geprüft 2026-10-15
+play-services-wearable = "20.0.1"
 
 [libraries]
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
@@ -54,6 +58,12 @@ wear-ambient = { module = "androidx.wear:wear", version.ref = "wear" }
 wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wear-ongoing" }
 androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "androidx-fragment" }
 
+sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
+sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "play-services-wearable" }
+
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 
@@ -73,6 +83,7 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-kmp-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 skie = { id = "co.touchlab.skie", version.ref = "skie" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-gradle" }
+sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 
 # Convention Plugins aus build-logic/
 advantly-kmp-library = { id = "advantly.kmp.library" }

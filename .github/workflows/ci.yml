@@ -110,14 +110,26 @@ jobs:
         env:
           WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
         run: ./gradlew watchosSimulatorArm64Test --continue -Padvantly.simulator.watchos="$WATCHOS_SIM"
+      # Spike S1: EventStore (data) + WatchStore-Facade (umbrella-watch) laufen hier mit dem SQLDelight-native-driver
+      - name: Testergebnisse ins Summary (watchOS/iOS)
+        if: ${{ !cancelled() }}
+        run: |
+          python3 .github/scripts/watch_metrics.py tests watchosSimulatorArm64Test
+          python3 .github/scripts/watch_metrics.py tests iosSimulatorArm64Test
       - name: XCFrameworks + Version.xcconfig erzeugen
         run: >-
           ./gradlew
           generateAppleVersionConfig
           :shared:umbrella-ios:assembleAdvantlyKitDebugXCFramework
           :shared:umbrella-watch:assembleAdvantlyWatchKitDebugXCFramework
-      - name: Framework-Größen
-        run: du -sh shared/umbrella-*/build/XCFrameworks/debug/*.xcframework/*/
+          :shared:umbrella-watch:assembleAdvantlyWatchKitReleaseXCFramework
+      # Spike S1: Größe je Slice/Architektur (Budget < 8 MB, 01 §2.3) → Job-Summary
+      - name: Framework-Größen (Summary)
+        run: >-
+          python3 .github/scripts/watch_metrics.py frameworks
+          shared/umbrella-watch/build/XCFrameworks/debug/AdvantlyWatchKit.xcframework
+          shared/umbrella-watch/build/XCFrameworks/release/AdvantlyWatchKit.xcframework
+          shared/umbrella-ios/build/XCFrameworks/debug/AdvantlyKit.xcframework
       - name: Compose-Resources im XCFramework prüfen
         run: find shared/umbrella-ios/build/XCFrameworks/debug -path '*composeResources*' -name '*.cvr' | tee /dev/stderr | grep -q .
       - name: XcodeGen installieren + Projekt erzeugen
@@ -142,12 +154,62 @@ jobs:
           -destination 'generic/platform=watchOS Simulator'
           -derivedDataPath build/DerivedData
           CODE_SIGNING_ALLOWED=NO
+      # Spike S1: beweist, dass arm64_32 (watchosArm64) UND arm64 (watchosDeviceArm64, Tier 3) inkl. SQLite und
+      # WatchConnectivity für echte Uhren linken – ohne Signatur, also ohne Apple-Account
+      - name: watchOS-App für Gerät bauen (arm64_32 + arm64, unsigniert)
+        run: >-
+          xcodebuild build
+          -project iosApp/Advantly.xcodeproj
+          -scheme AdvantlyWatch
+          -configuration Debug
+          -destination 'generic/platform=watchOS'
+          -derivedDataPath build/DerivedData
+          ARCHS="arm64_32 arm64" ONLY_ACTIVE_ARCH=NO
+          ENABLE_DEBUG_DYLIB=NO
+          CODE_SIGNING_ALLOWED=NO
+      # ENABLE_DEBUG_DYLIB=NO: sonst läge der App-Code in AdvantlyWatch.debug.dylib statt im Executable;
+      # das Skript misst eine evtl. vorhandene *.debug.dylib trotzdem mit
+      - name: Größe gelinkte Watch-App (Debug, Gerät)
+        run: >-
+          python3 .github/scripts/watch_metrics.py executable "AdvantlyWatch (Debug-Kotlin, Gerät)"
+          build/DerivedData/Build/Products/Debug-watchos/AdvantlyWatch.app/AdvantlyWatch
       - name: App-Bundles prüfen (Compose-Resources, Lokalisierung)
         run: |
           products=build/DerivedData/Build/Products
           find "$products/Debug-iphonesimulator/Advantly.app/compose-resources" -name '*.cvr' | tee /dev/stderr | grep -q .
           test -f "$products/Debug-watchsimulator/AdvantlyWatch.app/de.lproj/Localizable.strings"
           test -f "$products/Debug-watchsimulator/AdvantlyWatch.app/en.lproj/Localizable.strings"
+          test -f "$products/Debug-iphonesimulator/Advantly.app/de.lproj/Localizable.strings"
+          test -f "$products/Debug-iphonesimulator/Advantly.app/en.lproj/Localizable.strings"
+      # Spike S1: Watch-App im Simulator starten; ContentView schreibt per WatchStore.smokeCheck() in die
+      # SQLite-Datei und druckt ADVANTLY_SMOKE. Informativ (Simulator-Start kann flaky sein), Ergebnis im Summary.
+      - name: watchOS-App-Smoke im Simulator (EventStore)
+        continue-on-error: true
+        env:
+          WATCHOS_SIM: ${{ steps.sim.outputs.watchos }}
+        run: |
+          app=build/DerivedData/Build/Products/Debug-watchsimulator/AdvantlyWatch.app
+          xcrun simctl boot "$WATCHOS_SIM" 2>/dev/null || true
+          xcrun simctl bootstatus "$WATCHOS_SIM" -b
+          xcrun simctl install "$WATCHOS_SIM" "$app"
+          # -advantlySmoke: ContentView schreibt nur mit diesem Startparameter (und nur im Debug-Build) ins Store
+          xcrun simctl launch --console-pty --terminate-running-process "$WATCHOS_SIM" eu.advantly.watchkitapp -advantlySmoke > smoke.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 45); do grep -q ADVANTLY_SMOKE smoke.log && break; sleep 2; done
+          kill "$pid" 2>/dev/null || true
+          xcrun simctl terminate "$WATCHOS_SIM" eu.advantly.watchkitapp 2>/dev/null || true
+          tail -n 40 smoke.log
+          python3 .github/scripts/watch_metrics.py smoke smoke.log
+      # Spike S1: kaltstart-relevante Größe mit Release-Kotlin. project.yml verweist fest auf debug/ → das
+      # Release-XCFramework für diese Messung dorthin kopieren (letzter Build-Schritt, informativ).
+      - name: Größe gelinkte Watch-App (Release, Gerät)
+        continue-on-error: true
+        run: |
+          xcf=shared/umbrella-watch/build/XCFrameworks
+          rm -rf "$xcf/debug/AdvantlyWatchKit.xcframework"
+          cp -R "$xcf/release/AdvantlyWatchKit.xcframework" "$xcf/debug/AdvantlyWatchKit.xcframework"
+          xcodebuild build -project iosApp/Advantly.xcodeproj -scheme AdvantlyWatch -configuration Release -destination 'generic/platform=watchOS' -derivedDataPath build/DerivedData ARCHS="arm64_32 arm64" ONLY_ACTIVE_ARCH=NO ENABLE_DEBUG_DYLIB=NO CODE_SIGNING_ALLOWED=NO
+          python3 .github/scripts/watch_metrics.py executable "AdvantlyWatch (Release-Kotlin, Gerät)" build/DerivedData/Build/Products/Release-watchos/AdvantlyWatch.app/AdvantlyWatch
       - name: Berichte hochladen
         if: always()
         uses: actions/upload-artifact@v7

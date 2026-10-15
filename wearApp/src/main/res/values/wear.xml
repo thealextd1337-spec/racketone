@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wear Data Layer: Phone- und Wear-App melden dieselbe Capability; device-link findet so die Gegenstelle
+     (WearDataLayerTransport.CAPABILITY, FILTER_REACHABLE). Kein UI-Text. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@array/android_wear_capabilities">
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>advantly_device_link</item>
+    </string-array>
+</resources>
