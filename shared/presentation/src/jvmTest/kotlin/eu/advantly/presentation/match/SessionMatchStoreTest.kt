@@ -158,7 +158,7 @@ class SessionMatchStoreTest {
             eu.advantly.sync.protocol.SyncCodec
                 .encode(
                     eu.advantly.sync.protocol
-                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 3, v = 3),
+                        .Hello(DeviceId("new"), PeerKind.WATCH, minV = 4, v = 4),
                 ),
         )
         rig.settle()

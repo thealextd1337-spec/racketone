@@ -256,4 +256,6 @@
     <string name="live_workout_telemetry">♥ %1$s</string>
     <string name="live_workout_telemetry_description">Heart rate: %1$s beats per minute, steps: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <string name="setup_unassigned">Unassigned</string>
+    <string name="setup_no_players">Players available after syncing with your phone</string>
 </resources>

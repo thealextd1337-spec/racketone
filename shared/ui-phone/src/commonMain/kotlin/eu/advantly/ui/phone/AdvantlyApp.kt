@@ -33,6 +33,7 @@ import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.common.LocalSelfId
+import eu.advantly.ui.phone.common.PlaceholderAssignments
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -111,6 +112,7 @@ fun AdvantlyApp(
                         AdvantlyTheme(darkTheme = true) {
                             LiveScoreScreen(
                                 controller = model.controller,
+                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players) },
                                 debugTools = debugTools,
                                 onMinimize = { navigator.pop() },
                                 onShowResult = model::openResult,
@@ -122,8 +124,19 @@ fun AdvantlyApp(
                     }
 
                     is Overlay.Result -> {
+                        val history by model.history.matches.collectAsState()
                         ResultScreen(
-                            record = model.history.record(top.matchId),
+                            record =
+                                history.firstOrNull { it.matchId == top.matchId }?.let { model.history.record(it.matchId) }
+                                    ?: model.history.record(top.matchId),
+                            playerAssignments = {
+                                PlaceholderAssignments(
+                                    it.summary.matchId,
+                                    it.summary.setup,
+                                    model.history,
+                                    model.players,
+                                )
+                            },
                             onBack = { navigator.pop() },
                             onPlayAgain = { model.startMatch(it) },
                             onDelete = {

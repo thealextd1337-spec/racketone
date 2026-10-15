@@ -20,7 +20,11 @@ object PlayerSelection {
         selfId: PlayerId,
     ): List<Player> {
         val assigned = input.players.map { it.id }.toSet() + selfId
-        return (created + recent + guests).distinctBy { it.id }.filterNot { it.id in assigned }
+        return (created + recent + guests).distinctBy { it.id }.filterNot {
+            it.id in assigned || it.isPlaceholder ||
+                eu.advantly.core.model.Placeholders
+                    .isPlaceholder(it.id)
+        }
     }
 
     fun places(input: WizardInput): List<PlayerPlace> =

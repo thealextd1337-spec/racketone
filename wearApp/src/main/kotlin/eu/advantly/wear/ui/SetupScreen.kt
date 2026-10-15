@@ -4,7 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -21,16 +25,23 @@ import androidx.wear.compose.material3.SwipeToDismissBox
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Discipline
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.wear.R
 import eu.advantly.wear.live.SetupStep
 import eu.advantly.wear.live.WatchScreen
 import eu.advantly.wear.match.FormatChoice
+import eu.advantly.wear.match.PlayerSlot
 import eu.advantly.wear.match.SetupCatalog
 
 /** Aktionen des Kurz-Wizards. */
 interface SetupActions {
+    fun selectPlayer(
+        slot: PlayerSlot,
+        player: PlayerId?,
+    )
+
     fun selectSport(sport: Sport)
 
     fun selectDiscipline(discipline: Discipline)
@@ -63,11 +74,13 @@ fun SetupScreen(
     setup: WatchScreen.Setup,
     actions: SetupActions,
 ) {
-    BackHandler(onBack = actions::back)
+    var choosing by remember(setup.step) { mutableStateOf<PlayerSlot?>(null) }
+    val goBack = { if (choosing != null) choosing = null else actions.back() }
+    BackHandler(onBack = goBack)
     // je Schritt ein eigener Swipe-Zustand, sonst bliebe die Box nach dem ersten Zurück-Wischen „weggewischt“
-    key(setup.step) {
-        SwipeToDismissBox(onDismissed = actions::back) { isBackground ->
-            if (!isBackground) SetupStepContent(setup, actions)
+    key(setup.step, choosing) {
+        SwipeToDismissBox(onDismissed = goBack) { isBackground ->
+            if (!isBackground) SetupStepContent(setup, actions, choosing) { choosing = it }
         }
     }
 }
@@ -76,15 +89,22 @@ fun SetupScreen(
 private fun SetupStepContent(
     setup: WatchScreen.Setup,
     actions: SetupActions,
+    choosing: PlayerSlot?,
+    choose: (PlayerSlot?) -> Unit,
 ) {
     val listState = rememberScalingLazyListState()
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
-            when (setup.step) {
-                SetupStep.SPORT -> sportStep(actions)
-                SetupStep.DISCIPLINE -> disciplineStep(setup, actions)
-                SetupStep.FORMAT -> formatStep(setup, actions)
-                SetupStep.SERVER -> serverStep(setup, actions)
+            val slot = choosing
+            if (slot != null) {
+                playerPicker(setup, actions, slot) { choose(null) }
+            } else {
+                when (setup.step) {
+                    SetupStep.SPORT -> sportStep(actions)
+                    SetupStep.DISCIPLINE -> disciplineStep(setup, actions)
+                    SetupStep.FORMAT -> formatStep(setup, actions)
+                    SetupStep.SERVER -> serverStep(setup, actions, choose)
+                }
             }
         }
     }
@@ -153,6 +173,7 @@ private fun ScalingLazyListScope.formatStep(
 private fun ScalingLazyListScope.serverStep(
     setup: WatchScreen.Setup,
     actions: SetupActions,
+    choosePlayer: (PlayerSlot) -> Unit,
 ) {
     item { ListHeader { Text(stringResource(R.string.setup_server_title), textAlign = TextAlign.Center) } }
     // Doppel: konkreter Erstaufschläger (bestimmt Rotation bzw. Badminton-Feld, 02 §3.3); Einzel: Wir/Gegner
@@ -167,7 +188,17 @@ private fun ScalingLazyListScope.serverStep(
                 border = BorderStroke(2.dp, teamColor(side)),
                 label = {
                     val team = stringResource(if (side == Side.A) R.string.label_us else R.string.label_them)
-                    Text(if (doubles) "$team · ${defaultPlayerName(side, index, doubles = true)}" else team)
+                    val slot =
+                        when {
+                            side == Side.A && index == 1 -> PlayerSlot.PARTNER
+                            side == Side.B && index == 1 -> PlayerSlot.OPPONENT_2
+                            side == Side.B -> PlayerSlot.OPPONENT_1
+                            else -> null
+                        }
+                    val name =
+                        setup.recentPlayers.firstOrNull { it.id == setup.selectedPlayers[slot] }?.displayName
+                            ?: defaultPlayerName(side, index, doubles)
+                    Text("$team · $name", maxLines = 2)
                 },
             )
         }
@@ -175,6 +206,7 @@ private fun ScalingLazyListScope.serverStep(
     item {
         Text(stringResource(R.string.setup_server_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
     }
+    playerChoices(setup, choosePlayer)
     matchOptions(setup, actions)
     item {
         SwitchButton(
@@ -220,3 +252,68 @@ private fun ScalingLazyListScope.matchOptions(
         }
     }
 }
+
+/** Optionale Spielerwahl unter den Startknöpfen. Jede Person ist ein eigenes Element der Rotary-Liste. */
+private fun ScalingLazyListScope.playerChoices(
+    setup: WatchScreen.Setup,
+    choose: (PlayerSlot) -> Unit,
+) {
+    val slots = if (setup.discipline == Discipline.DOUBLES) PlayerSlot.entries else listOf(PlayerSlot.OPPONENT_1)
+    slots.forEach { slot ->
+        item {
+            Button(
+                onClick = { choose(slot) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(slotName(slot)) },
+                secondaryLabel = {
+                    Text(
+                        setup.recentPlayers.firstOrNull { it.id == setup.selectedPlayers[slot] }?.displayName
+                            ?: stringResource(R.string.setup_unassigned),
+                    )
+                },
+            )
+        }
+    }
+}
+
+private fun ScalingLazyListScope.playerPicker(
+    setup: WatchScreen.Setup,
+    actions: SetupActions,
+    slot: PlayerSlot,
+    close: () -> Unit,
+) {
+    item { ListHeader { Text(slotName(slot)) } }
+    item {
+        Button(
+            onClick = {
+                actions.selectPlayer(slot, null)
+                close()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.setup_unassigned)) },
+        )
+    }
+    setup.recentPlayers.filter { it.id !in setup.selectedPlayers.values || it.id == setup.selectedPlayers[slot] }.forEach { player ->
+        item {
+            Button(
+                onClick = {
+                    actions.selectPlayer(slot, player.id)
+                    close()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(player.displayName, maxLines = 2) },
+            )
+        }
+    }
+    if (setup.recentPlayers.isEmpty()) item { Text(stringResource(R.string.setup_no_players), textAlign = TextAlign.Center) }
+}
+
+@Composable
+private fun slotName(slot: PlayerSlot): String =
+    stringResource(
+        when (slot) {
+            PlayerSlot.PARTNER -> R.string.player_partner
+            PlayerSlot.OPPONENT_1 -> R.string.player_opponent_1
+            PlayerSlot.OPPONENT_2 -> R.string.player_opponent_2
+        },
+    )

@@ -21,6 +21,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ResultReason
@@ -31,6 +32,8 @@ import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
+import eu.advantly.data.assignments
+import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.CompanionDetector
 import eu.advantly.device.link.CompanionState
@@ -177,7 +180,7 @@ class SessionMatchStore(
         require(formatErrors.isEmpty()) { "Ungültiges MatchFormat: ${formatErrors.joinToString { it.message }}" }
         val lineupErrors = LineupValidator.validate(setup.format, setup.lineup)
         require(lineupErrors.isEmpty()) { "Ungültiges Lineup: ${lineupErrors.joinToString()}" }
-        val missing = (setup.lineup.a + setup.lineup.b).filter { setup.player(it) == null }
+        val missing = (setup.lineup.a + setup.lineup.b).filter { setup.player(it) == null && !data.isPlaceholder(it) }
         require(missing.isEmpty()) { "Spieler ohne Namen: $missing" }
         rememberPlayers(setup.players)
 
@@ -195,7 +198,18 @@ class SessionMatchStore(
                 ScorerOption.THIS_PHONE -> ScorerChoice.ThisDevice
             }
         // Workout-Wunsch als Metadatum am Match (MatchMeta.watchWorkout) – geht mit Genesis und Match-Kopf an die Uhr
-        return session.create(setup.format, setup.lineup, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
+        val assigned = setup.assignedPlayers
+
+        fun person(id: PlayerId) = assigned[id]?.id ?: id
+        val lineup =
+            setup.lineup.copy(
+                a = setup.lineup.a.map(::person),
+                b = setup.lineup.b.map(::person),
+                firstServer = person(setup.lineup.firstServer),
+                receiveRight = setup.lineup.receiveRight?.let { it.copy(a = it.a?.let(::person), b = it.b?.let(::person)) },
+            )
+        rememberPlayers(assigned.values.toList())
+        return session.create(setup.format, lineup, setup.meta.copy(watchWorkout = options.watchWorkout), scorer)
     }
 
     override fun recordPoint(side: Side): Boolean = session.recordPoint(side)
@@ -293,6 +307,14 @@ class SessionMatchStore(
 
     // --- MatchHistoryPort ------------------------------------------------------------------------
 
+    override fun canAssignPlayer(matchId: MatchId): Boolean = session.canAssignPlayer(matchId)
+
+    override fun assignPlayer(
+        matchId: MatchId,
+        slot: PlayerId,
+        player: PlayerId,
+    ): Boolean = session.assignPlayer(matchId, slot, player)
+
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
         val engine =
@@ -302,7 +324,16 @@ class SessionMatchStore(
                 return null
             }
         val genesis = engine.genesis ?: return null
-        val summary = summaryOf(header, engine.state, genesis.wallClockMs, engine.events.lastOrNull()?.wallClockMs)
+        val summary =
+            summaryOf(
+                header,
+                engine.state,
+                genesis.wallClockMs,
+                engine.events
+                    .lastOrNull {
+                        it.payload !is PlayerAssigned
+                    }?.wallClockMs,
+            )
         return MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
     }
 
@@ -320,13 +351,14 @@ class SessionMatchStore(
 
     // --- PlayersPort ------------------------------------------------------------------------------
 
-    /** Je 100 sportbezogene und allgemeine Besetzungen; dekodiert nur die benötigten Spieler-IDs. */
+    /** Je 100 sportbezogene und allgemeine Matches; Zuweisungen lösen die ursprünglichen Platz-IDs auf. */
     override fun recentPlayers(sport: Sport): List<Player> {
         val mine = aliases + self.value.id
-        return (data.matches.recentLineups(sport = sport, limit = 100) + data.matches.recentLineups(limit = 100))
+        return (data.matches.history(sport = sport, limit = 100) + data.matches.history(limit = 100))
+            .map(data::resolvedLineup)
             .filter { lineup -> (lineup.a + lineup.b).any { it in mine } }
             .flatMap { playersOf(it) }
-            .filterNot { it.id in mine }
+            .filterNot { it.id in mine || it.isPlaceholder }
             .filter { it.displayName.isNotBlank() }
             .distinctBy { it.id }
     }
@@ -475,7 +507,7 @@ class SessionMatchStore(
         val sync = state.sync
         return LiveMatchSnapshot(
             matchId = m.id,
-            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup), m.previousMatchId),
+            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup), m.previousMatchId, data.assignments(m.id)),
             state = m.state,
             canUndo = m.canUndo,
             canRedo = m.canRedo,
@@ -538,7 +570,7 @@ class SessionMatchStore(
         val at =
             data.events
                 .scoreEvents(m.id)
-                .lastOrNull()
+                .lastOrNull { it.payload !is PlayerAssigned }
                 ?.wallClockMs
         finishedAt = Triple(m.id, m.eventCount, at)
         return at
@@ -554,6 +586,7 @@ class SessionMatchStore(
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
     private fun refreshStored() {
         players.clear()
+        summaries.clear()
         aliases = data.selfAliases()
         guestsFlow.value = loadGuests()
         favoritesFlow.value = loadFavorites()
@@ -575,23 +608,38 @@ class SessionMatchStore(
     /** Anzeigename je Spieler-ID; Aliase des Besitzers (z. B. alter Uhr-Self) tragen den Namen des Besitzers. */
     private fun player(id: PlayerId): Player =
         players[id] ?: run {
-            val resolved = if (id in aliases) Player(id, selfFlow.value.displayName) else data.players.get(id)?.toPlayer()
+            val resolved =
+                if (id in
+                    aliases
+                ) {
+                    Player(id, selfFlow.value.displayName)
+                } else if (data.isPlaceholder(id)) {
+                    Player(id, "", isPlaceholder = true)
+                } else {
+                    data.players.get(id)?.toPlayer()
+                }
             resolved?.also { players[id] = it } ?: Player(id, "")
         }
+
+    private fun setupOf(record: StoredMatch): MatchSetup =
+        MatchSetup(record.format, record.lineup, record.meta, playersOf(record.lineup), record.previousMatchId, data.assignments(record.id))
 
     private fun playersOf(lineup: Lineup): List<Player> = (lineup.a + lineup.b).distinct().map(::player)
 
     /** Spieler aus einem Setup, die die Datenbank noch nicht kennt, als Gäste übernehmen (z. B. aus einem Favoriten). */
     private fun rememberPlayers(list: List<Player>) {
         val now = clock.nowMs()
-        list.filter { data.players.get(it.id) == null }.forEach { data.players.addGuest(it.id, it.displayName, now) }
+        list
+            .filter {
+                !it.isPlaceholder && !data.isPlaceholder(it.id) && data.players.get(it.id) == null
+            }.forEach { data.players.addGuest(it.id, it.displayName, now) }
     }
 
     private fun loadLastSetup(): MatchSetup? =
         data.matches
             .history(limit = 1)
             .firstOrNull()
-            ?.let { MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup)) }
+            ?.let { setupOf(it) }
 
     private fun loadHistory(): List<MatchSummary> {
         val headers = data.matches.history(limit = historyLimit)
@@ -599,7 +647,7 @@ class SessionMatchStore(
         return headers
             .filter { it.isFinished }
             .mapNotNull { header -> cachedSummary(header) }
-            .map { it.copy(setup = it.setup.copy(players = playersOf(it.setup.lineup))) }
+            .map { summary -> data.matches.get(summary.matchId)?.let { summary.copy(setup = setupOf(it)) } ?: summary }
             .sortedWith(compareByDescending<MatchSummary> { it.finishedAtMs }.thenByDescending { it.matchId.value })
     }
 
@@ -612,7 +660,16 @@ class SessionMatchStore(
                 return null
             }
         val genesis = engine.genesis ?: return null
-        val summary = summaryOf(header, engine.state, genesis.wallClockMs, engine.events.lastOrNull()?.wallClockMs)
+        val summary =
+            summaryOf(
+                header,
+                engine.state,
+                genesis.wallClockMs,
+                engine.events
+                    .lastOrNull {
+                        it.payload !is PlayerAssigned
+                    }?.wallClockMs,
+            )
         summaries[header.id] = header.updatedAtMs to summary
         return summary
     }
@@ -625,7 +682,7 @@ class SessionMatchStore(
     ): MatchSummary =
         MatchSummary(
             matchId = header.id,
-            setup = MatchSetup(header.format, header.lineup, header.meta, playersOf(header.lineup), header.previousMatchId),
+            setup = setupOf(header),
             result = state.result ?: MatchResult(null, ResultReason.ABANDONED),
             sets = state.sets,
             setsWon = state.setsWon,
@@ -658,7 +715,10 @@ class SessionMatchStore(
     }
 
     private fun loadFavorites(): List<FavoriteLineup> =
-        readFavorites().map { FavoriteLineup(it.id, MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup))) }
+        readFavorites()
+            .filter {
+                (it.lineup.a + it.lineup.b).none(data::isPlaceholder)
+            }.map { FavoriteLineup(it.id, MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup))) }
 
     private companion object {
         const val DEFAULT_HISTORY_LIMIT = 200L

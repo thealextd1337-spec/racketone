@@ -1,5 +1,6 @@
 package eu.advantly.presentation.stats
 
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Effect
@@ -100,6 +101,7 @@ object MatchStatistics {
     fun compute(record: MatchRecord): MatchStats {
         val genesis = record.events.first()
         val created = genesis.payload as MatchCreated
+        val setup = record.summary.setup
         // Vollständiges Log inkl. Genesis: Zähler-Rolle aus MatchCreated (Single-Scorer, 02 §7.1a).
         val points = ScoringEngine.pointHistory(record.events)
         return MatchStats(
@@ -116,9 +118,20 @@ object MatchStatistics {
             serve = SidePair.of { side -> serveStats(points) { it.before.serve?.side == side } },
             servers =
                 (created.lineup.a + created.lineup.b)
-                    .filter { player -> points.any { it.server == player } }
+                    .filter { player ->
+                        val assigned = player in setup.assignedPlayers
+                        setup.player(player)?.isPlaceholder != true && (assigned || !Placeholders.isPlaceholder(player))
+                    }.filter { player -> points.any { it.server == player } }
                     .map { player ->
-                        PlayerServeStats(player, checkNotNull(created.lineup.sideOf(player)), serveStats(points) { it.server == player })
+                        PlayerServeStats(
+                            setup.assignedPlayers[player]
+                                ?.id ?: player,
+                            checkNotNull(created.lineup.sideOf(player)),
+                            serveStats(points) {
+                                it.server ==
+                                    player
+                            },
+                        )
                     },
             serveInfoRecorded = points.any { it.serve != null },
         )
@@ -202,7 +215,7 @@ object MatchStatistics {
      * Rückgängig gemachte und übersprungene Events werden ignoriert.
      */
     private fun netDuration(record: MatchRecord): Long {
-        val events = record.events
+        val events = record.events.filterNot { it.payload is eu.advantly.core.scoring.PlayerAssigned }
         if (events.size < 2) return 0
         val end = events.last().wallClockMs
         var total = end - events.first().wallClockMs

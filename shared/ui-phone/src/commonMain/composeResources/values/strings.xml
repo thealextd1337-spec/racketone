@@ -425,4 +425,11 @@
     <string name="live_telemetry_heart_rate">Heart rate: %1$s bpm</string>
     <string name="live_telemetry_steps">Steps: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <string name="player_partner">Partner</string>
+    <string name="player_opponent_1">Opponent 1</string>
+    <string name="player_opponent_2">Opponent 2</string>
+    <string name="assign_player">Assign %1$s</string>
+    <string name="assign_player_name">Name</string>
+    <string name="assign_new_player">Create and assign guest</string>
+    <string name="assign_failed">This place has already been assigned. Please close the selection.</string>
 </resources>

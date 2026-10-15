@@ -249,4 +249,6 @@
     <string name="live_workout_telemetry">♥ %1$s</string>
     <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <string name="setup_unassigned">Nicht zugewiesen</string>
+    <string name="setup_no_players">Spieler nach dem nächsten Handy-Abgleich verfügbar</string>
 </resources>

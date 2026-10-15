@@ -2,28 +2,24 @@ package eu.advantly.wear.match
 
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
+import eu.advantly.data.recentPeople
+import eu.advantly.data.resolvedLineup
 import eu.advantly.data.toScoreEventOrNull
 
-/** Gast-Slots eines Uhr-Matches; je Slot ein stabiler Gast-Spieler pro Installation (keine Gast-Flut). */
-enum class GuestSlot { PARTNER, OPPONENT_1, OPPONENT_2 }
+/** Optionale Personenplätze eines Uhr-Matches. */
+enum class PlayerSlot { PARTNER, OPPONENT_1, OPPONENT_2 }
 
-/**
- * Lesesicht der Uhr auf ihre lokale Datenbank: eigener Spieler, Gast-Spieler, „Wie letztes Mal“, letzte Ergebnisse
- * und fortsetzbare Matches. Schreibt nur Spieler (Self/Gäste); alles Match-Bezogene geht über die `MatchSession`.
- *
- * Nur auf dem Session-Thread verwenden (Main-Thread, `LocalData` ist nicht thread-sicher).
- *
- * @param guestName lokalisierter Anzeigename eines neu angelegten Gast-Slots („Gegner 1“ …)
- */
+/** Lokale Lesesicht der Uhr; Match-Änderungen gehen ausschließlich über die Session. */
 class WatchDirectory(
     private val data: LocalData,
     private val nowMs: () -> Long,
     private val newId: () -> PlayerId,
-    private val guestName: (GuestSlot) -> String,
 ) {
     /**
      * Eigener Spieler (Side A, „Wir“) – bei **jedem** neuen Match frisch gelesen: Nach dem ersten `Hello` übernimmt die
@@ -35,16 +31,36 @@ class WatchDirectory(
     /** [id] ist der Besitzer (aktueller Self oder ein früherer Self/Alias) – Anzeige „Du“. */
     fun isSelf(id: PlayerId): Boolean = data.isSelf(id)
 
-    /** Stabiler Gast für [slot]; wird beim ersten Aufruf angelegt und danach wiederverwendet. */
-    fun guest(slot: GuestSlot): PlayerId {
-        val id = PlayerId(data.settings.getOrPut(GUEST_KEY_PREFIX + slot.name) { newId().value })
-        if (data.players.get(id) == null) data.players.addGuest(id, guestName(slot), nowMs())
-        return id
+    init {
+        data.migrateWatchPlaceholders()
     }
 
-    /** Alle Slots für [SetupCatalog.lineup]. */
-    fun lineupPlayers(): LineupPlayers =
-        LineupPlayers(self(), guest(GuestSlot.PARTNER), guest(GuestSlot.OPPONENT_1), guest(GuestSlot.OPPONENT_2))
+    /** Ein unbesetzter Platz hat nur eine Log-ID; keine Spieler- oder Settings-Zeile. */
+    fun placeholder(slot: PlayerSlot): PlayerId = Placeholders.id(slot.name.lowercase() + ":" + newId().value)
+
+    fun lineupPlayers(selected: Map<PlayerSlot, PlayerId> = emptyMap()): LineupPlayers =
+        LineupPlayers(
+            self(),
+            selected[PlayerSlot.PARTNER] ?: placeholder(PlayerSlot.PARTNER),
+            selected[PlayerSlot.OPPONENT_1] ?: placeholder(PlayerSlot.OPPONENT_1),
+            selected[PlayerSlot.OPPONENT_2] ?: placeholder(PlayerSlot.OPPONENT_2),
+        )
+
+    /** Handy-Verzeichnis zuerst; lokale Match-Historie ergänzt nach Offline-Matches. */
+    fun recentPlayers(): List<Player> {
+        val remote =
+            data.settings
+                .get("players.recentRemote")
+                .orEmpty()
+                .split(',')
+                .filter { it.isNotBlank() }
+                .map(::PlayerId)
+        return (remote.mapNotNull(data.players::get) + data.recentPeople())
+            .filterNot { data.isSelf(it.id) || data.isPlaceholder(it.id) }
+            .distinctBy { it.id }
+            .take(24)
+            .map { it.toPlayer() }
+    }
 
     /** Anzeigename oder `null` (unbekannt bzw. leer = Standardbezeichnung der UI). */
     fun displayName(id: PlayerId): String? =
@@ -62,7 +78,7 @@ class WatchDirectory(
             .recent(RECENT_SCAN)
             .filter { it.previousMatchId == null }
             .maxWithOrNull(compareBy<MatchRecord> { it.createdAtMs }.thenBy { it.id.value })
-            ?.let { WatchSetup(it.format, it.lineup, it.meta) }
+            ?.let { WatchSetup(it.format, data.resolvedLineup(it), it.meta) }
 
     /** Beendete Matches, neueste zuerst (die Historie enthält auch laufende – die fallen hier heraus). */
     fun recentResults(limit: Int = RESULTS): List<MatchRecord> =
@@ -83,7 +99,6 @@ class WatchDirectory(
     fun resumable(): MatchRecord? = data.matches.active().firstOrNull()
 
     private companion object {
-        const val GUEST_KEY_PREFIX = "wear.guest."
         const val SERVER_CHOSEN = "ServerChosen"
         const val RECENT_SCAN = 30L
         const val RESULTS = 5

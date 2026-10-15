@@ -381,7 +381,7 @@ internal fun BoxScope.CorrectServerSheet(
         )
         snapshot.setup.players.forEach { player ->
             SheetButton(
-                playerName(player),
+                playerName(snapshot.setup, player.id),
                 primary = player.id == serverId,
                 onClick = {
                     controller.correctServer(player.id, retroactive = firstGame)

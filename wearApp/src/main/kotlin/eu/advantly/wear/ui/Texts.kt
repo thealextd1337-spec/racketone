@@ -166,7 +166,7 @@ fun defaultPlayerName(
         when {
             side == Side.A && index == 0 -> R.string.player_you
             side == Side.A -> R.string.player_partner
-            !doubles -> R.string.player_opponent
+            !doubles -> R.string.player_opponent_1
             index == 0 -> R.string.player_opponent_1
             else -> R.string.player_opponent_2
         },
