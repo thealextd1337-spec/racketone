@@ -10,6 +10,12 @@ struct StartView: View {
     var body: some View {
         NavigationStack {
             List {
+                if model.storeUnavailable {
+                    // Dev-Daten-Reset: Datenbank aus der Zeit vor der Match-Session (Schema ohne Migration)
+                    Text("start.storeUnavailable")
+                        .font(.footnote)
+                        .foregroundStyle(Brand.hint)
+                }
                 if let last = model.lastSetup {
                     Section {
                         Button {
@@ -132,6 +138,10 @@ struct SetupView: View {
                         disciplineButton(doubles: false)
                         disciplineButton(doubles: true)
                     }
+                }
+                // 04 §3.1: unabhängig von der Rolle, Standard an
+                Toggle(isOn: $model.workoutAlongside) {
+                    Text("controls.workoutAlongside").font(.footnote)
                 }
                 Text("setup.whoServes").font(.headline).padding(.top, 4)
                 Button {

@@ -3,7 +3,7 @@ import AdvantlyWatchKit
 import Foundation
 
 /// Nur Debug-Build, für CI-Screenshots im Simulator. Startparameter:
-/// `-advantlyDemoStage <start|scoring|setend|matchend>` und optional `-advantlyDemo <sport>` (Default `tennis`;
+/// `-advantlyDemoStage <start|scoring|setend|matchend|display>` und optional `-advantlyDemo <sport>` (Default `tennis`;
 /// `padel`, `pickleball`, `badminton`, `table_tennis`).
 ///
 /// Die App baut den Zustand der Etappe direkt nach dem Start auf (offenes Match der Sportart, Punkte ohne Pause),
@@ -15,6 +15,8 @@ enum DemoRunner {
         case scoring
         case setend
         case matchend
+        /// Anzeige-Modus: ein anderes Gerät (Handy) zählt, die Uhr zeigt nur an
+        case display
     }
 
     static func runIfRequested(model: ScoringModel) {
@@ -42,7 +44,12 @@ enum DemoRunner {
     private static func run(stage: Stage, sport: String, model: ScoringModel) async {
         // definierter Ausgangspunkt: ein fortgesetztes Match aus der Anzeige nehmen (Log bleibt)
         model.closeMatch()
-        if stage != .start {
+        if stage == .display {
+            guard model.scoring.startDisplayDemo(presetId: sport + "_OPEN") != nil else {
+                mark("error", "display demo failed \(model.scoring.lastError())")
+                return
+            }
+        } else if stage != .start {
             let presetId = sport + "_OPEN"
             let doubles = sport == "PADEL" || sport == "PICKLEBALL"
             guard model.start(presetId: presetId, doubles: doubles, weServeFirst: true) else {
@@ -66,7 +73,7 @@ enum DemoRunner {
             if stage == .matchend {
                 model.decide(anotherSet: false, matchTiebreak: false)
             }
-            guard expected(stage, model.snapshot) else {
+            guard stage == .start || expected(stage, model.snapshot) else {
                 mark("error", "stage \(stage.rawValue) not reached after \(taps) taps")
                 return
             }
@@ -75,7 +82,7 @@ enum DemoRunner {
         try? await Task.sleep(nanoseconds: 3_500_000_000)
         let snap = model.snapshot
         let detail = snap.map { s in
-            "points=\(s.pointsA):\(s.pointsB) sets=\(ScoreText.sets(s)) hint=\(s.hintCode) status=\(s.status)"
+            "points=\(s.pointsA):\(s.pointsB) sets=\(ScoreText.sets(s)) hint=\(s.hintCode) status=\(s.status) scorer=\(s.isScorer)"
         } ?? "startlist"
         mark(stage.rawValue + " ready", detail)
     }
@@ -87,6 +94,7 @@ enum DemoRunner {
         case .scoring: return snap.status == "IN_PROGRESS"
         case .setend: return snap.pendingDecision
         case .matchend: return snap.matchFinished
+        case .display: return !snap.isScorer
         }
     }
 

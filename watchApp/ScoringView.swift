@@ -32,19 +32,25 @@ struct MatchPagerView: View {
 
 /// Scoring-Screen (04 §4.3): oben „Wir“ (Orange), unten „Gegner“ (Blau), Mittelband mit Undo, Stand und Hinweis-Pill.
 /// Tap auf eine Hälfte = Punkt (zählt beim Loslassen), Wischen nach unten = Undo, Krone ohne Funktion.
-/// Totzonen: oberste 12 % (Uhrzeit/Systemgesten) und das Mittelband zählen nie.
+/// Totzonen: oberste 12 % (Uhrzeit/Systemgesten, dort die Status-Zeile) und das Mittelband zählen nie.
+///
+/// **Anzeige** (ein anderes Gerät zählt, 04 §4.2 W3): gleiche Darstellung ohne Tap-Flächen, ohne Wisch-Undo und
+/// Undo-Button, deutlich „Anzeige · [Gerät] zählt“, „Stand vor X s“; nach > 30 s ohne Zähler das Angebot
+/// „Zählen übernehmen“ (mit Bestätigung).
 struct ScorePage: View {
     @ObservedObject var model: ScoringModel
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @Environment(\.isLuminanceReduced) private var dimmed
+    @State private var confirmTakeOver = false
 
     var body: some View {
         GeometryReader { geo in
             let height = geo.size.height
             VStack(spacing: 0) {
-                Color.clear
+                StatusStrip(snap: snap, dimmed: dimmed)
                     .frame(height: height * 0.12)
+                    .allowsHitTesting(false)
                 half(sideA: true)
                     .frame(height: height * 0.36)
                 MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
@@ -55,6 +61,8 @@ struct ScorePage: View {
             .overlay {
                 if let banner = model.banner, !dimmed {
                     BannerView(banner: banner)
+                } else if !snap.isScorer && !dimmed {
+                    TakeOverOffer(snap: snap) { confirmTakeOver = true }
                 }
             }
         }
@@ -66,29 +74,161 @@ struct ScorePage: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 30).onEnded { value in
                 let dy = value.translation.height
-                if !dimmed && dy > 40 && abs(value.translation.width) < dy {
+                if snap.isScorer && !dimmed && dy > 40 && abs(value.translation.width) < dy {
                     model.undo()
                 }
             }
         )
+        .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
     }
 
+    @ViewBuilder
     private func half(sideA: Bool) -> some View {
-        TeamHalf(
+        let team = TeamHalf(
             sideA: sideA,
             snap: snap,
             flash: model.flashSideA == sideA,
             dimmed: dimmed
         )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !dimmed { model.tap(sideA: sideA) }
+        if snap.isScorer {
+            team
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if !dimmed { model.tap(sideA: sideA) }
+                }
+                .allowsHitTesting(!dimmed)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(Text(LocalizedStringKey(sideA ? "a11y.pointUs" : "a11y.pointThem")))
+                .accessibilityAction { model.tap(sideA: sideA) }
+        } else {
+            // Anzeige: reine Darstellung, Stand als Text für VoiceOver
+            team
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.updatesFrequently)
         }
-        .allowsHitTesting(!dimmed)
+    }
+}
+
+/// Status-Zeile in der oberen Totzone (links, die Uhrzeit rechts bleibt frei).
+/// Zähler: „synchron“ / „N ausstehend“ / „nur lokal“. Anzeige: „ANZEIGE · [Gerät] zählt“.
+struct StatusStrip: View {
+    let snap: WatchScoreSnapshot
+    let dimmed: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if snap.isScorer {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .bold))
+                Text(scorerText)
+            } else {
+                Text(loc("role.display.short %@", RoleText.device(snap.scorerKind)))
+                    .textCase(.uppercase)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .foregroundStyle(color.opacity(dimmed ? 0.65 : 1))
+        .padding(.leading, 12)
+        .padding(.trailing, 64) // Systemuhrzeit
+        .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(Text(LocalizedStringKey(sideA ? "a11y.pointUs" : "a11y.pointThem")))
-        .accessibilityAction { model.tap(sideA: sideA) }
+    }
+
+    private var scorerText: String {
+        if !snap.linkConnected {
+            return snap.pendingToPeers > 0 ? loc("sync.localPending %@", String(snap.pendingToPeers)) : loc("sync.local")
+        }
+        return snap.pendingToPeers > 0 ? loc("sync.pending %@", String(snap.pendingToPeers)) : loc("sync.synced")
+    }
+
+    private var icon: String {
+        if !snap.linkConnected { return "iphone.slash" }
+        return snap.pendingToPeers > 0 ? "arrow.up.circle" : "checkmark.circle"
+    }
+
+    private var color: Color {
+        if snap.isScorer {
+            return snap.linkConnected && snap.pendingToPeers == 0 ? Brand.text2 : Brand.hint
+        }
+        return Color.white
+    }
+}
+
+/// Anzeige: „Stand vor X s“ seit dem letzten empfangenen Event; Always-on höchstens minütlich.
+struct StalenessLabel: View {
+    let snap: WatchScoreSnapshot
+    let dimmed: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: dimmed ? 60 : 1)) { context in
+            Text(RoleText.staleness(snap, now: context.date))
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(snap.scorerConnected ? Brand.text2 : Brand.hint)
+        }
+    }
+}
+
+/// Angebot „Zählen übernehmen“, sobald der Zähler > 30 s nicht erreichbar ist (04 §3.2).
+struct TakeOverOffer: View {
+    let snap: WatchScoreSnapshot
+    let onTap: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if RoleText.offerTakeOver(snap, now: context.date) {
+                Button(action: onTap) {
+                    Label("action.takeOver", systemImage: "hand.raised.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Brand.us))
+                        .foregroundStyle(Color.black)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// Texte zur Rolle (Gerätart des Zählers, Staleness, Übernahme-Angebot).
+enum RoleText {
+    /// Schwelle für das Übernahme-Angebot (04 §3.2, PLAN F15 offen)
+    static let offerAfterSeconds: Double = 30
+
+    static func device(_ kind: String) -> String {
+        loc("role.kind." + (kind.isEmpty ? "OTHER" : kind))
+    }
+
+    static func staleness(_ s: WatchScoreSnapshot, now: Date) -> String {
+        let last = max(s.lastEventReceivedAtMs, s.lastSyncAtMs)
+        guard last > 0 else { return loc(s.scorerConnected ? "sync.connected" : "sync.noData") }
+        let seconds = max(0, Int(now.timeIntervalSince1970 - Double(last) / 1000))
+        if s.scorerConnected && seconds < 5 { return loc("sync.live") }
+        return seconds < 120 ? loc("sync.ageSeconds %@", String(seconds)) : loc("sync.ageMinutes %@", String(seconds / 60))
+    }
+
+    static func offerTakeOver(_ s: WatchScoreSnapshot, now: Date) -> Bool {
+        guard !s.isScorer, !s.matchFinished, s.scorerDisconnectedSinceMs > 0 else { return false }
+        return now.timeIntervalSince1970 - Double(s.scorerDisconnectedSinceMs) / 1000 > offerAfterSeconds
+    }
+}
+
+extension View {
+    /// Bestätigung „Zählen übernehmen“ (04 §3.2): „Auf dieser Uhr zählen? Bisher zählt [Gerät] …“.
+    func takeOverConfirmation(isPresented: Binding<Bool>, snap: WatchScoreSnapshot, model: ScoringModel) -> some View {
+        alert(Text("takeOver.title"), isPresented: isPresented) {
+            Button("takeOver.confirm") { model.takeOverScoring() }
+            Button("common.cancel", role: .cancel) {}
+        } message: {
+            Text(loc("takeOver.message %@", RoleText.device(snap.scorerKind)))
+        }
     }
 }
 
@@ -223,15 +363,19 @@ struct MiddleBand: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(action: model.undo) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(Color.white.opacity(dimmed ? 0 : 0.16)))
+            if snap.isScorer {
+                Button(action: model.undo) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(dimmed ? 0 : 0.16)))
+                }
+                .buttonStyle(.plain)
+                .disabled(!snap.canUndo || dimmed)
+                .accessibilityLabel(Text("action.undo"))
+            } else {
+                StalenessLabel(snap: snap, dimmed: dimmed)
             }
-            .buttonStyle(.plain)
-            .disabled(!snap.canUndo || dimmed)
-            .accessibilityLabel(Text("action.undo"))
             summary
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .monospacedDigit()
@@ -334,36 +478,30 @@ struct BannerView: View {
         case .receiveOrderSwapped: return loc("banner.receiveOrder")
         case .healthUnavailable: return loc("banner.health")
         case .storeError: return loc("banner.storeError")
+        case let .rejectedInputs(count): return loc("banner.rejectedInputs %@", String(count))
+        case let .roleChanged(scorer): return loc(scorer ? "banner.nowScorer" : "banner.nowDisplay")
         }
     }
 }
 
-/// W4 Steuerung: Rückgängig, Wassersperre, Belegung der Action-Taste, Match beenden (mit Rückfrage).
+/// W4 Steuerung. Zähler: Rückgängig, Pause, Wassersperre, Action-Taste, Match beenden (mit Rückfrage).
+/// Anzeige (04 §2.2): Rolleninfo und „Zählen übernehmen“ (mit Bestätigung) statt der Zähl-Steuerung.
+/// Beide: Wassersperre und „Workout auf meiner Uhr“ (unabhängig von der Rolle).
 struct ControlsPage: View {
     @ObservedObject var model: ScoringModel
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @State private var confirmEnd = false
+    @State private var confirmTakeOver = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
-                Button(action: model.undo) {
-                    Label("action.undo", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
+                if snap.isScorer {
+                    scorerControls
+                } else {
+                    displayControls
                 }
-                .disabled(!snap.canUndo)
-                // Unterbrechung (Regen, Verletzung) – pausiert auch das Workout; Seitenwechsel ist keine Pause
-                Button {
-                    if snap.paused { model.resumeMatch() } else { model.pauseMatch() }
-                } label: {
-                    Label(
-                        LocalizedStringKey(snap.paused ? "controls.resume" : "controls.pause"),
-                        systemImage: snap.paused ? "play.fill" : "pause.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .disabled(!snap.paused && snap.status != "IN_PROGRESS")
                 // Echte Water Lock nur während des Workouts (05 §1.7); entsperren über die Krone
                 Button {
                     WKInterfaceDevice.current().enableWaterLock()
@@ -372,22 +510,9 @@ struct ControlsPage: View {
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(workout.state != .running && workout.state != .paused)
-                Button {
-                    model.actionButtonMode = model.actionButtonMode.next
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("controls.actionButton")
-                        Text(LocalizedStringKey("controls.actionButton." + model.actionButtonMode.rawValue))
-                            .font(.footnote)
-                            .foregroundStyle(Brand.hint)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Button(role: .destructive) {
-                    confirmEnd = true
-                } label: {
-                    Label("controls.end", systemImage: "xmark")
-                        .frame(maxWidth: .infinity)
+                Toggle(isOn: $model.workoutAlongside) {
+                    Text("controls.workoutAlongside")
+                        .font(.footnote)
                 }
             }
         }
@@ -395,6 +520,65 @@ struct ControlsPage: View {
             Button("controls.end", role: .destructive) { model.endMatch() }
             Button("common.cancel", role: .cancel) {}
         }
+        .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
+    }
+
+    @ViewBuilder
+    private var scorerControls: some View {
+        Button(action: model.undo) {
+            Label("action.undo", systemImage: "arrow.uturn.backward")
+                .frame(maxWidth: .infinity)
+        }
+        .disabled(!snap.canUndo)
+        // Unterbrechung (Regen, Verletzung) – pausiert auch das Workout; Seitenwechsel ist keine Pause
+        Button {
+            if snap.paused { model.resumeMatch() } else { model.pauseMatch() }
+        } label: {
+            Label(
+                LocalizedStringKey(snap.paused ? "controls.resume" : "controls.pause"),
+                systemImage: snap.paused ? "play.fill" : "pause.fill"
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .disabled(!snap.paused && snap.status != "IN_PROGRESS")
+        Button {
+            model.actionButtonMode = model.actionButtonMode.next
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("controls.actionButton")
+                Text(LocalizedStringKey("controls.actionButton." + model.actionButtonMode.rawValue))
+                    .font(.footnote)
+                    .foregroundStyle(Brand.hint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        Button(role: .destructive) {
+            confirmEnd = true
+        } label: {
+            Label("controls.end", systemImage: "xmark")
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var displayControls: some View {
+        VStack(spacing: 2) {
+            Text("role.display")
+                .font(.headline)
+                .textCase(.uppercase)
+            Text(loc("role.scorer %@", RoleText.device(snap.scorerKind)))
+                .font(.footnote)
+                .foregroundStyle(Brand.text2)
+            StalenessLabel(snap: snap, dimmed: false)
+        }
+        .multilineTextAlignment(.center)
+        Button {
+            confirmTakeOver = true
+        } label: {
+            Label("action.takeOver", systemImage: "hand.raised.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .disabled(snap.matchFinished)
     }
 }
 

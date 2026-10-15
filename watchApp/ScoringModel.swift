@@ -30,10 +30,15 @@ enum Banner: Equatable {
     case healthUnavailable
     /// Event nicht gespeichert (SQLite-Fehler) – Zustand unverändert, nochmal tippen
     case storeError
+    /// Die Engine hat Eingaben eines Nicht-Zählers verworfen (nach einer Übergabe)
+    case rejectedInputs(Int)
+    /// Rolle gewechselt: diese Uhr zählt jetzt (`true`) bzw. zeigt nur noch an
+    case roleChanged(scorer: Bool)
 }
 
-/// Zustand der Watch-App. Alle Zähl-Logik liegt in Kotlin (`WatchScoring`); Swift übernimmt nur Gesten,
-/// Sperrzeit, Haptik, Workout-Session und Anzeige. Alles läuft auf der Main-Queue.
+/// Zustand der Watch-App. Alle Zähl-Logik liegt in Kotlin (`WatchScoring` über die Match-Session); Swift übernimmt
+/// Gesten, Sperrzeit, Haptik, Workout-Session und Anzeige. Single-Scorer: Zählt ein anderes Gerät, ist die Uhr
+/// Anzeige (keine Zähl-/Undo-Aktionen, auch nicht über die Action-Taste). Alles läuft auf der Main-Queue.
 final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     static let shared = ScoringModel()
 
@@ -60,6 +65,19 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// die Screenshots verdeckt.
     var workoutEnabled = true
 
+    /// „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Standard an) – unabhängig von der Rolle Zähler/Anzeige.
+    @Published var workoutAlongside = UserDefaults.standard.object(forKey: ScoringModel.workoutKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(workoutAlongside, forKey: Self.workoutKey)
+            syncWorkout()
+        }
+    }
+
+    static let workoutKey = "advantly.watch.workoutAlongside"
+
+    /// Datenbank nicht lesbar (z. B. Schema aus der Zeit vor der Match-Session) → Hinweis auf der Startliste.
+    @Published private(set) var storeUnavailable = false
+
     private var bannerWork: DispatchWorkItem?
     /// Nach dem Aufwecken (Always-on → aktiv) zählen Taps 300 ms lang still nicht (04 §4.3.3 Punkt 4).
     private var silentUntil = Date.distantPast
@@ -80,16 +98,31 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     // MARK: WatchScoringListener
 
-    func onSnapshot(snapshot: WatchScoreSnapshot) {
+    /// Jeder neue Zustand – auch durch das iPhone (Anzeige, Übergabe, Abgleich); `nil` = kein Match offen.
+    func onSnapshot(snapshot: WatchScoreSnapshot?) {
+        let before = self.snapshot
         self.snapshot = snapshot
-        syncWorkout()
+        if let snapshot, let before, before.matchId == snapshot.matchId {
+            if before.isScorer != snapshot.isScorer {
+                show(.roleChanged(scorer: snapshot.isScorer))
+                Haptics.play(snapshot.isScorer ? .success : .directionDown)
+            } else if snapshot.rejectedByRoleCount > before.rejectedByRoleCount {
+                show(.rejectedInputs(Int(snapshot.rejectedByRoleCount)))
+                Haptics.play(.notification)
+            }
+        }
+        if snapshot == nil {
+            workout.end()
+        } else {
+            syncWorkout()
+        }
     }
 
     /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist
     /// pausiert, solange das Match unterbrochen ist.
     private func syncWorkout() {
         guard let snap = snapshot else { return }
-        if snap.matchFinished || !workoutEnabled {
+        if snap.matchFinished || !workoutEnabled || !workoutAlongside {
             workout.end()
         } else {
             workout.ensureRunning(
@@ -127,9 +160,24 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     /// Nach App-Start: laufendes Match aus dem Event-Log fortsetzen.
     func resumeIfNeeded() {
+        storeUnavailable = !scoring.isAvailable()
         if snapshot == nil, scoring.restore() == nil, !scoring.lastError().isEmpty {
             print("ADVANTLY_STORE restore=\(scoring.lastError())")
         }
+    }
+
+    /// App wieder im Vordergrund: sofort mit dem iPhone abgleichen.
+    func syncNow() {
+        scoring.syncNow()
+    }
+
+    /// „Zählen übernehmen“ – erst nach Bestätigung in der UI aufrufen (04 §3.2).
+    func takeOverScoring() {
+        guard scoring.takeOverScoring() != nil else {
+            rejected()
+            return
+        }
+        lockedUntil = .distantPast
     }
 
     var sports: [String] { scoring.sports() }
@@ -180,7 +228,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     /// Tap auf eine Hälfte. `force` umgeht die Sperrzeit (nur Demo-Modus).
     func tap(sideA: Bool, force: Bool = false) {
-        guard let before = snapshot, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
+        guard let before = snapshot, before.isScorer, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
         let now = Date()
         if !force && now < silentUntil { return }
         if !force && now < lockedUntil {
@@ -268,6 +316,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// Einziger Einstieg für die Action-Taste: welcher Intent auch gespendet war, es gilt die aktuelle Einstellung
     /// („Aus“ = nichts tun).
     func handleActionButton() {
+        // Anzeige: keine Zähl-/Undo-Aktion über Hardware (04 §4.2 Rollengrenze)
+        guard snapshot?.isScorer == true else { return }
         switch actionButtonMode {
         case .undo: undo()
         case .pointUs: tap(sideA: true)
@@ -276,7 +326,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func donateActionIntent() {
-        guard snapshot != nil, actionButtonMode != .off else { return }
+        guard snapshot?.isScorer == true, actionButtonMode != .off else { return }
         ActionIntents.donate(actionButtonMode)
     }
 

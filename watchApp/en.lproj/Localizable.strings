@@ -414,3 +414,78 @@
 
 /* Schnellstart-Fehler: keine Workout-Session (HealthKit) */
 "intent.error.workout" = "Match started, but without a workout session – check Health access.";
+
+/* Rolle: Anzeige (Status-Zeile oben, Gerät des Zählers) */
+"role.display.short %@" = "Display · %@ scores";
+
+/* Rolle: Anzeige (Steuerseite) */
+"role.display" = "Display";
+
+/* Rolle: wer zählt */
+"role.scorer %@" = "%@ is scoring";
+
+/* Gerätart des Zählers */
+"role.kind.PHONE" = "iPhone";
+
+/* Gerätart des Zählers */
+"role.kind.WATCH" = "Watch";
+
+/* Gerätart des Zählers (unbekannt) */
+"role.kind.OTHER" = "Other device";
+
+/* Sync-Status am Zähler: alles bestätigt */
+"sync.synced" = "Synced";
+
+/* Sync-Status am Zähler: unbestätigte Events */
+"sync.pending %@" = "%@ pending";
+
+/* Sync-Status am Zähler ohne Verbindung */
+"sync.local" = "Scorer · local only";
+
+/* Sync-Status am Zähler ohne Verbindung mit Rückstand */
+"sync.localPending %@" = "Local only · %@ pending";
+
+/* Anzeige: verbunden, noch kein Event empfangen */
+"sync.connected" = "Connected";
+
+/* Anzeige: noch nie ein Stand empfangen */
+"sync.noData" = "No update yet";
+
+/* Anzeige: Stand ist frisch */
+"sync.live" = "Live";
+
+/* Anzeige: Alter des Stands in Sekunden */
+"sync.ageSeconds %@" = "As of %@ s ago";
+
+/* Anzeige: Alter des Stands in Minuten */
+"sync.ageMinutes %@" = "As of %@ min ago";
+
+/* Zählen übernehmen (Uhr-Kurzform, Glossar action.take_over) */
+"action.takeOver" = "Take over";
+
+/* Bestätigung Übergabe: Titel */
+"takeOver.title" = "Score on this watch?";
+
+/* Bestätigung Übergabe: bisheriger Zähler */
+"takeOver.message %@" = "%@ is scoring now. Afterwards it will only display.";
+
+/* Bestätigung Übergabe: Aktion */
+"takeOver.confirm" = "Take over";
+
+/* Hinweis: Eingaben eines Nicht-Zählers verworfen */
+"banner.rejectedInputs %@" = "%@ inputs not applied";
+
+/* Hinweis: Rolle gewechselt – Uhr zählt */
+"banner.nowScorer" = "This watch is scoring now";
+
+/* Hinweis: Rolle gewechselt – Uhr zeigt an */
+"banner.nowDisplay" = "Display only – another device is scoring";
+
+/* Satzende-Dialog als Anzeige */
+"setend.decidedBy %@" = "%@ decides";
+
+/* Option: eigene Workout-Session unabhängig von der Rolle (Standard an) */
+"controls.workoutAlongside" = "Workout on my watch";
+
+/* Startliste: Datenbank nicht lesbar (Dev-Daten-Reset) */
+"start.storeUnavailable" = "Storage unreadable (old test data?). Please reinstall the watch app.";

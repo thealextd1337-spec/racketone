@@ -5,10 +5,15 @@ import WatchKit
 @main
 struct AdvantlyWatchApp: App {
     @WKApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // wieder im Vordergrund: sofort mit dem iPhone abgleichen (Anzeige: frischer Stand)
+            if phase == .active { ScoringModel.shared.syncNow() }
         }
     }
 }

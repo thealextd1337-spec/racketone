@@ -3,6 +3,7 @@ import SwiftUI
 
 /// W6 Satzende-Dialog (Modus OPEN, 04 §3.3): „Noch ein Satz?“ – Ja primär, Nein sekundär, kein Countdown.
 /// Bleibt stehen, bis jemand antwortet (Workout läuft weiter). Undo nimmt den Satzball zurück.
+/// Nur der Zähler entscheidet; als Anzeige zeigt die Uhr Satzergebnis und „[Gerät] entscheidet“ (04 §3.3).
 struct SetEndView: View {
     @ObservedObject var model: ScoringModel
     let snap: WatchScoreSnapshot
@@ -21,35 +22,48 @@ struct SetEndView: View {
                 Text("setend.question")
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Button {
-                    model.decide(anotherSet: true, matchTiebreak: false)
-                } label: {
-                    Text("setend.yes").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Brand.us)
-                .accessibilityIdentifier("setend.yes")
-                if snap.offerMatchTiebreak {
-                    Button {
-                        model.decide(anotherSet: true, matchTiebreak: true)
-                    } label: {
-                        Text("setend.matchTiebreak").frame(maxWidth: .infinity)
-                    }
-                }
-                Button {
-                    model.decide(anotherSet: false, matchTiebreak: false)
-                } label: {
-                    Text("setend.no").frame(maxWidth: .infinity)
-                }
-                Button(action: model.undo) {
-                    Label("action.undo", systemImage: "arrow.uturn.backward")
+                if snap.isScorer {
+                    decisionButtons
+                } else {
+                    Text(loc("setend.decidedBy %@", RoleText.device(snap.scorerKind)))
                         .font(.footnote)
+                        .foregroundStyle(Brand.text2)
+                        .multilineTextAlignment(.center)
+                    StalenessLabel(snap: snap, dimmed: false)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Brand.text2)
-                .padding(.top, 4)
             }
         }
+    }
+
+    @ViewBuilder
+    private var decisionButtons: some View {
+        Button {
+            model.decide(anotherSet: true, matchTiebreak: false)
+        } label: {
+            Text("setend.yes").frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Brand.us)
+        .accessibilityIdentifier("setend.yes")
+        if snap.offerMatchTiebreak {
+            Button {
+                model.decide(anotherSet: true, matchTiebreak: true)
+            } label: {
+                Text("setend.matchTiebreak").frame(maxWidth: .infinity)
+            }
+        }
+        Button {
+            model.decide(anotherSet: false, matchTiebreak: false)
+        } label: {
+            Text("setend.no").frame(maxWidth: .infinity)
+        }
+        Button(action: model.undo) {
+            Label("action.undo", systemImage: "arrow.uturn.backward")
+                .font(.footnote)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Brand.text2)
+        .padding(.top, 4)
     }
 
     private var lastSetScore: String {
@@ -85,12 +99,14 @@ struct MatchEndView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Brand.us)
-                Button(action: model.undo) {
-                    Label("action.undo", systemImage: "arrow.uturn.backward")
-                        .font(.footnote)
+                if snap.isScorer {
+                    Button(action: model.undo) {
+                        Label("action.undo", systemImage: "arrow.uturn.backward")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Brand.text2)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Brand.text2)
             }
         }
     }
