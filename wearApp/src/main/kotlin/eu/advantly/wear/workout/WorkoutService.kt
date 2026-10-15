@@ -43,6 +43,8 @@ import eu.advantly.wear.diagnostics.HeartRateGapDetector
 import eu.advantly.wear.diagnostics.PeriodicTrigger
 import eu.advantly.wear.scoring.ScoreRepository
 import eu.advantly.wear.scoring.SpikeScore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,19 +61,31 @@ import kotlin.math.roundToInt
  * Hält die Zähl-App während des Matches am Leben – auch bei Display aus / Handgelenk unten – und schreibt das
  * Feldtest-Log (Spike S5): Lebenszyklus, Puls-Samples, Lücken > 10 s, Akku alle 5 min, Display an/aus.
  *
- * Start/Stop über [start]/[stop]. Wird der Prozess vom System beendet und der Service neu gestartet (`START_STICKY`,
- * Intent `null`) oder öffnet der Nutzer die App nach einem Kill, wird die laufende Exercise wieder übernommen.
+ * Robustheit:
+ * - Eine **fremde** Exercise wird nie stillschweigend ersetzt ([ExerciseOwnership]); die UI fragt nach ([WorkoutPhase.CONFLICT]).
+ * - Abfragen (Capabilities, Exercise-Status) laufen mit begrenzten Wiederholungen; danach bedienbarer Fehlerzustand
+ *   ([WorkoutPhase.FAILED] + „Erneut versuchen“) statt Absturz. Unerwartete Exceptions fängt ein Handler ab.
+ * - Der Update-Callback gilt erst nach `onRegistered()` als angemeldet; bei Fehlschlag wird neu angemeldet.
+ * - Beim Beenden wird das Ende bestätigt; scheitert es, bleiben Callback, FGS und Recovery-Marker erhalten.
+ * - Fehlen Puls- und Aktivitätsrecht, startet kein Health-FGS (Rückfall [CountOnlySession] in der Activity).
  */
 class WorkoutService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val exceptionHandler =
+        CoroutineExceptionHandler { _, e ->
+            DiagnosticLog.log("COROUTINE_ERROR", "error" to e.javaClass.simpleName, "message" to e.message)
+            WorkoutStateHolder.fail(WorkoutError.INTERNAL, e.message ?: e.javaClass.simpleName)
+        }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
     private lateinit var exerciseClient: ExerciseClient
     private lateinit var store: SessionStore
 
-    private var notificationBuilder: NotificationCompat.Builder? = null
     private var ongoingActivity: OngoingActivity? = null
     private var foregroundStarted = false
-    private var callbackRegistered = false
+    private var callbackRequested = false
+    private var callbackConfirmed = false
+    private var callbackAttempts = 0
     private var sessionJob: Job? = null
+    private var stopJob: Job? = null
     private var tickerJob: Job? = null
     private var scoreJob: Job? = null
 
@@ -132,11 +146,16 @@ class WorkoutService : Service() {
                 stopSession()
             }
 
+            ACTION_REPLACE_OTHER -> {
+                replaceOtherExercise()
+            }
+
             else -> {
                 recoverSession()
             }
         }
-        return START_STICKY
+        // Nur mit aktiver Session vom System neu starten lassen, sonst keine Neustart-Schleife.
+        return if (store.sessionActive) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -144,107 +163,220 @@ class WorkoutService : Service() {
     // ---------------------------------------------------------------- Session
 
     private fun startSession(sport: SpikeSport) {
-        if (sessionJob?.isActive == true || WorkoutStateHolder.state.value.phase == WorkoutPhase.ACTIVE) {
-            DiagnosticLog.log("SESSION_START_IGNORED", "reason" to "already_running")
+        val phase = WorkoutStateHolder.state.value.phase
+        if (sessionJob?.isActive == true || phase == WorkoutPhase.ACTIVE || phase == WorkoutPhase.CONFLICT) {
+            DiagnosticLog.log("SESSION_START_IGNORED", "reason" to "already_running", "phase" to phase)
+            return
+        }
+        val permissions = Permissions.current(this)
+        if (!permissions.canRunHealthService) {
+            // Sollte nicht vorkommen (Activity wählt dann CountOnlySession) – ohne Rechte kein Health-FGS.
+            DiagnosticLog.log("FOREGROUND_SKIPPED_NO_PERMISSION")
+            WorkoutStateHolder.fail(WorkoutError.PERMISSIONS)
+            stopSelf()
             return
         }
         val sessionId = "s5-${System.currentTimeMillis()}"
         store.sessionId = sessionId
         store.sport = sport
+        store.countOnly = false
         store.sessionActive = true
         ScoreRepository.reset()
         resetCounters()
-        DiagnosticLog.log("SESSION_START", "sessionId" to sessionId, "sport" to sport)
+        DiagnosticLog.log("SESSION_START", "sessionId" to sessionId, "sport" to sport, "mode" to "workout")
+        logPermissions(permissions)
         WorkoutStateHolder.update { WorkoutUiState(phase = WorkoutPhase.STARTING) }
         if (!startForegroundWithOngoingActivity()) return
-        sessionJob = scope.launch { startExercise(sport) }
+        sessionJob = scope.launch { beginExercise(sport, userConfirmedReplace = false) }
+    }
+
+    /** Nutzer hat bestätigt, ein fremdes Training durch dieses Match zu ersetzen. */
+    private fun replaceOtherExercise() {
+        if (!store.sessionActive) return
+        DiagnosticLog.log("EXERCISE_REPLACE_CONFIRMED")
+        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.STARTING, error = null, errorDetail = null) }
+        if (!startForegroundWithOngoingActivity()) return
+        sessionJob?.cancel()
+        sessionJob = scope.launch { beginExercise(store.sport, userConfirmedReplace = true) }
     }
 
     private fun recoverSession() {
-        if (!store.sessionActive) {
-            DiagnosticLog.log("SERVICE_RECOVER_SKIPPED", "reason" to "no_active_session")
+        if (!store.sessionActive || store.countOnly) {
+            DiagnosticLog.log("SERVICE_RECOVER_SKIPPED", "reason" to if (store.countOnly) "count_only" else "no_active_session")
             if (!foregroundStarted) stopSelf()
             return
         }
-        if (foregroundStarted && callbackRegistered) return
+        val phase = WorkoutStateHolder.state.value.phase
+        if (phase == WorkoutPhase.ACTIVE && callbackConfirmed) return
+        if (sessionJob?.isActive == true || stopJob?.isActive == true) return
+        if (phase == WorkoutPhase.FAILED && WorkoutStateHolder.state.value.error == WorkoutError.END) {
+            // Beenden war fehlgeschlagen – „Erneut versuchen“ heißt hier: erneut beenden.
+            stopSession()
+            return
+        }
         DiagnosticLog.log("SESSION_RECOVER", "sessionId" to store.sessionId, "sport" to store.sport)
-        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.STARTING) }
+        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.STARTING, error = null, errorDetail = null) }
         if (!startForegroundWithOngoingActivity()) return
         sessionJob =
             scope.launch {
-                val info = runCatching { exerciseClient.getCurrentExerciseInfo() }.getOrNull()
-                DiagnosticLog.log("EXERCISE_INFO", "trackedStatus" to info?.exerciseTrackedStatus?.let(::trackedStatusName))
-                if (info?.exerciseTrackedStatus == TRACKED_OWNED_EXERCISE_IN_PROGRESS) {
-                    // Exercise lief in Health Services weiter – nur Callback neu anmelden.
-                    val caps = CapabilitiesRepository.load(this@WorkoutService)
-                    val selection = ExerciseTypeSelector.select(store.sport, caps)
-                    registerCallback()
-                    WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = selection) }
-                    DiagnosticLog.log("EXERCISE_REATTACHED")
-                    startTicker()
-                } else {
-                    DiagnosticLog.log("EXERCISE_RESTART_AFTER_KILL")
-                    startExercise(store.sport)
+                val status = queryTrackedStatus(retries = RETRY_DELAYS_MILLIS.size)
+                DiagnosticLog.log("EXERCISE_INFO", "trackedStatus" to status)
+                when (ExerciseOwnership.onRecover(status)) {
+                    RecoveryAction.REATTACH -> {
+                        // Exercise lief in Health Services weiter – nur Callback neu anmelden.
+                        val caps = loadCapabilities()
+                        val selection = caps?.let { ExerciseTypeSelector.select(store.sport, it, Permissions.current(this@WorkoutService)) }
+                        registerCallback()
+                        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = selection) }
+                        DiagnosticLog.log("EXERCISE_REATTACHED")
+                        startTicker()
+                    }
+
+                    RecoveryAction.RESTART -> {
+                        DiagnosticLog.log("EXERCISE_RESTART_AFTER_KILL")
+                        beginExercise(store.sport, userConfirmedReplace = false)
+                    }
+
+                    RecoveryAction.ASK_USER -> {
+                        enterConflict()
+                    }
+
+                    RecoveryAction.RETRY_OR_FAIL -> {
+                        DiagnosticLog.log("EXERCISE_INFO_FAILED", "context" to "recover")
+                        WorkoutStateHolder.fail(WorkoutError.STATUS_QUERY)
+                    }
                 }
             }
     }
 
-    private suspend fun startExercise(sport: SpikeSport) {
-        try {
-            val caps = CapabilitiesRepository.load(this)
-            val selection = ExerciseTypeSelector.select(sport, caps)
-            if (selection == null) {
-                DiagnosticLog.log("EXERCISE_UNSUPPORTED", "sport" to sport)
-                WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = null) }
-                startTicker()
+    private suspend fun beginExercise(
+        sport: SpikeSport,
+        userConfirmedReplace: Boolean,
+    ) {
+        val caps =
+            loadCapabilities() ?: run {
+                WorkoutStateHolder.fail(WorkoutError.CAPABILITIES)
                 return
             }
-            val info = runCatching { exerciseClient.getCurrentExerciseInfo() }.getOrNull()
-            if (info?.exerciseTrackedStatus == TRACKED_OTHER_APP_IN_PROGRESS) {
-                // Wir übernehmen; die andere App (z. B. Fitbit/Samsung Health) beendet dann ihr Training.
-                DiagnosticLog.log("EXERCISE_OTHER_APP_IN_PROGRESS")
-            }
-            val config =
-                ExerciseConfig
-                    .Builder(HealthServicesMapping.exerciseType(selection.type))
-                    .setDataTypes(selection.metrics.map(HealthServicesMapping::dataType).toSet())
-                    .setIsAutoPauseAndResumeEnabled(false)
-                    .setIsGpsEnabled(false) // kein GPS (05 §2.1, größter Akkuhebel)
-                    .build()
-            registerCallback()
-            DiagnosticLog.log(
-                "EXERCISE_START_REQUESTED",
-                "sport" to sport,
-                "type" to selection.type,
-                "fallback" to selection.isFallback,
-                "metrics" to selection.metrics.joinToString(","),
-            )
-            exerciseClient.startExercise(config)
-            DiagnosticLog.log("EXERCISE_START_OK")
-            WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = selection) }
+        val permissions = Permissions.current(this)
+        val selection = ExerciseTypeSelector.select(sport, caps, permissions)
+        if (selection == null) {
+            DiagnosticLog.log("EXERCISE_UNSUPPORTED", "sport" to sport)
+            WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = null) }
             startTicker()
+            return
+        }
+        val status = queryTrackedStatus(retries = RETRY_DELAYS_MILLIS.size)
+        DiagnosticLog.log("EXERCISE_INFO", "trackedStatus" to status, "context" to "start")
+        when (ExerciseOwnership.onStart(status, userConfirmedReplace)) {
+            StartAction.ASK_USER -> {
+                enterConflict()
+                return
+            }
+
+            StartAction.RETRY_OR_FAIL -> {
+                WorkoutStateHolder.fail(WorkoutError.STATUS_QUERY)
+                return
+            }
+
+            StartAction.START -> {
+                Unit
+            }
+        }
+        val config =
+            ExerciseConfig
+                .Builder(HealthServicesMapping.exerciseType(selection.type))
+                .setDataTypes(selection.metrics.map(HealthServicesMapping::dataType).toSet())
+                .setIsAutoPauseAndResumeEnabled(false)
+                .setIsGpsEnabled(false) // kein GPS (05 §2.1, größter Akkuhebel)
+                .build()
+        registerCallback()
+        DiagnosticLog.log(
+            "EXERCISE_START_REQUESTED",
+            "sport" to sport,
+            "type" to selection.type,
+            "fallback" to selection.isFallback,
+            "metrics" to selection.metrics.joinToString(","),
+            "replacedOtherApp" to (status == TrackedStatus.OTHER_APP),
+        )
+        try {
+            exerciseClient.startExercise(config)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             DiagnosticLog.log("EXERCISE_START_FAILED", "error" to e.javaClass.simpleName, "message" to e.message)
-            WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.FAILED, errorMessage = e.message ?: e.javaClass.simpleName) }
+            WorkoutStateHolder.fail(WorkoutError.START, e.message ?: e.javaClass.simpleName)
+            return
         }
+        DiagnosticLog.log("EXERCISE_START_OK")
+        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = selection, error = null, errorDetail = null) }
+        startTicker()
+    }
+
+    private fun enterConflict() {
+        DiagnosticLog.log("EXERCISE_CONFLICT_OTHER_APP")
+        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.CONFLICT) }
     }
 
     private fun stopSession() {
+        if (stopJob?.isActive == true) return
         DiagnosticLog.log("SESSION_STOP_REQUESTED", "sessionId" to store.sessionId)
-        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ENDING) }
+        WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ENDING, error = null, errorDetail = null) }
         sessionJob?.cancel()
-        scope.launch {
-            runCatching { exerciseClient.endExercise() }
-                .onFailure { DiagnosticLog.log("EXERCISE_END_FAILED", "error" to it.javaClass.simpleName, "message" to it.message) }
-            unregisterCallback()
-            logStatus("SESSION_END")
-            store.sessionActive = false
-            tickerJob?.cancel()
-            WorkoutStateHolder.reset()
-            ServiceCompat.stopForeground(this@WorkoutService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            foregroundStarted = false
-            stopSelf()
+        stopJob =
+            scope.launch {
+                if (!endExerciseConfirmed()) {
+                    // Zustand halten: Callback, FGS und Recovery-Marker bleiben, Nutzer kann erneut beenden.
+                    DiagnosticLog.log("SESSION_END_FAILED", "sessionId" to store.sessionId)
+                    WorkoutStateHolder.fail(WorkoutError.END)
+                    return@launch
+                }
+                unregisterCallback()
+                logStatus("SESSION_END")
+                store.sessionActive = false
+                tickerJob?.cancel()
+                WorkoutStateHolder.reset()
+                ServiceCompat.stopForeground(this@WorkoutService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                foregroundStarted = false
+                stopSelf()
+            }
+    }
+
+    /**
+     * Beendet die **eigene** Exercise und bestätigt das Ende per Statusabfrage. Eine fremde Exercise bleibt unangetastet.
+     * Liefert `false`, wenn nach allen Versuchen weiterhin eine eigene Exercise läuft oder der Status unklar ist.
+     */
+    private suspend fun endExerciseConfirmed(): Boolean {
+        repeat(END_ATTEMPTS) { attempt ->
+            val before = queryTrackedStatus(retries = 0)
+            if (ExerciseOwnership.isEndConfirmed(before)) {
+                DiagnosticLog.log("EXERCISE_END_CONFIRMED", "status" to before, "attempt" to attempt)
+                return true
+            }
+            if (ExerciseOwnership.needsEnd(before)) {
+                try {
+                    exerciseClient.endExercise()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DiagnosticLog.log(
+                        "EXERCISE_END_FAILED",
+                        "attempt" to attempt,
+                        "error" to e.javaClass.simpleName,
+                        "message" to e.message,
+                    )
+                }
+            }
+            repeat(END_CONFIRM_POLLS) {
+                delay(END_CONFIRM_POLL_MILLIS)
+                val after = queryTrackedStatus(retries = 0)
+                if (ExerciseOwnership.isEndConfirmed(after)) {
+                    DiagnosticLog.log("EXERCISE_END_CONFIRMED", "status" to after, "attempt" to attempt)
+                    return true
+                }
+            }
         }
+        return false
     }
 
     private fun resetCounters() {
@@ -255,6 +387,53 @@ class WorkoutService : Service() {
         stepsTotal = 0
         updateCount = 0
         statsSummary = null
+    }
+
+    private fun logPermissions(permissions: WorkoutPermissions) {
+        DiagnosticLog.log(
+            "PERMISSIONS",
+            "heartRate" to permissions.heartRate,
+            "activityRecognition" to permissions.activityRecognition,
+            "notifications" to permissions.notifications,
+        )
+    }
+
+    // ---------------------------------------------------------------- Abfragen mit begrenzten Wiederholungen
+
+    private suspend fun loadCapabilities(): ExerciseCapabilitiesView? {
+        for (attempt in 0..RETRY_DELAYS_MILLIS.size) {
+            try {
+                return CapabilitiesRepository.load(this)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DiagnosticLog.log("CAPABILITIES_FAILED", "attempt" to attempt, "error" to e.javaClass.simpleName, "message" to e.message)
+                RETRY_DELAYS_MILLIS.getOrNull(attempt)?.let { delay(it) }
+            }
+        }
+        return null
+    }
+
+    private suspend fun queryTrackedStatus(retries: Int): TrackedStatus {
+        for (attempt in 0..retries) {
+            val status =
+                try {
+                    TrackedStatus.fromHealthServices(exerciseClient.getCurrentExerciseInfo().exerciseTrackedStatus)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DiagnosticLog.log(
+                        "EXERCISE_INFO_ERROR",
+                        "attempt" to attempt,
+                        "error" to e.javaClass.simpleName,
+                        "message" to e.message,
+                    )
+                    TrackedStatus.FAILED
+                }
+            if (status != TrackedStatus.FAILED) return status
+            if (attempt < retries) RETRY_DELAYS_MILLIS.getOrNull(attempt)?.let { delay(it) }
+        }
+        return TrackedStatus.FAILED
     }
 
     // ---------------------------------------------------------------- Foreground + Ongoing Activity
@@ -283,7 +462,6 @@ class WorkoutService : Service() {
                 .setOngoing(true)
                 .setSilent(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        notificationBuilder = builder
         val activity =
             OngoingActivity
                 .Builder(this, NOTIFICATION_ID, builder)
@@ -304,7 +482,7 @@ class WorkoutService : Service() {
         } catch (e: Exception) {
             // z. B. SecurityException ohne Sensor-/Activity-Berechtigung oder ForegroundServiceStartNotAllowedException
             DiagnosticLog.log("FOREGROUND_START_FAILED", "error" to e.javaClass.simpleName, "message" to e.message)
-            WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.FAILED, errorMessage = e.message ?: e.javaClass.simpleName) }
+            WorkoutStateHolder.fail(WorkoutError.FOREGROUND, e.message ?: e.javaClass.simpleName)
             stopSelf()
             false
         }
@@ -341,11 +519,29 @@ class WorkoutService : Service() {
     private val updateCallback =
         object : ExerciseUpdateCallback {
             override fun onRegistered() {
+                callbackConfirmed = true
+                callbackAttempts = 0
                 DiagnosticLog.log("CALLBACK_REGISTERED")
             }
 
             override fun onRegistrationFailed(throwable: Throwable) {
-                DiagnosticLog.log("CALLBACK_REGISTRATION_FAILED", "error" to throwable.javaClass.simpleName, "message" to throwable.message)
+                callbackRequested = false
+                callbackConfirmed = false
+                callbackAttempts++
+                DiagnosticLog.log(
+                    "CALLBACK_REGISTRATION_FAILED",
+                    "attempt" to callbackAttempts,
+                    "error" to throwable.javaClass.simpleName,
+                    "message" to throwable.message,
+                )
+                if (callbackAttempts <= RETRY_DELAYS_MILLIS.size) {
+                    scope.launch {
+                        delay(RETRY_DELAYS_MILLIS[callbackAttempts - 1])
+                        if (store.sessionActive) registerCallback()
+                    }
+                } else {
+                    WorkoutStateHolder.fail(WorkoutError.CALLBACK, throwable.message)
+                }
             }
 
             override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
@@ -367,16 +563,20 @@ class WorkoutService : Service() {
             }
         }
 
+    /** Fordert die Anmeldung an; als angemeldet gilt der Callback erst nach `onRegistered()`. */
     private fun registerCallback() {
-        if (callbackRegistered) return
+        if (callbackRequested) return
+        callbackRequested = true
+        callbackConfirmed = false
         exerciseClient.setUpdateCallback(ContextCompat.getMainExecutor(this), updateCallback)
-        callbackRegistered = true
     }
 
     private suspend fun unregisterCallback() {
-        if (!callbackRegistered) return
+        if (!callbackRequested) return
         runCatching { exerciseClient.clearUpdateCallback(updateCallback) }
-        callbackRegistered = false
+            .onFailure { if (it is CancellationException) throw it }
+        callbackRequested = false
+        callbackConfirmed = false
     }
 
     private fun handleUpdate(update: ExerciseUpdate) {
@@ -430,12 +630,10 @@ class WorkoutService : Service() {
         }
         maybeLogBattery()
 
-        if (state.isEnded) {
+        if (state.isEnded && WorkoutStateHolder.state.value.phase != WorkoutPhase.ENDING) {
             // Ende, das wir nicht ausgelöst haben (z. B. andere App startet Training, Berechtigung entzogen).
-            if (WorkoutStateHolder.state.value.phase != WorkoutPhase.ENDING) {
-                DiagnosticLog.log("EXERCISE_ENDED_EXTERNALLY", "state" to state.name, "endReason" to update.exerciseStateInfo.endReason)
-                WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.FAILED, errorMessage = state.name) }
-            }
+            DiagnosticLog.log("EXERCISE_ENDED_EXTERNALLY", "state" to state.name, "endReason" to update.exerciseStateInfo.endReason)
+            WorkoutStateHolder.fail(WorkoutError.EXTERNAL_END, state.name)
         }
     }
 
@@ -458,12 +656,7 @@ class WorkoutService : Service() {
 
     private fun logStatus(event: String) {
         val battery =
-            ContextCompat.registerReceiver(
-                this,
-                null,
-                IntentFilter(Intent.ACTION_BATTERY_CHANGED),
-                ContextCompat.RECEIVER_NOT_EXPORTED,
-            )
+            ContextCompat.registerReceiver(this, null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
         val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
@@ -512,57 +705,55 @@ class WorkoutService : Service() {
     override fun onDestroy() {
         DiagnosticLog.log("SERVICE_DESTROY", "sessionActive" to store.sessionActive)
         runCatching { unregisterReceiver(screenReceiver) }
-        if (callbackRegistered) {
+        if (callbackRequested) {
             // Exercise läuft in Health Services weiter; nur den Callback lösen (ohne auf das Future zu warten).
             exerciseClient.clearUpdateCallbackAsync(updateCallback)
-            callbackRegistered = false
+            callbackRequested = false
+            callbackConfirmed = false
         }
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun trackedStatusName(status: Int): String =
-        when (status) {
-            TRACKED_OWNED_EXERCISE_IN_PROGRESS -> "OWNED_EXERCISE_IN_PROGRESS"
-            TRACKED_OTHER_APP_IN_PROGRESS -> "OTHER_APP_IN_PROGRESS"
-            TRACKED_NO_EXERCISE_IN_PROGRESS -> "NO_EXERCISE_IN_PROGRESS"
-            else -> "UNKNOWN"
-        }
-
     companion object {
         const val ACTION_START = "eu.advantly.wear.action.START_WORKOUT"
         const val ACTION_STOP = "eu.advantly.wear.action.STOP_WORKOUT"
         const val ACTION_RECOVER = "eu.advantly.wear.action.RECOVER_WORKOUT"
+        const val ACTION_REPLACE_OTHER = "eu.advantly.wear.action.REPLACE_OTHER_WORKOUT"
         const val EXTRA_SPORT = "sport"
-
-        // Werte von androidx.health.services.client.data.ExerciseTrackedStatus (1.1.0). Kotlin greift auf die Konstanten
-        // nur über den als @RestrictTo markierten Companion zu (Lint RestrictedApi), deshalb hier gespiegelt.
-        private const val TRACKED_OTHER_APP_IN_PROGRESS = 1
-        private const val TRACKED_OWNED_EXERCISE_IN_PROGRESS = 2
-        private const val TRACKED_NO_EXERCISE_IN_PROGRESS = 3
         private const val CHANNEL_ID = "workout"
         private const val NOTIFICATION_ID = 4711
         private const val BATTERY_LOG_INTERVAL_MILLIS = 5 * 60 * 1000L
         private const val TICKER_MILLIS = 60 * 1000L
 
-        /** Aus der sichtbaren Activity aufrufen (Hintergrundstarts von FGS sind eingeschränkt, 05 §2.2). */
+        /** Wartezeiten zwischen Wiederholungen (Capabilities, Status, Callback-Anmeldung). */
+        private val RETRY_DELAYS_MILLIS = longArrayOf(1_000, 3_000, 10_000)
+        private const val END_ATTEMPTS = 3
+        private const val END_CONFIRM_POLLS = 6
+        private const val END_CONFIRM_POLL_MILLIS = 500L
+
+        // Alle Aufrufe kommen aus der sichtbaren Activity (Hintergrundstarts von FGS sind eingeschränkt, 05 §2.2).
+        // Bewusst startService statt startForegroundService: Der Service ruft startForeground selbst auf, solange die App
+        // im Vordergrund ist. So gibt es keine Pflicht zum startForeground – ein abgebrochener Start (fehlende Rechte)
+        // führt nicht zum Absturz „did not then call startForeground“.
         fun start(
             context: Context,
             sport: SpikeSport,
+        ) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_START).putExtra(EXTRA_SPORT, sport.name))
+
+        fun stop(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
+
+        /** Nach einem Prozess-Neustart oder als „Erneut versuchen“: laufende Session wieder übernehmen. */
+        fun recover(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_RECOVER))
+
+        /** Nur nach ausdrücklicher Bestätigung im Konflikt-Dialog. */
+        fun replaceOther(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_REPLACE_OTHER))
+
+        private fun send(
+            context: Context,
+            intent: Intent,
         ) {
-            val intent = Intent(context, WorkoutService::class.java).setAction(ACTION_START).putExtra(EXTRA_SPORT, sport.name)
-            ContextCompat.startForegroundService(context, intent)
-        }
-
-        // Stop/Recover kommen ebenfalls aus der sichtbaren Activity. Bewusst startService statt startForegroundService:
-        // Stop ruft kein startForeground mehr auf, und Recover tut es selbst, solange die App im Vordergrund ist.
-        fun stop(context: Context) {
-            context.startService(Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
-        }
-
-        /** Nach einem Prozess-Neustart aus der (sichtbaren) Activity: laufende Session wieder übernehmen. */
-        fun recover(context: Context) {
-            context.startService(Intent(context, WorkoutService::class.java).setAction(ACTION_RECOVER))
+            context.startService(intent)
         }
     }
 }

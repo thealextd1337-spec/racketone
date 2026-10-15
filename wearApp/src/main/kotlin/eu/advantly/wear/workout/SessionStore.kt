@@ -22,6 +22,11 @@ class SessionStore(
         get() = prefs.getString(KEY_SESSION_ID, null)
         set(value) = prefs.edit { putString(KEY_SESSION_ID, value) }
 
+    /** Session läuft im Rückfall „nur zählen“ ohne Service/Exercise ([CountOnlySession]). */
+    var countOnly: Boolean
+        get() = prefs.getBoolean(KEY_COUNT_ONLY, false)
+        set(value) = prefs.edit { putBoolean(KEY_COUNT_ONLY, value) }
+
     var sport: SpikeSport
         get() = prefs.getString(KEY_SPORT, null)?.let { runCatching { SpikeSport.valueOf(it) }.getOrNull() } ?: SpikeSport.TENNIS
         set(value) = prefs.edit { putString(KEY_SPORT, value.name) }
@@ -44,6 +49,7 @@ class SessionStore(
     private companion object {
         const val KEY_ACTIVE = "session_active"
         const val KEY_SESSION_ID = "session_id"
+        const val KEY_COUNT_ONLY = "count_only"
         const val KEY_SPORT = "sport"
         const val KEY_SCORE = "score_events"
         const val KEY_LAST_EXIT = "last_exit_info_ts"

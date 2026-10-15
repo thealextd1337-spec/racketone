@@ -1,16 +1,11 @@
 package eu.advantly.wear
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.health.connect.HealthPermissions
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateOf
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.ambient.AmbientLifecycleObserver
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -19,9 +14,13 @@ import eu.advantly.wear.scoring.Side
 import eu.advantly.wear.scoring.TapGuard
 import eu.advantly.wear.ui.Haptics
 import eu.advantly.wear.workout.CapabilitiesRepository
+import eu.advantly.wear.workout.CountOnlySession
+import eu.advantly.wear.workout.Permissions
 import eu.advantly.wear.workout.SessionStore
 import eu.advantly.wear.workout.SpikeSport
+import eu.advantly.wear.workout.WorkoutPermissions
 import eu.advantly.wear.workout.WorkoutService
+import eu.advantly.wear.workout.WorkoutStateHolder
 import kotlinx.coroutines.launch
 
 /**
@@ -30,7 +29,7 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
     private val isAmbient = mutableStateOf(false)
-    private val permissionsGranted = mutableStateOf(true)
+    private val permissions = mutableStateOf(WorkoutPermissions.ALL)
     private val tapGuard = TapGuard()
     private lateinit var haptics: Haptics
     private lateinit var store: SessionStore
@@ -63,7 +62,7 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
-            permissionsGranted.value = result.values.all { it }
+            permissions.value = Permissions.current(this)
             pendingSport?.let { startWorkout(it) }
             pendingSport = null
         }
@@ -74,7 +73,7 @@ class MainActivity : ComponentActivity() {
         haptics = Haptics(this)
         store = SessionStore(this)
         ScoreRepository.init(this)
-        permissionsGranted.value = missingPermissions().isEmpty()
+        permissions.value = Permissions.current(this)
         DiagnosticLog.log("ACTIVITY_CREATE", "restored" to (savedInstanceState != null))
 
         // Capabilities beim App-Start abfragen und cachen (05 §0.1).
@@ -82,25 +81,30 @@ class MainActivity : ComponentActivity() {
             runCatching { CapabilitiesRepository.load(this@MainActivity) }
                 .onFailure { DiagnosticLog.log("CAPABILITIES_FAILED", "error" to it.javaClass.simpleName, "message" to it.message) }
         }
-        // Session war aktiv, Prozess wurde aber beendet → Service/Exercise wieder übernehmen.
-        if (store.sessionActive) WorkoutService.recover(this)
+        // Session war aktiv, Prozess wurde aber beendet → Service/Exercise (bzw. Nur-Zählen-Zustand) wieder übernehmen.
+        if (store.sessionActive) {
+            if (store.countOnly) CountOnlySession.restore(this) else WorkoutService.recover(this)
+        }
 
         setContent {
             WearApp(
                 isAmbient = isAmbient.value,
-                permissionsGranted = permissionsGranted.value,
+                permissions = permissions.value,
                 initialSport = store.sport,
                 logPath = DiagnosticLog.path,
                 onStart = ::requestPermissionsAndStart,
                 onPoint = ::onPoint,
                 onUndo = ::onUndo,
-                onEndMatch = { WorkoutService.stop(this) },
+                onEndMatch = ::endMatch,
+                onRetry = { WorkoutService.recover(this) },
+                onReplaceOther = { WorkoutService.replaceOther(this) },
             )
         }
     }
 
     override fun onResume() {
         super.onResume()
+        permissions.value = Permissions.current(this) // Rechte können in den Einstellungen geändert worden sein
         DiagnosticLog.log("ACTIVITY_RESUME")
     }
 
@@ -139,7 +143,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestPermissionsAndStart(sport: SpikeSport) {
-        val missing = missingPermissions()
+        val missing = Permissions.missing(this)
         if (missing.isEmpty()) {
             startWorkout(sport)
         } else {
@@ -148,27 +152,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Startet je nach gewährten Rechten: mit Puls- oder Aktivitätsrecht das Workout (Health-FGS, Messgrößen gefiltert),
+     * sonst den Rückfall „nur zählen“ ohne Laufzeitgarantie.
+     */
     private fun startWorkout(sport: SpikeSport) {
         store.sport = sport
-        WorkoutService.start(this, sport)
+        val granted = Permissions.current(this)
+        if (granted.canRunHealthService) {
+            WorkoutService.start(this, sport)
+        } else {
+            CountOnlySession.start(this, sport, granted)
+        }
     }
 
-    private fun missingPermissions(): List<String> =
-        requiredPermissions().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-
-    private companion object {
-        /** Wear OS 6 (API 36): `health.READ_HEART_RATE` statt `BODY_SENSORS` (05 §2.2). */
-        fun requiredPermissions(): List<String> =
-            listOf(
-                if (Build.VERSION.SDK_INT >=
-                    Build.VERSION_CODES.BAKLAVA
-                ) {
-                    HealthPermissions.READ_HEART_RATE
-                } else {
-                    Manifest.permission.BODY_SENSORS
-                },
-                Manifest.permission.ACTIVITY_RECOGNITION,
-                Manifest.permission.POST_NOTIFICATIONS,
-            )
+    private fun endMatch() {
+        if (WorkoutStateHolder.state.value.countOnly) CountOnlySession.stop(this) else WorkoutService.stop(this)
     }
 }

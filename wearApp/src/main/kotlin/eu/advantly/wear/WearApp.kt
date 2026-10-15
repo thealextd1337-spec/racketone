@@ -53,6 +53,8 @@ import eu.advantly.wear.workout.CapabilitiesRepository
 import eu.advantly.wear.workout.ExerciseTypeSelector
 import eu.advantly.wear.workout.SpikeSport
 import eu.advantly.wear.workout.WatchExerciseType
+import eu.advantly.wear.workout.WorkoutError
+import eu.advantly.wear.workout.WorkoutPermissions
 import eu.advantly.wear.workout.WorkoutPhase
 import eu.advantly.wear.workout.WorkoutStateHolder
 import eu.advantly.wear.workout.WorkoutUiState
@@ -67,13 +69,15 @@ private val AmbientDigits = Color.White.copy(alpha = 0.65f)
 @Composable
 fun WearApp(
     isAmbient: Boolean,
-    permissionsGranted: Boolean,
+    permissions: WorkoutPermissions,
     initialSport: SpikeSport,
     logPath: String?,
     onStart: (SpikeSport) -> Unit,
     onPoint: (Side) -> Boolean,
     onUndo: () -> Side?,
     onEndMatch: () -> Unit,
+    onRetry: () -> Unit,
+    onReplaceOther: () -> Unit,
 ) {
     MaterialTheme {
         val workout by WorkoutStateHolder.state.collectAsState()
@@ -82,11 +86,15 @@ fun WearApp(
         when (workout.phase) {
             WorkoutPhase.IDLE -> {
                 LaunchedEffect(Unit) { showControls = false }
-                SetupScreen(initialSport = initialSport, permissionsGranted = permissionsGranted, onStart = onStart)
+                SetupScreen(initialSport = initialSport, permissions = permissions, onStart = onStart)
             }
 
             WorkoutPhase.FAILED -> {
-                ErrorScreen(message = workout.errorMessage, onBack = onEndMatch)
+                ErrorScreen(workout = workout, onRetry = onRetry, onEndMatch = onEndMatch)
+            }
+
+            WorkoutPhase.CONFLICT -> {
+                ConflictScreen(onReplace = onReplaceOther, onCancel = onEndMatch)
             }
 
             else -> {
@@ -112,7 +120,7 @@ fun WearApp(
 @Composable
 private fun SetupScreen(
     initialSport: SpikeSport,
-    permissionsGranted: Boolean,
+    permissions: WorkoutPermissions,
     onStart: (SpikeSport) -> Unit,
 ) {
     var sport by remember { mutableStateOf(initialSport) }
@@ -141,8 +149,9 @@ private fun SetupScreen(
                     }
 
                     else -> {
-                        val selection = ExerciseTypeSelector.select(sport, caps)
+                        val selection = ExerciseTypeSelector.select(sport, caps, permissions)
                         when {
+                            !permissions.canRunHealthService -> stringResource(R.string.count_only_label)
                             selection == null -> stringResource(R.string.exercise_type_unsupported)
                             selection.isFallback -> stringResource(R.string.exercise_type_fallback, typeName(selection.type))
                             else -> stringResource(R.string.exercise_type_native, typeName(selection.type))
@@ -157,11 +166,17 @@ private fun SetupScreen(
             }
         }
         item {
-            Text(
-                stringResource(if (permissionsGranted) R.string.permission_rationale else R.string.permission_missing),
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
+            Text(stringResource(R.string.permission_rationale), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        }
+        permissionHints(permissions).forEach { hint ->
+            item {
+                Text(
+                    stringResource(hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
         item {
             Text(stringResource(R.string.gesture_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
@@ -175,6 +190,18 @@ private fun SetupScreen(
         }
     }
 }
+
+/** Hinweise zu fehlenden Rechten, damit klar ist, was ohne sie fehlt. */
+private fun permissionHints(permissions: WorkoutPermissions): List<Int> =
+    buildList {
+        if (!permissions.canRunHealthService) {
+            add(R.string.hint_no_health)
+        } else {
+            if (!permissions.heartRate) add(R.string.hint_no_heart_rate)
+            if (!permissions.activityRecognition) add(R.string.hint_no_activity)
+        }
+        if (!permissions.notifications) add(R.string.hint_no_notifications)
+    }
 
 @Composable
 private fun sportName(sport: SpikeSport): String =
@@ -384,7 +411,12 @@ private fun middleBandText(
         }
     val totalSec = activeMillis / 1000
     val duration = "${totalSec / 3600}:${twoDigits((totalSec / 60) % 60)}:${twoDigits(totalSec % 60)}"
-    val type = workout.selection?.let { typeName(it.type) }
+    val type =
+        if (workout.countOnly) {
+            stringResource(R.string.count_only_label) // ohne Workout: keine Laufzeitgarantie, sichtbar im Mittelband
+        } else {
+            workout.selection?.let { typeName(it.type) }
+        }
     return if (type != null) "$type · $duration" else duration
 }
 
@@ -449,6 +481,12 @@ private fun ControlsScreen(
     onResume: () -> Unit,
     onEndMatch: () -> Unit,
 ) {
+    var confirmEnd by remember { mutableStateOf(false) }
+    if (confirmEnd) {
+        // Kein Matchende ohne bewusste Bestätigung (04 §4.3.3 Punkt 8).
+        ConfirmEndScreen(onConfirm = onEndMatch, onCancel = { confirmEnd = false })
+        return
+    }
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         item { Text(stringResource(R.string.controls_title), style = MaterialTheme.typography.titleMedium) }
         item {
@@ -456,7 +494,7 @@ private fun ControlsScreen(
         }
         item {
             Button(
-                onClick = onEndMatch,
+                onClick = { confirmEnd = true },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.filledTonalButtonColors(),
             ) { Text(stringResource(R.string.action_end_match)) }
@@ -481,20 +519,94 @@ private fun ControlsScreen(
 }
 
 @Composable
-private fun ErrorScreen(
-    message: String?,
-    onBack: () -> Unit,
+private fun ConfirmEndScreen(
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        item { Text(stringResource(R.string.error_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
-        if (message != null) {
-            item { Text(message, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+        item {
+            Text(stringResource(R.string.confirm_end_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         }
         item {
-            Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_back)) }
+            Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
+        }
+        item {
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.filledTonalButtonColors(),
+            ) { Text(stringResource(R.string.action_confirm_end)) }
         }
     }
 }
+
+/** Fremdes Training läuft: ersetzen nur nach ausdrücklicher Entscheidung; „Abbrechen“ beendet nur unsere Session. */
+@Composable
+private fun ConflictScreen(
+    onReplace: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        item { Text(stringResource(R.string.conflict_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
+        item { Text(stringResource(R.string.conflict_text), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+        item {
+            Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
+        }
+        item {
+            Button(
+                onClick = onReplace,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.filledTonalButtonColors(),
+            ) { Text(stringResource(R.string.action_replace)) }
+        }
+    }
+}
+
+/** Bedienbarer Fehlerzustand: Erklärung, „Erneut versuchen“ und (bestätigtes) Matchende. */
+@Composable
+private fun ErrorScreen(
+    workout: WorkoutUiState,
+    onRetry: () -> Unit,
+    onEndMatch: () -> Unit,
+) {
+    var confirmEnd by remember { mutableStateOf(false) }
+    if (confirmEnd) {
+        ConfirmEndScreen(onConfirm = onEndMatch, onCancel = { confirmEnd = false })
+        return
+    }
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        item { Text(stringResource(R.string.error_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
+        item {
+            Text(stringResource(errorText(workout.error)), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        }
+        workout.errorDetail?.let { detail ->
+            item { Text(detail, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center) }
+        }
+        item {
+            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_retry)) }
+        }
+        item {
+            Button(
+                onClick = { confirmEnd = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.filledTonalButtonColors(),
+            ) { Text(stringResource(R.string.action_end_match)) }
+        }
+    }
+}
+
+private fun errorText(error: WorkoutError?): Int =
+    when (error) {
+        WorkoutError.PERMISSIONS -> R.string.error_permissions
+        WorkoutError.CAPABILITIES -> R.string.error_capabilities
+        WorkoutError.STATUS_QUERY -> R.string.error_status_query
+        WorkoutError.START -> R.string.error_start
+        WorkoutError.END -> R.string.error_end
+        WorkoutError.CALLBACK -> R.string.error_callback
+        WorkoutError.EXTERNAL_END -> R.string.error_external_end
+        WorkoutError.FOREGROUND -> R.string.error_foreground
+        WorkoutError.INTERNAL, null -> R.string.error_internal
+    }
 
 private const val HALF_FRACTION = (1f - TapZones.MIDDLE_BAND) / 2f
 private const val DIGIT_FRACTION = 0.55f

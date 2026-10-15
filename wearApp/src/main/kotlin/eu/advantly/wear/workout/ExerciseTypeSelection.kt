@@ -24,6 +24,36 @@ interface ExerciseCapabilitiesView {
     fun supportedMetrics(type: WatchExerciseType): Set<WorkoutMetric>
 }
 
+/**
+ * Gewährte Laufzeitrechte, soweit sie das Workout betreffen. Puls braucht das Puls-/Sensorrecht, Schritte das
+ * Aktivitätsrecht. Der Foreground Service vom Typ `health` setzt (Android 14+) eines der beiden voraus.
+ */
+data class WorkoutPermissions(
+    val heartRate: Boolean,
+    val activityRecognition: Boolean,
+    val notifications: Boolean,
+) {
+    /** Ohne Puls- und Aktivitätsrecht ist kein Health-FGS möglich → nur Zählen, ohne Laufzeitgarantie. */
+    val canRunHealthService: Boolean
+        get() = heartRate || activityRecognition
+
+    /** Messgrößen, die mit diesen Rechten angefordert werden dürfen. */
+    val allowedMetrics: Set<WorkoutMetric>
+        get() =
+            buildSet {
+                if (heartRate) {
+                    add(WorkoutMetric.HEART_RATE_BPM)
+                    add(WorkoutMetric.HEART_RATE_BPM_STATS)
+                }
+                if (activityRecognition) add(WorkoutMetric.STEPS)
+                if (canRunHealthService) add(WorkoutMetric.CALORIES_TOTAL)
+            }
+
+    companion object {
+        val ALL = WorkoutPermissions(heartRate = true, activityRecognition = true, notifications = true)
+    }
+}
+
 /** Ergebnis der Typwahl: tatsächlich verwendeter Typ, ob es ein Fallback ist, und die anzufordernden Messgrößen. */
 data class ExerciseSelection(
     val sport: SpikeSport,
@@ -39,7 +69,8 @@ data class ExerciseSelection(
  * 3. sonst `WORKOUT` (generisch).
  *
  * Die Messgrößen kommen **immer** aus den Capabilities des tatsächlich verwendeten Typs –
- * nie aus einer festen Liste und nie aus den TENNIS-Capabilities, wenn ein anderer Typ genutzt wird.
+ * nie aus einer festen Liste und nie aus den TENNIS-Capabilities, wenn ein anderer Typ genutzt wird –
+ * und werden zusätzlich auf die gewährten Rechte ([WorkoutPermissions.allowedMetrics]) beschränkt.
  */
 object ExerciseTypeSelector {
     val WANTED_METRICS: Set<WorkoutMetric> = WorkoutMetric.entries.toSet()
@@ -56,6 +87,7 @@ object ExerciseTypeSelector {
     fun select(
         sport: SpikeSport,
         capabilities: ExerciseCapabilitiesView,
+        permissions: WorkoutPermissions = WorkoutPermissions.ALL,
     ): ExerciseSelection? {
         val options = candidates(sport)
         val type = options.firstOrNull { it in capabilities.supportedTypes } ?: return null
@@ -63,7 +95,7 @@ object ExerciseTypeSelector {
             sport = sport,
             type = type,
             isFallback = type != options.first(),
-            metrics = capabilities.supportedMetrics(type).intersect(WANTED_METRICS),
+            metrics = capabilities.supportedMetrics(type).intersect(WANTED_METRICS).intersect(permissions.allowedMetrics),
         )
     }
 }

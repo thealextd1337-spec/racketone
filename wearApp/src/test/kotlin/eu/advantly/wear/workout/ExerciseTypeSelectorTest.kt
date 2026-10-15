@@ -109,4 +109,33 @@ class ExerciseTypeSelectorTest {
         )
         assertEquals(listOf(WatchExerciseType.TENNIS, WatchExerciseType.WORKOUT), ExerciseTypeSelector.candidates(SpikeSport.TENNIS))
     }
+
+    @Test
+    fun metricsAreFilteredByGrantedPermissions() {
+        val caps = FakeCapabilities(mapOf(WatchExerciseType.TENNIS to all))
+        val noHeartRate = WorkoutPermissions(heartRate = false, activityRecognition = true, notifications = true)
+        assertEquals(
+            setOf(WorkoutMetric.STEPS, WorkoutMetric.CALORIES_TOTAL),
+            ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, noHeartRate)!!.metrics,
+        )
+        val noActivity = WorkoutPermissions(heartRate = true, activityRecognition = false, notifications = false)
+        assertEquals(
+            setOf(WorkoutMetric.HEART_RATE_BPM, WorkoutMetric.HEART_RATE_BPM_STATS, WorkoutMetric.CALORIES_TOTAL),
+            ExerciseTypeSelector.select(SpikeSport.TENNIS, caps, noActivity)!!.metrics,
+        )
+    }
+
+    @Test
+    fun withoutHeartRateAndActivityNoHealthServiceAndNoMetrics() {
+        val none = WorkoutPermissions(heartRate = false, activityRecognition = false, notifications = true)
+        assertFalse(none.canRunHealthService)
+        assertEquals(emptySet<WorkoutMetric>(), none.allowedMetrics)
+        assertTrue(WorkoutPermissions(heartRate = true, activityRecognition = false, notifications = false).canRunHealthService)
+        assertTrue(WorkoutPermissions(heartRate = false, activityRecognition = true, notifications = false).canRunHealthService)
+    }
+
+    @Test
+    fun allPermissionsKeepAllSupportedMetrics() {
+        assertEquals(WorkoutMetric.entries.toSet(), WorkoutPermissions.ALL.allowedMetrics)
+    }
 }

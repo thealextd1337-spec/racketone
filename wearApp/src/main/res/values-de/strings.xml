@@ -14,7 +14,6 @@
     <string name="exercise_type_loading">Prüfe Fähigkeiten der Uhr…</string>
     <string name="action_start">Match starten</string>
     <string name="permission_rationale">Für den Feldtest werden Puls und Schritte aufgezeichnet. Die Daten bleiben auf der Uhr.</string>
-    <string name="permission_missing">Berechtigungen fehlen – Puls evtl. nicht verfügbar</string>
     <string name="gesture_hint">Tippen oben: Wir · unten: Gegner · nach unten wischen: Rückgängig · nach links: Menü</string>
     <string name="label_us">WIR</string>
     <string name="label_them">GEGNER</string>
@@ -27,8 +26,28 @@
     <string name="log_path">Log: %1$s</string>
     <string name="stats_line">%1$s kcal · %2$s Schritte</string>
     <string name="error_title">Workout fehlgeschlagen</string>
-    <string name="action_back">Zurück</string>
     <string name="notification_channel_workout">Laufendes Match</string>
     <string name="notification_title">Advantly-Match</string>
     <string name="notification_text">Tippen, um weiterzuzählen</string>
+    <string name="count_only_label">Nur Zählen</string>
+    <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: nur Zählen, die Uhr kann die App im Hintergrund beenden</string>
+    <string name="hint_no_heart_rate">Ohne Pulsrecht: Workout ohne Puls</string>
+    <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte</string>
+    <string name="hint_no_notifications">Ohne Benachrichtigungen: kein Symbol auf dem Zifferblatt</string>
+    <string name="conflict_title">Eine andere App zeichnet ein Training auf</string>
+    <string name="conflict_text">Durch dieses Match ersetzen? Das andere Training wird beendet.</string>
+    <string name="action_replace">Ersetzen</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_retry">Erneut versuchen</string>
+    <string name="confirm_end_title">Match beenden?</string>
+    <string name="action_confirm_end">Beenden</string>
+    <string name="error_permissions">Berechtigungen fehlen</string>
+    <string name="error_capabilities">Fähigkeiten der Uhr nicht abrufbar</string>
+    <string name="error_status_query">Trainingsstatus nicht abrufbar</string>
+    <string name="error_start">Training konnte nicht gestartet werden</string>
+    <string name="error_end">Training konnte nicht beendet werden</string>
+    <string name="error_callback">Keine Verbindung zu Health Services</string>
+    <string name="error_external_end">Training wurde vom System oder einer anderen App beendet</string>
+    <string name="error_foreground">Hintergrunddienst konnte nicht starten</string>
+    <string name="error_internal">Unerwarteter Fehler</string>
 </resources>
