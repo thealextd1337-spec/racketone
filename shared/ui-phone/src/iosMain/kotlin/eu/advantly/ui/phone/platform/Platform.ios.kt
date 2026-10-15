@@ -132,3 +132,14 @@ actual fun formatDateTime(epochMs: Long): String {
     // Designierter Initialisierer: Sekunden seit 2001-01-01 (Referenzdatum) = Unix-Sekunden − 978 307 200
     return formatter.stringFromDate(platform.Foundation.NSDate(timeIntervalSinceReferenceDate = epochMs / 1000.0 - 978_307_200.0))
 }
+
+actual fun formatMonth(
+    year: Int,
+    month: Int,
+): String {
+    val formatter = platform.Foundation.NSDateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    val date = formatter.dateFromString("$year-${month.toString().padStart(2, '0')}-01") ?: return ""
+    formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+    return formatter.stringFromDate(date)
+}

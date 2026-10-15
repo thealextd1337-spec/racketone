@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
@@ -39,7 +40,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.MatchRecord
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.isRated
-import eu.advantly.presentation.stats.MatchStatistics
+import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.stats.MatchStats
 import eu.advantly.presentation.stats.Ratio
 import eu.advantly.ui.phone.common.AdvantlyButton
@@ -48,7 +49,11 @@ import eu.advantly.ui.phone.common.SportBadge
 import eu.advantly.ui.phone.common.StatTile
 import eu.advantly.ui.phone.common.TopBar
 import eu.advantly.ui.phone.common.durationText
+import eu.advantly.ui.phone.common.formatDescription
+import eu.advantly.ui.phone.common.formatLabel
+import eu.advantly.ui.phone.common.resultLine
 import eu.advantly.ui.phone.common.safeContentPadding
+import eu.advantly.ui.phone.common.scorePair
 import eu.advantly.ui.phone.common.sportName
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -62,16 +67,22 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_delete
+import eu.advantly.ui.phone.resources.detail_break_saved
+import eu.advantly.ui.phone.resources.detail_breaks
+import eu.advantly.ui.phone.resources.detail_elapsed_duration
+import eu.advantly.ui.phone.resources.detail_format
+import eu.advantly.ui.phone.resources.detail_lineup
+import eu.advantly.ui.phone.resources.detail_net_duration
+import eu.advantly.ui.phone.resources.detail_set_score
+import eu.advantly.ui.phone.resources.detail_sets
 import eu.advantly.ui.phone.resources.result_compare_a11y
 import eu.advantly.ui.phone.resources.result_delete
 import eu.advantly.ui.phone.resources.result_delete_text
 import eu.advantly.ui.phone.resources.result_delete_title
-import eu.advantly.ui.phone.resources.result_duration
 import eu.advantly.ui.phone.resources.result_followup_of
 import eu.advantly.ui.phone.resources.result_not_found
 import eu.advantly.ui.phone.resources.result_not_rated
 import eu.advantly.ui.phone.resources.result_play_again
-import eu.advantly.ui.phone.resources.result_points_total
 import eu.advantly.ui.phone.resources.result_ratio
 import eu.advantly.ui.phone.resources.result_section_compare
 import eu.advantly.ui.phone.resources.result_stat_break_points
@@ -103,6 +114,8 @@ fun ResultScreen(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     playerAssignments: @Composable (MatchRecord) -> Unit = {},
+    headToHead: @Composable (MatchSetup) -> Unit = {},
+    statisticsCache: MatchStatisticsCache? = null,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     Column(
@@ -159,7 +172,9 @@ fun ResultScreen(
             )
             return@Column
         }
-        val stats = remember(record) { MatchStatistics.compute(record) }
+        val cache = statisticsCache ?: remember { MatchStatisticsCache() }
+        val stats =
+            remember(record.summary.matchId, record.summary.updatedAtMs, record.summary.setup, record.events.size) { cache.get(record) }
         Column(
             Modifier
                 .weight(1f)
@@ -167,11 +182,49 @@ fun ResultScreen(
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
             Hero(record)
+            SectionTitle(stringResource(Res.string.detail_format))
+            Text(
+                formatLabel(record.summary.setup.format),
+                style = AdvantlyTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+                color = AdvantlyTheme.colors.text,
+                modifier = Modifier.testTag("result_format_title"),
+            )
+            Text(
+                formatDescription(record.summary.setup.format),
+                style = AdvantlyTheme.typography.body,
+                color = AdvantlyTheme.colors.text2,
+                modifier = Modifier.testTag("result_format_description"),
+            )
+            SectionTitle(stringResource(Res.string.detail_lineup))
+            headToHead(record.summary.setup)
             playerAssignments(record)
-            Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-                StatTile(durationText(stats.netDurationMs), stringResource(Res.string.result_duration), Modifier.weight(1f))
-                StatTile(stats.totalPoints.toString(), stringResource(Res.string.result_points_total), Modifier.weight(1f))
+            SectionTitle(stringResource(Res.string.detail_sets))
+            record.summary.sets.forEachIndexed { index, set ->
+                Text(
+                    stringResource(
+                        Res.string.detail_set_score,
+                        index + 1,
+                        resultLine(listOf(set), null, null, record.summary.setsWon),
+                    ),
+                    color = AdvantlyTheme.colors.text,
+                    modifier = Modifier.testTag("result_set_$index"),
+                )
             }
+            record.summary.interruptedSet?.let {
+                Text(
+                    stringResource(
+                        Res.string.detail_set_score,
+                        record.summary.sets.size + 1,
+                        resultLine(emptyList(), it, null, record.summary.setsWon),
+                    ),
+                    color = AdvantlyTheme.colors.text2,
+                )
+            }
+            Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
+                StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
+            }
+            MatchProgression(record.summary.setup, stats.progression)
             SectionTitle(stringResource(Res.string.result_section_compare))
             Comparison(record, stats)
             ServeStatistics(record.summary.setup, stats)
@@ -208,9 +261,8 @@ private fun Hero(record: MatchRecord) {
                     },
                 )
             SportBadge(setup.sport, meta.joinToString(" · "))
-            Box(Modifier.weight(1f))
-            ResultBadge(summary)
         }
+        ResultBadge(summary)
         Text(formatDateTime(summary.startedAtMs), style = AdvantlyTheme.typography.caption, color = colors.text2)
         if (!summary.isRated) {
             // F21: bleibt mit Stand im Verlauf (löschbar), zählt aber nicht für Siege und Statistik
@@ -263,7 +315,11 @@ private fun Comparison(
         )
     rows += ratioRow(Res.string.result_stat_serve_points, stats.servicePoints)
     rows += ratioRow(Res.string.result_stat_return_points, stats.returnPoints)
-    if (sport.isTennisLike) rows += ratioRow(Res.string.result_stat_break_points, stats.breakPoints)
+    if (sport.isTennisLike) {
+        rows += ratioRow(Res.string.detail_breaks, stats.breaks)
+        rows += ratioRow(Res.string.result_stat_break_points, stats.breakPoints)
+        rows += ratioRow(Res.string.detail_break_saved, stats.breakPointsSaved)
+    }
     rows +=
         ratioRow(
             if (sport == Sport.PICKLEBALL) Res.string.result_stat_set_points_pickleball else Res.string.result_stat_set_points,

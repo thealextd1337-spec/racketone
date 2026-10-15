@@ -8,6 +8,7 @@ import eu.advantly.match.session.SessionListener
 import eu.advantly.wear.diagnostics.DiagLine
 import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.FieldTestRecorder
+import eu.advantly.wear.glance.GlancePublisher
 import eu.advantly.wear.sync.MatchNotifier
 import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.workout.SessionStore
@@ -42,6 +43,7 @@ class AdvantlyWearApplication : Application() {
         val holder = WearSessions.get(this)
         // P1-Gate-Feldtest (nur Debug, Schalter Standard aus): Akku/Display/Sync je Minute, ohne Gesundheitsdaten
         FieldTestRecorder.install(this, holder.session)
+        holder.session.addListener(GlancePublisher(this, holder))
         val workoutStore = SessionStore(this)
         holder.session.addListener(MatchNotifier(this))
         holder.session.addListener(

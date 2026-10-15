@@ -501,6 +501,11 @@ class InMemoryMatchStore(
                     .lastOrNull()
                     ?.wallClockMs ?: entry.genesis.wallClockMs,
             interruptedSet = state.current.takeIf { state.status == MatchStatus.FINISHED },
+            eventCount = entry.engine.events.size + 1,
+            updatedAtMs =
+                entry.engine.events
+                    .lastOrNull()
+                    ?.wallClockMs ?: entry.genesis.wallClockMs,
         )
     }
 

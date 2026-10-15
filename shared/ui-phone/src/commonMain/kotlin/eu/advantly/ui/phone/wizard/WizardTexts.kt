@@ -304,6 +304,14 @@ internal fun formatSummary(state: WizardUiState): String {
     val parts = mutableListOf(stringResource(sportName(sport)))
     if (format == null) return parts.joinToString(" · ")
     parts += formatLabel(format)
+    if (format.presetId == null) {
+        parts +=
+            if (format.match.mode == MatchMode.OPEN) {
+                stringResource(Res.string.format_open)
+            } else {
+                stringResource(Res.string.format_best_of, format.match.bestOf ?: 1)
+            }
+    }
     if (format.match.mode == MatchMode.BEST_OF && format.match.bestOf != 1 && sport == Sport.TABLE_TENNIS) {
         parts += stringResource(Res.string.fmt_sets_to_win, format.setsToWin ?: 1)
     }

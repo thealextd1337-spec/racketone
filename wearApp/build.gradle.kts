@@ -1,6 +1,7 @@
 // Wear-OS-App (Compose for Wear OS, Material 3). Logik aus shared/presentation, Zählen über shared/match-session.
 plugins {
     alias(libs.plugins.advantly.android.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -15,6 +16,11 @@ dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.wear.compose.foundation)
     implementation(libs.wear.compose.material3)
+    implementation(libs.wear.tiles)
+    implementation(libs.wear.protolayout)
+    implementation(libs.wear.complications)
+    implementation(libs.androidx.concurrent)
+    implementation(libs.kotlinx.serialization.json)
     // Workout: ExerciseClient, Ambient, Ongoing Activity (aus Spike S5)
     implementation(libs.health.services.client)
     implementation(libs.wear.ambient)

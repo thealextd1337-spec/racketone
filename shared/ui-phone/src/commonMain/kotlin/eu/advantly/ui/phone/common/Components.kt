@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -269,7 +270,14 @@ fun StatTile(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(value, style = AdvantlyTheme.typography.scoreM, color = AdvantlyTheme.colors.text)
-        Text(label, style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
+        Text(
+            label,
+            style = AdvantlyTheme.typography.caption,
+            color = AdvantlyTheme.colors.text2,
+            softWrap = false,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

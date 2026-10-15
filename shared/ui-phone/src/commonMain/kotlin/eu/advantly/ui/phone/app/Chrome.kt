@@ -29,9 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -86,6 +88,8 @@ fun TabBar(
         HorizontalDivider(color = colors.line)
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
             AppTab.entries.forEach { tab ->
+                val label = stringResource(tabLabel(tab))
+                val showLabel = LocalDensity.current.fontScale < 1.5f
                 val isSelected = tab == selected && tab != AppTab.Play
                 Column(
                     Modifier
@@ -93,8 +97,10 @@ fun TabBar(
                         .testTag("tab_${tab.name.lowercase()}")
                         .heightIn(min = 64.dp)
                         .clickable(role = Role.Tab) { onSelect(tab) }
-                        .semantics { this.selected = isSelected }
-                        .padding(vertical = Spacing.xs),
+                        .semantics {
+                            this.selected = isSelected
+                            contentDescription = label
+                        }.padding(vertical = Spacing.xs),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -105,13 +111,16 @@ fun TabBar(
                     } else {
                         Icon(tabIcon(tab), contentDescription = null, tint = if (isSelected) colors.brand else colors.text2)
                     }
-                    Text(
-                        stringResource(tabLabel(tab)),
-                        style = AdvantlyTheme.typography.caption.copy(fontSize = 11.sp),
-                        color = if (isSelected) colors.text else colors.text2,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
+                    if (showLabel) {
+                        Text(
+                            label,
+                            style = AdvantlyTheme.typography.caption.copy(fontSize = 11.sp),
+                            color = if (isSelected) colors.text else colors.text2,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
         }
@@ -188,6 +197,7 @@ fun ComingSoonScreen(
     versionName: String,
     modifier: Modifier = Modifier,
     players: PlayersPort? = null,
+    onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -210,7 +220,7 @@ fun ComingSoonScreen(
             style = AdvantlyTheme.typography.body,
             color = colors.text2,
         )
-        if (tab == AppTab.Profile && players != null) GuestList(players)
+        if (tab == AppTab.Profile && players != null) GuestList(players, onPlayerHistory)
         if (tab == AppTab.Profile) {
             // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
             val openLink = rememberSafeLinkOpener()

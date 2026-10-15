@@ -37,30 +37,87 @@ struct MatchPagerView: View {
 /// **Anzeige** (ein anderes Gerät zählt, 04 §4.2 W3): gleiche Darstellung ohne Tap-Flächen, ohne Wisch-Undo und
 /// Undo-Button, deutlich „Anzeige · [Gerät] zählt“, „Stand vor X s“; nach > 30 s ohne Zähler das Angebot
 /// „Zählen übernehmen“ (mit Bestätigung).
+/// Ein Ziel je Berührung, bestimmt beim Aufsetzen. Das Mittelband bleibt bis zum Loslassen nicht-zählend,
+/// auch wenn die Aufschlag-Leiste zwischenzeitlich verschwindet. Ein langer Druck zieht erst beim Loslassen ab.
+private enum ScoreTouchTarget {
+    case half(sideA: Bool, canRemove: Bool)
+    case ignored
+}
+
 struct ScorePage: View {
     @ObservedObject var model: ScoringModel
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @Environment(\.isLuminanceReduced) private var dimmed
+    @Environment(\.scenePhase) private var scenePhase
     @State private var confirmTakeOver = false
+    @State private var chooseServer = false
+    @State private var target: ScoreTouchTarget?
+    @State private var touchId: SpatialEventCollection.Event.ID?
+    @State private var touchIds: Set<SpatialEventCollection.Event.ID> = []
+    @State private var touchMatchId = ""
+    @State private var touchStart: TimeInterval = 0
+    @State private var touchStartLocation = CGPoint.zero
+    @State private var furthestTravel: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let height = geo.size.height
+            let deadTop = height * 0.12
+            let action = !dimmed && OperationStrip.hasAction(model, snap)
+            let middle = action ? max(44, height * 0.16) : height * 0.16
+            let guardHeight: CGFloat = action ? 4 : 0
+            let halfHeight = (height - deadTop - middle - 2 * guardHeight) / 2
+            let middleTop = deadTop + halfHeight
             VStack(spacing: 0) {
                 StatusStrip(snap: snap, dimmed: dimmed)
-                    .frame(height: height * 0.12)
+                    .frame(height: deadTop)
                     .allowsHitTesting(false)
-                half(sideA: true)
-                    .frame(height: height * 0.36)
-                MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
-                    .frame(height: height * 0.16)
-                half(sideA: false)
-                    .frame(height: height * 0.36)
+                half(sideA: true).frame(height: halfHeight)
+                Color.clear.frame(height: guardHeight)
+                if action {
+                    OperationStrip(model: model, snap: snap) { chooseServer = true }
+                        .frame(height: middle)
+                        .padding(.horizontal, 6)
+                } else {
+                    MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
+                        .frame(height: middle)
+                }
+                Color.clear.frame(height: guardHeight)
+                half(sideA: false).frame(height: halfHeight)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                SpatialEventGesture(coordinateSpace: .local)
+                    .onChanged { events in
+                        trackTouch(events, deadTop: deadTop, middleTop: middleTop, middleBottom: middleTop + middle + 2 * guardHeight)
+                    }
+                    .onEnded { events in
+                        defer {
+                            target = nil
+                            touchId = nil
+                            touchIds = []
+                        }
+                        guard touchIds.count == 1, events.count == 1, let event = events.first,
+                              event.id == touchId, event.phase == .ended,
+                              let target, snap.matchId == touchMatchId, snap.isScorer, !dimmed, scenePhase == .active else { return }
+                        guard case let .half(sideA, canRemove) = target else { return }
+                        let dx = event.location.x - touchStartLocation.x
+                        let dy = event.location.y - touchStartLocation.y
+                        if dy > 40 && abs(dx) < dy {
+                            model.undo()
+                        } else if furthestTravel < 14 && abs(dx) < 14 && abs(dy) < 14 {
+                            if event.timestamp - touchStart >= 1 {
+                                if canRemove { model.removePoint(sideA: sideA) }
+                            } else {
+                                model.tap(sideA: sideA)
+                            }
+                        }
+                    }
+            )
             .overlay {
-                if let banner = model.banner, !dimmed {
-                    BannerView(banner: banner)
+                if let banner = model.banner, banner != .pointRemoved, !dimmed {
+                    BannerView(banner: banner).allowsHitTesting(false)
                 } else if !snap.isScorer && !dimmed {
                     TakeOverOffer(snap: snap) { confirmTakeOver = true }
                 }
@@ -68,44 +125,76 @@ struct ScorePage: View {
         }
         .ignoresSafeArea()
         .background(Color.black)
-        .onChange(of: dimmed) { _, isDimmed in
-            if !isDimmed { model.didWake() }
+        .onChange(of: dimmed) { _, _ in
+            target = nil
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30).onEnded { value in
-                let dy = value.translation.height
-                if snap.isScorer && !dimmed && dy > 40 && abs(value.translation.width) < dy {
-                    model.undo()
-                }
+        .onChange(of: scenePhase) { _, phase in
+            target = nil
+            if phase != .active {
+                model.dismissServeBar()
             }
-        )
+        }
+        .onChange(of: snap.isScorer) { _, _ in
+            target = nil
+        }
+        .onChange(of: snap.matchId) { _, _ in target = nil }
+        .onDisappear { target = nil }
+        .sheet(isPresented: $chooseServer) {
+            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
+        }
         .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
+    }
+
+    private func trackTouch(_ events: SpatialEventCollection, deadTop: CGFloat, middleTop: CGFloat, middleBottom: CGFloat) {
+        guard !events.isEmpty else { return }
+        // Neue IDs erkennen auch nach einem Abbruch ohne onEnded eine neue Berührung – selbst am selben Ort.
+        if events.allSatisfy({ !touchIds.contains($0.id) }) {
+            target = nil
+            touchId = nil
+            touchIds = []
+        }
+        touchIds.formUnion(events.map(\.id))
+        // Mehrfinger/Handballen sperren die gesamte Folge, auch nachdem der erste Finger losgelassen wurde.
+        guard touchIds.count == 1, let event = events.first else {
+            target = .ignored
+            return
+        }
+        if event.phase == .cancelled {
+            target = nil
+            return
+        }
+        if touchId != event.id && event.phase == .active {
+            touchId = event.id
+            touchStart = event.timestamp
+            touchStartLocation = event.location
+            touchMatchId = snap.matchId
+            furthestTravel = 0
+            let y = event.location.y
+            if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
+                target = .half(sideA: true, canRemove: snap.canRemovePointA)
+            } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleBottom {
+                target = .half(sideA: false, canRemove: snap.canRemovePointB)
+            } else {
+                target = .ignored
+            }
+        }
+        furthestTravel = max(furthestTravel, max(abs(event.location.x - touchStartLocation.x), abs(event.location.y - touchStartLocation.y)))
     }
 
     @ViewBuilder
     private func half(sideA: Bool) -> some View {
-        let team = TeamHalf(
-            sideA: sideA,
-            snap: snap,
-            flash: model.flashSideA == sideA,
-            dimmed: dimmed
-        )
-        if snap.isScorer {
+        let team = TeamHalf(sideA: sideA, snap: snap, flash: model.flashSideA == sideA, dimmed: dimmed)
+        if snap.isScorer && !dimmed {
             team
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if !dimmed { model.tap(sideA: sideA) }
-                }
-                .allowsHitTesting(!dimmed)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(Text(LocalizedStringKey(sideA ? "a11y.pointUs" : "a11y.pointThem")))
                 .accessibilityAction { model.tap(sideA: sideA) }
+                .accessibilityAction(named: Text(LocalizedStringKey(sideA ? "action.removeUs" : "action.removeThem"))) {
+                    model.removePoint(sideA: sideA)
+                }
         } else {
-            // Anzeige: reine Darstellung, Stand als Text für VoiceOver
-            team
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.updatesFrequently)
+            team.accessibilityElement(children: .combine).accessibilityAddTraits(.updatesFrequently)
         }
     }
 }
@@ -118,7 +207,9 @@ struct StatusStrip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if snap.isScorer {
+            if !snap.updateRequired.isEmpty {
+                Text(LocalizedStringKey(snap.updateRequired == "THIS_DEVICE" ? "sync.updateWatch.short" : "sync.updatePhone.short"))
+            } else if snap.isScorer {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .bold))
                 Text(scorerText)
@@ -477,6 +568,7 @@ struct BannerView: View {
     private var text: String {
         switch banner {
         case let .undo(from, to): return loc("banner.undo %@ %@", from, to)
+        case .pointRemoved: return loc("banner.pointRemoved")
         case .changeEnds: return loc("banner.changeEnds")
         case .receiveOrderSwapped: return loc("banner.receiveOrder")
         case .healthUnavailable: return loc("banner.health")
@@ -495,6 +587,7 @@ struct ControlsPage: View {
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @State private var confirmEnd = false
+    @State private var chooseServer = false
     @State private var confirmTakeOver = false
 
     var body: some View {
@@ -519,6 +612,9 @@ struct ControlsPage: View {
                 }
             }
         }
+        .sheet(isPresented: $chooseServer) {
+            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
+        }
         .alert("controls.end.confirm", isPresented: $confirmEnd) {
             Button("controls.end", role: .destructive) { model.endMatch() }
             Button("common.cancel", role: .cancel) {}
@@ -528,6 +624,14 @@ struct ControlsPage: View {
 
     @ViewBuilder
     private var scorerControls: some View {
+        UpdateRequiredLabel(code: snap.updateRequired)
+        RemovePointButtons(model: model, snap: snap)
+        if model.banner == .pointRemoved && snap.canRedo {
+            Button("action.restorePoint", action: model.redoRemoval)
+        }
+        if snap.serverChoiceGame > 0 {
+            Button("serve.choose") { chooseServer = true }
+        }
         Button(action: model.undo) {
             Label("action.undo", systemImage: "arrow.uturn.backward")
                 .frame(maxWidth: .infinity)
@@ -565,6 +669,7 @@ struct ControlsPage: View {
 
     @ViewBuilder
     private var displayControls: some View {
+        UpdateRequiredLabel(code: snap.updateRequired)
         VStack(spacing: 2) {
             Text("role.display")
                 .font(.headline)

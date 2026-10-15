@@ -129,8 +129,9 @@ fun LiveScreen(
     isAmbient: Boolean,
     toast: WatchToast?,
     actions: LiveActions,
+    glanceLaunch: Int = 0,
 ) {
-    var controls by remember(live.matchId) { mutableStateOf(false) }
+    var controls by remember(live.matchId, glanceLaunch) { mutableStateOf(false) }
     when {
         isAmbient -> {
             ScorePage(live, workout, isAmbient = true, toast = null, actions = actions, onOpenControls = {})

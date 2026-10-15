@@ -46,3 +46,11 @@ actual fun formatDateTime(epochMs: Long): String =
                 .ofEpochMilli(epochMs)
                 .atZone(java.time.ZoneId.systemDefault()),
         )
+
+actual fun formatMonth(
+    year: Int,
+    month: Int,
+): String =
+    java.time.format.DateTimeFormatter
+        .ofPattern("LLLL yyyy", java.util.Locale.getDefault())
+        .format(java.time.YearMonth.of(year, month))
