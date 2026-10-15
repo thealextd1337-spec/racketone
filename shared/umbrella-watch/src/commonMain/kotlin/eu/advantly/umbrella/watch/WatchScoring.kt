@@ -19,6 +19,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
 import eu.advantly.match.session.ActiveMatch
@@ -567,7 +568,8 @@ class WatchMatchSetup(
  *
  * @property status `IN_PROGRESS`, `PAUSED`, `AWAITING_DECISION` oder `FINISHED`
  * @property winner `A`, `B` oder `""` (offen, Unentschieden, abgebrochen)
- * @property resultReason `COMPLETED`, `DRAW`, `RETIRED`, `WALKOVER`, `ABANDONED` oder `""`
+ * @property resultReason `COMPLETED`, `DRAW`, `RETIRED`, `WALKOVER`, `ABANDONED`, `STOPPED` (am Handy „beendet, wie es
+ *   steht“, mit Sieger) oder `""`; „beendet“ ohne Sieger meldet die Facade als `DRAW` (Swift zeigt „Unentschieden“)
  * @property pointsA Punktanzeige des laufenden Spiels/Satzes (`"0"`, `"15"`, `"AD"`, `"7"` …), `""` ohne laufenden Satz
  * @property gamesA Spiele im laufenden Satz (Tennis/Padel), sonst `-1`
  * @property setKind `REGULAR`, `MATCH_TIEBREAK`, `PB_GAME`, `RALLY_GAME` oder `""`
@@ -786,7 +788,7 @@ internal fun buildSnapshot(
                 .orEmpty(),
         resultReason =
             state.result
-                ?.reason
+                ?.let { if (it.reason == ResultReason.STOPPED && it.winner == null) ResultReason.DRAW else it.reason }
                 ?.name
                 .orEmpty(),
         pointsA = current?.display?.get(us).orEmpty(),

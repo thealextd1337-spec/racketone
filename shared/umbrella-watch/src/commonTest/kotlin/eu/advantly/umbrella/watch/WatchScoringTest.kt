@@ -9,6 +9,7 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
 import eu.advantly.device.link.ReliableDeviceLink
@@ -573,6 +574,50 @@ class WatchScoringTest {
         assertEquals(pending.value, snap.matchId)
         assertTrue(snap.scorerPending)
         assertFalse(snap.isScorer)
+    }
+
+    /** F22: Das Handy führt mehrere Matches, die Apple-Watch-Facade zeigt nur das ihr zugewiesene. */
+    @Test
+    fun facadeShowsOnlyTheAssignedMatch() {
+        val rig = Rig()
+        val phone = rig.phone
+        val singles = Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me"))
+        val onWatch = phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles, scorer = ScorerChoice.MyWatch)
+        rig.settle()
+        assertEquals(onWatch.value, assertNotNull(rig.watch.snapshot()).matchId)
+        phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles) // Nachbarplatz, Handy zählt
+        rig.settle()
+        phone.recordPoint(Side.A)
+        rig.settle()
+        val snap = assertNotNull(rig.watch.snapshot())
+        assertEquals(onWatch.value, snap.matchId, "Uhr bleibt bei ihrem Match")
+        assertTrue(snap.isScorer)
+        assertEquals("15", assertNotNull(rig.watch.point(sideA = true)).pointsA)
+    }
+
+    /** F21: „Beenden, wie es steht“ am Handy – Sieger bzw. Gleichstand kommen als bekannte Codes an. */
+    @Test
+    fun stoppedOnThePhoneIsShownWithKnownCodes() {
+        val rig = Rig()
+        val phone = rig.phone
+        val singles = Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me"))
+        phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        rig.settle()
+        phone.recordPoint(Side.A)
+        phone.recordPoint(Side.B)
+        assertTrue(phone.endMatch(EndReason.STOPPED))
+        rig.settle()
+        val tie = assertNotNull(rig.watch.snapshot())
+        assertTrue(tie.matchFinished)
+        assertEquals("DRAW", tie.resultReason, "15:15 → Unentschieden")
+        assertEquals("", tie.winner)
+        assertTrue(phone.undo())
+        phone.recordPoint(Side.A)
+        assertTrue(phone.endMatch(EndReason.STOPPED))
+        rig.settle()
+        val won = assertNotNull(rig.watch.snapshot())
+        assertEquals("STOPPED", won.resultReason)
+        assertEquals("A", won.winner)
     }
 
     private fun phoneDataOf(rig: Rig): LocalData = rig.phoneData

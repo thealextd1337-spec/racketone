@@ -740,7 +740,7 @@ class MatchSession(
 
     /**
      * Handy: Ein auf der Uhr gestartetes (oder von ihr gezähltes) neues, laufendes Match wird das Uhr-Match, sofern es
-     * nicht älter ist als ein noch laufendes bisheriges. Alte Matches aus einem Offline-Rückstand ändern nichts.
+     * jünger ist als ein noch laufendes bisheriges. Alte Matches aus einem Offline-Rückstand ändern nichts.
      */
     private fun adoptWatchStartedMatch(genesis: ScoreEvent) {
         if (!config.parallelMatches) return
@@ -750,7 +750,8 @@ class MatchSession(
         val record = data.matches.get(genesis.matchId) ?: return
         if (record.isFinished || watchAssignment?.matchId == record.id) return
         val current = watchAssignment?.matchId?.let { opened[it]?.record ?: data.matches.get(it) }
-        if (current != null && !current.isFinished && record.createdAtMs < current.createdAtMs) return
+        // nur echt jüngere: bei gleicher Millisekunde bleibt die bestehende Zuweisung (z. B. gerade am Handy angelegt)
+        if (current != null && !current.isFinished && record.createdAtMs <= current.createdAtMs) return
         assignWatch(record.id)
         broadcastMeta(record)
     }
