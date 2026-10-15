@@ -140,7 +140,6 @@ internal class Core private constructor(
                 is PointDetailSet -> isAppliedPoint(payload.target)
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
-                is ForkResolved -> error("ForkResolved wirkt in der Log-Analyse (02 §7.5)")
             }
         if (!applied) markIgnored(event.id)
         return applied
@@ -855,7 +854,7 @@ internal class Core private constructor(
     // Export in die kanonische Form (02 §8)
     // =================================================================================================================
 
-    fun export(openForks: List<OpenFork> = emptyList()): MatchState {
+    fun export(): MatchState {
         val live = inSet && !frozen
         val serve = if (live) serveInfo() else null
         return MatchState(
@@ -873,7 +872,6 @@ internal class Core private constructor(
             effects = effects.sortedBy { it.ordinal },
             ignoredEvents = ignored,
             continuation = continuation(),
-            openForks = openForks,
         )
     }
 

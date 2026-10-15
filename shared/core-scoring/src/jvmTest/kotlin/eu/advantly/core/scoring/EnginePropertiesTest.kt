@@ -36,18 +36,7 @@ class EnginePropertiesTest {
         }
     }
 
-    /**
-     * Ohne Effekte; bei offenen Gabelungen ohne die Event-/Geräteliste der Zweige (ein Undo-Event gehört zum Zweig,
-     * das weggelassene Event nicht – Punkte und Vorschauen bleiben gleich).
-     */
-    private fun MatchState.withoutEffects() =
-        copy(
-            effects = emptyList(),
-            openForks =
-                openForks.map { f ->
-                    f.copy(branches = f.branches.map { it.copy(events = emptyList(), devices = emptyList()) })
-                },
-        )
+    private fun MatchState.withoutEffects() = copy(effects = emptyList())
 
     @Test
     fun incrementalApplyEqualsFold() =

@@ -1,6 +1,5 @@
 package eu.advantly.core.scoring
 
-import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.End
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.PlayerId
@@ -28,58 +27,7 @@ data class MatchState(
     val effects: List<Effect>,
     val ignoredEvents: List<EventId>,
     val continuation: Continuation?,
-    val openForks: List<OpenFork>,
 )
-
-/**
- * Offene Gabelung (02 §7.5, §8): mindestens zwei Zweige ab [ancestor] mit je einem wirksamen, nicht absorbierten
- * `PointWon`, ohne gültige Auflösung. Die UI zeigt den Dialog „Version A / Version B / zusammenführen“; die Antwort ist
- * ein `ForkResolved(ancestor, branches = Wurzeln, keep)`.
- *
- * @property id deterministisch: `"<ancestor>:<Wurzel 1>|<Wurzel 2>…"` (Wurzeln in Ordnung)
- * @property branches lebende Zweige in der Ordnung ihrer Wurzel-Events
- * @property merged Stand bei „alle behalten“ (`ForkResolved(keep = null)`)
- */
-@Serializable
-data class OpenFork(
-    val id: String,
-    val ancestor: EventId,
-    val branches: List<ForkBranch>,
-    val merged: ForkPreview,
-)
-
-/**
- * Ein Zweig einer offenen Gabelung.
- *
- * @property root erstes Event des Zweigs (Kind von `ancestor`)
- * @property events alle Events des Zweigs in Ordnung (beglaubigte Kette, 02 §7.5)
- * @property devices erzeugende Geräte (sortiert)
- * @property points wirksame, nicht absorbierte `PointWon` des Zweigs
- * @property preview Stand, wenn nur dieser Zweig behalten wird (Fold mit hypothetischem `ForkResolved(keep = root)`)
- */
-@Serializable
-data class ForkBranch(
-    val root: EventId,
-    val events: List<EventId>,
-    val devices: List<DeviceId>,
-    val points: Int,
-    val preview: ForkPreview,
-)
-
-/** Kurzform eines Zustands für die Fork-Vorschau (Teilmenge von [MatchState]). */
-@Serializable
-data class ForkPreview(
-    val status: MatchStatus,
-    val result: MatchResult?,
-    val setsWon: SidePair<Int>,
-    val sets: List<SetRecord>,
-    val current: CurrentSet?,
-) {
-    companion object {
-        /** Kurzform von [state]. */
-        fun of(state: MatchState): ForkPreview = ForkPreview(state.status, state.result, state.setsWon, state.sets, state.current)
-    }
-}
 
 /** Wertepaar je Side, JSON `{"A": …, "B": …}`. */
 @Serializable

@@ -33,13 +33,8 @@ data class TapConflict(
  * @property undone durch ein wirksames, gültiges `Undo` unwirksame Events
  * @property invalidUndos wirksame `Undo`, deren Ziel in der Ordnung nicht vor ihnen steht (→ `ignoredEvents`)
  * @property absorbed als Doppel-Tap absorbierte `PointWon`
- * @property activeConflicts Widersprüche zwischen zwei wirksamen, nicht absorbierten `PointWon`, die nicht Teil einer
- *   Gabelung sind (die zeigt der Fork-Dialog)
- * @property resolvedConflicts Widersprüche, von denen mindestens eine Seite inzwischen unwirksam ist oder deren Gabelung
- *   aufgelöst ist
- * @property discarded Events verworfener Zweige (gültiges `ForkResolved` mit `keep`, 02 §7.5) – unwirksam wie undone
- * @property resolutions wirksame, gültige `ForkResolved` (je Gabelung das erste in Ordnung)
- * @property ignoredResolutions ungültige bzw. überholte `ForkResolved` (→ `ignoredEvents`)
+ * @property activeConflicts Widersprüche zwischen zwei wirksamen, nicht absorbierten `PointWon`
+ * @property resolvedConflicts Widersprüche, von denen mindestens eine Seite inzwischen unwirksam ist
  */
 data class LogAnalysis(
     val ordered: List<ScoreEvent>,
@@ -49,9 +44,6 @@ data class LogAnalysis(
     val absorbed: Set<EventId>,
     val activeConflicts: List<TapConflict>,
     val resolvedConflicts: List<TapConflict>,
-    val discarded: Set<EventId> = emptySet(),
-    val resolutions: Set<EventId> = emptySet(),
-    val ignoredResolutions: Set<EventId> = emptySet(),
 )
 
 /** Reine Funktionen über ein Event-Log: Ordnung, Duplikate, Wirksamkeit (Undo), Doppel-Taps und Widersprüche. */
@@ -72,16 +64,7 @@ object EventLog {
     fun ordered(events: Collection<ScoreEvent>): List<ScoreEvent> = analyze(events).ordered
 
     /** Vollständige Analyse eines (ungeordneten) Logs. */
-    fun analyze(events: Collection<ScoreEvent>): LogAnalysis = analyzeWithForks(events).first
-
-    /**
-     * Analyse inkl. Gabelungen (02 §7.3 Schritte 1–2, 6 und §7.5):
-     * 1. Undo-Wirksamkeit über alle nicht zurückgewiesenen Events (Durchlauf 1).
-     * 2. Verzweigungen und Auflösungen: je Gabelung gilt das erste nicht rückgängig gemachte gültige `ForkResolved`.
-     * 3. Verworfene Zweige: Undo-Wirksamkeit erneut, wobei verworfene Events nichts bewirken (Durchlauf 2).
-     * 4. Doppel-Taps ohne verworfene Partner, Widersprüche, offene Gabelungen.
-     */
-    internal fun analyzeWithForks(events: Collection<ScoreEvent>): Pair<LogAnalysis, List<ForkCandidate>> {
+    fun analyze(events: Collection<ScoreEvent>): LogAnalysis {
         val raw = distinctOrdered(events)
         val seen = HashSet<EventId>()
         val rejected = HashSet<EventId>()
@@ -89,45 +72,12 @@ object EventLog {
         for (event in raw) {
             if (seen.add(event.id)) ordered += event else rejected += event.id
         }
+        val (undone, invalidUndos) = effectiveness(ordered, rejected)
         val candidates = ordered.filter { it.id !in rejected }
-        var (undone, invalidUndos) = effectiveness(ordered, rejected)
-        val points = ForkAnalysis.branchPoints(candidates)
-        val resolutions = ForkAnalysis.resolutions(candidates, undone, points)
-        val discarded = resolutions.discarded
-        if (discarded.isNotEmpty()) {
-            val second = effectiveness(ordered, rejected + discarded)
-            undone = second.first - discarded
-            invalidUndos = second.second
-        }
-        val absorbed = absorbedDoubleTaps(candidates.filter { it.id !in discarded })
-        val ineffective = { id: EventId -> id in undone || id in absorbed || id in discarded }
-        val forks = ForkAnalysis.open(points, { id -> !ineffective(id) }, resolutions.winners)
+        val absorbed = absorbedDoubleTaps(candidates)
         val all = conflicts(candidates)
-        val openPairs = forks.flatMap { f -> f.live.map { it.id } }.toSet()
-        val resolvedPairs =
-            resolutions.winners
-                .map { it.payload as ForkResolved }
-                .flatMap { r -> r.branches.flatMap { a -> r.branches.filter { it != a }.map { b -> a to b } } }
-                .toSet()
-        val visible = all.filterNot { it.first in openPairs && it.second in openPairs }
-        val (active, resolved) =
-            visible.partition { c ->
-                listOf(c.first, c.second).none { ineffective(it) } && (c.first to c.second) !in resolvedPairs
-            }
-        val analysis =
-            LogAnalysis(
-                ordered = ordered,
-                rejected = rejected,
-                undone = undone,
-                invalidUndos = invalidUndos,
-                absorbed = absorbed,
-                activeConflicts = active,
-                resolvedConflicts = resolved,
-                discarded = discarded,
-                resolutions = resolutions.winners.mapTo(HashSet()) { it.id },
-                ignoredResolutions = resolutions.ignored,
-            )
-        return analysis to forks
+        val (active, resolved) = all.partition { c -> listOf(c.first, c.second).none { it in undone || it in absorbed } }
+        return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved)
     }
 
     /**
