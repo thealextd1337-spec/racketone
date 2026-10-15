@@ -99,7 +99,7 @@ fun TabBar(
                         .clickable(role = Role.Tab) { onSelect(tab) }
                         .semantics {
                             this.selected = isSelected
-                            contentDescription = label
+                            if (!showLabel) contentDescription = label
                         }.padding(vertical = Spacing.xs),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,

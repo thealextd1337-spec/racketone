@@ -214,9 +214,12 @@ internal fun SetTable(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = header.uppercase(),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 style = AdvantlyTheme.typography.overline.copy(fontSize = 11.sp),
                 color = if (outdoor) Color.White else colors.text2,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("set_table_header"),
             )
             elapsed()
         }
