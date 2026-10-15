@@ -1,5 +1,6 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -17,12 +18,15 @@ import eu.advantly.core.scoring.MatchFormatValidator
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
+import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
@@ -202,6 +206,17 @@ class SessionMatchStore(
         matchTiebreak: Boolean,
     ): Boolean = session.continueDecision(anotherSet, matchTiebreak)
 
+    override fun startNextSet(kind: NextSetKind): Boolean = session.startNextSet(kind)
+
+    override fun removeLastPointOf(side: Side): Boolean = session.removeLastPointOf(side)
+
+    override fun chooseServer(player: PlayerId): Boolean = session.chooseServer(player)
+
+    override fun setServeInfo(
+        pointId: EventId,
+        value: ServeOutcome?,
+    ): Boolean = session.setServeInfo(pointId, value)
+
     override fun endMatch(
         reason: EndReason,
         side: Side?,
@@ -261,7 +276,7 @@ class SessionMatchStore(
                         is PointWon -> InputKind.POINT to payload.side
                         is Undo -> InputKind.UNDO to null
                         is ContinueDecision -> InputKind.SET_DECISION to null
-                        is Correction -> InputKind.CORRECTION to null
+                        is Correction, is ServerChosen -> InputKind.CORRECTION to null
                         Paused -> InputKind.PAUSE to null
                         Resumed -> InputKind.RESUME to null
                         is MatchEnded -> InputKind.END to payload.side
@@ -460,6 +475,11 @@ class SessionMatchStore(
             scorerName = selfFlow.value.displayName,
             scorerKind = if (m.scorerDeviceId == MatchSession.PENDING_WATCH) DeviceKind.WATCH else m.scorerKind.toDeviceKind(m.isScorer),
             rejectedByRoleCount = m.rejectedByRoleCount,
+            lastPoint =
+                m.lastPoint?.let { LastPointInfo(it.id, it.side, it.servingSide, it.server, it.serve, it.doubleFaultAllowed) },
+            serveInfoEnabled = m.serveInfoEnabled,
+            canRemovePoint = m.canRemovePoint,
+            nextSetOptions = m.nextSetOptions,
             sync =
                 SyncInfo(
                     peers = sync.peers.count { it.compatibility == CompatibilityStatus.COMPATIBLE },

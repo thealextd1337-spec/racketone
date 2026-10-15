@@ -119,6 +119,60 @@ class SessionMatchStoreTest {
 
     private fun Rig.watchScoredMatch() = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
 
+    /** Neue Kommandos (Feldtest 2026-10-15) laufen über die Session; auf dem Anzeige-Gerät wirken sie nicht. */
+    @Test
+    fun operationCommandsGoThroughTheSession() {
+        val rig = Rig()
+        rig.phone.start(rig.phone.setupFor(Presets.TENNIS_OPEN.format()), StartOptions(ScorerOption.THIS_PHONE))
+        repeat(3) { rig.phone.recordPoint(Side.A) }
+        rig.phone.recordPoint(Side.B)
+        val last =
+            assertNotNull(
+                rig.phone.active.value
+                    ?.lastPoint,
+            )
+        assertTrue(
+            rig.phone.active.value!!
+                .serveInfoEnabled,
+        )
+        assertTrue(rig.phone.setServeInfo(last.id, eu.advantly.core.scoring.ServeOutcome.DOUBLE_FAULT))
+        assertEquals(
+            eu.advantly.core.scoring.ServeOutcome.DOUBLE_FAULT,
+            rig.phone.active.value
+                ?.lastPoint
+                ?.serve,
+        )
+        assertTrue(rig.phone.removeLastPointOf(Side.A))
+        assertEquals(
+            SidePair(2, 1),
+            rig.phone.active.value
+                ?.state
+                ?.current
+                ?.points,
+        )
+        assertEquals(
+            SidePair(true, true),
+            rig.phone.active.value
+                ?.canRemovePoint,
+        )
+        repeat(24) { rig.phone.recordPoint(Side.A) }
+        assertTrue(
+            rig.phone.active.value!!
+                .nextSetOptions
+                .contains(eu.advantly.core.scoring.NextSetKind.TIEBREAK_7),
+        )
+        assertTrue(rig.phone.startNextSet(eu.advantly.core.scoring.NextSetKind.TIEBREAK_7))
+        rig.settle()
+        assertEquals(
+            eu.advantly.core.scoring.SetKind.MATCH_TIEBREAK,
+            rig.watch.state.value.match
+                ?.state
+                ?.current
+                ?.setKind,
+        )
+        assertFalse(rig.watch.removeLastPointOf(Side.A), "Uhr zeigt nur an")
+    }
+
     @Test
     fun watchIsOfferedOnlyWhileConnected() {
         val rig = Rig()
