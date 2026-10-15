@@ -451,3 +451,43 @@
 
 /* Anzeige: iPhone hat „Meine Uhr“ gewählt, Übergabe per ScorerChanged steht aus (PENDING_WATCH) */
 "role.pending" = "Waiting for handover to this watch …";
+
+/* Bedienung und Setup nach W2-Vertrag. */
+"action.removeUs" = "Remove our last point";
+"action.removeThem" = "Remove opponents’ last point";
+"action.restorePoint" = "Restore point";
+"banner.pointRemoved" = "Point removed";
+"serve.first.short" = "1.";
+"serve.second.short" = "2.";
+"serve.df.short" = "DF";
+"serve.first" = "1st serve";
+"serve.second" = "2nd serve";
+"serve.df" = "Double fault";
+"serve.choose" = "Choose server";
+"serve.choice.first" = "Who serves first?";
+"serve.choice.second.us" = "Who serves for us?";
+"serve.choice.second.them" = "Who serves for the opponents?";
+"serve.choice.hint" = "Choose later – the current order applies.";
+"setend.regular" = "Regular set";
+"setend.tiebreak7" = "Tiebreak to 7";
+"setend.champions10" = "Champions tiebreak to 10";
+"setend.super10" = "Super tiebreak to 10";
+"setend.finish" = "End match";
+"setup.gamesPerSet" = "Games per set";
+"setup.games %@" = "%@ games per set";
+"setup.oneGameHint" = "Win by 2 games; tiebreak at 1–1. A set ends at 2–0 or 2–1.";
+"setup.serveStats" = "Track serve statistics";
+"setup.players" = "Player slots";
+"setup.recentPeople" = "Recent players";
+"setup.noRecentPeople" = "No recent players yet. They appear after syncing with your phone.";
+"setup.placeholder %@" = "%@ · Placeholder";
+"setup.player.self" = "You";
+"setup.player.partner" = "Partner";
+"setup.player.opponent" = "Opponent";
+"setup.player.opponent1" = "Opponent 1";
+"setup.player.opponent2" = "Opponent 2";
+"sync.updateWatch" = "Please update Advantly on this watch.";
+"sync.updatePhone" = "Please update Advantly on your phone.";
+"sync.updateWatch.short" = "Update watch";
+"sync.updatePhone.short" = "Update phone";
+"serve.bar" = "Serve bar";

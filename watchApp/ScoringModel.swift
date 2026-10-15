@@ -25,6 +25,7 @@ enum ActionButtonMode: String, CaseIterable {
 /// Kurzer Hinweis über dem Scoring-Screen (3 s).
 enum Banner: Equatable {
     case undo(from: String, to: String)
+    case pointRemoved
     case changeEnds
     case receiveOrderSwapped
     case healthUnavailable
@@ -54,6 +55,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     @Published private(set) var flashSideA: Bool?
     @Published private(set) var banner: Banner?
     @Published private(set) var lastSetup: WatchMatchSetup?
+    @Published private(set) var recentPeople: [WatchPlayer] = []
+    @Published private(set) var updateRequired = ""
+    /// Ausschließlich nach einem lokalen Punkt sichtbar; Sync-/Ack-Updates verlängern die Frist nicht.
+    @Published private(set) var serveBarPointId = ""
+    private var serveBarWork: DispatchWorkItem?
+    private var serveBarDeadline = Date.distantPast
     @Published var actionButtonMode = ActionButtonMode.stored {
         didSet {
             ActionButtonMode.stored = actionButtonMode
@@ -87,6 +94,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         super.init()
         scoring.setListener(listener: self)
         lastSetup = scoring.lastSetup()
+        refreshStartInfo()
         workout.onUnavailable = { [weak self] in
             if self?.snapshot != nil { self?.show(.healthUnavailable) }
         }
@@ -104,6 +112,15 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func onSnapshot(snapshot: WatchScoreSnapshot?) {
         let before = self.snapshot
         self.snapshot = snapshot
+        // Mit Match kommt der Versionshinweis direkt aus dem Snapshot; ohne Match liest der Getter nur Session-State.
+        updateRequired = snapshot?.updateRequired ?? scoring.updateRequired()
+        if snapshot?.matchId != before?.matchId {
+            recentPeople = scoring.recentPeople()
+        }
+        if snapshot?.matchId != before?.matchId || snapshot?.isScorer != true ||
+            (!serveBarPointId.isEmpty && snapshot?.lastPointId != serveBarPointId) {
+            dismissServeBar()
+        }
         if let snapshot, let before, before.matchId == snapshot.matchId {
             // Nur neue Match-Events als Anzeige auswerten. Sync-/Ack-Snapshots tragen dieselben Effekte;
             // der Zähler erhält seine Rückmeldung bereits nach dem lokalen Befehl.
@@ -128,6 +145,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         } else {
             syncWorkout()
         }
+    }
+
+    /// Personenverzeichnis nur beim Betreten des Starts oder beim Matchwechsel aus der Datenbank lesen.
+    func refreshStartInfo() {
+        recentPeople = scoring.recentPeople()
+        updateRequired = scoring.updateRequired()
     }
 
     /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist
@@ -219,11 +242,10 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     @discardableResult
     func start(presetId: String, doubles: Bool, weServeFirst: Bool) -> Bool {
-        let started = scoring.startMatch(
-            presetId: presetId,
-            doubles: doubles,
-            weServeFirst: weServeFirst,
-            watchWorkout: workoutAlongside
+        let started = scoring.startConfiguredMatch(
+            presetId: presetId, doubles: doubles, watchWorkout: workoutAlongside,
+            gamesPerSet: 0, serveStats: true, partnerId: "", opponent1Id: "", opponent2Id: "",
+            firstServerSlot: weServeFirst ? "SELF" : "OPPONENT_1"
         )
         guard started != nil else {
             rejected()
@@ -236,9 +258,31 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     @discardableResult
+    func startConfigured(presetId: String, doubles: Bool, gamesPerSet: Int32, serveStats: Bool,
+                         partnerId: String, opponent1Id: String, opponent2Id: String, firstServerSlot: String) -> Bool {
+        guard scoring.startConfiguredMatch(
+            presetId: presetId, doubles: doubles, watchWorkout: workoutAlongside,
+            gamesPerSet: gamesPerSet, serveStats: serveStats, partnerId: partnerId,
+            opponent1Id: opponent1Id, opponent2Id: opponent2Id, firstServerSlot: firstServerSlot
+        ) != nil else {
+            rejected()
+            return false
+        }
+        lastSetup = scoring.lastSetup()
+        lockedUntil = .distantPast
+        Haptics.play(.start)
+        return true
+    }
+
+    @discardableResult
     func startLast() -> Bool {
-        guard let last = lastSetup else { return false }
-        return start(presetId: last.presetId, doubles: last.doubles, weServeFirst: last.weServeFirst)
+        guard scoring.startLastMatch(watchWorkout: workoutAlongside) != nil else {
+            rejected()
+            return false
+        }
+        lockedUntil = .distantPast
+        Haptics.play(.start)
+        return true
     }
 
     /// Schnellstart über die Action-Taste (StartWorkoutIntent): letzte Auswahl dieser Sportart, sonst Default-Preset.
@@ -269,6 +313,13 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
             rejected()
             return
         }
+        dismissServeBar()
+        if after.serveInfoEnabled && !after.lastPointId.isEmpty {
+            serveBarPointId = after.lastPointId
+            serveBarDeadline = Date().addingTimeInterval(5)
+            scheduleServeBarDismiss(after: 5)
+        }
+        if banner == .pointRemoved { banner = nil }
         lockedUntil = now.addingTimeInterval(Self.lockInterval)
         flashSideA = sideA
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.flashSideA = nil }
@@ -280,10 +331,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     /// Display wurde aus dem Always-on-Zustand geweckt: der Aufweck-Tap soll nicht zählen.
     func didWake() {
+        dismissServeBar()
         silentUntil = Date().addingTimeInterval(0.3)
     }
 
     func undo() {
+        dismissServeBar()
         guard let before = snapshot, let after = scoring.undo() else {
             rejected()
             return
@@ -293,7 +346,82 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         afterCommand(after)
     }
 
+    func dismissServeBar() {
+        serveBarWork?.cancel()
+        serveBarWork = nil
+        serveBarPointId = ""
+    }
+
+    private func scheduleServeBarDismiss(after seconds: TimeInterval) {
+        serveBarWork?.cancel()
+        serveBarDeadline = min(serveBarDeadline, Date().addingTimeInterval(seconds))
+        let work = DispatchWorkItem { [weak self] in self?.serveBarPointId = "" }
+        serveBarWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    func canRemovePoint(sideA: Bool) -> Bool {
+        guard let snap = snapshot, snap.isScorer else { return false }
+        return sideA ? snap.canRemovePointA : snap.canRemovePointB
+    }
+
+    /// Aufruf beim Loslassen; dieselbe kurze Entprellung und Aufweck-Sperre wie beim Zählen.
+    func removePoint(sideA: Bool) {
+        guard canRemovePoint(sideA: sideA), Date() >= silentUntil, !isLocked else { return }
+        dismissServeBar()
+        guard scoring.removeLastPointOf(sideA: sideA) != nil else {
+            rejected()
+            return
+        }
+        lockedUntil = Date().addingTimeInterval(Self.lockInterval)
+        Haptics.undo()
+        show(.pointRemoved)
+    }
+
+    func redoRemoval() {
+        guard banner == .pointRemoved, snapshot?.canRedo == true else { return }
+        dismissServeBar()
+        guard scoring.redo() != nil else {
+            rejected()
+            return
+        }
+        banner = nil
+        Haptics.play(.click)
+    }
+
+    func setServeInfo(pointId: String, value: String) {
+        guard let snap = snapshot, snap.isScorer, snap.serveInfoEnabled,
+              !pointId.isEmpty, pointId == serveBarPointId, pointId == snap.lastPointId else { return }
+        guard scoring.setServeInfo(pointId: pointId, value: value) != nil else {
+            rejected()
+            return
+        }
+        Haptics.play(.click)
+        // Auswahl kurz markiert lassen; die ursprünglichen 5 s niemals verlängern.
+        scheduleServeBarDismiss(after: min(1.5, max(0, serveBarDeadline.timeIntervalSinceNow)))
+    }
+
+    @discardableResult
+    func chooseServer(_ id: String) -> Bool {
+        guard scoring.chooseServer(playerId: id) != nil else {
+            rejected()
+            return false
+        }
+        Haptics.play(.click)
+        return true
+    }
+
+    func startNextSet(_ kind: String) {
+        dismissServeBar()
+        guard scoring.startNextSet(kind: kind) != nil else {
+            rejected()
+            return
+        }
+        Haptics.play(.start)
+    }
+
     func decide(anotherSet: Bool, matchTiebreak: Bool) {
+        dismissServeBar()
         guard let after = scoring.continueDecision(anotherSet: anotherSet, matchTiebreak: matchTiebreak) else {
             rejected()
             return
@@ -303,6 +431,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func endMatch() {
+        dismissServeBar()
         guard let after = scoring.end() else {
             rejected()
             return
@@ -377,7 +506,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         self.banner = banner
         let work = DispatchWorkItem { [weak self] in self?.banner = nil }
         bannerWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (banner == .pointRemoved ? 5 : 3), execute: work)
     }
 }
 
@@ -396,6 +525,9 @@ enum ScoreText {
             let b = s.setScoresB[i].int32Value
             let tbA = s.setTiebreaksA[i].int32Value
             let tbB = s.setTiebreaksB[i].int32Value
+            if i < s.setKinds.count && s.setKinds[i] == "MATCH_TIEBREAK" {
+                return "[" + pair(a, b) + "]"
+            }
             if tbA >= 0 && tbB >= 0 {
                 return pair(a, b) + "(\(min(tbA, tbB)))"
             }

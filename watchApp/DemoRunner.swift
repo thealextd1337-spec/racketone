@@ -3,7 +3,7 @@ import AdvantlyWatchKit
 import Foundation
 
 /// Nur Debug-Build, für CI-Screenshots im Simulator. Startparameter:
-/// `-advantlyDemoStage <start|scoring|setend|matchend|display>` und optional `-advantlyDemo <sport>` (Default `tennis`;
+/// `-advantlyDemoStage <start|scoring|servebar|setend|matchend|display>` und optional `-advantlyDemo <sport>` (Default `tennis`;
 /// `padel`, `pickleball`, `badminton`, `table_tennis`).
 ///
 /// Die App baut den Zustand der Etappe direkt nach dem Start auf (offenes Match der Sportart, Punkte ohne Pause),
@@ -13,6 +13,7 @@ enum DemoRunner {
     enum Stage: String {
         case start
         case scoring
+        case servebar
         case setend
         case matchend
         /// Anzeige-Modus: ein anderes Gerät (Handy) zählt, die Uhr zeigt nur an
@@ -59,7 +60,7 @@ enum DemoRunner {
             // Muster Wir, Wir, Gegner – bis ein Break-/Satz-/Matchball ansteht
             var taps = 0
             let attention: Set<String> = ["BREAK_POINT", "SET_POINT", "MATCH_POINT"]
-            while let snap = model.snapshot, !snap.pendingDecision, taps < 400 {
+            while stage != .servebar, let snap = model.snapshot, !snap.pendingDecision, taps < 400 {
                 if snap.eventCount >= 12 && attention.contains(snap.hintCode) { break }
                 model.tap(sideA: taps % 3 != 2, force: true)
                 taps += 1
@@ -80,6 +81,17 @@ enum DemoRunner {
         }
         // Hinweise (Seitenwechsel, Undo) laufen nach 3 s ab; danach steht die Anzeige still
         try? await Task.sleep(nanoseconds: 3_500_000_000)
+        if stage == .servebar {
+            // Neuer Rückschlagpunkt unmittelbar vor dem Marker, damit die 5-s-Leiste beim Screenshot sicher steht.
+            model.tap(sideA: model.snapshot?.serveSide == "B", force: true)
+            guard let snap = model.snapshot, snap.serveInfoEnabled, snap.doubleFaultAllowed,
+                  model.serveBarPointId == snap.lastPointId else {
+                mark("error", "serve bar not available")
+                return
+            }
+        } else {
+            model.dismissServeBar()
+        }
         let snap = model.snapshot
         let detail = snap.map { s in
             "points=\(s.pointsA):\(s.pointsB) sets=\(ScoreText.sets(s)) hint=\(s.hintCode) status=\(s.status) scorer=\(s.isScorer)"
@@ -91,7 +103,7 @@ enum DemoRunner {
         guard let snap else { return false }
         switch stage {
         case .start: return false
-        case .scoring: return snap.status == "IN_PROGRESS"
+        case .scoring, .servebar: return snap.status == "IN_PROGRESS"
         case .setend: return snap.pendingDecision
         case .matchend: return snap.matchFinished
         case .display: return !snap.isScorer
