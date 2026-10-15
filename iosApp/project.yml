@@ -106,6 +106,24 @@ targets:
         CFBundleLocalizations: [en, de]
         WKApplication: true
         WKCompanionAppBundleIdentifier: eu.advantly
+        # Match zählt auch ohne iPhone in der Nähe (05 §1.5); Sync folgt nachträglich
+        WKRunsIndependentlyOfCompanionApp: true
+        # Workout-Session als Laufzeit-Anker während des Matches (05 §1.2, E2) und Action-Taste (StartWorkoutIntent)
+        WKBackgroundModes: [workout-processing]
+        # Englischer Default; DE/EN-Übersetzungen in watchApp/{en,de}.lproj/InfoPlist.strings
+        NSHealthShareUsageDescription: Advantly shows your heart rate on the watch while you play.
+        NSHealthUpdateUsageDescription: Advantly runs your match as a workout so the app stays active on your wrist.
+    # HealthKit (Workout-Session, Puls). Greift erst mit Signatur (Spike S2); unsignierte CI-Builds laufen ohne
+    # Entitlement → die App zählt dann ohne Workout (WorkoutManager.State.unavailable)
+    entitlements:
+      path: Generated/Watch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    attributes:
+      SystemCapabilities:
+        com.apple.HealthKit:
+          enabled: 1
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: eu.advantly.watchkitapp

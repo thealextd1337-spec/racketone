@@ -1,35 +1,49 @@
 import AdvantlyWatchKit
 import SwiftUI
 
+/// Wurzel: ohne Match die Startliste, sonst Live-Match, Satzende-Dialog oder Matchende.
+/// Ein laufendes Match wird nach dem App-Start aus dem Event-Log fortgesetzt.
 struct ContentView: View {
+    @ObservedObject private var model = ScoringModel.shared
+    /// `onAppear` an der Group feuert bei jedem Wechsel des Inhalts erneut – Startlogik nur einmal je Prozess
+    @State private var launched = false
     #if DEBUG
     /// Ergebnis des Store-Smoke-Tests (Spike S1), -1 = nicht gelaufen.
     @State private var storeCount: Int64 = -1
     #endif
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 8) {
-                    // Lokalisiert über en.lproj / de.lproj (Localizable.strings)
-                    Text("watch.greeting")
-                        .font(.headline)
-                    Text("watch.engine \(AdvantlyWatch.shared.engineModule())")
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                    #if DEBUG
-                    if storeCount >= 0 {
-                        Text("watch.store \(String(storeCount))")
-                            .font(.footnote)
-                    }
-                    NavigationLink("link.debug.open") { LinkDebugView() }
-                    #endif
+        Group {
+            if let snap = model.snapshot {
+                if snap.matchFinished {
+                    MatchEndView(model: model, snap: snap)
+                } else if snap.pendingDecision {
+                    SetEndView(model: model, snap: snap)
+                } else {
+                    MatchPagerView(model: model, snap: snap)
                 }
-                .padding()
+            } else {
+                StartView(model: model, debugInfo: debugInfo)
             }
         }
+        .onAppear {
+            guard !launched else { return }
+            launched = true
+            #if DEBUG
+            // vor dem Fortsetzen: der Demo-Modus schaltet die Workout-Session ab
+            DemoRunner.runIfRequested(model: model)
+            runStoreSmokeIfRequested()
+            #endif
+            model.resumeIfNeeded()
+        }
+    }
+
+    private var debugInfo: String {
         #if DEBUG
-        .onAppear(perform: runStoreSmokeIfRequested)
+        let engine = loc("watch.engine %@", AdvantlyWatch.shared.engineModule())
+        return storeCount >= 0 ? engine + "\n" + loc("watch.store %@", String(storeCount)) : engine
+        #else
+        return ""
         #endif
     }
 

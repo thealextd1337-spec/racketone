@@ -42,7 +42,7 @@ shared/entitlements          Freemium-Gates (Stub: alles frei)
 shared/presentation          ViewModels, UI-State, Session-Adapter (kein watchOS) → match-session, data, device-link, entitlements
 shared/ui-phone              CMP-Screens (android, ios, jvm("desktop"))    → presentation
 shared/umbrella-ios          XCFramework AdvantlyKit                       → ui-phone
-shared/umbrella-watch        XCFramework AdvantlyWatchKit                  → data, device-link
+shared/umbrella-watch        XCFramework AdvantlyWatchKit                  → match-session, data, device-link
 androidApp                   Phone-App                                     → ui-phone
 wearApp                      Wear-OS-App (minSdk 34)                       → presentation
 iosApp/                      XcodeGen-Projekt + Swift-Host (iOS)           → AdvantlyKit

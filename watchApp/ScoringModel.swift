@@ -1,0 +1,409 @@
+import AdvantlyWatchKit
+import Foundation
+import SwiftUI
+
+/// Was die Action-Taste (Ultra) im Match tut – Feature-Flag nach 05 §1.7 (Default: Rückgängig).
+/// Risiko R2 (Intent-Spende seit watchOS 26.5 fehlerhaft): der Undo-Button auf dem Display bleibt immer.
+enum ActionButtonMode: String, CaseIterable {
+    case undo
+    case pointUs
+    case off
+
+    static let key = "advantly.watch.actionButton"
+
+    static var stored: ActionButtonMode {
+        get { ActionButtonMode(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .undo }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+    }
+
+    var next: ActionButtonMode {
+        let all = ActionButtonMode.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
+    }
+}
+
+/// Kurzer Hinweis über dem Scoring-Screen (3 s).
+enum Banner: Equatable {
+    case undo(from: String, to: String)
+    case changeEnds
+    case receiveOrderSwapped
+    case healthUnavailable
+    /// Event nicht gespeichert (SQLite-Fehler) – Zustand unverändert, nochmal tippen
+    case storeError
+    /// Die Engine hat Eingaben eines Nicht-Zählers verworfen (nach einer Übergabe)
+    case rejectedInputs(Int)
+    /// Rolle gewechselt: diese Uhr zählt jetzt (`true`) bzw. zeigt nur noch an
+    case roleChanged(scorer: Bool)
+}
+
+/// Zustand der Watch-App. Alle Zähl-Logik liegt in Kotlin (`WatchScoring` über die Match-Session); Swift übernimmt
+/// Gesten, Sperrzeit, Haptik, Workout-Session und Anzeige. Single-Scorer: Zählt ein anderes Gerät, ist die Uhr
+/// Anzeige (keine Zähl-/Undo-Aktionen, auch nicht über die Action-Taste). Alles läuft auf der Main-Queue.
+final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
+    static let shared = ScoringModel()
+
+    /// Sperrzeit nach jedem Punkt für beide Flächen (04 §4.3.3, Entprellung).
+    static let lockInterval: TimeInterval = 0.6
+
+    let scoring = AdvantlyWatch.shared.scoring()
+    let workout = WorkoutManager()
+
+    @Published private(set) var snapshot: WatchScoreSnapshot?
+    @Published private(set) var lockedUntil = Date.distantPast
+    /// Kurzes Aufleuchten der getippten Hälfte (120 ms)
+    @Published private(set) var flashSideA: Bool?
+    @Published private(set) var banner: Banner?
+    @Published private(set) var lastSetup: WatchMatchSetup?
+    @Published var actionButtonMode = ActionButtonMode.stored {
+        didSet {
+            ActionButtonMode.stored = actionButtonMode
+            donateActionIntent()
+        }
+    }
+
+    /// Workout-Session an das Match koppeln. Der CI-Demo-Modus schaltet sie ab, damit kein HealthKit-Dialog
+    /// die Screenshots verdeckt.
+    var workoutEnabled = true
+
+    /// Voreinstellung „Workout auf meiner Uhr mitlaufen lassen“ (04 §3.1, Standard an) für auf der Uhr gestartete
+    /// Matches; landet als `MatchMeta.watchWorkout` im Match. Vom iPhone gestartete Matches bringen dessen Wahl mit.
+    @Published var workoutAlongside = UserDefaults.standard.object(forKey: ScoringModel.workoutKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(workoutAlongside, forKey: Self.workoutKey) }
+    }
+
+    /// Umschalten während des Matches (Steuerseite) – nur lokal auf dieser Uhr, je Match.
+    @Published private(set) var workoutOverrides: [String: Bool] = [:]
+
+    static let workoutKey = "advantly.watch.workoutAlongside"
+
+    /// Datenbank nicht lesbar (z. B. Schema aus der Zeit vor der Match-Session) → Hinweis auf der Startliste.
+    @Published private(set) var storeUnavailable = false
+
+    private var bannerWork: DispatchWorkItem?
+    /// Nach dem Aufwecken (Always-on → aktiv) zählen Taps 300 ms lang still nicht (04 §4.3.3 Punkt 4).
+    private var silentUntil = Date.distantPast
+
+    override private init() {
+        super.init()
+        scoring.setListener(listener: self)
+        lastSetup = scoring.lastSetup()
+        workout.onUnavailable = { [weak self] in
+            if self?.snapshot != nil { self?.show(.healthUnavailable) }
+        }
+        workout.onRunning = { [weak self] in self?.donateActionIntent() }
+        workout.onRecoveryFailed = { [weak self] in self?.syncWorkout() }
+        workout.onSystemPauseChange = { [weak self] paused in
+            guard let self, self.snapshot?.isScorer == true else { return }
+            if paused { self.pauseMatch() } else { self.resumeMatch() }
+        }
+    }
+
+    // MARK: WatchScoringListener
+
+    /// Jeder neue Zustand – auch durch das iPhone (Anzeige, Übergabe, Abgleich); `nil` = kein Match offen.
+    func onSnapshot(snapshot: WatchScoreSnapshot?) {
+        let before = self.snapshot
+        self.snapshot = snapshot
+        if let snapshot, let before, before.matchId == snapshot.matchId {
+            // Nur neue Match-Events als Anzeige auswerten. Sync-/Ack-Snapshots tragen dieselben Effekte;
+            // der Zähler erhält seine Rückmeldung bereits nach dem lokalen Befehl.
+            if !snapshot.isScorer && snapshot.eventCount != before.eventCount {
+                afterCommand(snapshot)
+            }
+            if before.isScorer != snapshot.isScorer {
+                show(.roleChanged(scorer: snapshot.isScorer))
+                Haptics.play(snapshot.isScorer ? .success : .directionDown)
+            } else if snapshot.rejectedByRoleCount > before.rejectedByRoleCount {
+                show(.rejectedInputs(Int(snapshot.rejectedByRoleCount)))
+                Haptics.play(.notification)
+            }
+        }
+        if snapshot == nil {
+            workout.end()
+        } else {
+            syncWorkout()
+        }
+    }
+
+    /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist
+    /// pausiert, solange das Match unterbrochen ist.
+    private func syncWorkout() {
+        guard let snap = snapshot else { return }
+        if snap.matchFinished || !workoutEnabled || !workoutWanted(snap) {
+            workout.end()
+        } else {
+            workout.ensureRunning(
+                matchId: snap.matchId,
+                sport: snap.sport,
+                presetId: snap.presetId,
+                doubles: snap.doubles,
+                paused: snap.isScorer ? snap.paused : nil
+            )
+        }
+    }
+
+    /// Workout für dieses Match: lokale Umschaltung, sonst der Wunsch aus `MatchMeta.watchWorkout`.
+    func workoutWanted(_ snap: WatchScoreSnapshot) -> Bool {
+        workoutOverrides[snap.matchId] ?? snap.watchWorkout
+    }
+
+    func setWorkout(_ wanted: Bool, for snap: WatchScoreSnapshot) {
+        workoutOverrides[snap.matchId] = wanted
+        syncWorkout()
+    }
+
+    /// Nach lokalem Befehl oder neuem Event als Anzeige: Hinweise und Haptik aus den Effekten.
+    private func afterCommand(_ snap: WatchScoreSnapshot) {
+        if snap.changeEnds {
+            show(.changeEnds)
+            Haptics.after(0.7, .start)
+        } else if snap.receiveOrderSwapped {
+            show(.receiveOrderSwapped)
+            Haptics.after(0.7, .start)
+        }
+    }
+
+    /// Befehl abgelehnt: Speicherfehler sichtbar machen, sonst nur Ablehnungs-Haptik.
+    private func rejected() {
+        let error = scoring.lastError()
+        if error == "STORE_WRITE" || error == "STORE_READ" {
+            print("ADVANTLY_STORE error=\(error)")
+            show(.storeError)
+        } else if error == "THREAD_VIOLATION" {
+            print("ADVANTLY_THREAD WatchScoring nur auf der Main-Queue aufrufen")
+        }
+        Haptics.rejected()
+    }
+
+    // MARK: Start
+
+    /// Nach App-Start: laufendes Match aus dem Event-Log fortsetzen.
+    func resumeIfNeeded() {
+        storeUnavailable = !scoring.isAvailable()
+        if snapshot == nil, scoring.restore() == nil, !scoring.lastError().isEmpty {
+            print("ADVANTLY_STORE restore=\(scoring.lastError())")
+        }
+    }
+
+    /// App wieder im Vordergrund: sofort mit dem iPhone abgleichen.
+    func syncNow() {
+        scoring.syncNow()
+    }
+
+    /// „Zählen übernehmen“ – erst nach Bestätigung in der UI aufrufen (04 §3.2).
+    func takeOverScoring() {
+        guard scoring.takeOverScoring() != nil else {
+            rejected()
+            return
+        }
+        lockedUntil = .distantPast
+    }
+
+    var sports: [String] { scoring.sports() }
+
+    /// Presets der Sportart, Default zuerst (Badminton-Default nach heutigem Datum).
+    func presets(for sport: String) -> [WatchPreset] {
+        let today = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return scoring.presets(
+            sport: sport,
+            year: Int32(today.year ?? 2026),
+            month: Int32(today.month ?? 1),
+            day: Int32(today.day ?? 1)
+        )
+    }
+
+    @discardableResult
+    func start(presetId: String, doubles: Bool, weServeFirst: Bool) -> Bool {
+        let started = scoring.startMatch(
+            presetId: presetId,
+            doubles: doubles,
+            weServeFirst: weServeFirst,
+            watchWorkout: workoutAlongside
+        )
+        guard started != nil else {
+            rejected()
+            return false
+        }
+        lastSetup = scoring.lastSetup()
+        lockedUntil = .distantPast
+        Haptics.play(.start)
+        return true
+    }
+
+    @discardableResult
+    func startLast() -> Bool {
+        guard let last = lastSetup else { return false }
+        return start(presetId: last.presetId, doubles: last.doubles, weServeFirst: last.weServeFirst)
+    }
+
+    /// Schnellstart über die Action-Taste (StartWorkoutIntent): letzte Auswahl dieser Sportart, sonst Default-Preset.
+    /// `true`, wenn ein Match läuft (neu gestartet oder schon offen).
+    func quickStart(sport: String) -> Bool {
+        if let snap = snapshot, !snap.matchFinished { return true }
+        if snapshot != nil { closeMatch() }
+        if let last = lastSetup, last.sport == sport {
+            return startLast()
+        }
+        let presets = presets(for: sport)
+        guard let preset = presets.first(where: { $0.isDefault }) ?? presets.first else { return false }
+        return start(presetId: preset.id, doubles: preset.defaultDoubles, weServeFirst: true)
+    }
+
+    // MARK: Zählen
+
+    /// Tap auf eine Hälfte. `force` umgeht die Sperrzeit (nur Demo-Modus).
+    func tap(sideA: Bool, force: Bool = false) {
+        guard let before = snapshot, before.isScorer, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
+        let now = Date()
+        if !force && now < silentUntil { return }
+        if !force && now < lockedUntil {
+            Haptics.rejected()
+            return
+        }
+        guard let after = scoring.point(sideA: sideA) else {
+            rejected()
+            return
+        }
+        lockedUntil = now.addingTimeInterval(Self.lockInterval)
+        flashSideA = sideA
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.flashSideA = nil }
+        Haptics.feedback(after: after, us: sideA, previousHint: before.hintCode)
+        afterCommand(after)
+    }
+
+    var isLocked: Bool { Date() < lockedUntil }
+
+    /// Display wurde aus dem Always-on-Zustand geweckt: der Aufweck-Tap soll nicht zählen.
+    func didWake() {
+        silentUntil = Date().addingTimeInterval(0.3)
+    }
+
+    func undo() {
+        guard let before = snapshot, let after = scoring.undo() else {
+            rejected()
+            return
+        }
+        Haptics.undo()
+        show(.undo(from: ScoreText.short(before), to: ScoreText.short(after)))
+        afterCommand(after)
+    }
+
+    func decide(anotherSet: Bool, matchTiebreak: Bool) {
+        guard let after = scoring.continueDecision(anotherSet: anotherSet, matchTiebreak: matchTiebreak) else {
+            rejected()
+            return
+        }
+        Haptics.play(anotherSet ? .start : .stop)
+        afterCommand(after)
+    }
+
+    func endMatch() {
+        guard let after = scoring.end() else {
+            rejected()
+            return
+        }
+        Haptics.play(.stop)
+        afterCommand(after)
+    }
+
+    /// Unterbrechung (Regen, Verletzung): Match `Paused`, Workout pausiert. Kein Effekt auf den Score.
+    func pauseMatch() {
+        guard let snap = snapshot, !snap.matchFinished else { return }
+        if !snap.isScorer {
+            workout.setPaused(true)
+            return
+        }
+        guard snap.status == "IN_PROGRESS" else { return }
+        guard let after = scoring.pause() else {
+            rejected()
+            return
+        }
+        Haptics.play(.stop)
+        afterCommand(after)
+    }
+
+    func resumeMatch() {
+        guard let snap = snapshot, !snap.matchFinished else { return }
+        if !snap.isScorer {
+            workout.setPaused(false)
+            return
+        }
+        guard snap.paused else { return }
+        guard let after = scoring.resumePlay() else {
+            rejected()
+            return
+        }
+        Haptics.play(.start)
+        afterCommand(after)
+    }
+
+    /// Matchende-Ansicht verlassen bzw. Match aus der Anzeige nehmen (das Log bleibt).
+    func closeMatch() {
+        scoring.close()
+        snapshot = nil
+        banner = nil
+        workout.end()
+        lastSetup = scoring.lastSetup()
+    }
+
+    // MARK: Action-Taste
+
+    /// Einziger Einstieg für die Action-Taste: welcher Intent auch gespendet war, es gilt die aktuelle Einstellung
+    /// („Aus“ = nichts tun).
+    func handleActionButton() {
+        // Anzeige: keine Zähl-/Undo-Aktion über Hardware (04 §4.2 Rollengrenze)
+        guard snapshot?.isScorer == true else { return }
+        switch actionButtonMode {
+        case .undo: undo()
+        case .pointUs: tap(sideA: true)
+        case .off: break
+        }
+    }
+
+    func donateActionIntent() {
+        guard snapshot?.isScorer == true, actionButtonMode != .off else { return }
+        ActionIntents.donate(actionButtonMode)
+    }
+
+    // MARK: Hinweise
+
+    func show(_ banner: Banner) {
+        bannerWork?.cancel()
+        self.banner = banner
+        let work = DispatchWorkItem { [weak self] in self?.banner = nil }
+        bannerWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+}
+
+/// Kurztexte für Spielstände (DE „6:4“, EN „6–4“, 04 §9.1).
+enum ScoreText {
+    static var separator: String { loc("score.separator") }
+
+    static func pair(_ a: String, _ b: String) -> String { a + separator + b }
+
+    static func pair(_ a: Int32, _ b: Int32) -> String { pair(String(a), String(b)) }
+
+    /// Abgeschlossene Sätze aus Sicht „Wir“, z. B. „6:4 3:6“; Satz-Tiebreak des Verlierers in Klammern.
+    static func sets(_ s: WatchScoreSnapshot) -> String {
+        s.setScoresA.indices.map { i -> String in
+            let a = s.setScoresA[i].int32Value
+            let b = s.setScoresB[i].int32Value
+            let tbA = s.setTiebreaksA[i].int32Value
+            let tbB = s.setTiebreaksB[i].int32Value
+            if tbA >= 0 && tbB >= 0 {
+                return pair(a, b) + "(\(min(tbA, tbB)))"
+            }
+            return pair(a, b)
+        }.joined(separator: " ")
+    }
+
+    /// Stand für den Undo-Hinweis, z. B. „3:2 30:15“.
+    static func short(_ s: WatchScoreSnapshot) -> String {
+        if s.pointsA.isEmpty {
+            return sets(s)
+        }
+        let points = pair(s.pointsA, s.pointsB)
+        return s.gamesA >= 0 ? pair(s.gamesA, s.gamesB) + " " + points : points
+    }
+}

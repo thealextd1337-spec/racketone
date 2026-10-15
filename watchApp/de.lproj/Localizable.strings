@@ -1,53 +1,453 @@
-/* Begrüßung auf dem Startscreen der Uhr */
-"watch.greeting" = "Hallo Advantly";
-
-/* Zeigt das Engine-Modul aus AdvantlyWatchKit (Platzhalter) */
-"watch.engine %@" = "Zähl-Engine: %@";
-
-/* Zeigt das Ergebnis des Store-Smoke-Tests (erwartet 1) */
+/* Store-Smoke-Test (Debug-Zeile auf der Startliste) */
 "watch.store %@" = "Event-Store: %@ Event(s)";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.debug.open" = "Link-Debug";
+/* Engine-Modul aus AdvantlyWatchKit (Debug-Zeile) */
+"watch.engine %@" = "Zähl-Engine: %@";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.CONNECTED" = "Verbunden";
+/* Startliste */
+"start.lastTime" = "Wie letztes Mal";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.DISCONNECTED" = "Getrennt";
+/* Startliste */
+"start.newMatch" = "Neues Match";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.state.UNAVAILABLE" = "Nicht verfügbar";
+/* Preset-Liste: Standard-Format der Sportart */
+"start.default" = "Standard";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.send10" = "10 Pings";
+/* Setup */
+"setup.singles" = "Einzel";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.stop" = "Stopp";
+/* Setup */
+"setup.doubles" = "Doppel";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.reset" = "Zurücksetzen";
+/* Setup */
+"setup.whoServes" = "Wer schlägt zuerst auf?";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.sent %@" = "Gesendet: %@";
+/* Setup */
+"setup.weServe" = "Wir schlagen auf";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.pongs %@" = "Pongs: %@";
+/* Setup */
+"setup.theyServe" = "Gegner schlägt auf";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.answered %@" = "Beantwortet: %@";
+/* Sportart */
+"sport.TENNIS" = "Tennis";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.queued %@" = "In Queue: %@";
+/* Sportart */
+"sport.PADEL" = "Padel";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.lost %@" = "Verloren: %@";
+/* Sportart */
+"sport.PICKLEBALL" = "Pickleball";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.retries %@" = "Wiederholungen: %@";
+/* Sportart */
+"sport.BADMINTON" = "Badminton";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.rtt %@ %@" = "RTT p50/p95: %1$@ / %2$@";
+/* Sportart */
+"sport.TABLE_TENNIS" = "Tischtennis";
 
-/* Link-Debug (Spike S3, nur DEBUG) */
-"link.nopeer" = "Noch keine Gegenstelle – ist die andere App offen?";
+/* Team-Label oben (Uhr-Besitzer) */
+"team.us" = "WIR";
+
+/* Team-Label unten */
+"team.them" = "GEGNER";
+
+/* Aufschlagfeld rechts (Kurzform) */
+"serve.court.RIGHT" = "R";
+
+/* Aufschlagfeld links (Kurzform) */
+"serve.court.LEFT" = "L";
+
+/* Trenner in Spielständen (DE 6:4, EN 6–4) */
+"score.separator" = ":";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DECIDING_POINT" = "Golden Pt";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DECIDING_POINT_RALLY" = "Entscheidung";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.STAR_POINT" = "Star Point";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.MATCH_POINT" = "Matchball";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.SET_POINT" = "Satzball";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.SET_POINT_PB" = "Spielball";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.BREAK_POINT" = "Breakball";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DEUCE" = "Einstand";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.DEUCE_RALLY" = "Verlängerung";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.TIEBREAK" = "Tiebreak";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
+"hint.MATCH_TIEBREAK" = "Match-TB";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.MATCH_POINT.n %@" = "%@ Matchbälle";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.SET_POINT.n %@" = "%@ Satzbälle";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.SET_POINT_PB.n %@" = "%@ Spielbälle";
+
+/* Hinweis-Pill mit Anzahl */
+"hint.BREAK_POINT.n %@" = "%@ Breakbälle";
+
+/* Rückgängig (Button, Bedienhilfe) */
+"action.undo" = "Zurück";
+
+/* Hinweis nach Undo: alter → neuer Stand */
+"banner.undo %@ %@" = "Zurück: %1$@ → %2$@";
+
+/* Hinweis Seitenwechsel */
+"banner.changeEnds" = "⇄ Seitenwechsel";
+
+/* Hinweis ohne HealthKit */
+"banner.health" = "Zählen ohne Health – kein Puls";
+
+/* Bedienhilfe: obere Hälfte */
+"a11y.pointUs" = "Punkt für uns";
+
+/* Bedienhilfe: untere Hälfte */
+"a11y.pointThem" = "Punkt für Gegner";
+
+/* Bedienhilfe: Aufschlag-Indikator */
+"a11y.serving" = "Schlägt auf";
+
+/* Steuerseite */
+"controls.waterLock" = "Wassersperre";
+
+/* Steuerseite: Belegung der Action-Taste (Ultra) */
+"controls.actionButton" = "Action-Taste";
+
+/* Steuerseite: Action-Taste = Rückgängig */
+"controls.actionButton.undo" = "Rückgängig";
+
+/* Steuerseite: Action-Taste = Punkt für uns */
+"controls.actionButton.pointUs" = "Punkt für uns";
+
+/* Steuerseite: Action-Taste aus */
+"controls.actionButton.off" = "Aus";
+
+/* Steuerseite */
+"controls.end" = "Match beenden";
+
+/* Rückfrage Match beenden */
+"controls.end.confirm" = "Match jetzt beenden?";
+
+/* Allgemein */
+"common.cancel" = "Abbrechen";
+
+/* Fitness-Seite */
+"fitness.heartRate" = "Puls";
+
+/* Fitness-Seite ohne HealthKit */
+"fitness.noHealth" = "Kein Health-Zugriff: nur Zählen. Bei gesenktem Handgelenk kann die App pausieren.";
+
+/* Satzende-Dialog: Satznummer und Stand */
+"setend.title %@ %@" = "Satz %1$@ · %2$@";
+
+/* Satzende-Dialog */
+"setend.won" = "gewonnen";
+
+/* Satzende-Dialog */
+"setend.lost" = "verloren";
+
+/* Satzende-Dialog */
+"setend.question" = "Noch ein Satz?";
+
+/* Satzende-Dialog (Primäraktion) */
+"setend.yes" = "Ja";
+
+/* Satzende-Dialog: Match-Tiebreak statt Satz */
+"setend.matchTiebreak" = "Match-Tiebreak";
+
+/* Satzende-Dialog */
+"setend.no" = "Nein, beenden";
+
+/* Matchende */
+"matchend.won" = "Gewonnen";
+
+/* Matchende */
+"matchend.lost" = "Verloren";
+
+/* Matchende */
+"matchend.draw" = "Unentschieden";
+
+/* Matchende */
+"matchend.abandoned" = "Abgebrochen";
+
+/* Matchende */
+"matchend.done" = "Fertig";
+
+/* Action-Taste (AppIntent) */
+"intent.undo.title" = "Letzten Punkt rückgängig";
+
+/* Action-Taste (AppIntent) */
+"intent.pointUs.title" = "Punkt für uns";
+
+/* Action-Taste: Schnellstart (StartWorkoutIntent) */
+"intent.start.title" = "Match starten";
+
+/* Action-Taste: Parameter Sportart */
+"intent.sport.type" = "Sportart";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SINGLES_BO3" = "Best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SINGLES_BO5_FS10" = "Best of 5, Finalsatz-TB 10";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_BO3_MTB10" = "Best of 3 + Match-TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_DOUBLES_MTB10" = "Doppel No-Ad + Match-TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_BO3_ADV_FINAL" = "Best of 3, Vorteilssatz";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SHORT_SETS" = "Kurzsätze bis 4";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_SHORT_SETS_3ALL" = "Kurzsätze, TB bei 3:3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_PRO_SET_8" = "Pro-Satz bis 8";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_PRO_SET_10" = "Pro-Satz bis 10";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_ONE_SET" = "Ein Satz";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_MATCH_TB_ONLY" = "Nur Match-Tiebreak";
+"preset.TENNIS_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
+"preset.TENNIS_TIEBREAK_ONLY_10" = "Nur Champions-Tiebreak (bis 10)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TENNIS_OPEN" = "Offen (Satz für Satz)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_PREMIER_2026" = "Premier (Star Point)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_GOLDEN_BO3" = "Golden Point";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_GOLDEN_STB" = "Golden Point + Super-TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_ADVANTAGE_BO3" = "Klassisch (Vorteil)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_ADV_FINAL_NO_TB" = "3. Satz ohne TB";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_MINI_SETS" = "Mini-Sätze bis 4";
+"preset.PADEL_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
+"preset.PADEL_TIEBREAK_ONLY_10" = "Nur Super-Tiebreak (bis 10)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PADEL_OPEN" = "Offen (Satz für Satz)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_11_SIDEOUT" = "Doppel bis 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_BO3_11" = "Doppel, Best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_15" = "Doppel bis 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_21" = "Doppel bis 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_SINGLES_11_SIDEOUT" = "Einzel bis 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_SINGLES_BO3_11" = "Einzel, Best of 3";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_DOUBLES_RALLY_21" = "Doppel Rally bis 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_RALLY_BO3_15" = "Rally, Best of 3 bis 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_RALLY_7_WEATHER" = "Rally bis 7 (Wetter)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_TEAM_WIN_BY_1" = "Team, Sieg mit 1";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.PICKLEBALL_OPEN" = "Offen (Spiel für Spiel)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_SINGLES_BO3_15" = "Einzel 3×15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_DOUBLES_BO3_15" = "Doppel 3×15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_SINGLES_BO3_21" = "Einzel 3×21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_DOUBLES_BO3_21" = "Doppel 3×21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_1GAME_21" = "Ein Satz bis 21";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_1GAME_15" = "Ein Satz bis 15";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_BO5_11" = "Best of 5 bis 11";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.BADMINTON_OPEN" = "Offen (Satz für Satz)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO5" = "Einzel, 3 Gewinnsätze";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO7" = "Einzel, 4 Gewinnsätze";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_SINGLES_BO3" = "Einzel, 2 Gewinnsätze";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_DOUBLES_BO5" = "Doppel, 3 Gewinnsätze";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_DOUBLES_BO3" = "Doppel, 2 Gewinnsätze";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_LEISURE_21" = "Bis 21 (alte Zählweise)";
+
+/* Preset-Name (02 §4, Uhr-Kurzform) */
+"preset.TABLE_TENNIS_OPEN" = "Offen (Satz für Satz)";
+
+/* Hinweis TT-Doppel: Rückschlagreihenfolge wechselt (Effekt RECEIVE_ORDER_SWAPPED) */
+"banner.receiveOrder" = "⇄ Rückschlag-Reihenfolge wechseln";
+
+/* Hinweis: Event nicht gespeichert (SQLite-Fehler) */
+"banner.storeError" = "Nicht gespeichert – bitte erneut tippen";
+
+/* Mittelband: Match unterbrochen */
+"status.paused" = "Pause";
+
+/* Steuerseite: Match unterbrechen */
+"controls.pause" = "Unterbrechen";
+
+/* Steuerseite: Match fortsetzen */
+"controls.resume" = "Fortsetzen";
+
+/* Bedienhilfe: Feldpositionen im Doppel (links, rechts) */
+"a11y.positions %@ %@" = "Spieler %1$@ links, Spieler %2$@ rechts";
+
+/* Bedienhilfe: Aufschläger → Rückschläger im Doppel */
+"a11y.serveFromTo %@ %@" = "Spieler %1$@ schlägt auf Spieler %2$@ auf";
+
+/* Action + Seitentaste (PauseWorkoutIntent) */
+"intent.pause.title" = "Match unterbrechen";
+
+/* Action + Seitentaste (ResumeWorkoutIntent) */
+"intent.resume.title" = "Match fortsetzen";
+
+/* Schnellstart-Fehler: kein Match gestartet */
+"intent.error.startFailed" = "Das Match konnte nicht gestartet werden.";
+
+/* Schnellstart-Fehler: keine Workout-Session (HealthKit) */
+"intent.error.workout" = "Match gestartet, aber ohne Training – Health-Zugriff prüfen.";
+
+/* Rolle: Anzeige (Status-Zeile oben, Gerät des Zählers) */
+"role.display.short %@" = "Anzeige · %@ zählt";
+
+/* Rolle: Anzeige (Steuerseite) */
+"role.display" = "Anzeige";
+
+/* Rolle: wer zählt */
+"role.scorer %@" = "%@ zählt";
+
+/* Gerätart des Zählers */
+"role.kind.PHONE" = "iPhone";
+
+/* Gerätart des Zählers */
+"role.kind.WATCH" = "Uhr";
+
+/* Gerätart des Zählers (unbekannt) */
+"role.kind.OTHER" = "Anderes Gerät";
+
+/* Sync-Status am Zähler: alles bestätigt */
+"sync.synced" = "Synchron";
+
+/* Sync-Status am Zähler: unbestätigte Events */
+"sync.pending %@" = "%@ ausstehend";
+
+/* Sync-Status am Zähler ohne Verbindung */
+"sync.local" = "Zähler · nur lokal";
+
+/* Sync-Status am Zähler ohne Verbindung mit Rückstand */
+"sync.localPending %@" = "Nur lokal · %@ ausstehend";
+
+/* Anzeige: verbunden, noch kein Event empfangen */
+"sync.connected" = "Verbunden";
+
+/* Anzeige: noch nie ein Stand empfangen */
+"sync.noData" = "Noch kein Stand";
+
+/* Anzeige: Stand ist frisch */
+"sync.live" = "Live";
+
+/* Anzeige: Alter des Stands in Sekunden */
+"sync.ageSeconds %@" = "Stand vor %@ s";
+
+/* Anzeige: Alter des Stands in Minuten */
+"sync.ageMinutes %@" = "Stand vor %@ min";
+
+/* Zählen übernehmen (Uhr-Kurzform, Glossar action.take_over) */
+"action.takeOver" = "Übernehmen";
+
+/* Bestätigung Übergabe: Titel */
+"takeOver.title" = "Auf dieser Uhr zählen?";
+
+/* Bestätigung Übergabe: bisheriger Zähler */
+"takeOver.message %@" = "Bisher zählt: %@. Danach zeigt es nur noch an.";
+
+/* Bestätigung Übergabe: Aktion */
+"takeOver.confirm" = "Übernehmen";
+
+/* Hinweis: Eingaben eines Nicht-Zählers verworfen */
+"banner.rejectedInputs %@" = "%@ Eingaben nicht übernommen";
+
+/* Hinweis: Rolle gewechselt – Uhr zählt */
+"banner.nowScorer" = "Diese Uhr zählt jetzt";
+
+/* Hinweis: Rolle gewechselt – Uhr zeigt an */
+"banner.nowDisplay" = "Nur Anzeige – ein anderes Gerät zählt";
+
+/* Satzende-Dialog als Anzeige */
+"setend.decidedBy %@" = "%@ entscheidet";
+
+/* Option: eigene Workout-Session unabhängig von der Rolle (Standard an) */
+"controls.workoutAlongside" = "Workout auf meiner Uhr";
+
+/* Startliste: Datenbank nicht lesbar (Dev-Daten-Reset) */
+"start.storeUnavailable" = "Speicher nicht lesbar (alte Testdaten?). Bitte Watch-App neu installieren.";
+
+/* Anzeige: iPhone hat „Meine Uhr“ gewählt, Übergabe per ScorerChanged steht aus (PENDING_WATCH) */
+"role.pending" = "Übergabe an diese Uhr läuft …";
