@@ -38,13 +38,13 @@ Die Dateien in diesem Ordner sind **handgeschriebene Referenzbeispiele** aus der
 | `sources` | ja | Regelstellen (ITF/FIP/USAP/BWF/ITTF-Regelnummer oder Abschnitt in 02) |
 | `config` | ja | `MatchFormat` (02 §3.1/3.2) |
 | `lineup` | ja | Lineup (02 §3.3): `A`, `B`, `firstServer`, optional `receiveRight`, `startEnds` |
-| `events` | ja | Event-Payloads in **kanonischer Ordnung**, siehe 1.1 |
+| `events` | ja | Event-Payloads in **Eingabereihenfolge**, siehe 1.1 |
 | `expect` | ja | Checkpoints, siehe 1.2 |
 
 ### 1.1 Events
 
 - Jedes Event hat `id` (im Vektor eindeutig, Konvention `e1`, `e2`, …), `type` und die Payload-Felder aus 02 §7, z. B. `{"id":"e17","type":"Undo","target":"e16"}`.
-- Die **Array-Reihenfolge ist die kanonische Ordnung** `(lamport, deviceId, id)`. Events dürfen optional die Hüllenfelder `lamport`, `deviceId`, `parentId` und `wallClockMs` tragen (insbesondere in `random/` und Mehrgeräte-Szenarien unter `rules/`). Sind sie vorhanden, MUSS der Runner sie statt der synthetischen Hülle verwenden. Fehlen sie, erzeugt er sie synthetisch: `lamport = Index + 1`, `deviceId = "tv"`, `wallClockMs = Index × 10 000`, `parentId = vorheriges Event` (0-basierter Index).
+- Ohne explizite Hülle ergibt die **Array-Reihenfolge die kanonische Ordnung** `(lamport, deviceId, id)` über die synthetischen Hüllenfelder. Bei expliziter Hülle (`lamport`/`deviceId`) MUSS die kanonische Ordnung aus der Hülle folgen; die Array-Reihenfolge ist dann nur die Eingabereihenfolge. Die Engine sortiert die Events selbst. Events dürfen optional die Hüllenfelder `lamport`, `deviceId`, `parentId` und `wallClockMs` tragen (insbesondere in `random/` und Mehrgeräte-Szenarien unter `rules/`). Sind sie vorhanden, MUSS der Runner sie statt der synthetischen Hülle verwenden. Fehlen sie, erzeugt er sie synthetisch: `lamport = Index + 1`, `deviceId = "tv"`, `wallClockMs = Index × 10 000`, `parentId = vorheriges Event` (0-basierter Index).
 - `MatchCreated` steht **nicht** im Array. Es ergibt sich implizit aus `config` + `lineup` und gilt als Event 0.
 - Auch übersprungene (ungültige) Events dürfen im Log stehen (02 §7.3 Punkt 4). Sie werden über `state.ignoredEvents` geprüft.
 
