@@ -70,6 +70,7 @@ class StopRulesTest {
         for (row in rows) {
             val m = row.driver()
             val before = m.state
+            assertEquals(row.winner, ScoringEngine.stoppedWinner(before), "Vorschau ${row.name}")
             m.stop()
             assertEquals(MatchStatus.FINISHED, m.state.status, row.name)
             assertEquals(MatchResult(row.winner, ResultReason.STOPPED), m.state.result, row.name)

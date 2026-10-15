@@ -90,6 +90,23 @@ data class PointRecord(
     val server: PlayerId? get() = before.serve?.player
 }
 
+/** Siegerregel von „Beenden, wie es steht“ (02 §9.27) – gemeinsam für Fold und Vorschau. */
+internal object StopRule {
+    /** Mehr Sätze, sonst mehr Spiele im laufenden Satz ([games], nur Tennis/Padel), sonst mehr Punkte; sonst `null`. */
+    fun winner(
+        setsWon: SidePair<Int>,
+        games: SidePair<Int>?,
+        points: SidePair<Int>?,
+    ): Side? = leader(setsWon) ?: games?.let(::leader) ?: points?.let(::leader)
+
+    private fun leader(pair: SidePair<Int>): Side? =
+        when {
+            pair.a > pair.b -> Side.A
+            pair.b > pair.a -> Side.B
+            else -> null
+        }
+}
+
 /**
  * Öffentliche API der Scoring-Engine (01 §3, 02 §6–§8). Rein funktional und deterministisch:
  * gleiche Events → gleicher Zustand auf jedem Gerät.
@@ -101,6 +118,7 @@ data class PointRecord(
  * next.state.serve?.player
  * ```
  */
+
 object ScoringEngine {
     /** Startzustand vor dem ersten Event. */
     fun initial(
@@ -250,10 +268,21 @@ object ScoringEngine {
             ?.id
 
     /**
+     * Sieger, wenn das Match jetzt „wie es steht“ beendet würde (`MatchEnded(STOPPED)`, 02 §9.27) – dieselbe Regel wie
+     * im Fold, z. B. für die Vorschau im Bestätigungsdialog. `null` bei Gleichstand oder schon beendetem Match.
+     */
+    fun stoppedWinner(state: MatchState): Side? {
+        if (state.status == MatchStatus.FINISHED) return null
+        val current = state.current
+        return StopRule.winner(state.setsWon, current?.games, current?.points)
+    }
+
+    /**
      * Wählbare Satzarten im Satzende-Dialog (02 §5.2, OPEN): Tennis/Padel normaler Satz, Tiebreak bis 7 und
      * Champions-Tiebreak bis 10; alle anderen Sportarten nur der normale Satz. `NextSetKind.MATCH_TIEBREAK` bleibt als
      * ältere Wire-Form gültig (nur mit `config.matchTiebreak`), wird hier aber nicht angeboten.
      */
+
     fun nextSetOptions(format: MatchFormat): List<NextSetKind> =
         if (format.sport.isTennisLike) {
             listOf(NextSetKind.REGULAR, NextSetKind.TIEBREAK_7, NextSetKind.MATCH_TIEBREAK_10)

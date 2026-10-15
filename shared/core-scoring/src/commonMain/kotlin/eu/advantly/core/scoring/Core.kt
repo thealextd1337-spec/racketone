@@ -248,18 +248,7 @@ internal class Core private constructor(
      * (Tennis/Padel), dann Punkte im laufenden Spiel bzw. Satz (Rohpunkte, im Tiebreak die Tiebreak-Punkte); bei
      * Gleichstand auf allen Stufen `null`. Ohne laufenden Satz (`AWAITING_DECISION`) zählen nur die Sätze.
      */
-    private fun leadingSide(): Side? {
-        fun leader(pair: SidePair<Int>): Side? =
-            when {
-                pair.a > pair.b -> Side.A
-                pair.b > pair.a -> Side.B
-                else -> null
-            }
-        leader(setsWon)?.let { return it }
-        if (!inSet) return null
-        if (sport.isTennisLike) leader(games)?.let { return it }
-        return leader(points)
-    }
+    private fun leadingSide(): Side? = StopRule.winner(setsWon, games.takeIf { inSet && sport.isTennisLike }, points.takeIf { inSet })
 
     private fun finish(
         winner: Side?,
