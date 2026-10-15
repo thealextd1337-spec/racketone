@@ -12,6 +12,9 @@ Menüpfade beziehen sich auf die deutschsprachige Console. Wenn ein Menüpunkt a
 > die Wear-App ist noch der Spike-S5-Stand. Für den **internen Test** reicht das. Den **geschlossenen Test** erst starten, wenn
 > W1-C (Phone-App) und W1-E (Watch-App) gemergt sind. Geschlossene Tests durchlaufen die Play-Prüfung, und die 14 Tage sollen
 > mit der echten App laufen.
+>
+> **Freigabekriterium vor dem ersten Upload, auch für den internen Test:** Die Datenschutzerklärung muss in Handy- **und** Uhr-App
+> erreichbar sein (§6.1). Das ist derzeit noch offen und wird in einem anderen Arbeitspaket umgesetzt.
 
 ---
 
@@ -88,13 +91,18 @@ Die Phone-App wurde auf einem Pixel 9 Pro XL gestartet, ohne Absturz. Auf der Uh
 
 ## 4. Wear OS als Formfaktor hinzufügen
 
-Laut Play-Hilfe und Wear-Doku [P2][P3]:
+Laut Play-Hilfe und Wear-Doku [P2][P3]. Das sind zwei getrennte Schritte zu verschiedenen Zeitpunkten.
+
+**4a. Formfaktor einrichten (jetzt, vor dem ersten Wear-Upload):**
 1. [ ] **Testen und veröffentlichen → Erweiterte Einstellungen → Formfaktoren → Formfaktor hinzufügen → Wear OS**.
 2. [ ] **Eigenen Release-Track für Wear OS verwenden** auswählen. Wear-AABs laufen dann über eigene Tracks („Wear OS only“), getrennt vom Smartphone-Track.
 3. [ ] Im Store-Eintrag mindestens **einen Wear-OS-Screenshot** hochladen [P3]: quadratisch, nur die App-UI, ohne Uhrengehäuse oder Maske.
    Aufnehmen kannst du ihn z. B. mit `adb -s <uhr> exec-out screencap -p > wear.png`.
-4. [ ] Den Wear-AAB in einen Test-Track des Wear-Formfaktors hochladen (§5).
-5. [ ] **Erweiterte Einstellungen → Wear OS → Opt-in für Wear OS und Zustimmung zur Überprüfungsrichtlinie.** Danach prüft Google die Uhr-App gegen die Wear-OS-Qualitätsrichtlinien [P3].
+4. [ ] Den Wear-AAB in einen Test-Track des Wear-Formfaktors hochladen (interner Test, §5).
+
+**4b. Wear-OS-Opt-in (später, erst im geschlossenen Test, §8):**
+5. [ ] Das Opt-in setzt einen Release im **geschlossenen** Test-Track voraus. Wörtlich: „Once you have a release in your closed testing track, you can opt in to Wear OS and agree to the review policy“ [P3].
+   Dann **Erweiterte Einstellungen → Wear OS → Opt-in für Wear OS und Zustimmung zur Überprüfungsrichtlinie**. Danach prüft Google die Uhr-App gegen die Wear-OS-Qualitätsrichtlinien [P3].
    Häufiger Ablehnungsgrund: **„Wear OS“ muss im Store-Eintrag vorkommen** (in §7 enthalten).
 
 Technische Voraussetzungen (erfüllt): gleiches Package `eu.advantly`, eindeutige versionCodes je Formfaktor (…1/…2), `uses-feature android.hardware.type.watch` ohne `required=false`, Standalone-Metadaten [P3].
@@ -103,7 +111,13 @@ Ziel-API: Seit 31.08.2026 brauchen neue Phone-Apps targetSdk ≥ 36, Wear-Apps �
 
 ## 5. Interner Test (zuerst)
 
-Der interne Test hat keine Prüfung durch Google, ist für maximal 100 Tester gedacht und eignet sich zum Ausprobieren der Play-Installation von Handy und Uhr.
+Der interne Test ist für maximal 100 Tester gedacht und eignet sich zum Ausprobieren der Play-Installation von Handy und Uhr.
+Updates im internen Test werden normalerweise **nicht** vorab geprüft und sind sofort verfügbar. Es gibt aber Ausnahmen [P13]:
+- Ist der **erste Release-Rollout** einer vollständig eingerichteten App ein interner Test, wird er **vor der Veröffentlichung geprüft**.
+  Das gilt nicht für interne Test-Apps, die noch nicht vollständig eingerichtet sind.
+- Nach einer **abgelehnten** Einreichung wird auch die nächste Einreichung geprüft.
+- Interne Updates können **nachträglich** geprüft werden.
+- Prüfungen dauern einige Stunden bis zu sieben Tage, in Ausnahmefällen länger [P13]. Für den ersten Upload deshalb Puffer einplanen.
 
 1. [ ] **Testen und veröffentlichen → Testen → Interner Test → Tester:** E-Mail-Liste anlegen (z. B. „Advantly intern“) mit den **Google-Konto-Adressen** der Tester, inklusive deiner eigenen.
 2. [ ] **Smartphone-Track:** Neuer Release → `androidApp-release.aab` hochladen. Versionshinweis z. B. „0.1.0 (1) – erster interner Test“ → Release prüfen → Einführen.
@@ -123,6 +137,12 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 - [ ] URL: **`https://advantly.eu/app-datenschutz.html`** (englische Fassung: `https://advantly.eu/en/app-privacy.html`)
 - [ ] Vorher prüfen, ob die Seite live ist. Sie wird erst nach dem Merge nach `main` über `pages.yml` veröffentlicht.
 - Die Seite ist öffentlich, ohne Geo-Sperre und als HTML erreichbar. Das verlangt Play, und für Health Connect muss es später **dieselbe** URL sein [P6].
+- [ ] **Verbindliches Freigabekriterium vor dem ersten Upload: Die Datenschutzerklärung ist auch in den Apps erreichbar.**
+  Google verlangt beides: „a privacy policy link in the designated field within Play Console“ **und** „a privacy policy link or text within the app itself“ [P14].
+  - **Handy:** Profil bzw. Einstellungen → „Datenschutz“ (DE) / „Privacy policy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser.
+  - **Uhr (Wear OS):** in den Einstellungen ein Eintrag „Datenschutz“ mit kurzem Text (Puls nur zur Anzeige, nichts wird übertragen oder gespeichert) und Verweis auf die URL.
+    Das geht als „Auf Handy öffnen“ (RemoteActivityHelper), QR-Code oder Hinweis „Details in der Handy-App unter Datenschutz“.
+  - **Status (W1-G):** Noch nicht umgesetzt. Die Umsetzung in den Apps übernimmt ein anderes Arbeitspaket. Bis dahin ist **kein** Upload in einen Track freigegeben.
 
 ### 6.2 App-Zugriff
 - [ ] **„Alle Funktionen sind ohne besondere Zugriffsrechte verfügbar“**. Es gibt keine Anmeldung, kein Konto und keinen Code.
@@ -142,16 +162,34 @@ Ablauf laut [P7]: Starten → E-Mail für IARC angeben (`alxpro@cakamper.at`) �
 - **Phase 2 neu ausfüllen:** Freunde/Teilen = Nutzerinteraktion, In-App-Abo = digitale Käufe.
 
 ### 6.5 Zielgruppe und Inhalte
-- [ ] **Altersgruppen:** nur **16–17** und **18 und älter** auswählen.
-- Begründung: Laut 03 §8.2 ist das Mindestalter 16, weil eine Art.-9-Einwilligung (Gesundheitsdaten, ab P3) und Art. 8 DSGVO sonst eine Einwilligung der Eltern erfordern.
-  Ohne Auswahl unter 13 gilt die Familienrichtlinie nicht. Die Datenschutzerklärung nennt 16 Jahre (§8).
+**Mindestalter: 14 Jahre** (Nutzerentscheidung vom 15.10.2026, ersetzt die 16 aus 03 §8.2).
+- Rechtsgrundlage: Nach Art. 8 Abs. 1 DSGVO kann ein Kind bei Diensten der Informationsgesellschaft ab 16 selbst einwilligen. Die Mitgliedstaaten dürfen die Grenze auf bis zu 13 senken.
+  Österreich hat sie in **§ 4 Abs. 4 DSG** auf **14** gesenkt. Deutschland hat keine abweichende Regel, dort gilt **16**.
+- Phase 1 stützt sich nicht auf eine Einwilligung nach Art. 6 Abs. 1 lit. a, Art. 8 greift deshalb nur am Rand. Die Grenze wird relevant, sobald in P2/P3 Einwilligungen eingeholt werden (Konto, Health).
+  Dann muss die Altersabfrage bei der Registrierung **je Land** prüfen (z. B. AT 14, DE 16) oder einheitlich 16 verlangen. Vor P2 juristisch klären.
+- Die Datenschutzerklärung (DE/EN, §8) nennt 14 Jahre.
+
+Die Play Console bietet nur feste Altersgruppen an: 5 und jünger, 6–8, 9–12, **13–15**, **16–17**, **18 und älter** [P15]. „14+“ lässt sich nicht exakt abbilden.
+- Die Gruppe 13–15 „may be considered to include children in some locales“ [P15]. Wenn mindestens eine ausgewählte Gruppe Kinder umfasst, gelten die Anforderungen der **Familienrichtlinie** [P15].
+- **Empfehlung: nur 16–17 und 18 und älter auswählen**, also 13–15 **nicht**. Gründe:
+  1. Die Zielgruppe in der Console beschreibt, für wen die App gestaltet ist, und ist keine Altersgrenze. 14- und 15-Jährige dürfen Advantly trotzdem nutzen, das Mindestalter (14) steht in der Datenschutzerklärung.
+  2. 13–15 würde ausdrücklich auch 13-Jährige unter dem Mindestalter ansprechen.
+  3. Mit 13–15 kann je nach Land die Familienrichtlinie greifen, mit Zusatzprüfung und Zusatzpflichten [P15]. Für eine Sport-Utility ohne kindgerichtete Gestaltung bringt das keinen Vorteil.
+- Alternative, falls Jugendliche ausdrücklich Zielgruppe sein sollen: 13–15 zusätzlich auswählen und die Familienrichtlinie erfüllen. Die App hat keine Werbung und keine SDKs, damit wäre das machbar, aber mit längerer Prüfung zu rechnen.
+- [ ] **Altersgruppen:** **16–17** und **18 und älter**.
 - [ ] „Könnte die App für Kinder interessant sein?“: **Nein** (Sport-Utility ohne kindgerichtete Gestaltung).
 
 ### 6.6 Datensicherheit (Data safety) – Phase 1
 Googles Definitionen [P8]:
 - **„Erheben“ (collect)** heißt, Daten von der App vom Gerät des Nutzers zu übertragen.
-- **Ausgenommen** sind nur auf dem Gerät verarbeitete Daten („only processed locally on the user's device and not sent off device“), ephemere Verarbeitung im Speicher
-  und Ende-zu-Ende-verschlüsselte Übertragung („unreadable by you or anyone other than the sender and recipient“).
+- Drei Ebenen auseinanderhalten: (1) **tatsächliche Übertragung** vom Gerät, (2) was im **Formular** anzugeben ist, (3) was **öffentlich** im Store angezeigt wird.
+  - **Nur auf dem Gerät verarbeitet** („only processed locally on the user's device and not sent off device“): nicht übertragen, also **gar nicht** im Formular anzugeben.
+    Auch lokal **gespeicherte** Daten sind keine Erhebung, solange sie das Gerät nicht verlassen.
+  - **Ende-zu-Ende-verschlüsselt übertragen** („unreadable by you or anyone other than the sender and recipient“, keine Zwischenstelle und auch nicht der Entwickler kann lesen):
+    zwar übertragen, aber **nicht** anzugeben.
+  - **Ephemer verarbeitet** (nur im Arbeitsspeicher, nur so lange wie für die Anfrage nötig): Das betrifft Daten, die das Gerät **verlassen**.
+    Sie **sind im Formular anzugeben** (Frage „Is this data processed ephemerally?“), werden aber **nicht öffentlich** im Data-safety-Abschnitt angezeigt.
+    „Ephemer“ ist also keine Ausnahme vom Ausfüllen, sondern nur von der Anzeige. Profilbildung oder Werbung gilt nie als ephemer.
 - **„Teilen“ (share)** heißt Weitergabe an Dritte.
 - Auch Apps ohne Datenerhebung müssen das Formular ausfüllen und eine Datenschutz-URL angeben [P8].
 
@@ -161,7 +199,7 @@ Einordnung für Phase 1:
 |---|---|---|
 | Match-Daten, Spielernamen | nur lokal (SQLite bzw. SharedPreferences) | auf dem Gerät → **nicht erhoben** |
 | Abgleich Handy ↔ Uhr (Data Layer) | per verschlüsseltem Bluetooth direkt. Sonst über Google Cloud, „All data transferred through Google Cloud is end-to-end encrypted“, und nur dieselbe App mit derselben Signatur kann mitlesen [P9] | Ende-zu-Ende-verschlüsselt, Anbieter ohne Zugriff → **nicht erhoben** |
-| Herzfrequenz (Health Services) | wird während der Session gelesen, angezeigt und nicht gespeichert oder übertragen (das S5-Diagnose-Log ist im Release abgeschaltet, im AAB geprüft) | ephemer bzw. auf dem Gerät → **nicht erhoben** |
+| Herzfrequenz (Health Services) | wird während der Session gelesen, angezeigt und nicht gespeichert oder übertragen (das S5-Diagnose-Log ist im Release abgeschaltet, im AAB geprüft) | nur auf dem Gerät → **nicht erhoben**, nicht anzugeben (keine „ephemere“ Angabe, weil nichts das Gerät verlässt) |
 | Schritte, Kalorien (ExerciseClient) | angefordert, nicht übertragen | auf dem Gerät → **nicht erhoben** |
 | Technischer Beleg | beide AABs haben **keine `INTERNET`-Berechtigung** | – |
 
@@ -169,8 +207,11 @@ Einordnung für Phase 1:
 - [ ] Die Folgefragen (Verschlüsselung bei der Übertragung, Löschanfrage) entfallen dann.
 - Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§5) ist sie erwähnt.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
-- **Neu ausfüllen, sobald** in P2 Konto oder Cloud kommen (dann erhoben: E-Mail, Name, Nutzer-IDs, App-Aktivität, „Fitness-Info“ für Match-Daten, verschlüsselt bei der Übertragung, Löschmöglichkeit)
-  oder in P3 Puls bzw. kcal gespeichert oder synchronisiert werden („Gesundheitsinfo/Fitness-Info“ = erhoben, Zweck App-Funktionalität, nicht geteilt).
+- **Neu ausfüllen, sobald** Daten das Gerät **ohne** Ende-zu-Ende-Verschlüsselung verlassen, z. B. in P2 mit Konto bzw. Cloud-Sync.
+  Dann sind erhoben: E-Mail, Name, Nutzer-IDs, App-Aktivität und Match-Daten als „Fitness-Info“, verschlüsselt bei der Übertragung, mit Löschmöglichkeit.
+  In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
+  **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
+  Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
 
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
 Alle Apps auf Play müssen sie ausfüllen, auch für interne und geschlossene Tests [P10].
@@ -328,9 +369,12 @@ Den Workflow starten können nur Personen mit Schreibrechten. Der Keystore wird 
 - [P5] Android Developers Blog, 64-Bit-Pflicht für Wear OS ab 15.09.2026 – https://android-developers.googleblog.com/2026/04/get-your-wear-os-apps-ready-for-64-bit-requirement.html
 - [P6] Health-App auf Google Play veröffentlichen (Datenschutz-URL identisch mit Health Connect) – https://developer.android.com/health-and-fitness/health-connect/publish
 - [P7] Content-Rating-Fragebogen – https://support.google.com/googleplay/android-developer/answer/188189 und https://support.google.com/googleplay/android-developer/answer/9898843
-- [P8] Datensicherheit: Definitionen „collect“/„share“ und Ausnahmen – https://support.google.com/googleplay/android-developer/answer/10787469
+- [P8] Datensicherheit: Definitionen „collect“/„share“, Ausnahmen, ephemere Verarbeitung im Formular – https://support.google.com/googleplay/android-developer/answer/10787469
 - [P9] Wear Data Layer: Übertragung (Bluetooth bzw. Google Cloud Ende-zu-Ende-verschlüsselt), gleiche Paketnamen und Signatur – https://developer.android.com/training/wearables/data/overview
 - [P10] Erklärung zu Gesundheits-Apps – https://support.google.com/googleplay/android-developer/answer/14738291
 - [P11] Vordergrunddienst-Anforderungen (Deklaration, Video, Typ `health`) – https://support.google.com/googleplay/android-developer/answer/13392821
 - [P12] Testanforderungen für neue private Entwicklerkonten (12 Tester, 14 Tage) – https://support.google.com/googleplay/android-developer/answer/14151465
+- [P13] Veröffentlichungsstatus und Prüfung (interner Test: Prüfung beim ersten Rollout bzw. nach Ablehnung) – https://support.google.com/googleplay/android-developer/answer/9859654
+- [P14] Richtlinie Nutzerdaten (Datenschutzerklärung in der Play Console **und** in der App) – https://support.google.com/googleplay/android-developer/answer/10144311
+- [P15] Zielgruppe und Inhalte (Altersgruppen, 13–15 „may be considered to include children in some locales“, Familienrichtlinie) – https://support.google.com/googleplay/android-developer/answer/9867159
 - Health-Services-Berechtigungen ab Wear OS 6 (`READ_HEART_RATE`) – https://developer.android.com/health-and-fitness/health-services/permissions

@@ -13,27 +13,11 @@
 -renamesourcefileattribute SourceFile
 
 # --- kotlinx-serialization ----------------------------------------------------------------------
-# kotlinx-serialization-core bringt R8-Regeln mit (META-INF/com.android.tools/r8/*.pro). Die
-# serialName-Strings erzeugt das Compiler-Plugin als Konstanten – Obfuskierung ändert also weder das
-# JSON-Format noch polymorphe Diskriminatoren. Zusätzlich abgesichert: Serializer unserer eigenen
-# @Serializable-Klassen, falls sie zur Laufzeit über serializer<T>()/Companion gesucht werden.
--if @kotlinx.serialization.Serializable class eu.advantly.**
--keepclassmembers class <1> {
-    static <1>$Companion Companion;
-}
--if @kotlinx.serialization.Serializable class eu.advantly.** {
-    static **$* *;
-}
--keepclassmembers class <2>$<3> {
-    kotlinx.serialization.KSerializer serializer(...);
-}
--if @kotlinx.serialization.Serializable class eu.advantly.** {
-    public static ** INSTANCE;
-}
--keepclassmembers class <1> {
-    public static <1> INSTANCE;
-    kotlinx.serialization.KSerializer serializer(...);
-}
+# Keine eigenen Regeln: kotlinx-serialization-core bringt R8-Regeln mit
+# (META-INF/com.android.tools/r8/kotlinx-serialization-common.pro und -r8.pro), die Companion-,
+# INSTANCE- und serializer()-Member aller @Serializable-Klassen behalten. Die serialName-Strings
+# erzeugt das Compiler-Plugin als Konstanten – Obfuskierung ändert also weder das JSON-Format noch
+# polymorphe Diskriminatoren.
 
 # --- SQLDelight (shared/data) -------------------------------------------------------------------
 # Generierter Code ohne Reflection; Enum-Spalten laufen über name()/enumValueOf, die Namen bleiben
