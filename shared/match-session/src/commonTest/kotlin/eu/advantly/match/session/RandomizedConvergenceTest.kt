@@ -9,8 +9,9 @@ import kotlin.random.Random
 import kotlin.test.Test
 
 /**
- * Zufällige Sync-Simulation (01 §8) mit festen Seeds: drei Geräte zählen, machen rückgängig, verlieren und
- * verdoppeln Frames und gehen zeitweise offline. Nach dem Wiederverbinden müssen alle denselben Zustand haben.
+ * Zufällige Sync-Simulation (01 §8) mit festen Seeds: drei Geräte übernehmen abwechselnd das Zählen (auch offline
+ * und gleichzeitig), zählen, machen rückgängig, verlieren und verdoppeln Frames und gehen zeitweise offline.
+ * Nach dem Wiederverbinden müssen alle denselben Zustand haben.
  */
 class RandomizedConvergenceTest {
     @Test
@@ -50,6 +51,10 @@ class RandomizedConvergenceTest {
 
                     3 -> {
                         session.continueDecision(anotherSet = true)
+                    }
+
+                    4 -> {
+                        session.takeOverScoring()
                     }
 
                     else -> {

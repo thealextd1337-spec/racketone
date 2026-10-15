@@ -19,6 +19,19 @@ object SystemWallClock : WallClock {
     override fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
 }
 
+/**
+ * Prüft, ob der Aufruf auf dem Thread des Schedulers läuft (Android: Main-Looper, Apple: Main-Queue). Öffentliche
+ * Session-Aufrufe von anderen Threads schlagen mit [IllegalStateException] fehl, statt still Zustand zu zerstören.
+ */
+fun interface ThreadGuard {
+    fun isSchedulerThread(): Boolean
+
+    companion object {
+        /** Keine Prüfung (Tests mit `ManualScheduler`, Desktop). */
+        val NONE: ThreadGuard = ThreadGuard { true }
+    }
+}
+
 /** Quelle für UUIDv7 (Match- und Event-IDs). In Tests deterministisch ersetzbar. */
 fun interface IdGenerator {
     fun newUuid7(nowMs: Long): Uuid7

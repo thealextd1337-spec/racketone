@@ -25,7 +25,7 @@ sealed interface SyncMessage {
     val v: Int
 }
 
-/** Art eines Geräts – nur Anzeige (z. B. „Version Uhr“ im Fork-Dialog, Sync-Pill „Uhr verbunden“). */
+/** Art eines Geräts – nur Anzeige (z. B. „Uhr zählt“, Sync-Pill „Uhr verbunden“). */
 @Serializable
 enum class PeerKind {
     PHONE,
@@ -75,8 +75,8 @@ data class Summary(
  * Events eines Matches – Live-Push einzelner Taps und Nachlieferung (Batch). Der Empfang ist idempotent über die
  * Event-`id` (01 §4.3 Regel 2). Events mit anderer `matchId` als [matchId] verwirft der Empfänger.
  *
- * @property more `true` = weitere Teile derselben Nachlieferung folgen. Der Empfänger speichert sofort, wendet den
- *   Batch aber erst mit dem letzten Teil gemeinsam an (ein `applyAll`, eine Fork-Prüfung über den ganzen Zweig).
+ * @property more `true` = weitere Teile derselben Nachlieferung folgen. Nur ein Hinweis: Der Empfänger speichert und
+ *   wendet jede Nachricht sofort an (Fold ist reihenfolgeunabhängig).
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable

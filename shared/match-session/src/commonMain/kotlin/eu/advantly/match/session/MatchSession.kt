@@ -23,8 +23,8 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.ScoringEngine
-import eu.advantly.core.scoring.TapConflict
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AppendResult
 import eu.advantly.data.FavoriteLineup
@@ -45,7 +45,6 @@ import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.DecodeResult
 import eu.advantly.sync.protocol.DeviceSeq
 import eu.advantly.sync.protocol.Events
-import eu.advantly.sync.protocol.Forks
 import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.MatchHeader
 import eu.advantly.sync.protocol.MatchMetaMessage
@@ -62,21 +61,24 @@ import kotlinx.coroutines.flow.asStateFlow
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
 /**
- * Orchestriert ein Match auf einem Gerät – gleichwertig auf Handy und Uhr (01 §4, PLAN K1):
+ * Orchestriert ein Match auf einem Gerät nach dem **Single-Scorer-Modell** (02 §7.5, 01 §4.4): Genau ein Gerät zählt
+ * (Standard: Uhr des Spielers, alternativ Director-Handy), alle anderen zeigen an und können „Zählen übernehmen“.
  *
- * - **Lokaler Tap** → Event (UUIDv7, Lamport, deviceId, deviceSeq, parentId) → [LocalData.events] (idempotent)
- *   → [ScoringEngine.applyAll] → Broadcast `Events` an alle Gegenstellen.
- * - **Empfang** → Store (eine Transaktion je Nachricht) → Engine mit dem **ganzen Batch** (`applyAll`) → Fork-Prüfung
- *   → Weiterleitung an die übrigen Gegenstellen (Hub-Rolle des Handys).
+ * - **Zähler-Tap** → Event (UUIDv7, Lamport, deviceId, deviceSeq, parentId) → [LocalData.events] (idempotent)
+ *   → [ScoringEngine.applyAll] → Broadcast `Events` an alle Gegenstellen. Auf Anzeige-Geräten liefern Zähl-Kommandos
+ *   `false` und schreiben nichts.
+ * - **Empfang** → jedes neue Event sofort speichern und mit dem Batch der Nachricht anwenden (`applyAll`, Fold ist
+ *   reihenfolgeunabhängig) → Weiterleitung an die übrigen Gegenstellen (Hub-Rolle des Handys).
  * - **Anti-Entropie** (`Hello` → `Summary` → fehlende Events) bei jeder Verbindung und alle 30 s im aktiven Match.
  *
  * Zustand: [state] (`StateFlow`) bzw. [addListener] (Callbacks, z. B. für die Swift-Facade).
  *
- * **Threading:** Alle Methoden und Callbacks laufen auf dem Thread des [scheduler] (Android: Main-Looper, Apple:
- * Main-Queue, Tests: `ManualScheduler`) – derselbe Thread, auf dem der [link] seine Callbacks liefert.
+ * **Threading:** Alle öffentlichen Aufrufe und Callbacks laufen auf dem Thread des [scheduler]; [threadGuard] erzwingt
+ * das (Android: Main-Looper, Apple: Main-Queue, Tests: `ManualScheduler`).
  *
  * @param link Geräte-Link oder `null` (Standalone, nur lokal zählen)
  */
+@Suppress("TooManyFunctions")
 class MatchSession(
     private val data: LocalData,
     private val link: DeviceLink?,
@@ -84,6 +86,7 @@ class MatchSession(
     val config: SessionConfig,
     private val clock: WallClock = SystemWallClock,
     private val ids: IdGenerator = RandomIdGenerator(),
+    private val threadGuard: ThreadGuard = ThreadGuard.NONE,
 ) {
     /** Stabile Installations-ID dieses Geräts. */
     val deviceId: DeviceId get() = config.deviceId
@@ -97,26 +100,17 @@ class MatchSession(
         val redo = ArrayDeque<EventId>()
         val id: MatchId get() = record.id
         val status: MatchStatus get() = engine.state.status
-
-        /** Vollständiges Log inkl. Genesis. */
-        fun log(): List<ScoreEvent> = listOf(genesis) + engine.events
+        val scorer: DeviceId? get() = engine.state.scorerDeviceId
 
         /** Log-Kopf = letztes Event in Event-Ordnung (01 §3.2 `parentId`). */
         fun head(): ScoreEvent = engine.events.lastOrNull()?.takeIf { EventOrdering.compare(it, genesis) > 0 } ?: genesis
     }
 
     private var open: OpenMatch? = null
-    private val forks = ForkLedger(data.settings)
     private val listeners = mutableListOf<SessionListener>()
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
-
-    /** Gespeicherte, aber noch nicht angewendete Teile einer Nachlieferung (`Events.more = true`). */
-    private val pending = LinkedHashMap<MatchId, MutableList<ScoreEvent>>()
-
-    /** Weitergeleitete Nachlieferungen, deren letzter Teil noch aussteht (Match → Absender). */
-    private val openForwards = HashMap<MatchId, String>()
     private var started = false
     private var timer: Cancellable? = null
     private var lastSyncAtMs: Long? = null
@@ -137,13 +131,14 @@ class MatchSession(
 
     private val mutableState = MutableStateFlow(buildState())
 
-    /** Aktueller Zustand (Match, Sync-Status, Konflikte, Fork). */
+    /** Aktueller Zustand (Match, Rolle, Sync-Status). */
     val state: StateFlow<SessionState> = mutableState.asStateFlow()
 
     // --- Lebenszyklus ---------------------------------------------------------------------------
 
     /** Startet Link und Anti-Entropie-Takt. Idempotent. */
     fun start() {
+        checkThread()
         if (started) return
         started = true
         link?.setListener(linkListener)
@@ -153,15 +148,15 @@ class MatchSession(
         publish()
     }
 
-    /** Stoppt Link und Takt; offene Teil-Lieferungen werden noch angewendet. */
+    /** Stoppt Link und Takt. */
     fun close() {
+        checkThread()
         if (!started) return
         started = false
         timer?.cancel()
         timer = null
         link?.setListener(null)
         link?.stop()
-        flushAll()
         hellos.clear()
         compatibility.clear()
         helloSent.clear()
@@ -170,62 +165,92 @@ class MatchSession(
 
     /** Meldet [listener] an; er bekommt sofort den aktuellen Zustand und danach jede Änderung. */
     fun addListener(listener: SessionListener) {
+        checkThread()
         listeners += listener
         listener.onStateChanged(mutableState.value)
     }
 
     fun removeListener(listener: SessionListener) {
+        checkThread()
         listeners -= listener
     }
 
     // --- Match öffnen -----------------------------------------------------------------------------
 
     /**
-     * Legt ein neues Match an (Genesis `MatchCreated`), öffnet es und meldet es den Gegenstellen.
+     * Legt ein neues Match an (Genesis `MatchCreated` mit Zähler), öffnet es und meldet es den Gegenstellen.
      *
+     * @param scorer wer zählt: dieses Gerät (Default) oder ein gekoppeltes, z. B. die Uhr des Spielers
      * @throws IllegalArgumentException bei ungültigem Format oder Lineup (siehe `MatchFormatValidator`)
      */
     fun create(
         format: MatchFormat,
         lineup: Lineup,
         meta: MatchMeta = MatchMeta(),
-    ): MatchId = createMatch(format, lineup, meta, previous = null)
+        scorer: ScorerChoice = ScorerChoice.ThisDevice,
+    ): MatchId {
+        checkThread()
+        val scorerId = if (scorer is ScorerChoice.Device) scorer.deviceId else deviceId
+        return createMatch(format, lineup, meta, scorerId, previous = null)
+    }
 
     /** Öffnet ein gespeichertes Match (Resume-Karte, App-Neustart). `false`, wenn Kopf oder Genesis fehlen. */
     fun resume(matchId: MatchId): Boolean {
-        if (!openMatch(matchId)) return false
-        open?.let { persistProgress(it) }
-        syncNow()
-        publish()
-        return true
+        checkThread()
+        return resumeMatch(matchId)
     }
 
     /** Schließt das offene Match in der Anzeige (es bleibt gespeichert und wird weiter synchronisiert). */
     fun closeMatch() {
+        checkThread()
         open = null
         publish()
     }
 
+    /** Löscht ein Match vollständig (Kopf + Events); ein offenes wird vorher geschlossen. */
+    fun deleteMatch(matchId: MatchId) {
+        checkThread()
+        if (open?.id == matchId) open = null
+        data.deleteMatch(matchId)
+        publish()
+    }
+
     /**
-     * Verknüpftes Folge-Match nach einem beendeten Match (02 §5.2): gleiche Besetzung und gleiches Satzformat,
-     * Modus `OPEN`, Erstaufschläger aus `state.continuation`, `previousMatchId` = das beendete Match.
+     * Verknüpftes Folge-Match nach einem beendeten Match (02 §5.2): gleiche Besetzung, gleiches Satzformat, Modus
+     * `OPEN`, Erstaufschläger aus `state.continuation`, `previousMatchId` gesetzt, gleicher Zähler.
      * `null`, wenn kein beendetes Match offen ist.
      */
     fun createFollowUp(): MatchId? {
+        checkThread()
         val m = open ?: return null
         if (m.status != MatchStatus.FINISHED) return null
         val previous = m.record
         val format = previous.format.copy(match = MatchSettings.OPEN, decidingSet = null)
         val next = m.engine.state.continuation
         val lineup = if (next != null) previous.lineup.copy(firstServer = next.player) else previous.lineup
-        return createMatch(format, lineup, previous.meta, previous = previous.id)
+        return createMatch(format, lineup, previous.meta, m.scorer ?: deviceId, previous = previous.id)
     }
 
-    // --- Zählen -----------------------------------------------------------------------------------
+    // --- Rolle ------------------------------------------------------------------------------------
 
-    /** Punkt für [side]. `false`, wenn kein Match offen ist oder es gerade keinen Punkt annimmt. */
-    fun recordPoint(side: Side): Boolean {
+    /**
+     * „Zählen übernehmen“ (02 §7.5): dieses Gerät wird Zähler (`ScorerChanged`). Die Bestätigung fragt die UI vorher ab.
+     * `false`, wenn kein Match offen ist, es beendet ist oder dieses Gerät schon zählt.
+     */
+    fun takeOverScoring(): Boolean {
+        checkThread()
         val m = open ?: return false
+        if (m.status == MatchStatus.FINISHED || m.scorer == deviceId) return false
+        emit(m, listOf(ScorerChanged(deviceId)))
+        return true
+    }
+
+    // --- Zählen (nur der Zähler) ------------------------------------------------------------------
+
+    /** Punkt für [side]. `false` ohne Match, auf Anzeige-Geräten oder wenn das Match gerade keinen Punkt annimmt. */
+    fun recordPoint(side: Side): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS && m.status != MatchStatus.PAUSED) return false
         m.redo.clear()
         emit(m, listOf(PointWon(side)))
@@ -234,7 +259,8 @@ class MatchSession(
 
     /** UI-Undo: macht das letzte wirksame Zähl-Event rückgängig (02 §7.3). */
     fun undo(): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         val target = m.engine.undoTarget ?: return false
         val undo = emit(m, listOf(Undo(target))).single()
         m.redo.addLast(undo.id)
@@ -244,7 +270,8 @@ class MatchSession(
 
     /** Redo = Undo auf das zuletzt hier erzeugte Undo (02 §7.3), solange es noch wirkt. */
     fun redo(): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         val undo = validRedo(m) ?: return false
         m.redo.removeLast()
         emit(m, listOf(Undo(undo)))
@@ -259,7 +286,8 @@ class MatchSession(
         anotherSet: Boolean,
         matchTiebreak: Boolean = false,
     ): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.AWAITING_DECISION) return false
         if (matchTiebreak && (!anotherSet || m.record.format.matchTiebreak == null)) return false
         m.redo.clear()
@@ -269,24 +297,27 @@ class MatchSession(
 
     /** Korrektur von Aufschläger, Reihenfolge oder Positionen (02 §7.1/§7.4); ungültige überspringt die Engine. */
     fun correct(correction: Correction): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         if (m.status == MatchStatus.FINISHED) return false
         m.redo.clear()
         emit(m, listOf(correction))
         return true
     }
 
-    /** Unterbrechung (Regen, Verletzung). */
+    /** Unterbrechung (Regen, Verletzung). Lässt den Redo-Stapel unberührt. */
     fun pause(): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS) return false
         emit(m, listOf(Paused))
         return true
     }
 
-    /** Fortsetzung nach [pause]. */
+    /** Fortsetzung nach [pause]. Lässt den Redo-Stapel unberührt. */
     fun resumePlay(): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.PAUSED) return false
         emit(m, listOf(Resumed))
         return true
@@ -301,7 +332,8 @@ class MatchSession(
         reason: EndReason = EndReason.ABANDONED,
         side: Side? = null,
     ): Boolean {
-        val m = open ?: return false
+        checkThread()
+        val m = scoringMatch() ?: return false
         val payload: EventPayload =
             when {
                 m.status == MatchStatus.FINISHED -> return false
@@ -314,50 +346,33 @@ class MatchSession(
         return true
     }
 
-    // --- Fork-Auflösung ---------------------------------------------------------------------------
-
-    /**
-     * „Version [keepBranch] behalten“ (01 §4.4): erzeugt Undo-Events für alle anderen Zweige der offenen Gabelung
-     * ([ActiveMatch.fork]). Wirkt über den Sync auf allen Geräten.
-     */
-    fun resolveFork(keepBranch: Int): Boolean {
-        val m = open ?: return false
-        val fork = openFork(m)?.fork ?: return false
-        if (keepBranch !in fork.branches.indices) return false
-        val targets = Forks.resolve(fork, keepBranch, m.log())
-        if (targets.isEmpty()) return false
-        m.redo.clear()
-        emit(m, targets.map { Undo(it) })
-        return true
-    }
-
-    /** „Beide zusammenführen“: alle Punkte bleiben; die Gabelung gilt auf diesem Gerät als erledigt. */
-    fun mergeFork(): Boolean {
-        val m = open ?: return false
-        val record = openFork(m) ?: return false
-        forks.markMerged(m.id, record.fork.id)
-        publish()
-        return true
-    }
-
     /** Stößt sofort einen Abgleich mit allen Gegenstellen an (z. B. App im Vordergrund). */
     fun syncNow() {
-        if (!started) return
-        broadcast(summaryOf(summaryMatches(), reply = false))
+        checkThread()
+        sendSummaries()
     }
 
     // --- Lokale Events ----------------------------------------------------------------------------
+
+    private fun checkThread() {
+        check(threadGuard.isSchedulerThread()) { "MatchSession nur auf dem Scheduler-Thread aufrufen (Main-Thread)" }
+    }
+
+    /** Offenes Match, falls dieses Gerät dort Zähler ist. */
+    private fun scoringMatch(): OpenMatch? = open?.takeIf { it.scorer == null || it.scorer == deviceId }
 
     private fun createMatch(
         format: MatchFormat,
         lineup: Lineup,
         meta: MatchMeta,
+        scorer: DeviceId,
         previous: MatchId?,
     ): MatchId {
         ScoringEngine.replay(format, lineup, emptyList()) // prüft Format und Lineup
         val now = clock.nowMs()
         val matchId = MatchId.of(ids.newUuid7(now))
-        val genesis = ScoreEvent(EventId.of(ids.newUuid7(now)), matchId, deviceId, 1, 1, now, null, MatchCreated(format, lineup, meta))
+        val created = MatchCreated(format, lineup, meta, scorerDeviceId = scorer)
+        val genesis = ScoreEvent(EventId.of(ids.newUuid7(now)), matchId, deviceId, 1, 1, now, null, created)
         data.transaction {
             data.events.append(genesis.toStoredEvent())
             data.matches.insertIfAbsent(matchId, format, lineup, meta, now, previous)
@@ -388,8 +403,17 @@ class MatchSession(
         m.engine = ScoringEngine.applyAll(m.engine, events)
         persistProgress(m)
         broadcast(Events(m.id, events))
+        maybeFollow(null)
         publish()
         return events
+    }
+
+    private fun resumeMatch(matchId: MatchId): Boolean {
+        if (!openMatch(matchId)) return false
+        open?.let { persistProgress(it) }
+        sendSummaries()
+        publish()
+        return true
     }
 
     private fun openMatch(matchId: MatchId): Boolean {
@@ -403,7 +427,6 @@ class MatchSession(
                 return false
             }
         open = OpenMatch(record, checkNotNull(engine.genesis), engine)
-        pending.remove(matchId)
         return true
     }
 
@@ -420,16 +443,19 @@ class MatchSession(
     ) {
         val message = (SyncCodec.decode(payload) as? DecodeResult.Ok)?.message ?: return
         if (message !is Hello && compatibility[peer]?.isCompatible == false) return
-        try {
-            when (message) {
-                is Hello -> onHello(peer, message)
-                is Summary -> onSummary(peer, message)
-                is Events -> onEvents(peer, message)
-                is MatchMetaMessage -> onMatchMeta(message)
+        val touched =
+            try {
+                when (message) {
+                    is Hello -> onHello(peer, message).let { null }
+                    is Summary -> onSummary(peer, message).let { null }
+                    is Events -> onEvents(peer, message)
+                    is MatchMetaMessage -> onMatchMeta(message)
+                }
+            } catch (e: IllegalArgumentException) {
+                // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) → verwerfen; der Rest bleibt konsistent
+                null
             }
-        } catch (e: IllegalArgumentException) {
-            // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) → verwerfen; der Rest bleibt konsistent
-        }
+        maybeFollow(touched)
         publish()
     }
 
@@ -463,57 +489,39 @@ class MatchSession(
         if (!summary.reply && behind.isNotEmpty()) send(peer, summaryOf(behind, reply = true))
     }
 
+    /** Speichert neue Events sofort und wendet sie als Batch an (kein Puffern, `more` ist nur ein Hinweis). */
     private fun onEvents(
         peer: String,
         message: Events,
-    ) {
+    ): MatchId {
         lastSyncAtMs = clock.nowMs()
         val matchId = message.matchId
         val valid = message.events.filter { AntiEntropy.isPlausible(it, matchId) }
         val results = data.events.appendAll(valid.map { it.toStoredEvent() })
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
+        if (inserted.isEmpty()) return matchId
         inserted.firstOrNull { it.payload is MatchCreated }?.let { ensureHeader(it) }
-        if (inserted.isNotEmpty()) pending.getOrPut(matchId) { mutableListOf() } += inserted
-        if (!message.more) flush(matchId)
-        forward(peer, matchId, inserted, message.more)
+        val m = open
+        if (m != null && m.id == matchId) {
+            m.engine = ScoringEngine.applyAll(m.engine, inserted)
+            persistProgress(m)
+        } else {
+            refreshHeader(matchId)
+        }
+        val forward = Events(matchId, inserted, message.more)
+        targets().filter { it != peer }.forEach { send(it, forward) }
+        return matchId
     }
 
-    private fun onMatchMeta(message: MatchMetaMessage) {
+    private fun onMatchMeta(message: MatchMetaMessage): MatchId? {
         val now = clock.nowMs()
         message.players.forEach { data.players.upsertRemote(it, now) }
         message.favorites.forEach { data.favorites.merge(it.toLocal()) }
-        val header = message.match ?: return
+        val header = message.match ?: return null
         data.matches.insertIfAbsent(header.matchId, header.format, header.lineup, header.meta, header.createdAtMs, header.previousMatchId)
         val m = open
         if (m != null && m.id == header.matchId) data.matches.get(m.id)?.let { m.record = it }
-        maybeFollow(header.matchId)
-    }
-
-    /** Wendet die gesammelten Events eines Matches an (offenes Match: Engine + Fork-Prüfung; sonst Kopf-Cache). */
-    private fun flush(matchId: MatchId) {
-        val batch = pending.remove(matchId).orEmpty()
-        val m = open
-        if (m != null && m.id == matchId) {
-            if (batch.isNotEmpty()) applyRemote(m, batch)
-            return
-        }
-        if (batch.isNotEmpty()) refreshHeader(matchId)
-        maybeFollow(matchId)
-    }
-
-    private fun flushAll() {
-        pending.keys.toList().forEach { flush(it) }
-    }
-
-    private fun applyRemote(
-        m: OpenMatch,
-        batch: List<ScoreEvent>,
-    ) {
-        val detected = Forks.detect(m.log(), batch)
-        m.engine = ScoringEngine.applyAll(m.engine, batch)
-        forks.add(m.id, detected)
-        if (batch.any { Forks.isScoreEvent(it) }) m.redo.clear()
-        persistProgress(m)
+        return header.matchId
     }
 
     /** Status/Ergebnis eines nicht offenen Matches aus seinem Log neu berechnen. */
@@ -529,16 +537,41 @@ class MatchSession(
         data.matches.updateProgress(matchId, state.status, ScoreSummary.of(state), clock.nowMs())
     }
 
-    /** Ohne offenes (oder mit beendetem) Match einem neuen, laufenden Match einer Gegenstelle folgen. */
-    private fun maybeFollow(matchId: MatchId) {
+    /**
+     * Folgt automatisch einem neuen, laufenden Match – nach **jeder** Zustandsänderung neu geprüft (Review-Befund 5):
+     * - ohne offenes Match: dem gerade berührten Match ([touched]),
+     * - mit beendetem Match: dem Folge-Match (`previousMatchId`) bzw. dem jüngsten danach angelegten laufenden Match.
+     * Bei mehreren Kandidaten deterministisch: Folge-Match zuerst, dann jüngstes `createdAt`, dann größte ID.
+     */
+    private fun maybeFollow(touched: MatchId?) {
         if (!config.autoFollow) return
         val m = open
-        if (m != null && (m.id == matchId || m.status != MatchStatus.FINISHED)) return
-        val record = data.matches.get(matchId) ?: return
-        if (record.isFinished) return
-        if (m != null && record.createdAtMs < m.record.createdAtMs) return
-        resume(matchId)
+        val candidates =
+            when {
+                m == null -> listOfNotNull(touched?.let { data.matches.get(it) })
+                m.status == MatchStatus.FINISHED -> data.matches.active().filter { it.id != m.id && isNewer(it, m.record) }
+                else -> return
+            }
+        val ordered =
+            candidates
+                .filter { !it.isFinished }
+                .sortedWith(
+                    compareByDescending<MatchRecord> { m != null && it.previousMatchId == m.id }
+                        .thenByDescending { it.createdAtMs }
+                        .thenByDescending { it.id.value },
+                )
+        for (record in ordered) {
+            if (resumeMatch(record.id)) return
+        }
     }
+
+    private fun isNewer(
+        candidate: MatchRecord,
+        current: MatchRecord,
+    ): Boolean =
+        candidate.previousMatchId == current.id ||
+            candidate.createdAtMs > current.createdAtMs ||
+            (candidate.createdAtMs == current.createdAtMs && candidate.id.value > current.id.value)
 
     private fun ensureHeader(genesis: ScoreEvent) {
         val created = genesis.payload as MatchCreated
@@ -552,10 +585,6 @@ class MatchSession(
             compatibility.remove(it)
             helloSent.remove(it)
         }
-        if (gone.isNotEmpty()) {
-            flushAll()
-            openForwards.entries.removeAll { it.value in gone }
-        }
         if (started) peers.filter { it !in helloSent }.forEach { sendHello(it) }
         publish()
     }
@@ -567,6 +596,10 @@ class MatchSession(
         send(peer, Hello(deviceId, config.kind, listOfNotNull(open?.id)))
     }
 
+    private fun sendSummaries() {
+        if (started) broadcast(summaryOf(summaryMatches(), reply = false))
+    }
+
     private fun sendEvents(
         peer: String,
         matchId: MatchId,
@@ -574,21 +607,6 @@ class MatchSession(
     ) {
         val batches = AntiEntropy.batches(events)
         batches.forEachIndexed { i, batch -> send(peer, Events(matchId, batch, more = i < batches.lastIndex)) }
-    }
-
-    /** Hub-Weiterleitung (01 §4.3 Regel 4): neue Events an alle außer dem Absender. */
-    private fun forward(
-        from: String,
-        matchId: MatchId,
-        inserted: List<ScoreEvent>,
-        more: Boolean,
-    ) {
-        val targets = targets().filter { it != from }
-        // leere Schlussteile nur weiterreichen, wenn vorher Teile derselben Nachlieferung weitergereicht wurden
-        val continuesForward = openForwards[matchId] == from
-        if (inserted.isEmpty() && !(continuesForward && !more)) return
-        if (more) openForwards[matchId] = from else openForwards.remove(matchId)
-        targets.forEach { send(it, Events(matchId, inserted, more)) }
     }
 
     private fun broadcast(message: SyncMessage) {
@@ -617,7 +635,7 @@ class MatchSession(
                 timer = null
                 if (!started) return@postDelayed
                 val m = open
-                if (m != null && m.status != MatchStatus.FINISHED) syncNow()
+                if (m != null && m.status != MatchStatus.FINISHED) sendSummaries()
                 scheduleAntiEntropy()
             }
     }
@@ -684,17 +702,22 @@ class MatchSession(
             link?.peers.orEmpty().map { peer ->
                 PeerInfo(peer, hellos[peer]?.deviceId, hellos[peer]?.kind, compatibility[peer]?.status)
             }
+        val compatiblePeers = peers.filter { it.compatibility == CompatibilityStatus.COMPATIBLE }
         val indicator =
             when {
-                match != null && (match.conflicts.isNotEmpty() || match.fork != null) -> SyncIndicator.CONFLICT
-                started && peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE } -> SyncIndicator.CONNECTED
+                match != null && match.conflicts.isNotEmpty() -> SyncIndicator.CONFLICT
+                started && compatiblePeers.isNotEmpty() -> SyncIndicator.CONNECTED
                 else -> SyncIndicator.LOCAL_ONLY
             }
-        return SessionState(match, SyncStatus(linkState, peers, indicator, lastSyncAtMs))
+        val scorerConnected =
+            match != null && (match.isScorer || (started && compatiblePeers.any { it.deviceId == match.scorerDeviceId }))
+        return SessionState(match, SyncStatus(linkState, peers, indicator, scorerConnected, lastSyncAtMs))
     }
 
     private fun activeMatch(m: OpenMatch): ActiveMatch {
         val engine = m.engine
+        val scorer = engine.state.scorerDeviceId
+        val isScorer = scorer == null || scorer == deviceId
         return ActiveMatch(
             id = m.id,
             format = m.record.format,
@@ -703,64 +726,25 @@ class MatchSession(
             createdAtMs = m.record.createdAtMs,
             previousMatchId = m.record.previousMatchId,
             state = engine.state,
-            canUndo = engine.undoTarget != null,
-            canRedo = validRedo(m) != null,
-            conflicts = engine.conflicts.filterNot { isForkConflict(m, it) },
+            pointsPlayed = engine.pointsPlayed,
+            scorerDeviceId = scorer,
+            scorerKind = scorer?.let { kindOf(it) },
+            isScorer = isScorer,
+            rejectedByRoleCount = engine.state.rejectedByRole.size,
+            canUndo = isScorer && engine.undoTarget != null,
+            canRedo = isScorer && validRedo(m) != null,
+            conflicts = engine.conflicts,
             absorbedTaps = engine.absorbedEvents,
-            fork = forkInfo(m),
             eventCount = engine.events.size + 1,
-        )
-    }
-
-    /**
-     * Widerspruch zwischen den ersten Punkten zweier Zweige einer erkannten Gabelung: Den behandelt der Fork-Dialog
-     * (bzw. „zusammenführen“ hat ihn bewusst bestätigt) – kein zusätzliches Konflikt-Banner.
-     */
-    private fun isForkConflict(
-        m: OpenMatch,
-        conflict: TapConflict,
-    ): Boolean =
-        forks.records(m.id).any { record ->
-            val first = record.fork.branches.indexOfFirst { conflict.first in it.events }
-            val second = record.fork.branches.indexOfFirst { conflict.second in it.events }
-            first >= 0 && second >= 0 && first != second
-        }
-
-    private fun openFork(m: OpenMatch): ForkRecord? {
-        val records = forks.records(m.id)
-        if (records.isEmpty()) return null
-        val log = m.log()
-        return records.firstOrNull { !it.merged && Forks.isOpen(it.fork, log) }
-    }
-
-    private fun forkInfo(m: OpenMatch): ForkInfo? {
-        val fork = openFork(m)?.fork ?: return null
-        val analysis = EventLog.analyze(m.log())
-        val byId = analysis.ordered.associateBy { it.id }
-        return ForkInfo(
-            id = fork.id,
-            branches =
-                fork.branches.mapIndexed { index, branch ->
-                    ForkVersion(
-                        devices = branch.devices,
-                        kinds = branch.devices.mapNotNull { kindOf(it) },
-                        includesThisDevice = deviceId in branch.devices,
-                        preview = Forks.preview(m.record.format, m.record.lineup, m.engine.events, fork, index),
-                        points =
-                            branch.events.count { id ->
-                                byId[id]?.payload is PointWon && id !in analysis.undone && id !in analysis.absorbed
-                            },
-                    )
-                },
         )
     }
 
     /** Oberstes Redo-Ziel, falls dessen Undo noch wirkt und sein Ziel noch unwirksam ist. */
     private fun validRedo(m: OpenMatch): EventId? {
         val top = m.redo.lastOrNull() ?: return null
-        val analysis = EventLog.analyze(m.engine.events)
+        val analysis = EventLog.analyze(m.engine.events, m.engine.initialScorer)
         val undo = analysis.ordered.firstOrNull { it.id == top }?.payload as? Undo ?: return null
-        return top.takeIf { it !in analysis.undone && undo.target in analysis.undone }
+        return top.takeIf { it !in analysis.undone && it !in analysis.roleRejected && undo.target in analysis.undone }
     }
 
     private fun kindOf(device: DeviceId): PeerKind? =

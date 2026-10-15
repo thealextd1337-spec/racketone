@@ -25,6 +25,7 @@ object MatchSessions {
      * Neue, noch nicht gestartete Session (danach [MatchSession.start] auf dem Scheduler-Thread aufrufen).
      *
      * @param link `null` = nur lokal zählen (z. B. Desktop-Preview, Uhr ohne Kopplung)
+     * @param threadGuard erzwingt Aufrufe auf dem Scheduler-Thread (Plattform-Fabriken setzen ihn)
      */
     fun create(
         data: LocalData,
@@ -33,5 +34,6 @@ object MatchSessions {
         kind: PeerKind,
         clock: WallClock = SystemWallClock,
         ids: IdGenerator = RandomIdGenerator(),
-    ): MatchSession = MatchSession(data, link, scheduler, SessionConfig(deviceId(data, clock, ids), kind), clock, ids)
+        threadGuard: ThreadGuard = ThreadGuard.NONE,
+    ): MatchSession = MatchSession(data, link, scheduler, SessionConfig(deviceId(data, clock, ids), kind), clock, ids, threadGuard)
 }

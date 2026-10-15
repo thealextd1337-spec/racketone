@@ -2,6 +2,7 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.scoreEvents
@@ -15,16 +16,18 @@ import eu.advantly.sync.protocol.SyncCodec
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Mehrgeräte-Konvergenz (01 §4, §8): Live-Zählen, Verlust, Duplikate, Reihenfolge, Offline-Phasen, Hub. */
+/** Mehrgeräte-Konvergenz (01 §4, §8): Zähler + Anzeigen bei Verlust, Duplikaten, Reihenfolge, Offline-Phasen, Hub. */
 class MultiDeviceSyncTest {
     private val format = Presets.TENNIS_SINGLES_BO3.format()
+    private val watchScores = ScorerChoice.Device(DeviceId("watch"))
 
     @Test
-    fun liveCountingOnPhoneAndWatchConverges() {
+    fun watchScoresAndPhoneDisplays() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
         val phone = cluster["phone"]
         val watch = cluster["watch"]
@@ -36,19 +39,25 @@ class MultiDeviceSyncTest {
                 .kind,
         )
 
-        val id = phone.session.create(format, SINGLES)
+        val id = phone.session.create(format, SINGLES, scorer = watchScores)
         cluster.settle()
         assertEquals(id, watch.match.id, "Uhr folgt dem neuen Match automatisch")
+        assertTrue(watch.match.isScorer)
+        assertFalse(phone.match.isScorer)
+        assertEquals(PeerKind.WATCH, phone.match.scorerKind)
+        assertTrue(phone.session.state.value.sync.scorerConnected)
         repeat(10) { i ->
-            val device = if (i % 2 == 0) phone else watch
-            device.session.recordPoint(if (i % 3 == 0) Side.B else Side.A)
+            assertTrue(watch.session.recordPoint(if (i % 3 == 0) Side.B else Side.A))
             cluster.settle(500)
         }
+        assertFalse(phone.session.recordPoint(Side.A), "Anzeige-Gerät zählt nicht")
+        assertFalse(phone.session.undo())
         cluster.assertConverged()
-        assertEquals(11, watch.match.eventCount)
+        assertEquals(11, phone.match.eventCount)
+        assertEquals(10, phone.match.pointsPlayed)
         assertEquals(
             MatchStatus.IN_PROGRESS,
-            watch.data.matches
+            phone.data.matches
                 .get(id)
                 ?.status,
         )
@@ -57,15 +66,16 @@ class MultiDeviceSyncTest {
     @Test
     fun lossDuplicatesAndRetriesConverge() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, scorer = watchScores)
         cluster.settle()
         cluster.network.lossRate = 0.3
         cluster.network.duplicateRate = 0.3
         val random = Random(11)
+        val watch = cluster["watch"].session
         repeat(60) {
-            val device = cluster[if (random.nextBoolean()) "phone" else "watch"]
-            device.session.recordPoint(if (random.nextBoolean()) Side.A else Side.B)
-            if (random.nextInt(5) == 0) device.session.undo()
+            watch.recordPoint(if (random.nextBoolean()) Side.A else Side.B)
+            if (random.nextInt(5) == 0) watch.undo()
+            if (random.nextInt(9) == 0) watch.redo()
             cluster.settle(random.nextLong(10, 400))
         }
         cluster.network.lossRate = 0.0
@@ -85,10 +95,7 @@ class MultiDeviceSyncTest {
         val id = phone.create(format, SINGLES)
         repeat(12) { phone.recordPoint(if (it % 3 == 0) Side.B else Side.A) }
         phone.undo()
-        phone.correct(
-            eu.advantly.core.scoring.Correction
-                .initialServer(SINGLES.b.single()),
-        )
+        phone.correct(Correction.initialServer(SINGLES.b.single()))
         cluster.settle()
         val events = phoneData.events.scoreEvents(id)
         (events + events.take(5)).shuffled(Random(3)).forEach { lab.send("watch", SyncCodec.encode(Events(id, listOf(it)))) }
@@ -108,9 +115,9 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun offlineWatchCatchesUpInOneBatch() {
+    fun offlineScorerCatchesUpInOneBatch() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, scorer = watchScores)
         cluster.settle()
         cluster.offline("watch")
         cluster.settle(30_000)
@@ -118,6 +125,10 @@ class MultiDeviceSyncTest {
             SyncIndicator.LOCAL_ONLY,
             cluster["watch"]
                 .session.state.value.sync.indicator,
+        )
+        assertFalse(
+            cluster["phone"]
+                .session.state.value.sync.scorerConnected,
         )
         repeat(30) {
             cluster["watch"].session.recordPoint(Side.A)
@@ -136,7 +147,7 @@ class MultiDeviceSyncTest {
         // Uhren sprechen nie direkt miteinander (WatchConnectivity/Data Layer: nur Uhr ↔ Handy)
         cluster.network.dropFilter = { from, to, _ -> setOf(from, to) != setOf("watch1", "watch2") }
         cluster.offline("watch2")
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, scorer = ScorerChoice.Device(DeviceId("watch1")))
         cluster.settle()
         repeat(6) {
             cluster["watch1"].session.recordPoint(Side.A)
@@ -145,13 +156,15 @@ class MultiDeviceSyncTest {
         cluster.online("watch2")
         cluster.settle(5_000)
         cluster.assertConverged()
-        // live: Uhr 2 zählt, Uhr 1 erfährt es nur über das Handy
+        // Uhr 2 übernimmt; Uhr 1 erfährt die Übernahme und die Punkte nur über das Handy
+        assertTrue(cluster["watch2"].session.takeOverScoring())
         repeat(4) {
             cluster["watch2"].session.recordPoint(Side.B)
             cluster.settle(500)
         }
         cluster.assertConverged()
-        assertEquals(11, cluster["watch1"].match.eventCount)
+        assertFalse(cluster["watch1"].match.isScorer)
+        assertEquals(12, cluster["watch1"].match.eventCount)
     }
 
     @Test
@@ -201,6 +214,6 @@ class MultiDeviceSyncTest {
                 .session.state.value.match,
         )
         assertNull(cluster["watch"].data.matches.get(id))
-        assertTrue(cluster["watch"].data.events.count(id.value) == 0L)
+        assertEquals(0L, cluster["watch"].data.events.count(id.value))
     }
 }

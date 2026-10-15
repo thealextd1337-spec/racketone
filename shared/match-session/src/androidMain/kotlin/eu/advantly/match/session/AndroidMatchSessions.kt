@@ -1,6 +1,7 @@
 package eu.advantly.match.session
 
 import android.content.Context
+import android.os.Looper
 import eu.advantly.data.createAndroidLocalData
 import eu.advantly.device.link.MainLooperScheduler
 import eu.advantly.device.link.createWearDeviceLink
@@ -22,8 +23,13 @@ object AndroidMatchSessions {
             val app = context.applicationContext
             val scheduler = MainLooperScheduler()
             MatchSessions
-                .create(createAndroidLocalData(app), createWearDeviceLink(app, scheduler), scheduler, kind)
-                .also {
+                .create(
+                    createAndroidLocalData(app),
+                    createWearDeviceLink(app, scheduler),
+                    scheduler,
+                    kind,
+                    threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
+                ).also {
                     it.start()
                     instance = it
                 }

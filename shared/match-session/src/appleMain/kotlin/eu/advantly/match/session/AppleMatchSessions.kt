@@ -4,6 +4,7 @@ import eu.advantly.data.createNativeLocalData
 import eu.advantly.device.link.MainQueueScheduler
 import eu.advantly.device.link.createWatchConnectivityLink
 import eu.advantly.sync.protocol.PeerKind
+import platform.Foundation.NSThread
 
 /**
  * Prozessweite [MatchSession] für iPhone und Apple Watch (WatchConnectivity als Link). Aufruf nur auf der
@@ -17,8 +18,13 @@ object AppleMatchSessions {
         instance ?: run {
             val scheduler = MainQueueScheduler()
             MatchSessions
-                .create(createNativeLocalData(), createWatchConnectivityLink(scheduler), scheduler, kind)
-                .also {
+                .create(
+                    createNativeLocalData(),
+                    createWatchConnectivityLink(scheduler),
+                    scheduler,
+                    kind,
+                    threadGuard = { NSThread.isMainThread },
+                ).also {
                     it.start()
                     instance = it
                 }

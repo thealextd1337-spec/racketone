@@ -1,114 +1,105 @@
 # `shared/match-session` – Match-Session (Engine + Store + Geräte-Sync)
 
-Orchestriert ein Match auf **einem** Gerät, gleichwertig auf Handy und Uhr (01 §4, PLAN K1). Ohne Compose, Ktor, Koin –
-läuft auf allen Targets inkl. watchOS. Abhängigkeiten: `core-scoring`, `sync-protocol`, `data`, `device-link`,
+Orchestriert ein Match auf **einem** Gerät nach dem **Single-Scorer-Modell** (Produktentscheidung 2026-10-15,
+02 §7.5, 01 §4.4): Pro Match zählt genau ein Gerät – Standard die Uhr des Spielers, alternativ ein Handy im
+Director-Modus. Alle anderen Geräte zeigen an und können „Zählen übernehmen“. Ohne Compose, Ktor, Koin – läuft auf
+allen Targets inkl. watchOS. Abhängigkeiten: `core-scoring`, `sync-protocol`, `data`, `device-link`,
 `kotlinx-coroutines` (nur `StateFlow`).
 
 | Baustein | Aufgabe |
 |---|---|
-| `MatchSession` | API für UI/Facades, Event-Erzeugung, Empfang, Anti-Entropie-Takt, Fork-Auflösung |
-| `SessionState` | Zustand für die UI: `ActiveMatch` (Engine-Zustand, Undo/Redo, Konflikte, Fork) + `SyncStatus` |
+| `MatchSession` | API für UI/Facades, Event-Erzeugung (nur Zähler), Empfang, Anti-Entropie-Takt, Übergabe |
+| `SessionState` | Zustand für die UI: `ActiveMatch` (Engine-Zustand, Rolle, Undo/Redo, `pointsPlayed`) + `SyncStatus` |
 | `MatchSessions` | DI-freie Fabrik + stabile Geräte-ID (`session.deviceId` in den Settings) |
-| `AndroidMatchSessions` / `AppleMatchSessions` | prozessweite Session mit fertigem Link (Wear Data Layer / WatchConnectivity), DB und Scheduler |
+| `AndroidMatchSessions` / `AppleMatchSessions` | prozessweite Session mit Link (Wear Data Layer / WatchConnectivity), DB, Scheduler und Thread-Prüfung |
 
 ## Ablauf
 
 ```mermaid
 sequenceDiagram
-  participant UI as UI (Handy/Uhr)
-  participant S as MatchSession
-  participant DB as LocalData (SQLDelight)
-  participant E as ScoringEngine
-  participant L as DeviceLink
-  participant P as Gegenstelle (MatchSession)
+  participant Z as Zähler (Uhr)
+  participant H as Handy (Hub, Anzeige)
+  participant A as weitere Anzeige
 
-  UI->>S: recordPoint(A)
-  S->>DB: maxLamport + 1, maxDeviceSeq + 1, parentId = Log-Kopf
-  S->>DB: append(Event) – idempotent über id
-  S->>E: applyAll(state, [Event])
-  S-->>UI: StateFlow / SessionListener
-  S->>L: Events([e]) an alle Gegenstellen
-  L->>P: Events([e])
-  P->>P: Store (Transaktion) → Fork-Prüfung → applyAll(Batch) → weiterleiten (Hub)
+  Z->>Z: recordPoint(A): Event (Lamport, deviceSeq, parentId) → Store → applyAll
+  Z->>H: Events([e])
+  H->>H: Store (idempotent) → applyAll(Batch der Nachricht)
+  H->>A: Events([e]) weiterleiten (Hub)
+  H-->>H: recordPoint(...) = false (Anzeige)
 
-  Note over S,P: Verbindung (wieder) da oder alle 30 s im aktiven Match
-  S->>P: Hello (deviceId, kind, v, minV)
-  P->>S: Hello + Summary {matchId: {deviceId: Wasserstand}}
-  S->>P: Events (fehlende deviceSeq-Bereiche, Teile mit more=true)
-  S->>P: Summary(reply=true), falls S selbst etwas fehlt
-  P->>S: Events (Rest)
-  P->>S: MatchMeta (Kopf, Spielernamen, Favoriten-Lineups)
-```
+  Note over Z,H: Verbindung (wieder) da oder alle 30 s im aktiven Match
+  H->>Z: Hello (deviceId, kind, v, minV)
+  Z->>H: Hello + Summary {matchId: {deviceId: Wasserstand}} + MatchMeta
+  H->>Z: Events (fehlende deviceSeq-Bereiche)
+  H->>Z: Summary(reply=true), falls H etwas fehlt
+  Z->>H: Events (Rest)
 
-Fork nach Offline-Zählen auf zwei Geräten (01 §4.4):
-
-```mermaid
-flowchart LR
-  R["Empfang eines Batches"] --> D{"Forks.detect: lokale Nachfahren des Anknüpfungspunkts<br/>und eingehender Zweig haben je ≥ 1 wirksames Zähl-Event?"}
-  D -- "nein / gleichzeitiger Tap" --> N["normal anwenden<br/>(Doppel-Tap absorbiert, Widerspruch = Konflikt-Banner)"]
-  D -- "ja" --> F["vorläufig zusammengeführt + ForkRecord (Settings)"]
-  F --> UI["ActiveMatch.fork: Version Uhr (Vorschau) / Version Handy / zusammenführen"]
-  UI -- "resolveFork(i)" --> U["Undo-Events für alle anderen Zweige → Sync → überall gleich"]
-  UI -- "mergeFork()" --> M["lokale Quittung, alle Punkte bleiben"]
+  Note over H: „Zählen übernehmen“ (UI bestätigt)
+  H->>H: takeOverScoring(): ScorerChanged(phone)
+  H->>Z: Events([ScorerChanged])
+  Z->>Z: isScorer = false; spätere Uhr-Eingaben → rejectedByRole
 ```
 
 ## API-Beispiel
 
 ```kotlin
-// Android (Main-Thread); Apple: AppleMatchSessions.shared(PeerKind.WATCH)
+// Android (Main-Thread); Apple: AppleMatchSessions.shared(PeerKind.PHONE)
 val session = AndroidMatchSessions.get(context, PeerKind.PHONE)
 
+// Match am Handy anlegen, die Uhr des Spielers zählt
 val matchId = session.create(
     format = Presets.TENNIS_SINGLES_BO3.format(),
     lineup = Lineup(a = listOf(me), b = listOf(bea), firstServer = me),
-    meta = MatchMeta(surface = Surface.CLAY, environment = Environment.OUTDOOR),
+    meta = MatchMeta(surface = Surface.CLAY),
+    scorer = ScorerChoice.Device(watchDeviceId),     // oder ScorerChoice.ThisDevice (Director-Modus)
 )
-session.recordPoint(Side.A)
-session.undo()
-session.redo()
 
-// Satzende-Dialog (OPEN): state.pending == ASK_ANOTHER_SET
-session.continueDecision(anotherSet = true, matchTiebreak = false)
-session.correct(Correction.server(bea))
-session.endMatch()                  // im Dialog: ContinueDecision(false), sonst MatchEnded(ABANDONED)
-session.createFollowUp()            // nach Best-of: verknüpftes Folge-Match (OPEN, previousMatchId)
+// Auf dem Zähler:
+session.recordPoint(Side.A)          // auf Anzeige-Geräten: false, nichts wird geschrieben
+session.undo(); session.redo()
+session.continueDecision(anotherSet = true)
+session.endMatch()                   // im Dialog: ContinueDecision(false), sonst MatchEnded(ABANDONED)
 
-// Zustand: StateFlow (Compose/ViewModel) …
-session.state.collect { s -> render(s.match?.state, s.sync.indicator, s.match?.fork) }
-// … oder Callbacks (Swift-Facade ohne Flows)
+// Auf einem Anzeige-Gerät nach Bestätigung:
+session.takeOverScoring()
+
+// Zustand: StateFlow (ViewModel) oder Callbacks (Swift-Facade ohne Flows)
+session.state.collect { s ->
+    val m = s.match ?: return@collect
+    render(m.state, m.isScorer, m.scorerKind, m.pointsPlayed, m.rejectedByRoleCount, s.sync.scorerConnected)
+}
 session.addListener { s -> render(s) }
 
-// Fork-Dialog
-session.state.value.match?.fork?.let { fork ->
-    val watchVersion = fork.branches.indexOfFirst { PeerKind.WATCH in it.kinds }
-    session.resolveFork(watchVersion)   // oder session.mergeFork()
-}
-
-session.resume(matchId)             // nach App-Neustart (Resume-Karte)
+session.createFollowUp()             // nach Best-of: verknüpftes Folge-Match (OPEN, gleicher Zähler)
+session.resume(matchId)              // Resume-Karte
+session.deleteMatch(matchId)         // schließt ein offenes Match vorher
 ```
 
 Tests/Desktop ohne Plattform-Link: `MatchSessions.create(createInMemoryJvmLocalData(), link = null, scheduler, PeerKind.PHONE)`.
 
 ## Regeln und Garantien
 
-- **Ein Thread:** alle Aufrufe und Callbacks auf dem Thread des `LinkScheduler` (Main-Looper / Main-Queue).
-- **Idempotent:** Empfang über Event-ID (`EventStore.appendAll`, eine Transaktion je Nachricht); Doppelzustellungen,
-  Wiederholungen und Hub-Echos sind No-ops.
-- **Batches:** Nachlieferungen werden gemeinsam angewendet (`ScoringEngine.applyAll`); mehrteilige Lieferungen
-  (`Events.more`) erst mit dem letzten Teil – eine Fork-Prüfung über den ganzen Zweig.
+- **Ein Thread:** alle öffentlichen Aufrufe auf dem Thread des `LinkScheduler`; `ThreadGuard` erzwingt das
+  (Android: Main-Looper, Apple: `NSThread.isMainThread`), sonst `IllegalStateException`.
+- **Rolle:** Zähl-Kommandos (`recordPoint`, `undo`, `redo`, `continueDecision`, `correct`, `pause`, `resumePlay`,
+  `endMatch`) wirken nur auf dem Zähler. Kommen trotzdem Eingaben eines Nicht-Zählers an (z. B. Altzähler offline),
+  verwirft sie die Engine deterministisch (`rejectedByRole`, `ActiveMatch.rejectedByRoleCount`).
+- **Redo:** Stapel ist gerätelokal; nur Punkt, `ContinueDecision`, `Correction` und Matchende leeren ihn, Pause/Fortsetzen nicht.
+- **Empfang:** jedes neue Event wird sofort idempotent gespeichert und mit dem Batch seiner Nachricht angewendet
+  (`ScoringEngine.applyAll`, Fold reihenfolgeunabhängig); `Events.more` ist nur ein Hinweis.
 - **Konvergenz:** Anti-Entropie bei jedem `Hello` und alle 30 s im aktiven Match; Versionsvektor = lückenloser
-  Wasserstand je Gerät (`sync-protocol`). Belegt durch `MultiDeviceSyncTest` und `RandomizedConvergenceTest`
-  (3 Geräte, Verlust, Duplikate, Offline-Phasen).
-- **Auto-Follow:** Ohne offenes bzw. mit beendetem Match öffnet eine Session ein neues, laufendes Match einer
-  Gegenstelle automatisch (Satzende-Dialog „auf allen Geräten“, Folge-Match).
-- **Folge-Match:** gleiche Besetzung und gleiches Satzformat, Modus `OPEN`, `decidingSet = null`,
-  Erstaufschläger aus `state.continuation`, `previousMatchId` gesetzt (02 §5.2).
+  Wasserstand je Gerät (`sync-protocol`). Belegt durch `MultiDeviceSyncTest`, `ScorerHandoverTest`,
+  `PermutationConvergenceTest` (alle Zustellreihenfolgen kleiner Szenarien) und `RandomizedConvergenceTest`.
+- **Auto-Follow:** nach jeder Zustandsänderung geprüft. Ohne offenes Match folgt die Session dem gerade empfangenen
+  Match; ist das offene beendet, dem Folge-Match bzw. dem jüngsten danach angelegten laufenden Match (Folge-Match
+  zuerst, dann `createdAt`, dann ID).
+- **Folge-Match:** gleiche Besetzung und gleiches Satzformat, Modus `OPEN`, `decidingSet = null`, Erstaufschläger aus
+  `state.continuation`, `previousMatchId` gesetzt, gleicher Zähler (02 §5.2).
 
 ## Abweichungen von 01 §4
 
 | Thema | 01 | Umsetzung | Grund |
 |---|---|---|---|
-| Fork-Erkennung | aus `parentId` im Log | **beim Empfang** (lokal vs. eingehend), Ergebnis als `ForkRecord` in den Settings | Aus dem fertigen Log ist nicht unterscheidbar, ob ein späteres Event den anderen Zweig schon kannte (nur ein `parentId`); beim Empfang ist es eindeutig |
-| „Beide zusammenführen“ | Auflösung im Dialog | gerätelokale Quittung ohne Event | kein Event-Typ ohne Score-Wirkung vorhanden; `core-scoring`/Testvektoren bleiben unverändert |
 | `Summary` „maxDeviceSeq“ | höchste Sequenz | **lückenloser Wasserstand** | außer der Reihe angekommene Events dürfen keine Lücke verdecken |
-| Konflikt-Banner bei Fork | – | Widersprüche zwischen Fork-Zweigen erscheinen nur im Fork-Dialog | keine doppelte UI für denselben Sachverhalt |
+| `Events` in Teilen | – | Feld `more` nur als Hinweis | Fold ist reihenfolgeunabhängig; Puffern bis zum letzten Teil hatte Events dauerhaft ungefaltet gelassen (Review-Befund 1) |
+| `sync-protocol` | nur `kotlinx-serialization-core` | zusätzlich `kotlinx-serialization-json` | Wire-Codec braucht JSON (01 §4.3), CLAUDE.md Regel 1 angepasst |

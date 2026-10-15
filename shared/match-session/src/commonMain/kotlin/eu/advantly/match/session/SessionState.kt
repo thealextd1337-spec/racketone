@@ -26,11 +26,14 @@ data class SessionState(
  * Das offene Match.
  *
  * @property state kanonischer Engine-Zustand (02 §8): Stand, Aufschlag, Flags, `pending`, Effekte des letzten Events
- * @property canUndo es gibt ein Undo-Ziel (02 §7.3)
+ * @property pointsPlayed wirksam gezählte Ballwechsel
+ * @property scorerDeviceId Gerät, das gerade zählt (02 §7.5); [isScorer] = dieses Gerät
+ * @property scorerKind Art des zählenden Geräts (soweit bekannt)
+ * @property rejectedByRoleCount Eingaben von Nicht-Zählern, die ignoriert wurden („N Eingaben nicht übernommen“)
+ * @property canUndo dieses Gerät zählt und es gibt ein Undo-Ziel (02 §7.3)
  * @property canRedo das zuletzt auf diesem Gerät rückgängig gemachte Event lässt sich wiederherstellen
- * @property conflicts aktive Widersprüche (gleichzeitig Punkt für A und B, 01 §4.4) – Banner mit 1-Tap-Undo
- * @property absorbedTaps als Doppel-Tap zusammengeführte Punkte (Hinweis „Doppelte Eingabe zusammengeführt“)
- * @property fork offene Gabelung nach Offline-Zählen auf mehreren Geräten (Dialog „Version A / Version B / zusammenführen“)
+ * @property conflicts aktive Widersprüche (nur noch innerhalb eines Geräts möglich, 01 §4.4)
+ * @property absorbedTaps als Doppel-Tap zusammengeführte Punkte
  */
 data class ActiveMatch(
     val id: MatchId,
@@ -40,11 +43,15 @@ data class ActiveMatch(
     val createdAtMs: Long,
     val previousMatchId: MatchId?,
     val state: MatchState,
+    val pointsPlayed: Int,
+    val scorerDeviceId: DeviceId?,
+    val scorerKind: PeerKind?,
+    val isScorer: Boolean,
+    val rejectedByRoleCount: Int,
     val canUndo: Boolean,
     val canRedo: Boolean,
     val conflicts: List<TapConflict>,
     val absorbedTaps: List<EventId>,
-    val fork: ForkInfo?,
     val eventCount: Int,
 )
 
@@ -60,12 +67,14 @@ enum class SyncIndicator {
  *
  * @property link Zustand des Geräte-Links (`UNAVAILABLE` auch ohne Link, z. B. Standalone)
  * @property peers live erreichbare Gegenstellen
+ * @property scorerConnected dieses Gerät zählt selbst oder der Zähler ist eine verbundene, kompatible Gegenstelle
  * @property lastSyncAtMs Wanduhrzeit des letzten empfangenen Abgleichs (Summary/Events), sonst `null`
  */
 data class SyncStatus(
     val link: LinkState,
     val peers: List<PeerInfo>,
     val indicator: SyncIndicator,
+    val scorerConnected: Boolean,
     val lastSyncAtMs: Long?,
 )
 
@@ -84,31 +93,14 @@ data class PeerInfo(
     val compatibility: CompatibilityStatus?,
 )
 
-/**
- * Offene Gabelung (01 §4.4) für den Auflösungsdialog.
- *
- * @property branches die konkurrierenden Versionen; Index = Parameter für [MatchSession.resolveFork]
- */
-data class ForkInfo(
-    val id: String,
-    val branches: List<ForkVersion>,
-)
+/** Wer ein neues Match zählt (02 §7.5): dieses Gerät oder ein gekoppeltes (z. B. die Uhr). */
+sealed interface ScorerChoice {
+    data object ThisDevice : ScorerChoice
 
-/**
- * Eine Version im Fork-Dialog, z. B. „Version Uhr (4:2)“.
- *
- * @property devices Geräte, die in diesem Zweig gezählt haben; [kinds] deren Art (soweit bekannt)
- * @property includesThisDevice dieses Gerät hat in dem Zweig gezählt
- * @property preview Zustand, wenn nur diese Version gilt
- * @property points Anzahl wirksamer Punkte im Zweig
- */
-data class ForkVersion(
-    val devices: List<DeviceId>,
-    val kinds: List<PeerKind>,
-    val includesThisDevice: Boolean,
-    val preview: MatchState,
-    val points: Int,
-)
+    data class Device(
+        val deviceId: DeviceId,
+    ) : ScorerChoice
+}
 
 /** Callback-Variante von [MatchSession.state] (für die Swift-Facade ohne Flows). Aufruf auf dem Scheduler-Thread. */
 fun interface SessionListener {

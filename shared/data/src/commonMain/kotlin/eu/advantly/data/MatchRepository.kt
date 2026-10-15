@@ -7,6 +7,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
@@ -32,7 +33,8 @@ data class SetScore(
  * Ergebnis-Zusammenfassung eines Matches für die Historie (01 §5.1 `match_summary`) – abgeleitet aus dem
  * Engine-Zustand, jederzeit neu berechenbar.
  *
- * @property current laufender Satz (Spiele bzw. Punkte), `null` wenn keiner läuft
+ * @property current laufender Satz (Spiele bzw. Punkte); bei Aufgabe/Abbruch der eingefrorene Stand, `null` nach
+ *   regulärem Ende bzw. im Satzende-Dialog
  */
 @Serializable
 data class ScoreSummary(
@@ -45,6 +47,17 @@ data class ScoreSummary(
 ) {
     companion object {
         val EMPTY: ScoreSummary = ScoreSummary()
+
+        private fun currentScore(c: CurrentSet): SetScore {
+            val games = c.games
+            return if (games !=
+                null
+            ) {
+                SetScore(games.a, games.b)
+            } else {
+                SetScore(c.points.a, c.points.b, matchTiebreak = c.setKind == SetKind.MATCH_TIEBREAK)
+            }
+        }
 
         /** Zusammenfassung aus dem kanonischen Zustand (02 §8). */
         fun of(state: MatchState): ScoreSummary =
@@ -71,22 +84,8 @@ data class ScoreSummary(
                             }
                         }
                     },
-                current =
-                    state.current?.takeIf { state.status != MatchStatus.FINISHED }?.let { c ->
-                        val games = c.games
-                        if (games !=
-                            null
-                        ) {
-                            SetScore(games.a, games.b)
-                        } else {
-                            SetScore(
-                                c.points.a,
-                                c.points.b,
-                                matchTiebreak =
-                                    c.setKind == SetKind.MATCH_TIEBREAK,
-                            )
-                        }
-                    },
+                // Engine liefert current = null bei regulärem Ende; bei Aufgabe/Abbruch bleibt der Satz eingefroren
+                current = state.current?.let { currentScore(it) },
             )
     }
 }

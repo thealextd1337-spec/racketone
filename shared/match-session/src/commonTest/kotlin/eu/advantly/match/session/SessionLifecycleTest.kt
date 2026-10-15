@@ -69,31 +69,35 @@ class SessionLifecycleTest {
     }
 
     @Test
-    fun undoAndRedoWorkAcrossDevices() {
+    fun undoAndRedoOnTheScorerAreVisibleEverywhere() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
         val phone = cluster["phone"]
         val watch = cluster["watch"]
         phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
         cluster.settle()
-        assertFalse(watch.match.canUndo)
+        assertFalse(phone.match.canUndo)
         repeat(2) { phone.session.recordPoint(Side.A) }
         cluster.settle()
-        assertTrue(watch.session.undo())
+        assertFalse(watch.match.canUndo, "Anzeige-Gerät")
+        assertTrue(phone.session.undo())
         cluster.settle()
-        assertEquals(SidePair(1, 0), phone.score.current?.points)
-        assertTrue(watch.match.canRedo)
-        assertFalse(phone.match.canRedo, "Redo-Stapel ist gerätelokal")
-        assertTrue(watch.session.redo())
-        cluster.settle()
-        assertEquals(SidePair(2, 0), phone.score.current?.points)
+        assertEquals(SidePair(1, 0), watch.score.current?.points)
+        assertTrue(phone.match.canRedo)
         assertFalse(watch.match.canRedo)
+        // Redo-Vertrag: Pause/Fortsetzen leeren den Redo-Stapel nicht
+        assertTrue(phone.session.pause())
+        assertTrue(phone.session.resumePlay())
+        assertTrue(phone.match.canRedo)
+        assertTrue(phone.session.redo())
+        cluster.settle()
+        assertEquals(SidePair(2, 0), watch.score.current?.points)
+        assertFalse(phone.match.canRedo)
 
-        assertTrue(watch.session.undo())
-        cluster.settle()
+        assertTrue(phone.session.undo())
         phone.session.recordPoint(Side.B)
+        assertFalse(phone.match.canRedo, "neuer Punkt verwirft das Redo")
+        assertFalse(phone.session.redo())
         cluster.settle()
-        assertFalse(watch.match.canRedo, "neuer Punkt verwirft das Redo")
-        assertFalse(watch.session.redo())
         cluster.assertConverged()
     }
 
@@ -107,14 +111,15 @@ class SessionLifecycleTest {
         repeat(24) { phone.session.recordPoint(Side.A) }
         cluster.settle()
         assertEquals(PendingQuestion.ASK_ANOTHER_SET, watch.score.pending)
-        assertFalse(watch.session.recordPoint(Side.A), "Satzende-Dialog offen")
-        assertFalse(watch.session.continueDecision(anotherSet = false, matchTiebreak = true))
-        assertTrue(watch.session.continueDecision(anotherSet = true))
+        assertFalse(phone.session.recordPoint(Side.A), "Satzende-Dialog offen")
+        assertFalse(phone.session.continueDecision(anotherSet = false, matchTiebreak = true))
+        assertFalse(watch.session.continueDecision(anotherSet = true), "Anzeige-Gerät")
+        assertTrue(phone.session.continueDecision(anotherSet = true))
         cluster.settle()
         assertEquals(MatchStatus.IN_PROGRESS, phone.score.status)
         assertEquals(1, phone.score.setsWon.a)
 
-        repeat(24) { watch.session.recordPoint(Side.B) }
+        repeat(24) { phone.session.recordPoint(Side.B) }
         cluster.settle()
         assertTrue(phone.session.endMatch(), "im Dialog = ContinueDecision(false)")
         cluster.settle()
@@ -123,7 +128,7 @@ class SessionLifecycleTest {
         val record = assertNotNull(watch.data.matches.get(watch.match.id))
         assertTrue(record.isFinished)
         assertEquals(listOf(SetScore(6, 0), SetScore(0, 6)), record.score.sets)
-        assertFalse(watch.session.endMatch())
+        assertFalse(phone.session.endMatch())
     }
 
     @Test
@@ -149,7 +154,7 @@ class SessionLifecycleTest {
         assertNull(phone.session.createFollowUp())
         val first = phone.session.create(Presets.TENNIS_ONE_SET.format(), SINGLES)
         cluster.settle()
-        repeat(24) { watch.session.recordPoint(Side.A) }
+        repeat(24) { phone.session.recordPoint(Side.A) }
         cluster.settle()
         assertEquals(MatchStatus.FINISHED, phone.score.status)
         val continuation = assertNotNull(phone.score.continuation)
@@ -226,6 +231,22 @@ class SessionLifecycleTest {
         val count = seen.size
         session.recordPoint(Side.A)
         assertEquals(count, seen.size)
+    }
+
+    @Test
+    fun deletingTheOpenMatchClosesItFirst() {
+        val (session, data) = standalone()
+        val id = session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        session.recordPoint(Side.A)
+        assertEquals(
+            1,
+            session.state.value.match
+                ?.pointsPlayed,
+        )
+        session.deleteMatch(id)
+        assertNull(session.state.value.match)
+        assertNull(data.matches.get(id))
+        assertEquals(0L, data.events.count(id.value))
     }
 
     @Test
