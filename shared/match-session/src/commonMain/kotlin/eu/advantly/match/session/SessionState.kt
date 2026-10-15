@@ -27,6 +27,8 @@ import eu.advantly.sync.protocol.PeerKind
  * @property matches alle offenen Matches (fokussiertes eingeschlossen), nach Erstellzeit; Uhren: höchstens eines (F22)
  * @property watchMatchId Handy: das Uhr-Match – das Match, das die eigene Uhr zählt bzw. anzeigt (01 §4.9), `null` = die
  *   Uhr ist frei. Uhr: das ihr vom Handy zugewiesene Match (dem sie folgt), `null` = keine Zuweisung bekannt
+ * @property droppedInputs Uhr: zuletzt gemeldete verworfene eigene Eingaben in einem nicht mehr offenen Match (z. B. nach
+ *   der bestätigten Übernahme durch das Handy) – UI-Hinweis „N Eingaben nicht übernommen“
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -34,6 +36,7 @@ data class SessionState(
     val dataRevision: Long = 0,
     val matches: List<ActiveMatch> = listOfNotNull(match),
     val watchMatchId: MatchId? = null,
+    val droppedInputs: DroppedInputs? = null,
 ) {
     /** Offenes Match [id] oder `null`. */
     fun match(id: MatchId): ActiveMatch? = matches.firstOrNull { it.id == id }
@@ -98,8 +101,13 @@ data class ActiveMatch(
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
 }
 
-/**
- * Der zuletzt gezählte Ballwechsel (für die Aufschlag-Leiste direkt nach dem Punkt).
+/** Verworfene eigene Eingaben ([count] insgesamt) im nicht offenen Match [matchId]. */
+data class DroppedInputs(
+    val matchId: MatchId,
+    val count: Int,
+)
+
+/** Der zuletzt gezählte Ballwechsel (für die Aufschlag-Leiste direkt nach dem Punkt).
  *
  * @property side Gewinner
  * @property servingSide aufschlagende Side vor dem Punkt

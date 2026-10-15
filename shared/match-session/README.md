@@ -59,7 +59,8 @@ val matchId = session.create(
 session.recordPoint(Side.A)          // auf Anzeige-Geräten: false, nichts wird geschrieben
 session.undo(); session.redo()
 session.continueDecision(anotherSet = true)
-session.endMatch()                   // im Dialog: ContinueDecision(false), sonst MatchEnded(ABANDONED)
+session.endMatch(EndReason.STOPPED)  // „Beenden“; im Satzende-Dialog regulär ContinueDecision(false)
+session.endMatch()                   // Abbruch ohne Wertung (MatchEnded(ABANDONED)), auch im Satzende-Dialog
 
 // Auf einem Anzeige-Gerät nach Bestätigung:
 session.takeOverScoring()
@@ -141,13 +142,19 @@ Normativ in 01 §4.9. Kurz:
   wirken auf das **fokussierte** (`resume(id)` fokussiert). `closeMatch()` schließt das fokussierte, danach rückt das
   jüngste offene nach (laufende vor beendeten).
 - **Uhr-Match** (`watchMatchId`, persistent in `session.watchMatch`): „Meine Uhr“ beim Anlegen, Director-Match bei freier
-  Uhr, auf der Uhr gestartetes Match, Folge-Match des Uhr-Matches oder `assignToWatch`. Wechselt die Uhr, übernimmt das
-  Handy ihr altes laufendes Match per `ScorerChanged` – die Uhr zählt nie zwei Matches.
+  Uhr, auf der Uhr gestartetes Match, Folge-Match des Uhr-Matches oder `assignToWatch`. Wechselt die Uhr, gibt sie ihr
+  altes laufendes Match **selbst** per `ScorerChanged` ans Handy ab (nach ihrer letzten Eingabe, verlustfrei); kennt sie
+  es nicht, übernimmt das Handy sofort. Ist sie nicht erreichbar, braucht der Wechsel `takeOverWatchMatch = true`
+  (`watchMatchNeedingTakeOver()`), die Uhr meldet danach `droppedInputs`. Die Uhr zählt nie zwei Matches.
+- **Routing:** Handy → Uhr nur Uhr-Match und Matches mit Events dieser Uhr; Director-Matches nie. `pendingToPeers` und der
+  Takt zählen nur Matches mit Replikationsziel.
+- **Neustart:** `openInBackground(id)` öffnet laufende Matches ohne Fokus (Adapter: alle laufenden, Fokus ≤ 12 h).
 - **Uhr**: genau ein offenes Match; mit Zuweisung (`MatchMeta.watchMatch`) folgt sie nur dem Uhr-Match, Events anderer
   Matches speichert sie nur (Backup). Ohne Zuweisung gilt das bisherige Auto-Follow.
 - **Migration:** Handy ohne gespeicherte Zuweisung → das zuletzt geänderte laufende Match wird Uhr-Match.
-- Tests: `ParallelMatchesTest` (drei Matches, Uhr in einem, Übergabe, Beenden/Abbrechen eines Nicht-Uhr-Matches,
-  verspätete Uhr-Eingaben, Prozessneustart, Migration, veraltete Zuweisung).
+- Tests: `ParallelMatchesTest` (drei Matches, Uhr in einem, Routing, verlustfreie Online-Übergabe, bestätigte
+  Offline-Übernahme mit Hinweis auf der Uhr, Offline-Rennen in beiden Reihenfolgen und gleicher Millisekunde,
+  Beenden/Abbrechen eines Nicht-Uhr-Matches, Abbruch im Satzende-Dialog, Prozessneustart, Migration, veraltete Zuweisung).
 
 ## Löschen (Löschmarkierungen)
 

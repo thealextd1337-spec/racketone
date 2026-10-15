@@ -6,6 +6,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
@@ -17,6 +18,7 @@ import eu.advantly.sync.protocol.WatchAssignment
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -63,7 +65,7 @@ class ParallelMatchesTest {
         assertEquals(DeviceId("watch"), state.match(a)?.scorerDeviceId)
         assertTrue(state.match(b)!!.isScorer && state.match(c)!!.isScorer, "übrige zählt das Handy als Director")
 
-        // Die Uhr bleibt bei A, obwohl B und C (als Backup) bei ihr ankommen
+        // Die Uhr bleibt bei A; B und C erreichen sie gar nicht (Routing Handy → Uhr: nur das Uhr-Match)
         assertEquals(
             a,
             watch.state.value.match
@@ -78,7 +80,8 @@ class ParallelMatchesTest {
             watch.state.value.match!!
                 .isScorer,
         )
-        assertTrue(cluster["watch"].data.matches.get(b) != null && cluster["watch"].data.matches.get(c) != null)
+        assertNull(cluster["watch"].data.matches.get(b), "Director-Match nicht auf der Uhr")
+        assertNull(cluster["watch"].data.matches.get(c), "Director-Match nicht auf der Uhr")
 
         // Zählen auf allen drei Plätzen, pro Match genau ein Zähler
         watch.points("AAB")
@@ -120,7 +123,9 @@ class ParallelMatchesTest {
                 ?.id,
             "Punkte der Nachbarplätze holen die Uhr nicht weg",
         )
-        assertEquals(0, phone.state.value.sync.pendingToPeers, "Sofort-Backup: alles bestätigt")
+        assertEquals(0, phone.state.value.sync.pendingToPeers, "Uhr-Match bestätigt, Director-Matches ohne Ziel nicht ausstehend")
+        assertNull(cluster["watch"].data.matches.get(b), "auch nach Punkten und Abgleich nicht")
+        assertTrue(cluster["phone"].data.events.unconfirmedCount() > 0, "Director-Events gelten nicht fälschlich als bestätigt")
     }
 
     @Test
@@ -179,9 +184,19 @@ class ParallelMatchesTest {
     @Test
     fun lateInputsOfTheWatchOnItsOldMatchAreRejected() {
         val (a, _, _) = threeMatches()
+        watch.points("A") // Uhr hat A schon selbst gezählt …
         cluster.offline("watch")
         cluster.settle()
-        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // Uhr offline: Handy übernimmt A
+        assertEquals(a, phone.watchMatchNeedingTakeOver(), "… und ist nicht erreichbar: Wechsel nur mit Bestätigung")
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+        assertFalse(
+            phone.assignToWatch(
+                phone.state.value.matches[1]
+                    .id,
+            ),
+        )
+        // bestätigt: das Handy übernimmt A sofort
+        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
         watch.points("AAA") // Uhr zählt offline weiter auf A
         cluster.online("watch")
         cluster.settle()
@@ -193,9 +208,143 @@ class ParallelMatchesTest {
         val onPhone = phone.state.value.match(a)!!
         assertEquals(3, onPhone.rejectedByRoleCount, "verspätete Uhr-Eingaben nach der Übernahme")
         assertEquals(
-            "0",
+            "15",
             onPhone.state.current!!
                 .display.a,
+            "der Punkt vor dem Offline-Gehen bleibt",
+        )
+        // sichtbarer Hinweis auf der Uhr nach der Wiederverbindung
+        assertEquals(DroppedInputs(a, 3), watch.state.value.droppedInputs)
+    }
+
+    /** Review #5: Online-Wechsel des Uhr-Matches ist verlustfrei – die Uhr übergibt nach ihrer letzten Eingabe. */
+    @Test
+    fun onlineSwitchKeepsEveryWatchPoint() {
+        val (a, _, _) = threeMatches()
+        watch.points("A")
+        cluster.settle()
+        assertNull(phone.watchMatchNeedingTakeOver(), "Uhr erreichbar: keine Rückfrage")
+        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        // die Uhr zählt weiter, bevor die neue Zuweisung ankommt
+        assertTrue(watch.recordPoint(Side.A))
+        assertTrue(watch.recordPoint(Side.A))
+        cluster.settle()
+        val onPhone = phone.state.value.match(a)!!
+        assertEquals(0, onPhone.rejectedByRoleCount, "nichts verworfen")
+        assertEquals(
+            "40",
+            onPhone.state.current!!
+                .display.a,
+            "alle drei Uhr-Punkte zählen",
+        )
+        assertTrue(onPhone.isScorer, "danach zählt das Handy A")
+        assertEquals(
+            d,
+            watch.state.value.match
+                ?.id,
+        )
+        assertTrue(
+            watch.state.value.match!!
+                .isScorer,
+        )
+        assertNull(watch.state.value.droppedInputs)
+    }
+
+    /** Review #1: Uhr offline, Handy weist B zu, Uhr startet W – danach zählt die Uhr genau ein Match. */
+    @Test
+    fun offlineRaceWatchStartedLater() = offlineRace(watchFirst = false)
+
+    @Test
+    fun offlineRaceWatchStartedFirst() = offlineRace(watchFirst = true)
+
+    @Test
+    fun offlineRaceSameMillisecond() = offlineRace(watchFirst = true, sameMs = true)
+
+    private fun offlineRace(
+        watchFirst: Boolean,
+        sameMs: Boolean = false,
+    ) {
+        cluster.offline("watch")
+        cluster.settle()
+        val (b, w) =
+            if (watchFirst) {
+                val w = watch.create(format, SINGLES)
+                if (!sameMs) cluster.settle(1_000)
+                phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) to w
+            } else {
+                val b = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+                cluster.settle(1_000)
+                b to watch.create(format, SINGLES)
+            }
+        watch.points("AB")
+        cluster.online("watch")
+        cluster.settle(5_000)
+        val watchScored =
+            phone.state.value.matches
+                .filter { it.state.status != MatchStatus.FINISHED && it.scorerDeviceId == DeviceId("watch") }
+                .map { it.id }
+        assertEquals(1, watchScored.size, "genau ein laufendes Match mit Zähler Uhr: $watchScored")
+        val expected = if (watchFirst) b else w
+        assertEquals(expected, phone.state.value.watchMatchId)
+        assertEquals(listOf(expected), watchScored)
+        assertEquals(
+            expected,
+            watch.state.value.match
+                ?.id,
+        )
+        assertTrue(
+            watch.state.value.match!!
+                .isScorer,
+        )
+        // keine Uhr-Eingabe ging verloren
+        assertEquals(
+            0,
+            phone.state.value
+                .match(w)!!
+                .rejectedByRoleCount,
+        )
+        assertEquals(
+            "15",
+            phone.state.value
+                .match(w)!!
+                .state.current!!
+                .display.a,
+        )
+        assertTrue(
+            listOf(b, w).all {
+                phone.state.value
+                    .match(it)!!
+                    .state.status == MatchStatus.IN_PROGRESS
+            },
+        )
+    }
+
+    /** Review #2: „Abbrechen“ im Satzende-Dialog bleibt ohne Wertung (kein ContinueDecision). */
+    @Test
+    fun abandonDuringTheSetEndQuestionIsNotRated() {
+        val open = phone.create(Presets.TENNIS_OPEN.format(), SINGLES)
+        phone.points("AAAA".repeat(6))
+        assertEquals(
+            MatchStatus.AWAITING_DECISION,
+            phone.state.value
+                .match(open)!!
+                .state.status,
+        )
+        assertTrue(phone.endMatch(EndReason.ABANDONED))
+        assertEquals(
+            MatchResult(null, ResultReason.ABANDONED),
+            phone.state.value
+                .match(open)!!
+                .state.result,
+        )
+        val other = phone.create(Presets.TENNIS_OPEN.format(), SINGLES)
+        phone.points("AAAA".repeat(6))
+        assertTrue(phone.endMatch(EndReason.STOPPED), "Beenden im Dialog = reguläres Ende")
+        assertEquals(
+            MatchResult(Side.A, ResultReason.COMPLETED),
+            phone.state.value
+                .match(other)!!
+                .state.result,
         )
     }
 
@@ -259,13 +408,12 @@ class ParallelMatchesTest {
                 .state.current!!
                 .display.a,
         )
-        assertEquals(
-            MatchStatus.FINISHED,
+        assertNull(
             cluster["watch"]
                 .data.matches
                 .get(c)
                 ?.status,
-            "Backup des Abbruchs auf der Uhr",
+            "Abbruch eines Director-Matches erreicht die Uhr nicht",
         )
     }
 
