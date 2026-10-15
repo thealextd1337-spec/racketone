@@ -93,7 +93,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         workout.onRunning = { [weak self] in self?.donateActionIntent() }
         workout.onRecoveryFailed = { [weak self] in self?.syncWorkout() }
         workout.onSystemPauseChange = { [weak self] paused in
-            if paused { self?.pauseMatch() } else { self?.resumeMatch() }
+            guard let self, self.snapshot?.isScorer == true else { return }
+            if paused { self.pauseMatch() } else { self.resumeMatch() }
         }
     }
 
@@ -104,6 +105,11 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         let before = self.snapshot
         self.snapshot = snapshot
         if let snapshot, let before, before.matchId == snapshot.matchId {
+            // Nur neue Match-Events als Anzeige auswerten. Sync-/Ack-Snapshots tragen dieselben Effekte;
+            // der Zähler erhält seine Rückmeldung bereits nach dem lokalen Befehl.
+            if !snapshot.isScorer && snapshot.eventCount != before.eventCount {
+                afterCommand(snapshot)
+            }
             if before.isScorer != snapshot.isScorer {
                 show(.roleChanged(scorer: snapshot.isScorer))
                 Haptics.play(snapshot.isScorer ? .success : .directionDown)
@@ -131,7 +137,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
                 sport: snap.sport,
                 presetId: snap.presetId,
                 doubles: snap.doubles,
-                paused: snap.paused
+                paused: snap.isScorer ? snap.paused : nil
             )
         }
     }
@@ -146,7 +152,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         syncWorkout()
     }
 
-    /// Nach jedem erfolgreichen Befehl (Punkt, Undo, Satzende-Antwort, Pause …): Hinweise und Haptik aus den Effekten.
+    /// Nach lokalem Befehl oder neuem Event als Anzeige: Hinweise und Haptik aus den Effekten.
     private func afterCommand(_ snap: WatchScoreSnapshot) {
         if snap.changeEnds {
             show(.changeEnds)
@@ -163,6 +169,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         if error == "STORE_WRITE" || error == "STORE_READ" {
             print("ADVANTLY_STORE error=\(error)")
             show(.storeError)
+        } else if error == "THREAD_VIOLATION" {
+            print("ADVANTLY_THREAD WatchScoring nur auf der Main-Queue aufrufen")
         }
         Haptics.rejected()
     }
@@ -300,7 +308,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     /// Unterbrechung (Regen, Verletzung): Match `Paused`, Workout pausiert. Kein Effekt auf den Score.
     func pauseMatch() {
-        guard let snap = snapshot, snap.status == "IN_PROGRESS" else { return }
+        guard let snap = snapshot, !snap.matchFinished else { return }
+        if !snap.isScorer {
+            workout.setPaused(true)
+            return
+        }
+        guard snap.status == "IN_PROGRESS" else { return }
         guard let after = scoring.pause() else {
             rejected()
             return
@@ -310,7 +323,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func resumeMatch() {
-        guard let snap = snapshot, snap.paused else { return }
+        guard let snap = snapshot, !snap.matchFinished else { return }
+        if !snap.isScorer {
+            workout.setPaused(false)
+            return
+        }
+        guard snap.paused else { return }
         guard let after = scoring.resumePlay() else {
             rejected()
             return

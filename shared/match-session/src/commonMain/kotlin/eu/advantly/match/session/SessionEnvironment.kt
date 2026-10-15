@@ -21,7 +21,7 @@ object SystemWallClock : WallClock {
 
 /**
  * Prüft, ob der Aufruf auf dem Thread des Schedulers läuft (Android: Main-Looper, Apple: Main-Queue). Öffentliche
- * Session-Aufrufe von anderen Threads schlagen mit [IllegalStateException] fehl, statt still Zustand zu zerstören.
+ * Session-Aufrufe von anderen Threads schlagen mit [SessionThreadViolation] fehl, statt still Zustand zu zerstören.
  */
 fun interface ThreadGuard {
     fun isSchedulerThread(): Boolean
@@ -31,6 +31,9 @@ fun interface ThreadGuard {
         val NONE: ThreadGuard = ThreadGuard { true }
     }
 }
+
+/** Eigener Fehlertyp, damit Facades einen falschen Aufruf-Thread von Speicherfehlern unterscheiden können. */
+class SessionThreadViolation : IllegalStateException("MatchSession nur auf dem Scheduler-Thread aufrufen (Main-Thread)")
 
 /** Quelle für UUIDv7 (Match- und Event-IDs). In Tests deterministisch ersetzbar. */
 fun interface IdGenerator {

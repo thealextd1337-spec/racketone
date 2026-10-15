@@ -35,14 +35,14 @@ final class WorkoutManager: NSObject, ObservableObject {
     var onRunning: (() -> Void)?
     /// Recovery fand keine (brauchbare) Session – der Aufrufer startet ggf. eine neue.
     var onRecoveryFailed: (() -> Void)?
-    /// Das System hat die Session selbst pausiert (`true`) bzw. fortgesetzt – das Match zieht nach.
+    /// Das System hat die Session selbst pausiert (`true`) bzw. fortgesetzt – als Zähler zieht das Match nach.
     var onSystemPauseChange: ((Bool) -> Void)?
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private(set) var matchId: String?
-    /// Gewünschter Zustand laut Match (Paused/Resumed)
+    /// Gewünschte Pause: als Zähler laut Match, als Anzeige lokal an dieser Uhr.
     private var wantsPaused = false
     /// Zählt bei jedem Start/Ende/Recovery hoch; asynchrone Antworten älterer Generationen werden verworfen.
     private var generation = 0
@@ -51,15 +51,16 @@ final class WorkoutManager: NSObject, ObservableObject {
     private var requested: HKWorkoutSessionState?
 
     /// Startet die Session für das Match, falls sie nicht schon dafür läuft, und setzt Pause/Fortsetzen durch. Idempotent.
-    func ensureRunning(matchId: String, sport: String, presetId: String, doubles: Bool, paused: Bool) {
-        wantsPaused = paused
-        if state == .unavailable { return }
+    /// `paused == nil`: Anzeige – die lokale Workout-Pause bleibt bei eingehenden Snapshots erhalten.
+    func ensureRunning(matchId: String, sport: String, presetId: String, doubles: Bool, paused: Bool?) {
+        if state == .unavailable && self.matchId == matchId { return }
         if self.matchId == matchId && (state == .starting || state == .running || state == .paused) {
+            if let paused { wantsPaused = paused }
             applyPause()
             return
         }
         end()
-        wantsPaused = paused
+        wantsPaused = paused ?? false
         generation += 1
         let current = generation
         self.matchId = matchId
@@ -92,7 +93,8 @@ final class WorkoutManager: NSObject, ObservableObject {
         heartRateAmbient = 0
         matchId = nil
         wantsPaused = false
-        if state != .unavailable { state = .idle }
+        // Abwählen/erneut Anwählen ist ein ausdrücklicher neuer Versuch, auch nach transientem Fehler.
+        state = .idle
         let session = self.session
         let builder = self.builder
         self.session = nil
@@ -101,6 +103,12 @@ final class WorkoutManager: NSObject, ObservableObject {
         if let session {
             Self.finish(session: session, builder: builder)
         }
+    }
+
+    /// Nur das lokale Workout pausieren/fortsetzen (Anzeige erzeugt keine Match-Events).
+    func setPaused(_ paused: Bool) {
+        wantsPaused = paused
+        applyPause()
     }
 
     /// Wartet (für den Schnellstart-Intent), bis der Start entschieden ist: `.running`/`.paused` oder `.unavailable`.
@@ -150,6 +158,7 @@ final class WorkoutManager: NSObject, ObservableObject {
                 builder.delegate = self
                 self.session = session
                 self.builder = builder
+                self.wantsPaused = session.state == .paused
                 self.state = session.state == .paused ? .paused : .running
                 self.onRunning?()
                 self.applyPause()
@@ -202,6 +211,9 @@ final class WorkoutManager: NSObject, ObservableObject {
         }
         session = nil
         builder = nil
+        requested = nil
+        heartRate = 0
+        heartRateAmbient = 0
         state = .unavailable
         onUnavailable?()
     }

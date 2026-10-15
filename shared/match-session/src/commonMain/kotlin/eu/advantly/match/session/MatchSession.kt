@@ -412,7 +412,7 @@ class MatchSession(
     // --- Lokale Events ----------------------------------------------------------------------------
 
     private fun checkThread() {
-        check(threadGuard.isSchedulerThread()) { "MatchSession nur auf dem Scheduler-Thread aufrufen (Main-Thread)" }
+        if (!threadGuard.isSchedulerThread()) throw SessionThreadViolation()
     }
 
     /** Offenes Match, falls dieses Gerät dort Zähler ist. */

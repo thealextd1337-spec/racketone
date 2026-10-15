@@ -104,8 +104,8 @@ enum MatchSport: String, AppEnum {
 }
 
 /// Schnellstart eines Matches über die Action-Taste (`suggestedWorkouts` = fünf Sportarten). Meldet Erfolg erst,
-/// wenn Berechtigung und Sessionstart entschieden sind; ohne Workout-Session schlägt der Intent fehl (die App zählt
-/// trotzdem, zeigt aber den Health-Hinweis).
+/// wenn Berechtigung und Sessionstart entschieden sind. Nur bei gewünschtem Workout ist eine fehlende Session ein
+/// Fehler (die App zählt trotzdem, zeigt aber den Health-Hinweis).
 struct StartMatchIntent: StartWorkoutIntent {
     static var title: LocalizedStringResource = "intent.start.title"
     static var openAppWhenRun: Bool = true
@@ -133,9 +133,13 @@ struct StartMatchIntent: StartWorkoutIntent {
         guard model.quickStart(sport: workoutStyle.rawValue) else {
             throw MatchIntentError.startFailed
         }
-        let state = await model.workout.waitUntilSettled()
-        guard state == .running || state == .paused else {
-            throw MatchIntentError.workoutUnavailable
+        if let snap = model.snapshot, model.workoutWanted(snap) {
+            let state = await model.workout.waitUntilSettled()
+            // Während der Berechtigungsabfrage kann der Nutzer das Workout abwählen.
+            if let current = model.snapshot, model.workoutWanted(current),
+               state != .running && state != .paused {
+                throw MatchIntentError.workoutUnavailable
+            }
         }
         return .result()
     }

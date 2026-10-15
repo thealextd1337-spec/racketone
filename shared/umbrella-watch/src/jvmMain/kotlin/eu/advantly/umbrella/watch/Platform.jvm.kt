@@ -10,5 +10,7 @@ import eu.advantly.sync.protocol.PeerKind
 // jvm() existiert nur für Tests auf Windows/Linux
 internal actual fun platformLocalData(): LocalData = createInMemoryJvmLocalData()
 
+internal actual fun platformDemoEnabled(): Boolean = false
+
 internal actual fun platformWatchSession(data: LocalData): MatchSession =
     MatchSessions.create(data, link = null, scheduler = ManualScheduler(), kind = PeerKind.WATCH).also { it.start() }

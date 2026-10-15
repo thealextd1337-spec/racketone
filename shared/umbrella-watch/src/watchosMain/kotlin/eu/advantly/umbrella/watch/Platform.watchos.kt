@@ -8,9 +8,16 @@ import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.match.session.ThreadGuard
 import eu.advantly.sync.protocol.PeerKind
+import platform.Foundation.NSProcessInfo
 import platform.Foundation.NSThread
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.Platform
 
 internal actual fun platformLocalData(): LocalData = createNativeLocalData()
+
+@OptIn(ExperimentalNativeApi::class)
+internal actual fun platformDemoEnabled(): Boolean =
+    Platform.isDebugBinary && NSProcessInfo.processInfo.arguments.contains("-advantlyDemoStage")
 
 /**
  * Wie `AppleMatchSessions.shared(PeerKind.WATCH)`, aber auf der [LocalData] der Facade, damit Store-Smoke und Session

@@ -11,3 +11,6 @@ internal expect fun platformLocalData(): LocalData
  * Main-Queue-Scheduler, Thread-Prüfung; JVM: ohne Link (nur Tests).
  */
 internal expect fun platformWatchSession(data: LocalData): MatchSession
+
+/** Nur Debug-Kotlin-Binary UND expliziter CI-Demostart; normale Starts und Release sind gesperrt. */
+internal expect fun platformDemoEnabled(): Boolean

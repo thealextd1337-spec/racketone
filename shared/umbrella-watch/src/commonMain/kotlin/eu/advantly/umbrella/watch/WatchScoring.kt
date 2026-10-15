@@ -28,6 +28,7 @@ import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.match.session.SessionThreadViolation
 import eu.advantly.match.session.SyncIndicator
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.match.session.SystemWallClock
@@ -66,6 +67,7 @@ class WatchScoring internal constructor(
     private val open: () -> Backend,
     private val clock: WallClock = SystemWallClock,
     private val ids: IdGenerator = RandomIdGenerator(),
+    private val demoEnabled: Boolean = platformDemoEnabled(),
 ) {
     /** Session und Datenbank; die Fabrik läuft beim ersten Zugriff (Fehler → [isAvailable] = `false`). */
     internal class Backend(
@@ -100,6 +102,7 @@ class WatchScoring internal constructor(
      * - `NOT_SCORER`: dieses Gerät ist Anzeige, ein anderes Gerät zählt
      * - `NOT_ALLOWED`: Befehl passt nicht zum Zustand (z. B. Punkt im Satzende-Dialog, nichts rückgängig zu machen)
      * - `NO_MATCH`: kein Match geöffnet
+     * - `THREAD_VIOLATION`: Aufruf außerhalb des Session-/Main-Threads; Programmierfehler, kein Speicherfehler
      */
     fun lastError(): String = error
 
@@ -236,7 +239,7 @@ class WatchScoring internal constructor(
     fun snapshot(): WatchScoreSnapshot? {
         backend() ?: return null
         val state = current ?: return null
-        return state.match?.let { buildSnapshot(it, state.sync, scorerLostAtMs, usSide(it)) }
+        return state.match?.let { snapshotOf(it, state.sync) }
     }
 
     /** Schließt das Match in der Anzeige (z. B. nach der Matchende-Ansicht). Es bleibt gespeichert und wird weiter synchronisiert. */
@@ -310,7 +313,7 @@ class WatchScoring internal constructor(
         val b = backend() ?: return fail(STORE_READ)
         val m = current?.match ?: return fail(NO_MATCH)
         if (m.isScorer || m.state.status == MatchStatus.FINISHED) return fail(NOT_ALLOWED)
-        val ok = call { b.session.takeOverScoring() } ?: return fail(STORE_WRITE)
+        val ok = call { b.session.takeOverScoring() } ?: return null
         return if (ok) snapshot() else fail(NOT_ALLOWED)
     }
 
@@ -322,14 +325,16 @@ class WatchScoring internal constructor(
 
     /**
      * Nur für CI-Screenshots (Debug-Demo, Etappe „display“): legt ein Match an, das ein anderes Gerät (Handy) zählt –
-     * die Uhr ist damit Anzeige. Nicht für die App-Logik gedacht.
+     * die Uhr ist damit Anzeige. Nur freigegeben bei Debug-Kotlin-Binary UND `-advantlyDemoStage` (Swift zusätzlich
+     * `#if DEBUG`); sonst `NOT_ALLOWED` ohne Datenbankzugriff. Nicht für die App-Logik gedacht.
      */
     fun startDisplayDemo(presetId: String): WatchScoreSnapshot? {
         error = ""
+        if (!demoEnabled) return fail(NOT_ALLOWED)
         val b = backend() ?: return fail(STORE_READ)
         val preset = Presets.byId(presetId) ?: return fail(INVALID_INPUT)
         // Session-interner Schlüssel der Gerätart, damit die Anzeige „zählt: Handy“ zeigt
-        call { b.data.settings.put("session.peerKind.$DEMO_SCORER", "PHONE") }
+        call { b.data.settings.put("session.peerKind.$DEMO_SCORER", "PHONE") } ?: return null
         return begin(preset.format(), weServeFirst = true, scorer = ScorerChoice.Device(DeviceId(DEMO_SCORER)), watchWorkout = false)
     }
 
@@ -365,7 +370,24 @@ class WatchScoring internal constructor(
         if (id != null && id != lastOpenId) putSetting(KEY_OPEN_MATCH, id)
         if (id == null && lastOpenId != null) removeSetting(KEY_OPEN_MATCH)
         lastOpenId = id
-        listener?.onSnapshot(match?.let { buildSnapshot(it, state.sync, scorerLostAtMs, usSide(it)) })
+        listener?.onSnapshot(match?.let { snapshotOf(it, state.sync) })
+    }
+
+    private fun snapshotOf(
+        match: ActiveMatch,
+        sync: SyncStatus,
+    ): WatchScoreSnapshot? {
+        val pending =
+            try {
+                backend
+                    ?.data
+                    ?.events
+                    ?.unconfirmedEvents(match.id.value)
+                    ?.size ?: return fail(STORE_READ)
+            } catch (e: Exception) {
+                return fail(STORE_READ)
+            }
+        return buildSnapshot(match, sync, scorerLostAtMs, usSide(match), pending)
     }
 
     private fun begin(
@@ -383,6 +405,8 @@ class WatchScoring internal constructor(
             }
         try {
             b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout), scorer)
+        } catch (e: SessionThreadViolation) {
+            return fail(THREAD_VIOLATION)
         } catch (e: IllegalArgumentException) {
             return fail(INVALID_INPUT)
         } catch (e: Exception) {
@@ -400,7 +424,7 @@ class WatchScoring internal constructor(
         val b = backend() ?: return fail(STORE_READ)
         val m = current?.match ?: return fail(NO_MATCH)
         if (!m.isScorer) return fail(NOT_SCORER)
-        val ok = call { action(b.session, m) } ?: return fail(STORE_WRITE)
+        val ok = call { action(b.session, m) } ?: return null
         return if (ok) snapshot() else fail(NOT_ALLOWED)
     }
 
@@ -408,13 +432,18 @@ class WatchScoring internal constructor(
     private fun <T> call(block: () -> T): T? =
         try {
             block()
+        } catch (e: SessionThreadViolation) {
+            error = THREAD_VIOLATION
+            null
         } catch (e: Exception) {
+            error = STORE_WRITE
             null
         }
 
     /**
      * Besetzung: A = Self-Player der Uhr (+ Partner), B = Gegner. Gab es diese Sportart/Disziplin schon mit dem
-     * Self-Player auf Side A, werden dieselben Spieler-IDs wiederverwendet (Statistik bleibt zusammen).
+     * Self-Player auf einer der beiden Seiten, werden dieselben Spieler-IDs aus Besitzerperspektive wiederverwendet
+     * (Statistik bleibt zusammen); Self/Aliase dürfen auch an zweiter Stelle im Doppel stehen.
      */
     private fun lineupFor(
         data: LocalData,
@@ -426,10 +455,11 @@ class WatchScoring internal constructor(
         val self = data.players.ensureSelf("", now) { PlayerId(ids.newUuid7(now).value) }.id
         val size = format.discipline.playersPerSide
         val last = data.matches.lastLineup(format.sport, format.discipline)
+        val ours = last?.let { lineup -> listOf(lineup.a, lineup.b).firstOrNull { team -> team.any { data.isSelf(it) } } }
         val (a, b) =
-            if (last != null && last.a.size == size && last.b.size == size && last.a.firstOrNull()?.let { data.isSelf(it) } == true) {
+            if (last != null && last.a.size == size && last.b.size == size && ours != null) {
                 // dieselben Mitspieler wie zuletzt; ein alter Uhr-Self (jetzt Alias) wird durch den aktuellen ersetzt
-                (listOf(self) + last.a.drop(1)) to last.b
+                ours.map { if (data.isSelf(it)) self else it } to if (ours == last.a) last.b else last.a
             } else {
                 val partner = (2..size).map { PlayerId(ids.newUuid7(now).value) }
                 (listOf(self) + partner) to (1..size).map { PlayerId(ids.newUuid7(now).value) }
@@ -477,6 +507,7 @@ class WatchScoring internal constructor(
         const val NOT_SCORER = "NOT_SCORER"
         const val NOT_ALLOWED = "NOT_ALLOWED"
         const val NO_MATCH = "NO_MATCH"
+        const val THREAD_VIOLATION = "THREAD_VIOLATION"
 
         private fun flag(value: Boolean) = if (value) "1" else "0"
 
@@ -546,7 +577,8 @@ class WatchMatchSetup(
  * @property serveSide `A`, `B` oder `""`
  * @property serveCourt `RIGHT`, `LEFT`, `RECEIVER_CHOICE` oder `""` (Tischtennis, kein Aufschlag)
  * @property paused Unterbrechung läuft (`status == PAUSED`)
- * @property server Spieler-ID des Aufschlägers (`A1`, `B2` …) oder `""`
+ * @property server Spieler-ID (UUID) des Aufschlägers oder `""`
+ * @property receiver Spieler-ID (UUID) des Rückschlägers oder `""` (offene Wahl/kein Aufschlag)
  * @property serverNo Aufschläger als Nummer im Team (1/2, Reihenfolge der Besetzung), sonst `0` – Doppel „2 → 1“
  * @property receiverNo Rückschläger als Nummer im Team (1/2), `0` wenn offen (Entscheidungspunkt) oder ohne Aufschlag
  * @property rightNoA wer von A im rechten Feld steht (1/2; Pickleball/Badminton, 02 §8 `positions`), sonst `0`
@@ -572,7 +604,8 @@ class WatchMatchSetup(
  * @property pointsPlayed wirksam gezählte Ballwechsel
  * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
  * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
- * @property pendingToPeers Events, die noch keine Gegenstelle bestätigt hat (0 = „synchron“, sonst „N ausstehend“)
+ * @property pendingToPeers Events des offenen Matches, die noch keine Gegenstelle bestätigt hat
+ *   (0 = „synchron“, sonst „N ausstehend“); nicht der globale Rückstand der Session
  * @property lastEventReceivedAtMs Wanduhrzeit des zuletzt empfangenen Events (Anzeige: „Stand vor X s“), sonst `0`
  * @property lastSyncAtMs Wanduhrzeit des letzten Abgleichs mit einer Gegenstelle, sonst `0`
  * @property scorerDisconnectedSinceMs Anzeige: seit wann der Zähler nicht erreichbar ist (nach > 30 s Angebot
@@ -695,6 +728,7 @@ internal fun buildSnapshot(
     sync: SyncStatus,
     scorerDisconnectedSinceMs: Long,
     us: Side = Side.A,
+    pendingToPeers: Int = sync.pendingToPeers,
 ): WatchScoreSnapshot {
     val them = us.other
 
@@ -805,7 +839,7 @@ internal fun buildSnapshot(
         pointsPlayed = match.pointsPlayed,
         linkConnected = sync.indicator != SyncIndicator.LOCAL_ONLY,
         scorerConnected = sync.scorerConnected,
-        pendingToPeers = sync.pendingToPeers,
+        pendingToPeers = pendingToPeers,
         lastEventReceivedAtMs = sync.lastEventReceivedAtMs ?: 0,
         lastSyncAtMs = sync.lastSyncAtMs ?: 0,
         scorerDisconnectedSinceMs = scorerDisconnectedSinceMs,

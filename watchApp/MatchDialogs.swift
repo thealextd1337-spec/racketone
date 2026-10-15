@@ -7,6 +7,7 @@ import SwiftUI
 struct SetEndView: View {
     @ObservedObject var model: ScoringModel
     let snap: WatchScoreSnapshot
+    @State private var confirmTakeOver = false
 
     var body: some View {
         let setNumber = snap.setWinners.count
@@ -30,9 +31,11 @@ struct SetEndView: View {
                         .foregroundStyle(Brand.text2)
                         .multilineTextAlignment(.center)
                     StalenessLabel(snap: snap, dimmed: false)
+                    TakeOverOffer(snap: snap) { confirmTakeOver = true }
                 }
             }
         }
+        .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
     }
 
     @ViewBuilder

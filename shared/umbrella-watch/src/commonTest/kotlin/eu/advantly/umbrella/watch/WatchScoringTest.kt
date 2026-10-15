@@ -6,6 +6,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
@@ -17,6 +18,7 @@ import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.ScorerChoice
+import eu.advantly.match.session.ThreadGuard
 import eu.advantly.match.session.WallClock
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
@@ -35,13 +37,16 @@ internal expect fun testLocalData(): LocalData
  * Uhr (über die Facade) und optional ein Handy (direkt über [MatchSession]) in einem In-Memory-Netz mit virtueller Zeit.
  * „Neustart“ = neue Session + neue Facade auf derselben Datenbank.
  */
-private class Rig {
+private class Rig(
+    private val demoEnabled: Boolean = false,
+) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, latencyMs = 20)
     val clock = WallClock { 1_760_000_000_000L + scheduler.nowMs() }
     val watchData = testLocalData()
     val snapshots = mutableListOf<WatchScoreSnapshot?>()
     private var seed = 1
+    var schedulerThread = true
 
     var watchSession: MatchSession = newSession("watch", PeerKind.WATCH, watchData)
     var watch: WatchScoring = facade()
@@ -55,12 +60,19 @@ private class Rig {
     ): MatchSession {
         val link = ReliableDeviceLink(network.transport(name), scheduler, newMessageId = { "$name-${seed++}-${scheduler.nowMs()}" })
         return MatchSessions
-            .create(data, link, scheduler, kind, clock = clock, ids = RandomIdGenerator(Random(seed++)))
-            .also { it.start() }
+            .create(
+                data,
+                link,
+                scheduler,
+                kind,
+                clock = clock,
+                ids = RandomIdGenerator(Random(seed++)),
+                threadGuard = ThreadGuard { schedulerThread },
+            ).also { it.start() }
     }
 
     fun facade(): WatchScoring =
-        WatchScoring({ WatchScoring.Backend(watchSession, watchData) }, clock, RandomIdGenerator(Random(seed++))).apply {
+        WatchScoring({ WatchScoring.Backend(watchSession, watchData) }, clock, RandomIdGenerator(Random(seed++)), demoEnabled).apply {
             setListener(
                 object : WatchScoringListener {
                     override fun onSnapshot(snapshot: WatchScoreSnapshot?) {
@@ -353,11 +365,80 @@ class WatchScoringTest {
 
     @Test
     fun displayDemoStartsAMatchCountedElsewhere() {
-        val rig = Rig()
+        val rig = Rig(demoEnabled = true)
         val snap = assertNotNull(rig.watch.startDisplayDemo("TENNIS_OPEN"))
         assertFalse(snap.isScorer)
         assertEquals("PHONE", snap.scorerKind)
         assertNull(rig.watch.point(sideA = true))
+    }
+
+    @Test
+    fun displayDemoIsBlockedWithoutFlagBeforeOpeningTheStore() {
+        var opened = false
+        val watch =
+            WatchScoring({
+                opened = true
+                error("must not open")
+            }, demoEnabled = false)
+        assertNull(watch.startDisplayDemo("TENNIS_OPEN"))
+        assertEquals("NOT_ALLOWED", watch.lastError())
+        assertFalse(opened)
+        val rig = Rig()
+        assertNull(rig.watch.startDisplayDemo("TENNIS_OPEN"))
+        assertNull(rig.watchData.settings.get("session.peerKind.${WatchScoring.DEMO_SCORER}"))
+        assertFalse(rig.watch.hasActiveMatch())
+    }
+
+    @Test
+    fun wrongThreadIsReportedSeparatelyAndDoesNotWriteAnEvent() {
+        val rig = Rig()
+        val before = assertNotNull(rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true))
+        rig.schedulerThread = false
+        assertNull(rig.watch.point(sideA = true))
+        assertEquals("THREAD_VIOLATION", rig.watch.lastError())
+        assertEquals(before.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+        rig.schedulerThread = true
+        assertEquals("15", assertNotNull(rig.watch.point(sideA = true)).pointsA)
+        assertEquals("", rig.watch.lastError())
+    }
+
+    @Test
+    fun pendingCountOnlyIncludesTheOpenMatch() {
+        val rig = Rig()
+        rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true)
+        rig.points("AAA")
+        rig.watch.close()
+        val next = assertNotNull(rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true))
+        assertEquals(1, next.pendingToPeers, "nur die neue Genesis, nicht die vier Events des alten Matches")
+        assertEquals(1, assertNotNull(rig.snapshots.last()).pendingToPeers)
+        assertEquals(5, rig.watchSession.state.value.sync.pendingToPeers, "Session bleibt geräteweit")
+        assertEquals(2, assertNotNull(rig.watch.point(sideA = true)).pendingToPeers)
+        val id = next.matchId
+        rig.watchData.events.markConfirmedUpTo(id, rig.watch.deviceId(), rig.watchData.events.maxDeviceSeq(id, rig.watch.deviceId()))
+        assertEquals(0, assertNotNull(rig.watch.snapshot()).pendingToPeers, "synchron trotz altem Rückstand")
+    }
+
+    @Test
+    fun lastLineupWithOwnerOnSideBReusesBothTeamsAndAliases() {
+        val rig = Rig()
+        val oldSelf =
+            rig.watchData.players
+                .ensureSelf("", rig.clock.nowMs()) { PlayerId("old-watch-self") }
+                .id
+        val owner = PlayerId("owner")
+        rig.watchData.adoptSelf(Player(owner, "Alex"), rig.clock.nowMs())
+        val opponents = listOf(PlayerId("opponent1"), PlayerId("opponent2"))
+        val partner = PlayerId("partner")
+        rig.watchSession.create(
+            Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES),
+            Lineup(opponents, listOf(partner, oldSelf), opponents.first()),
+        )
+        rig.watch.close()
+        val next = assertNotNull(rig.watch.startMatch("TENNIS_BO3_MTB10", doubles = true, weServeFirst = false, watchWorkout = true))
+        val lineup = assertNotNull(rig.watchData.matches.get(MatchId(next.matchId))).lineup
+        assertEquals(listOf(partner, owner), lineup.a, "Besitzerteam von B übernehmen, Alias ersetzen, Reihenfolge behalten")
+        assertEquals(opponents, lineup.b)
+        assertEquals(opponents.first(), lineup.firstServer)
     }
 
     @Test
