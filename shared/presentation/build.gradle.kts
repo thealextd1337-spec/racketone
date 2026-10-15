@@ -12,6 +12,8 @@ kotlin {
             // KMP-ViewModel + SavedStateHandle (überlebt Rotation und Prozesstod)
             api(libs.lifecycle.viewmodel)
             api(libs.lifecycle.viewmodel.savedstate)
+            // StateFlow in den Port-Schnittstellen (LiveMatchPort, MatchHistoryPort, PlayersPort)
+            api(libs.kotlinx.coroutines.core)
         }
     }
 }

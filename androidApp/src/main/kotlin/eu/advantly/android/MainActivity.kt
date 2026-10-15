@@ -1,29 +1,19 @@
 package eu.advantly.android
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import eu.advantly.ui.phone.AdvantlyApp
-import eu.advantly.ui.phone.live.LiveScoreSpikeApp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Live-Screen ist immer schwarz → helle Systemleisten-Symbole
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-        )
+        // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            // Spike S4: Debug-Build startet direkt im Live-Score-Screen (inkl. Latenz-Overlay)
-            if (BuildConfig.DEBUG) {
-                LiveScoreSpikeApp()
-            } else {
-                AdvantlyApp(versionName = BuildConfig.VERSION_NAME)
-            }
+            // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
+            AdvantlyApp(versionName = BuildConfig.VERSION_NAME, debugTools = BuildConfig.DEBUG)
         }
     }
 }
