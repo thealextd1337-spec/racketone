@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import eu.advantly.presentation.auth.AuthViewModel
+import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
@@ -32,6 +34,7 @@ import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
+import eu.advantly.ui.phone.auth.AccountScreen
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
@@ -47,6 +50,7 @@ import eu.advantly.ui.phone.live.LiveScoreScreen
 import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
+import eu.advantly.ui.phone.resources.auth_open
 import eu.advantly.ui.phone.resources.watch_takeover_confirm
 import eu.advantly.ui.phone.resources.watch_takeover_text
 import eu.advantly.ui.phone.resources.watch_takeover_title
@@ -74,6 +78,8 @@ fun AdvantlyApp(
     darkTheme: Boolean = isSystemInDarkTheme(),
     debugTools: Boolean = false,
     autoBenchmark: Boolean = false,
+    authModel: AuthViewModel? = null,
+    googleCredential: (suspend () -> GoogleCredential)? = null,
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
@@ -98,7 +104,7 @@ fun AdvantlyApp(
                 if (navigator.top == null) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
-                        Box(Modifier.weight(1f)) { TabLayer(model, versionName) }
+                        Box(Modifier.weight(1f)) { TabLayer(model, versionName, authModel, googleCredential) }
                     }
                 }
                 when (val top = navigator.top) {
@@ -184,7 +190,10 @@ fun AdvantlyApp(
 private fun TabLayer(
     model: AdvantlyAppModel,
     versionName: String,
+    authModel: AuthViewModel?,
+    googleCredential: (suspend () -> GoogleCredential)?,
 ) {
+    var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
@@ -204,9 +213,24 @@ private fun TabLayer(
                 }
 
                 AppTab.Profile -> {
-                    ComingSoonScreen(AppTab.Profile, versionName, players = model.players, onPlayerHistory = {
-                        navigator.push(Overlay.PlayerHistory(it))
-                    })
+                    if (showAccount && authModel != null) {
+                        AccountScreen(authModel, googleCredential) { showAccount = false }
+                    } else {
+                        Column {
+                            if (authModel != null) {
+                                TextButton(
+                                    {
+                                        authModel.refresh()
+                                        showAccount = true
+                                    },
+                                    modifier = Modifier.testTag("profile_account"),
+                                ) { Text(stringResource(Res.string.auth_open)) }
+                            }
+                            ComingSoonScreen(AppTab.Profile, versionName, players = model.players, onPlayerHistory = {
+                                navigator.push(Overlay.PlayerHistory(it))
+                            })
+                        }
+                    }
                 }
             }
         }

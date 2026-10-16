@@ -5,8 +5,9 @@ Visitor, Dummy-Zuweisung, Turnier-Grundgerüst. Plan und Arbeitspakete: [`docs/p
 Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.md) (§13 = Abgleich mit diesem Spike).
 
 > Status: **P2-A Code umgesetzt** – Spike gehärtet, staging-Deploy vorbereitet. Gehostetes Projekt, DPA und
-> Dashboard-Abnahme stehen noch aus. Keine Edge Functions (Push, Export-ZIP, Löschjob, RevenueCat), keine
-> Client-Anbindung. Keine Secrets im Repo.
+> Dashboard-Abnahme stehen noch aus. **P2-C ergänzt Android-Handy-Auth und das serverseitige Altersgate**;
+> Einrichtung und Abnahme: [docs/p2c-auth.md](../docs/p2c-auth.md). Keine Secrets im Repo, kein Deploy durch P2-C.
+> Edge Functions und der Cloud-Sync-Client bleiben separate Pakete.
 
 ## Inhalt
 
@@ -29,7 +30,8 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…16000200_spaltenrechte.sql` | Spaltenrechte, eigene Freundescodes über `my_friend_code()` |
 | `migrations/…16000300_sync_pull_performance.sql` | Rechteprüfungen beim Pull nur einmal je Match, Ersteller-Kurzpfad |
 | `migrations/…16000400_wartung_timeouts_volatilitaet.sql` | Timeouts für den bestehenden Löschjob, korrekte STABLE-Einstufung der Projektionsbereinigung |
-| `tests/database/*.test.sql` | pgTAP (356 Prüfungen in 15 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte und Review-Regressionen |
+| `migrations/…16000500_auth_altersgate.sql` | P2-C: anonyme Einmal-Tickets, Identitätsbindung, Before-User-Created-Hook, Alias-Onboarding, Abbruchwiderruf und Bereinigung; alter Spike-Onboarding-RPC für Clients gesperrt |
+| `tests/database/*.test.sql` | pgTAP (460 Prüfungen in 17 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte, Auth-Altersgate und Review-Regressionen |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 | `tests/perf/backend_perf.py` | optionaler Lasttest mit 500 Matches, parallelen Uploads, Cursor-Prüfung und EXPLAIN-JSON; außerhalb des CI-Pfads |
 
@@ -203,6 +205,13 @@ erneut messen und bei Überschreiten der 200 ms den im Plan genannten commit-geo
 
 **Noch manuell einzurichten und abzunehmen; hier wurde kein Projekt angelegt oder deployt.**
 
+0. **VOR `db push` im Dashboard Signup/neue Registrierungen AUS**, ebenso Google/Apple und Anonymous Sign-ins.
+   GoTrue verhält sich ohne aktivierten Before-User-Created-Hook **fail-open**: der Hook wird übersprungen;
+   gehostetes Signup ist standardmäßig AN. Nach Migration zuerst Hook aktivieren, dann den konkreten
+   [Negativtest per `/auth/v1/signup`](../docs/p2c-auth.md#staging-im-supabase-dashboard-manuell) ohne Ticket
+   durchführen (HTTP 403 / `age_ticket_required`, kein Auth-Insert); erst danach dauerhaft Signup/Google freigeben.
+   Signup AUS allein beweist den Hook nicht; die Anleitung beschreibt das kontrollierte Testfenster.
+
 1. Im Supabase-Dashboard ein getrenntes Projekt **Advantly staging**, **Free**, ausdrücklich Region
    **Central EU (Frankfurt), `eu-central-1`** erstellen (keine automatische allgemeine EU-Auswahl).
    DB-Passwort sicher verwahren; Projekt-Ref aus den Projekteinstellungen übernehmen. Datenbank-Hauptversion 17
@@ -270,9 +279,10 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
    Breaking Changes versionieren (`sync_push_v2`).
 2. **Jede neue Tabelle in `public`**: RLS aktivieren, Policies schreiben, Grants **explizit** setzen – die
    Default-Privileges sind bewusst entzogen (`…0990_rechte.sql`). Test 010 schlägt sonst fehl.
-3. RPCs: `security definer` + `set search_path = ''` + voll qualifizierte Namen; **erste Anweisung jedes Schreibwegs ist
+3. RPCs: `security definer` + `set search_path = ''` + voll qualifizierte Namen; **erste Anweisung jedes versionierten Schreibwegs ist
    `private.require_active()` oder `private.lock_sync()`** (Versionssperre vor Zeilensperren, sonst Deadlocks); Berechtigung im Funktionskörper
-   prüfen; `grant execute … to authenticated` nur für gewollte RPCs. Helfer gehören ins Schema `private`.
+   prüfen; Ausnahme: anonyme Altersgate-RPCs und Hook schreiben ausschließlich `private.age_*` ohne Sync-Version,
+   dürfen daher keinen Sync-Lock nehmen (Budgets/Zeilensperren/Unique-Constraints). `grant execute … to authenticated` nur für gewollte RPCs. Helfer gehören ins Schema `private`.
 4. Fehler über `private.fail('<grund>')` (SQLSTATE P0001) bzw. `private.fail('<grund>', '42501')` – der Grund ist
    ein stabiler Schlüssel für Clients und Tests.
 5. **Betrieb:** Konten nur über `purge_account`/`admin_purge_due_accounts` löschen (kein direktes
@@ -287,4 +297,46 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
 Edge Functions (`push-dispatch`, `export-my-data`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
 pg_cron-Jobs für reguläre Kontolöschung und Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
 (staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
-Auth-Hook, produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben Folgepakete.
+P2-C liefert den Auth-Hook; produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben manuell
+beziehungsweise Folgepakete.
+
+
+## P2-C: Auth und Altersgate
+
+Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,
+24-h-Sperre nach Altersablehnung, `before_user_created`-Hook sowie Alias-Onboarding ohne Geburtstag.
+`config.toml` registriert den Hook lokal, aktiviert E-Mail-Bestätigung und manuelles Identity Linking; Google bleibt
+ohne externe Providerkonfiguration aus. Lokal ist Registrierung nach bestandenem Gate weiterhin möglich.
+Test `140_auth_age_gate.test.sql` prüft die neuen Sicherheits-/Altersgrenzen; `010` erlaubt anonym ausschließlich
+`issue_age_ticket`, `bind_age_ticket` und `cancel_age_ticket` zusätzlich zu den lesbaren Länderregeln.
+
+Vollständige [P2-C-Anleitung](../docs/p2c-auth.md): Ticket-Zuordnung OTP/Google samt Sicherheitsbegründung,
+Keystore-/Backup-Regeln, Dashboard-Konfiguration, lokale Properties, Google-OAuth und SHA-Fingerprints,
+SMTP-Entscheidungsvorlage mit Empfehlung sowie manuelle staging-/Pixel-Abnahme. **Kein Deploy ausgeführt.**
+**Reihenfolge:** Signup vor Migration AUS → Hook im Dashboard aktivieren → Negativtest ohne Ticket
+(`age_ticket_required`, kein Auth-Insert) → erst dann dauerhaft Signup/Google AN. Ohne aktivierten Hook ist GoTrue
+fail-open. Die zweite DB-Linie (`finish_onboarding`, `is_active`/`require_active` samt aktiver RLS) verlangt einen
+serverseitigen Altersnachweis; ein ohne Hook erzeugtes Konto bleibt unbrauchbar, auch bei Status `active`.
+Admin-/Invite-Pfade umgehen den Hook: `service_role` **nie zur Kontoanlage** in Edge Functions, Skripten oder
+Supportwerkzeugen verwenden. pgTAP 150 modelliert diese Inserts und belegt die zweite Linie.
+
+IP-Budgets verwenden kanonisches `cf-connecting-ip`, sonst `x-forwarded-for` (erster Eintrag hinter dem Proxy),
+niemals `x-real-ip`; fehlend/ungültig: kleines gemeinsames Budget von drei je Aktion/Minute. Ausstellung zehn je
+IP/Gerät, bind/cancel 30 je IP, global 1.000/Minute. Diese Header sind nur bei nachgewiesenem Entfernen/Überschreiben
+oder Ablehnen gefälschter Clientheader vertrauenswürdig. **Staging-Spoofing-Test und Quellen in der
+[P2-C-Anleitung](../docs/p2c-auth.md#ticket-zuordnung-und-sicherheitsgrenze) sind Pflicht vor Freigabe.**
+Auth-Rate-Limits und hCaptcha/Turnstile im Dashboard für den Pilot empfohlen; CAPTCHA erst mit implementiertem
+nativen Challenge-Flow aktivieren. Es ersetzt weder Ticketbudget noch Hook.
+`private.purge_age_gate()` läuft stündlich per pg_cron; ohne Erweiterung extern als Owner einplanen.
+
+Echte Parallelprüfung (zwei DB-Sitzungen), nur nach Migrationen auf einer wegwerfbaren lokalen DB:
+
+```powershell
+$env:ADVANTLY_AUTH_TEST_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+uv run supabase/tests/concurrency/auth_age_gate.py --confirm-disposable
+Remove-Item Env:ADVANTLY_AUTH_TEST_DB_URL
+```
+
+Prüft genau einen Hook-Verbrauch, parallele Ersatzbindungen/Ausstellungen, den 500-ms-Hook-Lockabbruch und
+issue/bind/hook/cancel bei bereits gehaltenem globalem Sync-Lock. Das Skript legt nur private Ticket-/Budgetdaten
+an, keine Auth-Konten; die Datenbank muss anschließend verworfen werden. Es ersetzt keinen GoTrue-/Gateway-Test.

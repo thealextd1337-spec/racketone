@@ -7,6 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.shared.presentation)
+            api(projects.shared.presentationAuth)
             implementation(libs.lifecycle.viewmodel.compose)
             // LifecycleResumeEffect: Stand der Uhr bei App-Resume neu prüfen
             implementation(libs.lifecycle.runtime.compose)
