@@ -5,8 +5,9 @@ Visitor, Dummy-Zuweisung, Turnier-Grundgerüst. Plan und Arbeitspakete: [`docs/p
 Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.md) (§13 = Abgleich mit diesem Spike).
 
 > Status: **P2-A Code umgesetzt** – Spike gehärtet, staging-Deploy vorbereitet. Gehostetes Projekt, DPA und
-> Dashboard-Abnahme stehen noch aus. Keine Edge Functions (Push, Export-ZIP, Löschjob, RevenueCat), keine
-> Client-Anbindung. Keine Secrets im Repo.
+> Dashboard-Abnahme stehen noch aus. **P2-C ergänzt Android-Handy-Auth und das serverseitige Altersgate**;
+> Einrichtung und Abnahme: [docs/p2c-auth.md](../docs/p2c-auth.md). Keine Secrets im Repo, kein Deploy durch P2-C.
+> Edge Functions und der Cloud-Sync-Client bleiben separate Pakete.
 
 ## Inhalt
 
@@ -29,7 +30,8 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…16000200_spaltenrechte.sql` | Spaltenrechte, eigene Freundescodes über `my_friend_code()` |
 | `migrations/…16000300_sync_pull_performance.sql` | Rechteprüfungen beim Pull nur einmal je Match, Ersteller-Kurzpfad |
 | `migrations/…16000400_wartung_timeouts_volatilitaet.sql` | Timeouts für den bestehenden Löschjob, korrekte STABLE-Einstufung der Projektionsbereinigung |
-| `tests/database/*.test.sql` | pgTAP (356 Prüfungen in 15 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte und Review-Regressionen |
+| `migrations/…16000500_auth_altersgate.sql` | P2-C: anonyme Einmal-Tickets, Identitätsbindung, Before-User-Created-Hook, Alias-Onboarding, Abbruchwiderruf und Bereinigung; alter Spike-Onboarding-RPC für Clients gesperrt |
+| `tests/database/*.test.sql` | pgTAP (422 Prüfungen in 16 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte, Auth-Altersgate und Review-Regressionen |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 | `tests/perf/backend_perf.py` | optionaler Lasttest mit 500 Matches, parallelen Uploads, Cursor-Prüfung und EXPLAIN-JSON; außerhalb des CI-Pfads |
 
@@ -287,4 +289,22 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
 Edge Functions (`push-dispatch`, `export-my-data`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
 pg_cron-Jobs für reguläre Kontolöschung und Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
 (staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
-Auth-Hook, produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben Folgepakete.
+P2-C liefert den Auth-Hook; produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben manuell
+beziehungsweise Folgepakete.
+
+
+## P2-C: Auth und Altersgate
+
+Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,
+24-h-Sperre nach Altersablehnung, `before_user_created`-Hook sowie Alias-Onboarding ohne Geburtstag.
+`config.toml` registriert den Hook lokal, aktiviert E-Mail-Bestätigung und manuelles Identity Linking; Google bleibt
+ohne externe Providerkonfiguration aus. Lokal ist Registrierung nach bestandenem Gate weiterhin möglich.
+Test `140_auth_age_gate.test.sql` prüft die neuen Sicherheits-/Altersgrenzen; `010` erlaubt anonym ausschließlich
+`issue_age_ticket`, `bind_age_ticket` und `cancel_age_ticket` zusätzlich zu den lesbaren Länderregeln.
+
+Vollständige [P2-C-Anleitung](../docs/p2c-auth.md): Ticket-Zuordnung OTP/Google samt Sicherheitsbegründung,
+Keystore-/Backup-Regeln, Dashboard-Konfiguration, lokale Properties, Google-OAuth und SHA-Fingerprints,
+SMTP-Entscheidungsvorlage mit Empfehlung sowie manuelle staging-/Pixel-Abnahme. **Kein Deploy ausgeführt.**
+Der Orchestrator aktiviert den Hook nach Migration zusätzlich im gehosteten Dashboard. `X-Real-IP` muss dort vom
+Gateway überschrieben werden; bei fehlender IP scheitert die Ausstellung geschlossen. Vor Freigabe prüfen.
+`private.purge_age_gate()` läuft stündlich per pg_cron; ohne Erweiterung extern als Owner einplanen.
