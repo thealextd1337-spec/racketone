@@ -1,0 +1,35 @@
+-- Nur explizit bestätigte eigene Geräte binden, niemals IDs aus einem empfangenen Event-Log ableiten.
+CREATE TABLE cloud_device_owner (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    profile_id TEXT NOT NULL
+);
+CREATE INDEX cloud_device_owner_profile ON cloud_device_owner (profile_id, device_id);
+
+-- Gültigkeit auch über mehrere Repository-Instanzen am selben lokalen Store absichern.
+CREATE TABLE cloud_upload_epoch (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+    generation INTEGER NOT NULL CHECK (generation >= 0)
+);
+
+generation:
+SELECT coalesce((SELECT generation FROM cloud_upload_epoch WHERE singleton = 1), 0);
+
+saveGeneration:
+INSERT OR REPLACE INTO cloud_upload_epoch (singleton, generation) VALUES (1, ?);
+
+deviceOwner:
+SELECT profile_id FROM cloud_device_owner WHERE device_id = ?;
+
+bindDevice:
+INSERT OR IGNORE INTO cloud_device_owner (device_id, profile_id) VALUES (?, ?);
+
+pendingForProfile:
+SELECT e.id, e.match_id, e.device_id, e.device_seq, e.lamport, e.wall_clock_ms, e.parent_id, e.type, e.payload, e.confirmed
+FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id
+WHERE e.cloud_state = 0 AND o.profile_id = :profileId
+  AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = e.match_id)
+ORDER BY e.match_id, e.lamport, e.device_id, e.id LIMIT :limit;
+
+eventById:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload, confirmed
+FROM match_event WHERE id = ?;

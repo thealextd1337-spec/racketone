@@ -113,12 +113,20 @@ Für den Google-Play-Pfad werden Android-Teilgates gesondert abgenommen, solange
 Supabase (Frankfurt), Login mit Apple/Google/E-Mail-Code, Profile, Spieler und Dummy-Zuweisung (durch Erfasser, mit Widerspruch) bzw. Gäste-Claim per Link, Freundschaften (Suche, QR, Einladungslink), Upload der Events über die Outbox, geteilte Matches (Freunde sofort verknüpft, Widerspruch „War ich nicht“, F23), Push-Benachrichtigungen, Zähler-Wahl beim Start (Mitspieler/Freund mit Account oder externer Director) mit Cloud-Zustellung an dessen Gerät, benannte Visitor-Accounts für Live-Stand und Ergebnis (Realtime, ohne Zählen/Health), Account-Löschung und Export, Entitlements vorbereitet. **Turnierdirektor-Modus** (F22): Turnier anlegen, Plätze und Spielplan, Matches mehreren Zählern zuweisen, Live-Übersicht aller Plätze für den Turnierdirektor. Wear OS synchronisiert standalone.
 **Gate P2:** pgTAP-RLS-Tests grün. Zwei echte Accounts mit gemischten Geräten (iPhone + Ultra / Android + Galaxy Watch) spielen ein Doppel, und beide sehen das Match. Sync verträgt Abbrüche und Wiederholungen ohne Doppelungen. Zähler-Wahl und Übergabe funktionieren accountübergreifend; Visitor-RLS erlaubt nur Live-Lesen und Ergebnis, keine Schreibaktionen und keine Health-Daten.
 
+**Ergänzung 16.10.2026 – Feedback und Online-Verwaltung:** Vor dem nächsten Online-Pilot einen Bereich
+„Feedback & Hilfe“ auf Android/iOS für Feedback, Featurewünsche und Fehler sowie ein geschütztes
+Web-Admintool für deren Bearbeitung und den Betrieb bereitstellen. Startumfang, Rollen, Versand und
+Abnahme: [Feedback & Admin](plan-feedback-admin.md). Der Online-Pilot benötigt einen nachgewiesenen
+Meldeweg einschließlich Bearbeitung im Adminbereich; die reine Oberfläche erfüllt dieses Gate nicht.
+
 ### P3 – Statistik & Health
 
 **Release-Stufe:** Produktionsstart ausschließlich nach P3 und bestandenem Android-P1/P2/P3-Teilgate, stabilem Kandidatenpilot, Produktionszugang und Phone-/Wear-Review: zuerst DACH. Erster Release mit 100 % in den gewählten Ländern (Google erlaubt hier keine Prozentstaffelung); Folgeupdates 5 → 20 → 50 → 100 %, danach EU/weltweit nach eigenen Gates. Apple-Veröffentlichung separat nach Account und Realtests ([Release-Pfad](release/veroeffentlichungsplan.md)).
 
 Puls (5-s-Raster), Kalorien, Schritte und Dauer von der Uhr. Drei getrennte Einwilligungen: messen, synchronisieren, teilen. Schreiben nach Apple Health und Health Connect, ohne Schritte (vermeidet doppelte Zählung). Statistik-Screens: Momentum, Satzverlauf, H2H, Puls pro Satz. Optionale Punktdetails (Ass, Doppelfehler) per Long-Press. Datenschutz-Folgenabschätzung (DSFA) und Datenschutzerklärung.
-**Gate P3:** Puls-Qualität auf Ultra, Pixel und Galaxy validiert. Store-Review-Texte fertig. Danach ist der **Store-Release** möglich; der geschlossene Android-Pilot beginnt bereits in P1 und wird mit den neuen Features erneut validiert.
+**Fitness-Tracker (ergänzt 2026-10-16):** Fitnessdaten über das Handy importieren und nachträglich dem eigenen Teilnehmer im passenden Match zuordnen, auch ohne Display oder Advantly-App auf dem Tracker. Nachgelieferte Daten, Messwerte ohne Workout und Überschneidungen mit Smartwatch-Aufzeichnungen berücksichtigen. Fitbit Air zuerst; Zielumfang ist die gesamte Fitbit-Wearable-Serie der letzten fünf Jahre (Planungsstand 2026: etwa 2021–2026, mit und ohne Display). Unterstützung und Einschränkungen je Modell/Handy-Plattform anhand tatsächlich verfügbarer Daten nachweisen. Vertrag und Abnahme: [P3 Tracker-Import](p3-tracker-import.md).
+
+**Gate P3:** Puls-Qualität auf Ultra, Pixel und Galaxy validiert. Tracker-Import nach [P3 Tracker-Import](p3-tracker-import.md) mit echtem Gerät und den unterstützten Handy-Pfaden abgenommen; Wiederholung, Nachlieferung und Doppelaufzeichnung ohne Doppelzählung. Store-Review-Texte fertig. Danach ist der **Store-Release** möglich; der geschlossene Android-Pilot beginnt bereits in P1 und wird mit den neuen Features erneut validiert.
 
 ### P4 – Garmin
 

@@ -38,6 +38,10 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
    funktionsfähiger Export und Kontolöschung mit 14 Tagen Karenz; Widerruf eigener Geräte-Sitzungen.
    Erklärung DE/EN, Anbietervereinbarungen, Data safety und Prüferzugang anhand der tatsächlichen
    Datenflüsse abschließen. Vor dem ersten Pilot mit Auth/Cloud gilt das vorhandene Pilot-Gate.
+7. **Feedback & Admin vor nächstem Online-Pilot.** Android/iOS: Feedback, Featurewünsche und Fehler
+   erfassen und bewusst absenden. Geschütztes Web-Admintool: Meldungen bearbeiten, Kontosupport,
+   Geräte-/Sync-Betrieb und protokollierte Verwaltungsaktionen. Nach B2a den Meldeweg samt privater
+   Inbox als eigenes Paket neben B2b angehen; [Umfang und Abnahme](plan-feedback-admin.md).
 
 ## Danach in Abhängigkeitsreihenfolge
 
@@ -47,6 +51,8 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
   N eigenständige Wear-Sitzung. Erst nach belastbarem Upload/Pull und sozialen Rollen.
 - **P2-4 Abschluss:** M Turnierübersicht, Q Chaos-/Vertrags-/Gerätetests und dokumentiertes Android-Teilgate.
 - **P3 Statistik/Health:** erst nach P2-Gate; getrennte Einwilligungen, Speicherung und Health-Anbindung.
+  Einschließlich [Tracker ohne Display](p3-tracker-import.md): Daten via Handy nachträglich dem eigenen Match
+  zuordnen, Nachlieferungen und mehrere Quellen ohne Doppelzählung verarbeiten.
   Öffentliche Veröffentlichung weiterhin erst nach P3 und den bestehenden Release-Gates.
 
 ## Externe Voraussetzungen
@@ -81,3 +87,59 @@ Postgres-Stubsatz ersetzen nicht den echten Supabase-Stack mit Gateway, Auth und
   Entwicklungsrechner-Evidenz und kein gehosteter Kapazitätsnachweis.
 - B2–B4, P2-K sowie reale Konto-/Cloud-Abnahmen bleiben offen. Die neuen Primitive starten keinen
   Upload und ersetzen noch nicht den `CloudOutboxStore`-Adapter aus dem ursprünglichen P2-Plan.
+
+## Fortschritt nach PR #50
+
+P2-B1 wurde am 16.10.2026 nach dem Gegencheck „ship“ und vier grünen CI-Checks als `cc0466b` integriert,
+einschließlich Kotlin/Native-/Apple-Simulator- und echtem Supabase-pgTAP-Lauf.
+P2-B2 beginnt mit **B2a: Geräte-Eigentümer, Upload-Sitzungen und an die Auswahl gebundene Antworten**.
+Vertrag, Integrationsgrenzen und das verbleibende B2b-Paket: [p2-upload.md](p2-upload.md).
+
+## Ergänzung aus dem Feldtest: F31 / W9
+
+Der Planungs-PR [#51](https://github.com/thealextd1337-spec/racketone/pull/51) ergänzt einen sichtbaren
+Versionsstand und ein kleines Smartwatch-Symbol auf der Handy-Startseite. Laut Nutzer-Rückmeldung vom
+16.10.2026 ist das Uhren-Ampelsystem fertig implementiert und wird parallel geprüft. W9 wird daher
+hier als **implementiert, Review läuft** geführt; es ist kein weiteres Implementierungspaket dieses Threads.
+Versionsanzeige (Version, Commit, Build-Zeit) und Ampelsystem bleiben in der bestehenden parallelen Lieferung.
+
+- Grün: verbunden und gleicher Commit. Gelb: verbunden und kompatibel, aber anderer oder unbekannter Stand.
+  Rot: nicht erreichbar oder inkompatibel. Grau: keine gekoppelte Uhr.
+- Antippen zeigt Uhrname, beide Versionsstände und den letzten Kontakt. Auf der Uhr erscheint der
+  entsprechende Handy-Status am Ende der Startliste.
+- Je gekoppelter Uhr ein Symbol; Farbe durch Form/Text und Screenreader-Beschriftung ergänzen.
+- Versionsmetadaten werden optional im `Hello` ergänzt; Protokoll 3 und die Behandlung älterer Geräte
+  bleiben kompatibel. Ein unbekannter App-Stand darf nicht als gleicher Stand erscheinen.
+
+Reihenfolge: laufendes B2a-Paket integrieren und B2b fortsetzen. Für W9 nur das Ergebnis des parallelen
+Reviews, CI, Merge und die dokumentierte Geräteabnahme übernehmen; keine erneute Umsetzung oder
+doppeltes Review starten. „Implementiert“ bedeutet noch nicht „integriert und auf Geräten abgenommen“.
+Maßgeblich sind
+die F31-/W9-Details aus `docs/00-entscheidungen.md`, `docs/04-ux-design.md` und `docs/PLAN.md` nach Merge von #51.
+Laut aktualisierter Feldtest-Rückmeldung ist auch die Galaxy Watch8 inzwischen auf dem aktuellen Stand;
+die ältere Port-Blockade im übernommenen Ausgangsstand ist damit überholt. Noch kein neuer Testnachweis für W9.
+
+## Displaygrößen als laufendes Abnahmekriterium
+
+Der Feldtest vom 16.10.2026 erforderte laut Nutzer eine Layout-Anpassung für die kleinere Galaxy-Watch-Variante.
+Die bestehenden UX-Vorgaben (responsive Ränder, System-Schriftgrößen und deutsche Screenshots kleiner Uhren,
+[04-ux-design.md](04-ux-design.md), §§4.3.5, 8 und 9) werden deshalb für kommende UI-Pakete ausdrücklich geprüft:
+
+- Kleine und große Galaxy- und Pixel-Watch-Varianten, kleine rechteckige Apple-Watch-Displays und Ultra berücksichtigen.
+  Die tatsächlich verwendete Galaxy Watch als festen Regressionstest führen; Modell, nutzbare Fläche in dp/pt,
+  Dichte und Schriftgröße im Testnachweis erfassen. Gehäusegröße oder Marke allein bestimmen das Layout nicht.
+- iOS: kleine und große iPhone-Displays, Safe Areas und Dynamic Type abdecken. iPad-Flächen nur dann als
+  unterstützte Geräteklasse abnehmen, wenn iPad-Unterstützung ausdrücklich zum Produktumfang gehört.
+- Garmin: in der Garmin-Phase kleine und große runde sowie rechteckige Displays, MIP/AMOLED und Bedienung
+  per Tasten beziehungsweise Touch prüfen. Das ist eine Vorgabe für P4, keine Behauptung bestehender Unterstützung.
+- Live-Score, Doppel-Spielernamen, Aufschlagwahl, Dialoge, Startliste und F31-Status/Versionsanzeige prüfen:
+  keine verdeckten Aktionen, überlappenden Texte oder abgeschnittenen Punkte am runden Rand.
+- Deutsch und Englisch, lange Namen sowie vergrößerte Systemschrift prüfen. Bedienflächen erhalten;
+  bei Platzmangel Inhalte sinnvoll anordnen oder Listen scrollbar machen, nicht pauschal alles verkleinern.
+- Vor Abnahme Layout-/Screenshot-Prüfungen auf kleinen und großen Flächen dokumentieren; echte Geräteprüfungen
+  für Galaxy Watch, Pixel Watch, iPhone und Apple Watch sowie in P4 Garmin getrennt nachweisen. Die kleine
+  Galaxy Watch ist verpflichtender Regressionstest. Noch nicht verfügbare Geräte bleiben als offene Nachweise
+  sichtbar; ein Test auf einer Marke oder Größe ersetzt nicht die übrigen Varianten.
+
+Die heutige Anpassung ist übernommene Feldtest-Evidenz, kein Nachweis, dass alle Ansichten und Größen bereits
+abgedeckt sind. W9 bleibt in seiner parallelen Lieferung; dessen Größenabnahme wird dort übernommen.

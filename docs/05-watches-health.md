@@ -10,7 +10,7 @@ Dieses Dokument legt fest, wie Advantly auf Apple Watch, Wear OS (Pixel Watch, G
 
 | # | Frage | Entscheidung |
 |---|---|---|
-| E1 | Woher kommen die Health-Daten? | **Von der Uhr, die der Spieler trägt.** Sie ist die Quelle der Wahrheit für Puls, Kalorien und Schritte. Das Handy steuert keine eigenen Sensordaten bei. |
+| E1 | Woher kommen die Health-Daten? | **Von der getragenen Uhr oder einem getragenen Fitness-Tracker, auch ohne Display (P3).** Das Handy importiert und ordnet zu, steuert aber keine eigenen Sensordaten bei. Überlappende Quellen werden je Metrik aufgelöst, nicht addiert. Details: [Tracker-Import](p3-tracker-import.md). |
 | E2 | Ab wann gibt es eine Workout-Session auf der Uhr? | **Ab Phase 1** zum Wachhalten der App und zur Live-Pulsanzeige, unabhängig von der Zähler-Rolle. In P1/P2 wird das Workout am Ende verworfen (`discardWorkout` auf watchOS), ohne lokale Health-Persistenz, Apple-Health-Speicherung oder Health-Connect-Write. Persistenz und Health-Einwilligungen erst ab P3; nötige Systemberechtigungen für Session/Sensor bleiben davon getrennt. |
 | E3 | Aktivitätstyp Padel/Pickleball | Apple: `.tennis`, `.pickleball`; **für Padel gibt es keinen Typ → `.tennis` plus Metadaten**. Wear OS/Health Connect: **es gibt weder PADEL noch PICKLEBALL → `TENNIS` plus Titel/Metadaten**. Garmin: `SPORT_TENNIS` bzw. `SPORT_RACKET` mit `SUB_SPORT_PADEL`/`SUB_SPORT_PICKLEBALL`. |
 | E4 | Sync Uhr ↔ Handy während des Matches | Apple: **Workout Mirroring** (`sendToRemoteWorkoutSession`) als Hauptkanal, WatchConnectivity als Fallback. Wear OS: **Data Layer** (MessageClient für Live-Events, DataClient für den Zustand). Garmin: Connect IQ Mobile SDK. Überall gilt: idempotente Events mit Sequenznummer und Bestätigung (Ack). |
@@ -281,6 +281,11 @@ Aus `Toybox.Activity` [Q24]:
 
 ### 4.2 Nachträglicher Import (z. B. Garmin → Health → RacketOne)
 
+**Erweiterung 2026-10-16:** Dieser Import umfasst ausdrücklich Fitness-Tracker ohne Display und ohne
+Advantly-Geräte-App. Zeitgestützte Messwerte ohne Workout, verzögerte Synchronisierung, Zuordnung zum
+eigenen Match-Teilnehmer und die Auflösung mehrerer Quellen sind in [P3 Tracker-Import](p3-tracker-import.md)
+festgelegt. Das folgende Workout-Suchfenster ist eine Vorschlagsheuristik, kein automatischer Zuordnungsnachweis.
+
 - **Ablauf:** Nach Matchende, oder wenn der Nutzer die Match-Statistik öffnet, suchen wir im Health-Speicher nach Workouts, die das Matchfenster **[Start − 15 min, Ende + 15 min]** zu mindestens 60 % überlappen, beliebiger Quelle und Typ Tennis, Racket, Pickleball oder Other. Treffer werden als „Workout von Garmin verknüpfen?“ angeboten, **nie automatisch** verknüpft.
 - **iOS:** `HKSampleQuery` auf `HKWorkout` im Zeitfenster, danach `HKQuantityType(.heartRate)`-Samples per Prädikat auf das Workout bzw. Zeitfenster, Schritte per `HKStatisticsQuery(.cumulativeSum)` (dedupliziert).
 - **Android:** `readRecords(ExerciseSessionRecord)` und `HeartRateRecord` im Fenster, Schritte per `aggregate(StepsRecord.COUNT_TOTAL)`. Ohne `READ_HEALTH_DATA_HISTORY` reicht der Lesezugriff nur rund 30 Tage vor die erste Berechtigungserteilung zurück [Q17]. Für Matches ist das irrelevant, deshalb **fordern wir History nicht an**.
@@ -292,7 +297,11 @@ Aus `Toybox.Activity` [Q24]:
 
 ### 5.1 Grundsätze
 
-- **Ein Spieler mit eigener Uhr ergibt eine `HealthSession`.** In einem Doppel kann ein Match also bis zu vier HealthSessions haben. Jede gehört ausschließlich ihrem Spieler-Account. Andere sehen sie nur per Opt-in (siehe 6.4).
+- **Eine abgeleitete `HealthSession` pro Spieler und Match, beliebig viele getrennte Quelldatensätze.**
+  Fitbit und Pixel Watch dürfen gleichzeitig über Health Connect liefern. Originalquellen samt externer
+  ID/Version bleiben getrennt; die Auswertung wählt pro Metrik und Zeitabschnitt eine Quelle. In einem Doppel
+  entstehen bis zu vier Match-Auswertungen, nicht höchstens vier Originalaufzeichnungen. Jede gehört ihrem
+  Spieler-Account. Andere sehen nur freigegebene Auswertungen (siehe 6.4), keine Import-Provenienz.
 - Die Zeitbasis ist **UTC in ms**. Jedes Gerät liefert zusätzlich einen monotonen Offset. Die Satzgrenzen kommen aus dem Event-Log der Scoring-Engine, egal auf welchem Gerät gezählt wurde. Abweichungen der Uhrzeit zwischen Geräten (unter 1 s, NTP) sind bei 5-s-Auflösung irrelevant.
 
 ### 5.2 Schema (logisch; Abbildung in Supabase im Dokument [03](03-backend-datenmodell.md))
@@ -302,9 +311,8 @@ HealthSession
   id                  uuid
   matchId             uuid
   playerId            uuid           -- Besitzer, RLS-Schlüssel
-  source              enum APPLE_WATCH | WEAR_OS | GARMIN | IMPORT_HEALTHKIT | IMPORT_HEALTH_CONNECT | ESTIMATE
-  sourceDevice        text           -- "Apple Watch Ultra 2", "Pixel Watch 3", "Forerunner 265"
-  platformRef         text           -- HKWorkout UUID | HC clientRecordId | FIT-Datei-ID
+  revision            long           -- Version der abgeleiteten Auswertung
+  sourceSelections    list           -- Metrik/Zeitabschnitt → HealthSourceRecord + angewandte Version
   startedAt, endedAt  timestamptz
   activeDurationS     int            -- ohne Unterbrechungen (Regen etc.)
   activeKcal, totalKcal  int?
@@ -316,7 +324,45 @@ HealthSession
   quality             enum OK | SPARSE_HR | NO_HR | GAPS     -- siehe 5.5
   segments            jsonb          -- pro Satz: {set, start, end, hrAvg, hrMax, kcal, timeInZoneS[5]}
   seriesRef           text?          -- Storage-Objekt mit Pulsserie (nur bei Cloud-Opt-in)
+
+HealthSourceRecord                    -- Originalnachweis, unabhängig von einer Match-Zuordnung
+  id, ownerProfileId  uuid
+  providerNamespace   text           -- Adapter + Herkunftskonto/Store; keine Zugangsdaten
+  state               LIVE | TOMBSTONE
+  originSource        text?          -- bei LIVE Pflicht; ursprüngliche App/Gerät
+  externalId          text           -- stabile Datensatz-ID innerhalb des Namensraums
+  externalVersion     text?          -- Provider-Version, falls verfügbar
+  importRevision      long?          -- bei LIVE Pflicht; kein Vergleich fremder Versionsformate
+  sourceDevice        text?
+  metric, unit        text?          -- bei LIVE Pflicht
+  startedAt, endedAt   timestamptz?   -- bei LIVE Pflicht
+  originalZone        text?
+  deletedAt           timestamptz?
+  contentRef          text?          -- lokal; Cloud nur nach separater Einwilligung
+  unique              (ownerProfileId, providerNamespace, externalId)
+
+HealthSourceSelection                 -- nur Besitzer; bestätigte, korrigierbare Zuordnung
+  sessionId, sourceRecordId, ownerProfileId  uuid
+  metric, start, end, appliedImportRevision
+  state               SELECTED | UNLINKED
 ```
+
+Für `HealthSourceRecord` gilt: `LIVE` verlangt die als Pflicht markierten Inhaltsfelder; `TOMBSTONE`
+behält ausschließlich ID, Besitzer, Provider-Namensraum, externe ID und `state`. Alle anderen Quellfelder
+sind dann `null`, einschließlich externer Version, Importrevision und `deletedAt`. Diese bedingten
+Pflicht-/Nullregeln sind bei der P3-Implementierung durch Validierung und DB-Constraints abzusichern.
+
+Mehrere Selections dürfen auf dieselbe abgeleitete Session zeigen. Überlappungen derselben Metrik werden
+vor Aggregation aufgelöst; aktive Selections dürfen keine Messabschnitte doppelt zählen. Besitzer von Session
+und Quelle müssen identisch sein. Änderungen/Löschungen einer Quelle invalidieren betroffene Ableitungen
+und führen zu einer neuen Revision; eine gelöste Zuordnung bleibt gegen automatisches Wiederverknüpfen gesperrt.
+Solange eine gelöste Selection existiert, bleibt die referenzierte Quelle als minimale Identitätszeile
+(ID, Besitzer, Provider-Namensraum, externe ID, Tombstone-Status) ohne Messwerte/übrige Metadaten erhalten;
+die übrigen Quellfelder sind in diesem Zustand leer. Die Bereinigung darf diese FK-Zeile nicht entfernen.
+Erneuter Import derselben Identität darf die Sperre nicht aufheben; nur explizites erneutes Verknüpfen.
+Match-/Kontolöschung entfernt die zugehörigen Sperren. Vollständiges Health-Löschen entfernt auch sie und
+deaktiviert automatische Imports bis zur ausdrücklichen erneuten Aktivierung (Details in 03 §3.3.5).
+Das Backend-Modell ist entsprechend in [03 §3.3.5](03-backend-datenmodell.md) angepasst. Noch keine Migration.
 
 ### 5.3 Sampling-Raten & Datenmenge
 
@@ -327,7 +373,10 @@ HealthSession
 | Garmin | 1 Hz (Sensor-Events), in FIT „smart“ oder 1 s je nach Gerät | – |
 
 - **Vereinheitlichung:** Für Statistik und Sync **resamplen wir auf 5 s** (Mittelwert pro Bucket). Ein 2-h-Match ergibt 1.440 Werte; delta-kodiert (1 Byte bpm + implizite Zeit) und gzip sind das **unter 2 KB**, als JSON-Array etwa 6 KB. Die 1-Hz-Rohdaten bleiben nur lokal bzw. im OS-Health-Speicher.
-- In Supabase landen pro Spieler und Match eine Zeile `HealthSession` (unter 2 KB inklusive Segmente) und optional die 5-s-Serie als Storage-Objekt.
+- In Supabase landet bei Cloud-Einwilligung pro Spieler und Match eine abgeleitete `HealthSession` und
+  optional die 5-s-Serie; getrennte private Herkunfts-/Zuordnungsdaten kommen zusätzlich hinzu. Die frühere
+  Größenabschätzung pro Session ist kein Gesamtbudget für mehrere Quellen. Rohsamples verbleiben lokal/im
+  Health-Speicher; Herkunft und angewandte Revisionen müssen die synchronisierte Auswertung nachvollziehbar machen.
 
 ### 5.4 Pulszonen
 
