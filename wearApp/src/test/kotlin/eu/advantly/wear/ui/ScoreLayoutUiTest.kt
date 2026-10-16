@@ -90,6 +90,35 @@ class ScoreLayoutUiTest {
         check(liveUi(doubles = true), "score-doubles-de-180dp")
     }
 
+    // Galaxy Watch8 40 mm (SM-L320, Zielgerät): 438 px bei 340 dpi ≈ 206 dp – Pflichtgröße, Schrift 1,0 und 1,3
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun galaxyWatch8Singles() {
+        check(singles(), "score-singles-de-galaxy8")
+    }
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun galaxyWatch8SinglesLargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        check(singles(), "score-singles-de-galaxy8-font130")
+    }
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun galaxyWatch8DoublesLargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        check(liveUi(doubles = true).copy(hint = ScoreHint(ScoreHint.Kind.BreakPoint)), "score-doubles-de-galaxy8-font130")
+    }
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun galaxyWatch8DisplayRole() {
+        val display = singles().copy(role = LiveRole.DISPLAY, sync = SyncUi.Stale(45), takeOverOffered = true)
+        check(display, "score-display-de-galaxy8", bottomLine = true)
+    }
+
     // Samsung Galaxy Watch (rund, xhdpi): 396 px (40 mm), 432 px (Watch 6/7 40 mm), 480 px (44 mm/Ultra)
 
     @Test

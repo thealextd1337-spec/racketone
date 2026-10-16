@@ -204,6 +204,8 @@ object LiveModel {
         overlay: LiveOverlay? = null,
         isSelf: (PlayerId) -> Boolean = { false },
         serveBarPoint: EventId? = null,
+        serveBarRemainingMillis: Long = 0,
+        serveBarHideAtMillis: Long = 0,
         choiceMadeInWindow: Boolean = false,
     ): LiveUi {
         val state = match.state
@@ -262,7 +264,7 @@ object LiveModel {
             overlay = overlay,
             corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,
             canRemovePoint = match.canRemovePoint,
-            serveBar = OperationRules.serveBar(match, serveBarPoint),
+            serveBar = OperationRules.serveBar(match, serveBarPoint, serveBarRemainingMillis, serveBarHideAtMillis),
             serverChoice = OperationRules.serverChoice(match, ::player, choiceMadeInWindow),
             updateRequired = OperationRules.updateRequired(sync),
         )

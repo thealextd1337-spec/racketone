@@ -7,6 +7,7 @@ struct OperationStrip: View {
     let snap: WatchScoreSnapshot
     var chooseServer: () -> Void = {}
     @Environment(\.isLuminanceReduced) private var dimmed
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func hasServe(_ model: ScoringModel, _ snap: WatchScoreSnapshot) -> Bool {
         snap.isScorer && snap.serveInfoEnabled && !model.serveBarPointId.isEmpty && model.serveBarPointId == snap.lastPointId
@@ -92,11 +93,40 @@ struct OperationStrip: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minHeight: 44)
                 .background(RoundedRectangle(cornerRadius: 8).fill(selected ? color : Color(hex: 0x1E2128)))
+                .overlay(alignment: .bottomLeading) {
+                    ServeCountdownBar(deadline: model.serveBarDeadline, reduceMotion: reduceMotion,
+                                      color: selected ? Color.black.opacity(0.35) : Color.white.opacity(0.45))
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(LocalizedStringKey(label)))
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Restzeit der Aufschlag-Leiste als dünner Balken unten im Segment (links verankert, das rechte Ende läuft nach
+/// links): aus dem echten Ausblendzeitpunkt berechnet, startet also bei neuem Punkt oder Auswahl korrekt neu.
+/// Animiert nur, solange die Leiste sichtbar ist (im Always-on ist sie ausgeblendet); „Bewegung reduzieren“: 1×/s.
+private struct ServeCountdownBar: View {
+    let deadline: Date
+    let reduceMotion: Bool
+    let color: Color
+
+    var body: some View {
+        TimelineView(reduceMotion ? .periodic(from: .now, by: 1) : .animation(minimumInterval: 1.0 / 30)) { context in
+            let fraction = min(1, max(0, deadline.timeIntervalSince(context.date) / ScoringModel.serveBarVisible))
+            GeometryReader { geo in
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(0, geo.size.width - 8) * fraction, height: 2.5)
+                    .padding(.leading, 4)
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

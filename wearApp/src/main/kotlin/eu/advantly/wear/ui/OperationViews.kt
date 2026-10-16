@@ -1,5 +1,6 @@
 package eu.advantly.wear.ui
 
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,13 +19,27 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -44,6 +59,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.match.session.OperationTimings
 import eu.advantly.wear.R
 import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveUi
@@ -102,12 +118,14 @@ private fun ServeBar(
 ) {
     val density = LocalDensity.current
     val ranges = ActionStrip.segmentRanges(geometry, OperationRules.serveWeights(bar))
+    val countdown = rememberServeCountdown(bar)
     // schwarz hinterlegt: darunter liegende Namenszeilen scheinen nicht durch die Lücken
     Box(modifier = modifier.background(Color.Black, SEGMENT_SHAPE)) {
         bar.options.zip(ranges).forEach { (outcome, range) ->
             ServeSegment(
                 outcome = outcome,
                 selected = outcome == bar.selected,
+                countdown = countdown,
                 modifier =
                     with(density) {
                         Modifier
@@ -131,14 +149,22 @@ private fun ServeBar(
 private fun ServeSegment(
     outcome: ServeOutcome,
     selected: Boolean,
+    countdown: State<Float>,
     modifier: Modifier,
 ) {
+    val barColor = if (selected) Color.Black.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.45f)
     Box(
         modifier =
             modifier
-                .semantics { this.selected = selected }
-                .background(if (selected) Color.White else SegmentGray, SEGMENT_SHAPE)
-                .padding(horizontal = 3.dp, vertical = 2.dp),
+                .semantics {
+                    this.selected = selected
+                    serveCountdown = countdown.value
+                }.background(if (selected) Color.White else SegmentGray, SEGMENT_SHAPE)
+                .drawWithContent {
+                    drawContent()
+                    drawCountdown(countdown.value, barColor)
+                    // unten Platz für den Restzeit-Balken: das Label bleibt frei lesbar
+                }.padding(start = 3.dp, end = 3.dp, top = 2.dp, bottom = COUNTDOWN_HEIGHT + COUNTDOWN_BOTTOM + 2.dp),
         contentAlignment = Alignment.Center,
     ) {
         ServeLabel(
@@ -179,6 +205,58 @@ private fun ServeLabel(
         autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = ServeLabel.MAX_SP.sp, stepSize = 0.25.sp),
     )
 }
+
+/**
+ * Restzeit-Anzeige der Aufschlag-Leiste (Feldtest 2026-10-16): 1 → 0, abgeleitet aus der echten Restzeit
+ * ([ServeBarUi.remainingMillis]) und neu gestartet, sobald sich Punkt oder Ausblendzeitpunkt ändern (neuer Punkt,
+ * Auswahl). Läuft über Frame-Zeit (unabhängig von der Animationsskala des Systems), nur solange die Leiste
+ * komponiert ist; bei „Animationen entfernen“ (Skala 0) springt sie nur mit den Zustands-Ticks (≈ 1×/s).
+ */
+@Composable
+internal fun rememberServeCountdown(bar: ServeBarUi): State<Float> {
+    val start = OperationTimings.remainingFraction(bar.remainingMillis)
+    val context = LocalContext.current
+    val reduceMotion =
+        remember(context) { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+    val ticked = rememberUpdatedState(start)
+    if (reduceMotion) return ticked
+    val progress = remember(bar.pointId, bar.hideAtMillis) { mutableFloatStateOf(start) }
+    LaunchedEffect(bar.pointId, bar.hideAtMillis) {
+        val remaining = bar.remainingMillis
+        val first = withFrameMillis { it }
+        while (true) {
+            val left = remaining - (withFrameMillis { it } - first)
+            progress.floatValue = OperationTimings.remainingFraction(left)
+            if (left <= 0) break
+        }
+    }
+    return progress
+}
+
+/** Dünner Restzeit-Balken unten im Segment, links verankert: das rechte Ende läuft nach links (wie das Halten). */
+private fun DrawScope.drawCountdown(
+    fraction: Float,
+    color: Color,
+) {
+    if (fraction <= 0f) return
+    val inset = COUNTDOWN_INSET.toPx()
+    val height = COUNTDOWN_HEIGHT.toPx()
+    val width = (size.width - 2 * inset) * fraction
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(inset, size.height - COUNTDOWN_BOTTOM.toPx() - height),
+        size = Size(width, height),
+        cornerRadius = CornerRadius(height / 2),
+    )
+}
+
+/** Restzeit-Anteil eines Aufschlag-Segments (für Tests und Barrierefreiheits-Werkzeuge). */
+val ServeCountdownKey = SemanticsPropertyKey<Float>("ServeCountdown")
+private var SemanticsPropertyReceiver.serveCountdown by ServeCountdownKey
+
+private val COUNTDOWN_HEIGHT = 2.dp
+private val COUNTDOWN_INSET = 8.dp
+private val COUNTDOWN_BOTTOM = 3.dp
 
 /** Schriftgrenzen und Zeilen der Aufschlag-Labels: [MIN_SP] als dp (unabhängig von der Systemschrift), [MAX_SP] in sp. */
 object ServeLabel {
@@ -273,6 +351,7 @@ fun ServeChips(
         verticalArrangement = Arrangement.spacedBy(ActionStrip.SEGMENT_GAP_DP.dp),
     ) {
         Text(stringResource(R.string.serve_bar_title), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        val countdown = rememberServeCountdown(bar)
         bar.options.chunked(2).forEach { row ->
             Row(
                 horizontalArrangement = Arrangement.spacedBy(ActionStrip.SEGMENT_GAP_DP.dp),
@@ -282,6 +361,7 @@ fun ServeChips(
                     ServeSegment(
                         outcome = outcome,
                         selected = outcome == bar.selected,
+                        countdown = countdown,
                         modifier =
                             Modifier
                                 .weight(1f)

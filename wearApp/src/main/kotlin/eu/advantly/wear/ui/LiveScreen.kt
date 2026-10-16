@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
@@ -373,6 +374,9 @@ private fun ScorePage(
                         digitSize = digitSize.value,
                         isAmbient = isAmbient,
                         flashing = flashSide == side,
+                        // „Gegner“-Namen liegen am Mittelband unter der Aktionsleiste: solange sie steht, ausblenden
+                        // (statt halb verdeckt durchzuscheinen); Layout bleibt gleich
+                        labelHidden = side == Side.B && strip != null,
                         // Statuszeile oben und Hinweise unten bekommen eigenen Platz in ihrer Hälfte (keine Überlagerung)
                         header = {
                             if (side == Side.A) {
@@ -441,6 +445,7 @@ private fun TeamHalf(
     digitSize: Float,
     isAmbient: Boolean,
     flashing: Boolean,
+    labelHidden: Boolean,
     header: @Composable ColumnScope.() -> Unit,
     footer: @Composable ColumnScope.() -> Unit,
     modifier: Modifier,
@@ -531,7 +536,12 @@ private fun TeamHalf(
                 halfHeight = height,
                 screen = screen,
                 sideInset = sideInset,
-                label = { Column(horizontalAlignment = Alignment.CenterHorizontally) { label() } },
+                label = {
+                    Column(
+                        modifier = if (labelHidden) Modifier.alpha(0f) else Modifier,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) { label() }
+                },
                 digits = digits,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )

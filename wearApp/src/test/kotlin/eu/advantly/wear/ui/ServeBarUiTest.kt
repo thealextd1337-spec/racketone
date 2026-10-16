@@ -73,6 +73,36 @@ class ServeBarUiTest {
         rule.screenshot("serve-bar-de-228dp")
     }
 
+    // Galaxy Watch8 40 mm (SM-L320, Zielgerät): 438 px bei 340 dpi ≈ 206 dp – Pflichtgröße, Schrift 1,0 und 1,3
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun germanLabelsFitOnGalaxyWatch8() {
+        checkStrip(serveBar())
+        rule.screenshot("serve-bar-de-galaxy8")
+    }
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun germanLabelsFitOnGalaxyWatch8LargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        checkStrip(serveBar(selected = ServeOutcome.DOUBLE_FAULT))
+    }
+
+    @Test
+    @Config(qualifiers = "en-w206dp-h206dp-round-watch-340dpi")
+    fun englishLabelsFitOnGalaxyWatch8LargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        checkStrip(serveBar())
+    }
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun serveChipsOnGalaxyWatch8LargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        serveChipsOnTheSetEndPageUseTheLongLabels()
+    }
+
     // Samsung Galaxy Watch (rund, xhdpi): 396 px (40 mm), 432 px (Watch 6/7 40 mm), 480 px (44 mm/Ultra)
 
     @Test

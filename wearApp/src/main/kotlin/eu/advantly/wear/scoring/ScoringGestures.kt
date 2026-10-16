@@ -1,6 +1,7 @@
 package eu.advantly.wear.scoring
 
 import eu.advantly.core.model.Side
+import eu.advantly.match.session.OperationTimings
 import kotlin.math.abs
 
 /**
@@ -59,8 +60,8 @@ object GestureClassifier {
         }
     }
 
-    /** Entsperren: 1 s gedrückt halten (wie am Handy, 04 H6). */
-    const val LONG_PRESS_MILLIS = 1_000L
+    /** Entsperren bzw. Punkt abziehen: 1 s gedrückt halten (wie am Handy, 04 H6; gemeinsame Zeit aller Geräte). */
+    const val LONG_PRESS_MILLIS = OperationTimings.HOLD_TO_REMOVE_MILLIS
 
     /** Hauptrichtung muss deutlich überwiegen, sonst ist die Geste mehrdeutig und wird ignoriert. */
     private const val DIRECTION_RATIO = 1.5f
