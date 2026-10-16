@@ -4,6 +4,11 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
 
 ## Übernommener Stand
 
+- Fortschreibung 16.10.: B1 (PR #50), B2a (PR #52) und W9/Ampel (PR #53) sind integriert.
+  Aktuell: Meldeweg und Admin-Inbox als erstes Support-Paket auf `p2/support-admin`;
+  [Betrieb und offene Live-Abnahme](support-admin-betrieb.md). Danach B2b-Upload, B3-Download/Entzug
+  und Kontosupport/Betriebsansicht. Umsetzung und Review erfolgen bis auf Weiteres primär mit OpenAI-Modellen.
+
 - Ausgangspunkt: `main` bei `5e3db67`, PRs #43–#49 integriert. Kein offener PR bei Übernahme.
 - P2-A Backend-Härtung, P2-C Android-Login und P2-J Telemetrie-Sichtbarkeit sind im Code vorhanden.
   P2-C ist ohne Auth-Konfiguration, Zwei-Geräte-Cloud-Test und P2-K noch nicht vollständig abgenommen.

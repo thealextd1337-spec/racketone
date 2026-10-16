@@ -1,7 +1,14 @@
 # Feedback, Featurewünsche, Fehler und Online-Admintool
 
-Stand: 16.10.2026. Nutzerauftrag, noch nicht implementiert. Teil von P2/Betrieb; erste nutzbare Lieferung
+Stand: 16.10.2026. Paket 1 in Umsetzung/Abnahme auf `p2/support-admin`. Teil von P2/Betrieb; erste nutzbare Lieferung
 vor dem nächsten Online-Pilot. Android und iOS erhalten denselben Meldeweg, DE/EN und alle geplanten Displaygrößen.
+
+Implementierungsstand: Textformular mit optionalen Diagnosen, kontogetrennte lokale Entwürfe, idempotenter
+Empfang und private RPCs; Admin-Inbox mit MFA und serverseitiger Mitgliedschaft. Android verwendet das
+vorhandene Konto, iOS startet mit Gastversand (der iOS-Konto-Host fehlt noch). Antworten in der App sind
+deshalb zunächst auf Android mit Konto verfügbar. Das ist keine vollständige iOS-Auth-Abnahme.
+Einrichtung, Aufbewahrung und die noch offene echte Online-Abnahme: [Betriebsanleitung](support-admin-betrieb.md).
+Kontosupport und Betriebsansicht aus Paket 2 bleiben offen; W9/Ampel ist bereits über PR #53 integriert.
 
 ## Handy-App: Feedback & Hilfe
 
