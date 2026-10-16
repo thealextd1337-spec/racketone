@@ -24,6 +24,12 @@ data class MatchStepCounter(
         return copy(total = next, stepsAtMatchStart = baseline, baselinePending = false)
     }
 
+    /**
+     * Verwirft den Stand („Gar nicht“, P2-J): keine Schritte, bis wieder Werte kommen; der nächste Rohwert wird die neue
+     * Basis. Schritte aus der Zeit ohne Telemetrie tauchen so auch nach dem Wiedereinschalten nie auf.
+     */
+    fun restarted(): MatchStepCounter = copy(total = null, stepsAtMatchStart = 0, baselinePending = true)
+
     override fun toString(): String = "MatchStepCounter(<redacted>)"
 
     companion object {

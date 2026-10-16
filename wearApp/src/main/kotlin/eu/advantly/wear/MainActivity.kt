@@ -18,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -31,6 +32,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
@@ -43,6 +45,7 @@ import eu.advantly.wear.glance.GlanceLaunch
 import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
 import eu.advantly.wear.live.WatchEffect
+import eu.advantly.wear.live.WatchTelemetryPolicy
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.live.displayMillis
 import eu.advantly.wear.match.FormatChoice
@@ -65,6 +68,8 @@ import eu.advantly.wear.workout.WorkoutService
 import eu.advantly.wear.workout.WorkoutSport
 import eu.advantly.wear.workout.WorkoutStateHolder
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** Hält den [WatchController] über Konfigurationswechsel; die Session selbst ist prozessweit ([WearSessions]). */
@@ -183,6 +188,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by controller.state.collectAsState()
             val workout by WorkoutStateHolder.state.collectAsState()
+            // Telemetrie-Sichtbarkeit (P2-J) direkt aus der Session: „Gar nicht“ blendet Puls/Schritte sofort aus
+            val telemetryVisibility by remember {
+                holder.session.state
+                    .map { it.telemetryVisibility }
+                    .distinctUntilChanged()
+            }.collectAsState(TelemetryVisibility.DEFAULT)
             val ambient = isAmbient.value
             // Sekundentakt nur interaktiv (Staleness „Stand vor X s“); im Ambient über onUpdateAmbient
             LaunchedEffect(ambient) {
@@ -193,9 +204,13 @@ class MainActivity : ComponentActivity() {
             }
             WearApp(
                 state = state,
-                workout = workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
+                workout =
+                    WatchTelemetryPolicy.apply(
+                        workout.copy(heartRateBpm = shownTelemetry.value.first, steps = shownTelemetry.value.second),
+                        telemetryVisibility,
+                    ),
                 permissions = permissions.value,
-                heartRate = shownTelemetry.value.first,
+                heartRate = shownTelemetry.value.first.takeIf { telemetryVisibility.allowsLive },
                 isAmbient = ambient,
                 powerSave = powerSave.value,
                 toast = toast.value,
@@ -322,10 +337,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateTelemetry() {
-        val match =
-            holder.session.state.value.match
-                ?.id
-        if (match != telemetryMatch) {
+        val session = holder.session.state.value
+        val match = session.match?.id
+        if (match != telemetryMatch || !session.telemetryVisibility.allowsLive) {
+            // Match-Wechsel oder „Gar nicht“ (P2-J): angezeigte/gedrosselte Werte verwerfen
             telemetryMatch = match
             telemetryThrottle = ValueThrottle()
         }
@@ -422,6 +437,8 @@ class MainActivity : ComponentActivity() {
             override fun resume(matchId: MatchId): Boolean = controller.resume(matchId)
 
             override fun setWorkoutEnabled(enabled: Boolean) = controller.setWorkoutEnabled(enabled)
+
+            override fun setTelemetryVisibility(visibility: TelemetryVisibility) = controller.setTelemetryVisibility(visibility)
 
             override fun selectPlayer(
                 slot: PlayerSlot,

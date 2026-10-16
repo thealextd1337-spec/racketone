@@ -35,6 +35,7 @@ import androidx.health.services.client.getCurrentExerciseInfo
 import androidx.health.services.client.startExercise
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.wear.MainActivity
 import eu.advantly.wear.R
 import eu.advantly.wear.diagnostics.DiagLine
@@ -42,7 +43,9 @@ import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.HeartRateGapDetector
 import eu.advantly.wear.diagnostics.PeriodicTrigger
 import eu.advantly.wear.live.LiveModel
+import eu.advantly.wear.live.WatchTelemetryPolicy
 import eu.advantly.wear.sync.LiveTelemetrySender
+import eu.advantly.wear.sync.LiveTelemetrySubscriptions
 import eu.advantly.wear.sync.WearSessions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -65,6 +68,13 @@ import kotlin.math.roundToInt
  * in der Ongoing Activity den Spielstand der Match-Session. Der Puls wird **nicht gespeichert** (P1, Health erst P3);
  * am Ende wird die Exercise beendet und verworfen. Flüchtige Werte gehen nur live ans eigene Handy.
  * Das Debug-Diagnoselog enthält Lebenszyklus, Sensor-Lücken, Akku und Displaystatus, keine Messwerte.
+ *
+ * Telemetrie-Sichtbarkeit „Gar nicht“ (P2-J, F19/F29, [WatchTelemetryPolicy]): Die Exercise läuft als Laufzeitanker
+ * (Display aus, Ongoing Activity) weiter, aber Puls, Schritte und Kalorien werden im Callback verworfen – nicht angezeigt,
+ * nicht gesendet, Schritt-Basis und Abo des Handys verworfen. Was Health Services erzwingt: Die Datentypen einer
+ * Exercise stehen ab `startExercise` fest (kein Abwählen während der Exercise; nur Beenden und Neustart, was das laufende
+ * Match-Workout unterbrechen würde) – der Sensor misst also weiter, solange die Exercise läuft; die Werte erreichen nur
+ * diesen Callback und werden mit der Exercise verworfen (keine Health-Speicherung, kein Health Connect).
  *
  * Robustheit:
  * - Eine **fremde** Exercise wird nie stillschweigend ersetzt ([ExerciseOwnership]); die UI fragt nach ([WorkoutPhase.CONFLICT]).
@@ -555,6 +565,7 @@ class WorkoutService : Service() {
                             stepCounter = next
                             WorkoutStateHolder.update { workout -> workout.copy(steps = next.steps) }
                         }
+                        applyTelemetryVisibility(it.telemetryVisibility)
                         LiveModel.ongoingText(it.match)
                     }.distinctUntilChanged()
                     .collect { score ->
@@ -565,6 +576,19 @@ class WorkoutService : Service() {
                         if (granted) ongoingActivity?.update(this@WorkoutService, buildStatus(score))
                     }
             }
+    }
+
+    /**
+     * Telemetrie-Sichtbarkeit sofort umsetzen (auch wenn sie auf dem Handy geändert wurde): „Gar nicht“ verwirft
+     * Messwerte, Schritt-Basis und das Abo des Handys; sonst nur die Spalten wieder freigeben (Werte ab dem nächsten Update).
+     */
+    private fun applyTelemetryVisibility(visibility: TelemetryVisibility) {
+        if (!visibility.allowsLive) {
+            stepCounter = stepCounter.restarted()
+            fallbackStepsTotal = 0
+            LiveTelemetrySubscriptions.Watch.clear()
+        }
+        WorkoutStateHolder.update { WatchTelemetryPolicy.apply(it, visibility) }
     }
 
     // ---------------------------------------------------------------- ExerciseClient-Callback
@@ -662,15 +686,21 @@ class WorkoutService : Service() {
         DiagnosticLog.logAll(lines)
 
         val calories = metrics.getData(DataType.CALORIES_TOTAL)?.total
-        stepCounter =
-            stepCounter.forMatch(
-                WearSessions
-                    .get(this)
-                    .session.state.value.match
-                    ?.id,
-            )
+        val sessionState =
+            WearSessions
+                .get(this)
+                .session.state.value
+        val visibility = sessionState.telemetryVisibility
+        stepCounter = stepCounter.forMatch(sessionState.match?.id)
         val totalSteps = metrics.getData(DataType.STEPS_TOTAL)?.total
-        if (totalSteps != null) {
+        if (!visibility.allowsLive) {
+            // „Gar nicht“: nichts übernehmen; Fallback-Intervalle nur als verbraucht markieren
+            stepCounter = stepCounter.restarted()
+            fallbackStepsTotal = 0
+            metrics.getData(DataType.STEPS).maxOfOrNull { it.endDurationFromBoot.toMillis() }?.let {
+                lastStepEndMs = maxOf(lastStepEndMs, it)
+            }
+        } else if (totalSteps != null) {
             stepCounter = stepCounter.withTotal(totalSteps)
         } else if (WorkoutMetric.STEPS in (
                 WorkoutStateHolder.state.value.selection
@@ -690,17 +720,19 @@ class WorkoutService : Service() {
         }
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->
-            current.copy(
-                heartRateBpm = hrPoints.lastOrNull()?.value?.roundToInt() ?: current.heartRateBpm,
-                caloriesKcal = calories ?: current.caloriesKcal,
-                steps = stepCounter.steps,
-                activeDurationMillis = checkpoint?.activeDuration?.toMillis() ?: current.activeDurationMillis,
-                durationAnchorElapsedMillis =
-                    checkpoint?.let {
-                        SystemClock.elapsedRealtime() - (System.currentTimeMillis() - it.time.toEpochMilli())
-                    } ?: current.durationAnchorElapsedMillis,
-            )
+            current
+                .copy(
+                    heartRateBpm = hrPoints.lastOrNull()?.value?.roundToInt() ?: current.heartRateBpm,
+                    caloriesKcal = calories ?: current.caloriesKcal,
+                    steps = stepCounter.steps,
+                    activeDurationMillis = checkpoint?.activeDuration?.toMillis() ?: current.activeDurationMillis,
+                    durationAnchorElapsedMillis =
+                        checkpoint?.let {
+                            SystemClock.elapsedRealtime() - (System.currentTimeMillis() - it.time.toEpochMilli())
+                        } ?: current.durationAnchorElapsedMillis,
+                ).let { WatchTelemetryPolicy.apply(it, visibility) }
         }
+        // Sender prüft die Sichtbarkeit selbst („Gar nicht“: nichts senden, Abo verwerfen)
         telemetry.onUpdate(WorkoutStateHolder.state.value, exerciseActive = state == ExerciseState.ACTIVE)
         maybeLogBattery()
 
