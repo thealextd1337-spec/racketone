@@ -47,6 +47,8 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
   N eigenständige Wear-Sitzung. Erst nach belastbarem Upload/Pull und sozialen Rollen.
 - **P2-4 Abschluss:** M Turnierübersicht, Q Chaos-/Vertrags-/Gerätetests und dokumentiertes Android-Teilgate.
 - **P3 Statistik/Health:** erst nach P2-Gate; getrennte Einwilligungen, Speicherung und Health-Anbindung.
+  Einschließlich [Tracker ohne Display](p3-tracker-import.md): Daten via Handy nachträglich dem eigenen Match
+  zuordnen, Nachlieferungen und mehrere Quellen ohne Doppelzählung verarbeiten.
   Öffentliche Veröffentlichung weiterhin erst nach P3 und den bestehenden Release-Gates.
 
 ## Externe Voraussetzungen

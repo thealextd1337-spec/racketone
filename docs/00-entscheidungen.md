@@ -7,6 +7,7 @@ Stand: 2026-10-16
 | Sportarten | Tennis, Padel, Pickleball, **Badminton, Tischtennis** (ergänzt 2026-10-14) – alle offiziellen Varianten je Sportart (Einzel/Doppel, Tiebreak, Match-Tiebreak, No-Ad, Short Sets, Golden/Star Point, Side-Out/Rally Scoring, Badminton bis 21/Deckel 30, Tischtennis bis 11 mit Aufschlagwechsel) |
 | Handy-Plattformen | Android + iOS |
 | Watches | Apple Watch (watchOS), Wear OS (Pixel Watch, Galaxy Watch), Garmin (Connect IQ) |
+| Fitness-Tracker (P3) | **Entschieden 2026-10-16:** Fitnessdaten auch von Trackern ohne Display über die Handy-App importieren und nachträglich dem eigenen Teilnehmer eines gespielten Matches zuordnen, wie Smartwatch-Health-Daten. **Fitbit Air zuerst, gesamte Fitbit-Wearable-Serie der letzten fünf Jahre als Zielumfang** (ca. 2021–2026, mit und ohne Display); Modell-/Plattform-Matrix mit verfügbaren Messwerten und nachgewiesenen Einschränkungen. Kein Zählen auf dem Tracker erforderlich. Details: [P3 Tracker-Import](p3-tracker-import.md). |
 | Testgeräte real | iPhone, Apple Watch **Ultra 1** (max. watchOS 26, kein Double Tap), Google-Pixel-Handy + Pixel Watch + Galaxy Watch. Garmin nur im Simulator |
 | Tech-Stack | Kotlin Multiplatform: gemeinsame Scoring-Engine für Android, iOS, Wear OS, watchOS. Garmin separat in Monkey C, abgesichert durch gemeinsame JSON-Testvektoren |
 | Backend | Supabase (Auth, Postgres, RLS, Realtime) |

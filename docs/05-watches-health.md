@@ -10,7 +10,7 @@ Dieses Dokument legt fest, wie Advantly auf Apple Watch, Wear OS (Pixel Watch, G
 
 | # | Frage | Entscheidung |
 |---|---|---|
-| E1 | Woher kommen die Health-Daten? | **Von der Uhr, die der Spieler trägt.** Sie ist die Quelle der Wahrheit für Puls, Kalorien und Schritte. Das Handy steuert keine eigenen Sensordaten bei. |
+| E1 | Woher kommen die Health-Daten? | **Von der getragenen Uhr oder einem getragenen Fitness-Tracker, auch ohne Display (P3).** Das Handy importiert und ordnet zu, steuert aber keine eigenen Sensordaten bei. Überlappende Quellen werden je Metrik aufgelöst, nicht addiert. Details: [Tracker-Import](p3-tracker-import.md). |
 | E2 | Ab wann gibt es eine Workout-Session auf der Uhr? | **Ab Phase 1** zum Wachhalten der App und zur Live-Pulsanzeige, unabhängig von der Zähler-Rolle. In P1/P2 wird das Workout am Ende verworfen (`discardWorkout` auf watchOS), ohne lokale Health-Persistenz, Apple-Health-Speicherung oder Health-Connect-Write. Persistenz und Health-Einwilligungen erst ab P3; nötige Systemberechtigungen für Session/Sensor bleiben davon getrennt. |
 | E3 | Aktivitätstyp Padel/Pickleball | Apple: `.tennis`, `.pickleball`; **für Padel gibt es keinen Typ → `.tennis` plus Metadaten**. Wear OS/Health Connect: **es gibt weder PADEL noch PICKLEBALL → `TENNIS` plus Titel/Metadaten**. Garmin: `SPORT_TENNIS` bzw. `SPORT_RACKET` mit `SUB_SPORT_PADEL`/`SUB_SPORT_PICKLEBALL`. |
 | E4 | Sync Uhr ↔ Handy während des Matches | Apple: **Workout Mirroring** (`sendToRemoteWorkoutSession`) als Hauptkanal, WatchConnectivity als Fallback. Wear OS: **Data Layer** (MessageClient für Live-Events, DataClient für den Zustand). Garmin: Connect IQ Mobile SDK. Überall gilt: idempotente Events mit Sequenznummer und Bestätigung (Ack). |
@@ -280,6 +280,11 @@ Aus `Toybox.Activity` [Q24]:
   4. Später möglich (P5+): ein Bluetooth-Brustgurt direkt am Handy (Standard-GATT-Heart-Rate-Service; unter iOS 26+ auch per iPhone-`HKWorkoutSession` mit BT-Pulsgurt [Q5]).
 
 ### 4.2 Nachträglicher Import (z. B. Garmin → Health → RacketOne)
+
+**Erweiterung 2026-10-16:** Dieser Import umfasst ausdrücklich Fitness-Tracker ohne Display und ohne
+Advantly-Geräte-App. Zeitgestützte Messwerte ohne Workout, verzögerte Synchronisierung, Zuordnung zum
+eigenen Match-Teilnehmer und die Auflösung mehrerer Quellen sind in [P3 Tracker-Import](p3-tracker-import.md)
+festgelegt. Das folgende Workout-Suchfenster ist eine Vorschlagsheuristik, kein automatischer Zuordnungsnachweis.
 
 - **Ablauf:** Nach Matchende, oder wenn der Nutzer die Match-Statistik öffnet, suchen wir im Health-Speicher nach Workouts, die das Matchfenster **[Start − 15 min, Ende + 15 min]** zu mindestens 60 % überlappen, beliebiger Quelle und Typ Tennis, Racket, Pickleball oder Other. Treffer werden als „Workout von Garmin verknüpfen?“ angeboten, **nie automatisch** verknüpft.
 - **iOS:** `HKSampleQuery` auf `HKWorkout` im Zeitfenster, danach `HKQuantityType(.heartRate)`-Samples per Prädikat auf das Workout bzw. Zeitfenster, Schritte per `HKStatisticsQuery(.cumulativeSum)` (dedupliziert).
