@@ -351,19 +351,31 @@ class MatchSession(
         return adoptTelemetry(telemetry.merge(remote))
     }
 
+    /**
+     * Speichert [next] als **einen** Settings-Eintrag (Wert und Versionsangabe gemeinsam, ein Schreibvorgang = atomar) und
+     * übernimmt ihn erst danach in den RAM-Zustand. Scheitert das Schreiben, bleibt alles beim alten Stand (nichts
+     * gesendet, nichts veröffentlicht) und die Exception geht an den Aufrufer.
+     */
     private fun adoptTelemetry(next: TelemetryPreference): Boolean {
         if (next == telemetry) return false
+        val setting = checkNotNull(TelemetrySetting.of(next)) { "Telemetrie-Änderung ohne Versionsangabe" }
+        data.settings.put(TELEMETRY_KEY, SyncCodec.json.encodeToString(TelemetrySetting.serializer(), setting))
         telemetry = next
-        data.settings.put(TELEMETRY_KEY, next.visibility.wire)
-        data.settings.putLong(TELEMETRY_AT_KEY, next.changedAtMs)
-        TelemetrySetting.of(next)?.let { broadcast(MatchMetaMessage(telemetry = it)) }
+        broadcast(MatchMetaMessage(telemetry = setting))
         publish()
         return true
     }
 
+    /** Gespeicherte Einstellung; fehlt sie oder ist sie unlesbar, gilt der Standard (nie ein halber Stand). */
     private fun loadTelemetry(): TelemetryPreference {
-        val visibility = TelemetryVisibility.fromWire(data.settings.get(TELEMETRY_KEY)) ?: return TelemetryPreference()
-        return TelemetryPreference(visibility, data.settings.getLong(TELEMETRY_AT_KEY, 0).coerceAtLeast(0))
+        val stored = data.settings.get(TELEMETRY_KEY) ?: return TelemetryPreference()
+        val setting =
+            try {
+                SyncCodec.json.decodeFromString(TelemetrySetting.serializer(), stored)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        return setting?.toPreference() ?: TelemetryPreference()
     }
 
     private fun loadDroppedNotice(): DroppedInputs? {
@@ -1951,9 +1963,8 @@ class MatchSession(
         /** Settings: hier angelegtes Match wurde noch nie an eine Uhr gesendet (Handy); fehlt = möglicherweise gesendet. */
         private const val NEVER_SENT_TO_WATCH_PREFIX = "session.neverSentToWatch."
 
-        /** Settings: Telemetrie-Sichtbarkeit (`share`/`private`/`off`) und Zeitpunkt der letzten Änderung (P2-J). */
-        private const val TELEMETRY_KEY = "session.telemetryVisibility"
-        private const val TELEMETRY_AT_KEY = "session.telemetryVisibilityAt"
+        /** Settings: Telemetrie-Sichtbarkeit samt Versionsangabe als ein JSON-Eintrag (`TelemetrySetting`, P2-J). */
+        private const val TELEMETRY_KEY = "session.telemetry"
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"
