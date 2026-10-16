@@ -26,8 +26,10 @@ UI-Antworten; gelöschte App-Daten entfernen lokale Entwürfe.
 
 Admin-Inbox: Suche/Statusfilter (maximal 100 neueste Treffer), Details, Status/Priorität, Zuweisung,
 verwandte Meldung, interne Notiz und ausdrücklich bestätigte Nutzerantwort. Fehlerstatus „behoben“ verlangt
-eine Versionsangabe. Optimistische Versionen verhindern stilles Überschreiben; Nachrichten haben eigene
-idempotente UUIDs. Kontosperren, Sitzungswiderruf und Betriebskennzahlen gehören in das Folgepaket.
+eine Versionsangabe. Jede Vorgangsänderung braucht eine Begründung mit 1 bis 500 Zeichen. Sie soll sachlich
+bleiben und darf keine personenbezogenen oder sensiblen Angaben enthalten. Optimistische Versionen verhindern
+stilles Überschreiben; Nachrichten haben eigene idempotente UUIDs. Kontosperren, Sitzungswiderruf und
+Betriebskennzahlen gehören in das Folgepaket.
 
 ## Einrichtung auf Staging
 
@@ -75,7 +77,10 @@ idempotente UUIDs. Kontosperren, Sitzungswiderruf und Betriebskennzahlen gehöre
 - `export_my_data()` enthält alle eigenen Meldungen (auch über das Inbox-Limit hinaus). Der bestehende
   Kontolöschprozess mit Karenz entfernt beim endgültigen Löschen Tickets und Nachrichten per Kaskade.
 - Geschlossene/behobene Meldungen werden 180 Tage nach letzter Änderung gelöscht, Nachrichten mitgelöscht.
-  Auditaktionen bleiben ein Jahr, ohne Kopie des Meldungstexts; gelöschte Konten/Ziele werden entkoppelt.
+  Auditaktionen bleiben ein Jahr. Vorgangsänderungen speichern die kurze Begründung und nur geänderte
+  Status-, Prioritäts-, Zuweisungs-, Verknüpfungs- und Versionswerte mit vorher/nachher; Titel, Nachrichtentext,
+  Kontaktadresse, Diagnose und vollständige Ticketdaten werden nicht kopiert. Nachrichtenaktionen speichern
+  nur die feste Einordnung „interne Notiz“ oder „Nutzerantwort“. Gelöschte Konten/Ziele werden entkoppelt.
   Offene Vorgänge regelmäßig fachlich prüfen und abschließen, keine unbegrenzte Ablage ungenutzter Meldungen.
 - `private.purge_support()` räumt stündlich per `advantly-support-cleanup` auf (maximal 500 Tickets pro Lauf).
   Ohne `pg_cron` muss ein externer Betreiberjob dieselbe Funktion ausführen. Erfolg/Fehler überwachen.

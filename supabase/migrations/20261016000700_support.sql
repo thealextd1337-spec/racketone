@@ -40,6 +40,8 @@ create table ops.support_audit (
   actor_id uuid references auth.users(id) on delete set null,
   ticket_id uuid references ops.support_tickets(id) on delete set null,
   action text not null,
+  reason text,
+  changes jsonb not null default '{}'::jsonb check (jsonb_typeof(changes) = 'object'),
   created_at timestamptz not null default now()
 );
 create table ops.support_budgets (
@@ -190,14 +192,26 @@ end;
 $$;
 
 create function public.admin_support_update(p_id uuid,p_status text,p_priority text,p_assignee uuid,
-  p_related_id uuid,p_resolution_version text,p_expected_version bigint) returns jsonb
+  p_related_id uuid,p_resolution_version text,p_expected_version bigint,p_reason text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare v_actor uuid := private.require_support(); v_ticket ops.support_tickets%rowtype;
+declare
+  v_actor uuid := private.require_support();
+  v_ticket ops.support_tickets%rowtype;
+  v_resolution_version text;
+  v_reason text;
+  v_changes jsonb := '{}'::jsonb;
 begin
   perform private.lock_sync();
   select * into v_ticket from ops.support_tickets where id=p_id for update;
   if not found then perform private.fail('support_not_found'); end if;
   if p_expected_version is distinct from v_ticket.version then perform private.fail('support_conflict'); end if;
+  if p_reason is null then
+    perform private.fail('support_invalid');
+  end if;
+  v_reason := btrim(p_reason, E' \t\n\r\f' || chr(11) || chr(160) || chr(5760) || chr(8192) || chr(8193) || chr(8194)
+    || chr(8195) || chr(8196) || chr(8197) || chr(8198) || chr(8199) || chr(8200) || chr(8201) || chr(8202)
+    || chr(8232) || chr(8233) || chr(8239) || chr(8287) || chr(12288) || chr(65279));
+  if length(v_reason) not between 1 and 500 then perform private.fail('support_invalid'); end if;
   if p_status is null or p_status not in ('new','reviewing','planned','resolved','closed')
     or p_priority is null or p_priority not in ('low','normal','high')
     or length(coalesce(p_resolution_version,'')) > 80
@@ -206,9 +220,21 @@ begin
     or (p_related_id is not null and (p_related_id=p_id or not exists(select 1 from ops.support_tickets where id=p_related_id))) then
     perform private.fail('support_invalid');
   end if;
+  v_resolution_version := nullif(btrim(p_resolution_version),'');
+  v_changes := v_changes || case when v_ticket.status is distinct from p_status
+    then jsonb_build_object('status',jsonb_build_object('before',v_ticket.status,'after',p_status)) else '{}'::jsonb end;
+  v_changes := v_changes || case when v_ticket.priority is distinct from p_priority
+    then jsonb_build_object('priority',jsonb_build_object('before',v_ticket.priority,'after',p_priority)) else '{}'::jsonb end;
+  v_changes := v_changes || case when v_ticket.assignee is distinct from p_assignee
+    then jsonb_build_object('assignee',jsonb_build_object('before',v_ticket.assignee,'after',p_assignee)) else '{}'::jsonb end;
+  v_changes := v_changes || case when v_ticket.related_id is distinct from p_related_id
+    then jsonb_build_object('related_id',jsonb_build_object('before',v_ticket.related_id,'after',p_related_id)) else '{}'::jsonb end;
+  v_changes := v_changes || case when v_ticket.resolution_version is distinct from v_resolution_version
+    then jsonb_build_object('resolution_version',jsonb_build_object('before',v_ticket.resolution_version,'after',v_resolution_version)) else '{}'::jsonb end;
   update ops.support_tickets set status=p_status,priority=p_priority,assignee=p_assignee,related_id=p_related_id,
-    resolution_version=nullif(btrim(p_resolution_version),''),version=version+1,updated_at=clock_timestamp() where id=p_id;
-  insert into ops.support_audit(actor_id,ticket_id,action) values(v_actor,p_id,'update:' || v_ticket.status || '->' || p_status);
+    resolution_version=v_resolution_version,version=version+1,updated_at=clock_timestamp() where id=p_id;
+  insert into ops.support_audit(actor_id,ticket_id,action,reason,changes)
+    values(v_actor,p_id,'ticket_update',v_reason,v_changes);
   return private.support_ticket_json(p_id,true);
 end;
 $$;
@@ -232,7 +258,9 @@ begin
   else
     insert into ops.support_messages(id,ticket_id,author_id,body,internal) values(p_message_id,p_id,v_actor,btrim(p_body),p_internal);
     update ops.support_tickets set version=version+1,updated_at=clock_timestamp() where id=p_id;
-    insert into ops.support_audit(actor_id,ticket_id,action) values(v_actor,p_id,case when p_internal then 'internal_note' else 'user_reply' end);
+    insert into ops.support_audit(actor_id,ticket_id,action,reason)
+      values(v_actor,p_id,case when p_internal then 'internal_note' else 'user_reply' end,
+        case when p_internal then 'internal_note' else 'user_reply' end);
   end if;
   return private.support_ticket_json(p_id,true);
 end;
@@ -242,11 +270,11 @@ revoke all on function private.require_support(), private.support_budget(text,in
   private.support_ticket_json(uuid,boolean) from public,anon,authenticated;
 revoke all on function public.submit_support(uuid,text,text,text,text,text,jsonb), public.my_support_tickets(),
   public.admin_support_members(), public.admin_support_list(text,text),public.admin_support_ticket(uuid),
-  public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint),public.admin_support_message(uuid,uuid,text,boolean)
+  public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint,text),public.admin_support_message(uuid,uuid,text,boolean)
   from public,anon,authenticated;
 grant execute on function public.submit_support(uuid,text,text,text,text,text,jsonb) to anon,authenticated;
 grant execute on function public.my_support_tickets(),public.admin_support_members(),public.admin_support_list(text,text),
-  public.admin_support_ticket(uuid),public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint),
+  public.admin_support_ticket(uuid),public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint,text),
   public.admin_support_message(uuid,uuid,text,boolean) to authenticated;
 
 -- Geschlossene Meldungen 180 Tage, Audit ein Jahr; offene Vorgänge bleiben bis zum Abschluss erhalten.
@@ -271,8 +299,8 @@ end $$;
 -- Begrenzte RPC-Laufzeiten wie beim bestehenden Backend; keine Sperrwarteschlange durch Gastverkehr.
 alter function public.submit_support(uuid,text,text,text,text,text,jsonb) set lock_timeout = '500ms';
 alter function public.submit_support(uuid,text,text,text,text,text,jsonb) set statement_timeout = '3s';
-alter function public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint) set lock_timeout = '2s';
-alter function public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint) set statement_timeout = '5s';
+alter function public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint,text) set lock_timeout = '2s';
+alter function public.admin_support_update(uuid,text,text,uuid,uuid,text,bigint,text) set statement_timeout = '5s';
 alter function public.admin_support_message(uuid,uuid,text,boolean) set lock_timeout = '2s';
 alter function public.admin_support_message(uuid,uuid,text,boolean) set statement_timeout = '5s';
 

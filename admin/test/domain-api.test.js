@@ -35,7 +35,7 @@ test("ticket update helper sends a complete snapshot and enforces bug resolution
     status: "resolved", priority: "high", assignee: "", relatedId: "", resolutionVersion: "",
   }), (error) => error instanceof SupportError && error.code === "resolution-version-required");
   assert.deepEqual(buildTicketUpdateArgs(bug, {
-    status: "resolved", priority: "high", assignee: memberId, relatedId: "", resolutionVersion: " 2.3.1 ",
+    status: "resolved", priority: "high", assignee: memberId, relatedId: "", resolutionVersion: " 2.3.1 ", reason: "  Correct owner and priority.  ",
   }), {
     p_id: ticketId,
     p_status: "resolved",
@@ -44,10 +44,17 @@ test("ticket update helper sends a complete snapshot and enforces bug resolution
     p_related_id: null,
     p_resolution_version: "2.3.1",
     p_expected_version: 7,
+    p_reason: "Correct owner and priority.",
   });
   assert.throws(() => buildTicketUpdateArgs({ ...bug, version: 1 }, {
-    status: "new", priority: "normal", assignee: "", relatedId: ticketId, resolutionVersion: "",
+    status: "new", priority: "normal", assignee: "", relatedId: ticketId, resolutionVersion: "", reason: "Keep the reason valid for this check.",
   }), (error) => error.code === "support_invalid");
+  assert.throws(() => buildTicketUpdateArgs(bug, {
+    status: "new", priority: "normal", assignee: "", relatedId: "", resolutionVersion: "", reason: " \n ",
+  }), (error) => error.code === "update-reason-required");
+  assert.throws(() => buildTicketUpdateArgs(bug, {
+    status: "new", priority: "normal", assignee: "", relatedId: "", resolutionVersion: "", reason: "x".repeat(501),
+  }), (error) => error.code === "update-reason-too-long");
 });
 
 test("message helper enforces the limit and freezes an immutable idempotency payload", () => {
@@ -88,13 +95,17 @@ test("RPC adapter uses the settled names and argument shapes", async () => {
   await api.listTickets({ status: "new", search: "needle" });
   await api.getTicket(ticketId);
   await api.listMembers();
-  await api.updateTicket({ p_id: ticketId, p_status: "new" });
+  const updateArgs = {
+    p_id: ticketId, p_status: "new", p_priority: "normal", p_assignee: null, p_related_id: null,
+    p_resolution_version: null, p_expected_version: 1, p_reason: "Test the saved reason.",
+  };
+  await api.updateTicket(updateArgs);
   await api.sendMessage({ p_id: ticketId, p_internal: true });
   assert.deepEqual(calls, [
     { name: "admin_support_list", args: { p_status: "new", p_search: "needle" } },
     { name: "admin_support_ticket", args: { p_id: ticketId } },
     { name: "admin_support_members", args: {} },
-    { name: "admin_support_update", args: { p_id: ticketId, p_status: "new" } },
+    { name: "admin_support_update", args: updateArgs },
     { name: "admin_support_message", args: { p_id: ticketId, p_internal: true } },
   ]);
 });

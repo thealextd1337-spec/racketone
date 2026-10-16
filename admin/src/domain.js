@@ -21,6 +21,9 @@ export function validateTicketUpdate(ticket, fields) {
   if (fields.assignee && !isUuid(fields.assignee)) return "support_invalid";
   if (fields.relatedId && (!isUuid(fields.relatedId) || fields.relatedId === ticket.id)) return "support_invalid";
   if (!Number.isSafeInteger(Number(ticket.version)) || Number(ticket.version) < 0) return "support_invalid";
+  const reason = String(fields.reason ?? "").trim();
+  if (!reason) return "update-reason-required";
+  if (Array.from(reason).length > 500) return "update-reason-too-long";
   return null;
 }
 
@@ -35,6 +38,7 @@ export function buildTicketUpdateArgs(ticket, fields) {
     p_related_id: fields.relatedId || null,
     p_resolution_version: String(fields.resolutionVersion ?? "").trim() || null,
     p_expected_version: Number(ticket.version),
+    p_reason: String(fields.reason).trim(),
   };
 }
 

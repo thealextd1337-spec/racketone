@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { AdminController } from "../src/controller.js";
 import { SupportError } from "../src/domain.js";
+import { translate } from "../src/i18n.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -23,11 +24,19 @@ class FakeView {
     this.handlers = new Map();
     this.publicConfirmations = [];
     this.publicConfirmationHidden = 0;
+    this.renderCount = 0;
+    this.composerRendered = null;
   }
   on(name, callback) { this.handlers.set(name, callback); }
   off(name) { this.handlers.delete(name); }
-  render(state) {
+  render(state, data = {}) {
+    this.renderCount += 1;
     this.state = structuredClone(state);
+    const draft = data.composers?.get(state.selectedId) ?? { mode: "internal" };
+    this.composerRendered = state.ticket ? {
+      mode: draft.mode,
+      buttonLabel: translate(state.language, draft.mode === "internal" ? "sendNote" : "sendReply"),
+    } : null;
   }
   showPublicConfirmation(body) { this.publicConfirmations.push(body); }
   hidePublicConfirmation() { this.publicConfirmationHidden += 1; }
@@ -240,6 +249,52 @@ test("public response waits for confirmation; internal notes stay internal by de
   assert.equal(harness.calls.sendMessage[1].p_internal, true);
 });
 
+test("composer mode changes render the localized send button once and keep the draft", async () => {
+  const auth = {
+    async signIn(email) { return { kind: "setup", email, factorId: "factor", qrCode: qrOld, secret: "secret" }; },
+    async verifyTotp() { return { aal: "aal2" }; },
+    async signOut() {},
+    onAuthStateChange() { return () => {}; },
+  };
+  const ownerId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const harness = apiHarness({
+    async getTicket(id) { return ticket(id, 1, ownerId); },
+  });
+  const { controller, view } = controllerHarness(auth, harness.api);
+  await controller.signIn("operator@example.test", "password");
+  await controller.verifyTotp("123456");
+  await controller.selectTicket(ticketId);
+
+  for (const language of ["en", "de"]) {
+    controller.setLanguage(language);
+    assert.deepEqual(view.composerRendered, {
+      mode: "internal",
+      buttonLabel: language === "en" ? "Add internal note" : "Interne Notiz hinzufügen",
+    });
+    let renders = view.renderCount;
+    controller.setComposer({ body: `${language} internal draft` });
+    assert.equal(view.renderCount, renders, "typing does not rerender the composer");
+
+    controller.setComposer({ body: `${language} public draft`, mode: "public" });
+    assert.equal(view.renderCount, renders + 1, "a real mode change rerenders once");
+    assert.deepEqual(view.composerRendered, {
+      mode: "public",
+      buttonLabel: language === "en" ? "Review public response" : "Öffentliche Antwort prüfen",
+    });
+    assert.equal(controller.composers.get(ticketId).body, `${language} public draft`);
+
+    renders = view.renderCount;
+    controller.setComposer({ body: `${language} edited public draft`, mode: "public" });
+    assert.equal(view.renderCount, renders, "typing in public mode does not rerender");
+    controller.setComposer({ body: `${language} internal note`, mode: "internal" });
+    assert.equal(view.renderCount, renders + 1);
+    assert.deepEqual(view.composerRendered, {
+      mode: "internal",
+      buttonLabel: language === "en" ? "Add internal note" : "Interne Notiz hinzufügen",
+    });
+  }
+});
+
 test("guest tickets reject public confirmation and direct sends but allow internal notes", async () => {
   const auth = {
     async signIn(email) { return { kind: "setup", email, factorId: "factor", qrCode: qrOld, secret: "secret" }; },
@@ -319,13 +374,49 @@ test("version conflict reloads detail and keeps the reply draft", async () => {
   await controller.verifyTotp("123456");
   await controller.selectTicket(ticketId);
   controller.setComposer({ body: "Draft that must survive the reload" });
-  await controller.saveTicket({ status: "reviewing", priority: "high", assignee: "", relatedId: "", resolutionVersion: "" });
+  await controller.saveTicket({ status: "reviewing", priority: "high", assignee: "", relatedId: "", resolutionVersion: "", reason: "Preserve the review rationale." });
 
   assert.equal(harness.calls.updateTicket.length, 1);
   assert.equal(harness.calls.updateTicket[0].p_expected_version, 1);
+  assert.equal(harness.calls.updateTicket[0].p_reason, "Preserve the review rationale.");
   assert.equal(controller.state.ticket.version, 2);
   assert.equal(controller.state.detailNotice, "conflict");
   assert.equal(controller.composers.get(ticketId).body, "Draft that must survive the reload");
+  assert.equal(controller.state.updateDraft.reason, "Preserve the review rationale.");
+});
+
+test("ticket update reason survives validation and RPC failures, then clears on success", async () => {
+  const auth = {
+    async signIn(email) { return { kind: "setup", email, factorId: "factor", qrCode: qrOld, secret: "secret" }; },
+    async verifyTotp() { return { aal: "aal2" }; },
+    async signOut() {},
+    onAuthStateChange() { return () => {}; },
+  };
+  let updateAttempts = 0;
+  const harness = apiHarness({
+    async updateTicket(args) {
+      harness.calls.updateTicket.push(args);
+      if (updateAttempts++ === 0) throw new SupportError("support_unavailable");
+      return ticket(args.p_id, args.p_expected_version + 1);
+    },
+  });
+  const { controller } = controllerHarness(auth, harness.api);
+  await controller.signIn("operator@example.test", "password");
+  await controller.verifyTotp("123456");
+  await controller.selectTicket(ticketId);
+
+  const reason = "Move this request to review.";
+  await controller.saveTicket({ status: "invalid", priority: "normal", assignee: "", relatedId: "", resolutionVersion: "", reason });
+  assert.equal(harness.calls.updateTicket.length, 0);
+  assert.equal(controller.state.updateDraft.reason, reason);
+
+  await controller.saveTicket({ status: "reviewing", priority: "high", assignee: "", relatedId: "", resolutionVersion: "", reason });
+  assert.equal(harness.calls.updateTicket[0].p_reason, reason);
+  assert.equal(controller.state.updateDraft.reason, reason);
+
+  await controller.saveTicket({ status: "reviewing", priority: "high", assignee: "", relatedId: "", resolutionVersion: "", reason });
+  assert.equal(harness.calls.updateTicket[1].p_reason, reason);
+  assert.equal(controller.state.updateDraft.reason, "");
 });
 
 test("list and detail epochs discard responses that finish after logout", async () => {

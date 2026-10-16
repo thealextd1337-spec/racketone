@@ -511,6 +511,9 @@ export class AdminView {
     related.dataset.ticketField = "relatedId"; related.autocapitalize = "none"; related.spellcheck = false;
     const resolution = fieldInput({ value: draft.resolutionVersion, placeholder: translate(state.language, "versionPlaceholder"), name: "resolutionVersion", focusKey: "resolution-version", maxLength: 80 });
     resolution.dataset.ticketField = "resolutionVersion";
+    const reason = fieldInput({ value: draft.reason, placeholder: translate(state.language, "updateReasonPlaceholder"), name: "reason", focusKey: "update-reason", required: true, maxLength: 500 });
+    reason.dataset.ticketField = "reason";
+    reason.setAttribute("aria-describedby", "update-reason-hint");
     const grid = node("div", "update-form__grid");
     grid.append(
       addFieldLabel(translate(state.language, "status"), status),
@@ -519,7 +522,10 @@ export class AdminView {
       addFieldLabel(translate(state.language, "relatedTicket"), related),
       addFieldLabel(translate(state.language, "resolutionVersion"), resolution),
     );
-    form.append(grid);
+    form.append(grid, addFieldLabel(translate(state.language, "updateReason"), reason));
+    const reasonHint = node("p", "field-hint", translate(state.language, "updateReasonHint"));
+    reasonHint.id = "update-reason-hint";
+    form.append(reasonHint);
     if (ticket.category === "bug" && draft.status === "resolved" && !String(draft.resolutionVersion ?? "").trim()) {
       form.append(node("p", "field-hint field-hint--warning", translate(state.language, "bugResolutionRequired")));
     }
@@ -593,6 +599,7 @@ export class AdminView {
     for (const mode of ["internal", "public"]) {
       const input = node("input", "");
       input.type = "radio"; input.name = "messageMode"; input.value = mode; input.checked = draft.mode === mode; input.dataset.composerMode = "true";
+      setFocusKey(input, `composer-mode-${mode}`);
       input.disabled = mode === "public" && guestTicket;
       const label = node("label", `composer-mode composer-mode--${mode}`);
       label.append(input, node("span", "composer-mode__title", translate(state.language, mode === "internal" ? "internalNote" : "publicReply")));

@@ -74,6 +74,53 @@ test("guest composer disables public replies and explains the in-app limitation 
     );
     const ownedPublicMode = descendants(ownedTree).find((element) => element.tagName === "input" && element.value === "public");
     assert.equal(ownedPublicMode.disabled, false);
+    assert.equal(ownedPublicMode.dataset.focusKey, "composer-mode-public");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
+
+test("ticket update reason is required, bounded, and warned in both languages", () => {
+  class Element {
+    constructor(tag) {
+      this.tagName = tag;
+      this.children = [];
+      this.dataset = {};
+      this.attributes = new Map();
+    }
+    append(...children) { this.children.push(...children); }
+    setAttribute(name, value) { this.attributes.set(name, value); }
+  }
+
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tag) => new Element(tag),
+    createElementNS: (_namespace, tag) => new Element(tag),
+  };
+  try {
+    const view = Object.create(AdminView.prototype);
+    const descendants = (element) => [element, ...element.children.flatMap(descendants)];
+    for (const language of ["de", "en"]) {
+      const tree = view.renderUpdateForm(
+        { language, updateDraft: { status: "new", priority: "normal", assignee: "", relatedId: "", resolutionVersion: "", reason: "Existing reason" } },
+        { category: "feedback" },
+        [],
+      );
+      const elements = descendants(tree);
+      const reason = elements.find((element) => element.tagName === "input" && element.name === "reason");
+      const hint = elements.find((element) => element.id === "update-reason-hint");
+      const label = elements.find((element) => element.tagName === "label" && element.children.includes(reason));
+
+      assert.equal(reason.required, true);
+      assert.equal(reason.maxLength, 500);
+      assert.equal(reason.value, "Existing reason");
+      assert.equal(reason.dataset.ticketField, "reason");
+      assert.equal(reason.attributes.get("aria-describedby"), "update-reason-hint");
+      assert.equal(label.children[0].textContent, translate(language, "updateReason"));
+      assert.equal(hint.textContent, translate(language, "updateReasonHint"));
+      assert.match(hint.textContent, language === "de" ? /personenbezogenen oder sensiblen Daten/ : /personal or sensitive information/);
+    }
   } finally {
     if (previousDocument === undefined) delete globalThis.document;
     else globalThis.document = previousDocument;

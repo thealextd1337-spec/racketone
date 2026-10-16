@@ -37,11 +37,35 @@ select throws_ok('select public.admin_support_list()','P0001','support_mfa_requi
 select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);
 select is(jsonb_array_length(public.admin_support_list()),2,'Operator mit MFA sieht Inbox');
 select is(jsonb_array_length(public.admin_support_members()),1,'Nur aktive Operatoren zuweisbar');
-select is(public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','high',tests.uid('operator'),null,null,1)->>'status','planned','Statusänderung mit passender Version');
-select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','closed','normal',null,null,null,1)$$,'P0001','support_conflict','Veraltete Version überschreibt keine Änderungen');
-select throws_ok($$select public.admin_support_update('10000000-0000-4000-8000-000000000001','resolved','normal',null,null,null,1)$$,'P0001','support_invalid','Behobener Fehler braucht Versionsbezug');
-select is(public.admin_support_update('10000000-0000-4000-8000-000000000001','resolved','normal',null,null,'1.2.3',1)->>'resolution_version','1.2.3','Fehler mit Versionsbezug abschließbar');
+select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','high',tests.uid('operator'),null,null,1,null)$$,'P0001','support_invalid','Fehlende Änderungsbegründung abgewiesen');
+select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','high',tests.uid('operator'),null,null,1,' ' || chr(160) || E'\t')$$,'P0001','support_invalid','Leere Änderungsbegründung abgewiesen');
+select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','high',tests.uid('operator'),null,null,1,repeat('x',501))$$,'P0001','support_invalid','Zu lange Änderungsbegründung abgewiesen');
 reset role;
+select is((select version::int from ops.support_tickets where id='20000000-0000-4000-8000-000000000001'),1,'Ungültige Begründungen ändern keine Version');
+select is((select count(*)::int from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001'),0,'Ungültige Begründungen erzeugen kein Audit');
+select tests.authenticate_as('operator');
+select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);
+select is(public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','high',tests.uid('operator'),null,null,1,'  Triage ownership.  ')->>'status','planned','Statusänderung mit passender Version');
+select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','closed','normal',null,null,null,1,'Stale request')$$,'P0001','support_conflict','Veraltete Version überschreibt keine Änderungen');
+select is(public.admin_support_update('10000000-0000-4000-8000-000000000001','resolved','normal',null,null,'1.2.3',1,'Fixed in release 1.2.3')->>'resolution_version','1.2.3','Fehler mit Versionsbezug abschließbar');
+select is(public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','normal',tests.uid('operator'),null,null,2,'Lower after triage')->>'version','3','Prioritätsänderung erhöht die Version');
+select is(public.admin_support_update('20000000-0000-4000-8000-000000000001','planned','normal',null,'10000000-0000-4000-8000-000000000001',null,3,'Link related report')->>'version','4','Zuweisung und Verknüpfung ändern die Version');
+reset role;
+select is((select reason from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and reason='Triage ownership.'),'Triage ownership.','Änderungsbegründung wird getrimmt gespeichert');
+select is((select changes from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and reason='Triage ownership.'),
+  jsonb_build_object('status',jsonb_build_object('before','new','after','planned'),
+    'priority',jsonb_build_object('before','normal','after','high'),
+    'assignee',jsonb_build_object('before',null,'after',tests.uid('operator'))),
+  'Statusänderung protokolliert nur geänderte Verwaltungsfelder');
+select is((select changes from ops.support_audit where ticket_id='10000000-0000-4000-8000-000000000001' and action='ticket_update'),
+  '{"status":{"before":"new","after":"resolved"},"resolution_version":{"before":null,"after":"1.2.3"}}'::jsonb,
+  'Status und normalisierte Versionsangabe werden exakt protokolliert');
+select is((select changes from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and reason='Lower after triage'),
+  '{"priority":{"before":"high","after":"normal"}}'::jsonb,'Prioritätsänderung protokolliert ausschließlich vorher/nachher');
+select is((select changes from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and reason='Link related report'),
+  jsonb_build_object('assignee',jsonb_build_object('before',tests.uid('operator'),'after',null),
+    'related_id',jsonb_build_object('before',null,'after','10000000-0000-4000-8000-000000000001')),
+  'Zuweisung und Verknüpfung protokollieren auch Nullwerte');
 select is((select version::int from ops.support_tickets where id='10000000-0000-4000-8000-000000000001'),2,'Gastmeldungsversion vor öffentlicher Antwort');
 select is((select count(*)::int from ops.support_messages where ticket_id='10000000-0000-4000-8000-000000000001'),0,'Gastmeldung ohne Nachrichten vor öffentlicher Antwort');
 select is((select count(*)::int from ops.support_audit where ticket_id='10000000-0000-4000-8000-000000000001'),1,'Gastmeldungsaudit vor öffentlicher Antwort');
@@ -55,10 +79,10 @@ select is((select count(*)::int from ops.support_audit where ticket_id='10000000
 select tests.authenticate_as('operator');
 select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);
 select is(public.admin_support_message('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000004','Interne Notiz zur Gastmeldung',true)->>'version','3','Interne Notiz zu Gastmeldung erlaubt');
-select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','3','Interne Notiz erzeugt Version');
-select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','3','Notiz-Retry bleibt idempotent');
+select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','5','Interne Notiz erzeugt Version');
+select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','5','Notiz-Retry bleibt idempotent');
 select throws_ok($$select public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',false)$$,'P0001','support_conflict','Retry darf Sichtbarkeit nicht ändern');
-select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','Antwort',false)->>'version','4','Öffentliche Antwort angelegt');
+select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','Antwort',false)->>'version','6','Öffentliche Antwort angelegt');
 select is(jsonb_array_length(public.admin_support_ticket('20000000-0000-4000-8000-000000000001')->'messages'),2,'Operator sieht beide Nachrichtentypen');
 select tests.authenticate_as('support_owner');
 select is(jsonb_array_length(public.my_support_tickets()->0->'messages'),1,'Eigentümer sieht ausschließlich die öffentliche Antwort');
@@ -67,7 +91,9 @@ select ok(not (public.my_support_tickets()->0 ? 'assignee'),'Interne Zuordnung b
 select is(jsonb_array_length(public.export_my_data()->'support'),1,'Kontoexport umfasst eigene Meldungen');
 select ok((public.export_my_data()->'support')::text not like '%Intern%','Export enthält keine internen Notizen');
 reset role;
-select is((select count(*)::int from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001'),3,'Audit zählt Änderung und zwei Nachrichten einmal');
+select is((select count(*)::int from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001'),5,'Audit zählt drei Änderungen und zwei Nachrichten einmal');
+select is((select reason from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and action='internal_note'),'internal_note','Interne Nachricht protokolliert nur ihre feste Einordnung');
+select is((select reason from ops.support_audit where ticket_id='20000000-0000-4000-8000-000000000001' and action='user_reply'),'user_reply','Öffentliche Nachricht protokolliert nur ihre feste Einordnung');
 update ops.support_members set revoked_at=now() where id=tests.uid('operator');
 select tests.authenticate_as('operator');
 select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);

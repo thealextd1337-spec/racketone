@@ -56,6 +56,8 @@ function noticeForError(error, fallback = "genericError") {
     case "support_guest_reply_unavailable": return "guestPublicReplyUnavailable";
     case "message-required": return "messageRequired";
     case "message-too-long": return "messageTooLong";
+    case "update-reason-required": return "updateReasonRequired";
+    case "update-reason-too-long": return "updateReasonTooLong";
     default: return fallback;
   }
 }
@@ -76,6 +78,7 @@ function updateDraftFor(ticket) {
     assignee: ticket.assignee ?? "",
     relatedId: ticket.related_id ?? "",
     resolutionVersion: ticket.resolution_version ?? "",
+    reason: "",
   };
 }
 
@@ -310,25 +313,26 @@ export class AdminController {
     await this.fetchTicket(id, request, session);
   }
 
-  async loadTicket(id, { preserveNotice = false } = {}) {
+  async loadTicket(id, { preserveNotice = false, preserveReason = false } = {}) {
     if (!this.hasAccess() || id !== this.state.selectedId) return;
     const request = this.detailEpoch.next();
     const session = this.sessionToken;
     const currentNotice = preserveNotice ? this.state.detailNotice : null;
+    const currentReason = preserveReason ? this.state.updateDraft?.reason ?? "" : "";
     this.state.detailLoading = true;
     this.state.detailError = null;
     if (!preserveNotice) this.state.detailNotice = null;
     this.render();
-    await this.fetchTicket(id, request, session, currentNotice);
+    await this.fetchTicket(id, request, session, currentNotice, currentReason);
   }
 
-  async fetchTicket(id, request, session, preservedNotice = null) {
+  async fetchTicket(id, request, session, preservedNotice = null, preservedReason = "") {
     try {
       const ticket = await this.api.getTicket(id);
       if (!this.detailEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session) || this.state.selectedId !== id) return;
       if (!ticket || ticket.id !== id) throw new SupportError("support_not_found");
       this.state.ticket = ticket;
-      this.state.updateDraft = updateDraftFor(ticket);
+      this.state.updateDraft = { ...updateDraftFor(ticket), reason: preservedReason };
       this.state.detailLoading = false;
       this.state.detailNotice = preservedNotice;
       this.render();
@@ -374,6 +378,7 @@ export class AdminController {
 
   async saveTicket(fields) {
     if (!this.hasAccess() || this.state.saving || !this.state.ticket) return;
+    if (fields && this.state.updateDraft) this.state.updateDraft = { ...this.state.updateDraft, ...fields };
     let args;
     try {
       args = buildTicketUpdateArgs(this.state.ticket, fields ?? this.state.updateDraft);
@@ -412,7 +417,7 @@ export class AdminController {
       if (error?.code === "support_conflict") {
         this.state.detailNotice = "conflict";
         this.render();
-        await this.loadTicket(ticketId, { preserveNotice: true });
+        await this.loadTicket(ticketId, { preserveNotice: true, preserveReason: true });
         return;
       }
       this.state.detailNotice = noticeForError(error, "genericError");
@@ -435,9 +440,11 @@ export class AdminController {
   setComposer(payload) {
     if (!this.hasAccess() || !this.state.selectedId || this.pendingMessages.has(this.state.selectedId)) return;
     const current = composerState(this.composers, this.state.selectedId);
+    const previousMode = current.mode;
     if (typeof payload?.body === "string") current.body = payload.body.slice(0, 4000);
     if (payload?.mode === "internal" || payload?.mode === "public") current.mode = payload.mode;
     current.error = null;
+    if (current.mode !== previousMode) this.render();
   }
 
   async sendMessage() {
