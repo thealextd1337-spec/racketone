@@ -19,6 +19,8 @@ import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.serverChoiceContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -184,6 +186,7 @@ data class LiveMatchSnapshot(
     val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
     val nextSetOptions: List<NextSetKind> = emptyList(),
     val onWatch: Boolean = false,
+    val canCorrectServerRetroactively: Boolean = true,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 
@@ -195,6 +198,9 @@ data class LiveMatchSnapshot(
 
     /** Aufschlägerwahl offen und noch nicht getroffen (Hinweis „Wer schlägt auf?“, blockiert das Zählen nicht). */
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
+
+    /** Lokaler Kontext für das Auswahl-Sheet; vor dem Kommando unverändert zurückgeben. */
+    val serverChoiceContext: ServerChoiceContext? get() = serverChoiceContext(matchId, state)
 }
 
 /**
@@ -348,6 +354,12 @@ interface LiveMatchPort {
     /** Aufschlägerwahl im Doppel (02 §6.5.5): [player] aus `state.serverChoice.players`. Nur Zähler. */
     fun chooseServer(player: PlayerId): Boolean
 
+    /** Stale Sheet-Taps ohne Event abweisen; die gleiche noch wirksame Wahl bleibt idempotent. */
+    fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext,
+    ): Boolean
+
     /**
      * Aufschlag-Info für den Punkt [pointId] setzen/ändern/löschen (`null`), 02 §7.2: nur bei
      * [LiveMatchSnapshot.serveInfoEnabled], `DOUBLE_FAULT` nur für Punkte der Rückschlagseite. Nur Zähler.
@@ -379,7 +391,10 @@ interface LiveMatchPort {
      */
     fun abandonMatch(): Boolean
 
-    /** Aufschläger korrigieren: [retroactive] = `Correction(INITIAL_SERVER)` (ab Beginn), sonst `Correction(SERVER)` (ab jetzt). */
+    /**
+     * Aufschläger korrigieren: [retroactive] = INITIAL_SERVER (ab Beginn), sonst SERVER (ab jetzt).
+     * Rückwirkend nur bei [LiveMatchSnapshot.canCorrectServerRetroactively], sonst `false` ohne Event.
+     */
     fun correctServer(
         player: PlayerId,
         retroactive: Boolean,

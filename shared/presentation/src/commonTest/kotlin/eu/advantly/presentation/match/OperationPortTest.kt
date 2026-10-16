@@ -14,6 +14,7 @@ import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.presentation.stats.MatchStatistics
 import eu.advantly.presentation.stats.Ratio
 import eu.advantly.presentation.stats.ServeStats
@@ -27,6 +28,78 @@ import kotlin.test.assertTrue
 /** Port-Kommandos „Bedienung & Statistik“ (Feldtest 2026-10-15) über die engine-gestützte In-Memory-Implementierung. */
 class OperationPortTest {
     private val InMemoryMatchStore.snap get() = assertNotNull(active.value)
+
+    @Test
+    fun expectedChoiceContextIsSafeAcrossPhaseMatchAndCorrection() {
+        val store = testStore()
+        val setup = store.setupFor(Presets.PADEL_GOLDEN_BO3.format())
+        val id = store.start(setup)
+        val first = assertNotNull(store.snap.serverChoiceContext)
+        assertEquals(ServerChoicePhase.FIRST, first.phase)
+        assertEquals(setup.lineup.firstServer, first.defaultServer)
+        val opponent = setup.lineup.b.last()
+        val count = assertNotNull(store.record(id)).events.size
+        assertTrue(store.chooseServer(opponent, first))
+        assertTrue(store.chooseServer(opponent, first), "Doppeltap trotz geändertem eröffnendem Team")
+        assertEquals(count + 1, assertNotNull(store.record(id)).events.size)
+        assertFalse(store.snap.canCorrectServerRetroactively)
+        assertFalse(store.correctServer(setup.lineup.a.first(), retroactive = true))
+        assertEquals(count + 1, assertNotNull(store.record(id)).events.size)
+        val chosen = assertNotNull(store.snap.serverChoiceContext)
+        assertTrue(store.correctServer(setup.lineup.b.first(), retroactive = false))
+        assertNull(store.snap.serverChoiceContext?.chosen)
+        val correctedCount = assertNotNull(store.record(id)).events.size
+        assertFalse(store.chooseServer(opponent, chosen))
+        assertEquals(correctedCount, assertNotNull(store.record(id)).events.size)
+
+        store.play("BBBB")
+        val second = assertNotNull(store.snap.serverChoiceContext)
+        assertEquals(ServerChoicePhase.SECOND, second.phase)
+        val secondPlayer = setup.lineup.a.last()
+        val secondCount = assertNotNull(store.record(id)).events.size
+        assertFalse(store.chooseServer(secondPlayer, first), "Spieler in beiden Fenstern zulässig")
+        assertEquals(secondCount, assertNotNull(store.record(id)).events.size)
+        assertTrue(store.chooseServer(secondPlayer, second))
+        val nextId = store.start(setup)
+        val nextCount = assertNotNull(store.record(nextId)).events.size
+        assertFalse(store.chooseServer(secondPlayer, first), "gleiches Lineup, anderes Match")
+        assertEquals(nextCount, assertNotNull(store.record(nextId)).events.size)
+    }
+
+    @Test
+    fun forwardCorrectionAfterChoicePreservesPointServersAndUndoRedo() {
+        val store = testStore()
+        val setup = store.setupFor(Presets.PADEL_GOLDEN_BO3.format())
+        val id = store.start(setup)
+        val selected = setup.lineup.a.last()
+        val corrected = setup.lineup.b.last()
+        assertTrue(store.chooseServer(selected))
+        store.play("A")
+        val point = assertNotNull(store.snap.lastPoint)
+        assertTrue(store.correctServer(corrected, retroactive = false))
+        assertEquals(
+            corrected,
+            store.snap.state.serve
+                ?.player,
+        )
+        assertEquals(selected, store.snap.lastPoint?.server)
+        val count = assertNotNull(store.record(id)).events.size
+        assertFalse(store.correctServer(corrected, retroactive = true))
+        assertEquals(count, assertNotNull(store.record(id)).events.size)
+        assertTrue(store.undo(), "Undo nimmt Vorwärtskorrektur zurück")
+        assertEquals(
+            selected,
+            store.snap.state.serve
+                ?.player,
+        )
+        assertTrue(store.redo())
+        assertEquals(
+            corrected,
+            store.snap.state.serve
+                ?.player,
+        )
+        assertEquals(point, store.snap.lastPoint)
+    }
 
     @Test
     fun removeLastPointOfSideAndRedo() {

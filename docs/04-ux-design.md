@@ -1,6 +1,6 @@
 # 04 – UX- & Designkonzept Advantly
 
-Stand: 2026-10-15 · Status: Entwurf v0.1 zur Abstimmung · Klickbarer Mockup: [mockups/index.html](mockups/index.html)
+Stand: 2026-10-16 · Status: Entwurf v0.1 zur Abstimmung · Klickbarer Mockup: [mockups/index.html](mockups/index.html)
 
 Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [02 Scoring-Regeln](02-scoring-regeln.md) · [05 Watches & Health](05-watches-health.md)
 

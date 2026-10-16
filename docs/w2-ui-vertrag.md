@@ -80,3 +80,53 @@ Verbindlich: [Plan](plan-aufschlagwahl.md), insbesondere §3.1 und §3.5. Tennis
 Kommandos aus einem Sheet müssen den erwarteten Fensterkontext übergeben und vor dem Schreiben abweisen, wenn Match, Satz, Phase, Side oder Spielermenge veraltet sind. Gleiche noch wirksame Wahl ist idempotent; falsche Rolle schreibt nichts. Bestehende parameterlose Kontext-Aufrufe bleiben kompatibel. Keine Wire-/Event-Änderung (Protokoll 3).
 
 Undo nimmt einen Punkt bzw. das bisherige undo-fähige Kommando zurück, nicht die Wahl. Über Game-/Satzgrenzen und bei null Ballwechseln gilt unverändert die Replay-Semantik aus 02 §6.5.5. Nach expliziter Wahl kann `INITIAL_SERVER` übersteuert werden: keine falsche Erfolgsmeldung. Erneute Wahl im offenen Fenster, sonst Vorwärtskorrektur **„ab jetzt“**; bereits gezählte Punkte und ihre Aufschläger bleiben dabei unverändert.
+
+### 6.1 API für AP3–AP6 (AP2)
+
+Gemeinsame Typen aus `eu.advantly.match.session` (kein Compose, keine Plattform- oder Wire-Typen):
+
+```kotlin
+enum class ServerChoicePhase { FIRST, SECOND }
+data class ServerChoiceContext(
+    val matchId: MatchId,
+    val setIndex: Int,                 // nullbasiert
+    val phase: ServerChoicePhase,
+    val players: List<PlayerId>,        // Engine-Reihenfolge, fälliges Team zuerst
+    val dueSide: Side,
+    val defaultServer: PlayerId,        // tatsächlicher Aufschläger bei „Später“
+    val chosen: PlayerId?,
+    val gameKind: GameKind,
+)
+fun serverChoiceContext(matchId: MatchId, state: MatchState): ServerChoiceContext?
+```
+
+`ActiveMatch.serverChoiceContext` und `LiveMatchSnapshot.serverChoiceContext` liefern dieselbe Ableitung; `null` bedeutet kein Fenster. `MatchSession` und `LiveMatchPort` (beide Store-Implementierungen) ergänzen:
+
+```kotlin
+fun chooseServer(player: PlayerId, expected: ServerChoiceContext): Boolean
+fun correctServer(player: PlayerId, retroactive: Boolean): Boolean
+```
+
+Der Einparameter-Aufruf `chooseServer(player)` bleibt erhalten; neue Sheets verwenden die Variante mit dem **beim Öffnen gespeicherten** Kontext. Die Prüfung erfolgt vor Schreiben/IDs/Broadcast: Match, Satz, Phase, `gameKind`, Spielermenge sowie fällige Side/Default/Markierung müssen passen. Eine gleiche noch wirksame Wahl ist mit dem ursprünglichen Kontext idempotent (kein Event), auch wenn sie die Team-/Spielerreihenfolge geändert hat. Ein falsches Match/eine andere Phase bleibt auch für denselben Spieler stale. Rolle wird vor der Idempotenz geprüft. Keine Bindung an Eventzahl, Statistik- oder Sync-Refresh; kein Wire-Feld.
+
+`ActiveMatch.canCorrectServerRetroactively` und `LiveMatchSnapshot.canCorrectServerRetroactively` signalisieren, ob eine rückwirkende Korrektur ohne übersteuernde eröffnende Wahl möglich ist. Der Schutz gilt auch bei direktem `MatchSession.correct(Correction.initialServer(...))`: `false` ohne Event/Redo-Verlust bei Kollision. Eine reine zweite Wahl sperrt den rückwirkenden Weg nicht. Im offenen Fenster neu wählen; anschließend `retroactive=false` klar als „ab jetzt“ beschriften. Vorwärtskorrekturen lassen historische Aufschlägerzuordnungen unverändert. Verfügbarkeit/Status/Zählerrolle sind zusätzlich zu beachten.
+
+Apple Watch (`WatchScoring.kt`, Main-/Session-Thread, ohne SKIE) erhält einfache Klassen/Werte:
+
+```kotlin
+class WatchServerChoiceContext(
+    val matchId: String, val setIndex: Int, val phase: String,
+    val players: List<String>, val dueSide: String,
+    val defaultServer: String, val chosen: String, val gameKind: String,
+)
+// WatchScoreSnapshot:
+val serverChoiceContext: WatchServerChoiceContext?
+val canCorrectServerRetroactively: Boolean
+// WatchScoring:
+fun chooseServer(playerId: String, expected: WatchServerChoiceContext): WatchScoreSnapshot?
+fun correctServer(playerId: String, retroactive: Boolean): WatchScoreSnapshot?
+```
+
+`phase` = `FIRST`/`SECOND`, `chosen` leer = keine Wahl, `dueSide` in **Besitzerperspektive** (`A` Wir / `B` Gegner), `gameKind` = Engine-Code. Den erhaltenen Kontext unverändert zurückgeben. `null` plus `NOT_ALLOWED` bei stale/ungültiger Wahl oder Korrekturkollision, `NOT_SCORER` bei falscher Rolle, `THREAD_VIOLATION` bei falschem Thread; leere Spieler-ID → `INVALID_INPUT`. Bisheriges `chooseServer(playerId)` und alle bisherigen Snapshot-Felder bleiben erhalten. Fehlende Personenauflösung entfernt keine wählbaren Platz-IDs; Namen dürfen leer sein (lokalisierter Platzhalter in Swift).
+
+AP2 stellt Daten und sichere Kommandos bereit. Automatische Sheet-Steuerung, lokale „Später“-Merker und die Entfernung der bisherigen ersten Prompt-Unterdrückung folgen in AP3–AP6. Die bestehende Apple-Eigenschaft `serverChoicePrompt` bleibt bis AP5 unverändert; neue Präsentation nicht allein daraus ableiten.

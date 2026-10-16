@@ -90,12 +90,16 @@ data class ActiveMatch(
     val serveInfoEnabled: Boolean = false,
     val canRemovePoint: SidePair<Boolean> = SidePair(false, false),
     val nextSetOptions: List<NextSetKind> = emptyList(),
+    val canCorrectServerRetroactively: Boolean = true,
 ) {
     /**
      * Offene Aufschlägerwahl im Doppel (02 §6.5.5) aus dem Engine-Zustand: `game` 1/2, Side, wählbare Spieler, bereits
      * gewählter Spieler. `null` = kein Wahlfenster.
      */
     val serverChoice: ServerChoice? get() = state.serverChoice
+
+    /** Lokaler Kontext für sichere Auswahlkommandos; auch auf Anzeige-Geräten lesbar. */
+    val serverChoiceContext: ServerChoiceContext? get() = serverChoiceContext(id, state)
 
     /** Eine Aufschlägerwahl ist offen und noch nicht getroffen – die UI fragt (ohne das Zählen zu blockieren). */
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true

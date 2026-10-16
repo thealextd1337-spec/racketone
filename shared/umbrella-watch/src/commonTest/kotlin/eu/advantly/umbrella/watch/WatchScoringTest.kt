@@ -107,6 +107,114 @@ private class Rig(
 
 class WatchScoringTest {
     @Test
+    fun flatChoiceContextRejectsStaleTapsAndKeepsRepeatedChoiceIdempotent() {
+        val rig = Rig()
+        val start = assertNotNull(rig.watch.startMatch("PADEL_GOLDEN_BO3", true, true, false))
+        val first = assertNotNull(start.serverChoiceContext)
+        assertEquals(start.matchId, first.matchId)
+        assertEquals(0, first.setIndex)
+        assertEquals("FIRST", first.phase)
+        assertEquals("STANDARD", first.gameKind)
+        assertEquals(start.server, first.defaultServer)
+        assertEquals(start.serverChoicePlayers.map { it.id }, first.players)
+        val opponent = start.serverChoicePlayers.last { it.side == "B" }.id
+        val selected = assertNotNull(rig.watch.chooseServer(opponent, first))
+        assertEquals(opponent, selected.serverChoiceContext?.chosen)
+        assertEquals("B", selected.serverChoiceContext?.dueSide)
+        assertEquals(selected.eventCount, assertNotNull(rig.watch.chooseServer(opponent, first)).eventCount)
+        rig.points("BBBB")
+        val second = assertNotNull(rig.watch.snapshot())
+        val context = assertNotNull(second.serverChoiceContext)
+        assertEquals("SECOND", context.phase)
+        val ours = context.players.last()
+        assertNull(rig.watch.chooseServer(ours, first), "in beiden Fenstern zulässig, aber stale")
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertEquals(second.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+        assertNotNull(rig.watch.chooseServer(ours, context))
+        rig.watch.close()
+        val next = assertNotNull(rig.watch.startMatch("PADEL_GOLDEN_BO3", true, true, false))
+        assertNull(rig.watch.chooseServer(next.server, first))
+        assertEquals(next.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+    }
+
+    @Test
+    fun choiceContextWorksWithoutPeopleAndUsesOwnerPerspective() {
+        val rig = Rig()
+        val owner =
+            rig.watchData.players
+                .ensureSelf("Alex", 0) { PlayerId("owner") }
+                .id
+        val lineup = Lineup(listOf(PlayerId("missing1"), PlayerId("missing2")), listOf(owner, PlayerId("missing3")), owner)
+        rig.watchSession.create(Presets.TENNIS_TIEBREAK_ONLY_7.format(Discipline.DOUBLES), lineup)
+        val snap = assertNotNull(rig.watch.snapshot())
+        val first = assertNotNull(snap.serverChoiceContext)
+        assertTrue(snap.perspectiveSwapped)
+        assertEquals("A", first.dueSide)
+        assertEquals("MATCH_TIEBREAK", first.gameKind)
+        assertEquals(4, snap.serverChoicePlayers.size)
+        assertEquals(3, snap.serverChoicePlayers.count { it.displayName.isEmpty() })
+        assertNotNull(rig.watch.chooseServer("missing3", first))
+        rig.watch.point(true)
+        val second = assertNotNull(assertNotNull(rig.watch.snapshot()).serverChoiceContext)
+        assertEquals("SECOND", second.phase)
+        assertEquals("B", second.dueSide)
+        val chosen = assertNotNull(rig.watch.chooseServer("missing2", second))
+        assertEquals("missing2", chosen.server)
+        assertNotNull(rig.watch.undo())
+        val reopened = assertNotNull(rig.watch.snapshot())
+        assertEquals("FIRST", reopened.serverChoiceContext?.phase)
+        assertEquals("missing2", reopened.serverChoiceContext?.defaultServer)
+        assertEquals("missing2", reopened.serverChoiceContext?.chosen)
+        assertNull(rig.watch.chooseServer("missing2", second))
+        assertEquals(reopened.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+    }
+
+    @Test
+    fun safeChoiceAndCorrectionRequireScorerAndSchedulerThread() {
+        val rig = Rig()
+        val start = assertNotNull(rig.watch.startMatch("PADEL_GOLDEN_BO3", true, true, false))
+        val first = assertNotNull(start.serverChoiceContext)
+        rig.schedulerThread = false
+        assertNull(rig.watch.chooseServer(first.players.last(), first))
+        assertEquals("THREAD_VIOLATION", rig.watch.lastError())
+        rig.schedulerThread = true
+        assertEquals(start.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+        assertTrue(rig.phone.takeOverScoring())
+        rig.settle()
+        val display = assertNotNull(rig.watch.snapshot())
+        assertFalse(display.isScorer)
+        assertNull(rig.watch.chooseServer(first.players.last(), first))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertNull(rig.watch.correctServer(first.players.last(), false))
+        assertEquals("NOT_SCORER", rig.watch.lastError())
+        assertEquals(display.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+    }
+
+    @Test
+    fun correctionReportsCollisionAndInvalidatesOpenChoiceContext() {
+        val rig = Rig()
+        val start = assertNotNull(rig.watch.startMatch("PADEL_GOLDEN_BO3", true, true, false))
+        val selected = start.serverChoicePlayers.first { it.side == "A" && it.id != start.server }.id
+        val chosen = assertNotNull(rig.watch.chooseServer(selected, assertNotNull(start.serverChoiceContext)))
+        assertFalse(chosen.canCorrectServerRetroactively)
+        assertNull(rig.watch.correctServer(start.server, true))
+        assertEquals("NOT_ALLOWED", rig.watch.lastError())
+        assertEquals(chosen.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+        val corrected = assertNotNull(rig.watch.correctServer(start.server, false))
+        assertEquals("", corrected.serverChoiceContext?.chosen)
+        assertEquals(start.server, corrected.serverChoiceContext?.defaultServer)
+        assertNull(rig.watch.chooseServer(selected, assertNotNull(chosen.serverChoiceContext)))
+        assertEquals(corrected.eventCount, assertNotNull(rig.watch.snapshot()).eventCount)
+        assertNotNull(rig.watch.chooseServer(selected, assertNotNull(corrected.serverChoiceContext)))
+        val point = assertNotNull(rig.watch.point(true))
+        val other = start.serverChoicePlayers.last { it.side == "B" }.id
+        val forward = assertNotNull(rig.watch.correctServer(other, false))
+        assertEquals(other, forward.server)
+        assertEquals(selected, forward.lastPointServer)
+        assertEquals(point.lastPointId, forward.lastPointId)
+    }
+
+    @Test
     fun presetsPerSportWithDefaultFirst() {
         val s = Rig().watch
         assertEquals(listOf("TENNIS", "PADEL", "PICKLEBALL", "BADMINTON", "TABLE_TENNIS"), s.sports())

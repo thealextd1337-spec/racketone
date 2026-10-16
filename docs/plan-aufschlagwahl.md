@@ -294,7 +294,7 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 
 ### AP1 – Vertrag und Regressionen festhalten
 
-**Stand 16.10.2026:** umgesetzt; sechs zusätzliche Engine-Regressionen, `:shared:core-scoring:jvmTest` und vollständiges `./gradlew check --console=plain` grün (JDK 21, Windows/Git Bash). Keine Änderung der Fold-Semantik. Die vorhergesagten Undo-/Korrekturbesonderheiten bestätigt; kein zusätzlicher Engine-Bug festgestellt.
+**Stand 16.10.2026:** umgesetzt in `d7dfe3e`; fünf zusätzliche Engine-Regressionen, `:shared:core-scoring:jvmTest` und vollständiges `./gradlew check --console=plain` grün (JDK 21, Windows/Git Bash). Keine Änderung der Fold-Semantik. Die vorhergesagten Undo-/Korrekturbesonderheiten bestätigt; kein zusätzlicher Engine-Bug festgestellt.
 
 **Dateien:** `docs/02-scoring-regeln.md`, `docs/w2-ui-vertrag.md`, `docs/04-ux-design.md`; core-scoring `OperationRulesTest.kt`, `ScorerRulesTest.kt`.
 
@@ -303,6 +303,10 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 **Abnahme:** Erwartete Zustände sind für alle genannten Fälle explizit belegt; Dokumentation unterscheidet Standardregel, bestehende Freizeitregel und UI-Verhalten.
 
 ### AP2 – Gemeinsamer Wahlkontext und sichere Kommandos
+
+**Stand 16.10.2026:** umgesetzt; `ServerChoiceContext.kt` in match-session, kompatible sichere Auswahl-Overloads in Session/Ports/Apple-Facade und Schutz gegen übersteuerte rückwirkende Korrekturen. API-Übergabe: [w2-ui-vertrag §6.1](w2-ui-vertrag.md#61-api-für-ap3ap6-ap2). Tests in `OperationSessionTest`, `OperationPortTest`, `SessionMatchStoreTest` und `WatchScoringTest`; gezielte JVM-Tests und vollständiges `./gradlew check --console=plain` unter Windows/Git Bash grün (JDK 21). Keine Änderung an Fold, Protokoll 3, Eventtypen oder den UI-Dateien von AP3–AP6. Die bisherige Apple-Prompt-Unterdrückung bleibt ausdrücklich bis AP5 erhalten.
+
+**Auffälligkeiten:** AP1 bestätigt die bekannte Null-Ballwechsel-Umdeutung und INITIAL_SERVER-Kollision; kein zusätzlicher Engine-Bug gefunden. AP2 weist die Kollision lokal vor dem Schreiben ab und bietet einen Verfügbarkeitshinweis. Redo eines im Log vor der Wahl stehenden Punkts behält dessen historischen Aufschläger; der spätere Wahl-Event kann wieder als frühzeitige zweite Wahl gelten. Das ist bestehende Replay-Semantik, keine rückwirkende Neuzuordnung durch die Auswahl. Apple-Linken, Swift-Build und Simulatorprüfung sind weiterhin macOS-/Folgepaket-Aufgaben.
 
 **Dateien:** `MS/MatchSession.kt`, kleine neue Datei für Wahlkontext; `PR/match/MatchPorts.kt`, `SessionMatchStore.kt`, `InMemoryMatchStore.kt`; `AW/WatchScoring.kt`.
 
@@ -368,7 +372,7 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 
 **Reihenfolge:** AP1 → AP2 → AP3/AP4 → AP5 → AP6 → AP7. AP3/AP4 können gemeinsam umgesetzt, aber getrennt geprüft werden. Kein neues Scoringmodell vor den UI-Arbeiten.
 
-**Spätere technische Prüfungen:** betroffene JVM-/Desktop-/Wear-Tests; anschließend `gradlew.bat check` und Android-/Wear-Debug-Builds gemäß `CLAUDE.md`. Apple-Framework-Linken, Swift-Build und watchOS-Simulatorprüfung auf macOS/CI. Für diese reine Planung wurden diese Befehle nicht ausgeführt.
+**Spätere technische Prüfungen:** betroffene JVM-/Desktop-/Wear-Tests; anschließend `gradlew.bat check` und Android-/Wear-Debug-Builds gemäß `CLAUDE.md`. Apple-Framework-Linken, Swift-Build und watchOS-Simulatorprüfung auf macOS/CI. AP1 hat `:shared:core-scoring:jvmTest` und den vollständigen Windows-Check ausgeführt; die UI-/Geräteprüfungen bleiben den Folgepaketen vorbehalten.
 
 ## 7. Risiken und inzwischen entschiedene Nutzerfragen
 

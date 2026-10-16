@@ -35,6 +35,9 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.canCorrectServerRetroactively
+import eu.advantly.match.session.serverChoiceContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -203,14 +206,17 @@ class InMemoryMatchStore(
             true
         }
 
-    override fun chooseServer(player: PlayerId): Boolean =
+    override fun chooseServer(player: PlayerId): Boolean = active.value?.serverChoiceContext?.let { chooseServer(player, it) } ?: false
+
+    override fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext,
+    ): Boolean =
         command(clearRedo = false) { e ->
-            val state = e.engine.state
-            val choice = state.serverChoice ?: return@command false
-            val setIndex = state.current?.setIndex ?: return@command false
+            val context = serverChoiceContext(e.id, e.engine.state) ?: return@command false
+            if (!context.accepts(expected, player)) return@command false
             val side = e.setup.lineup.sideOf(player) ?: return@command false
-            if (player !in choice.players) return@command false
-            choice.chosen == player || append(e, ServerChosen(setIndex, side, player))
+            context.chosen == player || append(e, ServerChosen(context.setIndex, side, player))
         }
 
     override fun setServeInfo(
@@ -281,6 +287,7 @@ class InMemoryMatchStore(
     ): Boolean =
         command(clearRedo = true) { e ->
             if (e.setup.lineup.sideOf(player) == null) return@command false
+            if (retroactive && !canCorrectServerRetroactively(e.engine)) return@command false
             append(e, if (retroactive) Correction.initialServer(player) else Correction.server(player))
         }
 
@@ -552,6 +559,7 @@ class InMemoryMatchStore(
                 },
             serveInfoEnabled = serveInfoEnabled(e),
             canRemovePoint = SidePair.of { ScoringEngine.lastEffectivePointOf(e.engine, it) != null },
+            canCorrectServerRetroactively = canCorrectServerRetroactively(e.engine),
             nextSetOptions =
                 if (e.engine.state.status == MatchStatus.AWAITING_DECISION) {
                     ScoringEngine.nextSetOptions(e.setup.format)
