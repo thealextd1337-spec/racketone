@@ -554,4 +554,36 @@
     <string name="help_pickleball">Wählt 11, 15 oder 21 Punkte pro Spiel. Side-Out: Nur die aufschlagende Seite kann punkten; gewinnt die Rückschlagseite, wechseln Aufschläger oder Aufschlagrecht. Rally: Jeder Ballwechsel zählt, auch der Siegpunkt. Normalerweise braucht ihr zwei Punkte Vorsprung; ein Punkt Vorsprung unter Erweitert ist eine Freizeit-/Team-Play-Option.</string>
     <string name="help_end_change">Nur Entscheidungsspiel: Seitenwechsel, sobald eine Seite zuerst 6 (bis 11), 8 (bis 15) oder 11 (bis 21) erreicht. Jedes Spiel: dieser Wechsel gilt in jedem Spiel. Nie: kein Wechsel mitten im Spiel. Zwischen Spielen wechselt ihr, wenn ein weiteres Spiel folgt.</string>
     <string name="player_actions">Aktionen für %1$s</string>
+
+    <string name="auth_title">Konto</string>
+    <string name="auth_optional">Ein Konto ist optional. Lokal kannst du alles wie bisher nutzen.</string>
+    <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Österreich: ab 14, Deutschland, Schweiz und Liechtenstein: ab 16.</string>
+    <string name="auth_country">Wohnsitzland (AT, DE, CH, LI)</string>
+    <string name="auth_birth">Geburtsdatum (JJJJ-MM-TT)</string>
+    <string name="auth_continue">Weiter</string>
+    <string name="auth_google">Mit Google anmelden</string>
+    <string name="auth_email">E-Mail-Adresse</string>
+    <string name="auth_send">E-Mail-Code senden</string>
+    <string name="auth_code">E-Mail-Code</string>
+    <string name="auth_alias">Öffentlicher Alias</string>
+    <string name="auth_username">Benutzername (optional, 3–20: a–z, 0–9, _ oder .)</string>
+    <string name="auth_finish">Fertig</string>
+    <string name="auth_ready">Du bist angemeldet. Lokale Matches bleiben auf diesem Handy; Cloud-Übernahme folgt in P2-B.</string>
+    <string name="auth_link_google">Google mit diesem Konto verknüpfen</string>
+    <string name="auth_sign_out">Abmelden</string>
+    <string name="auth_restart">Neu anmelden</string>
+    <string name="auth_local">Lokal weiterzählen</string>
+    <string name="auth_unavailable">Konten sind in deinem Land noch nicht verfügbar. Lokal kannst du weiterzählen.</string>
+    <string name="auth_too_young">Ein Konto ist für dein Alter noch nicht verfügbar. Erneute Prüfung nach 24 Stunden. Lokal kannst du weiterzählen.</string>
+    <string name="auth_expired">Die Altersprüfung ist abgelaufen oder schon verwendet. Bitte neu beginnen.</string>
+    <string name="auth_profile_missing">Das Onboarding ist nach 24 Stunden abgelaufen. Bitte neu anmelden.</string>
+    <string name="auth_invalid_birth">Bitte ein gültiges Geburtsdatum eingeben.</string>
+    <string name="auth_username_taken">Dieser Benutzername ist bereits vergeben.</string>
+    <string name="auth_invalid_username">Dieser Benutzername ist ungültig oder reserviert.</string>
+    <string name="auth_invalid_alias">Bitte einen Alias mit 1–40 druckbaren Zeichen eingeben.</string>
+    <string name="auth_rate_limit">Zu viele Versuche. Bitte eine Minute warten.</string>
+    <string name="auth_invalid_code">Der Code ist ungültig oder abgelaufen. Bitte neu beginnen.</string>
+    <string name="auth_connection_failed">Der Kontodienst ist nicht erreichbar oder die Anmeldung wurde abgebrochen. Verbindung prüfen und erneut versuchen.</string>
+    <string name="auth_deletion">Die Kontolöschung ist beantragt.</string>
+    <string name="auth_open">Anmelden / Kontoeinstellungen</string>
 </resources>

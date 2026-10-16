@@ -319,7 +319,7 @@ Begründung:
 | `OutboxPlanner.kt` | `plan(...)` (Projektion nur mit dem letzten Batch des Matches), `evaluate(...)` → `OutboxUpdate(uploaded, rejected, retry, projectionRetry)` |
 | `Ports.kt` | `CloudBackend`, `CloudException`, `CloudAuthPort`, `CloudOutboxStore` (Adapter in cloud-sync über data-Primitive), `LiveChannelPort` (Kanal-Rotation), `CloudSyncPort` |
 
-Modulgraph ab P2-B: `cloud-sync → data` (+ supabase-kt); `presentation → cloud-sync`; `match-session` bleibt
+Modulgraph ab P2-B: `cloud-sync → data` (+ supabase-kt); `presentation-auth → cloud-sync`; `match-session` bleibt
 cloudfrei; `data` kennt `cloud-sync` nicht; `umbrella-watch` nie.
 
 ---
@@ -371,7 +371,10 @@ EDPB-Erklärung 1/2025 zur Altersverifikation betont Verhältnismäßigkeit und 
 P2 keine Gesundheitsdaten, zeigt keine Werbung, hat keine öffentlichen Profile oder offene Kommunikation (nur Freunde,
 exakte Suche) – das Risiko für Minderjährige ist gering. Eine stärkere Prüfung (Ausweis, Elternfreigabe) würde mehr
 und sensiblere Daten erheben als der Zweck rechtfertigt. Deshalb: Selbstauskunft, Geburtsdatum nicht gespeichert,
-keine Wiederholung derselben Prüfung nach Ablehnung auf demselben Gerät für 24 h (gegen schnelles Ausprobieren).
+24-h-Sperre nach Ablehnung im regulären Client (gegen schnelles Ausprobieren). `p_device_secret` ist
+vollständig clientgewählt: ein modifizierter Client kann bei jedem Aufruf einen neuen Wert senden und diese
+Sperre umgehen. Bewusst schwache Hürde, keine Geräteattestierung; IP-/Globalbudgets und Auth-Limits begrenzen
+Missbrauch zusätzlich. App-Reset ist dafür nicht erforderlich.
 Neu bewerten, sobald Health (P3) oder offene Kommunikation dazukommen.
 
 **CH und LI:** Grenze 16 ist eine vorsichtige Annahme (CH: revDSG ohne feste Grenze; LI: EWR, DSGVO Art. 8 mit

@@ -6,32 +6,38 @@ select tests.world();
 select tests.create_user('neu_at', false);
 select tests.create_user('neu_de', false);
 select tests.create_user('neu_xx', false);
+select set_config('request.headers', '{"x-real-ip":"192.0.2.20"}', true);
+-- Direkte SQL-Fixtures bilden hier den Nachweis des Auth-Hooks nach (Ticket/Hook separat in 140).
+update public.profile_settings set country = 'AT', age_confirmed_at = now(), age_rule_min_age = 14
+ where profile_id = tests.uid('neu_at');
+update public.profile_settings set country = 'DE', age_confirmed_at = now(), age_rule_min_age = 16
+ where profile_id = tests.uid('neu_de');
 
 -- Onboarding ---------------------------------------------------------------------------------------------
 select tests.authenticate_as('neu_at');
 select throws_ok($$ select public.send_friend_request(tests.uid('alice')) $$, '42501', 'profile_not_active',
                  'Ohne Onboarding keine sozialen Funktionen');
-select throws_ok($$ select public.complete_onboarding('AT', (current_date - interval '13 years 11 months')::date, 'Nina') $$,
-                 'P0001', 'age_below_minimum', 'AT: 13 Jahre werden abgelehnt');
-select lives_ok($$ select public.complete_onboarding('at', (current_date - interval '14 years')::date, ' Nina ', 'nina_at') $$,
-                'AT: ab 14 Jahren erlaubt (Land unabhängig von Groß-/Kleinschreibung)');
+select is(public.issue_age_ticket('AT', (current_date - interval '13 years 11 months')::date, repeat('x',64))->>'error',
+          'age_below_minimum', 'AT: 13 Jahre werden vor Auth abgelehnt');
+select lives_ok($$ select public.finish_onboarding(' Nina ', 'nina_at') $$,
+                'Alias nach bestandener Altersprüfung');
 select is((select alias from public.profiles where id = tests.uid('neu_at')), 'Nina', 'Alias wird getrimmt gespeichert');
 select is((select country from public.profile_settings where profile_id = tests.uid('neu_at')), 'AT',
           'Land gespeichert, Geburtsdatum nicht');
-select throws_ok($$ select public.complete_onboarding('AT', '2000-01-01', 'Nina') $$, 'P0001', 'already_onboarded',
+select throws_ok($$ select public.finish_onboarding('Nina') $$, 'P0001', 'already_onboarded',
                  'Onboarding nur einmal');
 
 select tests.authenticate_as('neu_de');
-select throws_ok($$ select public.complete_onboarding('DE', (current_date - interval '15 years')::date, 'Dirk') $$,
-                 'P0001', 'age_below_minimum', 'DE: 15 Jahre werden abgelehnt');
-select throws_ok($$ select public.complete_onboarding('DE', (current_date - interval '16 years')::date, 'Dirk', 'alice') $$,
+select is(public.issue_age_ticket('DE', (current_date - interval '15 years')::date, repeat('y',64))->>'error',
+          'age_below_minimum', 'DE: 15 Jahre werden vor Auth abgelehnt');
+select throws_ok($$ select public.finish_onboarding('Dirk', 'alice') $$,
                  'P0001', 'username_taken', 'Benutzername eindeutig');
-select lives_ok($$ select public.complete_onboarding('DE', (current_date - interval '16 years')::date, 'Dirk') $$,
+select lives_ok($$ select public.finish_onboarding('Dirk') $$,
                 'DE: ab 16 Jahren erlaubt');
 
 select tests.authenticate_as('neu_xx');
-select throws_ok($$ select public.complete_onboarding('US', '1990-01-01', 'Sam') $$, 'P0001', 'country_not_supported',
-                 'Nicht freigeschaltete Länder werden abgelehnt');
+select is(public.issue_age_ticket('US', '1990-01-01', repeat('z',64))->>'error', 'country_not_supported',
+          'Nicht freigeschaltete Länder werden vor Auth abgelehnt');
 
 -- Sichtbarkeit -------------------------------------------------------------------------------------------
 select tests.authenticate_as('bob');

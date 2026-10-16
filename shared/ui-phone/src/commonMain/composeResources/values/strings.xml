@@ -554,4 +554,36 @@
     <string name="help_pickleball">Choose 11, 15 or 21 points per game. Side-out: only the serving side can score; winning a rally as receiver changes the server or service side. Rally: every rally scores, including the winning point. Normally win by two; the advanced one-point margin is a leisure / team-play option.</string>
     <string name="help_end_change">Deciding game only: change ends when the first side reaches 6 (to 11), 8 (to 15) or 11 (to 21). Every game: do this in each game. Never: no mid-game change. Between games, ends change if another game follows.</string>
     <string name="player_actions">Actions for %1$s</string>
+
+    <string name="auth_title">Account</string>
+    <string name="auth_optional">An account is optional. All local features remain available.</string>
+    <string name="auth_birth_privacy">Your date of birth is only checked and never stored. Austria: 14+, Germany, Switzerland and Liechtenstein: 16+.</string>
+    <string name="auth_country">Country of residence (AT, DE, CH, LI)</string>
+    <string name="auth_birth">Date of birth (YYYY-MM-DD)</string>
+    <string name="auth_continue">Continue</string>
+    <string name="auth_google">Sign in with Google</string>
+    <string name="auth_email">Email address</string>
+    <string name="auth_send">Send email code</string>
+    <string name="auth_code">Email code</string>
+    <string name="auth_alias">Public alias</string>
+    <string name="auth_username">Username (optional, 3–20: a–z, 0–9, _ or .)</string>
+    <string name="auth_finish">Finish</string>
+    <string name="auth_ready">You are signed in. Local matches stay on this phone; cloud transfer follows in P2-B.</string>
+    <string name="auth_link_google">Link Google to this account</string>
+    <string name="auth_sign_out">Sign out</string>
+    <string name="auth_restart">Sign in again</string>
+    <string name="auth_local">Continue locally</string>
+    <string name="auth_unavailable">Accounts are not yet available in your country. You can continue locally.</string>
+    <string name="auth_too_young">An account is not available for your age. Try again after 24 hours. You can continue locally.</string>
+    <string name="auth_expired">The age check expired or was already used. Please start again.</string>
+    <string name="auth_profile_missing">Onboarding expired after 24 hours. Please sign in again.</string>
+    <string name="auth_invalid_birth">Please enter a valid date of birth.</string>
+    <string name="auth_username_taken">This username is already taken.</string>
+    <string name="auth_invalid_username">This username is invalid or reserved.</string>
+    <string name="auth_invalid_alias">Please enter an alias with 1–40 printable characters.</string>
+    <string name="auth_rate_limit">Too many attempts. Please wait a minute.</string>
+    <string name="auth_invalid_code">The code is invalid or expired. Please start again.</string>
+    <string name="auth_connection_failed">The account service could not be reached or sign-in was cancelled. Check your connection and try again.</string>
+    <string name="auth_deletion">Account deletion has been requested.</string>
+    <string name="auth_open">Sign in / account settings</string>
 </resources>
