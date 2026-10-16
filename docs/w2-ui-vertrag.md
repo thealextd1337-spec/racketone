@@ -1,6 +1,6 @@
 # W2 – UI-Vertrag „Bedienung & Statistik“
 
-Stand: 2026-10-15 · Paket W2-A (Engine, Spezifikation, Session-API) · Normativ ist [02-scoring-regeln.md](02-scoring-regeln.md) (§5.1, §5.2, §6.5.5, §7.2, §7.3, §8, §11, Entscheidungen K14–K20).
+Stand: 2026-10-16 · Paket W2-A (Engine, Spezifikation, Session-API) · Normativ ist [02-scoring-regeln.md](02-scoring-regeln.md) (§5.1, §5.2, §6.5.5, §7.2, §7.3, §8, §11, Entscheidungen K14–K20).
 
 Diese Notiz beschreibt, was die UI-Pakete (Handy, Wear OS, Apple Watch) nutzen. Alle Kommandos sind **local-first und synchron**: Liefern sie `true`, zeigt der Zustand die Änderung sofort. Sie wirken **nur auf dem Zähler** (Single-Scorer, 02 §7.5); auf Anzeige-Geräten liefern sie `false` und schreiben nichts. Ungültige Eingaben liefern `false` und schreiben ebenfalls nichts.
 
@@ -70,3 +70,13 @@ Diese Notiz beschreibt, was die UI-Pakete (Handy, Wear OS, Apple Watch) nutzen. 
 - **Watch:** Die Uhr ist meist Zähler. Aufschlägerwahl und „Punkt abziehen“ sind auf der Uhr sinnvoll; die Aufschlag-Leiste nur, wenn das UI-Paket sie vorsieht (02 §11.2 empfiehlt sie am Handy). Swift-Facade (watchOS, ohne SKIE): `ServerChoice`/`LastPoint` als einfache Klassen bzw. Felder durchreichen.
 - **Versionsunterschied:** Die Sync-Protokollversion ist jetzt 2 (`minV` 2, 01 §4.3). Ein Gerät mit älterem App-Stand ist inkompatibel; die Geräte tauschen dann nichts aus. Anzeige: `LiveMatchPort.updateRequired` (auch ohne Match) bzw. `LiveMatchSnapshot.sync.updateRequired` – `OTHER_DEVICE` → „Bitte Advantly auf der Uhr aktualisieren“ / „Please update Advantly on your watch“ (bzw. Handy), `THIS_DEVICE` → „Bitte Advantly auf diesem Gerät aktualisieren“ / „Please update Advantly on this device“. Session: `SyncStatus.versionMismatch` (`PEER_TOO_OLD`/`PEER_TOO_NEW`). Alte Logs bleiben vollständig lesbar.
 - `InputKind` für verworfene Eingaben: `ServerChosen` erscheint als `CORRECTION`.
+
+## 6. Aufschlagwahl live (F30, 16.10.2026; AP1/AP2)
+
+Verbindlich: [Plan](plan-aufschlagwahl.md), insbesondere §3.1 und §3.5. Tennis-/Padel-Doppel einschließlich ihrer Tiebreak-Formate: „Erster Aufschlag“ entfällt im Setup/Wizard auf Uhr und Handy; automatisch wählen lässt nur das zählende Gerät live. Vier Spieler in FIRST, zwei in SECOND, bei jedem neuen Satz wieder vier (fälliges Team zuerst, freie Teamwahl bleibt Freizeitregel). `serverChoice.game` ist eine **Wahlphase**, kein allgemeiner Game-Zähler. Texte über `current.gameKind` wählen: STANDARD → Spiel 1/2, TIEBREAK/MATCH_TIEBREAK → erster Aufschlag / erster Aufschlag des anderen Teams. Andere Sportarten und Einzel bleiben unverändert.
+
+„Später“, Zurück und Sheet-Dismiss schließen ohne Event; den aus `serve.player` berechneten Default nennen. Kein Pflicht-Gate. Während der Auswahl keine Punkte durch Touch, Hardware oder Bedienungshilfe an darunterliegende Eingaben durchreichen. UI merkt Dismiss pro Match/Satz/Phase lokal; Refresh/Ambient-Rückkehr öffnet nicht wieder, Prozessneustart oder neuer Zähler darf ein offenes unentschiedenes Fenster erneut zeigen. Replizierte gültige Wahl nicht erneut verlangen. Korrektur mit `chosen=null` erneut anbieten; nach Undo auf null Ballwechsel auch eine markierte Wahl einmal überprüfen lassen. Rollen-/Match-/Fensterwechsel schließen das Sheet. Aufschlagstatistik darf die Wahl nicht dauerhaft verdrängen.
+
+Kommandos aus einem Sheet müssen den erwarteten Fensterkontext übergeben und vor dem Schreiben abweisen, wenn Match, Satz, Phase, Side oder Spielermenge veraltet sind. Gleiche noch wirksame Wahl ist idempotent; falsche Rolle schreibt nichts. Bestehende parameterlose Kontext-Aufrufe bleiben kompatibel. Keine Wire-/Event-Änderung (Protokoll 3).
+
+Undo nimmt einen Punkt bzw. das bisherige undo-fähige Kommando zurück, nicht die Wahl. Über Game-/Satzgrenzen und bei null Ballwechseln gilt unverändert die Replay-Semantik aus 02 §6.5.5. Nach expliziter Wahl kann `INITIAL_SERVER` übersteuert werden: keine falsche Erfolgsmeldung. Erneute Wahl im offenen Fenster, sonst Vorwärtskorrektur **„ab jetzt“**; bereits gezählte Punkte und ihre Aufschläger bleiben dabei unverändert.

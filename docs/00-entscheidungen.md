@@ -1,6 +1,6 @@
 # Advantly (ehem. RacketOne) – Grundsatzentscheidungen
 
-Stand: 2026-10-15
+Stand: 2026-10-16
 
 | Thema | Entscheidung |
 |---|---|
@@ -30,6 +30,7 @@ Stand: 2026-10-15
 | Turnier (P2) | Plätze, Spielplan, Zähler, Live-Übersicht; ohne Auslosung (F27, 2026-10-15) |
 | Login & Betrieb (P2) | Google + E-Mail-Code (EU-Anbieter mit AVV), Apple sobald Developer-Account; Supabase **Free so lange wie möglich** (vor echtem Nutzerstart neu bewerten); kein Uhr-Login, eigene Uhr-Session per Code vom Handy (F28, 2026-10-15) |
 | Löschfrist & Telemetrie (P2) | Kontolöschung nach **14 Tagen**; Telemetrie Standard „Nur für mich“, „Gar nicht“ stoppt auch Live-Anzeige und gepufferte Übertragung (F29, 2026-10-15) |
+| Aufschlagwahl live (F30) | **Entschieden 2026-10-16:** Tennis-/Padel-Doppel inkl. Tiebreak-Formate: Wahl nur live am Zähler, kein „Erster Aufschlag“ im Setup/Wizard (auch Handy). Automatisch vier, danach zwei Spieler anbieten; „Später“ erlaubt mit sichtbarem Default. Neuer Satz: alle vier, fälliges Team zuerst (Freizeitregel bleibt). Bestehendes Undo/Replay sichtbar erhalten, keine Game-Bindung/Wire-Änderung. Andere Sportarten unverändert. Details: [Plan Aufschlagwahl](plan-aufschlagwahl.md). |
 | Sprache | Deutsch + Englisch ab Start |
 | Website | **advantly.eu** live (GitHub Pages, `site/`), ohne Verweise auf GitHub/Entwicklung |
 | Monetarisierung | Freemium/Abo später – Architektur vorbereiten |
