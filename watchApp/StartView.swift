@@ -206,24 +206,33 @@ struct SetupView: View {
                 Text("setup.players")
             }
             Toggle("controls.workoutAlongside", isOn: $model.workoutAlongside)
-            Section {
-                ForEach(slots, id: \.self) { slot in
-                    Button {
-                        model.startConfigured(
-                            presetId: preset.id, doubles: doubles, gamesPerSet: gamesPerSet, serveStats: serveStats,
-                            partnerId: doubles ? partnerId : "", opponent1Id: opponent1Id,
-                            opponent2Id: doubles ? opponent2Id : "", firstServerSlot: slot
-                        )
-                    } label: {
-                        Text(name(slot)).frame(maxWidth: .infinity, minHeight: 44)
+            if tennisLike && doubles {
+                Button("setup.startMatch") { start("SELF") }
+                    .frame(minHeight: 44)
+            } else {
+                Section {
+                    ForEach(slots, id: \.self) { slot in
+                        Button {
+                            start(slot)
+                        } label: {
+                            Text(name(slot)).frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .tint(slot == "SELF" || slot == "PARTNER" ? Brand.us : Brand.them)
                     }
-                    .tint(slot == "SELF" || slot == "PARTNER" ? Brand.us : Brand.them)
+                } header: {
+                    Text("setup.whoServes")
                 }
-            } header: {
-                Text("setup.whoServes")
             }
         }
         .navigationTitle(LocalizedStringKey("sport." + preset.sport))
+    }
+
+    private func start(_ slot: String) {
+        model.startConfigured(
+            presetId: preset.id, doubles: doubles, gamesPerSet: gamesPerSet, serveStats: serveStats,
+            partnerId: doubles ? partnerId : "", opponent1Id: opponent1Id,
+            opponent2Id: doubles ? opponent2Id : "", firstServerSlot: slot
+        )
     }
 
     private func name(_ slot: String) -> String {

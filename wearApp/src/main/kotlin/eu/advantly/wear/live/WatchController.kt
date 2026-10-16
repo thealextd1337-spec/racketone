@@ -14,6 +14,8 @@ import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DroppedInputs
 import eu.advantly.match.session.MatchSession
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
 import eu.advantly.presentation.live.HapticCue
@@ -71,12 +73,22 @@ class WatchController(
     private var draft: Draft? = null
     private var overlay: LiveOverlay? = null
     private var locked = false
+    private var correctionRejected = false
+    private var interactive = false
+    private var presentedChoice: ServerChoiceContext? = null
+    private var previousChoice: ServerChoiceContext? = null
+    private var previousPoints = 0
+    private val handledChoices = mutableSetOf<Triple<MatchId, Int, ServerChoicePhase>>()
+
+    private fun ServerChoiceContext.window() = Triple(matchId, setIndex, phase)
+
+    fun setInteractive(active: Boolean) {
+        interactive = active
+        publish()
+    }
 
     /** Sichtbarkeit der Aufschlag-Leiste nach dem Punkt (monoton über [elapsed]). */
     private val serveBar = ServeBarTimer()
-
-    /** Eröffnungswahl schon getroffen? (Hinweis nach aufgehobener Wahl; aus dem Event-Log, übersteht Neustarts) */
-    private val openingChoice = OpeningChoiceCheck(directory::serverChosen)
 
     /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
     private var disconnectedSince: Long? = null
@@ -126,6 +138,7 @@ class WatchController(
 
     /** Display wieder aktiv (Ambient → interaktiv): kurze Sperre gegen den Aufweck-Tap (04 §4.3.3 Punkt 4). */
     fun onWake() {
+        interactive = true
         tapGuard.onWake(uptime())
         // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei
         serveBar.dismiss()
@@ -280,7 +293,7 @@ class WatchController(
     /** Tap auf eine Hälfte. `true`, wenn ein Punkt gezählt wurde (UI: Aufleuchten). */
     fun point(side: Side): Boolean {
         val live = mutableState.value.live ?: return false
-        if (!live.isScorer || live.overlay != null) return false
+        if (!live.isScorer || live.overlay != null || !interactive) return false
         if (locked) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             emit(WatchEffect.Toast(WatchToast.Locked))
@@ -309,7 +322,7 @@ class WatchController(
      */
     fun removePoint(side: Side): Boolean {
         val live = mutableState.value.live ?: return false
-        if (!live.isScorer || live.overlay != null) return false
+        if (!live.isScorer || live.overlay != null || !interactive) return false
         if (locked) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             emit(WatchEffect.Toast(WatchToast.Locked))
@@ -350,17 +363,28 @@ class WatchController(
     fun openServerChoice() {
         val live = mutableState.value.live ?: return
         if (!live.isScorer || live.serverChoice == null || locked) return
+        presentedChoice =
+            session.state.value.match
+                ?.serverChoiceContext
         setOverlay(LiveOverlay.SERVER_CHOICE)
     }
 
     /** Aufschläger wählen (02 §6.5.5): nur Spieler aus `serverChoice.players`; schließt die Auswahl. */
-    fun chooseServer(player: PlayerId): Boolean {
-        val choice = mutableState.value.live?.serverChoice ?: return false
-        if (choice.players.none { it.id == player }) return false
+    fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext? = presentedChoice,
+    ): Boolean {
+        val context = expected ?: return false
+        if (locked || !interactive || presentedChoice != context || player !in context.players) return false
+        val chosen = session.chooseServer(player, context)
+        if (chosen) handledChoices += context.window()
         overlay = null
-        val chosen = session.chooseServer(player)
-        if (chosen) emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
+        presentedChoice = null
+        restoreServeBarAfterChoice()
+        tapGuard.onWake(uptime())
+        emit(WatchEffect.Haptic(if (chosen) WatchHaptic.CONFIRM else WatchHaptic.REJECTED))
         publish()
+        if (!chosen) openServerChoice()
         return chosen
     }
 
@@ -374,7 +398,7 @@ class WatchController(
     /** Wischen nach unten bzw. Button „Rückgängig“. */
     fun undo(): Boolean {
         val live = mutableState.value.live ?: return false
-        if (!live.isScorer || locked) return false
+        if (!live.isScorer || locked || live.overlay != null || !interactive) return false
         val before =
             session.state.value.match
                 ?.state ?: return false
@@ -393,7 +417,7 @@ class WatchController(
 
     /** Wiederholen – auch „Rückgängig“ nach „Punkt abziehen“ (gleicher Redo-Stapel, W2-Vertrag §1). */
     fun redo(): Boolean {
-        if (mutableState.value.live?.isScorer != true || locked) return false
+        if (mutableState.value.live?.let { it.isScorer && it.overlay == null } != true || locked || !interactive) return false
         if (!session.redo()) return false
         emit(WatchEffect.Toast(WatchToast.Redone))
         return true
@@ -438,7 +462,9 @@ class WatchController(
     fun correctServer(player: PlayerId): Boolean {
         val corrections = mutableState.value.live?.corrections ?: return false
         if (corrections.players.none { it.id == player }) return false
-        return applyCorrection(corrections.serverCorrection(player))
+        val applied = session.correctServer(player, corrections.retroactive)
+        finishCorrection(applied)
+        return applied
     }
 
     /** Positionen von [side] tauschen (Doppel; Tischtennis: Rückschläger), nur wenn angeboten. */
@@ -452,11 +478,20 @@ class WatchController(
     }
 
     private fun applyCorrection(correction: Correction): Boolean {
-        overlay = null
         val applied = session.correct(correction)
-        if (applied) emit(WatchEffect.Toast(WatchToast.Corrected))
-        publish()
+        finishCorrection(applied)
         return applied
+    }
+
+    private fun finishCorrection(applied: Boolean) {
+        correctionRejected = !applied
+        if (applied) {
+            overlay = null
+            emit(WatchEffect.Toast(WatchToast.Corrected))
+        } else {
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+        }
+        publish()
     }
 
     /** Bestätigtes Matchende (im Satzende-Dialog regulär, sonst Abbruch ohne Wertung). */
@@ -482,7 +517,15 @@ class WatchController(
         return taken
     }
 
-    fun dismissOverlay() = setOverlay(null)
+    fun dismissOverlay() {
+        if (overlay == LiveOverlay.SERVER_CHOICE) {
+            presentedChoice?.let { handledChoices += it.window() }
+            presentedChoice = null
+            restoreServeBarAfterChoice()
+            tapGuard.onWake(uptime())
+        }
+        setOverlay(null)
+    }
 
     /** „Noch einer in gleicher Besetzung?“ → verknüpftes Folge-Match (02 §5.2). */
     fun followUp(): Boolean = session.createFollowUp() != null
@@ -511,8 +554,15 @@ class WatchController(
             false
         }
 
+    /** Die Wahl darf die Erfassung zum letzten lokalen Punkt nicht dauerhaft verdrängen. */
+    private fun restoreServeBarAfterChoice() {
+        val match = session.state.value.match ?: return
+        if (match.isScorer && match.serveInfoEnabled) match.lastPoint?.let { serveBar.onPoint(it.id, elapsed()) }
+    }
+
     private fun setOverlay(value: LiveOverlay?) {
         overlay = value
+        correctionRejected = false
         publish()
     }
 
@@ -598,7 +648,38 @@ class WatchController(
     }
 
     private fun publish() {
+        updateServerChoice()
         mutableState.value = WatchUiState(screen())
+    }
+
+    /** Lokale Präsentation, keine Match-Events; Dismiss übersteht Refresh und Ambient. */
+    private fun updateServerChoice() {
+        val match = session.state.value.match
+        val context = match?.serverChoiceContext
+        if (context != previousChoice) {
+            if (overlay == LiveOverlay.SERVER_CHOICE && presentedChoice != context) {
+                overlay = null
+                presentedChoice = null
+            }
+            val reopened = context != null && previousPoints > match.pointsPlayed
+            val cleared =
+                context != null && previousChoice?.window() == context.window() &&
+                    previousChoice?.chosen != null && context.chosen == null
+            if (reopened || cleared) context?.let { handledChoices -= it.window() }
+        }
+        previousChoice = context
+        previousPoints = match?.pointsPlayed ?: 0
+        if (match?.isScorer != true) {
+            if (overlay == LiveOverlay.SERVER_CHOICE) overlay = null
+            presentedChoice = null
+            return
+        }
+        if (interactive && !locked && overlay == null && context != null && context.window() !in handledChoices &&
+            (context.chosen == null || (context.phase == ServerChoicePhase.FIRST && match.canRedo))
+        ) {
+            presentedChoice = context
+            overlay = LiveOverlay.SERVER_CHOICE
+        }
     }
 
     private fun screen(): WatchScreen {
@@ -606,19 +687,19 @@ class WatchController(
         val match = sessionState.match
         if (match != null) {
             return WatchScreen.Live(
-                LiveModel.build(
-                    match = match,
-                    sync = sessionState.sync,
-                    names = ::nameOf,
-                    isSelf = directory::isSelf,
-                    contactAgoMs = lastContactAt?.let { elapsed() - it },
-                    disconnectedForMs = disconnectedSince?.let { elapsed() - it },
-                    locked = locked,
-                    overlay = overlay,
-                    serveBarPoint = serveBar.visiblePoint(elapsed()),
-                    serveBarHideAtMillis = serveBar.hideAtMillis,
-                    choiceMadeInWindow = openingChoice.choiceMade(match),
-                ),
+                LiveModel
+                    .build(
+                        match = match,
+                        sync = sessionState.sync,
+                        names = ::nameOf,
+                        isSelf = directory::isSelf,
+                        contactAgoMs = lastContactAt?.let { elapsed() - it },
+                        disconnectedForMs = disconnectedSince?.let { elapsed() - it },
+                        locked = locked,
+                        overlay = overlay,
+                        serveBarPoint = serveBar.visiblePoint(elapsed()),
+                        serveBarHideAtMillis = serveBar.hideAtMillis,
+                    ).copy(correctionRejected = correctionRejected),
             )
         }
         val d = draft ?: return homeScreen()

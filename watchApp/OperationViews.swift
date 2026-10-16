@@ -156,44 +156,51 @@ private struct ServeLabel: View {
     }
 }
 
-/// Wahlfenster aus der Session; nur auf Wunsch öffnen, das Weiterzählen bleibt jederzeit möglich.
+/// Automatische, nicht blockierende Wahl; Kontext und Platz-IDs stammen unverändert aus der Facade.
 struct ServerChoiceView: View {
     @ObservedObject var model: ScoringModel
-    let window: String
-    @Environment(\.dismiss) private var dismiss
-
-    static func key(_ snap: WatchScoreSnapshot) -> String {
-        "\(snap.matchId):\(snap.setIndex):\(snap.serverChoiceGame)"
-    }
+    let context: WatchServerChoiceContext
 
     var body: some View {
         List {
-            if let snap = model.snapshot, snap.isScorer, snap.serverChoiceGame > 0, Self.key(snap) == window {
-                Text(LocalizedStringKey(snap.serverChoiceGame == 1 ? "serve.choice.first" :
-                     snap.serverChoiceSide == "A" ? "serve.choice.second.us" : "serve.choice.second.them"))
+            if let snap = model.snapshot, snap.isScorer,
+               ScoringModel.choiceSignature(snap.serverChoiceContext) == ScoringModel.choiceSignature(context) {
+                Text(LocalizedStringKey(context.phase == "FIRST" ? "serve.choice.first" :
+                     context.dueSide == "A" ? "serve.choice.second.us" : "serve.choice.second.them"))
                     .font(.headline)
+                Text(contextText).font(.footnote).foregroundStyle(Brand.text2)
                 ForEach(snap.serverChoicePlayers, id: \.id) { player in
                     Button {
-                        if model.chooseServer(player.id) { dismiss() }
+                        model.chooseServer(player.id, expected: context)
                     } label: {
                         HStack {
-                            Text(PlayerText.name(player, doubles: snap.doubles))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(PlayerText.name(player, doubles: snap.doubles)).lineLimit(2)
+                                Text(LocalizedStringKey(player.side == "A" ? "team.us" : "team.them"))
+                                    .font(.footnote).foregroundStyle(Brand.text2)
+                            }
                             Spacer()
-                            if player.id == snap.serverChoiceChosen { Image(systemName: "checkmark") }
+                            if player.id == context.chosen { Image(systemName: "checkmark") }
                         }
                         .frame(minHeight: 44)
                     }
+                    .accessibilityLabel(Text(verbatim: "\(PlayerText.name(player, doubles: snap.doubles)), \(loc(player.side == "A" ? "team.us" : "team.them")), \(player.number)"))
+                    .accessibilityAddTraits(player.id == context.chosen ? .isSelected : [])
                 }
-                Text("serve.choice.hint").font(.footnote).foregroundStyle(Brand.text2)
+                if let player = snap.serverChoicePlayers.first(where: { $0.id == context.defaultServer }) ?? snap.serverPlayer {
+                    Text(loc("serve.choice.current %@", PlayerText.name(player, doubles: snap.doubles)))
+                        .font(.footnote).foregroundStyle(Brand.text2)
+                }
             }
-            Button("common.cancel") { dismiss() }
+            Button("common.later") { model.dismissServerChoice() }.frame(minHeight: 44)
         }
-        .onChange(of: model.snapshot?.eventCount) { _, _ in
-            guard let snap = model.snapshot, snap.isScorer, snap.serverChoiceGame > 0, Self.key(snap) == window else {
-                dismiss()
-                return
-            }
+    }
+
+    private var contextText: String {
+        if context.gameKind == "STANDARD" {
+            return loc("serve.choice.game %@ %@", String(context.setIndex + 1), context.phase == "FIRST" ? "1" : "2")
         }
+        return loc(context.phase == "FIRST" ? "serve.choice.tb.first %@" : "serve.choice.tb.second %@", String(context.setIndex + 1))
     }
 }
 

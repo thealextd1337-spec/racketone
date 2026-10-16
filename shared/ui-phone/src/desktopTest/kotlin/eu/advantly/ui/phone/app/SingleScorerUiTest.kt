@@ -354,6 +354,8 @@ class SingleScorerUiTest {
             showApp(rig.model)
             runOnIdle { rig.model.startMatch(rig.model.setupFor(Presets.PADEL_GOLDEN_BO3.format()), StartOptions(ScorerOption.THIS_PHONE)) }
             rig.settle()
+            onNodeWithTag("server_choice_sheet").assertExists()
+            click("server_choice_later")
             onNodeWithTag("live_sport_chip").assertExists()
             onNodeWithTag("switch_match_watch_0", useUnmergedTree = true).assertExists()
             onNodeWithTag("live_minimize").performClick()
@@ -487,6 +489,8 @@ class SingleScorerUiTest {
             showApp(model)
             click("quick_fav_0")
             onNodeWithTag("scorer_dialog").assertDoesNotExist()
+            onNodeWithTag("server_choice_sheet").assertExists()
+            click("server_choice_later")
             onNodeWithTag("live_sport_chip").assertExists()
         }
 

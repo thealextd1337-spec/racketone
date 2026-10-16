@@ -96,6 +96,69 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     private var bannerWork: DispatchWorkItem?
     /// Nach dem Aufwecken (Always-on → aktiv) zählen Taps 300 ms lang still nicht (04 §4.3.3 Punkt 4).
     private var silentUntil = Date.distantPast
+    @Published private(set) var serverChoicePresented = false
+    @Published private(set) var serverChoiceContext: WatchServerChoiceContext?
+    private var choiceInteractive = false
+    private var handledChoices: Set<String> = []
+
+    static func choiceWindow(_ context: WatchServerChoiceContext) -> String {
+        "\(context.matchId):\(context.setIndex):\(context.phase)"
+    }
+
+    static func choiceSignature(_ context: WatchServerChoiceContext?) -> String {
+        guard let c = context else { return "" }
+        return [choiceWindow(c), c.dueSide, c.defaultServer, c.chosen, c.gameKind,
+                c.players.joined(separator: "|")].joined(separator: ":")
+    }
+
+    func setChoiceInteractive(_ active: Bool) {
+        choiceInteractive = active
+        updateServerChoice(previous: snapshot)
+    }
+
+    func openServerChoice() {
+        guard choiceInteractive, let snap = snapshot, snap.isScorer, let context = snap.serverChoiceContext else { return }
+        serverChoiceContext = context
+        serverChoicePresented = true
+    }
+
+    func dismissServerChoice() {
+        if let context = serverChoiceContext { handledChoices.insert(Self.choiceWindow(context)) }
+        serverChoicePresented = false
+        serverChoiceContext = nil
+        silentUntil = Date().addingTimeInterval(0.3)
+        if let snap = snapshot, snap.isScorer, snap.serveInfoEnabled, !snap.lastPointId.isEmpty {
+            serveBarPointId = snap.lastPointId
+            serveBarDeadline = Date().addingTimeInterval(Self.serveBarVisible)
+            scheduleServeBarDismiss(after: Self.serveBarVisible)
+        }
+    }
+
+    private func updateServerChoice(previous: WatchScoreSnapshot?) {
+        let next = snapshot
+        let context = next?.serverChoiceContext
+        let old = previous?.serverChoiceContext
+        if let context {
+            let window = Self.choiceWindow(context)
+            let reopened = next?.matchId == previous?.matchId && (next?.pointsPlayed ?? 0) < (previous?.pointsPlayed ?? 0)
+            let cleared = old.map { Self.choiceWindow($0) == window && !$0.chosen.isEmpty && context.chosen.isEmpty } ?? false
+            if reopened || cleared { handledChoices.remove(window) }
+        }
+        guard next?.isScorer == true, let context else {
+            serverChoicePresented = false
+            serverChoiceContext = nil
+            return
+        }
+        if serverChoicePresented && Self.choiceSignature(serverChoiceContext) != Self.choiceSignature(context) {
+            serverChoicePresented = false
+            serverChoiceContext = nil
+        }
+        let needsReview = context.chosen.isEmpty || (context.phase == "FIRST" && next?.canRedo == true)
+        if choiceInteractive && needsReview && !handledChoices.contains(Self.choiceWindow(context)) {
+            serverChoiceContext = context
+            serverChoicePresented = true
+        }
+    }
 
     override private init() {
         super.init()
@@ -120,6 +183,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func onSnapshot(snapshot: WatchScoreSnapshot?) {
         let before = self.snapshot
         self.snapshot = snapshot
+        updateServerChoice(previous: before)
         // Mit Match kommt der Versionshinweis direkt aus dem Snapshot; ohne Match liest der Getter nur Session-State.
         updateRequired = snapshot?.updateRequired ?? scoring.updateRequired()
         // Auch eine Änderung der Telemetrie-Sichtbarkeit am iPhone meldet sich hier
@@ -329,6 +393,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// Tap auf eine Hälfte. `force` umgeht die Sperrzeit (nur Demo-Modus).
     func tap(sideA: Bool, force: Bool = false) {
         guard let before = snapshot, before.isScorer, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
+        // Force wird ausschließlich vom Debug-DemoRunner zur Zustandsvorbereitung genutzt.
+        guard force || (!serverChoicePresented && choiceInteractive) else { return }
         let now = Date()
         if !force && now < silentUntil { return }
         if !force && now < lockedUntil {
@@ -362,6 +428,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func undo() {
+        guard !serverChoicePresented, choiceInteractive else { return }
         dismissServeBar()
         guard let before = snapshot, let after = scoring.undo() else {
             rejected()
@@ -393,7 +460,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
 
     /// Aufruf beim Loslassen; dieselbe kurze Entprellung und Aufweck-Sperre wie beim Zählen.
     func removePoint(sideA: Bool) {
-        guard canRemovePoint(sideA: sideA), Date() >= silentUntil, !isLocked else { return }
+        guard !serverChoicePresented, choiceInteractive, canRemovePoint(sideA: sideA), Date() >= silentUntil, !isLocked else { return }
         dismissServeBar()
         guard scoring.removeLastPointOf(sideA: sideA) != nil else {
             rejected()
@@ -405,7 +472,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     func redoRemoval() {
-        guard banner == .pointRemoved, snapshot?.canRedo == true else { return }
+        guard !serverChoicePresented, choiceInteractive, banner == .pointRemoved, snapshot?.canRedo == true else { return }
         dismissServeBar()
         guard scoring.redo() != nil else {
             rejected()
@@ -428,11 +495,17 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     }
 
     @discardableResult
-    func chooseServer(_ id: String) -> Bool {
-        guard scoring.chooseServer(playerId: id) != nil else {
+    func chooseServer(_ id: String, expected: WatchServerChoiceContext) -> Bool {
+        guard choiceInteractive, serverChoicePresented,
+              Self.choiceSignature(serverChoiceContext) == Self.choiceSignature(expected) else { return false }
+        guard scoring.chooseServer(playerId: id, expected: expected) != nil else {
             rejected()
+            onSnapshot(snapshot: scoring.snapshot())
+            openServerChoice()
             return false
         }
+        handledChoices.insert(Self.choiceWindow(expected))
+        dismissServerChoice()
         Haptics.play(.click)
         return true
     }

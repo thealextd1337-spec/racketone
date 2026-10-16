@@ -2,7 +2,9 @@ package eu.advantly.wear.ui
 
 import android.os.SystemClock
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -13,8 +15,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
@@ -28,6 +33,7 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.wear.R
@@ -50,16 +56,22 @@ import kotlinx.coroutines.delay
 private fun ListPage(
     edgeLabel: String?,
     onEdge: () -> Unit,
+    safeChoice: Boolean = false,
     content: ScalingLazyListScope.() -> Unit,
 ) {
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = if (safeChoice) 0 else 1)
     ScreenScaffold(
         scrollState = listState,
         edgeButton = {
             if (edgeLabel != null) EdgeButton(onClick = onEdge) { Text(edgeLabel) }
         },
     ) { padding ->
-        ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth(), content = content)
+        ScalingLazyColumn(
+            state = listState,
+            contentPadding = if (safeChoice) PaddingValues(horizontal = 20.dp, vertical = 40.dp) else padding,
+            modifier = Modifier.fillMaxWidth(),
+            content = content,
+        )
     }
 }
 
@@ -384,6 +396,7 @@ fun CorrectServerScreen(
     BackToScore(actions::dismissOverlay)
     ListPage(edgeLabel = stringResource(R.string.action_cancel), onEdge = actions::dismissOverlay) {
         item { ListHeader { Text(stringResource(R.string.action_correct_server), textAlign = TextAlign.Center) } }
+        if (live.correctionRejected) textItem { stringResource(R.string.correct_rejected) }
         textItem { stringResource(if (corrections.retroactive) R.string.correct_from_start else R.string.correct_from_now) }
         corrections.players.forEach { player ->
             item {
@@ -436,22 +449,62 @@ fun ServerChoiceScreen(
             choice.side == Side.A -> stringResource(R.string.server_choice_title_game2_us)
             else -> stringResource(R.string.server_choice_title_game2_them)
         }
-    ListPage(edgeLabel = stringResource(R.string.action_later), onEdge = actions::dismissOverlay) {
+    ListPage(edgeLabel = null, onEdge = actions::dismissOverlay, safeChoice = true) {
         item { ListHeader { Text(title, textAlign = TextAlign.Center) } }
+        choice.context?.let { context ->
+            textItem {
+                if (context.gameKind == GameKind.STANDARD) {
+                    stringResource(R.string.server_choice_context_game, context.setIndex + 1, choice.game)
+                } else {
+                    stringResource(
+                        if (choice.game ==
+                            1
+                        ) {
+                            R.string.server_choice_context_tiebreak_first
+                        } else {
+                            R.string.server_choice_context_tiebreak_second
+                        },
+                        context.setIndex + 1,
+                    )
+                }
+            }
+        }
         choice.players.forEach { player ->
             item {
                 val team = stringResource(if (player.side == Side.A) R.string.label_us else R.string.label_them)
                 Button(
-                    onClick = { actions.chooseServer(player.id) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        val context = choice.context
+                        if (context != null) actions.chooseServer(player.id, context)
+                    },
+                    enabled = choice.context != null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     colors = if (player.id == choice.chosen) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
                     border = BorderStroke(2.dp, teamColor(player.side)),
-                    label = { Text(playerName(player, live.doubles), maxLines = 1) },
+                    label = {
+                        val name = playerName(player, live.doubles)
+                        Text(
+                            name,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.semantics { contentDescription = "$name · $team · ${player.index + 1}" },
+                        )
+                    },
                     secondaryLabel = { Text(team, maxLines = 1) },
                 )
             }
         }
-        textItem { stringResource(R.string.server_choice_hint) }
+        val default =
+            (choice.players + live.teams.a + live.teams.b).firstOrNull { it.id == choice.context?.defaultServer }
+                ?: live.serve?.server
+        textItem {
+            if (default != null) {
+                stringResource(R.string.server_choice_current, playerName(default, live.doubles))
+            } else {
+                stringResource(R.string.server_choice_current_unknown)
+            }
+        }
+        actionItem(R.string.action_later, onClick = actions::dismissOverlay)
     }
 }
 

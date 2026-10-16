@@ -178,6 +178,7 @@ data class LiveUi(
     val serverChoice: ServerChoiceUi? = null,
     /** Versionsunterschied zum Handy: „Bitte Handy/Uhr aktualisieren“. */
     val updateRequired: UpdateRequired? = null,
+    val correctionRejected: Boolean = false,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 }
@@ -205,7 +206,6 @@ object LiveModel {
         isSelf: (PlayerId) -> Boolean = { false },
         serveBarPoint: EventId? = null,
         serveBarHideAtMillis: Long = 0,
-        choiceMadeInWindow: Boolean = false,
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
@@ -264,7 +264,7 @@ object LiveModel {
             corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,
             canRemovePoint = match.canRemovePoint,
             serveBar = OperationRules.serveBar(match, serveBarPoint, serveBarHideAtMillis),
-            serverChoice = OperationRules.serverChoice(match, ::player, choiceMadeInWindow),
+            serverChoice = OperationRules.serverChoice(match, ::player),
             updateRequired = OperationRules.updateRequired(sync),
         )
     }
@@ -341,7 +341,7 @@ object LiveModel {
                 }
             }
         }
-        return CorrectionsUi(firstGame, teams.a + teams.b, serve?.player, swaps)
+        return CorrectionsUi(firstGame && match.canCorrectServerRetroactively, teams.a + teams.b, serve?.player, swaps)
     }
 
     /** Stand als kurzer Text für Undo-Toast und Ongoing Activity, z. B. „30:15“, „AD:40“, ohne laufenden Satz „2:1“. */

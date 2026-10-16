@@ -554,6 +554,12 @@
     <string name="help_pickleball">Wählt 11, 15 oder 21 Punkte pro Spiel. Side-Out: Nur die aufschlagende Seite kann punkten; gewinnt die Rückschlagseite, wechseln Aufschläger oder Aufschlagrecht. Rally: Jeder Ballwechsel zählt, auch der Siegpunkt. Normalerweise braucht ihr zwei Punkte Vorsprung; ein Punkt Vorsprung unter Erweitert ist eine Freizeit-/Team-Play-Option.</string>
     <string name="help_end_change">Nur Entscheidungsspiel: Seitenwechsel, sobald eine Seite zuerst 6 (bis 11), 8 (bis 15) oder 11 (bis 21) erreicht. Jedes Spiel: dieser Wechsel gilt in jedem Spiel. Nie: kein Wechsel mitten im Spiel. Zwischen Spielen wechselt ihr, wenn ein weiteres Spiel folgt.</string>
     <string name="player_actions">Aktionen für %1$s</string>
+    <string name="action_later">Später</string>
+    <string name="correct_server_rejected">Korrektur nicht übernommen. Bitte aktuellen Aufschläger prüfen.</string>
+    <string name="server_choice_context_game">Satz %1$d · Spiel %2$d</string>
+    <string name="server_choice_context_tb_first">Satz %1$d · Erster Aufschlag</string>
+    <string name="server_choice_context_tb_second">Satz %1$d · Erster Aufschlag des anderen Teams</string>
+    <string name="server_choice_current">Aktuell: %1$s. Du kannst bis zum nächsten Punkt wählen.</string>
 
     <string name="auth_title">Konto</string>
     <string name="auth_optional">Ein Konto ist optional. Lokal kannst du alles wie bisher nutzen.</string>

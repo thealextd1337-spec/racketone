@@ -53,7 +53,6 @@ struct ScorePage: View {
     @Environment(\.isLuminanceReduced) private var dimmed
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmTakeOver = false
-    @State private var chooseServer = false
     @State private var target: ScoreTouchTarget?
     @State private var touchId: SpatialEventCollection.Event.ID?
     @State private var touchIds: Set<SpatialEventCollection.Event.ID> = []
@@ -83,7 +82,7 @@ struct ScorePage: View {
                 half(sideA: true).frame(height: halfHeight)
                 Color.clear.frame(height: guardHeight)
                 if action {
-                    OperationStrip(model: model, snap: snap) { chooseServer = true }
+                    OperationStrip(model: model, snap: snap) { model.openServerChoice() }
                         .frame(height: middle)
                         .padding(.horizontal, 6)
                 } else {
@@ -153,9 +152,6 @@ struct ScorePage: View {
         .onDisappear {
             target = nil
             cancelHold()
-        }
-        .sheet(isPresented: $chooseServer) {
-            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
         }
         .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
     }
@@ -698,7 +694,6 @@ struct ControlsPage: View {
     @ObservedObject var workout: WorkoutManager
     let snap: WatchScoreSnapshot
     @State private var confirmEnd = false
-    @State private var chooseServer = false
     @State private var confirmTakeOver = false
 
     var body: some View {
@@ -723,9 +718,6 @@ struct ControlsPage: View {
                 }
             }
         }
-        .sheet(isPresented: $chooseServer) {
-            ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
-        }
         .alert("controls.end.confirm", isPresented: $confirmEnd) {
             Button("controls.end", role: .destructive) { model.endMatch() }
             Button("common.cancel", role: .cancel) {}
@@ -741,7 +733,7 @@ struct ControlsPage: View {
             Button("action.restorePoint", action: model.redoRemoval)
         }
         if snap.serverChoiceGame > 0 {
-            Button("serve.choose") { chooseServer = true }
+            Button("serve.choose") { model.openServerChoice() }
         }
         Button(action: model.undo) {
             Label("action.undo", systemImage: "arrow.uturn.backward")

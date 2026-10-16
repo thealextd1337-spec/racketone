@@ -53,6 +53,8 @@ interface SetupActions {
         serverIndex: Int,
     ): Boolean
 
+    fun startMatch(): Boolean = selectServer(Side.A, 0)
+
     fun back()
 
     fun setWorkoutEnabled(enabled: Boolean)
@@ -176,36 +178,47 @@ private fun ScalingLazyListScope.serverStep(
     choosePlayer: (PlayerSlot) -> Unit,
 ) {
     playerChoices(setup, choosePlayer)
-    item { ListHeader { Text(stringResource(R.string.setup_server_title), textAlign = TextAlign.Center) } }
-    // Doppel: konkreter Erstaufschläger (bestimmt Rotation bzw. Badminton-Feld, 02 §3.3); Einzel: Wir/Gegner
-    val doubles = setup.discipline == Discipline.DOUBLES
-    val choices = listOf(Side.A, Side.B).flatMap { side -> (0 until if (doubles) 2 else 1).map { side to it } }
-    choices.forEach { (side, index) ->
+    val liveChoice = setup.discipline == Discipline.DOUBLES && setup.sport?.isTennisLike == true
+    if (liveChoice) {
         item {
             Button(
-                onClick = { actions.selectServer(side, index) },
+                onClick = { actions.startMatch() },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.filledTonalButtonColors(),
-                border = BorderStroke(2.dp, teamColor(side)),
-                label = {
-                    val team = stringResource(if (side == Side.A) R.string.label_us else R.string.label_them)
-                    val slot =
-                        when {
-                            side == Side.A && index == 1 -> PlayerSlot.PARTNER
-                            side == Side.B && index == 1 -> PlayerSlot.OPPONENT_2
-                            side == Side.B -> PlayerSlot.OPPONENT_1
-                            else -> null
-                        }
-                    val name =
-                        setup.recentPlayers.firstOrNull { it.id == setup.selectedPlayers[slot] }?.displayName
-                            ?: defaultPlayerName(side, index, doubles)
-                    Text("$team · $name", maxLines = 2)
-                },
+                label = { Text(stringResource(R.string.setup_start_match)) },
             )
         }
-    }
-    item {
-        Text(stringResource(R.string.setup_server_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+    } else {
+        item { ListHeader { Text(stringResource(R.string.setup_server_title), textAlign = TextAlign.Center) } }
+        // Doppel: konkreter Erstaufschläger (bestimmt Rotation bzw. Badminton-Feld, 02 §3.3); Einzel: Wir/Gegner
+        val doubles = setup.discipline == Discipline.DOUBLES
+        val choices = listOf(Side.A, Side.B).flatMap { side -> (0 until if (doubles) 2 else 1).map { side to it } }
+        choices.forEach { (side, index) ->
+            item {
+                Button(
+                    onClick = { actions.selectServer(side, index) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    border = BorderStroke(2.dp, teamColor(side)),
+                    label = {
+                        val team = stringResource(if (side == Side.A) R.string.label_us else R.string.label_them)
+                        val slot =
+                            when {
+                                side == Side.A && index == 1 -> PlayerSlot.PARTNER
+                                side == Side.B && index == 1 -> PlayerSlot.OPPONENT_2
+                                side == Side.B -> PlayerSlot.OPPONENT_1
+                                else -> null
+                            }
+                        val name =
+                            setup.recentPlayers.firstOrNull { it.id == setup.selectedPlayers[slot] }?.displayName
+                                ?: defaultPlayerName(side, index, doubles)
+                        Text("$team · $name", maxLines = 2)
+                    },
+                )
+            }
+        }
+        item {
+            Text(stringResource(R.string.setup_server_hint), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        }
     }
     matchOptions(setup, actions)
     item {

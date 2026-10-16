@@ -26,11 +26,9 @@ import eu.advantly.core.scoring.Preset
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.ServeOutcome
-import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
 import eu.advantly.data.freshPlaceholders
-import eu.advantly.data.toScoreEventOrNull
 import eu.advantly.data.watchPeople
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.IdGenerator
@@ -98,7 +96,6 @@ class WatchScoring internal constructor(
     private var current: SessionState? = null
     private var lastOpenId: String? = null
     private var scorerLostAtMs: Long = 0
-    private var openingChoiceCache: Pair<Pair<MatchId, Int>, Boolean>? = null
 
     private val sessionListener = SessionListener { state -> onState(state) }
 
@@ -607,41 +604,13 @@ class WatchScoring internal constructor(
             choice?.players.orEmpty().map { id ->
                 checkNotNull(watchPlayer(id)) { "Wählbarer Aufschläger $id ohne Seite" }
             }
-        // Die bisherige Prompt-Präsentation wird erst in AP5 umgestellt; Kontext/Optionen sind davon unabhängig.
-        val opening = choice?.game == 1 && match.state.sets.isEmpty()
-        val made =
-            try {
-                opening && choice.chosen == null && data != null && openingChoiceMade(match, data)
-            } catch (e: Exception) {
-                false
-            }
-        val prompt = match.isScorer && choice != null && choice.chosen == null && (!opening || made)
+        val prompt = match.isScorer && choice != null && choice.chosen == null
         // Aufschläger mit Namen (Platzhalter ohne Namen → Swift-Standardbezeichnung): Doppel-Anzeige „Name · R/L“
         val serverPlayer =
             match.state.serve
                 ?.player
                 ?.let(::watchPlayer)
         return buildSnapshot(match, sync, scorerLostAtMs, us, pending, current?.droppedInputs?.count ?: 0, players, prompt, serverPlayer)
-    }
-
-    private fun openingChoiceMade(
-        match: ActiveMatch,
-        data: LocalData,
-    ): Boolean {
-        val key = match.id to match.eventCount
-        openingChoiceCache?.takeIf { it.first == key }?.let { return it.second }
-        val made =
-            data.events
-                .eventsFor(match.id.value)
-                .filter { it.type == "ServerChosen" }
-                .mapNotNull { it.toScoreEventOrNull() }
-                .any { event ->
-                    val chosen = event.payload as? ServerChosen
-                    chosen?.set == match.state.current?.setIndex &&
-                        event.id !in match.state.ignoredEvents && event.id !in match.state.rejectedByRole
-                }
-        openingChoiceCache = key to made
-        return made
     }
 
     private fun begin(
@@ -917,7 +886,7 @@ class WatchPlayer(
  * @property serverChoiceSide Vorschlag für die Aufschlagseite (A/B/leer); Game 1 erlaubt auch das andere Team
  * @property serverChoiceChosen gewählte Spieler-ID oder leer; eine Korrektur kann sie wieder aufheben
  * @property serverChoicePlayers flache Optionen mit Namen, Besitzer-Seite und stabiler Teamnummer
- * @property serverChoicePrompt noch zu fragen; Setup-Wahl in Game 1/Satz 1 wird nicht wiederholt, nach Korrektur schon
+ * @property serverChoicePrompt noch unentschiedenes Wahlfenster; die lokale Präsentation steuert Swift
  * @property nextSetOptions REGULAR / TIEBREAK_7 / MATCH_TIEBREAK_10, nur bei AWAITING_DECISION
  * @property updateRequired THIS_DEVICE (Uhr aktualisieren), OTHER_DEVICE (Handy aktualisieren) oder leer
  * @property setKinds Art je abgeschlossenem Satz, insbesondere MATCH_TIEBREAK für die Klammer-Anzeige [7:5]

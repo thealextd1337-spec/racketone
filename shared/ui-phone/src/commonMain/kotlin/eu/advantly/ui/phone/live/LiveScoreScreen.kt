@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -196,6 +197,10 @@ fun LiveScoreScreen(
         onDispose { }
     }
     LaunchedEffect(controller) { controller.port.active.collect(controller::sync) }
+    LifecycleResumeEffect(controller) {
+        controller.setChoiceInteractive(true)
+        onPauseOrDispose { controller.setChoiceInteractive(false) }
+    }
     KeepScreenOn(controller.keepScreenOn)
     val systemReduceMotion = rememberReduceMotion()
     val reduceMotion = systemReduceMotion || controller.outdoorContrast
@@ -258,8 +263,8 @@ fun LiveScoreScreen(
         val openMatches by controller.port.openMatches.collectAsState()
         val now = rememberNow(controller.monotonic, ticking = display)
         val status = snapshot.state.status
-        LaunchedEffect(controller.servePromptId, status) {
-            if (status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED) {
+        LaunchedEffect(controller.servePromptId, status, controller.serverChoicePresentation) {
+            if ((status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED) && controller.serverChoicePresentation == null) {
                 controller.servePromptId?.let { id ->
                     delay(10_000)
                     controller.dismissServePrompt(id)
@@ -271,9 +276,11 @@ fun LiveScoreScreen(
         val displayEndOpen = displayEnd && display && status != MatchStatus.FINISHED
         // Satzende-Frage nur am Zähler (04 §3.3); die Anzeige zeigt stattdessen einen Hinweis über den Flächen
         val sheet = status == MatchStatus.FINISHED || (status == MatchStatus.AWAITING_DECISION && !display)
-        val modal = sheet || userDialog != null || rejectedSheet || displayEndOpen
+        val choice = controller.serverChoicePresentation.takeIf { !display && running }
+        val modal = sheet || userDialog != null || rejectedSheet || displayEndOpen || choice != null
         // System-Zurück schließt zuerst einen vom Nutzer geöffneten Dialog (nicht den Live-Screen)
-        BackHandler(enabled = userDialog != null || rejectedSheet || displayEndOpen) {
+        BackHandler(enabled = userDialog != null || rejectedSheet || displayEndOpen || choice != null) {
+            if (choice != null) controller.dismissServerChoice()
             dialog = null
             rejectedSheet = false
             displayEnd = false
@@ -405,6 +412,7 @@ fun LiveScoreScreen(
                 }
             }
         }
+        if (choice != null) ServerChoiceSheet(controller, snapshot, choice)
         if (rejectedSheet) {
             RejectedInputsSheet(snapshot, remember(snapshot.rejectedByRoleCount) { controller.port.rejectedInputs() }, onClose = {
                 rejectedSheet = false

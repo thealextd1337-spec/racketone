@@ -107,6 +107,29 @@ private class Rig(
 
 class WatchScoringTest {
     @Test
+    fun liveOpeningChoiceCoversBothSportsAndTiebreakFormats() {
+        for (preset in listOf("TENNIS_OPEN", "PADEL_GOLDEN_BO3", "TENNIS_TIEBREAK_ONLY_7", "PADEL_TIEBREAK_ONLY_10")) {
+            val rig = Rig()
+            val start = assertNotNull(rig.watch.startConfiguredMatch(preset, true, false, 0, true, "", "", "", "SELF"))
+            val first = assertNotNull(start.serverChoiceContext, preset)
+            assertTrue(start.serverChoicePrompt, preset)
+            assertEquals(4, first.players.size)
+            assertEquals("FIRST", first.phase)
+            val chosen = assertNotNull(rig.watch.chooseServer(first.players.last(), first))
+            assertFalse(chosen.serverChoicePrompt)
+            assertEquals(0, chosen.pointsPlayed)
+            rig.points(if (first.gameKind == "STANDARD") "AAAA" else "A")
+            val second = assertNotNull(rig.watch.snapshot()).serverChoiceContext!!
+            assertEquals("SECOND", second.phase)
+            assertEquals(2, second.players.size)
+            val before = assertNotNull(rig.watch.snapshot()).eventCount
+            assertNull(rig.watch.chooseServer(second.players.first(), first))
+            assertEquals(before, assertNotNull(rig.watch.snapshot()).eventCount)
+            assertNotNull(rig.watch.chooseServer(second.players.last(), second))
+        }
+    }
+
+    @Test
     fun flatChoiceContextRejectsStaleTapsAndKeepsRepeatedChoiceIdempotent() {
         val rig = Rig()
         val start = assertNotNull(rig.watch.startMatch("PADEL_GOLDEN_BO3", true, true, false))
@@ -839,7 +862,7 @@ class WatchScoringTest {
         assertEquals(1, start.serverChoiceGame)
         assertEquals(4, start.serverChoicePlayers.size)
         assertEquals("", start.serverChoiceChosen)
-        assertFalse(start.serverChoicePrompt)
+        assertTrue(start.serverChoicePrompt)
         assertEquals(2, start.serverNo)
         assertTrue(
             rig.watchData.events
@@ -848,7 +871,7 @@ class WatchScoringTest {
         )
         val initialOther = start.serverChoicePlayers.first { it.side == "B" }
         assertTrue(rig.watchSession.correct(Correction(CorrectionKind.SERVER, player = PlayerId(initialOther.id))))
-        assertFalse(assertNotNull(rig.watch.snapshot()).serverChoicePrompt)
+        assertTrue(assertNotNull(rig.watch.snapshot()).serverChoicePrompt)
         // Erst eine ausdrückliche Wahl im offenen Fenster wird nach Korrektur erneut erfragt.
         rig.watch.chooseServer(start.server)
         val other = start.serverChoicePlayers.first { it.side == "B" }

@@ -588,7 +588,9 @@ class MatchWizard(
         ): Lineup? {
             val a = input.teamA.map { it?.id ?: return null }
             val b = input.teamB.map { it?.id ?: return null }
-            val server = input.firstServer?.takeIf { it in a || it in b } ?: selfId.takeIf { it in a } ?: a.first()
+            val liveChoice = input.discipline == Discipline.DOUBLES && (input.sport == Sport.TENNIS || input.sport == Sport.PADEL)
+            val selected = input.firstServer?.takeUnless { liveChoice }
+            val server = selected?.takeIf { it in a || it in b } ?: selfId.takeIf { it in a } ?: a.first()
             return Lineup(a = a, b = b, firstServer = server)
         }
 

@@ -491,7 +491,6 @@
 "serve.choice.first" = "Wer schlägt auf?";
 "serve.choice.second.us" = "Wer schlägt bei uns auf?";
 "serve.choice.second.them" = "Wer schlägt bei den Gegnern auf?";
-"serve.choice.hint" = "Später wählen – es gilt die bisherige Reihenfolge.";
 "setend.regular" = "Normaler Satz";
 "setend.tiebreak7" = "Tiebreak bis 7";
 "setend.champions10" = "Champions-Tiebreak bis 10";
@@ -515,3 +514,11 @@
 "sync.updateWatch.short" = "Uhr aktualisieren";
 "sync.updatePhone.short" = "Handy aktualisieren";
 "serve.bar" = "Aufschlag-Leiste";
+
+// Aufschlagwahl live (F30)
+"setup.startMatch" = "Match starten";
+"common.later" = "Später";
+"serve.choice.current %@" = "Aktuell: %@. Du kannst bis zum nächsten Punkt wählen.";
+"serve.choice.game %@ %@" = "Satz %@ · Spiel %@";
+"serve.choice.tb.first %@" = "Satz %@ · Erster Aufschlag";
+"serve.choice.tb.second %@" = "Satz %@ · Erster Aufschlag des anderen Teams";

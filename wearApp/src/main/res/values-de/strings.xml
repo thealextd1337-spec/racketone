@@ -198,7 +198,6 @@
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>
-    <string name="server_choice_hint">Später wählen – es gilt die bisherige Reihenfolge</string>
     <string name="server_choice_prompt">Aufschlag wählen</string>
     <string name="action_later">Später</string>
     <string name="set_end_regular">Normaler Satz</string>
@@ -267,4 +266,11 @@
     <!-- Feldtest-Modus (nur Debug-Build, P1-Gate) -->
     <string name="field_test_toggle">Feldtest-Modus</string>
     <string name="field_test_hint">Protokolliert Akku, Display und Sync je Minute in %1$s (keine Gesundheitsdaten)</string>
+    <string name="setup_start_match">Match starten</string>
+    <string name="correct_rejected">Korrektur nicht übernommen. Bitte aktuellen Aufschläger prüfen.</string>
+    <string name="server_choice_context_game">Satz %1$d · Spiel %2$d</string>
+    <string name="server_choice_context_tiebreak_first">Satz %1$d · Erster Aufschlag</string>
+    <string name="server_choice_context_tiebreak_second">Satz %1$d · Erster Aufschlag des anderen Teams</string>
+    <string name="server_choice_current">Aktuell: %1$s. Du kannst bis zum nächsten Punkt wählen.</string>
+    <string name="server_choice_current_unknown">Du kannst bis zum nächsten Punkt wählen.</string>
 </resources>

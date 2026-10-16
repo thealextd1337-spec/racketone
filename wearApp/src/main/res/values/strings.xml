@@ -205,7 +205,6 @@
     <string name="server_choice_title_game1">Who serves first?</string>
     <string name="server_choice_title_game2_us">Who serves for us?</string>
     <string name="server_choice_title_game2_them">Who serves for the opponents?</string>
-    <string name="server_choice_hint">Choose later – the current order applies</string>
     <string name="server_choice_prompt">Choose server</string>
     <string name="action_later">Later</string>
     <string name="set_end_regular">Regular set</string>
@@ -275,4 +274,11 @@
     <!-- Feldtest-Modus (nur Debug-Build, P1-Gate) -->
     <string name="field_test_toggle">Field test mode</string>
     <string name="field_test_hint">Logs battery, display and sync every minute to %1$s (no health data)</string>
+    <string name="setup_start_match">Start match</string>
+    <string name="correct_rejected">Correction could not be applied. Please check the current server.</string>
+    <string name="server_choice_context_game">Set %1$d · Game %2$d</string>
+    <string name="server_choice_context_tiebreak_first">Set %1$d · First serve</string>
+    <string name="server_choice_context_tiebreak_second">Set %1$d · Other team’s first serve</string>
+    <string name="server_choice_current">Current: %1$s. You can choose until the next point.</string>
+    <string name="server_choice_current_unknown">You can choose until the next point.</string>
 </resources>

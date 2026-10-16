@@ -79,7 +79,10 @@ interface OperationActions {
 
     fun openServerChoice()
 
-    fun chooseServer(player: PlayerId): Boolean
+    fun chooseServer(
+        player: PlayerId,
+        expected: eu.advantly.match.session.ServerChoiceContext,
+    ): Boolean
 
     fun startNextSet(kind: NextSetKind): Boolean
 }

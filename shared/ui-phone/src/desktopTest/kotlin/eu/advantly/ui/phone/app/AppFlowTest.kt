@@ -104,6 +104,10 @@ class AppFlowTest {
         onNodeWithTag("scorer_THIS_PHONE").assertIsSelected()
         onNodeWithTag("scorer_MY_WATCH").assertIsNotEnabled()
         onNodeWithTag("wizard_start").assertIsEnabled().performClick()
+        if (doubles && sport.isTennisLike) {
+            onNodeWithTag("server_choice_sheet").assertExists()
+            click("server_choice_later")
+        }
         onNodeWithTag("live_sport_chip").assertExists()
         onNodeWithTag("panel_us").performClick()
     }
@@ -242,6 +246,8 @@ class AppFlowTest {
                     .state.current!!
                     .setKind,
             )
+            onNodeWithTag("server_choice_sheet").assertExists()
+            click("server_choice_later")
             onNodeWithTag("hint_pill").assertExists()
         }
 

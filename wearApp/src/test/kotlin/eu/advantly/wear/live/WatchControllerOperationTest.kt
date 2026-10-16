@@ -56,6 +56,8 @@ class WatchControllerOperationTest {
     /** Punkte mit genug Abstand für die 600-ms-Entprellung. */
     private fun points(vararg sides: Side) =
         sides.forEach {
+            if (live.overlay == LiveOverlay.SERVER_CHOICE) c.dismissOverlay()
+            h.scheduler.advanceBy(300)
             assertTrue(c.point(it))
             h.scheduler.advanceBy(700)
         }
@@ -188,7 +190,17 @@ class WatchControllerOperationTest {
                     side != servingBefore,
                     ServeOutcome.DOUBLE_FAULT in bar.options,
                 )
-                assertEquals("$sport: Leiste hat Vorrang", StripAction.Serve(bar), OperationRules.stripAction(live, null))
+                assertEquals(
+                    "$sport: Overlay schützt die Eingabe",
+                    if (live.overlay ==
+                        null
+                    ) {
+                        StripAction.Serve(bar)
+                    } else {
+                        null
+                    },
+                    OperationRules.stripAction(live, null),
+                )
             }
             assertEquals("$sport: im 2. Satz angekommen", 1, match.state.sets.size)
             c.confirmEnd()
@@ -228,12 +240,138 @@ class WatchControllerOperationTest {
         assertNull(live.serveBar)
     }
 
+    @Test
+    fun explicitOpeningChoiceOnlyOffersForwardCorrection() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        c.openServerChoice()
+        val partner = live.teams.a[1].id
+        assertTrue(c.chooseServer(partner))
+        assertFalse(live.corrections!!.retroactive)
+        c.requestCorrection()
+        assertTrue(c.correctServer(live.teams.b[1].id))
+        assertEquals(live.teams.b[1].id, match.state.serve?.player)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+    }
+
+    @Test
+    fun rejectedSessionChoiceReopensTheCurrentContextAndAllowsRetry() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        val first = match.serverChoiceContext!!
+        // Simuliert einen bereits zugestellten Touch bei noch nicht übernommener Session-Änderung.
+        c.dispose()
+        assertTrue(
+            h.watch.correct(
+                eu.advantly.core.scoring.Correction
+                    .server(first.players[1]),
+            ),
+        )
+        val current = match.serverChoiceContext!!
+        assertFalse(c.chooseServer(first.players.last(), first))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertEquals(current, live.serverChoice!!.context)
+        assertTrue(c.chooseServer(current.players.last(), current))
+        assertEquals(WatchHaptic.CONFIRM, h.haptics.last().pattern)
+        assertNull(live.overlay)
+        c.tick()
+        assertNull(live.overlay)
+        c.start()
+    }
+
+    @Test
+    fun rejectedSessionChoiceRefreshesTheWindowAndClosesAfterRoleLoss() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        h.settle()
+        val first = match.serverChoiceContext!!
+        c.dispose()
+        repeat(4) { assertTrue(h.watch.recordPoint(Side.A)) }
+        val second = match.serverChoiceContext!!
+        assertFalse(c.chooseServer(first.players.first(), first))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertEquals(second, live.serverChoice!!.context)
+        assertTrue(h.phone.takeOverScoring())
+        h.scheduler.advanceBy(2_000)
+        assertFalse(c.chooseServer(second.players.first(), second))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertNull(live.overlay)
+        assertEquals(LiveRole.DISPLAY, live.role)
+        c.start()
+    }
+
+    @Test
+    fun automaticChoiceIsLocalAndRejectsStaleTaps() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        val first = match.serverChoiceContext!!
+        val count = match.eventCount
+        assertFalse(c.point(Side.A))
+        assertFalse(c.undo())
+        c.dismissOverlay()
+        c.tick()
+        c.onWake()
+        assertNull(live.overlay)
+        assertEquals(count, match.eventCount)
+        points(Side.A, Side.A, Side.A, Side.A)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        val second = match.serverChoiceContext!!
+        assertFalse(c.chooseServer(second.players.first(), first))
+        assertEquals(second, match.serverChoiceContext)
+        assertTrue(c.chooseServer(second.players.last(), second))
+        assertNull(live.overlay)
+        assertFalse("Auswahltap zählt keinen Punkt", c.point(Side.A))
+        h.scheduler.advanceBy(300)
+        assertTrue(c.point(Side.A))
+    }
+
+    @Test
+    fun backgroundAndLockDeferAutomaticChoiceAndUndoReopensMarkedChoice() {
+        c.setInteractive(false)
+        startOnWatch(discipline = Discipline.DOUBLES, format = FormatChoice.TENNIS_TIEBREAK_7)
+        assertNull(live.overlay)
+        c.lock()
+        c.setInteractive(true)
+        assertNull("Gesperrt noch keine Auswahl", live.overlay)
+        c.unlock()
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        c.chooseServer(match.serverChoiceContext!!.players.last())
+        points(Side.A)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        c.dismissOverlay()
+        h.scheduler.advanceBy(300)
+        assertTrue(c.undo())
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertNotNull(live.serverChoice?.chosen)
+    }
+
     // --- Aufschlägerwahl im Doppel ----------------------------------------------------------------
+
+    @Test
+    fun undoAtTheStartOfALaterSetReviewsTheMarkedChoice() {
+        startOnWatch(discipline = Discipline.DOUBLES, format = FormatChoice.TENNIS_OPEN)
+        repeat(24) { points(Side.A) }
+        assertNotNull(live.decision)
+        assertTrue(c.startNextSet(NextSetKind.REGULAR))
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertTrue(
+            c.chooseServer(
+                live.serverChoice!!
+                    .players
+                    .last()
+                    .id,
+            ),
+        )
+        points(Side.A)
+        assertTrue(c.undo())
+        assertEquals(1, match.state.current?.setIndex)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertNotNull(live.serverChoice?.chosen)
+    }
 
     @Test
     fun doublesAsksTheOpponentsServerBeforeTheirFirstServiceGame() {
         startOnWatch(discipline = Discipline.DOUBLES)
-        assertFalse("Game 1 im 1. Satz hat der Start entschieden", live.serverChoice!!.prompt)
+        assertTrue("Erste Wahl erfolgt live", live.serverChoice!!.prompt)
         points(Side.A)
         assertNull("Game 1 läuft", live.serverChoice)
         points(Side.A, Side.A, Side.A)
@@ -241,11 +379,17 @@ class WatchControllerOperationTest {
         assertEquals(2, choice.game)
         assertEquals(Side.B, choice.side)
         assertTrue(choice.prompt)
+        h.scheduler.advanceBy(ServeBarTimer.VISIBLE_MILLIS + 1)
+        c.tick()
+        c.dismissOverlay()
+        assertNotNull("Aufschlag-Info bleibt nach längerer Auswahl erreichbar", live.serveBar)
         c.openServerChoice()
         assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
         assertFalse("Auswahl offen: kein Punkt", c.point(Side.A))
         c.dismissOverlay() // „Später“
         assertNull(live.overlay)
+        c.tick()
+        assertNull("Später öffnet nicht erneut", live.overlay)
         c.openServerChoice()
         val opponent2 = choice.players.single { it.index == 1 }
         assertTrue(c.chooseServer(opponent2.id))
@@ -277,7 +421,7 @@ class WatchControllerOperationTest {
     fun liftedChoiceInTheFirstGameIsAskedAgain() {
         startOnWatch(discipline = Discipline.DOUBLES)
         val partner = live.teams.a[1]
-        assertFalse(live.serverChoice!!.prompt)
+        assertTrue(live.serverChoice!!.prompt)
         assertTrue(c.chooseServer(partner.id))
         assertEquals(partner.id, live.serverChoice?.chosen)
         // Korrektur der Reihenfolge hebt die Wahl auf (Engine, Review R1) → Hinweis erscheint wieder

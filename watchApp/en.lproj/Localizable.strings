@@ -491,7 +491,6 @@
 "serve.choice.first" = "Who serves first?";
 "serve.choice.second.us" = "Who serves for us?";
 "serve.choice.second.them" = "Who serves for the opponents?";
-"serve.choice.hint" = "Choose later – the current order applies.";
 "setend.regular" = "Regular set";
 "setend.tiebreak7" = "Tiebreak to 7";
 "setend.champions10" = "Champions tiebreak to 10";
@@ -515,3 +514,11 @@
 "sync.updateWatch.short" = "Update watch";
 "sync.updatePhone.short" = "Update phone";
 "serve.bar" = "Serve bar";
+
+// Aufschlagwahl live (F30)
+"setup.startMatch" = "Start match";
+"common.later" = "Later";
+"serve.choice.current %@" = "Current: %@. You can choose until the next point.";
+"serve.choice.game %@ %@" = "Set %@ · Game %@";
+"serve.choice.tb.first %@" = "Set %@ · First serve";
+"serve.choice.tb.second %@" = "Set %@ · Other team’s first serve";

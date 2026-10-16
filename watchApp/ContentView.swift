@@ -29,13 +29,28 @@ struct ContentView: View {
             }
         }
         .allowsHitTesting(!dimmed && scenePhase == .active)
+        .sheet(isPresented: Binding(get: { model.serverChoicePresented }, set: { if !$0 { model.dismissServerChoice() } })) {
+            if let context = model.serverChoiceContext {
+                ServerChoiceView(model: model, context: context)
+                    .id(ScoringModel.choiceSignature(context))
+                    .onDisappear {
+                        // Ein alter Sheet-Inhalt darf beim Kontextwechsel nicht die neue Auswahl schließen.
+                        if ScoringModel.choiceSignature(model.serverChoiceContext) == ScoringModel.choiceSignature(context) {
+                            model.dismissServerChoice()
+                        }
+                    }
+            }
+        }
         .onChange(of: dimmed) { _, reduced in
+            model.setChoiceInteractive(!reduced && scenePhase == .active)
             if reduced { model.dismissServeBar() } else { model.didWake() }
         }
         .onChange(of: scenePhase) { _, phase in
+            model.setChoiceInteractive(phase == .active && !dimmed)
             if phase != .active { model.dismissServeBar() }
         }
         .onAppear {
+            model.setChoiceInteractive(scenePhase == .active && !dimmed)
             guard !launched else { return }
             launched = true
             #if DEBUG

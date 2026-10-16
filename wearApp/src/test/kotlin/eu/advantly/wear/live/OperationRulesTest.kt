@@ -4,15 +4,12 @@ import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
-import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ServeOutcome
-import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.data.LocalData
-import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -44,10 +41,6 @@ class OperationRulesTest {
         MatchSessions
             .create(data, link = null, scheduler = ManualScheduler(), kind = PeerKind.WATCH, clock = { 1_760_000_000_000L })
             .also { it.start() }
-
-    /** `ServerChosen` aus dem gespeicherten Log, wie `WatchDirectory.serverChosen`. */
-    private fun chosenFrom(data: LocalData): (MatchId) -> List<Pair<EventId, ServerChosen>> =
-        { id -> data.events.scoreEvents(id).mapNotNull { e -> (e.payload as? ServerChosen)?.let { e.id to it } } }
 
     private fun sync(compatibility: CompatibilityStatus? = CompatibilityStatus.COMPATIBLE) =
         SyncStatus(
@@ -113,7 +106,7 @@ class OperationRulesTest {
         val start = OperationRules.serverChoice(s.state.value.match!!, ::player)!!
         assertEquals(1, start.game)
         assertEquals(4, start.players.size)
-        assertFalse("Game 1 des 1. Satzes entscheidet der Start", start.prompt)
+        assertTrue("Game 1 wird live gewählt", start.prompt)
         s.recordPoint(Side.A)
         assertNull("Game 1 läuft, wir schlagen auf", OperationRules.serverChoice(s.state.value.match!!, ::player))
         repeat(3) { s.recordPoint(Side.A) } // Game 1 vorbei
@@ -129,13 +122,13 @@ class OperationRulesTest {
     }
 
     @Test
-    fun liftedOpeningChoiceIsRebuiltFromTheEventLog() {
+    fun liftedOpeningChoiceIsOfferedFromTheCurrentStateAfterRestart() {
         val data = testLocalData()
         val s = session(data)
         s.create(Presets.TENNIS_DOUBLES_MTB10.format(Discipline.DOUBLES), doubles)
-        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
+        assertTrue(OperationRules.serverChoice(s.state.value.match!!, ::player)!!.prompt)
         assertTrue(s.chooseServer(partner))
-        assertFalse("Wahl wirksam – nichts zu fragen", OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
+        assertFalse(OperationRules.serverChoice(s.state.value.match!!, ::player)!!.prompt)
         assertTrue(
             s.correct(
                 eu.advantly.core.scoring.Correction
@@ -144,30 +137,12 @@ class OperationRulesTest {
         )
         val lifted = s.state.value.match!!
         assertNull(lifted.serverChoice?.chosen)
-        // frischer Check (z. B. nach Prozessverlust): nur das gespeicherte Log zählt
-        val made = OpeningChoiceCheck(chosenFrom(data)).choiceMade(lifted)
-        assertTrue("im Eröffnungsfenster schon gewählt", made)
-        assertTrue(OperationRules.serverChoice(lifted, ::player, made)!!.prompt)
-        assertFalse("ohne Wahl im Fenster: Start hat entschieden", OperationRules.serverChoice(lifted, ::player)!!.prompt)
-        repeat(4) { s.recordPoint(Side.A) } // Game 2: kein Eröffnungsfenster mehr
-        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
-        assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(null))
-    }
-
-    @Test
-    fun ignoredChoicesDoNotCount() {
-        val s = session()
-        s.create(Presets.TENNIS_DOUBLES_MTB10.format(Discipline.DOUBLES), doubles)
-        val state =
-            s.state.value.match!!
-                .state
-        val valid = EventId("v") to ServerChosen(0, Side.A, partner)
-        assertTrue(OperationRules.choiceMadeInSet(listOf(valid), 0, state))
-        assertFalse("anderer Satz", OperationRules.choiceMadeInSet(listOf(valid), 1, state))
-        val ignored = state.copy(ignoredEvents = listOf(EventId("v")))
-        assertFalse(OperationRules.choiceMadeInSet(listOf(valid), 0, ignored))
-        val rejected = state.copy(rejectedByRole = listOf(EventId("v")))
-        assertFalse(OperationRules.choiceMadeInSet(listOf(valid), 0, rejected))
+        assertTrue(OperationRules.serverChoice(lifted, ::player)!!.prompt)
+        val restarted = session(data)
+        assertTrue(restarted.resume(lifted.id))
+        assertTrue(OperationRules.serverChoice(restarted.state.value.match!!, ::player)!!.prompt)
+        repeat(4) { s.recordPoint(Side.A) }
+        assertEquals(2, OperationRules.serverChoice(s.state.value.match!!, ::player)!!.game)
     }
 
     @Test

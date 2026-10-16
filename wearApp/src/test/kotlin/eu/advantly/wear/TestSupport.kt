@@ -76,6 +76,7 @@ class WatchHarness(
         watch.start()
         controller.effects = { effects += it }
         controller.start()
+        controller.setInteractive(true)
         settle()
     }
 
