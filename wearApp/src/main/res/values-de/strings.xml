@@ -198,7 +198,6 @@
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>
-    <string name="server_choice_hint">Später wählen – es gilt die bisherige Reihenfolge</string>
     <string name="server_choice_prompt">Aufschlag wählen</string>
     <string name="action_later">Später</string>
     <string name="set_end_regular">Normaler Satz</string>

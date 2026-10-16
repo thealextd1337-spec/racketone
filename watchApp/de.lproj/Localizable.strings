@@ -482,7 +482,6 @@
 "serve.choice.first" = "Wer schlägt auf?";
 "serve.choice.second.us" = "Wer schlägt bei uns auf?";
 "serve.choice.second.them" = "Wer schlägt bei den Gegnern auf?";
-"serve.choice.hint" = "Später wählen – es gilt die bisherige Reihenfolge.";
 "setend.regular" = "Normaler Satz";
 "setend.tiebreak7" = "Tiebreak bis 7";
 "setend.champions10" = "Champions-Tiebreak bis 10";

@@ -205,7 +205,6 @@
     <string name="server_choice_title_game1">Who serves first?</string>
     <string name="server_choice_title_game2_us">Who serves for us?</string>
     <string name="server_choice_title_game2_them">Who serves for the opponents?</string>
-    <string name="server_choice_hint">Choose later – the current order applies</string>
     <string name="server_choice_prompt">Choose server</string>
     <string name="action_later">Later</string>
     <string name="set_end_regular">Regular set</string>

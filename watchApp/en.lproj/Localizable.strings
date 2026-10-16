@@ -482,7 +482,6 @@
 "serve.choice.first" = "Who serves first?";
 "serve.choice.second.us" = "Who serves for us?";
 "serve.choice.second.them" = "Who serves for the opponents?";
-"serve.choice.hint" = "Choose later – the current order applies.";
 "setend.regular" = "Regular set";
 "setend.tiebreak7" = "Tiebreak to 7";
 "setend.champions10" = "Champions tiebreak to 10";
