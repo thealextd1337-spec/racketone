@@ -482,8 +482,16 @@ fun ServerChoiceScreen(
                 )
             }
         }
-        val default = live.serve?.server
-        textItem { stringResource(R.string.server_choice_current, default?.let { playerName(it, live.doubles) }.orEmpty()) }
+        val default =
+            (choice.players + live.teams.a + live.teams.b).firstOrNull { it.id == choice.context?.defaultServer }
+                ?: live.serve?.server
+        textItem {
+            if (default != null) {
+                stringResource(R.string.server_choice_current, playerName(default, live.doubles))
+            } else {
+                stringResource(R.string.server_choice_current_unknown)
+            }
+        }
         actionItem(R.string.action_later, onClick = actions::dismissOverlay)
     }
 }

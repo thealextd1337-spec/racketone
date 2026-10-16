@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
@@ -44,6 +45,7 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.dialog_no_finish
 import eu.advantly.ui.phone.resources.dialog_yes
 import eu.advantly.ui.phone.resources.live_restore_point
+import eu.advantly.ui.phone.resources.server_choice_current
 import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -156,6 +158,14 @@ class LiveOperationsUiTest {
                 model.controller.openServerChoice()
             }
             val second = model.controller.serverChoicePresentation!!
+            val currentText =
+                runBlocking {
+                    getString(
+                        eu.advantly.ui.phone.resources.Res.string.server_choice_current,
+                        "Jonas",
+                    )
+                }
+            onNodeWithText(currentText).performScrollTo().assertExists()
             onNodeWithTag("sheet_choose_server_${second.players.last().value}").performScrollTo().performClick()
             onNodeWithTag("server_choice_sheet").assertDoesNotExist()
             runOnIdle {

@@ -59,6 +59,7 @@ fun liveUi(
     serveBar: ServeBarUi? = null,
     sport: Sport = Sport.TENNIS,
     decision: DecisionUi? = null,
+    serving: Side = Side.A,
 ): LiveUi {
     val teams =
         if (doubles) {
@@ -89,12 +90,12 @@ fun liveUi(
         hint = null,
         serve =
             ServeUi(
-                side = Side.A,
+                side = serving,
                 court = null,
                 servesRemaining = null,
                 serverNumber = null,
-                server = if (doubles) teams.a[0] else null,
-                receiver = if (doubles) teams.b[1] else null,
+                server = if (doubles) teams[serving][0] else null,
+                receiver = if (doubles) teams[serving.other][1] else null,
             ),
         status = MatchStatus.IN_PROGRESS,
         sync = SyncUi.Pending(3),

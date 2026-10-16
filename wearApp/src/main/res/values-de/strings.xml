@@ -264,4 +264,5 @@
     <string name="server_choice_context_tiebreak_first">Satz %1$d · Erster Aufschlag</string>
     <string name="server_choice_context_tiebreak_second">Satz %1$d · Erster Aufschlag des anderen Teams</string>
     <string name="server_choice_current">Aktuell: %1$s. Du kannst bis zum nächsten Punkt wählen.</string>
+    <string name="server_choice_current_unknown">Du kannst bis zum nächsten Punkt wählen.</string>
 </resources>

@@ -187,7 +187,7 @@ struct ServerChoiceView: View {
                     .accessibilityLabel(Text(verbatim: "\(PlayerText.name(player, doubles: snap.doubles)), \(loc(player.side == "A" ? "team.us" : "team.them")), \(player.number)"))
                     .accessibilityAddTraits(player.id == context.chosen ? .isSelected : [])
                 }
-                if let player = snap.serverPlayer {
+                if let player = snap.serverChoicePlayers.first(where: { $0.id == context.defaultServer }) ?? snap.serverPlayer {
                     Text(loc("serve.choice.current %@", PlayerText.name(player, doubles: snap.doubles)))
                         .font(.footnote).foregroundStyle(Brand.text2)
                 }

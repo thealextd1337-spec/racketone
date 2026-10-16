@@ -1,6 +1,8 @@
 package eu.advantly.wear.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -69,6 +71,33 @@ class ServerChoiceUiTest {
     @Config(qualifiers = "en-w206dp-h206dp-round-watch-340dpi")
     fun englishTiebreakChoiceFits() = checkChoice(2, true, 1.3f, "choice-tiebreak-en-galaxy8", true)
 
+    @Test
+    fun contextDefaultWinsOverLiveServerAndMissingServe() {
+        val live = liveUi(doubles = true, names = false)
+        val players = live.teams.b
+        val context =
+            ServerChoiceContext(
+                live.matchId,
+                0,
+                ServerChoicePhase.SECOND,
+                players.map { it.id },
+                Side.B,
+                players[0].id,
+                null,
+                GameKind.STANDARD,
+            )
+        val choice = ServerChoiceUi(2, Side.B, players, null, true, context)
+        var missingServe by androidx.compose.runtime.mutableStateOf(false)
+        rule.setContent {
+            WearTestFrame { ServerChoiceScreen(if (missingServe) live.copy(serve = null) else live, choice, RecordingActions().actions) }
+        }
+        val text = "Aktuell: Gegner 1. Du kannst bis zum nächsten Punkt wählen."
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(text))
+        rule.onNodeWithText(text).assertExists()
+        rule.runOnIdle { missingServe = true }
+        rule.onNodeWithText(text).assertExists()
+    }
+
     private fun checkChoice(
         phase: Int,
         placeholders: Boolean,
@@ -77,7 +106,7 @@ class ServerChoiceUiTest {
         tiebreak: Boolean = false,
     ) {
         RuntimeEnvironment.setFontScale(font)
-        val live = liveUi(doubles = true, names = !placeholders)
+        val live = liveUi(doubles = true, names = !placeholders, serving = if (phase == 1) Side.A else Side.B)
         val players = if (phase == 1) live.teams.a + live.teams.b else live.teams.b
         val context =
             ServerChoiceContext(
@@ -85,7 +114,7 @@ class ServerChoiceUiTest {
                 0,
                 if (phase == 1) ServerChoicePhase.FIRST else ServerChoicePhase.SECOND,
                 players.map { it.id },
-                Side.B,
+                if (phase == 1) Side.A else Side.B,
                 players[0].id,
                 null,
                 if (tiebreak) GameKind.MATCH_TIEBREAK else GameKind.STANDARD,
@@ -120,6 +149,13 @@ class ServerChoiceUiTest {
             }
             if (i == 1 || i == labels.lastIndex) rule.screenshot("$shot-player$i")
         }
+        val current = app.getString(eu.advantly.wear.R.string.server_choice_current, labels.first())
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(current))
+        rule.onNodeWithText(current).assertExists()
+        if (phase == 2 && placeholders && !tiebreak) {
+            rule.onNodeWithText("Aktuell: Gegner 1. Du kannst bis zum nächsten Punkt wählen.").assertExists()
+        }
+        rule.screenshot("$shot-current")
         val later = app.getString(eu.advantly.wear.R.string.action_later)
         rule.onNode(hasScrollToNodeAction()).performScrollToIndex(players.size + 3)
         rule.screenshot("$shot-later")

@@ -272,4 +272,5 @@
     <string name="server_choice_context_tiebreak_first">Set %1$d · First serve</string>
     <string name="server_choice_context_tiebreak_second">Set %1$d · Other team’s first serve</string>
     <string name="server_choice_current">Current: %1$s. You can choose until the next point.</string>
+    <string name="server_choice_current_unknown">You can choose until the next point.</string>
 </resources>
