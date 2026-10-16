@@ -283,6 +283,59 @@ class MatchWizardTest {
     }
 
     @Test
+    fun switchingFromBadmintonDoublesToPadelIgnoresTheHiddenServerSelection() {
+        val w = wizard()
+        w.selectSport(Sport.BADMINTON)
+        w.setDiscipline(Discipline.DOUBLES)
+        w.fillOpponents()
+        val opponent =
+            w.state.value.input.teamB
+                .first()!!
+                .id
+        w.setFirstServer(opponent)
+        assertEquals(
+            opponent,
+            w.state.value.setup!!
+                .lineup.firstServer,
+        )
+        w.selectSport(Sport.PADEL)
+        assertNull(w.state.value.input.firstServer)
+        w.fillOpponents()
+        assertTrue(w.next())
+        assertEquals(store.self.value.id, assertNotNull(w.finish()).lineup.firstServer)
+    }
+
+    @Test
+    fun switchingTennisDisciplineUsesTheLiveChoiceDefaultOnlyForDoubles() {
+        val w = wizard()
+        w.selectSport(Sport.TENNIS)
+        w.fillOpponents()
+        val opponent =
+            w.state.value.input.teamB
+                .first()!!
+                .id
+        w.setFirstServer(opponent)
+        assertEquals(
+            opponent,
+            w.state.value.setup!!
+                .lineup.firstServer,
+        )
+        w.setDiscipline(Discipline.DOUBLES)
+        w.fillOpponents()
+        assertEquals(
+            store.self.value.id,
+            w.state.value.setup!!
+                .lineup.firstServer,
+        )
+        w.setDiscipline(Discipline.SINGLES)
+        assertEquals(
+            opponent,
+            w.state.value.setup!!
+                .lineup.firstServer,
+        )
+    }
+
+    @Test
     fun coinTossPicksAServerFromTheLineup() {
         val w = wizard()
         w.selectSport(Sport.TENNIS)
