@@ -39,7 +39,7 @@
     <string name="format_best_of">Best of %1$d</string>
     <string name="format_open_sets">Offen (Satz für Satz)</string>
     <string name="format_open_games">Offen (Spiel für Spiel)</string>
-    <string name="format_tennis_mtb">Best of 3 · Match-Tiebreak</string>
+    <string name="format_tennis_mtb">Best of 3 · Champions-Tiebreak</string>
     <string name="format_one_set">1 Satz</string>
     <string name="format_short_sets">Kurzsätze bis 4</string>
     <string name="format_padel_golden">Best of 3 · Golden Point</string>
@@ -106,7 +106,8 @@
     <string name="hint_deuce">Einstand</string>
     <string name="hint_extension">Verlängerung</string>
     <string name="hint_tiebreak">Tiebreak</string>
-    <string name="hint_match_tiebreak">Match-Tiebreak</string>
+    <string name="hint_match_tiebreak">Champions-TB</string>
+    <string name="hint_super_tiebreak">Super-TB</string>
     <string name="hint_change_ends">Seitenwechsel</string>
     <string name="hint_receive_swap">Rückschlag tauschen</string>
     <string name="hint_side_out">Side-Out</string>

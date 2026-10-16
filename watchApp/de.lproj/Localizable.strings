@@ -89,7 +89,10 @@
 "hint.TIEBREAK" = "Tiebreak";
 
 /* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
-"hint.MATCH_TIEBREAK" = "Match-TB";
+"hint.MATCH_TIEBREAK" = "Champions-TB";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform), Padel */
+"hint.MATCH_TIEBREAK_PADEL" = "Super-TB";
 
 /* Hinweis-Pill mit Anzahl */
 "hint.MATCH_POINT.n %@" = "%@ Matchbälle";
@@ -169,9 +172,6 @@
 /* Satzende-Dialog (Primäraktion) */
 "setend.yes" = "Ja";
 
-/* Satzende-Dialog: Match-Tiebreak statt Satz */
-"setend.matchTiebreak" = "Match-Tiebreak";
-
 /* Satzende-Dialog */
 "setend.no" = "Nein, beenden";
 
@@ -209,10 +209,10 @@
 "preset.TENNIS_SINGLES_BO5_FS10" = "Best of 5, Finalsatz-TB 10";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_BO3_MTB10" = "Best of 3 + Match-TB";
+"preset.TENNIS_BO3_MTB10" = "Best of 3 + Champions-TB";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_DOUBLES_MTB10" = "Doppel No-Ad + Match-TB";
+"preset.TENNIS_DOUBLES_MTB10" = "Doppel No-Ad + Champions-TB";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.TENNIS_BO3_ADV_FINAL" = "Best of 3, Vorteilssatz";
@@ -233,7 +233,7 @@
 "preset.TENNIS_ONE_SET" = "Ein Satz";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_MATCH_TB_ONLY" = "Nur Match-Tiebreak";
+"preset.TENNIS_MATCH_TB_ONLY" = "Nur Champions-Tiebreak";
 "preset.TENNIS_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
 "preset.TENNIS_TIEBREAK_ONLY_10" = "Nur Champions-Tiebreak (bis 10)";
 

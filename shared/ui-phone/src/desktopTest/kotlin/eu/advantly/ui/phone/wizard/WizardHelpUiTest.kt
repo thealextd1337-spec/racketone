@@ -130,7 +130,7 @@ class WizardHelpUiTest {
                                 WizardHelp.SETS,
                                 WizardHelp.GAMES,
                                 WizardHelp.DEUCE,
-                                WizardHelp.DECIDING,
+                                if (sport == Sport.PADEL) WizardHelp.DECIDING_PADEL else WizardHelp.DECIDING,
                                 WizardHelp.SERVE_STATS,
                             )
                         }

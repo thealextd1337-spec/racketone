@@ -91,6 +91,9 @@
 /* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
 "hint.MATCH_TIEBREAK" = "Match TB";
 
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform), Padel */
+"hint.MATCH_TIEBREAK_PADEL" = "Super TB";
+
 /* Hinweis-Pill mit Anzahl */
 "hint.MATCH_POINT.n %@" = "%@ match pts";
 
@@ -168,9 +171,6 @@
 
 /* Satzende-Dialog (Primäraktion) */
 "setend.yes" = "Yes";
-
-/* Satzende-Dialog: Match-Tiebreak statt Satz */
-"setend.matchTiebreak" = "Match tiebreak";
 
 /* Satzende-Dialog */
 "setend.no" = "No, end match";

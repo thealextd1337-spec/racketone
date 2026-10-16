@@ -113,6 +113,7 @@
     <string name="hint_extension">Deuce</string>
     <string name="hint_tiebreak">Tiebreak</string>
     <string name="hint_match_tiebreak">Match tiebreak</string>
+    <string name="hint_super_tiebreak">Super tiebreak</string>
     <string name="hint_change_ends">Change ends</string>
     <string name="hint_receive_swap">Swap receivers</string>
     <string name="hint_side_out">Side out</string>

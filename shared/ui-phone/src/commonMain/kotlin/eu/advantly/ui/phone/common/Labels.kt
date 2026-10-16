@@ -38,6 +38,7 @@ import eu.advantly.ui.phone.resources.format_mtb
 import eu.advantly.ui.phone.resources.format_no_tb
 import eu.advantly.ui.phone.resources.format_open
 import eu.advantly.ui.phone.resources.format_points
+import eu.advantly.ui.phone.resources.format_super_tb
 import eu.advantly.ui.phone.resources.format_tb
 import eu.advantly.ui.phone.resources.format_win_by
 import eu.advantly.ui.phone.resources.live_games_and_points
@@ -196,6 +197,13 @@ fun durationText(ms: Long): String {
     }
 }
 
+/** Match-Tiebreak sportgerecht: Tennis „Champions-Tiebreak bis 10“, Padel „Super-Tiebreak bis 10“. */
+@Composable
+fun matchTiebreakText(
+    sport: Sport,
+    pointsToWin: Int,
+): String = stringResource(if (sport == Sport.PADEL) Res.string.format_super_tb else Res.string.format_mtb, pointsToWin)
+
 /** Struktur bleibt auch bei benutzerdefiniertem Titel vollständig sichtbar. */
 @Composable
 fun formatDescription(format: MatchFormat): String {
@@ -203,7 +211,7 @@ fun formatDescription(format: MatchFormat): String {
     if (onlyTiebreak != null) {
         return listOf(
             stringResource(Res.string.format_best_of, 1),
-            stringResource(Res.string.format_mtb, onlyTiebreak.pointsToWin),
+            matchTiebreakText(format.sport, onlyTiebreak.pointsToWin),
             stringResource(Res.string.format_win_by, onlyTiebreak.winBy),
         ).joinToString(" · ")
     }
@@ -230,7 +238,7 @@ fun formatDescription(format: MatchFormat): String {
         val text =
             when (it) {
                 is RegularSet -> regular(it)
-                is MatchTiebreakFormat -> stringResource(Res.string.format_mtb, it.pointsToWin)
+                is MatchTiebreakFormat -> matchTiebreakText(format.sport, it.pointsToWin)
             }
         parts += stringResource(Res.string.format_decider, text)
     }

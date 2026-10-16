@@ -61,7 +61,7 @@ class ScoreTextsTest {
         val previous = Locale.getDefault()
         val descriptions =
             listOf(
-                Locale.GERMANY to "Best of 1 · Match-Tiebreak bis 10 · 2 Punkte Vorsprung",
+                Locale.GERMANY to "Best of 1 · Champions-Tiebreak bis 10 · 2 Punkte Vorsprung",
                 Locale.US to "Best of 1 · Match tiebreak to 10 · Win by 2",
             )
         try {

@@ -146,7 +146,7 @@
     <string name="fmt_deciding_title">Entscheidungssatz</string>
     <string name="fmt_deciding_title_padel">3. Satz</string>
     <string name="fmt_deciding_normal">Normal</string>
-    <string name="fmt_deciding_mtb">Match-TB bis 10</string>
+    <string name="fmt_deciding_mtb">Champions-TB bis 10</string>
     <string name="fmt_deciding_adv_set">Vorteilssatz</string>
     <string name="fmt_deciding_tb10">TB bis 10</string>
     <string name="fmt_deciding_padel_super_tb">Super-Tiebreak</string>
@@ -193,7 +193,8 @@
     <string name="hint_deciding_point">Entscheidungspunkt</string>
     <string name="hint_star_point">Star Point</string>
     <string name="hint_tiebreak">Tiebreak</string>
-    <string name="hint_match_tiebreak">Match-Tiebreak</string>
+    <string name="hint_match_tiebreak">Champions-Tiebreak</string>
+    <string name="hint_super_tiebreak">Super-Tiebreak</string>
     <string name="hint_changeends">Seitenwechsel</string>
     <string name="hint_receive_order_swapped">Rückschlagreihenfolge wechseln</string>
     <string name="hint_side_out">Side-Out</string>
@@ -468,7 +469,8 @@
     <string name="format_no_tb">Ohne Tiebreak</string>
     <string name="format_cap">Deckel %1$d</string>
     <string name="format_decider">Entscheidungssatz: %1$s</string>
-    <string name="format_mtb">Match-Tiebreak bis %1$d</string>
+    <string name="format_mtb">Champions-Tiebreak bis %1$d</string>
+    <string name="format_super_tb">Super-Tiebreak bis %1$d</string>
     <string name="detail_format">Format</string>
     <string name="detail_lineup">Besetzung · lokale Bilanz</string>
     <string name="detail_sets">Satzverlauf</string>
@@ -527,7 +529,8 @@
     <string name="help_sets">Best of 1: 1 Satz gewinnt. Best of 3: 2 Gewinnsätze. Best of 5: 3 Gewinnsätze. Best of 7: 4 Gewinnsätze. Offen: Nach jedem Satz entscheidet ihr, ob ihr weiterspielt; die Satzanzahl ist nicht festgelegt. Bei Pickleball heißen diese Einheiten Spiele.</string>
     <string name="help_games">Games zum Satzgewinn, normalerweise mit zwei Games Vorsprung. Standard: 6; kurze Sätze: 4. Der Tiebreak beginnt normalerweise beim gewählten Wert, z. B. 4:4. Bei 1 Game kann der Satz trotzdem bis 2:0 oder zum Tiebreak bei 1:1 gehen; er endet nicht automatisch nach einem Game.</string>
     <string name="help_deuce">Bei 40:40: Mit Vorteil (Advantage) braucht ihr zwei Punkte in Folge zum Gamegewinn. No-Ad (Tennis) und Golden Point (Padel) entscheiden mit einem Punkt; die Rückschlagseite wählt die Annahmeseite. Star Point (Padel): Nach zwei Vorteilsrunden entscheidet beim nächsten Einstand ein Punkt.</string>
-    <string name="help_deciding">Normal: Ihr spielt einen vollen Entscheidungssatz. Match-Tiebreak (auch Champions-Tiebreak, im Padel Super-Tiebreak): bis 10 mit zwei Punkten Vorsprung, ersetzt den Entscheidungssatz. Vorteilssatz: zwei Games Vorsprung, kein Tiebreak. Tiebreak bis 10: voller Entscheidungssatz mit Tiebreak bis 10 beim eingestellten Gleichstand.</string>
+    <string name="help_deciding">Normal: Ihr spielt einen vollen Entscheidungssatz. Champions-Tiebreak (auch Super-Tiebreak; im Padel Super-Tiebreak): bis 10 mit zwei Punkten Vorsprung, ersetzt den Entscheidungssatz. Vorteilssatz: zwei Games Vorsprung, kein Tiebreak. Tiebreak bis 10: voller Entscheidungssatz mit Tiebreak bis 10 beim eingestellten Gleichstand.</string>
+    <string name="help_deciding_padel">Normal: Ihr spielt einen vollen 3. Satz mit Tiebreak beim Gleichstand. Super-Tiebreak: bis 10 mit zwei Punkten Vorsprung, ersetzt den 3. Satz. Ohne Tiebreak: der 3. Satz läuft bis zwei Games Vorsprung.</string>
     <string name="help_tiebreak">Ein Tiebreak beginnt normalerweise bei 6:6 und geht bis 7 mit zwei Punkten Vorsprung. Bei kürzeren Sätzen bestimmt die Gamezahl den Gleichstand. Ein Game früher bedeutet z. B. 3:3 im Vier-Game-Satz. Ohne Tiebreak spielt ihr bis zu zwei Games Vorsprung. Die Wahl des Entscheidungssatzes kann diese Regel ersetzen.</string>
     <string name="help_serve_stats">Erfasst je Punkt ersten Aufschlag, zweiten Aufschlag oder Doppelfehler. So entstehen Aufschlag-Statistiken im Ergebnis; die Zählweise bleibt gleich. Punkte können auch ohne Aufschlagdetails bleiben.</string>
     <string name="help_discipline">Einzel: ein Spieler pro Seite. Doppel: zwei pro Seite; die App führt die Aufschlagreihenfolge mit. Mixed kennzeichnet ein Doppel und ändert die Zählweise nicht.</string>

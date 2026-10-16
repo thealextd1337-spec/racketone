@@ -32,6 +32,7 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.help_badminton
 import eu.advantly.ui.phone.resources.help_deciding
+import eu.advantly.ui.phone.resources.help_deciding_padel
 import eu.advantly.ui.phone.resources.help_deuce
 import eu.advantly.ui.phone.resources.help_discipline
 import eu.advantly.ui.phone.resources.help_end_change
@@ -55,6 +56,9 @@ internal enum class WizardHelp(
     GAMES(Res.string.help_games),
     DEUCE(Res.string.help_deuce),
     DECIDING(Res.string.help_deciding),
+
+    /** Padel: „3. Satz“ mit Super-Tiebreak bzw. ohne Tiebreak statt Champions-Tiebreak/Vorteilssatz. */
+    DECIDING_PADEL(Res.string.help_deciding_padel),
     TIEBREAK(Res.string.help_tiebreak),
     SERVE_STATS(Res.string.help_serve_stats),
     DISCIPLINE(Res.string.help_discipline),

@@ -533,7 +533,8 @@ struct HintPill: View {
             .overlay(Capsule().stroke(Brand.hint, lineWidth: 1.5))
     }
 
-    /// Schlüssel `hint.<CODE>[_PB|_RALLY][.n %@]` – Pickleball-Satzball heißt Spielball, B/TT-Einstand „Verlängerung“.
+    /// Schlüssel `hint.<CODE>[_PB|_RALLY|_PADEL][.n %@]` – Pickleball-Satzball heißt Spielball, B/TT-Einstand
+    /// „Verlängerung“, Padel-Match-Tiebreak „Super-TB“.
     static func text(_ s: WatchScoreSnapshot) -> String {
         var key = s.hintCode
         if key == "SET_POINT" && s.sport == "PICKLEBALL" {
@@ -541,6 +542,10 @@ struct HintPill: View {
         }
         if (key == "DEUCE" || key == "DECIDING_POINT") && SportStyle.isRally(s.sport) {
             key += "_RALLY"
+        }
+        // Tennis: Champions-Tiebreak, Padel: Super-Tiebreak (gleicher Hinweis-Code der Facade)
+        if key == "MATCH_TIEBREAK" && s.sport == "PADEL" {
+            key += "_PADEL"
         }
         if s.hintCount > 1 {
             return loc("hint." + key + ".n %@", String(s.hintCount))

@@ -35,6 +35,7 @@ import eu.advantly.ui.phone.resources.hint_setpoint
 import eu.advantly.ui.phone.resources.hint_setpoints
 import eu.advantly.ui.phone.resources.hint_side_out
 import eu.advantly.ui.phone.resources.hint_star_point
+import eu.advantly.ui.phone.resources.hint_super_tiebreak
 import eu.advantly.ui.phone.resources.hint_tiebreak
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -89,8 +90,9 @@ fun hintText(
                 Res.string.hint_tiebreak to null
             }
 
+            // Tennis: Champions-Tiebreak, Padel: Super-Tiebreak
             ScoreHint.Kind.MatchTiebreak -> {
-                Res.string.hint_match_tiebreak to null
+                (if (sport == Sport.PADEL) Res.string.hint_super_tiebreak else Res.string.hint_match_tiebreak) to null
             }
 
             ScoreHint.Kind.ChangeEnds -> {

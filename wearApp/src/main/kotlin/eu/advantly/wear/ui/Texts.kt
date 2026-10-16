@@ -259,8 +259,9 @@ fun hintText(
             stringResource(R.string.hint_tiebreak)
         }
 
+        // Tennis: Champions-Tiebreak, Padel: Super-Tiebreak
         ScoreHint.Kind.MatchTiebreak -> {
-            stringResource(R.string.hint_match_tiebreak)
+            stringResource(if (sport == Sport.PADEL) R.string.hint_super_tiebreak else R.string.hint_match_tiebreak)
         }
 
         ScoreHint.Kind.ChangeEnds -> {
