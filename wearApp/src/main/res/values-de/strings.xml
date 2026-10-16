@@ -217,6 +217,11 @@
     <string name="a11y_score">Stand %1$s zu %2$s</string>
     <string name="a11y_serving_us">Aufschlag Wir</string>
     <string name="a11y_serving_them">Aufschlag Gegner</string>
+    <string name="serve_court_right">Rechts</string>
+    <string name="serve_court_left">Links</string>
+    <string name="a11y_serve_court_right">Aufschlag von rechts</string>
+    <string name="a11y_serve_court_left">Aufschlag von links</string>
+    <string name="a11y_server">%1$s schlägt auf</string>
     <string name="a11y_view_only">Anzeige, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->

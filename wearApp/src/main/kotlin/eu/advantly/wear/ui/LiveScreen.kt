@@ -81,11 +81,14 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.match.session.OperationTimings
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.wear.R
+import eu.advantly.wear.live.CourtLetter
 import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveOverlay
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
 import eu.advantly.wear.live.OperationRules
+import eu.advantly.wear.live.PlayerUi
+import eu.advantly.wear.live.ServeUi
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.TouchDecision
 import eu.advantly.wear.live.TouchRouting
@@ -386,19 +389,7 @@ private fun ScorePage(
             val scoreA = pointText(live.points.a)
             val scoreB = pointText(live.points.b)
             val scoreDescription = stringResource(R.string.a11y_score, scoreA, scoreB)
-            val serveDescription =
-                live.serve
-                    ?.let {
-                        stringResource(
-                            if (it.side ==
-                                Side.A
-                            ) {
-                                R.string.a11y_serving_us
-                            } else {
-                                R.string.a11y_serving_them
-                            },
-                        )
-                    }.orEmpty()
+            val serveDescription = live.serve?.let { serveA11y(live, it) }.orEmpty()
             val undoLabel = stringResource(R.string.action_undo)
             val controlsLabel = stringResource(R.string.controls_title)
             val roleDescription = stringResource(R.string.a11y_view_only, stringResource(R.string.scoring_by, deviceName(live.scorerKind)))
@@ -535,6 +526,8 @@ private fun TeamHalf(
         }
     val serving = live.serve?.takeIf { it.side == side && live.status != MatchStatus.FINISHED }
     val arrowServe = serving?.takeIf { it.server != null && it.receiver != null }
+    // Tennis/Padel-Doppel: Aufschläger und Feld (rechts/links) statt „auf wen“ – wer wo steht, weiß die Uhr nicht
+    val tennisDoubles = live.sport.isTennisLike && live.doubles
     Box(modifier = styled) {
         val label: @Composable () -> Unit = {
             val names = live.teams[side]
@@ -556,7 +549,9 @@ private fun TeamHalf(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (serving != null) {
-                    val marker = listOfNotNull("●", serving.court?.name, serving.servesRemaining?.let { "•".repeat(it) }).joinToString(" ")
+                    // Feldbuchstabe in der Teamzeile nur im Einzel; im Tennis/Padel-Doppel steht das Feld beim Aufschläger
+                    val court = serving.court?.name?.takeUnless { tennisDoubles }
+                    val marker = listOfNotNull("●", court, serving.servesRemaining?.let { "•".repeat(it) }).joinToString(" ")
                     Text(
                         " $marker",
                         modifier = Modifier.testTag(LiveTags.SERVE_MARKER),
@@ -568,7 +563,10 @@ private fun TeamHalf(
                     )
                 }
             }
-            if (arrowServe?.server != null && arrowServe.receiver != null) {
+            val server = serving?.server
+            if (tennisDoubles && serving != null && server != null) {
+                ServerLine(server, serving.court, isAmbient)
+            } else if (arrowServe?.server != null && arrowServe.receiver != null) {
                 Text(
                     stringResource(R.string.serve_arrow, playerName(arrowServe.server, true), playerName(arrowServe.receiver, true)),
                     modifier = Modifier.testTag(LiveTags.SERVE_ARROW),
@@ -853,6 +851,64 @@ private object BottomLine {
     ): Boolean = !isAmbient && (live.takeOverOffered || (live.rejectedInputs > 0 && live.role == LiveRole.DISPLAY))
 }
 
+/**
+ * Tennis/Padel-Doppel: „Aufschläger · Rechts/Links“ (Feld, von dem aufgeschlagen wird – Summe der Punkte gerade =
+ * rechts, 02 §6.3). Der Name kürzt mit „…“, das Feld bleibt immer lesbar; bei Entscheidungspunkt (Rückschläger wählt)
+ * nur der Name.
+ */
+@Composable
+private fun ServerLine(
+    server: PlayerUi,
+    court: CourtLetter?,
+    isAmbient: Boolean,
+) {
+    val color = if (isAmbient) AmbientDigits else TextSecondary
+    Row(modifier = Modifier.testTag(LiveTags.SERVE_ARROW), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            playerName(server, true),
+            modifier = Modifier.weight(1f, fill = false),
+            fontSize = 10.sp,
+            lineHeight = LABEL_LINE_HEIGHT,
+            style = SMALL_LINE,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (court != null) {
+            Text(
+                " · " + stringResource(if (court == CourtLetter.R) R.string.serve_court_right else R.string.serve_court_left),
+                modifier = Modifier.testTag(LiveTags.SERVE_COURT),
+                fontSize = 10.sp,
+                lineHeight = LABEL_LINE_HEIGHT,
+                style = SMALL_LINE,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isAmbient) AmbientDigits else Color.White,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/** Bedienhilfe zum Aufschlag: Team, im Tennis/Padel-Doppel der Aufschläger, Feld ausgeschrieben – nie der Rückschläger. */
+@Composable
+private fun serveA11y(
+    live: LiveUi,
+    serve: ServeUi,
+): String {
+    val team = stringResource(if (serve.side == Side.A) R.string.a11y_serving_us else R.string.a11y_serving_them)
+    val server =
+        serve.server
+            ?.takeIf {
+                live.sport.isTennisLike && live.doubles
+            }?.let { stringResource(R.string.a11y_server, playerName(it, true)) }
+    val court =
+        serve.court?.takeIf { live.sport.isTennisLike }?.let {
+            stringResource(if (it == CourtLetter.R) R.string.a11y_serve_court_right else R.string.a11y_serve_court_left)
+        }
+    return listOfNotNull(team, server, court).joinToString(". ")
+}
+
 /** Laufendes Halten auf [side] seit [startUptime]; [fired] = Haltezeit erreicht, Aktion ausgelöst (Anzeige voll). */
 private data class HoldUi(
     val side: Side,
@@ -918,6 +974,7 @@ internal object LiveTags {
     const val TOP_STATUS = "live_top_status"
     const val SERVE_MARKER = "live_serve_marker"
     const val SERVE_ARROW = "live_serve_arrow"
+    const val SERVE_COURT = "live_serve_court"
     const val SETS = "live_sets"
     const val HINT = "live_hint"
     const val TOAST = "live_toast"

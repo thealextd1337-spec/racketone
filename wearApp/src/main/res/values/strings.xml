@@ -64,6 +64,7 @@
     <string name="player_opponent_1">Opponent 1</string>
     <string name="player_opponent_2">Opponent 2</string>
     <string name="serve_arrow" translatable="false">%1$s → %2$s</string>
+    <string name="serve_from" translatable="false">%1$s · %2$s</string>
     <string name="heart_rate_value" translatable="false">♥ %1$d</string>
     <string name="heart_rate_unknown" translatable="false">♥ --</string>
     <string name="role_view">VIEW ONLY</string>
@@ -223,6 +224,11 @@
     <string name="a11y_score">Score %1$s to %2$s</string>
     <string name="a11y_serving_us">Serve: us</string>
     <string name="a11y_serving_them">Serve: them</string>
+    <string name="serve_court_right">Right</string>
+    <string name="serve_court_left">Left</string>
+    <string name="a11y_serve_court_right">Serving from the right</string>
+    <string name="a11y_serve_court_left">Serving from the left</string>
+    <string name="a11y_server">%1$s serves</string>
     <string name="a11y_view_only">View only, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->

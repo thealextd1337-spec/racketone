@@ -365,6 +365,15 @@
 /* Bedienhilfe: Aufschläger → Rückschläger im Doppel */
 "a11y.serveFromTo %@ %@" = "Spieler %1$@ schlägt auf Spieler %2$@ auf";
 
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.RIGHT %@" = "%@ schlägt von rechts auf";
+
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.LEFT %@" = "%@ schlägt von links auf";
+
+/* Bedienhilfe Tennis/Padel: Aufschläger ohne Feld (Entscheidungspunkt, Rückschläger wählt) */
+"a11y.serverOnly %@" = "%@ schlägt auf";
+
 /* Action + Seitentaste (PauseWorkoutIntent) */
 "intent.pause.title" = "Match unterbrechen";
 

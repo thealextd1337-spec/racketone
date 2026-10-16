@@ -490,13 +490,22 @@ struct ServeIndicator: View {
                 ForEach(0..<max(Int(snap.servesRemaining), 1), id: \.self) { _ in ball }
             } else {
                 ball
+                if tennisDoubles, let server = snap.serverPlayer {
+                    // Tennis/Padel-Doppel: Aufschläger je Game mit Namen, dahinter das Feld R/L – kein „auf wen“
+                    Text(verbatim: PlayerText.name(server, doubles: true))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(color)
+                }
                 if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
                     Text(LocalizedStringKey("serve.court." + snap.serveCourt))
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(color)
                 }
             }
-            if snap.doubles && snap.serverNo > 0 {
+            if tennisDoubles && snap.serverPlayer != nil {
+                EmptyView()
+            } else if snap.doubles && snap.serverNo > 0 {
                 Text(String(snap.serverNo))
                     .foregroundStyle(color)
                 if snap.receiverNo > 0 {
@@ -512,7 +521,16 @@ struct ServeIndicator: View {
         .accessibilityLabel(Text(a11y))
     }
 
+    private var tennisDoubles: Bool { snap.doubles && (snap.sport == "TENNIS" || snap.sport == "PADEL") }
+
     private var a11y: String {
+        if tennisDoubles, let server = snap.serverPlayer {
+            let name = PlayerText.name(server, doubles: true)
+            if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                return loc("a11y.serverFrom." + snap.serveCourt + " %@", name)
+            }
+            return loc("a11y.serverOnly %@", name)
+        }
         guard snap.doubles && snap.serverNo > 0 else { return loc("a11y.serving") }
         let receiver = snap.receiverNo > 0 ? String(snap.receiverNo) : "?"
         return loc("a11y.serveFromTo %@ %@", String(snap.serverNo), receiver)

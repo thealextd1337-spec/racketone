@@ -575,6 +575,13 @@ class WatchScoringTest {
         assertEquals("B", tennis.serveSide)
         assertEquals(1, tennis.receiverNo)
         assertEquals(0, tennis.rightNoA)
+        // Aufschläger je Game mit Team und Nummer (Anzeige „Name · R/L“), Feld: Summe gerade → von rechts
+        val server = assertNotNull(tennis.serverPlayer)
+        assertEquals("B", server.side)
+        assertEquals(tennis.serverNo, server.number)
+        assertEquals(tennis.server, server.id)
+        assertEquals("RIGHT", tennis.serveCourt)
+        assertEquals("LEFT", assertNotNull(rig.watch.point(sideA = true)).serveCourt)
     }
 
     @Test

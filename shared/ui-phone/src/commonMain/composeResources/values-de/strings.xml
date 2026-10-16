@@ -175,6 +175,11 @@
     <string name="live_no_match">Kein laufendes Match.</string>
     <string name="court_right">R</string>
     <string name="court_left">L</string>
+    <string name="live_court_right">Rechts</string>
+    <string name="live_court_left">Links</string>
+    <string name="live_serve_from">%1$s · %2$s</string>
+    <string name="a11y_serve_court_right">Aufschlag von rechts</string>
+    <string name="a11y_serve_court_left">Aufschlag von links</string>
     <string name="hint_breakpoint">Breakball</string>
     <string name="hint_breakpoints">%1$d Breakbälle</string>
     <string name="hint_setpoint">Satzball</string>

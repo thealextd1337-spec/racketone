@@ -62,6 +62,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.ServeCourt
 import eu.advantly.presentation.live.LiveOperationRules
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
@@ -92,6 +93,8 @@ import eu.advantly.ui.phone.platform.rememberHaptics
 import eu.advantly.ui.phone.platform.rememberReduceMotion
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.a11y_point_for
+import eu.advantly.ui.phone.resources.a11y_serve_court_left
+import eu.advantly.ui.phone.resources.a11y_serve_court_right
 import eu.advantly.ui.phone.resources.a11y_serving
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_more
@@ -113,12 +116,15 @@ import eu.advantly.ui.phone.resources.latency_source_line
 import eu.advantly.ui.phone.resources.latency_source_synthetic
 import eu.advantly.ui.phone.resources.latency_stats
 import eu.advantly.ui.phone.resources.latency_toggle
+import eu.advantly.ui.phone.resources.live_court_left
+import eu.advantly.ui.phone.resources.live_court_right
 import eu.advantly.ui.phone.resources.live_no_match
 import eu.advantly.ui.phone.resources.live_point_removed
 import eu.advantly.ui.phone.resources.live_remove_point_them
 import eu.advantly.ui.phone.resources.live_remove_point_us
 import eu.advantly.ui.phone.resources.live_restore_point
 import eu.advantly.ui.phone.resources.live_serve
+import eu.advantly.ui.phone.resources.live_serve_from
 import eu.advantly.ui.phone.resources.live_serve_line
 import eu.advantly.ui.phone.resources.live_team_them
 import eu.advantly.ui.phone.resources.live_team_them_name
@@ -567,7 +573,20 @@ private fun Panels(
     val points = Side.entries.associateWith { pointText(LiveScoreRules.pointLabel(state, it)) }
     val serve = state.serve
     val serverName = serve?.let { playerName(setup, it.player) }
-    val serving = serve?.let { stringResource(Res.string.a11y_serving, if (it.side == Side.A) usName else themName) }.orEmpty()
+    // Tennis/Padel: Feld ausgeschrieben („Aufschlag von rechts“), nie der Rückschläger
+    val courtA11y =
+        serve?.court?.takeIf { sport.isTennisLike }?.let {
+            when (it) {
+                ServeCourt.RIGHT -> stringResource(Res.string.a11y_serve_court_right)
+                ServeCourt.LEFT -> stringResource(Res.string.a11y_serve_court_left)
+                ServeCourt.RECEIVER_CHOICE -> null
+            }
+        }
+    val serving =
+        serve
+            ?.let { stringResource(Res.string.a11y_serving, if (it.side == Side.A) usName else themName) }
+            ?.let { listOfNotNull(it, serverName?.takeIf { sport.isTennisLike && setup.lineup.a.size > 1 }, courtA11y).joinToString(". ") }
+            .orEmpty()
     val undoLabel = stringResource(Res.string.action_undo)
     val serveWord = stringResource(Res.string.live_serve)
     val doubles = setup.lineup.a.size > 1
@@ -654,7 +673,8 @@ private fun Panels(
 
 /**
  * Mittelband zwischen den Flächen (nicht scorend, 04 §4.3.3): Hinweis-Pill, darunter im Doppel „Aufschläger →
- * Rückschläger“ (02 §8.4) bzw. bei Pickleball die Ansage „4-2-1“.
+ * Rückschläger“ (02 §8.4) bzw. bei Pickleball die Ansage „4-2-1“. Tennis/Padel-Doppel: nur „Aufschläger · Rechts/Links“
+ * (Feldtest 2026-10-16: wer wo steht, ist offen – das Feld ist eindeutig, der Rückschläger nicht).
  */
 @Composable
 private fun HintBand(
@@ -672,6 +692,14 @@ private fun HintBand(
         when {
             setup.sport == Sport.PICKLEBALL -> {
                 snapshot.state.scoreCall
+            }
+
+            setup.sport.isTennisLike && setup.lineup.a.size > 1 && serverName != null -> {
+                when (serve?.court) {
+                    ServeCourt.RIGHT -> stringResource(Res.string.live_serve_from, serverName, stringResource(Res.string.live_court_right))
+                    ServeCourt.LEFT -> stringResource(Res.string.live_serve_from, serverName, stringResource(Res.string.live_court_left))
+                    else -> serverName
+                }
             }
 
             setup.lineup.a.size > 1 && serverName != null && receiverName != null -> {
