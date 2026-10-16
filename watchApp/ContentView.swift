@@ -33,6 +33,12 @@ struct ContentView: View {
             if let context = model.serverChoiceContext {
                 ServerChoiceView(model: model, context: context)
                     .id(ScoringModel.choiceSignature(context))
+                    .onDisappear {
+                        // Ein alter Sheet-Inhalt darf beim Kontextwechsel nicht die neue Auswahl schließen.
+                        if ScoringModel.choiceSignature(model.serverChoiceContext) == ScoringModel.choiceSignature(context) {
+                            model.dismissServerChoice()
+                        }
+                    }
             }
         }
         .onChange(of: dimmed) { _, reduced in
