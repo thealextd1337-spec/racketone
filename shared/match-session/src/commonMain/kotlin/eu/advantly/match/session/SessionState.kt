@@ -8,6 +8,8 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
@@ -29,6 +31,8 @@ import eu.advantly.sync.protocol.PeerKind
  *   Uhr ist frei. Uhr: das ihr vom Handy zugewiesene Match (dem sie folgt), `null` = keine Zuweisung bekannt
  * @property droppedInputs Uhr: zuletzt gemeldete verworfene eigene Eingaben in einem nicht mehr offenen Match (z. B. nach
  *   der bestätigten Übernahme durch das Handy) – UI-Hinweis „N Eingaben nicht übernommen“
+ * @property telemetry Telemetrie-Sichtbarkeit des Besitzers (P2-J, F19/F29) mit Änderungszeit; auf Handy und Uhr gleich,
+ *   sobald sie sich gesehen haben ([MatchSession.setTelemetryVisibility])
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -37,7 +41,11 @@ data class SessionState(
     val matches: List<ActiveMatch> = listOfNotNull(match),
     val watchMatchId: MatchId? = null,
     val droppedInputs: DroppedInputs? = null,
+    val telemetry: TelemetryPreference = TelemetryPreference(),
 ) {
+    /** Kurzform für Anzeige und Versandentscheidung. */
+    val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility
+
     /** Offenes Match [id] oder `null`. */
     fun match(id: MatchId): ActiveMatch? = matches.firstOrNull { it.id == id }
 

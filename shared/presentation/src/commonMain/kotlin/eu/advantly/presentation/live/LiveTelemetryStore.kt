@@ -54,6 +54,12 @@ class LiveTelemetryStore(
     fun remainingVisibilityMs(): Long =
         mutableRecent.value?.let { (RECENT_FOR_MS - (clock.nowMs() - it.receivedAtMs)).coerceIn(0, RECENT_FOR_MS) } ?: 0
 
+    /** „Gar nicht“ (P2-J): Wert und Empfangsmerker sofort verwerfen, nicht erst nach Ablauf. */
+    fun clear() {
+        mutable.value = null
+        mutableRecent.value = null
+    }
+
     /** Auch ohne offenen Live-Screen nach Ablauf wirklich aus dem RAM-Halter entfernen. */
     fun expire() {
         val current = mutable.value

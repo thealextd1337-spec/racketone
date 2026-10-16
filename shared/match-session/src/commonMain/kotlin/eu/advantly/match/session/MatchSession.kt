@@ -10,6 +10,8 @@ import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.CorrectionKind
@@ -74,6 +76,7 @@ import eu.advantly.sync.protocol.SeqRange
 import eu.advantly.sync.protocol.Summary
 import eu.advantly.sync.protocol.SyncCodec
 import eu.advantly.sync.protocol.SyncMessage
+import eu.advantly.sync.protocol.TelemetrySetting
 import eu.advantly.sync.protocol.VersionVector
 import eu.advantly.sync.protocol.WatchAssignment
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,6 +173,9 @@ class MatchSession(
      * [acknowledgeDroppedInputs] quittiert (übersteht Neustarts).
      */
     private var droppedInputs: DroppedInputs? = loadDroppedNotice()
+
+    /** Telemetrie-Sichtbarkeit des Besitzers (P2-J), persistent in den Settings; Abgleich über `MatchMeta.telemetry`. */
+    private var telemetry: TelemetryPreference = loadTelemetry()
 
     /**
      * Matches, die nachweislich noch nie an eine Uhr gesendet wurden (Cache der Settings `session.neverSentToWatch.*`).
@@ -320,6 +326,44 @@ class MatchSession(
         droppedInputs = null
         data.settings.remove(DROPPED_NOTICE_KEY)
         publish()
+    }
+
+    // --- Telemetrie-Sichtbarkeit (P2-J, F19/F29) -----------------------------------------------------------------
+
+    /**
+     * Nutzer ändert die Telemetrie-Sichtbarkeit auf diesem Gerät (Handy oder Uhr). Wird gespeichert, sofort an alle
+     * verbundenen eigenen Geräte gesendet und sonst beim nächsten `Hello` abgeglichen. Konfliktregel: letzte Änderung
+     * gewinnt, Gleichstand → restriktiver Wert ([TelemetryPreference.merge]). Die Wirkung („Gar nicht“ stoppt Anzeige und
+     * Übertragung) setzen die Apps aus [SessionState.telemetry] um.
+     */
+    fun setTelemetryVisibility(visibility: TelemetryVisibility) {
+        checkThread()
+        if (visibility == telemetry.visibility) return
+        adoptTelemetry(telemetry.changedTo(visibility, clock.nowMs()))
+    }
+
+    /**
+     * Schnittstelle für einen späteren Profil-Abgleich (P2-E, `profile_settings.telemetry_visibility`): [remote] wird nach
+     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte. `true`, wenn sich der Wert geändert hat.
+     */
+    fun mergeTelemetryPreference(remote: TelemetryPreference): Boolean {
+        checkThread()
+        return adoptTelemetry(telemetry.merge(remote))
+    }
+
+    private fun adoptTelemetry(next: TelemetryPreference): Boolean {
+        if (next == telemetry) return false
+        telemetry = next
+        data.settings.put(TELEMETRY_KEY, next.visibility.wire)
+        data.settings.putLong(TELEMETRY_AT_KEY, next.changedAtMs)
+        TelemetrySetting.of(next)?.let { broadcast(MatchMetaMessage(telemetry = it)) }
+        publish()
+        return true
+    }
+
+    private fun loadTelemetry(): TelemetryPreference {
+        val visibility = TelemetryVisibility.fromWire(data.settings.get(TELEMETRY_KEY)) ?: return TelemetryPreference()
+        return TelemetryPreference(visibility, data.settings.getLong(TELEMETRY_AT_KEY, 0).coerceAtLeast(0))
     }
 
     private fun loadDroppedNotice(): DroppedInputs? {
@@ -1311,6 +1355,8 @@ class MatchSession(
         }
         // Kopf zuerst: die Uhr vergleicht beim Übergeben mit dem zugewiesenen Match
         message.watchMatch?.let { adoptAssignment(peer, it) }
+        // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
+        message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -1768,6 +1814,7 @@ class MatchSession(
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),
             watchMatch = watchAssignment?.takeIf { config.parallelMatches },
+            telemetry = TelemetrySetting.of(telemetry),
         )
     }
 
@@ -1806,6 +1853,7 @@ class MatchSession(
             matches,
             watchAssignment?.matchId,
             droppedInputs,
+            telemetry,
         )
     }
 
@@ -1902,6 +1950,10 @@ class MatchSession(
 
         /** Settings: hier angelegtes Match wurde noch nie an eine Uhr gesendet (Handy); fehlt = möglicherweise gesendet. */
         private const val NEVER_SENT_TO_WATCH_PREFIX = "session.neverSentToWatch."
+
+        /** Settings: Telemetrie-Sichtbarkeit (`share`/`private`/`off`) und Zeitpunkt der letzten Änderung (P2-J). */
+        private const val TELEMETRY_KEY = "session.telemetryVisibility"
+        private const val TELEMETRY_AT_KEY = "session.telemetryVisibilityAt"
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"

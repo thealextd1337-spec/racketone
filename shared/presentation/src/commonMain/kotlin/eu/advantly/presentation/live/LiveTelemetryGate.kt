@@ -1,6 +1,7 @@
 package eu.advantly.presentation.live
 
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.match.session.PeerInfo
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.LiveTelemetry
@@ -15,14 +16,17 @@ object LiveTelemetryGate {
         kind: PeerKind,
     ): Boolean = peers.any { it.peer == nodeId && it.kind == kind && it.compatibility == CompatibilityStatus.COMPATIBLE }
 
+    /** [visibility] „Gar nicht“ (P2-J) verwirft jeden Wert, auch von einer älteren Uhr, die die Einstellung nicht kennt. */
     fun accept(
         value: LiveTelemetry,
         sourceNodeId: String,
         matchId: MatchId?,
         workoutEnabled: Boolean,
         peers: List<PeerInfo>,
+        visibility: TelemetryVisibility,
     ): Boolean =
-        workoutEnabled && value.matchId == matchId && value.v in LiveTelemetry.MIN_VERSION..LiveTelemetry.CURRENT_VERSION &&
+        visibility.allowsLive && workoutEnabled && value.matchId == matchId &&
+            value.v in LiveTelemetry.MIN_VERSION..LiveTelemetry.CURRENT_VERSION &&
             compatiblePeer(peers, sourceNodeId, PeerKind.WATCH)
 }
 

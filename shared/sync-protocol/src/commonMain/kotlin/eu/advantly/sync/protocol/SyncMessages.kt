@@ -9,6 +9,8 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ScoreEvent
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -104,6 +106,8 @@ data class Events(
  *   Übernahme) – Matches mit diesen IDs zeigen den Besitzer, keinen Gast
  * @property watchMatch nur vom Handy: welches seiner (ggf. mehreren) offenen Matches die eigene Uhr zählt bzw. anzeigt
  *   (F22, 01 §4.3 „Uhr-Match“); `null` = keine Angabe (Uhr, ältere Absender)
+ * @property telemetry Telemetrie-Sichtbarkeit des Besitzers (P2-J, F19/F29) mit Änderungszeit, von Handy **und** Uhr;
+ *   `null` = nie geändert bzw. älterer Absender (Empfänger behält seinen Wert)
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -119,8 +123,36 @@ data class MatchMetaMessage(
     /** Additiv in Protokoll 3: nur IDs, damit lokale Uhr-Historie entfernte Gäste nicht erneut anbietet. */
     val archivedPlayerIds: List<PlayerId> = emptyList(),
     val watchMatch: WatchAssignment? = null,
+    /** Additiv in Protokoll 3 (P2-J): ältere Geräte ignorieren das unbekannte Feld (`ignoreUnknownKeys`). */
+    val telemetry: TelemetrySetting? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
 ) : SyncMessage
+
+/**
+ * Telemetrie-Sichtbarkeit auf dem Draht (P2-J). [visibility] bleibt bewusst ein Text (`share`/`private`/`off`): Ein
+ * unbekannter Wert einer künftigen Version macht nur diese Angabe unbrauchbar ([toPreference] = `null`), nie die ganze
+ * `MatchMeta`-Nachricht.
+ *
+ * @property changedAtMs Wanduhr des Geräts, auf dem die Einstellung zuletzt geändert wurde (Konfliktregel
+ *   [TelemetryPreference.merge]: letzte Änderung gewinnt, Gleichstand → restriktiver)
+ */
+@Serializable
+data class TelemetrySetting(
+    val visibility: String,
+    val changedAtMs: Long,
+) {
+    /** Gültige Einstellung oder `null` (unbekannter Wert, nie geändert bzw. negativer Zeitstempel). */
+    fun toPreference(): TelemetryPreference? {
+        val value = TelemetryVisibility.fromWire(visibility) ?: return null
+        return if (changedAtMs > 0) TelemetryPreference(value, changedAtMs) else null
+    }
+
+    companion object {
+        /** Nur geänderte Einstellungen gehen auf den Draht; der Standard braucht keine Nachricht. */
+        fun of(preference: TelemetryPreference): TelemetrySetting? =
+            if (preference.changedAtMs > 0) TelemetrySetting(preference.visibility.wire, preference.changedAtMs) else null
+    }
+}
 
 /**
  * Zuweisung des „Uhr-Matches“ durch das Handy (F22, 01 §4.3): Das Handy kann mehrere Matches parallel führen, die eigene
