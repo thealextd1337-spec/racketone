@@ -20,6 +20,7 @@ import eu.advantly.wear.live.CourtLetter
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
 import eu.advantly.wear.live.SyncUi
+import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.scoring.TapZones
 import eu.advantly.wear.workout.WorkoutUiState
 import org.junit.Assert.assertEquals
@@ -160,6 +161,19 @@ class ScoreLayoutUiTest {
         assertNoOverlaps(bottomLine = false, telemetry = false)
     }
 
+    /** Toast im Mittelband (zwischen Puls und Schritten) bleibt im Kreis und überdeckt die Telemetrie nicht. */
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun toastStaysInsideOnGalaxyWatch8() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        render(singles(), activeWorkout(), toast = WatchToast.Undone("30:15", "15:15"))
+        val root = rule.onRoot().fetchSemanticsNode().boundsInRoot
+        val toast = bounds(LiveTags.TOAST)
+        assertInsideCircle("Toast", toast, root)
+        for (tag in listOf(LiveTags.HEART_RATE, LiveTags.STEPS)) assertFalse("Toast überlappt $tag", toast.overlaps(bounds(tag)))
+        rule.screenshot("score-toast-de-galaxy8-font130")
+    }
+
     /** Solange die Aufschlag-Leiste steht, pausiert die Telemetrie am Rand (die Leiste reicht fast bis zum Rand). */
     @Test
     @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
@@ -199,10 +213,11 @@ class ScoreLayoutUiTest {
         live: LiveUi,
         workout: WorkoutUiState,
         isAmbient: Boolean = false,
+        toast: WatchToast? = null,
     ): RecordingActions {
         val recorder = RecordingActions()
         rule.setContent {
-            WearTestFrame { LiveScreen(live, workout, heartRate = null, isAmbient = isAmbient, toast = null, actions = recorder.actions) }
+            WearTestFrame { LiveScreen(live, workout, heartRate = null, isAmbient = isAmbient, toast = toast, actions = recorder.actions) }
         }
         rule.waitForIdle()
         return recorder
@@ -252,10 +267,10 @@ class ScoreLayoutUiTest {
             }
         }
         // Telemetrie, Namen und Satzanzeige liegen im runden Display (nichts am Rand abgeschnitten)
-        val inside =
-            listOf(LiveTags.label(Side.A), LiveTags.label(Side.B), LiveTags.SETS) + listOfNotNull(LiveTags.HINT.takeIf(::exists)) +
-                (if (telemetry) listOf(LiveTags.HEART_RATE, LiveTags.STEPS) else emptyList())
-        for (tag in inside) assertInsideCircle(tag, rects.getValue(tag), root)
+        // Safe-Inset rund: jedes Element vollständig im Kreis (alle Ecken ≤ Radius) – auch Ziffern, Aufschlag-Indikator,
+        // Doppel-Pfeil und der Anzeige-Hinweis unten (Feldbefund Galaxy Watch8: „unten abgeschnitten“)
+        rects[LiveTags.SERVE_MARKER] = marker
+        for ((tag, r) in rects) assertInsideCircle(tag, r, root)
         if (telemetry) {
             val heart = rects.getValue(LiveTags.HEART_RATE)
             val steps = rects.getValue(LiveTags.STEPS)

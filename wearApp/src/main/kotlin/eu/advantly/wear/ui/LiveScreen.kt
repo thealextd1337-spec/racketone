@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.CurvedTextStyle
+import androidx.wear.compose.material3.LocalContentColor
 import androidx.wear.compose.material3.LocalTextStyle
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
@@ -442,7 +443,10 @@ private fun ScorePage(
                         },
                         footer = {
                             if (side == Side.B && BottomLine.shown(live, isAmbient)) {
-                                BottomLine(live, actions, Modifier.padding(top = 2.dp, bottom = bottomGap))
+                                // runder Safe-Inset: so breit, wie der Kreis an der Unterkante erlaubt (Galaxy Watch8: „unten
+                                // abgeschnitten“)
+                                val bottomWidth = ScoreLayout.chordWidth(screen.value, (screen - bottomGap).value).dp
+                                BottomLine(live, actions, Modifier.padding(top = 2.dp, bottom = bottomGap).widthIn(max = bottomWidth))
                             }
                         },
                         modifier =
@@ -770,11 +774,10 @@ internal fun statusText(live: LiveUi): String =
 
         live.role == LiveRole.SCORER -> syncText(live.sync)
 
-        live.sync == SyncUi.Live -> "${stringResource(
-            R.string.role_view,
-        )} · ${stringResource(R.string.scoring_by, deviceName(live.scorerKind))}"
+        // kurz, weil gebogen neben der Uhrzeit: „ANZEIGE · Handy zählt“ / „ANZEIGE · vor 45 s“
+        live.sync == SyncUi.Live -> stringResource(R.string.status_view_live, deviceName(live.scorerKind))
 
-        else -> "${stringResource(R.string.role_view)} · ${stringResource(R.string.sync_last_update, syncText(live.sync))}"
+        else -> stringResource(R.string.status_view_stale, syncText(live.sync))
     }
 
 /**
@@ -819,7 +822,15 @@ private fun BottomLine(
         androidx.wear.compose.material3.CompactButton(
             onClick = actions::requestTakeOver,
             modifier = modifier,
-            label = { Text(stringResource(R.string.take_over_offer), fontSize = 11.sp) },
+            label = {
+                BasicText(
+                    stringResource(R.string.take_over_offer),
+                    style = LocalTextStyle.current.merge(TextStyle(color = LocalContentColor.current)),
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 11.sp, stepSize = 0.5.sp),
+                )
+            },
         )
         return
     }
@@ -830,6 +841,7 @@ private fun BottomLine(
         lineHeight = LABEL_LINE_HEIGHT,
         color = HintAmber,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -924,10 +936,10 @@ private const val DIGIT_FRACTION = 0.55f
 private const val DIGIT_BOX_RATIO = 1.2f
 
 /** Bogen der Uhrzeit-Zeile mit Status (länger als die reine Uhrzeit, damit „ANZEIGE · Stand vor 45 s“ passt). */
-private const val STATUS_SWEEP_DEGREES = 130f
+private const val STATUS_SWEEP_DEGREES = 100f
 
-/** Abstand der Anzeige-Hinweise zum unteren Rand. */
-private const val BOTTOM_FRACTION = 0.04f
+/** Abstand der Anzeige-Hinweise zum unteren Rand (wie die obere Totzone; darunter ist der Kreis zu schmal). */
+private const val BOTTOM_FRACTION = 0.12f
 
 /** Ziffern dürfen bis auf diesen Anteil schrumpfen, damit Status, Namen und Hinweise Platz behalten. */
 private const val DIGIT_MIN_FRACTION = 0.45f

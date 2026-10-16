@@ -77,6 +77,8 @@
     <string name="sync_ago_minutes">vor %1$d min</string>
     <string name="sync_no_contact">Kein Kontakt</string>
     <string name="sync_last_update">Stand %1$s</string>
+    <string name="status_view_live">ANZEIGE · %1$s zählt</string>
+    <string name="status_view_stale">ANZEIGE · %1$s</string>
     <string name="take_over_offer">Zählen übernehmen</string>
     <plurals name="rejected_inputs">
         <item quantity="one">%1$d Eingabe nicht übernommen</item>

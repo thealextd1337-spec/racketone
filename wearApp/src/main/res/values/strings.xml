@@ -83,6 +83,8 @@
     <string name="sync_ago_minutes">%1$d min ago</string>
     <string name="sync_no_contact">No contact</string>
     <string name="sync_last_update">Last update %1$s</string>
+    <string name="status_view_live">VIEW · %1$s scoring</string>
+    <string name="status_view_stale">VIEW · %1$s</string>
     <string name="take_over_offer">Take over scoring</string>
     <plurals name="rejected_inputs">
         <item quantity="one">%1$d input not applied</item>
