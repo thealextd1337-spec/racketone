@@ -26,6 +26,7 @@ class LocalData(
     val players: PlayerRepository = PlayerRepository(database.playerQueries)
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
+    val cloud: CloudSyncRepository = CloudSyncRepository(database, events)
     private val identityListeners = mutableSetOf<() -> Unit>()
 
     /**
@@ -210,7 +211,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 2: materialisierte Personenzuweisungen; 1.sqm erhält bestehende Daten. */
-        const val SCHEMA_VERSION: Long = 2
+        /** Schema 3: unabhängige Cloud-Outbox und kontogebundene Cursor; 2.sqm erhält bestehende Daten. */
+        const val SCHEMA_VERSION: Long = 3
     }
 }

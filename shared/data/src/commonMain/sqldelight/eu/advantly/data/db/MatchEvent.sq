@@ -1,5 +1,5 @@
 -- Event-Log aller Matches (append-only, 01 §5.1). Ordnung (lamport, device_id, id) wie 01 §3.2.
--- Die Spalte uploaded (Outbox) kommt mit dem Cloud-Sync in P2. Schema-Migrationen siehe 1.sqm.
+-- Cloud-Bestätigung ist unabhängig vom Geräte-Ack (confirmed). Migrationen siehe 1.sqm und 2.sqm.
 CREATE TABLE match_event (
     id TEXT NOT NULL PRIMARY KEY,
     match_id TEXT NOT NULL,
@@ -13,11 +13,15 @@ CREATE TABLE match_event (
     payload TEXT NOT NULL,
     -- 1 = mindestens eine Gegenstelle hat das Event (Ack, Summary oder von dort empfangen); 0 = Ausgangs-Rückstand
     confirmed INTEGER NOT NULL DEFAULT 0,
+    -- 0 = ausstehend, 1 = Cloud bestätigt, 2 = dauerhaft abgewiesen
+    cloud_state INTEGER NOT NULL DEFAULT 0,
+    cloud_rejection TEXT,
     UNIQUE (match_id, device_id, device_seq)
 );
 
 -- Ausgangs-Rückstand über alle Matches (Sofort-Sync, Anzeige „N ausstehend“)
 CREATE INDEX match_event_unconfirmed ON match_event (confirmed, match_id);
+CREATE INDEX match_event_cloud_pending ON match_event (cloud_state, match_id, lamport, device_id, id);
 
 -- Deckt eventsForMatch inkl. Sortierung (lamport, device_id, id) ab – 01 §3.2.
 -- Bereichsabfragen je Gerät (Anti-Entropie) nutzen den UNIQUE-Index (match_id, device_id, device_seq).

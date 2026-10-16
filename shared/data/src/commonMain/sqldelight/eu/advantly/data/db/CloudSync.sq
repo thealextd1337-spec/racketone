@@ -1,0 +1,36 @@
+-- Cursor sind kontogebunden: ein neuer Account darf keinen alten Download-Wasserstand übernehmen.
+CREATE TABLE cloud_cursor (
+    profile_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    value INTEGER NOT NULL CHECK (value >= 0),
+    PRIMARY KEY (profile_id, stream)
+);
+
+pendingEvents:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload, confirmed
+FROM match_event WHERE cloud_state = 0
+ORDER BY match_id, lamport, device_id, id LIMIT :limit;
+
+pendingCount:
+SELECT count(*) FROM match_event WHERE cloud_state = 0;
+
+rejectedEvents:
+SELECT id, cloud_rejection FROM match_event WHERE cloud_state = 2 ORDER BY id;
+
+markUploaded:
+UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL WHERE id = ?;
+
+markRejected:
+UPDATE match_event SET cloud_state = 2, cloud_rejection = :reason WHERE id = :id AND cloud_state = 0;
+
+confirmDownloaded:
+UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL, confirmed = 1 WHERE id = ?;
+
+cursor:
+SELECT value FROM cloud_cursor WHERE profile_id = ? AND stream = ?;
+
+saveCursor:
+INSERT OR REPLACE INTO cloud_cursor (profile_id, stream, value) VALUES (?, ?, ?);
+
+clearCursors:
+DELETE FROM cloud_cursor WHERE profile_id = ?;

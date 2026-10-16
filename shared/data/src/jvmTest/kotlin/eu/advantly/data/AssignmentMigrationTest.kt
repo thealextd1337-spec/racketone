@@ -42,7 +42,7 @@ class AssignmentMigrationTest {
                 val assigned = event(1, PlayerAssigned(slot, person, me))
                 val oldStore = SqlDelightEventStore(driver)
                 oldStore.appendAll(listOf(assigned, genesis).map { it.toStoredEvent() })
-                AdvantlyDatabase.Schema.migrate(driver, 1, 2).value
+                AdvantlyDatabase.Schema.migrate(driver, 1, LocalData.SCHEMA_VERSION).value
                 val data = LocalData(driver)
                 assertEquals("value", data.settings.get("keep"))
                 assertEquals(2, data.events.count(match.value))

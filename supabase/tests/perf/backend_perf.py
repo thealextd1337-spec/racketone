@@ -134,13 +134,34 @@ def main():
         report["postgres"] = admin.execute("select version()").fetchone()[0]
         try:
             with admin.transaction():
+                # Der lokale SQL-Test simuliert GoTrue, ohne Altersprüfung/Trigger abzuschalten.
+                # Kein alter Admin-Onboarding-Bypass: dieselben öffentlichen RPCs und Hook-Rechte wie im Auth-Fluss.
+                email = f"perf-{uid}@test.advantly.eu"
+                admin.execute("set local role anon")
+                ticket_result = admin.execute(
+                    "select public.issue_age_ticket('AT','1990-01-01',%s)",
+                    (uuid.uuid4().hex + uuid.uuid4().hex,)).fetchone()[0]
+                assert "ticket" in ticket_result, ticket_result
+                ticket = ticket_result["ticket"]
+                binding = admin.execute("select public.bind_age_ticket(%s,'email',%s)",
+                                        (ticket, email)).fetchone()[0]
+                assert binding == {}, binding
+                admin.execute("reset role")
+                admin.execute("set local role supabase_auth_admin")
+                hook = admin.execute("select public.before_user_created(%s)", (Jsonb({
+                    "user": {"id": str(uid), "email": email,
+                             "app_metadata": {"provider": "email"},
+                             "user_metadata": {"age_ticket": ticket}}
+                }),)).fetchone()[0]
+                assert hook == {}, hook
+                admin.execute("reset role")
                 admin.execute("select private.lock_sync()")
                 admin.execute("""insert into auth.users
                     (id,email,raw_user_meta_data,raw_app_meta_data,aud,role,created_at,updated_at)
-                    values (%s,%s,'{}','{}','authenticated','authenticated',now(),now())""",
-                              (uid, f"perf-{uid}@test.advantly.eu"))
+                    values (%s,%s,%s,%s,'authenticated','authenticated',now(),now())""",
+                              (uid, email, Jsonb({"age_ticket": ticket}), Jsonb({"provider": "email"})))
                 authenticate(admin)
-                admin.execute("select public.complete_onboarding('AT','1990-01-01','Perf')")
+                admin.execute("select public.finish_onboarding('Perf')")
                 for device in device_ids:
                     admin.execute("select public.register_device(%s,'phone','android')", (device,))
             # Aufbau ebenfalls über die tatsächlichen RPCs, ohne Test-Helfer oder ausgeschaltete Trigger.

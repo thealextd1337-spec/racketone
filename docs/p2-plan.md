@@ -1,5 +1,7 @@
 # Phase 2 – Plan: Accounts, Freunde, Cloud-Sync
 
+Aktueller Ausführungsplan ab 16.10.2026: [nächste Phasen und Abnahmekriterien](p2-next-steps.md).
+
 | | |
 |---|---|
 | **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1–3 (PR #40) eingearbeitet |
