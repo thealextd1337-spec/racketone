@@ -464,8 +464,9 @@ fun ServerChoiceScreen(
                 Button(
                     onClick = {
                         val context = choice.context
-                        if (context != null) actions.chooseServer(player.id, context) else actions.chooseServer(player.id)
+                        if (context != null) actions.chooseServer(player.id, context)
                     },
+                    enabled = choice.context != null,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     colors = if (player.id == choice.chosen) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
                     border = BorderStroke(2.dp, teamColor(player.side)),

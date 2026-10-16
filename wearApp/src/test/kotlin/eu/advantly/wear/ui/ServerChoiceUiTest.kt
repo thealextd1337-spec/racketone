@@ -3,6 +3,7 @@ package eu.advantly.wear.ui
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -20,6 +21,7 @@ import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.wear.live.LiveOverlay
 import eu.advantly.wear.live.ServerChoiceUi
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -44,10 +46,21 @@ class ServerChoiceUiTest {
         val base = liveUi(doubles = true)
         val name = "Maximilian Meyer-Langenberg"
         val players = (base.teams.a + base.teams.b).map { it.copy(name = name, isSelf = false) }
-        val choice = ServerChoiceUi(1, Side.A, players, null, true)
+        val context =
+            ServerChoiceContext(
+                base.matchId,
+                0,
+                ServerChoicePhase.FIRST,
+                players.map { it.id },
+                Side.A,
+                players[0].id,
+                null,
+                GameKind.STANDARD,
+            )
+        val choice = ServerChoiceUi(1, Side.A, players, null, true, context)
         rule.setContent { WearTestFrame { ServerChoiceScreen(base, choice, RecordingActions().actions) } }
         players.forEachIndexed { i, player ->
-            rule.onNode(hasScrollToNodeAction()).performScrollToIndex(1 + i)
+            rule.onNode(hasScrollToNodeAction()).performScrollToIndex(2 + i)
             val team =
                 RuntimeEnvironment.getApplication().getString(
                     if (player.side == Side.A) eu.advantly.wear.R.string.label_us else eu.advantly.wear.R.string.label_them,
@@ -70,6 +83,42 @@ class ServerChoiceUiTest {
     @Test
     @Config(qualifiers = "en-w206dp-h206dp-round-watch-340dpi")
     fun englishTiebreakChoiceFits() = checkChoice(2, true, 1.3f, "choice-tiebreak-en-galaxy8", true)
+
+    @Test
+    fun missingContextDisablesPlayerSelection() {
+        val live = liveUi(doubles = true, names = false).copy(serve = null)
+        val choice = ServerChoiceUi(1, Side.A, live.teams.a + live.teams.b, null, true)
+        rule.setContent { WearTestFrame { ServerChoiceScreen(live, choice, RecordingActions().actions) } }
+        rule.onNode(hasScrollToNodeAction()).performScrollToIndex(1)
+        rule.onNode(hasText("Du") and hasClickAction()).assertIsNotEnabled()
+        val hint = RuntimeEnvironment.getApplication().getString(eu.advantly.wear.R.string.server_choice_current_unknown)
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(hint))
+        rule.onNodeWithText(hint).assertExists()
+    }
+
+    @Test
+    fun playerSelectionPassesTheDisplayedContext() {
+        val live = liveUi(doubles = true, names = false)
+        val players = live.teams.a + live.teams.b
+        val context =
+            ServerChoiceContext(
+                live.matchId,
+                0,
+                ServerChoicePhase.FIRST,
+                players.map { it.id },
+                Side.A,
+                players[0].id,
+                null,
+                GameKind.STANDARD,
+            )
+        val choice = ServerChoiceUi(1, Side.A, players, null, true, context)
+        val recorder = RecordingActions()
+        rule.setContent { WearTestFrame { ServerChoiceScreen(live, choice, recorder.actions) } }
+        rule.onNode(hasScrollToNodeAction()).performScrollToIndex(2)
+        rule.onNode(hasText("Du") and hasClickAction()).performClick()
+        assertTrue(recorder.calls.single().startsWith("chooseServer"))
+        assertEquals("${players[0].id}, $context)", recorder.calls.single().substringAfter("("))
+    }
 
     @Test
     fun contextDefaultWinsOverLiveServerAndMissingServe() {
@@ -119,7 +168,7 @@ class ServerChoiceUiTest {
                 null,
                 if (tiebreak) GameKind.MATCH_TIEBREAK else GameKind.STANDARD,
             )
-        val choice = ServerChoiceUi(phase, Side.B, players, null, true, context)
+        val choice = ServerChoiceUi(phase, context.dueSide, players, null, true, context)
         val recorder = RecordingActions()
         rule.setContent { WearTestFrame { ServerChoiceScreen(live.copy(overlay = LiveOverlay.SERVER_CHOICE), choice, recorder.actions) } }
         rule.screenshot("$shot-start")

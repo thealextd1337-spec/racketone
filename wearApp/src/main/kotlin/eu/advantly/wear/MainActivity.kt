@@ -501,8 +501,6 @@ class MainActivity : ComponentActivity() {
 
             override fun openServerChoice() = controller.openServerChoice()
 
-            override fun chooseServer(player: PlayerId): Boolean = controller.chooseServer(player)
-
             override fun chooseServer(
                 player: PlayerId,
                 expected: eu.advantly.match.session.ServerChoiceContext,
