@@ -33,10 +33,10 @@ class FakeView {
   hidePublicConfirmation() { this.publicConfirmationHidden += 1; }
 }
 
-function ticket(id = ticketId, version = 1) {
+function ticket(id = ticketId, version = 1, ownerId = null) {
   return {
     id, category: "feedback", title: "A support request", body: "The message body",
-    contact_email: "person@example.test", diagnostics: { platform: "web" }, owner_id: null,
+    contact_email: "person@example.test", diagnostics: { platform: "web" }, owner_id: ownerId,
     status: "new", priority: "normal", assignee: null, related_id: null,
     resolution_version: null, version, created_at: "2026-10-15T10:00:00Z",
     updated_at: "2026-10-15T10:00:00Z", messages: [],
@@ -218,7 +218,11 @@ test("public response waits for confirmation; internal notes stay internal by de
     async signOut() {},
     onAuthStateChange() { return () => {}; },
   };
-  const harness = apiHarness();
+  const ownerId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const harness = apiHarness({
+    async getTicket(id) { harness.calls.getTicket.push(id); return ticket(id, 1, ownerId); },
+    async sendMessage(args) { harness.calls.sendMessage.push(args); return ticket(args.p_id, 1, ownerId); },
+  });
   const { controller, view } = controllerHarness(auth, harness.api);
   await controller.signIn("operator@example.test", "password");
   await controller.verifyTotp("123456");
@@ -234,6 +238,39 @@ test("public response waits for confirmation; internal notes stay internal by de
   controller.setComposer({ body: "An internal note" });
   await controller.sendMessage();
   assert.equal(harness.calls.sendMessage[1].p_internal, true);
+});
+
+test("guest tickets reject public confirmation and direct sends but allow internal notes", async () => {
+  const auth = {
+    async signIn(email) { return { kind: "setup", email, factorId: "factor", qrCode: qrOld, secret: "secret" }; },
+    async verifyTotp() { return { aal: "aal2" }; },
+    async signOut() {},
+    onAuthStateChange() { return () => {}; },
+  };
+  const harness = apiHarness();
+  const { controller, view } = controllerHarness(auth, harness.api);
+  await controller.signIn("operator@example.test", "password");
+  await controller.verifyTotp("123456");
+  await controller.selectTicket(ticketId);
+
+  controller.setComposer({ body: "Guest reply draft", mode: "public" });
+  await controller.sendMessage();
+  assert.deepEqual(view.publicConfirmations, []);
+  assert.deepEqual(harness.calls.sendMessage, []);
+  assert.equal(controller.composers.get(ticketId).body, "Guest reply draft");
+  assert.equal(controller.composers.get(ticketId).error, "guestPublicReplyUnavailable");
+
+  controller.state.publicConfirmation = { ticketId, body: "Stale guest reply" };
+  await controller.confirmPublicSend();
+  await controller.startMessage(ticketId, "Direct guest reply", false);
+  assert.deepEqual(view.publicConfirmations, []);
+  assert.deepEqual(harness.calls.sendMessage, []);
+
+  controller.setComposer({ body: "Internal guest note", mode: "internal" });
+  await controller.sendMessage();
+  assert.equal(harness.calls.sendMessage.length, 1);
+  assert.equal(harness.calls.sendMessage[0].p_internal, true);
+  assert.equal(harness.calls.sendMessage[0].p_body, "Internal guest note");
 });
 
 test("unknown message failure retries the same immutable message ID and payload", async () => {

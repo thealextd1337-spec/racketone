@@ -84,6 +84,7 @@ export function mapSafeError(error) {
     "support_conflict",
     "support_invalid",
     "support_not_found",
+    "support_guest_reply_unavailable",
     "support_unavailable",
   ]);
   const candidates = [error?.code, error?.message];

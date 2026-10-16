@@ -53,6 +53,7 @@ function noticeForError(error, fallback = "genericError") {
     case "support_conflict": return "conflict";
     case "support_invalid": return "invalidFields";
     case "support_not_found": return "notFound";
+    case "support_guest_reply_unavailable": return "guestPublicReplyUnavailable";
     case "message-required": return "messageRequired";
     case "message-too-long": return "messageTooLong";
     default: return fallback;
@@ -62,6 +63,10 @@ function noticeForError(error, fallback = "genericError") {
 function composerState(map, ticketId) {
   if (!map.has(ticketId)) map.set(ticketId, { body: "", mode: "internal", error: null });
   return map.get(ticketId);
+}
+
+function isOwnedTicket(ticket, ticketId) {
+  return ticket?.id === ticketId && ticket.owner_id !== null && ticket.owner_id !== undefined;
 }
 
 function updateDraftFor(ticket) {
@@ -448,6 +453,7 @@ export class AdminController {
       return;
     }
     if (composer.mode === "public") {
+      if (this.rejectUnavailablePublicReply(ticketId, composer.body)) return;
       this.state.publicConfirmation = { ticketId, body };
       this.view.showPublicConfirmation?.(body);
       return;
@@ -460,6 +466,7 @@ export class AdminController {
     this.state.publicConfirmation = null;
     this.view.hidePublicConfirmation?.();
     if (!confirmation || !this.hasAccess() || confirmation.ticketId !== this.state.selectedId) return;
+    if (this.rejectUnavailablePublicReply(confirmation.ticketId, confirmation.body)) return;
     await this.startMessage(confirmation.ticketId, confirmation.body, false);
   }
 
@@ -470,6 +477,7 @@ export class AdminController {
 
   async startMessage(ticketId, body, internal) {
     if (!this.hasAccess() || ticketId !== this.state.selectedId || this.pendingMessages.has(ticketId)) return;
+    if (!internal && this.rejectUnavailablePublicReply(ticketId, body)) return;
     let operation;
     try {
       operation = makeMessageOperation(ticketId, body, internal, messageId);
@@ -482,6 +490,16 @@ export class AdminController {
     this.pendingMessages.set(ticketId, { operation, status: "queued", error: null });
     this.render();
     await this.transmitMessage(ticketId);
+  }
+
+  rejectUnavailablePublicReply(ticketId, body) {
+    if (isOwnedTicket(this.state.ticket, ticketId)) return false;
+    const composer = composerState(this.composers, ticketId);
+    if (!String(composer.body ?? "").length && typeof body === "string") composer.body = body;
+    composer.mode = "internal";
+    composer.error = "guestPublicReplyUnavailable";
+    this.render();
+    return true;
   }
 
   async transmitMessage(ticketId) {

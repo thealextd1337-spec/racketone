@@ -110,4 +110,6 @@ test("RPC errors expose only mapped safe codes", async () => {
   });
   const conflict = createSupportApi({ async rpc() { return { error: { message: "support_conflict" } }; } });
   await assert.rejects(conflict.getTicket(ticketId), (error) => error.code === "support_conflict");
+  const guestReply = createSupportApi({ async rpc() { return { error: { message: "support_guest_reply_unavailable" } }; } });
+  await assert.rejects(guestReply.sendMessage({ p_id: ticketId, p_internal: false }), (error) => error.code === "support_guest_reply_unavailable");
 });

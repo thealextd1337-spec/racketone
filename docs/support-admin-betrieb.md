@@ -11,9 +11,10 @@ für jeden Versand festgehalten. iOS besitzt derzeit keinen Konto-Host und verse
 Beide Plattformen: Feedback, Funktionswunsch oder Fehler, Titel/Text, freiwillige Kontaktadresse,
 ausdrücklich ausgewählte technische Angaben mit Vorschau, lokaler Entwurf und bestätigte Vorgangsnummer.
 Keine Screenshots, automatischen Logs, Match- oder Fitnessdaten. Texteingaben sind privat, keine GitHub-Issues.
-Die Kontaktadresse löst keine automatische E-Mail aus. Antworten erscheinen im Bereich „Meine Meldungen“
-für das angemeldete Besitzerkonto. Gastmeldungen sind nicht lesbar und werden durch späteres Anmelden
-nicht automatisch einem Konto zugeordnet.
+Antworten erscheinen im Bereich „Meine Meldungen“ für das angemeldete Besitzerkonto. Gastmeldungen sind
+weder für den Gast in der App lesbar noch einem später angemeldeten Konto zugeordnet; Support kann dazu nur
+interne Notizen hinterlegen, keine öffentliche Antwort. Eine Kontaktadresse löst keine E-Mail aus. Ein
+manueller externer Kontakt durch Support liegt außerhalb dieser App.
 
 Vor dem ersten HTTP-Versand wird der Entwurf unveränderlich mit UUID und Zufallsgeheimnis gespeichert.
 Ein Retry verwendet dieselben Werte. Das Geheimnis erlaubt nur die Wiederholung des Empfangsnachweises,

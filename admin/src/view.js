@@ -569,6 +569,7 @@ export class AdminView {
     const draft = data.composers.get(ticket.id) ?? { body: "", mode: "internal", error: null };
     const form = node("form", "composer-form");
     form.dataset.form = "message";
+    const guestTicket = ticket.owner_id === null || ticket.owner_id === undefined;
 
     if (pending) {
       const modeKey = pending.operation.internal ? "internalResponseLabel" : "publicResponseLabel";
@@ -592,9 +593,11 @@ export class AdminView {
     for (const mode of ["internal", "public"]) {
       const input = node("input", "");
       input.type = "radio"; input.name = "messageMode"; input.value = mode; input.checked = draft.mode === mode; input.dataset.composerMode = "true";
+      input.disabled = mode === "public" && guestTicket;
       const label = node("label", `composer-mode composer-mode--${mode}`);
       label.append(input, node("span", "composer-mode__title", translate(state.language, mode === "internal" ? "internalNote" : "publicReply")));
-      label.append(node("span", "composer-mode__hint", translate(state.language, mode === "internal" ? "internalHint" : "publicHint")));
+      const hintKey = mode === "internal" ? "internalHint" : guestTicket ? "guestPublicReplyUnavailable" : "publicHint";
+      label.append(node("span", "composer-mode__hint", translate(state.language, hintKey)));
       modes.append(label);
     }
     form.append(modes);

@@ -216,13 +216,15 @@ $$;
 create function public.admin_support_message(p_id uuid,p_message_id uuid,p_body text,p_internal boolean) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare v_actor uuid := private.require_support(); v_existing ops.support_messages%rowtype;
+  v_owner_id uuid;
 begin
   perform private.lock_sync();
   if p_message_id is null or p_body is null or length(btrim(p_body)) not between 1 and 4000 or p_internal is null then
     perform private.fail('support_invalid');
   end if;
-  perform 1 from ops.support_tickets where id=p_id for update;
+  select owner_id into v_owner_id from ops.support_tickets where id=p_id for update;
   if not found then perform private.fail('support_not_found'); end if;
+  if not p_internal and v_owner_id is null then perform private.fail('support_guest_reply_unavailable'); end if;
   select * into v_existing from ops.support_messages where id=p_message_id;
   if found then
     if v_existing.ticket_id<>p_id or v_existing.author_id is distinct from v_actor

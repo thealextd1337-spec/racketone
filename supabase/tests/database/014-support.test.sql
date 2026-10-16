@@ -41,6 +41,20 @@ select is(public.admin_support_update('20000000-0000-4000-8000-000000000001','pl
 select throws_ok($$select public.admin_support_update('20000000-0000-4000-8000-000000000001','closed','normal',null,null,null,1)$$,'P0001','support_conflict','Veraltete Version überschreibt keine Änderungen');
 select throws_ok($$select public.admin_support_update('10000000-0000-4000-8000-000000000001','resolved','normal',null,null,null,1)$$,'P0001','support_invalid','Behobener Fehler braucht Versionsbezug');
 select is(public.admin_support_update('10000000-0000-4000-8000-000000000001','resolved','normal',null,null,'1.2.3',1)->>'resolution_version','1.2.3','Fehler mit Versionsbezug abschließbar');
+reset role;
+select is((select version::int from ops.support_tickets where id='10000000-0000-4000-8000-000000000001'),2,'Gastmeldungsversion vor öffentlicher Antwort');
+select is((select count(*)::int from ops.support_messages where ticket_id='10000000-0000-4000-8000-000000000001'),0,'Gastmeldung ohne Nachrichten vor öffentlicher Antwort');
+select is((select count(*)::int from ops.support_audit where ticket_id='10000000-0000-4000-8000-000000000001'),1,'Gastmeldungsaudit vor öffentlicher Antwort');
+select tests.authenticate_as('operator');
+select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);
+select throws_ok($$select public.admin_support_message('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000003','Antwort an Gast',false)$$,'P0001','support_guest_reply_unavailable','Öffentliche Antwort für Gastmeldung abgewiesen');
+reset role;
+select is((select version::int from ops.support_tickets where id='10000000-0000-4000-8000-000000000001'),2,'Abgewiesene Gastantwort ändert keine Version');
+select is((select count(*)::int from ops.support_messages where ticket_id='10000000-0000-4000-8000-000000000001'),0,'Abgewiesene Gastantwort erzeugt keine Nachricht');
+select is((select count(*)::int from ops.support_audit where ticket_id='10000000-0000-4000-8000-000000000001'),1,'Abgewiesene Gastantwort erzeugt keinen Audit-Eintrag');
+select tests.authenticate_as('operator');
+select set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid('operator'),'role','authenticated','aal','aal2')::text,true);
+select is(public.admin_support_message('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000004','Interne Notiz zur Gastmeldung',true)->>'version','3','Interne Notiz zu Gastmeldung erlaubt');
 select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','3','Interne Notiz erzeugt Version');
 select is(public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',true)->>'version','3','Notiz-Retry bleibt idempotent');
 select throws_ok($$select public.admin_support_message('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Intern',false)$$,'P0001','support_conflict','Retry darf Sichtbarkeit nicht ändern');
@@ -62,7 +76,7 @@ select throws_ok('select public.admin_support_list()','P0001','support_forbidden
 reset role;
 delete from auth.users where id=tests.uid('support_owner');
 select is((select count(*)::int from ops.support_tickets where id='20000000-0000-4000-8000-000000000001'),0,'Kontolöschung entfernt Ticket');
-select is((select count(*)::int from ops.support_messages),0,'Kontolöschung entfernt Nachrichten');
+select is((select count(*)::int from ops.support_messages where ticket_id='20000000-0000-4000-8000-000000000001'),0,'Kontolöschung entfernt Nachrichten');
 select tests.authenticate_anon();
 select set_config('request.headers','{"cf-connecting-ip":"203.0.113.92"}',true);
 do $$ begin for i in 1..10 loop
