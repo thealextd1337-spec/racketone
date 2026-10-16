@@ -110,6 +110,7 @@ class WorkoutService : Service() {
     private var hrSampleCount = 0L
     private var hrGapCount = 0L
     private var stepCounter = MatchStepCounter()
+    private var caloriesCounter = CaloriesCounter()
     private var fallbackStepsTotal = 0L
     private var lastStepEndMs = -1L
     private var updateCount = 0L
@@ -339,6 +340,7 @@ class WorkoutService : Service() {
         )
         try {
             stepCounter = MatchStepCounter()
+            caloriesCounter = CaloriesCounter()
             fallbackStepsTotal = 0
             lastStepEndMs = -1
             exerciseClient.startExercise(config)
@@ -428,6 +430,7 @@ class WorkoutService : Service() {
         hrSampleCount = 0
         hrGapCount = 0
         stepCounter = MatchStepCounter()
+        caloriesCounter = CaloriesCounter()
         fallbackStepsTotal = 0
         lastStepEndMs = -1
         updateCount = 0
@@ -585,6 +588,7 @@ class WorkoutService : Service() {
     private fun applyTelemetryVisibility(visibility: TelemetryVisibility) {
         if (!visibility.allowsLive) {
             stepCounter = stepCounter.restarted()
+            caloriesCounter = caloriesCounter.restarted()
             fallbackStepsTotal = 0
             LiveTelemetrySubscriptions.Watch.clear()
         }
@@ -696,6 +700,7 @@ class WorkoutService : Service() {
         if (!visibility.allowsLive) {
             // „Gar nicht“: nichts übernehmen; Fallback-Intervalle nur als verbraucht markieren
             stepCounter = stepCounter.restarted()
+            caloriesCounter = caloriesCounter.restarted()
             fallbackStepsTotal = 0
             metrics.getData(DataType.STEPS).maxOfOrNull { it.endDurationFromBoot.toMillis() }?.let {
                 lastStepEndMs = maxOf(lastStepEndMs, it)
@@ -718,12 +723,13 @@ class WorkoutService : Service() {
                 }
             }
         }
+        if (visibility.allowsLive && calories != null) caloriesCounter = caloriesCounter.withTotal(calories)
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->
             current
                 .copy(
                     heartRateBpm = hrPoints.lastOrNull()?.value?.roundToInt() ?: current.heartRateBpm,
-                    caloriesKcal = calories ?: current.caloriesKcal,
+                    caloriesKcal = if (calories != null) caloriesCounter.kcal else current.caloriesKcal,
                     steps = stepCounter.steps,
                     activeDurationMillis = checkpoint?.activeDuration?.toMillis() ?: current.activeDurationMillis,
                     durationAnchorElapsedMillis =
