@@ -27,6 +27,7 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
@@ -52,12 +53,14 @@ import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.auth_open
+import eu.advantly.ui.phone.resources.support_open
 import eu.advantly.ui.phone.resources.watch_takeover_confirm
 import eu.advantly.ui.phone.resources.watch_takeover_text
 import eu.advantly.ui.phone.resources.watch_takeover_title
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_title_scorer
 import eu.advantly.ui.phone.result.ResultScreen
+import eu.advantly.ui.phone.support.SupportScreen
 import eu.advantly.ui.phone.wizard.ScorerChooser
 import eu.advantly.ui.phone.wizard.WizardScreen
 import org.jetbrains.compose.resources.stringResource
@@ -84,6 +87,8 @@ fun AdvantlyApp(
     onBenchmarkFinished: (String) -> Unit = {},
     buildCommit: String = "",
     buildTimeUtc: String = "",
+    supportModel: SupportViewModel? = null,
+    supportDiagnostics: Map<String, String> = emptyMap(),
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -113,7 +118,18 @@ fun AdvantlyApp(
                 if (navigator.top == null) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
-                        Box(Modifier.weight(1f)) { TabLayer(model, versionName, authModel, googleCredential, buildCommit, buildTimeUtc) }
+                        Box(Modifier.weight(1f)) {
+                            TabLayer(
+                                model,
+                                versionName,
+                                authModel,
+                                googleCredential,
+                                buildCommit,
+                                buildTimeUtc,
+                                supportModel,
+                                supportDiagnostics,
+                            )
+                        }
                     }
                 }
                 when (val top = navigator.top) {
@@ -195,6 +211,7 @@ fun AdvantlyApp(
 }
 
 /** Tabs, Mini-Scorebar und Tab-Leiste (nur ohne Vollbild-Ebene). */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TabLayer(
     model: AdvantlyAppModel,
@@ -203,8 +220,11 @@ private fun TabLayer(
     googleCredential: (suspend () -> GoogleCredential)?,
     buildCommit: String,
     buildTimeUtc: String,
+    supportModel: SupportViewModel?,
+    supportDiagnostics: Map<String, String>,
 ) {
     var showAccount by remember { mutableStateOf(false) }
+    var showSupport by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
@@ -224,10 +244,32 @@ private fun TabLayer(
                 }
 
                 AppTab.Profile -> {
-                    if (showAccount && authModel != null) {
-                        AccountScreen(authModel, googleCredential) { showAccount = false }
+                    if (showSupport && supportModel != null) {
+                        BackHandler { showSupport = false }
+                        SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
+                            showSupport =
+                                false
+                        }
+                    } else if (showAccount && authModel != null) {
+                        AccountScreen(
+                            authModel,
+                            googleCredential,
+                            onSupport =
+                                if (supportModel !=
+                                    null
+                                ) {
+                                    ({ showSupport = true })
+                                } else {
+                                    null
+                                },
+                        ) { showAccount = false }
                     } else {
                         Column {
+                            if (supportModel != null) {
+                                TextButton({ showSupport = true }, modifier = Modifier.testTag("profile_support")) {
+                                    Text(stringResource(Res.string.support_open))
+                                }
+                            }
                             if (authModel != null) {
                                 TextButton(
                                     {

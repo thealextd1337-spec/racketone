@@ -23,6 +23,7 @@ jobs:
     outputs:
       apple: ${{ steps.filter.outputs.apple }}
       supabase: ${{ steps.filter.outputs.supabase }}
+      admin: ${{ steps.filter.outputs.admin }}
     steps:
       - uses: actions/checkout@v7
       - id: filter
@@ -42,6 +43,28 @@ jobs:
             supabase:
               - 'supabase/**'
               - '.github/workflows/ci.yml'
+            admin:
+              - 'admin/**'
+              - '.github/workflows/ci.yml'
+
+  admin:
+    name: Admin Tests + Build
+    needs: changes
+    if: needs.changes.outputs.admin == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+        working-directory: admin
+      - run: npm test
+        working-directory: admin
+      - run: npm run build
+        working-directory: admin
 
   gradle-check:
     name: Gradle check + Android/Wear-APKs (ubuntu)

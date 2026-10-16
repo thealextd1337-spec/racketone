@@ -24,7 +24,13 @@ data class AuthState(
 class AuthViewModel(
     private val auth: CloudAuthPort,
     private val workScope: CoroutineScope? = null,
+    val support: eu.advantly.presentation.support.SupportViewModel? = null,
 ) : ViewModel() {
+    override fun onCleared() {
+        support?.close()
+        super.onCleared()
+    }
+
     private val mutable = MutableStateFlow(AuthState())
     val state = mutable.asStateFlow()
     private var ticket: String? = null

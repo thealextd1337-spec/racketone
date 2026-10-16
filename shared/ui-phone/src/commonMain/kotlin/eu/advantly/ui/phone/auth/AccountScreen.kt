@@ -54,6 +54,7 @@ import eu.advantly.ui.phone.resources.auth_too_young
 import eu.advantly.ui.phone.resources.auth_unavailable
 import eu.advantly.ui.phone.resources.auth_username
 import eu.advantly.ui.phone.resources.auth_username_taken
+import eu.advantly.ui.phone.resources.support_open
 import org.jetbrains.compose.resources.stringResource
 
 /** Optionaler Kontobereich; kein Zugriff auf lokale Matches und kein Login auf der Uhr. */
@@ -61,6 +62,7 @@ import org.jetbrains.compose.resources.stringResource
 fun AccountScreen(
     model: AuthViewModel,
     google: (suspend () -> GoogleCredential)?,
+    onSupport: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
     val state by model.state.collectAsState()
@@ -74,6 +76,7 @@ fun AccountScreen(
     Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(Res.string.auth_title))
         Text(stringResource(Res.string.auth_optional))
+        onSupport?.let { TextButton(it) { Text(stringResource(Res.string.support_open)) } }
         when (state.step) {
             AuthStep.AGE -> {
                 Text(stringResource(Res.string.auth_birth_privacy))

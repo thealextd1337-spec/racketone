@@ -10,8 +10,10 @@ import eu.advantly.android.BuildConfig
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
 import eu.advantly.cloud.sync.SupabasePhoneAuth
+import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
+import eu.advantly.presentation.support.SupportViewModel
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
@@ -30,8 +32,18 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
             install(Auth) { sessionManager = storage }
             install(Postgrest)
         }
-    return AuthViewModel(SupabasePhoneAuth(client, storage.deviceSecret))
+    return AuthViewModel(
+        SupabasePhoneAuth(client, storage.deviceSecret),
+        support =
+            SupportViewModel(
+                SupabaseSupport(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, client),
+                storage,
+            ),
+    )
 }
+
+/** Ohne Backendkonfiguration bleiben lokale Entwürfe möglich; Versand zeigt ausdrücklich „nicht verfügbar“. */
+fun ComponentActivity.createOfflineSupport(): SupportViewModel = SupportViewModel(null, PhoneAuthStorage(applicationContext))
 
 suspend fun ComponentActivity.googleCredential(): GoogleCredential {
     val rawNonce = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }

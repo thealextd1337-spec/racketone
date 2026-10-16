@@ -49,6 +49,8 @@ targets:
       path: Generated/iOS-Info.plist
       properties:
         CFBundleDisplayName: Advantly
+        AdvantlySupabaseURL: $(ADVANTLY_SUPABASE_URL)
+        AdvantlySupabaseKey: $(ADVANTLY_SUPABASE_KEY)
         AdvantlyGitCommit: $(ADVANTLY_GIT_COMMIT)
         AdvantlyBuildTime: $(ADVANTLY_BUILD_TIME)
         CFBundleShortVersionString: $(MARKETING_VERSION)

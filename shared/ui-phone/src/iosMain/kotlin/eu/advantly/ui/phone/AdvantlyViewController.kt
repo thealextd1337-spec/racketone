@@ -1,11 +1,15 @@
 package eu.advantly.ui.phone
 
 import androidx.compose.ui.window.ComposeUIViewController
+import androidx.lifecycle.viewmodel.compose.viewModel
 import eu.advantly.presentation.match.InMemoryMatchStore
 import eu.advantly.presentation.match.MatchStore
+import eu.advantly.presentation.support.createAppleSupport
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import kotlinx.cinterop.ExperimentalForeignApi
+import platform.Foundation.NSBundle
 import platform.Foundation.NSProcessInfo
+import platform.UIKit.UIDevice
 import platform.UIKit.UIViewController
 import platform.posix.fflush
 
@@ -24,6 +28,10 @@ fun advantlyViewController(store: () -> MatchStore = { InMemoryMatchStore() }): 
     return ComposeUIViewController {
         AdvantlyApp(
             model = rememberAdvantlyAppModel(store),
+            supportModel = viewModel { createAppleSupport() },
+            versionName = NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleShortVersionString") as? String ?: "",
+            buildCommit = NSBundle.mainBundle.objectForInfoDictionaryKey("AdvantlyGitCommit") as? String ?: "",
+            supportDiagnostics = mapOf("os" to "iOS ${UIDevice.currentDevice.systemVersion}", "device" to UIDevice.currentDevice.model),
             debugTools = autoBench,
             autoBenchmark = autoBench,
             // Landet auf stdout (CI: `simctl launch --stdout=…`)
