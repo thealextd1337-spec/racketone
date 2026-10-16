@@ -11,6 +11,7 @@ create table private.age_tickets (
   provider text check (provider in ('email', 'google')),
   consumed_at timestamptz
 );
+create unique index age_tickets_open_device on private.age_tickets(device_hash) where consumed_at is null;
 create unique index age_tickets_identity on private.age_tickets(identity_hash);
 create table private.age_attempts (
   key_hash bytea primary key,
@@ -25,6 +26,59 @@ revoke all on private.age_tickets, private.age_attempts from public, anon, authe
 create function private.age_hash(p_value text) returns bytea
 language sql immutable strict set search_path = '' as $$
   select sha256(convert_to(p_value, 'UTF8'));
+$$;
+
+-- Nur der vorgeschaltete, vertrauenswürdige Proxy darf diese Header setzen; staging muss Spoofing ausschließen.
+-- Supabase dokumentiert X-Forwarded-For[1]; Cloudflare hat Vorrang, X-Real-IP wird nie vertraut.
+create function private.age_client_ip() returns text
+language plpgsql stable set search_path = '' as $$
+declare
+  v_headers jsonb := coalesce(nullif(current_setting('request.headers', true), ''), '{}')::jsonb;
+  v_ip text;
+begin
+  v_ip := coalesce(nullif(btrim(v_headers ->> 'cf-connecting-ip'), ''),
+    nullif(btrim(split_part(v_headers ->> 'x-forwarded-for', ',', 1)), ''));
+  if v_ip is null or v_ip like '%/%' then return null; end if;
+  return host(v_ip::inet);
+exception when invalid_text_representation then return null;
+end;
+$$;
+
+-- Nur private Tabellen: keine Versionsvergabe, daher ausdrücklich KEIN globaler Sync-Lock.
+-- Jeder UPSERT sperrt seine Budgetzeile atomar. Ablehnungen als JSON erhalten die Budgetbuchung.
+create function private.age_request_budget(p_action text, p_device bytea default null) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_ip text := private.age_client_ip();
+  v_key bytea;
+  v_budget private.age_attempts%rowtype;
+  v_limit int;
+begin
+  foreach v_key in array array[private.age_hash('global'),
+    private.age_hash(p_action || ':ip:' || coalesce(v_ip, 'missing')), p_device] loop
+    continue when v_key is null;
+    insert into private.age_attempts as a(key_hash, started_at, attempts) values (v_key, v_now, 1)
+    on conflict (key_hash) do update set
+      attempts = case when a.started_at <= v_now - interval '1 minute' then 1 else a.attempts + 1 end,
+      started_at = case when a.started_at <= v_now - interval '1 minute' then v_now else a.started_at end
+    returning * into v_budget;
+    if v_budget.blocked_until > v_now then return 'age_retry_later'; end if;
+    v_limit := case when v_key = private.age_hash('global') then 1000
+      when v_key = p_device then 10 when v_ip is null then 3
+      when p_action = 'issue' then 10 else 30 end;
+    if v_budget.attempts > v_limit then return 'rate_limit_exceeded'; end if;
+  end loop;
+  return null;
+end;
+$$;
+
+-- Zweite Linie für deaktivierte Hooks und Admin/Invite-Pfade: auch ein irrtümlich aktives Profil
+-- ohne Altersnachweis erhält weder aktive RPCs (require_active) noch aktive RLS-Rechte.
+create or replace function private.is_active(p_profile uuid default auth.uid())
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.profiles p join public.profile_settings s on s.profile_id = p.id
+    where p.id = p_profile and p.status = 'active' and s.age_confirmed_at is not null);
 $$;
 
 -- Kalenderdatum des Wohnsitzlandes, unabhängig von DB-/Geräte-Zeitzone; 29.02. wird in Nicht-Schaltjahren am 01.03. alt.
@@ -52,30 +106,16 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_now timestamptz := clock_timestamp();
   v_device bytea;
-  v_ip text;
-  v_key bytea;
-  v_budget private.age_attempts%rowtype;
   v_result text;
   v_token text;
   v_min smallint;
 begin
-  perform private.lock_sync();
-  if length(coalesce(p_device_secret, '')) not between 43 and 128 then
-    return jsonb_build_object('error', 'invalid_device_secret');
-  end if;
-  v_device := private.age_hash('device:' || p_device_secret);
-  -- X-Real-IP MUSS am Gateway überschrieben werden. Kein vom Client wählbarer IP-Parameter.
-  v_ip := nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-real-ip';
-  if v_ip is null then return jsonb_build_object('error', 'gateway_ip_missing'); end if;
-  foreach v_key in array array[private.age_hash('global'), private.age_hash('ip:' || v_ip), v_device] loop
-    insert into private.age_attempts as a(key_hash, started_at, attempts) values (v_key, v_now, 1)
-    on conflict (key_hash) do update set
-      attempts = case when a.started_at <= v_now - interval '1 minute' then 1 else a.attempts + 1 end,
-      started_at = case when a.started_at <= v_now - interval '1 minute' then v_now else a.started_at end
-    returning * into v_budget;
-    if v_budget.blocked_until > v_now then return jsonb_build_object('error', 'age_retry_later'); end if;
-    if v_budget.attempts > (case when v_key = private.age_hash('global') then 100 else 10 end) then return jsonb_build_object('error', 'rate_limit_exceeded'); end if;
-  end loop;
+  -- Erst Transportbudget buchen, auch bei ungültigem Installationsgeheimnis.
+  v_device := case when length(coalesce(p_device_secret, '')) between 43 and 128
+    then private.age_hash('device:' || p_device_secret) end;
+  v_result := private.age_request_budget('issue', v_device);
+  if v_result is not null then return jsonb_build_object('error', v_result); end if;
+  if v_device is null then return jsonb_build_object('error', 'invalid_device_secret'); end if;
   delete from private.age_tickets where device_hash = v_device and consumed_at is null;
   v_result := private.age_result(p_country, p_birth_date, v_now);
   if v_result = 'age_below_minimum' then
@@ -93,44 +133,51 @@ end;
 $$;
 
 create function public.bind_age_ticket(p_ticket text, p_provider text, p_identity text)
-returns jsonb language plpgsql security definer set search_path = '' as $$
+returns jsonb language plpgsql security definer set search_path = '' set lock_timeout = '500ms' as $$
 declare
   v_hash bytea := private.age_hash(p_ticket);
   v_identity bytea;
+  v_ticket private.age_tickets%rowtype;
+  v_error text;
+  v_now timestamptz := clock_timestamp();
 begin
-  perform private.lock_sync();
+  v_error := private.age_request_budget('bind');
+  if v_error is not null then return jsonb_build_object('error', v_error); end if;
   if p_provider is null or p_provider not in ('email', 'google') or length(coalesce(btrim(p_identity), '')) not between 1 and 320 then
     return jsonb_build_object('error', 'invalid_identity');
   end if;
-  -- Google: sub (kein E-Mail-Alias). E-Mail: normalisierte Adresse.
   v_identity := private.age_hash(p_provider || ':' || case when p_provider = 'email'
     then lower(btrim(p_identity)) else p_identity end);
-  if not exists (select 1 from private.age_tickets where token_hash = v_hash
-                 and consumed_at is null and expires_at > clock_timestamp()) then
+  -- Nur konkurrierende Bindungen DIESER Identität serialisieren; kein Lock auf Sync oder öffentliche Tabellen.
+  -- Vor der Ticketzeile nehmen, damit paralleles Ersetzen ohne Unique-Rennen abgeschlossen werden kann.
+  perform pg_advisory_xact_lock(hashtextextended('age-identity:' || encode(v_identity, 'hex'), 0));
+  select * into v_ticket from private.age_tickets where token_hash = v_hash for update;
+  if not found or v_ticket.consumed_at is not null or v_ticket.expires_at <= v_now then
     return jsonb_build_object('error', 'age_ticket_expired');
   end if;
-  if exists (select 1 from private.age_tickets where token_hash = v_hash and identity_hash is not null
-             and (identity_hash <> v_identity or provider <> p_provider)) then
+  if v_ticket.identity_hash is not null and (v_ticket.identity_hash <> v_identity or v_ticket.provider <> p_provider) then
     return jsonb_build_object('error', 'age_ticket_bound');
   end if;
-  -- Nach verlorener HTTP-Antwort darf dieselbe Bindung wiederholt werden, niemals eine andere Identität.
-  delete from private.age_tickets where identity_hash = v_identity and expires_at <= clock_timestamp();
+  -- Offene Fremdbindung ersetzen; einen laufenden Hook→Insert höchstens eine Minute schützen.
+  delete from private.age_tickets where identity_hash = v_identity and token_hash <> v_hash
+    and (consumed_at is null or consumed_at <= v_now - interval '1 minute' or expires_at <= v_now);
   if exists (select 1 from private.age_tickets where identity_hash = v_identity and token_hash <> v_hash) then
     return jsonb_build_object('error', 'age_ticket_bound');
   end if;
-  update private.age_tickets set identity_hash = v_identity, provider = p_provider where token_hash = v_hash;
+  update private.age_tickets set identity_hash = v_identity, provider = p_provider,
+    expires_at = least(expires_at, v_now + interval '2 minutes') where token_hash = v_hash;
   return '{}'::jsonb;
 end;
 $$;
 
 create function public.before_user_created(event jsonb)
-returns jsonb language plpgsql security definer set search_path = '' as $$
+returns jsonb language plpgsql security definer set search_path = ''
+set lock_timeout = '500ms' set statement_timeout = '2s' as $$
 declare
   v_provider text := event #>> '{user,app_metadata,provider}';
   v_identity text;
   v_count int;
 begin
-  perform private.lock_sync();
   if v_provider = 'email' then
     v_identity := lower(btrim(event #>> '{user,email}'));
   elsif v_provider = 'google' then
@@ -170,12 +217,15 @@ begin
   -- Gleiche verifizierte Provider-Identität wie im Hook, auch wenn GoTrue eine neue UUID erzeugt.
   delete from private.age_tickets
     where provider = v_provider and identity_hash = private.age_hash(v_provider || ':' || v_identity)
-      and consumed_at is not null and expires_at > clock_timestamp()
+      and consumed_at > clock_timestamp() - interval '1 minute' and expires_at > clock_timestamp()
       and (v_provider = 'google' or token_hash = private.age_hash(new.raw_user_meta_data ->> 'age_ticket'))
     returning * into v_ticket;
   insert into public.profiles(id) values (new.id);
   insert into public.profile_settings(profile_id, country, age_confirmed_at, age_rule_min_age)
     values (new.id, v_ticket.country, v_ticket.checked_at, v_ticket.min_age);
+  -- AFTER INSERT: NEW zu ändern reicht nicht; das bereits gespeicherte Metadatum gezielt entfernen.
+  update auth.users set raw_user_meta_data = raw_user_meta_data - 'age_ticket'
+    where id = new.id and raw_user_meta_data ? 'age_ticket';
   return new;
 end;
 $$;
@@ -216,7 +266,7 @@ alter table public.profiles add constraint alias_no_control_characters check (al
 create function public.cancel_age_ticket(p_ticket text) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform private.lock_sync();
+  if private.age_request_budget('cancel') is not null then return; end if;
   delete from private.age_tickets where token_hash = private.age_hash(p_ticket) and consumed_at is null;
 end;
 $$;
@@ -238,7 +288,6 @@ $$;
 create function private.purge_age_gate() returns void
 language plpgsql security definer set search_path = '' set lock_timeout = '5s' set statement_timeout = '60s' as $$
 begin
-  perform private.lock_sync();
   delete from private.age_tickets where expires_at < clock_timestamp() - interval '1 hour';
   delete from private.age_attempts where started_at < clock_timestamp() - interval '25 hours'
     and coalesce(blocked_until, '-infinity'::timestamptz) < clock_timestamp();
@@ -249,7 +298,8 @@ do $$ begin
     perform cron.schedule('advantly-purge-age-gate', '29 * * * *', 'set statement_timeout = ''60s''; select private.purge_age_gate();');
   end if;
 end $$;
-revoke all on function private.age_hash(text), private.age_result(text,date,timestamptz), private.purge_age_gate()
+revoke all on function private.age_hash(text), private.age_result(text,date,timestamptz), private.purge_age_gate(),
+  private.age_client_ip(), private.age_request_budget(text,bytea)
   from public, anon, authenticated;
 revoke all on function public.issue_age_ticket(text,date,text), public.bind_age_ticket(text,text,text),
   public.cancel_age_ticket(text), public.finish_onboarding(text,text), public.my_auth_profile() from public, anon, authenticated;

@@ -1,6 +1,6 @@
 -- P2-C: echte DB-Funktionen, keine externen Dienste. GoTrue-Ende-zu-Ende-Abnahme separat auf staging.
 begin;
-select plan(66);
+select plan(67);
 select is(private.age_result('AT','2012-10-16','2026-10-15 22:00:00+00'), 'ok', 'AT: 14 am Geburtstag, Wien bereits 16.10.');
 select is(private.age_result('AT','2012-10-16','2026-10-15 21:59:59+00'), 'age_below_minimum', 'AT: Sekunde vor Mitternacht zu jung');
 select is(private.age_result('DE','2010-10-16','2026-10-16 12:00+00'), 'ok', 'DE: genau 16');
@@ -34,7 +34,7 @@ select is(public.before_user_created(tests.age_event(gen_random_uuid(),'email','
 select is(public.before_user_created(tests.age_event(gen_random_uuid(),'apple','subject')) #>> '{error,message}',
   'age_ticket_required','Apple nicht freigegeben');
 select is_empty($$ select id from auth.users where email = 'missing@example.com' $$, 'Ablehnung erzeugt keinen Auth-Nutzer');
-select set_config('request.headers','{"x-real-ip":"192.0.2.1"}',true);
+select set_config('request.headers','{"x-forwarded-for":"192.0.2.1"}',true);
 create temp table ticket as select public.issue_age_ticket('AT','2000-01-01',repeat('a',64))->>'ticket' as token;
 select ok((select length(token) = 64 from ticket), 'Zufallsticket mit 244 Bit Entropie');
 select is(public.bind_age_ticket((select token from ticket),'email',' Adult@Example.com '), '{}'::jsonb, 'OTP-Ticket binden');
@@ -52,6 +52,8 @@ insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data)
 select is((select country from public.profile_settings where profile_id = (select id from accepted_id)), 'AT', 'Nachweis aus Ticket übernommen');
 select is((select age_rule_min_age::int from public.profile_settings where profile_id = (select id from accepted_id)), 14, 'Angewandte Grenze übernommen');
 select is_empty($$ select * from private.age_tickets where token_hash=private.age_hash((select token from ticket)) $$, 'Verbrauchte Bindung entfernt');
+select ok(not (select raw_user_meta_data ? 'age_ticket' from auth.users where id=(select id from accepted_id)),
+  'OTP-Ticket nach erfolgreichem Verbrauch aus Auth-Metadaten entfernt');
 select tests.authenticate_as_id((select id from accepted_id));
 select throws_ok($$ select public.finish_onboarding('Alias','support') $$, 'P0001','username_reserved','Reservierung durch Server');
 select throws_ok($$ select public.finish_onboarding('','valid_name') $$, 'P0001','invalid_alias','Leerer Alias abgelehnt');
@@ -92,17 +94,17 @@ update private.age_attempts set blocked_until=clock_timestamp()-interval '1 seco
 select ok(public.issue_age_ticket('AT','2000-01-01',repeat('d',64)) ? 'ticket', 'Nach Sperrablauf neuer Versuch');
 -- Separates Budgetfenster für deterministische Rate-Grenzprüfung.
 delete from private.age_attempts;
-select set_config('request.headers','{"x-real-ip":"192.0.2.2"}',true);
+select set_config('request.headers','{"x-forwarded-for":"192.0.2.2"}',true);
 select public.issue_age_ticket('US','2000-01-01',repeat('e',64)) from generate_series(1,10);
 select is(public.issue_age_ticket('US','2000-01-01',repeat('e',64))->>'error', 'rate_limit_exceeded', 'Auch fachliche Ablehnungen zählen: Versuch 11 gesperrt');
 update private.age_attempts set started_at=clock_timestamp()-interval '61 seconds';
 select is(public.issue_age_ticket('US','2000-01-01',repeat('e',64))->>'error', 'country_not_supported', 'Fenster läuft ab');
 select is_empty($$ select id from auth.users where email='expired@example.com' $$, 'Abgelaufene/abgelehnte Versuche ohne Auth-Nutzer');
 select set_config('request.headers','{}',true);
-select is(public.issue_age_ticket('AT','2000-01-01',repeat('f',64))->>'error', 'gateway_ip_missing', 'Fehlende Gateway-IP geschlossen abgelehnt');
+select ok(public.issue_age_ticket('AT','2000-01-01',repeat('f',64)) ? 'ticket', 'Fehlende IP nutzt begrenztes gemeinsames Budget');
 select ok(not has_function_privilege('authenticated','public.complete_onboarding(text,date,text,text)','execute'),
   'Alter Spike-RPC bietet keinen Umgehungsweg');
-select set_config('request.headers','{"x-real-ip":"192.0.2.3"}',true);
+select set_config('request.headers','{"x-forwarded-for":"192.0.2.3"}',true);
 delete from private.age_attempts;
 create temp table retry_ticket as select public.issue_age_ticket('AT','2000-01-01',repeat('r',64))->>'ticket' as token;
 select is(public.bind_age_ticket((select token from retry_ticket),'email','retry@example.com'), '{}'::jsonb, 'Neue OTP-Bindung');
@@ -125,12 +127,12 @@ select public.issue_age_ticket('US','2000-01-01',repeat('g',63)||i::text) from g
 select is(public.issue_age_ticket('AT','2000-01-01',repeat('h',64))->>'error','rate_limit_exceeded','IP-Budget gilt installationsübergreifend');
 delete from private.age_attempts;
 do $$ begin
-  for i in 1..100 loop
-    perform set_config('request.headers',jsonb_build_object('x-real-ip','192.0.2.'||i)::text,true);
+  for i in 1..1000 loop
+    perform set_config('request.headers',jsonb_build_object('x-forwarded-for','2001:db8::'||to_hex(i))::text,true);
     perform public.issue_age_ticket('US','2000-01-01',repeat('z',60)||i::text);
   end loop;
 end $$;
-select set_config('request.headers','{"x-real-ip":"192.0.2.200"}',true);
+select set_config('request.headers','{"x-forwarded-for":"192.0.2.200"}',true);
 select is(public.issue_age_ticket('AT','2000-01-01',repeat('w',64))->>'error','rate_limit_exceeded','Globales Budget gilt auch bei wechselnder IP');
 update private.age_tickets set expires_at=clock_timestamp()-interval '2 hours';
 update private.age_attempts set started_at=clock_timestamp()-interval '26 hours',blocked_until=null;
