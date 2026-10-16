@@ -19,6 +19,17 @@
 # erzeugt das Compiler-Plugin als Konstanten – Obfuskierung ändert also weder das JSON-Format noch
 # polymorphe Diskriminatoren.
 
+# --- supabase-kt / Ktor (nur Phone) -------------------------------------------------------------
+# supabase-kt 3.8.0 verwendet generierte kotlinx-Serializer für Auth-/PostgREST-DTOs: die obigen
+# Consumer Rules gelten auch für diese Klassen. Keine pauschalen -keep io.github.jan.supabase.**;
+# diese würden den Shrinker für den kompletten SDK-Graphen aushebeln.
+# Ktor 3.5.1 liefert META-INF/proguard/ktor.pro (AtomicFU-Felder und HttpClientEngineContainer).
+# Den tatsächlich verwendeten OkHttp-ServiceLoader-Einstieg samt Konstruktor zusätzlich explizit
+# halten: createSupabaseClient erzeugt HttpClient ohne Engine-Parameter und entdeckt ihn zur Laufzeit.
+-keep class io.ktor.client.engine.okhttp.OkHttpEngineContainer {
+    public <init>();
+}
+
 # --- SQLDelight (shared/data) -------------------------------------------------------------------
 # Generierter Code ohne Reflection; Enum-Spalten laufen über name()/enumValueOf, die Namen bleiben
 # erhalten (proguard-android-optimize.txt behält values()/valueOf()). Keine Regeln nötig.

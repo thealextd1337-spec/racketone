@@ -201,17 +201,28 @@ private fun ScalingLazyListScope.fitnessItems(
     heartRate: Int?,
     actions: LiveActions,
 ) {
+    // Telemetrie „Gar nicht“ (P2-J): statt leerer Werte ein Hinweis, nur die Dauer bleibt
+    val telemetry = workout.telemetryAllowed
     item {
         Text(
-            heartRate?.let { stringResource(R.string.heart_rate_value, it) } ?: stringResource(R.string.heart_rate_unknown),
-            style = MaterialTheme.typography.titleMedium,
+            when {
+                !telemetry -> stringResource(R.string.telemetry_controls_off)
+                heartRate != null -> stringResource(R.string.heart_rate_value, heartRate)
+                else -> stringResource(R.string.heart_rate_unknown)
+            },
+            style = if (telemetry) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
         )
     }
     item { WorkoutStatusText(workout) }
     if (workout.phase == WorkoutPhase.ACTIVE) {
         textItem {
-            val kcal = workout.caloriesKcal?.toInt()?.toString() ?: "--"
-            "${workoutDuration(workout)} · ${stringResource(R.string.stats_line, kcal, workout.steps?.toString() ?: "--")}"
+            if (!telemetry) {
+                workoutDuration(workout)
+            } else {
+                val kcal = workout.caloriesKcal?.toInt()?.toString() ?: "--"
+                "${workoutDuration(workout)} · ${stringResource(R.string.stats_line, kcal, workout.steps?.toString() ?: "--")}"
+            }
         }
     }
     if (workout.phase == WorkoutPhase.FAILED) {

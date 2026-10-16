@@ -28,5 +28,8 @@ class LiveTelemetryPublisher {
     }
 }
 
-/** ACTIVE ohne Selection bedeutet: kein unterstützter Exercise-Typ, also kein laufendes Workout. */
-val WorkoutUiState.telemetryActive: Boolean get() = phase == WorkoutPhase.ACTIVE && selection != null
+/**
+ * Live-Telemetrie läuft: Workout aktiv mit Exercise und Telemetrie erlaubt (nicht „Gar nicht“, P2-J). ACTIVE ohne Selection
+ * bedeutet: kein unterstützter Exercise-Typ, also kein laufendes Workout.
+ */
+val WorkoutUiState.telemetryActive: Boolean get() = phase == WorkoutPhase.ACTIVE && selection != null && telemetryAllowed

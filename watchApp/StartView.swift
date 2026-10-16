@@ -54,6 +54,7 @@ struct StartView: View {
                 } header: {
                     Text("start.newMatch")
                 }
+                TelemetrySection(model: model)
                 #if DEBUG
                 if !debugInfo.isEmpty {
                     Section {
@@ -72,6 +73,36 @@ struct StartView: View {
         let serve = loc(setup.weServeFirst ? "setup.weServe" : "setup.theyServe")
         let games = setup.gamesPerSet > 0 ? " · " + loc("setup.games %@", String(setup.gamesPerSet)) : ""
         return discipline + " · " + serve + games
+    }
+}
+
+/// „Puls & Schritte“ (P2-J): Teilen / Nur für mich (Standard) / Gar nicht, mit kurzer Erklärung der Wahl.
+struct TelemetrySection: View {
+    @ObservedObject var model: ScoringModel
+
+    var body: some View {
+        Section {
+            Picker("start.telemetry", selection: Binding(
+                get: { model.telemetryVisibility },
+                set: { model.setTelemetryVisibility($0) }
+            )) {
+                Text("start.telemetry.share").tag("share")
+                Text("start.telemetry.private").tag("private")
+                Text("start.telemetry.off").tag("off")
+            }
+            .accessibilityIdentifier("start.telemetry")
+            Text(hint)
+                .font(.footnote)
+                .foregroundStyle(Brand.text2)
+        }
+    }
+
+    private var hint: LocalizedStringKey {
+        switch model.telemetryVisibility {
+        case "share": return "start.telemetry.shareHint"
+        case "off": return "start.telemetry.offHint"
+        default: return "start.telemetry.privateHint"
+        }
     }
 }
 

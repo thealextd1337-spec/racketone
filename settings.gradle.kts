@@ -45,6 +45,7 @@ include(":shared:match-session")
 include(":shared:cloud-sync")
 // Präsentation
 include(":shared:presentation")
+include(":shared:presentation-auth")
 include(":shared:ui-phone")
 // Apple-Frameworks (XCFrameworks werden nur auf macOS gebaut)
 include(":shared:umbrella-ios")

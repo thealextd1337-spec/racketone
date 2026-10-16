@@ -1,6 +1,8 @@
 package eu.advantly.presentation.live
 
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.core.model.TelemetryVisibility.PRIVATE
 import eu.advantly.match.session.PeerInfo
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.LiveTelemetry
@@ -16,16 +18,30 @@ class LiveTelemetryGateTest {
 
     @Test
     fun onlyOwnCompatibleWatchForEnabledMatchingWorkoutIsAccepted() {
-        assertTrue(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch)))
-        assertFalse(LiveTelemetryGate.accept(value, "foreign", match, true, listOf(watch)))
-        assertFalse(LiveTelemetryGate.accept(value, watch.peer, MatchId("other"), true, listOf(watch)))
-        assertFalse(LiveTelemetryGate.accept(value, watch.peer, null, true, listOf(watch)))
-        assertFalse(LiveTelemetryGate.accept(value, watch.peer, match, false, listOf(watch)))
-        assertFalse(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch.copy(kind = PeerKind.PHONE))))
+        assertTrue(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch), PRIVATE))
+        assertFalse(LiveTelemetryGate.accept(value, "foreign", match, true, listOf(watch), PRIVATE))
+        assertFalse(LiveTelemetryGate.accept(value, watch.peer, MatchId("other"), true, listOf(watch), PRIVATE))
+        assertFalse(LiveTelemetryGate.accept(value, watch.peer, null, true, listOf(watch), PRIVATE))
+        assertFalse(LiveTelemetryGate.accept(value, watch.peer, match, false, listOf(watch), PRIVATE))
+        assertFalse(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch.copy(kind = PeerKind.PHONE)), PRIVATE))
         assertFalse(
-            LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch.copy(compatibility = CompatibilityStatus.PEER_TOO_OLD))),
+            LiveTelemetryGate.accept(
+                value,
+                watch.peer,
+                match,
+                true,
+                listOf(watch.copy(compatibility = CompatibilityStatus.PEER_TOO_OLD)),
+                PRIVATE,
+            ),
         )
-        assertFalse(LiveTelemetryGate.accept(value.copy(v = 99), watch.peer, match, true, listOf(watch)))
+        assertFalse(LiveTelemetryGate.accept(value.copy(v = 99), watch.peer, match, true, listOf(watch), PRIVATE))
+    }
+
+    /** P2-J: „Teilen“ wirkt lokal wie „Nur für mich“; „Gar nicht“ verwirft auch Werte einer Uhr ohne die Einstellung. */
+    @Test
+    fun offDropsEveryValueAndShareBehavesLikePrivate() {
+        assertTrue(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch), TelemetryVisibility.SHARE))
+        assertFalse(LiveTelemetryGate.accept(value, watch.peer, match, true, listOf(watch), TelemetryVisibility.OFF))
     }
 
     @Test

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import eu.advantly.core.model.Side
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.PlayersPort
+import eu.advantly.presentation.match.TelemetrySettingsPort
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
@@ -198,6 +199,7 @@ fun ComingSoonScreen(
     modifier: Modifier = Modifier,
     players: PlayersPort? = null,
     onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
+    telemetry: TelemetrySettingsPort? = null,
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -221,6 +223,8 @@ fun ComingSoonScreen(
             color = colors.text2,
         )
         if (tab == AppTab.Profile && players != null) GuestList(players, onPlayerHistory)
+        // Einstellung „Puls & Schritte“ (P2-J) – lokal, wirkt auf Uhr und Handy, später mit dem Profil synchronisiert
+        if (tab == AppTab.Profile && telemetry != null) TelemetryVisibilitySection(telemetry, Modifier.padding(top = Spacing.l))
         if (tab == AppTab.Profile) {
             // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
             val openLink = rememberSafeLinkOpener()

@@ -18,9 +18,11 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.live.LiveTelemetryStore
 import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.sync.protocol.LiveTelemetry
+import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import java.io.File
 import java.util.Locale
@@ -71,6 +73,31 @@ class LiveWorkoutTelemetryTest {
         runDesktopComposeUiTest(width = 412, height = 120) {
             setContent { AdvantlyTheme(darkTheme = true) { LiveWorkoutTelemetry(match, false, false) } }
             onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
+        }
+
+    /** P2-J: „Gar nicht“ zeigt auch frische Werte nicht (etwa von einer älteren Uhr ohne die Einstellung). */
+    @Test
+    fun offVisibilityHidesEvenFreshTelemetry() =
+        runDesktopComposeUiTest(width = 412, height = 120) {
+            val source = LiveTelemetryStore().apply { receive(LiveTelemetry(1, match, 142, 12)) }
+            setContent {
+                CompositionLocalProvider(LocalTelemetryVisibility provides TelemetryVisibility.OFF) {
+                    AdvantlyTheme { LiveWorkoutTelemetry(match, true, false, source, compatibleWatch = true) }
+                }
+            }
+            onNodeWithTag("live_workout_telemetry").assertDoesNotExist()
+        }
+
+    @Test
+    fun shareShowsTelemetryLikeOnlyMe() =
+        runDesktopComposeUiTest(width = 412, height = 120) {
+            val source = LiveTelemetryStore().apply { receive(LiveTelemetry(1, match, 142, 12)) }
+            setContent {
+                AdvantlyTheme {
+                    LiveWorkoutTelemetry(match, true, false, source, compatibleWatch = true, visibility = TelemetryVisibility.SHARE)
+                }
+            }
+            onNodeWithTag("live_workout_telemetry").assertExists()
         }
 
     @Test

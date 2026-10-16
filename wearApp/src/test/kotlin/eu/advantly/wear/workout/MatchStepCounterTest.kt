@@ -24,6 +24,19 @@ class MatchStepCounterTest {
         assertNull(counter.forMatch(null).steps)
     }
 
+    /** „Gar nicht“ (P2-J) verwirft den Stand; nach dem Wiedereinschalten zählen nur neue Schritte. */
+    @Test
+    fun restartDropsStepsAndTheNextTotalBecomesTheBaseline() {
+        var counter = MatchStepCounter().forMatch(first).withTotal(100).withTotal(180)
+        assertEquals(180L, counter.steps)
+        counter = counter.restarted()
+        assertNull(counter.steps)
+        assertNull(counter.forMatch(first).steps)
+        counter = counter.withTotal(400)
+        assertEquals(0L, counter.steps)
+        assertEquals(25L, counter.withTotal(425).steps)
+    }
+
     @Test
     fun exerciseResetCannotProduceNegativeSteps() {
         val counter =

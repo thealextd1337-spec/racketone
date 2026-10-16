@@ -260,6 +260,15 @@
     <string name="notification_match_display">Live score from the phone – tap to open</string>
     <string name="live_workout_telemetry_description">Heart rate: %1$s beats per minute, steps: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
+    <string name="telemetry_visibility_title">Heart rate &amp; steps</string>
+    <string name="telemetry_visibility_share">Share</string>
+    <string name="telemetry_visibility_private">Only me</string>
+    <string name="telemetry_visibility_off">Off</string>
+    <string name="telemetry_visibility_share_hint">Like “Only me” for now – sharing starts once friends and live view are available</string>
+    <string name="telemetry_visibility_private_hint">Only on this watch and your phone</string>
+    <string name="telemetry_visibility_off_hint">Not shown, nothing is sent</string>
+    <string name="telemetry_controls_off">Heart rate &amp; steps: Off</string>
     <string name="setup_unassigned">Unassigned</string>
     <string name="setup_no_players">Players available after syncing with your phone</string>
     <!-- Feldtest-Modus (nur Debug-Build, P1-Gate) -->

@@ -1,6 +1,8 @@
 package eu.advantly.presentation.live
 
 import eu.advantly.core.model.MatchId
+import eu.advantly.match.session.MatchSession
+import eu.advantly.match.session.SessionListener
 import eu.advantly.presentation.match.MonotonicClock
 import eu.advantly.sync.protocol.LiveTelemetry
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +56,12 @@ class LiveTelemetryStore(
     fun remainingVisibilityMs(): Long =
         mutableRecent.value?.let { (RECENT_FOR_MS - (clock.nowMs() - it.receivedAtMs)).coerceIn(0, RECENT_FOR_MS) } ?: 0
 
+    /** „Gar nicht“ (P2-J): Wert und Empfangsmerker sofort verwerfen, nicht erst nach Ablauf. */
+    fun clear() {
+        mutable.value = null
+        mutableRecent.value = null
+    }
+
     /** Auch ohne offenen Live-Screen nach Ablauf wirklich aus dem RAM-Halter entfernen. */
     fun expire() {
         val current = mutable.value
@@ -66,6 +74,17 @@ class LiveTelemetryStore(
         const val RECENT_FOR_MS: Long = 120_000
         val Phone: LiveTelemetryStore = LiveTelemetryStore(liveTelemetryClock())
     }
+}
+
+/**
+ * Koppelt den flüchtigen Eingang an die **prozessweite** [session] (P2-J): Wechselt die Telemetrie-Sichtbarkeit auf
+ * „Gar nicht“ – lokal oder von der Uhr –, wird er sofort geleert, auch wenn keine UI (kein `SessionMatchStore`) läuft,
+ * z. B. wenn nur der Listener-Service den Prozess hält. Auf dem Session-Thread aufrufen; Rückgabe löst die Kopplung.
+ */
+fun LiveTelemetryStore.clearWhenTelemetryOff(session: MatchSession): () -> Unit {
+    val listener = SessionListener { if (!it.telemetryVisibility.allowsLive) clear() }
+    session.addListener(listener)
+    return { session.removeListener(listener) }
 }
 
 /** Für den Stale-Hinweis bleiben nur Match-ID und Empfangszeit, keine Gesundheitswerte. */

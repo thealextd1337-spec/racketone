@@ -29,6 +29,17 @@ final class WorkoutManager: NSObject, ObservableObject {
     /// Puls für Always-on: höchstens einmal pro Minute aktualisiert (04 §4.3.6)
     @Published private(set) var heartRateAmbient: Int = 0
 
+    /// Telemetrie-Sichtbarkeit (P2-J): `false` bei „Gar nicht“ – Pulswerte werden verworfen und nicht angezeigt.
+    /// Die Workout-Session läuft als Laufzeitanker (Always-on) weiter; sie wird am Ende ohnehin verworfen.
+    @Published var telemetryAllowed = true {
+        didSet {
+            if !telemetryAllowed {
+                heartRate = 0
+                heartRateAmbient = 0
+            }
+        }
+    }
+
     /// Wird gemeldet, wenn die Session nicht starten kann (UI zeigt den Hinweis).
     var onUnavailable: (() -> Void)?
     /// Session läuft (z. B. um den Action-Button-Intent zu spenden).
@@ -317,7 +328,8 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
         else { return }
         let bpm = Int(quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute())).rounded())
         DispatchQueue.main.async { [weak self] in
-            guard let self, workoutBuilder === self.builder else { return }
+            // „Gar nicht“ (P2-J): Wert verwerfen, nichts anzeigen
+            guard let self, workoutBuilder === self.builder, self.telemetryAllowed else { return }
             self.heartRate = bpm
             let now = Date()
             if self.heartRateAmbient == 0 || now.timeIntervalSince(self.ambientUpdatedAt) >= 60 {

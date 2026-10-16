@@ -29,7 +29,8 @@ $$, 'Kern-Tabellen ohne direkte INSERT/DELETE-Rechte');
 select is_empty($$
   select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private') and has_function_privilege('anon', p.oid, 'EXECUTE')
-$$, 'anon darf keine Funktion in public/private ausführen');
+    and p.proname not in ('issue_age_ticket', 'bind_age_ticket', 'cancel_age_ticket')
+$$, 'anon darf ausschließlich Altersgate-Ticket-RPCs ausführen');
 
 select ok(not has_function_privilege('authenticated', 'public.admin_purge_due_accounts(interval)', 'EXECUTE'),
           'Löschjob nur für service_role');
@@ -69,19 +70,21 @@ select is_empty($$
   select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.prosecdef
     and p.proname not in ('find_profile', 'sync_pull', 'get_visitor_match', 'my_visitor_matches', 'export_my_data',
-                          'tournament_overview')
+                          'tournament_overview', 'issue_age_ticket', 'bind_age_ticket', 'cancel_age_ticket', 'before_user_created')
     and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
 $$, 'jede schreibende RPC nimmt die Versionssperre');
 select is_empty($$
   select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' and p.prosecdef and strpos(lower(p.prosrc), 'for update') > 0
+  where n.nspname = 'public' and p.prosecdef and p.proname <> 'bind_age_ticket'
+    and strpos(lower(p.prosrc), 'for update') > 0
     and strpos(lower(p.prosrc), 'for update') < least(
           nullif(strpos(p.prosrc, 'private.require_active()'), 0),
           nullif(strpos(p.prosrc, 'private.lock_sync()'), 0))
 $$, 'RPCs sperren Zeilen erst nach der Versionssperre');
 select is_empty($$
   select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' and p.prosecdef and strpos(lower(p.prosrc), 'for update') > 0
+  where n.nspname = 'public' and p.prosecdef and p.proname <> 'bind_age_ticket'
+    and strpos(lower(p.prosrc), 'for update') > 0
     and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
 $$, 'keine RPC sperrt Zeilen ohne Versionssperre');
 

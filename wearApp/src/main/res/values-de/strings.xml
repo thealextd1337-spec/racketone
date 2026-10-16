@@ -252,6 +252,15 @@
     <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
     <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
+    <string name="telemetry_visibility_title">Puls &amp; Schritte</string>
+    <string name="telemetry_visibility_share">Teilen</string>
+    <string name="telemetry_visibility_private">Nur für mich</string>
+    <string name="telemetry_visibility_off">Gar nicht</string>
+    <string name="telemetry_visibility_share_hint">Vorerst wie „Nur für mich“ – Teilen wirkt, sobald Freunde und Live-Ansicht verfügbar sind</string>
+    <string name="telemetry_visibility_private_hint">Nur auf dieser Uhr und deinem Handy</string>
+    <string name="telemetry_visibility_off_hint">Keine Anzeige, es wird nichts gesendet</string>
+    <string name="telemetry_controls_off">Puls &amp; Schritte: Gar nicht</string>
     <string name="setup_unassigned">Nicht zugewiesen</string>
     <string name="setup_no_players">Spieler nach dem nächsten Handy-Abgleich verfügbar</string>
     <!-- Feldtest-Modus (nur Debug-Build, P1-Gate) -->

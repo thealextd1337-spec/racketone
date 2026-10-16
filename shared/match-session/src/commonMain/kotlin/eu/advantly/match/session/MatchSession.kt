@@ -10,6 +10,8 @@ import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.CorrectionKind
@@ -74,6 +76,7 @@ import eu.advantly.sync.protocol.SeqRange
 import eu.advantly.sync.protocol.Summary
 import eu.advantly.sync.protocol.SyncCodec
 import eu.advantly.sync.protocol.SyncMessage
+import eu.advantly.sync.protocol.TelemetrySetting
 import eu.advantly.sync.protocol.VersionVector
 import eu.advantly.sync.protocol.WatchAssignment
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,6 +173,9 @@ class MatchSession(
      * [acknowledgeDroppedInputs] quittiert (übersteht Neustarts).
      */
     private var droppedInputs: DroppedInputs? = loadDroppedNotice()
+
+    /** Telemetrie-Sichtbarkeit des Besitzers (P2-J), persistent in den Settings; Abgleich über `MatchMeta.telemetry`. */
+    private var telemetry: TelemetryPreference = loadTelemetry()
 
     /**
      * Matches, die nachweislich noch nie an eine Uhr gesendet wurden (Cache der Settings `session.neverSentToWatch.*`).
@@ -320,6 +326,60 @@ class MatchSession(
         droppedInputs = null
         data.settings.remove(DROPPED_NOTICE_KEY)
         publish()
+    }
+
+    // --- Telemetrie-Sichtbarkeit (P2-J, F19/F29) -----------------------------------------------------------------
+
+    /**
+     * Nutzer ändert die Telemetrie-Sichtbarkeit auf diesem Gerät (Handy oder Uhr). Wird gespeichert, sofort an alle
+     * verbundenen eigenen Geräte gesendet und sonst beim nächsten `Hello` abgeglichen. Konfliktregel über einen
+     * Lamport-Zähler ([TelemetryPreference.merge]): eine Änderung, die die andere schon kannte, gilt; konkurrierende
+     * Änderungen mit gleichem Zähler → restriktiver Wert. Die Wirkung („Gar nicht“ stoppt Anzeige und Übertragung) setzen
+     * die Apps aus [SessionState.telemetry] um.
+     */
+    fun setTelemetryVisibility(visibility: TelemetryVisibility) {
+        checkThread()
+        if (visibility == telemetry.visibility) return
+        adoptTelemetry(telemetry.changedBy(deviceId.value, visibility))
+    }
+
+    /**
+     * Schnittstelle für einen späteren Profil-Abgleich (P2-E, `profile_settings.telemetry_visibility`): [remote] wird nach
+     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte. **P2-E:** Der Server muss dafür `counter` und
+     * `origin` neben `telemetry_visibility` speichern; ein Standard (counter 0) wird ignoriert. `true`, wenn sich der Stand
+     * geändert hat.
+     */
+    fun mergeTelemetryPreference(remote: TelemetryPreference): Boolean {
+        checkThread()
+        if (remote.isDefault || remote.origin == null) return false
+        return adoptTelemetry(telemetry.merge(remote))
+    }
+
+    /**
+     * Speichert [next] als **einen** Settings-Eintrag (Wert und Versionsangabe gemeinsam, ein Schreibvorgang = atomar) und
+     * übernimmt ihn erst danach in den RAM-Zustand. Scheitert das Schreiben, bleibt alles beim alten Stand (nichts
+     * gesendet, nichts veröffentlicht) und die Exception geht an den Aufrufer.
+     */
+    private fun adoptTelemetry(next: TelemetryPreference): Boolean {
+        if (next == telemetry) return false
+        val setting = checkNotNull(TelemetrySetting.of(next)) { "Telemetrie-Änderung ohne Versionsangabe" }
+        data.settings.put(TELEMETRY_KEY, SyncCodec.json.encodeToString(TelemetrySetting.serializer(), setting))
+        telemetry = next
+        broadcast(MatchMetaMessage(telemetry = setting))
+        publish()
+        return true
+    }
+
+    /** Gespeicherte Einstellung; fehlt sie oder ist sie unlesbar, gilt der Standard (nie ein halber Stand). */
+    private fun loadTelemetry(): TelemetryPreference {
+        val stored = data.settings.get(TELEMETRY_KEY) ?: return TelemetryPreference()
+        val setting =
+            try {
+                SyncCodec.json.decodeFromString(TelemetrySetting.serializer(), stored)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        return setting?.toPreference() ?: TelemetryPreference()
     }
 
     private fun loadDroppedNotice(): DroppedInputs? {
@@ -1311,6 +1371,8 @@ class MatchSession(
         }
         // Kopf zuerst: die Uhr vergleicht beim Übergeben mit dem zugewiesenen Match
         message.watchMatch?.let { adoptAssignment(peer, it) }
+        // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
+        message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -1768,6 +1830,7 @@ class MatchSession(
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),
             watchMatch = watchAssignment?.takeIf { config.parallelMatches },
+            telemetry = TelemetrySetting.of(telemetry),
         )
     }
 
@@ -1806,6 +1869,7 @@ class MatchSession(
             matches,
             watchAssignment?.matchId,
             droppedInputs,
+            telemetry,
         )
     }
 
@@ -1902,6 +1966,9 @@ class MatchSession(
 
         /** Settings: hier angelegtes Match wurde noch nie an eine Uhr gesendet (Handy); fehlt = möglicherweise gesendet. */
         private const val NEVER_SENT_TO_WATCH_PREFIX = "session.neverSentToWatch."
+
+        /** Settings: Telemetrie-Sichtbarkeit samt Versionsangabe als ein JSON-Eintrag (`TelemetrySetting`, P2-J). */
+        private const val TELEMETRY_KEY = "session.telemetry"
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"

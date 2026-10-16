@@ -3,8 +3,11 @@ package eu.advantly.wear.ui
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -18,6 +21,7 @@ import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.wear.BuildConfig
 import eu.advantly.wear.R
 import eu.advantly.wear.diagnostics.FieldTestRecorder
@@ -34,10 +38,13 @@ interface HomeActions {
     fun resume(matchId: MatchId): Boolean
 
     fun setWorkoutEnabled(enabled: Boolean)
+
+    /** Telemetrie-Sichtbarkeit (P2-J); wird mit dem Handy abgeglichen. */
+    fun setTelemetryVisibility(visibility: TelemetryVisibility)
 }
 
 /**
- * Startliste (04 W1): fortsetzbares Match, „Wie letztes Mal“, Workout-Schalter, letzte Ergebnisse;
+ * Startliste (04 W1): fortsetzbares Match, „Wie letztes Mal“, Workout-Schalter, Telemetrie-Sichtbarkeit, letzte Ergebnisse;
  * EdgeButton „Neues Match“ (04 §1.2: im `edgeButton`-Slot des `ScreenScaffold`).
  */
 @Composable
@@ -141,6 +148,7 @@ fun HomeScreen(
                     }
                 }
             }
+            item { TelemetryVisibilityButton(home.telemetryVisibility, actions::setTelemetryVisibility) }
             item { ListHeader { Text(stringResource(R.string.home_recent)) } }
             if (home.recent.isEmpty()) {
                 item { Text(stringResource(R.string.home_no_matches), style = MaterialTheme.typography.bodySmall) }
@@ -178,3 +186,48 @@ fun permissionHints(permissions: WorkoutPermissions): List<Int> =
         }
         if (!permissions.notifications) add(R.string.hint_no_notifications)
     }
+
+/**
+ * „Puls & Schritte“ (P2-J): Tippen wechselt reihum Teilen → Nur für mich → Gar nicht; die Zeile darunter erklärt die
+ * aktuelle Wahl. Von „Nur für mich“ (Standard) ist „Gar nicht“ einen Tipp entfernt.
+ */
+@Composable
+internal fun TelemetryVisibilityButton(
+    visibility: TelemetryVisibility,
+    onChange: (TelemetryVisibility) -> Unit,
+) {
+    val name = stringResource(telemetryVisibilityName(visibility))
+    Button(
+        onClick = { onChange(nextTelemetryVisibility(visibility)) },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(TELEMETRY_VISIBILITY_TAG)
+                .semantics { stateDescription = name },
+        colors = ButtonDefaults.filledTonalButtonColors(),
+        label = { Text(stringResource(R.string.telemetry_visibility_title)) },
+        secondaryLabel = {
+            Text("$name · ${stringResource(telemetryVisibilityHint(visibility))}", maxLines = 3)
+        },
+    )
+}
+
+/** Reihum in der Reihenfolge der Optionen. */
+fun nextTelemetryVisibility(current: TelemetryVisibility): TelemetryVisibility =
+    TelemetryVisibility.entries[(current.ordinal + 1) % TelemetryVisibility.entries.size]
+
+fun telemetryVisibilityName(visibility: TelemetryVisibility): Int =
+    when (visibility) {
+        TelemetryVisibility.SHARE -> R.string.telemetry_visibility_share
+        TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private
+        TelemetryVisibility.OFF -> R.string.telemetry_visibility_off
+    }
+
+fun telemetryVisibilityHint(visibility: TelemetryVisibility): Int =
+    when (visibility) {
+        TelemetryVisibility.SHARE -> R.string.telemetry_visibility_share_hint
+        TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private_hint
+        TelemetryVisibility.OFF -> R.string.telemetry_visibility_off_hint
+    }
+
+const val TELEMETRY_VISIBILITY_TAG = "home_telemetry_visibility"

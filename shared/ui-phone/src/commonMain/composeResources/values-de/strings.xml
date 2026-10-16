@@ -425,6 +425,16 @@
     <string name="live_telemetry_heart_rate">Puls: %1$s bpm</string>
     <string name="live_telemetry_steps">Schritte: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <!-- P2-J: Telemetrie-Sichtbarkeit (Profil) -->
+    <string name="telemetry_section">Puls &amp; Schritte</string>
+    <string name="telemetry_intro">Wer Puls und Schritte deiner Uhr sehen darf. Gilt für deine Uhr und dieses Handy. Gespeichert wird nichts.</string>
+    <string name="telemetry_share">Teilen</string>
+    <string name="telemetry_share_sub">Vorerst wie „Nur für mich“; später auch für Freunde und die Live-Ansicht.</string>
+    <string name="telemetry_private">Nur für mich (Standard)</string>
+    <string name="telemetry_private_sub">Live nur auf deiner Uhr und diesem Handy.</string>
+    <string name="telemetry_off">Gar nicht</string>
+    <string name="telemetry_off_sub">Keine Live-Anzeige, die Uhr sendet nichts und gepufferte Werte werden verworfen.</string>
+    <string name="telemetry_share_pending">Wirkt, sobald Freunde und Live-Ansicht verfügbar sind.</string>
     <string name="home_open_matches">Laufende Matches (%1$d)</string>
     <string name="home_new_match_parallel">Weiteren Platz starten – laufende Matches laufen weiter.</string>
     <string name="open_match_watch_scores">Deine Uhr zählt</string>
@@ -550,4 +560,36 @@
     <string name="server_choice_context_tb_first">Satz %1$d · Erster Aufschlag</string>
     <string name="server_choice_context_tb_second">Satz %1$d · Erster Aufschlag des anderen Teams</string>
     <string name="server_choice_current">Aktuell: %1$s. Du kannst bis zum nächsten Punkt wählen.</string>
+
+    <string name="auth_title">Konto</string>
+    <string name="auth_optional">Ein Konto ist optional. Lokal kannst du alles wie bisher nutzen.</string>
+    <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Österreich: ab 14, Deutschland, Schweiz und Liechtenstein: ab 16.</string>
+    <string name="auth_country">Wohnsitzland (AT, DE, CH, LI)</string>
+    <string name="auth_birth">Geburtsdatum (JJJJ-MM-TT)</string>
+    <string name="auth_continue">Weiter</string>
+    <string name="auth_google">Mit Google anmelden</string>
+    <string name="auth_email">E-Mail-Adresse</string>
+    <string name="auth_send">E-Mail-Code senden</string>
+    <string name="auth_code">E-Mail-Code</string>
+    <string name="auth_alias">Öffentlicher Alias</string>
+    <string name="auth_username">Benutzername (optional, 3–20: a–z, 0–9, _ oder .)</string>
+    <string name="auth_finish">Fertig</string>
+    <string name="auth_ready">Du bist angemeldet. Lokale Matches bleiben auf diesem Handy; Cloud-Übernahme folgt in P2-B.</string>
+    <string name="auth_link_google">Google mit diesem Konto verknüpfen</string>
+    <string name="auth_sign_out">Abmelden</string>
+    <string name="auth_restart">Neu anmelden</string>
+    <string name="auth_local">Lokal weiterzählen</string>
+    <string name="auth_unavailable">Konten sind in deinem Land noch nicht verfügbar. Lokal kannst du weiterzählen.</string>
+    <string name="auth_too_young">Ein Konto ist für dein Alter noch nicht verfügbar. Erneute Prüfung nach 24 Stunden. Lokal kannst du weiterzählen.</string>
+    <string name="auth_expired">Die Altersprüfung ist abgelaufen oder schon verwendet. Bitte neu beginnen.</string>
+    <string name="auth_profile_missing">Das Onboarding ist nach 24 Stunden abgelaufen. Bitte neu anmelden.</string>
+    <string name="auth_invalid_birth">Bitte ein gültiges Geburtsdatum eingeben.</string>
+    <string name="auth_username_taken">Dieser Benutzername ist bereits vergeben.</string>
+    <string name="auth_invalid_username">Dieser Benutzername ist ungültig oder reserviert.</string>
+    <string name="auth_invalid_alias">Bitte einen Alias mit 1–40 druckbaren Zeichen eingeben.</string>
+    <string name="auth_rate_limit">Zu viele Versuche. Bitte eine Minute warten.</string>
+    <string name="auth_invalid_code">Der Code ist ungültig oder abgelaufen. Bitte neu beginnen.</string>
+    <string name="auth_connection_failed">Der Kontodienst ist nicht erreichbar oder die Anmeldung wurde abgebrochen. Verbindung prüfen und erneut versuchen.</string>
+    <string name="auth_deletion">Die Kontolöschung ist beantragt.</string>
+    <string name="auth_open">Anmelden / Kontoeinstellungen</string>
 </resources>

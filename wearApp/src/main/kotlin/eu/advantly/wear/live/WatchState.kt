@@ -5,6 +5,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.presentation.match.UpdateRequired
@@ -23,6 +24,8 @@ sealed interface WatchScreen {
         val phoneConnected: Boolean = false,
         /** Handy erreichbar, aber andere Protokollversion: „Bitte Handy/Uhr aktualisieren“ (W2-Vertrag §5). */
         val updateRequired: UpdateRequired? = null,
+        /** Telemetrie-Sichtbarkeit für Puls und Schritte (P2-J), mit dem Handy abgeglichen. */
+        val telemetryVisibility: TelemetryVisibility = TelemetryVisibility.DEFAULT,
     ) : WatchScreen
 
     /** Kurz-Wizard (04 W2): Sport → Einzel/Doppel → Format → Erstaufschläger (= Start). */
