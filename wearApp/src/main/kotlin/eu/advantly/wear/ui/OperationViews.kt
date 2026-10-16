@@ -1,5 +1,6 @@
 package eu.advantly.wear.ui
 
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +25,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -207,25 +209,32 @@ private fun ServeLabel(
 }
 
 /**
- * Restzeit-Anzeige der Aufschlag-Leiste (Feldtest 2026-10-16): 1 → 0, abgeleitet aus der echten Restzeit
- * ([ServeBarUi.remainingMillis]) und neu gestartet, sobald sich Punkt oder Ausblendzeitpunkt ändern (neuer Punkt,
- * Auswahl). Läuft über Frame-Zeit (unabhängig von der Animationsskala des Systems), nur solange die Leiste
- * komponiert ist; bei „Animationen entfernen“ (Skala 0) springt sie nur mit den Zustands-Ticks (≈ 1×/s).
+ * Monotone Uhr derselben Zeitbasis wie der Controller (`SystemClock.elapsedRealtime`, siehe MainActivity), in ms. Die
+ * Restzeit-Anzeige rechnet damit aus [ServeBarUi.hideAtMillis]; Tests setzen eine eigene Uhr.
+ */
+val LocalElapsedClock = staticCompositionLocalOf<() -> Long> { SystemClock::elapsedRealtime }
+
+/**
+ * Restzeit-Anzeige der Aufschlag-Leiste (Feldtest 2026-10-16): 1 → 0, immer aus Ausblendzeitpunkt − jetzt
+ * ([ServeBarUi.hideAtMillis], [LocalElapsedClock]) – auch beim Wiedereinstieg (z. B. zurück von der Steuerseite) und
+ * zwischen den Controller-Ticks stimmt sie also. Neuer Punkt bzw. Auswahl (neuer Ausblendzeitpunkt) starten sie neu.
+ * Läuft je Frame, nur solange die Leiste komponiert ist; bei „Animationen entfernen“ (Skala 0) springt sie nur mit den
+ * Zustands-Ticks (≈ 1×/s).
  */
 @Composable
 internal fun rememberServeCountdown(bar: ServeBarUi): State<Float> {
-    val start = OperationTimings.remainingFraction(bar.remainingMillis)
+    val clock = LocalElapsedClock.current
+    val now = OperationTimings.remainingFraction(bar.hideAtMillis - clock())
     val context = LocalContext.current
     val reduceMotion =
         remember(context) { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
-    val ticked = rememberUpdatedState(start)
+    val ticked = rememberUpdatedState(now)
     if (reduceMotion) return ticked
-    val progress = remember(bar.pointId, bar.hideAtMillis) { mutableFloatStateOf(start) }
-    LaunchedEffect(bar.pointId, bar.hideAtMillis) {
-        val remaining = bar.remainingMillis
-        val first = withFrameMillis { it }
+    val progress = remember(bar.pointId, bar.hideAtMillis) { mutableFloatStateOf(now) }
+    LaunchedEffect(bar.pointId, bar.hideAtMillis, clock) {
         while (true) {
-            val left = remaining - (withFrameMillis { it } - first)
+            withFrameMillis { }
+            val left = bar.hideAtMillis - clock()
             progress.floatValue = OperationTimings.remainingFraction(left)
             if (left <= 0) break
         }

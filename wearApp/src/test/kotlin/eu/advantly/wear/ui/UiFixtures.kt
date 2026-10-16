@@ -115,13 +115,11 @@ fun liveUi(
 fun serveBar(
     withDoubleFault: Boolean = true,
     selected: ServeOutcome? = null,
-    remainingMillis: Long = 0,
     hideAtMillis: Long = 0,
     point: Int = 99,
 ): ServeBarUi =
     ServeBarUi(
         pointId = EventId(id(point)),
-        remainingMillis = remainingMillis,
         hideAtMillis = hideAtMillis,
         options =
             listOfNotNull(

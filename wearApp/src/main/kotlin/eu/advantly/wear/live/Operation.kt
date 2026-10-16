@@ -24,15 +24,13 @@ import eu.advantly.wear.scoring.StripHit
  *
  * @property options wählbare Werte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den Punkt gewann
  * @property selected aktuell erfasster Wert (markieren) oder `null`
- * @property remainingMillis Restzeit bis zum Ausblenden zum Zeitpunkt dieses Zustands (Restzeit-Anzeige in den Segmenten)
- * @property hideAtMillis Ausblendzeitpunkt (monotone Zeit des Controllers); ändert sich nur bei neuem Punkt bzw. Auswahl –
- *   Schlüssel, an dem die Anzeige neu startet
+ * @property hideAtMillis Ausblendzeitpunkt (monotone Zeit des Controllers, `SystemClock.elapsedRealtime`); die
+ *   Restzeit-Anzeige rechnet hideAtMillis − jetzt und startet neu, wenn er sich ändert (neuer Punkt, Auswahl)
  */
 data class ServeBarUi(
     val pointId: EventId,
     val options: List<ServeOutcome>,
     val selected: ServeOutcome?,
-    val remainingMillis: Long = 0,
     val hideAtMillis: Long = 0,
 )
 
@@ -116,9 +114,6 @@ class ServeBarTimer(
     /** Ausblendzeitpunkt der sichtbaren Leiste (monotone Zeit). */
     val hideAtMillis: Long get() = hideAt
 
-    /** Restzeit der sichtbaren Leiste (≥ 0). */
-    fun remainingMillis(nowMillis: Long): Long = (hideAt - nowMillis).coerceAtLeast(0)
-
     companion object {
         const val VISIBLE_MILLIS = OperationTimings.SERVE_BAR_VISIBLE_MILLIS
         const val AFTER_CHOICE_MILLIS = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
@@ -157,13 +152,12 @@ object OperationRules {
     fun serveBar(
         match: ActiveMatch,
         visiblePoint: EventId?,
-        remainingMillis: Long = 0,
         hideAtMillis: Long = 0,
     ): ServeBarUi? {
         if (!match.isScorer || !match.serveInfoEnabled || visiblePoint == null) return null
         val last = match.lastPoint?.takeIf { it.id == visiblePoint } ?: return null
         val options = SERVE_ORDER.filter { it != ServeOutcome.DOUBLE_FAULT || last.doubleFaultAllowed }
-        return ServeBarUi(last.id, options, last.serve, remainingMillis, hideAtMillis)
+        return ServeBarUi(last.id, options, last.serve, hideAtMillis)
     }
 
     /**
