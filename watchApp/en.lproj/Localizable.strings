@@ -55,6 +55,12 @@
 /* Aufschlagfeld links (Kurzform) */
 "serve.court.LEFT" = "L";
 
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Rechts“) */
+"serve.courtLong.RIGHT" = "Right";
+
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Links“) */
+"serve.courtLong.LEFT" = "Left";
+
 /* Trenner in Spielständen (DE 6:4, EN 6–4) */
 "score.separator" = "–";
 

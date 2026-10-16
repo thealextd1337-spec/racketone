@@ -491,13 +491,22 @@ struct ServeIndicator: View {
             } else {
                 ball
                 if tennisDoubles, let server = snap.serverPlayer {
-                    // Tennis/Padel-Doppel: Aufschläger je Game mit Namen, dahinter das Feld R/L – kein „auf wen“
+                    // Tennis/Padel-Doppel: Aufschläger je Game mit Namen, dahinter das Feld ausgeschrieben – kein „auf wen“
                     Text(verbatim: PlayerText.name(server, doubles: true))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .foregroundStyle(color)
                 }
-                if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                if tennisDoubles && snap.serverPlayer != nil {
+                    // ausgeschrieben („Max · Rechts“), die Kurzform „R“/„L“ bleibt fürs Einzel und andere Sportarten
+                    if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                        Text(verbatim: "· " + loc(snap.serveCourt == "RIGHT" ? "serve.courtLong.RIGHT" : "serve.courtLong.LEFT"))
+                            .font(.system(size: 11, weight: .bold))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .foregroundStyle(Color.white.opacity(dimmed ? 0.65 : 1))
+                    }
+                } else if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
                     Text(LocalizedStringKey("serve.court." + snap.serveCourt))
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(color)
