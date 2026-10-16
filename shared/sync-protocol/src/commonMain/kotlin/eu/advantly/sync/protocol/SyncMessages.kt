@@ -41,6 +41,7 @@ enum class PeerKind {
  *
  * @property minV älteste Version, die der Absender noch lesen kann
  * @property activeMatches Matches, die beim Absender gerade offen sind
+ * @property session zufällige Kennung der Session-Instanz; fehlt bei älteren Absendern (Protokoll 3)
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -52,6 +53,7 @@ data class Hello(
     @EncodeDefault val minV: Int = ProtocolVersion.MIN_SUPPORTED,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
     val appBuild: AppBuild? = null,
+    val session: String? = null,
 ) : SyncMessage
 
 /**

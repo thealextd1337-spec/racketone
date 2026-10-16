@@ -17,6 +17,8 @@ import eu.advantly.sync.protocol.SyncMessage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class DeviceStatusTest {
@@ -100,7 +102,7 @@ class DeviceStatusTest {
         val link = StatusLink()
         val phone = MatchSession(testLocalData(), link, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE))
         phone.start()
-        val hello = Hello(DeviceId("pixel"), PeerKind.WATCH, appBuild = build)
+        val hello = Hello(DeviceId("pixel"), PeerKind.WATCH, appBuild = build, session = "watch-session")
         link.sent.clear()
         link.deliver("pixel", hello)
         assertTrue(link.sent.isNotEmpty(), "Erstes Hello gleicht ab")
@@ -127,6 +129,69 @@ class DeviceStatusTest {
         link.sent.clear()
         link.deliver("pixel", hello)
         assertTrue(link.sent.isNotEmpty(), "Reconnect muss Archive und Tombstones erneut abgleichen")
+        phone.close()
+    }
+
+    @Test
+    fun watchRestartWithoutPhonePeerChangeReceivesHelloAndSummaryButSameSessionDoesNotBurst() {
+        val scheduler = ManualScheduler()
+        val phoneLink = StatusLink().apply { online = listOf("pixel") }
+        val watchLink = StatusLink().apply { online = listOf("phone") }
+        val phone = MatchSession(testLocalData(), phoneLink, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        val watchData = testLocalData()
+
+        fun watch() = MatchSession(watchData, watchLink, scheduler, SessionConfig(DeviceId("pixel"), PeerKind.WATCH))
+        phone.start()
+        val firstWatch = watch().also { it.start() }
+        val firstHello = watchLink.sent.filterIsInstance<Hello>().single()
+        phoneLink.deliver("pixel", firstHello)
+        phoneLink.sent.filterIsInstance<Hello>().forEach { watchLink.deliver("phone", it) }
+        assertEquals(
+            CompatibilityStatus.COMPATIBLE,
+            firstWatch.state.value.sync.peers
+                .single()
+                .compatibility,
+        )
+        firstWatch.close()
+        // Plattform-Link und Peer-Liste des Handys bleiben beim Prozessneustart der Uhr unverändert.
+        phoneLink.sent.clear()
+        watchLink.sent.clear()
+        val restartedWatch = watch().also { it.start() }
+        val restartedHello = watchLink.sent.filterIsInstance<Hello>().single()
+        assertNotNull(firstHello.session)
+        assertNotNull(restartedHello.session)
+        assertNotEquals(firstHello.session, restartedHello.session)
+        phoneLink.deliver("pixel", restartedHello)
+        val replyHello = phoneLink.sent.filterIsInstance<Hello>().single()
+        assertEquals(firstWatch.deviceId, restartedWatch.deviceId)
+        assertTrue(phoneLink.sent.any { it is Summary }, "Neue Uhr-Session erhält sofort den Stand")
+        watchLink.deliver("phone", replyHello)
+        assertEquals(
+            CompatibilityStatus.COMPATIBLE,
+            restartedWatch.state.value.sync.peers
+                .single()
+                .compatibility,
+        )
+        assertNotEquals(SyncIndicator.LOCAL_ONLY, restartedWatch.state.value.sync.indicator)
+        phoneLink.sent.clear()
+        val repeatedHello = watchLink.sent.filterIsInstance<Hello>().last()
+        assertEquals(restartedHello.session, repeatedHello.session, "Eigene Session-ID bleibt stabil")
+        repeat(3) { phoneLink.deliver("pixel", repeatedHello) }
+        assertTrue(phoneLink.sent.isEmpty(), "Dieselbe Session erzeugt keinen weiteren Antwort-Burst")
+        restartedWatch.close()
+        phone.close()
+    }
+
+    @Test
+    fun legacyHelloWithoutSessionAlwaysReceivesSummary() {
+        val link = StatusLink()
+        val phone = MatchSession(testLocalData(), link, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        phone.start()
+        repeat(3) {
+            link.sent.clear()
+            link.deliver("pixel", Hello(DeviceId("pixel"), PeerKind.WATCH))
+            assertTrue(link.sent.any { it is Summary }, "Alte Gegenstellen werden bei jedem Hello abgeglichen")
+        }
         phone.close()
     }
 

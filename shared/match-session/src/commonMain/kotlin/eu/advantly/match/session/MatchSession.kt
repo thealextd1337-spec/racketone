@@ -197,6 +197,10 @@ class MatchSession(
                 .toMutableMap()
         }.getOrElse { mutableMapOf() }
     private var persistedDeviceStatuses = deviceStatuses.toMap()
+    private var deviceStatusesSavedAtMs = scheduler.nowMs()
+
+    /** Neue Instanz auch bei unverändertem Plattform-Link als Neustart erkennbar machen. */
+    private val sessionId = ids.newUuid7(clock.nowMs()).value
     private val lastContacts = HashMap<String, Long>()
     private val contactTimers = HashMap<String, Cancellable>()
     private val hellos = HashMap<String, Hello>()
@@ -241,7 +245,7 @@ class MatchSession(
         if (started) return
         data.migrateWatchPlaceholders()
         started = true
-        saveDeviceStatuses()
+        saveDeviceStatusesIfNeeded()
         link?.setListener(linkListener)
         link?.start()
         peersChanged(link?.peers.orEmpty())
@@ -261,7 +265,7 @@ class MatchSession(
         contactTimers.values.forEach { it.cancel() }
         contactTimers.clear()
         lastContacts.clear()
-        saveDeviceStatuses()
+        saveDeviceStatusesIfNeeded()
         hellos.clear()
         compatibility.clear()
         helloSent.clear()
@@ -1224,7 +1228,7 @@ class MatchSession(
                 null
             }
         maybeFollow(touched)
-        saveDeviceStatuses()
+        saveDeviceStatusesIfNeeded()
         publish()
     }
 
@@ -1233,9 +1237,12 @@ class MatchSession(
         hello: Hello,
     ) {
         val previous = hellos.put(peer, hello)
+        val sessionChanged = hello.session != null && previous?.session != hello.session
         val needsSync =
-            previous == null || previous.deviceId != hello.deviceId || previous.kind != hello.kind ||
-                previous.v != hello.v || previous.minV != hello.minV
+            hello.session == null || sessionChanged || previous == null || previous.deviceId != hello.deviceId ||
+                previous.kind != hello.kind || previous.v != hello.v || previous.minV != hello.minV
+        // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
+        if (sessionChanged) helloSent.remove(peer)
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
         deviceStatuses[peer] =
@@ -1246,7 +1253,6 @@ class MatchSession(
                 compatibility = result.status,
                 lastSeenAtMs = clock.nowMs(),
             )
-        saveDeviceStatuses()
         if (data.settings.get(peerKindKey(hello.deviceId)) != hello.kind.name) {
             data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
             knownKindsCache = null
@@ -1262,7 +1268,7 @@ class MatchSession(
         // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
         earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
         if (peer !in helloSent) sendHello(peer)
-        // Pro Link-Up nur einmal abgleichen. Wiederholte Hellos aktualisieren ausschließlich den Status.
+        // Pro Link-Up und Peer-Session nur einmal abgleichen; alte Peers ohne Session immer bedienen.
         if (!needsSync) return
         handOverToWaitingWatch(hello)
         handOverStrayMatches()
@@ -1634,9 +1640,23 @@ class MatchSession(
         checkThread()
         val retained = peers + link?.peers.orEmpty()
         if (deviceStatuses.keys.removeAll { it !in retained }) {
-            saveDeviceStatuses()
+            saveDeviceStatusesIfNeeded()
             publish()
         }
+    }
+
+    private fun saveDeviceStatusesIfNeeded() {
+        val now = scheduler.nowMs()
+        val statusChanged =
+            deviceStatuses.keys != persistedDeviceStatuses.keys ||
+                deviceStatuses.any { (peer, status) ->
+                    val previous = persistedDeviceStatuses[peer]
+                    previous == null || status.copy(lastSeenAtMs = previous.lastSeenAtMs) != previous
+                }
+        // Reine Empfangszeit-Updates bleiben fünf Minuten im RAM, ohne Sortierung, JSON oder Settings-Zugriff.
+        if (!statusChanged && now - deviceStatusesSavedAtMs in 0 until DEVICE_STATUS_SAVE_INTERVAL_MS) return
+        saveDeviceStatuses()
+        deviceStatusesSavedAtMs = now
     }
 
     private fun saveDeviceStatuses() {
@@ -1672,7 +1692,7 @@ class MatchSession(
 
     private fun sendHello(peer: String) {
         helloSent += peer
-        send(peer, Hello(deviceId, config.kind, opened.keys.toList(), appBuild = config.appBuild))
+        send(peer, Hello(deviceId, config.kind, opened.keys.toList(), appBuild = config.appBuild, session = sessionId))
     }
 
     private fun sendSummaries() {
