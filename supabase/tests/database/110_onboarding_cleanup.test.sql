@@ -1,6 +1,6 @@
 -- P2-A: Ablaufgrenze, vollständige Kaskade, Batchgröße und Scheduler-Konfiguration.
 begin;
-select plan(15);
+select plan(16);
 select tests.create_user('stale_onboarding', false);
 select tests.create_user('boundary_onboarding', false);
 select tests.create_user('recent_onboarding', false);
@@ -38,23 +38,22 @@ select is(private.purge_stale_onboarding(), 100, 'Ein Lauf ist auf 100 Konten be
 select is(private.purge_stale_onboarding(), 1, 'Nächster Lauf erledigt Rest');
 select is(private.purge_stale_onboarding(), 0, 'Danach keine verwaisten Konten');
 
--- Reines Postgres ohne pg_cron testet die Funktion; im Supabase-Stack ist der konkrete Zeitplan Pflicht.
+-- Pflicht im Supabase-Stack: fehlendes pg_cron darf nicht als Skip/grün durchgehen.
+select has_extension('pg_cron', 'pg_cron ist installiert');
 do $$
-declare v_ok boolean;
+declare v_ok boolean := false;
 begin
-  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
-    execute $q$select count(*) = 1 from cron.job
-      where jobname = 'advantly-purge-stale-onboarding' and schedule = '17 * * * *'
-        and command = 'select private.purge_stale_onboarding();' and active$q$ into v_ok;
-  else
-    v_ok := true;
+  -- Ohne Erweiterung bleibt das Ergebnis rot; der Guard ermöglicht die übrige lokale Funktionsprüfung.
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    execute $q$select count(*) = 1 and count(*) filter (
+        where schedule = '17 * * * *'
+          and command = 'set statement_timeout = ''60s''; select private.purge_stale_onboarding();'
+          and active) = 1
+      from cron.job where jobname = 'advantly-purge-stale-onboarding'$q$ into v_ok;
   end if;
   perform set_config('tests.cron_ok', v_ok::text, true);
 end;
 $$;
-select ok(current_setting('tests.cron_ok')::boolean, 'pg_cron: genau ein aktiver stündlicher Job')
- where exists (select 1 from pg_available_extensions where name = 'pg_cron');
-select skip('Reines Postgres ohne pg_cron; Zeitplan im Supabase-Stack prüfen', 1)
- where not exists (select 1 from pg_available_extensions where name = 'pg_cron');
+select ok(current_setting('tests.cron_ok')::boolean, 'pg_cron: genau ein benannter aktiver Job mit Schedule und Command');
 select * from finish();
 rollback;

@@ -251,7 +251,8 @@ begin
   perform private.consume_rate_limit('invitation');
   select * into v_m from public.matches m where m.id = p_match_id;
   if not found or v_m.deleted_at is not null then
-    perform private.fail('match_not_found');
+    -- Fehlend/gelöscht und unberechtigt sind für Aufrufer nicht unterscheidbar.
+    perform private.fail('forbidden', '42501');
   end if;
   if not (v_m.created_by = v_uid
           or (v_m.tournament_id is not null and private.is_tournament_director(v_m.tournament_id, v_uid))) then
@@ -299,7 +300,8 @@ begin
   perform private.consume_rate_limit('invitation');
   select * into v_m from public.matches m where m.id = p_match_id;
   if not found or v_m.deleted_at is not null then
-    perform private.fail('match_not_found');
+    -- Fehlend/gelöscht und unberechtigt sind für Aufrufer nicht unterscheidbar.
+    perform private.fail('forbidden', '42501');
   end if;
   if not (v_m.created_by = v_uid
           or exists (select 1 from public.match_participants mp

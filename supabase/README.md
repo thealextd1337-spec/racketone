@@ -28,7 +28,8 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…16000100_onboarding_cleanup.sql` | begrenzter Onboarding-Aufräumjob, partieller Index und stündlicher pg_cron-Zeitplan |
 | `migrations/…16000200_spaltenrechte.sql` | Spaltenrechte, eigene Freundescodes über `my_friend_code()` |
 | `migrations/…16000300_sync_pull_performance.sql` | Rechteprüfungen beim Pull nur einmal je Match, Ersteller-Kurzpfad |
-| `tests/database/*.test.sql` | pgTAP (344 Prüfungen in 14 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob und effektive Spaltenrechte |
+| `migrations/…16000400_wartung_timeouts_volatilitaet.sql` | Timeouts für den bestehenden Löschjob, korrekte STABLE-Einstufung der Projektionsbereinigung |
+| `tests/database/*.test.sql` | pgTAP (356 Prüfungen in 15 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte und Review-Regressionen |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 | `tests/perf/backend_perf.py` | optionaler Lasttest mit 500 Matches, parallelen Uploads, Cursor-Prüfung und EXPLAIN-JSON; außerhalb des CI-Pfads |
 
@@ -80,6 +81,8 @@ Client-Grants. Die atomare Fensterprüfung läuft in den RPCs nach `require_acti
 Versionssperre; Quoten lassen sich weder per Konto-Parameter noch durch einen alternativen RPC umgehen.
 
 - **Suche:** 30 Aufrufe pro 60 Sekunden (`find_profile`, auch ohne Treffer), wie Datenmodell §6 vorsieht.
+  Wegen der Budgetbuchung ist `find_profile` **VOLATILE/schreibend**: ausschließlich per **POST-RPC** aufrufen
+  (`supabase-kt rpc()` verwendet POST). GET-/HEAD-RPC ist dafür ungeeignet.
 - **Einladungen:** gemeinsam 20 Aufrufe pro 60 Sekunden für `send_friend_request`, `create_invite`, `redeem_invite`,
   `assign_player`, `invite_scorer`, `add_match_visitor` und `add_tournament_staff`. Dieser konkrete Wert ist eine
   P2-A-Betriebsannahme; der Plan nennt keinen Zahlenwert. Auch wiederholte erfolgreiche Aufrufe verbrauchen Budget.
@@ -113,6 +116,20 @@ werden samt Profil/Einstellungen kaskadierend entfernt. Aktive Konten und die **
 unberührt. Abgelaufene Budgetzeilen werden mit aufgeräumt. Test 110 prüft insbesondere exakt 24 Stunden,
 eine Mikrosekunde darunter, Idempotenz, Rollenrechte, Kaskaden und Batchgröße.
 
+Beide Wartungsfunktionen (`purge_stale_onboarding`, `admin_purge_due_accounts`) setzen funktionslokal
+`lock_timeout = 5s` und `statement_timeout = 60s` (Test 130 prüft `pg_proc.proconfig`). Die Versionssperre wird
+nach höchstens 5 Sekunden Warten abgebrochen; der Lauf rollt zurück und der nächste Lauf räumt nach.
+Für das Gesamtlaufzeitlimit muss der Scheduler **vor dem SELECT** `set statement_timeout = '60s';` senden:
+Postgres startet den Statement-Timer beim äußeren Befehl, nicht durch ein SET innerhalb der Funktion.
+Der Onboarding-Cron setzt das bereits; ein späterer P2-K-Job für `admin_purge_due_accounts` muss es ebenso tun.
+Die Funktionswerte werden beim Verlassen wiederhergestellt; ein gleichnamiges `SET LOCAL` innerhalb wäre
+auf den Funktionsaufruf begrenzt ([Postgres](https://www.postgresql.org/docs/17/sql-createfunction.html)).
+Der lokale Paralleltest bestätigt für beide Jobs den Abbruch nach rund 5 Sekunden und die anschließende
+Freigabe neuer Leser; auch SET-LOCAL-Kompatibilität und der äußere Statement-Timer sind geprüft.
+
+**P2-C:** Nach mindestens 24 Stunden im Onboarding kann das Konto bereits entfernt sein. Ein RPC mit noch
+vorhandenem Token liefert dann `profile_missing`; der Client muss **„neu anmelden“** anbieten.
+
 Die Migration aktiviert **pg_cron**, wenn es in `pg_available_extensions` vorhanden ist, und registriert den
 benannten Job `advantly-purge-stale-onboarding`, Zeitplan **`17 * * * *`** (jede Stunde zur Minute 17, UTC bei
 Supabase-Standardkonfiguration). Ein erneutes `cron.schedule` mit demselben Namen aktualisiert den Job.
@@ -120,7 +137,8 @@ Supabase stellt [Cron](https://supabase.com/docs/guides/cron/install) bereit; di
 [Postgres-Konfiguration](https://github.com/supabase/postgres/blob/develop/ansible/files/postgresql_config/postgresql.conf.j2)
 enthält pg_cron bereits in `shared_preload_libraries`. Reines Postgres ohne die Erweiterung migriert mit einer
 deutlichen Warnung weiter und braucht einen externen stündlichen Scheduler. Bei vorhandener Erweiterung werden
-Installations-/Rechtefehler nicht verschluckt. Der Zeitplantest wird ohne Erweiterung ausdrücklich übersprungen.
+Installations-/Rechtefehler nicht verschluckt. Test 110 verlangt die installierte Erweiterung sowie genau einen
+benannten aktiven Job mit dem erwarteten Zeitplan und Befehl; ohne pg_cron schlagen diese zwei Prüfungen fehl.
 Im echten lokalen Supabase-Stack bzw. auf staging muss der aktive Job vorhanden sein:
 
 ```sql
@@ -193,8 +211,10 @@ erneut messen und bei Überschreiten der 200 ms den im Plan genannten commit-geo
 2. GitHub → Repository **Settings → Environments → `staging`** anlegen. Dort als **Environment Secrets**
    `SUPABASE_ACCESS_TOKEN` (Supabase-Konto-PAT mit Zugriff auf das staging-Projekt) und
    `SUPABASE_DB_PASSWORD` setzen; als **Environment Variable** `SUPABASE_STAGING_PROJECT_REF` den Ref.
-   Keine Werte ins Repo/Logs schreiben. Optional Deployment-Branches auf `main` begrenzen und Reviewer setzen.
-3. Actions → **Supabase staging deploy** → **Run workflow** auf dem freigegebenen Commit.
+   Keine Werte ins Repo/Logs schreiben. **Pflicht:** Deployment-Branch-Regel ausschließlich `main`
+   (für `staging` bereits serverseitig gesetzt). Required Reviewer bleiben optional.
+3. Actions → **Supabase staging deploy** → **Run workflow** auf `main` mit dem freigegebenen Commit.
+   Die Job-Bedingung `github.ref == 'refs/heads/main'` zeigt andere Refs im Actions-UI als **skipped** an.
    Workflow `.github/workflows/supabase-deploy.yml`: gepinnte CLI, `supabase link`, `db push --dry-run`, dann
    `db push`. `--skip-vault` vermeidet Vault-Änderungen, insbesondere beim Dry-run; kein Seed/kein Config-Push.
    Deploys sind über eine gemeinsame Concurrency-Gruppe serialisiert. Fehlt ein Secret oder die Variable,
@@ -234,8 +254,10 @@ geeignet. Der Workflow hinterlässt auf staging keine Testdaten/-Helfer; Migrati
 Ein späterer Hosted-Smoke-Test braucht eine getrennte, garantiert schreibfreie Suite.
 
 **Offene Betriebsabnahme:** Migrationen deployen, echten Stack-Lint/pgTAP in CI grün abwarten, Cron-Lauf, Advisor
-und DPA dokumentieren. Lokal wurden 344 pgTAP-Prüfungen gegen Postgres 17 ausgeführt (ein expliziter Cron-Skip),
-der Lasttest bestanden und `gradlew.bat check` grün. Die pgTAP-Matrix lief auch ohne automatische
+und DPA dokumentieren. Lokal bestehen im dockerfreien Postgres-17-Harness **354 von 356** pgTAP-Prüfungen;
+die zwei verbindlichen Cron-Prüfungen schlagen wegen fehlendem pg_cron fehl (kein Skip). Die neuen
+Timeout-/Volatilitäts-/Fehlercode-Regressionen sind grün. Der bisherige Lasttest und das erneut ausgeführte `gradlew.bat check` sind grün.
+Die bisherige pgTAP-Matrix lief auch ohne automatische
 Supabase-Default-Grants grün. `actionlint` prüfte beide Workflows; die Konfigurationsprüfung wurde mit fehlenden
 und vollständigen Werten separat ausgeführt. CLI 2.121.0 ist per `npx` ausführbar, Docker fehlt;
 `plpgsql_check` und `pg_cron` fehlen im dockerfreien Harness. Deshalb **kein lokaler echter `db lint`- oder

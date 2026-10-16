@@ -8,6 +8,9 @@ returns integer
 language plpgsql
 security definer
 set search_path = ''
+-- Funktionslokal: vor der ersten Versionssperre wirksam, ohne Konfiguration des Aufrufers zu verändern.
+set lock_timeout = '5s'
+set statement_timeout = '60s'
 as $$
 declare
   v_id uuid;
@@ -40,8 +43,9 @@ do $$
 begin
   if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
     create extension if not exists pg_cron;
+    -- Statement-Timer vor dem SELECT aktivieren; die Funktions-SET-Klausel allein startet ihn nicht.
     perform cron.schedule('advantly-purge-stale-onboarding', '17 * * * *',
-                          'select private.purge_stale_onboarding();');
+                          'set statement_timeout = ''60s''; select private.purge_stale_onboarding();');
   else
     raise warning 'pg_cron unavailable: schedule private.purge_stale_onboarding() hourly externally';
   end if;
