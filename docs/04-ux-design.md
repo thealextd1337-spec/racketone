@@ -265,7 +265,7 @@ Die Bestätigung schützt die Head-to-Head-Bilanz vor einseitigen Einträgen und
 
 | # | Screen | Inhalte | Interaktionen |
 |---|---|---|---|
-| H1 | **Start** | Begrüßung, Resume-Karten aller offenen Matches (F22), „Revanche“-Presets (Sport-Icon, Gegner, Format), Inbox-Karte „2 Matches bestätigen“, Wochenbilanz (Matches, Siege, Spielzeit) | Tap Preset → Zusammenfassung → Start; Long-Press Preset → bearbeiten/löschen |
+| H1 | **Start** | Uhr-Status-Symbol oben (F31, siehe 4.1.1), Begrüßung, Resume-Karten aller offenen Matches (F22), „Revanche“-Presets (Sport-Icon, Gegner, Format), Inbox-Karte „2 Matches bestätigen“, Wochenbilanz (Matches, Siege, Spielzeit) | Tap Preset → Zusammenfassung → Start; Long-Press Preset → bearbeiten/löschen |
 | H2 | **Wizard 1 – Sportart** | 3 große Sportkarten (Icon, Name, Akzentfarbe, Kurzinfo „zuletzt vor 3 Tagen“), Zeile „Zuletzt gespielt“ | Tap = Auswahl + automatisch weiter (kein extra „Weiter“) |
 | H3 | **Wizard 2 – Belag** (nur Tennis) | Sand, Hartplatz, Rasen, Teppich/Kunstrasen; Schalter Halle/Draußen | Tap = Auswahl + weiter; „Überspringen“ |
 | H4 | **Wizard 3 – Spieler** | Segment Einzel/Doppel; Team-Slots „Wir“ (Du + ggf. Partner) und „Gegner“; Freundesliste mit Suche & „Zuletzt“; „+ Gast“ (nur Name) | Tap Freund füllt nächsten freien Slot; Slot antippen = leeren; Drag zwischen Teams (Doppel) |
@@ -281,13 +281,26 @@ Die Bestätigung schützt die Head-to-Head-Bilanz vor einseitigen Einträgen und
 | H13 | **Profil & Einstellungen** | Eigene Stats, Uhren & Geräte, Live-Einstellungen (Haptik, Töne, Sperre, Outdoor-Kontrast, Seitenzuordnung), Sprache, Health, Konto, Datenschutz, später Abo | Standard-Settings-Muster |
 | H14 | **Onboarding / Pre-Permissions / Paywall** | siehe Kapitel 7 | |
 
+#### 4.1.1 Uhr-Status-Symbol (F31)
+
+Kleines Smartwatch-Symbol in der Kopfzeile der Start-Seite (H1), je gekoppelter Uhr eines; Farbe nach Zustand, zusätzlich Form/Text für Farbfehlsichtige und Screenreader (z. B. Haken, Ausrufezeichen, Strich):
+
+| Farbe | Zustand | Bedeutung |
+|---|---|---|
+| Grün | verbunden, gleicher App-Stand (Commit) | alles in Ordnung |
+| Gelb | verbunden und kompatibel, Stand anders oder unbekannt | Update empfohlen |
+| Rot | gekoppelt, aber nicht erreichbar, oder inkompatibel (Protokoll) | Verbindung prüfen bzw. Update nötig |
+| Grau | keine Uhr gekoppelt | – |
+
+Tipp öffnet Details: Name der Uhr, App-Stand Uhr ↔ Handy, zuletzt gesehen, Hinweis zur Abhilfe. Die Uhr zeigt am Ende ihrer Startliste (W1) das Gegenstück zum Handy sowie den eigenen Versionsstand. Der App-Stand wird über ein optionales Feld im `Hello` übertragen; ältere Geräte ohne Feld gelten als „unbekannt“ (Gelb).
+
 H7 und die Match-Steuerung sind nur am Zähler bedienbar. Auch Änderungen an laufendem Match/Ergebnis in H8–H13 dürfen kein zweites Zähler-Gerät freischalten; Anzeige-Geräte bieten dafür zunächst die bestätigte Übernahme.
 
 ### 4.2 Watch – Screen-Liste
 
 | # | Screen | Apple Watch (rechteckig) | Wear OS (rund) | Garmin (rund/eckig, Tasten) |
 |---|---|---|---|---|
-| W1 | Startliste | `List` mit Liquid-Glass-Toolbar, Presets oben | `TransformingLazyColumn`, Arc-Text-Titel, EdgeButton „Neues Match“ | Menü (Menu2), START = auswählen |
+| W1 | Startliste | `List` mit Liquid-Glass-Toolbar, Presets oben; am Ende Handy-Status + Versionsstand (F31) | `TransformingLazyColumn`, Arc-Text-Titel, EdgeButton „Neues Match“; am Ende Handy-Status + Versionsstand (F31) | Menü (Menu2), START = auswählen |
 | W2 | Kurz-Wizard | 3 Listen-Schritte | 3 Listen-Schritte | 3 Menüs |
 | W3 | **Live-Score / Anzeige** | rollenabhängig, siehe 4.3 | rollenabhängig, siehe 4.3 | rollenabhängig, siehe 4.3 |
 | W4 | Steuerung (Pager links) | Glas-Buttons 2×2 + „Beenden“ | Button-Gruppe + EdgeButton „Beenden“ | Pause-Menü über START |
