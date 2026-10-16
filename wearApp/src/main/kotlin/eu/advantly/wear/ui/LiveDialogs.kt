@@ -260,8 +260,9 @@ private fun errorText(error: WorkoutError?): Int =
 /**
  * Satzende-Dialog (04 W6, 02 §5.2, Modus Offen): nur der Zähler entscheidet – keine automatische Auswahl. Tennis/Padel
  * (W2, K18): „Normaler Satz“ (EdgeButton), „Tiebreak bis 7“, „Champions-Tiebreak bis 10“ (Padel: Super-Tiebreak),
- * „Match beenden“; andere Sportarten: „Ja“ / „Nein, beenden“. Dazu ggf. die Aufschlag-Leiste für den Satzball und
- * Rückgängig. Die Anzeige sieht das Satzergebnis und „Handy entscheidet“.
+ * „Match beenden“; andere Sportarten: „Ja“ / „Nein, beenden“. Die Frage ist nummeriert („2. Satz?“). Dazu ggf. die
+ * Aufschlag-Leiste für den Satzball (oben, sie läuft ab) und Rückgängig. Die Anzeige sieht das Satzergebnis und
+ * „Handy entscheidet“.
  */
 @Composable
 fun DecisionScreen(
@@ -278,7 +279,8 @@ fun DecisionScreen(
             stringResource(R.string.unit_set, decision.setNumber)
         }
     val outcome = stringResource(if (decision.winner == Side.A) R.string.decision_won else R.string.decision_lost)
-    val question = stringResource(if (live.sport == Sport.PICKLEBALL) R.string.dialog_another_game else R.string.dialog_another_set)
+    // nummeriert nach dem nächsten Satz (Feldtest 2026-10-16): „2. Satz?“ bzw. Pickleball „2. Spiel?“
+    val question = nextSetQuestion(live.sport, decision.setNumber)
     // mehr als „normaler Satz“ im Angebot → Satzarten ausschreiben, sonst die kurze Ja/Nein-Frage wie bisher
     val withKinds = decision.options.size > 1
     ListPage(
@@ -290,10 +292,11 @@ fun DecisionScreen(
             },
         onEdge = { actions.startNextSet(NextSetKind.REGULAR) },
     ) {
+        // Aufschlag für den Satzball zuerst (läuft ab); danach Satzstand direkt über der nummerierten Frage
+        live.serveBar?.let { bar -> item { ServeChips(bar, actions) } }
         item { ListHeader { Text("$unit · ${decision.score.a}:${decision.score.b}") } }
         textItem(secondary = false) { outcome }
         if (toast != null) textItem { toastText(toast) }
-        live.serveBar?.let { bar -> item { ServeChips(bar, actions) } }
         if (scorer) {
             item { Text(question, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
             decision.options.filter { it != NextSetKind.REGULAR }.forEach { kind ->

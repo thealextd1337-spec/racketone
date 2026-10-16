@@ -323,6 +323,22 @@ class WatchControllerOperationTest {
         assertEquals(SidePair(0, 7), decision.score)
     }
 
+    /** „{n}. Satz?“ zählt nach dem beendeten Satz – auch nachdem Undo den Satzball zurückgenommen hat. */
+    @Test
+    fun decisionNumbersFollowTheFinishedSetAlsoAfterUndo() {
+        startOnWatch(format = FormatChoice.TENNIS_OPEN)
+        repeat(6 * 4) { points(Side.A) }
+        assertEquals("1. Satz beendet → „2. Satz?“", 1, live.decision?.setNumber)
+        assertTrue(c.startNextSet(NextSetKind.REGULAR))
+        repeat(6 * 4) { points(Side.B) }
+        assertEquals(2, live.decision?.setNumber)
+        assertTrue(c.undo()) // Satzball zurück: wieder im 2. Satz
+        assertNull(live.decision)
+        assertEquals(1, match.state.sets.size)
+        points(Side.B)
+        assertEquals("erneut 2. Satz beendet → „3. Satz?“", 2, live.decision?.setNumber)
+    }
+
     @Test
     fun otherSportsOnlyOfferARegularSet() {
         startOnWatch(sport = Sport.TABLE_TENNIS, format = FormatChoice.TABLE_TENNIS_OPEN)

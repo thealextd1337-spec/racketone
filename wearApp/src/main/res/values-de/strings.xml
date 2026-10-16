@@ -168,8 +168,8 @@
     <string name="unit_game">Spiel %1$d</string>
     <string name="decision_won">gewonnen</string>
     <string name="decision_lost">verloren</string>
-    <string name="dialog_another_set">Noch ein Satz?</string>
-    <string name="dialog_another_game">Noch ein Spiel?</string>
+    <string name="dialog_next_set">%1$d. Satz?</string>
+    <string name="dialog_next_game">%1$d. Spiel?</string>
     <string name="decision_waiting">%1$s entscheidet</string>
     <string name="finished_title">Match beendet</string>
 

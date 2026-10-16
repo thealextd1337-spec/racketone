@@ -167,7 +167,10 @@
 "setend.lost" = "verloren";
 
 /* Satzende-Dialog */
-"setend.question" = "Noch ein Satz?";
+"setend.question %@" = "%@. Satz?";
+
+/* Satzende-Dialog, Pickleball: nummerierte Frage nach dem nächsten Spiel */
+"setend.question.game %@" = "%@. Spiel?";
 
 /* Satzende-Dialog (Primäraktion) */
 "setend.yes" = "Ja";

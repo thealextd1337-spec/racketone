@@ -414,6 +414,16 @@ fun nextSetText(
         },
     )
 
+/**
+ * Frage im Satzende-Dialog, nummeriert nach dem nächsten Satz: „2. Satz?“ (en „Set 2?“), Pickleball „2. Spiel?“
+ * („Game 2?“). [finishedSet] = gerade beendeter Satz (1-basiert, [eu.advantly.wear.live.DecisionUi.setNumber]).
+ */
+@Composable
+fun nextSetQuestion(
+    sport: Sport,
+    finishedSet: Int,
+): String = stringResource(if (sport == Sport.PICKLEBALL) R.string.dialog_next_game else R.string.dialog_next_set, finishedSet + 1)
+
 /** Versionshinweis (W2-Vertrag §5); [short] für die Statuszeile im Score. */
 @Composable
 fun updateText(
