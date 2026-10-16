@@ -116,6 +116,14 @@ object AdvantlyIcons {
         icon("Replay", "M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z")
     }
 
+    val More: ImageVector by lazy {
+        icon("More", "M12,8a2,2 0,1 0,0 -4a2,2 0,0 0,0 4M12,14a2,2 0,1 0,0 -4a2,2 0,0 0,0 4M12,20a2,2 0,1 0,0 -4a2,2 0,0 0,0 4")
+    }
+
+    val Info: ImageVector by lazy {
+        icon("Info", "M11,17h2v-6h-2zM12,2a10,10 0,1 0,0 20a10,10 0,0 0,0 -20M12,4a8,8 0,1 1,0 16a8,8 0,0 1,0 -16M11,9h2V7h-2z")
+    }
+
     private fun icon(
         name: String,
         pathData: String,

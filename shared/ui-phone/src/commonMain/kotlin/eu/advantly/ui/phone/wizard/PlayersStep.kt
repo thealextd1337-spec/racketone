@@ -12,12 +12,12 @@ import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.ChoiceChip
 import eu.advantly.ui.phone.common.SectionTitle
-import eu.advantly.ui.phone.common.SegmentedChoice
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.help_discipline_title
 import eu.advantly.ui.phone.resources.wizard_coin_toss
 import eu.advantly.ui.phone.resources.wizard_doubles
 import eu.advantly.ui.phone.resources.wizard_first_server
@@ -42,7 +42,8 @@ internal fun PlayersStep(
     val sport = input.sport ?: return
     StepTitle(stringResource(Res.string.wizard_title_players))
     if (state.options.disciplineSelectable) {
-        SegmentedChoice(
+        HelpSection(stringResource(Res.string.help_discipline_title), WizardHelp.DISCIPLINE)
+        WizardChoices(
             options = listOf(Discipline.SINGLES, Discipline.DOUBLES),
             selected = input.discipline,
             label = { stringResource(if (it == Discipline.SINGLES) Res.string.wizard_singles else Res.string.wizard_doubles) },

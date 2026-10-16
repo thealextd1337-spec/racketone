@@ -9,9 +9,9 @@ import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.freshPlaceholders
-import eu.advantly.data.recentPeople
 import eu.advantly.data.resolvedLineup
 import eu.advantly.data.toScoreEventOrNull
+import eu.advantly.data.watchPeople
 
 /** Optionale Personenplätze eines Uhr-Matches. */
 enum class PlayerSlot { PARTNER, OPPONENT_1, OPPONENT_2 }
@@ -47,21 +47,8 @@ class WatchDirectory(
             selected[PlayerSlot.OPPONENT_2] ?: placeholder(PlayerSlot.OPPONENT_2),
         )
 
-    /** Handy-Verzeichnis zuerst; lokale Match-Historie ergänzt nach Offline-Matches. */
-    fun recentPlayers(): List<Player> {
-        val remote =
-            data.settings
-                .get("players.recentRemote")
-                .orEmpty()
-                .split(',')
-                .filter { it.isNotBlank() }
-                .map(::PlayerId)
-        return (remote.mapNotNull(data.players::get) + data.recentPeople())
-            .filterNot { data.isSelf(it.id) || data.isPlaceholder(it.id) }
-            .distinctBy { it.id }
-            .take(24)
-            .map { it.toPlayer() }
-    }
+    /** Handy-Verzeichnis mit lokaler Offline-Historie, ohne archivierte Personen. */
+    fun recentPlayers(): List<Player> = data.watchPeople().map { it.toPlayer() }
 
     /** Anzeigename oder `null` (unbekannt bzw. leer = Standardbezeichnung der UI). */
     fun displayName(id: PlayerId): String? =
@@ -79,7 +66,7 @@ class WatchDirectory(
             .recent(RECENT_SCAN)
             .filter { it.previousMatchId == null }
             .maxWithOrNull(compareBy<MatchRecord> { it.createdAtMs }.thenBy { it.id.value })
-            ?.let { WatchSetup(it.format, data.freshPlaceholders(data.resolvedLineup(it), newId), it.meta) }
+            ?.let { WatchSetup(it.format, data.freshPlaceholders(data.resolvedLineup(it), newId = newId), it.meta) }
 
     /** Beendete Matches, neueste zuerst (die Historie enthält auch laufende – die fallen hier heraus). */
     fun recentResults(limit: Int = RESULTS): List<MatchRecord> =

@@ -32,6 +32,7 @@ import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
+import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.PlaceholderAssignments
@@ -75,6 +76,7 @@ fun AdvantlyApp(
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
 ) {
+    val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
     val aliases by model.players.ownerAliases.collectAsState()
     val updateRequired by model.live.updateRequired.collectAsState()
@@ -88,7 +90,7 @@ fun AdvantlyApp(
         model.live.refreshWatchStatus()
         onPauseOrDispose {}
     }
-    CompositionLocalProvider(LocalSelfId provides self.id, LocalSelfAliases provides aliases) {
+    CompositionLocalProvider(LocalSelfId provides self.id, LocalSelfAliases provides aliases, LocalArchivedPlayerIds provides archived) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar

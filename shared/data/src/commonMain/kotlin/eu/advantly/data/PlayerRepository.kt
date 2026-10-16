@@ -16,6 +16,9 @@ enum class PlayerKind {
 
     /** Nur für migrierte Uhr-Slots; niemals in Personenlisten. */
     PLACEHOLDER,
+
+    /** Aus der Auswahl entfernt; Name und ID bleiben für vergangene Matches erhalten. */
+    ARCHIVED,
 }
 
 /** Lokal bekannter Spieler. Regeln referenzieren nur [id]; [displayName] ist reine Anzeige. */
@@ -91,7 +94,8 @@ class PlayerRepository internal constructor(
                     queries.insertOrIgnore(player.id.value, player.displayName, PlayerKind.GUEST.name, nowMs, null)
                 }
 
-                existing.kind == PlayerKind.GUEST && existing.displayName != player.displayName -> {
+                (existing.kind == PlayerKind.GUEST || (existing.kind == PlayerKind.ARCHIVED && existing.displayName.isBlank())) &&
+                    existing.displayName != player.displayName -> {
                     queries.rename(
                         player.displayName,
                         player.id.value,
@@ -141,7 +145,7 @@ class PlayerRepository internal constructor(
         id: PlayerId,
         nowMs: Long,
     ) {
-        if (Placeholders.isPlaceholder(id) || get(id)?.kind == PlayerKind.SELF) return
+        if (Placeholders.isPlaceholder(id) || get(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
         queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
         queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
     }
@@ -149,7 +153,7 @@ class PlayerRepository internal constructor(
     fun canMarkPlaceholder(id: PlayerId): Boolean =
         get(id).let {
             it == null || (
-                it.kind != PlayerKind.SELF &&
+                it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED &&
                     (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
             )
         }
@@ -169,8 +173,16 @@ class PlayerRepository internal constructor(
         queries
             .selectAll()
             .executeAsList()
-            .filter { it.kind != PlayerKind.PLACEHOLDER.name }
+            .filter { it.kind == PlayerKind.SELF.name || it.kind == PlayerKind.GUEST.name }
             .map { it.toLocal() }
+
+    fun archivedIds(): Set<PlayerId> =
+        queries
+            .selectAll()
+            .executeAsList()
+            .filter { it.kind == PlayerKind.ARCHIVED.name }
+            .map { PlayerId(it.id) }
+            .toSet()
 
     fun rename(
         id: PlayerId,
@@ -188,7 +200,7 @@ class PlayerRepository internal constructor(
         if (people.isNotEmpty()) queries.markUsed(nowMs, people.map { it.value })
     }
 
-    /** Löscht einen Gast; der Self-Player bleibt. Liefert `true`, wenn gelöscht. */
+    /** Archiviert einen Gast ohne Namensverlust. Self, Platzhalter und bereits archivierte bleiben unverändert. */
     fun deleteGuest(id: PlayerId): Boolean =
         queries.transactionWithResult {
             val existing = get(id) ?: return@transactionWithResult false
@@ -196,6 +208,18 @@ class PlayerRepository internal constructor(
             queries.deleteGuest(id.value)
             true
         }
+
+    /** Archivmarkierung vom Handy; schützt auch vor später eintreffenden alten Metadaten. */
+    fun archiveRemote(
+        id: PlayerId,
+        nowMs: Long,
+    ) {
+        if (Placeholders.isPlaceholder(id)) return
+        queries.transaction {
+            queries.insertOrIgnore(id.value, "", PlayerKind.ARCHIVED.name, nowMs, null)
+            if (get(id)?.kind == PlayerKind.GUEST) queries.deleteGuest(id.value)
+        }
+    }
 
     private fun PlayerRow.toLocal(): LocalPlayer =
         LocalPlayer(PlayerId(id), display_name, PlayerKind.valueOf(kind), created_at_ms, last_used_at_ms)

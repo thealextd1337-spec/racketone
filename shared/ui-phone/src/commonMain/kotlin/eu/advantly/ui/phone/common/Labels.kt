@@ -64,6 +64,9 @@ import org.jetbrains.compose.resources.stringResource
 val LocalSelfId = staticCompositionLocalOf<PlayerId?> { null }
 val LocalSelfAliases = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
+/** Archivierte Personen nur aus Auswahlen ausblenden, nie aus historischen Matchdaten. */
+internal val LocalArchivedPlayerIds = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
+
 fun sportName(sport: Sport): StringResource =
     when (sport) {
         Sport.TENNIS -> Res.string.sport_tennis

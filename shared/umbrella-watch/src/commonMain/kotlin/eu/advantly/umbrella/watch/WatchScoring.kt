@@ -29,8 +29,8 @@ import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.data.LocalData
 import eu.advantly.data.freshPlaceholders
-import eu.advantly.data.recentPeople
 import eu.advantly.data.toScoreEventOrNull
+import eu.advantly.data.watchPeople
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.IdGenerator
 import eu.advantly.match.session.MatchSession
@@ -181,21 +181,13 @@ class WatchScoring internal constructor(
         )
     }
 
-    /** Zuletzt gespielte Personen: Handy-Verzeichnis zuerst, lokale Historie danach; keine Platzhalter/Self. */
+    /** Zuletzt gespielte Personen: Handy-Verzeichnis und lokale Historie, ohne Archive; keine Platzhalter/Self. */
     fun recentPeople(): List<WatchPlayer> {
         error = ""
         val b = backend() ?: return emptyList()
         return call(STORE_READ) {
-            val remote =
-                b.data.settings
-                    .get("players.recentRemote")
-                    .orEmpty()
-                    .split(',')
-                    .filter { it.isNotBlank() }
-            (remote.mapNotNull { b.data.players.get(PlayerId(it)) } + b.data.recentPeople())
-                .filterNot { b.data.isSelf(it.id) || b.data.isPlaceholder(it.id) }
-                .distinctBy { it.id }
-                .take(24)
+            b.data
+                .watchPeople()
                 .map { WatchPlayer(it.id.value, it.displayName, "", 0, false) }
         }.orEmpty()
     }

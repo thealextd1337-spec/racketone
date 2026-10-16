@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -113,6 +114,10 @@ fun HistoryScreen(
                 }.distinctBy { it.player.id to it.role }
                 .sortedBy { it.player.displayName.lowercase() }
         }
+    val offeredPeople = people.filter { role == null || it.role == role }.distinctBy { it.player.id }
+    LaunchedEffect(offeredPeople, personId) {
+        if (personId != null && offeredPeople.none { it.player.id.value == personId }) personId = null
+    }
     val shown =
         remember(matches, filter, personId, role, query, selfIds) {
             filterHistory(matches, HistoryFilter(filter, personId?.let(::PlayerId), role, query), selfIds)
@@ -170,7 +175,7 @@ fun HistoryScreen(
         item {
             FilterRow {
                 ChoiceChip(stringResource(Res.string.history_people_all), personId == null, { personId = null }, "person_ALL")
-                people.filter { role == null || it.role == role }.distinctBy { it.player.id }.forEach { person ->
+                offeredPeople.forEach { person ->
                     ChoiceChip(person.player.displayName, personId == person.player.id.value, {
                         personId = person.player.id.value
                     }, "person_${person.player.id.value}")

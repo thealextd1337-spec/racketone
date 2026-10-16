@@ -26,6 +26,17 @@ class SyncCodecTest {
     }
 
     @Test
+    fun archivedIdsAreAnOptionalProtocolThreeExtension() {
+        val message = MatchMetaMessage(archivedPlayerIds = listOf(PlayerId("removed")))
+        roundTrip(message)
+        assertEquals(3, message.v)
+        val old = """{"type":"MatchMeta","v":3}"""
+        val decoded = (SyncCodec.decode(old.encodeToByteArray()) as DecodeResult.Ok).message as MatchMetaMessage
+        assertTrue(decoded.archivedPlayerIds.isEmpty())
+        assertTrue(SyncCodec.encodeToString(message).contains("archivedPlayerIds"))
+    }
+
+    @Test
     fun allMessageTypesRoundTrip() {
         roundTrip(Hello(DeviceId("watch-1"), PeerKind.WATCH, listOf(MATCH)))
         roundTrip(Deleted(listOf(DeletedMatch(MATCH, 1_760_000_000_000))))
