@@ -23,6 +23,13 @@ Stand: 2026-10-15
 | Uhr-Spieler | Uhr-Matches: Auswahl der zuletzt gespielten Spieler, sonst neutrale **Platzhalter** (nicht gespeichert, nicht in Vorschlägen), am Handy nachträglich zuweisbar (F20, 2026-10-15) |
 | Beenden/Abbrechen | Am Handy: **Beenden** = Ergebnis gilt wie es steht; **Abbrechen** = bleibt im Verlauf „Abgebrochen“, ohne Wertung (F21, 2026-10-15) |
 | Parallel/Turnier | Mehrere Matches parallel am Handy, höchstens eines auf der eigenen Uhr; **Turnierdirektor-Modus in P2** (F22, 2026-10-15) |
+| Geteilte Matches (P2) | Ein Freund, den der Ersteller als Mitspieler einträgt, **sieht das Match sofort und es zählt sofort** (keine Bestätigung je Match); „War ich nicht“ löst die Verknüpfung (F23, 2026-10-15) |
+| Länder/Alter (P2) | Konto nur in **AT (14), DE, CH, LI (16)**, sonst „noch nicht verfügbar“; Selbstauskunft Geburtsdatum (nicht gespeichert, risikobasiert begründet); CH/LI rechtlich gesondert bestätigen (F24, 2026-10-15) |
+| Visitor-Dauer (P2) | Visitor sehen ein Match **dauerhaft bis Widerruf**; benennen: Ersteller + Mitspieler (eigene Freunde); widerrufen: Benennender, Ersteller, Visitor; Entfreunden/Blockieren beendet (F25, 2026-10-15) |
+| Zähler-Person (P2) | Wählbar: Freunde und Mitspieler mit Konto; Übernahme mit Bestätigung am übernehmenden Gerät (F26, 2026-10-15) |
+| Turnier (P2) | Plätze, Spielplan, Zähler, Live-Übersicht; ohne Auslosung (F27, 2026-10-15) |
+| Login & Betrieb (P2) | Google + E-Mail-Code (EU-Anbieter mit AVV), Apple sobald Developer-Account; Supabase **Free so lange wie möglich** (vor echtem Nutzerstart neu bewerten); kein Uhr-Login, eigene Uhr-Session per Code vom Handy (F28, 2026-10-15) |
+| Löschfrist & Telemetrie (P2) | Kontolöschung nach **14 Tagen**; Telemetrie Standard „Nur für mich“, „Gar nicht“ stoppt auch Live-Anzeige und gepufferte Übertragung (F29, 2026-10-15) |
 | Sprache | Deutsch + Englisch ab Start |
 | Website | **advantly.eu** live (GitHub Pages, `site/`), ohne Verweise auf GitHub/Entwicklung |
 | Monetarisierung | Freemium/Abo später – Architektur vorbereiten |
@@ -40,3 +47,4 @@ Stand: 2026-10-15
 - [06 Marktanalyse (GPT)](06-marktanalyse.md)
 - [07 Namensprüfung Advantly](07-namenspruefung-advantly.md)
 - [PLAN – Gesamtplan & Roadmap](PLAN.md)
+- [P2-Plan – Accounts, Freunde, Cloud-Sync](p2-plan.md)

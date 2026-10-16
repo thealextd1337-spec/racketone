@@ -1,0 +1,33 @@
+[
+  {
+    "id": "e9500000-0000-7000-8000-000000000001",
+    "type": "MatchCreated",
+    "lamport": 1,
+    "matchId": "a9500000-0000-7000-8000-000000000001",
+    "payload": {
+      "type": "MatchCreated"
+    },
+    "deviceId": "d0000000-0000-7000-8000-0000000000a1",
+    "parentId": null,
+    "redacted": false,
+    "deviceSeq": 1,
+    "serverSeq": 3,
+    "wallClockMs": 1760608801000
+  },
+  {
+    "id": "e9500000-0000-7000-8000-000000000002",
+    "type": "PointWon",
+    "lamport": 2,
+    "matchId": "a9500000-0000-7000-8000-000000000001",
+    "payload": {
+      "side": "A",
+      "type": "PointWon"
+    },
+    "deviceId": "d0000000-0000-7000-8000-0000000000a1",
+    "parentId": null,
+    "redacted": false,
+    "deviceSeq": 2,
+    "serverSeq": 4,
+    "wallClockMs": 1760608802000
+  }
+]

@@ -39,6 +39,7 @@ shared/data                  SQLDelight, EventStore, Repositories, Outbox  → c
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
 shared/match-session         Session: Zähler/Anzeige, Event→Store→Engine   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
+shared/cloud-sync            P2-Entwurf: Wire-DTOs, Ports, Outbox-Logik (noch unverdrahtet, kein watchOS) → data
 shared/presentation          ViewModels, UI-State, Session-Adapter (kein watchOS) → match-session, data, device-link, entitlements
 shared/ui-phone              CMP-Screens (android, ios, jvm("desktop"))    → presentation
 shared/umbrella-ios          XCFramework AdvantlyKit                       → ui-phone
@@ -49,7 +50,8 @@ iosApp/                      XcodeGen-Projekt + Swift-Host (iOS)           → A
 watchApp/                    SwiftUI-Quellen der watchOS-App               → AdvantlyWatchKit
 tools/gate-check             JVM-Werkzeug P1-Gate (kein App-Teil)          → data
 ```
-Später (noch nicht angelegt): `shared/cloud-sync` (P2), `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `backend/`, `testvectors/`.
+Backend (P2-Spike): `supabase/` (Migrationen, pgTAP-Tests, siehe `supabase/README.md`, Plan `docs/p2-plan.md`).
+Später (noch nicht angelegt): `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `testvectors/`.
 
 **Harte Regeln**
 1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`

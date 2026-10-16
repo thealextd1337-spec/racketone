@@ -1,0 +1,59 @@
+-- Länder-/Altersabfrage (F13), Alias (F18), Profil- und Einstellungs-Sichtbarkeit, Suche.
+begin;
+select plan(20);
+
+select tests.world();
+select tests.create_user('neu_at', false);
+select tests.create_user('neu_de', false);
+select tests.create_user('neu_xx', false);
+
+-- Onboarding ---------------------------------------------------------------------------------------------
+select tests.authenticate_as('neu_at');
+select throws_ok($$ select public.send_friend_request(tests.uid('alice')) $$, '42501', 'profile_not_active',
+                 'Ohne Onboarding keine sozialen Funktionen');
+select throws_ok($$ select public.complete_onboarding('AT', (current_date - interval '13 years 11 months')::date, 'Nina') $$,
+                 'P0001', 'age_below_minimum', 'AT: 13 Jahre werden abgelehnt');
+select lives_ok($$ select public.complete_onboarding('at', (current_date - interval '14 years')::date, ' Nina ', 'nina_at') $$,
+                'AT: ab 14 Jahren erlaubt (Land unabhängig von Groß-/Kleinschreibung)');
+select is((select alias from public.profiles where id = tests.uid('neu_at')), 'Nina', 'Alias wird getrimmt gespeichert');
+select is((select country from public.profile_settings where profile_id = tests.uid('neu_at')), 'AT',
+          'Land gespeichert, Geburtsdatum nicht');
+select throws_ok($$ select public.complete_onboarding('AT', '2000-01-01', 'Nina') $$, 'P0001', 'already_onboarded',
+                 'Onboarding nur einmal');
+
+select tests.authenticate_as('neu_de');
+select throws_ok($$ select public.complete_onboarding('DE', (current_date - interval '15 years')::date, 'Dirk') $$,
+                 'P0001', 'age_below_minimum', 'DE: 15 Jahre werden abgelehnt');
+select throws_ok($$ select public.complete_onboarding('DE', (current_date - interval '16 years')::date, 'Dirk', 'alice') $$,
+                 'P0001', 'username_taken', 'Benutzername eindeutig');
+select lives_ok($$ select public.complete_onboarding('DE', (current_date - interval '16 years')::date, 'Dirk') $$,
+                'DE: ab 16 Jahren erlaubt');
+
+select tests.authenticate_as('neu_xx');
+select throws_ok($$ select public.complete_onboarding('US', '1990-01-01', 'Sam') $$, 'P0001', 'country_not_supported',
+                 'Nicht freigeschaltete Länder werden abgelehnt');
+
+-- Sichtbarkeit -------------------------------------------------------------------------------------------
+select tests.authenticate_as('bob');
+select results_eq($$ select alias from public.profiles where id = tests.uid('alice') $$, $$ values ('Alice'::text) $$,
+                  'Freund sieht Alias');
+select is_empty($$ select 1 from public.profiles where id = tests.uid('dave') $$, 'Fremdes Profil nicht lesbar');
+select is_empty($$ select 1 from public.profile_settings where profile_id = tests.uid('alice') $$,
+                'Einstellungen (Telemetrie-Sichtbarkeit, Land) anderer nie lesbar – auch nicht für Freunde');
+
+select lives_ok($$ update public.profiles set alias = 'Bobby' where id = tests.uid('bob') $$, 'Eigenen Alias ändern');
+select lives_ok($$ update public.profiles set alias = 'Hacked' where id = tests.uid('alice') $$,
+                'Fremden Alias ändern läuft ins Leere …');
+select is((select alias from public.profiles where id = tests.uid('alice')), 'Alice', '… und ändert nichts (RLS)');
+select throws_ok($$ update public.profiles set status = 'active' where id = tests.uid('bob') $$, '42501', null,
+                 'Status nicht direkt änderbar (nur RPC)');
+select lives_ok($$ update public.profile_settings set telemetry_visibility = 'share' where profile_id = tests.uid('bob') $$,
+                'F19: eigene Telemetrie-Sichtbarkeit änderbar');
+
+-- Suche: exakt, ohne Enumeration --------------------------------------------------------------------------
+select results_eq($$ select alias from public.find_profile('DAVE') $$, $$ values ('Dave'::text) $$,
+                  'Suche per Benutzername (exakt, case-insensitiv)');
+select is_empty($$ select 1 from public.find_profile('dav') $$, 'Keine Präfixsuche');
+
+select * from finish();
+rollback;

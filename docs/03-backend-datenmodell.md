@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Entwurf zur Entscheidung |
+| **Status** | Entwurf zur Entscheidung · **P2-Spike umgesetzt** (`supabase/`, 15.10.2026) – Abweichungen und Präzisierungen in [§13](#13-abgleich-mit-dem-p2-spike-15102026); bei Widerspruch gilt der Spike bzw. [p2-plan](p2-plan.md) |
 | **Stand** | 15.10.2026 |
 | **Rolle** | Backend-Architektur |
 | **Betrifft Phasen** | P2 (Accounts/Freunde/Sync), P3 (Statistik & Health), P4 (Garmin) – P1 ist backendfrei |
@@ -20,9 +20,9 @@
 | E2 | Plan | Lokal + **Free** für Entwicklung/Closed Beta, **Pro (ab 25 $/Monat)** ab erstem öffentlichen Release | Free pausiert nach 1 Woche Inaktivität und hat keine Backups – für Produktion ungeeignet. |
 | E3 | Login | **Sign in with Apple + Google + E-Mail-OTP**; Apple auch auf Android (OAuth-Flow) | Guideline 4.8 (Apple-Login ist der anerkannte Weg, die Anforderung zu erfüllen); Plattformwechsler müssen sich mit demselben Konto einloggen können. |
 | E4 | IDs | **Client-generierte UUIDv7** für alle syncbaren Entitäten | Offline-first, Idempotenz, gute Index-Lokalität. |
-| E5 | Spieler-Identität | `players`-Tabelle: **Self-Player mit `id = profile.id`**, Gäste mit eigener UUID; Claim setzt `players.profile_id` (Historie bleibt unverändert) | Kein Umschreiben alter Matches; Statistik-Schlüssel `coalesce(profile_id, player_id)`. |
+| E5 | Spieler-Identität | `players`-Tabelle: **Self-Player mit `id = profile.id`**, Gäste mit eigener UUID; Claim setzt `players.profile_id` (Historie bleibt unverändert) · **Spike: lokale Self-IDs bleiben als `players.kind = 'self'` (Self-Aliase), kein Umschlüsseln (§13 A2)** | Kein Umschreiben alter Matches; Statistik-Schlüssel `coalesce(profile_id, player_id)`. |
 | E6 | Sichtbarkeit | **Pro Teilnehmer** steuerbar (`share_with_friends`), Default **aus** (Privacy by Default) | Jeder entscheidet selbst, ob *seine* Matches bei *seinen* Freunden auftauchen. |
-| E7 | Events | Zeilenbasiert in `match_events`, append-only, `ON CONFLICT DO NOTHING`; Kompaktierung alter Matches optional ab P3 | Idempotenz + Realtime + einfache RLS; Speicher ist kein Kostentreiber. |
+| E7 | Events | Zeilenbasiert in `match_events`, append-only, `ON CONFLICT DO NOTHING`; Kompaktierung alter Matches optional ab P3 · **Spike: Spalten wie lokal (`device_seq`, `wall_clock_ms`, `parent_id`), Engine-Typnamen (§13 A1)** | Idempotenz + Realtime + einfache RLS; Speicher ist kein Kostentreiber. |
 | E8 | Zähler-Rolle | **Entschieden 2026-10-15: genau ein Zähler-Gerät**, Wechsel durch repliziertes Engine-Event „Zähler wechselt“ (`scorer_handover` als Arbeitsname), kein Zeit-Lease | Nur der zum jeweiligen Event-Zeitpunkt aktive Zähler erzeugt wirksame Zähl-/Undo-Events. Engine- und Ordnungsdetails siehe [02](02-scoring-regeln.md), Replikation siehe [01](01-architektur.md). |
 | E9 | Match-Zusammenfassung | **Client-Engine berechnet**, Server prüft **Plausibilität in SQL** beim Finalisieren; vollständiger Server-Replay (Kotlin/JS-Engine in Edge Function) erst bei Ranglisten | Eine Engine-Implementierung, keine Duplikation; Manipulation hat heute keinen Anreiz. |
 | E10 | Health-Zeitreihe | **Ein Datensatz pro Session & Metrik mit `smallint[]` auf festem 5-s-Raster** (NULL = Lücke) | ~2 KB pro Match statt 5.000 Zeilen; Postgres komprimiert (TOAST); trivial zu löschen/exportieren. |
@@ -31,7 +31,7 @@
 | E13 | Fan-out | Über `match_participants.profile_id`; Benachrichtigung via **Outbox-Tabelle → Edge Function → FCM v1 / APNs** | Matches „erscheinen“ durch RLS automatisch beim Pull; Push nur als Anstoß. |
 | E14 | Uhren | Uhren sprechen **nicht direkt** mit Supabase, sondern über das Handy (Ausnahme später: Wear OS standalone) | Keine Tokens auf Uhren, ein Sync-Pfad, Garmin kann ohnehin nur über die Companion-App. |
 | E15 | Account-Löschung | 14 Tage Karenz, dann Hard Delete; gemeinsame Matches bleiben für andere, Teilnehmer wird zu „Gelöschter Spieler“ anonymisiert; Health sofort hart gelöscht | DSGVO Art. 17 + Datenintegrität der Mitspieler. |
-| E16 | Repo/Tooling | `backend/supabase` mit CLI-Migrationen, `seed.sql`, pgTAP-Tests (`supabase test db`) in CI; Umgebungen local → staging → prod | Reproduzierbar, RLS testbar. |
+| E16 | Repo/Tooling | `supabase/` im Repo-Root (Spike, §13 A9; ursprünglich `backend/supabase`) mit CLI-Migrationen, `seed.sql`, pgTAP-Tests (`supabase test db`) in CI; Umgebungen local → staging → prod | Reproduzierbar, RLS testbar. |
 
 ---
 
@@ -447,6 +447,7 @@ create table public.match_events (
   client_ts        timestamptz not null,
   received_at      timestamptz not null default now(),
   type             text not null check (type in (
+                     -- Spike (§13 A1): stattdessen die Engine-Namen MatchCreated, PointWon, Undo, …
                      'match_start','point','undo','server_change','side_change',
                      'scorer_handover','timeout','retire','match_end','correction')),
   payload          jsonb not null default '{}'::jsonb,
@@ -838,7 +839,7 @@ create policy pmr_select on public.player_match_results for select to authentica
 create policy players_select on public.players for select to authenticated
   using ( owner_id = (select auth.uid())
        or profile_id = (select auth.uid())
-       or (id = profile_id and profile_id = any ((select private.my_friend_ids()))) );
+       or (id = profile_id and profile_id = any ((select private.my_friend_ids())::uuid[])) );
 create policy players_write on public.players for all to authenticated
   using ( owner_id = (select auth.uid()) and claimed_at is null )
   with check ( owner_id = (select auth.uid()) );
@@ -847,7 +848,7 @@ create policy players_write on public.players for all to authenticated
 -- PROFILE ------------------------------------------------------------------
 create policy profiles_select on public.profiles for select to authenticated
   using ( id = (select auth.uid())
-       or id = any ((select private.my_friend_ids())) );
+       or id = any ((select private.my_friend_ids())::uuid[]) );
 create policy profiles_update on public.profiles for update to authenticated
   using ( id = (select auth.uid()) ) with check ( id = (select auth.uid()) );
 -- Fremde Profile nur über search_profiles() / Co-Teilnehmer-Infos über View mit Basisfeldern
@@ -861,7 +862,7 @@ create policy hs_select on public.health_sessions for select to authenticated
         and (select private.is_match_participant(match_id)))
     or (visibility = 'friends'
         and not (select private.is_match_visitor(match_id))
-        and profile_id = any ((select private.my_friend_ids()))
+        and profile_id = any ((select private.my_friend_ids())::uuid[])
         and (select private.can_view_match(match_id)))
   );
 
@@ -1334,6 +1335,8 @@ Kaskaden im Detail:
 
 ### 9.2 Repo-Struktur
 
+> Spike (15.10.2026): Ordner `supabase/` im Repo-Root, Testdateien `supabase/tests/database/NNN_*.test.sql`, siehe [`supabase/README.md`](../supabase/README.md).
+
 ```
 backend/
   supabase/
@@ -1465,7 +1468,41 @@ Fazit: Das Backend kostet bei 10.000 aktiven Nutzern **unter 1 Cent pro Nutzer u
 
 ---
 
+## 13. Abgleich mit dem P2-Spike (15.10.2026)
+
+Der Spike setzt dieses Dokument als lauffähiges Schema um: [`supabase/migrations`](../supabase/migrations) (11
+Migrationen, RLS, 33 RPCs) und [`supabase/tests/database`](../supabase/tests/database) (280 pgTAP-Prüfungen, Stand nach Review-Runde 3). Plan,
+Arbeitspakete und offene Fragen: [p2-plan.md](p2-plan.md). Die Skizzen in §3–§9 bleiben als Begründung stehen;
+verbindlich für P2 ist das Schema im Spike mit folgenden Abweichungen. (Abschnitt 13 steht vor 12, damit die offenen
+Fragen am Ende bleiben.)
+
+| # | Thema | 03 (Skizze) | Spike | Begründung |
+|---|---|---|---|---|
+| A1 | Event-Zeile | `client_ts`, `type` in Snake-Case (`point`, `scorer_handover` …), Eindeutigkeit `(match_id, lamport, device_id)` | Spalten wie die lokale Tabelle `match_event`: `device_seq`, `wall_clock_ms`, `parent_id`; `type` = Engine-Name (`MatchCreated`, `PointWon`, `Undo`, `ContinueDecision`, `Correction`, `MatchEnded`, `Paused`, `Resumed`, `ScorerChanged`, `PointDetailSet`, `ServerChosen`, `PlayerAssigned`); `payload` = unveränderter Event-JSON inkl. `type`; Eindeutigkeit `(match_id, device_id, device_seq)`; genau eine Genesis je Match; `server_seq` als Download-Cursor | P1 hat das Event-Modell festgelegt (02 §7, 01 §4.3); Upload ohne Umkodieren, Anti-Entropie per Wasserstand wie zwischen Geräten |
+| A2 | Self-Player | `players.id = profiles.id`, lokale Self-ID beim ersten Login umschlüsseln (§5.9) | Lokale Self-IDs (Handy, Uhr, frühere Aliase aus W1-I) werden als `players.kind = 'self'` dem Profil zugeordnet | Events sind unveränderlich und referenzieren die lokalen IDs (Lineup, `createdBy`, `PlayerAssigned`) – Umschlüsseln hieße Logs umschreiben |
+| A3 | Teilnehmer | PK `(match_id, player_id)`, `player_id` Pflicht | PK `(match_id, slot_id)` mit `slot_id` = Lineup-ID (auch `placeholder:…`, F20); `player_id`/`profile_id` optional; `link_status` = `self`/`linked`/`assigned`/`confirmed`, alle sofort sichtbar und gewertet (F23), Widerspruch „War ich nicht“ je Match bzw. je Dummy; Sperrlisten `match_link_rejections`, `player_assignment_rejections` | Platzhalter sind keine Spieler (02 §7.6); F23 ersetzt die Bestätigung je Match (04 §3.5) |
+| A4 | Rollen | `match_roles.role in ('director','player-viewer')`, `may_take_over` | `role in ('scorer','director')` mit `status` `invited`/`accepted`/`declined`/`revoked` und Zielgerät; Übernahme-Recht abgeleitet: Ersteller, verknüpfte Teilnehmer, Rolle `accepted`, Turnierleitung | F17 braucht Einladung + Annahme; Mitspieler übernehmen ohne eigene Zeile; widerrufene Zähler dürfen verspätete Events noch hochladen, aber nicht mehr übernehmen |
+| A5 | Upload | `sync_push` als `security invoker` mit Insert-Kern | `sync_push` als `security definer` mit expliziten Prüfungen je Element (Autor, Gerätebindung `devices.profile_id`, Mitgliedschaft, Typ-Regeln für `MatchCreated`/`ScorerChanged`/`PlayerAssigned`); Antwort je Element mit stabilem Grund | Direkte INSERT-Rechte sind entzogen (wie in 03 gefordert) – der Pfad muss definer sein; per-Element-Ergebnis für die Outbox |
+| A6 | Zusammenfassung | `finalize_match` mit SQL-Plausibilitätsprüfung, `match_sets`, `player_match_results` | Projektion (`status`, `result_reason`, `winner`, `summary`, `live_state`) per `sync_push`, monoton über `projection_event_count`, von jedem Mitglied mit Upload-Recht; **Plausibilitätsprüfung und Statistik-Tabellen erst P3** | P2 braucht Stand/Ergebnis für Listen und Visitor; Statistik ist P3 |
+| A7 | Visitor | eigener Kanal `match-live:<id>`, RPCs angedacht | umgesetzt: `get_visitor_match`, `my_visitor_matches`; Ausgabe aus festem Schema neu aufgebaut (`sets`, `games`, `points`, `serving`, `flags`, `status`, `winner`, `tiebreak`, `scorerConnected`, `updatedAtMs`, je mit Typ-/Wertprüfung); **dauerhaft bis Widerruf** (F25); Widerruf bei Entfreunden/Blockieren | F16/F25; keine Profil-/Geräte-IDs, keine Telemetrie – auch verschachtelt nicht |
+| A8 | Profil | `username citext`, `display_name`, `health_visibility_default`, `share_matches_default` im Profil | `profiles`: `alias` (öffentlich, F18), `username` (Kleinbuchstaben per CHECK), `friend_code`, `status` (`onboarding`/`active`/`deletion_requested`); private Werte in `profile_settings` (Land, Altersprüfung, `telemetry_visibility` F19, `share_matches_default`, Löschantrag) | RLS filtert Zeilen, nicht Spalten → private Werte in eigener Tabelle; kein `citext` nötig |
+| A9 | Repo-Pfad | `backend/supabase` | `supabase/` im Repo-Root | CLI ohne `--workdir`, CI-Pfadfilter |
+| A10 | Altersprüfung | Länderabfrage „vor P2 einplanen“ | `country_age_rules` (AT 14, DE 16, CH 16, LI 16, sonst nicht freigeschaltet) + `complete_onboarding`; Geburtsdatum wird nicht gespeichert; ohne Onboarding keine Schreib-/Sozialfunktionen | F13, Datenminimierung |
+| A11 | Kontolöschung | Edge Function `delete-account` führt die Kaskade aus | Kaskade als `BEFORE DELETE`-Trigger auf `profiles` (Ersteller-Wechsel, „Gelöschter Spieler“, Dummy-Zuweisungen lösen); Löschjob `admin_purge_due_accounts` nur für service_role; Edge Function bleibt für Apple-Token-Widerruf und `auth.admin.deleteUser` | Jeder Löschweg erzeugt denselben Zustand |
+| A12 | Rechte | Policies + einzelne `revoke` | Alle Default-Grants entzogen, Grants explizit (`…0990_rechte.sql`), Strukturtest prüft RLS, anon, Schreibrechte, `search_path` | Least Privilege, Regressionen fallen auf |
+| A13 | SQL-Korrektur | `x = any ((select private.my_friend_ids()))` | `x = any ((select private.my_friend_ids())::uuid[])` (in §4.3 korrigiert) | Die Skizze vergleicht sonst `uuid` mit `uuid[]` (Fehler beim Anlegen der Policy) |
+| A14 | Health | Tabellen `health_sessions/series` | **nicht** im Spike (P3); F19 nur als Einstellung `profile_settings.telemetry_visibility` (`share`/`private`/`off`, Standard `private`) | PLAN: Health-Speicherung erst P3 |
+| A15 | Turnier | nicht modelliert | `tournaments`, `tournament_courts`, `tournament_staff`, `matches.tournament_id/court_id/scheduled_at`, Status `scheduled`, `tournament_overview`, Kanal `tournament:<id>` | F22 (P2) |
+| A17 | Feed (Freunde eines teilenden Teilnehmers) | Lesen von Match, Teilnehmern und Event-Log per RLS (§4.1) | Basistabellen **nur für Mitglieder**; Feed ausschließlich über bereinigtes `sync_pull` (`access = feed`: kein Ersteller, keine Rollen/Live/Events, Konto/Alias nur von eigenen Freunden) | Direktabfragen hätten fremde `profile_id`, `created_by`, `author_id` und Geräte-IDs offengelegt (Review P2 #2) |
+| A18 | Realtime-Widerruf | Policy auf `match:<id>` | Kanäle mit Rechte-Version `match:<id>:<epoch>`, `match-live:<id>:<epoch>`, `tournament:<id>:<epoch>`; jeder Entzug erhöht die Version, alte Kanäle bekommen nur `rotate` | Supabase prüft Kanalrechte nur beim Beitritt (Review P2 #1) |
+| A19 | Delta-Cursor | `server_version` aus Sequenz, Hinweis auf Full-Resync | Versionsvergabe unter Transaktionssperre (Commit-Reihenfolge), `sync_pull` unter geteilter Sperre, Cursor = höchste Version; alle Schreibwege nehmen diese Sperre zuerst (RPC-Anfang, Statement-Trigger `zz_lock_sync` auf allen Tabellen in `public` und für DELETE auf `auth.users`); `profile_settings.visibility_epoch` signalisiert Vollabgleich bei Sichtbarkeitswechsel, `access` je Match den Wechsel `member → feed` | Review P2 #6/#7; Lasttest als Abnahmekriterium P2-A |
+| A20 | Lösch-Ausnahme | Events unveränderlich, `author_id` → Platzhalter | Klarnamen in `PlayerAssigned`-Payloads der gelöschten Person werden redigiert (`redacted_at`, `matches.redaction_epoch`), Re-Uploads alter Kopien bleiben Duplikat | Art. 17 vs. unveränderliches Log (Review P2 #4); Protokoll 4 ohne Klarnamen geplant |
+| A21 | Projektion/Übernahme | – | Projektion nur mit Übernahme-Recht und `eventCount` ≤ gespeicherte Events; `ScorerChanged`-Ziel nur eigenes Gerät oder Gerät der angenommenen Rolle | Review P2 #5/#10 |
+| A16 | Weitere Tabellen | `invites`, `consents`, Outbox, Entitlements, `player_link_requests` | `invites` (Freund/Claim, sha256), `entitlements`, `ops.notification_outbox` umgesetzt; `player_link_requests` entfällt (Zuweisung ohne Vorab-Bestätigung, 2026-10-15); `consents`, `match_sets`, `player_match_results` folgen mit P3 bzw. P2-K | Einwilligungen für Health erst P3; Version von Nutzungsbedingungen/Datenschutz in P2-K ergänzen |
+
 ## 12. Offene Fragen an den Nutzer
+
+P2-spezifische Fragen (Länder, Visitor-Dauer, Zähler-Kreis, Bestätigung, Plan, …) stehen gesammelt in [p2-plan §12](p2-plan.md#12-offene-entscheidungen-an-dich).
 
 | # | Frage | Vorschlag |
 |---|---|---|

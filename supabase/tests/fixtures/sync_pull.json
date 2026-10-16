@@ -1,0 +1,109 @@
+{
+  "cursor": 44,
+  "hasMore": false,
+  "matches": [
+    {
+      "id": "a9500000-0000-7000-8000-000000000001",
+      "meta": {},
+      "roles": [
+        {
+          "role": "scorer",
+          "alias": "Bob",
+          "status": "invited",
+          "deviceId": null,
+          "profileId": "db384f78-13d0-4765-b5f0-63ee28c72ead"
+        }
+      ],
+      "sport": "tennis",
+      "access": "member",
+      "format": {
+        "sport": "TENNIS",
+        "setsToWin": 2
+      },
+      "status": "in_progress",
+      "winner": null,
+      "courtId": null,
+      "deleted": false,
+      "endedAt": null,
+      "summary": null,
+      "createdBy": "9b09e391-56be-48c3-afe1-be15b2f53948",
+      "liveState": {
+        "sets": [
+          [
+            1,
+            0
+          ]
+        ],
+        "points": [
+          "15",
+          "0"
+        ]
+      },
+      "startedAt": "2026-10-16T12:00:00+02:00",
+      "discipline": "singles",
+      "accessEpoch": 1,
+      "scheduledAt": null,
+      "participants": [
+        {
+          "team": "A",
+          "hidden": false,
+          "slotId": "s-a",
+          "playerId": null,
+          "position": 1,
+          "profileId": "9b09e391-56be-48c3-afe1-be15b2f53948",
+          "linkStatus": "self",
+          "displayName": "Alice",
+          "deletedProfile": false,
+          "shareWithFriends": false
+        },
+        {
+          "team": "B",
+          "hidden": null,
+          "slotId": "s-b",
+          "playerId": "b9500000-0000-7000-8000-000000000001",
+          "position": 1,
+          "profileId": null,
+          "linkStatus": null,
+          "displayName": "Max",
+          "deletedProfile": false,
+          "shareWithFriends": null
+        }
+      ],
+      "resultReason": null,
+      "tournamentId": null,
+      "serverVersion": 44,
+      "redactionEpoch": 0,
+      "previousMatchId": null,
+      "projectionEventCount": 2
+    }
+  ],
+  "players": [
+    {
+      "id": "b9500000-0000-7000-8000-000000000001",
+      "kind": "guest",
+      "owned": true,
+      "deleted": false,
+      "profileId": null,
+      "displayName": "Max",
+      "serverVersion": 36,
+      "assignmentSource": null
+    }
+  ],
+  "friendships": [
+    {
+      "alias": "Bob",
+      "status": "accepted",
+      "outgoing": true,
+      "profileId": "db384f78-13d0-4765-b5f0-63ee28c72ead",
+      "serverVersion": 33
+    },
+    {
+      "alias": "Vera",
+      "status": "accepted",
+      "outgoing": true,
+      "profileId": "37c703b3-d373-4fc1-a09a-8569e23122ca",
+      "serverVersion": 34
+    }
+  ],
+  "visibilityEpoch": 2
+}
