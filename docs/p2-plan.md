@@ -4,6 +4,7 @@
 |---|---|
 | **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1–3 (PR #40) eingearbeitet |
 | **Status** | Planung + lauffähiger Backend-Spike (`supabase/`) + Schnittstellenentwurf (`shared/cloud-sync`) |
+| **P2-A · 16.10.2026** | Code umgesetzt: Rate-Limits, Onboarding-Cron, Spaltenrechte, CI-Lint, lokaler 500-Match-/Parallel-Lasttest, staging-Deploy-Workflow. Lokal pgTAP/Gradle grün; echter Stack-Lint/Cron in CI und gehostetes staging, DPA/Advisor noch offen. Details: [Backend-README](../supabase/README.md). |
 | **Grundlage** | [PLAN](PLAN.md) (P2, Gate P2, F13–F29), [00](00-entscheidungen.md), [01](01-architektur.md) §4–5, [02](02-scoring-regeln.md) §7, [03](03-backend-datenmodell.md) (§13 = Abgleich mit dem Spike), [Veröffentlichungsplan](release/veroeffentlichungsplan.md) |
 | **Gilt bei Widerspruch** | PLAN.md vor diesem Dokument; dieses Dokument vor 03 für alles, was der Spike konkret festlegt |
 
