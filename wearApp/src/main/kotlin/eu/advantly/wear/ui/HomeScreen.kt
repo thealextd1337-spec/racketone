@@ -22,7 +22,6 @@ import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
-import eu.advantly.wear.BuildConfig
 import eu.advantly.wear.R
 import eu.advantly.wear.diagnostics.FieldTestRecorder
 import eu.advantly.wear.diagnostics.FieldTestToggle
@@ -162,15 +161,9 @@ fun HomeScreen(
                     )
                 }
             }
-            item {
-                Text(
-                    stringResource(R.string.wear_version, BuildConfig.VERSION_NAME),
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = TextAlign.Center,
-                )
-            }
             // P1-Gate: versteckter Feldtest-Schalter, nur Debug-Build
             if (FieldTestRecorder.AVAILABLE) item { FieldTestToggle() }
+            item { BuildVersionLabel() }
         }
     }
 }

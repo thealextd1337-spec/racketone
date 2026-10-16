@@ -200,6 +200,8 @@ fun ComingSoonScreen(
     players: PlayersPort? = null,
     onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
     telemetry: TelemetrySettingsPort? = null,
+    buildCommit: String = "",
+    buildTimeUtc: String = "",
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -239,7 +241,14 @@ fun ComingSoonScreen(
             LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { openLink(privacyUrl) }
             LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { openLink(imprintUrl) }
             if (versionName.isNotBlank()) {
-                Text(stringResource(Res.string.app_version, versionName), style = AdvantlyTheme.typography.caption, color = colors.text2)
+                SelectionContainer {
+                    Text(
+                        stringResource(Res.string.app_version, versionDetails(versionName, buildCommit, buildTimeUtc)),
+                        style = AdvantlyTheme.typography.caption,
+                        color = colors.text2,
+                        modifier = Modifier.testTag("profile_version"),
+                    )
+                }
             }
         }
     }

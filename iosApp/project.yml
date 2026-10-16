@@ -49,6 +49,8 @@ targets:
       path: Generated/iOS-Info.plist
       properties:
         CFBundleDisplayName: Advantly
+        AdvantlyGitCommit: $(ADVANTLY_GIT_COMMIT)
+        AdvantlyBuildTime: $(ADVANTLY_BUILD_TIME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleLocalizations: [en, de]
@@ -101,6 +103,8 @@ targets:
       path: Generated/Watch-Info.plist
       properties:
         CFBundleDisplayName: Advantly
+        AdvantlyGitCommit: $(ADVANTLY_GIT_COMMIT)
+        AdvantlyBuildTime: $(ADVANTLY_BUILD_TIME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleLocalizations: [en, de]

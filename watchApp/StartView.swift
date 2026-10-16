@@ -62,6 +62,13 @@ struct StartView: View {
                     }
                 }
                 #endif
+                Section {
+                    Text(BuildVersionText.details)
+                        .font(.footnote)
+                        .foregroundStyle(Brand.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("buildVersion")
+                }
             }
             .navigationTitle("Advantly")
         }
@@ -326,4 +333,20 @@ enum SetupSlotText {
 
 private extension String {
     var nonBlank: String? { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self }
+}
+
+/// Aus Gradles vorhandener Version.xcconfig; Release lässt die Bauzeit leer.
+enum BuildVersionText {
+    static var details: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
+        let commit = info["AdvantlyGitCommit"] as? String ?? "unknown"
+        var lines = [loc("start.version %@", version) + " · " + commit]
+        if let raw = info["AdvantlyBuildTime"] as? String, let seconds = TimeInterval(raw) {
+            let formatter = DateFormatter()
+            formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
+            lines.append(formatter.string(from: Date(timeIntervalSince1970: seconds)))
+        }
+        return lines.joined(separator: "\n")
+    }
 }

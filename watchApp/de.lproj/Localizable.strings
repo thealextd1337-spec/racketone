@@ -522,3 +522,5 @@
 "serve.choice.game %@ %@" = "Satz %@ · Spiel %@";
 "serve.choice.tb.first %@" = "Satz %@ · Erster Aufschlag";
 "serve.choice.tb.second %@" = "Satz %@ · Erster Aufschlag des anderen Teams";
+
+"start.version %@" = "v%@";

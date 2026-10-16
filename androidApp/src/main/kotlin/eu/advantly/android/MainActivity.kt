@@ -50,6 +50,8 @@ class MainActivity : ComponentActivity() {
             AdvantlyApp(
                 model = model,
                 versionName = BuildConfig.VERSION_NAME,
+                buildCommit = getString(R.string.build_git_commit),
+                buildTimeUtc = getString(R.string.build_time_utc),
                 debugTools = BuildConfig.DEBUG,
                 authModel = auth,
                 googleCredential =

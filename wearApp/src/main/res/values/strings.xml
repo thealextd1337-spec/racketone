@@ -3,7 +3,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
-    <string name="wear_version">Version %1$s</string>
+    <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>

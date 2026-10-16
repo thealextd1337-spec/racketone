@@ -71,6 +71,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
                 configureReleaseSigning(this)
             }
+            configureAndroidBuildInfo()
             dependencies {
                 add("testImplementation", libs.library("junit4"))
             }

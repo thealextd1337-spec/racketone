@@ -135,7 +135,16 @@ object FieldTestRecorder {
         lastSession = read(matchSession.state.value)
         write(
             FieldTestLogic.KIND_START,
-            device = DeviceInfo(Build.MODEL, Build.VERSION.RELEASE, BuildConfig.VERSION_NAME),
+            device =
+                DeviceInfo(
+                    Build.MODEL,
+                    Build.VERSION.RELEASE,
+                    listOf(
+                        BuildConfig.VERSION_NAME,
+                        context.getString(eu.advantly.wear.R.string.build_git_commit),
+                        context.getString(eu.advantly.wear.R.string.build_time_utc),
+                    ).filter(String::isNotBlank).joinToString(" · "),
+                ),
             reason = reason,
         )
         matchSession.addListener(sessionListener)
