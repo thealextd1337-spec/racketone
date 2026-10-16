@@ -297,7 +297,11 @@ festgelegt. Das folgende Workout-Suchfenster ist eine Vorschlagsheuristik, kein 
 
 ### 5.1 Grundsätze
 
-- **Ein Spieler mit eigener Uhr ergibt eine `HealthSession`.** In einem Doppel kann ein Match also bis zu vier HealthSessions haben. Jede gehört ausschließlich ihrem Spieler-Account. Andere sehen sie nur per Opt-in (siehe 6.4).
+- **Eine abgeleitete `HealthSession` pro Spieler und Match, beliebig viele getrennte Quelldatensätze.**
+  Fitbit und Pixel Watch dürfen gleichzeitig über Health Connect liefern. Originalquellen samt externer
+  ID/Version bleiben getrennt; die Auswertung wählt pro Metrik und Zeitabschnitt eine Quelle. In einem Doppel
+  entstehen bis zu vier Match-Auswertungen, nicht höchstens vier Originalaufzeichnungen. Jede gehört ihrem
+  Spieler-Account. Andere sehen nur freigegebene Auswertungen (siehe 6.4), keine Import-Provenienz.
 - Die Zeitbasis ist **UTC in ms**. Jedes Gerät liefert zusätzlich einen monotonen Offset. Die Satzgrenzen kommen aus dem Event-Log der Scoring-Engine, egal auf welchem Gerät gezählt wurde. Abweichungen der Uhrzeit zwischen Geräten (unter 1 s, NTP) sind bei 5-s-Auflösung irrelevant.
 
 ### 5.2 Schema (logisch; Abbildung in Supabase im Dokument [03](03-backend-datenmodell.md))
@@ -307,9 +311,8 @@ HealthSession
   id                  uuid
   matchId             uuid
   playerId            uuid           -- Besitzer, RLS-Schlüssel
-  source              enum APPLE_WATCH | WEAR_OS | GARMIN | IMPORT_HEALTHKIT | IMPORT_HEALTH_CONNECT | ESTIMATE
-  sourceDevice        text           -- "Apple Watch Ultra 2", "Pixel Watch 3", "Forerunner 265"
-  platformRef         text           -- HKWorkout UUID | HC clientRecordId | FIT-Datei-ID
+  revision            long           -- Version der abgeleiteten Auswertung
+  sourceSelections    list           -- Metrik/Zeitabschnitt → HealthSourceRecord + angewandte Version
   startedAt, endedAt  timestamptz
   activeDurationS     int            -- ohne Unterbrechungen (Regen etc.)
   activeKcal, totalKcal  int?
@@ -321,7 +324,33 @@ HealthSession
   quality             enum OK | SPARSE_HR | NO_HR | GAPS     -- siehe 5.5
   segments            jsonb          -- pro Satz: {set, start, end, hrAvg, hrMax, kcal, timeInZoneS[5]}
   seriesRef           text?          -- Storage-Objekt mit Pulsserie (nur bei Cloud-Opt-in)
+
+HealthSourceRecord                    -- Originalnachweis, unabhängig von einer Match-Zuordnung
+  id, ownerProfileId  uuid
+  providerNamespace   text           -- Adapter + Herkunftskonto/Store; keine Zugangsdaten
+  originSource        text           -- ursprüngliche App/Gerät, nicht nur "Health Connect"
+  externalId          text           -- stabile Datensatz-ID innerhalb des Namensraums
+  externalVersion     text?          -- Provider-Version, falls verfügbar
+  importRevision      long           -- lokale Version; kein Vergleich fremder Versionsformate
+  sourceDevice        text?
+  metric, unit        text
+  startedAt, endedAt   timestamptz
+  originalZone        text?
+  deletedAt           timestamptz?
+  contentRef          text?          -- lokal; Cloud nur nach separater Einwilligung
+  unique              (ownerProfileId, providerNamespace, externalId)
+
+HealthSourceSelection                 -- nur Besitzer; bestätigte, korrigierbare Zuordnung
+  sessionId, sourceRecordId, ownerProfileId  uuid
+  metric, start, end, appliedImportRevision
+  state               SELECTED | UNLINKED
 ```
+
+Mehrere Selections dürfen auf dieselbe abgeleitete Session zeigen. Überlappungen derselben Metrik werden
+vor Aggregation aufgelöst; aktive Selections dürfen keine Messabschnitte doppelt zählen. Besitzer von Session
+und Quelle müssen identisch sein. Änderungen/Löschungen einer Quelle invalidieren betroffene Ableitungen
+und führen zu einer neuen Revision; eine gelöste Zuordnung bleibt gegen automatisches Wiederverknüpfen gesperrt.
+Das Backend-Modell ist entsprechend in [03 §3.3.5](03-backend-datenmodell.md) angepasst. Noch keine Migration.
 
 ### 5.3 Sampling-Raten & Datenmenge
 
@@ -332,7 +361,10 @@ HealthSession
 | Garmin | 1 Hz (Sensor-Events), in FIT „smart“ oder 1 s je nach Gerät | – |
 
 - **Vereinheitlichung:** Für Statistik und Sync **resamplen wir auf 5 s** (Mittelwert pro Bucket). Ein 2-h-Match ergibt 1.440 Werte; delta-kodiert (1 Byte bpm + implizite Zeit) und gzip sind das **unter 2 KB**, als JSON-Array etwa 6 KB. Die 1-Hz-Rohdaten bleiben nur lokal bzw. im OS-Health-Speicher.
-- In Supabase landen pro Spieler und Match eine Zeile `HealthSession` (unter 2 KB inklusive Segmente) und optional die 5-s-Serie als Storage-Objekt.
+- In Supabase landet bei Cloud-Einwilligung pro Spieler und Match eine abgeleitete `HealthSession` und
+  optional die 5-s-Serie; getrennte private Herkunfts-/Zuordnungsdaten kommen zusätzlich hinzu. Die frühere
+  Größenabschätzung pro Session ist kein Gesamtbudget für mehrere Quellen. Rohsamples verbleiben lokal/im
+  Health-Speicher; Herkunft und angewandte Revisionen müssen die synchronisierte Auswertung nachvollziehbar machen.
 
 ### 5.4 Pulszonen
 

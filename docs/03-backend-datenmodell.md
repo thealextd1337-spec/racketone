@@ -260,7 +260,7 @@ erDiagram
     uuid id PK
     uuid match_id FK
     uuid profile_id FK
-    text source
+    bigint revision
     smallint hr_avg
     smallint hr_max
     text visibility
@@ -538,13 +538,32 @@ create index on public.player_match_results using gin (opponent_keys);
 
 #### 3.3.5 Health
 
+**P3-Plan, erweitert 16.10.2026:** `health_sessions` ist die abgeleitete Auswertung je Match und Profil,
+nicht die Originalaufzeichnung. Eine Herkunft wie `health_connect` ist kein eindeutiger Gerät-/Datensatzschlüssel.
+Die frühere Eindeutigkeit `(match_id, profile_id, source)` entfällt zugunsten `(match_id, profile_id)`.
+Originalquellen und die Quellenauswahl werden getrennt geplant:
+
+| Entität | Identität und Inhalt | Zugriff |
+|---|---|---|
+| `health_source_records` | UUID; `profile_id`; eindeutig `(profile_id, provider_namespace, external_id)`; ursprüngliche App/Gerät, externe Version, interne Importrevision, Metrik/Einheit, Start/Ende, ursprüngliche Zeitzone, Löschmarker; kein Match-FK, da eine Aufzeichnung mehrere Matches umfassen kann | ausschließlich Besitzer, auch wenn eine Auswertung geteilt ist |
+| `health_source_selections` | Zuordnung `session_id` → `source_record_id`, Besitzer, Metrik, gewähltes Zeitintervall, angewandte Importrevision und Status ausgewählt/gelöst | ausschließlich Besitzer; Quelle und Session müssen per zusammengesetzter Besitzer-FK zum selben Profil gehören |
+| `health_sessions` / `health_series` | revisionierte, aus gewählten Abschnitten abgeleitete Match-Auswertung | bestehende private/ausdrücklich freigegebene Sichtbarkeit |
+
+Vor der P3-Migration sind diese zwei zusätzlichen Tabellen mit RLS und Besitzer-FKs umzusetzen und zu testen;
+die unten stehenden Session-/Series-Policies erteilen ihnen keine Rechte. Provenienz zunächst lokal führen,
+nur bei Cloud-Einwilligung mitsynchronisieren. Keine Rohsamples oder Tokens im Herkunftsnachweis. Gemeinsame
+Provider-Namen dürfen zwei Geräte nicht zusammenlegen. Quellkorrektur/-löschung berechnet betroffene
+Ableitungen atomar neu; Überlappungen derselben Metrik werden vor Summenbildung aufgelöst. Gelöste Zuordnungen
+bleiben als Sperrmarker erhalten. Konto-/Match-Löschung, Widerruf und Export müssen auch die neuen privaten
+Tabellen abdecken; ungenutzte Herkunftsnachweise beim Entfernen der letzten Zuordnung bereinigen.
+Details und Testfälle: [Tracker-Import](p3-tracker-import.md), [05 §5](05-watches-health.md).
+
 ```sql
 create table public.health_sessions (
   id              uuid primary key,                       -- Client-UUIDv7
   match_id        uuid not null references public.matches(id) on delete cascade,
   profile_id      uuid not null references public.profiles(id) on delete cascade,
-  device_id       uuid,
-  source          text not null check (source in ('apple_health','health_connect','wear_os','garmin')),
+  revision        bigint not null,                         -- abgeleitete Auswertung; Herkunft separat
   started_at      timestamptz not null,
   ended_at        timestamptz not null,
   duration_s      int generated always as (extract(epoch from ended_at - started_at)::int) stored,
@@ -560,7 +579,7 @@ create table public.health_sessions (
   server_version  bigint not null,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  unique (match_id, profile_id, source)
+  unique (match_id, profile_id)
 );
 
 create table public.health_series (

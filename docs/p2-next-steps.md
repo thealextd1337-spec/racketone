@@ -38,6 +38,10 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
    funktionsfähiger Export und Kontolöschung mit 14 Tagen Karenz; Widerruf eigener Geräte-Sitzungen.
    Erklärung DE/EN, Anbietervereinbarungen, Data safety und Prüferzugang anhand der tatsächlichen
    Datenflüsse abschließen. Vor dem ersten Pilot mit Auth/Cloud gilt das vorhandene Pilot-Gate.
+7. **Feedback & Admin vor nächstem Online-Pilot.** Android/iOS: Feedback, Featurewünsche und Fehler
+   erfassen und bewusst absenden. Geschütztes Web-Admintool: Meldungen bearbeiten, Kontosupport,
+   Geräte-/Sync-Betrieb und protokollierte Verwaltungsaktionen. Nach B2a den Meldeweg samt privater
+   Inbox als eigenes Paket neben B2b angehen; [Umfang und Abnahme](plan-feedback-admin.md).
 
 ## Danach in Abhängigkeitsreihenfolge
 
