@@ -175,6 +175,11 @@
     <string name="live_no_match">No match in progress.</string>
     <string name="court_right">R</string>
     <string name="court_left">L</string>
+    <string name="live_court_right">Right</string>
+    <string name="live_court_left">Left</string>
+    <string name="live_serve_from">%1$s · %2$s</string>
+    <string name="a11y_serve_court_right">Serving from the right</string>
+    <string name="a11y_serve_court_left">Serving from the left</string>
     <string name="hint_breakpoint">Break point</string>
     <string name="hint_breakpoints">%1$d break points</string>
     <string name="hint_setpoint">Set point</string>
@@ -194,6 +199,7 @@
     <string name="hint_star_point">Star point</string>
     <string name="hint_tiebreak">Tiebreak</string>
     <string name="hint_match_tiebreak">Match tiebreak</string>
+    <string name="hint_super_tiebreak">Super tiebreak</string>
     <string name="hint_changeends">Change ends</string>
     <string name="hint_receive_order_swapped">Switch receiving order</string>
     <string name="hint_side_out">Side out</string>
@@ -469,6 +475,7 @@
     <string name="format_cap">Cap %1$d</string>
     <string name="format_decider">Deciding set: %1$s</string>
     <string name="format_mtb">Match tiebreak to %1$d</string>
+    <string name="format_super_tb">Super tiebreak to %1$d</string>
     <string name="detail_format">Format</string>
     <string name="detail_lineup">Players · local head-to-head</string>
     <string name="detail_sets">Set scores</string>
@@ -528,6 +535,7 @@
     <string name="help_games">Games needed to win a set, normally with a two-game lead. Standard: 6; short sets: 4. A tiebreak normally starts at the chosen number, e.g. 4–4. With 1 game, the set can still reach 2–0 or a tiebreak at 1–1; it is not automatically over after one game.</string>
     <string name="help_deuce">At 40–40: Advantage requires two consecutive points to win the game. No-Ad (tennis) and Golden Point (padel) use one deciding point; the receiving team chooses the receiving side. Star Point (padel): after two advantage cycles, the next deuce is decided by one point.</string>
     <string name="help_deciding">Normal: play a full deciding set. Match tiebreak (also called Champions tiebreak, or Super tiebreak in padel): first to 10 with a two-point lead, replacing the deciding set. Advantage set: two-game lead, no tiebreak. Tiebreak to 10: a full deciding set with a tiebreak to 10 at the configured tie score.</string>
+    <string name="help_deciding_padel">Normal: play a full third set with a tiebreak at the tie score. Super tiebreak: first to 10 with a two-point lead, replacing the third set. No tiebreak: the third set continues until a two-game lead.</string>
     <string name="help_tiebreak">A tiebreak normally starts at 6–6 and goes to 7 with a two-point lead. For shorter sets, the chosen game count sets the tie score. One game earlier means e.g. 3–3 in a four-game set. Without a tiebreak, play until a two-game lead. The deciding-set choice can override this rule.</string>
     <string name="help_serve_stats">Record whether each point used a first serve, second serve or double fault. This adds serve statistics to the result and does not change scoring. You can leave points without serve details.</string>
     <string name="help_discipline">Singles: one player on each side. Doubles: two on each side; the app tracks the serving order. Mixed labels a doubles match and does not change scoring.</string>

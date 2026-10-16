@@ -60,7 +60,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// Ausschließlich nach einem lokalen Punkt sichtbar; Sync-/Ack-Updates verlängern die Frist nicht.
     @Published private(set) var serveBarPointId = ""
     private var serveBarWork: DispatchWorkItem?
-    private var serveBarDeadline = Date.distantPast
+    /// Ausblendzeitpunkt der Aufschlag-Leiste (Restzeit-Anzeige in den Segmenten).
+    @Published private(set) var serveBarDeadline = Date.distantPast
+    /// Zeiten aus der Kotlin-Facade (gleich wie Wear OS).
+    static let serveBarVisible = TimeInterval(AdvantlyWatch.shared.serveBarVisibleMillis()) / 1000
+    static let serveBarAfterChoice = TimeInterval(AdvantlyWatch.shared.serveBarAfterChoiceMillis()) / 1000
+    static let holdToRemove = TimeInterval(AdvantlyWatch.shared.holdToRemoveMillis()) / 1000
     @Published var actionButtonMode = ActionButtonMode.stored {
         didSet {
             ActionButtonMode.stored = actionButtonMode
@@ -316,8 +321,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         dismissServeBar()
         if after.serveInfoEnabled && !after.lastPointId.isEmpty {
             serveBarPointId = after.lastPointId
-            serveBarDeadline = Date().addingTimeInterval(5)
-            scheduleServeBarDismiss(after: 5)
+            serveBarDeadline = Date().addingTimeInterval(Self.serveBarVisible)
+            scheduleServeBarDismiss(after: Self.serveBarVisible)
         }
         if banner == .pointRemoved { banner = nil }
         lockedUntil = now.addingTimeInterval(Self.lockInterval)
@@ -398,7 +403,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         }
         Haptics.play(.click)
         // Auswahl kurz markiert lassen; die ursprünglichen 5 s niemals verlängern.
-        scheduleServeBarDismiss(after: min(1.5, max(0, serveBarDeadline.timeIntervalSinceNow)))
+        scheduleServeBarDismiss(after: min(Self.serveBarAfterChoice, max(0, serveBarDeadline.timeIntervalSinceNow)))
     }
 
     @discardableResult

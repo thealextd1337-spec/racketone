@@ -1,10 +1,13 @@
 package eu.advantly.match.session
 
+import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.PointDetailSet
@@ -105,6 +108,148 @@ class OperationSessionTest {
         assertEquals(before + 1, phone.data.events.count(phone.match.id.value), "kein No-op")
         assertEquals(PlayerId("max"), phone.score.serve?.player)
         assertEquals(PlayerId("max"), phone.match.serverChoice?.chosen)
+    }
+
+    @Test
+    fun expectedChoiceContextRejectsStalePhaseSetMatchAndRoleWithoutEvents() {
+        val (cluster, phone, watch) = cluster()
+        phone.session.create(Presets.TENNIS_SHORT_SETS.format(Discipline.DOUBLES), doubles)
+        cluster.settle()
+        val first = assertNotNull(phone.match.serverChoiceContext)
+        assertEquals(ServerChoicePhase.FIRST, first.phase)
+        assertEquals(GameKind.STANDARD, first.gameKind)
+        assertEquals(PlayerId("me"), first.defaultServer)
+        assertEquals(Side.A, first.dueSide)
+        val remoteCount = watch.data.events.count(phone.match.id.value)
+        assertFalse(watch.session.chooseServer(PlayerId("cem"), first))
+        assertEquals(remoteCount, watch.data.events.count(phone.match.id.value))
+        repeat(4) { phone.session.recordPoint(Side.A) }
+        val second = assertNotNull(phone.match.serverChoiceContext)
+        assertEquals(ServerChoicePhase.SECOND, second.phase)
+        assertEquals(listOf(PlayerId("bea"), PlayerId("cem")), second.players)
+        assertEquals(PlayerId("bea"), second.defaultServer)
+        val count = phone.data.events.count(phone.match.id.value)
+        assertFalse(phone.session.chooseServer(PlayerId("cem"), first), "Spieler wäre in neuem Fenster ebenfalls erlaubt")
+        assertFalse(phone.session.chooseServer(PlayerId("cem"), second.copy(players = listOf(PlayerId("cem")))))
+        assertFalse(phone.session.chooseServer(PlayerId("cem"), second.copy(dueSide = Side.A)))
+        assertFalse(phone.session.chooseServer(PlayerId("nobody"), second))
+        assertEquals(count, phone.data.events.count(phone.match.id.value))
+        assertTrue(phone.session.chooseServer(PlayerId("cem"), second))
+        repeat(12) { phone.session.recordPoint(Side.A) }
+        assertEquals(1, phone.score.current?.setIndex)
+        val next = assertNotNull(phone.match.serverChoiceContext)
+        val nextCount = phone.data.events.count(phone.match.id.value)
+        assertFalse(phone.session.chooseServer(PlayerId("max"), first), "gleiche Phase, anderer Satz")
+        assertEquals(nextCount, phone.data.events.count(phone.match.id.value))
+        cluster.settle()
+        cluster.assertConverged()
+        phone.session.create(Presets.PADEL_GOLDEN_BO3.format(), doubles)
+        val newCount = phone.data.events.count(phone.match.id.value)
+        assertFalse(phone.session.chooseServer(PlayerId("max"), next), "anderes Match mit gleichen Spielern")
+        assertFalse(phone.session.chooseServer(PlayerId("max"), first))
+        assertEquals(newCount, phone.data.events.count(phone.match.id.value))
+    }
+
+    @Test
+    fun expectedChoiceIsIdempotentEvenWhenOpeningTeamChangesAndKeepsRedo() {
+        val (_, phone, _) = cluster()
+        phone.session.create(Presets.PADEL_GOLDEN_BO3.format(), doubles)
+        phone.session.recordPoint(Side.A)
+        phone.session.undo()
+        val first = assertNotNull(phone.match.serverChoiceContext)
+        val count = phone.match.eventCount
+        assertTrue(phone.session.chooseServer(PlayerId("cem"), first))
+        assertEquals(count + 1, phone.match.eventCount)
+        assertEquals(Side.B, phone.match.serverChoiceContext?.dueSide)
+        assertTrue(phone.session.chooseServer(PlayerId("cem"), first), "Doppeltap mit ursprünglichem Kontext")
+        assertEquals(count + 1, phone.match.eventCount)
+        assertTrue(phone.match.canRedo)
+        assertTrue(phone.session.redo())
+        assertEquals(PlayerId("me"), phone.match.lastPoint?.server, "Punkt steht im Log vor der Wahl")
+        assertNull(phone.match.serverChoiceContext, "nach Redo wird die spätere Wahl wieder zur frühzeitigen zweiten Wahl")
+    }
+
+    @Test
+    fun correctionInvalidatesExpectedChoiceAndRetroactiveCollisionIsRejected() {
+        val (cluster, phone, watch) = cluster()
+        phone.session.create(Presets.PADEL_GOLDEN_BO3.format(), doubles)
+        assertTrue(phone.match.canCorrectServerRetroactively)
+        assertTrue(phone.session.chooseServer(PlayerId("max")))
+        val chosen = assertNotNull(phone.match.serverChoiceContext)
+        assertFalse(phone.match.canCorrectServerRetroactively)
+        val count = phone.match.eventCount
+        assertFalse(phone.session.correctServer(PlayerId("cem"), retroactive = true))
+        assertFalse(phone.session.correct(Correction.initialServer(PlayerId("cem"))), "auch direkter Korrekturpfad")
+        assertEquals(count, phone.match.eventCount)
+        assertTrue(phone.session.correctServer(PlayerId("me"), retroactive = false))
+        assertNull(phone.match.serverChoiceContext?.chosen)
+        assertEquals(PlayerId("me"), phone.match.serverChoiceContext?.defaultServer)
+        val correctedCount = phone.match.eventCount
+        assertFalse(phone.session.chooseServer(PlayerId("max"), chosen), "vor Korrektur geöffnetes Sheet")
+        assertEquals(correctedCount, phone.match.eventCount)
+        assertTrue(phone.session.chooseServer(PlayerId("max"), assertNotNull(phone.match.serverChoiceContext)))
+        phone.session.recordPoint(Side.A)
+        val point = assertNotNull(phone.match.lastPoint)
+        assertTrue(phone.session.correctServer(PlayerId("cem"), retroactive = false))
+        assertEquals(PlayerId("cem"), phone.score.serve?.player)
+        assertEquals(PlayerId("max"), phone.match.lastPoint?.server)
+        assertEquals(point.id, phone.match.lastPoint?.id)
+        cluster.settle()
+        assertFalse(watch.session.correctServer(PlayerId("me"), retroactive = false))
+        assertEquals(phone.score.serve, watch.score.serve)
+        cluster.assertConverged()
+    }
+
+    @Test
+    fun choiceContextUsesGameKindForTiebreakAndReopensAfterFirstPointUndo() {
+        for (preset in listOf(Presets.TENNIS_TIEBREAK_ONLY_7, Presets.PADEL_TIEBREAK_ONLY_10)) {
+            val (_, phone, _) = cluster()
+            phone.session.create(preset.format(Discipline.DOUBLES), doubles)
+            val first = assertNotNull(phone.match.serverChoiceContext)
+            assertEquals(GameKind.MATCH_TIEBREAK, first.gameKind)
+            assertTrue(phone.session.chooseServer(PlayerId("max"), first))
+            phone.session.recordPoint(Side.A)
+            val second = assertNotNull(phone.match.serverChoiceContext)
+            assertEquals(ServerChoicePhase.SECOND, second.phase)
+            assertTrue(phone.session.chooseServer(PlayerId("cem"), second))
+            phone.session.undo()
+            val reopened = assertNotNull(phone.match.serverChoiceContext)
+            assertEquals(ServerChoicePhase.FIRST, reopened.phase)
+            assertEquals(PlayerId("cem"), reopened.chosen)
+            assertEquals(PlayerId("cem"), reopened.defaultServer)
+            assertEquals(4, reopened.players.size)
+            val count = phone.match.eventCount
+            assertFalse(phone.session.chooseServer(PlayerId("cem"), second), "auch gleicher Spieler ist in anderer Phase stale")
+            assertEquals(count, phone.match.eventCount)
+        }
+    }
+
+    @Test
+    fun retroactiveCorrectionStillWorksWithoutAnOpeningChoice() {
+        val (_, phone, _) = cluster()
+        phone.session.create(Presets.PADEL_GOLDEN_BO3.format(), doubles)
+        repeat(4) { phone.session.recordPoint(Side.A) }
+        assertTrue(phone.session.chooseServer(PlayerId("cem")))
+        assertTrue(phone.match.canCorrectServerRetroactively, "nur zweite Wahl, keine übersteuernde Eröffnungswahl")
+        assertTrue(phone.session.correctServer(PlayerId("max"), retroactive = true))
+        assertEquals(PlayerId("max"), phone.match.lastPoint?.server)
+        assertEquals(PlayerId("cem"), phone.score.serve?.player)
+    }
+
+    @Test
+    fun choiceContextIsAbsentForSinglesAndOtherSports() {
+        val (_, phone, _) = cluster()
+        for (preset in listOf(
+            Presets.TENNIS_SINGLES_BO3,
+            Presets.PICKLEBALL_DOUBLES_11_SIDEOUT,
+            Presets.BADMINTON_DOUBLES_BO3_21,
+            Presets.TABLE_TENNIS_DOUBLES_BO3,
+        )) {
+            val format = preset.format()
+            phone.session.create(format, if (format.discipline == Discipline.DOUBLES) doubles else SINGLES)
+            assertNull(phone.match.serverChoiceContext, preset.id)
+            assertTrue(phone.match.canCorrectServerRetroactively, preset.id)
+        }
     }
 
     @Test

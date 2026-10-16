@@ -38,7 +38,9 @@ struct MatchPagerView: View {
 /// Undo-Button, deutlich „Anzeige · [Gerät] zählt“, „Stand vor X s“; nach > 30 s ohne Zähler das Angebot
 /// „Zählen übernehmen“ (mit Bestätigung).
 /// Ein Ziel je Berührung, bestimmt beim Aufsetzen. Das Mittelband bleibt bis zum Loslassen nicht-zählend,
-/// auch wenn die Aufschlag-Leiste zwischenzeitlich verschwindet. Ein langer Druck zieht erst beim Loslassen ab.
+/// auch wenn die Aufschlag-Leiste zwischenzeitlich verschwindet. Halten (1 s, Zeit aus der Facade) zieht den letzten
+/// Punkt der Hälfte ab, sobald die Haltezeit erreicht ist – eine Füllung läuft dabei von rechts nach links über die
+/// Hälfte und ist genau beim Auslösen voll; früher loslassen oder Bewegen bricht ab (Feldtest 2026-10-16).
 private enum ScoreTouchTarget {
     case half(sideA: Bool, canRemove: Bool)
     case ignored
@@ -59,6 +61,11 @@ struct ScorePage: View {
     @State private var touchStart: TimeInterval = 0
     @State private var touchStartLocation = CGPoint.zero
     @State private var furthestTravel: CGFloat = 0
+    /// Laufendes Halten: Start, Hälfte, ausgelöst (Füllung voll bis zum Loslassen)
+    @State private var holdStart: Date?
+    @State private var holdSideA = true
+    @State private var holdFired = false
+    @State private var holdWork: DispatchWorkItem?
 
     var body: some View {
         GeometryReader { geo in
@@ -93,23 +100,27 @@ struct ScorePage: View {
                         trackTouch(events, deadTop: deadTop, middleTop: middleTop, middleBottom: middleTop + middle + 2 * guardHeight)
                     }
                     .onEnded { events in
+                        let fired = holdFired
                         defer {
                             target = nil
                             touchId = nil
                             touchIds = []
+                            cancelHold()
                         }
+                        // Halten hat schon ausgelöst: Loslassen tut nichts mehr
+                        if fired { return }
                         guard touchIds.count == 1, events.count == 1, let event = events.first,
                               event.id == touchId, event.phase == .ended,
                               let target, snap.matchId == touchMatchId, snap.isScorer, !dimmed, scenePhase == .active else { return }
-                        guard case let .half(sideA, canRemove) = target else { return }
+                        guard case let .half(sideA, _) = target else { return }
                         let dx = event.location.x - touchStartLocation.x
                         let dy = event.location.y - touchStartLocation.y
                         if dy > 40 && abs(dx) < dy {
                             model.undo()
                         } else if furthestTravel < 14 && abs(dx) < 14 && abs(dy) < 14 {
-                            if event.timestamp - touchStart >= 1 {
-                                if canRemove { model.removePoint(sideA: sideA) }
-                            } else {
+                            // kürzer als die Haltezeit = Tap; länger ohne Abzugsmöglichkeit tut nichts (mit Abzug hat
+                            // das Halten schon beim Erreichen der Haltezeit ausgelöst)
+                            if event.timestamp - touchStart < ScoringModel.holdToRemove {
                                 model.tap(sideA: sideA)
                             }
                         }
@@ -127,6 +138,7 @@ struct ScorePage: View {
         .background(Color.black)
         .onChange(of: dimmed) { _, _ in
             target = nil
+            cancelHold()
         }
         .onChange(of: scenePhase) { _, phase in
             target = nil
@@ -138,7 +150,10 @@ struct ScorePage: View {
             target = nil
         }
         .onChange(of: snap.matchId) { _, _ in target = nil }
-        .onDisappear { target = nil }
+        .onDisappear {
+            target = nil
+            cancelHold()
+        }
         .sheet(isPresented: $chooseServer) {
             ServerChoiceView(model: model, window: ServerChoiceView.key(snap))
         }
@@ -157,10 +172,12 @@ struct ScorePage: View {
         // Mehrfinger/Handballen sperren die gesamte Folge, auch nachdem der erste Finger losgelassen wurde.
         guard touchIds.count == 1, let event = events.first else {
             target = .ignored
+            cancelHold()
             return
         }
         if event.phase == .cancelled {
             target = nil
+            cancelHold()
             return
         }
         if touchId != event.id && event.phase == .active {
@@ -172,18 +189,55 @@ struct ScorePage: View {
             let y = event.location.y
             if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
                 target = .half(sideA: true, canRemove: snap.canRemovePointA)
+                if snap.canRemovePointA { startHold(sideA: true) }
             } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleBottom {
                 target = .half(sideA: false, canRemove: snap.canRemovePointB)
+                if snap.canRemovePointB { startHold(sideA: false) }
             } else {
                 target = .ignored
             }
         }
         furthestTravel = max(furthestTravel, max(abs(event.location.x - touchStartLocation.x), abs(event.location.y - touchStartLocation.y)))
+        if furthestTravel >= 14 && !holdFired { cancelHold() }
+    }
+
+    /// Halten beginnt: Füllung startet, nach der Haltezeit wird abgezogen, solange der Finger still liegt.
+    private func startHold(sideA: Bool) {
+        cancelHold()
+        holdSideA = sideA
+        holdFired = false
+        holdStart = Date()
+        let matchId = snap.matchId
+        let work = DispatchWorkItem {
+            guard holdStart != nil, !holdFired, furthestTravel < 14, touchIds.count == 1, model.snapshot?.matchId == matchId,
+                  case let .half(side, canRemove)? = target, side == sideA, canRemove, !dimmed, scenePhase == .active else { return }
+            holdFired = true
+            model.removePoint(sideA: sideA)
+        }
+        holdWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + ScoringModel.holdToRemove, execute: work)
+    }
+
+    /// Loslassen/Abbruch: Timer weg, Füllung läuft kurz zurück (ausblenden).
+    private func cancelHold() {
+        holdWork?.cancel()
+        holdWork = nil
+        guard holdStart != nil else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            holdStart = nil
+            holdFired = false
+        }
     }
 
     @ViewBuilder
     private func half(sideA: Bool) -> some View {
         let team = TeamHalf(sideA: sideA, snap: snap, flash: model.flashSideA == sideA, dimmed: dimmed)
+            .overlay {
+                if let start = holdStart, holdSideA == sideA, !dimmed {
+                    HoldFill(start: start, fired: holdFired, color: Brand.team(sideA: sideA))
+                        .transition(.opacity)
+                }
+            }
         if snap.isScorer && !dimmed {
             team
                 .accessibilityElement(children: .combine)
@@ -196,6 +250,30 @@ struct ScorePage: View {
         } else {
             team.accessibilityElement(children: .combine).accessibilityAddTraits(.updatesFrequently)
         }
+    }
+}
+
+/// Halte-Fortschritt über einer Hälfte: Füllung von rechts nach links (wie der Restzeit-Balken der Aufschlag-Leiste),
+/// voll genau nach der Haltezeit bzw. sobald ausgelöst. „Bewegung reduzieren“: Schritte statt flüssiger Animation.
+struct HoldFill: View {
+    let start: Date
+    let fired: Bool
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.25 : 1.0 / 30)) { context in
+            let fraction = fired ? 1 : min(1, max(0, context.date.timeIntervalSince(start) / ScoringModel.holdToRemove))
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(color.opacity(0.35))
+                    .frame(width: geo.size.width * fraction)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 4)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -412,13 +490,31 @@ struct ServeIndicator: View {
                 ForEach(0..<max(Int(snap.servesRemaining), 1), id: \.self) { _ in ball }
             } else {
                 ball
-                if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                if tennisDoubles, let server = snap.serverPlayer {
+                    // Tennis/Padel-Doppel: Aufschläger je Game mit Namen, dahinter das Feld ausgeschrieben – kein „auf wen“
+                    Text(verbatim: PlayerText.name(server, doubles: true))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(color)
+                }
+                if tennisDoubles && snap.serverPlayer != nil {
+                    // ausgeschrieben („Max · Rechts“), die Kurzform „R“/„L“ bleibt fürs Einzel und andere Sportarten
+                    if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                        Text(verbatim: "· " + loc(snap.serveCourt == "RIGHT" ? "serve.courtLong.RIGHT" : "serve.courtLong.LEFT"))
+                            .font(.system(size: 11, weight: .bold))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .foregroundStyle(Color.white.opacity(dimmed ? 0.65 : 1))
+                    }
+                } else if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
                     Text(LocalizedStringKey("serve.court." + snap.serveCourt))
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(color)
                 }
             }
-            if snap.doubles && snap.serverNo > 0 {
+            if tennisDoubles && snap.serverPlayer != nil {
+                EmptyView()
+            } else if snap.doubles && snap.serverNo > 0 {
                 Text(String(snap.serverNo))
                     .foregroundStyle(color)
                 if snap.receiverNo > 0 {
@@ -434,7 +530,16 @@ struct ServeIndicator: View {
         .accessibilityLabel(Text(a11y))
     }
 
+    private var tennisDoubles: Bool { snap.doubles && (snap.sport == "TENNIS" || snap.sport == "PADEL") }
+
     private var a11y: String {
+        if tennisDoubles, let server = snap.serverPlayer {
+            let name = PlayerText.name(server, doubles: true)
+            if snap.serveCourt == "RIGHT" || snap.serveCourt == "LEFT" {
+                return loc("a11y.serverFrom." + snap.serveCourt + " %@", name)
+            }
+            return loc("a11y.serverOnly %@", name)
+        }
         guard snap.doubles && snap.serverNo > 0 else { return loc("a11y.serving") }
         let receiver = snap.receiverNo > 0 ? String(snap.receiverNo) : "?"
         return loc("a11y.serveFromTo %@ %@", String(snap.serverNo), receiver)
@@ -533,7 +638,8 @@ struct HintPill: View {
             .overlay(Capsule().stroke(Brand.hint, lineWidth: 1.5))
     }
 
-    /// Schlüssel `hint.<CODE>[_PB|_RALLY][.n %@]` – Pickleball-Satzball heißt Spielball, B/TT-Einstand „Verlängerung“.
+    /// Schlüssel `hint.<CODE>[_PB|_RALLY|_PADEL][.n %@]` – Pickleball-Satzball heißt Spielball, B/TT-Einstand
+    /// „Verlängerung“, Padel-Match-Tiebreak „Super-TB“.
     static func text(_ s: WatchScoreSnapshot) -> String {
         var key = s.hintCode
         if key == "SET_POINT" && s.sport == "PICKLEBALL" {
@@ -541,6 +647,10 @@ struct HintPill: View {
         }
         if (key == "DEUCE" || key == "DECIDING_POINT") && SportStyle.isRally(s.sport) {
             key += "_RALLY"
+        }
+        // Tennis: Champions-Tiebreak, Padel: Super-Tiebreak (gleicher Hinweis-Code der Facade)
+        if key == "MATCH_TIEBREAK" && s.sport == "PADEL" {
+            key += "_PADEL"
         }
         if s.hintCount > 1 {
             return loc("hint." + key + ".n %@", String(s.hintCount))

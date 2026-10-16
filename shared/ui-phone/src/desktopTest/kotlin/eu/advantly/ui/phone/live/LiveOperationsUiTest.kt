@@ -331,6 +331,43 @@ class LiveOperationsUiTest {
             }
         }
 
+    /** Halte-Fortschritt (Feldtest 2026-10-16): läuft von rechts nach links, voll genau beim Auslösen, sonst zurück. */
+    @Test
+    fun holdProgressIsFullWhenTheRemovalTriggersAndResetsOnEarlyRelease() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), "ABB") }
+            show(model)
+
+            fun progress() = onNodeWithTag("panel_them").fetchSemanticsNode().config[HoldProgressKey]
+            mainClock.autoAdvance = false
+            onNodeWithTag("panel_them").performTouchInput { down(center) }
+            mainClock.advanceTimeBy(500)
+            assertEquals(0.5f, progress(), 0.08f)
+            onNodeWithTag("panel_them").performTouchInput { up() }
+            mainClock.advanceTimeBy(400)
+            assertEquals(0f, progress(), 0.001f, "vorzeitig losgelassen: zurückgesetzt")
+            // Handy wie bisher: kürzer als 1 s gehalten zählt beim Loslassen als Tap – abgezogen wird nichts
+            assertEquals(
+                3,
+                model.live.active.value!!
+                    .state.current!!
+                    .points.b,
+                "nichts abgezogen",
+            )
+            onNodeWithTag("panel_them").performTouchInput { down(center) }
+            mainClock.advanceTimeBy(1_050)
+            assertEquals(1f, progress(), 0.001f, "ausgelöst und voll")
+            assertEquals(
+                2,
+                model.live.active.value!!
+                    .state.current!!
+                    .points.b,
+            )
+            onNodeWithTag("panel_them").performTouchInput { up() }
+            mainClock.autoAdvance = true
+            waitForIdle()
+        }
+
     @Test
     fun holdingWithoutRemovablePointCountsOnRelease() =
         runComposeUiTest {

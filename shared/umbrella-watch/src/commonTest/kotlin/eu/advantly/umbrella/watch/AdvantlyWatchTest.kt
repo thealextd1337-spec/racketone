@@ -12,6 +12,13 @@ class AdvantlyWatchTest {
     }
 
     @Test
+    fun operationTimingsMatchWearOs() {
+        assertEquals(5_000L, AdvantlyWatch.serveBarVisibleMillis())
+        assertEquals(1_500L, AdvantlyWatch.serveBarAfterChoiceMillis())
+        assertEquals(1_000L, AdvantlyWatch.holdToRemoveMillis())
+    }
+
+    @Test
     fun engineModuleIsCoreScoring() {
         assertEquals("core-scoring", AdvantlyWatch.engineModule())
     }

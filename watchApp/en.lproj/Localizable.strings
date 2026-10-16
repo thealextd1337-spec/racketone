@@ -55,6 +55,12 @@
 /* Aufschlagfeld links (Kurzform) */
 "serve.court.LEFT" = "L";
 
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Rechts“) */
+"serve.courtLong.RIGHT" = "Right";
+
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Links“) */
+"serve.courtLong.LEFT" = "Left";
+
 /* Trenner in Spielständen (DE 6:4, EN 6–4) */
 "score.separator" = "–";
 
@@ -90,6 +96,9 @@
 
 /* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
 "hint.MATCH_TIEBREAK" = "Match TB";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform), Padel */
+"hint.MATCH_TIEBREAK_PADEL" = "Super TB";
 
 /* Hinweis-Pill mit Anzahl */
 "hint.MATCH_POINT.n %@" = "%@ match pts";
@@ -164,13 +173,13 @@
 "setend.lost" = "lost";
 
 /* Satzende-Dialog */
-"setend.question" = "Another set?";
+"setend.question %@" = "Set %@?";
+
+/* Satzende-Dialog, Pickleball: nummerierte Frage nach dem nächsten Spiel */
+"setend.question.game %@" = "Game %@?";
 
 /* Satzende-Dialog (Primäraktion) */
 "setend.yes" = "Yes";
-
-/* Satzende-Dialog: Match-Tiebreak statt Satz */
-"setend.matchTiebreak" = "Match tiebreak";
 
 /* Satzende-Dialog */
 "setend.no" = "No, end match";
@@ -362,6 +371,15 @@
 /* Bedienhilfe: Aufschläger → Rückschläger im Doppel */
 "a11y.serveFromTo %@ %@" = "Player %1$@ serves to player %2$@";
 
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.RIGHT %@" = "%@ serves from the right";
+
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.LEFT %@" = "%@ serves from the left";
+
+/* Bedienhilfe Tennis/Padel: Aufschläger ohne Feld (Entscheidungspunkt, Rückschläger wählt) */
+"a11y.serverOnly %@" = "%@ serves";
+
 /* Action + Seitentaste (PauseWorkoutIntent) */
 "intent.pause.title" = "Pause match";
 
@@ -457,9 +475,6 @@
 "action.removeThem" = "Remove opponents’ last point";
 "action.restorePoint" = "Restore point";
 "banner.pointRemoved" = "Point removed";
-"serve.first.short" = "1.";
-"serve.second.short" = "2.";
-"serve.df.short" = "DF";
 "serve.first" = "1st serve";
 "serve.second" = "2nd serve";
 "serve.df" = "Double fault";

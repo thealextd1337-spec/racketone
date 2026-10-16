@@ -71,7 +71,8 @@ def main():
     if len(hint_codes) < 8:
         errors.append(f"nur {len(hint_codes)} Hinweis-Codes in {FACADE.name} gefunden – Muster prüfen")
     # Varianten wie in HintPill.text (ScoringView.swift)
-    hint_keys = {f"hint.{c}" for c in hint_codes} | {"hint.SET_POINT_PB", "hint.DEUCE_RALLY", "hint.DECIDING_POINT_RALLY"}
+    hint_keys = {f"hint.{c}" for c in hint_codes} | {"hint.SET_POINT_PB", "hint.DEUCE_RALLY", "hint.DECIDING_POINT_RALLY",
+                                                     "hint.MATCH_TIEBREAK_PADEL"}
     hint_keys |= {f"hint.{c}.n %@" for c in ("MATCH_POINT", "SET_POINT", "SET_POINT_PB", "BREAK_POINT")}
     # Gerätart des Zählers (RoleText.device, PeerKind aus sync-protocol)
     role_keys = {f"role.kind.{k}" for k in ("PHONE", "WATCH", "OTHER")}

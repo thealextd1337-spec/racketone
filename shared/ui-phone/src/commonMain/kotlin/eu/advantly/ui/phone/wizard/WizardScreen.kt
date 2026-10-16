@@ -490,7 +490,7 @@ private fun TennisLikeAdvanced(
     val input = state.input
     val options = state.options
     if (input.sets != SetsChoice.Open && input.sets != SetsChoice.BestOf(1)) {
-        HelpSection(stringResource(decidingTitle(input.sport)), WizardHelp.DECIDING)
+        HelpSection(stringResource(decidingTitle(input.sport)), decidingHelp(input.sport))
         WizardChoices(
             options = options.decidingSets,
             selected = input.decidingSet,

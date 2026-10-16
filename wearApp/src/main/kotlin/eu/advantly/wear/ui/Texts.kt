@@ -259,8 +259,9 @@ fun hintText(
             stringResource(R.string.hint_tiebreak)
         }
 
+        // Tennis: Champions-Tiebreak, Padel: Super-Tiebreak
         ScoreHint.Kind.MatchTiebreak -> {
-            stringResource(R.string.hint_match_tiebreak)
+            stringResource(if (sport == Sport.PADEL) R.string.hint_super_tiebreak else R.string.hint_match_tiebreak)
         }
 
         ScoreHint.Kind.ChangeEnds -> {
@@ -380,18 +381,7 @@ fun toastText(toast: WatchToast): String =
         }
     }
 
-/** Kurzlabel der Aufschlag-Leiste („1.“, „2.“, „DF“). */
-@Composable
-fun serveShortText(outcome: ServeOutcome): String =
-    stringResource(
-        when (outcome) {
-            ServeOutcome.FIRST_SERVE_IN -> R.string.serve_first_short
-            ServeOutcome.SECOND_SERVE_IN -> R.string.serve_second_short
-            ServeOutcome.DOUBLE_FAULT -> R.string.serve_double_fault_short
-        },
-    )
-
-/** Langlabel (TalkBack, Listen): „1. Aufschlag“, „2. Aufschlag“, „Doppelfehler“. */
+/** Label der Aufschlag-Leiste (Score und Listen, auch TalkBack): „1. Aufschlag“, „2. Aufschlag“, „Doppelfehler“. */
 @Composable
 fun serveText(outcome: ServeOutcome): String =
     stringResource(
@@ -423,6 +413,16 @@ fun nextSetText(
             }
         },
     )
+
+/**
+ * Frage im Satzende-Dialog, nummeriert nach dem nächsten Satz: „2. Satz?“ (en „Set 2?“), Pickleball „2. Spiel?“
+ * („Game 2?“). [finishedSet] = gerade beendeter Satz (1-basiert, [eu.advantly.wear.live.DecisionUi.setNumber]).
+ */
+@Composable
+fun nextSetQuestion(
+    sport: Sport,
+    finishedSet: Int,
+): String = stringResource(if (sport == Sport.PICKLEBALL) R.string.dialog_next_game else R.string.dialog_next_set, finishedSet + 1)
 
 /** Versionshinweis (W2-Vertrag §5); [short] für die Statuszeile im Score. */
 @Composable

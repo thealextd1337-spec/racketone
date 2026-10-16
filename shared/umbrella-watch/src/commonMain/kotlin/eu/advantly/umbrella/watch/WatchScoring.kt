@@ -36,6 +36,8 @@ import eu.advantly.match.session.IdGenerator
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.ScorerChoice
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
 import eu.advantly.match.session.SessionThreadViolation
@@ -394,6 +396,27 @@ class WatchScoring internal constructor(
         return command { session, _ -> session.chooseServer(PlayerId(playerId)) }
     }
 
+    /** Sichere Sheet-Variante mit dem beim Öffnen gelesenen Kontext; stale Tap → NOT_ALLOWED, ohne Event. */
+    fun chooseServer(
+        playerId: String,
+        expected: WatchServerChoiceContext,
+    ): WatchScoreSnapshot? {
+        if (playerId.isBlank()) return fail(INVALID_INPUT)
+        return command { session, match ->
+            val context = expected.toSession(usSide(match)) ?: return@command false
+            session.chooseServer(PlayerId(playerId), context)
+        }
+    }
+
+    /** Aufschläger „ab jetzt“ bzw. ohne übersteuernde eröffnende Wahl rückwirkend korrigieren. */
+    fun correctServer(
+        playerId: String,
+        retroactive: Boolean,
+    ): WatchScoreSnapshot? {
+        if (playerId.isBlank()) return fail(INVALID_INPUT)
+        return command { session, _ -> session.correctServer(PlayerId(playerId), retroactive) }
+    }
+
     /** Satzart aus nextSetOptions; unbekannter Code → INVALID_INPUT, nicht angebotene Art → NOT_ALLOWED. */
     fun startNextSet(kind: String): WatchScoreSnapshot? {
         val option = NextSetKind.entries.firstOrNull { it.name == kind } ?: return fail(INVALID_INPUT)
@@ -529,38 +552,53 @@ class WatchScoring internal constructor(
             } catch (e: Exception) {
                 null
             } ?: sync.pendingToPeers
-        var players = emptyList<WatchPlayer>()
-        var prompt = false
         val data = backend?.data
         val us = usSide(match)
         val choice = match.serverChoice
-        if (data != null && choice != null) {
-            try {
-                players =
-                    choice.players.map { id ->
-                        val side = match.lineup.sideOf(id)!!
-                        WatchPlayer(
-                            id.value,
-                            data.players
-                                .get(id)
-                                ?.displayName
-                                .orEmpty()
-                                .takeUnless { data.isPlaceholder(id) }
-                                .orEmpty(),
-                            if (side == us) "A" else "B",
-                            match.lineup.players(side).indexOf(id) + 1,
-                            data.isSelf(id),
-                        )
-                    }
-                // Nach Korrektur aufgehobene Wahl auch im ersten Satz erneut anbieten; aus dem Log rekonstruieren.
-                val opening = choice.game == 1 && match.state.sets.isEmpty()
-                val made = opening && choice.chosen == null && openingChoiceMade(match, data)
-                prompt = match.isScorer && choice.chosen == null && (!opening || made)
-            } catch (e: Exception) {
-                // Optionales Personenverzeichnis darf den vorhandenen Spielstand nicht verschwinden lassen.
-            }
+
+        // Fehlertolerant: fehlende Namen oder ein Lesefehler liefern leere Namen/false, entfernen aber nie einen Spieler.
+        fun watchPlayer(id: PlayerId): WatchPlayer? {
+            val side = match.lineup.sideOf(id) ?: return null
+            val name =
+                try {
+                    data
+                        ?.players
+                        ?.get(id)
+                        ?.displayName
+                        .orEmpty()
+                        .takeUnless { data?.isPlaceholder(id) == true }
+                        .orEmpty()
+                } catch (e: Exception) {
+                    ""
+                }
+            val self =
+                try {
+                    data?.isSelf(id) == true
+                } catch (e: Exception) {
+                    false
+                }
+            return WatchPlayer(id.value, name, if (side == us) "A" else "B", match.lineup.players(side).indexOf(id) + 1, self)
         }
-        return buildSnapshot(match, sync, scorerLostAtMs, us, pending, current?.droppedInputs?.count ?: 0, players, prompt)
+        // Fehlende Namen oder ein Lesefehler dürfen keinen zulässigen Spieler aus der Auswahl entfernen.
+        val players =
+            choice?.players.orEmpty().map { id ->
+                checkNotNull(watchPlayer(id)) { "Wählbarer Aufschläger $id ohne Seite" }
+            }
+        // Die bisherige Prompt-Präsentation wird erst in AP5 umgestellt; Kontext/Optionen sind davon unabhängig.
+        val opening = choice?.game == 1 && match.state.sets.isEmpty()
+        val made =
+            try {
+                opening && choice.chosen == null && data != null && openingChoiceMade(match, data)
+            } catch (e: Exception) {
+                false
+            }
+        val prompt = match.isScorer && choice != null && choice.chosen == null && (!opening || made)
+        // Aufschläger mit Namen (Platzhalter ohne Namen → Swift-Standardbezeichnung): Doppel-Anzeige „Name · R/L“
+        val serverPlayer =
+            match.state.serve
+                ?.player
+                ?.let(::watchPlayer)
+        return buildSnapshot(match, sync, scorerLostAtMs, us, pending, current?.droppedInputs?.count ?: 0, players, prompt, serverPlayer)
     }
 
     private fun openingChoiceMade(
@@ -806,6 +844,8 @@ class WatchPlayer(
  * @property server Spieler-ID (UUID) des Aufschlägers oder `""`
  * @property receiver Spieler-ID (UUID) des Rückschlägers oder `""` (offene Wahl/kein Aufschlag)
  * @property serverNo Aufschläger als Nummer im Team (1/2, Reihenfolge der Besetzung), sonst `0` – Doppel „2 → 1“
+ * @property serverPlayer Aufschläger mit Namen (leer bei Platzhalter), Team-Code und Nummer, `null` ohne Aufschlag –
+ *   Tennis/Padel-Doppel zeigen „Name · R/L“ statt „Aufschläger → Rückschläger“
  * @property receiverNo Rückschläger als Nummer im Team (1/2), `0` wenn offen (Entscheidungspunkt) oder ohne Aufschlag
  * @property rightNoA wer von A im rechten Feld steht (1/2; Pickleball/Badminton, 02 §8 `positions`), sonst `0`
  * @property leftNoA wer von A im linken Feld steht (1/2), `0` im Einzel bzw. ohne Positionen
@@ -940,10 +980,49 @@ class WatchScoreSnapshot(
     val serverChoiceChosen: String = "",
     val serverChoicePlayers: List<WatchPlayer> = emptyList(),
     val serverChoicePrompt: Boolean = false,
+    val serverPlayer: WatchPlayer? = null,
     val nextSetOptions: List<String> = emptyList(),
     val updateRequired: String = "",
     val setKinds: List<String> = emptyList(),
+    val serverChoiceContext: WatchServerChoiceContext? = null,
+    val canCorrectServerRetroactively: Boolean = true,
 )
+
+/**
+ * Lokaler Fensterkontext für Swift ohne SKIE. Satzindex nullbasiert, phase FIRST/SECOND, gameKind aus der Engine.
+ * dueSide in Besitzerperspektive (A = Wir). IDs bleiben stabile Plätze, auch ohne Personenauflösung.
+ * Unverändert an chooseServer(playerId, expected) zurückgeben; nicht persistieren/synchronisieren.
+ */
+class WatchServerChoiceContext(
+    val matchId: String,
+    val setIndex: Int,
+    val phase: String,
+    val players: List<String>,
+    val dueSide: String,
+    val defaultServer: String,
+    val chosen: String,
+    val gameKind: String,
+)
+
+private fun WatchServerChoiceContext.toSession(us: Side): ServerChoiceContext? {
+    if (matchId.isBlank() || setIndex < 0 || players.any { it.isBlank() } || defaultServer.isBlank()) return null
+    val side =
+        when (dueSide) {
+            "A" -> us
+            "B" -> us.other
+            else -> return null
+        }
+    return ServerChoiceContext(
+        MatchId(matchId),
+        setIndex,
+        ServerChoicePhase.entries.firstOrNull { it.name == phase } ?: return null,
+        players.map { PlayerId(it) },
+        side,
+        PlayerId(defaultServer),
+        chosen.takeIf { it.isNotEmpty() }?.let { PlayerId(it) },
+        GameKind.entries.firstOrNull { it.name == gameKind } ?: return null,
+    )
+}
 
 /** Hinweis-Pill: Code, Side (`A`/`B`/`""`), Anzahl. */
 internal data class WatchHint(
@@ -994,6 +1073,7 @@ internal fun buildSnapshot(
     droppedInputs: Int = 0,
     serverChoicePlayers: List<WatchPlayer> = emptyList(),
     serverChoicePrompt: Boolean = false,
+    serverPlayer: WatchPlayer? = null,
 ): WatchScoreSnapshot {
     val them = us.other
 
@@ -1154,6 +1234,21 @@ internal fun buildSnapshot(
                 .orEmpty(),
         serverChoicePlayers = serverChoicePlayers,
         serverChoicePrompt = serverChoicePrompt,
+        serverChoiceContext =
+            match.serverChoiceContext?.let {
+                WatchServerChoiceContext(
+                    it.matchId.value,
+                    it.setIndex,
+                    it.phase.name,
+                    it.players.map { id -> id.value },
+                    code(it.dueSide),
+                    it.defaultServer.value,
+                    it.chosen?.value.orEmpty(),
+                    it.gameKind.name,
+                )
+            },
+        canCorrectServerRetroactively = match.canCorrectServerRetroactively,
+        serverPlayer = serverPlayer,
         nextSetOptions = match.nextSetOptions.map { it.name },
         updateRequired = updateCode(sync),
         setKinds = sets.map { it.kind.name },

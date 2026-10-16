@@ -64,6 +64,7 @@
     <string name="player_opponent_1">Opponent 1</string>
     <string name="player_opponent_2">Opponent 2</string>
     <string name="serve_arrow" translatable="false">%1$s → %2$s</string>
+    <string name="serve_from" translatable="false">%1$s · %2$s</string>
     <string name="heart_rate_value" translatable="false">♥ %1$d</string>
     <string name="heart_rate_unknown" translatable="false">♥ --</string>
     <string name="role_view">VIEW ONLY</string>
@@ -83,6 +84,8 @@
     <string name="sync_ago_minutes">%1$d min ago</string>
     <string name="sync_no_contact">No contact</string>
     <string name="sync_last_update">Last update %1$s</string>
+    <string name="status_view_live">VIEW · %1$s scoring</string>
+    <string name="status_view_stale">VIEW · %1$s</string>
     <string name="take_over_offer">Take over scoring</string>
     <plurals name="rejected_inputs">
         <item quantity="one">%1$d input not applied</item>
@@ -113,6 +116,7 @@
     <string name="hint_extension">Deuce</string>
     <string name="hint_tiebreak">Tiebreak</string>
     <string name="hint_match_tiebreak">Match tiebreak</string>
+    <string name="hint_super_tiebreak">Super tiebreak</string>
     <string name="hint_change_ends">Change ends</string>
     <string name="hint_receive_swap">Swap receivers</string>
     <string name="hint_side_out">Side out</string>
@@ -173,8 +177,8 @@
     <string name="unit_game">Game %1$d</string>
     <string name="decision_won">won</string>
     <string name="decision_lost">lost</string>
-    <string name="dialog_another_set">Another set?</string>
-    <string name="dialog_another_game">Another game?</string>
+    <string name="dialog_next_set">Set %1$d?</string>
+    <string name="dialog_next_game">Game %1$d?</string>
     <string name="decision_waiting">%1$s decides</string>
     <string name="finished_title">Match over</string>
 
@@ -189,7 +193,7 @@
         <item quantity="other">%1$d games</item>
     </plurals>
     <string name="setup_serve_stats">Track serve statistics</string>
-    <string name="setup_serve_stats_hint">After each point: 1st · 2nd · DF</string>
+    <string name="setup_serve_stats_hint">After each point: 1st/2nd serve or double fault</string>
     <string name="live_remove_point_us">Remove our last point</string>
     <string name="live_remove_point_them">Remove opponents\' last point</string>
     <string name="live_point_removed">Point removed</string>
@@ -198,9 +202,6 @@
     <string name="serve_first_in">1st serve</string>
     <string name="serve_second_in">2nd serve</string>
     <string name="serve_double_fault">Double fault</string>
-    <string name="serve_first_short">1st</string>
-    <string name="serve_second_short">2nd</string>
-    <string name="serve_double_fault_short">DF</string>
     <string name="server_choice_title_game1">Who serves first?</string>
     <string name="server_choice_title_game2_us">Who serves for us?</string>
     <string name="server_choice_title_game2_them">Who serves for the opponents?</string>
@@ -223,6 +224,11 @@
     <string name="a11y_score">Score %1$s to %2$s</string>
     <string name="a11y_serving_us">Serve: us</string>
     <string name="a11y_serving_them">Serve: them</string>
+    <string name="serve_court_right">Right</string>
+    <string name="serve_court_left">Left</string>
+    <string name="a11y_serve_court_right">Serving from the right</string>
+    <string name="a11y_serve_court_left">Serving from the left</string>
+    <string name="a11y_server">%1$s serves</string>
     <string name="a11y_view_only">View only, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->
@@ -253,7 +259,6 @@
     <string name="notification_match_title">Match running</string>
     <string name="notification_match_scorer">This watch is scoring – tap to open</string>
     <string name="notification_match_display">Live score from the phone – tap to open</string>
-    <string name="live_workout_telemetry">♥ %1$s</string>
     <string name="live_workout_telemetry_description">Heart rate: %1$s beats per minute, steps: %2$s</string>
     <string name="telemetry_unknown">—</string>
     <string name="setup_unassigned">Unassigned</string>

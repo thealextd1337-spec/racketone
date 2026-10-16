@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 class ActionStripTest {
     /** Pixel Watch 3 (41 mm): 384 px bei 2 px/dp = 192 dp. */
@@ -80,7 +82,7 @@ class ActionStripTest {
     fun segmentsSplitTheStripEvenly() {
         val third = g.width / 3
         assertEquals(0, ActionStrip.segment(g.left + 1f, g, 3))
-        assertEquals(0, ActionStrip.segment(g.left + third - 1f, g, 3))
+        assertEquals(0, ActionStrip.segment(g.left + third - 3f, g, 3))
         assertEquals(1, ActionStrip.segment(size / 2, g, 3))
         assertEquals(2, ActionStrip.segment(g.left + 2 * third + 1f, g, 3))
         assertEquals("rechter Rand gehört zum letzten Segment", 2, ActionStrip.segment(g.right, g, 3))
@@ -88,5 +90,47 @@ class ActionStripTest {
         assertEquals(1, ActionStrip.segment(size / 2 + 1f, g, 2))
         assertNull(ActionStrip.segment(5f, g, 3))
         assertNull(ActionStrip.segment(size / 2, g, 0))
+    }
+
+    /** Gewichtete Segmente (Aufschlag-Leiste: „Doppelfehler“ breiter): Darstellung und Treffer aus denselben Bereichen. */
+    @Test
+    fun weightedSegmentsShareRangesWithTheHitTest() {
+        val weights = listOf(1f, 1f, 1.3f)
+        val ranges = ActionStrip.segmentRanges(g, weights)
+        assertEquals(3, ranges.size)
+        assertEquals(g.left, ranges.first().start, 0.01f)
+        assertEquals(g.right, ranges.last().endInclusive, 0.01f)
+        assertEquals("Abstand", ActionStrip.SEGMENT_GAP_DP * density, ranges[1].start - ranges[0].endInclusive, 0.01f)
+        val width = ranges.map { it.endInclusive - it.start }
+        assertEquals(width[0], width[1], 0.01f)
+        assertEquals(1.3f, width[2] / width[0], 0.001f)
+        ranges.forEachIndexed { i, r ->
+            assertEquals(i, ActionStrip.segment((r.start + r.endInclusive) / 2, g, weights))
+            assertEquals(i, ActionStrip.segment(r.start, g, weights))
+            assertEquals(i, ActionStrip.segment(r.endInclusive, g, weights))
+        }
+        // Lücke: linke Hälfte zum linken, rechte Hälfte zum rechten Segment
+        val gapMid = (ranges[0].endInclusive + ranges[1].start) / 2
+        assertEquals(0, ActionStrip.segment(gapMid - 1f, g, weights))
+        assertEquals(1, ActionStrip.segment(gapMid + 1f, g, weights))
+        assertNull(ActionStrip.segment(g.right + 1f, g, weights))
+        assertNull(ActionStrip.segment(size / 2, g, emptyList()))
+    }
+
+    /** Die breite Leiste (kleiner Seitenrand) bleibt mit ihren Ecken im runden Display – auf allen Größen. */
+    @Test
+    fun stripCornersStayInsideRoundDisplays() {
+        for (dp in listOf(160f, 180f, 192f, 208f, 228f, 260f, 450f)) {
+            val geo = ActionStrip.geometry(dp, dp, 1f)
+            val r = dp / 2
+            for (y in listOf(geo.visualTop, geo.visualTop + geo.visualHeight)) {
+                for (x in listOf(geo.left, geo.right)) {
+                    // Segmentecken sind gerundet: geprüft wird der Punkt 3 dp diagonal nach innen
+                    val dx = abs(x - r) - 3f
+                    val dy = abs(y - r) - 3f
+                    assertTrue("$dp dp: Ecke ($x, $y) außerhalb", sqrt(dx * dx + dy * dy) <= r)
+                }
+            }
+        }
     }
 }

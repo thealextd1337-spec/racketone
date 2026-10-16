@@ -12,6 +12,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.CorrectionKind
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
@@ -643,13 +644,22 @@ class MatchSession(
     fun chooseServer(player: PlayerId): Boolean {
         checkThread()
         val m = scoringMatch() ?: return false
-        val state = m.engine.state
-        val choice = state.serverChoice ?: return false
-        val setIndex = state.current?.setIndex ?: return false
+        val expected = deriveServerChoiceContext(m.id, m.engine.state) ?: return false
+        return chooseServer(player, expected)
+    }
+
+    /** Sichere Sheet-Variante: [expected] muss noch zum aktuellen Wahlfenster passen (kein Wire-Feld). */
+    fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext,
+    ): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        val context = deriveServerChoiceContext(m.id, m.engine.state) ?: return false
+        if (!context.accepts(expected, player)) return false
         val side = m.record.lineup.sideOf(player) ?: return false
-        if (player !in choice.players) return false
-        if (choice.chosen == player) return true
-        emit(m, listOf(ServerChosen(setIndex, side, player)))
+        if (context.chosen == player) return true
+        emit(m, listOf(ServerChosen(context.setIndex, side, player)))
         return true
     }
 
@@ -682,9 +692,22 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         if (m.status == MatchStatus.FINISHED) return false
+        if (correction.kind == CorrectionKind.INITIAL_SERVER && !canCorrectServerRetroactively(m.engine)) return false
         m.redo.clear()
         emit(m, listOf(correction))
         return true
+    }
+
+    /** Geprüfte Aufschlägerkorrektur; rückwirkend nur ohne übersteuernde eröffnende Wahl. Sonst „ab jetzt“ wählen. */
+    fun correctServer(
+        player: PlayerId,
+        retroactive: Boolean,
+    ): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        if (m.record.lineup.sideOf(player) == null || m.status == MatchStatus.FINISHED) return false
+        if (!retroactive && m.status != MatchStatus.IN_PROGRESS && m.status != MatchStatus.PAUSED) return false
+        return correct(if (retroactive) Correction.initialServer(player) else Correction.server(player))
     }
 
     /** Unterbrechung (Regen, Verletzung). Lässt den Redo-Stapel unberührt. */
@@ -1834,6 +1857,7 @@ class MatchSession(
                 },
             serveInfoEnabled = serveInfoEnabled(m),
             canRemovePoint = SidePair.of { isScorer && ScoringEngine.lastEffectivePointOf(engine, it) != null },
+            canCorrectServerRetroactively = canCorrectServerRetroactively(engine),
             nextSetOptions =
                 if (engine.state.status == MatchStatus.AWAITING_DECISION) ScoringEngine.nextSetOptions(m.record.format) else emptyList(),
         )

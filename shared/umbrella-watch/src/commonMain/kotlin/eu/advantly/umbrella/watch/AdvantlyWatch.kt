@@ -3,6 +3,7 @@ package eu.advantly.umbrella.watch
 import eu.advantly.core.scoring.CoreScoringInfo
 import eu.advantly.data.DataInfo
 import eu.advantly.device.link.DeviceLinkInfo
+import eu.advantly.match.session.OperationTimings
 
 /**
  * Öffentliche Swift-API von `AdvantlyWatchKit` – bewusst klein halten (Facade).
@@ -35,4 +36,13 @@ object AdvantlyWatch {
 
     /** Zählen bzw. Anzeigen auf der Uhr über die gemeinsame Match-Session (W1-E); eine Instanz je Prozess. */
     fun scoring(): WatchScoring = sharedScoring
+
+    /** Aufschlag-Leiste: sichtbar ohne Auswahl (ms) – gleiche Zeit wie Wear OS (`OperationTimings`). */
+    fun serveBarVisibleMillis(): Long = OperationTimings.SERVE_BAR_VISIBLE_MILLIS
+
+    /** Aufschlag-Leiste: nach einer Auswahl noch sichtbar (ms), verlängert nie. */
+    fun serveBarAfterChoiceMillis(): Long = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
+
+    /** Halten auf einer Hälfte zum Abziehen des letzten Punktes (ms). */
+    fun holdToRemoveMillis(): Long = OperationTimings.HOLD_TO_REMOVE_MILLIS
 }

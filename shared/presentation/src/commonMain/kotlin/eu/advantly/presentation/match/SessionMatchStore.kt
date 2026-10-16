@@ -46,6 +46,7 @@ import eu.advantly.device.link.CompanionState
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
+import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -248,6 +249,11 @@ class SessionMatchStore(
 
     override fun chooseServer(player: PlayerId): Boolean = session.chooseServer(player)
 
+    override fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext,
+    ): Boolean = session.chooseServer(player, expected)
+
     override fun setServeInfo(
         pointId: EventId,
         value: ServeOutcome?,
@@ -283,15 +289,7 @@ class SessionMatchStore(
     override fun correctServer(
         player: PlayerId,
         retroactive: Boolean,
-    ): Boolean {
-        val m = current() ?: return false
-        if (!m.isScorer || m.lineup.sideOf(player) == null) return false
-        val status = m.state.status
-        if (status == MatchStatus.FINISHED) return false
-        // Correction(SERVER) gilt nur bei IN_PROGRESS/PAUSED (02 §7.1), INITIAL_SERVER jederzeit
-        if (!retroactive && status != MatchStatus.IN_PROGRESS && status != MatchStatus.PAUSED) return false
-        return session.correct(if (retroactive) Correction.initialServer(player) else Correction.server(player))
-    }
+    ): Boolean = session.correctServer(player, retroactive)
 
     override fun pause(): Boolean = session.pause()
 
@@ -611,6 +609,7 @@ class SessionMatchStore(
             serveInfoEnabled = m.serveInfoEnabled,
             canRemovePoint = m.canRemovePoint,
             nextSetOptions = m.nextSetOptions,
+            canCorrectServerRetroactively = m.canCorrectServerRetroactively,
             sync =
                 SyncInfo(
                     peers = sync.peers.count { it.compatibility == CompatibilityStatus.COMPATIBLE },

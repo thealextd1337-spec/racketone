@@ -1,6 +1,6 @@
 # W2 – UI-Vertrag „Bedienung & Statistik“
 
-Stand: 2026-10-15 · Paket W2-A (Engine, Spezifikation, Session-API) · Normativ ist [02-scoring-regeln.md](02-scoring-regeln.md) (§5.1, §5.2, §6.5.5, §7.2, §7.3, §8, §11, Entscheidungen K14–K20).
+Stand: 2026-10-16 · Paket W2-A (Engine, Spezifikation, Session-API) · Normativ ist [02-scoring-regeln.md](02-scoring-regeln.md) (§5.1, §5.2, §6.5.5, §7.2, §7.3, §8, §11, Entscheidungen K14–K20).
 
 Diese Notiz beschreibt, was die UI-Pakete (Handy, Wear OS, Apple Watch) nutzen. Alle Kommandos sind **local-first und synchron**: Liefern sie `true`, zeigt der Zustand die Änderung sofort. Sie wirken **nur auf dem Zähler** (Single-Scorer, 02 §7.5); auf Anzeige-Geräten liefern sie `false` und schreiben nichts. Ungültige Eingaben liefern `false` und schreiben ebenfalls nichts.
 
@@ -70,3 +70,65 @@ Diese Notiz beschreibt, was die UI-Pakete (Handy, Wear OS, Apple Watch) nutzen. 
 - **Watch:** Die Uhr ist meist Zähler. Aufschlägerwahl und „Punkt abziehen“ sind auf der Uhr sinnvoll; die Aufschlag-Leiste nur, wenn das UI-Paket sie vorsieht (02 §11.2 empfiehlt sie am Handy). Swift-Facade (watchOS, ohne SKIE): `ServerChoice`/`LastPoint` als einfache Klassen bzw. Felder durchreichen.
 - **Versionsunterschied:** Die Sync-Protokollversion ist jetzt 2 (`minV` 2, 01 §4.3). Ein Gerät mit älterem App-Stand ist inkompatibel; die Geräte tauschen dann nichts aus. Anzeige: `LiveMatchPort.updateRequired` (auch ohne Match) bzw. `LiveMatchSnapshot.sync.updateRequired` – `OTHER_DEVICE` → „Bitte Advantly auf der Uhr aktualisieren“ / „Please update Advantly on your watch“ (bzw. Handy), `THIS_DEVICE` → „Bitte Advantly auf diesem Gerät aktualisieren“ / „Please update Advantly on this device“. Session: `SyncStatus.versionMismatch` (`PEER_TOO_OLD`/`PEER_TOO_NEW`). Alte Logs bleiben vollständig lesbar.
 - `InputKind` für verworfene Eingaben: `ServerChosen` erscheint als `CORRECTION`.
+
+## 6. Aufschlagwahl live (F30, 16.10.2026; AP1/AP2)
+
+Verbindlich: [Plan](plan-aufschlagwahl.md), insbesondere §3.1 und §3.5. Tennis-/Padel-Doppel einschließlich ihrer Tiebreak-Formate: „Erster Aufschlag“ entfällt im Setup/Wizard auf Uhr und Handy; automatisch wählen lässt nur das zählende Gerät live. Vier Spieler in FIRST, zwei in SECOND, bei jedem neuen Satz wieder vier (fälliges Team zuerst, freie Teamwahl bleibt Freizeitregel). `serverChoice.game` ist eine **Wahlphase**, kein allgemeiner Game-Zähler. Texte über `current.gameKind` wählen: STANDARD → Spiel 1/2, TIEBREAK/MATCH_TIEBREAK → erster Aufschlag / erster Aufschlag des anderen Teams. Andere Sportarten und Einzel bleiben unverändert.
+
+„Später“, Zurück und Sheet-Dismiss schließen ohne Event; den aus `serve.player` berechneten Default nennen. Kein Pflicht-Gate. Während der Auswahl keine Punkte durch Touch, Hardware oder Bedienungshilfe an darunterliegende Eingaben durchreichen. UI merkt Dismiss pro Match/Satz/Phase lokal; Refresh/Ambient-Rückkehr öffnet nicht wieder, Prozessneustart oder neuer Zähler darf ein offenes unentschiedenes Fenster erneut zeigen. Replizierte gültige Wahl nicht erneut verlangen. Korrektur mit `chosen=null` erneut anbieten; nach Undo auf null Ballwechsel auch eine markierte Wahl einmal überprüfen lassen. Rollen-/Match-/Fensterwechsel schließen das Sheet. Aufschlagstatistik darf die Wahl nicht dauerhaft verdrängen.
+
+Kommandos aus einem Sheet müssen den erwarteten Fensterkontext übergeben und vor dem Schreiben abweisen, wenn Match, Satz, Phase, Side oder Spielermenge veraltet sind. Gleiche noch wirksame Wahl ist idempotent; falsche Rolle schreibt nichts. Bestehende parameterlose Kontext-Aufrufe bleiben kompatibel. Keine Wire-/Event-Änderung (Protokoll 3).
+
+Undo nimmt einen Punkt bzw. das bisherige undo-fähige Kommando zurück, nicht die Wahl. Über Game-/Satzgrenzen und bei null Ballwechseln gilt unverändert die Replay-Semantik aus 02 §6.5.5. Nach expliziter Wahl kann `INITIAL_SERVER` übersteuert werden: keine falsche Erfolgsmeldung. Erneute Wahl im offenen Fenster, sonst Vorwärtskorrektur **„ab jetzt“**; bereits gezählte Punkte und ihre Aufschläger bleiben dabei unverändert.
+
+### 6.1 API für AP3–AP6 (AP2)
+
+Gemeinsame Typen aus `eu.advantly.match.session` (kein Compose, keine Plattform- oder Wire-Typen):
+
+```kotlin
+enum class ServerChoicePhase { FIRST, SECOND }
+data class ServerChoiceContext(
+    val matchId: MatchId,
+    val setIndex: Int,                 // nullbasiert
+    val phase: ServerChoicePhase,
+    val players: List<PlayerId>,        // Engine-Reihenfolge, fälliges Team zuerst
+    val dueSide: Side,
+    val defaultServer: PlayerId,        // tatsächlicher Aufschläger bei „Später“
+    val chosen: PlayerId?,
+    val gameKind: GameKind,
+)
+fun deriveServerChoiceContext(matchId: MatchId, state: MatchState): ServerChoiceContext?
+```
+
+`ActiveMatch.serverChoiceContext` und `LiveMatchSnapshot.serverChoiceContext` liefern dieselbe Ableitung; `null` bedeutet kein Fenster. `MatchSession` und `LiveMatchPort` (beide Store-Implementierungen) ergänzen:
+
+```kotlin
+fun chooseServer(player: PlayerId, expected: ServerChoiceContext): Boolean
+fun correctServer(player: PlayerId, retroactive: Boolean): Boolean
+```
+
+Der Einparameter-Aufruf `chooseServer(player)` bleibt erhalten; neue Sheets verwenden die Variante mit dem **beim Öffnen gespeicherten** Kontext. Die Prüfung durch `accepts()` erfolgt vor Schreiben/IDs/Broadcast: `matchId`, `setIndex`, `phase`, `gameKind` und die Spielermenge (`players.toSet()`, unabhängig von der Reihenfolge) müssen übereinstimmen; der gewählte `player` muss in `players` enthalten sein. Zusätzlich müssen `dueSide`, `defaultServer` und `chosen` übereinstimmen, außer bei idempotenter gleicher, noch wirksamer Wahl (`chosen == player`). Diese ist mit dem ursprünglichen Kontext ein No-op (kein Event), auch wenn sie die Team-/Spielerreihenfolge geändert hat; alle übrigen Feldprüfungen gelten weiterhin. Rolle wird vor der Idempotenz geprüft. Keine Bindung an Eventzahl, Statistik- oder Sync-Refresh; kein Wire-Feld.
+
+Nach jeder erfolgreichen Wahl bzw. jedem Snapshot-Wechsel Kontext neu lesen; Auswahl-Sheet schließen/aktualisieren, wenn sich `serverChoiceContext` ändert (auch durch `PlayerAssigned`).
+
+`ActiveMatch.canCorrectServerRetroactively` und `LiveMatchSnapshot.canCorrectServerRetroactively` signalisieren, ob eine rückwirkende Korrektur ohne übersteuernde eröffnende Wahl möglich ist. Der Schutz gilt auch bei direktem `MatchSession.correct(Correction.initialServer(...))`: `false` ohne Event/Redo-Verlust bei Kollision. Eine reine zweite Wahl sperrt den rückwirkenden Weg nicht. Im offenen Fenster neu wählen; anschließend `retroactive=false` klar als „ab jetzt“ beschriften. Vorwärtskorrekturen lassen historische Aufschlägerzuordnungen unverändert. Verfügbarkeit/Status/Zählerrolle sind zusätzlich zu beachten.
+
+Apple Watch (`WatchScoring.kt`, Main-/Session-Thread, ohne SKIE) erhält einfache Klassen/Werte:
+
+```kotlin
+class WatchServerChoiceContext(
+    val matchId: String, val setIndex: Int, val phase: String,
+    val players: List<String>, val dueSide: String,
+    val defaultServer: String, val chosen: String, val gameKind: String,
+)
+// WatchScoreSnapshot:
+val serverChoiceContext: WatchServerChoiceContext?
+val canCorrectServerRetroactively: Boolean
+// WatchScoring:
+fun chooseServer(playerId: String, expected: WatchServerChoiceContext): WatchScoreSnapshot?
+fun correctServer(playerId: String, retroactive: Boolean): WatchScoreSnapshot?
+```
+
+`phase` = `FIRST`/`SECOND`, `chosen` leer = keine Wahl, `dueSide` in **Besitzerperspektive** (`A` Wir / `B` Gegner), `gameKind` = Engine-Code. Den erhaltenen Kontext unverändert zurückgeben. `null` plus `NOT_ALLOWED` bei stale/ungültiger Wahl oder Korrekturkollision, `NOT_SCORER` bei falscher Rolle, `THREAD_VIOLATION` bei falschem Thread; leere Spieler-ID → `INVALID_INPUT`. Bisheriges `chooseServer(playerId)` und alle bisherigen Snapshot-Felder bleiben erhalten. Fehlende Personenauflösung entfernt keine wählbaren Platz-IDs; Namen dürfen leer sein (lokalisierter Platzhalter in Swift).
+
+AP2 stellt Daten und sichere Kommandos bereit. Automatische Sheet-Steuerung, lokale „Später“-Merker und die Entfernung der bisherigen ersten Prompt-Unterdrückung folgen in AP3–AP6. Die bestehende Apple-Eigenschaft `serverChoicePrompt` bleibt bis AP5 unverändert; neue Präsentation nicht allein daraus ableiten.

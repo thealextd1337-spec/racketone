@@ -15,6 +15,7 @@ import kotlin.math.min
  *   bleiben – die Trefferzone ist größer als die Darstellung, wie bei Material-Mindestflächen üblich)
  * @property usArea Höhe der Zählfläche „Wir“, solange die Leiste steht (Ende der oberen Totzone bis Schutzstreifen)
  * @property themArea Höhe der Zählfläche „Gegner“, solange die Leiste steht (Schutzstreifen bis Displayunterkante)
+ * @property segmentGap sichtbarer Abstand zwischen zwei Segmenten ([ActionStrip.segmentRanges])
  */
 data class StripGeometry(
     val top: Float,
@@ -25,6 +26,7 @@ data class StripGeometry(
     val visualHeight: Float,
     val usArea: Float,
     val themArea: Float,
+    val segmentGap: Float = 0f,
 ) {
     val width: Float get() = right - left
     val height: Float get() = bottom - top
@@ -70,8 +72,15 @@ object ActionStrip {
     /** Anteil der Höhe, den die Trefferzone auf großen Displays hat. */
     const val MIN_HEIGHT_FRACTION = 0.16f
 
-    /** Seitenrand links und rechts (Anteil der Breite); innerhalb davon liegen die Segmente. */
-    const val SIDE_MARGIN = 0.06f
+    /**
+     * Seitenrand links und rechts (Anteil der Breite); innerhalb davon liegen die Segmente. Klein gehalten, damit die
+     * ausgeschriebenen Aufschlag-Labels Platz haben – die Leiste liegt auf Höhe des Durchmessers, ihre Ecken bleiben
+     * auch auf runden Displays im Kreis (getestet).
+     */
+    const val SIDE_MARGIN = 0.03f
+
+    /** Sichtbarer Abstand zwischen zwei Segmenten. */
+    const val SEGMENT_GAP_DP = 3f
 
     /**
      * Geometrie für ein Display von [width] × [height] px bei [density] px/dp. Auf Displays ab etwa 178 dp Höhe sind alle
@@ -103,6 +112,7 @@ object ActionStrip {
             visualHeight = max(0f, touch - 2 * VISUAL_INSET_DP * density),
             usArea = top - guard - deadTop,
             themArea = height - bottom - guard,
+            segmentGap = SEGMENT_GAP_DP * density,
         )
     }
 
@@ -126,8 +136,42 @@ object ActionStrip {
         x: Float,
         g: StripGeometry,
         count: Int,
+    ): Int? = segment(x, g, List(count.coerceAtLeast(0)) { 1f })
+
+    /**
+     * Sichtbare x-Bereiche (px) der Segmente mit den relativen Breiten [weights]: Die Leistenbreite abzüglich der
+     * Abstände ([StripGeometry.segmentGap]) wird nach Gewicht verteilt. Darstellung und Trefferprüfung ([segment])
+     * nutzen genau diese Bereiche.
+     */
+    fun segmentRanges(
+        g: StripGeometry,
+        weights: List<Float>,
+    ): List<ClosedFloatingPointRange<Float>> {
+        val total = weights.sum()
+        if (weights.isEmpty() || total <= 0f || g.width <= 0f) return emptyList()
+        val unit = max(0f, g.width - g.segmentGap * (weights.size - 1)) / total
+        var start = g.left
+        return weights.mapIndexed { i, w ->
+            // letztes Segment endet exakt am rechten Rand (keine Rundungslücke zur Trefferzone)
+            val range = start..(if (i == weights.lastIndex) g.right else start + w * unit)
+            start = range.endInclusive + g.segmentGap
+            range
+        }
+    }
+
+    /**
+     * Segment unter [x] bei Segmenten mit den Breiten [weights] ([segmentRanges]). Ein Abstand zwischen zwei Segmenten
+     * wird in der Mitte geteilt und zählt zum nächstgelegenen Segment; außerhalb der Leiste `null`.
+     */
+    fun segment(
+        x: Float,
+        g: StripGeometry,
+        weights: List<Float>,
     ): Int? {
-        if (g.width <= 0f || count <= 0 || x < g.left || x > g.right) return null
-        return ((x - g.left) / g.width * count).toInt().coerceIn(0, count - 1)
+        if (x < g.left || x > g.right) return null
+        val ranges = segmentRanges(g, weights)
+        if (ranges.isEmpty()) return null
+        val index = ranges.indexOfFirst { x <= it.endInclusive + g.segmentGap / 2 }
+        return if (index < 0) ranges.lastIndex else index
     }
 }
