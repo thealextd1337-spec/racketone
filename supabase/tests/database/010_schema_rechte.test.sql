@@ -29,7 +29,8 @@ $$, 'Kern-Tabellen ohne direkte INSERT/DELETE-Rechte');
 select is_empty($$
   select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private') and has_function_privilege('anon', p.oid, 'EXECUTE')
-$$, 'anon darf keine Funktion in public/private ausführen');
+    and p.proname not in ('issue_age_ticket', 'bind_age_ticket', 'cancel_age_ticket')
+$$, 'anon darf ausschließlich Altersgate-Ticket-RPCs ausführen');
 
 select ok(not has_function_privilege('authenticated', 'public.admin_purge_due_accounts(interval)', 'EXECUTE'),
           'Löschjob nur für service_role');
