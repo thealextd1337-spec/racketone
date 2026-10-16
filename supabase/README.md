@@ -31,7 +31,8 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…16000300_sync_pull_performance.sql` | Rechteprüfungen beim Pull nur einmal je Match, Ersteller-Kurzpfad |
 | `migrations/…16000400_wartung_timeouts_volatilitaet.sql` | Timeouts für den bestehenden Löschjob, korrekte STABLE-Einstufung der Projektionsbereinigung |
 | `migrations/…16000500_auth_altersgate.sql` | P2-C: anonyme Einmal-Tickets, Identitätsbindung, Before-User-Created-Hook, Alias-Onboarding, Abbruchwiderruf und Bereinigung; alter Spike-Onboarding-RPC für Clients gesperrt |
-| `tests/database/*.test.sql` | pgTAP (460 Prüfungen in 17 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte, Auth-Altersgate und Review-Regressionen |
+| `migrations/…16000600_auth_xff_vertrauen.sql` | XFF-Fallback nur mit ausdrücklicher lokaler/Self-Host-DB-Freigabe; Hosted nutzt Cloudflare oder das kleine gemeinsame Ersatzbudget |
+| `tests/database/*.test.sql` | pgTAP (480 Prüfungen in 18 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob, effektive Spaltenrechte, Auth-Altersgate und Review-Regressionen |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
 | `tests/perf/backend_perf.py` | optionaler Lasttest mit 500 Matches, parallelen Uploads, Cursor-Prüfung und EXPLAIN-JSON; außerhalb des CI-Pfads |
 
@@ -320,10 +321,20 @@ serverseitigen Altersnachweis; ein ohne Hook erzeugtes Konto bleibt unbrauchbar,
 Admin-/Invite-Pfade umgehen den Hook: `service_role` **nie zur Kontoanlage** in Edge Functions, Skripten oder
 Supportwerkzeugen verwenden. pgTAP 150 modelliert diese Inserts und belegt die zweite Linie.
 
-IP-Budgets verwenden kanonisches `cf-connecting-ip`, sonst `x-forwarded-for` (erster Eintrag hinter dem Proxy),
-niemals `x-real-ip`; fehlend/ungültig: kleines gemeinsames Budget von drei je Aktion/Minute. Ausstellung zehn je
-IP/Gerät, bind/cancel 30 je IP, global 1.000/Minute. Diese Header sind nur bei nachgewiesenem Entfernen/Überschreiben
-oder Ablehnen gefälschter Clientheader vertrauenswürdig. **Staging-Spoofing-Test und Quellen in der
+IP-Budgets verwenden kanonisches `cf-connecting-ip` (auf Hosted von Cloudflare überschrieben), niemals
+`x-real-ip`. Der clientgewählte erste Eintrag von `x-forwarded-for` wird nur mit
+`current_setting('app.settings.trust_xff', true) = 'on'` als Fallback genutzt. **Auf Hosted/staging keinen
+XFF-Schalter setzen.** Ohne Cloudflare-IP und ohne Freigabe oder bei ungültiger IP: kleines gemeinsames Budget
+von drei je Aktion/Minute. Ausstellung zehn je IP/Gerät, bind/cancel 30 je IP, global 1.000/Minute.
+Migration `…16000600` ersetzt nur die Funktion, setzt keinen DB-Default und lässt Owner/Grants unverändert.
+Die pgTAP-Tests 140/150 setzen `set local app.settings.trust_xff = 'on'` ausschließlich in ihrer Transaktion;
+Test 160 prüft die geschlossene Voreinstellung und gefälschte Header. Das Paralleltest-Skript aktiviert die
+Freigabe nur in seinen lokalen Testsitzungen. Ein stackweiter Schalter ist für Stack/CI daher nicht nötig.
+Lokal/Self-Host darf nach nachgewiesenem Entfernen/Überschreiben oder Ablehnen gefälschter Clientheader eine
+ausschließlich lokale Seed-/Test-Konfiguration `alter database postgres set app.settings.trust_xff = 'on'`
+setzen (wirksam für neue Verbindungen); niemals in einer staging-Migration. PostgREST darf nicht am geprüften
+Gateway vorbei erreichbar sein. **Staging-Spoofing-Test mit allen drei Headern und Ergebnis/Zeitpunkt im
+Abnahmeprotokoll sowie Quellen in der
 [P2-C-Anleitung](../docs/p2c-auth.md#ticket-zuordnung-und-sicherheitsgrenze) sind Pflicht vor Freigabe.**
 Auth-Rate-Limits und hCaptcha/Turnstile im Dashboard für den Pilot empfohlen; CAPTCHA erst mit implementiertem
 nativen Challenge-Flow aktivieren. Es ersetzt weder Ticketbudget noch Hook.

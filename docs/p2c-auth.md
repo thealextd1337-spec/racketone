@@ -77,8 +77,14 @@ großem verteiltem Missbrauch ein möglicher Engpass; Budget-Ablehnungen überwa
 Untergrenze sperrt das clientgewählte Installationsgeheimnis 24 Stunden.
 
 **Proxy-Annahme (vor Freigabe nachweisen):** PostgREST liefert Header in `request.headers`. Vorrang hat
-`cf-connecting-ip`; sonst der erste Eintrag von `x-forwarded-for` hinter dem Supabase-Proxy, wie im
-[Supabase-Beispiel](https://supabase.com/docs/guides/api/securing-your-api#request-information).
+`cf-connecting-ip`, das auf Supabase-Hosted von Cloudflare überschrieben wird. Der erste Eintrag von
+`x-forwarded-for` ist clientgewählt und wird standardmäßig **ignoriert**. Nur wenn die DB-Einstellung
+`app.settings.trust_xff` exakt `on` ist, dient er als Fallback. **Auf Hosted/staging diesen Schalter nicht setzen.**
+Ohne Cloudflare-IP und ohne Freigabe greift das gemeinsame Dreierbudget. Die neue Migration
+`20261016000600_auth_xff_vertrauen.sql` setzt keinen solchen DB-Default; lokale Tests aktivieren ihn ausdrücklich
+in ihrer Testsitzung. Für lokale/Self-Host-Instanzen ist eine Freigabe erst nach nachgewiesenem Überschreiben
+der Clientheader zulässig (z. B. `alter database postgres set app.settings.trust_xff = 'on'` in einer ausschließlich
+lokalen Seed-/Test-Konfiguration, nie in einer staging-Migration).
 IP-Literale werden kanonisiert, Netze/ungültige Werte nutzen das kleine Ersatzbudget; `x-real-ip` wird ignoriert.
 Die SQL-Funktion kann die Herkunft eines Headers nicht verifizieren. Daher müssen Supabase/Cloudflare/Kong
 unvertrauenswürdige Clientwerte **entfernen/überschreiben oder die Anfrage ablehnen**, und PostgREST darf nicht
@@ -193,6 +199,8 @@ ersetzt aber nicht das Ziel „kein ungeprüfter Auth-Nutzer“.
    kurzes kontrolliertes E-Mail-Signup-Testfenster öffnen (Google bleibt AUS), folgenden Aufruf ausführen und
    Signup danach sofort wieder AUS. Mit Signup AUS liefert GoTrue nur `signup_disabled`; das beweist den Hook
    ausdrücklich nicht. Für den eigentlichen Hook-Nachweis ist dieses Testfenster deshalb erforderlich.
+   Auf Hosted **kein** `app.settings.trust_xff = 'on'` setzen; die Header-Abnahme aus Schritt 8 bleibt Pflicht
+   und muss vor dauerhafter Signup-/Google-Freigabe im Abnahmeprotokoll stehen.
 
    ```bash
    curl -sS -w '\nHTTP %{http_code}\n' "$SUPABASE_URL/auth/v1/signup" \
@@ -235,7 +243,10 @@ Linie greift auch bei Admin-/Invite-Inserts und bei einem irrtümlich auf `activ
    Künftiges Browser-OAuth/Apple-Linking erst mit PKCE und verifiziertem HTTPS-App-Link freischalten:
    z. B. `https://advantly.eu/auth/callback`, zugehörige `assetlinks.json`, Android `autoVerify` sowie
    iOS Associated Domains/Universal Links. Keine ungeprüften Wildcards oder bloßes Custom-Scheme als Freigabe.
-8. RPC über das tatsächliche staging-Gateway prüfen: echte IP vorhanden, gefälschtes `X-Real-IP` überschrieben;
+8. RPC über das tatsächliche staging-Gateway prüfen: `cf-connecting-ip` wird vom Gateway überschrieben,
+   `x-forwarded-for` ohne ausdrückliche DB-Freigabe und `x-real-ip` werden ignoriert. Auf Hosted keinen
+   XFF-Schalter setzen. Den oben beschriebenen Spoofing-Test mit allen drei gefälschten Headern durchführen
+   und Ergebnis/Zeitpunkt im Abnahmeprotokoll festhalten; ohne bestandenen Nachweis keine Freigabe.
    Ticket-Body nicht im Logging. In `cron.job` muss `advantly-purge-age-gate` aktiv sein, Zeitplan `29 * * * *`,
    Befehl `set statement_timeout = '60s'; select private.purge_age_gate();` (als Owner prüfen).
    Dann Pilot-Abnahme unten durchführen.

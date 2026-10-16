@@ -1,5 +1,6 @@
 -- Sicherheitsreview P2-C: Transportbudgets, Ersatzbindung, zweite Linie und Metadaten-Minimierung.
 begin;
+set local app.settings.trust_xff = 'on';
 select plan(37);
 select set_config('request.headers','{"x-real-ip":"203.0.113.99"}',true);
 select is(private.age_client_ip(), null::text, 'X-Real-IP wird nicht vertraut');

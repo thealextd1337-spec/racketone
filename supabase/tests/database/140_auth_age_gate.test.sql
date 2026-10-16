@@ -1,5 +1,6 @@
 -- P2-C: echte DB-Funktionen, keine externen Dienste. GoTrue-Ende-zu-Ende-Abnahme separat auf staging.
 begin;
+set local app.settings.trust_xff = 'on';
 select plan(67);
 select is(private.age_result('AT','2012-10-16','2026-10-15 22:00:00+00'), 'ok', 'AT: 14 am Geburtstag, Wien bereits 16.10.');
 select is(private.age_result('AT','2012-10-16','2026-10-15 21:59:59+00'), 'age_below_minimum', 'AT: Sekunde vor Mitternacht zu jung');
