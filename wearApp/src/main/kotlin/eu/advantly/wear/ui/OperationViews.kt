@@ -102,7 +102,8 @@ private fun ServeBar(
 ) {
     val density = LocalDensity.current
     val ranges = ActionStrip.segmentRanges(geometry, OperationRules.serveWeights(bar))
-    Box(modifier = modifier) {
+    // schwarz hinterlegt: darunter liegende Namenszeilen scheinen nicht durch die Lücken
+    Box(modifier = modifier.background(Color.Black, SEGMENT_SHAPE)) {
         bar.options.zip(ranges).forEach { (outcome, range) ->
             ServeSegment(
                 outcome = outcome,

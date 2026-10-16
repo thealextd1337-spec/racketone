@@ -142,20 +142,30 @@ fun activeWorkout(): WorkoutUiState =
         steps = 12_345,
     )
 
-/** [LiveActions], die jeden Aufruf aufzeichnet (`setServe(FIRST_SERVE_IN)` …); Boolean-Rückgaben `true`. */
-class RecordingActions {
-    val calls = mutableListOf<String>()
+/** Beliebiges Aktions-Interface als Aufzeichnung (`setServe(FIRST_SERVE_IN)` …); Boolean-Rückgaben `true`. */
+inline fun <reified T : Any> recording(calls: MutableList<String> = mutableListOf()): T = recording(T::class.java, calls)
 
-    val actions: LiveActions =
-        Proxy.newProxyInstance(LiveActions::class.java.classLoader, arrayOf(LiveActions::class.java)) { proxy, method, args ->
+fun <T : Any> recording(
+    type: Class<T>,
+    calls: MutableList<String>,
+): T =
+    type.cast(
+        Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, args ->
             when (method.name) {
-                "toString" -> return@newProxyInstance "RecordingActions"
+                "toString" -> return@newProxyInstance "Recording(${type.simpleName})"
                 "hashCode" -> return@newProxyInstance System.identityHashCode(proxy)
                 "equals" -> return@newProxyInstance proxy === args?.firstOrNull()
             }
             calls += "${method.name}(${args?.joinToString().orEmpty()})"
             if (method.returnType == java.lang.Boolean.TYPE) true else Unit
-        } as LiveActions
+        },
+    )
+
+/** [LiveActions], die jeden Aufruf aufzeichnet. */
+class RecordingActions {
+    val calls = mutableListOf<String>()
+
+    val actions: LiveActions = recording(LiveActions::class.java, calls)
 }
 
 /** Wie in [WearApp]: Material-Theme und AppScaffold (Uhrzeit oben). */

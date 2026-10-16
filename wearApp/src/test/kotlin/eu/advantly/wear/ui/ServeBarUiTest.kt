@@ -73,6 +73,23 @@ class ServeBarUiTest {
         rule.screenshot("serve-bar-de-228dp")
     }
 
+    // Samsung Galaxy Watch (rund, xhdpi): 396 px (40 mm), 432 px (Watch 6/7 40 mm), 480 px (44 mm/Ultra)
+
+    @Test
+    @Config(qualifiers = "de-w198dp-h198dp-round-watch-xhdpi")
+    fun germanLabelsFitOnGalaxyWatch396px() = checkStrip(serveBar())
+
+    @Test
+    @Config(qualifiers = "de-w216dp-h216dp-round-watch-xhdpi")
+    fun germanLabelsFitOnGalaxyWatch432px() = checkStrip(serveBar(selected = ServeOutcome.DOUBLE_FAULT))
+
+    @Test
+    @Config(qualifiers = "de-w240dp-h240dp-round-watch-xhdpi")
+    fun germanLabelsFitOnGalaxyWatch480px() {
+        checkStrip(serveBar())
+        rule.screenshot("serve-bar-de-galaxy-480px")
+    }
+
     @Test
     @Config(qualifiers = "en-w192dp-h192dp-round-watch-xhdpi")
     fun englishLabelsFit() {
