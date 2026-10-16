@@ -271,6 +271,18 @@ class ScoreLayoutUiTest {
         // Doppel-Pfeil und der Anzeige-Hinweis unten (Feldbefund Galaxy Watch8: „unten abgeschnitten“)
         rects[LiveTags.SERVE_MARKER] = marker
         for ((tag, r) in rects) assertInsideCircle(tag, r, root)
+        // Kein Text wird in seinem Knoten abgeschnitten (Bounds allein reichen nicht: geclippter Text läge „innen“).
+        // Telemetrie, Satzstände und Hinweis müssen vollständig sichtbar sein (ohne „…“); Namen dürfen mit „…“ enden.
+        val complete =
+            listOfNotNull(LiveTags.SETS, LiveTags.HINT.takeIf(::exists)) +
+                (if (telemetry) TelemetryKind.entries.map(LiveTags::telemetryValue) else emptyList())
+        for (tag in complete) {
+            val layout = rule.onNodeWithTag(tag, useUnmergedTree = true).textLayout()
+            val text = layout.layoutInput.text.text
+            assertFalse("$tag „$text“ abgeschnitten", layout.hasVisualOverflow)
+            assertFalse("$tag „$text“ gekürzt", layout.isLineEllipsized(0))
+            assertEquals("$tag „$text“ vollständig", text.length, layout.getLineEnd(0, visibleEnd = true))
+        }
         if (telemetry) {
             val heart = rects.getValue(LiveTags.HEART_RATE)
             val steps = rects.getValue(LiveTags.STEPS)

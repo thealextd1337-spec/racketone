@@ -10,11 +10,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -25,13 +28,14 @@ import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.LocalTextStyle
 import androidx.wear.compose.material3.Text
 import eu.advantly.wear.R
+import eu.advantly.wear.live.TelemetryFormat
 import eu.advantly.wear.workout.WorkoutUiState
 
 /** Welche Seite der Telemetrie: links Puls, rechts Schritte. */
 internal enum class TelemetryKind { HEART_RATE, STEPS }
 
 /**
- * Puls (links) bzw. Schritte (rechts) als kompakte Spalte „♥ / 168“ bzw. Schritt-Symbol / „12345“ am runden Rand auf
+ * Puls (links) bzw. Schritte (rechts) als kompakte Spalte „♥ / 168“ bzw. Schritt-Symbol / „9876“ („12,3k“) am runden Rand auf
  * Höhe der Mitte (Feldtest 2026-10-16: unten verdeckte die Zeile „Gegner“). Feste Breite [TELEMETRY_WIDTH], die Zahl
  * schrumpft bei Bedarf statt abgeschnitten zu werden; die Spalte darf über das schmale Mittelband hinausragen (dort
  * liegen am Rand weder Ziffern noch Namen). Nicht klickbar; im Ambient-Modus gedimmt, Werte dort höchstens 1×/min.
@@ -44,15 +48,20 @@ internal fun TelemetrySide(
     isAmbient: Boolean,
     modifier: Modifier,
 ) {
-    val pulse = workout.heartRateBpm?.toString() ?: stringResource(R.string.telemetry_unknown)
-    val steps = workout.steps?.toString() ?: stringResource(R.string.telemetry_unknown)
-    val description = stringResource(R.string.live_workout_telemetry_description, pulse, steps)
+    val unknown = stringResource(R.string.telemetry_unknown)
+    val pulse = workout.heartRateBpm?.toString() ?: unknown
+    val locale = LocalConfiguration.current.locales[0]
+    // Anzeige kompakt (ab 10.000 „12,3k“), TalkBack ausgeschrieben
+    val steps = workout.steps?.let { TelemetryFormat.steps(it, locale) } ?: unknown
+    val description = stringResource(R.string.live_workout_telemetry_description, pulse, workout.steps?.toString() ?: unknown)
     val color = if (isAmbient) AmbientDigits else Color.White
+    // Untergrenze physisch (dp): bei großer Systemschrift so klein wie bei normaler, statt abgeschnitten zu werden
+    val minSize = with(LocalDensity.current) { TELEMETRY_MIN_DP.dp.toSp() }
     val semantics =
         if (kind == TelemetryKind.HEART_RATE) {
-            Modifier.clearAndSetSemantics { contentDescription = description }
+            Modifier.semantics { contentDescription = description }
         } else {
-            Modifier.clearAndSetSemantics {}
+            Modifier
         }
     Column(
         modifier =
@@ -64,22 +73,34 @@ internal fun TelemetrySide(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (kind == TelemetryKind.HEART_RATE) {
-            Text("♥", fontSize = 10.sp, lineHeight = 11.sp, color = if (isAmbient) AmbientDigits else ErrorRed, maxLines = 1)
+            Text(
+                "♥",
+                modifier = Modifier.semantics { hideFromAccessibility() },
+                fontSize = 10.sp,
+                lineHeight = 11.sp,
+                color = if (isAmbient) AmbientDigits else ErrorRed,
+                maxLines = 1,
+            )
         } else {
             Icon(painterResource(R.drawable.ic_steps), contentDescription = null, tint = color, modifier = Modifier.size(11.dp))
         }
         BasicText(
             text = if (kind == TelemetryKind.HEART_RATE) pulse else steps,
+            // im Baum (Layout-Tests prüfen Abschneiden), für TalkBack aber nur die Beschreibung an der Puls-Spalte
+            modifier = Modifier.testTag(LiveTags.telemetryValue(kind)).semantics { hideFromAccessibility() },
             style =
                 LocalTextStyle.current.merge(
                     TextStyle(color = color, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 1.1.em),
                 ),
             maxLines = 1,
             softWrap = false,
-            autoSize = TextAutoSize.StepBased(minFontSize = 7.sp, maxFontSize = 10.sp, stepSize = 0.5.sp),
+            autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = 10.sp, stepSize = 0.25.sp),
         )
     }
 }
 
-/** Breite einer Telemetrie-Spalte (fünfstellige Schrittzahl bei 9–10 sp). */
+/** Breite einer Telemetrie-Spalte (drei Ziffern Puls, vier Ziffern bzw. „12,3k“ Schritte bei 9–10 sp). */
 internal val TELEMETRY_WIDTH = 26.dp
+
+/** Kleinste Schrift der Telemetrie-Werte (dp, unabhängig von der Systemschrift). */
+private const val TELEMETRY_MIN_DP = 7.5f

@@ -686,7 +686,10 @@ private fun MiddleBand(
     val telemetry = workout.telemetryActive
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         if (telemetry) TelemetrySide(TelemetryKind.HEART_RATE, workout, isAmbient, Modifier.padding(start = TELEMETRY_EDGE))
-        Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            // Hinweis-Pill höchstens HINT_MAX_FRACTION der Mitte: die Satzstände behalten immer ihren Platz (große Schrift)
+            val hintMax = maxWidth * HINT_MAX_FRACTION
+            val minSize = with(LocalDensity.current) { BAND_MIN_DP.dp.toSp() }
             if (toast != null) {
                 Text(
                     toastText(toast),
@@ -697,7 +700,7 @@ private fun MiddleBand(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                return@Box
+                return@BoxWithConstraints
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val left = live.scoreCall ?: LiveModel.setsText(live.sets)
@@ -707,17 +710,27 @@ private fun MiddleBand(
                         modifier = Modifier.weight(1f, fill = false).testTag(LiveTags.SETS),
                         style =
                             LocalTextStyle.current.merge(
-                                TextStyle(color = if (isAmbient) AmbientDigits else Color.White, platformStyle = NO_FONT_PADDING),
+                                TextStyle(
+                                    color = if (isAmbient) AmbientDigits else Color.White,
+                                    platformStyle = NO_FONT_PADDING,
+                                    // Zeilenhöhe an die Schrift gebunden: passt ins schmale Mittelband (sonst Höhen-Überlauf)
+                                    lineHeight = 1.15.em,
+                                ),
                             ),
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
-                        autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 12.sp, stepSize = 0.5.sp),
+                        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = 12.sp, stepSize = 0.25.sp),
                     )
                 }
                 val hint = live.hint?.let { hintText(it, live.sport) }
                 if (hint != null) {
-                    HintPill(hint, live.hint.kind.level, isAmbient, Modifier.padding(start = 6.dp).testTag(LiveTags.HINT))
+                    HintPill(
+                        hint,
+                        live.hint.kind.level,
+                        isAmbient,
+                        Modifier.padding(start = 6.dp).widthIn(max = hintMax).testTag(LiveTags.HINT),
+                    )
                 }
             }
         }
@@ -754,11 +767,17 @@ private fun HintPill(
                             else -> HintAmber
                         },
                     platformStyle = NO_FONT_PADDING,
+                    lineHeight = 1.15.em,
                 ),
             ),
         maxLines = 1,
         softWrap = false,
-        autoSize = TextAutoSize.StepBased(minFontSize = 7.5.sp, maxFontSize = 10.sp, stepSize = 0.5.sp),
+        autoSize =
+            TextAutoSize.StepBased(
+                minFontSize = with(LocalDensity.current) { BAND_MIN_DP.dp.toSp() },
+                maxFontSize = 10.sp,
+                stepSize = 0.25.sp,
+            ),
     )
 }
 
@@ -984,6 +1003,8 @@ internal object LiveTags {
     fun label(side: Side): String = "live_label_${side.name}"
 
     fun points(side: Side): String = "live_points_${side.name}"
+
+    fun telemetryValue(kind: TelemetryKind): String = "live_telemetry_value_${kind.name}"
 }
 
 private const val HALF_FRACTION = (1f - TapZones.MIDDLE_BAND) / 2f
@@ -1012,6 +1033,12 @@ private val NO_FONT_PADDING = PlatformTextStyle(includeFontPadding = false)
 
 /** Stil der kleinen Zeilen (Status, Namen, Aufschlag-Pfeil). */
 private val SMALL_LINE = TextStyle(platformStyle = NO_FONT_PADDING, lineHeightStyle = LineHeightStyle.Default)
+
+/** Kleinste Schrift im Mittelband (dp, unabhängig von der Systemschrift): Satzstände und Hinweis-Pill. */
+private const val BAND_MIN_DP = 7f
+
+/** Anteil der Mitte (zwischen den Telemetrie-Spalten), den die Hinweis-Pill höchstens belegt. */
+private const val HINT_MAX_FRACTION = 0.62f
 
 /** Abstand der Telemetrie-Spalten zum runden Rand (auf Höhe der Mitte ist der Kreis am breitesten). */
 private val TELEMETRY_EDGE = 3.dp
