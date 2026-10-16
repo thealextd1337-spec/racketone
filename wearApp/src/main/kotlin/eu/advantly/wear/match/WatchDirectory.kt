@@ -66,7 +66,7 @@ class WatchDirectory(
             .recent(RECENT_SCAN)
             .filter { it.previousMatchId == null }
             .maxWithOrNull(compareBy<MatchRecord> { it.createdAtMs }.thenBy { it.id.value })
-            ?.let { WatchSetup(it.format, data.freshPlaceholders(data.resolvedLineup(it), newId), it.meta) }
+            ?.let { WatchSetup(it.format, data.freshPlaceholders(data.resolvedLineup(it), newId = newId), it.meta) }
 
     /** Beendete Matches, neueste zuerst (die Historie enthält auch laufende – die fallen hier heraus). */
     fun recentResults(limit: Int = RESULTS): List<MatchRecord> =

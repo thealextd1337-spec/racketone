@@ -38,6 +38,7 @@ import eu.advantly.data.AppendResult
 import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
+import eu.advantly.data.PlayerKind
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredSequence
 import eu.advantly.data.assignments
@@ -432,7 +433,7 @@ class MatchSession(
         val resolved = data.resolvedLineup(previous)
         val nextPlayer = next?.player?.let { data.assignments(previous.id)[it]?.id ?: it }
         val lineup = if (nextPlayer != null) resolved.copy(firstServer = nextPlayer) else resolved
-        val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
+        val fresh = data.freshPlaceholders(lineup, replaceArchived = false) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
         // Folge-Match des Uhr-Matches bleibt auf der Uhr (gleicher Zähler)
         val onWatch = watchAssignment?.matchId == previous.id || watchIsFree()
         return createMatch(format, fresh, previous.meta, m.scorer ?: deviceId, previous = previous.id, assignToWatch = onWatch)
@@ -732,7 +733,10 @@ class MatchSession(
     fun syncNow() {
         checkThread()
         sendSummaries()
-        if (started) broadcastMeta(primaryRecord())
+        if (started) {
+            targets().forEach(::sendArchives)
+            broadcastMeta(primaryRecord())
+        }
     }
 
     // --- Lokale Events ----------------------------------------------------------------------------
@@ -1133,6 +1137,7 @@ class MatchSession(
         handOverToWaitingWatch(hello)
         handOverStrayMatches()
         sendDeleted(peer)
+        sendArchives(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(primaryRecord()))
         // jetzt identifiziert: zulässigen Rückstand nachschieben (vorher hielt das Routing alles zurück)
@@ -1248,7 +1253,17 @@ class MatchSession(
         (message.players + message.recentPlayers.orEmpty())
             .filterNot { it.id in protectedIds }
             .forEach { data.players.upsertRemote(it, now) }
-        if (corrections.isNotEmpty() && config.kind == PeerKind.PHONE) send(peer, MatchMetaMessage(players = corrections))
+        if (config.kind == PeerKind.PHONE) {
+            corrections.chunked(ARCHIVES_IN_META).forEach { players ->
+                send(
+                    peer,
+                    MatchMetaMessage(
+                        players = players,
+                        archivedPlayerIds = players.map { it.id }.filter { data.players.get(it)?.kind == PlayerKind.ARCHIVED },
+                    ),
+                )
+            }
+        }
         if (config.kind == PeerKind.WATCH) message.archivedPlayerIds.forEach { data.players.archiveRemote(it, now) }
         message.recentPlayers?.let { people ->
             data.settings.put(
@@ -1619,6 +1634,14 @@ class MatchSession(
         if (selected.isNotEmpty()) send(peer, Deleted(selected.map { DeletedMatch(it.matchId, it.deletedAtMs) }))
     }
 
+    /** Alle Archive in begrenzten Paketen: auch alte Löschmarkierungen konvergieren nach einem Reconnect. */
+    private fun sendArchives(peer: String) {
+        if (config.kind != PeerKind.PHONE) return
+        data.players.archivedIds().toList().chunked(ARCHIVES_IN_META).forEach { ids ->
+            send(peer, MatchMetaMessage(archivedPlayerIds = ids))
+        }
+    }
+
     private fun broadcastMeta(record: MatchRecord?) {
         if (targets().isNotEmpty()) broadcast(metaMessage(record))
     }
@@ -1717,7 +1740,7 @@ class MatchSession(
             players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() },
             placeholderIds = data.players.placeholderIds().toList(),
             recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() } else null,
-            archivedPlayerIds = if (config.kind == PeerKind.PHONE) data.players.archivedIds().toList() else emptyList(),
+            archivedPlayerIds = if (config.kind == PeerKind.PHONE) playerIds.filter { it in archived } else emptyList(),
             favorites = favorites.map { it.toWire() },
             self = data.players.self()?.toPlayer(),
             selfAliases = data.selfAliases().toList(),
@@ -1840,6 +1863,7 @@ class MatchSession(
     private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
     companion object {
+        private const val ARCHIVES_IN_META = 200
         private const val FAVORITES_IN_META = 10L
         private const val PEER_KIND_PREFIX = "session.peerKind."
 

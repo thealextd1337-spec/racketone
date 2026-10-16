@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
@@ -28,6 +29,8 @@ import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.PlayerSelection
 import eu.advantly.presentation.wizard.WizardStep
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.help_discipline_title
 import org.jetbrains.compose.resources.getString
 import java.io.File
 import java.util.Locale
@@ -39,6 +42,23 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class WizardHelpUiTest {
+    @Test
+    fun padelPlayersStepHasNeitherDisciplineHeadingNorHelpIcon() =
+        runDesktopComposeUiTest(width = 412, height = 892) {
+            val wizard = MatchWizard(InMemoryMatchStore(selfName = "Alex")).apply { selectSport(Sport.PADEL) }
+            if (wizard.state.value.step == WizardStep.SURFACE) wizard.selectSurface(null)
+            assertEquals(WizardStep.PLAYERS, wizard.state.value.step)
+            val title = getString(Res.string.help_discipline_title)
+            setContent {
+                AdvantlyTheme(darkTheme = true) {
+                    Column { PlayersStep(wizard, wizard.state.value) }
+                }
+            }
+            onNodeWithText(title).assertDoesNotExist()
+            onNodeWithTag("help_DISCIPLINE").assertDoesNotExist()
+            onNodeWithTag("discipline_0").assertDoesNotExist()
+        }
+
     @Test
     fun everyHelpTopicHasTranslatedScrollableTextAndACloseActionAtDoubleFontSize() {
         val previous = Locale.getDefault()

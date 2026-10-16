@@ -41,8 +41,8 @@ internal fun PlayersStep(
     val input = state.input
     val sport = input.sport ?: return
     StepTitle(stringResource(Res.string.wizard_title_players))
-    HelpSection(stringResource(Res.string.help_discipline_title), WizardHelp.DISCIPLINE)
     if (state.options.disciplineSelectable) {
+        HelpSection(stringResource(Res.string.help_discipline_title), WizardHelp.DISCIPLINE)
         WizardChoices(
             options = listOf(Discipline.SINGLES, Discipline.DOUBLES),
             selected = input.discipline,

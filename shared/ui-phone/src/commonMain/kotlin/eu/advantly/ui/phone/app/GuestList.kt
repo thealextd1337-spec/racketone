@@ -95,7 +95,10 @@ internal fun GuestList(
             text = { Text(stringResource(Res.string.player_delete_hint)) },
             confirmButton = {
                 TextButton(
-                    onClick = { if (players.deleteGuest(guest.id)) deleting = null },
+                    onClick = {
+                        players.deleteGuest(guest.id)
+                        deleting = null
+                    },
                     modifier = Modifier.testTag("delete_confirm"),
                 ) {
                     Text(stringResource(Res.string.player_delete))

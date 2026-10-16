@@ -23,7 +23,6 @@ import eu.advantly.presentation.stats.HistoryRole
 import eu.advantly.presentation.stats.headToHead
 import eu.advantly.presentation.stats.historyPeople
 import eu.advantly.ui.phone.common.AdvantlyCard
-import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.SectionTitle
@@ -51,8 +50,7 @@ internal fun HeadToHeadLinks(
     onOpen: (PlayerId) -> Unit,
 ) {
     val selfIds = LocalSelfAliases.current + listOfNotNull(LocalSelfId.current)
-    val archived = LocalArchivedPlayerIds.current
-    historyPeople(setup, selfIds).filterNot { it.player.id in archived }.forEach { person ->
+    historyPeople(setup, selfIds).forEach { person ->
         TextButton(
             onClick = { onOpen(person.player.id) },
             modifier = Modifier.fillMaxWidth().testTag("h2h_person_${person.player.id.value}"),

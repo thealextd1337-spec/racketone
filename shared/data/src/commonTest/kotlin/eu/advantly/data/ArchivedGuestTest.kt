@@ -6,6 +6,7 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ReceiveRight
 import eu.advantly.core.scoring.Presets
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,6 +15,22 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ArchivedGuestTest {
+    @Test
+    fun followUpRefreshesRealPlaceholdersButKeepsArchivedPlayersAndReceiveOrder() {
+        val data = LocalData(createTestDriver())
+        val self = data.players.ensureSelf("Alex", 1) { PlayerId("self") }.id
+        val partner = data.players.addGuest(PlayerId("partner"), "Bea", 1).id
+        val archived = data.players.addGuest(PlayerId("archived"), "Sam", 1).id
+        assertTrue(data.players.deleteGuest(archived))
+        val slot = Placeholders.id("old")
+        val lineup = Lineup(listOf(self, partner), listOf(archived, slot), slot, ReceiveRight(self, slot))
+        val fresh = data.freshPlaceholders(lineup, replaceArchived = false) { PlayerId("fresh") }
+        assertEquals(listOf(self, partner), fresh.a)
+        assertEquals(listOf(archived, Placeholders.id("fresh")), fresh.b)
+        assertEquals(Placeholders.id("fresh"), fresh.firstServer)
+        assertEquals(ReceiveRight(self, Placeholders.id("fresh")), fresh.receiveRight)
+    }
+
     @Test
     fun archivePreservesHistoricalNamesAndCannotBeResurrectedByRemoteMetadata() {
         val data = LocalData(createTestDriver())
@@ -49,6 +66,7 @@ class ArchivedGuestTest {
         val fresh = data.freshPlaceholders(lineup) { PlayerId("fresh") }
         assertTrue(data.isPlaceholder(fresh.b.single()))
         assertEquals(fresh.b.single(), fresh.firstServer)
+        assertEquals(lineup, data.freshPlaceholders(lineup, replaceArchived = false) { error("Kein neuer Platz nötig") })
     }
 
     @Test

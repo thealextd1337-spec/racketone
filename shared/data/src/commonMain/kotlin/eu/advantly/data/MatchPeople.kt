@@ -41,14 +41,15 @@ fun LocalData.recentPeople(limit: Int = 24): List<LocalPlayer> =
         .filter { it.kind == PlayerKind.GUEST }
         .take(limit)
 
-/** Neue IDs für unbesetzte Plätze und entfernte Gäste in neuen Matches; Rotation und Annahme werden konsistent mitgenommen. */
+/** Neue IDs für unbesetzte Plätze und optional entfernte Gäste; Rotation und Annahme werden konsistent mitgenommen. */
 fun LocalData.freshPlaceholders(
     lineup: Lineup,
+    replaceArchived: Boolean = true,
     newId: () -> PlayerId,
 ): Lineup {
     val replacements =
         (lineup.a + lineup.b)
-            .filter { isPlaceholder(it) || players.get(it)?.kind == PlayerKind.ARCHIVED }
+            .filter { isPlaceholder(it) || (replaceArchived && players.get(it)?.kind == PlayerKind.ARCHIVED) }
             .associateWith { Placeholders.id(newId().value) }
 
     fun person(id: PlayerId) = replacements[id] ?: id
