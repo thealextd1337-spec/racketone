@@ -37,6 +37,27 @@ class ScoringGesturesTest {
         assertEquals(ScoringGesture.LONG_PRESS, classify(dx = 2f, dy = 0f, duration = 1_000))
     }
 
+    /** Review PR #46: über die Slop gewandert und zurück – weder Halten noch Tap; echte Swipes bleiben. */
+    @Test
+    fun wanderingAwayAndBackIsNeitherLongPressNorTap() {
+        assertEquals(
+            ScoringGesture.NONE,
+            GestureClassifier.classify(0f, 0f, 1_200, touchSlopPx = 8f, swipeThresholdPx = 40f, maxTravelPx = 60f),
+        )
+        assertEquals(
+            ScoringGesture.NONE,
+            GestureClassifier.classify(1f, 0f, 120, touchSlopPx = 8f, swipeThresholdPx = 40f, maxTravelPx = 30f),
+        )
+        assertEquals(
+            ScoringGesture.LONG_PRESS,
+            GestureClassifier.classify(1f, 0f, 1_200, touchSlopPx = 8f, swipeThresholdPx = 40f, maxTravelPx = 6f),
+        )
+        assertEquals(
+            ScoringGesture.SWIPE_DOWN,
+            GestureClassifier.classify(5f, 120f, 300, touchSlopPx = 8f, swipeThresholdPx = 40f, maxTravelPx = 121f),
+        )
+    }
+
     @Test
     fun swipeDownIsUndo() {
         assertEquals(ScoringGesture.SWIPE_DOWN, classify(dx = 10f, dy = 120f, duration = 200))

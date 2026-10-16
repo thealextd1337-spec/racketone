@@ -119,6 +119,39 @@ class HoldToRemoveUiTest {
         assertTrue(recorder.calls.toString(), recorder.calls.none { it.startsWith("removePoint") })
     }
 
+    /** Review PR #46: wegbewegen (Abbruch), zurück zum Ausgangspunkt, nach ≥ 1 s loslassen – nichts passiert. */
+    @Test
+    fun movingAwayAndBackThenReleasingLateDoesNothing() {
+        val recorder = render()
+        val at = digitsCenter(Side.B)
+        rule.onRoot().performTouchInput { down(at) }
+        rule.mainClock.advanceTimeBy(200)
+        rule.onRoot().performTouchInput { moveBy(Offset(0f, 60f)) }
+        rule.mainClock.advanceTimeBy(200)
+        rule.onRoot().performTouchInput { moveBy(Offset(0f, -60f)) }
+        rule.mainClock.advanceTimeBy(1_000)
+        assertEquals("abgebrochen", 0f, progress(Side.B), 0.001f)
+        rule.onRoot().performTouchInput { up() }
+        rule.mainClock.advanceTimeBy(100)
+        assertTrue(recorder.calls.toString(), recorder.calls.none { it.startsWith("removePoint") || it.startsWith("point") })
+    }
+
+    /** Gesperrt: gleiche Regel, Hin- und Rückbewegung entsperrt nicht. */
+    @Test
+    fun movingAwayAndBackDoesNotUnlock() {
+        val recorder = render(liveUi().copy(locked = true))
+        val at = digitsCenter(Side.A)
+        rule.onRoot().performTouchInput { down(at) }
+        rule.mainClock.advanceTimeBy(150)
+        rule.onRoot().performTouchInput { moveBy(Offset(50f, 0f)) }
+        rule.mainClock.advanceTimeBy(150)
+        rule.onRoot().performTouchInput { moveBy(Offset(-50f, 0f)) }
+        rule.mainClock.advanceTimeBy(1_100)
+        rule.onRoot().performTouchInput { up() }
+        rule.mainClock.advanceTimeBy(100)
+        assertTrue(recorder.calls.toString(), recorder.calls.none { it.startsWith("unlock") || it.startsWith("removePoint") })
+    }
+
     @Test
     fun noProgressWithoutAPointToRemove() {
         val recorder = render(liveUi().copy(canRemovePoint = SidePair(false, false)))

@@ -38,6 +38,8 @@ enum class ScoringGesture { TAP, LONG_PRESS, SWIPE_DOWN, SWIPE_LEFT, NONE }
  * Klassifiziert eine Geste aus Gesamtverschiebung und Dauer. Wischen nach unten = Undo,
  * Wischen nach links = Steuerseite (rechts ist System-Back, 04 §4.3.2). Tap gilt erst beim Loslassen.
  * Langes Halten ([longPressMillis]) entsperrt die Touch-Sperre (04 §4.3.2 „Sperre“), sonst passiert nichts.
+ * [maxTravelPx] = weiteste Entfernung vom Aufsetzpunkt während der Geste: Wer einmal über die Touch-Slop gewandert
+ * ist, tippt bzw. hält nicht mehr – auch wenn der Finger zum Ausgangspunkt zurückkehrt (Review PR #46).
  */
 object GestureClassifier {
     fun classify(
@@ -48,8 +50,9 @@ object GestureClassifier {
         swipeThresholdPx: Float,
         maxTapMillis: Long = 500,
         longPressMillis: Long = LONG_PRESS_MILLIS,
+        maxTravelPx: Float = 0f,
     ): ScoringGesture {
-        val isTapDistance = abs(dx) <= touchSlopPx && abs(dy) <= touchSlopPx
+        val isTapDistance = abs(dx) <= touchSlopPx && abs(dy) <= touchSlopPx && maxTravelPx <= touchSlopPx
         return when {
             isTapDistance && durationMillis <= maxTapMillis -> ScoringGesture.TAP
             isTapDistance && durationMillis >= longPressMillis -> ScoringGesture.LONG_PRESS

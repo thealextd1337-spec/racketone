@@ -275,6 +275,8 @@ private fun ScorePage(
                                 )
                             var holding = holdSide != null
                             var held = false
+                            // weiteste Entfernung vom Aufsetzpunkt: einmal gewandert = kein Tap/Halten mehr (auch zurück)
+                            var maxTravel = 0f
                             if (holdSide != null) hold = HoldUi(holdSide, down.uptimeMillis)
                             try {
                                 while (true) {
@@ -307,7 +309,8 @@ private fun ScorePage(
                                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                     last = change.position
                                     endTime = change.uptimeMillis
-                                    if (holding && (multiTouch || (last - down.position).getDistance() > touchSlop)) {
+                                    maxTravel = maxOf(maxTravel, (last - down.position).getDistance())
+                                    if (holding && (multiTouch || maxTravel > touchSlop)) {
                                         holding = false // bewegt bzw. zweiter Finger: Halten abgebrochen
                                         hold = null
                                     }
@@ -324,6 +327,7 @@ private fun ScorePage(
                                     durationMillis = endTime - down.uptimeMillis,
                                     touchSlopPx = touchSlop,
                                     swipeThresholdPx = swipeThreshold,
+                                    maxTravelPx = maxTravel,
                                 )
                             val decision =
                                 TouchRouting.decide(
