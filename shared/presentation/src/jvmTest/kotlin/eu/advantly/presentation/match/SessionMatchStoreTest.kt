@@ -249,6 +249,46 @@ class SessionMatchSummaryEqualityTest(
 
 /** Session-Adapter (W1-I): Rollen, Übernahme, Persistenz, Löschen, Vertrag der Ports. */
 class SessionMatchStoreTest {
+    @Test
+    fun expectedChoiceContextAndCorrectionGuardReachTheSession() {
+        val rig = Rig()
+        val phone = rig.phone
+        try {
+            val setup = phone.setupFor(Presets.PADEL_GOLDEN_BO3.format())
+            val id = phone.start(setup, StartOptions(ScorerOption.THIS_PHONE))
+            val first = assertNotNull(phone.active.value?.serverChoiceContext)
+            val opponent = setup.lineup.b.last()
+            assertTrue(phone.chooseServer(opponent, first))
+            val count = assertNotNull(phone.record(id)).events.size
+            assertTrue(phone.chooseServer(opponent, first))
+            assertEquals(count, assertNotNull(phone.record(id)).events.size)
+            assertFalse(assertNotNull(phone.active.value).canCorrectServerRetroactively)
+            assertFalse(phone.correctServer(setup.lineup.a.first(), retroactive = true))
+            assertEquals(count, assertNotNull(phone.record(id)).events.size)
+            phone.play("BBBB")
+            val second = assertNotNull(phone.active.value?.serverChoiceContext)
+            val secondCount = assertNotNull(phone.record(id)).events.size
+            assertFalse(phone.chooseServer(setup.lineup.a.last(), first))
+            assertEquals(secondCount, assertNotNull(phone.record(id)).events.size)
+            assertTrue(phone.chooseServer(setup.lineup.a.last(), second))
+            rig.settle()
+            assertEquals(
+                phone.active.value?.serverChoiceContext,
+                rig.watch.state.value.match
+                    ?.serverChoiceContext,
+            )
+            assertTrue(rig.watch.takeOverScoring())
+            rig.settle()
+            val displayCount = assertNotNull(phone.record(id)).events.size
+            assertFalse(phone.chooseServer(setup.lineup.a.last(), second), "Rollenprüfung vor No-op")
+            assertEquals(displayCount, assertNotNull(phone.record(id)).events.size)
+        } finally {
+            phone.close()
+            rig.phoneSession.close()
+            rig.watch.close()
+        }
+    }
+
     private val tennis = Presets.TENNIS_SINGLES_BO3.format()
     private val badminton15 = Presets.BADMINTON_1GAME_15.format()
     private val files = mutableListOf<File>()

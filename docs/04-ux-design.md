@@ -1,6 +1,6 @@
 # 04 – UX- & Designkonzept Advantly
 
-Stand: 2026-10-15 · Status: Entwurf v0.1 zur Abstimmung · Klickbarer Mockup: [mockups/index.html](mockups/index.html)
+Stand: 2026-10-16 · Status: Entwurf v0.1 zur Abstimmung · Klickbarer Mockup: [mockups/index.html](mockups/index.html)
 
 Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [02 Scoring-Regeln](02-scoring-regeln.md) · [05 Watches & Health](05-watches-health.md)
 
@@ -140,7 +140,9 @@ flowchart TD
   T -- "Nein" --> S3
   S2 --> S3["3 Spieler: Einzel/Doppel, Freunde oder Gast"]
   S3 --> S4["4 Format: Sätze, Games, Tiebreak, Einstand-Regel bzw. Pickleball-Punkte, Side-Out/Rally"]
-  S4 --> SRV["Erster Aufschlag: Wir / Gegner / Münzwurf"]
+  S4 --> DB{"Tennis-/Padel-Doppel?"}
+  DB -- "Ja: Wahl live am Zähler" --> SUM
+  DB -- "Nein" --> SRV["Erster Aufschlag: Wir / Gegner / Münzwurf"]
   SRV --> SUM
   SUM --> WHO["Wer zählt? P1: Meine Uhr / Dieses Handy (Director)"]
   WHO --> WORK["Workout auf meiner Uhr mitlaufen lassen (Standard an, auch Director)"]
@@ -150,6 +152,12 @@ flowchart TD
   W -- "Ja" --> BOTH["Ein Zähler, übrige Geräte: Anzeige"]
   W -- "Nein" --> PH["Live-Score nur Handy"]
 ```
+
+**Aufschlagwahl live (F30, 16.10.2026):** Bei Tennis-/Padel-Doppel (inkl. Tiebreak-Formate) entfällt „Erster Aufschlag“ auch im Handy-Wizard; Hinweis „Aufschlagwahl beim Start am Zähler“. Auf dem aktiven, entsperrten Zähler vor der ersten Punkteingabe automatisch vier Spieler als scrollbare Zeilen (Name + Team) zeigen, vor dem ersten Aufschlag des anderen Teams zwei. Jeder neue Satz bietet alle vier, fälliges Team zuerst; freie Teamwahl bleibt Freizeitregel. STANDARD: „Satz … · Spiel 1/2“; `gameKind` TIEBREAK/MATCH_TIEBREAK: „Erster Aufschlag“ / „Erster Aufschlag [Team]“. Kein „Game 2“ im Tiebreak. Einzel, Pickleball, Badminton und Tischtennis behalten ihren Ablauf.
+
+Antippen wählt sofort, zählt keinen Punkt. „Später“ (auch Zurück/Wischen) schließt und nennt „Aktuell: [tatsächlicher Aufschläger]“; danach ist Punkteingabe erlaubt, der manuelle Einstieg bleibt erreichbar. Auswahl blockiert darunterliegende Touch-/Hardware-/Assistenz-Punkteingaben. Apple-Zeilen mindestens 44 pt, Wear mindestens 48 dp, zweizeilige Namen und Teamtext, Crown/Rotary und VoiceOver/TalkBack unterstützen. Anzeige-Geräte bieten keine Wahl. Rollen-/Match-/Fensterwechsel schließen die Auswahl; stale Taps werden durch lokalen erwarteten Kontext abgewiesen. Dismiss lokal pro Fenster merken; kein Wiederöffnen bei Refresh/Ambient-Rückkehr. Aufschlagstatistik bleibt nach Schließen erreichbar und verdrängt die Wahl nicht dauerhaft.
+
+**Undo und Korrektur:** Wahl ist kein Undo-Ziel. Nach Gameball-Undo kann die zweite Wahl als frühzeitige Wahl erhalten bleiben; Satzball-Undo ignoriert die Folgesatzwahl (Redo reaktiviert). Bei Rückkehr auf null Ballwechsel kann die zweite Wahl zum eröffnenden Aufschläger werden; deshalb auch eine markierte Wahl einmal überprüfen lassen und den errechneten Aufschläger zeigen (02 §6.5.5, Plan §3.5). Eine aufgehobene Wahl erneut anbieten. Im offenen Fenster erneut wählen; anschließend „Aufschläger korrigieren – ab jetzt“ (historische Punkte unverändert). Rückwirkend nur anbieten, wenn keine explizite Wahl `INITIAL_SERVER` übersteuert; keine falsche Erfolgsmeldung.
 
 **Watch-Kurz-Wizard** (ohne Handy): Sport (Liste) → Einzel/Doppel → Format-Preset (3–4 Vorschläge je Sport, z. B. „Best of 3 · MTB“, „1 Satz bis 6“, „Pickleball 11 · Side-Out“) → Start. Gegner werden als „Gegner“ angelegt und später am Handy zugeordnet.
 

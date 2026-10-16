@@ -178,6 +178,109 @@ class OperationRulesTest {
     }
 
     @Test
+    fun secondChoiceSurvivesUndoAcrossGameBoundaryAndRedo() {
+        val m = MatchDriver(Presets.PADEL_GOLDEN_BO3.format())
+        m.send(ServerChosen(0, Side.A, p("A2")))
+        m.points("AAA")
+        val gameBall = m.point(Side.A)
+        m.send(ServerChosen(0, Side.B, p("B2")))
+        val secondGamePoint = m.point(Side.B)
+        val undoPoint = m.send(Undo(secondGamePoint))
+        assertEquals(SidePair(1, 0), m.cur.games)
+        assertEquals(SidePair(0, 0), m.cur.points)
+        assertEquals(ServerChoice(2, Side.B, listOf(p("B2"), p("B1")), p("B2")), m.state.serverChoice)
+
+        val undoGame = m.send(Undo(gameBall))
+        assertEquals(SidePair(0, 0), m.cur.games)
+        assertEquals(SidePair(3, 0), m.cur.points)
+        assertEquals(p("A2"), m.srv.player)
+        assertNull(m.state.serverChoice, "zweite Wahl bleibt als frühzeitige Wahl gültig")
+        assertEquals(emptyList(), m.state.ignoredEvents)
+        m.send(Undo(undoGame))
+        assertEquals(p("B2"), m.state.serverChoice?.chosen)
+        m.send(Undo(undoPoint))
+        assertEquals(SidePair(0, 1), m.cur.points)
+        assertEquals(p("B2"), m.srv.player)
+        assertNull(m.state.serverChoice)
+    }
+
+    @Test
+    fun nextSetChoiceIsIgnoredAfterSetBallUndoAndReactivatedByRedo() {
+        val m = MatchDriver(Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES)).winGames(Side.A, 6)
+        val setBall = m.events.last().id
+        val choice = m.send(ServerChosen(1, Side.B, p("B2")))
+        val undo = m.send(Undo(setBall))
+        assertEquals(0, m.cur.setIndex)
+        assertEquals(SidePair(5, 0), m.cur.games)
+        assertEquals(SidePair(3, 0), m.cur.points)
+        assertEquals(p("B1"), m.srv.player)
+        assertEquals(listOf(choice), m.state.ignoredEvents)
+        m.send(Undo(undo))
+        assertEquals(1, m.cur.setIndex)
+        assertEquals(SidePair(0, 0), m.cur.points)
+        assertEquals(p("B2"), m.srv.player)
+        assertEquals(p("B2"), m.state.serverChoice?.chosen)
+        assertEquals(emptyList(), m.state.ignoredEvents)
+    }
+
+    @Test
+    fun secondChoiceBecomesOpeningChoiceWhenAllRalliesAreUndone() {
+        val m = MatchDriver(Presets.PADEL_GOLDEN_BO3.format())
+        m.send(ServerChosen(0, Side.A, p("A2")))
+        m.points("AAAA")
+        val points = m.events.filter { it.payload is PointWon }.map { it.id }
+        m.send(ServerChosen(0, Side.B, p("B2")))
+        points.reversed().forEach { m.send(Undo(it)) }
+        assertEquals(0, m.engineState.pointsPlayed)
+        assertEquals(SidePair(0, 0), m.cur.games)
+        assertEquals(SidePair(0, 0), m.cur.points)
+        assertEquals(p("B2"), m.srv.player)
+        assertEquals(ServerChoice(1, Side.B, listOf(p("B2"), p("B1"), p("A2"), p("A1")), p("B2")), m.state.serverChoice)
+        assertEquals(emptyList(), m.state.ignoredEvents, "kein Phasenanker im historischen Event")
+    }
+
+    @Test
+    fun tiebreakFirstPointUndoReinterpretsSecondChoiceAndRedoRestoresRotation() {
+        for (preset in listOf(Presets.TENNIS_TIEBREAK_ONLY_7, Presets.PADEL_TIEBREAK_ONLY_10)) {
+            val m = MatchDriver(preset.format(Discipline.DOUBLES))
+            m.send(ServerChosen(0, Side.A, p("A2")))
+            val point = m.point(Side.A)
+            m.send(ServerChosen(0, Side.B, p("B2")))
+            assertEquals(2, m.state.serverChoice?.game)
+            val undo = m.undo()
+            assertEquals(0, m.engineState.pointsPlayed)
+            assertEquals(p("B2"), m.srv.player)
+            assertEquals(1, m.state.serverChoice?.game)
+            assertEquals(p("B2"), m.state.serverChoice?.chosen)
+            m.send(Undo(undo))
+            assertEquals(SidePair(1, 0), m.cur.points)
+            assertEquals(2, m.state.serverChoice?.game)
+            assertEquals(p("B2"), m.srv.player)
+            assertEquals(p("A2"), m.engineState.point(point)?.server)
+            m.point(Side.B)
+            assertEquals(p("B2"), m.srv.player, "Zweierblock nach Punkt 1")
+            m.point(Side.A)
+            assertEquals(p("A1"), m.srv.player)
+        }
+    }
+
+    @Test
+    fun explicitChoiceOverridesInitialServerButForwardCorrectionPreservesHistory() {
+        val m = MatchDriver(Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES))
+        m.send(ServerChosen(0, Side.A, p("A2")))
+        val point = m.point(Side.A)
+        val correction = m.send(Correction.initialServer(p("B2")))
+        assertTrue(correction !in m.state.ignoredEvents, "akzeptiert bedeutet nicht rückwirkend wirksam")
+        assertEquals(p("A2"), m.srv.player)
+        assertEquals(p("A2"), m.engineState.point(point)?.server)
+        m.send(Correction.server(p("B2")))
+        assertEquals(p("B2"), m.srv.player)
+        assertEquals(p("A2"), m.engineState.point(point)?.server, "ab jetzt, historische Zuordnung unverändert")
+        val next = m.point(Side.B)
+        assertEquals(p("B2"), m.engineState.point(next)?.server)
+    }
+
+    @Test
     fun serverChoiceOnlyTennisAndPadelDoubles() {
         for (format in listOf(
             Presets.TENNIS_SINGLES_BO3.format(),

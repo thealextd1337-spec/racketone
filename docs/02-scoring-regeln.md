@@ -1,6 +1,6 @@
 # 02 – Scoring-Regeln & Engine-Spezifikation
 
-Stand: 2026-10-15 · Status: Entwurf v1.0 zur Abstimmung · Spec-Version für Testvektoren: `schema: 1`, `formatVersion: 1`
+Stand: 2026-10-16 · Status: Entwurf v1.0 zur Abstimmung · Spec-Version für Testvektoren: `schema: 1`, `formatVersion: 1`
 
 Bezug: [00 Grundsatzentscheidungen](00-entscheidungen.md) · [01 Architektur §3 Scoring-Engine](01-architektur.md) · [04 UX](04-ux-design.md) · [Testvektoren](testvectors/README.md)
 
@@ -669,7 +669,18 @@ Teamintern: `serveIdx` wird auf 0 gesetzt, `order[X]` bleibt aus dem Vorsatz erh
 
 Rückschläger (`serve.receiver`): Einzel = Gegner. Doppel = Spieler der Rückschlagseite auf der Seite `court` laut `lineup.receiveRight`. Eine Änderung erfolgt per `Correction(RECEIVE_POSITIONS)`. Hinweis Mixed (No-Ad/Golden/Star): Der gleichgeschlechtliche Spieler returniert den Entscheidungspunkt. Das ist nur ein UI-Hinweis, die Engine kennt kein Geschlecht.
 
-#### 6.5.5 Aufschlägerwahl im Doppel (Tennis/Padel, Entscheidung 2026-10-15, K15)
+#### 6.5.5 Aufschlägerwahl im Doppel (Tennis/Padel, K15, F30 vom 2026-10-16)
+
+**Live-Vertrag (F30):** Nur Tennis-/Padel-Doppel, einschließlich Match-/Nur-Tiebreak. Die verbindliche Erstaufschlägerwahl entfällt im Setup/Wizard aller Geräte; `Lineup.firstServer` bleibt der technische Default. Am aktiven Zähler automatisch vor der ersten Punkteingabe eines unentschiedenen Fensters anbieten: zuerst vier Spieler, dann zwei des anderen Teams. Bei jedem neuen Satz wieder alle vier; das regelgemäß fällige Team zuerst anzeigen. Freie Wahl des anderen eröffnenden Teams bleibt die bestehende Freizeitabweichung, keine neue offizielle Regel. Ein normaler Satz-Tiebreak setzt die Rotation fort und eröffnet keine neue Wahl. Bei `gameKind != STANDARD` heißen die Phasen „Erster Aufschlag“ / „Erster Aufschlag [Team]“, nicht „Game 2“.
+
+**„Später“:** schließt die Auswahl ohne Event und ohne Pflicht-Gate; tatsächlich berechneten Default (`serve.player`) nennen. Punkte bleiben erlaubt. Automatische Präsentation und lokale Dismiss-Merker sind UI-Verantwortung; Anzeige-Geräte wählen nicht. Ein lokales Kommando prüft den erwarteten Fensterkontext durch `accepts()` unmittelbar vor Eventerzeugung: `matchId`, `setIndex`, `phase`, `gameKind` und die Spielermenge (`players.toSet()`, unabhängig von der Reihenfolge) müssen übereinstimmen; der gewählte `player` muss in `players` enthalten sein. Zusätzlich müssen `dueSide`, `defaultServer` und `chosen` übereinstimmen, außer bei idempotenter gleicher, noch wirksamer Wahl (`chosen == player`); alle übrigen Feldprüfungen gelten weiterhin. Der Wire-Payload bleibt `{set, side, player}` bei Protokoll 3.
+
+Nach jeder erfolgreichen Wahl bzw. jedem Snapshot-Wechsel Kontext neu lesen; Auswahl-Sheet schließen/aktualisieren, wenn sich `serverChoiceContext` ändert (auch durch `PlayerAssigned`).
+
+**Undo/Replay unverändert (Plan §3.5):** `ServerChosen` ist kein normales UI-Undo-Ziel. Nach Undo des ersten Punkts von Game 2 bleibt dessen gültige Wahl markiert. Nach Undo des Gameballs von Game 1 kann sie als frühzeitige Wahl erhalten bleiben und bei Game 2 wieder gelten. Nach Undo des Satzballs wird eine Wahl des entfallenen Folgesatzes wegen ihres Satzindex ignoriert; Redo kann sie reaktivieren. Bei Rückkehr auf **null Ballwechsel** kann eine spätere Wahl des zweiten Teams zur eröffnenden Wahl werden (bei Nur-Tiebreak bereits nach Undo von Punkt 1). Die UI zeigt diese Wahl am Satzanfang einmal zur Überprüfung, auch bei bestehender Markierung, und nennt den tatsächlich errechneten Aufschläger. Kein Versprechen, Undo stelle die frühere Wahl wieder her; kein zusätzlicher Game-/Punktanker.
+
+**Korrekturkollision:** `INITIAL_SERVER` verändert vor dem Fold das initiale Lineup. Eine explizite eröffnende `ServerChosen`-Wahl kann es erneut übersteuern; eine akzeptierte Korrektur ist deshalb nicht automatisch eine wirksame rückwirkende Aufschlägeränderung. Im offenen Fenster neu wählen, nach dessen Schließung `Correction(SERVER)` klar als **„ab jetzt“** anbieten (historische Punkte bleiben unverändert). Einen rückwirkenden Weg nur anbieten/als erfolgreich melden, wenn keine übersteuernde Wahl besteht. Regressionen: `OperationRulesTest` (Game-/Satzgrenzen, null Ballwechsel, Tiebreak-Punkt 1, INITIAL_SERVER).
+
 
 Grundlage: ITF R14 („Das Team, das das 1. Spiel eines Satzes aufschlägt, bestimmt seinen Aufschläger, der Gegner vor Spiel 2 ebenso“), FIP 6.8. Die Wahl ist ein eigenes Event `ServerChosen(set, side, player)` (§7) und legt die teaminterne Reihenfolge `order[side] = [player, partner]` mit `serveIdx[side] = 0` für den laufenden Satz fest. Danach gilt die Rotation aus §6.5.1/§6.5.2 bis Satzende.
 
