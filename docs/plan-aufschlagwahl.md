@@ -1,6 +1,6 @@
 # Advantly – Plan „Aufschlagwahl auf der Uhr“
 
-Stand: 16.10.2026 · Umsetzung AP1/AP2 im Worktree `H:/racketone-wt/w8-aufschlagwahl`, Branch `w8/aufschlagwahl`, Basis `origin/main` / `f78dc82dd8ee2f83406410e8fc2ddcfad8debcf3`. Analysegrundlage: `H:/racketone`, Branch `main`, Commit `f78dc82dd8ee2f83406410e8fc2ddcfad8debcf3`. Das Arbeitsverzeichnis war zu Umsetzungsbeginn sauber. Die Ist-Analyse unten beschreibt diesen Basis-Commit; AP1/AP2 ergänzen Verträge, Regressionstests und lokale APIs. AP3–AP7 sind Folgearbeit. Die jeweiligen Umsetzungs-Commits sind über die Git-Historie dieser Datei und der betroffenen Module nachvollziehbar.
+Stand: 16.10.2026 · Umsetzung AP1/AP2 im Worktree `H:/racketone-wt/w8-aufschlagwahl`, Branch `w8/aufschlagwahl`, Basis `origin/main` / `f78dc82dd8ee2f83406410e8fc2ddcfad8debcf3`. Analysegrundlage: `H:/racketone`, Branch `main`, Commit `f78dc82dd8ee2f83406410e8fc2ddcfad8debcf3`. Das Arbeitsverzeichnis war zu Umsetzungsbeginn sauber. Die Ist-Analyse unten beschreibt diesen Basis-Commit; AP1/AP2 ergänzen Verträge, Regressionstests und lokale APIs. AP3–AP7 sind im Folge-Worktree `H:/racketone-wt/w8-ui` umgesetzt (lokale Abnahme siehe §6.2). Die jeweiligen Umsetzungs-Commits sind über die Git-Historie dieser Datei und der betroffenen Module nachvollziehbar.
 
 ## Entscheidungen 16.10.2026
 
@@ -290,7 +290,7 @@ Abzusichern:
 
 ## 6. Arbeitspakete, Reihenfolge und Abnahme
 
-Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bleiben geplant; deren UI-Abnahmen werden hier nicht als erledigt geführt.
+Umsetzung AP1/AP2: ursprünglicher Auftrag. AP3–AP7: Folgeauftrag im Worktree `H:/racketone-wt/w8-ui`, Branch `w8/aufschlagwahl-ui`, Basis `d6b04f5`. Die lokale Abnahme und die noch offenen Plattformprüfungen stehen in §6.2.
 
 ### AP1 – Vertrag und Regressionen festhalten
 
@@ -377,6 +377,20 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 **Reihenfolge:** AP1 → AP2 → AP3/AP4 → AP5 → AP6 → AP7. AP3/AP4 können gemeinsam umgesetzt, aber getrennt geprüft werden. Kein neues Scoringmodell vor den UI-Arbeiten.
 
 **Spätere technische Prüfungen:** betroffene JVM-/Desktop-/Wear-Tests; anschließend `gradlew.bat check` und Android-/Wear-Debug-Builds gemäß `CLAUDE.md`. Apple-Framework-Linken, Swift-Build und watchOS-Simulatorprüfung auf macOS/CI. AP1 hat `:shared:core-scoring:jvmTest` und den vollständigen Windows-Check ausgeführt; die UI-/Geräteprüfungen bleiben den Folgepaketen vorbehalten.
+
+### 6.2 Lokale Abnahme AP3–AP7 (16.10.2026)
+
+- **AP3 / `80c442b`:** Wear-Setup zeigt im Tennis-/Padel-Doppel „Match starten“, ohne Erstaufschlagwahl. Besetzung und Optionen bleiben erreichbar. Korrektur nur mit Session-Freigabe rückwirkend, sonst „ab jetzt“; abgewiesene Korrektur bleibt mit Hinweis offen. Controller-/Modelltests und vollständiger Check grün.
+- **AP4 / `deffc23`:** Wear präsentiert vier/zwei Spieler automatisch. Lokale Fenstermerker, sichere Kontextübergabe, Lock-/Hintergrundschutz, Undo und Eingabeschutz. Scrollbare Rotary-Liste mit zweizeiligen Namen, Team/Platz im TalkBack-Label, Tiebreakkontext und tatsächlichem Default. Robolectric prüft 206 dp rund in DE/EN, Schrift 1,0/1,3, Kreisgrenzen und mindestens 48 dp; vorhandene Rotary-Tests bleiben grün.
+- **AP5 / `8d985f2`:** Apple-Watch-Start ohne Setup-Wahl, automatische Auswahl am Zähler, „Später“, Team-/Platzlabels und mindestens 44 pt. Sheet am gemeinsamen Wurzelview, damit Steuerseite, Satzende-Undo und Hintergrundwechsel denselben Zustand verwenden. Facade-Tests für Tennis/Padel und Tiebreak-only sowie String-Prüfung grün. Swift bleibt ausschließlich für Darstellung und lokale Präsentation zuständig.
+- **AP6 / `eea78ca`:** Handy-Wizard ohne Erstaufschlagwahl für den Scope; automatisches Live-Sheet nur am aktiven Handy-Zähler. Vorhandene Bar bleibt zugänglich; Hintergrundsemantik und Controller sperren Punkte während der Auswahl. Korrekturgrenze und sichtbare Ablehnung geprüft. Wizard-, Schnellstart-, Folgesatz-, Rollen- und UI-Tests sowie String-Parität grün.
+- **AP7:** 64 Session-Szenarien (acht Tennis-/Padel-Formate × zwei ursprüngliche Zählergeräte × vier Eröffnungsspieler) prüfen Offline-Wahl, doppelte Zustellung, Rollenübernahme und Zustandsgleichheit mit Replay. Eingefrorene v3-Payloads prüfen die unveränderte Serialisierung in beiden Richtungen. Statistiktests sichern Spielerzuordnung, Tiebreak-Zweierblock, Vorwärtskorrektur und Undo/Redo; die unabhängig laufende Matchdauer wird beim Statistikvergleich ausgeklammert. UI-Regressionen prüfen die markierte Wahl nach Undo am Beginn eines späteren Satzes, Hintergrund und Touch-Sperre; lange gleichnamige Wear-Spieler bleiben per Team und Platznummer barrierefrei unterscheidbar. Platzhalter behalten die Punktzuordnung zur Platz-ID, persönliche Statistikzeilen erscheinen erst nach Personenzuweisung. Die Aufschlag-Info des letzten Punktes bleibt nach einer längeren Auswahl erreichbar.
+
+Verifikation: `JAVA_HOME=/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot`, `GRADLE_USER_HOME=H:/dev/gradle`, `./gradlew check --console=plain`. Zusätzlich `./gradlew :androidApp:assembleDebug :wearApp:assembleDebug --console=plain` und `python .github/scripts/check_watch_strings.py` (tatsächlicher Skriptpfad in diesem Checkout). Kein neuer Eventtyp, kein neues Wire-Feld, unverändert Protokoll 3 und unveränderte Fold-/Replay-Implementierung.
+
+Screenshots: `ADVANTLY_SCREENSHOT_DIR=H:/dev/tmp/shots-aufschlagwahl`, Dateien `choice-*.png` (Start, mittig gescrollte Spieler und „Später“; 206 dp). Diese lokalen Dateien werden nicht eingecheckt.
+
+**Offene Plattformabnahmen:** Swift-Build, Framework-Linken, kleiner watchOS-Simulator, Crown/VoiceOver und reale Sperr-/Hintergrundwechsel auf macOS/CI bzw. Geräten. Android-/Wear-Prüfung lokal per Robolectric und Debug-Build; kein physischer Uhrentest. Die v3-Tests verwenden eingefrorene Payloadformen und den kompatiblen bisherigen Kommandoaufruf; ein separater historischer App-Binary-Stand wurde nicht auf Geräten ausgeführt. Diese Prüfungen werden nicht als bestanden ausgegeben.
 
 ## 7. Risiken und inzwischen entschiedene Nutzerfragen
 

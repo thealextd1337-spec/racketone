@@ -9,8 +9,6 @@ struct MatchPagerView: View {
     let snap: WatchScoreSnapshot
     @State private var page = 1
     @State private var returnWork: DispatchWorkItem?
-    @Environment(\.isLuminanceReduced) private var dimmed
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $page) {
@@ -22,16 +20,6 @@ struct MatchPagerView: View {
                 .tag(2)
         }
         .tabViewStyle(.page)
-        .onAppear { model.setChoiceInteractive(scenePhase == .active && !dimmed) }
-        .onChange(of: scenePhase) { _, phase in model.setChoiceInteractive(phase == .active && !dimmed) }
-        .onChange(of: dimmed) { _, reduced in model.setChoiceInteractive(scenePhase == .active && !reduced) }
-        .onDisappear { model.setChoiceInteractive(false) }
-        .sheet(isPresented: Binding(get: { model.serverChoicePresented }, set: { if !$0 { model.dismissServerChoice() } })) {
-            if let context = model.serverChoiceContext {
-                ServerChoiceView(model: model, context: context)
-                    .id(ScoringModel.choiceSignature(context))
-            }
-        }
         .onChange(of: page) { _, newPage in
             returnWork?.cancel()
             guard newPage != 1 else { return }

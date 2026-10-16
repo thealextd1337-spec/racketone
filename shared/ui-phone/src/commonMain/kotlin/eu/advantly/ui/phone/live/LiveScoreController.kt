@@ -177,7 +177,7 @@ class LiveScoreController(
             return
         }
         if (serverChoicePresentation != null && serverChoicePresentation != context) serverChoicePresentation = null
-        val needsReview = context.chosen == null || (next.pointsPlayed == 0 && next.canRedo)
+        val needsReview = context.chosen == null || (context.phase == ServerChoicePhase.FIRST && next.canRedo)
         if (choiceInteractive && needsReview && context.window() !in handledChoices) serverChoicePresentation = context
     }
 

@@ -179,18 +179,18 @@ struct SetupView: View {
                 Button("setup.startMatch") { start("SELF") }
                     .frame(minHeight: 44)
             } else {
-            Section {
-                ForEach(slots, id: \.self) { slot in
-                    Button {
-                        start(slot)
-                    } label: {
-                        Text(name(slot)).frame(maxWidth: .infinity, minHeight: 44)
+                Section {
+                    ForEach(slots, id: \.self) { slot in
+                        Button {
+                            start(slot)
+                        } label: {
+                            Text(name(slot)).frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .tint(slot == "SELF" || slot == "PARTNER" ? Brand.us : Brand.them)
                     }
-                    .tint(slot == "SELF" || slot == "PARTNER" ? Brand.us : Brand.them)
+                } header: {
+                    Text("setup.whoServes")
                 }
-            } header: {
-                Text("setup.whoServes")
-            }
             }
         }
         .navigationTitle(LocalizedStringKey("sport." + preset.sport))

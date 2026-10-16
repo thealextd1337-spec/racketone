@@ -1,9 +1,12 @@
 package eu.advantly.wear.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -32,6 +35,26 @@ import kotlin.math.hypot
 @Config(sdk = [35], qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
 class ServerChoiceUiTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    fun longDuplicateNamesKeepFullNameTeamAndSlotAccessible() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        val base = liveUi(doubles = true)
+        val name = "Maximilian Meyer-Langenberg"
+        val players = (base.teams.a + base.teams.b).map { it.copy(name = name, isSelf = false) }
+        val choice = ServerChoiceUi(1, Side.A, players, null, true)
+        rule.setContent { WearTestFrame { ServerChoiceScreen(base, choice, RecordingActions().actions) } }
+        players.forEachIndexed { i, player ->
+            rule.onNode(hasScrollToNodeAction()).performScrollToIndex(1 + i)
+            val team =
+                RuntimeEnvironment.getApplication().getString(
+                    if (player.side == Side.A) eu.advantly.wear.R.string.label_us else eu.advantly.wear.R.string.label_them,
+                )
+            val label = rule.onNodeWithContentDescription("$name · $team · ${player.index + 1}", useUnmergedTree = true)
+            assertTrue(label.textLayout().lineCount <= 2)
+            rule.screenshot("choice-long-names-galaxy8-font130-player$i")
+        }
+    }
 
     @Test
     fun firstChoiceFitsWithLargeFontAndNames() = checkChoice(1, false, 1.3f, "choice-first-de-galaxy8-font130")
@@ -86,6 +109,8 @@ class ServerChoiceUiTest {
         labels.forEachIndexed { i, text ->
             rule.onNode(hasScrollToNodeAction()).performScrollToIndex(2 + i)
             rule.waitForIdle()
+            val target = rule.onNode(hasText(text) and hasClickAction()).getUnclippedBoundsInRoot()
+            assertTrue("Touchziel mindestens 48 dp", (target.bottom - target.top).value >= 48f)
             val node = rule.onNodeWithText(text, useUnmergedTree = true)
             assertFalse("Name abgeschnitten: $text", node.textLayout().hasVisualOverflow)
             val r = node.fetchSemanticsNode().boundsInRoot

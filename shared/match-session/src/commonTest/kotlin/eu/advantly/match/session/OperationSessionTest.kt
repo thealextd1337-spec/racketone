@@ -1,5 +1,6 @@
 package eu.advantly.match.session
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchMeta
@@ -12,6 +13,7 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChoice
 import eu.advantly.core.scoring.SetKind
@@ -33,6 +35,58 @@ class OperationSessionTest {
     private fun cluster(): Triple<Cluster, Device, Device> {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
         return Triple(cluster, cluster["phone"], cluster["watch"])
+    }
+
+    @Test
+    fun offlineChoicesConvergeWithDuplicatesAndConfirmedScorerHandover() {
+        val presets =
+            listOf(
+                Presets.TENNIS_BO3_MTB10,
+                Presets.TENNIS_SHORT_SETS,
+                Presets.PADEL_GOLDEN_BO3,
+                Presets.PADEL_PREMIER_2026,
+                Presets.TENNIS_TIEBREAK_ONLY_7,
+                Presets.TENNIS_TIEBREAK_ONLY_10,
+                Presets.PADEL_TIEBREAK_ONLY_7,
+                Presets.PADEL_TIEBREAK_ONLY_10,
+            )
+        for (preset in presets) {
+            for (origin in listOf("phone", "watch")) {
+                for (index in 0..3) {
+                    val (cluster, phone, watch) = cluster()
+                    phone.session.create(preset.format(Discipline.DOUBLES), doubles, scorer = ScorerChoice.Device(DeviceId(origin)))
+                    cluster.settle()
+                    val scorer = cluster[origin]
+                    val display = if (origin == "phone") watch else phone
+                    cluster.offline(display.name)
+                    val first = assertNotNull(scorer.match.serverChoiceContext)
+                    val selected = first.players[index]
+                    assertTrue(scorer.session.chooseServer(selected, first))
+                    val count = scorer.match.eventCount
+                    assertTrue(scorer.session.chooseServer(selected, first))
+                    assertEquals(count, scorer.match.eventCount)
+                    repeat(if (first.gameKind == GameKind.STANDARD) 4 else 1) { assertTrue(scorer.session.recordPoint(Side.A)) }
+                    val second = assertNotNull(scorer.match.serverChoiceContext)
+                    assertEquals(ServerChoicePhase.SECOND, second.phase)
+                    // Alter v3-Aufrufer ohne erwarteten Kontext erzeugt dasselbe Event.
+                    assertTrue(scorer.session.chooseServer(second.players.last()))
+                    assertTrue(scorer.session.recordPoint(Side.B))
+                    cluster.network.duplicateRate = 1.0
+                    cluster.online(display.name)
+                    cluster.settle(5_000)
+                    cluster.assertConverged()
+                    assertEquals(ScoringEngine.fold(scorer.data.events.scoreEvents(scorer.match.id)), display.score)
+                    assertTrue(display.session.takeOverScoring())
+                    cluster.settle()
+                    assertTrue(display.match.isScorer)
+                    assertFalse(scorer.match.isScorer)
+                    assertFalse(scorer.session.chooseServer(selected, first))
+                    assertTrue(display.session.recordPoint(Side.A))
+                    cluster.settle()
+                    cluster.assertConverged()
+                }
+            }
+        }
     }
 
     @Test

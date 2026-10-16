@@ -73,7 +73,7 @@ class WatchController(
     private var overlay: LiveOverlay? = null
     private var locked = false
     private var correctionRejected = false
-    private var interactive = true
+    private var interactive = false
     private var presentedChoice: ServerChoiceContext? = null
     private var previousChoice: ServerChoiceContext? = null
     private var previousPoints = 0
@@ -376,6 +376,7 @@ class WatchController(
         overlay = null
         presentedChoice = null
         val chosen = session.chooseServer(player, context)
+        restoreServeBarAfterChoice()
         tapGuard.onWake(uptime())
         if (chosen) emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
         publish()
@@ -515,6 +516,7 @@ class WatchController(
         if (overlay == LiveOverlay.SERVER_CHOICE) {
             presentedChoice?.let { handledChoices += it.window() }
             presentedChoice = null
+            restoreServeBarAfterChoice()
             tapGuard.onWake(uptime())
         }
         setOverlay(null)
@@ -546,6 +548,12 @@ class WatchController(
             emit(WatchEffect.Toast(WatchToast.StartFailed))
             false
         }
+
+    /** Die Wahl darf die Erfassung zum letzten lokalen Punkt nicht dauerhaft verdrängen. */
+    private fun restoreServeBarAfterChoice() {
+        val match = session.state.value.match ?: return
+        if (match.isScorer && match.serveInfoEnabled) match.lastPoint?.let { serveBar.onPoint(it.id, elapsed()) }
+    }
 
     private fun setOverlay(value: LiveOverlay?) {
         overlay = value
@@ -662,7 +670,7 @@ class WatchController(
             return
         }
         if (interactive && !locked && overlay == null && context != null && context.window() !in handledChoices &&
-            (context.chosen == null || (previousPoints == 0 && match.canRedo))
+            (context.chosen == null || (context.phase == ServerChoicePhase.FIRST && match.canRedo))
         ) {
             presentedChoice = context
             overlay = LiveOverlay.SERVER_CHOICE

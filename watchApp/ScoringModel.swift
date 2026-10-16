@@ -125,6 +125,11 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         serverChoicePresented = false
         serverChoiceContext = nil
         silentUntil = Date().addingTimeInterval(0.3)
+        if let snap = snapshot, snap.isScorer, snap.serveInfoEnabled, !snap.lastPointId.isEmpty {
+            serveBarPointId = snap.lastPointId
+            serveBarDeadline = Date().addingTimeInterval(Self.serveBarVisible)
+            scheduleServeBarDismiss(after: Self.serveBarVisible)
+        }
     }
 
     private func updateServerChoice(previous: WatchScoreSnapshot?) {
@@ -134,7 +139,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         if let context {
             let window = Self.choiceWindow(context)
             let reopened = next?.matchId == previous?.matchId && (next?.pointsPlayed ?? 0) < (previous?.pointsPlayed ?? 0)
-            let cleared = old != nil && Self.choiceWindow(old!) == window && !(old?.chosen.isEmpty ?? true) && context.chosen.isEmpty
+            let cleared = old.map { Self.choiceWindow($0) == window && !$0.chosen.isEmpty && context.chosen.isEmpty } ?? false
             if reopened || cleared { handledChoices.remove(window) }
         }
         guard next?.isScorer == true, let context else {
@@ -146,7 +151,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
             serverChoicePresented = false
             serverChoiceContext = nil
         }
-        let needsReview = context.chosen.isEmpty || (next?.pointsPlayed == 0 && next?.canRedo == true)
+        let needsReview = context.chosen.isEmpty || (context.phase == "FIRST" && next?.canRedo == true)
         if choiceInteractive && needsReview && !handledChoices.contains(Self.choiceWindow(context)) {
             serverChoiceContext = context
             serverChoicePresented = true
@@ -367,7 +372,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     /// Tap auf eine Hälfte. `force` umgeht die Sperrzeit (nur Demo-Modus).
     func tap(sideA: Bool, force: Bool = false) {
         guard let before = snapshot, before.isScorer, before.status == "IN_PROGRESS" || before.status == "PAUSED" else { return }
-        guard !serverChoicePresented, choiceInteractive else { return }
+        // Force wird ausschließlich vom Debug-DemoRunner zur Zustandsvorbereitung genutzt.
+        guard force || (!serverChoicePresented && choiceInteractive) else { return }
         let now = Date()
         if !force && now < silentUntil { return }
         if !force && now < lockedUntil {

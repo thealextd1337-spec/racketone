@@ -283,7 +283,10 @@ class WatchControllerOperationTest {
         c.setInteractive(false)
         startOnWatch(discipline = Discipline.DOUBLES, format = FormatChoice.TENNIS_TIEBREAK_7)
         assertNull(live.overlay)
+        c.lock()
         c.setInteractive(true)
+        assertNull("Gesperrt noch keine Auswahl", live.overlay)
+        c.unlock()
         assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
         c.chooseServer(match.serverChoiceContext!!.players.last())
         points(Side.A)
@@ -298,6 +301,28 @@ class WatchControllerOperationTest {
     // --- Aufschlägerwahl im Doppel ----------------------------------------------------------------
 
     @Test
+    fun undoAtTheStartOfALaterSetReviewsTheMarkedChoice() {
+        startOnWatch(discipline = Discipline.DOUBLES, format = FormatChoice.TENNIS_OPEN)
+        repeat(24) { points(Side.A) }
+        assertNotNull(live.decision)
+        assertTrue(c.startNextSet(NextSetKind.REGULAR))
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertTrue(
+            c.chooseServer(
+                live.serverChoice!!
+                    .players
+                    .last()
+                    .id,
+            ),
+        )
+        points(Side.A)
+        assertTrue(c.undo())
+        assertEquals(1, match.state.current?.setIndex)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertNotNull(live.serverChoice?.chosen)
+    }
+
+    @Test
     fun doublesAsksTheOpponentsServerBeforeTheirFirstServiceGame() {
         startOnWatch(discipline = Discipline.DOUBLES)
         assertTrue("Erste Wahl erfolgt live", live.serverChoice!!.prompt)
@@ -308,6 +333,10 @@ class WatchControllerOperationTest {
         assertEquals(2, choice.game)
         assertEquals(Side.B, choice.side)
         assertTrue(choice.prompt)
+        h.scheduler.advanceBy(ServeBarTimer.VISIBLE_MILLIS + 1)
+        c.tick()
+        c.dismissOverlay()
+        assertNotNull("Aufschlag-Info bleibt nach längerer Auswahl erreichbar", live.serveBar)
         c.openServerChoice()
         assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
         assertFalse("Auswahl offen: kein Punkt", c.point(Side.A))

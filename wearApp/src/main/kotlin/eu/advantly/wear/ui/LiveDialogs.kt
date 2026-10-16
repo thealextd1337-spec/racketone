@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
@@ -473,6 +474,7 @@ fun ServerChoiceScreen(
                         Text(
                             name,
                             maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.semantics { contentDescription = "$name · $team · ${player.index + 1}" },
                         )
                     },

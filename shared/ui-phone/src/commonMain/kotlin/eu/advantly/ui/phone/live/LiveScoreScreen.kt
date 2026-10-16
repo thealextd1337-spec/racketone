@@ -263,8 +263,8 @@ fun LiveScoreScreen(
         val openMatches by controller.port.openMatches.collectAsState()
         val now = rememberNow(controller.monotonic, ticking = display)
         val status = snapshot.state.status
-        LaunchedEffect(controller.servePromptId, status) {
-            if (status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED) {
+        LaunchedEffect(controller.servePromptId, status, controller.serverChoicePresentation) {
+            if ((status == MatchStatus.IN_PROGRESS || status == MatchStatus.PAUSED) && controller.serverChoicePresentation == null) {
                 controller.servePromptId?.let { id ->
                     delay(10_000)
                     controller.dismissServePrompt(id)

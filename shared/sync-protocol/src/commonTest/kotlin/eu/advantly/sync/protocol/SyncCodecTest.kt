@@ -14,6 +14,7 @@ import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.Undo
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,6 +24,21 @@ import kotlin.test.assertTrue
 class SyncCodecTest {
     private fun roundTrip(message: SyncMessage) {
         assertEquals(DecodeResult.Ok(message), SyncCodec.decode(SyncCodec.encode(message)))
+    }
+
+    /** Eingefrorene v3-Payloads: ServerChosen hatte schon vor F30 nur Satz, Team und Spieler. */
+    @Test
+    fun legacyProtocolThreeChoicePayloadIsUnchangedInBothDirections() {
+        for (device in listOf("phone", "watch")) {
+            val legacy =
+                """{"type":"Events","matchId":"m1","events":[{"id":"e1","matchId":"m1","deviceId":"$device",""" +
+                    """"deviceSeq":2,"lamport":2,"wallClockMs":20000,"parentId":"g",""" +
+                    """"payload":{"type":"ServerChosen","set":0,"side":"B","player":"B2"}}],"v":3}"""
+            val message = Events(MATCH, listOf(ev("e1", device, 2, 2, "g", ServerChosen(0, Side.B, PlayerId("B2")))))
+            assertEquals(DecodeResult.Ok(message), SyncCodec.decode(legacy))
+            assertEquals(legacy, SyncCodec.encodeToString(message))
+            assertEquals(3, ProtocolVersion.CURRENT)
+        }
     }
 
     @Test

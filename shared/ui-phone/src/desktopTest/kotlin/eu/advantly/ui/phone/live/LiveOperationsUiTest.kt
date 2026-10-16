@@ -70,6 +70,29 @@ class LiveOperationsUiTest {
     }
 
     @Test
+    fun undoInALaterSetReviewsTheMarkedChoiceAndRoleLossClosesIt() {
+        val model = testModel().apply { startWith(Presets.PADEL_OPEN.format(), "A".repeat(24)) }
+        val c = model.controller
+        c.setChoiceInteractive(true)
+        assertTrue(c.startNextSet(NextSetKind.REGULAR))
+        assertNotNull(c.serverChoicePresentation)
+        val first = c.serverChoicePresentation!!
+        assertTrue(c.chooseServer(first.players.last(), first))
+        c.debounceEnabled = false
+        c.onTap(Side.A, null)
+        c.undo()
+        assertEquals(
+            1,
+            c.snapshot!!
+                .state.current
+                ?.setIndex,
+        )
+        assertNotNull(c.serverChoicePresentation?.chosen)
+        c.sync(c.snapshot!!.copy(role = LiveRole.DISPLAY, revision = c.snapshot!!.revision + 1))
+        assertNull(c.serverChoicePresentation)
+    }
+
+    @Test
     fun correctionAfterOpeningChoiceUsesForwardPath() =
         runComposeUiTest {
             val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format()) }
