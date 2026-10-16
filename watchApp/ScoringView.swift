@@ -262,7 +262,7 @@ struct HoldFill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(reduceMotion ? .periodic(from: start, by: 0.25) : .animation(minimumInterval: 1.0 / 30)) { context in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.25 : 1.0 / 30)) { context in
             let fraction = fired ? 1 : min(1, max(0, context.date.timeIntervalSince(start) / ScoringModel.holdToRemove))
             GeometryReader { geo in
                 RoundedRectangle(cornerRadius: 12)

@@ -114,7 +114,7 @@ private struct ServeCountdownBar: View {
     let color: Color
 
     var body: some View {
-        TimelineView(reduceMotion ? .periodic(from: .now, by: 1) : .animation(minimumInterval: 1.0 / 30)) { context in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 1 : 1.0 / 30)) { context in
             let fraction = min(1, max(0, deadline.timeIntervalSince(context.date) / ScoringModel.serveBarVisible))
             GeometryReader { geo in
                 Capsule()
