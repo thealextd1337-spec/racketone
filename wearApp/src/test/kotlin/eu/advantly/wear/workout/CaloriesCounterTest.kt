@@ -48,4 +48,16 @@ class CaloriesCounterTest {
                 ).withTotal(5_000)
         assertEquals(0L, steps.steps)
     }
+
+    @Test
+    fun invalidSamplesAreIgnoredWithoutConsumingThePendingBaseline() {
+        var counter = CaloriesCounter.recovered()
+        for (bad in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) counter = counter.withTotal(bad)
+        assertNull(counter.kcal)
+        counter = counter.withTotal(100.0)
+        assertEquals(0.0, counter.kcal!!, 0.0)
+        counter = counter.withTotal(Double.NaN).withTotal(-5.0)
+        assertEquals(0.0, counter.kcal!!, 0.0)
+        assertEquals(20.0, counter.withTotal(120.0).kcal!!, 0.0)
+    }
 }

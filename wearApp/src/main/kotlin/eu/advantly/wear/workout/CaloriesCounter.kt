@@ -12,7 +12,9 @@ data class CaloriesCounter(
 ) {
     val kcal: Double? get() = total?.let { (it - baseline).coerceAtLeast(0.0) }
 
+    /** Ungültige Werte (negativ, NaN, unendlich) werden verworfen, ohne eine ausstehende Basis zu verbrauchen. */
     fun withTotal(next: Double): CaloriesCounter {
+        if (!next.isFinite() || next < 0) return this
         val base =
             when {
                 baselinePending -> next
