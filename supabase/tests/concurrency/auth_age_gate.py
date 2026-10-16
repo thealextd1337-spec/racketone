@@ -28,6 +28,8 @@ def main():
     def connect():
         conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5)
         conn.execute("set statement_timeout='3s'")
+        # Ausschließlich diese lokale Testsitzung vertraut den simulierten Proxy-Headern.
+        conn.execute("set app.settings.trust_xff = 'on'")
         conn.execute("select set_config('request.headers', %s, false)",
                      (json.dumps({"x-forwarded-for": "192.0.2.190"}),))
         return conn
