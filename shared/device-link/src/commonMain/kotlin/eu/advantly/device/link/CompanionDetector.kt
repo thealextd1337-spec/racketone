@@ -15,12 +15,22 @@ enum class CompanionState {
     APP_INSTALLED,
 }
 
+/** Einzelner Knoten aus der Kopplungserkennung; Name kommt von der Plattform. */
+data class CompanionDevice(
+    val peer: String,
+    val name: String,
+    val appInstalled: Boolean = true,
+)
+
 /**
  * Erkennt die eigene Uhr unabhängig von einer laufenden Verbindung (W1-I, Feldtest Pixel Watch: Uhr-App lief nicht,
  * „Meine Uhr“ war trotzdem wählbar zu machen). Android: Wear `CapabilityClient` (`FILTER_ALL`), iOS:
  * `WCSession.isPaired && isWatchAppInstalled`. Callbacks auf dem Main-Thread.
  */
 interface CompanionDetector {
+    /** Einzelne gekoppelte Knoten (Android); leer, wenn die Plattform nur den Gesamtstatus kennt. */
+    val devices: List<CompanionDevice> get() = emptyList()
+
     /** Startet die Erkennung; [listener] bekommt jede Änderung (und sofort nach der ersten Abfrage den Stand). */
     fun start(listener: (CompanionState) -> Unit)
 

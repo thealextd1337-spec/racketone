@@ -61,3 +61,6 @@ expect fun formatMonth(
     year: Int,
     month: Int,
 ): String
+
+/** Bauminute in lokaler Zeitzone, kompakt DE/EN (ohne Sekunden). */
+expect fun formatBuildDate(epochMs: Long): String

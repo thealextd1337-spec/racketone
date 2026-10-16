@@ -8,6 +8,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.ResultReason
+import eu.advantly.match.session.DeviceLight
 import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.match.FormatChoice
@@ -26,6 +27,8 @@ sealed interface WatchScreen {
         val updateRequired: UpdateRequired? = null,
         /** Telemetrie-Sichtbarkeit für Puls und Schritte (P2-J), mit dem Handy abgeglichen. */
         val telemetryVisibility: TelemetryVisibility = TelemetryVisibility.DEFAULT,
+        val phoneLight: DeviceLight = DeviceLight.GRAY,
+        val developmentBuild: Boolean = false,
     ) : WatchScreen
 
     /** Kurz-Wizard (04 W2): Sport → Einzel/Doppel → Format → Erstaufschläger (= Start). */

@@ -146,3 +146,9 @@ actual fun formatMonth(
     formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
     return formatter.stringFromDate(date)
 }
+
+actual fun formatBuildDate(epochMs: Long): String {
+    val formatter = platform.Foundation.NSDateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
+    return formatter.stringFromDate(platform.Foundation.NSDate(timeIntervalSinceReferenceDate = epochMs / 1000.0 - 978_307_200.0))
+}

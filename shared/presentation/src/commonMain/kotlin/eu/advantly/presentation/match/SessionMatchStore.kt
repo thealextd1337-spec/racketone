@@ -45,6 +45,7 @@ import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.CompanionDetector
 import eu.advantly.device.link.CompanionState
 import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.DeviceStatus
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
@@ -130,6 +131,9 @@ class SessionMatchStore(
     override val active: StateFlow<LiveMatchSnapshot?> = activeFlow.asStateFlow()
     override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
+    override val localAppBuild get() = session.config.appBuild
+    private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
+    override val deviceStatuses = deviceStatusFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
     private val updateRequiredFlow = MutableStateFlow<UpdateRequired?>(null)
@@ -181,6 +185,51 @@ class SessionMatchStore(
                 companionState == CompanionState.NO_WATCH -> WatchStatus.NO_WATCH
                 else -> WatchStatus.UNKNOWN
             }
+        val known =
+            state.devices
+                .map {
+                    it.copy(name = data.settings.get("presentation.deviceName." + it.peer).orEmpty())
+                }.toMutableList()
+        val inventory = companion?.devices.orEmpty()
+        val inventoryKnown = companionState != CompanionState.UNKNOWN
+        val inventoryPeers =
+            inventory.map { it.peer }.toSet() +
+                if (inventory.isEmpty() && companionState in listOf(CompanionState.APP_INSTALLED, CompanionState.APP_NOT_INSTALLED)) {
+                    setOf("watch")
+                } else {
+                    emptySet()
+                }
+        if (inventoryKnown) {
+            val retained =
+                inventoryPeers + state.sync.peers.map { it.peer } + state.devices.filter { it.kind != PeerKind.WATCH }.map { it.peer }
+            session.retainDeviceStatuses(retained)
+            known.removeAll { it.kind == PeerKind.WATCH && it.peer !in retained }
+        }
+        inventory.forEach { device ->
+            if (data.settings.get("presentation.deviceName." + device.peer) != device.name) {
+                data.settings.put("presentation.deviceName." + device.peer, device.name)
+            }
+            val index = known.indexOfFirst { it.peer == device.peer }
+            if (index >= 0) {
+                known[index] = known[index].copy(name = device.name, appInstalled = device.appInstalled)
+            } else {
+                known +=
+                    DeviceStatus(device.peer, PeerKind.WATCH, name = device.name, appInstalled = device.appInstalled)
+            }
+        }
+        // WCSession meldet auch eine Uhr, die noch nie ein Hello gesendet hat.
+        if (known.none { it.kind == PeerKind.WATCH } &&
+            companionState in listOf(CompanionState.APP_INSTALLED, CompanionState.APP_NOT_INSTALLED)
+        ) {
+            known +=
+                DeviceStatus("watch", PeerKind.WATCH, appInstalled = companionState == CompanionState.APP_INSTALLED)
+        }
+        deviceStatusFlow.value =
+            known
+                .filterNot {
+                    it.kind == PeerKind.WATCH && companionState == CompanionState.NO_WATCH &&
+                        state.sync.peers.none { peer -> peer.peer == it.peer }
+                }.sortedBy { it.peer }
         watchStatusFlow.value = status
         watchFlow.value = status == WatchStatus.AVAILABLE
     }

@@ -22,11 +22,13 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.data.db.AdvantlyDatabase
+import eu.advantly.device.link.CompanionDevice
 import eu.advantly.device.link.CompanionState
 import eu.advantly.device.link.ReliableDeviceLink
 import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
@@ -1040,12 +1042,106 @@ class SessionMatchStoreTest {
         val rig = Rig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
         assertFalse(rig.phone.watchAvailable.value)
         assertEquals(WatchStatus.APP_NOT_INSTALLED, rig.phone.watchStatus.value)
+        assertEquals(
+            false,
+            rig.phone.deviceStatuses.value
+                .single()
+                .appInstalled,
+        )
+        assertEquals(
+            DeviceLight.GRAY,
+            rig.phone.deviceStatuses.value
+                .single()
+                .light(null),
+        )
+        rig.companion.devices =
+            listOf(
+                CompanionDevice("pixel", "Pixel Watch"),
+                CompanionDevice("galaxy", "Galaxy Watch"),
+            )
         rig.companion.state = CompanionState.APP_INSTALLED
+        assertEquals(
+            listOf("Galaxy Watch", "Pixel Watch"),
+            rig.phone.deviceStatuses.value
+                .map { it.name },
+        )
+        assertTrue(
+            rig.phone.deviceStatuses.value
+                .all { it.light(null) == DeviceLight.RED },
+        )
         assertTrue(rig.phone.watchAvailable.value)
         assertEquals(WatchStatus.AVAILABLE, rig.phone.watchStatus.value)
         val before = rig.companion.refreshes
         rig.phone.refreshWatchStatus()
         assertEquals(before + 1, rig.companion.refreshes)
+    }
+
+    @Test
+    fun inventoryRemovesOldWatchesButKeepsLivePeersAndPerDeviceInstallationState() {
+        val rig = Rig()
+        assertTrue(
+            rig.phoneSession.state.value.devices
+                .any { it.peer == "watch" },
+        )
+        rig.companion.devices =
+            listOf(
+                CompanionDevice("pixel", "Pixel", appInstalled = true),
+                CompanionDevice("galaxy", "Galaxy", appInstalled = false),
+            )
+        rig.companion.state = CompanionState.APP_INSTALLED
+        assertEquals(
+            setOf("pixel", "galaxy", "watch"),
+            rig.phone.deviceStatuses.value
+                .map { it.peer }
+                .toSet(),
+        )
+        assertEquals(
+            DeviceLight.GRAY,
+            rig.phone.deviceStatuses.value
+                .single { it.peer == "galaxy" }
+                .light(null),
+        )
+        assertEquals(
+            DeviceLight.RED,
+            rig.phone.deviceStatuses.value
+                .single { it.peer == "pixel" }
+                .light(null),
+        )
+        rig.offline("watch")
+        rig.settle()
+        assertEquals(
+            setOf("pixel", "galaxy"),
+            rig.phone.deviceStatuses.value
+                .map { it.peer }
+                .toSet(),
+        )
+        assertTrue(
+            rig.phoneSession.state.value.devices
+                .none { it.peer == "watch" },
+        )
+        assertFalse(
+            rig.phoneSession.data.settings
+                .get("session.deviceStatuses")
+                .orEmpty()
+                .contains("\"peer\":\"watch\""),
+        )
+        // Ein späteres FILTER_ALL-Ergebnis darf auch alte Inventarzeilen entfernen.
+        rig.companion.devices =
+            listOf(
+                CompanionDevice("pixel", "Pixel"),
+            )
+        rig.companion.refresh()
+        assertEquals(
+            listOf("pixel"),
+            rig.phone.deviceStatuses.value
+                .map { it.peer },
+        )
+        rig.companion.devices = emptyList()
+        rig.companion.state = CompanionState.NO_WATCH
+        assertTrue(
+            rig.phone.deviceStatuses.value
+                .isEmpty(),
+        )
     }
 
     /** Start mit „Meine Uhr“ ohne Verbindung, die Uhr war nie verbunden → sie zählt, sobald sie sich meldet. */

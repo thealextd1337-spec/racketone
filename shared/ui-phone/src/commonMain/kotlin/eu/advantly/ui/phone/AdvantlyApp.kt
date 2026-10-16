@@ -82,6 +82,8 @@ fun AdvantlyApp(
     authModel: AuthViewModel? = null,
     googleCredential: (suspend () -> GoogleCredential)? = null,
     onBenchmarkFinished: (String) -> Unit = {},
+    buildCommit: String = "",
+    buildTimeUtc: String = "",
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -111,7 +113,7 @@ fun AdvantlyApp(
                 if (navigator.top == null) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
-                        Box(Modifier.weight(1f)) { TabLayer(model, versionName, authModel, googleCredential) }
+                        Box(Modifier.weight(1f)) { TabLayer(model, versionName, authModel, googleCredential, buildCommit, buildTimeUtc) }
                     }
                 }
                 when (val top = navigator.top) {
@@ -199,6 +201,8 @@ private fun TabLayer(
     versionName: String,
     authModel: AuthViewModel?,
     googleCredential: (suspend () -> GoogleCredential)?,
+    buildCommit: String,
+    buildTimeUtc: String,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
@@ -239,6 +243,8 @@ private fun TabLayer(
                                 players = model.players,
                                 onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
                                 telemetry = model.telemetry,
+                                buildCommit = buildCommit,
+                                buildTimeUtc = buildTimeUtc,
                             )
                         }
                     }

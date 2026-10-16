@@ -13,6 +13,8 @@ class WatchConnectivityCompanionDetector(
     private var listener: ((CompanionState) -> Unit)? = null
     private var last: CompanionState? = null
     private var timer: Cancellable? = null
+    override var devices: List<CompanionDevice> = emptyList()
+        private set
 
     override fun start(listener: (CompanionState) -> Unit) {
         this.listener = listener
@@ -36,8 +38,12 @@ class WatchConnectivityCompanionDetector(
     }
 
     private fun current(): CompanionState {
-        if (!WCSession.isSupported()) return CompanionState.UNKNOWN
+        if (!WCSession.isSupported()) {
+            devices = emptyList()
+            return CompanionState.UNKNOWN
+        }
         val session = WCSession.defaultSession
+        devices = if (session.paired) listOf(CompanionDevice(WATCH_PEER, "", session.watchAppInstalled)) else emptyList()
         return when {
             !session.paired -> CompanionState.NO_WATCH
             !session.watchAppInstalled -> CompanionState.APP_NOT_INSTALLED

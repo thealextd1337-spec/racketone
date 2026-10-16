@@ -10,9 +10,14 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.presentation.live.PointLabel
+import eu.advantly.presentation.match.UpdateRequired
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.sync.protocol.SyncCodec
 import eu.advantly.wear.WatchHarness
 import eu.advantly.wear.match.FormatChoice
 import org.junit.Assert.assertEquals
@@ -59,6 +64,32 @@ class WatchControllerTest {
         assertNull(home.last)
         assertNull(home.resume)
         assertTrue(home.workoutEnabled)
+    }
+
+    @Test
+    fun homeRetainsConcreteUpdateHintAfterDisconnect() {
+        h.offline("phone")
+        h.settle()
+        for ((version, expected) in listOf(
+            1 to UpdateRequired.OTHER_DEVICE,
+            99 to UpdateRequired.THIS_DEVICE,
+        )) {
+            val peer = ReliableDeviceLink(h.network.transport("incompatible"), h.scheduler).apply { start() }
+            h.settle()
+            peer.send(
+                "watch",
+                SyncCodec.encode(
+                    Hello(DeviceId("peer"), PeerKind.PHONE, minV = version, v = version),
+                ),
+            )
+            h.settle()
+            assertEquals(expected, (c.state.value.screen as WatchScreen.Home).updateRequired)
+            peer.stop()
+            h.settle()
+            val home = c.state.value.screen as WatchScreen.Home
+            assertEquals(expected, home.updateRequired)
+            assertEquals(DeviceLight.RED, home.phoneLight)
+        }
     }
 
     @Test

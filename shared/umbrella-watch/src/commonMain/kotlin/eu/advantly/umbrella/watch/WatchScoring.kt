@@ -45,6 +45,7 @@ import eu.advantly.match.session.SyncStatus
 import eu.advantly.match.session.SystemWallClock
 import eu.advantly.match.session.WallClock
 import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 
 /**
@@ -192,6 +193,27 @@ class WatchScoring internal constructor(
                 .watchPeople()
                 .map { WatchPlayer(it.id.value, it.displayName, "", 0, false) }
         }.orEmpty()
+    }
+
+    /** F31: flache Statusdaten ohne UI-Texte; Aufruf und Benachrichtigung bleiben auf der Main-Queue. */
+    fun phoneStatus(): WatchPhoneStatus {
+        val session = backend()?.session ?: return WatchPhoneStatus("GRAY", "", false)
+        val phone =
+            session.state.value.devices
+                .firstOrNull { it.kind == PeerKind.PHONE }
+        val update =
+            when (phone?.compatibility) {
+                CompatibilityStatus.PEER_TOO_OLD -> "OTHER_DEVICE"
+                CompatibilityStatus.PEER_TOO_NEW -> "THIS_DEVICE"
+                else -> ""
+            }
+        return WatchPhoneStatus(
+            phone?.light(session.config.appBuild)?.name ?: "GRAY",
+            update,
+            session.config.appBuild
+                ?.commit
+                ?.endsWith("-dirty") == true || phone?.appBuild?.commit?.endsWith("-dirty") == true,
+        )
     }
 
     /** Versionshinweis auch ohne offenes Match: THIS_DEVICE / OTHER_DEVICE / leer (kompatibel oder unbekannt). */
@@ -1266,3 +1288,10 @@ internal fun updateCode(sync: SyncStatus?): String =
         CompatibilityStatus.PEER_TOO_NEW -> "THIS_DEVICE"
         CompatibilityStatus.COMPATIBLE, null -> ""
     }
+
+/** Status der Handy-Verbindung für SwiftUI; ausschließlich flache Werte. */
+data class WatchPhoneStatus(
+    val light: String,
+    val updateRequired: String,
+    val developmentBuild: Boolean,
+)

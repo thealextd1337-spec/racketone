@@ -3,6 +3,7 @@ package eu.advantly.match.session
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Uuid7
 import eu.advantly.sync.protocol.AntiEntropy
+import eu.advantly.sync.protocol.AppBuild
 import eu.advantly.sync.protocol.PeerKind
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -69,4 +70,5 @@ data class SessionConfig(
     val summaryMatchLimit: Long = 8,
     val autoFollow: Boolean = true,
     val parallelMatches: Boolean = kind == PeerKind.PHONE,
+    val appBuild: AppBuild? = null,
 )

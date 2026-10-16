@@ -1,12 +1,15 @@
 package eu.advantly.device.link.testing
 
 import eu.advantly.device.link.CompanionDetector
+import eu.advantly.device.link.CompanionDevice
 import eu.advantly.device.link.CompanionState
 
 /** [CompanionDetector] für Tests und Previews: Stand wird von Hand gesetzt, [refreshes] zählt Neuabfragen. */
 class FakeCompanionDetector(
     initial: CompanionState = CompanionState.UNKNOWN,
 ) : CompanionDetector {
+    override var devices: List<CompanionDevice> = emptyList()
+
     private var listener: ((CompanionState) -> Unit)? = null
 
     var state: CompanionState = initial

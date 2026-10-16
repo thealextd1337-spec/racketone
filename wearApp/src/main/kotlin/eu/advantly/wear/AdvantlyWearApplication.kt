@@ -32,6 +32,8 @@ class AdvantlyWearApplication : Application() {
             "PROCESS_START",
             "pid" to Process.myPid(),
             "version" to BuildConfig.VERSION_NAME,
+            "commit" to getString(R.string.build_git_commit),
+            "buildTimeUtc" to getString(R.string.build_time_utc),
             "sessionActive" to store.sessionActive,
             "sessionId" to store.sessionId,
         )

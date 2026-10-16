@@ -3,7 +3,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
-    <string name="wear_version">Version %1$s</string>
+    <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>
@@ -281,4 +281,9 @@
     <string name="server_choice_context_tiebreak_second">Set %1$d · Other team’s first serve</string>
     <string name="server_choice_current">Current: %1$s. You can choose until the next point.</string>
     <string name="server_choice_current_unknown">You can choose until the next point.</string>
+    <string name="phone_status_green">Phone connected · same build</string>
+    <string name="phone_status_yellow">Phone connected · update recommended</string>
+    <string name="phone_status_red">Phone unreachable</string>
+    <string name="phone_status_gray">No phone paired</string>
+    <string name="phone_status_development">Development build</string>
 </resources>

@@ -62,6 +62,14 @@ struct StartView: View {
                     }
                 }
                 #endif
+                Section {
+                    PhoneStatusLabel(code: model.phoneStatus, update: model.phoneStatusUpdate, developmentBuild: model.phoneDevelopmentBuild)
+                    Text(BuildVersionText.details)
+                        .font(.footnote)
+                        .foregroundStyle(Brand.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("buildVersion")
+                }
             }
             .navigationTitle("Advantly")
         }
@@ -326,4 +334,51 @@ enum SetupSlotText {
 
 private extension String {
     var nonBlank: String? { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self }
+}
+
+/// F31: Farbe plus Badge und ausgeschriebener VoiceOver-Text.
+struct PhoneStatusLabel: View {
+    let code: String
+    var update: String = ""
+    var developmentBuild: Bool = false
+    private var key: String {
+        if code == "RED" && !update.isEmpty {
+            return update == "THIS_DEVICE" ? "sync.updateWatch" : "sync.updatePhone"
+        }
+        if code == "YELLOW" && developmentBuild { return "start.phoneStatus.development" }
+        return "start.phoneStatus." + code.lowercased()
+    }
+    private var color: Color {
+        switch code {
+        case "GREEN": return .green
+        case "YELLOW": return Brand.hint
+        case "RED": return .red
+        default: return Brand.text2
+        }
+    }
+    private var badge: String { code == "GREEN" ? "✓" : (code == "GRAY" ? "–" : (code == "RED" ? "×" : "!")) }
+    var body: some View {
+        Text(badge + " " + loc(key))
+            .font(.footnote)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(Text(LocalizedStringKey(key)))
+            .accessibilityIdentifier("phoneStatus")
+    }
+}
+
+/// Aus Gradles vorhandener Version.xcconfig; Release lässt die Bauzeit leer.
+enum BuildVersionText {
+    static var details: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
+        let commit = info["AdvantlyGitCommit"] as? String ?? "unknown"
+        var lines = [loc("start.version %@", version) + " · " + commit]
+        if let raw = info["AdvantlyBuildTime"] as? String, let seconds = TimeInterval(raw) {
+            let formatter = DateFormatter()
+            formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
+            lines.append(formatter.string(from: Date(timeIntervalSince1970: seconds)))
+        }
+        return lines.joined(separator: "\n")
+    }
 }

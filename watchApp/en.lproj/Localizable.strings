@@ -522,3 +522,12 @@
 "serve.choice.game %@ %@" = "Set %@ · Game %@";
 "serve.choice.tb.first %@" = "Set %@ · First serve";
 "serve.choice.tb.second %@" = "Set %@ · Other team’s first serve";
+
+"start.version %@" = "v%@";
+
+// F31: Verbindung zum Handy, Farbe immer mit Text und Badge.
+"start.phoneStatus.green" = "Phone connected · same build";
+"start.phoneStatus.yellow" = "Phone connected · update recommended";
+"start.phoneStatus.red" = "Phone unreachable";
+"start.phoneStatus.gray" = "No phone paired";
+"start.phoneStatus.development" = "Development build";

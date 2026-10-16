@@ -18,6 +18,10 @@ dependencies {
 
 gradlePlugin {
     plugins {
+        register("buildInfo") {
+            id = "advantly.build.info"
+            implementationClass = "eu.advantly.buildlogic.BuildInfoConventionPlugin"
+        }
         register("kmpBase") {
             id = "advantly.kmp.base"
             implementationClass = "eu.advantly.buildlogic.KmpBaseConventionPlugin"

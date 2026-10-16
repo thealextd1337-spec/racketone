@@ -4,6 +4,7 @@ import eu.advantly.core.model.DeviceId
 import eu.advantly.data.LocalData
 import eu.advantly.device.link.DeviceLink
 import eu.advantly.device.link.LinkScheduler
+import eu.advantly.sync.protocol.AppBuild
 import eu.advantly.sync.protocol.PeerKind
 
 /**
@@ -35,5 +36,7 @@ object MatchSessions {
         clock: WallClock = SystemWallClock,
         ids: IdGenerator = RandomIdGenerator(),
         threadGuard: ThreadGuard = ThreadGuard.NONE,
-    ): MatchSession = MatchSession(data, link, scheduler, SessionConfig(deviceId(data, clock, ids), kind), clock, ids, threadGuard)
+        appBuild: AppBuild? = null,
+    ): MatchSession =
+        MatchSession(data, link, scheduler, SessionConfig(deviceId(data, clock, ids), kind, appBuild = appBuild), clock, ids, threadGuard)
 }

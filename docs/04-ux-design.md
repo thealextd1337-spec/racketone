@@ -288,11 +288,11 @@ Kleines Smartwatch-Symbol in der Kopfzeile der Start-Seite (H1), je gekoppelter 
 | Farbe | Zustand | Bedeutung |
 |---|---|---|
 | Grün | verbunden, gleicher App-Stand (Commit) | alles in Ordnung |
-| Gelb | verbunden und kompatibel, Stand anders oder unbekannt | Update empfohlen |
-| Rot | gekoppelt, aber nicht erreichbar, oder inkompatibel (Protokoll) | Verbindung prüfen bzw. Update nötig |
-| Grau | keine Uhr gekoppelt | – |
+| Gelb | verbunden und kompatibel, Stand anders oder unbekannt, oder Entwicklungsbuild (`dirty`) | Update empfohlen bzw. Entwicklungsbuild |
+| Rot | gekoppelt, aber nicht erreichbar, oder inkompatibel (Protokoll) | „× nicht erreichbar“ bzw. „Update nötig“ mit konkretem Gerät (Handy oder Uhr) |
+| Grau | keine Uhr gekoppelt oder Advantly auf der Uhr nicht installiert | Details: Kopplungs- bzw. Installationshinweis |
 
-Tipp öffnet Details: Name der Uhr, App-Stand Uhr ↔ Handy, zuletzt gesehen, Hinweis zur Abhilfe. Die Uhr zeigt am Ende ihrer Startliste (W1) das Gegenstück zum Handy sowie den eigenen Versionsstand. Der App-Stand wird über ein optionales Feld im `Hello` übertragen; ältere Geräte ohne Feld gelten als „unbekannt“ (Gelb).
+Tipp öffnet Details: Name der Uhr, App-Stand Uhr ↔ Handy, zuletzt gesehen, Hinweis zur Abhilfe. Erreichbarkeit kommt aus dem System (Wear OS: `FILTER_REACHABLE`, Apple: `WCSession.isReachable`); es gibt kein periodisches `Hello`. Die Uhr zeigt am Ende ihrer Startliste (W1) das Gegenstück zum Handy sowie den eigenen Versionsstand. Der App-Stand wird über ein optionales Feld im `Hello` übertragen; ältere Geräte ohne Feld gelten als „unbekannt“ (Gelb).
 
 H7 und die Match-Steuerung sind nur am Zähler bedienbar. Auch Änderungen an laufendem Match/Ergebnis in H8–H13 dürfen kein zweites Zähler-Gerät freischalten; Anzeige-Geräte bieten dafür zunächst die bestätigte Übernahme.
 

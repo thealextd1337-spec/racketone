@@ -248,3 +248,21 @@ actual fun formatMonth(
     java.time.format.DateTimeFormatter
         .ofPattern("LLLL yyyy", java.util.Locale.getDefault())
         .format(java.time.YearMonth.of(year, month))
+
+actual fun formatBuildDate(epochMs: Long): String =
+    java.time.format.DateTimeFormatter
+        .ofPattern(
+            if (java.util.Locale
+                    .getDefault()
+                    .language == "de"
+            ) {
+                "dd.MM. HH:mm"
+            } else {
+                "MMM d, HH:mm"
+            },
+            java.util.Locale.getDefault(),
+        ).format(
+            java.time.Instant
+                .ofEpochMilli(epochMs)
+                .atZone(java.time.ZoneId.systemDefault()),
+        )

@@ -42,6 +42,7 @@ data class SessionState(
     val watchMatchId: MatchId? = null,
     val droppedInputs: DroppedInputs? = null,
     val telemetry: TelemetryPreference = TelemetryPreference(),
+    val devices: List<DeviceStatus> = emptyList(),
 ) {
     /** Kurzform für Anzeige und Versandentscheidung. */
     val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility

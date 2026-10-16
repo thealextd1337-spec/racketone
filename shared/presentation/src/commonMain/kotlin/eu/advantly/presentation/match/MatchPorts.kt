@@ -19,8 +19,10 @@ import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.match.session.DeviceStatus
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.deriveServerChoiceContext
+import eu.advantly.sync.protocol.AppBuild
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -297,6 +299,10 @@ interface LiveMatchPort {
 
     /** Stand der eigenen Uhr für „Wer zählt?“ (auch ohne Live-Verbindung, reagiert auf Änderungen). */
     val watchStatus: StateFlow<WatchStatus>
+
+    /** F31: einzelne Gegenstellen, auch offline; unabhängig vom Zähler-Setup. */
+    val deviceStatuses: StateFlow<List<DeviceStatus>>
+    val localAppBuild: AppBuild? get() = null
 
     /**
      * Versionsunterschied zu einem gekoppelten Gerät, auch ohne aktives Match (z. B. Schritt „Wer zählt?“); `null` = keiner.
