@@ -24,14 +24,19 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
@@ -43,6 +48,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
@@ -70,6 +77,7 @@ import androidx.wear.compose.material3.timeTextSeparator
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.match.session.OperationTimings
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.wear.R
 import eu.advantly.wear.live.LiveModel
@@ -221,6 +229,9 @@ private fun ScorePage(
             flashSide = null
         }
     }
+    // Halten auf einer Hälfte: Fortschritt von rechts nach links, löst nach der Haltezeit aus (solange der Finger liegt)
+    var hold by remember { mutableStateOf<HoldUi?>(null) }
+    val holdProgress = rememberHoldProgress(hold)
     val currentLive by rememberUpdatedState(live)
     val currentActions by rememberUpdatedState(actions)
     val currentOpenControls by rememberUpdatedState(onOpenControls)
@@ -249,15 +260,59 @@ private fun ScorePage(
                             var last = down.position
                             var endTime = down.uptimeMillis
                             var multiTouch = false
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                if (event.changes.count { it.pressed } > 1) multiTouch = true
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                last = change.position
-                                endTime = change.uptimeMillis
-                                if (!change.pressed) break
+                            val downHalf = TapZones.classify(down.position.y, size.height.toFloat())
+                            val holdSide =
+                                TouchRouting.holdSide(
+                                    target = target,
+                                    half = downHalf,
+                                    locked = currentLive.locked,
+                                    scorer = currentLive.role == LiveRole.SCORER,
+                                    canRemove = downHalf?.let { currentLive.canRemovePoint[it] } == true,
+                                )
+                            var holding = holdSide != null
+                            var held = false
+                            if (holdSide != null) hold = HoldUi(holdSide, down.uptimeMillis)
+                            try {
+                                while (true) {
+                                    val event =
+                                        if (holding) {
+                                            val heldFor = endTime - down.uptimeMillis
+                                            withTimeoutOrNull((GestureClassifier.LONG_PRESS_MILLIS - heldFor).coerceAtLeast(1)) {
+                                                awaitPointerEvent()
+                                            }
+                                        } else {
+                                            awaitPointerEvent()
+                                        }
+                                    if (event == null) {
+                                        // Haltezeit erreicht, Finger liegt still: jetzt auslösen (Anzeige ist genau jetzt voll)
+                                        holding = false
+                                        held = true
+                                        hold = hold?.copy(fired = true)
+                                        if (currentLive.locked) {
+                                            currentActions.unlock()
+                                        } else {
+                                            holdSide?.let {
+                                                currentActions.removePoint(
+                                                    it,
+                                                )
+                                            }
+                                        }
+                                        continue
+                                    }
+                                    if (event.changes.count { it.pressed } > 1) multiTouch = true
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    last = change.position
+                                    endTime = change.uptimeMillis
+                                    if (holding && (multiTouch || (last - down.position).getDistance() > touchSlop)) {
+                                        holding = false // bewegt bzw. zweiter Finger: Halten abgebrochen
+                                        hold = null
+                                    }
+                                    if (!change.pressed) break
+                                }
+                            } finally {
+                                hold = null // Loslassen/Abbruch: Anzeige läuft kurz zurück
                             }
-                            if (multiTouch) return@awaitEachGesture // Handballen/Mehrfinger ignorieren
+                            if (multiTouch || held) return@awaitEachGesture // Handballen/Mehrfinger ignorieren; Halten erledigt
                             val gesture =
                                 GestureClassifier.classify(
                                     dx = last.x - down.position.x,
@@ -283,7 +338,8 @@ private fun ScorePage(
                                     }
                                 }
 
-                                // Halten (1 s, ausgelöst beim Loslassen): letzten Punkt dieser Hälfte abziehen
+                                // Halten ohne Abzugsmöglichkeit (sonst löst der Fortschritt schon beim Halten aus):
+                                // Controller meldet „nichts abzuziehen“
                                 TouchDecision.RemovePoint -> {
                                     half?.let { currentActions.removePoint(it) }
                                 }
@@ -374,6 +430,7 @@ private fun ScorePage(
                         digitSize = digitSize.value,
                         isAmbient = isAmbient,
                         flashing = flashSide == side,
+                        holdProgress = { if (holdProgress.side == side) holdProgress.fraction else 0f },
                         // „Gegner“-Namen liegen am Mittelband unter der Aktionsleiste: solange sie steht, ausblenden
                         // (statt halb verdeckt durchzuscheinen); Layout bleibt gleich
                         labelHidden = side == Side.B && strip != null,
@@ -445,6 +502,7 @@ private fun TeamHalf(
     digitSize: Float,
     isAmbient: Boolean,
     flashing: Boolean,
+    holdProgress: () -> Float,
     labelHidden: Boolean,
     header: @Composable ColumnScope.() -> Unit,
     footer: @Composable ColumnScope.() -> Unit,
@@ -456,7 +514,20 @@ private fun TeamHalf(
         if (isAmbient) {
             base.border(1.dp, color.copy(alpha = 0.5f)) // nur Kontur (04 §4.3.6)
         } else {
-            base.background(color.copy(alpha = if (flashing) 0.35f else 0.12f))
+            base
+                .background(color.copy(alpha = if (flashing) 0.35f else 0.12f))
+                .semantics { holdProgressValue = holdProgress() }
+                .drawBehind {
+                    // Halte-Fortschritt: Füllung läuft von rechts nach links (wie der Restzeit-Balken der Aufschlag-Leiste)
+                    val p = holdProgress()
+                    if (p > 0f) {
+                        drawRect(
+                            color.copy(alpha = HOLD_FILL_ALPHA),
+                            topLeft = Offset(size.width * (1 - p), 0f),
+                            size = Size(size.width * p, size.height),
+                        )
+                    }
+                }
         }
     val serving = live.serve?.takeIf { it.side == side && live.status != MatchStatus.FINISHED }
     val arrowServe = serving?.takeIf { it.server != null && it.receiver != null }
@@ -617,6 +688,7 @@ private fun MiddleBand(
             if (toast != null) {
                 Text(
                     toastText(toast),
+                    modifier = Modifier.testTag(LiveTags.TOAST),
                     fontSize = 11.sp,
                     color = Color.White,
                     textAlign = TextAlign.Center,
@@ -769,6 +841,66 @@ private object BottomLine {
     ): Boolean = !isAmbient && (live.takeOverOffered || (live.rejectedInputs > 0 && live.role == LiveRole.DISPLAY))
 }
 
+/** Laufendes Halten auf [side] seit [startUptime]; [fired] = Haltezeit erreicht, Aktion ausgelöst (Anzeige voll). */
+private data class HoldUi(
+    val side: Side,
+    val startUptime: Long,
+    val fired: Boolean = false,
+)
+
+/** Halte-Fortschritt einer Hälfte (0 → 1). */
+private class HoldProgress {
+    var side by mutableStateOf<Side?>(null)
+    var fraction by mutableFloatStateOf(0f)
+}
+
+/**
+ * Fortschritt 0 → 1 über die Haltezeit ([GestureClassifier.LONG_PRESS_MILLIS], Frame-Zeit statt Animationsskala, damit
+ * er genau beim Auslösen voll ist); ausgelöst bleibt er voll, bis der Finger hochgeht; Loslassen bzw. Abbruch lässt ihn
+ * kurz zurücklaufen ([HOLD_RESET_MILLIS]).
+ */
+@Composable
+private fun rememberHoldProgress(hold: HoldUi?): HoldProgress {
+    val progress = remember { HoldProgress() }
+    LaunchedEffect(hold) {
+        when {
+            hold == null -> {
+                val from = progress.fraction
+                if (from <= 0f) return@LaunchedEffect
+                val first = withFrameMillis { it }
+                while (true) {
+                    val t = (withFrameMillis { it } - first).toFloat() / HOLD_RESET_MILLIS
+                    progress.fraction = (from * (1 - t)).coerceAtLeast(0f)
+                    if (t >= 1f) break
+                }
+            }
+
+            hold.fired -> {
+                progress.side = hold.side
+                progress.fraction = 1f
+            }
+
+            else -> {
+                progress.side = hold.side
+                progress.fraction = 0f
+                val first = withFrameMillis { it }
+                while (true) {
+                    progress.fraction = OperationTimings.holdFraction(withFrameMillis { it } - first)
+                    if (progress.fraction >= 1f) break
+                }
+            }
+        }
+    }
+    return progress
+}
+
+/** Halte-Fortschritt einer Hälfte (für Tests und Barrierefreiheits-Werkzeuge). */
+val HoldProgressKey = SemanticsPropertyKey<Float>("HoldProgress")
+private var SemanticsPropertyReceiver.holdProgressValue by HoldProgressKey
+
+private const val HOLD_FILL_ALPHA = 0.35f
+private const val HOLD_RESET_MILLIS = 180L
+
 /** Test-Tags der Score-Seite (Layout-Tests: nichts darf sich überlagern). */
 internal object LiveTags {
     const val TOP_STATUS = "live_top_status"
@@ -776,6 +908,7 @@ internal object LiveTags {
     const val SERVE_ARROW = "live_serve_arrow"
     const val SETS = "live_sets"
     const val HINT = "live_hint"
+    const val TOAST = "live_toast"
     const val HEART_RATE = "live_heart_rate"
     const val STEPS = "live_steps"
 

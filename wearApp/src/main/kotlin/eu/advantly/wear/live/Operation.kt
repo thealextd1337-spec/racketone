@@ -267,6 +267,26 @@ sealed interface TouchDecision {
  * sie zu einem anderen Punkt, wird die Eingabe verworfen – kein Rückfall aufs Zählen.
  */
 object TouchRouting {
+    /**
+     * Halten mit Fortschritt (Feldtest 2026-10-16): Auf welcher Hälfte läuft beim Aufsetzen die Halte-Anzeige, die nach
+     * [eu.advantly.wear.scoring.GestureClassifier.LONG_PRESS_MILLIS] auslöst? Nur auf den Zählflächen ([target] =
+     * [TouchTarget.Score]) und nur, wenn Halten dort etwas tut: entsperren (gesperrt) bzw. am Zähler den letzten Punkt
+     * dieser Seite abziehen ([canRemove]). Sonst `null` (kein Fortschritt; Halten meldet wie bisher „nichts abzuziehen“).
+     */
+    fun holdSide(
+        target: TouchTarget,
+        half: Side?,
+        locked: Boolean,
+        scorer: Boolean,
+        canRemove: Boolean,
+    ): Side? =
+        when {
+            target != TouchTarget.Score || half == null -> null
+            locked -> half
+            scorer && canRemove -> half
+            else -> null
+        }
+
     fun target(
         strip: StripAction?,
         hit: StripHit,

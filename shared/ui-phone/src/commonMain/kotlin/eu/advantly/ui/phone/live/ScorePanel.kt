@@ -53,6 +53,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
@@ -68,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import eu.advantly.core.model.Side
+import eu.advantly.presentation.live.LiveOperationRules
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
@@ -89,8 +92,15 @@ private val MIN_DIGIT_HEIGHT = 24.dp
 private const val FLASH_MILLIS = 120
 private const val FLASH_ALPHA = 0.24f
 
-/** Gleiche bewusste Haltegeste wie auf der Uhr. */
-private const val REMOVE_HOLD_MILLIS = 1_000L
+/** Gleiche bewusste Haltegeste wie auf der Uhr (gemeinsame Zeit aller Geräte). */
+private const val REMOVE_HOLD_MILLIS = LiveOperationRules.HOLD_TO_REMOVE_MILLIS
+
+/** Halte-Fortschritt: kurzes Zurücklaufen nach vorzeitigem Loslassen. */
+private const val HOLD_RESET_MILLIS = 180
+
+/** Halte-Fortschritt eines Panels 0 → 1 (für Tests und Barrierefreiheits-Werkzeuge). */
+internal val HoldProgressKey = SemanticsPropertyKey<Float>("HoldProgress")
+private var SemanticsPropertyReceiver.holdProgressValue by HoldProgressKey
 
 /** Inhalt eines Score-Panels. */
 internal data class ScorePanelContent(
@@ -141,9 +151,18 @@ internal fun ScorePanel(
     val currentCanRemove by rememberUpdatedState(canRemovePoint)
     var pressed by remember { mutableStateOf(false) }
     val holdProgress = remember { Animatable(0f) }
-    LaunchedEffect(pressed, canRemovePoint) {
-        holdProgress.snapTo(0f)
-        if (pressed && canRemovePoint) holdProgress.animateTo(1f, tween(REMOVE_HOLD_MILLIS.toInt(), easing = LinearEasing))
+    // Fortschritt beim Halten (Feldtest 2026-10-16): läuft über die Haltezeit von rechts nach links und ist genau beim
+    // Auslösen voll; früher loslassen lässt ihn kurz zurücklaufen (keine Auslösung)
+    var holdFired by remember { mutableStateOf(false) }
+    LaunchedEffect(pressed, canRemovePoint, holdFired) {
+        if (holdFired) {
+            holdProgress.snapTo(1f) // ausgelöst: voll, bis der Finger hochgeht
+        } else if (pressed && canRemovePoint) {
+            holdProgress.snapTo(0f)
+            holdProgress.animateTo(1f, tween(REMOVE_HOLD_MILLIS.toInt(), easing = LinearEasing))
+        } else {
+            holdProgress.animateTo(0f, tween(HOLD_RESET_MILLIS, easing = LinearEasing))
+        }
     }
 
     // Neues Animatable pro Punkt, mit Startwert > 0: Der Blitz ist damit schon im ERSTEN Frame nach dem Tap
@@ -168,15 +187,20 @@ internal fun ScorePanel(
                     drawContent()
                     val alpha = flash.value
                     if (alpha > 0f) drawRect(Color.White.copy(alpha = alpha))
-                    if (holdProgress.value > 0f) {
-                        val height = 3.dp.toPx()
+                    val hold = holdProgress.value
+                    if (hold > 0f) {
+                        // Füllung von rechts nach links über die Fläche, dazu eine kräftige Kante unten
+                        val width = size.width * hold
+                        drawRect(teamColor.copy(alpha = 0.18f), topLeft = Offset(size.width - width, 0f), size = Size(width, size.height))
+                        val height = 4.dp.toPx()
                         drawRect(
-                            teamColor.copy(alpha = 0.65f),
-                            topLeft = Offset(0f, size.height - height),
-                            size = Size(size.width * holdProgress.value, height),
+                            teamColor.copy(alpha = 0.75f),
+                            topLeft = Offset(size.width - width, size.height - height),
+                            size = Size(width, height),
                         )
                     }
                 }.semantics(mergeDescendants = true) {
+                    holdProgressValue = holdProgress.value
                     contentDescription = content.a11yDescription
                     liveRegion = LiveRegionMode.Polite
                     if (interactive) {
@@ -232,6 +256,7 @@ internal fun ScorePanel(
                                 if (event == null) {
                                     if (currentCanRemove) {
                                         longPressHandled = true
+                                        holdFired = true
                                         pressed = false
                                         currentOnRemove()
                                     }
@@ -249,6 +274,7 @@ internal fun ScorePanel(
                             }
                         } finally {
                             pressed = false
+                            holdFired = false
                         }
                         val release = up ?: return@awaitEachGesture
                         val delta = release.position - down.position
