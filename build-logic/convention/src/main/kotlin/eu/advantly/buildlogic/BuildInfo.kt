@@ -18,6 +18,7 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
@@ -70,7 +71,7 @@ abstract class GenerateAndroidBuildInfo : DefaultTask() {
         val time = if (debug.get()) Instant.now().truncatedTo(ChronoUnit.MINUTES).toString() else ""
         val output = outputDirectory.file("values/build_info.xml").get().asFile
         output.parentFile.mkdirs()
-        output.writeText(
+        output.writeIfChanged(
             """
             |<resources>
             |    <string name="build_git_commit" translatable="false">${revision.get()}</string>
@@ -118,7 +119,7 @@ abstract class GenerateAppleVersionConfig : DefaultTask() {
         outputFile.get().asFile.apply {
             parentFile.mkdirs()
             // Epoch-Sekunden vermeiden den xcconfig-Kommentartrenner // und lassen sich in Foundation sicher lesen.
-            writeText(
+            writeIfChanged(
                 """
                 |// Generiert von generateAppleVersionConfig – nicht von Hand ändern.
                 |MARKETING_VERSION = $name
@@ -131,6 +132,11 @@ abstract class GenerateAppleVersionConfig : DefaultTask() {
             )
         }
     }
+}
+
+/** Unveränderte Inhalte nicht neu schreiben, damit Folgetasks ihre Eingaben wiederverwenden. */
+private fun File.writeIfChanged(content: String) {
+    if (!exists() || readText() != content) writeText(content)
 }
 
 class BuildInfoConventionPlugin : Plugin<Project> {
