@@ -477,12 +477,14 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func chooseServer(_ id: String, expected: WatchServerChoiceContext) -> Bool {
         guard choiceInteractive, serverChoicePresented,
               Self.choiceSignature(serverChoiceContext) == Self.choiceSignature(expected) else { return false }
-        handledChoices.insert(Self.choiceWindow(expected))
-        dismissServerChoice()
         guard scoring.chooseServer(playerId: id, expected: expected) != nil else {
             rejected()
+            onSnapshot(snapshot: scoring.snapshot())
+            openServerChoice()
             return false
         }
+        handledChoices.insert(Self.choiceWindow(expected))
+        dismissServerChoice()
         Haptics.play(.click)
         return true
     }

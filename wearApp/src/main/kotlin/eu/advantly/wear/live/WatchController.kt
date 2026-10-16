@@ -372,14 +372,15 @@ class WatchController(
     ): Boolean {
         val context = expected ?: return false
         if (locked || !interactive || presentedChoice != context || player !in context.players) return false
-        handledChoices += context.window()
+        val chosen = session.chooseServer(player, context)
+        if (chosen) handledChoices += context.window()
         overlay = null
         presentedChoice = null
-        val chosen = session.chooseServer(player, context)
         restoreServeBarAfterChoice()
         tapGuard.onWake(uptime())
-        if (chosen) emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
+        emit(WatchEffect.Haptic(if (chosen) WatchHaptic.CONFIRM else WatchHaptic.REJECTED))
         publish()
+        if (!chosen) openServerChoice()
         return chosen
     }
 

@@ -254,6 +254,52 @@ class WatchControllerOperationTest {
     }
 
     @Test
+    fun rejectedSessionChoiceReopensTheCurrentContextAndAllowsRetry() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        val first = match.serverChoiceContext!!
+        // Simuliert einen bereits zugestellten Touch bei noch nicht übernommener Session-Änderung.
+        c.dispose()
+        assertTrue(
+            h.watch.correct(
+                eu.advantly.core.scoring.Correction
+                    .server(first.players[1]),
+            ),
+        )
+        val current = match.serverChoiceContext!!
+        assertFalse(c.chooseServer(first.players.last(), first))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertEquals(current, live.serverChoice!!.context)
+        assertTrue(c.chooseServer(current.players.last(), current))
+        assertEquals(WatchHaptic.CONFIRM, h.haptics.last().pattern)
+        assertNull(live.overlay)
+        c.tick()
+        assertNull(live.overlay)
+        c.start()
+    }
+
+    @Test
+    fun rejectedSessionChoiceRefreshesTheWindowAndClosesAfterRoleLoss() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        h.settle()
+        val first = match.serverChoiceContext!!
+        c.dispose()
+        repeat(4) { assertTrue(h.watch.recordPoint(Side.A)) }
+        val second = match.serverChoiceContext!!
+        assertFalse(c.chooseServer(first.players.first(), first))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
+        assertEquals(second, live.serverChoice!!.context)
+        assertTrue(h.phone.takeOverScoring())
+        h.scheduler.advanceBy(2_000)
+        assertFalse(c.chooseServer(second.players.first(), second))
+        assertEquals(WatchHaptic.REJECTED, h.haptics.last().pattern)
+        assertNull(live.overlay)
+        assertEquals(LiveRole.DISPLAY, live.role)
+        c.start()
+    }
+
+    @Test
     fun automaticChoiceIsLocalAndRejectsStaleTaps() {
         startOnWatch(discipline = Discipline.DOUBLES)
         assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
