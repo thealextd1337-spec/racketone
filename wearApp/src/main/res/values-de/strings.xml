@@ -183,7 +183,7 @@
         <item quantity="other">%1$d Games</item>
     </plurals>
     <string name="setup_serve_stats">Aufschlag-Statistik erfassen</string>
-    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1. · 2. · DF</string>
+    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1./2. Aufschlag oder Doppelfehler</string>
     <string name="live_remove_point_us">Letzten Punkt von uns abziehen</string>
     <string name="live_remove_point_them">Letzten Punkt der Gegner abziehen</string>
     <string name="live_point_removed">Punkt abgezogen</string>
@@ -192,9 +192,6 @@
     <string name="serve_first_in">1. Aufschlag</string>
     <string name="serve_second_in">2. Aufschlag</string>
     <string name="serve_double_fault">Doppelfehler</string>
-    <string name="serve_first_short">1.</string>
-    <string name="serve_second_short">2.</string>
-    <string name="serve_double_fault_short">DF</string>
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>

@@ -457,9 +457,6 @@
 "action.removeThem" = "Remove opponents’ last point";
 "action.restorePoint" = "Restore point";
 "banner.pointRemoved" = "Point removed";
-"serve.first.short" = "1.";
-"serve.second.short" = "2.";
-"serve.df.short" = "DF";
 "serve.first" = "1st serve";
 "serve.second" = "2nd serve";
 "serve.df" = "Double fault";

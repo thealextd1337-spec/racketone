@@ -18,7 +18,8 @@ import eu.advantly.wear.scoring.StripHit
 // Aktionsleiste im Mittelband und Versionshinweis – reine Modelle und Regeln ohne Android (JVM-getestet).
 
 /**
- * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2): „1. · 2. · DF“ für [pointId] (= `lastPoint`).
+ * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2): „1. Aufschlag · 2. Aufschlag · Doppelfehler“ für [pointId]
+ * (= `lastPoint`).
  *
  * @property options wählbare Werte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den Punkt gewann
  * @property selected aktuell erfasster Wert (markieren) oder `null`
@@ -128,8 +129,17 @@ sealed interface StripAction {
 
 /** Reine Regeln für Aufschlag-Leiste, Aufschlägerwahl, Aktionsleiste und Versionshinweis. */
 object OperationRules {
-    /** Reihenfolge der Leiste: „1. · 2. · DF“. */
+    /** Reihenfolge der Leiste: „1. Aufschlag · 2. Aufschlag · Doppelfehler“. */
     private val SERVE_ORDER = listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT)
+
+    /**
+     * Relative Breite des Segments „Doppelfehler“: ein langes Wort ohne Umbruchstelle („Doppelfehler“), die anderen
+     * Labels brechen zweizeilig um („1.“ / „Aufschlag“).
+     */
+    const val DOUBLE_FAULT_WEIGHT = 1.3f
+
+    /** Relative Segmentbreiten der Aufschlag-Leiste (Darstellung und Treffer, [eu.advantly.wear.scoring.ActionStrip]). */
+    fun serveWeights(bar: ServeBarUi): List<Float> = bar.options.map { if (it == ServeOutcome.DOUBLE_FAULT) DOUBLE_FAULT_WEIGHT else 1f }
 
     /** Aufschlag-Leiste für [match], falls sie für [visiblePoint] gerade sichtbar ist (nur Zähler mit Aufschlag-Statistik). */
     fun serveBar(

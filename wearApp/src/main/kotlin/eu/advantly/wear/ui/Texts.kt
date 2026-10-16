@@ -380,18 +380,7 @@ fun toastText(toast: WatchToast): String =
         }
     }
 
-/** Kurzlabel der Aufschlag-Leiste („1.“, „2.“, „DF“). */
-@Composable
-fun serveShortText(outcome: ServeOutcome): String =
-    stringResource(
-        when (outcome) {
-            ServeOutcome.FIRST_SERVE_IN -> R.string.serve_first_short
-            ServeOutcome.SECOND_SERVE_IN -> R.string.serve_second_short
-            ServeOutcome.DOUBLE_FAULT -> R.string.serve_double_fault_short
-        },
-    )
-
-/** Langlabel (TalkBack, Listen): „1. Aufschlag“, „2. Aufschlag“, „Doppelfehler“. */
+/** Label der Aufschlag-Leiste (Score und Listen, auch TalkBack): „1. Aufschlag“, „2. Aufschlag“, „Doppelfehler“. */
 @Composable
 fun serveText(outcome: ServeOutcome): String =
     stringResource(

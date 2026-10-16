@@ -457,9 +457,6 @@
 "action.removeThem" = "Letzten Punkt der Gegner abziehen";
 "action.restorePoint" = "Punkt zurückholen";
 "banner.pointRemoved" = "Punkt abgezogen";
-"serve.first.short" = "1.";
-"serve.second.short" = "2.";
-"serve.df.short" = "DF";
 "serve.first" = "1. Aufschlag";
 "serve.second" = "2. Aufschlag";
 "serve.df" = "Doppelfehler";

@@ -352,11 +352,9 @@ private fun ScorePage(
         if (strip != null) {
             val density = LocalDensity.current
             val geometry = with(density) { ActionStrip.geometry(maxWidth.toPx(), maxHeight.toPx(), density.density) }
-            val stripWidth = with(density) { geometry.width.toDp() }
-            val stripHeight = with(density) { geometry.visualHeight.toDp() }
             val stripTop = with(density) { geometry.visualTop.toDp() }
             // nicht zwingend mittig: auf kleinen Displays rückt die Leiste nach unten (beide Zählflächen ≥ 48 dp)
-            ActionStripContent(strip, live, stripWidth, stripHeight, actions, Modifier.align(Alignment.TopCenter).padding(top = stripTop))
+            ActionStripContent(strip, live, geometry, actions, Modifier.align(Alignment.TopCenter).padding(top = stripTop))
         }
         TopStatus(live, isAmbient, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * TOP_STATUS_FRACTION))
         BottomLine(live, workout, isAmbient, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * 0.04f))

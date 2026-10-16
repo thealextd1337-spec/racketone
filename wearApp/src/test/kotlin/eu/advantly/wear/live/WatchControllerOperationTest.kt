@@ -160,6 +160,42 @@ class WatchControllerOperationTest {
         assertFalse(c.setServe(ServeOutcome.FIRST_SERVE_IN))
     }
 
+    /**
+     * Feldtest 2026-10-16: Die Leiste muss nach JEDEM Punkt stehen (Aufschlag-Statistik ist Default an) – über Spiel- und
+     * Satzgrenzen, im Tiebreak, im Doppel trotz offener Aufschlägerwahl und im Padel; sie hat in der Aktionsleiste Vorrang.
+     */
+    @Test
+    fun serveBarFollowsEveryPointThroughGamesSetsAndTiebreaks() {
+        for ((sport, discipline, format) in listOf(
+            Triple(Sport.TENNIS, Discipline.SINGLES, FormatChoice.TENNIS_BO3),
+            Triple(Sport.TENNIS, Discipline.DOUBLES, FormatChoice.TENNIS_BO3_MTB),
+            Triple(Sport.PADEL, Discipline.DOUBLES, FormatChoice.PADEL_GOLDEN),
+        )) {
+            startOnWatch(sport = sport, discipline = discipline, format = format)
+            assertTrue("$sport: Aufschlag-Statistik ist Default an", match.meta.serveStats)
+            // 6:6 über abwechselnd gewonnene Spiele, dann Tiebreak bis 7:5 – und der erste Punkt des 2. Satzes
+            val rallies =
+                List(6) { List(4) { Side.A } + List(4) { Side.B } }.flatten() + List(5) { listOf(Side.A, Side.B) }.flatten() +
+                    listOf(Side.A, Side.A, Side.B)
+            rallies.forEachIndexed { i, side ->
+                val servingBefore = match.state.serve?.side
+                points(side)
+                val bar = live.serveBar
+                assertNotNull("$sport $discipline: Leiste nach Punkt ${i + 1}", bar)
+                assertEquals("$sport: für genau diesen Punkt", match.lastPoint?.id, bar!!.pointId)
+                assertEquals(
+                    "$sport: Doppelfehler nur bei Punkt der Rückschlagseite",
+                    side != servingBefore,
+                    ServeOutcome.DOUBLE_FAULT in bar.options,
+                )
+                assertEquals("$sport: Leiste hat Vorrang", StripAction.Serve(bar), OperationRules.stripAction(live, null))
+            }
+            assertEquals("$sport: im 2. Satz angekommen", 1, match.state.sets.size)
+            c.confirmEnd()
+            c.close()
+        }
+    }
+
     @Test
     fun serveBarHidesAutomaticallyAndOnUndoOrWake() {
         startOnWatch()
