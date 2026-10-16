@@ -350,6 +350,12 @@ Mehrere Selections dürfen auf dieselbe abgeleitete Session zeigen. Überlappung
 vor Aggregation aufgelöst; aktive Selections dürfen keine Messabschnitte doppelt zählen. Besitzer von Session
 und Quelle müssen identisch sein. Änderungen/Löschungen einer Quelle invalidieren betroffene Ableitungen
 und führen zu einer neuen Revision; eine gelöste Zuordnung bleibt gegen automatisches Wiederverknüpfen gesperrt.
+Solange eine gelöste Selection existiert, bleibt die referenzierte Quelle als minimale Identitätszeile
+(ID, Besitzer, Provider-Namensraum, externe ID, Tombstone-Status) ohne Messwerte/übrige Metadaten erhalten;
+die übrigen Quellfelder sind in diesem Zustand leer. Die Bereinigung darf diese FK-Zeile nicht entfernen.
+Erneuter Import derselben Identität darf die Sperre nicht aufheben; nur explizites erneutes Verknüpfen.
+Match-/Kontolöschung entfernt die zugehörigen Sperren. Vollständiges Health-Löschen entfernt auch sie und
+deaktiviert automatische Imports bis zur ausdrücklichen erneuten Aktivierung (Details in 03 §3.3.5).
 Das Backend-Modell ist entsprechend in [03 §3.3.5](03-backend-datenmodell.md) angepasst. Noch keine Migration.
 
 ### 5.3 Sampling-Raten & Datenmenge

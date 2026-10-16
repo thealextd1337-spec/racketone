@@ -554,8 +554,15 @@ die unten stehenden Session-/Series-Policies erteilen ihnen keine Rechte. Proven
 nur bei Cloud-Einwilligung mitsynchronisieren. Keine Rohsamples oder Tokens im Herkunftsnachweis. Gemeinsame
 Provider-Namen dürfen zwei Geräte nicht zusammenlegen. Quellkorrektur/-löschung berechnet betroffene
 Ableitungen atomar neu; Überlappungen derselben Metrik werden vor Summenbildung aufgelöst. Gelöste Zuordnungen
-bleiben als Sperrmarker erhalten. Konto-/Match-Löschung, Widerruf und Export müssen auch die neuen privaten
-Tabellen abdecken; ungenutzte Herkunftsnachweise beim Entfernen der letzten Zuordnung bereinigen.
+bleiben als Sperrmarker erhalten. **Ausnahme bei Bereinigung:** Solange eine gelöste Selection auf eine Quelle
+verweist, deren Zeile als minimale Identität behalten: `id`, `profile_id`, `provider_namespace`, `external_id`
+und Tombstone-Status, ohne Messwerte, Zeitverlauf, Gerätename oder andere Metadaten. Die FK bleibt gültig;
+ein erneuter Import derselben externen Identität findet dieselbe ID und muss die Sperre beachten.
+Nur Quellen ohne aktive UND ohne gelöste Selection vollständig entfernen. Explizites erneutes Verknüpfen
+hebt die Sperre für die gewählte Zuordnung auf. Match-/Kontolöschung entfernt auch die betreffenden Sperren;
+bei vollständigem Health-Löschen alle Quellen/Zuordnungen löschen und automatischen Import deaktivieren,
+bis der Nutzer ihn erneut ausdrücklich aktiviert. Widerruf stoppt weitere Imports. Export und Löschung
+müssen auch diese privaten Tabellen abdecken.
 Details und Testfälle: [Tracker-Import](p3-tracker-import.md), [05 §5](05-watches-health.md).
 
 ```sql

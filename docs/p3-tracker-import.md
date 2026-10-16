@@ -64,6 +64,12 @@ Fehlende Geräte-/API-Zugänge als offene Nachweise führen, nicht durch Simulat
 Zusätzlich die Modellmatrix der letzten fünf Jahre abarbeiten; gemeinsame Importverträge automatisiert prüfen
 und die Datenlieferung jeder Modell-/Plattform-Kombination belegen. Air allein belegt nicht die gesamte Serie.
 
+Regression für gelöste Zuordnungen: Quelle importieren, einziges Match zuordnen, Zuordnung lösen und
+Quellinhalte bereinigen. Minimale Quellidentität samt gelöster Selection bleibt gemäß 03 §3.3.5 erhalten.
+Dieselbe externe ID erneut importieren: weder neuer Vorschlag für diese Zuordnung noch automatische
+Verknüpfung; erst eine explizite erneute Auswahl hebt die Sperre auf. Nach vollständigem Health-Löschen
+bleiben keine Quellen/Sperren zurück und automatische Imports sind bis zur erneuten Aktivierung aus.
+
 ## Geprüfte Grundlagen
 
 Google beschreibt Fitbit Air ausdrücklich als Tracker ohne Display:
