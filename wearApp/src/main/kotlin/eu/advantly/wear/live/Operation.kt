@@ -9,6 +9,7 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.OperationTimings
+import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -51,6 +52,7 @@ data class ServerChoiceUi(
     val players: List<PlayerUi>,
     val chosen: PlayerId?,
     val prompt: Boolean,
+    val context: ServerChoiceContext? = null,
 )
 
 /**
@@ -174,9 +176,14 @@ object OperationRules {
         val choice = match.serverChoice ?: return null
         val players = choice.players.mapNotNull(player)
         if (players.isEmpty()) return null
-        // Game 1 des ersten Satzes hat der Start (Erstaufschläger im Assistenten) schon entschieden
-        val decidedAtStart = choice.game == 1 && match.state.sets.isEmpty() && !choiceMadeInWindow
-        return ServerChoiceUi(choice.game, choice.side, players, choice.chosen, prompt = choice.chosen == null && !decidedAtStart)
+        return ServerChoiceUi(
+            choice.game,
+            choice.side,
+            players,
+            choice.chosen,
+            prompt = choice.chosen == null,
+            context = match.serverChoiceContext,
+        )
     }
 
     /**

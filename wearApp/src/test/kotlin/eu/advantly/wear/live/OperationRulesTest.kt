@@ -113,7 +113,7 @@ class OperationRulesTest {
         val start = OperationRules.serverChoice(s.state.value.match!!, ::player)!!
         assertEquals(1, start.game)
         assertEquals(4, start.players.size)
-        assertFalse("Game 1 des 1. Satzes entscheidet der Start", start.prompt)
+        assertTrue("Game 1 wird live gewählt", start.prompt)
         s.recordPoint(Side.A)
         assertNull("Game 1 läuft, wir schlagen auf", OperationRules.serverChoice(s.state.value.match!!, ::player))
         repeat(3) { s.recordPoint(Side.A) } // Game 1 vorbei
@@ -148,7 +148,7 @@ class OperationRulesTest {
         val made = OpeningChoiceCheck(chosenFrom(data)).choiceMade(lifted)
         assertTrue("im Eröffnungsfenster schon gewählt", made)
         assertTrue(OperationRules.serverChoice(lifted, ::player, made)!!.prompt)
-        assertFalse("ohne Wahl im Fenster: Start hat entschieden", OperationRules.serverChoice(lifted, ::player)!!.prompt)
+        assertTrue("ohne Wahl erneut anbieten", OperationRules.serverChoice(lifted, ::player)!!.prompt)
         repeat(4) { s.recordPoint(Side.A) } // Game 2: kein Eröffnungsfenster mehr
         assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(s.state.value.match))
         assertFalse(OpeningChoiceCheck(chosenFrom(data)).choiceMade(null))

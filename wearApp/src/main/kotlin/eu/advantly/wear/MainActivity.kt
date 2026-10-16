@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
         object : AmbientLifecycleObserver.AmbientLifecycleCallback {
             override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
                 isAmbient.value = true
+                controller.setInteractive(false)
                 DiagnosticLog.log("AMBIENT_ENTER", "burnIn" to ambientDetails.burnInProtectionRequired)
             }
 
@@ -232,6 +233,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         UiVisibility.resumed = true
+        controller.setInteractive(!isAmbient.value)
         consumeGlanceAction()
         MatchNotifier.cancel(this)
         permissions.value = Permissions.current(this) // Rechte können in den Einstellungen geändert worden sein
@@ -244,6 +246,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         UiVisibility.resumed = false
+        controller.setInteractive(false)
         DiagnosticLog.log("ACTIVITY_PAUSE")
         super.onPause()
     }
@@ -499,6 +502,11 @@ class MainActivity : ComponentActivity() {
             override fun openServerChoice() = controller.openServerChoice()
 
             override fun chooseServer(player: PlayerId): Boolean = controller.chooseServer(player)
+
+            override fun chooseServer(
+                player: PlayerId,
+                expected: eu.advantly.match.session.ServerChoiceContext,
+            ): Boolean = controller.chooseServer(player, expected)
 
             override fun startNextSet(kind: NextSetKind): Boolean = controller.startNextSet(kind)
         }

@@ -47,6 +47,8 @@ class WatchControllerTest {
     /** Punkte mit genug Abstand für die 600-ms-Entprellung. */
     private fun points(vararg sides: Side) =
         sides.forEach {
+            if (live.overlay == LiveOverlay.SERVER_CHOICE) c.dismissOverlay()
+            h.scheduler.advanceBy(300)
             assertTrue(c.point(it))
             h.scheduler.advanceBy(700)
         }
@@ -414,7 +416,7 @@ class WatchControllerTest {
         c.requestCorrection()
         assertEquals(LiveOverlay.CORRECT_SERVER, live.overlay)
         assertTrue(c.correctServer(opponent2.id))
-        assertNull(live.overlay)
+        assertEquals(LiveOverlay.SERVER_CHOICE, live.overlay)
         assertEquals(opponent2.id, live.serve?.server?.id)
         assertEquals(WatchToast.Corrected, h.toasts.last())
         points(Side.A, Side.A, Side.A, Side.A) // 1. Spiel vorbei → ab jetzt
