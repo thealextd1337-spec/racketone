@@ -162,6 +162,15 @@
 
 /* Fitness-Seite ohne HealthKit */
 "fitness.noHealth" = "Kein Health-Zugriff: nur Zählen. Bei gesenktem Handgelenk kann die App pausieren.";
+/* P2-J: Telemetrie-Sichtbarkeit (Startliste, mit dem iPhone abgeglichen) */
+"start.telemetry" = "Puls & Schritte";
+"start.telemetry.share" = "Teilen";
+"start.telemetry.private" = "Nur für mich";
+"start.telemetry.off" = "Gar nicht";
+"start.telemetry.shareHint" = "Vorerst wie „Nur für mich“ – Teilen wirkt, sobald Freunde und Live-Ansicht verfügbar sind.";
+"start.telemetry.privateHint" = "Nur auf dieser Uhr und deinem iPhone.";
+"start.telemetry.offHint" = "Keine Anzeige, es wird nichts gesendet.";
+"fitness.telemetryOff" = "Puls ausgeblendet (Puls & Schritte: Gar nicht).";
 
 /* Satzende-Dialog: Satznummer und Stand */
 "setend.title %@ %@" = "Satz %1$@ · %2$@";

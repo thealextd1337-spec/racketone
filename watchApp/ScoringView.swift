@@ -592,7 +592,8 @@ struct MiddleBand: View {
                     .overlay(Capsule().stroke(Color.white.opacity(0.7), lineWidth: 1.5))
             } else if !snap.hintCode.isEmpty {
                 HintPill(snap: snap, dimmed: dimmed)
-            } else if heartRate > 0 {
+            } else if model.telemetryShown && heartRate > 0 {
+                // „Gar nicht“ (P2-J): kein Puls, das Band bleibt leer
                 Label(String(heartRate), systemImage: "heart.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .labelStyle(.titleAndIcon)
@@ -808,18 +809,26 @@ struct FitnessPage: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "heart.fill")
-                    .foregroundStyle(Color.red)
-                // Always-on: höchstens minütlich aktualisiert (04 §4.3.6)
-                let bpm = dimmed ? workout.heartRateAmbient : workout.heartRate
-                Text(bpm > 0 ? String(bpm) : "--")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .monospacedDigit()
+            if workout.telemetryAllowed {
+                HStack(spacing: 6) {
+                    Image(systemName: "heart.fill")
+                        .foregroundStyle(Color.red)
+                    // Always-on: höchstens minütlich aktualisiert (04 §4.3.6)
+                    let bpm = dimmed ? workout.heartRateAmbient : workout.heartRate
+                    Text(bpm > 0 ? String(bpm) : "--")
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                }
+                Text("fitness.heartRate")
+                    .font(.footnote)
+                    .foregroundStyle(Brand.text2)
+            } else {
+                // Telemetrie „Gar nicht“ (P2-J): nur Dauer, kein Puls
+                Text("fitness.telemetryOff")
+                    .font(.footnote)
+                    .foregroundStyle(Brand.text2)
+                    .multilineTextAlignment(.center)
             }
-            Text("fitness.heartRate")
-                .font(.footnote)
-                .foregroundStyle(Brand.text2)
             // Always-on: höchstens 1 Aktualisierung pro Minute
             TimelineView(.periodic(from: .now, by: dimmed ? 60 : 1)) { context in
                 Text(Self.duration(since: snap.startedAtMs, now: context.date))
