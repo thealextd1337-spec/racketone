@@ -623,7 +623,7 @@
     <string name="support_send">Send report</string>
     <string name="support_retry">Retry delivery</string>
     <string name="support_discard">Discard draft and start again</string>
-    <string name="support_receipt">Report received. Reference: %1$s</string>
+    <string name="support_receipt">Last received report — reference: %1$s</string>
     <string name="support_unavailable">Sending is not available in this build. You can keep a draft on this phone.</string>
     <string name="support_error">Delivery could not be confirmed. Keep this draft and retry with the same account when connected.</string>
     <string name="support_invalid">Check the title, description and optional details, then try again.</string>

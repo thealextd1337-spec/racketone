@@ -623,7 +623,7 @@
     <string name="support_send">Meldung senden</string>
     <string name="support_retry">Versand wiederholen</string>
     <string name="support_discard">Entwurf verwerfen und neu beginnen</string>
-    <string name="support_receipt">Meldung empfangen. Vorgangsnummer: %1$s</string>
+    <string name="support_receipt">Letzte empfangene Meldung – Vorgangsnummer: %1$s</string>
     <string name="support_unavailable">Senden ist in dieser App-Version noch nicht verfügbar. Du kannst einen Entwurf auf diesem Handy speichern.</string>
     <string name="support_error">Der Versand konnte nicht bestätigt werden. Behalte den Entwurf und versuche es mit demselben Konto und bestehender Verbindung erneut.</string>
     <string name="support_invalid">Prüfe Titel, Beschreibung und optionale Angaben und versuche es erneut.</string>
