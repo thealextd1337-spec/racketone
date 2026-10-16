@@ -133,24 +133,31 @@ data class MatchMetaMessage(
  * unbekannter Wert einer künftigen Version macht nur diese Angabe unbrauchbar ([toPreference] = `null`), nie die ganze
  * `MatchMeta`-Nachricht.
  *
- * @property changedAtMs Wanduhr des Geräts, auf dem die Einstellung zuletzt geändert wurde (Konfliktregel
- *   [TelemetryPreference.merge]: letzte Änderung gewinnt, Gleichstand → restriktiver)
+ * @property versions Versionsvektor Gerät → Zahl seiner Änderungen (kausale Konfliktregel [TelemetryPreference.merge],
+ *   unabhängig von der Wanduhr)
  */
 @Serializable
 data class TelemetrySetting(
     val visibility: String,
-    val changedAtMs: Long,
+    val versions: Map<String, Long> = emptyMap(),
 ) {
-    /** Gültige Einstellung oder `null` (unbekannter Wert, nie geändert bzw. negativer Zeitstempel). */
+    /** Gültige Einstellung oder `null` (unbekannter Wert, leerer/zu großer Vektor, ungültige Einträge). */
     fun toPreference(): TelemetryPreference? {
         val value = TelemetryVisibility.fromWire(visibility) ?: return null
-        return if (changedAtMs > 0) TelemetryPreference(value, changedAtMs) else null
+        val valid =
+            versions.isNotEmpty() && versions.size <= MAX_DEVICES &&
+                versions.all { (device, count) -> device.isNotBlank() && device.length <= MAX_DEVICE_ID && count > 0 }
+        return if (valid) TelemetryPreference(value, versions) else null
     }
 
     companion object {
+        /** Mehr eigene Geräte trägt ein Besitzer nicht; schützt vor übergroßen Nachrichten. */
+        const val MAX_DEVICES: Int = 32
+        const val MAX_DEVICE_ID: Int = 64
+
         /** Nur geänderte Einstellungen gehen auf den Draht; der Standard braucht keine Nachricht. */
         fun of(preference: TelemetryPreference): TelemetrySetting? =
-            if (preference.changedAtMs > 0) TelemetrySetting(preference.visibility.wire, preference.changedAtMs) else null
+            if (preference.isDefault) null else TelemetrySetting(preference.visibility.wire, preference.versions)
     }
 }
 

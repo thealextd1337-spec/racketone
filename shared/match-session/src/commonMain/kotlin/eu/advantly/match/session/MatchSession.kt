@@ -332,19 +332,21 @@ class MatchSession(
 
     /**
      * Nutzer ändert die Telemetrie-Sichtbarkeit auf diesem Gerät (Handy oder Uhr). Wird gespeichert, sofort an alle
-     * verbundenen eigenen Geräte gesendet und sonst beim nächsten `Hello` abgeglichen. Konfliktregel: letzte Änderung
-     * gewinnt, Gleichstand → restriktiver Wert ([TelemetryPreference.merge]). Die Wirkung („Gar nicht“ stoppt Anzeige und
+     * verbundenen eigenen Geräte gesendet und sonst beim nächsten `Hello` abgeglichen. Konfliktregel kausal über einen
+     * Versionsvektor ([TelemetryPreference.merge]): eine Änderung, die die andere schon kannte, gilt; nebenläufige
+     * Änderungen (beide seit dem letzten Abgleich) → restriktiver Wert. Die Wirkung („Gar nicht“ stoppt Anzeige und
      * Übertragung) setzen die Apps aus [SessionState.telemetry] um.
      */
     fun setTelemetryVisibility(visibility: TelemetryVisibility) {
         checkThread()
         if (visibility == telemetry.visibility) return
-        adoptTelemetry(telemetry.changedTo(visibility, clock.nowMs()))
+        adoptTelemetry(telemetry.changedBy(deviceId.value, visibility))
     }
 
     /**
      * Schnittstelle für einen späteren Profil-Abgleich (P2-E, `profile_settings.telemetry_visibility`): [remote] wird nach
-     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte. `true`, wenn sich der Wert geändert hat.
+     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte (der Server muss dafür den Versionsvektor
+     * mitführen; ohne ihn wäre jede Server-Angabe nebenläufig → restriktiver Wert). `true`, wenn sich der Wert geändert hat.
      */
     fun mergeTelemetryPreference(remote: TelemetryPreference): Boolean {
         checkThread()

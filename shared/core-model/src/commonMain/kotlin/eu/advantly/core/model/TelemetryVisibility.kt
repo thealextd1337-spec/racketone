@@ -38,30 +38,56 @@ enum class TelemetryVisibility(
 }
 
 /**
- * Telemetrie-Einstellung mit Zeitpunkt der letzten Änderung (Wanduhr des ändernden Geräts).
+ * Telemetrie-Einstellung mit Versionsvektor (Gerät → Zahl seiner Änderungen). Ordnet Änderungen **kausal**, nicht nach
+ * Wanduhr: Eine abweichende Uhr eines Geräts kann so keine spätere Datenschutzentscheidung aufheben (Review #47).
  *
- * **Konfliktregel (letzte Änderung gewinnt):** Handy und Uhr dürfen die Einstellung ändern; es gilt die jüngere Änderung.
- * Bei gleichem Zeitstempel gewinnt der restriktivere Wert (datenschutzfreundlich und auf allen Geräten gleich). Die Wanduhr
- * der Uhr wird vom gekoppelten Handy gestellt, daher genügt sie zum Ordnen zweier Nutzerentscheidungen.
+ * **Konfliktregel:**
+ * - Hat ein Gerät die Änderung des anderen schon gekannt (Vektor dominiert), gilt die spätere – auch wenn sie
+ *   weniger restriktiv ist (bewusste Entscheidung nach dem Abgleich).
+ * - Haben beide Seiten seit dem letzten gemeinsamen Stand geändert (nebenläufig, z. B. Uhr offline), gewinnt der
+ *   **restriktivere** Wert („im Zweifel restriktiv“); der Vektor wird punktweise zusammengeführt.
+ * - Gleicher Vektor, anderer Wert (kann nur durch Zusammenführung entstehen) → ebenfalls restriktiver Wert.
  *
- * @property changedAtMs `0` = nie geändert (Standard); ein nie geänderter Wert verdrängt nie eine Änderung
+ * [merge] ist kommutativ und idempotent; alle eigenen Geräte enden beim selben Wert, sobald sie sich gesehen haben.
+ *
+ * @property versions Gerät (Installations-ID) → Zahl seiner Änderungen; leer = nie geändert (Standard), ein Standard
+ *   verdrängt nie eine Änderung
  */
 data class TelemetryPreference(
     val visibility: TelemetryVisibility = TelemetryVisibility.DEFAULT,
-    val changedAtMs: Long = 0,
+    val versions: Map<String, Long> = emptyMap(),
 ) {
-    /** Zusammenführen mit [other] nach der Konfliktregel; kommutativ und idempotent. */
-    fun merge(other: TelemetryPreference): TelemetryPreference =
-        when {
-            other.changedAtMs > changedAtMs -> other
-            other.changedAtMs < changedAtMs -> this
-            other.visibility.restriction > visibility.restriction -> other
-            else -> this
-        }
+    /** Nie geändert: es gilt der Standard, auf dem Draht wird nichts gesendet. */
+    val isDefault: Boolean get() = versions.isEmpty()
 
-    /** Lokale Änderung zu [nowMs]; immer jünger als der bisherige Stand, auch wenn die Wanduhr zurückgesprungen ist. */
-    fun changedTo(
+    /** Lokale Änderung auf [device]: dessen Zähler steigt, der neue Stand folgt kausal auf alles Bekannte. */
+    fun changedBy(
+        device: String,
         visibility: TelemetryVisibility,
-        nowMs: Long,
-    ): TelemetryPreference = TelemetryPreference(visibility, maxOf(nowMs, changedAtMs + 1))
+    ): TelemetryPreference = TelemetryPreference(visibility, versions + (device to (versions[device] ?: 0) + 1))
+
+    /** Zusammenführen mit [other] nach der Konfliktregel. */
+    fun merge(other: TelemetryPreference): TelemetryPreference {
+        if (other.isDefault) return this
+        if (isDefault) return other
+        val keys = versions.keys + other.versions.keys
+        val thisCovers = keys.all { (versions[it] ?: 0) >= (other.versions[it] ?: 0) }
+        val otherCovers = keys.all { (other.versions[it] ?: 0) >= (versions[it] ?: 0) }
+        return when {
+            thisCovers && !otherCovers -> {
+                this
+            }
+
+            otherCovers && !thisCovers -> {
+                other
+            }
+
+            else -> {
+                // gleich oder nebenläufig: restriktiver Wert, punktweises Maximum
+                val strict = if (other.visibility.restriction > visibility.restriction) other.visibility else visibility
+                val merged = TelemetryPreference(strict, keys.associateWith { maxOf(versions[it] ?: 0, other.versions[it] ?: 0) })
+                if (merged == this) this else merged
+            }
+        }
+    }
 }

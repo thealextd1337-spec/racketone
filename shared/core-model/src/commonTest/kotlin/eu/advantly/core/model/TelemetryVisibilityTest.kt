@@ -4,14 +4,20 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class TelemetryVisibilityTest {
+    private val share = TelemetryVisibility.SHARE
+    private val private = TelemetryVisibility.PRIVATE
+    private val off = TelemetryVisibility.OFF
+
     @Test
     fun wireValuesMatchTheServerAndDefaultIsPrivate() {
         assertEquals(listOf("share", "private", "off"), TelemetryVisibility.entries.map { it.wire })
-        assertEquals(TelemetryVisibility.PRIVATE, TelemetryVisibility.DEFAULT)
-        assertEquals(TelemetryVisibility.PRIVATE, TelemetryPreference().visibility)
+        assertEquals(private, TelemetryVisibility.DEFAULT)
+        assertEquals(private, TelemetryPreference().visibility)
+        assertTrue(TelemetryPreference().isDefault)
         TelemetryVisibility.entries.forEach { assertEquals(it, TelemetryVisibility.fromWire(it.wire)) }
         assertNull(TelemetryVisibility.fromWire("friends"))
         assertNull(TelemetryVisibility.fromWire(null))
@@ -19,34 +25,73 @@ class TelemetryVisibilityTest {
 
     @Test
     fun onlyOffStopsLiveValuesAndOnlyShareIsMarkedForOthers() {
-        assertTrue(TelemetryVisibility.SHARE.allowsLive && TelemetryVisibility.PRIVATE.allowsLive)
-        assertFalse(TelemetryVisibility.OFF.allowsLive)
-        assertTrue(TelemetryVisibility.SHARE.sharesWithOthers)
-        assertFalse(TelemetryVisibility.PRIVATE.sharesWithOthers || TelemetryVisibility.OFF.sharesWithOthers)
+        assertTrue(share.allowsLive && private.allowsLive)
+        assertFalse(off.allowsLive)
+        assertTrue(share.sharesWithOthers)
+        assertFalse(private.sharesWithOthers || off.sharesWithOthers)
     }
 
     @Test
-    fun latestChangeWinsAndTiesPreferTheMoreRestrictiveValue() {
-        val share = TelemetryPreference(TelemetryVisibility.SHARE, 200)
-        val off = TelemetryPreference(TelemetryVisibility.OFF, 100)
-        assertEquals(share, share.merge(off))
-        assertEquals(share, off.merge(share))
-        val tieOff = TelemetryPreference(TelemetryVisibility.OFF, 200)
-        assertEquals(tieOff, share.merge(tieOff))
-        assertEquals(tieOff, tieOff.merge(share))
-        assertEquals(share, share.merge(share))
-        // Ein nie geänderter Standard verdrängt keine Änderung – auch nicht „Teilen“ durch das restriktivere „Nur für mich“
-        assertEquals(share, share.merge(TelemetryPreference()))
-        assertEquals(share, TelemetryPreference().merge(share))
+    fun localChangesCountPerDevice() {
+        val first = TelemetryPreference().changedBy("phone", off)
+        assertEquals(mapOf("phone" to 1L), first.versions)
+        val second = first.changedBy("watch", share).changedBy("phone", private)
+        assertEquals(private, second.visibility)
+        assertEquals(mapOf("phone" to 2L, "watch" to 1L), second.versions)
+    }
+
+    /** Eine Änderung, die die andere schon kannte, gilt – auch wenn sie weniger restriktiv ist. */
+    @Test
+    fun causallyLaterChangeWinsInBothDirections() {
+        val phoneOff = TelemetryPreference().changedBy("phone", off)
+        val watchShareAfterSeeingIt = phoneOff.changedBy("watch", share)
+        assertEquals(watchShareAfterSeeingIt, phoneOff.merge(watchShareAfterSeeingIt))
+        assertSame(watchShareAfterSeeingIt, watchShareAfterSeeingIt.merge(phoneOff))
+    }
+
+    /** Beide Seiten haben seit dem letzten gemeinsamen Stand geändert: der restriktivere Wert gewinnt, egal in welcher Reihenfolge. */
+    @Test
+    fun concurrentChangesResolveToTheMoreRestrictiveValue() {
+        val common = TelemetryPreference().changedBy("phone", private)
+        val watchShare = common.changedBy("watch", share)
+        val phoneOff = common.changedBy("phone", off)
+        val a = watchShare.merge(phoneOff)
+        val b = phoneOff.merge(watchShare)
+        assertEquals(a, b)
+        assertEquals(off, a.visibility)
+        assertEquals(mapOf("phone" to 2L, "watch" to 1L), a.versions)
+        // danach eine bewusste Änderung auf Basis des gemeinsamen Stands gilt wieder
+        val reopened = a.changedBy("watch", share)
+        assertEquals(reopened, a.merge(reopened))
     }
 
     @Test
-    fun localChangeIsAlwaysNewerEvenWhenTheClockJumpedBack() {
-        val stored = TelemetryPreference(TelemetryVisibility.SHARE, 5_000)
-        val changed = stored.changedTo(TelemetryVisibility.OFF, nowMs = 1_000)
-        assertEquals(TelemetryVisibility.OFF, changed.visibility)
-        assertEquals(5_001, changed.changedAtMs)
-        assertEquals(changed, stored.merge(changed))
-        assertEquals(9_000, stored.changedTo(TelemetryVisibility.PRIVATE, 9_000).changedAtMs)
+    fun mergeIsIdempotentAndDefaultsNeverWin() {
+        val changed = TelemetryPreference().changedBy("phone", share)
+        assertSame(changed, changed.merge(changed))
+        assertSame(changed, changed.merge(TelemetryPreference()))
+        assertEquals(changed, TelemetryPreference().merge(changed))
+        // gleicher Vektor, anderer Wert (nur durch Zusammenführung möglich) → restriktiver Wert, kommutativ
+        val sameVectorOff = TelemetryPreference(off, changed.versions)
+        assertEquals(sameVectorOff, changed.merge(sameVectorOff))
+        assertEquals(sameVectorOff, sameVectorOff.merge(changed))
+    }
+
+    /** Drei Geräte, beliebige Reihenfolge: alle enden beim selben Ergebnis. */
+    @Test
+    fun threeDevicesConvergeRegardlessOfOrder() {
+        val base = TelemetryPreference().changedBy("phone", private)
+        val states =
+            listOf(
+                base.changedBy("phone", off),
+                base.changedBy("watch", share),
+                base.changedBy("tablet", private),
+            )
+        val results =
+            listOf(listOf(0, 1, 2), listOf(2, 1, 0), listOf(1, 0, 2), listOf(1, 2, 0)).map { order ->
+                order.map(states::get).reduce { acc, next -> acc.merge(next) }
+            }
+        assertTrue(results.all { it == results.first() }, results.toString())
+        assertEquals(off, results.first().visibility)
     }
 }
