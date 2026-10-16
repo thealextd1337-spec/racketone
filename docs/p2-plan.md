@@ -1,5 +1,7 @@
 # Phase 2 – Plan: Accounts, Freunde, Cloud-Sync
 
+Aktueller Ausführungsplan ab 16.10.2026: [nächste Phasen und Abnahmekriterien](p2-next-steps.md).
+
 | | |
 |---|---|
 | **Stand** | 15.10.2026 · Branch `p2/a-plan-backend-spike` · Review-Runden 1–3 (PR #40) eingearbeitet |
@@ -147,7 +149,9 @@ Kein zweites Log: Die Outbox ist ein Zustand **am vorhandenen Event**. SQLDeligh
 | `player` | `cloud_dirty INTEGER` | Self-Aliase/Dummys hochladen |
 | neu `cloud_cursor` | `stream TEXT PK, value INTEGER` | `sync_pull`-Cursor, `visibilityEpoch`, je Match `server_seq` und `redactionEpoch` |
 
-Empfangene Cloud-Events werden mit `cloud_state = 1` und `confirmed = 1` gespeichert (`EventRows.toStored`).
+Empfangene Cloud-Events werden über `CloudSyncRepository.storeDownloaded` mit `cloud_state = 1` gespeichert.
+Neue Events behalten `confirmed = 0`, damit sie an gekoppelte Geräte weitergegeben werden. Bei Duplikaten
+bleibt der vorhandene Geräte-Ack unverändert. Cloud-Empfang ersetzt keinen Geräte-Ack (Review-Korrektur P2-B1).
 
 ### 5.2 Abbildung Event ↔ Tabelle
 
