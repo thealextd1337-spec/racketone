@@ -17,9 +17,9 @@ class TelemetrySettingCodecTest {
 
     @Test
     fun settingRoundTripsAndDefaultIsNotSent() {
-        val message = MatchMetaMessage(telemetry = TelemetrySetting("off", mapOf("phone" to 2, "watch" to 1)))
+        val message = MatchMetaMessage(telemetry = TelemetrySetting("off", 2, "watch"))
         val json = SyncCodec.encodeToString(message)
-        assertTrue(""""telemetry":{"visibility":"off","versions":{"phone":2,"watch":1}}""" in json, json)
+        assertTrue(""""telemetry":{"visibility":"off","counter":2,"origin":"watch"}""" in json, json)
         assertEquals(message, decodeMeta(json))
         assertTrue("telemetry" !in SyncCodec.encodeToString(MatchMetaMessage()))
         assertNull(TelemetrySetting.of(TelemetryPreference()))
@@ -35,20 +35,24 @@ class TelemetrySettingCodecTest {
     fun unknownOrInvalidValuesOnlyDropTheSettingNotTheMessage() {
         val future =
             decodeMeta(
-                """{"type":"MatchMeta","players":[{"id":"p","displayName":"Sam"}],"telemetry":{"visibility":"friends","versions":{"w":5}},"v":3}""",
+                """{"type":"MatchMeta","players":[{"id":"p","displayName":"Sam"}],"telemetry":{"visibility":"friends","counter":5,"origin":"w"},"v":3}""",
             )
         assertEquals(listOf(Player(PlayerId("p"), "Sam")), future.players)
         assertNull(future.telemetry?.toPreference())
-        assertNull(TelemetrySetting("off").toPreference(), "ohne Versionsvektor")
-        assertNull(TelemetrySetting("off", mapOf("w" to 0)).toPreference())
-        assertNull(TelemetrySetting("off", mapOf("w" to -3)).toPreference())
-        assertNull(TelemetrySetting("off", mapOf(" " to 1)).toPreference())
-        assertNull(TelemetrySetting("off", (1..33).associate { "d$it" to 1L }).toPreference(), "zu viele Geräte")
+        assertNull(TelemetrySetting("off").toPreference(), "ohne Zähler")
+        assertNull(TelemetrySetting("off", 0, "w").toPreference())
+        assertNull(TelemetrySetting("off", -3, "w").toPreference())
+        assertNull(TelemetrySetting("off", 1, " ").toPreference())
+        assertNull(TelemetrySetting("off", 1, "x".repeat(65)).toPreference(), "Herkunft zu lang")
+        // nie veröffentlichtes Vektorformat wird verworfen
+        assertNull(
+            decodeMeta("""{"type":"MatchMeta","telemetry":{"visibility":"off","versions":{"w":1}},"v":3}""").telemetry?.toPreference(),
+        )
         // Form vor der Review (nur Zeitstempel) gilt als ungültig, nicht als Änderung
         assertNull(decodeMeta("""{"type":"MatchMeta","telemetry":{"visibility":"off","changedAtMs":5},"v":3}""").telemetry?.toPreference())
-        val share = TelemetryPreference(TelemetryVisibility.SHARE, mapOf("w" to 7))
-        assertEquals(share, TelemetrySetting("share", mapOf("w" to 7)).toPreference())
-        assertEquals(TelemetrySetting("share", mapOf("w" to 7)), TelemetrySetting.of(share))
+        val share = TelemetryPreference(TelemetryVisibility.SHARE, 7, "w")
+        assertEquals(share, TelemetrySetting("share", 7, "w").toPreference())
+        assertEquals(TelemetrySetting("share", 7, "w"), TelemetrySetting.of(share))
     }
 
     /** Ein Gerät mit dem bisherigen Protokoll 3 kennt das Feld nicht: dieselbe Codec-Konfiguration ignoriert es. */
@@ -56,7 +60,7 @@ class TelemetrySettingCodecTest {
     fun olderReceiverIgnoresTheField() {
         val json =
             SyncCodec.encodeToString(
-                MatchMetaMessage(players = listOf(Player(PlayerId("p"), "Sam")), telemetry = TelemetrySetting("off", mapOf("w" to 3))),
+                MatchMetaMessage(players = listOf(Player(PlayerId("p"), "Sam")), telemetry = TelemetrySetting("off", 3, "w")),
             )
         val old = SyncCodec.json.decodeFromString(PreviousMatchMeta.serializer(), json)
         assertEquals(PreviousMatchMeta(players = listOf(Player(PlayerId("p"), "Sam")), v = 3), old)

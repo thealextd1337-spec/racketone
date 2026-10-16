@@ -131,33 +131,38 @@ data class MatchMetaMessage(
 /**
  * Telemetrie-Sichtbarkeit auf dem Draht (P2-J). [visibility] bleibt bewusst ein Text (`share`/`private`/`off`): Ein
  * unbekannter Wert einer künftigen Version macht nur diese Angabe unbrauchbar ([toPreference] = `null`), nie die ganze
- * `MatchMeta`-Nachricht.
+ * `MatchMeta`-Nachricht. Konstante Größe (Lamport-Zähler statt Versionsvektor).
  *
- * @property versions Versionsvektor Gerät → Zahl seiner Änderungen (kausale Konfliktregel [TelemetryPreference.merge],
- *   unabhängig von der Wanduhr)
+ * @property counter Lamport-Zähler der Änderung (> 0), Konfliktregel [TelemetryPreference.merge]
+ * @property origin Installations-ID des ändernden Geräts
  */
 @Serializable
 data class TelemetrySetting(
     val visibility: String,
-    val versions: Map<String, Long> = emptyMap(),
+    val counter: Long = 0,
+    val origin: String = "",
 ) {
-    /** Gültige Einstellung oder `null` (unbekannter Wert, leerer/zu großer Vektor, ungültige Einträge). */
+    /** Gültige Einstellung oder `null` (unbekannter Wert, kein Zähler, leere/zu lange Herkunft, altes Format). */
     fun toPreference(): TelemetryPreference? {
         val value = TelemetryVisibility.fromWire(visibility) ?: return null
-        val valid =
-            versions.isNotEmpty() && versions.size <= MAX_DEVICES &&
-                versions.all { (device, count) -> device.isNotBlank() && device.length <= MAX_DEVICE_ID && count > 0 }
-        return if (valid) TelemetryPreference(value, versions) else null
+        val valid = counter > 0 && origin.isNotBlank() && origin.length <= MAX_ORIGIN
+        return if (valid) TelemetryPreference(value, counter, origin) else null
     }
 
     companion object {
-        /** Mehr eigene Geräte trägt ein Besitzer nicht; schützt vor übergroßen Nachrichten. */
-        const val MAX_DEVICES: Int = 32
-        const val MAX_DEVICE_ID: Int = 64
+        const val MAX_ORIGIN: Int = 64
 
         /** Nur geänderte Einstellungen gehen auf den Draht; der Standard braucht keine Nachricht. */
-        fun of(preference: TelemetryPreference): TelemetrySetting? =
-            if (preference.isDefault) null else TelemetrySetting(preference.visibility.wire, preference.versions)
+        fun of(preference: TelemetryPreference): TelemetrySetting? {
+            val origin = preference.origin
+            return if (preference.isDefault ||
+                origin == null
+            ) {
+                null
+            } else {
+                TelemetrySetting(preference.visibility.wire, preference.counter, origin)
+            }
+        }
     }
 }
 

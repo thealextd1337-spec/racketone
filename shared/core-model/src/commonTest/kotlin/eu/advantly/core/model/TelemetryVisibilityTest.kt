@@ -1,5 +1,6 @@
 package eu.advantly.core.model
 
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -16,7 +17,7 @@ class TelemetryVisibilityTest {
     fun wireValuesMatchTheServerAndDefaultIsPrivate() {
         assertEquals(listOf("share", "private", "off"), TelemetryVisibility.entries.map { it.wire })
         assertEquals(private, TelemetryVisibility.DEFAULT)
-        assertEquals(private, TelemetryPreference().visibility)
+        assertEquals(TelemetryPreference(private, 0, null), TelemetryPreference())
         assertTrue(TelemetryPreference().isDefault)
         TelemetryVisibility.entries.forEach { assertEquals(it, TelemetryVisibility.fromWire(it.wire)) }
         assertNull(TelemetryVisibility.fromWire("friends"))
@@ -32,66 +33,94 @@ class TelemetryVisibilityTest {
     }
 
     @Test
-    fun localChangesCountPerDevice() {
+    fun localChangeIsOneAboveTheLargestSeenCounter() {
         val first = TelemetryPreference().changedBy("phone", off)
-        assertEquals(mapOf("phone" to 1L), first.versions)
-        val second = first.changedBy("watch", share).changedBy("phone", private)
-        assertEquals(private, second.visibility)
-        assertEquals(mapOf("phone" to 2L, "watch" to 1L), second.versions)
+        assertEquals(TelemetryPreference(off, 1, "phone"), first)
+        val seen = first.merge(TelemetryPreference(share, 5, "watch"))
+        assertEquals(TelemetryPreference(private, 6, "phone"), seen.changedBy("phone", private))
     }
 
     /** Eine Änderung, die die andere schon kannte, gilt – auch wenn sie weniger restriktiv ist. */
     @Test
-    fun causallyLaterChangeWinsInBothDirections() {
+    fun causallyLaterChangeWins() {
         val phoneOff = TelemetryPreference().changedBy("phone", off)
         val watchShareAfterSeeingIt = phoneOff.changedBy("watch", share)
-        assertEquals(watchShareAfterSeeingIt, phoneOff.merge(watchShareAfterSeeingIt))
+        assertSame(watchShareAfterSeeingIt, phoneOff.merge(watchShareAfterSeeingIt))
         assertSame(watchShareAfterSeeingIt, watchShareAfterSeeingIt.merge(phoneOff))
     }
 
-    /** Beide Seiten haben seit dem letzten gemeinsamen Stand geändert: der restriktivere Wert gewinnt, egal in welcher Reihenfolge. */
+    /** Konkurrierende Offline-Änderungen mit gleichem Zähler: der restriktivere Wert gewinnt, Reihenfolge egal. */
     @Test
-    fun concurrentChangesResolveToTheMoreRestrictiveValue() {
+    fun concurrentChangesWithTheSameCounterResolveRestrictively() {
         val common = TelemetryPreference().changedBy("phone", private)
         val watchShare = common.changedBy("watch", share)
         val phoneOff = common.changedBy("phone", off)
-        val a = watchShare.merge(phoneOff)
-        val b = phoneOff.merge(watchShare)
-        assertEquals(a, b)
-        assertEquals(off, a.visibility)
-        assertEquals(mapOf("phone" to 2L, "watch" to 1L), a.versions)
-        // danach eine bewusste Änderung auf Basis des gemeinsamen Stands gilt wieder
-        val reopened = a.changedBy("watch", share)
-        assertEquals(reopened, a.merge(reopened))
+        assertEquals(phoneOff, watchShare.merge(phoneOff))
+        assertEquals(phoneOff, phoneOff.merge(watchShare))
+        // gleicher Zähler und Wert, andere Herkunft: lexikografisch, aber auf allen Geräten gleich
+        val a = TelemetryPreference(off, 3, "a")
+        val b = TelemetryPreference(off, 3, "b")
+        assertEquals(b, a.merge(b))
+        assertEquals(b, b.merge(a))
+    }
+
+    /** Bewusster, dokumentierter Kompromiss: mehrere Offline-Änderungen schlagen eine einzelne konkurrierende. */
+    @Test
+    fun multipleOfflineChangesCanBeatASingleConcurrentOne() {
+        val watch = TelemetryPreference().changedBy("watch", private).changedBy("watch", share)
+        val phone = TelemetryPreference().changedBy("phone", off)
+        assertEquals(share, watch.merge(phone).visibility)
+    }
+
+    /** Gegenbeispiel aus Review-Runde 2 (Versionsvektor war nicht assoziativ). */
+    @Test
+    fun reviewCounterexampleIsAssociativeNow() {
+        val a = TelemetryPreference(off, 1, "phone")
+        val b = TelemetryPreference(private, 2, "phone")
+        val c = TelemetryPreference(share, 1, "watch")
+        assertEquals(a.merge(c).merge(b), a.merge(c.merge(b)))
+        assertEquals(b, a.merge(c).merge(b))
     }
 
     @Test
-    fun mergeIsIdempotentAndDefaultsNeverWin() {
+    fun defaultsNeverWin() {
         val changed = TelemetryPreference().changedBy("phone", share)
-        assertSame(changed, changed.merge(changed))
         assertSame(changed, changed.merge(TelemetryPreference()))
-        assertEquals(changed, TelemetryPreference().merge(changed))
-        // gleicher Vektor, anderer Wert (nur durch Zusammenführung möglich) → restriktiver Wert, kommutativ
-        val sameVectorOff = TelemetryPreference(off, changed.versions)
-        assertEquals(sameVectorOff, changed.merge(sameVectorOff))
-        assertEquals(sameVectorOff, sameVectorOff.merge(changed))
+        assertSame(changed, TelemetryPreference().merge(changed))
     }
 
-    /** Drei Geräte, beliebige Reihenfolge: alle enden beim selben Ergebnis. */
+    /** Property-artig mit festem Seed: Halbverbandsgesetze über viele zufällige Zustände. */
     @Test
-    fun threeDevicesConvergeRegardlessOfOrder() {
-        val base = TelemetryPreference().changedBy("phone", private)
-        val states =
-            listOf(
-                base.changedBy("phone", off),
-                base.changedBy("watch", share),
-                base.changedBy("tablet", private),
-            )
-        val results =
-            listOf(listOf(0, 1, 2), listOf(2, 1, 0), listOf(1, 0, 2), listOf(1, 2, 0)).map { order ->
-                order.map(states::get).reduce { acc, next -> acc.merge(next) }
+    fun mergeIsCommutativeAssociativeAndIdempotent() {
+        val random = Random(47)
+        val origins = listOf("phone", "watch", "tablet", "server")
+
+        fun next(): TelemetryPreference =
+            if (random.nextInt(8) == 0) {
+                TelemetryPreference()
+            } else {
+                TelemetryPreference(TelemetryVisibility.entries.random(random), random.nextLong(1, 6), origins.random(random))
             }
-        assertTrue(results.all { it == results.first() }, results.toString())
-        assertEquals(off, results.first().visibility)
+        repeat(2_000) {
+            val a = next()
+            val b = next()
+            val c = next()
+            assertEquals(a.merge(b), b.merge(a), "kommutativ: $a $b")
+            assertEquals(a.merge(b).merge(c), a.merge(b.merge(c)), "assoziativ: $a $b $c")
+            assertEquals(a, a.merge(a), "idempotent: $a")
+            // Ergebnis ist immer einer der Eingänge (konstante Größe, nichts Erfundenes)
+            assertTrue(a.merge(b) == a || a.merge(b) == b)
+        }
+    }
+
+    /** Geräte, die Änderungen in beliebiger Reihenfolge sehen, enden beim selben Stand. */
+    @Test
+    fun anyDeliveryOrderConverges() {
+        val random = Random(7)
+        repeat(200) {
+            val changes = List(5) { TelemetryPreference(TelemetryVisibility.entries.random(random), random.nextLong(1, 4), "d$it") }
+            val results = List(6) { changes.shuffled(random).fold(TelemetryPreference()) { acc, next -> acc.merge(next) } }
+            assertTrue(results.all { it == results.first() })
+        }
     }
 }

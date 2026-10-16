@@ -130,11 +130,11 @@ class TelemetryVisibilitySyncTest {
         val stale = phone.lastTelemetry()
         relay(phone, watch)
         watch.session.setTelemetryVisibility(TelemetryVisibility.OFF)
-        assertEquals(TelemetrySetting("off", mapOf("phone" to 1, "watch" to 1)), watch.lastTelemetry().telemetry)
+        assertEquals(TelemetrySetting("off", 2, "watch"), watch.lastTelemetry().telemetry)
         // Handy ohne P2-J (kein Feld), der überholte Stand und ein unbekannter Wert ändern nichts
         watch.link.deliver(MatchMetaMessage())
         watch.link.deliver(stale)
-        watch.link.deliver(MatchMetaMessage(telemetry = TelemetrySetting("friends", mapOf("phone" to 9))))
+        watch.link.deliver(MatchMetaMessage(telemetry = TelemetrySetting("friends", 9, "phone")))
         assertEquals(TelemetryVisibility.OFF, watch.visibility())
         // eine Änderung des Handys, die „Gar nicht“ kannte, gilt
         relay(watch, phone)
@@ -149,10 +149,12 @@ class TelemetryVisibilitySyncTest {
         phone.session.setTelemetryVisibility(TelemetryVisibility.OFF)
         phone.link.sent.clear()
         // gleicher Stand mit weniger restriktivem Wert: keine Änderung, keine Nachricht
-        assertFalse(phone.session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE, mapOf("phone" to 1))))
+        assertFalse(phone.session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE, 1, "phone")))
         assertTrue(phone.link.sent.isEmpty())
-        // nebenläufiger Server-Stand ohne Kenntnis von „Gar nicht“: Vektor wird zusammengeführt, „Gar nicht“ bleibt
-        phone.session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE, mapOf("server" to 1)))
+        // konkurrierender Server-Stand ohne Kenntnis von „Gar nicht“ (gleicher Zähler): „Gar nicht“ bleibt
+        assertFalse(phone.session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE, 1, "server")))
+        // ein Standard (Server ohne Zähler) wird ignoriert
+        assertFalse(phone.session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE)))
         assertEquals(TelemetryVisibility.OFF, phone.visibility())
         // Server-Stand, der „Gar nicht“ kannte, gilt
         val later =

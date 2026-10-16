@@ -38,56 +38,41 @@ enum class TelemetryVisibility(
 }
 
 /**
- * Telemetrie-Einstellung mit Versionsvektor (Gerät → Zahl seiner Änderungen). Ordnet Änderungen **kausal**, nicht nach
- * Wanduhr: Eine abweichende Uhr eines Geräts kann so keine spätere Datenschutzentscheidung aufheben (Review #47).
+ * Telemetrie-Einstellung mit **Lamport-Zähler** (Review #47, Orchestrator-Entscheidung): ordnet Änderungen ohne Wanduhr –
+ * eine abweichende Uhr eines Geräts kann keine spätere Datenschutzentscheidung aufheben. Konstante Größe.
  *
- * **Konfliktregel:**
- * - Hat ein Gerät die Änderung des anderen schon gekannt (Vektor dominiert), gilt die spätere – auch wenn sie
- *   weniger restriktiv ist (bewusste Entscheidung nach dem Abgleich).
- * - Haben beide Seiten seit dem letzten gemeinsamen Stand geändert (nebenläufig, z. B. Uhr offline), gewinnt der
- *   **restriktivere** Wert („im Zweifel restriktiv“); der Vektor wird punktweise zusammengeführt.
- * - Gleicher Vektor, anderer Wert (kann nur durch Zusammenführung entstehen) → ebenfalls restriktiver Wert.
+ * **Konfliktregel:** [merge] nimmt das Maximum nach der totalen Ordnung (counter, Restriktivität OFF > PRIVATE > SHARE,
+ * origin lexikografisch). Damit kommutativ, assoziativ und idempotent; alle eigenen Geräte enden beim selben Wert.
+ * - Eine kausal spätere Änderung (sie kannte die andere) hat immer den höheren counter und gewinnt – auch wenn sie
+ *   weniger restriktiv ist.
+ * - Konkurrierende Offline-Änderungen mit gleichem counter → der restriktivere Wert gewinnt („im Zweifel restriktiv“).
+ * - **Bewusster Kompromiss:** Ändert ein Gerät offline mehrmals, kann sein höherer counter eine konkurrierende einzelne
+ *   Änderung des anderen Geräts schlagen, auch wenn diese restriktiver war. Dafür bleibt der Zustand konstant klein und
+ *   die Zusammenführung eine echte Halbverbandsoperation (kein unbegrenzt wachsender Versionsvektor).
  *
- * [merge] ist kommutativ und idempotent; alle eigenen Geräte enden beim selben Wert, sobald sie sich gesehen haben.
- *
- * @property versions Gerät (Installations-ID) → Zahl seiner Änderungen; leer = nie geändert (Standard), ein Standard
- *   verdrängt nie eine Änderung
+ * @property counter Lamport-Zähler; `0` = nie geändert (Standard), ein Standard verdrängt nie eine Änderung
+ * @property origin Installations-ID des Geräts, das diesen Stand gesetzt hat; `null` beim Standard
  */
 data class TelemetryPreference(
     val visibility: TelemetryVisibility = TelemetryVisibility.DEFAULT,
-    val versions: Map<String, Long> = emptyMap(),
+    val counter: Long = 0,
+    val origin: String? = null,
 ) {
     /** Nie geändert: es gilt der Standard, auf dem Draht wird nichts gesendet. */
-    val isDefault: Boolean get() = versions.isEmpty()
+    val isDefault: Boolean get() = counter == 0L
 
-    /** Lokale Änderung auf [device]: dessen Zähler steigt, der neue Stand folgt kausal auf alles Bekannte. */
+    /** Lokale Änderung auf [device]: counter = größter bisher gesehener + 1 (der eigene Stand ist bereits das Maximum). */
     fun changedBy(
         device: String,
         visibility: TelemetryVisibility,
-    ): TelemetryPreference = TelemetryPreference(visibility, versions + (device to (versions[device] ?: 0) + 1))
+    ): TelemetryPreference = TelemetryPreference(visibility, counter + 1, device)
 
-    /** Zusammenführen mit [other] nach der Konfliktregel. */
-    fun merge(other: TelemetryPreference): TelemetryPreference {
-        if (other.isDefault) return this
-        if (isDefault) return other
-        val keys = versions.keys + other.versions.keys
-        val thisCovers = keys.all { (versions[it] ?: 0) >= (other.versions[it] ?: 0) }
-        val otherCovers = keys.all { (other.versions[it] ?: 0) >= (versions[it] ?: 0) }
-        return when {
-            thisCovers && !otherCovers -> {
-                this
-            }
+    /** Maximum nach der totalen Ordnung; bei Gleichheit dieser Stand. */
+    fun merge(other: TelemetryPreference): TelemetryPreference = if (ORDER.compare(other, this) > 0) other else this
 
-            otherCovers && !thisCovers -> {
-                other
-            }
-
-            else -> {
-                // gleich oder nebenläufig: restriktiver Wert, punktweises Maximum
-                val strict = if (other.visibility.restriction > visibility.restriction) other.visibility else visibility
-                val merged = TelemetryPreference(strict, keys.associateWith { maxOf(versions[it] ?: 0, other.versions[it] ?: 0) })
-                if (merged == this) this else merged
-            }
-        }
+    companion object {
+        /** Totale Ordnung: counter, dann Restriktivität, dann origin (Standard ohne origin zuerst). */
+        val ORDER: Comparator<TelemetryPreference> =
+            compareBy<TelemetryPreference>({ it.counter }, { it.visibility.restriction }, { it.origin ?: "" })
     }
 }

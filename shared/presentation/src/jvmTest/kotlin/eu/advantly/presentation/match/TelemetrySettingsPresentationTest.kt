@@ -69,7 +69,7 @@ class TelemetrySettingsPresentationTest {
         val release = buffer.clearWhenTelemetryOff(session)
         release()
         buffer.receive(LiveTelemetry(1, match, 140, 10))
-        session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.OFF, mapOf("watch" to 1L)))
+        session.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.OFF, 1, "watch"))
         assertNotNull(buffer.state.value)
     }
 
