@@ -18,6 +18,7 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.live.LiveSettings
 import eu.advantly.presentation.match.InMemoryMatchStore
+import eu.advantly.presentation.match.InMemoryTelemetrySettings
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchHistoryPort
@@ -28,6 +29,7 @@ import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.presentation.match.StartOptions
+import eu.advantly.presentation.match.TelemetrySettingsPort
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.wizard.MatchWizard
@@ -95,6 +97,8 @@ class AdvantlyAppModel(
     val clock: WallClock = WallClock.System,
     /** Monotone Uhr für „Stand vor X s“; dieselbe Basis wie `SyncInfo.lastScorerContactMono` des Ports. */
     val monotonic: MonotonicClock = MonotonicClock.System,
+    /** Telemetrie-Sichtbarkeit (P2-J); Standard: der Store hinter [players], sonst nur im Speicher. */
+    val telemetry: TelemetrySettingsPort = players as? TelemetrySettingsPort ?: InMemoryTelemetrySettings(),
 ) {
     val wizard =
         MatchWizard(
@@ -249,7 +253,7 @@ class AdvantlyAppViewModel(
     savedState: SavedStateHandle,
     private val store: MatchStore = InMemoryMatchStore(),
 ) : ViewModel() {
-    val model = AdvantlyAppModel(store, store, store, LiveSettings(savedState))
+    val model = AdvantlyAppModel(store, store, store, LiveSettings(savedState), telemetry = store)
 
     override fun onCleared() {
         (store as? SessionMatchStore)?.close()
