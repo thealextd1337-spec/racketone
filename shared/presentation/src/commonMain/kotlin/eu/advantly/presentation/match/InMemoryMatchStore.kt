@@ -36,9 +36,11 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
+import eu.advantly.match.session.DeviceStatus
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.canCorrectServerRetroactively
 import eu.advantly.match.session.deriveServerChoiceContext
+import eu.advantly.sync.protocol.AppBuild
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -104,6 +106,14 @@ class InMemoryMatchStore(
 
     private val watchFlow = MutableStateFlow(watchAvailable)
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
+    private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
+    override val deviceStatuses = deviceStatusFlow.asStateFlow()
+    override var localAppBuild: AppBuild? = null
+
+    fun setDeviceStatuses(devices: List<DeviceStatus>) {
+        deviceStatusFlow.value = devices
+    }
+
     private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
 

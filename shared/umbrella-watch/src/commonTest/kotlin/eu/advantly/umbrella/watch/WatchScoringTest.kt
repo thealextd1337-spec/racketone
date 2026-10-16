@@ -1055,6 +1055,20 @@ class WatchScoringTest {
     }
 
     @Test
+    fun phoneStatusUpdatesWithoutAnOpenMatchAndWithoutSkie() {
+        val rig = Rig()
+        assertEquals("RED", rig.watch.phoneStatus())
+        rig.phone
+        rig.settle()
+        assertEquals("YELLOW", rig.watch.phoneStatus(), "Hello ohne App-Stand bleibt unbekannt")
+        rig.network.setConnected("phone", false)
+        rig.settle()
+        assertEquals("RED", rig.watch.phoneStatus())
+        rig.restartWatch()
+        assertEquals("RED", rig.watch.phoneStatus())
+    }
+
+    @Test
     fun versionMismatchReachesFacadeWithoutAnOpenMatch() {
         for ((version, expected) in listOf(1 to "OTHER_DEVICE", 99 to "THIS_DEVICE")) {
             val rig = Rig()
@@ -1064,6 +1078,7 @@ class WatchScoringTest {
             rig.settle()
             assertNull(rig.watch.snapshot())
             assertEquals(expected, rig.watch.updateRequired())
+            assertEquals("RED", rig.watch.phoneStatus())
             peer.stop()
         }
     }

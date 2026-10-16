@@ -63,6 +63,7 @@ struct StartView: View {
                 }
                 #endif
                 Section {
+                    PhoneStatusLabel(code: model.phoneStatus)
                     Text(BuildVersionText.details)
                         .font(.footnote)
                         .foregroundStyle(Brand.text2)
@@ -333,6 +334,29 @@ enum SetupSlotText {
 
 private extension String {
     var nonBlank: String? { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self }
+}
+
+/// F31: Farbe plus Badge und ausgeschriebener VoiceOver-Text.
+struct PhoneStatusLabel: View {
+    let code: String
+    private var key: String { "start.phoneStatus." + code.lowercased() }
+    private var color: Color {
+        switch code {
+        case "GREEN": return .green
+        case "YELLOW": return Brand.hint
+        case "RED": return .red
+        default: return Brand.text2
+        }
+    }
+    private var badge: String { code == "GREEN" ? "✓" : (code == "GRAY" ? "–" : "!") }
+    var body: some View {
+        Text(badge + " " + loc(key))
+            .font(.footnote)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(Text(LocalizedStringKey(key)))
+            .accessibilityIdentifier("phoneStatus")
+    }
 }
 
 /// Aus Gradles vorhandener Version.xcconfig; Release lässt die Bauzeit leer.

@@ -57,6 +57,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     @Published private(set) var lastSetup: WatchMatchSetup?
     @Published private(set) var recentPeople: [WatchPlayer] = []
     @Published private(set) var updateRequired = ""
+    @Published private(set) var phoneStatus = "RED"
     /// Telemetrie-Sichtbarkeit (P2-J): `share`, `private` (Standard) oder `off`; mit dem iPhone abgeglichen.
     @Published private(set) var telemetryVisibility = "private"
     /// Ausschließlich nach einem lokalen Punkt sichtbar; Sync-/Ack-Updates verlängern die Frist nicht.
@@ -186,6 +187,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         updateServerChoice(previous: before)
         // Mit Match kommt der Versionshinweis direkt aus dem Snapshot; ohne Match liest der Getter nur Session-State.
         updateRequired = snapshot?.updateRequired ?? scoring.updateRequired()
+        phoneStatus = scoring.phoneStatus()
         // Auch eine Änderung der Telemetrie-Sichtbarkeit am iPhone meldet sich hier
         refreshTelemetryVisibility()
         if snapshot?.matchId != before?.matchId {
@@ -241,6 +243,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func refreshStartInfo() {
         recentPeople = scoring.recentPeople()
         updateRequired = scoring.updateRequired()
+        phoneStatus = scoring.phoneStatus()
     }
 
     /// Workout-Session läuft genau so lange wie das Match (Start mit dem Match, Ende mit dem Matchende) und ist

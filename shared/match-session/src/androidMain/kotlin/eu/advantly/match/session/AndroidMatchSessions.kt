@@ -31,6 +31,7 @@ object AndroidMatchSessions {
                     createWearDeviceLink(app, scheduler),
                     scheduler,
                     kind,
+                    appBuild = androidAppBuild(app),
                     threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
                 ).also {
                     it.start()

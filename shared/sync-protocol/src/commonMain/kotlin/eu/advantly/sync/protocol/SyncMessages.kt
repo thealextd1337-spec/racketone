@@ -51,6 +51,7 @@ data class Hello(
     val activeMatches: List<MatchId> = emptyList(),
     @EncodeDefault val minV: Int = ProtocolVersion.MIN_SUPPORTED,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    val appBuild: AppBuild? = null,
 ) : SyncMessage
 
 /**

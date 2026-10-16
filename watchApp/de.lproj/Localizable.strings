@@ -524,3 +524,9 @@
 "serve.choice.tb.second %@" = "Satz %@ · Erster Aufschlag des anderen Teams";
 
 "start.version %@" = "v%@";
+
+// F31: Verbindung zum Handy, Farbe immer mit Text und Badge.
+"start.phoneStatus.green" = "Handy verbunden · gleicher Stand";
+"start.phoneStatus.yellow" = "Handy verbunden · Update empfohlen";
+"start.phoneStatus.red" = "Handy nicht erreichbar oder Update nötig";
+"start.phoneStatus.gray" = "Kein Handy gekoppelt";

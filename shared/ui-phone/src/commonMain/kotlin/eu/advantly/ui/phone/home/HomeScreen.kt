@@ -98,18 +98,21 @@ fun HomeScreen(
             .padding(horizontal = Spacing.screenEdgeCompact)
             .testTag("home"),
     ) {
-        Text(
-            if (self.displayName.isBlank()) {
-                stringResource(
-                    Res.string.home_greeting,
-                )
-            } else {
-                stringResource(Res.string.home_greeting_named, self.displayName)
-            },
-            style = AdvantlyTheme.typography.headline,
-            color = AdvantlyTheme.colors.text,
-            modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.l).semantics { heading() },
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (self.displayName.isBlank()) {
+                    stringResource(
+                        Res.string.home_greeting,
+                    )
+                } else {
+                    stringResource(Res.string.home_greeting_named, self.displayName)
+                },
+                style = AdvantlyTheme.typography.headline,
+                color = AdvantlyTheme.colors.text,
+                modifier = Modifier.weight(1f).padding(top = Spacing.xl, bottom = Spacing.l).semantics { heading() },
+            )
+            WatchStatusIndicator(model.live)
+        }
         if (open.size > 1) SectionTitle(stringResource(Res.string.home_open_matches, runningCount))
         open.forEachIndexed { index, snapshot ->
             ResumeCard(snapshot, if (index == 0) "resume_card" else "resume_card_$index", onClick = { model.openMatch(snapshot.matchId) })

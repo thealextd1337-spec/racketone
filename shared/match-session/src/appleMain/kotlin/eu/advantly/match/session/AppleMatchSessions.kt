@@ -23,6 +23,7 @@ object AppleMatchSessions {
                     createWatchConnectivityLink(scheduler),
                     scheduler,
                     kind,
+                    appBuild = appleAppBuild(),
                     threadGuard = { NSThread.isMainThread },
                 ).also {
                     it.start()

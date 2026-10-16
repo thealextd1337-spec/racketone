@@ -19,7 +19,8 @@ class WearCompanionDetector(
     private val nodeClient = Wearable.getNodeClient(appContext)
     private val handler = Handler(Looper.getMainLooper())
     private var listener: ((CompanionState) -> Unit)? = null
-    private var last: CompanionState? = null
+    override var devices: List<CompanionDevice> = emptyList()
+        private set
 
     private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { refresh() }
 
@@ -43,16 +44,18 @@ class WearCompanionDetector(
                 capabilityClient
                     .getCapability(WearDataLayerTransport.CAPABILITY, CapabilityClient.FILTER_ALL)
                     .addOnSuccessListener { info ->
-                        if (info.nodes.any { it.id != local.id }) {
-                            publish(CompanionState.APP_INSTALLED)
-                        } else {
-                            nodeClient.connectedNodes
-                                .addOnSuccessListener { nodes ->
-                                    publish(
-                                        if (nodes.none { it.id != local.id }) CompanionState.NO_WATCH else CompanionState.APP_NOT_INSTALLED,
-                                    )
-                                }.addOnFailureListener { publish(CompanionState.UNKNOWN) }
-                        }
+                        nodeClient.connectedNodes
+                            .addOnSuccessListener { connected ->
+                                val nodes = (info.nodes + connected).filter { it.id != local.id }.distinctBy { it.id }
+                                devices = nodes.map { CompanionDevice(it.id, it.displayName) }.sortedBy { it.peer }
+                                publish(
+                                    when {
+                                        info.nodes.any { it.id != local.id } -> CompanionState.APP_INSTALLED
+                                        nodes.isNotEmpty() -> CompanionState.APP_NOT_INSTALLED
+                                        else -> CompanionState.NO_WATCH
+                                    },
+                                )
+                            }.addOnFailureListener { publish(CompanionState.UNKNOWN) }
                     }.addOnFailureListener { publish(CompanionState.UNKNOWN) }
             }.addOnFailureListener { publish(CompanionState.UNKNOWN) }
     }
@@ -61,13 +64,10 @@ class WearCompanionDetector(
         handler.removeCallbacks(loop)
         capabilityClient.removeListener(capabilityListener, WearDataLayerTransport.CAPABILITY)
         listener = null
-        last = null
     }
 
     private fun publish(state: CompanionState) {
         // Play-Services-Callbacks laufen auf dem Main-Thread
-        if (state == last) return
-        last = state
         listener?.invoke(state)
     }
 

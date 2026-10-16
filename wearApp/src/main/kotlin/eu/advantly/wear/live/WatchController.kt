@@ -12,6 +12,7 @@ import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.DroppedInputs
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ServerChoiceContext
@@ -759,6 +760,10 @@ class WatchController(
             phoneConnected,
             updateRequired,
             session.state.value.telemetryVisibility,
+            session.state.value.devices
+                .firstOrNull { it.kind == PeerKind.PHONE }
+                ?.light(session.config.appBuild)
+                ?: DeviceLight.RED,
         )
     }
 

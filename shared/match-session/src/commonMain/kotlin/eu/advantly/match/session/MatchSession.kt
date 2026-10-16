@@ -82,6 +82,8 @@ import eu.advantly.sync.protocol.WatchAssignment
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
 /**
@@ -184,6 +186,16 @@ class MatchSession(
      */
     private val neverSentCache = HashMap<MatchId, Boolean>()
     private val listeners = mutableListOf<SessionListener>()
+    private val deviceJson = Json { ignoreUnknownKeys = true }
+    private val deviceStatuses =
+        runCatching {
+            deviceJson
+                .decodeFromString<List<DeviceStatus>>(data.settings.get("session.deviceStatuses") ?: "[]")
+                .associateBy { it.peer }
+                .toMutableMap()
+        }.getOrElse { mutableMapOf() }
+    private val lastContacts = HashMap<String, Long>()
+    private val contactTimers = HashMap<String, Cancellable>()
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
@@ -242,6 +254,10 @@ class MatchSession(
         timer = null
         link?.setListener(null)
         link?.stop()
+        contactTimers.values.forEach { it.cancel() }
+        contactTimers.clear()
+        lastContacts.clear()
+        saveDeviceStatuses()
         hellos.clear()
         compatibility.clear()
         helloSent.clear()
@@ -1182,6 +1198,14 @@ class MatchSession(
         checkThread()
         val message = (SyncCodec.decode(payload) as? DecodeResult.Ok)?.message ?: return
         if (message !is Hello && compatibility[peer]?.isCompatible == false) return
+        lastContacts[peer] = scheduler.nowMs()
+        contactTimers.remove(peer)?.cancel()
+        contactTimers[peer] =
+            scheduler.postDelayed(DEVICE_CONTACT_TIMEOUT_MS + 1) {
+                contactTimers.remove(peer)
+                publish()
+            }
+        deviceStatuses[peer]?.let { deviceStatuses[peer] = it.copy(lastSeenAtMs = clock.nowMs()) }
         val touched =
             try {
                 when (message) {
@@ -1206,6 +1230,15 @@ class MatchSession(
         hellos[peer] = hello
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
+        deviceStatuses[peer] =
+            DeviceStatus(
+                peer,
+                hello.kind,
+                appBuild = hello.appBuild,
+                compatibility = result.status,
+                lastSeenAtMs = clock.nowMs(),
+            )
+        saveDeviceStatuses()
         data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
         // Knoten → Gerät merken: das Routing kennt die Uhr so schon vor ihrem nächsten Hello
         data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
@@ -1565,6 +1598,8 @@ class MatchSession(
             compatibility.remove(it)
             helloSent.remove(it)
             earlyOwners.remove(it)
+            lastContacts.remove(it)
+            contactTimers.remove(it)?.cancel()
         }
         if (started) {
             peers.filter { it !in helloSent }.forEach { peer ->
@@ -1580,9 +1615,18 @@ class MatchSession(
 
     // --- Senden -----------------------------------------------------------------------------------
 
+    private fun saveDeviceStatuses() {
+        val json =
+            deviceJson.encodeToString(
+                ListSerializer(DeviceStatus.serializer()),
+                deviceStatuses.values.toList(),
+            )
+        if (data.settings.get("session.deviceStatuses") != json) data.settings.put("session.deviceStatuses", json)
+    }
+
     private fun sendHello(peer: String) {
         helloSent += peer
-        send(peer, Hello(deviceId, config.kind, opened.keys.toList()))
+        send(peer, Hello(deviceId, config.kind, opened.keys.toList(), appBuild = config.appBuild))
     }
 
     private fun sendSummaries() {
@@ -1781,6 +1825,10 @@ class MatchSession(
                 // Takt nur für Matches mit Replikationsziel (Director-Matches ohne Ziel halten ihn nicht am Laufen)
                 val active = opened.values.any { it.status != MatchStatus.FINISHED && hasReplicationTarget(it.id) }
                 if (active || pendingCount() > 0) sendSummaries()
+                // Hello als 30-s-Lebenszeichen: auch ältere Apps antworten ohne offenes Match mit Summary/Meta.
+                link?.peers.orEmpty().forEach(::sendHello)
+                saveDeviceStatuses()
+                publish()
                 scheduleAntiEntropy()
             }
     }
@@ -1870,6 +1918,13 @@ class MatchSession(
             watchAssignment?.matchId,
             droppedInputs,
             telemetry,
+            deviceStatuses.values.sortedBy { it.peer }.map { status ->
+                status.copy(
+                    reachable =
+                        started && status.peer in link?.peers.orEmpty() &&
+                            contactIsFresh(scheduler.nowMs(), lastContacts[status.peer]),
+                )
+            },
         )
     }
 

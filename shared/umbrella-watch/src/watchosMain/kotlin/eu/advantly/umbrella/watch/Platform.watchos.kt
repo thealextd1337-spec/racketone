@@ -32,6 +32,9 @@ internal actual fun platformWatchSession(data: LocalData): MatchSession {
             createWatchConnectivityLink(scheduler),
             scheduler,
             PeerKind.WATCH,
+            appBuild =
+                eu.advantly.match.session
+                    .appleAppBuild(),
             threadGuard = ThreadGuard { NSThread.isMainThread },
         ).also { it.start() }
 }

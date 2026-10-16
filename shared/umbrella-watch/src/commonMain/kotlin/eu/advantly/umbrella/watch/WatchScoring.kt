@@ -45,6 +45,7 @@ import eu.advantly.match.session.SyncStatus
 import eu.advantly.match.session.SystemWallClock
 import eu.advantly.match.session.WallClock
 import eu.advantly.sync.protocol.CompatibilityStatus
+import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 
 /**
@@ -192,6 +193,15 @@ class WatchScoring internal constructor(
                 .watchPeople()
                 .map { WatchPlayer(it.id.value, it.displayName, "", 0, false) }
         }.orEmpty()
+    }
+
+    /** F31: flacher Farbcode; Aufruf und Benachrichtigung bleiben auf der Main-Queue. */
+    fun phoneStatus(): String {
+        val session = backend()?.session ?: return "RED"
+        return session.state.value.devices
+            .firstOrNull { it.kind == PeerKind.PHONE }
+            ?.light(session.config.appBuild)
+            ?.name ?: "RED"
     }
 
     /** Versionshinweis auch ohne offenes Match: THIS_DEVICE / OTHER_DEVICE / leer (kompatibel oder unbekannt). */

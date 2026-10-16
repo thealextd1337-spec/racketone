@@ -62,20 +62,6 @@ fun HomeScreen(
     ) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxWidth()) {
             item { ListHeader { Text(stringResource(R.string.app_name)) } }
-            item {
-                // Verbindungsstatus zum Handy (Feldtest Pixel Watch 3); Versionsunterschied statt „nicht verbunden“ (W2)
-                val required = home.updateRequired
-                Text(
-                    when {
-                        required != null -> updateText(required)
-                        home.phoneConnected -> stringResource(R.string.home_phone_connected)
-                        else -> stringResource(R.string.home_phone_disconnected)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (home.phoneConnected && required == null) MaterialTheme.colorScheme.onSurface else HintAmber,
-                    textAlign = TextAlign.Center,
-                )
-            }
             if (powerSave) {
                 item {
                     Text(
@@ -163,6 +149,7 @@ fun HomeScreen(
             }
             // P1-Gate: versteckter Feldtest-Schalter, nur Debug-Build
             if (FieldTestRecorder.AVAILABLE) item { FieldTestToggle() }
+            item { PhoneStatusLabel(home.phoneLight) }
             item { BuildVersionLabel() }
         }
     }

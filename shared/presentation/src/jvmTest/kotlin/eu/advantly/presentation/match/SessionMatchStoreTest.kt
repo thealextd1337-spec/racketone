@@ -27,6 +27,7 @@ import eu.advantly.device.link.ReliableDeviceLink
 import eu.advantly.device.link.testing.FakeCompanionDetector
 import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
@@ -1040,7 +1041,23 @@ class SessionMatchStoreTest {
         val rig = Rig(watchOnline = false, companion = FakeCompanionDetector(CompanionState.APP_NOT_INSTALLED))
         assertFalse(rig.phone.watchAvailable.value)
         assertEquals(WatchStatus.APP_NOT_INSTALLED, rig.phone.watchStatus.value)
+        rig.companion.devices =
+            listOf(
+                eu.advantly.device.link
+                    .CompanionDevice("pixel", "Pixel Watch"),
+                eu.advantly.device.link
+                    .CompanionDevice("galaxy", "Galaxy Watch"),
+            )
         rig.companion.state = CompanionState.APP_INSTALLED
+        assertEquals(
+            listOf("Galaxy Watch", "Pixel Watch"),
+            rig.phone.deviceStatuses.value
+                .map { it.name },
+        )
+        assertTrue(
+            rig.phone.deviceStatuses.value
+                .all { it.light(null) == DeviceLight.RED },
+        )
         assertTrue(rig.phone.watchAvailable.value)
         assertEquals(WatchStatus.AVAILABLE, rig.phone.watchStatus.value)
         val before = rig.companion.refreshes
