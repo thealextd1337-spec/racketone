@@ -361,6 +361,9 @@ jobs:
         run: supabase start -x storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
       - name: pgTAP-Tests (RLS, RPCs)
         run: supabase test db
+      # Warnungen sichtbar machen; SQL-/Typfehler lassen den Job scheitern. Auch interne Helfer prüfen.
+      - name: Datenbank-Lint (Fehler sind fatal)
+        run: supabase db lint --local --schema public,private,ops --level warning --fail-on error
       - name: Stack stoppen
         if: always()
         run: supabase stop --no-backup

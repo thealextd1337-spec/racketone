@@ -4,8 +4,9 @@ Supabase (Postgres, Auth, RLS, Realtime) für Phase 2: Accounts, Freunde, Cloud-
 Visitor, Dummy-Zuweisung, Turnier-Grundgerüst. Plan und Arbeitspakete: [`docs/p2-plan.md`](../docs/p2-plan.md),
 Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.md) (§13 = Abgleich mit diesem Spike).
 
-> Status: **Spike** – lauffähiges Schema mit RLS, RPCs und pgTAP-Tests. Noch kein gehostetes Projekt, keine Edge
-> Functions (Push, Export-ZIP, Löschjob, RevenueCat), keine Client-Anbindung. Keine Secrets im Repo.
+> Status: **P2-A Code umgesetzt** – Spike gehärtet, staging-Deploy vorbereitet. Gehostetes Projekt, DPA und
+> Dashboard-Abnahme stehen noch aus. Keine Edge Functions (Push, Export-ZIP, Löschjob, RevenueCat), keine
+> Client-Anbindung. Keine Secrets im Repo.
 
 ## Inhalt
 
@@ -22,9 +23,14 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 | `migrations/…0700_rpc_zuweisung_claim.sql` | Dummy-Zuweisung, „War ich nicht“ (je Dummy und je Match, F23), Einladungslink/QR/Claim |
 | `migrations/…0800_rpc_konto_export.sql` | Löschung mit Karenz, Anonymisierung (Trigger), Löschjob, Export |
 | `migrations/…0900_turnier.sql` | Turnierhelfer, Live-Übersicht (F22) |
-| `migrations/…0990_rechte.sql` | Least-Privilege-Grants (zuletzt) |
-| `tests/database/*.test.sql` | pgTAP (280 Prüfungen): Schema/Rechte, Onboarding, Freunde, Events/Feed, Zähler-Wahl, Visitor/Kanalversionen, Zuweisung/Claim, Löschung/Redaktion/Export, Turnier/Cursor/Realtime, Wire-Vertrag |
+| `migrations/…0990_rechte.sql` | Least-Privilege-Grants (Spike-Abschluss) |
+| `migrations/20261016000000_rate_limits.sql` | kontoweise Budgets für Suche und sämtliche Einladungs-RPCs |
+| `migrations/…16000100_onboarding_cleanup.sql` | begrenzter Onboarding-Aufräumjob, partieller Index und stündlicher pg_cron-Zeitplan |
+| `migrations/…16000200_spaltenrechte.sql` | Spaltenrechte, eigene Freundescodes über `my_friend_code()` |
+| `migrations/…16000300_sync_pull_performance.sql` | Rechteprüfungen beim Pull nur einmal je Match, Ersteller-Kurzpfad |
+| `tests/database/*.test.sql` | pgTAP (344 Prüfungen in 14 Dateien): bisherige Matrix plus Rate-Limits, Aufräumjob und effektive Spaltenrechte |
 | `tests/fixtures/*.json`, `generate.psql` | echte RPC-Antworten für die Kotlin-Vertragstests (`shared/cloud-sync`, `WireFixturesTest`); `.psql`, damit `supabase test db` sie nicht ausführt |
+| `tests/perf/backend_perf.py` | optionaler Lasttest mit 500 Matches, parallelen Uploads, Cursor-Prüfung und EXPLAIN-JSON; außerhalb des CI-Pfads |
 
 ## Lokal ausführen (Docker nötig)
 
@@ -36,7 +42,7 @@ npx supabase start            # Stack starten; wendet alle Migrationen an (ca. 1
 npx supabase test db          # alle pgTAP-Tests unter supabase/tests (pg_prove im Container)
 npx supabase db reset         # DB neu aufsetzen (Migrationen erneut), z. B. nach Änderungen an Migrationen
 npx supabase migration new <name>   # neue Migration anlegen (SQL von Hand schreiben)
-npx supabase db lint          # optional: plpgsql_check über alle Funktionen
+npx supabase db lint --local --schema public,private,ops --level warning --fail-on error
 npx supabase stop --no-backup # Stack stoppen und Daten verwerfen
 ```
 
@@ -62,7 +68,179 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -At -F '|' -f sup
 ## CI
 
 Job **„Supabase – Migrationen + pgTAP (ubuntu)“** in `.github/workflows/ci.yml`: läuft nur, wenn sich `supabase/**`
-(oder die Workflow-Datei) ändert, startet den Stack per CLI und führt `supabase test db` aus.
+(oder die Workflow-Datei) ändert, startet den Stack per CLI und führt `supabase test db` sowie
+`supabase db lint --local --schema public,private,ops --level warning --fail-on error` aus. Warnungen bleiben sichtbar;
+Fehler führen zu einem fehlgeschlagenen Job (`--fail-on` ist nötig, der CLI-Standard wäre `none`). Die internen
+Schemas werden ausdrücklich mitgeprüft. Siehe [CLI-Referenz](https://supabase.com/docs/reference/cli/supabase-db-lint).
+
+## P2-A: Rate-Limits und Spaltenrechte
+
+`ops.rate_limits` hält je `auth.uid()` und Budget genau eine Zeile, mit RLS ohne Client-Policy und ohne
+Client-Grants. Die atomare Fensterprüfung läuft in den RPCs nach `require_active()` und damit nach der globalen
+Versionssperre; Quoten lassen sich weder per Konto-Parameter noch durch einen alternativen RPC umgehen.
+
+- **Suche:** 30 Aufrufe pro 60 Sekunden (`find_profile`, auch ohne Treffer), wie Datenmodell §6 vorsieht.
+- **Einladungen:** gemeinsam 20 Aufrufe pro 60 Sekunden für `send_friend_request`, `create_invite`, `redeem_invite`,
+  `assign_player`, `invite_scorer`, `add_match_visitor` und `add_tournament_staff`. Dieser konkrete Wert ist eine
+  P2-A-Betriebsannahme; der Plan nennt keinen Zahlenwert. Auch wiederholte erfolgreiche Aufrufe verbrauchen Budget.
+- Fensterbeginn = erster Aufruf, kein Kalender-Minutenwechsel. Nach Ablauf beginnt der Zähler wieder bei eins.
+  Überschreitung liefert SQLSTATE `P0001`, Grund `rate_limit_exceeded`. Tests 100 prüfen 30/31, 20/21,
+  Fensterablauf, Nutzerisolation, jeden RPC-Weg, Berechtigungen und RLS bei versehentlichen Grants.
+- **Transaktionsgrenze:** Ein späterer fachlicher Fehler oder ein Rollback setzt auch die Budgetbuchung zurück.
+  Dieses DB-Budget begrenzt abgeschlossene Suchen/Einladungen, zählt keine abgelehnten Einlöseversuche dauerhaft.
+  Für IP-/Transportmissbrauch sind zusätzlich Auth-/Gateway-Limits nötig; die zufälligen Einladungstoken haben
+  weiterhin rund 244 Bit Entropie. Altersgate-Tickets und deren Missbrauchsschutz gehören zu P2-C (§8 des Plans).
+
+Spaltenprüfung (Test 120): `profiles.friend_code`, `invites.token_hash`, Geräte-Push-Token/-Provider und
+`match_roles.device_id` sind direkt nicht mehr lesbar. Der eigene Freundescode kommt aus **`my_friend_code()`**;
+die eigene Rollen-Gerätebindung weiterhin aus `sync_pull`. Bei Tabellenabfragen explizite Spalten wählen
+(`select *` auf diesen vier Tabellen ist absichtlich nicht mehr erlaubt). Öffentliche Profilfelder bleiben per RLS
+lesbar. Turnier-INSERT erlaubt nur `id`, `director_id`, Name/Sport/Datum/Status, UPDATE nur Name/Sport/Datum/Status;
+Platz-UPDATE nur Name und Sortierung. Serverversion, Kanalversion, Zeitstempel, IDs und Turnierleitung bleiben
+serververwaltet. Die vollständige effektive INSERT-/UPDATE-/REFERENCES-Matrix wird gegen eine Whitelist geprüft.
+
+**Geräte-ID-Risiko (§10):** `register_device` akzeptiert eine bereits registrierte ID nur für deren Eigentümer
+(`device_owned_by_other`); Uploads prüfen Konto und registriertes Quellgerät. Eine noch unregistrierte UUID ist
+kein Besitznachweis: zufällige Installations-IDs vor Veröffentlichung registrieren. Eine kryptografische
+Geräteattestierung ist hier nicht eingeführt; das verbleibende Erstregistrierungsrisiko bleibt dokumentiert.
+
+## P2-A: Onboarding aufräumen
+
+`private.purge_stale_onboarding()` entfernt ausschließlich Profile im Status `onboarding`, deren `created_at`
+mindestens **24 Stunden** zurückliegt (konkrete P2-A-Annahme). Höchstens **100 Konten pro Lauf**, älteste zuerst.
+Der Job nimmt die Versionssperre vor Zeilensperren und nutzt `private.purge_account`: Auth-Konto und Sitzungen
+werden samt Profil/Einstellungen kaskadierend entfernt. Aktive Konten und die **14-tägige Löschkarenz** bleiben
+unberührt. Abgelaufene Budgetzeilen werden mit aufgeräumt. Test 110 prüft insbesondere exakt 24 Stunden,
+eine Mikrosekunde darunter, Idempotenz, Rollenrechte, Kaskaden und Batchgröße.
+
+Die Migration aktiviert **pg_cron**, wenn es in `pg_available_extensions` vorhanden ist, und registriert den
+benannten Job `advantly-purge-stale-onboarding`, Zeitplan **`17 * * * *`** (jede Stunde zur Minute 17, UTC bei
+Supabase-Standardkonfiguration). Ein erneutes `cron.schedule` mit demselben Namen aktualisiert den Job.
+Supabase stellt [Cron](https://supabase.com/docs/guides/cron/install) bereit; die
+[Postgres-Konfiguration](https://github.com/supabase/postgres/blob/develop/ansible/files/postgresql_config/postgresql.conf.j2)
+enthält pg_cron bereits in `shared_preload_libraries`. Reines Postgres ohne die Erweiterung migriert mit einer
+deutlichen Warnung weiter und braucht einen externen stündlichen Scheduler. Bei vorhandener Erweiterung werden
+Installations-/Rechtefehler nicht verschluckt. Der Zeitplantest wird ohne Erweiterung ausdrücklich übersprungen.
+Im echten lokalen Supabase-Stack bzw. auf staging muss der aktive Job vorhanden sein:
+
+```sql
+select name, installed_version from pg_available_extensions where name = 'pg_cron';
+select jobname, schedule, command, active from cron.job
+where jobname = 'advantly-purge-stale-onboarding';
+select status, return_message, start_time from cron.job_run_details
+where jobid = (select jobid from cron.job where jobname = 'advantly-purge-stale-onboarding')
+order by start_time desc limit 10;
+```
+
+Dieser Job ersetzt **nicht** das Altersgate vor Kontoanlage (P2-C). Auf staging bleiben neue Registrierungen bis
+zur Umsetzung und Abnahme des Gates ausgeschaltet. Der reguläre Löschjob inkl. Apple-Widerruf bleibt P2-K.
+
+## P2-A: Last-/Performance-Prüfung
+
+Nur auf einer **wegwerfbaren lokalen Datenbank**, nach Migrationen; Owner-Zugang nötig. Kein gehostetes staging
+als Testziel. Das Skript akzeptiert nur `localhost`/Loopback, legt eine zufällige Testidentität an, baut 500 Matches
+mit je zwei Teilnehmern, Genesis und Punkt über die echten RPCs auf und entfernt seine Daten im `finally` über
+den regulären Löschweg. Sequenzlücken und ANALYZE-Statistik bleiben; daher kein Lauf gegen echte Nutzerdaten.
+Keine Test-Helfer, keine deaktivierten Trigger, keine zusätzlichen Schemaobjekte. Ausgabe außerhalb des Worktrees:
+
+```powershell
+# Wegwerfbarer lokaler Supabase-Stack, niemals staging; Passwort gegebenenfalls lokal anpassen.
+$env:ADVANTLY_PERF_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+uv run supabase/tests/perf/backend_perf.py --confirm-disposable --output H:/dev/tmp/p2a-perf.json
+Remove-Item Env:ADVANTLY_PERF_DB_URL
+```
+
+Linux/macOS: dieselbe Umgebungsvariable setzen und z. B. `--output /tmp/p2a-perf.json` verwenden. Python ≥ 3.11;
+`uv` installiert das im Skript gepinnte Psycopg. Das Skript ist kein `.sql` und wird von `supabase test db` nicht
+ausgeführt. Parameter `--clients`, `--uploads` und `--pull-samples` steuern die Last. Standard: 20 volle Pulls mit
+500 Matches, dann **4 gleichzeitige Verbindungen × 50 Upload-Transaktionen** desselben Kontos über eigene Geräte.
+Jeder Upload erzeugt ein neues Match mit zwei Events. Ein weiterer Leser prüft parallel Delta-Pagination mit
+37 Matches und volle 500er-Seiten. Erwartet: **kein fehlendes/doppeltes Match**, kein Deadlock, maximale beobachtete
+Sperrwartezeit **< 200 ms** (Plan §5.4). Zusätzliches diagnostisches Pull-Budget: 2 s, kein Produkt-SLA.
+Die Sperrmessung nimmt dieselbe globale Sperre wie der RPC vorab; sie umfasst auch den lokalen Roundtrip und
+überschätzt damit eher die reine DB-Wartezeit. Upload-Latenz umfasst Transaktion und Commit, Durchsatz auch den
+konkurrierenden Leser. EXPLAIN-JSON für Funktionsaufruf und Kandidatenauswahl steht in der Ergebnisdatei.
+
+**Lokale Messung 16.10.2026:** Windows 11, Ryzen 7 7800X3D (8 Kerne/16 Threads), Postgres 17.10,
+pgTAP 1.3.3, Supabase-Nachbau (Auth/Rollen/Realtime, keine echte Realtime-Netzwerklast). Vor Optimierung:
+500er-Pull p95 **511 ms**, Maximum **523 ms**. Danach p95 **28,25 ms**, Maximum **28,27 ms**;
+4 × 50 Uploads **279,91 Transaktionen/s**, **1.399,55 vergebene Versionen/s**, Sperrwartezeit p95 **24,53 ms**,
+Maximum **92,99 ms**, **0 übersprungene Matches**, **0 verbleibende Testkonten**. Rohprotokolle lokal unter
+`H:/dev/tmp/p2a-fundament/`; bei anderer Hardware/echtem Supabase-Stack erneut messen.
+
+**EXPLAIN-Begründung:** Vorher dauerte der reine RPC rund 480 ms. In der Kandidatenauswahl entfielen etwa 90 ms
+auf den Match-Scan mit `can_view_match`, während Union/Hash-Aggregat nur etwa 0,4 ms brauchten.
+`match_roles_profile_idx`, `match_participants_profile_idx` und `matches_tournament_idx` wurden bereits genutzt;
+Seq Scans auf den 500 eigenen Matches bzw. 1.000 Teilnehmern sind für diesen Vollabgleich passend. Daher kein
+zusätzlicher Sync-Index: Migration `…16000300` nutzt die bereits bewiesene Mitgliedschaft des Erstellers und
+verhindert per `LATERAL ... OFFSET 0` mehrfaches Auswerten der Mitgliedschaft pro Match. Alle anderen Leser
+durchlaufen weiterhin die Rechteprüfung, Wire- und RLS-Tests bleiben unverändert grün. Der neue partielle
+Onboarding-Index betrifft ausschließlich den begrenzten Aufräumjob.
+
+Bewertung: Die lokale Pilotlast erfüllt §5.4; daraus folgt keine Kapazitätszusage für Free/Hosted oder Netzlatenz.
+Der Versions-Lock bleibt global. Längere Transaktionen/Vollabgleiche können Schreiber aufhalten; bei steigender Last
+erneut messen und bei Überschreiten der 200 ms den im Plan genannten commit-geordneten Änderungsstrom bewerten.
+
+## Gehostetes staging-Projekt
+
+**Noch manuell einzurichten und abzunehmen; hier wurde kein Projekt angelegt oder deployt.**
+
+1. Im Supabase-Dashboard ein getrenntes Projekt **Advantly staging**, **Free**, ausdrücklich Region
+   **Central EU (Frankfurt), `eu-central-1`** erstellen (keine automatische allgemeine EU-Auswahl).
+   DB-Passwort sicher verwahren; Projekt-Ref aus den Projekteinstellungen übernehmen. Datenbank-Hauptversion 17
+   wie lokal wählen bzw. Abweichung vor dem Deploy prüfen.
+   [Regionen](https://supabase.com/docs/guides/platform/regions).
+2. GitHub → Repository **Settings → Environments → `staging`** anlegen. Dort als **Environment Secrets**
+   `SUPABASE_ACCESS_TOKEN` (Supabase-Konto-PAT mit Zugriff auf das staging-Projekt) und
+   `SUPABASE_DB_PASSWORD` setzen; als **Environment Variable** `SUPABASE_STAGING_PROJECT_REF` den Ref.
+   Keine Werte ins Repo/Logs schreiben. Optional Deployment-Branches auf `main` begrenzen und Reviewer setzen.
+3. Actions → **Supabase staging deploy** → **Run workflow** auf dem freigegebenen Commit.
+   Workflow `.github/workflows/supabase-deploy.yml`: gepinnte CLI, `supabase link`, `db push --dry-run`, dann
+   `db push`. `--skip-vault` vermeidet Vault-Änderungen, insbesondere beim Dry-run; kein Seed/kein Config-Push.
+   Deploys sind über eine gemeinsame Concurrency-Gruppe serialisiert. Fehlt ein Secret oder die Variable,
+   überspringt der Job alle Deploy-Schritte mit grüner Notice/Summary und den fehlenden **Namen**, ohne Secretwerte.
+   Andere Deploy-Fehler bleiben rot. Aktuell nur `workflow_dispatch`, kein automatischer Push-Trigger.
+4. **Data API aktivieren**, exposed schemas nur `public` (optional `graphql_public` wie lokal), **niemals**
+   `private`, `ops`, `auth`, `tests` oder `cron`. **„Automatically expose new tables“ ausschalten**, falls die
+   Oberfläche den Schalter anbietet; bei neuen sicheren Plattformdefaults ist das bereits Standard.
+   Unsere Migrationen hängen **nicht** davon ab: `…0990_rechte` entzieht die Default-Grants, setzt alle gewünschten
+   Tabellen-/Funktions-Grants explizit; spätere Migrationen tun dasselbe. Dashboard-Migrationen als Rolle `postgres`
+   ausführen wie `db push`, nicht als beliebiger anderer Owner. Keine pauschalen GRANTs über das Dashboard nachtragen.
+   [Supabase: Grants und RLS](https://supabase.com/docs/guides/api/securing-your-api).
+5. **Auth-Grundlage P2-A:** neue Registrierungen deaktivieren, Anonymous Sign-ins aus, Phone/SMS aus;
+   Google und Apple zunächst aus. Keine echten Nutzer vor P2-C/Altersgate-Hook und dem Datenschutz-Pilot-Gate P2-K.
+   Für später Site URL `https://advantly.eu`, Redirect-Allowlist nur explizite staging-/App-Callback-URLs;
+   keine Wildcards und keine produktiven Clients gegen staging. Konkrete native Callbacks und Account-Linking
+   werden in P2-C festgelegt. E-Mail-Code erst mit eigenem EU-SMTP-Anbieter und AVV, bestätigte E-Mail,
+   eingeschaltete E-Mail-Änderungsbestätigung und geeignete OTP-/Auth-Rate-Limits. Apple erst mit Developer-Account
+   und dokumentierter Secret-Rotation. `config.toml` ist **nur lokal** und wird mit diesem Workflow nicht gepusht;
+   dortige offene Test-Registrierungen sind keine staging-Vorgabe. Secrets dort ausschließlich `env(...)`.
+6. **DPA/AVV:** vor personenbezogenen Testdaten die geltende
+   [Supabase-DPA](https://supabase.com/legal/customer-resources/data-processing-addendum) im Organisations-/Vertragskontext
+   prüfen, erforderlichen Abschluss dokumentieren und Fassung/Datum im Datenschutz-Nachweis ablegen; ebenso
+   Unterauftragsverarbeiter und internationale Transfers prüfen. Frankfurt allein ersetzt diesen Nachweis nicht.
+   E-Mail-/Google-/Apple-Verträge und VVT bleiben Teil des Pilot-Gates P2-K; CH/LI bleiben rechtlich gesondert zu prüfen.
+7. Nach dem Deploy **Security Advisor und Performance Advisor** im Dashboard ausführen und Befunde/Erledigung im
+   Abnahmeprotokoll festhalten ([Advisors](https://supabase.com/docs/guides/observability/advisors)). RLS/Grants,
+   `search_path`, externe Schemaexposition und Auth-Konfiguration kontrollieren; keine echten Konten zum Testen
+   anlegen. `ops.rate_limits` hat absichtlich keine Client-Policy. Cron-Verfügbarkeit, genau einen aktiven Job
+   sowie dessen ersten erfolgreichen Lauf mit den SQL-Abfragen oben prüfen. Fehlende FK-Indizes nicht pauschal
+   ergänzen: betroffene Abfrage mit EXPLAIN prüfen. **Advisor ohne Befund ist hier noch nicht nachgewiesen.**
+
+**Warum kein `supabase test db --linked` nach Deploy?** Die erste Testdatei installiert außerhalb einer
+Rollback-Transaktion dauerhaft das Schema `tests`, SECURITY-DEFINER-Testhelfer und breite Test-Grants. Zudem sind
+Sequenzänderungen nicht transaktional. Die derzeitige Suite ist daher nur für wegwerfbare lokale/CI-Datenbanken
+geeignet. Der Workflow hinterlässt auf staging keine Testdaten/-Helfer; Migrationen enthalten keine Testfixtures.
+Ein späterer Hosted-Smoke-Test braucht eine getrennte, garantiert schreibfreie Suite.
+
+**Offene Betriebsabnahme:** Migrationen deployen, echten Stack-Lint/pgTAP in CI grün abwarten, Cron-Lauf, Advisor
+und DPA dokumentieren. Lokal wurden 344 pgTAP-Prüfungen gegen Postgres 17 ausgeführt (ein expliziter Cron-Skip),
+der Lasttest bestanden und `gradlew.bat check` grün. Die pgTAP-Matrix lief auch ohne automatische
+Supabase-Default-Grants grün. `actionlint` prüfte beide Workflows; die Konfigurationsprüfung wurde mit fehlenden
+und vollständigen Werten separat ausgeführt. CLI 2.121.0 ist per `npx` ausführbar, Docker fehlt;
+`plpgsql_check` und `pg_cron` fehlen im dockerfreien Harness. Deshalb **kein lokaler echter `db lint`- oder
+Scheduler-Nachweis**, kein Hosted-Deploy-Nachweis. Free-Pausierung und fehlende tägliche Backups gemäß §8/F28
+vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes EU-Backup-Verfahren festlegen.
 
 ## Regeln für Migrationen
 
@@ -85,5 +263,6 @@ Job **„Supabase – Migrationen + pgTAP (ubuntu)“** in `.github/workflows/ci
 ## Noch nicht enthalten (siehe Plan)
 
 Edge Functions (`push-dispatch`, `export-my-data`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
-pg_cron-Jobs (Löschjob, Outbox-Retry, Aufräumen von Onboarding-Leichen), Rate-Limits für Suche/Einladungen,
-gehostete Projekte (staging/prod in `eu-central-1` Frankfurt) und Deploy-Pipeline.
+pg_cron-Jobs für reguläre Kontolöschung und Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
+(staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
+Auth-Hook, produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben Folgepakete.
