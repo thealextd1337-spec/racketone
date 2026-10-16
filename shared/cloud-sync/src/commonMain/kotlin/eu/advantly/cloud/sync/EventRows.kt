@@ -10,8 +10,8 @@ import kotlinx.serialization.json.jsonObject
  *
  * - Die Payload wird **nicht** neu serialisiert, sondern als JSON-Objekt 1:1 übernommen (gleiche Form wie auf dem
  *   Draht, 01 §4.3). Strukturelle Gleichheit genügt (02 §7.3 „bitgleich“ meint data-class-Gleichheit).
- * - `confirmed` ist ein lokales Replikations-Flag und wird nicht übertragen. Aus der Cloud geladene Events gelten als
- *   bestätigt (eine Gegenstelle – die Cloud – hat sie).
+ * - `confirmed` ist ein Geräte-Replikations-Flag und wird nicht übertragen. Ein Cloud-Download bestätigt
+ *   nur die Cloud (`cloud_state`); die Weitergabe an gekoppelte Geräte bleibt ausstehend.
  */
 object EventRows {
     /** Lokales Event → Cloud-Zeile. Fehlt [StoredEvent.type] (Alt-Daten), wird er aus der Payload gelesen. */
@@ -35,7 +35,7 @@ object EventRows {
         )
     }
 
-    /** Cloud-Zeile → lokales Event (für `EventStore.appendAll`, idempotent über die ID). */
+    /** Cloud-Zeile → lokales Event (CloudSyncRepository speichert atomar samt Cloud-Markierung). */
     fun toStored(row: EventRow): StoredEvent =
         StoredEvent(
             id = row.id,
@@ -47,7 +47,7 @@ object EventRows {
             wallClockMs = row.wallClockMs,
             parentId = row.parentId,
             type = row.type,
-            confirmed = true,
+            confirmed = false,
         )
 }
 

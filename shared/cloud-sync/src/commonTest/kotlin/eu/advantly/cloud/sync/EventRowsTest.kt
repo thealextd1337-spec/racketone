@@ -14,7 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class EventRowsTest {
     private val match = MatchId("0199f0a0-0000-7000-8000-000000000001")
@@ -41,7 +41,7 @@ class EventRowsTest {
         assertEquals(stored.parentId, row.parentId)
 
         val back = EventRows.toStored(row)
-        assertTrue(back.confirmed, "aus der Cloud geladene Events gelten als bestätigt")
+        assertFalse(back.confirmed, "Cloud-Empfang bestätigt keine Zustellung an ein gekoppeltes Gerät")
         assertEquals(original, back.toScoreEvent(), "Engine-Event strukturell gleich (02 §7.3)")
     }
 

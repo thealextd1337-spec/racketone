@@ -65,9 +65,13 @@ Postgres-Stubsatz ersetzen nicht den echten Supabase-Stack mit Gateway, Auth und
 
 ## Nachweise dieser Lieferung
 
-- B1 ist implementiert; 44 JVM-Tests in `shared/data` einschließlich elf neuer Outbox-/Migrationstests
-  bestanden. SQLDelight-Migrationsprüfung und `gradlew.bat check` bestanden (686 Tasks, 1 min 36 s).
+- B1 ist implementiert; 50 JVM-Tests in `shared/data` einschließlich 17 neuer Outbox-/Migrationstests
+  bestanden. SQLDelight-Migrationsprüfung und `gradlew.bat check` bestanden.
   Unabhängiges Review und CI sind vor Integration zusätzlich erforderlich.
+- Review-Runde 1: JSON-Payloads strukturell vergleichen (Feldreihenfolge/Leerzeichen), alte leere Typfelder
+  ableiten und vorhandene Payloads unverändert lassen. Cloud-Empfang darf den Geräte-Rückstand nicht
+  bestätigen; Duplikate behalten ihren Geräte-Ack, neue Downloads bleiben für Geräte ausstehend.
+  Beide Befunde sind korrigiert und mit zusätzlichen Regressionstests abgesichert.
 - Lasttest gegen einen frisch aufgebauten lokalen PostgreSQL 17.10 mit allen aktuellen Migrationen:
   500 Ausgangsmatches, vier Schreiber mit je 50 Uploads, 20 Pull-Messungen. Ohne parallelen Build:
   0 fehlende Matches, 0 verbleibende Fixture-Konten, maximale Sperrzeit 117,488 ms (Budget 200 ms),

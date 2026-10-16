@@ -23,9 +23,6 @@ UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL WHERE id = ?;
 markRejected:
 UPDATE match_event SET cloud_state = 2, cloud_rejection = :reason WHERE id = :id AND cloud_state = 0;
 
-confirmDownloaded:
-UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL, confirmed = 1 WHERE id = ?;
-
 cursor:
 SELECT value FROM cloud_cursor WHERE profile_id = ? AND stream = ?;
 

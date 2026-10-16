@@ -60,14 +60,88 @@ class CloudSyncRepositoryTest {
     }
 
     @Test
-    fun repeatedDownloadsAreConfirmedWithoutEchoUpload() {
+    fun repeatedDownloadsKeepDeviceBacklogWithoutEchoUpload() {
         val rows = listOf(event("one"), event("two", 2))
         data.events.append(rows.first())
-        data.cloud.storeDownloaded(rows)
-        data.cloud.storeDownloaded(rows)
+        // Selbst ein altes Mapping mit confirmed=true darf keinen Geräte-Ack vortäuschen.
+        data.cloud.storeDownloaded(rows.map { it.copy(confirmed = true) })
+        data.cloud.storeDownloaded(rows.map { it.copy(confirmed = true) })
         assertEquals(2, data.events.count("match"))
-        assertEquals(0, data.events.unconfirmedCount())
+        assertEquals(rows, data.events.unconfirmedEvents("match"))
         assertEquals(0, data.cloud.pendingCount())
+    }
+
+    @Test
+    fun reorderedAndSpacedJsonIncludingNestedObjectsIsAnUnchangedDuplicate() {
+        val original = event("one").copy(payload = """{"type":"PointWon","side":"A","extra":{"a":1,"b":2}}""")
+        data.events.append(original)
+        data.cloud.storeDownloaded(
+            listOf(original.copy(payload = """{ "extra": {"b":2, "a":1}, "side":"A", "type":"PointWon" }""")),
+        )
+        assertEquals(listOf(original), data.events.eventsFor("match"))
+        assertEquals(listOf(original), data.events.unconfirmedEvents("match"))
+        assertEquals(0, data.cloud.pendingCount())
+    }
+
+    @Test
+    fun legacyTypeInPayloadMatchesExplicitDownloadedTypeWithoutRewritingLocalRow() {
+        val original = event("one").copy(type = "")
+        data.events.append(original)
+        data.cloud.storeDownloaded(listOf(original.copy(type = "PointWon", payload = """{"side":"A","type":"PointWon"}""")))
+        assertEquals(listOf(original), data.events.eventsFor("match"))
+        assertEquals(0, data.cloud.pendingCount())
+        assertEquals(1, data.events.unconfirmedCount())
+    }
+
+    @Test
+    fun downloadsPreserveExistingDeviceConfirmation() {
+        data.events.appendAll(listOf(event("one"), event("two", 2)))
+        data.events.markConfirmedUpTo("match", "phone", 1)
+        data.cloud.storeDownloaded(listOf(event("one"), event("two", 2), event("three", 3)))
+        assertEquals(listOf("two", "three"), data.events.unconfirmedEvents("match").map { it.id })
+        assertEquals(0, data.cloud.pendingCount())
+    }
+
+    @Test
+    fun genuinelyChangedJsonValueRollsBackTheWholeDownload() {
+        val original = event("one").copy(payload = """{"type":"PointWon","side":"A","extra":{"a":1}}""")
+        data.events.append(original)
+        assertFailsWith<IllegalArgumentException> {
+            data.cloud.storeDownloaded(
+                listOf(event("two", 2), original.copy(payload = """{"side":"A","type":"PointWon","extra":{"a":2}}""")),
+            )
+        }
+        assertEquals(listOf(original), data.events.eventsFor("match"))
+        assertEquals(1, data.cloud.pendingCount())
+    }
+
+    @Test
+    fun immutableMetadataDifferencesCannotPassAsDuplicateJson() {
+        val original = event("one")
+        data.events.append(original)
+        val conflicting =
+            listOf(
+                original.copy(matchId = "other"),
+                original.copy(deviceId = "other"),
+                original.copy(deviceSeq = 2),
+                original.copy(lamport = 2),
+                original.copy(wallClockMs = 42),
+                original.copy(parentId = "parent"),
+                original.copy(type = "Paused"),
+            )
+        conflicting.forEach { row ->
+            assertFailsWith<IllegalArgumentException> { data.cloud.storeDownloaded(listOf(row)) }
+            assertEquals(listOf(original), data.events.eventsFor("match"))
+            assertEquals(1, data.cloud.pendingCount())
+        }
+    }
+
+    @Test
+    fun malformedNewEventRollsBackEarlierInserts() {
+        assertFailsWith<IllegalArgumentException> {
+            data.cloud.storeDownloaded(listOf(event("one"), event("two", 2).copy(payload = "[]")))
+        }
+        assertEquals(0, data.events.count("match"))
     }
 
     @Test

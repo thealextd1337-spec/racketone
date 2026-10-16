@@ -1,6 +1,9 @@
 package eu.advantly.data
 
 import eu.advantly.data.db.AdvantlyDatabase
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Persistente P2-B-Primitive ohne Netzwerk-/Auth-Abhängigkeit. Wie [LocalData] seriell verwenden.
@@ -40,7 +43,8 @@ class CloudSyncRepository internal constructor(
     }
 
     /**
-     * Download atomar speichern, beide Bestätigungen setzen und Wiederholungen deduplizieren.
+     * Download atomar speichern, Cloud-Bestätigung setzen und Wiederholungen deduplizieren.
+     * Neue Events bleiben für Geräte ausstehend; Duplikate behalten ihren bisherigen Geräte-Ack.
      * Abweichender Inhalt unter gleicher ID oder eine belegte Gerätesequenz bricht den ganzen Batch ab.
      * Events lokal gelöschter Matches werden verworfen, damit ein später Download sie nicht wiederherstellt.
      * Cursor muss der Aufrufer in derselben [LocalData.transaction] wie den vollständigen Empfang speichern.
@@ -49,22 +53,44 @@ class CloudSyncRepository internal constructor(
         database.transaction {
             downloaded.forEach { event ->
                 if (database.matchTombstoneQueries.countById(event.matchId).executeAsOne() > 0) return@forEach
-                val received = event.copy(confirmed = true)
+                val payload = DataJson.parseToJsonElement(event.payload).jsonObject
+                val received = event.copy(confirmed = false, type = effectiveType(event, payload))
                 when (events.append(received)) {
                     AppendResult.INSERTED -> {}
 
                     AppendResult.DUPLICATE -> {
                         val existing = events.eventsFor(event.matchId).firstOrNull { it.id == event.id }
-                        require(existing?.copy(confirmed = true) == received) { "Cloud-Event-ID mit abweichendem Inhalt" }
+                        require(existing != null && sameContent(existing, received, payload)) { "Cloud-Event-ID mit abweichendem Inhalt" }
                     }
 
                     AppendResult.SEQUENCE_CONFLICT -> {
                         error("Cloud-Event mit belegter Gerätesequenz")
                     }
                 }
-                queries.confirmDownloaded(event.id)
+                queries.markUploaded(event.id)
             }
         }
+    }
+
+    /** JSONB darf Objektfelder umordnen; die gespeicherte Payload selbst bleibt unverändert. */
+    private fun sameContent(
+        existing: StoredEvent,
+        received: StoredEvent,
+        receivedPayload: JsonObject,
+    ): Boolean {
+        val existingPayload = DataJson.parseToJsonElement(existing.payload).jsonObject
+        val normalized = existing.copy(payload = "", type = effectiveType(existing, existingPayload), confirmed = false)
+        return normalized == received.copy(payload = "") && existingPayload == receivedPayload
+    }
+
+    /** Alte P1-Zeilen können den Typ ausschließlich in der Payload enthalten. */
+    private fun effectiveType(
+        event: StoredEvent,
+        payload: JsonObject,
+    ): String {
+        val type = (payload["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        require(!type.isNullOrEmpty() && (event.type.isEmpty() || event.type == type)) { "Event-Typ passt nicht zur Payload" }
+        return type
     }
 
     fun cursor(
