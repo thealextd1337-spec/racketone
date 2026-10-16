@@ -112,3 +112,28 @@ Maßgeblich sind
 die F31-/W9-Details aus `docs/00-entscheidungen.md`, `docs/04-ux-design.md` und `docs/PLAN.md` nach Merge von #51.
 Laut aktualisierter Feldtest-Rückmeldung ist auch die Galaxy Watch8 inzwischen auf dem aktuellen Stand;
 die ältere Port-Blockade im übernommenen Ausgangsstand ist damit überholt. Noch kein neuer Testnachweis für W9.
+
+## Displaygrößen als laufendes Abnahmekriterium
+
+Der Feldtest vom 16.10.2026 erforderte laut Nutzer eine Layout-Anpassung für die kleinere Galaxy-Watch-Variante.
+Die bestehenden UX-Vorgaben (responsive Ränder, System-Schriftgrößen und deutsche Screenshots kleiner Uhren,
+[04-ux-design.md](04-ux-design.md), §§4.3.5, 8 und 9) werden deshalb für kommende UI-Pakete ausdrücklich geprüft:
+
+- Kleine und große Galaxy- und Pixel-Watch-Varianten, kleine rechteckige Apple-Watch-Displays und Ultra berücksichtigen.
+  Die tatsächlich verwendete Galaxy Watch als festen Regressionstest führen; Modell, nutzbare Fläche in dp/pt,
+  Dichte und Schriftgröße im Testnachweis erfassen. Gehäusegröße oder Marke allein bestimmen das Layout nicht.
+- iOS: kleine und große iPhone-Displays, Safe Areas und Dynamic Type abdecken. iPad-Flächen nur dann als
+  unterstützte Geräteklasse abnehmen, wenn iPad-Unterstützung ausdrücklich zum Produktumfang gehört.
+- Garmin: in der Garmin-Phase kleine und große runde sowie rechteckige Displays, MIP/AMOLED und Bedienung
+  per Tasten beziehungsweise Touch prüfen. Das ist eine Vorgabe für P4, keine Behauptung bestehender Unterstützung.
+- Live-Score, Doppel-Spielernamen, Aufschlagwahl, Dialoge, Startliste und F31-Status/Versionsanzeige prüfen:
+  keine verdeckten Aktionen, überlappenden Texte oder abgeschnittenen Punkte am runden Rand.
+- Deutsch und Englisch, lange Namen sowie vergrößerte Systemschrift prüfen. Bedienflächen erhalten;
+  bei Platzmangel Inhalte sinnvoll anordnen oder Listen scrollbar machen, nicht pauschal alles verkleinern.
+- Vor Abnahme Layout-/Screenshot-Prüfungen auf kleinen und großen Flächen dokumentieren; echte Geräteprüfungen
+  für Galaxy Watch, Pixel Watch, iPhone und Apple Watch sowie in P4 Garmin getrennt nachweisen. Die kleine
+  Galaxy Watch ist verpflichtender Regressionstest. Noch nicht verfügbare Geräte bleiben als offene Nachweise
+  sichtbar; ein Test auf einer Marke oder Größe ersetzt nicht die übrigen Varianten.
+
+Die heutige Anpassung ist übernommene Feldtest-Evidenz, kein Nachweis, dass alle Ansichten und Größen bereits
+abgedeckt sind. W9 bleibt in seiner parallelen Lieferung; dessen Größenabnahme wird dort übernommen.
