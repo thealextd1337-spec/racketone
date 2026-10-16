@@ -328,13 +328,14 @@ HealthSession
 HealthSourceRecord                    -- Originalnachweis, unabhängig von einer Match-Zuordnung
   id, ownerProfileId  uuid
   providerNamespace   text           -- Adapter + Herkunftskonto/Store; keine Zugangsdaten
-  originSource        text           -- ursprüngliche App/Gerät, nicht nur "Health Connect"
+  state               LIVE | TOMBSTONE
+  originSource        text?          -- bei LIVE Pflicht; ursprüngliche App/Gerät
   externalId          text           -- stabile Datensatz-ID innerhalb des Namensraums
   externalVersion     text?          -- Provider-Version, falls verfügbar
-  importRevision      long           -- lokale Version; kein Vergleich fremder Versionsformate
+  importRevision      long?          -- bei LIVE Pflicht; kein Vergleich fremder Versionsformate
   sourceDevice        text?
-  metric, unit        text
-  startedAt, endedAt   timestamptz
+  metric, unit        text?          -- bei LIVE Pflicht
+  startedAt, endedAt   timestamptz?   -- bei LIVE Pflicht
   originalZone        text?
   deletedAt           timestamptz?
   contentRef          text?          -- lokal; Cloud nur nach separater Einwilligung
@@ -345,6 +346,11 @@ HealthSourceSelection                 -- nur Besitzer; bestätigte, korrigierbar
   metric, start, end, appliedImportRevision
   state               SELECTED | UNLINKED
 ```
+
+Für `HealthSourceRecord` gilt: `LIVE` verlangt die als Pflicht markierten Inhaltsfelder; `TOMBSTONE`
+behält ausschließlich ID, Besitzer, Provider-Namensraum, externe ID und `state`. Alle anderen Quellfelder
+sind dann `null`, einschließlich externer Version, Importrevision und `deletedAt`. Diese bedingten
+Pflicht-/Nullregeln sind bei der P3-Implementierung durch Validierung und DB-Constraints abzusichern.
 
 Mehrere Selections dürfen auf dieselbe abgeleitete Session zeigen. Überlappungen derselben Metrik werden
 vor Aggregation aufgelöst; aktive Selections dürfen keine Messabschnitte doppelt zählen. Besitzer von Session
