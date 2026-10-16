@@ -322,6 +322,8 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 
 **Arbeit:** Für Tennis-/Padel-Doppel separaten Start ohne verbindliche Aufschlägerwahl anbieten. Besetzungs- und Matchoptionen beibehalten. Alte Setupwege für Einzel/andere Sportarten erhalten.
 
+**Pflicht – Korrektur-UI:** Wear (`WE/live/LiveModel.kt:134–140`, `WE/ui/LiveDialogs.kt:373`) bietet „ab Beginn“ nur bei `canCorrectServerRetroactively`, sonst Label „ab jetzt“; abgewiesene Korrektur zeigt Hinweis statt stumm zu schließen.
+
 **Tests:** `WatchControllerTest.kt`, `WatchControllerOperationTest.kt`, `SetupCatalogTest.kt`.
 
 **Abnahme:** Neu-/Schnell-/Folgestart erzeugen ein gültiges Match und landen vor Punkteingabe im ersten Wahlfenster; keine doppelte Setup- und Live-Abfrage.
@@ -351,6 +353,8 @@ Umsetzungsumfang dieses Auftrags: **AP1 und AP2**. Die weiteren Arbeitspakete bl
 **Dateien:** `PH/wizard/PlayersStep.kt`, gegebenenfalls `PR/wizard/MatchWizard.kt`; `PH/live/LiveOperations.kt`, `LiveSheets.kt`, `LiveScoreScreen.kt`, `LiveScoreController.kt`; DE/EN-Ressourcen.
 
 **Arbeit:** Erstaufschlag im Doppel zum aktiven Zähler verlagern; automatische Live-Auswahl am Handy-Zähler; vorhandene Bar als Wiedereinstieg behalten. Auf Anzeige-Handy nur Status.
+
+**Pflicht – Korrektur-UI:** Phone (`PH/live/LiveSheets.kt:355–380`) bietet „ab Beginn“ nur bei `canCorrectServerRetroactively`, sonst Label „ab jetzt“; abgewiesene Korrektur zeigt Hinweis statt stumm zu schließen.
 
 **Tests:** `LiveOperationsUiTest.kt`, `LiveScoreScreenTest.kt`, vorhandene Wizard-Tests und `StringResourcesParityTest`.
 

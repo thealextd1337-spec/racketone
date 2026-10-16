@@ -1,8 +1,11 @@
 package eu.advantly.match.session
 
+import eu.advantly.core.model.Discipline
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.GameKind
@@ -47,7 +50,7 @@ data class ServerChoiceContext(
 }
 
 /** Ableitung ausschließlich aus der Engine; `null` bei geschlossenem oder für diesen Sport unzulässigem Fenster. */
-fun serverChoiceContext(
+fun deriveServerChoiceContext(
     matchId: MatchId,
     state: MatchState,
 ): ServerChoiceContext? {
@@ -71,10 +74,28 @@ fun serverChoiceContext(
  * In diesem Fall rückwirkende Korrektur nicht anbieten/erzeugen; neu wählen oder SERVER „ab jetzt“ verwenden.
  * Auch die nach Undo auf null Ballwechsel umgedeutete zweite Wahl zählt. Historische Logs bleiben unverändert.
  */
-fun canCorrectServerRetroactively(engine: EngineState): Boolean {
-    val excluded = EventLog.analyze(engine.events, engine.initialScorer).undone + engine.state.ignoredEvents
-    return engine.events.takeWhile { engine.point(it.id) == null }.none {
-        val choice = it.payload as? ServerChosen
-        choice?.set == 0 && it.id !in excluded
+fun canCorrectServerRetroactively(engine: EngineState): Boolean =
+    canCorrectServerRetroactively(engine) {
+        EventLog.analyze(engine.events, engine.initialScorer).undone + engine.state.ignoredEvents
     }
+
+/** Ausschlüsse erst für eine mögliche eröffnende Wahl berechnen; separat auf Kurzschluss prüfbar. */
+internal fun canCorrectServerRetroactively(
+    engine: EngineState,
+    excludedEvents: () -> Set<EventId>,
+): Boolean {
+    if (engine.format.discipline != Discipline.DOUBLES ||
+        (engine.format.sport != Sport.TENNIS && engine.format.sport != Sport.PADEL)
+    ) {
+        return true
+    }
+    val openingChoices =
+        engine.events
+            .asSequence()
+            .takeWhile { engine.point(it.id) == null }
+            .filter { (it.payload as? ServerChosen)?.set == 0 }
+            .toList()
+    if (openingChoices.isEmpty()) return true
+    val excluded = excludedEvents()
+    return openingChoices.none { it.id !in excluded }
 }

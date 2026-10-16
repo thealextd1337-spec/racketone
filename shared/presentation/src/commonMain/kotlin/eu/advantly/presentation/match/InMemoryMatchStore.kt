@@ -37,7 +37,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.canCorrectServerRetroactively
-import eu.advantly.match.session.serverChoiceContext
+import eu.advantly.match.session.deriveServerChoiceContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -213,7 +213,7 @@ class InMemoryMatchStore(
         expected: ServerChoiceContext,
     ): Boolean =
         command(clearRedo = false) { e ->
-            val context = serverChoiceContext(e.id, e.engine.state) ?: return@command false
+            val context = deriveServerChoiceContext(e.id, e.engine.state) ?: return@command false
             if (!context.accepts(expected, player)) return@command false
             val side = e.setup.lineup.sideOf(player) ?: return@command false
             context.chosen == player || append(e, ServerChosen(context.setIndex, side, player))

@@ -644,7 +644,7 @@ class MatchSession(
     fun chooseServer(player: PlayerId): Boolean {
         checkThread()
         val m = scoringMatch() ?: return false
-        val expected = serverChoiceContext(m.id, m.engine.state) ?: return false
+        val expected = deriveServerChoiceContext(m.id, m.engine.state) ?: return false
         return chooseServer(player, expected)
     }
 
@@ -655,7 +655,7 @@ class MatchSession(
     ): Boolean {
         checkThread()
         val m = scoringMatch() ?: return false
-        val context = serverChoiceContext(m.id, m.engine.state) ?: return false
+        val context = deriveServerChoiceContext(m.id, m.engine.state) ?: return false
         if (!context.accepts(expected, player)) return false
         val side = m.record.lineup.sideOf(player) ?: return false
         if (context.chosen == player) return true

@@ -99,7 +99,7 @@ data class ActiveMatch(
     val serverChoice: ServerChoice? get() = state.serverChoice
 
     /** Lokaler Kontext für sichere Auswahlkommandos; auch auf Anzeige-Geräten lesbar. */
-    val serverChoiceContext: ServerChoiceContext? get() = serverChoiceContext(id, state)
+    val serverChoiceContext: ServerChoiceContext? get() = deriveServerChoiceContext(id, state)
 
     /** Eine Aufschlägerwahl ist offen und noch nicht getroffen – die UI fragt (ohne das Zählen zu blockieren). */
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true

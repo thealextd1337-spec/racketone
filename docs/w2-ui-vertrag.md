@@ -97,7 +97,7 @@ data class ServerChoiceContext(
     val chosen: PlayerId?,
     val gameKind: GameKind,
 )
-fun serverChoiceContext(matchId: MatchId, state: MatchState): ServerChoiceContext?
+fun deriveServerChoiceContext(matchId: MatchId, state: MatchState): ServerChoiceContext?
 ```
 
 `ActiveMatch.serverChoiceContext` und `LiveMatchSnapshot.serverChoiceContext` liefern dieselbe Ableitung; `null` bedeutet kein Fenster. `MatchSession` und `LiveMatchPort` (beide Store-Implementierungen) ergänzen:
@@ -107,7 +107,9 @@ fun chooseServer(player: PlayerId, expected: ServerChoiceContext): Boolean
 fun correctServer(player: PlayerId, retroactive: Boolean): Boolean
 ```
 
-Der Einparameter-Aufruf `chooseServer(player)` bleibt erhalten; neue Sheets verwenden die Variante mit dem **beim Öffnen gespeicherten** Kontext. Die Prüfung erfolgt vor Schreiben/IDs/Broadcast: Match, Satz, Phase, `gameKind`, Spielermenge sowie fällige Side/Default/Markierung müssen passen. Eine gleiche noch wirksame Wahl ist mit dem ursprünglichen Kontext idempotent (kein Event), auch wenn sie die Team-/Spielerreihenfolge geändert hat. Ein falsches Match/eine andere Phase bleibt auch für denselben Spieler stale. Rolle wird vor der Idempotenz geprüft. Keine Bindung an Eventzahl, Statistik- oder Sync-Refresh; kein Wire-Feld.
+Der Einparameter-Aufruf `chooseServer(player)` bleibt erhalten; neue Sheets verwenden die Variante mit dem **beim Öffnen gespeicherten** Kontext. Die Prüfung durch `accepts()` erfolgt vor Schreiben/IDs/Broadcast: `matchId`, `setIndex`, `phase`, `gameKind` und die Spielermenge (`players.toSet()`, unabhängig von der Reihenfolge) müssen übereinstimmen; der gewählte `player` muss in `players` enthalten sein. Zusätzlich müssen `dueSide`, `defaultServer` und `chosen` übereinstimmen, außer bei idempotenter gleicher, noch wirksamer Wahl (`chosen == player`). Diese ist mit dem ursprünglichen Kontext ein No-op (kein Event), auch wenn sie die Team-/Spielerreihenfolge geändert hat; alle übrigen Feldprüfungen gelten weiterhin. Rolle wird vor der Idempotenz geprüft. Keine Bindung an Eventzahl, Statistik- oder Sync-Refresh; kein Wire-Feld.
+
+Nach jeder erfolgreichen Wahl bzw. jedem Snapshot-Wechsel Kontext neu lesen; Auswahl-Sheet schließen/aktualisieren, wenn sich `serverChoiceContext` ändert (auch durch `PlayerAssigned`).
 
 `ActiveMatch.canCorrectServerRetroactively` und `LiveMatchSnapshot.canCorrectServerRetroactively` signalisieren, ob eine rückwirkende Korrektur ohne übersteuernde eröffnende Wahl möglich ist. Der Schutz gilt auch bei direktem `MatchSession.correct(Correction.initialServer(...))`: `false` ohne Event/Redo-Verlust bei Kollision. Eine reine zweite Wahl sperrt den rückwirkenden Weg nicht. Im offenen Fenster neu wählen; anschließend `retroactive=false` klar als „ab jetzt“ beschriften. Vorwärtskorrekturen lassen historische Aufschlägerzuordnungen unverändert. Verfügbarkeit/Status/Zählerrolle sind zusätzlich zu beachten.
 

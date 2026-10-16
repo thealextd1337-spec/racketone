@@ -20,7 +20,7 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetRecord
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.ServerChoiceContext
-import eu.advantly.match.session.serverChoiceContext
+import eu.advantly.match.session.deriveServerChoiceContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -200,7 +200,7 @@ data class LiveMatchSnapshot(
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
 
     /** Lokaler Kontext für das Auswahl-Sheet; vor dem Kommando unverändert zurückgeben. */
-    val serverChoiceContext: ServerChoiceContext? get() = serverChoiceContext(matchId, state)
+    val serverChoiceContext: ServerChoiceContext? get() = deriveServerChoiceContext(matchId, state)
 }
 
 /**
