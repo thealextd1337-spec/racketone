@@ -8,7 +8,7 @@ Freigabe für Pilot-Builds mit Konten bleibt am Datenschutz-/Store-Gate P2-K hä
 - Optionaler Kontobereich im Profil: Wohnsitzland und Geburtstag → Altersgate → Google Credential Manager
   oder E-Mail-Code → öffentlicher Alias, optional eindeutiger Benutzername. Lokales Zählen braucht kein Konto.
 - AT ab 14, DE/CH/LI ab 16; andere Länder noch nicht verfügbar. CH/LI rechtlich vor Pilot bestätigen (F24).
-- `shared/cloud-sync`: `CloudAuthPort`, `SupabasePhoneAuth`; `presentation/auth`: `AuthViewModel`;
+- `shared/cloud-sync`: `CloudAuthPort`, `SupabasePhoneAuth`; `shared/presentation-auth`: `AuthViewModel`;
   `ui-phone/auth`: Compose-Kontobereich; Android-Host injiziert Konfiguration und sicheren Speicher.
 - Kein Apple-/iOS-Login in dieser Lieferung. Der Port und der plattformunabhängige Flow erlauben später native
   iOS-Credentials; auf iOS wird noch kein Auth-Client erzeugt. Uhr und Wear-Login bleiben unverändert (P2-N).
@@ -41,8 +41,8 @@ gehashte Identitätsbindung und Verbrauchszeit. Es ist eine risikobasierte Selbs
    Supabase prüft Signatur, Aussteller, Audience, Ablauf und Nonce. Im Hook kommt die `sub` aus diesen verifizierten
    Google-Claims. Bei abweichendem Provider oder anderer `sub` gibt es keine passende Bindung.
    Eine selbst erstellte JWT-Payload reicht nicht: Der Auth-Endpunkt muss das Token zuerst akzeptieren.
-3. **Hook:** `public.before_user_created(jsonb)` ist nur für `supabase_auth_admin` ausführbar. Unter derselben
-   Transaktionssperre wie die übrigen Schreib-RPCs markiert er genau ein ungenutztes, nicht abgelaufenes Ticket
+3. **Hook:** `public.before_user_created(jsonb)` ist nur für `supabase_auth_admin` ausführbar. Mit einem
+   atomaren `UPDATE … WHERE consumed_at IS NULL` markiert er genau ein ungenutztes, nicht abgelaufenes Ticket
    als verbraucht. Ohne Treffer gibt er HTTP 403 / `age_ticket_required` zurück; kein `auth.users`-Eintrag.
    Gleichzeitige Versuche können denselben Nachweis nicht zweimal verbrauchen.
 4. Der vorhandene AFTER-INSERT-Trigger übernimmt Land/Zeit/Grenze aus dem serverseitigen Ticket in
@@ -50,7 +50,9 @@ gehashte Identitätsbindung und Verbrauchszeit. Es ist eine risikobasierte Selbs
    bei OTP zusätzlich über den Ticket-Hash. **Die Hook-UUID ist dafür ungeeignet:** GoTrue erzeugt für externe
    Provider zunächst ein vorläufiges User-Objekt und beim späteren Insert eine neue UUID. Ein Unique-Index erlaubt
    nur ein gebundenes Ticket pro Identität, einschließlich bereits vom Hook verbrauchter, noch nicht übernommener
-   Nachweise. Eine neue Bindung überschreibt diesen Nachweis nicht; ohne Insert läuft er nach zehn Minuten ab.
+   Nachweise. Neue Tickets ersetzen ältere ungenutzte Bindungen derselben Identität; die Bindung verkürzt die
+   Ticketgültigkeit auf höchstens zwei Minuten. Ein verbrauchter Nachweis bleibt für Hook→Insert höchstens eine
+   Minute geschützt; danach kann eine neue Altersprüfung einen fehlgeschlagenen Insert ersetzen.
    `finish_onboarding(alias, username)` braucht diesen
    Nachweis und keinen Geburtstag. `my_auth_profile()` unterscheidet Onboarding, aktives Konto und Löschantrag.
    Der alte `complete_onboarding(country,birth_date,…)` bleibt als Funktion für administrative
@@ -58,20 +60,69 @@ gehashte Identitätsbindung und Verbrauchszeit. Es ist eine risikobasierte Selbs
    Damit kann auch ein ungeprüftes Profil nicht über einen zweiten Client-RPC aktiviert werden.
 
 Für Google werden weder eine Geräte-ID aus Metadaten noch eine unverifizierte E-Mail als Beweis vertraut.
-Das Installationsgeheimnis ist ausschließlich Missbrauchsbremse; Zurücksetzen der App ist keine starke
-Geräteattestierung. Kennt jemand ein fremdes Google-`sub`, kann er mit einer eigenen bestandenen Selbstauskunft
+`p_device_secret` ist vollständig clientgewählt: Ein modifizierter Client kann bei jedem Aufruf einen neuen
+Wert senden und die gerätebezogene 24-h-Sperre umgehen, auch ohne App-Reset. Diese bewusst schwache Hürde
+bremst nur den regulären Client; sie ist weder Geräteattestierung noch ein belastbarer Identitätsnachweis (F24).
+Die getrennten IP-/Globalbudgets bleiben erforderlich. Kennt jemand ein fremdes Google-`sub`, kann er mit einer eigenen bestandenen Selbstauskunft
 höchstens eine kurzlebige Bindung dafür vorbereiten, ohne sich als diese Person anmelden zu können. Die Person
 muss weiterhin selbst einen gültigen Google-Token vorlegen. Absichtliche Falschangaben zum Alter verhindert diese
 Selbstauskunft nicht (F24). Metadaten allein können keine Tickets erzeugen oder auf andere Provider übertragen.
 
-Budgets: zehn Aufrufe je IP und Installation pro festem Ein-Minuten-Fenster ab Erstaufruf, zusätzlich 100 global
-pro Minute. Auch fachliche Ablehnungen verbrauchen Budget (JSON-Fehler, kein Transaktionsrollback).
-Untergrenze sperrt die Installation 24 Stunden; erfolgreiche neue Ausstellung widerruft vorherige offene Tickets.
-`X-Real-IP` muss vom vertrauenswürdigen Gateway gesetzt/überschrieben werden. Fehlt sie, schlägt die Ausstellung
-mit `gateway_ip_missing` geschlossen fehl. **Vor staging-Freigabe prüfen**, dass ein selbst gesetzter Header nicht
-übernommen wird; andernfalls Gateway entsprechend konfigurieren. Das globale Budget schützt auch bei gespooften
-oder wechselnden IPs vor unbeschränktem Tabellenwachstum, kann aber als globaler Engpass missbraucht werden.
-Zusätzlich Auth-/Gateway-Rate-Limits bzw. CAPTCHA nach Lastbedarf aktivieren; nicht als Ersatz für den DB-Hook.
+Budgets je festem Ein-Minuten-Fenster ab Erstaufruf: Ausstellung zehn je IP und Installation, Bindung und
+Abbruch je 30 je IP, insgesamt 1.000 anonyme Schreibaufrufe global. Auch fachliche Ablehnungen zählen
+(JSON-Fehler, kein Rollback). Fehlende/ungültige IP fällt geschlossen auf **drei je Aktion** in einem gemeinsamen
+Budget zurück; keine unlimitierte oder pro Client frei wählbare Ersatz-IP. `cancel_age_ticket` bleibt `void` und
+verändert nach Budgetende kein Ticket. Die höhere globale Notbremse begrenzt Tabellenwachstum, bleibt aber bei
+großem verteiltem Missbrauch ein möglicher Engpass; Budget-Ablehnungen überwachen und Lastkapazität prüfen.
+Untergrenze sperrt das clientgewählte Installationsgeheimnis 24 Stunden.
+
+**Proxy-Annahme (vor Freigabe nachweisen):** PostgREST liefert Header in `request.headers`. Vorrang hat
+`cf-connecting-ip`; sonst der erste Eintrag von `x-forwarded-for` hinter dem Supabase-Proxy, wie im
+[Supabase-Beispiel](https://supabase.com/docs/guides/api/securing-your-api#request-information).
+IP-Literale werden kanonisiert, Netze/ungültige Werte nutzen das kleine Ersatzbudget; `x-real-ip` wird ignoriert.
+Die SQL-Funktion kann die Herkunft eines Headers nicht verifizieren. Daher müssen Supabase/Cloudflare/Kong
+unvertrauenswürdige Clientwerte **entfernen/überschreiben oder die Anfrage ablehnen**, und PostgREST darf nicht
+am Gateway vorbei erreichbar sein. Die Dokumentation des ersten XFF-Eintrags allein beweist diese Eigenschaft
+nicht. Für Self-Hosting die vertrauenswürdigen Proxy-Hops explizit konfigurieren; bei Änderungen neu abnehmen.
+
+**Staging-Nachweis gegen Spoofing:** ohne personenbezogene Daten und mit frischem Budgetfenster zehn
+`issue_age_ticket`-Aufrufe vom selben Anschluss, mit je neuem `p_device_secret` und `US` (erwartet
+`country_not_supported`). Der elfte muss `rate_limit_exceeded` liefern. Danach jeden der drei Header einzeln mit
+wechselnden erfundenen IPs probieren: kein neuer Erfolg, sondern `rate_limit_exceeded` oder Ablehnung am Proxy.
+Beispiel (Bash, `SUPABASE_URL` und öffentlicher `SUPABASE_ANON_KEY` bereits gesetzt):
+
+```bash
+for i in $(seq 1 10); do
+  curl -sS "$SUPABASE_URL/rest/v1/rpc/issue_age_ticket" \
+    -H "apikey: $SUPABASE_ANON_KEY" -H 'Content-Type: application/json' \
+    -d "{\"p_country\":\"US\",\"p_birth_date\":\"2000-01-01\",\"p_device_secret\":\"$(openssl rand -hex 32)\"}"
+done
+for header in x-real-ip x-forwarded-for cf-connecting-ip; do
+  for i in 21 22; do
+    curl -sS -w '\nHTTP %{http_code}\n' "$SUPABASE_URL/rest/v1/rpc/issue_age_ticket" \
+      -H "apikey: $SUPABASE_ANON_KEY" -H 'Content-Type: application/json' -H "$header: 203.0.113.$i" \
+      -d "{\"p_country\":\"US\",\"p_birth_date\":\"2000-01-01\",\"p_device_secret\":\"$(openssl rand -hex 32)\"}"
+  done
+done
+```
+
+Ergebnis und Zeitpunkt im Abnahmeprotokoll festhalten. Lässt sich das Budget umgehen, **keine Freigabe**;
+Gateway korrigieren. Hinter einem gemeinsamen eigenen Server/LB muss dessen Weiterleitung zuerst geprüft werden.
+[Supabase-Auth-Rate-Limits](https://supabase.com/docs/guides/auth/rate-limits) im Dashboard ausdrücklich für
+OTP-Versand, Verifikation und Signup konfigurieren. [CAPTCHA](https://supabase.com/docs/guides/auth/auth-captcha)
+mit hCaptcha oder Turnstile ist für den Pilot empfohlen; Aktivierung erfordert im nativen Client einen
+passenden Challenge-/`captchaToken`-Flow (hier noch nicht implementiert). Auth-CAPTCHA schützt den anonymen
+PostgREST-Ticket-RPC nicht; bei Missbrauch ist dort zusätzlich ein Gateway-Limit/Challenge nötig.
+
+Die anonymen RPCs, der Hook und die reine Ticketbereinigung schreiben nur `private.age_*`, vergeben keine
+Sync-Version und nehmen **keine** globale Versionssperre. Budget-UPSERTs, Ticket-Zeilensperren,
+ein Lock je Identität beim Binden und Unique-Constraints sichern konkurrierende Versuche ab. Der Hook setzt
+funktionslokal `lock_timeout=500ms`, `statement_timeout=2s`. Ein Funktions-SET startet keinen neuen äußeren
+Statement-Timer; das äußere Laufzeitlimit muss der Auth-Aufrufer setzen (Supabase begrenzt Postgres-Hooks auf
+[zwei Sekunden](https://supabase.com/docs/guides/auth/auth-hooks)). Der Auth-INSERT-Trigger schreibt dagegen
+versionierte Profile und behält die vorgeschriebene Versionssperre. Lange Sync-Transaktionen können diesen
+Insert weiterhin verzögern; sie blockieren weder Ticket-Ausstellung noch den Hook.
+
 Der stündliche Job `advantly-purge-age-gate` entfernt abgelaufene Bindungen (nach einer Stunde) und Budgetdaten
 (nach 25 Stunden und Ablauf einer eventuellen Sperre). Ohne pg_cron extern stündlich als Owner ausführen.
 
@@ -99,8 +150,9 @@ als deprecated markiert; der explizite SessionManager-Port ermöglicht später e
   lokale Sitzung auch bei Netzfehler; ein fehlgeschlagener globaler Serverwiderruf kann offline nicht nachgeholt
   werden. Bereits ausgegebene Access-Tokens bleiben grundsätzlich bis Ablauf gültig (P2-N-Sitzungswiderruf separat).
 - Geburtsdatum, OTP und Ticket werden nicht per `rememberSaveable` oder `SavedStateHandle` gesichert.
-  Das OTP-Ticket wird als Auth-Metadatum übergeben und kann dadurch in Auth-Nutzerdaten und der verschlüsselten
-  Session enthalten sein. Nach Einmalverbrauch ist es wertlos; das Geburtsdatum wird dort nie übertragen.
+  Das OTP-Ticket wird als Auth-Metadatum übergeben. Der AFTER-INSERT-Trigger entfernt `age_ticket` sofort aus
+  `auth.users.raw_user_meta_data`, ohne andere Metadaten zu ändern. Vorübergehende Auth-Antworten können es
+  trotzdem enthalten; nach Einmalverbrauch ist es wertlos. Das Geburtsdatum wird dort nie übertragen.
   Rotation kann die Alters-/Codeeingabe leeren; der ViewModel-Flow und die sichere Sitzung bleiben erhalten.
 - Alias: 1–40 druckbare Zeichen, nicht eindeutig. Benutzername optional, normalisiert, 3–20 Zeichen `[a-z0-9_.]`,
   eindeutig durch DB-Unique-Constraint, reserviert: admin, advantly, support, moderator, system, deleted, null, official.
@@ -127,13 +179,42 @@ Ein Google-ID-Token-Test verlangt einen korrekt konfigurierten Provider; lokal i
 
 ## Staging im Supabase-Dashboard (manuell)
 
+**GoTrue ist ohne aktivierten Before-User-Created-Hook fail-open:** Ein deaktivierter/fehlender Hook wird
+übersprungen, er lehnt Signup nicht ab. Gehostete Projekte haben Signup standardmäßig an; `db push` überträgt
+keine Dashboard-Hook-Konfiguration. Die zweite DB-Linie verhindert die Nutzung eines so entstandenen Kontos,
+ersetzt aber nicht das Ziel „kein ungeprüfter Auth-Nutzer“.
+
+0. **VOR jedem ersten `db push`: Authentication → neue Registrierungen/Signup AUS**, Google/Apple und Anonymous
+   Sign-ins AUS. Dies im Deploy-Protokoll bestätigen, bevor der Workflow startet; `config.toml` gilt nur lokal.
 1. Orchestrator deployt Migrationen später über den vorhandenen staging-Workflow. **Nicht hier deployen.**
 2. Authentication → Hooks → Before User Created → Postgres-Funktion `public.before_user_created` aktivieren.
-   Prüfen, dass nur `supabase_auth_admin` Ausführungsrecht hat. Dashboard-Konfiguration ist nicht automatisch
-   durch eine Migration auf das gehostete Projekt übertragen.
-3. Anonymous Sign-ins aus, Signup an, E-Mail-Confirmations an, Secure Email Change an,
-   Refresh Token Rotation an. Kein Phone-/Password-UI. Auth-Logs auf Ticketfehler und Budget-Ablehnungen prüfen,
-   ohne Request-Bodies oder JWTs zu protokollieren.
+   Nur `supabase_auth_admin` darf sie ausführen. Ohne Hook keine Freigabe.
+3. **Negativtest ohne Ticket vor der dauerhaften Signup-/Google-Freigabe:** im isolierten staging-Projekt ein
+   kurzes kontrolliertes E-Mail-Signup-Testfenster öffnen (Google bleibt AUS), folgenden Aufruf ausführen und
+   Signup danach sofort wieder AUS. Mit Signup AUS liefert GoTrue nur `signup_disabled`; das beweist den Hook
+   ausdrücklich nicht. Für den eigentlichen Hook-Nachweis ist dieses Testfenster deshalb erforderlich.
+
+   ```bash
+   curl -sS -w '\nHTTP %{http_code}\n' "$SUPABASE_URL/auth/v1/signup" \
+     -H "apikey: $SUPABASE_ANON_KEY" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"age-gate-probe-$(openssl rand -hex 8)@example.com\",\"password\":\"Probe-only-$(openssl rand -hex 16)\"}"
+   ```
+
+   Erwartet: **HTTP 403** und Meldung **`age_ticket_required`**, kein neuer `auth.users`-Eintrag. Ein anderer Fehler
+   (z. B. `signup_disabled`, CAPTCHA oder Mail-Limit) ist kein bestandener Hook-Test. Bei unerwartetem Erfolg
+   Signup AUS lassen, Testkonto administrativ über den vorgesehenen Löschweg entfernen, Konfiguration korrigieren.
+   Erst nach dokumentierter Ablehnung und bestandenem Header-Nachweis Signup dauerhaft AN. E-Mail-Confirmations,
+   Secure Email Change und Refresh Token Rotation AN; Anonymous Sign-ins AUS. Kein Phone-/Password-UI.
+   Auth-Logs ohne Request-Bodies/JWTs auf Ticket-/Budgetfehler prüfen.
+
+**Admin-/Service-Role-Verbot für Kontoanlage:** `adminUserCreate`, `inviteUserByEmail` und entsprechende
+Admin-/Invite-Endpunkte umgehen diesen Hook. `service_role` daher **nie** für Kontoanlage in Edge Functions,
+Skripten oder Supportwerkzeugen einsetzen. Der Insert-Trigger übernimmt ausschließlich einen zuvor verbrauchten
+Nachweis; ohne ihn bleiben `age_confirmed_at` leer und das Profil im Onboarding. `finish_onboarding` lehnt es ab;
+`is_active`/`require_active` und aktive RLS-Rechte verlangen zusätzlich zum Status den Altersnachweis. Diese zweite
+Linie greift auch bei Admin-/Invite-Inserts und bei einem irrtümlich auf `active` gesetzten ungeprüften Profil
+(pgTAP 150). Bestehende ungeprüfte Konten sind keine zulässige Onboarding-Alternative und werden bereinigt.
+
 4. Authentication → Providers → Google aktivieren. Web-Client-ID und Web-Client-Secret aus dem nächsten Abschnitt
    eintragen; Web-Audience sowie benötigte Android-Client-IDs in der zulässigen Client-ID-Liste berücksichtigen.
    „Skip nonce checks“ **nicht** einschalten. Apple bleibt aus.
@@ -225,11 +306,12 @@ Absenderdomain, Zustelltests, Retention, Löschprozess und Betriebsverantwortlic
 Lokale Verifikation am 16.10.2026 im Worktree `p2c-auth`:
 
 - JDK 21.0.12, `GRADLE_USER_HOME=H:/dev/gradle`, `gradlew.bat check --console=plain --max-workers=2`: grün
-  (640 Tasks). Unter Git Bash entspricht dies `./gradlew check --console=plain --max-workers=2` mit dem
+  (681 Tasks). Unter Git Bash entspricht dies `./gradlew check --console=plain --max-workers=2` mit dem
   vorgegebenen `JAVA_HOME`. macOS-exklusive Ausführung/Link-Schritte bleiben wie üblich übersprungen.
 - Neue Tests: vier Adaptertests jeweils JVM + Android-Host, zehn Auth-ViewModel-Tests jeweils JVM + Android-Host,
-  drei Compose-Desktop-UI-Tests. Sämtliche Auth-Netzaufrufe sind simuliert.
-- Postgres-17-Harness, alle Migrationen frisch angewendet: 420/422 pgTAP-Prüfungen grün, davon 66/66 in Test 140.
+  drei Compose-Desktop-UI-Tests sowie zwei Android-Unit-Tests für die Credential-Typprüfung.
+  Die zehn ViewModel-Tests liegen jetzt in `shared/presentation-auth`; sämtliche Auth-Netzaufrufe sind simuliert.
+- Postgres-17-Harness, alle Migrationen frisch angewendet: 458/460 pgTAP-Prüfungen grün, davon 67/67 in Test 140 und 37/37 in Test 150.
   Ausschließlich Test 110, Prüfungen 15/16 (installiertes pg_cron + aktiver Onboarding-Cron), scheitert an der im
   Windows-Harness fehlenden Erweiterung. Der vollständige Supabase-Stack/CI einschließlich Cron bleibt offen;
   die Pflichtprüfungen wurden weder übersprungen noch abgeschwächt.
@@ -243,8 +325,42 @@ Nonce-Weitergabe, bereinigte Fehler und lokale Sitzungslöschung bei fehlendem S
 Länder-/Geburtstagsgrenzen, Wohnsitzzeitzone, Schaltjahr, Ticketbindung, Hook-Rechte, Annahme/Ablehnung,
 Einmalverbrauch, Ablauf, Datensparsamkeit, Reservierungen/Unique-Namen und Budgets. Dazu Regressionen für
 abweichende Google-Hook-/Insert-UUID, idempotente Bindung, Umbindungsverbot, Abbruchwiderruf und den gesperrten
-Spike-RPC. Der Cron-Harness benötigt echte `pg_cron`-Unterstützung; die zwei Pflichtprüfungen in Test 110 bleiben
+Spike-RPC. Test 150 ergänzt Proxy-Header/Kanonisierung, kleine Fallbackbudgets, bind/cancel-Budgets,
+Bindungsersatz und Wiederholung nach gescheitertem Insert, Hook-Timeouteinstellungen, ungeprüfte Email-/Google-/
+Admin-Konten, RPC-/RLS-Schutz auch bei Status `active` sowie die bewusst umgehbare clientgewählte Gerätesperre.
+Fünf echte Parallelprüfungen in `supabase/tests/concurrency/auth_age_gate.py` bestehen: einmaliger Verbrauch,
+parallele Ersatzbindungen, parallele Ausstellungen, Hook-Sperrabbruch nach 0,523 s und unabhängige Ticketwege bei
+gehaltenem Sync-Lock. Der Cron-Harness benötigt echte `pg_cron`-Unterstützung; die zwei Pflichtprüfungen in Test 110 bleiben
 ohne diese Erweiterung bewusst rot. Keine Testausnahme ersetzt die Supabase-Stack-Abnahme.
+
+Abhängigkeiten nach Modultrennung, mit `gradlew.bat … --console=plain` geprüft:
+
+```text
+:androidApp:dependencies --configuration debugRuntimeClasspath
+  41 Ktor-Nennungen, alle aufgelöst auf 3.5.1 (einschließlich ktor-client-okhttp/core)
+:wearApp:dependencies (alle Konfigurationen; zusätzlich debugRuntimeClasspath separat)
+  keine io.github.jan-tennert.supabase, io.ktor oder androidx.security:security-crypto
+:shared:umbrella-watch:dependencies --configuration watchosArm64CompileKlibraries
+  keine Supabase-, Ktor- oder security-crypto-Abhängigkeit
+```
+
+`ui-phone → presentation-auth → cloud-sync` ist der einzige neue Auth-Pfad. `presentation` hängt nicht mehr an
+`cloud-sync`; Wear bleibt bei `presentation`, `umbrella-watch` bei data/device-link/match-session.
+Rohberichte und die maschinelle Versions-/Ausschlussprüfung liegen lokal unter `H:/dev/tmp/p2c-security/`
+(`phone-dependencies.log`, `watch-dependencies.log`, `check-client-commit.log`, `dependency-proof.txt`).
+
+R8-Nachweis: `:androidApp:assembleRelease` grün (291 Tasks), mit `minifyEnabled`/Resource-Shrinking und
+öffentlichen Platzhaltern für `advantly.supabase.url=https://example.invalid`,
+`advantly.supabase.key=public-r8-test-key`, `advantly.google.webClientId=r8-test.apps.googleusercontent.com`.
+Dadurch bleibt der Auth-Pfad erreichbar, während ein Build ohne Konfiguration ihn wegoptimieren könnte.
+`ADVANTLY_UPLOAD_*` wurde ausschließlich mit dem vorhandenen **Debug-Keystore** und dessen Standardwerten
+belegt; dieser ENV-Vorrang verhindert das Lesen einer lokalen Upload-Key-Konfiguration. Keine Datei unter
+`H:/dev/keys` gelesen. `apksigner verify` bestätigt die Signatur `CN=Android Debug`; R8-Mapping enthält den
+Auth-Adapter, supabase Auth und den OkHttp-Engine-Einstieg. Die gemeinsamen Proguard-Regeln behalten gezielt
+den OkHttp-ServiceLoader-Konstruktor; kotlinx-serialization- und Ktor-Consumer-Regeln sind im SDK enthalten
+und dokumentiert. Kein pauschales Keep des gesamten SDKs. Logs: `release-auth.log`, `release-signature.log`;
+Test-APK: `H:/dev/tmp/p2c-security/advantly-auth-r8-debug-signed.apk` (nur Platzhalterkonfiguration).
+Ein echter minifizierter OTP-/Google-Gerätetest bleibt Teil der staging-/Pixel-Abnahme.
 
 GoTrue-Verhalten geprüft anhand des [externen Hook-Aufrufs](https://github.com/supabase/auth/blob/master/internal/api/hooks.go)
 und des [ID-Token-Endpunkts](https://github.com/supabase/auth/blob/master/internal/api/token_oidc.go).
