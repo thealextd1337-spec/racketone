@@ -28,4 +28,12 @@ data class CaloriesCounter(
     fun restarted(): CaloriesCounter = CaloriesCounter(baselinePending = true)
 
     override fun toString(): String = "CaloriesCounter(<redacted>)"
+
+    companion object {
+        /**
+         * Nach Prozessverlust (Exercise lief in Health Services weiter, REATTACH): Ob vorher „Gar nicht“ galt, ist ohne
+         * Health-Persistenz unbekannt – konservativ ab null, der erste Rohwert wird die Basis.
+         */
+        fun recovered(): CaloriesCounter = CaloriesCounter(baselinePending = true)
+    }
 }

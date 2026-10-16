@@ -263,6 +263,8 @@ class WorkoutService : Service() {
 
                             is ReattachResult.Active -> {
                                 stepCounter = MatchStepCounter.recovered()
+                                // Rohwert enthält ggf. eine „Gar nicht“-Phase vor dem Prozessverlust: erster Wert = Basis
+                                caloriesCounter = CaloriesCounter.recovered()
                                 registerCallback()
                                 WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ACTIVE, selection = result.selection) }
                                 DiagnosticLog.log("EXERCISE_REATTACHED")
