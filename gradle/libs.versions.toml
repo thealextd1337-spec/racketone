@@ -49,7 +49,23 @@ sqldelight = "2.4.1"
 # Wear Data Layer (MessageClient, DataClient, CapabilityClient) – Google Maven, geprüft 2026-10-15
 play-services-wearable = "20.0.1"
 
+supabase = "3.8.0"
+ktor = "3.3.3"
+credentials = "1.5.0"
+googleid = "1.1.1"
+security-crypto = "1.1.0"
+
 [libraries]
+supabase-auth = { module = "io.github.jan-tennert.supabase:auth-kt", version.ref = "supabase" }
+supabase-postgrest = { module = "io.github.jan-tennert.supabase:postgrest-kt", version.ref = "supabase" }
+ktor-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
+androidx-credentials-play = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
+google-id = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
 # core-model/core-scoring: nur Tests/Werkzeuge (Testvektoren). Einzige Pure-Ausnahme in commonMain: sync-protocol (Wire-Codec, 01 §4.3)
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }

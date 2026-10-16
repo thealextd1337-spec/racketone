@@ -5,8 +5,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 
-// Schnittstellenentwurf P2 (docs/p2-plan.md §6). Implementierungen folgen in P2-B/C:
-// CloudBackend + CloudAuthPort + LiveChannelPort mit supabase-kt (nur Handy und Wear OS standalone),
+// Schnittstellen P2 (docs/p2-plan.md §6). CloudAuthPort ist für das Android-Handy implementiert (P2-C).
+// CloudBackend + LiveChannelPort folgen in P2-B/H mit supabase-kt (Handy und später Wear OS standalone),
 // CloudOutboxStore als Adapter HIER in cloud-sync über neue Primitive in shared/data (Spalte cloud_state, Cursor-Tabelle,
 // Migration 2.sqm) – data kennt cloud-sync nicht (kein Modulzyklus), CloudSyncPort als Worker.
 
@@ -45,41 +45,54 @@ class CloudException(
 /** Angemeldete Sitzung (Profil-ID = `auth.uid()`). */
 data class CloudSession(
     val profileId: String,
-    /** `false` bis `complete_onboarding` (Länder-/Altersabfrage, Alias) erfolgreich war. */
+    /** `false` bis `finish_onboarding` (Alias nach serverseitigem Altersgate) erfolgreich war. */
     val onboarded: Boolean,
     val deletionRequested: Boolean = false,
 )
 
 enum class IdTokenProvider { GOOGLE, APPLE }
 
-/**
- * Anmeldung (03 E3): Google/Apple nativ per ID-Token, sonst E-Mail-Code (OTP). Die Länder-/Altersabfrage (F13) zeigt die
- * App **vor** diesem Port; [completeOnboarding] wiederholt die Prüfung serverseitig und speichert kein Geburtsdatum.
- */
+/** Handy-Auth. Geburtsdatum und Ticket leben nur für den laufenden Anmeldeversuch im Speicher. */
 interface CloudAuthPort {
     val session: StateFlow<CloudSession?>
+
+    suspend fun issueAgeTicket(
+        country: String,
+        birthDate: String,
+    ): String
+
+    suspend fun cancelAgeTicket(ticket: String)
 
     suspend fun signInWithIdToken(
         provider: IdTokenProvider,
         idToken: String,
         rawNonce: String?,
+        ticket: String,
     )
 
-    suspend fun sendEmailCode(email: String)
+    suspend fun linkGoogle(
+        idToken: String,
+        rawNonce: String?,
+    )
+
+    suspend fun sendEmailCode(
+        email: String,
+        ticket: String,
+    )
 
     suspend fun verifyEmailCode(
         email: String,
         code: String,
     )
 
-    /** `complete_onboarding(country, birthDate, alias, username)`; [birthDate] als ISO-Datum `yyyy-MM-dd`. */
     suspend fun completeOnboarding(
-        country: String,
-        birthDate: String,
         alias: String,
         username: String?,
     )
 
+    suspend fun refreshProfile()
+
+    /** Lokale Sitzung wird auch offline gelöscht; serverseitiger Widerruf benötigt Netz. */
     suspend fun signOut()
 }
 

@@ -1,0 +1,210 @@
+package eu.advantly.presentation.auth
+
+import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudException
+import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.IdTokenProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+
+class FakePhoneAuth : CloudAuthPort {
+    override val session = MutableStateFlow<CloudSession?>(null)
+    val calls = mutableListOf<String>()
+    var failure: String? = null
+
+    private fun call(name: String) {
+        calls += name
+        failure?.let { throw CloudException(it, false) }
+    }
+
+    override suspend fun issueAgeTicket(
+        country: String,
+        birthDate: String,
+    ): String {
+        call("age:$country")
+        return "ticket"
+    }
+
+    override suspend fun signInWithIdToken(
+        provider: IdTokenProvider,
+        idToken: String,
+        rawNonce: String?,
+        ticket: String,
+    ) {
+        call("google:$ticket")
+        session.value = CloudSession("id", false)
+    }
+
+    override suspend fun cancelAgeTicket(ticket: String) {
+        call("cancel:$ticket")
+    }
+
+    override suspend fun linkGoogle(
+        idToken: String,
+        rawNonce: String?,
+    ) {
+        call("link")
+    }
+
+    override suspend fun sendEmailCode(
+        email: String,
+        ticket: String,
+    ) {
+        call("send:$ticket")
+    }
+
+    override suspend fun verifyEmailCode(
+        email: String,
+        code: String,
+    ) {
+        call("verify")
+        session.value = CloudSession("id", false)
+    }
+
+    override suspend fun completeOnboarding(
+        alias: String,
+        username: String?,
+    ) {
+        call("finish")
+        session.value = CloudSession("id", true)
+    }
+
+    override suspend fun refreshProfile() {
+        call("refresh")
+    }
+
+    override suspend fun signOut() {
+        session.value = null
+        call("logout")
+    }
+}
+
+class AuthViewModelTest {
+    @Test fun calendarValidationRejectsInvalidDatesBeforeTransport() {
+        assertFalse(validBirthDate("2001-02-29"))
+        assertFalse(validBirthDate("2000-13-01"))
+        assertFalse(validBirthDate("2000-01-00"))
+        assertFalse(validBirthDate("not-a-date"))
+        assertEquals(true, validBirthDate("2000-02-29"))
+    }
+
+    private val scope = CoroutineScope(Dispatchers.Unconfined)
+
+    @Test fun otpOnboardingRequiresAgeThenAlias() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.sendCode("a@example.com")
+        assertEquals("age_ticket_expired", model.state.value.error)
+        model.checkAge("AT", "2000-01-01")
+        assertEquals(AuthStep.PROVIDER, model.state.value.step)
+        model.sendCode("a@example.com")
+        assertEquals(AuthStep.CODE, model.state.value.step)
+        model.verifyCode("123456")
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        model.finish("Alias", "alias")
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+        model.signOut()
+        assertEquals(AuthStep.AGE, model.state.value.step)
+        assertNull(auth.session.value)
+    }
+
+    @Test fun unsupportedCountryDoesNotCallBackendOrProvider() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.checkAge("US", "2000-01-01")
+        assertEquals(listOf("refresh"), auth.calls)
+        assertEquals("country_not_supported", model.state.value.error)
+    }
+
+    @Test fun ageRejectionAndExpiredTicketReturnToGate() {
+        for (reason in listOf("age_below_minimum", "age_retry_later", "age_ticket_expired", "age_ticket_required")) {
+            val auth = FakePhoneAuth()
+            val model = AuthViewModel(auth, scope)
+            model.checkAge("DE", "2000-01-01")
+            auth.failure = reason
+            model.sendCode("a@example.com")
+            assertEquals(AuthStep.AGE, model.state.value.step)
+            assertEquals(reason, model.state.value.error)
+            assertFalse(model.state.value.busy)
+        }
+    }
+
+    @Test fun offlineAndUsernameCollisionPreserveRetryStep() {
+        val auth = FakePhoneAuth()
+        auth.session.value = CloudSession("id", false)
+        val model = AuthViewModel(auth, scope)
+        auth.failure = "username_taken"
+        model.finish("Alias", "taken")
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        auth.failure = "connection_failed"
+        model.finish("Alias", "free")
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        assertEquals("connection_failed", model.state.value.error)
+    }
+
+    @Test fun staleProfileOffersReauthenticationAndOfflineLogoutClearsLocalSession() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        auth.failure = "profile_missing"
+        model.refresh()
+        assertEquals("profile_missing", model.state.value.error)
+        auth.session.value = CloudSession("id", false)
+        auth.failure = "connection_failed"
+        model.signOut()
+        assertNull(auth.session.value)
+        assertEquals(AuthStep.AGE, model.state.value.step)
+    }
+
+    @Test fun googleAndManualLinkAreSeparateActions() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.google({ error("Must not open credential manager before gate") })
+        assertEquals("age_ticket_expired", model.state.value.error)
+        model.checkAge("CH", "2000-01-01")
+        model.google({ GoogleCredential("token", "nonce") })
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        model.finish("Alias", "alias")
+        model.google({ GoogleCredential("token", "nonce") }, link = true)
+        assertEquals("link", auth.calls.last())
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+    }
+
+    @Test fun restartDiscardsTicket() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.checkAge("LI", "2000-01-01")
+        model.restart()
+        assertEquals("cancel:ticket", auth.calls.last())
+        model.sendCode("a@example.com")
+        assertEquals("age_ticket_expired", model.state.value.error)
+    }
+
+    @Test fun offlineCancellationStillDiscardsTicket() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.checkAge("AT", "2000-01-01")
+        auth.failure = "connection_failed"
+        model.restart()
+        assertEquals(AuthStep.AGE, model.state.value.step)
+        assertNull(model.state.value.error)
+        model.google({ error("Discarded ticket must not open credentials") })
+        assertEquals("age_ticket_expired", model.state.value.error)
+    }
+
+    @Test fun leavingAccountKeepsSessionAndCredentialCancellationCanRetry() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.checkAge("AT", "2000-01-01")
+        model.google({ throw CloudException("auth_cancelled", false) })
+        assertEquals(AuthStep.PROVIDER, model.state.value.step)
+        assertNull(model.state.value.error)
+        model.google({ GoogleCredential("token", "nonce") })
+        model.restart()
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+    }
+}

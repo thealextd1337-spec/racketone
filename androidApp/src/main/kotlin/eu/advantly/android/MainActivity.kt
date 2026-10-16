@@ -4,8 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.ViewModelProvider
+import eu.advantly.android.auth.createPhoneAccount
+import eu.advantly.android.auth.googleCredential
 import eu.advantly.device.link.WearCompanionDetector
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.AdvantlyApp
@@ -16,6 +20,21 @@ class MainActivity : ComponentActivity() {
         // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // ViewModelStore hält Auth über Rotation; keine Credentials in Bundle oder SavedState.
+        val auth =
+            if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_KEY.isBlank()) {
+                null
+            } else {
+                runCatching {
+                    ViewModelProvider(
+                        this,
+                        object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = createPhoneAccount() as T
+                        },
+                    )[AuthViewModel::class.java]
+                }.getOrNull()
+            }
         setContent {
             // Prozessweite Match-Session (Datenbank + Wear Data Layer zur Uhr); ohne Uhr bzw. Play Services bleibt der
             // Link „nicht verfügbar“ und das Handy zählt selbst (Director).
@@ -28,7 +47,18 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
-            AdvantlyApp(model = model, versionName = BuildConfig.VERSION_NAME, debugTools = BuildConfig.DEBUG)
+            AdvantlyApp(
+                model = model,
+                versionName = BuildConfig.VERSION_NAME,
+                debugTools = BuildConfig.DEBUG,
+                authModel = auth,
+                googleCredential =
+                    if (BuildConfig.GOOGLE_WEB_CLIENT_ID.isBlank()) {
+                        null
+                    } else {
+                        { googleCredential() }
+                    },
+            )
         }
     }
 }
