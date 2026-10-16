@@ -92,8 +92,10 @@ Vertrag, Integrationsgrenzen und das verbleibende B2b-Paket: [p2-upload.md](p2-u
 ## Ergänzung aus dem Feldtest: F31 / W9
 
 Der Planungs-PR [#51](https://github.com/thealextd1337-spec/racketone/pull/51) ergänzt einen sichtbaren
-Versionsstand und ein kleines Smartwatch-Symbol auf der Handy-Startseite. Die Versionsanzeige
-(Version, Commit, Build-Zeit) wird bereits im bisherigen Projektthread umgesetzt; keine doppelte Implementierung.
+Versionsstand und ein kleines Smartwatch-Symbol auf der Handy-Startseite. Laut Nutzer-Rückmeldung vom
+16.10.2026 ist das Uhren-Ampelsystem fertig implementiert und wird parallel geprüft. W9 wird daher
+hier als **implementiert, Review läuft** geführt; es ist kein weiteres Implementierungspaket dieses Threads.
+Versionsanzeige (Version, Commit, Build-Zeit) und Ampelsystem bleiben in der bestehenden parallelen Lieferung.
 
 - Grün: verbunden und gleicher Commit. Gelb: verbunden und kompatibel, aber anderer oder unbekannter Stand.
   Rot: nicht erreichbar oder inkompatibel. Grau: keine gekoppelte Uhr.
@@ -103,8 +105,10 @@ Versionsstand und ein kleines Smartwatch-Symbol auf der Handy-Startseite. Die Ve
 - Versionsmetadaten werden optional im `Hello` ergänzt; Protokoll 3 und die Behandlung älterer Geräte
   bleiben kompatibel. Ein unbekannter App-Stand darf nicht als gleicher Stand erscheinen.
 
-Reihenfolge: laufendes B2a-Paket prüfen, die bestehende Versionsanzeige integrieren, anschließend W9
-mit Tests für die vier Zustände und Geräteabnahme umsetzen; danach B2b fortsetzen. Maßgeblich sind
+Reihenfolge: laufendes B2a-Paket integrieren und B2b fortsetzen. Für W9 nur das Ergebnis des parallelen
+Reviews, CI, Merge und die dokumentierte Geräteabnahme übernehmen; keine erneute Umsetzung oder
+doppeltes Review starten. „Implementiert“ bedeutet noch nicht „integriert und auf Geräten abgenommen“.
+Maßgeblich sind
 die F31-/W9-Details aus `docs/00-entscheidungen.md`, `docs/04-ux-design.md` und `docs/PLAN.md` nach Merge von #51.
 Laut aktualisierter Feldtest-Rückmeldung ist auch die Galaxy Watch8 inzwischen auf dem aktuellen Stand;
 die ältere Port-Blockade im übernommenen Ausgangsstand ist damit überholt. Noch kein neuer Testnachweis für W9.
