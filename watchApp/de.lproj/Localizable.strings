@@ -506,3 +506,11 @@
 "sync.updateWatch.short" = "Uhr aktualisieren";
 "sync.updatePhone.short" = "Handy aktualisieren";
 "serve.bar" = "Aufschlag-Leiste";
+
+// Aufschlagwahl live (F30)
+"setup.startMatch" = "Match starten";
+"common.later" = "Später";
+"serve.choice.current %@" = "Aktuell: %@. Du kannst bis zum nächsten Punkt wählen.";
+"serve.choice.game %@ %@" = "Satz %@ · Spiel %@";
+"serve.choice.tb.first %@" = "Satz %@ · Erster Aufschlag";
+"serve.choice.tb.second %@" = "Satz %@ · Erster Aufschlag des anderen Teams";
