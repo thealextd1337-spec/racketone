@@ -245,7 +245,7 @@ class LiveScoreController(
     /** Übernimmt einen Snapshot, der nicht durch ein eigenes Kommando entstand (Flow des Ports). */
     fun sync(next: LiveMatchSnapshot?) {
         val current = snapshot
-        if (next == current) return
+        if (next?.matchId == current?.matchId && next?.revision == current?.revision) return
         if (next?.matchId != current?.matchId) {
             undoNotice = null
             flashSide = null

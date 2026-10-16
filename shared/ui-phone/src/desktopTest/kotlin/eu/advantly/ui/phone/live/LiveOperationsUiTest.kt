@@ -72,6 +72,24 @@ class LiveOperationsUiTest {
     }
 
     @Test
+    fun syncDeduplicatesTheSameRevisionDespiteVolatileFields() {
+        val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
+        val c = model.controller
+        val current = c.snapshot!!
+        val generation = c.generation
+        val refreshed = current.copy(sync = current.sync.copy(lastScorerContactMono = 123L))
+        c.sync(refreshed)
+        assertEquals(generation, c.generation)
+        c.sync(refreshed.copy(revision = current.revision + 1))
+        assertEquals(generation + 1, c.generation)
+        assertEquals(refreshed.sync, c.snapshot!!.sync)
+        c.sync(null)
+        assertEquals(generation + 2, c.generation)
+        c.sync(null)
+        assertEquals(generation + 2, c.generation)
+    }
+
+    @Test
     fun undoInALaterSetReviewsTheMarkedChoiceAndRoleLossClosesIt() {
         val model = testModel().apply { startWith(Presets.PADEL_OPEN.format(), "A".repeat(24)) }
         val c = model.controller
