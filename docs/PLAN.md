@@ -100,6 +100,7 @@ Für den Google-Play-Pfad werden Android-Teilgates gesondert abgenommen, solange
 | **F** Lokale Datenbank + Match-Historie | A |
 | **W3-S** Uhr-Spielerwahl + Platzhalter + nachträgliche Zuweisung am Handy (F20) | A–F |
 | **W3-M** Mehrere Matches parallel am Handy (max. eines auf der eigenen Uhr) + Beenden/Abbrechen (F21, F22) | A–F |
+| **W9** Versionsanzeige auf allen Geräten + Uhr-Status-Symbol (Ampel Grün/Gelb/Rot/Grau) auf der Handy-Startseite, Gegenstück auf der Uhr (F31) | B, C, D, E |
 
 **Gate P1:** 10 echte Matches über alle fünf Sportarten auf Ultra, Pixel Watch, Galaxy Watch und Handys. Dabei gehen **0 Punkte verloren**, auch bei Flugmodus mitten im Satz. Übergabe Uhr → Handy und zurück mit Bestätigung testen, einschließlich Ausfall der bisherigen Zähler-Uhr, Wiederverbinden und verspäteten Events des alten Geräts: Danach zählt ausschließlich das neue Gerät, alle anderen bleiben Anzeige ohne Undo. Deterministische Rollenprüfung gemäß 02 und Dedup bleiben Pflicht; gleichzeitige Eingaben zweier gültiger Zähler entfallen durch Single-Scorer. Akku < 15 %/h auf der Uhr. Alle Testvektoren grün.
 
