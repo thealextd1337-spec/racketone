@@ -1,0 +1,11 @@
+-- P2-B2a: keine automatische Eigentümerzuweisung bestehender Events oder Geräte.
+CREATE TABLE cloud_device_owner (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    profile_id TEXT NOT NULL
+);
+CREATE INDEX cloud_device_owner_profile ON cloud_device_owner (profile_id, device_id);
+
+CREATE TABLE cloud_upload_epoch (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+    generation INTEGER NOT NULL CHECK (generation >= 0)
+);

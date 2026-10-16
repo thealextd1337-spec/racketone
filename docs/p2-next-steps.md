@@ -81,3 +81,30 @@ Postgres-Stubsatz ersetzen nicht den echten Supabase-Stack mit Gateway, Auth und
   Entwicklungsrechner-Evidenz und kein gehosteter Kapazitätsnachweis.
 - B2–B4, P2-K sowie reale Konto-/Cloud-Abnahmen bleiben offen. Die neuen Primitive starten keinen
   Upload und ersetzen noch nicht den `CloudOutboxStore`-Adapter aus dem ursprünglichen P2-Plan.
+
+## Fortschritt nach PR #50
+
+P2-B1 wurde am 16.10.2026 nach dem Gegencheck „ship“ und vier grünen CI-Checks als `cc0466b` integriert,
+einschließlich Kotlin/Native-/Apple-Simulator- und echtem Supabase-pgTAP-Lauf.
+P2-B2 beginnt mit **B2a: Geräte-Eigentümer, Upload-Sitzungen und an die Auswahl gebundene Antworten**.
+Vertrag, Integrationsgrenzen und das verbleibende B2b-Paket: [p2-upload.md](p2-upload.md).
+
+## Ergänzung aus dem Feldtest: F31 / W9
+
+Der Planungs-PR [#51](https://github.com/thealextd1337-spec/racketone/pull/51) ergänzt einen sichtbaren
+Versionsstand und ein kleines Smartwatch-Symbol auf der Handy-Startseite. Die Versionsanzeige
+(Version, Commit, Build-Zeit) wird bereits im bisherigen Projektthread umgesetzt; keine doppelte Implementierung.
+
+- Grün: verbunden und gleicher Commit. Gelb: verbunden und kompatibel, aber anderer oder unbekannter Stand.
+  Rot: nicht erreichbar oder inkompatibel. Grau: keine gekoppelte Uhr.
+- Antippen zeigt Uhrname, beide Versionsstände und den letzten Kontakt. Auf der Uhr erscheint der
+  entsprechende Handy-Status am Ende der Startliste.
+- Je gekoppelter Uhr ein Symbol; Farbe durch Form/Text und Screenreader-Beschriftung ergänzen.
+- Versionsmetadaten werden optional im `Hello` ergänzt; Protokoll 3 und die Behandlung älterer Geräte
+  bleiben kompatibel. Ein unbekannter App-Stand darf nicht als gleicher Stand erscheinen.
+
+Reihenfolge: laufendes B2a-Paket prüfen, die bestehende Versionsanzeige integrieren, anschließend W9
+mit Tests für die vier Zustände und Geräteabnahme umsetzen; danach B2b fortsetzen. Maßgeblich sind
+die F31-/W9-Details aus `docs/00-entscheidungen.md`, `docs/04-ux-design.md` und `docs/PLAN.md` nach Merge von #51.
+Laut aktualisierter Feldtest-Rückmeldung ist auch die Galaxy Watch8 inzwischen auf dem aktuellen Stand;
+die ältere Port-Blockade im übernommenen Ausgangsstand ist damit überholt. Noch kein neuer Testnachweis für W9.
