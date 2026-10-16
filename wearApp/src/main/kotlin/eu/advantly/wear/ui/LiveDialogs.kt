@@ -373,6 +373,7 @@ fun CorrectServerScreen(
     BackToScore(actions::dismissOverlay)
     ListPage(edgeLabel = stringResource(R.string.action_cancel), onEdge = actions::dismissOverlay) {
         item { ListHeader { Text(stringResource(R.string.action_correct_server), textAlign = TextAlign.Center) } }
+        if (live.correctionRejected) textItem { stringResource(R.string.correct_rejected) }
         textItem { stringResource(if (corrections.retroactive) R.string.correct_from_start else R.string.correct_from_now) }
         corrections.players.forEach { player ->
             item {

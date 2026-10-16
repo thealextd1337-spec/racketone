@@ -266,4 +266,6 @@
     <!-- Feldtest-Modus (nur Debug-Build, P1-Gate) -->
     <string name="field_test_toggle">Field test mode</string>
     <string name="field_test_hint">Logs battery, display and sync every minute to %1$s (no health data)</string>
+    <string name="setup_start_match">Start match</string>
+    <string name="correct_rejected">Correction could not be applied. Please check the current server.</string>
 </resources>

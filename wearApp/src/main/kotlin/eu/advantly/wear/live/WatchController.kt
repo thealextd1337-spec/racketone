@@ -70,6 +70,7 @@ class WatchController(
     private var draft: Draft? = null
     private var overlay: LiveOverlay? = null
     private var locked = false
+    private var correctionRejected = false
 
     /** Sichtbarkeit der Aufschlag-Leiste nach dem Punkt (monoton über [elapsed]). */
     private val serveBar = ServeBarTimer()
@@ -431,7 +432,9 @@ class WatchController(
     fun correctServer(player: PlayerId): Boolean {
         val corrections = mutableState.value.live?.corrections ?: return false
         if (corrections.players.none { it.id == player }) return false
-        return applyCorrection(corrections.serverCorrection(player))
+        val applied = session.correctServer(player, corrections.retroactive)
+        finishCorrection(applied)
+        return applied
     }
 
     /** Positionen von [side] tauschen (Doppel; Tischtennis: Rückschläger), nur wenn angeboten. */
@@ -445,11 +448,20 @@ class WatchController(
     }
 
     private fun applyCorrection(correction: Correction): Boolean {
-        overlay = null
         val applied = session.correct(correction)
-        if (applied) emit(WatchEffect.Toast(WatchToast.Corrected))
-        publish()
+        finishCorrection(applied)
         return applied
+    }
+
+    private fun finishCorrection(applied: Boolean) {
+        correctionRejected = !applied
+        if (applied) {
+            overlay = null
+            emit(WatchEffect.Toast(WatchToast.Corrected))
+        } else {
+            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+        }
+        publish()
     }
 
     /** Bestätigtes Matchende (im Satzende-Dialog regulär, sonst Abbruch ohne Wertung). */
@@ -506,6 +518,7 @@ class WatchController(
 
     private fun setOverlay(value: LiveOverlay?) {
         overlay = value
+        correctionRejected = false
         publish()
     }
 
@@ -599,19 +612,20 @@ class WatchController(
         val match = sessionState.match
         if (match != null) {
             return WatchScreen.Live(
-                LiveModel.build(
-                    match = match,
-                    sync = sessionState.sync,
-                    names = ::nameOf,
-                    isSelf = directory::isSelf,
-                    contactAgoMs = lastContactAt?.let { elapsed() - it },
-                    disconnectedForMs = disconnectedSince?.let { elapsed() - it },
-                    locked = locked,
-                    overlay = overlay,
-                    serveBarPoint = serveBar.visiblePoint(elapsed()),
-                    serveBarHideAtMillis = serveBar.hideAtMillis,
-                    choiceMadeInWindow = openingChoice.choiceMade(match),
-                ),
+                LiveModel
+                    .build(
+                        match = match,
+                        sync = sessionState.sync,
+                        names = ::nameOf,
+                        isSelf = directory::isSelf,
+                        contactAgoMs = lastContactAt?.let { elapsed() - it },
+                        disconnectedForMs = disconnectedSince?.let { elapsed() - it },
+                        locked = locked,
+                        overlay = overlay,
+                        serveBarPoint = serveBar.visiblePoint(elapsed()),
+                        serveBarHideAtMillis = serveBar.hideAtMillis,
+                        choiceMadeInWindow = openingChoice.choiceMade(match),
+                    ).copy(correctionRejected = correctionRejected),
             )
         }
         val d = draft ?: return homeScreen()

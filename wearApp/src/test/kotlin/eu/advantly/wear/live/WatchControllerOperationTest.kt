@@ -228,6 +228,19 @@ class WatchControllerOperationTest {
         assertNull(live.serveBar)
     }
 
+    @Test
+    fun explicitOpeningChoiceOnlyOffersForwardCorrection() {
+        startOnWatch(discipline = Discipline.DOUBLES)
+        c.openServerChoice()
+        val partner = live.teams.a[1].id
+        assertTrue(c.chooseServer(partner))
+        assertFalse(live.corrections!!.retroactive)
+        c.requestCorrection()
+        assertTrue(c.correctServer(live.teams.b[1].id))
+        assertEquals(live.teams.b[1].id, match.state.serve?.player)
+        assertNull(live.overlay)
+    }
+
     // --- Aufschlägerwahl im Doppel ----------------------------------------------------------------
 
     @Test

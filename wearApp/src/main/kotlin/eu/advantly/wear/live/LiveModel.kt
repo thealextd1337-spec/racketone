@@ -178,6 +178,7 @@ data class LiveUi(
     val serverChoice: ServerChoiceUi? = null,
     /** Versionsunterschied zum Handy: „Bitte Handy/Uhr aktualisieren“. */
     val updateRequired: UpdateRequired? = null,
+    val correctionRejected: Boolean = false,
 ) {
     val isScorer: Boolean get() = role == LiveRole.SCORER
 }
@@ -341,7 +342,7 @@ object LiveModel {
                 }
             }
         }
-        return CorrectionsUi(firstGame, teams.a + teams.b, serve?.player, swaps)
+        return CorrectionsUi(firstGame && match.canCorrectServerRetroactively, teams.a + teams.b, serve?.player, swaps)
     }
 
     /** Stand als kurzer Text für Undo-Toast und Ongoing Activity, z. B. „30:15“, „AD:40“, ohne laufenden Satz „2:1“. */
