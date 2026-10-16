@@ -70,7 +70,7 @@ internal fun PlayersStep(
             )
         }
     }
-    if (state.playersComplete) FirstServerPicker(wizard, state)
+    if (state.playersComplete && !(doubles && sport.isTennisLike)) FirstServerPicker(wizard, state)
 }
 
 /** Erster Aufschlag: Chips je Spieler + Münzwurf (02 §5.1: Default „Ich“). */

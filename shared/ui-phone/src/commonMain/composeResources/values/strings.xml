@@ -544,4 +544,10 @@
     <string name="help_pickleball">Choose 11, 15 or 21 points per game. Side-out: only the serving side can score; winning a rally as receiver changes the server or service side. Rally: every rally scores, including the winning point. Normally win by two; the advanced one-point margin is a leisure / team-play option.</string>
     <string name="help_end_change">Deciding game only: change ends when the first side reaches 6 (to 11), 8 (to 15) or 11 (to 21). Every game: do this in each game. Never: no mid-game change. Between games, ends change if another game follows.</string>
     <string name="player_actions">Actions for %1$s</string>
+    <string name="action_later">Later</string>
+    <string name="correct_server_rejected">Correction could not be applied. Please check the current server.</string>
+    <string name="server_choice_context_game">Set %1$d · Game %2$d</string>
+    <string name="server_choice_context_tb_first">Set %1$d · First serve</string>
+    <string name="server_choice_context_tb_second">Set %1$d · Other team’s first serve</string>
+    <string name="server_choice_current">Current: %1$s. You can choose until the next point.</string>
 </resources>

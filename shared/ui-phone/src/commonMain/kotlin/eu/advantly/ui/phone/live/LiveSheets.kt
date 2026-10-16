@@ -45,6 +45,8 @@ import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.SetKind
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.isDraw
@@ -59,9 +61,11 @@ import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
+import eu.advantly.ui.phone.resources.action_later
 import eu.advantly.ui.phone.resources.action_undo
 import eu.advantly.ui.phone.resources.correct_server_from_now
 import eu.advantly.ui.phone.resources.correct_server_from_start
+import eu.advantly.ui.phone.resources.correct_server_rejected
 import eu.advantly.ui.phone.resources.correct_server_title
 import eu.advantly.ui.phone.resources.dialog_another_match
 import eu.advantly.ui.phone.resources.dialog_another_set
@@ -81,6 +85,12 @@ import eu.advantly.ui.phone.resources.hint_match_won
 import eu.advantly.ui.phone.resources.match_end_retired_suffix
 import eu.advantly.ui.phone.resources.match_end_walkover_suffix
 import eu.advantly.ui.phone.resources.result_followup_hint
+import eu.advantly.ui.phone.resources.server_choice_context_game
+import eu.advantly.ui.phone.resources.server_choice_context_tb_first
+import eu.advantly.ui.phone.resources.server_choice_context_tb_second
+import eu.advantly.ui.phone.resources.server_choice_current
+import eu.advantly.ui.phone.resources.server_choice_title_game1
+import eu.advantly.ui.phone.resources.server_choice_title_game2
 import eu.advantly.ui.phone.resources.set_end_finish
 import org.jetbrains.compose.resources.stringResource
 
@@ -364,26 +374,73 @@ internal fun BoxScope.CorrectServerSheet(
                     true
                 }
             }
+    val retroactive = firstGame && snapshot.canCorrectServerRetroactively
+    var failed by remember { mutableStateOf(false) }
     val serverId = snapshot.state.serve?.player
     LiveSheet(title = title, tag = "correct_server_sheet") {
         SheetQuestion(title)
         Text(
-            stringResource(if (firstGame) Res.string.correct_server_from_start else Res.string.correct_server_from_now),
+            stringResource(if (retroactive) Res.string.correct_server_from_start else Res.string.correct_server_from_now),
             style = AdvantlyTheme.typography.body,
             color = AdvantlyTheme.colors.text2,
         )
+        if (failed) Text(stringResource(Res.string.correct_server_rejected), modifier = Modifier.testTag("correct_server_rejected"))
         snapshot.setup.players.forEach { player ->
             SheetButton(
                 playerName(snapshot.setup, player.id),
                 primary = player.id == serverId,
                 onClick = {
-                    controller.correctServer(player.id, retroactive = firstGame)
-                    onClose()
+                    if (controller.correctServer(player.id, retroactive = retroactive)) onClose() else failed = true
                 },
                 modifier = Modifier.fillMaxWidth().testTag("server_${player.id.value}"),
             )
         }
         SheetButton(stringResource(Res.string.action_cancel), primary = false, onClick = onClose, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** Automatische Vierer-/Zweierwahl am Zähler; der erwartete Kontext gehört zur dargestellten Zeile. */
+@Composable
+internal fun BoxScope.ServerChoiceSheet(
+    controller: LiveScoreController,
+    snapshot: LiveMatchSnapshot,
+    context: ServerChoiceContext,
+) {
+    val first = context.phase == ServerChoicePhase.FIRST
+    val title =
+        if (first) {
+            stringResource(Res.string.server_choice_title_game1)
+        } else {
+            stringResource(Res.string.server_choice_title_game2, teamName(snapshot.setup, context.dueSide))
+        }
+    LiveSheet(title, "server_choice_sheet") {
+        SheetQuestion(title)
+        Text(
+            if (context.gameKind == GameKind.STANDARD) {
+                stringResource(Res.string.server_choice_context_game, context.setIndex + 1, if (first) 1 else 2)
+            } else {
+                stringResource(
+                    if (first) Res.string.server_choice_context_tb_first else Res.string.server_choice_context_tb_second,
+                    context.setIndex + 1,
+                )
+            },
+        )
+        context.players.forEach { player ->
+            val side = snapshot.setup.lineup.sideOf(player) ?: return@forEach
+            SheetButton(
+                "${playerName(snapshot.setup, player)} · ${teamName(snapshot.setup, side)}",
+                primary = context.chosen == player,
+                onClick = { controller.chooseServer(player, context) },
+                modifier = Modifier.fillMaxWidth().testTag("sheet_choose_server_${player.value}"),
+            )
+        }
+        Text(stringResource(Res.string.server_choice_current, playerName(snapshot.setup, context.defaultServer)))
+        SheetButton(
+            stringResource(Res.string.action_later),
+            primary = false,
+            onClick = controller::dismissServerChoice,
+            modifier = Modifier.fillMaxWidth().testTag("server_choice_later"),
+        )
     }
 }
 

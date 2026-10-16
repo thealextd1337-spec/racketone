@@ -14,6 +14,8 @@ import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveOperationRules
 import eu.advantly.presentation.live.LiveScoreRules
@@ -137,6 +139,48 @@ class LiveScoreController(
     /** Fensterkoordinaten (px) der Tap-Flächen – nur für den Desktop-Benchmark (AWT-Klicks). */
     val panelBounds = mutableMapOf<Side, Rect>()
 
+    var serverChoicePresentation: ServerChoiceContext? by mutableStateOf(null)
+        private set
+    private var choiceInteractive = false
+    private val handledChoices = mutableSetOf<Triple<MatchId, Int, ServerChoicePhase>>()
+
+    private fun ServerChoiceContext.window() = Triple(matchId, setIndex, phase)
+
+    fun setChoiceInteractive(active: Boolean) {
+        choiceInteractive = active
+        updateServerChoice(snapshot, snapshot)
+    }
+
+    fun openServerChoice() {
+        val current = snapshot ?: return
+        if (current.isScorer && choiceInteractive) serverChoicePresentation = current.serverChoiceContext
+    }
+
+    fun dismissServerChoice() {
+        serverChoicePresentation?.let { handledChoices += it.window() }
+        serverChoicePresentation = null
+    }
+
+    private fun updateServerChoice(
+        previous: LiveMatchSnapshot?,
+        next: LiveMatchSnapshot?,
+    ) {
+        val context = next?.serverChoiceContext
+        val old = previous?.serverChoiceContext
+        if (context != null) {
+            val reopened = previous?.matchId == next.matchId && next.pointsPlayed < previous.pointsPlayed
+            val cleared = old?.window() == context.window() && old?.chosen != null && context.chosen == null
+            if (reopened || cleared) handledChoices -= context.window()
+        }
+        if (next?.isScorer != true || context == null) {
+            serverChoicePresentation = null
+            return
+        }
+        if (serverChoicePresentation != null && serverChoicePresentation != context) serverChoicePresentation = null
+        val needsReview = context.chosen == null || (next.pointsPlayed == 0 && next.canRedo)
+        if (choiceInteractive && needsReview && context.window() !in handledChoices) serverChoicePresentation = context
+    }
+
     var servePromptId: EventId? by mutableStateOf(null)
         private set
 
@@ -145,6 +189,7 @@ class LiveScoreController(
     }
 
     fun removeLastPointOf(side: Side): Boolean {
+        if (serverChoicePresentation != null) return false
         val before = snapshot
         if (before == null || !LiveOperationRules.canRemove(before, side) || !port.removeLastPointOf(side)) {
             haptics.perform(HapticCue.Rejected)
@@ -158,16 +203,19 @@ class LiveScoreController(
         return true
     }
 
-    fun chooseServer(player: PlayerId): Boolean {
-        val current = snapshot ?: return false
-        if (!current.isScorer || player !in
-            current.state.serverChoice
-                ?.players
-                .orEmpty()
-        ) {
-            return false
-        }
-        return metadataCommand { port.chooseServer(player) }
+    fun chooseServer(player: PlayerId): Boolean = snapshot?.serverChoiceContext?.let { chooseServer(player, it) } ?: false
+
+    fun chooseServer(
+        player: PlayerId,
+        expected: ServerChoiceContext,
+    ): Boolean {
+        val current = snapshot?.serverChoiceContext ?: return false
+        if (snapshot?.isScorer != true || !current.accepts(expected, player)) return false
+        handledChoices += expected.window()
+        serverChoicePresentation = null
+        val chosen = metadataCommand { port.chooseServer(player, expected) }
+        if (!chosen) sync(port.active.value)
+        return chosen
     }
 
     fun setServeInfo(
@@ -197,7 +245,7 @@ class LiveScoreController(
     /** Übernimmt einen Snapshot, der nicht durch ein eigenes Kommando entstand (Flow des Ports). */
     fun sync(next: LiveMatchSnapshot?) {
         val current = snapshot
-        if (next?.matchId == current?.matchId && next?.revision == current?.revision) return
+        if (next == current) return
         if (next?.matchId != current?.matchId) {
             undoNotice = null
             flashSide = null
@@ -219,6 +267,7 @@ class LiveScoreController(
             servePromptId = null
         }
         snapshot = next
+        updateServerChoice(previous, next)
     }
 
     fun dismissAbsorbedNotice(id: Int) {
@@ -253,6 +302,7 @@ class LiveScoreController(
         t0: Long,
         source: InputClockSource,
     ) {
+        if (serverChoicePresentation != null) return
         rawTaps++
         val match = port.active.value?.matchId
         val sameMatch = match != null && match == lastPointMatch
@@ -279,6 +329,7 @@ class LiveScoreController(
     }
 
     fun undo(eventUptimeMillis: Long? = null) {
+        if (serverChoicePresentation != null) return
         servePromptId = null
         val (t0, source) = inputTime(eventUptimeMillis)
         val before = snapshot?.state
@@ -293,6 +344,7 @@ class LiveScoreController(
     }
 
     fun redo() {
+        if (serverChoicePresentation != null) return
         if (!port.redo()) return
         undoNotice = null
         apply(port.active.value, ScoreDirection.Forward, null, monotonicNanos(), InputClockSource.Handler)

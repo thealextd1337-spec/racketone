@@ -99,7 +99,7 @@ internal fun ServerChoiceBar(
                 ChoiceChip(
                     text = playerName(snapshot.setup, player),
                     selected = choice.chosen == player,
-                    onClick = { controller.chooseServer(player) },
+                    onClick = { snapshot.serverChoiceContext?.let { controller.chooseServer(player, it) } },
                     tag = "choose_server_${player.value}",
                 )
             }

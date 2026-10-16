@@ -41,6 +41,23 @@ class PlayerSelectionUiTest {
     private fun ComposeUiTest.click(tag: String) = onNodeWithTag(tag).performScrollTo().performClick()
 
     @Test
+    fun padelDoublesHasNoSetupServerPicker() =
+        runDesktopComposeUiTest(width = 412, height = 892) {
+            val wizard =
+                MatchWizard(InMemoryMatchStore(selfName = "Alex")).apply {
+                    selectSport(Sport.PADEL)
+                    addGuest("Sam")
+                    addGuest("Robin")
+                    addGuest("Kim")
+                }
+            show(wizard)
+            assertTrue(wizard.state.value.playersComplete)
+            onNodeWithTag("coin_toss").assertDoesNotExist()
+            wizard.state.value.input.players
+                .forEach { player -> onNodeWithTag("server_${player.id.value}").assertDoesNotExist() }
+        }
+
+    @Test
     fun emptyPlaceCreatesAtThatPlaceAndTapActionsMoveSwapAndRemove() =
         runDesktopComposeUiTest(width = 412, height = 892) {
             val store = InMemoryMatchStore(selfName = "Alex")

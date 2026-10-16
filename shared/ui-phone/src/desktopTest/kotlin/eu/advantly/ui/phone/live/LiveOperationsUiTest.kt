@@ -58,11 +58,121 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class LiveOperationsUiTest {
-    private fun ComposeUiTest.show(model: AdvantlyAppModel) {
+    private fun ComposeUiTest.show(
+        model: AdvantlyAppModel,
+        skipChoice: Boolean = true,
+    ) {
         model.navigator.push(Overlay.Live)
         setContent { Box(Modifier.size(412.dp, 892.dp)) { AdvantlyApp(model = model, darkTheme = true) } }
         waitForIdle()
+        if (skipChoice) runOnIdle { model.controller.dismissServerChoice() }
+        waitForIdle()
     }
+
+    @Test
+    fun correctionAfterOpeningChoiceUsesForwardPath() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format()) }
+            val controller = model.controller
+            val first = controller.snapshot!!.serverChoiceContext!!
+            assertTrue(controller.chooseServer(first.players.last(), first))
+            val snap = controller.snapshot!!
+            assertFalse(snap.canCorrectServerRetroactively)
+            var closed = false
+            setContent {
+                eu.advantly.ui.phone.designsystem.AdvantlyTheme(darkTheme = true) {
+                    Box { CorrectServerSheet(controller, snap, onClose = { closed = true }) }
+                }
+            }
+            onNodeWithTag("server_${first.players.first().value}").performScrollTo().performClick()
+            assertTrue(closed)
+            assertEquals(
+                first.players.first(),
+                controller.snapshot!!
+                    .state.serve
+                    ?.player,
+            )
+        }
+
+    @Test
+    fun automaticChoiceBlocksInputAndLaterStaysLocalUntilTheNextWindow() =
+        runComposeUiTest {
+            val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format()) }
+            show(model, skipChoice = false)
+            onNodeWithTag("server_choice_sheet").assertExists()
+            onNodeWithTag("panel_us").assertDoesNotExist()
+            val first = model.controller.serverChoicePresentation!!
+            runOnIdle {
+                model.controller.onTap(Side.A, null)
+                model.controller.undo()
+                assertEquals(
+                    0,
+                    model.live.active.value!!
+                        .pointsPlayed,
+                )
+            }
+            onNodeWithTag("server_choice_later").performScrollTo().performClick()
+            runOnIdle {
+                model.controller.sync(model.live.active.value)
+                model.controller.setChoiceInteractive(false)
+                model.controller.setChoiceInteractive(true)
+                assertNull(model.controller.serverChoicePresentation)
+                model.live.play("AAAA")
+                model.controller.sync(model.live.active.value)
+                assertNotNull(model.controller.serverChoicePresentation)
+                val second = model.controller.serverChoicePresentation!!
+                val revision =
+                    model.live.active.value!!
+                        .revision
+                assertFalse(model.controller.chooseServer(second.players.first(), first))
+                assertEquals(
+                    revision,
+                    model.live.active.value!!
+                        .revision,
+                )
+                model.controller.openServerChoice()
+            }
+            val second = model.controller.serverChoicePresentation!!
+            onNodeWithTag("sheet_choose_server_${second.players.last().value}").performScrollTo().performClick()
+            onNodeWithTag("server_choice_sheet").assertDoesNotExist()
+            runOnIdle {
+                assertEquals(
+                    4,
+                    model.live.active.value!!
+                        .pointsPlayed,
+                )
+                assertEquals(
+                    second.players.last(),
+                    model.live.active.value!!
+                        .state.serve
+                        ?.player,
+                )
+            }
+        }
+
+    @Test
+    fun rejectedCorrectionStaysOpenAndShowsTheFailure() =
+        runComposeUiTest {
+            val model =
+                testModel { store ->
+                    object : LiveMatchPort by store {
+                        override fun correctServer(
+                            player: eu.advantly.core.model.PlayerId,
+                            retroactive: Boolean,
+                        ) = false
+                    }
+                }.apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
+            var closed = false
+            val snap = model.controller.snapshot!!
+            setContent {
+                eu.advantly.ui.phone.designsystem.AdvantlyTheme(darkTheme = true) {
+                    Box { CorrectServerSheet(model.controller, snap, onClose = { closed = true }) }
+                }
+            }
+            onNodeWithTag("server_${snap.setup.lineup.b.first().value}").performScrollTo().performClick()
+            onNodeWithTag("correct_server_rejected").assertExists()
+            assertFalse(closed)
+        }
 
     @Test
     fun longPressRemovesOnlyThatSideAndSnackbarRestoresIt() =
@@ -197,6 +307,7 @@ class LiveOperationsUiTest {
             runOnIdle {
                 model.live.play("AAA")
                 model.controller.sync(model.live.active.value)
+                model.controller.dismissServerChoice()
             }
             val choice =
                 model.live.active.value!!
@@ -207,6 +318,7 @@ class LiveOperationsUiTest {
             runOnIdle {
                 model.live.play("A".repeat(20))
                 model.controller.sync(model.live.active.value)
+                model.controller.dismissServerChoice()
             }
             val nextSet =
                 model.live.active.value!!
@@ -535,6 +647,7 @@ class LiveOperationsUiTest {
                 runOnIdle {
                     model.live.play("AAA")
                     model.controller.sync(model.live.active.value)
+                    model.controller.dismissServerChoice()
                 }
                 onNodeWithTag("server_choice").assertExists()
                 assertEquals(slot, onNodeWithTag("live_operations_slot").getBoundsInRoot())
@@ -543,6 +656,7 @@ class LiveOperationsUiTest {
                 runOnIdle {
                     model.live.play("A".repeat(20))
                     model.controller.sync(model.live.active.value)
+                    model.controller.dismissServerChoice()
                 }
                 onNodeWithTag("server_choice").assertExists()
                 assertEquals(slot, onNodeWithTag("live_operations_slot").getBoundsInRoot())
