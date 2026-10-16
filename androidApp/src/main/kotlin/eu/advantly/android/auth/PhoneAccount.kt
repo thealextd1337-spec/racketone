@@ -43,6 +43,14 @@ suspend fun ComponentActivity.googleCredential(): GoogleCredential {
         } catch (_: GetCredentialCancellationException) {
             throw CloudException("auth_cancelled", false)
         }
+    requireGoogleCredentialType(result.credential.type)
     val token = GoogleIdTokenCredential.createFrom(result.credential.data).idToken
     return GoogleCredential(token, rawNonce)
+}
+
+/** Unbekannte Credential-Typen dürfen nicht als Google-ID-Token geparst werden. */
+internal fun requireGoogleCredentialType(type: String) {
+    if (type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+        throw CloudException("auth_failed", false)
+    }
 }

@@ -12,7 +12,6 @@ kotlin {
             // Match-Session (Single-Scorer, Persistenz, Sync) hinter den Ports
             api(projects.shared.matchSession)
             api(projects.shared.entitlements)
-            api(projects.shared.cloudSync)
             // KMP-ViewModel + SavedStateHandle (überlebt Rotation und Prozesstod)
             api(libs.lifecycle.viewmodel)
             api(libs.lifecycle.viewmodel.savedstate)
