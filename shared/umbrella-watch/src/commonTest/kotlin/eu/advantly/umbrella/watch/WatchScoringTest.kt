@@ -1057,15 +1057,15 @@ class WatchScoringTest {
     @Test
     fun phoneStatusUpdatesWithoutAnOpenMatchAndWithoutSkie() {
         val rig = Rig()
-        assertEquals("RED", rig.watch.phoneStatus())
+        assertEquals("GRAY", rig.watch.phoneStatus().light)
         rig.phone
         rig.settle()
-        assertEquals("YELLOW", rig.watch.phoneStatus(), "Hello ohne App-Stand bleibt unbekannt")
+        assertEquals("YELLOW", rig.watch.phoneStatus().light, "Hello ohne App-Stand bleibt unbekannt")
         rig.network.setConnected("phone", false)
         rig.settle()
-        assertEquals("RED", rig.watch.phoneStatus())
+        assertEquals("RED", rig.watch.phoneStatus().light)
         rig.restartWatch()
-        assertEquals("RED", rig.watch.phoneStatus())
+        assertEquals("RED", rig.watch.phoneStatus().light)
     }
 
     @Test
@@ -1078,8 +1078,11 @@ class WatchScoringTest {
             rig.settle()
             assertNull(rig.watch.snapshot())
             assertEquals(expected, rig.watch.updateRequired())
-            assertEquals("RED", rig.watch.phoneStatus())
+            assertEquals(expected, rig.watch.phoneStatus().updateRequired)
+            assertEquals("RED", rig.watch.phoneStatus().light)
             peer.stop()
+            rig.settle()
+            assertEquals(expected, rig.watch.phoneStatus().updateRequired)
         }
     }
 

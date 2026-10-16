@@ -14,14 +14,17 @@ import platform.darwin.dispatch_after
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 import platform.darwin.dispatch_time
+import platform.posix.CLOCK_MONOTONIC_RAW
+import platform.posix.clock_gettime_nsec_np
 import platform.posix.memcpy
-import kotlin.time.TimeSource
 
 /** [LinkScheduler] auf der Main-Queue (WCSession-Delegates kommen auf einer Hintergrund-Queue an). */
+@OptIn(ExperimentalForeignApi::class)
 class MainQueueScheduler : LinkScheduler {
-    private val origin = TimeSource.Monotonic.markNow()
+    private val origin = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW.convert())
 
-    override fun nowMs(): Long = origin.elapsedNow().inWholeMilliseconds
+    // Darwin bildet MONOTONIC_RAW auf mach_continuous_time ab: zählt auch im Geräteschlaf weiter.
+    override fun nowMs(): Long = ((clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW.convert()) - origin) / NANOS_PER_MS.toULong()).toLong()
 
     override fun post(action: () -> Unit) {
         dispatch_async(dispatch_get_main_queue()) { action() }

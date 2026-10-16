@@ -39,6 +39,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.platform.formatBuildDate
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.device_details
+import eu.advantly.ui.phone.resources.device_development
 import eu.advantly.ui.phone.resources.device_gray
 import eu.advantly.ui.phone.resources.device_green
 import eu.advantly.ui.phone.resources.device_last_seen
@@ -54,6 +55,7 @@ import eu.advantly.ui.phone.resources.device_update_watch
 import eu.advantly.ui.phone.resources.device_watch
 import eu.advantly.ui.phone.resources.device_watch_build
 import eu.advantly.ui.phone.resources.device_yellow
+import eu.advantly.ui.phone.resources.wizard_scorer_not_installed
 import org.jetbrains.compose.resources.stringResource
 
 /** F31: bis zu zwei Einzelsymbole, danach eine kompakte Gruppe; Details enthalten alle Uhren. */
@@ -77,6 +79,7 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
                     when {
                         DeviceLight.RED in hiddenLights -> DeviceLight.RED
                         DeviceLight.YELLOW in hiddenLights -> DeviceLight.YELLOW
+                        DeviceLight.GRAY in hiddenLights -> DeviceLight.GRAY
                         else -> DeviceLight.GREEN
                     }
                 val description = stringResource(Res.string.device_more, watches.size - 2) + ": " + statusText(light)
@@ -111,7 +114,7 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
                 watches.forEach { device ->
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(deviceName(device), style = AdvantlyTheme.typography.title)
-                        Text(statusText(device.light(local)))
+                        Text(statusText(device, local))
                         Text(stringResource(Res.string.device_watch_build, buildText(device.appBuild)))
                         Text(stringResource(Res.string.device_phone_build, buildText(local)))
                         Text(
@@ -123,9 +126,11 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
                         )
                         val hint =
                             when {
+                                device.appInstalled == false -> Res.string.wizard_scorer_not_installed
                                 device.compatibility == CompatibilityStatus.PEER_TOO_OLD -> Res.string.device_update_watch
                                 device.compatibility == CompatibilityStatus.PEER_TOO_NEW -> Res.string.device_update_phone
                                 !device.reachable -> Res.string.device_reconnect
+                                device.isDevelopmentBuild(local) -> Res.string.device_development
                                 device.light(local) == DeviceLight.YELLOW -> Res.string.device_update_recommended
                                 else -> Res.string.device_ready
                             }
@@ -146,7 +151,7 @@ private fun WatchButton(
 ) {
     val light = device?.light(local) ?: DeviceLight.GRAY
     val color = statusColor(light)
-    val label = listOfNotNull(device?.let { deviceName(it) }, statusText(light)).joinToString(": ")
+    val label = listOfNotNull(device?.let { deviceName(it) }, device?.let { statusText(it, local) } ?: statusText(light)).joinToString(": ")
     IconButton(onClick = onClick, modifier = Modifier.testTag(tag).semantics { contentDescription = label }) {
         Box(Modifier.size(32.dp)) {
             Icon(AdvantlyIcons.Watch, contentDescription = null, tint = color, modifier = Modifier.size(28.dp).align(Alignment.Center))
@@ -167,6 +172,22 @@ private fun deviceName(device: DeviceStatus): String = device.name.ifBlank { str
 private fun buildText(build: AppBuild?): String =
     build?.let { versionDetails(it.version, it.commit, it.timeUtc) }
         ?: stringResource(Res.string.device_unknown)
+
+private fun DeviceStatus.isDevelopmentBuild(local: AppBuild?): Boolean =
+    local?.commit?.endsWith("-dirty") == true || appBuild?.commit?.endsWith("-dirty") == true
+
+@Composable
+private fun statusText(
+    device: DeviceStatus,
+    local: AppBuild?,
+): String =
+    when {
+        device.appInstalled == false -> stringResource(Res.string.wizard_scorer_not_installed)
+        device.compatibility == CompatibilityStatus.PEER_TOO_OLD -> stringResource(Res.string.device_update_watch)
+        device.compatibility == CompatibilityStatus.PEER_TOO_NEW -> stringResource(Res.string.device_update_phone)
+        device.light(local) == DeviceLight.YELLOW && device.isDevelopmentBuild(local) -> stringResource(Res.string.device_development)
+        else -> statusText(device.light(local))
+    }
 
 @Composable
 private fun statusText(light: DeviceLight): String =
@@ -191,6 +212,7 @@ private fun statusColor(light: DeviceLight): androidx.compose.ui.graphics.Color 
 private fun statusBadge(light: DeviceLight): String =
     when (light) {
         DeviceLight.GREEN -> "✓"
-        DeviceLight.YELLOW, DeviceLight.RED -> "!"
+        DeviceLight.YELLOW -> "!"
+        DeviceLight.RED -> "×"
         DeviceLight.GRAY -> "–"
     }

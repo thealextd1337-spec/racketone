@@ -528,5 +528,6 @@
 // F31: Verbindung zum Handy, Farbe immer mit Text und Badge.
 "start.phoneStatus.green" = "Handy verbunden · gleicher Stand";
 "start.phoneStatus.yellow" = "Handy verbunden · Update empfohlen";
-"start.phoneStatus.red" = "Handy nicht erreichbar oder Update nötig";
+"start.phoneStatus.red" = "Handy nicht erreichbar";
 "start.phoneStatus.gray" = "Kein Handy gekoppelt";
+"start.phoneStatus.development" = "Entwicklungsbuild";

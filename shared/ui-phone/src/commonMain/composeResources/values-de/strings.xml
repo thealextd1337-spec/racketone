@@ -595,7 +595,7 @@
     <string name="device_details">Uhr-Verbindung</string>
     <string name="device_green">Verbunden · gleicher App-Stand</string>
     <string name="device_yellow">Verbunden · Update empfohlen</string>
-    <string name="device_red">Nicht erreichbar oder Update nötig</string>
+    <string name="device_red">Nicht erreichbar</string>
     <string name="device_gray">Keine Uhr gekoppelt</string>
     <string name="device_unknown">Unbekannt</string>
     <string name="device_watch_build">Uhr: %1$s</string>
@@ -607,4 +607,5 @@
     <string name="device_reconnect">Geräte näher zusammenbringen, Bluetooth prüfen und Advantly auf der Uhr öffnen.</string>
     <string name="device_update_recommended">Auf beiden Geräten denselben App-Stand installieren. Ältere Geräte melden ihren Stand eventuell nicht.</string>
     <string name="device_ready">Beide Geräte sind bereit.</string>
+    <string name="device_development">Entwicklungsbuild</string>
 </resources>

@@ -14,19 +14,30 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import eu.advantly.match.session.DeviceLight
+import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.wear.R
 
 @Composable
-internal fun PhoneStatusLabel(light: DeviceLight) {
+internal fun PhoneStatusLabel(
+    light: DeviceLight,
+    updateRequired: UpdateRequired? = null,
+    developmentBuild: Boolean = false,
+) {
     val text =
-        stringResource(
-            when (light) {
-                DeviceLight.GREEN -> R.string.phone_status_green
-                DeviceLight.YELLOW -> R.string.phone_status_yellow
-                DeviceLight.RED -> R.string.phone_status_red
-                DeviceLight.GRAY -> R.string.phone_status_gray
-            },
-        )
+        if (light == DeviceLight.RED && updateRequired != null) {
+            updateText(updateRequired)
+        } else if (light == DeviceLight.YELLOW && developmentBuild) {
+            stringResource(R.string.phone_status_development)
+        } else {
+            stringResource(
+                when (light) {
+                    DeviceLight.GREEN -> R.string.phone_status_green
+                    DeviceLight.YELLOW -> R.string.phone_status_yellow
+                    DeviceLight.RED -> R.string.phone_status_red
+                    DeviceLight.GRAY -> R.string.phone_status_gray
+                },
+            )
+        }
     val color =
         when (light) {
             DeviceLight.GREEN -> Color(0xFF4ADE80)
@@ -37,7 +48,8 @@ internal fun PhoneStatusLabel(light: DeviceLight) {
     val badge =
         when (light) {
             DeviceLight.GREEN -> "✓"
-            DeviceLight.YELLOW, DeviceLight.RED -> "!"
+            DeviceLight.YELLOW -> "!"
+            DeviceLight.RED -> "×"
             DeviceLight.GRAY -> "–"
         }
     Text(

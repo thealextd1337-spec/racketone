@@ -23,6 +23,7 @@ import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.match.LocalDay
+import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.match.FormatChoice
@@ -751,7 +752,15 @@ class WatchController(
         val phoneConnected =
             session.state.value.sync.peers
                 .any { it.kind == PeerKind.PHONE && it.compatibility == CompatibilityStatus.COMPATIBLE }
-        val updateRequired = OperationRules.updateRequired(session.state.value.sync)
+        val phone =
+            session.state.value.devices
+                .firstOrNull { it.kind == PeerKind.PHONE }
+        val updateRequired =
+            OperationRules.updateRequired(session.state.value.sync) ?: when (phone?.compatibility) {
+                CompatibilityStatus.PEER_TOO_OLD -> UpdateRequired.OTHER_DEVICE
+                CompatibilityStatus.PEER_TOO_NEW -> UpdateRequired.THIS_DEVICE
+                else -> null
+            }
         return WatchScreen.Home(
             resume,
             last,
@@ -760,10 +769,11 @@ class WatchController(
             phoneConnected,
             updateRequired,
             session.state.value.telemetryVisibility,
-            session.state.value.devices
-                .firstOrNull { it.kind == PeerKind.PHONE }
-                ?.light(session.config.appBuild)
-                ?: DeviceLight.RED,
+            phone?.light(session.config.appBuild) ?: DeviceLight.GRAY,
+            developmentBuild =
+                session.config.appBuild
+                    ?.commit
+                    ?.endsWith("-dirty") == true || phone?.appBuild?.commit?.endsWith("-dirty") == true,
         )
     }
 

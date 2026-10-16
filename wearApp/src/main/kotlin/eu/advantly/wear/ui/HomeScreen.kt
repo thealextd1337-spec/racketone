@@ -149,7 +149,7 @@ fun HomeScreen(
             }
             // P1-Gate: versteckter Feldtest-Schalter, nur Debug-Build
             if (FieldTestRecorder.AVAILABLE) item { FieldTestToggle() }
-            item { PhoneStatusLabel(home.phoneLight) }
+            item { PhoneStatusLabel(home.phoneLight, home.updateRequired, home.developmentBuild) }
             item { BuildVersionLabel() }
         }
     }

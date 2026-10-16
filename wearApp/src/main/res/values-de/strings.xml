@@ -275,6 +275,7 @@
     <string name="server_choice_current_unknown">Du kannst bis zum nächsten Punkt wählen.</string>
     <string name="phone_status_green">Handy verbunden · gleicher Stand</string>
     <string name="phone_status_yellow">Handy verbunden · Update empfohlen</string>
-    <string name="phone_status_red">Handy nicht erreichbar oder Update nötig</string>
+    <string name="phone_status_red">Handy nicht erreichbar</string>
     <string name="phone_status_gray">Kein Handy gekoppelt</string>
+    <string name="phone_status_development">Entwicklungsbuild</string>
 </resources>

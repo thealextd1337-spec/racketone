@@ -18,16 +18,18 @@ data class DeviceStatus(
     val compatibility: CompatibilityStatus? = null,
     val lastSeenAtMs: Long? = null,
     val reachable: Boolean = false,
+    val appInstalled: Boolean? = null,
 ) {
     fun light(local: AppBuild?): DeviceLight =
         when {
+            appInstalled == false -> DeviceLight.GRAY
             !reachable || (compatibility != null && compatibility != CompatibilityStatus.COMPATIBLE) -> DeviceLight.RED
             compatibility == CompatibilityStatus.COMPATIBLE && sameCommit(local?.commit, appBuild?.commit) -> DeviceLight.GREEN
             else -> DeviceLight.YELLOW
         }
 }
 
-/** Drei 30-s-Abgleiche; zwei verpasste Antworten werden toleriert. Transport-Abbruch wirkt sofort. */
+/** Ergänzender Kontaktnachweis im aktiven Match; ohne Match zählt allein die Plattform-Erreichbarkeit. */
 const val DEVICE_CONTACT_TIMEOUT_MS: Long = 90_000L
 
 fun contactIsFresh(
@@ -38,4 +40,4 @@ fun contactIsFresh(
 private fun sameCommit(
     local: String?,
     remote: String?,
-): Boolean = local != null && local.matches(Regex("[0-9a-fA-F]{7,40}(-dirty)?")) && local == remote
+): Boolean = local != null && local.matches(Regex("[0-9a-fA-F]{7,40}")) && local == remote

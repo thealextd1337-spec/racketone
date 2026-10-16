@@ -191,16 +191,30 @@ class SessionMatchStore(
                     it.copy(name = data.settings.get("presentation.deviceName." + it.peer).orEmpty())
                 }.toMutableList()
         val inventory = companion?.devices.orEmpty()
+        val inventoryKnown = companionState != CompanionState.UNKNOWN
+        val inventoryPeers =
+            inventory.map { it.peer }.toSet() +
+                if (inventory.isEmpty() && companionState in listOf(CompanionState.APP_INSTALLED, CompanionState.APP_NOT_INSTALLED)) {
+                    setOf("watch")
+                } else {
+                    emptySet()
+                }
+        if (inventoryKnown) {
+            val retained =
+                inventoryPeers + state.sync.peers.map { it.peer } + state.devices.filter { it.kind != PeerKind.WATCH }.map { it.peer }
+            session.retainDeviceStatuses(retained)
+            known.removeAll { it.kind == PeerKind.WATCH && it.peer !in retained }
+        }
         inventory.forEach { device ->
             if (data.settings.get("presentation.deviceName." + device.peer) != device.name) {
                 data.settings.put("presentation.deviceName." + device.peer, device.name)
             }
             val index = known.indexOfFirst { it.peer == device.peer }
             if (index >= 0) {
-                known[index] = known[index].copy(name = device.name)
+                known[index] = known[index].copy(name = device.name, appInstalled = device.appInstalled)
             } else {
                 known +=
-                    DeviceStatus(device.peer, PeerKind.WATCH, name = device.name)
+                    DeviceStatus(device.peer, PeerKind.WATCH, name = device.name, appInstalled = device.appInstalled)
             }
         }
         // WCSession meldet auch eine Uhr, die noch nie ein Hello gesendet hat.
@@ -208,7 +222,7 @@ class SessionMatchStore(
             companionState in listOf(CompanionState.APP_INSTALLED, CompanionState.APP_NOT_INSTALLED)
         ) {
             known +=
-                DeviceStatus("watch", PeerKind.WATCH)
+                DeviceStatus("watch", PeerKind.WATCH, appInstalled = companionState == CompanionState.APP_INSTALLED)
         }
         deviceStatusFlow.value =
             known

@@ -1,5 +1,6 @@
 package eu.advantly.ui.phone.app
 
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
@@ -42,7 +43,14 @@ class ProfileVersionUiTest {
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(2f, 1.3f)) {
                         AdvantlyTheme(darkTheme = true) {
-                            ComingSoonScreen(AppTab.Profile, "0.1.0", buildCommit = "5e3db67-dirty", buildTimeUtc = "2026-10-16T14:54:00Z")
+                            Surface(color = AdvantlyTheme.colors.bg) {
+                                ComingSoonScreen(
+                                    AppTab.Profile,
+                                    "0.1.0",
+                                    buildCommit = "5e3db67-dirty",
+                                    buildTimeUtc = "2026-10-16T14:54:00Z",
+                                )
+                            }
                         }
                     }
                 }

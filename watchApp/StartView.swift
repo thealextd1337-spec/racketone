@@ -63,7 +63,7 @@ struct StartView: View {
                 }
                 #endif
                 Section {
-                    PhoneStatusLabel(code: model.phoneStatus)
+                    PhoneStatusLabel(code: model.phoneStatus, update: model.phoneStatusUpdate, developmentBuild: model.phoneDevelopmentBuild)
                     Text(BuildVersionText.details)
                         .font(.footnote)
                         .foregroundStyle(Brand.text2)
@@ -339,7 +339,15 @@ private extension String {
 /// F31: Farbe plus Badge und ausgeschriebener VoiceOver-Text.
 struct PhoneStatusLabel: View {
     let code: String
-    private var key: String { "start.phoneStatus." + code.lowercased() }
+    var update: String = ""
+    var developmentBuild: Bool = false
+    private var key: String {
+        if code == "RED" && !update.isEmpty {
+            return update == "THIS_DEVICE" ? "sync.updateWatch" : "sync.updatePhone"
+        }
+        if code == "YELLOW" && developmentBuild { return "start.phoneStatus.development" }
+        return "start.phoneStatus." + code.lowercased()
+    }
     private var color: Color {
         switch code {
         case "GREEN": return .green
@@ -348,7 +356,7 @@ struct PhoneStatusLabel: View {
         default: return Brand.text2
         }
     }
-    private var badge: String { code == "GREEN" ? "✓" : (code == "GRAY" ? "–" : "!") }
+    private var badge: String { code == "GREEN" ? "✓" : (code == "GRAY" ? "–" : (code == "RED" ? "×" : "!")) }
     var body: some View {
         Text(badge + " " + loc(key))
             .font(.footnote)

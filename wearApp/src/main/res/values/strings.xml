@@ -283,6 +283,7 @@
     <string name="server_choice_current_unknown">You can choose until the next point.</string>
     <string name="phone_status_green">Phone connected · same build</string>
     <string name="phone_status_yellow">Phone connected · update recommended</string>
-    <string name="phone_status_red">Phone unreachable or update required</string>
+    <string name="phone_status_red">Phone unreachable</string>
     <string name="phone_status_gray">No phone paired</string>
+    <string name="phone_status_development">Development build</string>
 </resources>

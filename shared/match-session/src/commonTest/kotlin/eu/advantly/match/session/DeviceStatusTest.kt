@@ -35,7 +35,7 @@ class DeviceStatusTest {
         assertEquals(DeviceLight.GREEN, peer.light(build))
         assertEquals(DeviceLight.YELLOW, peer.light(build.copy(commit = "223dff1-dirty")))
         assertEquals(
-            DeviceLight.GREEN,
+            DeviceLight.YELLOW,
             peer.copy(appBuild = build.copy(commit = "223dff1-dirty")).light(build.copy(commit = "223dff1-dirty")),
         )
         assertEquals(DeviceLight.YELLOW, peer.copy(appBuild = null).light(build))
@@ -48,7 +48,7 @@ class DeviceStatusTest {
     }
 
     @Test
-    fun twoWatchesHaveIndependentStatusAndExpiryAndSurviveRestartOffline() {
+    fun idleConnectedPeersStayReachableWithoutTrafficForFiveMinutesAndSurviveRestartOffline() {
         val scheduler = ManualScheduler()
         val link = StatusLink()
         val data = testLocalData()
@@ -63,20 +63,18 @@ class DeviceStatusTest {
             )
         val phone = session().also { it.start() }
         assertTrue(link.sent.filterIsInstance<Hello>().all { it.appBuild == build })
-        val startupHellos = link.sent.filterIsInstance<Hello>().size
 
         fun devices() = phone.state.value.devices
         link.deliver("pixel", Hello(DeviceId("pixel"), PeerKind.WATCH, appBuild = build))
         link.deliver("galaxy", Hello(DeviceId("galaxy"), PeerKind.WATCH))
         assertEquals(listOf(DeviceLight.YELLOW, DeviceLight.GREEN), devices().map { it.light(build) })
-        scheduler.advanceBy(90_000)
-        assertTrue(link.sent.filterIsInstance<Hello>().size > startupHellos, "Startliste sendet weiter Hello an alte Peers")
-        assertTrue(devices().all { it.reachable }, "Grenze ist einschließlich 90 Sekunden")
-        scheduler.advanceBy(1)
-        assertTrue(devices().all { it.light(build) == DeviceLight.RED })
+        link.sent.clear()
+        scheduler.advanceBy(300_000)
+        assertTrue(link.sent.isEmpty(), "Ohne Match/Rückstand darf der Timer nichts senden")
+        assertTrue(devices().all { it.reachable }, "Plattform-Erreichbarkeit braucht keinen Hello-Keepalive")
         link.deliver("pixel", Summary(emptyMap()))
         assertEquals(DeviceLight.GREEN, devices().first { it.peer == "pixel" }.light(build))
-        assertEquals(DeviceLight.RED, devices().first { it.peer == "galaxy" }.light(build))
+        assertEquals(DeviceLight.YELLOW, devices().first { it.peer == "galaxy" }.light(build))
         link.online = emptyList()
         link.sink!!.onStateChanged(LinkState.DISCONNECTED, emptyList())
         assertTrue(devices().none { it.reachable }, "Node nicht erreichbar wirkt sofort")
@@ -88,7 +86,7 @@ class DeviceStatusTest {
                 .none { it.reachable },
         )
         assertEquals(
-            1_760_000_090_001L,
+            1_760_000_300_000L,
             restarted.state.value.devices
                 .first { it.peer == "pixel" }
                 .lastSeenAtMs,
@@ -97,11 +95,101 @@ class DeviceStatusTest {
     }
 
     @Test
+    fun repeatedHelloOnlyUpdatesStatusAndReconnectOrIdentityOrProtocolChangeSyncsAgain() {
+        val scheduler = ManualScheduler()
+        val link = StatusLink()
+        val phone = MatchSession(testLocalData(), link, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        phone.start()
+        val hello = Hello(DeviceId("pixel"), PeerKind.WATCH, appBuild = build)
+        link.sent.clear()
+        link.deliver("pixel", hello)
+        assertTrue(link.sent.isNotEmpty(), "Erstes Hello gleicht ab")
+        link.sent.clear()
+        link.deliver("pixel", hello.copy(appBuild = build.copy(commit = "a48fa00")))
+        assertTrue(link.sent.isEmpty(), "Wiederholtes Hello darf keinen Antwort-Burst erzeugen")
+        assertEquals(
+            "a48fa00",
+            phone.state.value.devices
+                .first { it.peer == "pixel" }
+                .appBuild
+                ?.commit,
+        )
+        link.deliver("pixel", hello.copy(deviceId = DeviceId("reinstalled")))
+        assertTrue(link.sent.isNotEmpty(), "Neue Installation gleicht erneut ab")
+        link.deliver("pixel", hello.copy(v = 99, minV = 99))
+        link.sent.clear()
+        link.deliver("pixel", hello)
+        assertTrue(link.sent.isNotEmpty(), "Wieder kompatibles Protokoll gleicht erneut ab")
+        link.online = emptyList()
+        link.sink!!.onStateChanged(LinkState.DISCONNECTED, emptyList())
+        link.online = listOf("pixel")
+        link.sink!!.onStateChanged(LinkState.CONNECTED, link.online)
+        link.sent.clear()
+        link.deliver("pixel", hello)
+        assertTrue(link.sent.isNotEmpty(), "Reconnect muss Archive und Tombstones erneut abgleichen")
+        phone.close()
+    }
+
+    @Test
+    fun lastSeenIsPersistedAtMostEveryFiveMinutesUnlessStatusChanges() {
+        val scheduler = ManualScheduler()
+        val link = StatusLink()
+        val data = testLocalData()
+        val phone = MatchSession(data, link, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE), clock = { scheduler.nowMs() })
+        phone.start()
+        val hello = Hello(DeviceId("pixel"), PeerKind.WATCH, appBuild = build)
+        link.deliver("pixel", hello)
+        val saved = data.settings.all()
+        repeat(9) {
+            scheduler.advanceBy(30_000)
+            link.deliver("pixel", hello)
+            link.deliver("pixel", Summary(emptyMap()))
+            assertEquals(saved, data.settings.all())
+        }
+        scheduler.advanceBy(30_000)
+        link.deliver("pixel", Summary(emptyMap()))
+        assertFalse(saved == data.settings.all())
+        phone.close()
+    }
+
+    @Test
     fun contactAgeUsesMonotonicTimeAndRejectsUnknownOrNegativeAge() {
         assertTrue(contactIsFresh(90_000, 0))
         assertFalse(contactIsFresh(90_001, 0))
         assertFalse(contactIsFresh(0, null))
         assertFalse(contactIsFresh(0, 1))
+    }
+
+    @Test
+    fun storedStatusHistoryIsBoundedAndRetainsCurrentPeers() {
+        val scheduler = ManualScheduler()
+        val data = testLocalData()
+        val link = StatusLink()
+        val phone = MatchSession(data, link, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE), clock = { scheduler.nowMs() })
+        phone.start()
+        link.deliver("pixel", Hello(DeviceId("pixel"), PeerKind.WATCH))
+        repeat(30) {
+            scheduler.advanceBy(1)
+            link.deliver("old-$it", Hello(DeviceId("old-$it"), PeerKind.WATCH))
+        }
+        assertEquals(16, phone.state.value.devices.size)
+        assertTrue(
+            phone.state.value.devices
+                .any { it.peer == "pixel" },
+        )
+        phone.retainDeviceStatuses(emptySet())
+        assertEquals(
+            listOf("pixel"),
+            phone.state.value.devices
+                .map { it.peer },
+        )
+        phone.close()
+        val restarted = MatchSession(data, null, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        assertEquals(
+            listOf("pixel"),
+            restarted.state.value.devices
+                .map { it.peer },
+        )
     }
 
     private class StatusLink : DeviceLink {

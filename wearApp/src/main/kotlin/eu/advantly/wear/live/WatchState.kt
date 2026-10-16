@@ -28,6 +28,7 @@ sealed interface WatchScreen {
         /** Telemetrie-Sichtbarkeit für Puls und Schritte (P2-J), mit dem Handy abgeglichen. */
         val telemetryVisibility: TelemetryVisibility = TelemetryVisibility.DEFAULT,
         val phoneLight: DeviceLight = DeviceLight.GRAY,
+        val developmentBuild: Boolean = false,
     ) : WatchScreen
 
     /** Kurz-Wizard (04 W2): Sport → Einzel/Doppel → Format → Erstaufschläger (= Start). */

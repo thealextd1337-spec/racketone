@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import eu.advantly.match.session.DeviceLight
+import eu.advantly.presentation.match.UpdateRequired
+import eu.advantly.wear.R
 import eu.advantly.wear.live.WatchScreen
 import eu.advantly.wear.workout.WorkoutPermissions
 import org.junit.Assert.assertFalse
@@ -42,12 +44,29 @@ class PhoneStatusUiTest {
 
     @Test fun grayPhoneStatusAtLargeFont() = check("de", DeviceLight.GRAY)
 
+    @Test fun olderPhoneShowsUpdateHint() = check("de", DeviceLight.RED, UpdateRequired.OTHER_DEVICE)
+
+    @Test fun newerPhoneShowsUpdateHint() = check("de", DeviceLight.RED, UpdateRequired.THIS_DEVICE)
+
+    @Test fun dirtyBuildShowsDevelopmentHint() = check("de", DeviceLight.YELLOW, developmentBuild = true)
+
     private fun check(
         language: String,
         light: DeviceLight = DeviceLight.YELLOW,
+        update: UpdateRequired? = null,
+        developmentBuild: Boolean = false,
     ) {
         RuntimeEnvironment.setFontScale(1.3f)
-        val home = WatchScreen.Home(null, null, emptyList(), workoutEnabled = false, phoneLight = light)
+        val home =
+            WatchScreen.Home(
+                null,
+                null,
+                emptyList(),
+                workoutEnabled = false,
+                phoneLight = light,
+                updateRequired = update,
+                developmentBuild = developmentBuild,
+            )
         rule.setContent { WearTestFrame { HomeScreen(home, WorkoutPermissions.ALL, false, recording<HomeActions>()) } }
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag(PHONE_STATUS_TAG))
         // ScrollToNode bringt den Eintrag zunächst an den Rand. Wie mit Krone/Rotary in die Kreismitte scrollen;
@@ -66,20 +85,40 @@ class PhoneStatusUiTest {
             rule.onNode(hasScrollToNodeAction()).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, offset) }
             rule.waitForIdle()
         }
-        rule.screenshot("home-phone-status-${light.name.lowercase()}-$language-206dp-font130")
+        val shot = "home-phone-status-${light.name.lowercase()}-$language-${update ?: "none"}-$developmentBuild-206dp-font130"
+        rule.screenshot(shot)
         val node = rule.onNodeWithTag(PHONE_STATUS_TAG).assertIsDisplayed()
         val layout = node.textLayout()
         val badge =
             when (light) {
                 DeviceLight.GREEN -> "✓"
                 DeviceLight.GRAY -> "–"
+                DeviceLight.RED -> "×"
                 else -> "!"
             }
         assertTrue(
             layout.layoutInput.text.text
                 .startsWith("$badge "),
         )
-        if (light == DeviceLight.YELLOW) {
+        if (update != null) {
+            val resource =
+                if (update ==
+                    UpdateRequired.THIS_DEVICE
+                ) {
+                    R.string.update_this_device
+                } else {
+                    R.string.update_other_device
+                }
+            assertTrue(
+                layout.layoutInput.text.text
+                    .contains(rule.activity.getString(resource)),
+            )
+        } else if (developmentBuild) {
+            assertTrue(
+                layout.layoutInput.text.text
+                    .contains("Entwicklungsbuild"),
+            )
+        } else if (light == DeviceLight.YELLOW) {
             assertTrue(
                 layout.layoutInput.text.text
                     .contains(if (language == "de") "Update empfohlen" else "update recommended"),
@@ -94,6 +133,6 @@ class PhoneStatusUiTest {
                 assertTrue("Handy-Status vollständig im Kreis: $bounds", hypot(x - root.center.x, y - root.center.y) <= radius + 1f)
             }
         }
-        rule.screenshot("home-phone-status-${light.name.lowercase()}-$language-206dp-font130")
+        rule.screenshot(shot)
     }
 }

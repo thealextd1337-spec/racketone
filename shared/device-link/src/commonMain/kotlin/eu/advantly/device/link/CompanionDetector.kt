@@ -19,6 +19,7 @@ enum class CompanionState {
 data class CompanionDevice(
     val peer: String,
     val name: String,
+    val appInstalled: Boolean = true,
 )
 
 /**

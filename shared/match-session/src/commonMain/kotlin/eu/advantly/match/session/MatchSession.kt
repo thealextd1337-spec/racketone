@@ -191,9 +191,12 @@ class MatchSession(
         runCatching {
             deviceJson
                 .decodeFromString<List<DeviceStatus>>(data.settings.get("session.deviceStatuses") ?: "[]")
+                .sortedByDescending { it.lastSeenAtMs }
+                .take(MAX_DEVICE_STATUSES)
                 .associateBy { it.peer }
                 .toMutableMap()
         }.getOrElse { mutableMapOf() }
+    private var persistedDeviceStatuses = deviceStatuses.toMap()
     private val lastContacts = HashMap<String, Long>()
     private val contactTimers = HashMap<String, Cancellable>()
     private val hellos = HashMap<String, Hello>()
@@ -238,6 +241,7 @@ class MatchSession(
         if (started) return
         data.migrateWatchPlaceholders()
         started = true
+        saveDeviceStatuses()
         link?.setListener(linkListener)
         link?.start()
         peersChanged(link?.peers.orEmpty())
@@ -1220,6 +1224,7 @@ class MatchSession(
                 null
             }
         maybeFollow(touched)
+        saveDeviceStatuses()
         publish()
     }
 
@@ -1227,7 +1232,10 @@ class MatchSession(
         peer: String,
         hello: Hello,
     ) {
-        hellos[peer] = hello
+        val previous = hellos.put(peer, hello)
+        val needsSync =
+            previous == null || previous.deviceId != hello.deviceId || previous.kind != hello.kind ||
+                previous.v != hello.v || previous.minV != hello.minV
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
         deviceStatuses[peer] =
@@ -1239,10 +1247,14 @@ class MatchSession(
                 lastSeenAtMs = clock.nowMs(),
             )
         saveDeviceStatuses()
-        data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
+        if (data.settings.get(peerKindKey(hello.deviceId)) != hello.kind.name) {
+            data.settings.put(peerKindKey(hello.deviceId), hello.kind.name)
+            knownKindsCache = null
+        }
         // Knoten → Gerät merken: das Routing kennt die Uhr so schon vor ihrem nächsten Hello
-        data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
-        knownKindsCache = null
+        if (data.settings.get(NODE_DEVICE_PREFIX + peer) != hello.deviceId.value) {
+            data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
+        }
         if (!result.isCompatible) {
             earlyOwners.remove(peer)
             return
@@ -1250,6 +1262,8 @@ class MatchSession(
         // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
         earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
         if (peer !in helloSent) sendHello(peer)
+        // Pro Link-Up nur einmal abgleichen. Wiederholte Hellos aktualisieren ausschließlich den Status.
+        if (!needsSync) return
         handOverToWaitingWatch(hello)
         handOverStrayMatches()
         sendDeleted(peer)
@@ -1615,13 +1629,45 @@ class MatchSession(
 
     // --- Senden -----------------------------------------------------------------------------------
 
+    /** Bekanntes Companion-Inventar: veraltete Statuszeilen entfernen, aktive Links immer behalten. */
+    fun retainDeviceStatuses(peers: Set<String>) {
+        checkThread()
+        val retained = peers + link?.peers.orEmpty()
+        if (deviceStatuses.keys.removeAll { it !in retained }) {
+            saveDeviceStatuses()
+            publish()
+        }
+    }
+
     private fun saveDeviceStatuses() {
+        // Statusspeicher begrenzen; aktive Links haben Vorrang vor alten Installationen.
+        val retained =
+            deviceStatuses.values
+                .sortedWith(
+                    compareByDescending<DeviceStatus> { it.peer in link?.peers.orEmpty() }.thenByDescending { it.lastSeenAtMs },
+                ).take(MAX_DEVICE_STATUSES)
+                .map { it.peer }
+                .toSet()
+        deviceStatuses.keys.retainAll(retained)
+        val snapshot =
+            deviceStatuses.mapValues { (peer, status) ->
+                val previous = persistedDeviceStatuses[peer]
+                // Empfangszeit im RAM aktuell halten, aber höchstens alle fünf Minuten schreiben.
+                if (previous != null && status.copy(lastSeenAtMs = previous.lastSeenAtMs) == previous &&
+                    (status.lastSeenAtMs ?: 0) - (previous.lastSeenAtMs ?: 0) in 0 until DEVICE_STATUS_SAVE_INTERVAL_MS
+                ) {
+                    previous
+                } else {
+                    status
+                }
+            }
         val json =
             deviceJson.encodeToString(
                 ListSerializer(DeviceStatus.serializer()),
-                deviceStatuses.values.toList(),
+                snapshot.values.toList(),
             )
         if (data.settings.get("session.deviceStatuses") != json) data.settings.put("session.deviceStatuses", json)
+        persistedDeviceStatuses = snapshot
     }
 
     private fun sendHello(peer: String) {
@@ -1825,9 +1871,6 @@ class MatchSession(
                 // Takt nur für Matches mit Replikationsziel (Director-Matches ohne Ziel halten ihn nicht am Laufen)
                 val active = opened.values.any { it.status != MatchStatus.FINISHED && hasReplicationTarget(it.id) }
                 if (active || pendingCount() > 0) sendSummaries()
-                // Hello als 30-s-Lebenszeichen: auch ältere Apps antworten ohne offenes Match mit Summary/Meta.
-                link?.peers.orEmpty().forEach(::sendHello)
-                saveDeviceStatuses()
                 publish()
                 scheduleAntiEntropy()
             }
@@ -1921,8 +1964,13 @@ class MatchSession(
             deviceStatuses.values.sortedBy { it.peer }.map { status ->
                 status.copy(
                     reachable =
-                        started && status.peer in link?.peers.orEmpty() &&
-                            contactIsFresh(scheduler.nowMs(), lastContacts[status.peer]),
+                        started && (
+                            status.peer in link?.peers.orEmpty() ||
+                                (
+                                    opened.values.any { it.status != MatchStatus.FINISHED } &&
+                                        contactIsFresh(scheduler.nowMs(), lastContacts[status.peer])
+                                )
+                        ),
                 )
             },
         )
@@ -2006,6 +2054,8 @@ class MatchSession(
     private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
     companion object {
+        private const val MAX_DEVICE_STATUSES = 16
+        private const val DEVICE_STATUS_SAVE_INTERVAL_MS = 300_000L
         private const val ARCHIVES_IN_META = 200
         private const val FAVORITES_IN_META = 10L
         private const val PEER_KIND_PREFIX = "session.peerKind."

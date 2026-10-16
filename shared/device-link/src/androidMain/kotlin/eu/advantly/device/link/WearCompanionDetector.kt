@@ -19,6 +19,7 @@ class WearCompanionDetector(
     private val nodeClient = Wearable.getNodeClient(appContext)
     private val handler = Handler(Looper.getMainLooper())
     private var listener: ((CompanionState) -> Unit)? = null
+    private var published: Pair<CompanionState, List<CompanionDevice>>? = null
     override var devices: List<CompanionDevice> = emptyList()
         private set
 
@@ -34,6 +35,7 @@ class WearCompanionDetector(
 
     override fun start(listener: (CompanionState) -> Unit) {
         this.listener = listener
+        published = null
         capabilityClient.addListener(capabilityListener, WearDataLayerTransport.CAPABILITY)
         handler.post(loop)
     }
@@ -47,7 +49,8 @@ class WearCompanionDetector(
                         nodeClient.connectedNodes
                             .addOnSuccessListener { connected ->
                                 val nodes = (info.nodes + connected).filter { it.id != local.id }.distinctBy { it.id }
-                                devices = nodes.map { CompanionDevice(it.id, it.displayName) }.sortedBy { it.peer }
+                                val installed = info.nodes.map { it.id }.toSet()
+                                devices = nodes.map { CompanionDevice(it.id, it.displayName, it.id in installed) }.sortedBy { it.peer }
                                 publish(
                                     when {
                                         info.nodes.any { it.id != local.id } -> CompanionState.APP_INSTALLED
@@ -64,11 +67,16 @@ class WearCompanionDetector(
         handler.removeCallbacks(loop)
         capabilityClient.removeListener(capabilityListener, WearDataLayerTransport.CAPABILITY)
         listener = null
+        published = null
     }
 
     private fun publish(state: CompanionState) {
         // Play-Services-Callbacks laufen auf dem Main-Thread
-        listener?.invoke(state)
+        val value = state to devices
+        if (value != published) {
+            published = value
+            listener?.invoke(state)
+        }
     }
 
     private companion object {

@@ -1,5 +1,6 @@
 package eu.advantly.ui.phone.home
 
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
@@ -38,6 +39,52 @@ class WatchStatusUiTest {
 
     @Test fun englishHeaderAndDetailsAtLargeFont() = check(Locale.US, 1.3f)
 
+    @Test fun germanStatusHints() = checkHints(Locale.GERMANY)
+
+    @Test fun englishStatusHints() = checkHints(Locale.US)
+
+    private fun checkHints(locale: Locale) {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(locale)
+            val de = locale.language == "de"
+            val build = AppBuild("0.1.0", "223dff1-dirty")
+            val store = InMemoryMatchStore().apply { localAppBuild = build }
+            val model = AdvantlyAppModel(store, store, store)
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                setContent {
+                    CompositionLocalProvider(LocalDensity provides Density(2f, 1.3f)) {
+                        AdvantlyTheme(darkTheme = true) { Surface(color = AdvantlyTheme.colors.bg) { HomeScreen(model) } }
+                    }
+                }
+                val variants =
+                    listOf(
+                        DeviceStatus("pixel", PeerKind.WATCH, compatibility = CompatibilityStatus.PEER_TOO_OLD) to
+                            if (de) "Advantly auf der Uhr aktualisieren." else "Update Advantly on the watch.",
+                        DeviceStatus("pixel", PeerKind.WATCH, compatibility = CompatibilityStatus.PEER_TOO_NEW) to
+                            if (de) "Advantly auf dem Handy aktualisieren." else "Update Advantly on the phone.",
+                        DeviceStatus("pixel", PeerKind.WATCH, appInstalled = false) to
+                            if (de) "Advantly ist auf deiner Uhr nicht installiert." else "Advantly is not installed on your watch.",
+                        DeviceStatus(
+                            "pixel",
+                            PeerKind.WATCH,
+                            appBuild = build,
+                            compatibility = CompatibilityStatus.COMPATIBLE,
+                            reachable = true,
+                        ) to
+                            if (de) "Entwicklungsbuild" else "Development build",
+                    )
+                variants.forEachIndexed { index, (device, hint) ->
+                    runOnIdle { store.setDeviceStatuses(listOf(device)) }
+                    onNodeWithTag("watch_status_pixel").assertContentDescriptionContains(hint, substring = true)
+                    screenshot("phone-status-hint-$index-${locale.language}")
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
     private fun check(
         locale: Locale,
         fontScale: Float,
@@ -45,7 +92,7 @@ class WatchStatusUiTest {
         val previous = Locale.getDefault()
         try {
             Locale.setDefault(locale)
-            val build = AppBuild("0.1.0", "223dff1-dirty", "2026-10-16T14:54:00Z")
+            val build = AppBuild("0.1.0", "223dff1", "2026-10-16T14:54:00Z")
             val store =
                 InMemoryMatchStore().apply {
                     localAppBuild = build
@@ -68,7 +115,7 @@ class WatchStatusUiTest {
             runDesktopComposeUiTest(width = 720, height = 1280) {
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(2f, fontScale)) {
-                        AdvantlyTheme(darkTheme = true) { HomeScreen(model) }
+                        AdvantlyTheme(darkTheme = true) { Surface(color = AdvantlyTheme.colors.bg) { HomeScreen(model) } }
                     }
                 }
                 onNodeWithTag("watch_status_pixel")
@@ -109,7 +156,7 @@ class WatchStatusUiTest {
                             } else {
                                 "Watch: "
                             }
-                        ) + "0.1.0 · 223dff1-dirty",
+                        ) + "0.1.0 · 223dff1",
                         substring = true,
                     ).performScrollTo()
                         .assertIsDisplayed()
