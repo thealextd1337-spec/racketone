@@ -50,7 +50,6 @@ import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
-import eu.advantly.presentation.live.LiveTelemetryStore
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,8 +98,6 @@ class SessionMatchStore(
     private val historyLimit: Long = DEFAULT_HISTORY_LIMIT,
     private val monotonic: MonotonicClock = MonotonicClock.System,
     private val companion: CompanionDetector? = null,
-    /** Flüchtiger Telemetrie-Eingang, den „Gar nicht“ sofort leert (P2-J); `null` = keiner. */
-    private val telemetryStore: LiveTelemetryStore? = LiveTelemetryStore.Phone,
 ) : MatchStore {
     private val data: LocalData = session.data
     private var aliases: Set<PlayerId> = emptySet()
@@ -500,9 +497,8 @@ class SessionMatchStore(
         trackScorerContact(state)
         updateWatchStatus(state)
         updateRequiredFlow.value = updateRequiredOf(state)
+        // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
-        // „Gar nicht“ – auch wenn die Uhr es eingestellt hat: gepufferte Werte sofort verwerfen
-        if (!state.telemetryVisibility.allowsLive) telemetryStore?.clear()
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }
