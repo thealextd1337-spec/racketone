@@ -89,9 +89,6 @@ class WatchController(
     /** Sichtbarkeit der Aufschlag-Leiste nach dem Punkt (monoton über [elapsed]). */
     private val serveBar = ServeBarTimer()
 
-    /** Eröffnungswahl schon getroffen? (Hinweis nach aufgehobener Wahl; aus dem Event-Log, übersteht Neustarts) */
-    private val openingChoice = OpeningChoiceCheck(directory::serverChosen)
-
     /** Monoton: seit wann der Zähler aus Sicht dieser Anzeige nicht verbunden ist. */
     private var disconnectedSince: Long? = null
 
@@ -695,7 +692,6 @@ class WatchController(
                         overlay = overlay,
                         serveBarPoint = serveBar.visiblePoint(elapsed()),
                         serveBarHideAtMillis = serveBar.hideAtMillis,
-                        choiceMadeInWindow = openingChoice.choiceMade(match),
                     ).copy(correctionRejected = correctionRejected),
             )
         }

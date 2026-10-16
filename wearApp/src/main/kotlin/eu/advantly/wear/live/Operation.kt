@@ -1,12 +1,9 @@
 package eu.advantly.wear.live
 
 import eu.advantly.core.model.EventId
-import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
-import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.ServeOutcome
-import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.OperationTimings
 import eu.advantly.match.session.ServerChoiceContext
@@ -42,9 +39,7 @@ data class ServeBarUi(
  * @property side Team, das nach Regel aufschlägt (Game 1: Vorschlag, dessen Spieler stehen vorn)
  * @property players wählbare Spieler in der Reihenfolge der Engine
  * @property chosen in diesem Fenster bereits gewählter Spieler, sonst `null`
- * @property prompt Hinweis „Aufschlag wählen“ im Mittelband zeigen: Wahl offen und nicht schon beim Start getroffen
- *   (Game 1 des ersten Satzes legt der Start-Assistent über den Erstaufschläger fest – es sei denn, in diesem Fenster
- *   wurde schon gewählt und eine Korrektur hat die Wahl wieder aufgehoben)
+ * @property prompt Hinweis „Aufschlag wählen“ im Mittelband zeigen, solange im aktuellen Fenster keine Wahl gilt
  */
 data class ServerChoiceUi(
     val game: Int,
@@ -54,30 +49,6 @@ data class ServerChoiceUi(
     val prompt: Boolean,
     val context: ServerChoiceContext? = null,
 )
-
-/**
- * Wurde im Eröffnungsfenster (Game 1 des ersten Satzes) schon ein Aufschläger gewählt? Hebt eine Korrektur diese Wahl
- * wieder auf (Engine: `chosen = null`, 02 §6.5.5), ist das nicht mehr die beim Start erledigte Wahl – der Hinweis
- * erscheint wieder. Rekonstruiert aus dem gespeicherten Event-Log ([chosenEvents]: wirksame und unwirksame
- * `ServerChosen` des Matches), damit es auch nach Prozessverlust bzw. neuer Activity stimmt. Gelesen wird nur in genau
- * diesem Fenster und nur, wenn sich die Zahl der Events geändert hat.
- */
-class OpeningChoiceCheck(
-    private val chosenEvents: (MatchId) -> List<Pair<EventId, ServerChosen>>,
-) {
-    private var cache: Pair<Pair<MatchId, Int>, Boolean>? = null
-
-    fun choiceMade(match: ActiveMatch?): Boolean {
-        val choice = match?.serverChoice ?: return false
-        if (choice.game != 1 || match.state.sets.isNotEmpty() || choice.chosen != null) return false
-        val set = match.state.current?.setIndex ?: return false
-        val key = match.id to match.eventCount
-        cache?.takeIf { it.first == key }?.let { return it.second }
-        val made = OperationRules.choiceMadeInSet(chosenEvents(match.id), set, match.state)
-        cache = key to made
-        return made
-    }
-}
 
 /**
  * Sichtbarkeit der Aufschlag-Leiste: erscheint nach jedem auf dieser Uhr gezählten Punkt für [VISIBLE_MILLIS], nach einer
@@ -162,15 +133,10 @@ object OperationRules {
         return ServeBarUi(last.id, options, last.serve, hideAtMillis)
     }
 
-    /**
-     * Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. [choiceMadeInWindow] = im
-     * Eröffnungsfenster wurde schon gewählt (siehe [OpeningChoiceCheck]) – dann ist `chosen = null` eine aufgehobene
-     * Wahl und wird wieder erfragt, auch in Game 1 des ersten Satzes.
-     */
+    /** Offene Aufschlägerwahl für die Uhr (nur Zähler); Spieler über [player] aufgelöst. */
     fun serverChoice(
         match: ActiveMatch,
         player: (PlayerId) -> PlayerUi?,
-        choiceMadeInWindow: Boolean = false,
     ): ServerChoiceUi? {
         if (!match.isScorer) return null
         val choice = match.serverChoice ?: return null
@@ -200,13 +166,6 @@ object OperationRules {
         if (live.serverChoice?.prompt == true) return StripAction.ChooseServer
         return null
     }
-
-    /** Gab es in Satz [set] eine Aufschlägerwahl, die die Engine angenommen hat (nicht ignoriert, nicht rollenfremd)? */
-    fun choiceMadeInSet(
-        chosen: List<Pair<EventId, ServerChosen>>,
-        set: Int,
-        state: MatchState,
-    ): Boolean = chosen.any { (id, event) -> event.set == set && id !in state.ignoredEvents && id !in state.rejectedByRole }
 
     /** Segment [index] der Aufschlag-Leiste → Wert. */
     fun serveOption(

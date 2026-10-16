@@ -206,7 +206,6 @@ object LiveModel {
         isSelf: (PlayerId) -> Boolean = { false },
         serveBarPoint: EventId? = null,
         serveBarHideAtMillis: Long = 0,
-        choiceMadeInWindow: Boolean = false,
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
@@ -265,7 +264,7 @@ object LiveModel {
             corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,
             canRemovePoint = match.canRemovePoint,
             serveBar = OperationRules.serveBar(match, serveBarPoint, serveBarHideAtMillis),
-            serverChoice = OperationRules.serverChoice(match, ::player, choiceMadeInWindow),
+            serverChoice = OperationRules.serverChoice(match, ::player),
             updateRequired = OperationRules.updateRequired(sync),
         )
     }
