@@ -6,6 +6,8 @@ plugins {
 
 android {
     namespace = "eu.advantly.wear"
+    // Compose-UI-Tests unter Robolectric (src/test) brauchen die App-Ressourcen (Strings, Drawables, Locales)
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -29,4 +31,8 @@ dependencies {
 
     // JVM-Tests der Session-Integration: SQLite über JDBC statt Android-Treiber
     testImplementation(libs.sqldelight.sqlite.driver)
+    // Layout-/Screenshot-Tests der Wear-UI: Compose-UI-Test unter Robolectric (runde Uhr-Displays über Qualifier)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

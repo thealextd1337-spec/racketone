@@ -1,32 +1,59 @@
 package eu.advantly.wear.ui
 
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material3.LocalTextStyle
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextToggleButton
@@ -34,6 +61,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.match.session.OperationTimings
 import eu.advantly.wear.R
 import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveUi
@@ -58,68 +86,199 @@ interface OperationActions {
 
 /**
  * Inhalt der Aktionsleiste ([ActionStrip]) über dem Mittelband des Scores. Die Taps verteilt der Gesten-Handler des
- * Score-Screens (Segmente über [ActionStrip.segment]); hier nur Darstellung und TalkBack-Aktionen.
- *
- * @param width Breite der Trefferzone ([StripGeometry.width])
- * @param height Höhe der sichtbaren Leiste ([StripGeometry.visualHeight]); die Trefferzone ist etwas höher
+ * Score-Screens (Segmente über [ActionStrip.segment]); hier nur Darstellung und TalkBack-Aktionen. Die sichtbare Leiste
+ * ist [StripGeometry.visualHeight] hoch und [StripGeometry.width] breit (die Trefferzone ist etwas höher).
  */
 @Composable
 fun ActionStripContent(
     action: StripAction,
     live: LiveUi,
-    width: Dp,
-    height: Dp,
+    geometry: StripGeometry,
     actions: LiveActions,
     modifier: Modifier = Modifier,
 ) {
-    val strip = modifier.size(width, height)
+    val density = LocalDensity.current
+    val strip = with(density) { modifier.size(geometry.width.toDp(), geometry.visualHeight.toDp()) }
     when (action) {
-        is StripAction.Serve -> ServeBar(action.bar, actions, strip)
+        is StripAction.Serve -> ServeBar(action.bar, geometry, actions, strip)
         StripAction.UndoRemoval -> UndoRemovalStrip(actions, strip)
         StripAction.ChooseServer -> ChooseServerStrip(live, actions, strip)
     }
 }
 
-/** „1. · 2. · DF“ – große Segmente, gewählter Wert hell hinterlegt. */
+/**
+ * „1. Aufschlag · 2. Aufschlag · Doppelfehler“ – ausgeschriebene Labels in großen Segmenten, gewählter Wert hell
+ * hinterlegt. Lage und Breite jedes Segments kommen aus [ActionStrip.segmentRanges] – dieselben Bereiche nutzt die
+ * Trefferprüfung ([onStripTap]), Darstellung und Tap passen also exakt zusammen.
+ */
 @Composable
 private fun ServeBar(
     bar: ServeBarUi,
+    geometry: StripGeometry,
     actions: OperationActions,
     modifier: Modifier,
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        bar.options.forEach { outcome ->
-            val selected = outcome == bar.selected
-            val description = serveText(outcome)
-            Box(
+    val density = LocalDensity.current
+    val ranges = ActionStrip.segmentRanges(geometry, OperationRules.serveWeights(bar))
+    val countdown = rememberServeCountdown(bar)
+    // schwarz hinterlegt: darunter liegende Namenszeilen scheinen nicht durch die Lücken
+    Box(modifier = modifier.background(Color.Black, SEGMENT_SHAPE)) {
+        bar.options.zip(ranges).forEach { (outcome, range) ->
+            ServeSegment(
+                outcome = outcome,
+                selected = outcome == bar.selected,
+                countdown = countdown,
                 modifier =
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .background(if (selected) Color.White else SegmentGray, PILL)
-                        .semantics {
-                            role = Role.Button
-                            this.selected = selected
-                            contentDescription = description
-                            onClick { actions.setServe(outcome) }
-                        },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    serveShortText(outcome),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color =
-                        when {
-                            selected -> Color.Black
-                            outcome == ServeOutcome.DOUBLE_FAULT -> ErrorRed
-                            else -> Color.White
-                        },
-                    maxLines = 1,
-                )
-            }
+                    with(density) {
+                        Modifier
+                            .offset(x = (range.start - geometry.left).toDp())
+                            .width((range.endInclusive - range.start).toDp())
+                            .fillMaxHeight()
+                    }.semantics(mergeDescendants = true) {
+                        role = Role.Button
+                        onClick { actions.setServe(outcome) }
+                    },
+            )
         }
     }
+}
+
+/**
+ * Ein Segment der Aufschlag-Leiste: Langlabel („1. Aufschlag“, „Doppelfehler“) höchstens zweizeilig, die Schrift passt
+ * sich der Segmentgröße an ([ServeLabel]) – auf kleinen runden Uhren und bei großer Systemschrift wird nichts abgeschnitten.
+ */
+@Composable
+private fun ServeSegment(
+    outcome: ServeOutcome,
+    selected: Boolean,
+    countdown: State<Float>,
+    modifier: Modifier,
+) {
+    val barColor = if (selected) Color.Black.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.45f)
+    Box(
+        modifier =
+            modifier
+                .semantics {
+                    this.selected = selected
+                    serveCountdown = countdown.value
+                }.background(if (selected) Color.White else SegmentGray, SEGMENT_SHAPE)
+                .drawWithContent {
+                    drawContent()
+                    drawCountdown(countdown.value, barColor)
+                    // unten Platz für den Restzeit-Balken: das Label bleibt frei lesbar
+                }.padding(start = 3.dp, end = 3.dp, top = 2.dp, bottom = COUNTDOWN_HEIGHT + COUNTDOWN_BOTTOM + 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        ServeLabel(
+            outcome = outcome,
+            color =
+                when {
+                    selected -> Color.Black
+                    outcome == ServeOutcome.DOUBLE_FAULT -> ErrorRed
+                    else -> Color.White
+                },
+        )
+    }
+}
+
+/** Langlabel eines Aufschlag-Werts, zweizeilig an Leerzeichen, Schriftgröße automatisch zwischen [ServeLabel.MIN_SP] und [ServeLabel.MAX_SP]. */
+@Composable
+private fun ServeLabel(
+    outcome: ServeOutcome,
+    color: Color,
+) {
+    val text = serveText(outcome)
+    // Untergrenze physisch (dp): bei großer Systemschrift darf das Label so klein werden wie bei normaler, statt
+    // abgeschnitten zu werden; nach oben wächst es mit der Systemschrift bis MAX_SP
+    val minSize = with(LocalDensity.current) { ServeLabel.MIN_SP.dp.toSp() }
+    BasicText(
+        text = text,
+        style =
+            LocalTextStyle.current.merge(
+                TextStyle(
+                    color = color,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 1.1.em,
+                ),
+            ),
+        // nur an Leerzeichen umbrechen: ein Wort („Doppelfehler“) bleibt einzeilig und wird notfalls kleiner, nie getrennt
+        maxLines = ServeLabel.maxLines(text),
+        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = ServeLabel.MAX_SP.sp, stepSize = 0.25.sp),
+    )
+}
+
+/**
+ * Monotone Uhr derselben Zeitbasis wie der Controller (`SystemClock.elapsedRealtime`, siehe MainActivity), in ms. Die
+ * Restzeit-Anzeige rechnet damit aus [ServeBarUi.hideAtMillis]; Tests setzen eine eigene Uhr.
+ */
+val LocalElapsedClock = staticCompositionLocalOf<() -> Long> { SystemClock::elapsedRealtime }
+
+/**
+ * Restzeit-Anzeige der Aufschlag-Leiste (Feldtest 2026-10-16): 1 → 0, immer aus Ausblendzeitpunkt − jetzt
+ * ([ServeBarUi.hideAtMillis], [LocalElapsedClock]) – auch beim Wiedereinstieg (z. B. zurück von der Steuerseite) und
+ * zwischen den Controller-Ticks stimmt sie also. Neuer Punkt bzw. Auswahl (neuer Ausblendzeitpunkt) starten sie neu.
+ * Läuft je Frame, nur solange die Leiste komponiert ist; bei „Animationen entfernen“ (Skala 0) springt sie nur mit den
+ * Zustands-Ticks (≈ 1×/s).
+ */
+@Composable
+internal fun rememberServeCountdown(bar: ServeBarUi): State<Float> {
+    val clock = LocalElapsedClock.current
+    val now = OperationTimings.remainingFraction(bar.hideAtMillis - clock())
+    val context = LocalContext.current
+    val reduceMotion =
+        remember(context) { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+    val ticked = rememberUpdatedState(now)
+    if (reduceMotion) return ticked
+    val progress = remember(bar.pointId, bar.hideAtMillis) { mutableFloatStateOf(now) }
+    LaunchedEffect(bar.pointId, bar.hideAtMillis, clock) {
+        while (true) {
+            withFrameMillis { }
+            val left = bar.hideAtMillis - clock()
+            progress.floatValue = OperationTimings.remainingFraction(left)
+            if (left <= 0) break
+        }
+    }
+    return progress
+}
+
+/** Dünner Restzeit-Balken unten im Segment, links verankert: das rechte Ende läuft nach links (wie das Halten). */
+private fun DrawScope.drawCountdown(
+    fraction: Float,
+    color: Color,
+) {
+    if (fraction <= 0f) return
+    val inset = COUNTDOWN_INSET.toPx()
+    val height = COUNTDOWN_HEIGHT.toPx()
+    val width = (size.width - 2 * inset) * fraction
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(inset, size.height - COUNTDOWN_BOTTOM.toPx() - height),
+        size = Size(width, height),
+        cornerRadius = CornerRadius(height / 2),
+    )
+}
+
+/** Restzeit-Anteil eines Aufschlag-Segments (für Tests und Barrierefreiheits-Werkzeuge). */
+val ServeCountdownKey = SemanticsPropertyKey<Float>("ServeCountdown")
+private var SemanticsPropertyReceiver.serveCountdown by ServeCountdownKey
+
+private val COUNTDOWN_HEIGHT = 2.dp
+private val COUNTDOWN_INSET = 8.dp
+private val COUNTDOWN_BOTTOM = 3.dp
+
+/** Schriftgrenzen und Zeilen der Aufschlag-Labels: [MIN_SP] als dp (unabhängig von der Systemschrift), [MAX_SP] in sp. */
+object ServeLabel {
+    const val MIN_SP = 8f
+    const val MAX_SP = 13f
+
+    /** Höchstens zwei Zeilen, aber nie mehr als Wörter – sonst würde ein einzelnes Wort mitten im Wort umbrechen. */
+    fun maxLines(text: String): Int =
+        text
+            .trim()
+            .split(' ')
+            .count { it.isNotEmpty() }
+            .coerceIn(1, 2)
 }
 
 /** „Punkt abgezogen · RÜCKGÄNGIG“ – die ganze Leiste ist die Schaltfläche (Redo). */
@@ -185,22 +344,42 @@ private fun ChooseServerStrip(
     }
 }
 
-/** Aufschlag-Leiste als Listeneintrag (Satzende-/Matchende-Seite): runde Umschalter „1.“, „2.“, „DF“. */
+/**
+ * Aufschlag-Leiste als Listeneintrag (Satzende-/Matchende-Seite): dieselben Segmente mit Langlabels wie im Score, hier
+ * als normale Schaltflächen in zwei Zeilen – „1. Aufschlag · 2. Aufschlag“, darunter „Doppelfehler“ über die volle
+ * Breite. So bleibt jedes Label einzeilig groß lesbar, auch wenn die Liste am runden Rand schmaler wird.
+ */
 @Composable
 fun ServeChips(
     bar: ServeBarUi,
     actions: OperationActions,
 ) {
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(ActionStrip.SEGMENT_GAP_DP.dp),
+    ) {
         Text(stringResource(R.string.serve_bar_title), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-            bar.options.forEach { outcome ->
-                val description = serveText(outcome)
-                TextToggleButton(
-                    checked = outcome == bar.selected,
-                    onCheckedChange = { actions.setServe(outcome) },
-                    modifier = Modifier.size(CHIP).semantics { contentDescription = description },
-                ) { Text(serveShortText(outcome), fontWeight = FontWeight.Bold) }
+        val countdown = rememberServeCountdown(bar)
+        bar.options.chunked(2).forEach { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(ActionStrip.SEGMENT_GAP_DP.dp),
+                modifier = Modifier.fillMaxWidth().height(CHIP_HEIGHT),
+            ) {
+                row.forEach { outcome ->
+                    ServeSegment(
+                        outcome = outcome,
+                        selected = outcome == bar.selected,
+                        countdown = countdown,
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(SEGMENT_SHAPE)
+                                .clickable(role = Role.Button) { actions.setServe(outcome) }
+                                .semantics(mergeDescendants = true) {},
+                    )
+                }
             }
         }
     }
@@ -234,8 +413,12 @@ fun NumberChips(
 }
 
 private val PILL = RoundedCornerShape(50)
+
+/** Segmente mit weniger stark gerundeten Ecken als [PILL], damit zweizeilige Labels nicht an der Rundung kleben. */
+private val SEGMENT_SHAPE = RoundedCornerShape(12.dp)
 private val SegmentGray = Color(0xFF2A2F38)
 private val CHIP = 44.dp
+private val CHIP_HEIGHT = 44.dp
 
 /** Tap auf die Aktionsleiste an [x] (px): Segment der Aufschlag-Leiste, Redo bzw. Auswahl öffnen. */
 fun onStripTap(
@@ -247,7 +430,7 @@ fun onStripTap(
     when (action) {
         is StripAction.Serve -> {
             ActionStrip
-                .segment(x, geometry, action.bar.options.size)
+                .segment(x, geometry, OperationRules.serveWeights(action.bar))
                 ?.let { OperationRules.serveOption(action.bar, it) }
                 ?.let { actions.setServe(it) }
         }

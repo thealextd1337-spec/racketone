@@ -34,8 +34,11 @@ import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.latency.InputClockSource
 import eu.advantly.ui.phone.platform.Haptics
+import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.live_court_left
 import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
+import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -294,6 +297,21 @@ class LiveScoreScreenTest {
             // Doppel: „Aufschläger → Rückschläger“ im Mittelband
             onNodeWithTag("serve_line", useUnmergedTree = true).assertExists()
             onNodeWithTag("current_us", useUnmergedTree = true).assertTextEquals("2")
+        }
+
+    /** Tennis/Padel-Doppel (Feldtest 2026-10-16): Aufschläger und Feld rechts/links, kein Rückschläger-Name. */
+    @Test
+    fun tennisAndPadelDoublesShowServerAndCourtWithoutReceiver() =
+        runComposeUiTest {
+            showLive(testModel().apply { startWith(Presets.TENNIS_DOUBLES_MTB10.format(), "A") })
+            val line =
+                onNodeWithTag("serve_line", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .config[SemanticsProperties.Text]
+                    .joinToString { it.text }
+            // ein Punkt gespielt (Summe ungerade): von links
+            assertTrue(line.endsWith(" · ${getString(Res.string.live_court_left)}"), line)
+            assertFalse("→" in line, line)
         }
 
     @Test

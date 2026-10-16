@@ -8,6 +8,7 @@ import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.match.session.ActiveMatch
+import eu.advantly.match.session.OperationTimings
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.presentation.match.UpdateRequired
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -18,15 +19,19 @@ import eu.advantly.wear.scoring.StripHit
 // Aktionsleiste im Mittelband und Versionshinweis – reine Modelle und Regeln ohne Android (JVM-getestet).
 
 /**
- * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2): „1. · 2. · DF“ für [pointId] (= `lastPoint`).
+ * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2): „1. Aufschlag · 2. Aufschlag · Doppelfehler“ für [pointId]
+ * (= `lastPoint`).
  *
  * @property options wählbare Werte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den Punkt gewann
  * @property selected aktuell erfasster Wert (markieren) oder `null`
+ * @property hideAtMillis Ausblendzeitpunkt (monotone Zeit des Controllers, `SystemClock.elapsedRealtime`); die
+ *   Restzeit-Anzeige rechnet hideAtMillis − jetzt und startet neu, wenn er sich ändert (neuer Punkt, Auswahl)
  */
 data class ServeBarUi(
     val pointId: EventId,
     val options: List<ServeOutcome>,
     val selected: ServeOutcome?,
+    val hideAtMillis: Long = 0,
 )
 
 /**
@@ -106,9 +111,12 @@ class ServeBarTimer(
     /** Punkt, für den die Leiste gerade sichtbar ist, sonst `null`. */
     fun visiblePoint(nowMillis: Long): EventId? = pointId?.takeIf { nowMillis < hideAt }
 
+    /** Ausblendzeitpunkt der sichtbaren Leiste (monotone Zeit). */
+    val hideAtMillis: Long get() = hideAt
+
     companion object {
-        const val VISIBLE_MILLIS = 5_000L
-        const val AFTER_CHOICE_MILLIS = 1_500L
+        const val VISIBLE_MILLIS = OperationTimings.SERVE_BAR_VISIBLE_MILLIS
+        const val AFTER_CHOICE_MILLIS = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
     }
 }
 
@@ -128,18 +136,28 @@ sealed interface StripAction {
 
 /** Reine Regeln für Aufschlag-Leiste, Aufschlägerwahl, Aktionsleiste und Versionshinweis. */
 object OperationRules {
-    /** Reihenfolge der Leiste: „1. · 2. · DF“. */
+    /** Reihenfolge der Leiste: „1. Aufschlag · 2. Aufschlag · Doppelfehler“. */
     private val SERVE_ORDER = listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT)
+
+    /**
+     * Relative Breite des Segments „Doppelfehler“: ein langes Wort ohne Umbruchstelle („Doppelfehler“), die anderen
+     * Labels brechen zweizeilig um („1.“ / „Aufschlag“).
+     */
+    const val DOUBLE_FAULT_WEIGHT = 1.3f
+
+    /** Relative Segmentbreiten der Aufschlag-Leiste (Darstellung und Treffer, [eu.advantly.wear.scoring.ActionStrip]). */
+    fun serveWeights(bar: ServeBarUi): List<Float> = bar.options.map { if (it == ServeOutcome.DOUBLE_FAULT) DOUBLE_FAULT_WEIGHT else 1f }
 
     /** Aufschlag-Leiste für [match], falls sie für [visiblePoint] gerade sichtbar ist (nur Zähler mit Aufschlag-Statistik). */
     fun serveBar(
         match: ActiveMatch,
         visiblePoint: EventId?,
+        hideAtMillis: Long = 0,
     ): ServeBarUi? {
         if (!match.isScorer || !match.serveInfoEnabled || visiblePoint == null) return null
         val last = match.lastPoint?.takeIf { it.id == visiblePoint } ?: return null
         val options = SERVE_ORDER.filter { it != ServeOutcome.DOUBLE_FAULT || last.doubleFaultAllowed }
-        return ServeBarUi(last.id, options, last.serve)
+        return ServeBarUi(last.id, options, last.serve, hideAtMillis)
     }
 
     /**
@@ -243,6 +261,26 @@ sealed interface TouchDecision {
  * sie zu einem anderen Punkt, wird die Eingabe verworfen – kein Rückfall aufs Zählen.
  */
 object TouchRouting {
+    /**
+     * Halten mit Fortschritt (Feldtest 2026-10-16): Auf welcher Hälfte läuft beim Aufsetzen die Halte-Anzeige, die nach
+     * [eu.advantly.wear.scoring.GestureClassifier.LONG_PRESS_MILLIS] auslöst? Nur auf den Zählflächen ([target] =
+     * [TouchTarget.Score]) und nur, wenn Halten dort etwas tut: entsperren (gesperrt) bzw. am Zähler den letzten Punkt
+     * dieser Seite abziehen ([canRemove]). Sonst `null` (kein Fortschritt; Halten meldet wie bisher „nichts abzuziehen“).
+     */
+    fun holdSide(
+        target: TouchTarget,
+        half: Side?,
+        locked: Boolean,
+        scorer: Boolean,
+        canRemove: Boolean,
+    ): Side? =
+        when {
+            target != TouchTarget.Score || half == null -> null
+            locked -> half
+            scorer && canRemove -> half
+            else -> null
+        }
+
     fun target(
         strip: StripAction?,
         hit: StripHit,

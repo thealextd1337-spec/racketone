@@ -235,6 +235,9 @@ internal fun deuceHint(
         DeuceMode.STAR_POINT -> Res.string.fmt_deuce_hint_star
     }
 
+/** Hilfe zum Entscheidungssatz: Padel spricht vom Super-Tiebreak, Tennis vom Champions-Tiebreak. */
+internal fun decidingHelp(sport: Sport?): WizardHelp = if (sport == Sport.PADEL) WizardHelp.DECIDING_PADEL else WizardHelp.DECIDING
+
 internal fun decidingTitle(sport: Sport?): StringResource =
     if (sport == Sport.PADEL) Res.string.fmt_deciding_title_padel else Res.string.fmt_deciding_title
 

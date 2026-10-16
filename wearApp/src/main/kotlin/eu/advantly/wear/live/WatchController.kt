@@ -609,6 +609,7 @@ class WatchController(
                     locked = locked,
                     overlay = overlay,
                     serveBarPoint = serveBar.visiblePoint(elapsed()),
+                    serveBarHideAtMillis = serveBar.hideAtMillis,
                     choiceMadeInWindow = openingChoice.choiceMade(match),
                 ),
             )

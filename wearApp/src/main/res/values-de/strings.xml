@@ -39,7 +39,7 @@
     <string name="format_best_of">Best of %1$d</string>
     <string name="format_open_sets">Offen (Satz für Satz)</string>
     <string name="format_open_games">Offen (Spiel für Spiel)</string>
-    <string name="format_tennis_mtb">Best of 3 · Match-Tiebreak</string>
+    <string name="format_tennis_mtb">Best of 3 · Champions-Tiebreak</string>
     <string name="format_one_set">1 Satz</string>
     <string name="format_short_sets">Kurzsätze bis 4</string>
     <string name="format_padel_golden">Best of 3 · Golden Point</string>
@@ -77,6 +77,8 @@
     <string name="sync_ago_minutes">vor %1$d min</string>
     <string name="sync_no_contact">Kein Kontakt</string>
     <string name="sync_last_update">Stand %1$s</string>
+    <string name="status_view_live">ANZEIGE · %1$s zählt</string>
+    <string name="status_view_stale">ANZEIGE · %1$s</string>
     <string name="take_over_offer">Zählen übernehmen</string>
     <plurals name="rejected_inputs">
         <item quantity="one">%1$d Eingabe nicht übernommen</item>
@@ -106,7 +108,8 @@
     <string name="hint_deuce">Einstand</string>
     <string name="hint_extension">Verlängerung</string>
     <string name="hint_tiebreak">Tiebreak</string>
-    <string name="hint_match_tiebreak">Match-Tiebreak</string>
+    <string name="hint_match_tiebreak">Champions-TB</string>
+    <string name="hint_super_tiebreak">Super-TB</string>
     <string name="hint_change_ends">Seitenwechsel</string>
     <string name="hint_receive_swap">Rückschlag tauschen</string>
     <string name="hint_side_out">Side-Out</string>
@@ -167,8 +170,8 @@
     <string name="unit_game">Spiel %1$d</string>
     <string name="decision_won">gewonnen</string>
     <string name="decision_lost">verloren</string>
-    <string name="dialog_another_set">Noch ein Satz?</string>
-    <string name="dialog_another_game">Noch ein Spiel?</string>
+    <string name="dialog_next_set">%1$d. Satz?</string>
+    <string name="dialog_next_game">%1$d. Spiel?</string>
     <string name="decision_waiting">%1$s entscheidet</string>
     <string name="finished_title">Match beendet</string>
 
@@ -183,7 +186,7 @@
         <item quantity="other">%1$d Games</item>
     </plurals>
     <string name="setup_serve_stats">Aufschlag-Statistik erfassen</string>
-    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1. · 2. · DF</string>
+    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1./2. Aufschlag oder Doppelfehler</string>
     <string name="live_remove_point_us">Letzten Punkt von uns abziehen</string>
     <string name="live_remove_point_them">Letzten Punkt der Gegner abziehen</string>
     <string name="live_point_removed">Punkt abgezogen</string>
@@ -192,9 +195,6 @@
     <string name="serve_first_in">1. Aufschlag</string>
     <string name="serve_second_in">2. Aufschlag</string>
     <string name="serve_double_fault">Doppelfehler</string>
-    <string name="serve_first_short">1.</string>
-    <string name="serve_second_short">2.</string>
-    <string name="serve_double_fault_short">DF</string>
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>
@@ -217,6 +217,11 @@
     <string name="a11y_score">Stand %1$s zu %2$s</string>
     <string name="a11y_serving_us">Aufschlag Wir</string>
     <string name="a11y_serving_them">Aufschlag Gegner</string>
+    <string name="serve_court_right">Rechts</string>
+    <string name="serve_court_left">Links</string>
+    <string name="a11y_serve_court_right">Aufschlag von rechts</string>
+    <string name="a11y_serve_court_left">Aufschlag von links</string>
+    <string name="a11y_server">%1$s schlägt auf</string>
     <string name="a11y_view_only">Anzeige, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->
@@ -246,7 +251,6 @@
     <string name="notification_match_title">Match läuft</string>
     <string name="notification_match_scorer">Diese Uhr zählt – tippen zum Öffnen</string>
     <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
-    <string name="live_workout_telemetry">♥ %1$s</string>
     <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
     <string name="telemetry_unknown">—</string>
     <string name="setup_unassigned">Nicht zugewiesen</string>

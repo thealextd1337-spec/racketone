@@ -55,6 +55,12 @@
 /* Aufschlagfeld links (Kurzform) */
 "serve.court.LEFT" = "L";
 
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Rechts“) */
+"serve.courtLong.RIGHT" = "Rechts";
+
+/* Tennis/Padel-Doppel: Feld des Aufschlägers ausgeschrieben („Max · Links“) */
+"serve.courtLong.LEFT" = "Links";
+
 /* Trenner in Spielständen (DE 6:4, EN 6–4) */
 "score.separator" = ":";
 
@@ -89,7 +95,10 @@
 "hint.TIEBREAK" = "Tiebreak";
 
 /* Hinweis-Pill im Mittelband (Uhr-Kurzform) */
-"hint.MATCH_TIEBREAK" = "Match-TB";
+"hint.MATCH_TIEBREAK" = "Champions-TB";
+
+/* Hinweis-Pill im Mittelband (Uhr-Kurzform), Padel */
+"hint.MATCH_TIEBREAK_PADEL" = "Super-TB";
 
 /* Hinweis-Pill mit Anzahl */
 "hint.MATCH_POINT.n %@" = "%@ Matchbälle";
@@ -164,13 +173,13 @@
 "setend.lost" = "verloren";
 
 /* Satzende-Dialog */
-"setend.question" = "Noch ein Satz?";
+"setend.question %@" = "%@. Satz?";
+
+/* Satzende-Dialog, Pickleball: nummerierte Frage nach dem nächsten Spiel */
+"setend.question.game %@" = "%@. Spiel?";
 
 /* Satzende-Dialog (Primäraktion) */
 "setend.yes" = "Ja";
-
-/* Satzende-Dialog: Match-Tiebreak statt Satz */
-"setend.matchTiebreak" = "Match-Tiebreak";
 
 /* Satzende-Dialog */
 "setend.no" = "Nein, beenden";
@@ -209,10 +218,10 @@
 "preset.TENNIS_SINGLES_BO5_FS10" = "Best of 5, Finalsatz-TB 10";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_BO3_MTB10" = "Best of 3 + Match-TB";
+"preset.TENNIS_BO3_MTB10" = "Best of 3 + Champions-TB";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_DOUBLES_MTB10" = "Doppel No-Ad + Match-TB";
+"preset.TENNIS_DOUBLES_MTB10" = "Doppel No-Ad + Champions-TB";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
 "preset.TENNIS_BO3_ADV_FINAL" = "Best of 3, Vorteilssatz";
@@ -233,7 +242,7 @@
 "preset.TENNIS_ONE_SET" = "Ein Satz";
 
 /* Preset-Name (02 §4, Uhr-Kurzform) */
-"preset.TENNIS_MATCH_TB_ONLY" = "Nur Match-Tiebreak";
+"preset.TENNIS_MATCH_TB_ONLY" = "Nur Champions-Tiebreak";
 "preset.TENNIS_TIEBREAK_ONLY_7" = "Nur Tiebreak (bis 7)";
 "preset.TENNIS_TIEBREAK_ONLY_10" = "Nur Champions-Tiebreak (bis 10)";
 
@@ -362,6 +371,15 @@
 /* Bedienhilfe: Aufschläger → Rückschläger im Doppel */
 "a11y.serveFromTo %@ %@" = "Spieler %1$@ schlägt auf Spieler %2$@ auf";
 
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.RIGHT %@" = "%@ schlägt von rechts auf";
+
+/* Bedienhilfe Tennis/Padel-Doppel: Aufschläger und Feld (ohne Rückschläger) */
+"a11y.serverFrom.LEFT %@" = "%@ schlägt von links auf";
+
+/* Bedienhilfe Tennis/Padel: Aufschläger ohne Feld (Entscheidungspunkt, Rückschläger wählt) */
+"a11y.serverOnly %@" = "%@ schlägt auf";
+
 /* Action + Seitentaste (PauseWorkoutIntent) */
 "intent.pause.title" = "Match unterbrechen";
 
@@ -457,9 +475,6 @@
 "action.removeThem" = "Letzten Punkt der Gegner abziehen";
 "action.restorePoint" = "Punkt zurückholen";
 "banner.pointRemoved" = "Punkt abgezogen";
-"serve.first.short" = "1.";
-"serve.second.short" = "2.";
-"serve.df.short" = "DF";
 "serve.first" = "1. Aufschlag";
 "serve.second" = "2. Aufschlag";
 "serve.df" = "Doppelfehler";

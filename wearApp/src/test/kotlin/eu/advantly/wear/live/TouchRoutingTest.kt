@@ -1,6 +1,7 @@
 package eu.advantly.wear.live
 
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.wear.scoring.ScoringGesture
 import eu.advantly.wear.scoring.StripHit
@@ -73,5 +74,25 @@ class TouchRoutingTest {
         assertEquals(TouchDecision.None, decide(score, ScoringGesture.TAP, null, scorer = false))
         assertEquals(TouchDecision.None, decide(score, ScoringGesture.LONG_PRESS, null, scorer = false))
         assertEquals(TouchDecision.None, decide(score, ScoringGesture.SWIPE_DOWN, null, scorer = false))
+    }
+
+    /** Halte-Fortschritt nur auf Zählflächen, wo Halten etwas bewirkt (Abziehen am Zähler bzw. Entsperren). */
+    @Test
+    fun holdProgressOnlyWhereHoldingDoesSomething() {
+        val score = TouchTarget.Score
+        assertEquals(Side.B, TouchRouting.holdSide(score, Side.B, locked = false, scorer = true, canRemove = true))
+        assertNull("nichts abzuziehen", TouchRouting.holdSide(score, Side.B, locked = false, scorer = true, canRemove = false))
+        assertNull("Anzeige zieht nie ab", TouchRouting.holdSide(score, Side.A, locked = false, scorer = false, canRemove = true))
+        assertEquals(
+            "gesperrt: Halten entsperrt",
+            Side.A,
+            TouchRouting.holdSide(score, Side.A, locked = true, scorer = true, canRemove = false),
+        )
+        assertNull("Totzone/Mittelband", TouchRouting.holdSide(score, null, locked = false, scorer = true, canRemove = true))
+        assertNull(
+            "Aktionsleiste",
+            TouchRouting.holdSide(TouchTarget.Strip(serveP1), Side.A, locked = false, scorer = true, canRemove = true),
+        )
+        assertNull("Schutzstreifen", TouchRouting.holdSide(TouchTarget.Guard, Side.A, locked = false, scorer = true, canRemove = true))
     }
 }

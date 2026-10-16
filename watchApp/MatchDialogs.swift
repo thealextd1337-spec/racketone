@@ -1,7 +1,7 @@
 import AdvantlyWatchKit
 import SwiftUI
 
-/// W6 Satzende-Dialog (Modus OPEN, 04 §3.3): „Noch ein Satz?“ – Ja primär, Nein sekundär, kein Countdown.
+/// W6 Satzende-Dialog (Modus OPEN, 04 §3.3): „2. Satz?“ (nummeriert) – Ja primär, Nein sekundär, kein Countdown.
 /// Bleibt stehen, bis jemand antwortet (Workout läuft weiter). Undo nimmt den Satzball zurück.
 /// Nur der Zähler entscheidet; als Anzeige zeigt die Uhr Satzergebnis und „[Gerät] entscheidet“ (04 §3.3).
 struct SetEndView: View {
@@ -24,7 +24,9 @@ struct SetEndView: View {
                 Text(LocalizedStringKey(won ? "setend.won" : "setend.lost"))
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(won ? Brand.us : Brand.them)
-                Text("setend.question")
+                // Nummeriert nach dem nächsten Satz (Feldtest 2026-10-16): „2. Satz?“, Pickleball „2. Spiel?“
+                Text(snap.sport == "PICKLEBALL" ? loc("setend.question.game %@", String(setNumber + 1))
+                     : loc("setend.question %@", String(setNumber + 1)))
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
                 if snap.isScorer {
