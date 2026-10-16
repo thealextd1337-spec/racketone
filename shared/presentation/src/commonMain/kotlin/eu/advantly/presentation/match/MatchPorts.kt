@@ -566,8 +566,9 @@ interface PlayersPort {
     ): Boolean
 }
 
-/** Alle drei Ports aus einer Quelle (In-Memory für Tests/Previews, Session-Adapter in den Apps). */
+/** Alle Ports aus einer Quelle (In-Memory für Tests/Previews, Session-Adapter in den Apps). */
 interface MatchStore :
     LiveMatchPort,
     MatchHistoryPort,
-    PlayersPort
+    PlayersPort,
+    TelemetrySettingsPort

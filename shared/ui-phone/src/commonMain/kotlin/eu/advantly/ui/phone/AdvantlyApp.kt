@@ -30,6 +30,7 @@ import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
+import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
@@ -86,6 +87,7 @@ fun AdvantlyApp(
     val self by model.players.self.collectAsState()
     val aliases by model.players.ownerAliases.collectAsState()
     val updateRequired by model.live.updateRequired.collectAsState()
+    val telemetryVisibility by model.telemetry.telemetryVisibility.collectAsState()
     val navigator = model.navigator
     if (autoBenchmark) {
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
@@ -96,7 +98,12 @@ fun AdvantlyApp(
         model.live.refreshWatchStatus()
         onPauseOrDispose {}
     }
-    CompositionLocalProvider(LocalSelfId provides self.id, LocalSelfAliases provides aliases, LocalArchivedPlayerIds provides archived) {
+    CompositionLocalProvider(
+        LocalSelfId provides self.id,
+        LocalSelfAliases provides aliases,
+        LocalArchivedPlayerIds provides archived,
+        LocalTelemetryVisibility provides telemetryVisibility,
+    ) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
@@ -226,9 +233,13 @@ private fun TabLayer(
                                     modifier = Modifier.testTag("profile_account"),
                                 ) { Text(stringResource(Res.string.auth_open)) }
                             }
-                            ComingSoonScreen(AppTab.Profile, versionName, players = model.players, onPlayerHistory = {
-                                navigator.push(Overlay.PlayerHistory(it))
-                            })
+                            ComingSoonScreen(
+                                AppTab.Profile,
+                                versionName,
+                                players = model.players,
+                                onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
+                                telemetry = model.telemetry,
+                            )
                         }
                     }
                 }

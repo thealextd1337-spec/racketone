@@ -33,7 +33,8 @@ import java.util.concurrent.TimeoutException
  *   Session alle gespeichert hat. Gelöscht wird ein Item erst NACH dem Speichern; bleibt es wegen Timeout/Prozess-Tod
  *   liegen, liest es der Transport beim nächsten Start erneut (idempotent).
  *
- * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und ihr Uhr-Match mit Workout.
+ * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und ihr Uhr-Match mit Workout,
+ *   nie bei Telemetrie-Sichtbarkeit „Gar nicht“ (P2-J).
  *
  * Callbacks laufen auf einem Worker-Thread; die Session nur auf dem Main-Thread benutzen.
  */
@@ -55,6 +56,8 @@ class PhoneSyncListenerService : WearableListenerService() {
                         watchMatch?.id,
                         watchMatch?.meta?.watchWorkout == true,
                         state.sync.peers,
+                        // „Gar nicht“ (P2-J): auch Werte einer älteren Uhr ohne diese Einstellung verwerfen
+                        state.telemetryVisibility,
                     )
                 ) {
                     LiveTelemetryStore.Phone.receive(payload)

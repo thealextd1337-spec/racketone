@@ -25,7 +25,10 @@ fun interface TelemetryMessageClient {
     )
 }
 
-/** RAM-Abo des eigenen Handys; Annahme und Alter werden unabhängig vom Versand geprüft. Main-Thread. */
+/**
+ * RAM-Abo des eigenen Handys; Annahme und Alter werden unabhängig vom Versand geprüft. Bei Telemetrie-Sichtbarkeit
+ * „Gar nicht“ (P2-J) wird kein Abo angenommen und ein bestehendes verworfen ([clear]). Main-Thread.
+ */
 class LiveTelemetrySubscriptions {
     private var current: ReceivedTelemetrySubscription? = null
 
@@ -35,13 +38,19 @@ class LiveTelemetrySubscriptions {
         state: SessionState,
         nowMs: Long,
     ) {
-        if (value.v !in LiveTelemetrySubscription.MIN_VERSION..LiveTelemetrySubscription.CURRENT_VERSION ||
+        if (!state.telemetryVisibility.allowsLive ||
+            value.v !in LiveTelemetrySubscription.MIN_VERSION..LiveTelemetrySubscription.CURRENT_VERSION ||
             state.match?.id != value.matchId || state.match?.meta?.watchWorkout != true ||
             !LiveTelemetryGate.compatiblePeer(state.sync.peers, nodeId, PeerKind.PHONE)
         ) {
             return
         }
         current = ReceivedTelemetrySubscription(value.matchId, nodeId, nowMs)
+    }
+
+    /** Abo verwerfen („Gar nicht“): bis zum nächsten angenommenen Keepalive wird nichts gesendet. */
+    fun clear() {
+        current = null
     }
 
     fun isFresh(
@@ -76,6 +85,11 @@ class LiveTelemetrySender(
         exerciseActive: Boolean,
     ) {
         val current = state()
+        if (!current.telemetryVisibility.allowsLive) {
+            // „Gar nicht“ (P2-J): nichts senden, Abo verwerfen (kein Puffer, keine Wiederholung)
+            subscriptions.clear()
+            return
+        }
         val match = current.match ?: return
         val phone =
             current.sync.peers.singleOrNull {

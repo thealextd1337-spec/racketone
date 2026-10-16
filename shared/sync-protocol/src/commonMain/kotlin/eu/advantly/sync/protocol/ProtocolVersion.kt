@@ -22,6 +22,9 @@ package eu.advantly.sync.protocol
  *   kann Version 2 nicht dekodieren. Keine verlustbehaftete Rückübersetzung; gespeicherte Logs der Versionen 1/2 bleiben
  *   lesbar.
  *
+ *   Additiv in Version 3 (P2-J): `MatchMeta.telemetry` (Telemetrie-Sichtbarkeit). Ältere Geräte der Version 3 ignorieren
+ *   das Feld; fehlt es, behält der Empfänger seinen Wert. Kein Versionssprung nötig.
+ *
  * **Warum [MIN_SUPPORTED] = [CURRENT]:** Events lassen sich nicht in eine ältere Version „herunterschreiben“ – ein Log,
  * das die neuen Inhalte enthält, käme bei einem älteren Gerät nur teilweise an (es verwirft die unlesbaren
  * `Events`-Nachrichten still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand mit falschem

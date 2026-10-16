@@ -45,6 +45,11 @@ data class WorkoutUiState(
     val heartRateAvailability: String? = null,
     val error: WorkoutError? = null,
     val errorDetail: String? = null,
+    /**
+     * Telemetrie-Sichtbarkeit erlaubt Live-Werte (P2-J): `false` bei „Gar nicht“ – dann keine Messwerte im Zustand, keine
+     * Puls-/Schritte-Spalten und kein Versand. Setzt [eu.advantly.wear.live.WatchTelemetryPolicy].
+     */
+    val telemetryAllowed: Boolean = true,
 ) {
     override fun toString(): String = "WorkoutUiState(phase=$phase, telemetry=<redacted>)"
 }

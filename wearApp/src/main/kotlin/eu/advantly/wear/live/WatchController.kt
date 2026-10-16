@@ -5,6 +5,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
@@ -151,6 +152,12 @@ class WatchController(
         prefs.workoutEnabled = enabled
         publish()
     }
+
+    /**
+     * Telemetrie-Sichtbarkeit auf der Uhr ändern (P2-J): gilt sofort hier und geht an das Handy (letzte Änderung gewinnt).
+     * Die Session meldet den neuen Zustand über den Listener, der die Startliste neu aufbaut.
+     */
+    fun setTelemetryVisibility(visibility: TelemetryVisibility) = session.setTelemetryVisibility(visibility)
 
     // --- Kurz-Wizard ------------------------------------------------------------------------------
 
@@ -663,7 +670,15 @@ class WatchController(
             session.state.value.sync.peers
                 .any { it.kind == PeerKind.PHONE && it.compatibility == CompatibilityStatus.COMPATIBLE }
         val updateRequired = OperationRules.updateRequired(session.state.value.sync)
-        return WatchScreen.Home(resume, last, recent, prefs.workoutEnabled, phoneConnected, updateRequired)
+        return WatchScreen.Home(
+            resume,
+            last,
+            recent,
+            prefs.workoutEnabled,
+            phoneConnected,
+            updateRequired,
+            session.state.value.telemetryVisibility,
+        )
     }
 
     private fun nameOf(id: PlayerId): String? =

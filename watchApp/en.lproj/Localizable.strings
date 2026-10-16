@@ -162,6 +162,15 @@
 
 /* Fitness-Seite ohne HealthKit */
 "fitness.noHealth" = "No Health access: counting only. The app may pause when your wrist is down.";
+/* P2-J: Telemetrie-Sichtbarkeit (Startliste, mit dem iPhone abgeglichen) */
+"start.telemetry" = "Heart rate & steps";
+"start.telemetry.share" = "Share";
+"start.telemetry.private" = "Only me";
+"start.telemetry.off" = "Off";
+"start.telemetry.shareHint" = "Like “Only me” for now – sharing starts once friends and live view are available.";
+"start.telemetry.privateHint" = "Only on this watch and your iPhone.";
+"start.telemetry.offHint" = "Not shown, nothing is sent.";
+"fitness.telemetryOff" = "Heart rate hidden (Heart rate & steps: Off).";
 
 /* Satzende-Dialog: Satznummer und Stand */
 "setend.title %@ %@" = "Set %1$@ · %2$@";

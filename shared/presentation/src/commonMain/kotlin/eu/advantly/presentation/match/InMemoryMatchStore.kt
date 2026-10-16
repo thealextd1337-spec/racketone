@@ -10,6 +10,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
@@ -105,6 +106,13 @@ class InMemoryMatchStore(
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
+
+    private val telemetryFlow = MutableStateFlow(TelemetryVisibility.DEFAULT)
+    override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
+
+    override fun setTelemetryVisibility(visibility: TelemetryVisibility) {
+        telemetryFlow.value = visibility
+    }
 
     /** Ein Gerät: nie ein Versionsunterschied. */
     override val updateRequired: StateFlow<UpdateRequired?> = MutableStateFlow<UpdateRequired?>(null).asStateFlow()

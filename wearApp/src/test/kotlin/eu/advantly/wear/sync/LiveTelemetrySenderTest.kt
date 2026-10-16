@@ -3,6 +3,7 @@ package eu.advantly.wear.sync
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Presets
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.LiveTelemetry
@@ -113,5 +114,37 @@ class LiveTelemetrySenderTest {
         )
         sender.onUpdate(workout, true)
         assertEquals(0, sent.size)
+    }
+
+    /** P2-J: „Gar nicht“ stoppt den Versand sofort, verwirft das Abo und nimmt keine neuen an. */
+    @Test
+    fun offSendsNothingDropsTheSubscriptionAndRejectsNewOnes() {
+        subscribe()
+        sender.onUpdate(workout, true)
+        assertEquals(1, sent.size)
+        harness.watch.setTelemetryVisibility(TelemetryVisibility.OFF)
+        now = 5_000
+        sender.onUpdate(workout, true)
+        subscribe()
+        now = 10_000
+        sender.onUpdate(workout, true)
+        assertEquals(1, sent.size)
+        // wieder erlaubt: erst ein neues Abo des Handys startet den Versand
+        harness.watch.setTelemetryVisibility(TelemetryVisibility.PRIVATE)
+        now = 15_000
+        sender.onUpdate(workout, true)
+        assertEquals(1, sent.size)
+        subscribe()
+        sender.onUpdate(workout, true)
+        assertEquals(2, sent.size)
+    }
+
+    /** „Teilen“ verhält sich heute wie „Nur für mich“ (nur eigenes Handy). */
+    @Test
+    fun shareBehavesLikePrivateForTheOwnPhone() {
+        harness.watch.setTelemetryVisibility(TelemetryVisibility.SHARE)
+        subscribe()
+        sender.onUpdate(workout, true)
+        assertEquals(1, sent.size)
     }
 }

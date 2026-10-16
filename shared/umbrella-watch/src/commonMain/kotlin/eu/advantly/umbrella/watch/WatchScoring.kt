@@ -13,6 +13,7 @@ import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Callout
 import eu.advantly.core.scoring.Effect
 import eu.advantly.core.scoring.FlagLevel
@@ -68,6 +69,8 @@ import eu.advantly.sync.protocol.SyncCodec
  *   (z. B. vom iPhone so angelegt), dreht die Facade die Seiten; ohne Besitzer im Match gilt Engine-A = „Wir“.
  * - **Self:** Neue Matches lesen den Self jedes Mal frisch aus `players` – nach dem ersten `Hello` übernimmt die Session
  *   den Self des iPhones (`adoptSelf`), der alte Uhr-Self wird Alias.
+ * - **Telemetrie-Sichtbarkeit (P2-J):** [telemetryVisibility]/[setTelemetryVisibility] (`share`/`private`/`off`),
+ *   unabhängig vom offenen Match; bei `off` zeigt die Uhr keinen Puls.
  * - **Workout-Wunsch:** `MatchMeta.watchWorkout` – auf der Uhr gestartete Matches schreiben den Wunsch der Uhr hinein,
  *   vom iPhone gestartete bringen dessen Wahl mit ([WatchScoreSnapshot.watchWorkout]).
  * - Nur auf der Main-Queue aufrufen; [WatchScoringListener] wird synchron auf der Main-Queue benachrichtigt (auch bei
@@ -485,6 +488,26 @@ class WatchScoring internal constructor(
     fun syncNow() {
         val b = backend() ?: return
         call { b.session.syncNow() }
+    }
+
+    // --- Telemetrie-Sichtbarkeit (P2-J, F19/F29) -------------------------------------------------------------------
+
+    /**
+     * Telemetrie-Sichtbarkeit für Puls (und Schritte): `share`, `private` (Standard) oder `off`. Mit dem iPhone abgeglichen
+     * (letzte Änderung gewinnt); Änderungen von dort melden sich über [WatchScoringListener] (Swift liest dann neu).
+     * `off` = keinen Puls anzeigen (die Workout-Session darf als Laufzeitanker weiterlaufen). Ohne Datenbank der Standard.
+     */
+    fun telemetryVisibility(): String {
+        val b = backend() ?: return TelemetryVisibility.DEFAULT.wire
+        return call(STORE_READ) { b.session.state.value.telemetryVisibility.wire } ?: TelemetryVisibility.DEFAULT.wire
+    }
+
+    /** Ändert die Telemetrie-Sichtbarkeit auf der Uhr (`share`/`private`/`off`); unbekannter Wert → `INVALID_INPUT`. */
+    fun setTelemetryVisibility(value: String): Boolean {
+        error = ""
+        val visibility = TelemetryVisibility.fromWire(value) ?: return false.also { error = INVALID_INPUT }
+        val b = backend() ?: return false.also { error = STORE_READ }
+        return call { b.session.setTelemetryVisibility(visibility) } != null
     }
 
     /**

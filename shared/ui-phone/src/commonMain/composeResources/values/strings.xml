@@ -425,6 +425,16 @@
     <string name="live_telemetry_heart_rate">Heart rate: %1$s bpm</string>
     <string name="live_telemetry_steps">Steps: %1$s</string>
     <string name="live_telemetry_unknown">—</string>
+    <!-- P2-J: Telemetrie-Sichtbarkeit (Profil) -->
+    <string name="telemetry_section">Heart rate &amp; steps</string>
+    <string name="telemetry_intro">Who may see heart rate and steps from your watch. Applies to your watch and this phone. Nothing is stored.</string>
+    <string name="telemetry_share">Share</string>
+    <string name="telemetry_share_sub">Like “Only me” for now; later also for friends and the live view.</string>
+    <string name="telemetry_private">Only me (default)</string>
+    <string name="telemetry_private_sub">Shown live on your watch and this phone only.</string>
+    <string name="telemetry_off">Off</string>
+    <string name="telemetry_off_sub">No live display, your watch sends nothing and buffered values are discarded.</string>
+    <string name="telemetry_share_pending">Takes effect once friends and the live view are available.</string>
     <string name="home_open_matches">Running matches (%1$d)</string>
     <string name="home_new_match_parallel">Start another court – running matches keep going.</string>
     <string name="open_match_watch_scores">Your watch scores</string>

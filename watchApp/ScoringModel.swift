@@ -57,6 +57,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     @Published private(set) var lastSetup: WatchMatchSetup?
     @Published private(set) var recentPeople: [WatchPlayer] = []
     @Published private(set) var updateRequired = ""
+    /// Telemetrie-Sichtbarkeit (P2-J): `share`, `private` (Standard) oder `off`; mit dem iPhone abgeglichen.
+    @Published private(set) var telemetryVisibility = "private"
     /// Ausschließlich nach einem lokalen Punkt sichtbar; Sync-/Ack-Updates verlängern die Frist nicht.
     @Published private(set) var serveBarPointId = ""
     private var serveBarWork: DispatchWorkItem?
@@ -100,6 +102,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         scoring.setListener(listener: self)
         lastSetup = scoring.lastSetup()
         refreshStartInfo()
+        refreshTelemetryVisibility()
         workout.onUnavailable = { [weak self] in
             if self?.snapshot != nil { self?.show(.healthUnavailable) }
         }
@@ -119,6 +122,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         self.snapshot = snapshot
         // Mit Match kommt der Versionshinweis direkt aus dem Snapshot; ohne Match liest der Getter nur Session-State.
         updateRequired = snapshot?.updateRequired ?? scoring.updateRequired()
+        // Auch eine Änderung der Telemetrie-Sichtbarkeit am iPhone meldet sich hier
+        refreshTelemetryVisibility()
         if snapshot?.matchId != before?.matchId {
             recentPeople = scoring.recentPeople()
         }
@@ -150,6 +155,22 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         } else {
             syncWorkout()
         }
+    }
+
+    /// Puls anzeigen? `false` bei Telemetrie-Sichtbarkeit „Gar nicht“ (P2-J).
+    var telemetryShown: Bool { telemetryVisibility != "off" }
+
+    /// Telemetrie-Sichtbarkeit auf der Uhr ändern; geht ans iPhone (letzte Änderung gewinnt).
+    func setTelemetryVisibility(_ value: String) {
+        _ = scoring.setTelemetryVisibility(value: value)
+        refreshTelemetryVisibility()
+    }
+
+    private func refreshTelemetryVisibility() {
+        let value = scoring.telemetryVisibility()
+        if value != telemetryVisibility { telemetryVisibility = value }
+        let allowed = value != "off"
+        if workout.telemetryAllowed != allowed { workout.telemetryAllowed = allowed }
     }
 
     /// Personenverzeichnis nur beim Betreten des Starts oder beim Matchwechsel aus der Datenbank lesen.

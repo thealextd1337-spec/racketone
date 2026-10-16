@@ -10,6 +10,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.CurrentSet
@@ -133,6 +134,8 @@ class SessionMatchStore(
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
     private val updateRequiredFlow = MutableStateFlow<UpdateRequired?>(null)
     override val updateRequired: StateFlow<UpdateRequired?> = updateRequiredFlow.asStateFlow()
+    private val telemetryFlow = MutableStateFlow(session.state.value.telemetryVisibility)
+    override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
 
     // Zustand für Revision und „Stand vor X s“
@@ -181,6 +184,9 @@ class SessionMatchStore(
         watchStatusFlow.value = status
         watchFlow.value = status == WatchStatus.AVAILABLE
     }
+
+    /** Speichert über die Session; sie gleicht mit der eigenen Uhr ab (letzte Änderung gewinnt). */
+    override fun setTelemetryVisibility(visibility: TelemetryVisibility) = session.setTelemetryVisibility(visibility)
 
     /** Workout-Wunsch des Matches (`MatchMeta.watchWorkout`, geht mit dem Match-Kopf an die Uhr), `null` = unbekannt. */
     fun watchWorkout(matchId: MatchId): Boolean? =
@@ -491,6 +497,8 @@ class SessionMatchStore(
         trackScorerContact(state)
         updateWatchStatus(state)
         updateRequiredFlow.value = updateRequiredOf(state)
+        // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
+        telemetryFlow.value = state.telemetryVisibility
         if (storedDataMayHaveChanged(previous, state)) refreshStored()
         publishActive(state)
     }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import eu.advantly.core.model.Side
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.live.SetColumn
@@ -20,6 +21,7 @@ import eu.advantly.wear.live.CourtLetter
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
 import eu.advantly.wear.live.SyncUi
+import eu.advantly.wear.live.WatchTelemetryPolicy
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.scoring.TapZones
 import eu.advantly.wear.workout.WorkoutUiState
@@ -159,6 +161,23 @@ class ScoreLayoutUiTest {
         render(singles(), WorkoutUiState())
         assertTrue(rule.onAllNodesWithTag(LiveTags.HEART_RATE, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertNoOverlaps(bottomLine = false, telemetry = false)
+    }
+
+    /**
+     * Telemetrie „Gar nicht“ (P2-J) bei laufendem Workout auf der Pflichtgröße (Galaxy Watch8, 206 dp, Schrift 1,3): keine
+     * Puls-/Schritte-Spalten, das Mittelband und die Namen bleiben sauber und überlappungsfrei.
+     */
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun telemetryOffHidesHeartRateAndStepsOnGalaxyWatch8() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        val off = WatchTelemetryPolicy.apply(activeWorkout(), TelemetryVisibility.OFF)
+        render(singles(), off)
+        for (tag in listOf(LiveTags.HEART_RATE, LiveTags.STEPS)) {
+            assertTrue("$tag ausgeblendet", rule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        }
+        assertNoOverlaps(bottomLine = false, telemetry = false)
+        rule.screenshot("score-telemetry-off-de-galaxy8-font130")
     }
 
     /** Toast im Mittelband (zwischen Puls und Schritten) bleibt im Kreis und überdeckt die Telemetrie nicht. */
