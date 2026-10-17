@@ -159,7 +159,21 @@ export class AdminView {
         const password = passwordInput?.value ?? "";
         if (passwordInput) passwordInput.value = "";
         this.emit("sign-in", { email: values.get("email"), password });
-      } else if (form.dataset.form === "verify-totp") this.emit("verify-totp", { code: values.get("code") });
+      } else if (["verify-totp", "verify-recovery"].includes(form.dataset.form)) {
+        const code = values.get("code");
+        const input = form.elements.namedItem("code");
+        if (input) input.value = "";
+        this.emit(form.dataset.form, { code });
+      } else if (form.dataset.form === "request-recovery") this.emit("request-recovery", { email: values.get("email") });
+      else if (form.dataset.form === "update-password") {
+        const password = values.get("password");
+        const confirmation = values.get("confirmation");
+        for (const name of ["password", "confirmation"]) {
+          const input = form.elements.namedItem(name);
+          if (input) input.value = "";
+        }
+        this.emit("update-password", { password, confirmation });
+      }
       else if (form.dataset.form === "ticket-update") this.emit("save-ticket", { fields: Object.fromEntries(values.entries()) });
       else if (form.dataset.form === "message") this.emit("send-message");
     };
@@ -203,7 +217,8 @@ export class AdminView {
     const frame = node("div", "app-frame");
     if (state.phase === "missing-config") frame.append(this.renderMissingConfig(state));
     else if (state.phase === "login") frame.append(this.renderLogin(state));
-    else if (state.phase === "mfa-setup" || state.phase === "mfa-challenge") frame.append(this.renderMfa(state));
+    else if (["mfa-setup", "mfa-challenge", "recovery-mfa"].includes(state.phase)) frame.append(this.renderMfa(state));
+    else if (state.phase.startsWith("recovery-")) frame.append(this.renderRecovery(state));
     else frame.append(this.renderInbox(state, data));
     this.app.replaceChildren(frame);
     if (focusKey) {
@@ -285,6 +300,7 @@ export class AdminView {
     const card = node("section", "auth-card");
     card.append(node("h1", "auth-card__heading", translate(state.language, "signInHeading")), node("p", "auth-card__copy", translate(state.language, "signInCopy")));
     if (state.authError) card.append(alertBox(state.language, state.authError));
+    if (state.authNotice) card.append(alertBox(state.language, state.authNotice, "success"));
     const form = node("form", "auth-form"); form.dataset.form = "sign-in";
     const email = fieldInput({ type: "email", value: state.loginEmail, placeholder: translate(state.language, "emailPlaceholder"), name: "email", focusKey: "login-email", autocomplete: "username", required: true });
     email.inputMode = "email"; email.autocapitalize = "none"; email.spellcheck = false;
@@ -292,14 +308,51 @@ export class AdminView {
     form.append(addFieldLabel(translate(state.language, "email"), email), addFieldLabel(translate(state.language, "password"), password));
     const submit = node("button", "button button--accent button--wide", state.busy ? translate(state.language, "signingIn") : translate(state.language, "signIn"));
     submit.type = "submit"; submit.disabled = state.busy; submit.append(icon("arrow", "icon button__trailing-icon")); form.append(submit);
-    card.append(form);
+    const forgot = makeButton(translate(state.language, "forgotPassword"), "start-recovery", "button button--link");
+    forgot.disabled = state.busy;
+    card.append(form, forgot);
+    return this.authScaffold(state, card);
+  }
+
+  renderRecovery(state) {
+    const language = state.language;
+    const request = state.phase === "recovery-request";
+    const verify = state.phase === "recovery-code";
+    const card = node("section", "auth-card");
+    card.append(node("h1", "auth-card__heading", translate(language, "resetPasswordHeading")),
+      node("p", "auth-card__copy", translate(language, request ? "recoveryRequestCopy" : verify ? "recoveryCodeCopy" : "newPasswordCopy")));
+    if (state.authNotice) card.append(alertBox(language, state.authNotice, "success"));
+    if (state.authError) card.append(alertBox(language, state.authError));
+    const form = node("form", "auth-form");
+    form.dataset.form = request ? "request-recovery" : verify ? "verify-recovery" : "update-password";
+    if (request) {
+      const email = fieldInput({ type: "email", name: "email", value: state.loginEmail, autocomplete: "username", required: true });
+      email.inputMode = "email"; email.autocapitalize = "none"; email.spellcheck = false;
+      form.append(addFieldLabel(translate(language, "email"), email));
+    } else if (verify) {
+      const code = fieldInput({ name: "code", autocomplete: "one-time-code", required: true, maxLength: 8 });
+      code.inputMode = "numeric"; code.pattern = "[0-9]{6,8}";
+      form.append(addFieldLabel(translate(language, "recoveryCode"), code));
+    } else {
+      for (const [name, label] of [["password", "newPassword"], ["confirmation", "confirmPassword"]]) {
+        const input = fieldInput({ type: "password", name, autocomplete: "new-password", required: true });
+        input.minLength = 12;
+        form.append(addFieldLabel(translate(language, label), input));
+      }
+    }
+    const label = state.busy ? "verifying" : request ? "sendRecoveryCode" : verify ? "verifyRecoveryCode" : "savePassword";
+    const submit = node("button", "button button--accent button--wide", translate(language, label));
+    submit.type = "submit"; submit.disabled = state.busy;
+    form.append(submit);
+    card.append(form, makeButton(translate(language, "backToSignIn"), "sign-out", "button button--link"));
     return this.authScaffold(state, card);
   }
 
   renderMfa(state) {
     const setupMode = state.phase === "mfa-setup";
+    const recoveryMode = state.phase === "recovery-mfa";
     const card = node("section", "auth-card mfa-card");
-    card.append(node("h1", "auth-card__heading", translate(state.language, setupMode ? "mfaSetupHeading" : "mfaChallengeHeading")), node("p", "auth-card__copy", translate(state.language, setupMode ? "mfaSetupCopy" : "mfaChallengeCopy")));
+    card.append(node("h1", "auth-card__heading", translate(state.language, setupMode ? "mfaSetupHeading" : "mfaChallengeHeading")), node("p", "auth-card__copy", translate(state.language, setupMode ? "mfaSetupCopy" : recoveryMode ? "recoveryMfaCopy" : "mfaChallengeCopy")));
     if (state.authError) card.append(alertBox(state.language, state.authError));
     if (setupMode) {
       const setup = node("div", "totp-setup");
@@ -312,7 +365,7 @@ export class AdminView {
     const code = fieldInput({ type: "text", placeholder: translate(state.language, "codePlaceholder"), name: "code", focusKey: "totp-code", autocomplete: "one-time-code", required: true, maxLength: 8 });
     code.inputMode = "numeric"; code.pattern = "[0-9 ]{6,9}"; code.autocapitalize = "off";
     form.append(addFieldLabel(translate(state.language, "authenticatorCode"), code));
-    const submit = node("button", "button button--accent button--wide", state.busy ? translate(state.language, "verifying") : translate(state.language, "verifyAndOpen"));
+    const submit = node("button", "button button--accent button--wide", state.busy ? translate(state.language, "verifying") : translate(state.language, recoveryMode ? "verifyRecoveryCode" : "verifyAndOpen"));
     submit.type = "submit"; submit.disabled = state.busy; submit.append(icon("arrow", "icon button__trailing-icon")); form.append(submit);
     card.append(form, makeButton(translate(state.language, "backToSignIn"), "sign-out", "button button--link"));
     return this.authScaffold(state, card);

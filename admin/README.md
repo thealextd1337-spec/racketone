@@ -60,6 +60,29 @@ der öffentliche Supabase-Schlüssel und ein verifiziertes persönliches Betreib
 
 Mit einem vorab provisionierten Betreiberkonto und Passwort anmelden. Beim ersten Login einen TOTP-Authentifikator einrichten; danach den aktuellen Code bestätigen. Die Inbox öffnet erst nach AAL2; jeder Support-RPC prüft zusätzlich die aktive Betreiberrolle. Sitzungen werden nicht dauerhaft gespeichert.
 
+„Passwort vergessen“ fordert einen E-Mail-Code an. Der Code wird im geöffneten Formular bestätigt,
+danach ein vorhandener TOTP-Faktor geprüft und ein neues Passwort mit mindestens 12 Zeichen zweimal
+eingegeben. Abschließend wird die Recovery-Sitzung abgemeldet; die normale Anmeldung ist erneut nötig.
+Der Ablauf öffnet keine Inbox und entfernt keine Faktoren. Bei verlorenem Authentifikator gilt der
+kontrollierte Betreiber-Recovery-Prozess der Betriebsanleitung.
+
+Voraussetzung im Supabase-Dashboard unter **Authentication → Email → Reset password**: Die Vorlage
+muss `{{ .Token }}` als sichtbaren Code enthalten, nicht nur `{{ .ConfirmationURL }}`. Beispiel:
+
+```html
+<h2>Advantly</h2>
+<p>Code zum Zurücksetzen / Password reset code:</p>
+<p>{{ .Token }}</p>
+<p>Im geöffneten Formular eingeben. / Enter in the open recovery form.</p>
+<p>Nicht angefordert? Ignoriere diese E-Mail. / Not requested? Ignore this email.</p>
+```
+
+SMTP muss eingerichtet sein. Für Staging sind achtstellige Codes und zehn Minuten Gültigkeit
+vorgesehen; der Client akzeptiert sechs bis acht Ziffern. Ablauf und Gültigkeit hängen von der
+Supabase-Konfiguration ab. Es werden keine Recovery-Links oder Tokens aus der URL übernommen.
+Grundlage: [Supabase Password Recovery](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)
+und [E-Mail-Vorlagen](https://supabase.com/docs/guides/auth/auth-email-templates).
+
 Interne Notizen sind voreingestellt. Eine Nutzerantwort erfordert eine ausdrückliche Auswahl und Bestätigung. Bei Versionskonflikten wird der aktuelle Vorgang geladen; der Antwortentwurf bleibt erhalten.
 
 ## Prüfungen

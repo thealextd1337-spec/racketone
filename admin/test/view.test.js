@@ -3,6 +3,44 @@ import assert from "node:assert/strict";
 import { translate } from "../src/i18n.js";
 import { AdminView, node } from "../src/view.js";
 
+test("recovery forms expose localized labels, code autocomplete and new-password controls", () => {
+  class Element {
+    constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; }
+    append(...children) { this.children.push(...children); }
+    setAttribute() {}
+  }
+  const previous = globalThis.document;
+  globalThis.document = {
+    createElement: (tag) => new Element(tag),
+    createElementNS: (_namespace, tag) => new Element(tag),
+  };
+  try {
+    const view = Object.create(AdminView.prototype);
+    const descendants = (element) => [element, ...element.children.flatMap(descendants)];
+    for (const language of ["en", "de"]) {
+      for (const phase of ["recovery-request", "recovery-code", "recovery-password", "recovery-mfa"]) {
+        const state = { language, phase, busy: false, loginEmail: "operator@example.test" };
+        const elements = descendants(phase === "recovery-mfa" ? view.renderMfa(state) : view.renderRecovery(state));
+        assert.ok(elements.some((element) => element.dataset.action === "sign-out"));
+        assert.ok(elements.some((element) => element.type === "submit"));
+        if (phase === "recovery-password") {
+          const passwords = elements.filter((element) => element.type === "password");
+          assert.equal(passwords.length, 2);
+          assert.ok(passwords.every((element) => element.autocomplete === "new-password" && element.minLength === 12 && element.value === ""));
+        } else if (phase === "recovery-code" || phase === "recovery-mfa") {
+          assert.ok(elements.some((element) => element.name === "code" && element.autocomplete === "one-time-code"));
+          assert.ok(!elements.some((element) => element.textContent === translate(language, "verifyAndOpen")));
+        }
+      }
+      const login = descendants(view.renderLogin({ language, busy: false }));
+      assert.ok(login.some((element) => element.dataset.action === "start-recovery"));
+      assert.notEqual(translate(language, "forgotPassword"), "forgotPassword");
+    }
+  } finally {
+    globalThis.document = previous;
+  }
+});
+
 test("localized UI copy retains German umlauts and English separator punctuation", () => {
   assert.match(translate("de", "inboxDescription"), /Featurew\u00fcnsche/);
   assert.equal(translate("de", "statusReviewing"), "In Pr\u00fcfung");

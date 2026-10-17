@@ -23,6 +23,7 @@ function initialState(config) {
     phase: config?.ok ? "login" : "missing-config",
     configReason: config?.ok ? null : config?.reason ?? "invalid-url",
     authError: null,
+    authNotice: null,
     loginEmail: "",
     busy: false,
     email: "",
@@ -108,6 +109,10 @@ export class AdminController {
     const routes = {
       language: (payload) => this.setLanguage(payload?.language),
       "sign-in": (payload) => this.signIn(payload?.email, payload?.password),
+      "start-recovery": () => this.startRecovery(),
+      "request-recovery": (payload) => this.requestRecovery(payload?.email),
+      "verify-recovery": (payload) => this.verifyRecovery(payload?.code),
+      "update-password": (payload) => this.updatePassword(payload?.password, payload?.confirmation),
       "verify-totp": (payload) => this.verifyTotp(payload?.code),
       "sign-out": () => this.signOut(),
       refresh: () => this.refresh(),
@@ -156,6 +161,7 @@ export class AdminController {
     this.authOperations += 1;
     this.state.busy = true;
     this.state.authError = null;
+    this.state.authNotice = null;
     this.state.loginEmail = String(email ?? "").trim();
     this.render();
     try {
@@ -184,7 +190,7 @@ export class AdminController {
   }
 
   async verifyTotp(code) {
-    if (this.state.busy || !["mfa-setup", "mfa-challenge"].includes(this.state.phase)) return;
+    if (this.state.busy || !["mfa-setup", "mfa-challenge", "recovery-mfa"].includes(this.state.phase)) return;
     const flow = this.authFlowEpoch.next();
     const expectedPhase = this.state.phase;
     this.authOperations += 1;
@@ -195,7 +201,12 @@ export class AdminController {
       const result = await this.runAuthFlow(flow, () => this.auth.verifyTotp(this.state.factorId, code));
       if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== expectedPhase || !result) return;
       if (result?.aal !== "aal2") throw new SupportError("support_mfa_required");
-      await this.openInbox(flow, expectedPhase);
+      if (expectedPhase === "recovery-mfa") {
+        this.state.phase = "recovery-password";
+        this.state.factorId = null;
+        this.state.busy = false;
+        this.render();
+      } else await this.openInbox(flow, expectedPhase);
     } catch (error) {
       if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== expectedPhase) return;
       this.state.busy = false;
@@ -222,6 +233,71 @@ export class AdminController {
         release();
       }
     })();
+  }
+
+  startRecovery() {
+    if (!this.config?.ok || !this.auth || this.state.busy || this.state.phase !== "login") return;
+    this.state.phase = "recovery-request";
+    this.state.authError = null;
+    this.state.authNotice = null;
+    this.render();
+  }
+
+  async runRecoveryStep(expectedPhase, action, complete, errorKey) {
+    if (!this.auth || this.state.busy || this.state.phase !== expectedPhase) return;
+    const flow = this.authFlowEpoch.next();
+    this.authOperations += 1;
+    this.state.busy = true;
+    this.state.authError = null;
+    this.render();
+    try {
+      const result = await this.runAuthFlow(flow, action);
+      if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== expectedPhase || !result) return;
+      this.state.busy = false;
+      await complete(result);
+    } catch {
+      if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== expectedPhase) return;
+      this.state.busy = false;
+      this.state.authError = errorKey;
+      this.render();
+    } finally {
+      this.authOperations -= 1;
+    }
+  }
+
+  async requestRecovery(emailValue) {
+    if (this.state.busy || this.state.phase !== "recovery-request") return;
+    const email = String(emailValue ?? "").trim();
+    this.state.loginEmail = email;
+    await this.runRecoveryStep("recovery-request", () => this.auth.requestRecovery(email), () => {
+      this.state.phase = "recovery-code";
+      this.state.authNotice = "recoverySent";
+      this.render();
+    }, "recoveryRequestError");
+  }
+
+  async verifyRecovery(code) {
+    const email = this.state.loginEmail;
+    await this.runRecoveryStep("recovery-code", () => this.auth.verifyRecovery(email, code), (result) => {
+      if (result.kind !== "password" && !(result.kind === "challenge" && result.factorId)) {
+        throw new SupportError("auth_failed");
+      }
+      this.state.phase = result.kind === "challenge" ? "recovery-mfa" : "recovery-password";
+      this.state.factorId = result.factorId ?? null;
+      this.state.authNotice = null;
+      this.render();
+    }, "recoveryCodeError");
+  }
+
+  async updatePassword(password, confirmation) {
+    if (this.state.busy || this.state.phase !== "recovery-password") return;
+    if (typeof password !== "string" || password.length < 12 || password !== confirmation) {
+      this.state.authError = "passwordValidationError";
+      this.render();
+      return;
+    }
+    await this.runRecoveryStep("recovery-password", () => this.auth.updateRecoveredPassword(password),
+      () => this.clearSession(null, "passwordResetComplete"), "passwordUpdateError");
   }
 
   async runAuthFlow(flow, action) {
@@ -587,7 +663,7 @@ export class AdminController {
     await this.clearSession(null);
   }
 
-  async clearSession(messageKey) {
+  async clearSession(messageKey, noticeKey = null) {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = null;
     this.sessionEpoch.invalidate();
@@ -602,6 +678,7 @@ export class AdminController {
     this.state = initialState(this.config);
     this.state.language = language;
     this.state.authError = messageKey;
+    this.state.authNotice = noticeKey;
     this.view.hidePublicConfirmation?.();
     this.render();
     if (hadSession || this.authOperations > 0) {
