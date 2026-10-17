@@ -224,70 +224,75 @@ private fun TabLayer(
     supportDiagnostics: Map<String, String>,
 ) {
     var showAccount by remember { mutableStateOf(false) }
-    var showSupport by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
+    var showSupport by remember(navigator.tab) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().safeContentPadding()) {
         Box(Modifier.weight(1f)) {
-            when (navigator.tab) {
-                AppTab.Home, AppTab.Play -> {
-                    HomeScreen(model, clock = model.clock)
+            if (showSupport && supportModel != null) {
+                BackHandler { showSupport = false }
+                SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
+                    showSupport = false
                 }
+            } else {
+                when (navigator.tab) {
+                    AppTab.Home, AppTab.Play -> {
+                        HomeScreen(
+                            model,
+                            clock = model.clock,
+                            onSupport = if (supportModel != null) ({ showSupport = true }) else null,
+                        )
+                    }
 
-                AppTab.History -> {
-                    HistoryScreen(model.history, onOpen = model::openResult)
-                }
+                    AppTab.History -> {
+                        HistoryScreen(model.history, onOpen = model::openResult)
+                    }
 
-                AppTab.Friends -> {
-                    ComingSoonScreen(AppTab.Friends, versionName)
-                }
+                    AppTab.Friends -> {
+                        ComingSoonScreen(AppTab.Friends, versionName)
+                    }
 
-                AppTab.Profile -> {
-                    if (showSupport && supportModel != null) {
-                        BackHandler { showSupport = false }
-                        SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
-                            showSupport =
-                                false
-                        }
-                    } else if (showAccount && authModel != null) {
-                        AccountScreen(
-                            authModel,
-                            googleCredential,
-                            onSupport =
-                                if (supportModel !=
-                                    null
-                                ) {
-                                    ({ showSupport = true })
-                                } else {
-                                    null
-                                },
-                        ) { showAccount = false }
-                    } else {
-                        Column {
-                            if (supportModel != null) {
-                                TextButton({ showSupport = true }, modifier = Modifier.testTag("profile_support")) {
-                                    Text(stringResource(Res.string.support_open))
-                                }
-                            }
-                            if (authModel != null) {
-                                TextButton(
-                                    {
-                                        authModel.refresh()
-                                        showAccount = true
+                    AppTab.Profile -> {
+                        if (showAccount && authModel != null) {
+                            AccountScreen(
+                                authModel,
+                                googleCredential,
+                                onSupport =
+                                    if (supportModel !=
+                                        null
+                                    ) {
+                                        ({ showSupport = true })
+                                    } else {
+                                        null
                                     },
-                                    modifier = Modifier.testTag("profile_account"),
-                                ) { Text(stringResource(Res.string.auth_open)) }
+                            ) { showAccount = false }
+                        } else {
+                            Column {
+                                if (supportModel != null) {
+                                    TextButton({ showSupport = true }, modifier = Modifier.testTag("profile_support")) {
+                                        Text(stringResource(Res.string.support_open))
+                                    }
+                                }
+                                if (authModel != null) {
+                                    TextButton(
+                                        {
+                                            authModel.refresh()
+                                            showAccount = true
+                                        },
+                                        modifier = Modifier.testTag("profile_account"),
+                                    ) { Text(stringResource(Res.string.auth_open)) }
+                                }
+                                ComingSoonScreen(
+                                    AppTab.Profile,
+                                    versionName,
+                                    players = model.players,
+                                    onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
+                                    telemetry = model.telemetry,
+                                    buildCommit = buildCommit,
+                                    buildTimeUtc = buildTimeUtc,
+                                )
                             }
-                            ComingSoonScreen(
-                                AppTab.Profile,
-                                versionName,
-                                players = model.players,
-                                onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
-                                telemetry = model.telemetry,
-                                buildCommit = buildCommit,
-                                buildTimeUtc = buildTimeUtc,
-                            )
                         }
                     }
                 }

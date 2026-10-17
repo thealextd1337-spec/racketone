@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -70,6 +71,8 @@ import eu.advantly.ui.phone.resources.home_versus
 import eu.advantly.ui.phone.resources.home_week_matches
 import eu.advantly.ui.phone.resources.home_week_time
 import eu.advantly.ui.phone.resources.home_week_wins
+import eu.advantly.ui.phone.resources.support_feedback
+import eu.advantly.ui.phone.resources.support_open
 import org.jetbrains.compose.resources.stringResource
 
 private const val WEEK_MS = 7L * 24 * 60 * 60 * 1000
@@ -84,6 +87,7 @@ fun HomeScreen(
     model: AdvantlyAppModel,
     modifier: Modifier = Modifier,
     clock: WallClock = WallClock.System,
+    onSupport: (() -> Unit)? = null,
 ) {
     val self by model.players.self.collectAsState()
     val open by model.live.openMatches.collectAsState()
@@ -111,7 +115,26 @@ fun HomeScreen(
                 color = AdvantlyTheme.colors.text,
                 modifier = Modifier.weight(1f).padding(top = Spacing.xl, bottom = Spacing.l).semantics { heading() },
             )
-            WatchStatusIndicator(model.live)
+            if (onSupport != null) {
+                val supportDescription = stringResource(Res.string.support_open)
+                FilledTonalButton(
+                    onClick = onSupport,
+                    modifier =
+                        Modifier
+                            .padding(start = Spacing.s)
+                            .testTag("home_support")
+                            .semantics { contentDescription = supportDescription },
+                ) {
+                    Text(stringResource(Res.string.support_feedback))
+                }
+            } else {
+                WatchStatusIndicator(model.live)
+            }
+        }
+        if (onSupport != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                WatchStatusIndicator(model.live)
+            }
         }
         if (open.size > 1) SectionTitle(stringResource(Res.string.home_open_matches, runningCount))
         open.forEachIndexed { index, snapshot ->
