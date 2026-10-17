@@ -5,9 +5,12 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
 ## Übernommener Stand
 
 - Fortschreibung 16.10.: B1 (PR #50), B2a (PR #52) und W9/Ampel (PR #53) sind integriert.
-  Aktuell: Meldeweg und Admin-Inbox als erstes Support-Paket auf `p2/support-admin`;
-  [Betrieb und offene Live-Abnahme](support-admin-betrieb.md). Danach B2b-Upload, B3-Download/Entzug
-  und Kontosupport/Betriebsansicht. Umsetzung und Review erfolgen bis auf Weiteres primär mit OpenAI-Modellen.
+  Fortschreibung 17.10.: Meldeweg/Admin-Inbox, Staging und Passwort-Recovery sind integriert;
+  PR #58 ergänzt das optionale Merken einer MFA-Sitzung für 30 Tage und ist auf Staging veröffentlicht.
+  [Betrieb und offene Live-Abnahme](support-admin-betrieb.md). Die beauftragten Punkte 2–4 sind im
+  [Cloud-/Pilot-Lieferplan](p2-cloud-pilot-lieferplan.md) in Upload, Download/Entzug und Datenschutz/
+  Kontosupport zerlegt. Nächster Umsetzungsschnitt ist U1 (Auth-Kontext bis zum HTTP-Request).
+  Planung durch ChatGPT und ergänzend Claude; Umsetzung primär mit OpenAI-Modellen.
 
 - Ausgangspunkt: `main` bei `5e3db67`, PRs #43–#49 integriert. Kein offener PR bei Übernahme.
 - P2-A Backend-Härtung, P2-C Android-Login und P2-J Telemetrie-Sichtbarkeit sind im Code vorhanden.
@@ -15,7 +18,8 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
 - Laut Feldtest-Protokoll des bisherigen Projektthreads läuft dieser Build auf Pixel 9 Pro XL,
   Pixel Watch 3 und Pixel 6. Die Galaxy Watch8 wartet dort auf einen erreichbaren WLAN-Debug-Port.
   Das sind übernommene Nachweise, kein neuer Gerätetest in diesem Arbeitspaket.
-- staging-Migrationen sind laut Übergabe bis `20261016000600` ausgerollt. Hook-Negativtest und
+- Staging-Migrationen sind einschließlich `20261016000700` ausgerollt; der Deployment-Nachweis
+  steht in [support-admin-betrieb.md](support-admin-betrieb.md). Hook-Negativtest und
   Google-Anmeldung stehen aus; diese Übergabe ersetzt keine Prüfung des gehosteten Systems.
 - Der Backend-Lasttest verwendet noch den seit P2-C gesperrten Onboarding-RPC.
 
@@ -64,7 +68,8 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
 
 Auth-Einrichtung: Signup/Anonymous/Google aus → `public.before_user_created` als Hook aktivieren →
 kontrollierter Negativtest → Provider einrichten. Ablauf und Nachweise: [P2-C](p2c-auth.md).
-E-Mail-Anbieter ist noch offen; Apple-Account und echte Apple-Tests bleiben separat ausstehend.
+Resend ist technisch als E-Mail-Versand für Supabase-Staging eingerichtet; Anbieter-/Datenschutznachweise
+bleiben Teil des Pilot-Gates. Apple-Account und echte Apple-Tests bleiben separat ausstehend.
 Diese Punkte blockieren lokale Implementierung und automatische Tests von B1–B3 nicht, wohl aber
 die entsprechenden Live-Abnahmen. Keine Produktionsfreigabe aus einem lokalen Testergebnis ableiten.
 
