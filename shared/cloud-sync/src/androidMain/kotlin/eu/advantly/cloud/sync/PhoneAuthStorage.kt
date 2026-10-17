@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.security.SecureRandom
+import java.util.UUID
 
 /** Kein Fallback auf Klartext; Keystore-/Dateifehler brechen die Cloud-Initialisierung ab, lokales Zählen bleibt möglich. */
 class PhoneAuthStorage(
@@ -53,6 +54,28 @@ class PhoneAuthStorage(
                 .also { SecureRandom().nextBytes(it) }
                 .joinToString("") { "%02x".format(it) }
                 .also { check(prefs.edit().putString("device_secret", it).commit()) }
+
+    /** Eigene Capability für den späteren Cloud-Vertrag, niemals das Altersgate-Geheimnis wiederverwenden. */
+    val cloudInstallation: CloudInstallation
+        get() {
+            val id = prefs.getString("cloud_installation_id_v1", null)
+            val proof = prefs.getString("cloud_installation_proof_v1", null)
+            if (id != null && proof != null) return CloudInstallation(id, proof)
+            // Ein unvollständiger Datensatz wird nicht durch eine neue Identität umgangen.
+            check(id == null && proof == null)
+            val createdId = UUID.randomUUID().toString()
+            val createdProof = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+            check(
+                prefs
+                    .edit()
+                    .putString(
+                        "cloud_installation_id_v1",
+                        createdId,
+                    ).putString("cloud_installation_proof_v1", createdProof)
+                    .commit(),
+            )
+            return CloudInstallation(createdId, createdProof)
+        }
 
     override suspend fun saveSession(session: UserSession) =
         withContext(Dispatchers.IO) {

@@ -1,5 +1,6 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.data.CloudUploadStore
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.SignOutScope
@@ -7,10 +8,19 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.providers.builtin.OTP
-import io.github.jan.supabase.postgrest.postgrest
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -23,9 +33,66 @@ import kotlin.io.encoding.Base64
 class SupabasePhoneAuth(
     private val client: SupabaseClient,
     private val deviceSecret: String,
+    uploads: CloudUploadStore? = null,
+    private val scope: CoroutineScope,
+    threadGuard: () -> Boolean = { true },
+    private val requestTimeoutMillis: Long = 20_000,
 ) : CloudAuthPort {
-    private val current = MutableStateFlow<CloudSession?>(null)
-    override val session = current.asStateFlow()
+    private val transport =
+        CloudHttp(
+            client.supabaseHttpUrl,
+            client.supabaseKey,
+            client.config.networkConfig.httpEngine
+                ?.let { HttpClient(it) { followRedirects = false } }
+                ?: HttpClient { followRedirects = false },
+            requestTimeoutMillis,
+        )
+    val sessions = CloudSessionGate(::credentials, uploads, threadGuard)
+    override val session = sessions.session
+    private val mutations = Mutex()
+    private val lifecycle = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
+    private var closed = false
+
+    init {
+        lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
+            client.auth.sessionStatus.collect { sessions.synchronize() }
+        }
+    }
+
+    private fun credentials(): CloudCredentials? {
+        val raw = client.auth.currentSessionOrNull() ?: return null
+        return try {
+            val claims =
+                Json.parseToJsonElement(
+                    Base64.UrlSafe
+                        .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
+                        .decode(raw.accessToken.split('.')[1])
+                        .decodeToString(),
+                ) as JsonObject
+            val profile = claims.getValue("sub").jsonPrimitive.content
+            val sessionId = claims.getValue("session_id").jsonPrimitive.content
+            if (profile.isBlank() || sessionId.isBlank() || (raw.user != null && raw.user?.id != profile)) return null
+            CloudCredentials(profile, sessionId, raw.accessToken)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Keine automatische Registrierung/Übertragung; der versionierte Serververtrag ist noch ein Release-Gate. */
+    fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend = SupabaseCloudBackend(sessions, transport, installation)
+
+    /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
+    fun stopForDeletion() = sessions.stop()
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        sessions.stop()
+        lifecycle.cancel()
+        client.auth.stopAutoRefreshForCurrentSession()
+        transport.close()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { withContext(NonCancellable) { client.close() } }
+    }
 
     override suspend fun issueAgeTicket(
         country: String,
@@ -44,7 +111,7 @@ class SupabasePhoneAuth(
 
     override suspend fun cancelAgeTicket(ticket: String) =
         guarded {
-            client.postgrest.rpc("cancel_age_ticket", buildJsonObject { put("p_ticket", ticket) })
+            rpc("cancel_age_ticket", buildJsonObject { put("p_ticket", ticket) })
             Unit
         }
 
@@ -53,7 +120,7 @@ class SupabasePhoneAuth(
         idToken: String,
         rawNonce: String?,
         ticket: String,
-    ) = guarded {
+    ) = newLogin {
         if (provider != IdTokenProvider.GOOGLE) throw CloudException("provider_unavailable", false)
         // Nur Routing, kein Vertrauensbeweis: Supabase verifiziert Signatur, aud, exp und Nonce des ganzen Tokens.
         val subject =
@@ -69,72 +136,113 @@ class SupabasePhoneAuth(
             this.idToken = idToken
             nonce = rawNonce
         }
-        refreshProfile()
     }
 
     override suspend fun linkGoogle(
         idToken: String,
         rawNonce: String?,
     ) = guarded {
-        client.auth.linkIdentityWithIdToken(Google, idToken) { nonce = rawNonce }
-        refreshProfile()
+        val lease = sessions.capture(requireProfile = false)
+        mutations.withLock {
+            sessions.request(lease) { boundedAuth { client.auth.linkIdentityWithIdToken(Google, idToken) { nonce = rawNonce } } }
+            refreshProfile()
+        }
     }
 
     override suspend fun sendEmailCode(
         email: String,
         ticket: String,
-    ) = guarded {
-        bind(ticket, "email", email)
-        client.auth.signInWith(OTP) {
-            this.email = email.trim()
-            data = buildJsonObject { put("age_ticket", ticket) }
+    ) {
+        val transition = sessions.stop()
+        guarded {
+            mutations.withLock {
+                sessions.requireTransition(transition)
+                bind(ticket, "email", email)
+                boundedAuth {
+                    client.auth.signInWith(OTP) {
+                        this.email = email.trim()
+                        data = buildJsonObject { put("age_ticket", ticket) }
+                    }
+                }
+            }
         }
     }
 
     override suspend fun verifyEmailCode(
         email: String,
         code: String,
-    ) = guarded {
+    ) = newLogin {
         client.auth.verifyEmailOtp(OtpType.Email.EMAIL, email.trim(), code.trim())
-        refreshProfile()
     }
 
     override suspend fun completeOnboarding(
         alias: String,
         username: String?,
     ) = guarded {
-        client.postgrest.rpc(
-            "finish_onboarding",
-            buildJsonObject {
-                put("p_alias", alias)
-                put("p_username", username)
-            },
-        )
+        val lease = sessions.capture(requireProfile = false)
+        sessions.request(lease) {
+            transport.rpc(
+                "finish_onboarding",
+                buildJsonObject {
+                    put("p_alias", alias)
+                    put("p_username", username)
+                },
+                lease.credentials.accessToken,
+            )
+        }
         refreshProfile()
     }
 
     override suspend fun refreshProfile() =
         guarded {
             client.auth.awaitInitialization()
-            if (client.auth.currentSessionOrNull() == null) {
-                current.value = null
-            } else {
-                val profile = rpc("my_auth_profile", buildJsonObject {})
-                current.value =
-                    CloudSession(
-                        profile.getValue("profileId").jsonPrimitive.content,
-                        profile.getValue("onboarded").jsonPrimitive.boolean,
-                        profile.getValue("deletionRequested").jsonPrimitive.boolean,
-                    )
-            }
+            sessions.synchronize()
+            if (client.auth.currentSessionOrNull() == null) return@guarded
+            val lease = sessions.capture(requireProfile = false)
+            val profile =
+                sessions.request(lease) {
+                    Json.parseToJsonElement(
+                        transport.rpc("my_auth_profile", buildJsonObject {}, lease.credentials.accessToken),
+                    ) as JsonObject
+                }
+            sessions.publish(
+                lease,
+                CloudSession(
+                    profile.getValue("profileId").jsonPrimitive.content,
+                    profile.getValue("onboarded").jsonPrimitive.boolean,
+                    profile.getValue("deletionRequested").jsonPrimitive.boolean,
+                ),
+            )
         }
 
+    private suspend fun newLogin(block: suspend () -> Unit) {
+        val transition = sessions.stop()
+        guarded {
+            mutations.withLock {
+                sessions.requireTransition(transition)
+                boundedAuth { block() }
+                sessions.completeTransition(transition)
+                refreshProfile()
+            }
+        }
+    }
+
     override suspend fun signOut() {
+        val transition = sessions.stop()
         try {
-            guarded { client.auth.signOut(SignOutScope.GLOBAL) }
+            boundedAuth {
+                mutations.withLock {
+                    sessions.requireTransition(transition)
+                    guarded { client.auth.signOut(SignOutScope.GLOBAL) }
+                }
+            }
         } finally {
-            client.auth.clearSession()
-            current.value = null
+            // Auch ein abgebrochener Logout wartet auf ältere Auth-Mutationen und löscht deren Credentials.
+            withContext(NonCancellable) {
+                mutations.withLock {
+                    if (sessions.isTransitionCurrent(transition)) client.auth.clearSession()
+                }
+            }
         }
     }
 
@@ -153,21 +261,30 @@ class SupabasePhoneAuth(
         )
     }
 
+    private suspend fun boundedAuth(block: suspend () -> Unit) {
+        withTimeoutOrNull(requestTimeoutMillis) {
+            block()
+            true
+        } ?: throw CloudException("connection_failed", false)
+    }
+
     private suspend fun rpc(
         name: String,
         params: JsonObject,
     ): JsonObject {
-        val result = client.postgrest.rpc(name, params).decodeAs<JsonObject>()
+        val result = Json.parseToJsonElement(transport.rpc(name, params, null)) as JsonObject
         result["error"]?.let { throw CloudException(it.jsonPrimitive.content, false) }
         return result
     }
 
     private suspend fun <T> guarded(block: suspend () -> T): T =
         try {
+            if (closed) throw CloudException("cloud_closed", false)
             block()
         } catch (e: CancellationException) {
             throw e
         } catch (e: CloudException) {
+            if (e.reason == "cloud_connection_failed") throw CloudException("connection_failed", e.permission)
             throw e
         } catch (e: Exception) {
             // Keine Rohantwort/Token an UI oder Logs weitergeben. Unbekannte Fehler bleiben generisch.

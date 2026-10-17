@@ -46,7 +46,8 @@ Standard; zusätzliches Claude-Kontingent gezielt für unabhängige Fachprüfung
 | K4–K6 | Backend, Admin-Web, Betriebsdaten | siehe unten | Begrenzter Kontosupport und Betriebsansicht |
 | K7 | Orchestrator und reale Geräteprüfung | Cloud-Pfad, K1–K6, externe Nachweise | Dokumentierte Pilotentscheidung |
 
-**Erster Umsetzungsschnitt: U1.** Parallel kann K1 vorbereitet werden. K3-Serververtrag früh
+**Erster Umsetzungsschnitt: U1 (Clientgrenze umgesetzt, Serverfreigabe offen).** Danach U2/U3;
+parallel kann K1 vorbereitet werden. K3-Serververtrag früh
 festlegen, damit D3 nicht auf eine spätere UI warten muss. B4 darf die Begrenzung und den
 Abbruch eines einzelnen Upload-/Pull-Laufs nicht aufschieben: diese gehören bereits zu U1/U4/D1.
 Apple-Host und echte Apple-Abnahme sind getrennte Lieferungen; ein BGTask allein stellt keine iOS-Parität her.
@@ -54,6 +55,12 @@ Apple-Host und echte Apple-Abnahme sind getrennte Lieferungen; ein BGTask allein
 ## Punkt 2: Upload (B2b)
 
 ### U1 – Auth-Sitzung und tatsächlichen HTTP-Request gemeinsam binden
+
+Umsetzungsstand 17.10.2026: Clientgrenze mit expliziter Generation, festem HTTP-Bearer,
+sofortigem lokalem Abbruch und an Auswahl/Bindung gekoppeltem Ack umgesetzt.
+Der [U1-Vertrag](p2-u1-sitzungs-und-geraetevertrag.md) beschreibt die ausführbare, ohne bestätigten
+v1-Server gesperrte Gerätebindung und die noch offene Server-/K4-Abnahme. Automatische
+Uploads/Downloads und die Serverdurchsetzung bleiben U4/D1/K4; U1 erteilt keine Pilotfreigabe.
 
 Explizite Sitzungsgeneration vom Auth-Lebenszyklus bis HTTP-Adapter, Upload-Auswahl und Ack führen.
 Gleiches Konto nach erneuter Anmeldung ist eine neue Sitzung; Token-Erneuerung innerhalb derselben
@@ -181,5 +188,6 @@ Backup-/Wiederherstellungskonzept vor Fremdnutzer-Pilot bewerten. Keine Rechtsfr
   Fremdzugriff, fehlende MFA und widerrufene Mitgliedschaft bleiben als vollständige Live-Matrix offen.
 - Android-Teilgate getrennt von Apple: iOS-Konto-Host, Apple-Account, Token-Widerruf und reale Geräte
   zusätzlich nachweisen. P2-Pilot ist keine öffentliche Produktionsfreigabe.
-- Nächster ausführbarer Auftrag: U1 mit Tests für den tatsächlichen HTTP-Auth-Kontext. Dieser Plan
-  löst noch keine Cloud-Uploads, neuen Admin-Rechte oder Pilot-Verteilung aus.
+- Nächster ausführbarer Auftrag nach U1-Review: U2/U3 für Eigentum, neue Identitäten und
+  Metadatenrevisionen. Serverdurchsetzung des U1-Vertrags mit U4/D1 und K4 nachweisen.
+  Dieser Plan löst noch keine Cloud-Uploads, neuen Admin-Rechte oder Pilot-Verteilung aus.
