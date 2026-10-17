@@ -11,6 +11,7 @@ sealed interface DecodeResult {
     /** Nachricht gelesen. */
     data class Ok(
         val message: SyncMessage,
+        val identity: IdentityEnvelope? = null,
     ) : DecodeResult
 
     /** Gültiges JSON, aber Protokollversion [v] wird nicht unterstützt (siehe [ProtocolVersion.accepts]). */
@@ -46,6 +47,16 @@ object SyncCodec {
 
     fun encode(message: SyncMessage): ByteArray = encodeToString(message).encodeToByteArray()
 
+    fun encode(
+        message: SyncMessage,
+        identity: IdentityEnvelope,
+    ): ByteArray {
+        val original = json.parseToJsonElement(encodeToString(message)) as JsonObject
+        return JsonObject(
+            original + ("identity" to json.encodeToJsonElement(IdentityEnvelope.serializer(), identity)),
+        ).toString().encodeToByteArray()
+    }
+
     fun decode(bytes: ByteArray): DecodeResult = decode(bytes.decodeToString())
 
     fun decode(text: String): DecodeResult {
@@ -61,7 +72,10 @@ object SyncCodec {
         // Hello immer lesen: Versionsprüfung braucht genau diese Nachricht
         if (type != HELLO && !ProtocolVersion.accepts(v)) return DecodeResult.Unsupported(v, type)
         return try {
-            DecodeResult.Ok(json.decodeFromJsonElement(SyncMessage.serializer(), obj))
+            DecodeResult.Ok(
+                json.decodeFromJsonElement(SyncMessage.serializer(), obj),
+                obj["identity"]?.let { json.decodeFromJsonElement(IdentityEnvelope.serializer(), it) },
+            )
         } catch (e: IllegalArgumentException) {
             if (!ProtocolVersion.accepts(v)) DecodeResult.Unsupported(v, type) else DecodeResult.Malformed(e.message ?: "unlesbar")
         }

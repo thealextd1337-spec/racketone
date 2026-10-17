@@ -93,9 +93,35 @@ Event-Payloads unverändert lassen. Ein eigenes Gerät verleiht keine Schreibrec
 Abnahme: fremde/ungebundene Quellen ausgeschlossen, Konflikt atomar zurückgerollt, alte Logs unverändert,
 neue Daten unter neuen Identitäten, verifizierte Uhren-Aliase und Rückwechsel zum alten Konto.
 
+**Lokaler Umsetzungsschnitt (17.10.2026):** Schema 5 speichert eigene Identitäten je lokalem,
+opakem Kontobereich und Herkunft separat von importierten Event-Quellen. Android aktiviert diese
+Grenze synchron vor der sichtbaren Cloud-Sitzung. Abmeldung und bestätigter Sitzungsverlust
+wechseln in einen eigenen Gastbereich; bloße SDK-Initialisierung und Host-Schließen tun dies nicht.
+Der Kontobereich bietet die ausdrückliche Auswahl einzelner alter Handy-/Uhren-Quellen mit Eventzahl.
+Abbruch lässt sie ungebunden. Direkt von der Uhr gemeldete Zahlen machen auch noch nicht auf dem
+Handy eingetroffene Altbestände auswählbar. IDs und Payloads alter Events bleiben unverändert.
+
+Das additive Geräte-Handshake verlangt `identityProtocol=1`, eine persistente Phone-Autorität,
+monoton steigende Epoche, opaken Bereich und gegenseitige Instanz-Challenges. Sämtliche weiteren
+Nachrichten tragen diesen Kontext. Quelle und Challenge werden vor jeder Mutation geprüft;
+Transport-Acks bestätigen im Kontomodus keine Event-Zustellung. Erst eine gültige Summary quittiert
+die Events. Alte Offline-Events von A bleiben während B unbestätigt auf der Uhr und werden erst
+nach Rückkehr zu A nachgeliefert. Kontextlose P1-Replikation bleibt nur vor der ersten Aktivierung
+erlaubt. Alte Gegenstellen erhalten danach keine privaten Nutzdaten und werden als zu alt angezeigt.
+
+Herkunftsbeleg ist der direkte Plattformkanal (Wear Data Layer: gleiche App-ID/Signatur;
+WatchConnectivity: tatsächliche gekoppelte Gegenstelle), niemals `Hello.kind` oder eine Event-Quellenliste.
+Generische Transporte sind standardmäßig unvertraut. Eine andere Phone-Autorität wird auf einer
+bereits aktivierten Uhr geschlossen abgewiesen; ein automatischer Austausch/Reinstallations- oder
+Neukopplungsablauf ist nicht implementiert. Ein expliziter lokaler Reset ist dafür erforderlich;
+vorher müssen noch benötigte lokale Daten gesichert werden.
+
+Dieser Schnitt startet keinen Cloud-Upload und keinen Scheduler. Schreibrechte und Revisionen für
+Matchköpfe bleiben U3, der Serververtrag U1 und der eigentliche Cloud-Betrieb U4 weiterhin eigene Gates.
+
 ### U3 – Revisions- und Herkunftsmetadaten
 
-Schema nach bestehender Version 4 erweitern: Änderungsversionen für Matchköpfe, Teilnehmer, Spieler
+Schema nach bestehender Version 5 erweitern: Änderungsversionen für Matchköpfe, Teilnehmer, Spieler
 und Projektionen sowie deren Herkunft/Schreibberechtigung. Auswahl enthält einen festen Stand;
 ein Ack bestätigt nur diesen. Neuere Änderungen bleiben ausstehend. `cloud_dirty` aus dem älteren
 Plan ist derzeit keine verfügbare Implementierung.

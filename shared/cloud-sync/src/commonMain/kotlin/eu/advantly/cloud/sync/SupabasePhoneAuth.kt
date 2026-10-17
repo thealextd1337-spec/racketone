@@ -1,6 +1,7 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.data.CloudUploadStore
+import eu.advantly.data.LocalAccountOwnership
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.SignOutScope
@@ -37,6 +38,7 @@ class SupabasePhoneAuth(
     private val scope: CoroutineScope,
     threadGuard: () -> Boolean = { true },
     private val requestTimeoutMillis: Long = 20_000,
+    ownership: LocalAccountOwnership? = null,
 ) : CloudAuthPort {
     private val transport =
         CloudHttp(
@@ -47,7 +49,7 @@ class SupabasePhoneAuth(
                 ?: HttpClient { followRedirects = false },
             requestTimeoutMillis,
         )
-    val sessions = CloudSessionGate(::credentials, uploads, threadGuard)
+    val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership)
     override val session = sessions.session
     private val mutations = Mutex()
     private val lifecycle = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
@@ -84,10 +86,14 @@ class SupabasePhoneAuth(
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() = sessions.stop()
 
+    override fun adoptionSources(): List<CloudAdoptionSource> = sessions.adoptionSources()
+
+    override fun adoptSources(ids: Set<String>) = sessions.adoptSources(ids)
+
     override fun close() {
         if (closed) return
         closed = true
-        sessions.stop()
+        sessions.stop(leaveIdentity = false)
         lifecycle.cancel()
         client.auth.stopAutoRefreshForCurrentSession()
         transport.close()
@@ -197,7 +203,10 @@ class SupabasePhoneAuth(
         guarded {
             client.auth.awaitInitialization()
             sessions.synchronize()
-            if (client.auth.currentSessionOrNull() == null) return@guarded
+            if (client.auth.currentSessionOrNull() == null) {
+                sessions.verifiedAbsent()
+                return@guarded
+            }
             val lease = sessions.capture(requireProfile = false)
             val profile =
                 sessions.request(lease) {

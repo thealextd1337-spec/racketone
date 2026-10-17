@@ -43,6 +43,7 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
             client,
             storage.deviceSecret,
             uploads = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE).data.cloudUploads,
+            ownership = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE),
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
             threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
         ),

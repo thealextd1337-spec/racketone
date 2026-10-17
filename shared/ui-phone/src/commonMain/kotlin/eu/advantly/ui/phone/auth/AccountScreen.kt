@@ -2,11 +2,13 @@ package eu.advantly.ui.phone.auth
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,6 +26,11 @@ import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.auth_adoption_accept
+import eu.advantly.ui.phone.resources.auth_adoption_cancel
+import eu.advantly.ui.phone.resources.auth_adoption_phone
+import eu.advantly.ui.phone.resources.auth_adoption_title
+import eu.advantly.ui.phone.resources.auth_adoption_watch
 import eu.advantly.ui.phone.resources.auth_alias
 import eu.advantly.ui.phone.resources.auth_birth
 import eu.advantly.ui.phone.resources.auth_birth_privacy
@@ -174,6 +181,35 @@ fun AccountScreen(
                     }
                 }
             }
+        }
+        if (state.adoptionSources.isNotEmpty()) {
+            Text(stringResource(Res.string.auth_adoption_title))
+            state.adoptionSources.forEachIndexed { index, source ->
+                Row {
+                    Checkbox(
+                        checked = source.key in state.selectedSources,
+                        onCheckedChange = { model.selectSource(source.key) },
+                        enabled = !state.busy,
+                        modifier = Modifier.testTag("auth_adoption_source_$index"),
+                    )
+                    Text(
+                        stringResource(
+                            if (source.watch) Res.string.auth_adoption_watch else Res.string.auth_adoption_phone,
+                            source.eventCount,
+                        ),
+                    )
+                }
+            }
+            Button(
+                model::acceptAdoption,
+                enabled = !state.busy && state.selectedSources.isNotEmpty(),
+                modifier = Modifier.testTag("auth_adoption_accept"),
+            ) { Text(stringResource(Res.string.auth_adoption_accept)) }
+            TextButton(
+                model::cancelAdoption,
+                enabled = !state.busy,
+                modifier = Modifier.testTag("auth_adoption_cancel"),
+            ) { Text(stringResource(Res.string.auth_adoption_cancel)) }
         }
         state.error?.let { error -> Text(stringResource(authError(error)), modifier = Modifier.testTag("auth_error")) }
         if (state.error == "profile_missing") {

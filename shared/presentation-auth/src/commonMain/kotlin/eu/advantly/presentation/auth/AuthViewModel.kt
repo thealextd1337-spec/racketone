@@ -13,11 +13,19 @@ import kotlinx.coroutines.launch
 
 enum class AuthStep { AGE, PROVIDER, CODE, ALIAS, ACCOUNT }
 
+data class AdoptionChoice(
+    val key: String,
+    val watch: Boolean,
+    val eventCount: Long,
+)
+
 data class AuthState(
     val step: AuthStep = AuthStep.AGE,
     val busy: Boolean = false,
     val error: String? = null,
     val deletionRequested: Boolean = false,
+    val adoptionSources: List<AdoptionChoice> = emptyList(),
+    val selectedSources: Set<String> = emptySet(),
 )
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -36,6 +44,7 @@ class AuthViewModel(
     val state = mutable.asStateFlow()
     private var ticket: String? = null
     private var email: String = ""
+    private var adoptionGeneration: Long? = null
     private val scope get() = workScope ?: viewModelScope
 
     init {
@@ -126,8 +135,31 @@ class AuthViewModel(
             showSession()
         }
 
+    fun selectSource(key: String) {
+        if (mutable.value.busy || mutable.value.adoptionSources.none { it.key == key }) return
+        val selected = mutable.value.selectedSources
+        mutable.value = mutable.value.copy(selectedSources = if (key in selected) selected - key else selected + key)
+    }
+
+    fun cancelAdoption() {
+        if (mutable.value.busy) return
+        adoptionGeneration = null
+        mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
+    }
+
+    fun acceptAdoption() =
+        runAction {
+            val generation = adoptionGeneration
+            if (generation == null || auth.session.value?.generation != generation) throw CloudException("cloud_session_changed", true)
+            auth.adoptSources(mutable.value.selectedSources)
+            adoptionGeneration = null
+            mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
+        }
+
     private fun showSession() {
         val session = auth.session.value
+        val candidates = if (session?.onboarded == true && !session.deletionRequested) auth.adoptionSources() else emptyList()
+        adoptionGeneration = session?.generation
         mutable.value =
             AuthState(
                 step =
@@ -137,6 +169,7 @@ class AuthViewModel(
                         else -> AuthStep.ALIAS
                     },
                 deletionRequested = session?.deletionRequested == true,
+                adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
             )
     }
 

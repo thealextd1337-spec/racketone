@@ -3,6 +3,7 @@ package eu.advantly.cloud.sync
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.CloudUploadSnapshot
 import eu.advantly.data.CloudUploadStore
+import eu.advantly.data.LocalAccountOwnership
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -32,6 +33,7 @@ class CloudSessionGate internal constructor(
     private val credentials: () -> CloudCredentials?,
     private val uploads: CloudUploadStore? = null,
     private val threadGuard: () -> Boolean = { true },
+    private val ownership: LocalAccountOwnership? = null,
 ) {
     private val mutable = MutableStateFlow<CloudSession?>(null)
     val session = mutable.asStateFlow()
@@ -39,26 +41,37 @@ class CloudSessionGate internal constructor(
     private var identity: CloudCredentials? = null
     private var acceptSdkSession = true
     private var uploadSession: CloudUploadSession? = null
+    private var ownershipActive = false
     private val requests = mutableSetOf<Job>()
 
     private fun confined() = check(threadGuard()) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
 
-    private fun invalidate() {
+    private fun invalidate(
+        leaveIdentity: Boolean = true,
+        forceLeave: Boolean = false,
+    ) {
         confined()
         check(generation < Long.MAX_VALUE)
         generation++
+        val shouldLeave = leaveIdentity && (ownershipActive || forceLeave)
+        ownershipActive = false
         identity = null
         mutable.value = null
         uploadSession = null
-        uploads?.deactivate()
-        requests.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
-        requests.clear()
+        try {
+            uploads?.deactivate()
+        } finally {
+            requests.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
+            requests.clear()
+            ownership?.detachAccountSession()
+            if (shouldLeave) ownership?.leaveAccount()
+        }
     }
 
     /** Vor dem ersten suspendierenden Aufruf von Logout, Kontowechsel oder Löschantrag. */
-    fun stop(): Long {
+    fun stop(leaveIdentity: Boolean = true): Long {
         acceptSdkSession = false
-        invalidate()
+        invalidate(leaveIdentity, forceLeave = true)
         return generation
     }
 
@@ -84,9 +97,14 @@ class CloudSessionGate internal constructor(
         if (!acceptSdkSession) return
         val sdk = credentials()
         if (sdk?.profileId != identity?.profileId || sdk?.sessionId != identity?.sessionId) {
-            invalidate()
+            invalidate(leaveIdentity = sdk?.profileId != identity?.profileId, forceLeave = sdk == null && identity != null)
             identity = sdk
         }
+    }
+
+    internal fun verifiedAbsent() {
+        confined()
+        if (credentials() == null && acceptSdkSession) invalidate(forceLeave = true)
     }
 
     internal fun capture(requireProfile: Boolean = true): CloudLease {
@@ -119,12 +137,35 @@ class CloudSessionGate internal constructor(
             mutable.value = profile.copy(generation = generation)
             return
         }
-        mutable.value = profile.copy(generation = generation)
-        if (profile.onboarded && uploadSession == null) uploadSession = uploads?.activate(profile.profileId)
-        if (!profile.onboarded && uploadSession != null) {
-            uploads?.deactivate()
-            uploadSession = null
+        if (profile.onboarded && uploadSession == null) {
+            val activated = uploads?.activate(profile.profileId)
+            try {
+                if (activated != null) ownership?.activateAccount(profile.profileId, activated)
+                uploadSession = activated
+                ownershipActive = ownership != null && activated != null
+            } catch (error: Exception) {
+                invalidate()
+                throw error
+            }
         }
+        if (!profile.onboarded && uploadSession != null) {
+            invalidate()
+            identity = lease.credentials
+        }
+        mutable.value = profile.copy(generation = generation)
+    }
+
+    internal fun adoptionSources(): List<CloudAdoptionSource> {
+        capture()
+        return ownership?.adoptionSources()?.map { CloudAdoptionSource(it.deviceId, it.kind, it.eventCount) }.orEmpty()
+    }
+
+    internal fun adoptSources(ids: Set<String>) {
+        val lease = capture()
+        val active = uploadSession ?: changed()
+        requireCurrent(lease)
+        ownership?.adoptSources(active, ids)
+        requireCurrent(lease)
     }
 
     internal suspend fun <T> request(

@@ -112,6 +112,13 @@ class SessionMatchStore(
     private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
     private val selfFlow = MutableStateFlow(ensureSelf())
+    private val ownerIdentityListeners = mutableSetOf<() -> Unit>()
+
+    override fun observeOwnerIdentity(onChanged: () -> Unit): () -> Unit {
+        ownerIdentityListeners += onChanged
+        return { ownerIdentityListeners -= onChanged }
+    }
+
     private val guestsFlow = MutableStateFlow<List<Player>>(emptyList())
     private val favoritesFlow = MutableStateFlow<List<FavoriteLineup>>(emptyList())
     private val lastSetupFlow = MutableStateFlow<MatchSetup?>(null)
@@ -169,6 +176,7 @@ class SessionMatchStore(
     fun close() {
         companion?.stop()
         session.removeListener(listener)
+        ownerIdentityListeners.clear()
     }
 
     override fun refreshWatchStatus() {
@@ -726,6 +734,9 @@ class SessionMatchStore(
 
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
     private fun refreshStored() {
+        val previousSelf = selfFlow.value.id
+        selfFlow.value = ensureSelf()
+        if (previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
         players.clear()
         val previousAliases = aliases
         aliases = data.selfAliases()
@@ -805,7 +816,8 @@ class SessionMatchStore(
         data.matches
             .lastRated()
             ?.let {
-                val lineup = data.freshPlaceholders(data.resolvedLineup(it)) { PlayerId(ids.newId().value) }
+                val own = templateLineup(data.resolvedLineup(it)) ?: return@let null
+                val lineup = data.freshPlaceholders(own) { PlayerId(ids.newId().value) }
                 MatchSetup(it.format, lineup, it.meta, playersOf(lineup))
             }
 
@@ -945,11 +957,27 @@ class SessionMatchStore(
         data.settings.put(FAVORITES_KEY, FavoritesJson.encodeToString(FAVORITES, list))
     }
 
+    private fun templateLineup(previous: Lineup): Lineup? {
+        if (!data.accountIdentities.managed) return previous
+        if ((previous.a + previous.b).none(data::isSelf)) return null
+
+        fun current(id: PlayerId): PlayerId = if (data.isSelf(id)) selfFlow.value.id else id
+        return previous.copy(
+            a = previous.a.map(::current),
+            b = previous.b.map(::current),
+            firstServer = current(previous.firstServer),
+            receiveRight = previous.receiveRight?.let { right -> right.copy(a = right.a?.let(::current), b = right.b?.let(::current)) },
+        )
+    }
+
     private fun loadFavorites(): List<FavoriteLineup> =
         readFavorites()
             .filter {
                 (it.lineup.a + it.lineup.b).none { id -> data.isPlaceholder(id) || id in archivedPlayerIds.value }
-            }.map { FavoriteLineup(it.id, MatchSetup(it.format, it.lineup, it.meta, playersOf(it.lineup))) }
+            }.mapNotNull {
+                val lineup = templateLineup(it.lineup) ?: return@mapNotNull null
+                FavoriteLineup(it.id, MatchSetup(it.format, lineup, it.meta, playersOf(lineup)))
+            }
 
     private companion object {
         const val DEFAULT_HISTORY_LIMIT = Long.MAX_VALUE

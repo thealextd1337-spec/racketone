@@ -54,6 +54,11 @@ data class Hello(
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
     val appBuild: AppBuild? = null,
     val session: String? = null,
+    val identityProtocol: Int? = null,
+    val ownerContext: OwnerContext? = null,
+    val recipientSession: String? = null,
+    val localSources: List<OwnSource> = emptyList(),
+    val adoptedSources: List<String> = emptyList(),
 ) : SyncMessage
 
 /**
@@ -240,4 +245,30 @@ data class FavoriteLineup(
     val name: String? = null,
     val lastUsedAtMs: Long = 0,
     val useCount: Int = 0,
+)
+
+/** Nur die gekoppelte Phone-Instanz vergibt Epochen; Account-IDs werden nicht übertragen. */
+@Serializable
+data class OwnerContext(
+    val authority: String,
+    val epoch: Long,
+    val scope: String,
+)
+
+/** Direkter Herkunftsnachweis des eigenen lokalen Stores, niemals importierte Self-Aliase. */
+@Serializable
+data class OwnSource(
+    val deviceId: String,
+    val selfId: String,
+    val scope: String,
+    val kind: String,
+    val eventCount: Long = 0,
+)
+
+/** Vor jeder Mutation prüfen, einschließlich Summary, Löschung, Metadaten und Events. */
+@Serializable
+data class IdentityEnvelope(
+    val context: OwnerContext,
+    val senderSession: String,
+    val recipientSession: String,
 )

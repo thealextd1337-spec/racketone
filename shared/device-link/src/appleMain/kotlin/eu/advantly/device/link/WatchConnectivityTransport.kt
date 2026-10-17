@@ -29,6 +29,8 @@ class WatchConnectivityTransport(
     private val counterpartPeer: String,
     private val useUserInfoQueue: Boolean = true,
 ) : LinkTransport {
+    override fun isTrustedCounterpart(peer: String): Boolean = peer == counterpartPeer
+
     private var listener: LinkTransport.Listener? = null
 
     // Starke Referenz halten: WCSession.delegate ist weak

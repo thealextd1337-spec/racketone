@@ -13,6 +13,8 @@ class ReliableDeviceLink(
     private val policy: RetryPolicy = RetryPolicy(),
     private val newMessageId: () -> String = ::randomMessageId,
 ) : DeviceLink {
+    override fun isTrustedCounterpart(peer: String): Boolean = transport.isTrustedCounterpart(peer)
+
     private class Outgoing(
         val id: String,
         val peer: String,

@@ -1,0 +1,25 @@
+CREATE TABLE local_identity (
+    scope_id TEXT NOT NULL PRIMARY KEY,
+    device_id TEXT NOT NULL UNIQUE,
+    self_id TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE local_source (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    self_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    local INTEGER NOT NULL,
+    reported_event_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE local_scope_source (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    scope_id TEXT NOT NULL
+);
+
+CREATE TABLE local_match_source (
+    match_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    PRIMARY KEY(match_id, device_id)
+);

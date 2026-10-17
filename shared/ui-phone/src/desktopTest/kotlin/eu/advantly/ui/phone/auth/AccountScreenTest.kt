@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
+import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
@@ -26,6 +27,14 @@ class FakePhoneAuth : CloudAuthPort {
     override val session = MutableStateFlow<CloudSession?>(null)
     val calls = mutableListOf<String>()
     var failure: String? = null
+    var sources: List<CloudAdoptionSource> = emptyList()
+    val adopted = mutableListOf<Set<String>>()
+
+    override fun adoptionSources(): List<CloudAdoptionSource> = sources
+
+    override fun adoptSources(ids: Set<String>) {
+        adopted += ids
+    }
 
     private fun call(name: String) {
         calls += name
@@ -96,6 +105,26 @@ class FakePhoneAuth : CloudAuthPort {
 
 @OptIn(ExperimentalTestApi::class)
 class AccountScreenTest {
+    @Test fun adoptionSelectionUsesLabelsAndCancelHasNoOwnershipEffect() =
+        runComposeUiTest {
+            val auth =
+                FakePhoneAuth().also {
+                    it.session.value = CloudSession("alice", true, generation = 4)
+                    it.sources = listOf(CloudAdoptionSource("secret-source-id", "WATCH", 8))
+                }
+            val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+            setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+            onNodeWithTag("auth_adoption_accept").assertIsNotEnabled()
+            onNodeWithTag("auth_adoption_source_0").performScrollTo().performClick()
+            onNodeWithTag("auth_adoption_cancel").performScrollTo().performClick()
+            onNodeWithTag("auth_adoption_source_0").assertDoesNotExist()
+            assertEquals(emptyList(), auth.adopted)
+            runOnIdle { model.refresh() }
+            onNodeWithTag("auth_adoption_source_0").performScrollTo().performClick()
+            onNodeWithTag("auth_adoption_accept").performScrollTo().performClick()
+            assertEquals(listOf(setOf("secret-source-id")), auth.adopted)
+        }
+
     @Test fun ageGateHasNoProviderActionUntilServerAccepted() =
         runComposeUiTest {
             val auth = FakePhoneAuth()
