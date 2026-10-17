@@ -65,6 +65,12 @@ jobs:
         working-directory: admin
       - run: npm run build
         working-directory: admin
+      - run: npm run build:staging
+        working-directory: admin
+        env:
+          VITE_SUPABASE_URL: https://lgeoafnbluvxoezpftzo.supabase.co
+          # Ausschließlich Build-Fixture, kein gültiger Zugangsschlüssel.
+          VITE_SUPABASE_ANON_KEY: sb_publishable_test_fixture
 
   gradle-check:
     name: Gradle check + Android/Wear-APKs (ubuntu)

@@ -1,8 +1,15 @@
 # Privater Meldeweg und Admin-Inbox
 
-Stand: 16.10.2026. Erste Lieferung aus [Feedback & Admin](plan-feedback-admin.md).
+Stand: 17.10.2026. Erste Lieferung aus [Feedback & Admin](plan-feedback-admin.md).
 Noch keine Produktionsbereitstellung und kein eingerichteter Betreiberzugang. Die Datenbankmigration,
 die Handy-Anbindung und `admin/` werden zusammen ausgeliefert; die folgenden Live-Nachweise bleiben ein Gate.
+
+Staging: `20261016000700_support.sql` wurde am 17.10.2026 erfolgreich auf dem bestehenden Projekt
+`lgeoafnbluvxoezpftzo` angewendet ([Deployment-Nachweis](https://github.com/thealextd1337-spec/racketone/actions/runs/39014532139),
+Revision `3fbd5dced4220e1722999cf21ffd21d9a6d3f268`). Der Workflow belegt die Migration, nicht die tatsächliche
+Projektregion, Auth-/Gateway-Konfiguration oder erfolgreiche Cron-Läufe. Diese Nachweise bleiben offen.
+Cloudflare Workers Static Assets ist als separates Admin-Hosting vorbereitet; Adresse, Veröffentlichung und
+persönlicher Betreiberzugang stehen noch aus. Einrichtung siehe [Admin-README](../admin/README.md#staging-auf-cloudflare).
 
 ## Funktionen und Grenzen
 

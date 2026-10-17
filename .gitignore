@@ -35,6 +35,7 @@ iosApp/build/
 Thumbs.db
 
 # Logs
+.wrangler/
 *.log
 hs_err_pid*
 

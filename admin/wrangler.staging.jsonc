@@ -1,0 +1,12 @@
+{
+  "name": "advantly-admin-staging",
+  "compatibility_date": "2026-10-17",
+  "workers_dev": true,
+  "preview_urls": false,
+  "build": {
+    "command": "npm run build:staging"
+  },
+  "assets": {
+    "directory": "./dist"
+  }
+}
