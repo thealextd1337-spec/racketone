@@ -16,8 +16,39 @@ function safeQrDataUrl(value) {
     && /^data:image\/svg\+xml(?:;charset=utf-8|;utf-8|;base64)?,/i.test(value);
 }
 
-export function createAuthService(client) {
+export function createAuthService(client, sessionStorage = null) {
   let recoveryUserId = null;
+  let rememberRequested = false;
+
+  function rememberVerifiedSession() {
+    if (!rememberRequested || recoveryUserId) return false;
+    try {
+      if (!sessionStorage) return true;
+      sessionStorage.remember();
+      return false;
+    } catch {
+      sessionStorage?.forget();
+      return true;
+    }
+  }
+
+  async function restoreSession() {
+    if (!sessionStorage?.isRemembered()) return null;
+    try {
+      const { error: refreshError } = await client.auth.refreshSession();
+      if (refreshError) throw refreshError;
+      const { data, error } = await client.auth.getUser();
+      if (error || !data?.user?.id) throw new SupportError("auth_failed");
+      if (await assurance() !== "aal2" || !(await factors()).some((factor) => factor.status === "verified")) {
+        throw new SupportError("support_mfa_required");
+      }
+      if (!sessionStorage.isRemembered()) throw new SupportError("auth_failed");
+      return { kind: "unlocked", email: data.user.email ?? "", aal: "aal2" };
+    } catch (error) {
+      await signOut();
+      throw asSafeAuthError(error);
+    }
+  }
 
   async function requestRecovery(emailValue) {
     try {
@@ -31,6 +62,8 @@ export function createAuthService(client) {
 
   async function verifyRecovery(emailValue, codeValue) {
     recoveryUserId = null;
+    rememberRequested = false;
+    sessionStorage?.clear();
     let sessionCreated = false;
     try {
       const token = String(codeValue ?? "").replace(/\s/g, "");
@@ -84,7 +117,10 @@ export function createAuthService(client) {
     return totpFactors(data);
   }
 
-  async function signIn(emailValue, password) {
+  async function signIn(emailValue, password, rememberDevice = false) {
+    recoveryUserId = null;
+    rememberRequested = rememberDevice === true;
+    sessionStorage?.clear();
     try {
       const email = String(emailValue ?? "").trim();
       const { data, error } = await client.auth.signInWithPassword({ email, password });
@@ -95,7 +131,7 @@ export function createAuthService(client) {
       const verified = available.find((factor) => factor.status === "verified");
 
       if (verified && currentAssurance === "aal2") {
-        return { kind: "unlocked", email: data.user.email ?? email, aal: "aal2" };
+        return { kind: "unlocked", email: data.user.email ?? email, aal: "aal2", rememberFailed: rememberVerifiedSession() };
       }
       if (verified) {
         return { kind: "challenge", email: data.user.email ?? email, factorId: verified.id };
@@ -136,7 +172,7 @@ export function createAuthService(client) {
       if (currentAssurance !== "aal2" || !available.some((factor) => factor.id === factorId && factor.status === "verified")) {
         throw new SupportError("support_mfa_required");
       }
-      return { aal: "aal2" };
+      return { aal: "aal2", rememberFailed: rememberVerifiedSession() };
     } catch (error) {
       throw asSafeAuthError(error);
     }
@@ -144,23 +180,26 @@ export function createAuthService(client) {
 
   async function signOut() {
     recoveryUserId = null;
+    rememberRequested = false;
+    sessionStorage?.forget();
     try {
       const { error } = await client.auth.signOut();
       if (error) throw createSupportError(error);
     } catch {
       // Der Aufrufer leert die Oberfläche auch bei fehlgeschlagener Server-Abmeldung.
-    }
+    } finally { sessionStorage?.clear(); }
   }
 
   function onAuthStateChange(callback) {
+    const unsubscribeExpiration = sessionStorage?.onExpire(() => callback("SIGNED_OUT"));
     const { data } = client.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT" || (event === "TOKEN_REFRESHED" && !session)) {
         recoveryUserId = null;
         callback(event);
       }
     });
-    return () => data?.subscription?.unsubscribe?.();
+    return () => { data?.subscription?.unsubscribe?.(); unsubscribeExpiration?.(); };
   }
 
-  return Object.freeze({ signIn, verifyTotp, signOut, onAuthStateChange, requestRecovery, verifyRecovery, updateRecoveredPassword });
+  return Object.freeze({ signIn, verifyTotp, signOut, onAuthStateChange, requestRecovery, verifyRecovery, updateRecoveredPassword, restoreSession });
 }

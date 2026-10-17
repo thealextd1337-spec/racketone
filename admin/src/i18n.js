@@ -1,5 +1,8 @@
 const messages = {
   en: {
+    rememberDevice: "Remember this device for 30 days",
+    rememberDeviceFailed: "You are signed in, but this browser could not remember the device. You will need to sign in again after closing or reloading the page.",
+    rememberDeviceHint: "Only on your own device. Signing out ends the remembered session.",
     forgotPassword: "Forgot password?",
     resetPasswordHeading: "Reset your password",
     recoveryRequestCopy: "Request an email code for your existing account.",
@@ -151,6 +154,9 @@ const messages = {
     invalidRelated: "Enter a valid ticket UUID that differs from this ticket.",
   },
   de: {
+    rememberDevice: "Dieses Gerät 30 Tage merken",
+    rememberDeviceFailed: "Du bist angemeldet, aber dieser Browser konnte das Gerät nicht merken. Nach dem Schließen oder Neuladen musst du dich erneut anmelden.",
+    rememberDeviceHint: "Nur auf deinem eigenen Gerät. Abmelden beendet die gemerkte Sitzung.",
     forgotPassword: "Passwort vergessen?",
     resetPasswordHeading: "Passwort zur\u00fccksetzen",
     recoveryRequestCopy: "Fordere einen E-Mail-Code f\u00fcr dein bestehendes Konto an.",

@@ -58,7 +58,11 @@ der öffentliche Supabase-Schlüssel und ein verifiziertes persönliches Betreib
 
 ## Anmeldung und Posteingang
 
-Mit einem vorab provisionierten Betreiberkonto und Passwort anmelden. Beim ersten Login einen TOTP-Authentifikator einrichten; danach den aktuellen Code bestätigen. Die Inbox öffnet erst nach AAL2; jeder Support-RPC prüft zusätzlich die aktive Betreiberrolle. Sitzungen werden nicht dauerhaft gespeichert.
+Mit einem vorab provisionierten Betreiberkonto und Passwort anmelden. Beim ersten Login einen TOTP-Authentifikator einrichten; danach den aktuellen Code bestätigen. Die Inbox öffnet erst nach AAL2; jeder Support-RPC prüft zusätzlich die aktive Betreiberrolle.
+
+Die optionale Auswahl „Dieses Gerät 30 Tage merken“ speichert erst nach erfolgreicher MFA die Supabase-Sitzung im lokalen Browser-Speicher. Ohne Auswahl bleibt sie flüchtig. Die feste Frist beginnt mit der MFA-Bestätigung und wird durch Token-Erneuerung nicht verlängert. Beim Wiederöffnen wird die Sitzung erneuert, der Benutzer serverseitig geprüft und AAL2 erneut kontrolliert. Abmelden löscht die gespeicherte Sitzung sofort, auch bei einem Netzwerkfehler; der Recovery-Ablauf wird nie gemerkt. Die Option gehört nur auf persönliche Geräte.
+
+Das ist eine lokale Aufbewahrungsfrist, keine Änderung der projektweiten Supabase-Sitzungsdauer. Zugangstokens bleiben kurzlebig; ihre serverseitige Gültigkeit richtet sich weiterhin nach Supabase. Grundlage: [Supabase-Sitzungen](https://supabase.com/docs/guides/auth/sessions).
 
 „Passwort vergessen“ fordert einen E-Mail-Code an. Der Code wird im geöffneten Formular bestätigt,
 danach ein vorhandener TOTP-Faktor geprüft und ein neues Passwort mit mindestens 12 Zeichen zweimal

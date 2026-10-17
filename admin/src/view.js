@@ -158,7 +158,7 @@ export class AdminView {
         const passwordInput = form.elements.namedItem("password");
         const password = passwordInput?.value ?? "";
         if (passwordInput) passwordInput.value = "";
-        this.emit("sign-in", { email: values.get("email"), password });
+        this.emit("sign-in", { email: values.get("email"), password, rememberDevice: values.get("rememberDevice") === "on" });
       } else if (["verify-totp", "verify-recovery"].includes(form.dataset.form)) {
         const code = values.get("code");
         const input = form.elements.namedItem("code");
@@ -306,6 +306,12 @@ export class AdminView {
     email.inputMode = "email"; email.autocapitalize = "none"; email.spellcheck = false;
     const password = fieldInput({ type: "password", name: "password", focusKey: "login-password", autocomplete: "current-password", required: true });
     form.append(addFieldLabel(translate(state.language, "email"), email), addFieldLabel(translate(state.language, "password"), password));
+    const remember = node("input");
+    remember.type = "checkbox"; remember.name = "rememberDevice"; remember.checked = state.rememberDevice === true;
+    remember.disabled = state.busy;
+    const rememberLabel = node("label", "remember-device");
+    rememberLabel.append(remember, node("span", "", translate(state.language, "rememberDevice")));
+    form.append(rememberLabel, node("p", "auth-card__copy", translate(state.language, "rememberDeviceHint")));
     const submit = node("button", "button button--accent button--wide", state.busy ? translate(state.language, "signingIn") : translate(state.language, "signIn"));
     submit.type = "submit"; submit.disabled = state.busy; submit.append(icon("arrow", "icon button__trailing-icon")); form.append(submit);
     const forgot = makeButton(translate(state.language, "forgotPassword"), "start-recovery", "button button--link");
@@ -385,7 +391,9 @@ export class AdminView {
 
     const workspace = node("div", `workspace${state.selectedId ? " has-selection" : ""}`);
     workspace.append(this.renderList(state), this.renderDetail(state, data));
-    shell.append(heading, workspace);
+    shell.append(heading);
+    if (state.rememberFailed) shell.append(alertBox(state.language, "rememberDeviceFailed", "warning"));
+    shell.append(workspace);
     page.append(shell);
     return page;
   }

@@ -306,3 +306,5 @@ textarea.control { resize: vertical; line-height: 1.58; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+.remember-device { display: flex; align-items: center; gap: .65rem; cursor: pointer; }
+.remember-device input { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); }
