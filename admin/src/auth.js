@@ -17,6 +17,61 @@ function safeQrDataUrl(value) {
 }
 
 export function createAuthService(client) {
+  let recoveryUserId = null;
+
+  async function requestRecovery(emailValue) {
+    try {
+      const { error } = await client.auth.resetPasswordForEmail(String(emailValue ?? "").trim());
+      if (error) throw error;
+      return {};
+    } catch (error) {
+      throw asSafeAuthError(error);
+    }
+  }
+
+  async function verifyRecovery(emailValue, codeValue) {
+    recoveryUserId = null;
+    let sessionCreated = false;
+    try {
+      const token = String(codeValue ?? "").replace(/\s/g, "");
+      if (!/^\d{6,8}$/.test(token)) throw new SupportError("auth_failed");
+      const { data, error } = await client.auth.verifyOtp({
+        email: String(emailValue ?? "").trim(), token, type: "recovery",
+      });
+      sessionCreated = Boolean(data?.session);
+      if (error) throw error;
+      if (!data?.session || !data?.user?.id) throw new SupportError("auth_failed");
+      const verified = (await factors()).find((factor) => factor.status === "verified");
+      recoveryUserId = data.user.id;
+      return verified
+        ? { kind: "challenge", factorId: verified.id }
+        : { kind: "password" };
+    } catch (error) {
+      if (sessionCreated) await signOut();
+      throw asSafeAuthError(error);
+    }
+  }
+
+  async function updateRecoveredPassword(password) {
+    try {
+      if (!recoveryUserId || typeof password !== "string" || password.length < 12) {
+        throw new SupportError("auth_failed");
+      }
+      const { data, error } = await client.auth.getUser();
+      if (error) throw error;
+      if (data?.user?.id !== recoveryUserId) throw new SupportError("auth_failed");
+      const available = await factors();
+      if (available.some((factor) => factor.status === "verified") && await assurance() !== "aal2") {
+        throw new SupportError("support_mfa_required");
+      }
+      const { error: updateError } = await client.auth.updateUser({ password });
+      if (updateError) throw updateError;
+      recoveryUserId = null;
+      return {};
+    } catch (error) {
+      throw asSafeAuthError(error);
+    }
+  }
   async function assurance() {
     const { data, error } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
     if (error) throw asSafeAuthError(error);
@@ -88,6 +143,7 @@ export function createAuthService(client) {
   }
 
   async function signOut() {
+    recoveryUserId = null;
     try {
       const { error } = await client.auth.signOut();
       if (error) throw createSupportError(error);
@@ -98,10 +154,13 @@ export function createAuthService(client) {
 
   function onAuthStateChange(callback) {
     const { data } = client.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" || (event === "TOKEN_REFRESHED" && !session)) callback(event);
+      if (event === "SIGNED_OUT" || (event === "TOKEN_REFRESHED" && !session)) {
+        recoveryUserId = null;
+        callback(event);
+      }
     });
     return () => data?.subscription?.unsubscribe?.();
   }
 
-  return Object.freeze({ signIn, verifyTotp, signOut, onAuthStateChange });
+  return Object.freeze({ signIn, verifyTotp, signOut, onAuthStateChange, requestRecovery, verifyRecovery, updateRecoveredPassword });
 }
