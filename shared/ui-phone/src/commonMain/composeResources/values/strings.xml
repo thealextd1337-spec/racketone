@@ -637,4 +637,9 @@
     <string name="support_planned">Planned</string>
     <string name="support_resolved">Resolved</string>
     <string name="support_closed">Closed</string>
+    <string name="auth_adoption_title">Choose which local data belongs to this account. Unselected data stays unassigned.</string>
+    <string name="auth_adoption_phone">Phone: %1$d events</string>
+    <string name="auth_adoption_watch">Watch: %1$d events</string>
+    <string name="auth_adoption_accept">Adopt selected data</string>
+    <string name="auth_adoption_cancel">Keep unassigned</string>
 </resources>

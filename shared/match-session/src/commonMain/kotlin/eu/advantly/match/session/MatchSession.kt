@@ -37,8 +37,11 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
+import eu.advantly.data.AdoptionSource
 import eu.advantly.data.AppendResult
+import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.FavoriteLineup
+import eu.advantly.data.LocalAccountOwnership
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.PlayerKind
@@ -70,6 +73,7 @@ import eu.advantly.sync.protocol.Events
 import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.MatchHeader
 import eu.advantly.sync.protocol.MatchMetaMessage
+import eu.advantly.sync.protocol.OwnSource
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.ProtocolVersion
 import eu.advantly.sync.protocol.SeqRange
@@ -98,9 +102,9 @@ import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
  * - **Zähler-Tap** → Event (UUIDv7, Lamport, deviceId, deviceSeq, parentId) → [LocalData.events] (idempotent)
  *   → [ScoringEngine.applyAll] → Broadcast `Events` an alle Gegenstellen. Auf Anzeige-Geräten liefern Zähl-Kommandos
  *   `false` und schreiben nichts.
- * - **Empfang** → jedes neue Event sofort speichern und mit dem Batch der Nachricht anwenden (`applyAll`, Fold ist
+ * - **Empfang** â†’ jedes neue Event sofort speichern und mit dem Batch der Nachricht anwenden (`applyAll`, Fold ist
  *   reihenfolgeunabhängig) → Weiterleitung an die übrigen Gegenstellen (Hub-Rolle des Handys).
- * - **Anti-Entropie** (`Hello` → `Summary` → fehlende Events) bei jeder Verbindung und alle 30 s im aktiven Match.
+ * - **Anti-Entropie** (`Hello` â†’ `Summary` â†’ fehlende Events) bei jeder Verbindung und alle 30 s im aktiven Match.
  *
  * Zustand: [state] (`StateFlow`) bzw. [addListener] (Callbacks, z. B. für die Swift-Facade).
  *
@@ -121,9 +125,118 @@ class MatchSession(
     private val clock: WallClock = SystemWallClock,
     private val ids: IdGenerator = RandomIdGenerator(),
     private val threadGuard: ThreadGuard = ThreadGuard.NONE,
-) {
+) : LocalAccountOwnership {
     /** Stabile Installations-ID dieses Geräts. */
-    val deviceId: DeviceId get() = config.deviceId
+    private var currentDeviceId = config.deviceId
+    val deviceId: DeviceId get() = currentDeviceId
+    private var activeOwnership: CloudUploadSession? = null
+    private val pairing = AccountPairing(data, config.kind) { ids.newUuid7(clock.nowMs()).value }
+
+    private fun initializeIdentity() {
+        val self = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
+        data.accountIdentities.initialize(deviceId.value, self.id.value, config.kind.name)
+    }
+
+    override fun detachAccountSession() {
+        checkThread()
+        activeOwnership = null
+    }
+
+    override fun leaveAccount() {
+        checkThread()
+        activeOwnership = null
+        if (!data.accountIdentities.managed || data.accountIdentities.profile == null) return
+        var guest = data.settings.get("identity.guest")
+        if (guest == null || data.accountIdentities.scopeHasOwnedSource(guest)) {
+            guest = ids.newUuid7(clock.nowMs()).value
+            data.settings.put("identity.guest", guest)
+        }
+        selectIdentity(guest, null)
+    }
+
+    override fun activateAccount(
+        profileId: String,
+        session: CloudUploadSession,
+    ) {
+        checkThread()
+        require(config.kind == PeerKind.PHONE && profileId == session.profileId)
+        initializeIdentity()
+        val changed = data.accountIdentities.profile != profileId
+        val scope = data.accountIdentities.accountScope(profileId) { ids.newUuid7(clock.nowMs()).value }
+        val next =
+            data.transaction {
+                val id = if (changed) selectStoredIdentity(scope, profileId) else deviceId
+                data.accountIdentities.bindCurrent(session)
+                id
+            }
+        activeOwnership = session
+        if (changed) finishIdentityChange(next, scope)
+    }
+
+    override fun adoptionSources(): List<AdoptionSource> = data.accountIdentities.adoptionSources()
+
+    override fun adoptSources(
+        session: CloudUploadSession,
+        deviceIds: Set<String>,
+    ) {
+        checkThread()
+        data.accountIdentities.adopt(session, deviceIds)
+        link?.peers.orEmpty().forEach(::sendHello)
+        dataRevision++
+        publish()
+    }
+
+    private fun selectStoredIdentity(
+        scope: String,
+        profile: String?,
+    ): DeviceId {
+        val id =
+            DeviceId(
+                data.accountIdentities.select(scope, profile, clock.nowMs(), config.kind.name) {
+                    ids.newUuid7(clock.nowMs()).value
+                },
+            )
+        data.settings.put(WATCH_MATCH_KEY, "")
+        data.settings.remove(WATCH_MATCH_AT_KEY)
+        data.settings.remove(DROPPED_NOTICE_KEY)
+        val targetTelemetry = "$TELEMETRY_KEY.$scope"
+        if (data.settings.get(targetTelemetry) == null && telemetry.visibility == TelemetryVisibility.OFF) {
+            val off = TelemetrySetting(TelemetryVisibility.OFF.wire, 1, id.value)
+            data.settings.put(targetTelemetry, SyncCodec.json.encodeToString(TelemetrySetting.serializer(), off))
+        }
+        if (config.kind == PeerKind.PHONE) pairing.rotate(scope)
+        return id
+    }
+
+    private fun selectIdentity(
+        scope: String,
+        profile: String?,
+    ) {
+        val next = data.transaction { selectStoredIdentity(scope, profile) }
+        data.afterCommit { finishIdentityChange(next, scope) }
+    }
+
+    private fun finishIdentityChange(
+        next: DeviceId,
+        scope: String,
+    ) {
+        currentDeviceId = next
+        opened.clear()
+        focusedId = null
+        watchAssignment = null
+        assignmentPending = false
+        earlyOwners.clear()
+        devicesInMatch.clear()
+        hellos.clear()
+        helloSent.clear()
+        compatibility.clear()
+        knownKindsCache = null
+        droppedInputs = null
+        telemetry = loadTelemetry()
+        dataRevision++
+        publish()
+        if (started && config.kind == PeerKind.PHONE) link?.peers.orEmpty().forEach(::sendHello)
+    }
 
     /** Offenes Match mit Engine-Zustand und gerätelokalem Redo-Stapel. */
     private class OpenMatch(
@@ -200,7 +313,7 @@ class MatchSession(
     private var deviceStatusesSavedAtMs = scheduler.nowMs()
 
     /** Neue Instanz auch bei unverändertem Plattform-Link als Neustart erkennbar machen. */
-    private val sessionId = ids.newUuid7(clock.nowMs()).value
+    private val sessionId: String get() = pairing.nonce
     private val lastContacts = HashMap<String, Long>()
     private val contactTimers = HashMap<String, Cancellable>()
     private val hellos = HashMap<String, Hello>()
@@ -387,7 +500,7 @@ class MatchSession(
     private fun adoptTelemetry(next: TelemetryPreference): Boolean {
         if (next == telemetry) return false
         val setting = checkNotNull(TelemetrySetting.of(next)) { "Telemetrie-Änderung ohne Versionsangabe" }
-        data.settings.put(TELEMETRY_KEY, SyncCodec.json.encodeToString(TelemetrySetting.serializer(), setting))
+        data.settings.put(telemetryKey(), SyncCodec.json.encodeToString(TelemetrySetting.serializer(), setting))
         telemetry = next
         broadcast(MatchMetaMessage(telemetry = setting))
         publish()
@@ -395,8 +508,11 @@ class MatchSession(
     }
 
     /** Gespeicherte Einstellung; fehlt sie oder ist sie unlesbar, gilt der Standard (nie ein halber Stand). */
+    private fun telemetryKey(): String =
+        if (data.accountIdentities.managed) "$TELEMETRY_KEY.${data.accountIdentities.scope}" else TELEMETRY_KEY
+
     private fun loadTelemetry(): TelemetryPreference {
-        val stored = data.settings.get(TELEMETRY_KEY) ?: return TelemetryPreference()
+        val stored = data.settings.get(telemetryKey()) ?: return TelemetryPreference()
         val setting =
             try {
                 SyncCodec.json.decodeFromString(TelemetrySetting.serializer(), stored)
@@ -497,6 +613,7 @@ class MatchSession(
         forgetAssignment(matchId)
         devicesInMatch.remove(matchId)
         val now = clock.nowMs()
+        data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
         data.deleteMatch(matchId, now)
         dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
@@ -918,6 +1035,7 @@ class MatchSession(
         matchId: MatchId,
         focus: Boolean = true,
     ): Boolean {
+        if (!inCurrentScope(matchId)) return false
         if (opened.containsKey(matchId)) {
             if (focus) focusedId = matchId
             publish()
@@ -1066,7 +1184,7 @@ class MatchSession(
         if (config.parallelMatches) return
         val target = watchAssignment?.matchId ?: return
         val phone = hellos.values.firstOrNull { it.kind == PeerKind.PHONE }?.deviceId ?: return
-        val candidates = (opened.keys + data.matches.active().map { it.id }).distinct().filter { it != target }
+        val candidates = (opened.keys + data.matches.active().map { it.id }).distinct().filter { it != target && inCurrentScope(it) }
         for (id in candidates) {
             val m = opened[id] ?: detached(id) ?: continue
             if (m.status == MatchStatus.FINISHED || m.scorer != deviceId || keepsOwnMatch(m, target)) continue
@@ -1180,6 +1298,7 @@ class MatchSession(
             return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit)
         }
         if (!config.parallelMatches) return null
+        if (data.accountIdentities.managed) return null
         val legacy = data.matches.active().firstOrNull() ?: return null
         return WatchAssignment(legacy.id, 0).also(::storeAssignment)
     }
@@ -1204,7 +1323,63 @@ class MatchSession(
         payload: ByteArray,
     ) {
         checkThread()
-        val message = (SyncCodec.decode(payload) as? DecodeResult.Ok)?.message ?: return
+        try {
+            receiveValidated(peer, payload)
+        } catch (_: IllegalArgumentException) {
+            // Ungültige Protokolldaten ver?ndern weder Herkunft noch Eigentum.
+        } catch (_: IllegalStateException) {
+            // Ein Herkunfts-/Eigentumskonflikt bleibt geschlossen und wird nicht teilweise übernommen.
+        }
+    }
+
+    private fun receiveValidated(
+        peer: String,
+        payload: ByteArray,
+    ) {
+        checkThread()
+        val decoded = SyncCodec.decode(payload) as? DecodeResult.Ok ?: return
+        val message = decoded.message
+        val pairingRevision = pairing.revision
+        val responseRevision = pairing.responseRevision
+        val scoped = data.accountIdentities.managed || (message is Hello && message.ownerContext != null)
+        if (message is Hello && scoped) {
+            val accepted =
+                pairing.observe(peer, message, link?.isTrustedCounterpart(peer) == true) { scope ->
+                    initializeIdentity()
+                    selectIdentity(scope, null)
+                }
+            if (!accepted) {
+                if (message.identityProtocol != 1) {
+                    compatibility[peer] = Compatibility(CompatibilityStatus.PEER_TOO_OLD, null)
+                }
+                if (pairing.responseRevision != responseRevision) sendHello(peer)
+                publish()
+                return
+            }
+            recordOwnSources(peer, message)
+        } else if (message !is Hello && scoped && !pairing.accepts(peer, decoded.identity)) {
+            return
+        } else if (message !is Hello && !scoped && decoded.identity != null) {
+            return
+        }
+        if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
+        if (message is Summary && scoped) {
+            val own = data.accountIdentities.currentSources()
+            if (message.matches.any { (id, vector) ->
+                    !inCurrentScope(MatchId(id)) &&
+                        (data.events.count(id) > 0 || vector.watermarks.keys.none { it.value in own })
+                }
+            ) {
+                return
+            }
+            message.matches.forEach { (id, vector) ->
+                devicesIn(MatchId(id)).addAll(
+                    vector.watermarks.keys
+                        .filter { it.value in own }
+                        .map { it.value },
+                )
+            }
+        }
         if (message !is Hello && compatibility[peer]?.isCompatible == false) return
         lastContacts[peer] = scheduler.nowMs()
         contactTimers.remove(peer)?.cancel()
@@ -1217,14 +1392,14 @@ class MatchSession(
         val touched =
             try {
                 when (message) {
-                    is Hello -> onHello(peer, message).let { null }
+                    is Hello -> onHello(peer, message, pairing.revision != pairingRevision).let { null }
                     is Summary -> onSummary(peer, message).let { null }
                     is Events -> onEvents(peer, message)
                     is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
                 }
             } catch (e: IllegalArgumentException) {
-                // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) → verwerfen; der Rest bleibt konsistent
+                // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) â†’ verwerfen; der Rest bleibt konsistent
                 null
             }
         maybeFollow(touched)
@@ -1235,14 +1410,17 @@ class MatchSession(
     private fun onHello(
         peer: String,
         hello: Hello,
+        forceSync: Boolean = false,
     ) {
+        recordOwnSources(peer, hello)
         val previous = hellos.put(peer, hello)
         val sessionChanged = hello.session != null && previous?.session != hello.session
         val needsSync =
-            hello.session == null || sessionChanged || previous == null || previous.deviceId != hello.deviceId ||
-                previous.kind != hello.kind || previous.v != hello.v || previous.minV != hello.minV
+            forceSync || hello.session == null || sessionChanged || previous == null || previous.deviceId != hello.deviceId ||
+                previous.kind != hello.kind || previous.v != hello.v || previous.minV != hello.minV ||
+                previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
-        if (sessionChanged) helloSent.remove(peer)
+        if (sessionChanged || forceSync) helloSent.remove(peer)
         val result = ProtocolVersion.negotiate(hello.v, hello.minV)
         compatibility[peer] = result
         deviceStatuses[peer] =
@@ -1277,7 +1455,7 @@ class MatchSession(
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(primaryRecord()))
         // jetzt identifiziert: zulässigen Rückstand nachschieben (vorher hielt das Routing alles zurück)
-        if (config.parallelMatches) pushBacklog(peer)
+        if (config.parallelMatches || data.accountIdentities.managed) pushBacklog(peer)
     }
 
     private fun onSummary(
@@ -1314,6 +1492,7 @@ class MatchSession(
             closeOpened(tombstone.matchId)
             forgetAssignment(tombstone.matchId)
             devicesInMatch.remove(tombstone.matchId)
+            data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
             data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
         }
         dataRevision++
@@ -1337,7 +1516,10 @@ class MatchSession(
         val results = data.events.appendAll(valid.map { it.toStoredEvent().copy(confirmed = true) })
         data.events.markConfirmed(matchId.value, valid.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
-        if (inserted.isEmpty()) return matchId
+        if (inserted.isEmpty()) {
+            if (data.accountIdentities.managed) send(peer, summaryOf(listOf(matchId), reply = true))
+            return matchId
+        }
         lastEventReceivedAtMs = clock.nowMs()
         val relevantBefore = replicates(peer, matchId)
         devicesIn(matchId) += inserted.map { it.deviceId.value }
@@ -1360,6 +1542,7 @@ class MatchSession(
         if (inserted.any { it.payload is PlayerAssigned || it.payload is MatchCreated }) reconcilePeople(matchId)
         val forward = Events(matchId, inserted, message.more)
         targets().filter { it != peer }.forEach { send(it, forward) }
+        if (data.accountIdentities.managed) send(peer, summaryOf(listOf(matchId), reply = true))
         return matchId
     }
 
@@ -1439,11 +1622,12 @@ class MatchSession(
         peer: String,
         message: MatchMetaMessage,
     ) {
+        if (data.accountIdentities.managed) return
         if (data.addSelfAliases(message.selfAliases)) dataRevision++
         val owner = message.self ?: return
         val senderKind = hellos[peer]?.kind
         if (senderKind == null) {
-            // Art der Gegenstelle noch unbekannt (Hello steht aus) → puffern, im Hello verarbeiten
+            // Art der Gegenstelle noch unbekannt (Hello steht aus) â†’ puffern, im Hello verarbeiten
             earlyOwners[peer] = message
             return
         }
@@ -1586,7 +1770,7 @@ class MatchSession(
             }
         val ordered =
             candidates
-                .filter { !it.isFinished }
+                .filter { !it.isFinished && inCurrentScope(it.id) }
                 .sortedWith(
                     compareByDescending<MatchRecord> { m != null && it.previousMatchId == m.id }
                         .thenByDescending { it.createdAtMs }
@@ -1690,9 +1874,76 @@ class MatchSession(
         persistedDeviceStatuses = snapshot
     }
 
+    private fun recordOwnSources(
+        peer: String,
+        hello: Hello,
+    ) = data.transaction {
+        if (link?.isTrustedCounterpart(peer) != true || hello.identityProtocol != 1) return@transaction
+        if (config.kind == hello.kind || hello.kind == PeerKind.OTHER) return@transaction
+        require(hello.localSources.all { it.kind == hello.kind.name })
+        require(
+            hello.localSources
+                .map { it.deviceId }
+                .distinct()
+                .size == hello.localSources.size,
+        )
+        if (data.accountIdentities.managed) {
+            require(
+                hello.localSources.any {
+                    it.deviceId == hello.deviceId.value && it.scope == data.accountIdentities.scope
+                },
+            )
+        }
+        val ownSources = hello.localSources.filter { it.kind == hello.kind.name }
+        ownSources.forEach {
+            data.accountIdentities.recordSource(it.deviceId, it.selfId, it.kind, it.scope, local = false, eventCount = it.eventCount)
+        }
+        if (config.kind == PeerKind.WATCH && data.accountIdentities.managed) {
+            data.accountIdentities.scope?.let { data.accountIdentities.acceptOwnSources(it, hello.adoptedSources.toSet()) }
+        }
+        activeOwnership?.let { session ->
+            val fresh =
+                ownSources
+                    .filter { it.scope == data.accountIdentities.scope && data.accountIdentities.sourceScope(it.deviceId) == it.scope }
+                    .map { it.deviceId }
+                    .toSet()
+            data.cloudUploads.bindOwnedDevices(session, fresh)
+        }
+    }
+
     private fun sendHello(peer: String) {
+        if (data.players.self() != null && data.accountIdentities.localSources().isEmpty()) initializeIdentity()
         helloSent += peer
-        send(peer, Hello(deviceId, config.kind, opened.keys.toList(), appBuild = config.appBuild, session = sessionId))
+        val scoped = data.accountIdentities.managed
+        val known = pairing.candidate(peer) ?: hellos[peer]
+        send(
+            peer,
+            Hello(
+                deviceId,
+                config.kind,
+                if (scoped) emptyList() else opened.keys.toList(),
+                minV = if (scoped && known?.identityProtocol != 1) 4 else ProtocolVersion.MIN_SUPPORTED,
+                appBuild = config.appBuild,
+                session = sessionId,
+                identityProtocol = 1,
+                ownerContext = pairing.context,
+                recipientSession = known?.session,
+                localSources =
+                    if (!scoped || known?.identityProtocol == 1) {
+                        data.accountIdentities.localSources().map {
+                            OwnSource(it.deviceId, it.selfId, it.scope, it.kind, it.eventCount)
+                        }
+                    } else {
+                        emptyList()
+                    },
+                adoptedSources =
+                    if (scoped && config.kind == PeerKind.PHONE && known?.identityProtocol == 1) {
+                        data.accountIdentities.currentSources().toList()
+                    } else {
+                        emptyList()
+                    },
+            ),
+        )
     }
 
     private fun sendSummaries() {
@@ -1704,21 +1955,37 @@ class MatchSession(
     /**
      * Zentrale Routingregel je Gegenstelle: Darf [matchId] an [peer] repliziert werden? Gilt für Live-Events,
      * Weiterleitung, Rückstand, Match-Köpfe, Summaries und Antworten darauf (alles läuft über [send]).
-     * - Uhr → Handy und zwischen Handys: alles.
+     * - Uhr â†’ Handy und zwischen Handys: alles.
      * - Handy → eigene Uhr: nur das aktuelle Uhr-Match und Matches, in denen diese Uhr selbst Events hat (Übergabe,
      *   Rückstand früherer Uhr-Matches). Director-Matches der Nachbarplätze erreichen die Uhr nie.
      * Löschmarkierungen und `Hello` gehen immer an alle.
      */
+    private fun inCurrentScope(matchId: MatchId): Boolean =
+        !data.accountIdentities.managed ||
+            (devicesIn(matchId) + data.accountIdentities.matchSources(matchId.value)).any { it in data.accountIdentities.currentSources() }
+
     private fun replicates(
         peer: String,
         matchId: MatchId,
     ): Boolean {
+        if (!inCurrentScope(matchId)) return false
         if (!config.parallelMatches) return true
         // Review W3-M R2 #3: noch nicht identifizierte Gegenstelle (kein Hello, kein gemerkter Knoten) bekommt keine
         // Matchdaten; nach ihrem Hello schiebt onHello Summary und zulässigen Rückstand nach
         val device = peerDeviceOf(peer) ?: return false
         val kind = peerKindOf(peer) ?: return false
-        return kind != PeerKind.WATCH || matchId == watchAssignment?.matchId || device.value in devicesIn(matchId)
+        val watchSources =
+            if (data.accountIdentities.managed) {
+                hellos[peer]
+                    ?.localSources
+                    .orEmpty()
+                    .map { it.deviceId }
+                    .toSet()
+            } else {
+                setOf(device.value)
+            }
+        return kind != PeerKind.WATCH || matchId == watchAssignment?.matchId ||
+            (devicesIn(matchId) + data.accountIdentities.matchSources(matchId.value)).any { it in watchSources }
     }
 
     private fun peerDeviceOf(peer: String): DeviceId? =
@@ -1852,13 +2119,17 @@ class MatchSession(
         message: SyncMessage,
     ) {
         if (!started) return
-        val routed = route(peer, message) ?: return
+        val envelope = if (data.accountIdentities.managed && message !is Hello) pairing.envelope(peer) ?: return else null
+        var routed = route(peer, message) ?: return
+        if (data.accountIdentities.managed && routed is Deleted) {
+            routed = routed.copy(matches = routed.matches.filter { inCurrentScope(it.matchId) })
+        }
         if (routed is Events && routed.events.isNotEmpty() && peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
-        val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() }?.let { ackCallback(it) }
-        link?.send(peer, SyncCodec.encode(routed), callback)
+        val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
+        link?.send(peer, if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope), callback)
     }
 
-    /** Ack einer `Events`-Nachricht (ReliableDeviceLink, Scheduler-Thread) → Events gelten als bei der Gegenstelle. */
+    /** Ack einer `Events`-Nachricht (ReliableDeviceLink, Scheduler-Thread) â†’ Events gelten als bei der Gegenstelle. */
     private fun ackCallback(message: Events): SendCallback =
         object : SendCallback {
             override fun onAcked(
@@ -1867,6 +2138,7 @@ class MatchSession(
                 latencyMs: Long,
             ) {
                 checkThread()
+                if (data.accountIdentities.managed) return
                 data.events.markConfirmed(message.matchId.value, message.events.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
                 publish()
             }
@@ -1904,7 +2176,7 @@ class MatchSession(
             opened.keys.toList() +
                 data.matches.recent(config.summaryMatchLimit).map { it.id } +
                 data.events.unconfirmedMatches().map { MatchId(it) }
-        ).distinct().filter { !data.matches.isDeleted(it) }
+        ).distinct().filter { !data.matches.isDeleted(it) && inCurrentScope(it) }
 
     private fun summaryOf(
         matches: List<MatchId>,
@@ -1924,6 +2196,18 @@ class MatchSession(
             .sortedWith(EventOrdering)
 
     private fun metaMessage(record: MatchRecord?): MatchMetaMessage {
+        if (data.accountIdentities.managed) {
+            return MatchMetaMessage(
+                match =
+                    record?.takeIf { inCurrentScope(it.id) }?.let {
+                        MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId)
+                    },
+                players = record?.lineup?.let { (it.a + it.b).distinct().mapNotNull { id -> data.players.get(id)?.toPlayer() } }.orEmpty(),
+                self = data.players.self()?.toPlayer(),
+                watchMatch = watchAssignment?.takeIf { config.parallelMatches },
+                telemetry = TelemetrySetting.of(telemetry),
+            )
+        }
         val archived = data.players.archivedIds()
         val favorites =
             data.favorites.recent(limit = FAVORITES_IN_META).filter {

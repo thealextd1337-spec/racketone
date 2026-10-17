@@ -28,6 +28,7 @@ class LocalData(
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
     val cloud: CloudSyncRepository = CloudSyncRepository(database, events)
     val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver)
+    val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
     private val identityListeners = mutableSetOf<() -> Unit>()
 
     /**
@@ -125,6 +126,8 @@ class LocalData(
     /** Führt [block] in einer Transaktion aus (alles oder nichts). */
     fun <T> transaction(block: () -> T): T = database.transactionWithResult { block() }
 
+    fun afterCommit(block: () -> Unit) = database.transaction { afterCommit(block) }
+
     /**
      * Löscht ein Match vollständig (Kopf + Events) und hinterlässt eine dauerhafte Löschmarkierung, damit es durch
      * keinen Abgleich wieder auftaucht – „Wischen → löschen“ in der Historie bzw. empfangene Löschung.
@@ -172,16 +175,21 @@ class LocalData(
      * Matches mit diesen IDs zeigen den Besitzer („Du“), keinen Gast.
      */
     fun selfAliases(): Set<PlayerId> =
-        settings
-            .get(SELF_ALIASES_KEY)
-            ?.split(',')
-            ?.filter { it.isNotBlank() }
-            ?.map { PlayerId(it) }
-            ?.toSet()
-            .orEmpty()
+        if (accountIdentities.managed) {
+            accountIdentities.aliases()
+        } else {
+            settings
+                .get(SELF_ALIASES_KEY)
+                ?.split(',')
+                ?.filter { it.isNotBlank() }
+                ?.map { PlayerId(it) }
+                ?.toSet()
+                .orEmpty()
+        }
 
     /** Merkt [ids] als Aliase des Besitzers (der aktuelle Self wird ausgelassen). `true`, wenn sich etwas geändert hat. */
     fun addSelfAliases(ids: Collection<PlayerId>): Boolean {
+        if (accountIdentities.managed) return false
         val self = players.self()?.id
         val current = selfAliases()
         val next = current + ids.filter { it != self && it.value.isNotBlank() && ',' !in it.value }
@@ -213,6 +221,6 @@ class LocalData(
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
         /** Schema 4: Geräte-Eigentümer und Upload-Sitzungszähler; 3.sqm weist bestehende Daten keinem Konto zu. */
-        const val SCHEMA_VERSION: Long = 4
+        const val SCHEMA_VERSION: Long = 5
     }
 }

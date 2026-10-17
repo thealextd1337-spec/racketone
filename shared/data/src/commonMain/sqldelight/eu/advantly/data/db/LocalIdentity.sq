@@ -1,0 +1,76 @@
+CREATE TABLE local_identity (
+    scope_id TEXT NOT NULL PRIMARY KEY,
+    device_id TEXT NOT NULL UNIQUE,
+    self_id TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE local_source (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    self_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    local INTEGER NOT NULL,
+    reported_event_count INTEGER NOT NULL DEFAULT 0
+);
+
+identityForScope:
+SELECT * FROM local_identity WHERE scope_id = ?;
+
+putIdentity:
+INSERT INTO local_identity(scope_id, device_id, self_id) VALUES (?, ?, ?);
+
+source:
+SELECT * FROM local_source WHERE device_id = ?;
+
+putSource:
+INSERT OR IGNORE INTO local_source(device_id, self_id, kind, scope_id, local) VALUES (?, ?, ?, ?, ?);
+
+localSources:
+SELECT s.*, (SELECT count(*) FROM match_event e WHERE e.device_id = s.device_id) AS stored_event_count FROM local_source s WHERE s.local = 1;
+
+sourcesForScope:
+SELECT * FROM local_source WHERE scope_id = ?;
+
+unboundSources:
+SELECT s.device_id, s.self_id, s.kind, max(count(e.id), s.reported_event_count) AS event_count
+FROM local_source s LEFT JOIN match_event e ON e.device_id = s.device_id
+WHERE NOT EXISTS (SELECT 1 FROM cloud_device_owner o WHERE o.device_id = s.device_id)
+GROUP BY s.device_id HAVING max(count(e.id), s.reported_event_count) > 0 ORDER BY s.kind, s.device_id;
+
+aliasesForProfile:
+SELECT s.self_id FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id WHERE o.profile_id = ?;
+
+ownedSource:
+SELECT s.device_id FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id WHERE o.profile_id = ?;
+
+CREATE TABLE local_scope_source (
+    device_id TEXT NOT NULL PRIMARY KEY,
+    scope_id TEXT NOT NULL
+);
+
+acceptedScopeForSource:
+SELECT scope_id FROM local_scope_source WHERE device_id = ?;
+
+acceptSourceScope:
+INSERT OR IGNORE INTO local_scope_source(device_id, scope_id) VALUES (?, ?);
+
+acceptedSources:
+SELECT device_id FROM local_scope_source WHERE scope_id = ?;
+
+reportSourceCount:
+UPDATE local_source SET reported_event_count = max(reported_event_count, ?) WHERE device_id = ?;
+
+CREATE TABLE local_match_source (
+    match_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    PRIMARY KEY(match_id, device_id)
+);
+
+rememberMatchSource:
+INSERT OR IGNORE INTO local_match_source(match_id, device_id) VALUES (?, ?);
+
+matchSources:
+SELECT device_id FROM local_match_source WHERE match_id = ?;
+
+ownedSourcesInScope:
+SELECT count(*) FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id WHERE s.scope_id = ?;

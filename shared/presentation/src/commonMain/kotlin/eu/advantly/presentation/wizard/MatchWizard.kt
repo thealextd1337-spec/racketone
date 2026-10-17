@@ -63,15 +63,32 @@ class MatchWizard(
     // Einmal beim Sportwechsel laden; Gesten und Recomposition bleiben frei von Datenbankzugriffen.
     private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
-    val state: StateFlow<WizardUiState> = mutableState.asStateFlow()
+    private var draftSelfId = players.self.value.id
+    private val detachIdentity = players.observeOwnerIdentity(::ensureCurrentIdentity)
 
-    private val input: WizardInput get() = mutableState.value.input
+    fun close() = detachIdentity()
+
+    val state: StateFlow<WizardUiState>
+        get() {
+            ensureCurrentIdentity()
+            return mutableState.asStateFlow()
+        }
+
+    private fun ensureCurrentIdentity() {
+        if (draftSelfId != players.self.value.id) reset()
+    }
+
+    private val input: WizardInput get() {
+        ensureCurrentIdentity()
+        return mutableState.value.input
+    }
 
     /** Bekannte Gäste (zuletzt verwendete zuerst) für die Spielerauswahl. */
     val guests: StateFlow<List<Player>> get() = players.guests
 
     /** Setzt den Assistenten auf Schritt 1 zurück. */
     fun reset() {
+        draftSelfId = players.self.value.id
         createdPlayers.clear()
         recentPlayers = emptyList()
         set(initialInput())
@@ -346,6 +363,7 @@ class MatchWizard(
 
     /** Fertiges Setup (oder `null`); speichert es auf Wunsch als Favoriten. */
     fun finish(): MatchSetup? {
+        ensureCurrentIdentity()
         val setup = mutableState.value.setup ?: return null
         if (input.saveAsFavorite) players.saveFavorite(setup)
         return setup

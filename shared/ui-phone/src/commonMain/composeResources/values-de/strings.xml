@@ -637,4 +637,9 @@
     <string name="support_planned">Geplant</string>
     <string name="support_resolved">Behoben</string>
     <string name="support_closed">Geschlossen</string>
+    <string name="auth_adoption_title">Welche lokalen Daten gehören zu diesem Konto? Nicht ausgewählte Daten bleiben ohne Zuordnung.</string>
+    <string name="auth_adoption_phone">Handy: %1$d Events</string>
+    <string name="auth_adoption_watch">Uhr: %1$d Events</string>
+    <string name="auth_adoption_accept">Auswahl übernehmen</string>
+    <string name="auth_adoption_cancel">Ohne Zuordnung lassen</string>
 </resources>

@@ -36,6 +36,8 @@ class WearDataLayerTransport(
     /** DataItem-Queue nutzen, wenn die Gegenseite nicht live erreichbar ist. */
     private val useDataItemQueue: Boolean = true,
 ) : LinkTransport {
+    override fun isTrustedCounterpart(peer: String): Boolean = peer.isNotBlank()
+
     private val appContext = context.applicationContext
     private val messageClient = Wearable.getMessageClient(appContext)
     private val dataClient = Wearable.getDataClient(appContext)

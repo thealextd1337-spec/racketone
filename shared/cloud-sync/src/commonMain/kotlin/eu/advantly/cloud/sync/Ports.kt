@@ -55,7 +55,17 @@ data class CloudSession(
 enum class IdTokenProvider { GOOGLE, APPLE }
 
 /** Handy-Auth. Geburtsdatum und Ticket leben nur für den laufenden Anmeldeversuch im Speicher. */
+data class CloudAdoptionSource(
+    val key: String,
+    val kind: String,
+    val eventCount: Long,
+)
+
 interface CloudAuthPort {
+    fun adoptionSources(): List<CloudAdoptionSource> = emptyList()
+
+    fun adoptSources(ids: Set<String>) {}
+
     val session: StateFlow<CloudSession?>
 
     suspend fun issueAgeTicket(

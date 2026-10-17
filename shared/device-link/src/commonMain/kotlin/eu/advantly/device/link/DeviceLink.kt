@@ -23,6 +23,9 @@ package eu.advantly.device.link
  * (Android: Main-Looper, Apple: Main-Queue, Tests: [eu.advantly.device.link.testing.ManualScheduler]).
  */
 interface DeviceLink {
+    /** Plattformbeleg f?r den direkten App-Kanal; generische Transporte bleiben unvertraut. */
+    fun isTrustedCounterpart(peer: String): Boolean = false
+
     /** Aktueller Verbindungsstatus. */
     val state: LinkState
 

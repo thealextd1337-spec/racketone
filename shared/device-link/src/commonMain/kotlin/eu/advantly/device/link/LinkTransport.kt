@@ -6,6 +6,9 @@ package eu.advantly.device.link
  * Threads aufrufen; [ReliableDeviceLink] reicht sie an seinen [LinkScheduler] weiter.
  */
 interface LinkTransport {
+    /** Plattformbeleg f?r den direkten App-Kanal; generische Transporte bleiben unvertraut. */
+    fun isTrustedCounterpart(peer: String): Boolean = false
+
     fun start(listener: Listener)
 
     fun stop()

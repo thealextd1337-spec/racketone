@@ -1,5 +1,6 @@
 package eu.advantly.presentation.auth
 
+import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
@@ -16,6 +17,14 @@ class FakePhoneAuth : CloudAuthPort {
     override val session = MutableStateFlow<CloudSession?>(null)
     val calls = mutableListOf<String>()
     var failure: String? = null
+    var sources: List<CloudAdoptionSource> = emptyList()
+    val adopted = mutableListOf<Set<String>>()
+
+    override fun adoptionSources(): List<CloudAdoptionSource> = sources
+
+    override fun adoptSources(ids: Set<String>) {
+        adopted += ids
+    }
 
     private fun call(name: String) {
         calls += name
@@ -91,6 +100,30 @@ class AuthViewModelTest {
         assertFalse(validBirthDate("2000-01-00"))
         assertFalse(validBirthDate("not-a-date"))
         assertEquals(true, validBirthDate("2000-02-29"))
+    }
+
+    @Test fun adoptionRequiresSelectionAndCancelLeavesSourcesUnbound() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true, generation = 4)
+                it.sources = listOf(CloudAdoptionSource("opaque", "WATCH", 8))
+            }
+        val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+        assertEquals(1, model.state.value.adoptionSources.size)
+        model.selectSource("opaque")
+        model.cancelAdoption()
+        assertEquals(emptyList(), auth.adopted)
+        assertEquals(emptySet(), model.state.value.selectedSources)
+        model.refresh()
+        model.selectSource("opaque")
+        auth.session.value = CloudSession("bob", true, generation = 5)
+        model.acceptAdoption()
+        assertEquals("cloud_session_changed", model.state.value.error)
+        assertEquals(emptyList(), auth.adopted)
+        model.refresh()
+        model.selectSource("opaque")
+        model.acceptAdoption()
+        assertEquals(listOf(setOf("opaque")), auth.adopted)
     }
 
     private val scope = CoroutineScope(Dispatchers.Unconfined)
