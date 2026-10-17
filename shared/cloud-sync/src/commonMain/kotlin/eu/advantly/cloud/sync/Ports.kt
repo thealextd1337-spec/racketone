@@ -48,6 +48,8 @@ data class CloudSession(
     /** `false` bis `finish_onboarding` (Alias nach serverseitigem Altersgate) erfolgreich war. */
     val onboarded: Boolean,
     val deletionRequested: Boolean = false,
+    /** Prozesslokale Auth-Generation; neue Anmeldung ist auch beim selben Konto eine neue Sitzung. */
+    val generation: Long = 0,
 )
 
 enum class IdTokenProvider { GOOGLE, APPLE }
@@ -94,6 +96,9 @@ interface CloudAuthPort {
 
     /** Lokale Sitzung wird auch offline gelöscht; serverseitiger Widerruf benötigt Netz. */
     suspend fun signOut()
+
+    /** Ressourcen freigeben und lokale Cloud-Arbeit sofort sperren. */
+    fun close() {}
 }
 
 /**

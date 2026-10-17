@@ -28,6 +28,7 @@ class AuthViewModel(
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
+        auth.close()
         super.onCleared()
     }
 

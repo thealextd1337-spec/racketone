@@ -13,6 +13,8 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -48,7 +50,7 @@ class SupabasePhoneAuthTest {
                     },
                 )
             try {
-                val auth = SupabasePhoneAuth(sdk, "installation-secret")
+                val auth = SupabasePhoneAuth(sdk, "installation-secret", scope = CoroutineScope(coroutineContext + SupervisorJob()))
                 val ticket = auth.issueAgeTicket("AT", "2000-01-01")
                 auth.sendEmailCode("adult@example.com", ticket)
                 assertEquals(
@@ -82,7 +84,7 @@ class SupabasePhoneAuthTest {
                     },
                 )
             try {
-                val auth = SupabasePhoneAuth(sdk, "installation-secret")
+                val auth = SupabasePhoneAuth(sdk, "installation-secret", scope = CoroutineScope(coroutineContext + SupervisorJob()))
                 assertEquals(
                     "age_ticket_expired",
                     assertFailsWith<CloudException> { auth.sendEmailCode("adult@example.com", "old-ticket") }.reason,
@@ -104,7 +106,7 @@ class SupabasePhoneAuthTest {
             try {
                 sdk.auth.awaitInitialization()
                 sdk.auth.importAuthToken("local-test-access-token", autoRefresh = false)
-                val auth = SupabasePhoneAuth(sdk, "installation-secret")
+                val auth = SupabasePhoneAuth(sdk, "installation-secret", scope = CoroutineScope(coroutineContext + SupervisorJob()))
                 assertEquals("connection_failed", assertFailsWith<CloudException> { auth.signOut() }.message)
                 assertNull(sdk.auth.currentSessionOrNull())
                 assertNull(auth.session.value)
@@ -132,7 +134,7 @@ class SupabasePhoneAuthTest {
                     },
                 )
             try {
-                val auth = SupabasePhoneAuth(sdk, "installation-secret")
+                val auth = SupabasePhoneAuth(sdk, "installation-secret", scope = CoroutineScope(coroutineContext + SupervisorJob()))
                 // Nur Transporttest; die Tokenprüfung bleibt beim Auth-Server.
                 val token = "header.eyJzdWIiOiJnb29nbGUtc3ViIn0.signature"
                 val error = assertFailsWith<CloudException> { auth.signInWithIdToken(IdTokenProvider.GOOGLE, token, "raw-nonce", "ticket") }

@@ -1,5 +1,6 @@
 package eu.advantly.android.auth
 
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -11,13 +12,18 @@ import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
 import eu.advantly.cloud.sync.SupabasePhoneAuth
 import eu.advantly.cloud.sync.SupabaseSupport
+import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.support.SupportViewModel
+import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -33,7 +39,13 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
             install(Postgrest)
         }
     return AuthViewModel(
-        SupabasePhoneAuth(client, storage.deviceSecret),
+        SupabasePhoneAuth(
+            client,
+            storage.deviceSecret,
+            uploads = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE).data.cloudUploads,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
+        ),
         support =
             SupportViewModel(
                 SupabaseSupport(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, client),
