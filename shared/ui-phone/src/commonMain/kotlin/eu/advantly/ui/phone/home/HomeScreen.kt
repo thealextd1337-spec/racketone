@@ -115,6 +115,7 @@ fun HomeScreen(
                 color = AdvantlyTheme.colors.text,
                 modifier = Modifier.weight(1f).padding(top = Spacing.xl, bottom = Spacing.l).semantics { heading() },
             )
+            WatchStatusIndicator(model.live)
             if (onSupport != null) {
                 val supportDescription = stringResource(Res.string.support_open)
                 FilledTonalButton(
@@ -127,13 +128,6 @@ fun HomeScreen(
                 ) {
                     Text(stringResource(Res.string.support_feedback))
                 }
-            } else {
-                WatchStatusIndicator(model.live)
-            }
-        }
-        if (onSupport != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                WatchStatusIndicator(model.live)
             }
         }
         if (open.size > 1) SectionTitle(stringResource(Res.string.home_open_matches, runningCount))
