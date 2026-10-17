@@ -33,6 +33,8 @@ test("recovery forms expose localized labels, code autocomplete and new-password
         }
       }
       const login = descendants(view.renderLogin({ language, busy: false }));
+      assert.ok(login.some((element) => element.name === "rememberDevice" && element.type === "checkbox" && element.checked === false));
+      assert.ok(login.some((element) => element.textContent === translate(language, "rememberDevice")));
       assert.ok(login.some((element) => element.dataset.action === "start-recovery"));
       assert.notEqual(translate(language, "forgotPassword"), "forgotPassword");
     }

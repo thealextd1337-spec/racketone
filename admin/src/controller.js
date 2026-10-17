@@ -25,6 +25,8 @@ function initialState(config) {
     authError: null,
     authNotice: null,
     loginEmail: "",
+    rememberDevice: false,
+    rememberFailed: false,
     busy: false,
     email: "",
     factorId: null,
@@ -108,7 +110,7 @@ export class AdminController {
   subscribe() {
     const routes = {
       language: (payload) => this.setLanguage(payload?.language),
-      "sign-in": (payload) => this.signIn(payload?.email, payload?.password),
+      "sign-in": (payload) => this.signIn(payload?.email, payload?.password, payload?.rememberDevice),
       "start-recovery": () => this.startRecovery(),
       "request-recovery": (payload) => this.requestRecovery(payload?.email),
       "verify-recovery": (payload) => this.verifyRecovery(payload?.code),
@@ -155,7 +157,29 @@ export class AdminController {
     this.render();
   }
 
-  async signIn(email, password) {
+  async restoreSession() {
+    if (!this.config?.ok || !this.auth?.restoreSession || this.state.busy || this.state.phase !== "login") return;
+    const flow = this.authFlowEpoch.next();
+    this.authOperations += 1;
+    this.state.busy = true;
+    this.render();
+    try {
+      const result = await this.runAuthFlow(flow, () => this.auth.restoreSession());
+      if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== "login") return;
+      if (result?.kind === "unlocked" && result.aal === "aal2") {
+        this.state.email = result.email;
+        await this.openInbox(flow, "login");
+      } else { this.state.busy = false; this.render(); }
+    } catch {
+      if (this.authFlowEpoch.isCurrent(flow)) {
+        this.state.busy = false;
+        this.state.authError = "sessionExpired";
+        this.render();
+      }
+    } finally { this.authOperations -= 1; }
+  }
+
+  async signIn(email, password, rememberDevice = false) {
     if (!this.config?.ok || !this.auth || this.state.busy || this.state.phase !== "login") return;
     const flow = this.authFlowEpoch.next();
     this.authOperations += 1;
@@ -163,12 +187,14 @@ export class AdminController {
     this.state.authError = null;
     this.state.authNotice = null;
     this.state.loginEmail = String(email ?? "").trim();
+    this.state.rememberDevice = rememberDevice === true;
     this.render();
     try {
-      const result = await this.runAuthFlow(flow, () => this.auth.signIn(this.state.loginEmail, password));
+      const result = await this.runAuthFlow(flow, () => this.auth.signIn(this.state.loginEmail, password, this.state.rememberDevice));
       if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== "login" || !result) return;
       this.state.email = result.email;
       if (result.kind === "unlocked" && result.aal === "aal2") {
+        this.state.rememberFailed = result.rememberFailed === true;
         await this.openInbox(flow, "login");
       } else {
         this.state.factorId = result.factorId;
@@ -201,6 +227,7 @@ export class AdminController {
       const result = await this.runAuthFlow(flow, () => this.auth.verifyTotp(this.state.factorId, code));
       if (!this.authFlowEpoch.isCurrent(flow) || this.state.phase !== expectedPhase || !result) return;
       if (result?.aal !== "aal2") throw new SupportError("support_mfa_required");
+      this.state.rememberFailed = result.rememberFailed === true;
       if (expectedPhase === "recovery-mfa") {
         this.state.phase = "recovery-password";
         this.state.factorId = null;
