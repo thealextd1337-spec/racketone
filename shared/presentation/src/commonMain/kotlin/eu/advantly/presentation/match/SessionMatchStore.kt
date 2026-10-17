@@ -214,7 +214,13 @@ class SessionMatchStore(
                 known[index] = known[index].copy(name = device.name, appInstalled = device.appInstalled)
             } else {
                 known +=
-                    DeviceStatus(device.peer, PeerKind.WATCH, name = device.name, appInstalled = device.appInstalled)
+                    DeviceStatus(
+                        device.peer,
+                        PeerKind.WATCH,
+                        name = device.name,
+                        appInstalled = device.appInstalled,
+                        reachable = state.sync.peers.any { it.peer == device.peer },
+                    )
             }
         }
         // WCSession meldet auch eine Uhr, die noch nie ein Hello gesendet hat.

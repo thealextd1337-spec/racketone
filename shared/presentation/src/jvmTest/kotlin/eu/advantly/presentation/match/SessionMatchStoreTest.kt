@@ -1077,6 +1077,37 @@ class SessionMatchStoreTest {
     }
 
     @Test
+    fun reachableWatchWithoutHelloIsYellowAndTurnsRedOnlyWhenDisconnected() {
+        val rig = Rig(watchOnline = false)
+        val idleLink = ReliableDeviceLink(rig.network.transport("idle-watch"), rig.scheduler, newMessageId = { "idle" })
+        idleLink.start()
+        rig.companion.devices = listOf(CompanionDevice("idle-watch", "Idle Watch"))
+        rig.companion.state = CompanionState.APP_INSTALLED
+        rig.settle()
+        assertTrue(
+            rig.phoneSession.state.value.sync.peers
+                .any { it.peer == "idle-watch" },
+        )
+        assertTrue(
+            rig.phoneSession.state.value.devices
+                .none { it.peer == "idle-watch" },
+        )
+
+        fun light() =
+            rig.phone.deviceStatuses.value
+                .single { it.peer == "idle-watch" }
+                .light(null)
+        assertEquals(DeviceLight.YELLOW, light(), "Erreichbarkeit ist auch vor dem ersten Hello bekannt")
+        rig.offline("idle-watch")
+        rig.settle()
+        assertEquals(DeviceLight.RED, light())
+        rig.online("idle-watch")
+        rig.settle()
+        assertEquals(DeviceLight.YELLOW, light())
+        idleLink.stop()
+    }
+
+    @Test
     fun inventoryRemovesOldWatchesButKeepsLivePeersAndPerDeviceInstallationState() {
         val rig = Rig()
         assertTrue(
