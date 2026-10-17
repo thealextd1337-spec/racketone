@@ -1,15 +1,23 @@
 # Privater Meldeweg und Admin-Inbox
 
 Stand: 17.10.2026. Erste Lieferung aus [Feedback & Admin](plan-feedback-admin.md).
-Noch keine Produktionsbereitstellung und kein eingerichteter Betreiberzugang. Die Datenbankmigration,
-die Handy-Anbindung und `admin/` werden zusammen ausgeliefert; die folgenden Live-Nachweise bleiben ein Gate.
+Staging ist eingerichtet, der persönliche Betreiberzugang mit MFA funktioniert laut Nutzerbestätigung.
+Noch keine Produktionsfreigabe. Die folgenden vollständigen Live-Nachweise bleiben ein Gate.
 
 Staging: `20261016000700_support.sql` wurde am 17.10.2026 erfolgreich auf dem bestehenden Projekt
 `lgeoafnbluvxoezpftzo` angewendet ([Deployment-Nachweis](https://github.com/thealextd1337-spec/racketone/actions/runs/39014532139),
 Revision `3fbd5dced4220e1722999cf21ffd21d9a6d3f268`). Der Workflow belegt die Migration, nicht die tatsächliche
 Projektregion, Auth-/Gateway-Konfiguration oder erfolgreiche Cron-Läufe. Diese Nachweise bleiben offen.
-Cloudflare Workers Static Assets ist als separates Admin-Hosting vorbereitet; Adresse, Veröffentlichung und
-persönlicher Betreiberzugang stehen noch aus. Einrichtung siehe [Admin-README](../admin/README.md#staging-auf-cloudflare).
+Cloudflare Workers Static Assets stellt die [Admin-Staging-Oberfläche](https://advantly-admin-staging.thealextd1337.workers.dev/)
+bereit. Supabase verwendet den eingerichteten Resend-Versand. Einrichtung siehe
+[Admin-README](../admin/README.md#staging-auf-cloudflare).
+
+PR #58 (`524b02e`, geprüfter Quellstand `e37de50`) ist am 17.10. auf Cloudflare-Version `b49112c9`
+veröffentlicht. Live-Login DE/EN zeigt „Dieses Gerät 30 Tage merken“, standardmäßig ausgeschaltet.
+Das ausgelieferte JS `index-B3iCy1Lo.js` stimmt mit dem geprüften Build-Artefakt überein
+(SHA-256 `25182da2a4e2d1cd5f2ed04272962fe81a6c3c1a84d40ce9919e04b71039bef7`).
+42 Admin-Tests und `gradlew check` bestanden; unabhängiges Review und CI vor Merge bestanden.
+Das erneute Öffnen mit einer echten gemerkten Betreiber-Sitzung ist noch nicht als Live-Abnahme bestätigt.
 
 ## Funktionen und Grenzen
 
@@ -50,7 +58,10 @@ Betriebskennzahlen gehören in das Folgepaket.
    Entwurf nutzbar, Senden ist sichtbar deaktiviert. Ausschließlich öffentliche/publishable Schlüssel.
 3. `admin/`: gemäß dortiger README mit `VITE_SUPABASE_URL` und `VITE_SUPABASE_ANON_KEY` bauen, `dist/`
    auf eigener HTTPS-Adminadresse ausliefern. Keine Service-Schlüssel und keine fremden Skripte einbetten.
-   Sitzungen bleiben im Arbeitsspeicher. CSP/Sicherheitsheader des Hostings und Zugriff auf den tatsächlichen
+   Sitzungen bleiben standardmäßig im Arbeitsspeicher. Optional nach erfolgreicher MFA für feste 30 Tage
+   im eigenen Browser merken; Token-Erneuerung verlängert diese Frist nicht. Abmelden entfernt die
+   Speicherung. Wiederherstellung prüft Auth, AAL2 und aktive Supportrolle erneut; Recovery-Sitzungen
+   werden nicht gespeichert. CSP/Sicherheitsheader des Hostings und Zugriff auf den tatsächlichen
    Supabase-Endpunkt prüfen. Der Build stellt nichts selbst online.
 4. Persönliches Betreiberkonto mit verifizierter E-Mail über den bestehenden Altersgate-/Auth-Prozess
    bereitstellen. Für den separaten Admin-Login ein individuelles Passwort über einen kontrollierten
@@ -66,7 +77,8 @@ Betriebskennzahlen gehören in das Folgepaket.
    `support` und `admin` erlauben in dieser Lieferung dieselben Inbox-Aktionen. Noch keine zusätzlichen
    Kontoverwaltungsrechte aus der Rollenbezeichnung ableiten. Profil-Metadaten vergeben keine Rechte.
 6. Im Admin-Login TOTP einrichten und verifizieren. Erst ein MFA-JWT (`aal2`) plus aktive Mitgliedschaft
-   öffnet die Inbox. Recovery: zweiter separat provisionierter Betreiber; bei Geräteverlust kontrollierter
+   öffnet die Inbox. „Passwort vergessen?“ bietet den integrierten Passwort-Recovery-Ablauf; dabei bleibt
+   die MFA-Pflicht bestehen. Faktor-Recovery: zweiter separat provisionierter Betreiber; bei Geräteverlust kontrollierter
    Identitätsnachweis und Faktor-Reset über den Supabase-Betreiberzugang, anschließend neue TOTP-Einrichtung.
    Kein MFA-Bypass in der App. Mitgliedschaft widerrufen:
 
