@@ -48,6 +48,33 @@ as $$
   select u.id from tests.users u where u.identifier = p_identifier;
 $$;
 
+-- U1: bestehende Fachtests laufen mit echter auth.sessions-Zeile und eigener Caller-Capability.
+-- Negative Sitzungs-/Proof-Fälle werden ausdrücklich in 170 ohne diese Komfortfixture geprüft.
+create table if not exists tests.cloud_context (
+  profile_id uuid primary key references auth.users(id) on delete cascade,
+  session_id uuid not null default gen_random_uuid(),
+  installation_id uuid not null default gen_random_uuid(),
+  device_id uuid not null default gen_random_uuid()
+);
+grant select on tests.cloud_context to authenticated;
+create or replace function tests.prepare_cloud_context(p_profile uuid)
+returns tests.cloud_context language plpgsql security definer set search_path = '' as $$
+declare v_context tests.cloud_context;
+begin
+  insert into tests.cloud_context(profile_id) values (p_profile) on conflict do nothing;
+  select * into strict v_context from tests.cloud_context where profile_id = p_profile;
+  insert into auth.sessions(id, user_id, created_at, updated_at)
+    values (v_context.session_id, p_profile, now(), now()) on conflict do nothing;
+  insert into public.devices(id, profile_id) values (v_context.device_id, p_profile) on conflict do nothing;
+  insert into private.cloud_installations(profile_id, installation_id, device_id, proof_digest)
+    values (p_profile, v_context.installation_id, v_context.device_id, sha256(decode(repeat('a1',32),'hex')))
+    on conflict do nothing;
+  insert into private.cloud_session_bindings(session_id, profile_id, installation_id, device_id)
+    values (v_context.session_id, p_profile, v_context.installation_id, v_context.device_id) on conflict do nothing;
+  return v_context;
+end;
+$$;
+
 -- Rolle authenticated mit JWT-Claims des Testnutzers (wie supabase_test_helpers/basejump).
 create or replace function tests.authenticate_as(p_identifier text)
 returns void
@@ -56,12 +83,18 @@ set search_path = ''
 as $$
 declare
   v_id uuid := tests.uid(p_identifier);
+  v_context tests.cloud_context;
 begin
   if v_id is null then
     raise exception 'Testnutzer % fehlt', p_identifier;
   end if;
+  v_context := tests.prepare_cloud_context(v_id);
   perform set_config('role', 'authenticated', true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_id, 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', v_id, 'role', 'authenticated',
+    'session_id', v_context.session_id)::text, true);
+  perform set_config('request.headers', (coalesce(nullif(current_setting('request.headers',true),'')::jsonb,'{}'::jsonb)
+    || jsonb_build_object('x-advantly-installation-id', v_context.installation_id,
+      'x-advantly-installation-proof', repeat('a1',32)))::text, true);
 end;
 $$;
 
