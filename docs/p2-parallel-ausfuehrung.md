@@ -875,6 +875,16 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+### U4-Kern auf main abgeschlossen
+
+PR #66 wurde auf exakt `09bdd1b` nach grüner Ubuntu-/APK- und Apple-Simulator-CI
+(Run `39140546089`) zusammengeführt; main ist `870792a`.
+Der anschließende Root-Abgleich löst ausschließlich den Plankonflikt und erhält beide
+Nachweise. Produktbaum gegen Root `eb187f5` unverändert; der vollständige grüne
+744-Task-Check mit Android-APK gilt fort. PR #68 benötigt wegen seines konkreten
+Plankonflikts diesen Mainabgleich und anschließend CI auf dem neuen Head.
+K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
+
 ### K2 Phone – konkrete parallele Verträge
 
 Root-Androidintegration `ba1f37d` unabhängig `ship`, keine offenen Befunde; 20 Tests frisch
@@ -980,6 +990,11 @@ pinnt 2.9.7 im zentralen Katalog und verlangt zwei Leerzeichen; mit genau dieser
 19 Tests/Typen/Format/Lint und Gesamtcheck 692 Tasks grün. Neue Service-CI und Review 2
 laufen. PR66 nach PR65-Squash im eigenen Hilfsworktree auf `09bdd1b` abgeglichen; ausschließlich
 Plan-Konflikt, Produktcode/SQL/Tests unverändert. Neue CI erforderlich.
+PR #66 nach PR65-Squash erneut auf main `cb14420` abgeglichen. Ausschließlich add/add im
+Plan; der neuere vollständige Orchestratorplan bleibt erhalten. Gate und sämtliche übrigen
+Produkt-/SQL-/Testdateien unverändert zu `270782b` und zum unabhängig geprüften U4-Kandidaten.
+Der grüne vollständige 692-Task-Check dieses identischen Produktbaums gilt fort; CI wird
+auf dem neuen Mergehead erneut ausgeführt, kein Force-Push und keine fremden Worktreeedits.
 
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
 Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
