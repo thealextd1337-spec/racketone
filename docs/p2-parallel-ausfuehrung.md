@@ -490,6 +490,19 @@ für REQUEST/RECOVERY und ACCEPT/DECLINE mit Erfolg, verlorener Antwort und Fehl
 Zusätzlich darf REQUIRED/UNAVAILABLE eine unbestätigte Ablehnung nicht quittieren; nur frisches
 DECLINED oder bewusste neuere bestätigte Annahme. Öffentliche API, Gate und SQL unverändert.
 
+K3 meldet einen DST-Befund: `interval '14 days'` kann in Europe/Paris über Winterzeit um eine
+Stunde abweichen. Freigegeben ist ausschließlich in 004 eine funktionslokale UTC-Festlegung
+auch für bestehendes `cancel_account_deletion()` per ALTER FUNCTION, ohne API-/Rechteänderung.
+Status, Rücknahme und Job müssen identisch entscheiden; Sommer-/Winterzeit und UTC-Kontrollen
+sowie vor/an/nach Frist testen. Zusätzlich nachgewiesenen Lock-Wait über die Fristgrenze prüfen;
+weitere Änderung des Fristvergleichs erst nach belegtem Repro und konkreter Meldung.
+
+K1 Fix4-Fokus: Cloud 78, Auth JVM 51/AndroidHost 27 grün. Zwei Dateien, neun Produktivzeilen;
+24 echte Recovery-Integrationstests einschließlich 36-Zellen-Matrix. Originaladapter `bc283f4`
+mit finalen Tests 7 rot/17 Kontrollen grün; korrigiert 24/24. Der Decline-Flagdelta wurde
+zusätzlich isoliert rot→grün geprüft. Vollständiger Check und unveränderte SQL-Suite laufen;
+Commit und neues unabhängiges Review 5 stehen noch aus.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
