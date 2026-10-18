@@ -22,8 +22,13 @@ class LocalData(
 ) {
     private val database = AdvantlyDatabase(driver)
     val events: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
-    val matches: MatchRepository = MatchRepository(database.matchHeaderQueries, database.matchTombstoneQueries, ::assignmentIds)
-    val players: PlayerRepository = PlayerRepository(database.playerQueries)
+    val matches: MatchRepository =
+        MatchRepository(
+            database.matchHeaderQueries,
+            database.matchTombstoneQueries,
+            ::assignmentIds,
+        ) { cloud.resolveMatchMetadataSource(it) }
+    val players: PlayerRepository = PlayerRepository(database.playerQueries) { cloud.recordLocalPlayer(it) }
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
     val cloud: CloudSyncRepository = CloudSyncRepository(database, events)
@@ -94,7 +99,11 @@ class LocalData(
 
     fun rebuildAssignments(id: MatchId) {
         transaction {
+            cloud.resolveMatchMetadataSource(id.value)
             val projection = PlayerAssignments.project(identityEvents(id), players.placeholderIds())
+            val previous = storedProjection(id)
+            val next = projection.slots.associateWith { projection.people[it] }
+            if (previous == next) return@transaction
             database.matchAssignmentQueries.clearMatch(id.value)
             projection.slots.forEach { slot ->
                 val player = projection.people[slot]
@@ -220,7 +229,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 4: Geräte-Eigentümer und Upload-Sitzungszähler; 3.sqm weist bestehende Daten keinem Konto zu. */
-        const val SCHEMA_VERSION: Long = 5
+        /** Schema 6: unabhängige Metadatenrevisionen und Herkunft ohne implizite Übernahme von Altbeständen. */
+        const val SCHEMA_VERSION: Long = 6
     }
 }

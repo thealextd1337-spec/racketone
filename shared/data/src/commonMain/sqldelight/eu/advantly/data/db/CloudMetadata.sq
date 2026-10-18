@@ -1,0 +1,104 @@
+-- Eigene Metadaten-Acks sind unabhängig von Geräte- und Event-Cloud-Acks.
+CREATE TABLE cloud_metadata (
+    kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+    uploaded_revision INTEGER NOT NULL DEFAULT 0 CHECK (uploaded_revision >= 0 AND uploaded_revision <= revision),
+    origin TEXT NOT NULL DEFAULT 'UNKNOWN',
+    source_device_id TEXT,
+    writer_profile_id TEXT,
+    PRIMARY KEY (kind, entity_id)
+);
+
+CREATE INDEX cloud_metadata_pending ON cloud_metadata(kind, uploaded_revision, revision);
+
+CREATE TRIGGER cloud_header_insert AFTER INSERT ON match_header BEGIN
+    INSERT INTO cloud_metadata(kind, entity_id) VALUES ('HEADER', new.id);
+    INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PARTICIPANTS', new.id);
+    INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PROJECTION', new.id);
+END;
+
+CREATE TRIGGER cloud_header_update AFTER UPDATE OF format_json, meta_json, previous_match_id ON match_header
+WHEN old.format_json IS NOT new.format_json OR old.meta_json IS NOT new.meta_json OR old.previous_match_id IS NOT new.previous_match_id BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'HEADER' AND entity_id = new.id;
+END;
+
+CREATE TRIGGER cloud_lineup_update AFTER UPDATE OF lineup_json ON match_header
+WHEN old.lineup_json IS NOT new.lineup_json BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.id;
+END;
+
+CREATE TRIGGER cloud_projection_update AFTER UPDATE OF status, score_json ON match_header
+WHEN old.status IS NOT new.status OR old.score_json IS NOT new.score_json BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PROJECTION' AND entity_id = new.id;
+END;
+
+CREATE TRIGGER cloud_header_delete AFTER DELETE ON match_header BEGIN
+    DELETE FROM cloud_metadata WHERE entity_id = old.id AND kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION');
+END;
+
+CREATE TRIGGER cloud_assignment_insert AFTER INSERT ON match_assignment BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
+
+CREATE TRIGGER cloud_assignment_delete AFTER DELETE ON match_assignment BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = old.match_id;
+END;
+
+CREATE TRIGGER cloud_player_insert AFTER INSERT ON player BEGIN
+    INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PLAYER', new.id);
+END;
+
+CREATE TRIGGER cloud_player_update AFTER UPDATE OF display_name, kind ON player
+WHEN old.display_name IS NOT new.display_name OR (old.kind = 'ARCHIVED') != (new.kind = 'ARCHIVED')
+    OR (old.kind = 'PLACEHOLDER') != (new.kind = 'PLACEHOLDER') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PLAYER' AND entity_id = new.id;
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.id || '"') > 0
+    );
+END;
+
+CREATE TRIGGER cloud_assignment_update AFTER UPDATE OF player_json ON match_assignment
+WHEN old.player_json IS NOT new.player_json BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
+
+byKey:
+SELECT * FROM cloud_metadata WHERE kind = ? AND entity_id = ?;
+
+unknownMatches:
+SELECT entity_id FROM cloud_metadata WHERE kind = 'HEADER' AND origin = 'UNKNOWN';
+
+unknownPlayers:
+SELECT entity_id FROM cloud_metadata WHERE kind = 'PLAYER' AND origin = 'UNKNOWN';
+
+recordSource:
+UPDATE cloud_metadata SET origin = :origin, source_device_id = :source
+WHERE entity_id = :id AND origin = 'UNKNOWN' AND kind IN :kinds;
+
+recordDownload:
+UPDATE cloud_metadata SET origin = 'CLOUD', source_device_id = NULL, writer_profile_id = :writer,
+    uploaded_revision = revision WHERE kind = :kind AND entity_id = :id;
+
+pendingForProfile:
+SELECT m.* FROM cloud_metadata m
+LEFT JOIN cloud_device_owner o ON o.device_id = m.source_device_id
+WHERE m.revision > m.uploaded_revision AND (m.writer_profile_id = :profile OR o.profile_id = :profile)
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id AND m.kind != 'PLAYER')
+ORDER BY CASE m.kind WHEN 'PLAYER' THEN 0 WHEN 'HEADER' THEN 1 WHEN 'PARTICIPANTS' THEN 2 ELSE 3 END, m.entity_id
+LIMIT :limit;
+
+acknowledge:
+UPDATE cloud_metadata SET uploaded_revision = max(uploaded_revision, :selectedRevision)
+WHERE kind = :kind AND entity_id = :id AND revision >= :selectedRevision;
+
+currentSource:
+SELECT i.device_id FROM local_identity i JOIN setting s ON s.key = 'identity.scope' AND s.value = i.scope_id;
+
+sourceForSelf:
+SELECT device_id FROM local_source WHERE self_id = ? ORDER BY local DESC, device_id LIMIT 1;
+
+genesisForMatch:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
+FROM match_event WHERE match_id = ? AND (type = 'MatchCreated' OR type = '') ORDER BY lamport, device_id, id;

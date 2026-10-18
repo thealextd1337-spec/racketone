@@ -1,5 +1,6 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.data.CloudMetadataRevision
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.CloudUploadSnapshot
 import eu.advantly.data.CloudUploadStore
@@ -207,9 +208,10 @@ class CloudSessionGate internal constructor(
         snapshot: CloudUploadSnapshot,
         uploaded: Set<String>,
         rejected: Map<String, String>,
+        metadata: Set<CloudMetadataRevision> = emptySet(),
     ) {
         requireUpload(lease, snapshot)
-        requireNotNull(uploads).acknowledge(snapshot, uploaded, rejected)
+        requireNotNull(uploads).acknowledge(snapshot, uploaded, rejected, metadata)
     }
 
     private fun changed(): Nothing = throw CloudException("cloud_session_changed", true)
