@@ -23,7 +23,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Review 3 `ship`, Android-/Apple-CI grün auf `fbca22d`; PR #63 als `1575d58` nach main gemergt |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `025efc5` auf Entwurfs-PR #64; Review 6 Ship ohne offene Befunde, finale CI läuft |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Review 6 Ship, CI auf `025efc5` vollständig grün; PR #64 als `d9f055c` nach main gemergt |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -745,6 +745,21 @@ K2 meldet erste lokale Nachweise: 59 SQL-Fachassertions, acht echte Parallelrenn
 Deno-Tests grün; Gesamtcheck 692 Tasks grün. Harte 200-Plattformprüfungen für Storage/Cron/
 pg_net fehlen im lokalen PG17-Harness ausdrücklich. Root integriert nach finalem Commit
 beide Function-Konfigurationen und echte Storage-/Edge-CI; keine Ersatzdienste oder Skips.
+
+K1 PR #64 ist nach Review6 und allen relevanten CI-Jobs auf exakt `025efc5` als
+`d9f055c` gemergt. Deployworkflow ist ausschließlich manuell; kein Deployment ausgelöst.
+Vor PR65-Merge zeigte der historische Mergebaum einen Gatekonflikt und einen automatischen
+020-Fixture-Doppelimport. Auflösung bewahrt den bereits gemeinsam abgenommenen Root-Gatebaum
+einschließlich vollständiger K1-Fences und die 003-Testkataloghelfer. Vor Dokuänderung ist der
+aufgelöste Gitbaum exakt identisch zum bisherigen geprüften Rootbaum; keine Produktiv-/SQL-
+Änderung aus der Auflösung. Vollständiger Check danach 688 Tasks grün (29s, Exit 0).
+Main wird als eigener Merge übernommen; PR #65 erhält deshalb einen neuen CI-Lauf statt
+einen unbekannten Mergebaum freizugeben. Watch #64 beendet; weitere Arbeit bleibt aktiv.
+
+U4 Android: zusätzlich ausschließlich `testImplementation(libs.ktor.mock)` und
+`testImplementation(libs.sqldelight.sqlite.driver)` im vorhandenen Android-Build freigegeben,
+keine neue Version/Produktionsdependency. Serielle injizierte Testgrenze ersetzt keine
+Android-Geräteabnahme; produktiv Main.immediate und Looper-Guard erhalten.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
