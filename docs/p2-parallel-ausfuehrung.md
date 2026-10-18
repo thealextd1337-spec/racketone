@@ -94,6 +94,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
 - K1 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r3`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
+- Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 
 ### Server/K4 – erste Übergabe
@@ -307,6 +308,11 @@ Cloud-Seams prüft `require_current_consents` die unabhängige Auth-Sitzung nach
 erneut. Historische Produktionsmigrationen 001/002 und die 180-K1-Tests bleiben unverändert.
 Positive Legacy-Suites erhalten explizite TESTzustimmung. Parent prüft den tatsächlichen
 Diff und beauftragt unabhängiges Review vor Übernahme/Freigabe.
+
+Das unabhängige Server-Consent-Review ist auf exakt `20f0e43` gestartet, einschließlich
+der bekannten Statement-Snapshot-/Isolations-/Sitzungswiderruf-Risiken aus früheren Reviews.
+Währenddessen läuft U4 weiter. Neue Umsetzungspakete werden erst nach stabilen Verträgen
+und ohne Überschneidung mit den laufenden Review-/Uploaddateien gestartet.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
