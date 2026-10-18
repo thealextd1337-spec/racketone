@@ -477,6 +477,19 @@ und minimaler aggregierter Laufnachweis. Bestehende Purge-/Redaktions-/Support-A
 wiederverwenden, keine neue Redaktion oder öffentliche Diagnosedaten. Eigener Harnessport
 54587; D3, UI, echte Cronausführung und Apple-Widerruf bleiben getrennte Abnahmen.
 
+U4-Herkunftskorrektur zusätzlich konkret freigegeben: gemeinsame U3-Auflösung in
+`CloudSyncMetadata.kt`, UNKNOWN-Matches bei `CloudUploadStore.activate` mit bereits
+kontoeigener Genesisquelle, nach atomarem `bindOwnedDevices` sowie nach belegtem
+`AccountIdentityRepository.recordSource`. Vorhandene Kotlin-Genesisprüfung bleibt maßgeblich;
+Kandidaten in höchstens 500 IDs pro Seite mit strikt fortschreitendem Cursor. Keine Auflösung
+im Refresh, keine bereits quittierte Gesamthistorie parsen. Auch inverse Self-Aliasabhängigkeit
+zwischen zwei belegten Quellen desselben Kontos testen; nie aktuelles Hostkonto als Beleg nutzen.
+
+K1 Fix4 bleibt in Adapter und vorhandenen Recovery-Integrationstests. Kompakte 36-Zellen-Matrix
+für REQUEST/RECOVERY und ACCEPT/DECLINE mit Erfolg, verlorener Antwort und Fehler ohne Commit.
+Zusätzlich darf REQUIRED/UNAVAILABLE eine unbestätigte Ablehnung nicht quittieren; nur frisches
+DECLINED oder bewusste neuere bestätigte Annahme. Öffentliche API, Gate und SQL unverändert.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
