@@ -6,6 +6,36 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 
 ## Bestätigter Stand nach D1-Merge
 
+### Neue Parallelwelle: CI-Korrektur und D2/D3-Grundlagen
+
+PR #70 auf `5e5a408` hat einen belegten Ubuntu-Testfehler: Die Rename-Barriere erwartet
+`DOWNLOADING`, beobachtet aber bereits `LOCAL_FILE`. Die Korrekturlane untersucht zuerst
+die tatsächliche Dispatcherreihenfolge; Produktcode wird ohne belegten Produktfehler nicht geändert.
+Der vorherige Upload-ACK-Testfix bleibt erhalten. Neue CI und unabhängiger Review bleiben Pflicht.
+
+Zwei weitere Pakete starten isoliert auf exakt `5e5a408`, ohne Dateien der CI-Lane zu besitzen:
+
+| Paket | Besitz | Ergebnis und Akzeptanz | Abhängigkeit danach |
+|---|---|---|---|
+| K2-C CI R2 | Nur `PhoneExportHostTest.kt` | Rename und Owner-Publication deterministisch trennen; bisherige Cancel-/Discard-/Kontowechsel-/Close-Beweise erhalten; Rot→Grün, Gesamtcheck/APKs | Frischer Review, Root-Integration und aktuelle CI |
+| D2/D3 Server R1 | Neue additive Migration `20261018000600_cloud_lifecycle_redactions.sql` und neue `210_*`-Tests | Vollständige monotone Sichtbarkeitsgeneration, kumulative Personen-ID-Redaktionsnachweise, begrenzte Mitglieds-RPC; Paging, ACL und echte Lockrennen | Unabhängiger Review; anschließend Client-/Store-Vertrag |
+| D3 ID-Zuweisungen R1 | `Events.kt` nur PlayerAssigned, `PlayerAssignments.kt`, neuer Serializer und direkte Engine-Tests | Namenfreie Version 2, Legacy-Form unverändert, ID-Projektion ohne künstliche Namen; Pure-Regeln, Golden- und Gesamttests | Unabhängiger Review; Producer-/Namensauflösung erst im Integrationspaket |
+
+Task-IDs dieser Runde:
+
+```text
+node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-host-ci-fix-r2
+node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-server-impl-r1
+node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d3-id-assignments-impl-r1
+```
+
+Root besitzt Dokumente, Reviews und Integration. Server-RPC und ID-only-Factory starten noch
+keinen Clientpfad. Geräteprotokoll 4 wird erst gemeinsam mit dauerhaftem Entzug, Wiederfreigabe,
+Redaktionszustellung und den Session-Anschlussstellen aktiviert. U2-Herkunft und bewusste
+Altbestandsübernahme bleiben zu erhalten; ungeklärte Importe verleihen keine Cloud-Rechte.
+B4 bleibt davon abhängig. Der kurze Claude-Abschlussreview des stabilen integrierten Stands
+bleibt auf ausdrücklichen Nutzerwunsch eingeplant.
+
 PR #69 ist auf exakt `637f8ba` mit fünf erfolgreichen Checks als `08bece9` nach main gemergt.
 Echte lokale Auth-/PostgREST-Abnahme besteht das strikte D1-XML-Gate: genau ein ausgeführter
 Test, null Fehler/Skips; 1299 pgTAP-Assertions und die vorhandenen K2-Service-/Schedulerprüfungen

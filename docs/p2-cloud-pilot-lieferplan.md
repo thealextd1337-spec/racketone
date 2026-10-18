@@ -1,7 +1,8 @@
 # Cloud-Synchronisierung und Online-Pilot: Lieferplan
 
 Stand: 18.10.2026. Konkretisierung der beauftragten Punkte 2 (Upload), 3 (Download)
-und 4 (Pilot, Datenschutz, Kontosupport). **U1/U2 integriert; weitere Umsetzung beauftragt.**
+und 4 (Pilot, Datenschutz, Kontosupport). **U1–U4, D1 sowie K1/K3-Server und K2-Server integriert;
+Android-ZIP-Export in abschließender Integrations-CI, D2/D3-Grundlagen in Umsetzung.**
 Der [Ausführungsplan](p2-parallel-ausfuehrung.md) hält laufende Aufträge, Besitzgrenzen und Folgewellen fest.
 Grundlage: [PLAN](PLAN.md), [P2](p2-plan.md), [Upload-Vertrag](p2-upload.md)
 und [Feedback/Admin](plan-feedback-admin.md). Bei Widersprüchen gilt `PLAN.md`.
@@ -47,9 +48,10 @@ Standard; zusätzliches Claude-Kontingent gezielt für unabhängige Fachprüfung
 | K4–K6 | Backend, Admin-Web, Betriebsdaten | siehe unten | Begrenzter Kontosupport und Betriebsansicht |
 | K7 | Orchestrator und reale Geräteprüfung | Cloud-Pfad, K1–K6, externe Nachweise | Dokumentierte Pilotentscheidung |
 
-**Laufende erste Parallelwelle: U3, Server-Gerätevertrag/K4 und K1.** U1 und U2 sind integriert
-(#60/#61); die Serverfreigabe bleibt offen. K3-Serververtrag früh
-festlegen, damit D3 nicht auf eine spätere UI warten muss. B4 darf die Begrenzung und den
+**Erste Parallelwelle integriert:** U3, Server-Gerätevertrag/K4 und K1; anschließend U4,
+K3-Server, K2-Server und D1. Der Android-ZIP-Export wartet auf die korrigierte aktuelle CI von #70.
+D2/D3 beginnen mit getrennten Server- und Enginepaketen; ihre Geräte-/Session-Integration folgt
+nach unabhängigen Reviews. Dies erteilt keine Hosted-/Pilotfreigabe. B4 darf die Begrenzung und den
 Abbruch eines einzelnen Upload-/Pull-Laufs nicht aufschieben: diese gehören bereits zu U1/U4/D1.
 Apple-Host und echte Apple-Abnahme sind getrennte Lieferungen; ein BGTask allein stellt keine iOS-Parität her.
 
