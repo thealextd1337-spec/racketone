@@ -131,7 +131,7 @@ fun CloudUploadSection(port: PhoneUploadPort) {
             }
             TextButton(
                 port::refreshStatus,
-                enabled = state.available && !state.busy,
+                enabled = state.available && state.canRefreshStatus && !state.busy,
                 modifier = Modifier.fillMaxWidth().testTag("cloud_upload_refresh"),
             ) {
                 Text(stringResource(Res.string.cloud_upload_refresh))

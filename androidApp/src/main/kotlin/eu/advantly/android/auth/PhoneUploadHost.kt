@@ -143,7 +143,7 @@ internal class PhoneUploadHost(
                             nowMs,
                             threadGuard = threadGuard,
                         ).also { runner = it }
-                    mutable.value = mutable.value.copy(phase = PhoneUploadPhase.UPLOADING)
+                    mutable.value = mutable.value.copy(phase = PhoneUploadPhase.UPLOADING, canRefreshStatus = true)
                     val revision = localRevision
                     val result = active.uploadNow()
                     currentCoroutineContext().ensureActive()
@@ -204,6 +204,7 @@ internal class PhoneUploadHost(
             PhoneUploadState(
                 available = true,
                 busy = true,
+                canRefreshStatus = context != null && bound == context && runner != null,
                 pendingEvents = result.inventory?.pendingEvents,
                 rejectedEvents = result.inventory?.rejectedEvents,
                 pendingMetadata = result.inventory?.pendingMetadata,

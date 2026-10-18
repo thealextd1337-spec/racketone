@@ -80,8 +80,8 @@ class CloudUploadSectionTest {
                     onNodeWithTag("cloud_upload_events").assertDoesNotExist()
                     assertEquals(0, upload.uploads)
                     assertEquals(0, upload.refreshes)
-                    onNodeWithTag("cloud_upload_refresh").performScrollTo().performClick()
-                    assertEquals(1, upload.refreshes)
+                    onNodeWithTag("cloud_upload_refresh").performScrollTo().assertIsNotEnabled()
+                    assertEquals(0, upload.refreshes)
                     onNodeWithTag("cloud_upload_now").performScrollTo().performClick()
                     assertEquals(1, upload.uploads)
 
@@ -94,10 +94,11 @@ class CloudUploadSectionTest {
                             observedAtMs = 1000L,
                             lastResponseAtMs = 500L,
                             action = PhoneUploadAction.UPLOAD,
+                            canRefreshStatus = true,
                         )
                     val states =
                         listOf(
-                            observed.copy(busy = true, phase = PhoneUploadPhase.BINDING),
+                            observed.copy(busy = true, phase = PhoneUploadPhase.BINDING, canRefreshStatus = false),
                             observed.copy(busy = true, phase = PhoneUploadPhase.UPLOADING),
                         ) +
                             PhoneUploadResult.entries.map {
@@ -137,6 +138,11 @@ class CloudUploadSectionTest {
                             onNodeWithTag("cloud_upload_now").performScrollTo().assertIsNotEnabled()
                         } else {
                             onNodeWithTag("cloud_upload_now").performScrollTo().assertIsEnabled()
+                        }
+                        if (state.canRefreshStatus && !state.busy) {
+                            onNodeWithTag("cloud_upload_refresh").performScrollTo().assertIsEnabled().performClick()
+                        } else {
+                            onNodeWithTag("cloud_upload_refresh").performScrollTo().assertIsNotEnabled()
                         }
                         onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
                         onNodeWithTag("account_delete").performScrollTo().assertIsEnabled()

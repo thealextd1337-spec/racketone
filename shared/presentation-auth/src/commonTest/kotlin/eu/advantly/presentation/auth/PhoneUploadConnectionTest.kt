@@ -32,6 +32,10 @@ class PhoneUploadConnectionTest {
         val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT) }
         val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined), upload = Upload())
         assertFalse(model.state.value.busy)
+        assertFalse(
+            model.upload!!
+                .state.value.canRefreshStatus,
+        )
         model.exportData()
         model.requestDeletion()
         model.cancelDeletion()

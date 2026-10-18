@@ -301,6 +301,7 @@ class PhoneUploadHostTest {
                 f.signIn()
                 assertNotEquals(f.phone.config.deviceId, f.phone.deviceId)
                 assertTrue(f.host.state.value.available)
+                assertFalse(f.host.state.value.canRefreshStatus)
                 assertNull(f.host.state.value.pendingEvents)
                 val before = f.requests.toList()
                 f.driver.record = true
@@ -314,8 +315,78 @@ class PhoneUploadHostTest {
                 assertEquals(listOf(f.phone.deviceId.value), f.bindings.toList())
                 assertFalse(f.bindings.contains(f.phone.config.deviceId.value))
                 assertEquals(PhoneUploadResult.DRAINED, f.host.state.value.result)
+                assertTrue(f.host.state.value.canRefreshStatus)
             } finally {
                 f.close()
+            }
+        }
+
+    @Test fun localRefreshIsAvailableOnlyForBoundRunnerAndResetsAtEveryAccountBoundary() =
+        runBlocking {
+            for (transition in listOf("consent", "logout", "bob", "alice-again", "deletion", "close")) {
+                val f = Fixture(this)
+                try {
+                    assertFalse(f.host.state.value.canRefreshStatus)
+                    f.signIn()
+                    assertFalse(f.host.state.value.canRefreshStatus)
+                    f.match()
+                    f.host.uploadNow()
+                    f.idle()
+                    assertTrue(f.host.state.value.canRefreshStatus)
+                    assertTrue(f.phone.recordPoint(Side.A))
+                    val beforeRefresh = f.requests.toList()
+                    f.driver.writes.clear()
+                    f.driver.record = true
+                    f.host.refreshStatus()
+                    f.idle()
+                    assertTrue(f.host.state.value.canRefreshStatus)
+                    assertEquals(1L, f.host.state.value.pendingEvents)
+                    assertEquals(1000L, f.host.state.value.lastResponseAtMs)
+                    assertEquals(beforeRefresh, f.requests.toList())
+                    assertTrue(f.driver.writes.isEmpty())
+                    f.driver.record = false
+                    when (transition) {
+                        "consent" -> {
+                            f.consent = ConsentStatus.REQUIRED
+                            f.auth.refreshProfile()
+                        }
+
+                        "logout" -> {
+                            f.auth.signOut()
+                        }
+
+                        "deletion" -> {
+                            f.deletion = true
+                            f.auth.refreshProfile()
+                        }
+
+                        "close" -> {
+                            f.host.close {
+                                f.trace += "auth-close"
+                                f.auth.close()
+                            }
+                        }
+
+                        else -> {
+                            f.owner = if (transition == "bob") "bob" else "alice"
+                            f.epoch++
+                            f.signIn()
+                        }
+                    }
+                    yield()
+                    assertFalse(f.host.state.value.canRefreshStatus)
+                    assertNull(f.host.state.value.pendingEvents)
+                    val beforeBlocked = f.requests.toList()
+                    f.driver.writes.clear()
+                    f.driver.record = true
+                    f.host.refreshStatus()
+                    f.idle()
+                    assertFalse(f.host.state.value.canRefreshStatus)
+                    assertEquals(beforeBlocked, f.requests.toList())
+                    assertTrue(f.driver.writes.isEmpty())
+                } finally {
+                    f.close()
+                }
             }
         }
 
@@ -398,6 +469,7 @@ class PhoneUploadHostTest {
                 f.idle()
                 assertEquals(PhoneUploadResult.FAILED, f.host.state.value.result)
                 assertEquals(PhoneUploadAction.RETRY, f.host.state.value.action)
+                assertTrue(f.host.state.value.canRefreshStatus)
                 assertNull(f.host.state.value.lastResponseAtMs)
                 yield()
                 assertEquals(PhoneUploadResult.FAILED, f.host.state.value.result)
@@ -434,6 +506,7 @@ class PhoneUploadHostTest {
                     if (binding) f.holdBinding = hold else f.holdPush = hold
                     f.host.uploadNow()
                     withTimeout(15_000) { hold.entered.await() }
+                    assertEquals(!binding, f.host.state.value.canRefreshStatus)
                     repeat(4) {
                         f.host.uploadNow()
                         f.host.refreshStatus()
@@ -551,6 +624,7 @@ class PhoneUploadHostTest {
                         }
                         withTimeout(15_000) { hold.cancelled.await() }
                         assertNull(f.host.state.value.pendingEvents)
+                        assertFalse(f.host.state.value.canRefreshStatus)
                         assertNull(f.host.state.value.lastResponseAtMs)
                         hold.release.complete(Unit)
                         f.idle()
@@ -613,6 +687,7 @@ class PhoneUploadHostTest {
                     withTimeout(15_000) { hold.cancelled.await() }
                     withTimeout(15_000) { drain.cancelled.await() }
                     assertEquals(PhoneUploadPhase.CLOSED, f.host.state.value.phase)
+                    assertFalse(f.host.state.value.canRefreshStatus)
                     assertFalse(f.trace.contains("auth-close"))
                     val before = f.requests.toList()
                     f.host.uploadNow()

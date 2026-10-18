@@ -24,6 +24,8 @@ data class PhoneUploadState(
     val result: PhoneUploadResult? = null,
     val error: PhoneUploadError? = null,
     val action: PhoneUploadAction = PhoneUploadAction.NONE,
+    /** Erst nach expliziter Bindung mit aktuellem Runner; Busy sperrt die Bedienung zusätzlich. */
+    val canRefreshStatus: Boolean = false,
 )
 
 /** Phone-Präsentation ohne SDK-, Netzwerk- oder Datenbanktypen. Alle Aufrufe auf dem seriellen Host-Kontext. */
