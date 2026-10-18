@@ -42,7 +42,9 @@ jobs:
               - '.github/scripts/**'
             supabase:
               - 'supabase/**'
+              - 'gradle/libs.versions.toml'
               - '.github/workflows/ci.yml'
+              - '.github/scripts/export_stack_ci.py'
             admin:
               - 'admin/**'
               - '.github/workflows/ci.yml'
@@ -379,20 +381,50 @@ jobs:
     needs: changes
     if: needs.changes.outputs.supabase == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v1
         with:
           version: 2.121.0
-      # Nur Datenbank, Auth und Realtime (realtime.messages + Policies); übrige Dienste werden nicht gebraucht
+      - name: Deno-Version aus dem zentralen Katalog lesen
+        id: export-tools
+        run: python3 -c 'import tomllib; print("deno=" + tomllib.load(open("gradle/libs.versions.toml", "rb"))["versions"]["deno"])' >> "$GITHUB_OUTPUT"
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ steps.export-tools.outputs.deno }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Edge Functions prüfen (Typen, Format, Lint, Tests)
+        run: |
+          for function in export-my-data cleanup-data-exports; do
+            (cd "supabase/functions/$function" && deno task check && deno fmt --check --indent-width 2 && deno lint && deno task test)
+          done
+      - name: Zufälligen lokalen Cleanup-Schlüssel vorbereiten
+        run: uv run .github/scripts/export_stack_ci.py prepare
+      # K2 benötigt echte Storage- und Edge-Dienste zusätzlich zu DB/Auth/Realtime.
       - name: Lokalen Stack starten (wendet alle Migrationen an)
-        run: supabase start -x storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+        run: supabase start -x imgproxy,mailpit,postgres-meta,studio,logflare,vector,supavisor > "$RUNNER_TEMP/supabase-start.log" 2>&1
+      - name: Lokale Schlüssel maskieren und Vault verbinden
+        run: uv run .github/scripts/export_stack_ci.py configure
+      - name: Edge Functions lokal bedienen
+        run: |
+          supabase functions serve --env-file supabase/functions/.env > "$RUNNER_TEMP/export-functions.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/export-functions.pid"
+          uv run .github/scripts/export_stack_ci.py ready
       - name: pgTAP-Tests (RLS, RPCs)
         run: supabase test db
+      - name: Export-Rennen und SQL-ZIP-CSV-Rundlauf
+        run: uv run supabase/tests/database/200_private_data_exports_concurrency.py --confirm-disposable --archive-roundtrip
+      - name: Export über echte Auth-, HTTP- und Storage-Dienste
+        run: uv run supabase/tests/200_private_data_exports_live.py --confirm-disposable
+      - name: Vault-Scheduler über pg_net und Edge prüfen
+        run: uv run .github/scripts/export_stack_ci.py scheduler
       # Warnungen sichtbar machen; SQL-/Typfehler lassen den Job scheitern. Auch interne Helfer prüfen.
       - name: Datenbank-Lint (Fehler sind fatal)
         run: supabase db lint --local --schema public,private,ops --level warning --fail-on error
       - name: Stack stoppen
         if: always()
-        run: supabase stop --no-backup
+        run: |
+          if [ -f "$RUNNER_TEMP/export-functions.pid" ]; then kill "$(cat "$RUNNER_TEMP/export-functions.pid")" 2>/dev/null || true; fi
+          supabase stop --no-backup
+          rm -f supabase/functions/.env

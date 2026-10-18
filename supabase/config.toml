@@ -400,6 +400,13 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# Beide Handler prüfen selbst: Export über die frische Kontositzung, Cleanup über einen eigenen Schlüssel.
+[functions.export-my-data]
+verify_jwt = false
+
+[functions.cleanup-data-exports]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
