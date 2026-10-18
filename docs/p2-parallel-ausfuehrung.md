@@ -773,6 +773,17 @@ Teilarchiv. Unabhängiges Review 1 auf exakt diesem Head läuft:
 Root ergänzt nach Review Function-Konfiguration und echte Storage-/Edge-CI; keine automatische
 Live-Auslieferung oder Secrets im Repo. K2/UI und Konten oberhalb der Budgets bleiben offen.
 
+PR #66 wurde im eigenen Orchestrator-Hilfsworktree `p2-u4-main-sync` abgeglichen und per
+normalem Fast-forward auf `270782b` gepusht. Code, Tests und SQL bytegleich zum geprüften
+`9ecb8d2`; nur README/Plan neuer. Vollständiger Check 692 Tasks grün, neue CI läuft.
+Keine fremden Worktreeedits/History-Rewrites. Der Hilfsworktree enthält den eigenen Merge.
+
+D1: für echten Runner-/DB-Close-Reopen-Test zusätzlich ausschließlich
+`jvmTest.dependencies { implementation(libs.sqldelight.sqlite.driver) }` in
+`shared/cloud-sync/build.gradle.kts` freigegeben. Bestehender Katalogeintrag, keine neue
+Version oder Produktionsdependency. Dependencycommit `4a95352` enthält unverändert U4;
+dessen Gesamtcheck 692 Tasks grün. Schema-7-/Pullimplementierung und eigene Abnahme laufen.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
