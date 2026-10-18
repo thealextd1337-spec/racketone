@@ -3,6 +3,8 @@ begin;
 select plan(53);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 
 -- alice legt ein Einzel an: A = alice (self), B = bob (Freund → pending). Events von alice-Handy und -Uhr.
 select tests.authenticate_as('alice');

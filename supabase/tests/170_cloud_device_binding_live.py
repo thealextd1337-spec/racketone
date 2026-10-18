@@ -108,6 +108,50 @@ def local_http_json(url, headers, body=None, method="POST"):
         return exc.code, json.loads(exc.read())
 
 
+@contextmanager
+def test_consent_catalog(owner):
+    # Nur nach Loopback-Prüfung und --confirm-disposable: andere DB-Sitzungen brauchen den Commit.
+    # Keine Abhängigkeit vom pgTAP-Schema tests und keine Freigabe der unreleased-Fassungen.
+    version = "binding-test-" + secrets.token_hex(12)
+    with owner.transaction():
+        owner.execute("select private.lock_sync()")
+        previous = owner.execute("select document_type,version from private.consent_versions where is_current").fetchall()
+        owner.execute("update private.consent_versions set is_current=false where is_current")
+        owner.execute("insert into private.consent_versions(document_type,version,is_current) "
+                      "values('TERMS',%s,true),('PRIVACY',%s,true)", (version, version))
+        owner.execute("insert into private.consent_translations(document_type,version,language,url) "
+                      "select document_type,%s,language,'https://advantly.eu/test-only/'||lower(document_type)||'/'||language "
+                      "from (values('TERMS'),('PRIVACY')) d(document_type) cross join (values('de'),('en')) l(language)", (version,))
+        owner.execute("update private.consent_versions set approved_at=clock_timestamp() where version=%s", (version,))
+    try:
+        yield version
+    finally:
+        with owner.transaction():
+            owner.execute("reset role")
+            owner.execute("select private.lock_sync()")
+            owner.execute("update private.consent_versions set is_current=false where version=%s", (version,))
+            for document, old_version in previous:
+                owner.execute("update private.consent_versions set is_current=true where document_type=%s and version=%s",
+                              (document, old_version))
+            # Ausschließlich eigene TESTfassungen entfernen: freigegebene Fassungen sind sonst unveränderlich.
+            # Beide Guards werden nur für diesen Cleanup unter Tabellen-/Sync-Lock transaktional ausgesetzt;
+            # ein Fehler rollt auch die Triggerzustände zurück. Während sämtlicher Tests bleiben sie aktiv.
+            owner.execute("alter table private.consent_translations disable trigger consent_translations_guard")
+            owner.execute("alter table private.consent_versions disable trigger consent_versions_guard")
+            owner.execute("delete from private.consent_history where version=%s", (version,))
+            owner.execute("delete from private.consent_translations where version=%s", (version,))
+            owner.execute("delete from private.consent_versions where version=%s", (version,))
+            owner.execute("alter table private.consent_translations enable trigger consent_translations_guard")
+            owner.execute("alter table private.consent_versions enable trigger consent_versions_guard")
+
+
+def accept_test_consents(owner, uid, version):
+    # Explizite positive Nutzerentscheidung für genau die von diesem Lauf angelegten TESTdokumente.
+    owner.execute("insert into private.consent_history(profile_id,document_type,version,language,accepted) "
+                  "select %s,document_type,version,'en',true from private.consent_versions "
+                  "where version=%s and is_current and approved_at is not null", (uid, version))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--confirm-disposable", action="store_true", required=True)
@@ -142,6 +186,7 @@ def main():
         owner.execute("update public.profiles set status='active',alias='Binding Test' where id=%s", (uid,))
         owner.execute("update public.profile_settings set age_confirmed_at=now(),country='AT',age_rule_min_age=14 "
                       "where profile_id=%s", (uid,))
+        accept_test_consents(owner, uid, consent_version)
         return uid
 
     def session(owner, uid, age="0 seconds"):
@@ -158,7 +203,8 @@ def main():
         with conn.transaction():
             conn.execute("set local role authenticated")
             conn.execute("select set_config('request.jwt.claims',%s,true)",
-                         (json.dumps({"sub": str(uid), "session_id": str(sid), "role": "authenticated"}),))
+                         (json.dumps({"sub": str(uid), "session_id": str(sid), "role": "authenticated",
+                                      "exp": int(time.time()) + 3600}),))
             conn.execute("select set_config('request.headers',%s,true)", (json.dumps({
                 "x-advantly-installation-id": str(cap[0]), "x-advantly-installation-proof": cap[2]}),))
             yield conn
@@ -227,7 +273,7 @@ def main():
                     return
             raise AssertionError("Realtime-Beitritt ohne definitive Ablehnung")
 
-    with connect() as owner:
+    with connect() as owner, test_consent_catalog(owner) as consent_version:
         try:
             uid = user(owner)
             other = user(owner)

@@ -2,17 +2,9 @@
 begin;
 select plan(20);
 
--- Ausschließlich transaktionale Testfassungen für die Consent-Voraussetzung; keine Textfreigabe.
-update private.consent_versions set is_current = false;
-insert into private.consent_versions(document_type,version,is_current)
-  values ('TERMS','onboarding-test',true),('PRIVACY','onboarding-test',true);
-insert into private.consent_translations(document_type,version,language,url)
-  select document_type,version,l.language,'https://advantly.eu/app-datenschutz.html'
-  from private.consent_versions cross join (values('de'),('en')) l(language)
-  where version='onboarding-test';
-update private.consent_versions set approved_at=now() where version='onboarding-test';
-
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 select tests.create_user('neu_at', false);
 select tests.create_user('neu_de', false);
 select tests.create_user('neu_xx', false);

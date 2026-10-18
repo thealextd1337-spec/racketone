@@ -3,6 +3,8 @@ begin;
 select plan(29);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 
 -- Turnier + Platz (direkt per RLS)
 select tests.authenticate_as('alice');

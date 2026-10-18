@@ -3,6 +3,8 @@ begin;
 select plan(19);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 
 select tests.authenticate_as('carol');
 select is(public.send_friend_request(tests.uid('dave'), 'code'), 'requested', 'Anfrage carol → dave');

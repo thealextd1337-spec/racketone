@@ -3,6 +3,8 @@ begin;
 select plan(23);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 
 -- alice: Self-Alias + zwei Dummys; drei Matches mit Max, eines mit Tom
 select tests.authenticate_as('alice');
