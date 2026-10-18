@@ -655,6 +655,40 @@ Export-Whitelist ab: private ZIP-Ausgabe, Ablauf/Aufräumen und idempotente Anfo
 noch keine Implementierung oder API-Erweiterung. Clientbedienung bleibt eigener Folgeschritt.
 Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-scope-r1`.
 
+### K2 – abgegrenzter Serverauftrag
+
+Die Codeerkundung bestätigt: bislang keine Edge Functions, Storage-CI oder ZIP-Auslieferung.
+Kleinster vollständiger Serverteilschnitt: additive `20261018000500_private_data_exports.sql`,
+`functions/export-my-data`, `functions/cleanup-data-exports`, funktionslokale Deno-Konfiguration
+und Lockdatei sowie neue `200_private_data_exports*`-SQL-/Parallel-/HTTP-/Storage-Tests.
+Ein synchroner begrenzter Produzent reicht zunächst; keine stillen Teilarchive. Technische
+Grenzüberschreitung ist ein sichtbarer Fehler und keine K2-Abnahme für das betroffene Konto.
+
+Bestehende `export_my_data()`-Auswahl samt Consent-/Supporthistorie wiederverwenden;
+verschachtelte Format-/Meta-/Summary-/Eventdetails und Ticketfelder additiv in 005 nach
+dem vorhandenen Fachschema whitelisten. Freitext bleibt ausdrücklich Freitext; zusätzliche
+technische Schlüssel und fremde strukturierte Referenzen dürfen nicht durchgereicht werden.
+Eigene Kontorechte verwenden `require_account_session()` auch bei Anforderung/Status/Download,
+ohne Consent-/Gerätezwang und ohne `auth.getUser()` als Ersatz für Sitzungswiderruf.
+
+HTTP-Vertrag v1: POST mit `requestId` erzeugt idempotent; GET Status; GET Download prüft
+erneut die eigene Sitzung und liefert ZIP ohne Cache. ZIP enthält vollständiges `data.json`
+und CSVs aller Exportbereiche mit festen Spalten/Pfaden und Formelschutz. Private Storageobjekte
+werden nicht über dauerhaft berechtigende Signed-URLs herausgegeben. Metadaten/CAS-Versuche,
+Leasewechsel und Cleanupqueue sichern parallele Anforderung, verlorene Antworten und späte
+Produzenten; Purge invalidiert alte Archive auch bei enthaltenen redigierten Mitspielern.
+Physisches Löschen erfolgt über Storage-API, nicht durch SQL-DELETE in `storage.objects`.
+
+Besitz des Implementierers ausschließlich neue 005-/200-Dateien und beide Function-Verzeichnisse.
+Historische Migrationen, Kotlin/UI und Authadapter bleiben unberührt. Root besitzt
+`supabase/config.toml`, CI-/Deploy-Workflows und Dokumentation; notwendige Integrationswerte
+meldet der Worker konkret. Keine Live-Deploys oder erfundenen Secrets. Geplanter Cleanup
+über Cron/pg_net mit Vault-Bezug bleibt ohne echte Einrichtung ausdrücklich unbewiesen.
+Akzeptanz: entpackbares vollständiges ZIP/CSV, Whitelist-/Rechte-Negativfälle, Widerruf,
+Expiry, echte parallele Reservierung/Leaseübernahme, Upload-/Finalizefehler, Purge-Rennen und
+physischer Cleanup; Deno-/SQL-/HTTP-Tests plus vollständiger Gradle-Check vor Commit.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-impl-r1`.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
