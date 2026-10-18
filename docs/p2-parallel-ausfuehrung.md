@@ -503,6 +503,15 @@ mit finalen Tests 7 rot/17 Kontrollen grün; korrigiert 24/24. Der Decline-Flagd
 zusätzlich isoliert rot→grün geprüft. Vollständiger Check und unveränderte SQL-Suite laufen;
 Commit und neues unabhängiges Review 5 stehen noch aus.
 
+K3 hat den echten Frist-Wait belegt: gleiche Authsitzung beginnt vor Fälligkeit, nachgewiesene
+Advisory-Sperre wird erst nach Ablauf freigegeben; `now()` erlaubt trotzdem noch Recovery.
+Zusätzlich konkret freigegeben ist in 004 die additive identische Neudefinition von
+`cancel_account_deletion`, ausschließlich Fristvergleich mit `clock_timestamp()` statt
+Transaktionsbeginn plus funktionslokales UTC. Status erfasst Serverzeit nach dem Lock;
+Job verwendet ebenfalls frische Zeit. API, Grants, SecurityDefiner, search_path und sämtliche
+Session-/Ursprungs-/Consentregeln erhalten. Rot→Grün muss Status/Rücknahme/Job konsistent
+belegen; 001/002/003-Dateien bleiben unverändert.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
