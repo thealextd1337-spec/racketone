@@ -889,6 +889,16 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+D1-Stack-Harness `fb91858` unabhängig ohne Befund freigegeben: vier Dateien, zehn
+Guard-/XML-/Cleanup-Tests, Actionlint/Syntax und Gesamtcheck 692 Tasks grün. Zusätzlich
+isolierte SQL-Probe bestätigt 201 Matches/402 Teilnehmer/701 Events/501 im Hauptmatch;
+kein Ersatz für echten Auth/PostgREST. Root übernimmt per Fast-forward und gleicht mit
+nach PR #67 gemergtem main `8660716` ab. CI-Konflikte erhalten exakt den geprüften
+D1-Workflow (dessen `gradle/**` auch den bisherigen Katalogfilter abdeckt), Plan erhält
+beide Nachweise. Gesamter Produkt-/Test-/Workflow-/Serverbaum bytegleich `fb91858`;
+grüner 692-Task-Check gilt fort. Eigener Draft-PR für tatsächliche CI, vor Merge weiterhin
+Android-Vorläufer #68 und echte erfolgreiche Stackprüfung ohne Skip erforderlich.
+
 Die gemeinsame D1-/K2-Abhängigkeit `139f8ee` besteht den Gesamtcheck mit 692 Tasks
 (3m29s, `advantly-d1-k2-stack-dependency-check.log`). Der zusätzliche Abgleich mit
 Root-Planstand `5cd8169` betrifft ausschließlich Dokumentation; Produktbaum unverändert,
