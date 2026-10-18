@@ -60,19 +60,19 @@ class AccountOwnershipGateTest {
         assertNull(owner.active)
         sdk = CloudCredentials("alice", "session", "token")
         val lease = gate.capture(false)
-        gate.publish(lease, CloudSession("alice", true))
+        gate.publish(lease, CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
         assertEquals("alice", owner.active)
         assertEquals("alice", gate.session.value?.profileId)
         sdk = CloudCredentials("alice", "session", "refreshed-token")
         gate.synchronize()
-        gate.publish(gate.capture(false), CloudSession("alice", true))
+        gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
         assertEquals(1, owner.activations)
         val beforeReplacement = owner.detaches
         sdk = CloudCredentials("alice", "replacement-session", "new-token")
         gate.synchronize()
         assertEquals(beforeReplacement + 1, owner.detaches)
         assertEquals("alice", owner.active)
-        gate.publish(gate.capture(false), CloudSession("alice", true))
+        gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
         val beforeClose = owner.detaches
         gate.stop(leaveIdentity = false)
         assertEquals(beforeClose + 1, owner.detaches)
@@ -87,7 +87,7 @@ class AccountOwnershipGateTest {
         val owner = Owner().also { it.failActivation = true }
         val gate = CloudSessionGate({ CloudCredentials("alice", "session", "token") }, data.cloudUploads, ownership = owner)
         val lease = gate.capture(false)
-        assertFailsWith<IllegalStateException> { gate.publish(lease, CloudSession("alice", true)) }
+        assertFailsWith<IllegalStateException> { gate.publish(lease, CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT)) }
         assertNull(gate.session.value)
         assertFailsWith<CloudException> { gate.requireCurrent(lease) }
     }
@@ -97,7 +97,7 @@ class AccountOwnershipGateTest {
         val data = LocalData(createInMemoryJvmDriver())
         val owner = Owner()
         val gate = CloudSessionGate({ CloudCredentials("alice", "session", "token") }, data.cloudUploads, ownership = owner)
-        gate.publish(gate.capture(false), CloudSession("alice", true))
+        gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
         val lease = gate.capture()
         val captured = gate.captureUpload(lease, 10)
         owner.failLeave = true

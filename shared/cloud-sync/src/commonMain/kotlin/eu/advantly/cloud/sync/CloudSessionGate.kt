@@ -24,6 +24,8 @@ internal class CloudCredentials(
 internal class CloudLease(
     val generation: Long,
     val credentials: CloudCredentials,
+    val requiresConsent: Boolean = false,
+    val consentGeneration: Long = 0,
 )
 
 /**
@@ -39,11 +41,12 @@ class CloudSessionGate internal constructor(
     private val mutable = MutableStateFlow<CloudSession?>(null)
     val session = mutable.asStateFlow()
     private var generation = 0L
+    private var consentGeneration = 0L
     private var identity: CloudCredentials? = null
     private var acceptSdkSession = true
     private var uploadSession: CloudUploadSession? = null
     private var ownershipActive = false
-    private val requests = mutableSetOf<Job>()
+    private val requests = mutableMapOf<Job, Boolean>()
 
     private fun confined() = check(threadGuard()) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
 
@@ -62,7 +65,7 @@ class CloudSessionGate internal constructor(
         try {
             uploads?.deactivate()
         } finally {
-            requests.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
+            requests.keys.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
             requests.clear()
             ownership?.detachAccountSession()
             if (shouldLeave) ownership?.leaveAccount()
@@ -112,10 +115,17 @@ class CloudSessionGate internal constructor(
         synchronize()
         if (!acceptSdkSession) changed()
         val sdk = credentials() ?: changed()
-        if (requireProfile && (mutable.value?.onboarded != true || mutable.value?.deletionRequested != false)) {
+        if (requireProfile) requireCloudProfile()
+        return CloudLease(generation, sdk, requiresConsent = requireProfile, consentGeneration = consentGeneration)
+    }
+
+    private fun requireCloudProfile() {
+        if (mutable.value?.onboarded != true || mutable.value?.deletionRequested != false) {
             throw CloudException("profile_not_active", true)
         }
-        return CloudLease(generation, sdk)
+        if (mutable.value?.consentStatus != ConsentStatus.CURRENT) {
+            throw CloudException("consent_required", true)
+        }
     }
 
     internal fun requireCurrent(lease: CloudLease) {
@@ -125,6 +135,10 @@ class CloudSessionGate internal constructor(
         ) {
             changed()
         }
+        if (lease.requiresConsent) {
+            requireCloudProfile()
+            if (lease.consentGeneration != consentGeneration) changed()
+        }
     }
 
     internal fun publish(
@@ -133,12 +147,30 @@ class CloudSessionGate internal constructor(
     ) {
         requireCurrent(lease)
         if (profile.profileId != lease.credentials.profileId) changed()
+        if (lease.consentGeneration != consentGeneration) changed()
+        if (mutable.value?.consentStatus != profile.consentStatus) {
+            check(consentGeneration < Long.MAX_VALUE)
+            consentGeneration++
+        }
         if (profile.deletionRequested) {
             stop()
             mutable.value = profile.copy(generation = generation)
             return
         }
-        if (profile.onboarded && uploadSession == null) {
+        if (profile.onboarded && profile.consentStatus != ConsentStatus.CURRENT) {
+            mutable.value = profile.copy(generation = generation)
+            if (uploadSession != null) {
+                uploadSession = null
+                uploads?.deactivate()
+                ownership?.detachAccountSession()
+            }
+            // Zustimmungssperre verändert keine U2-Kontoidentität und sperrt keine unabhängigen Konto-RPCs.
+            val cloudRequests = requests.filterValues { it }.keys.toList()
+            cloudRequests.forEach { it.cancel(CancellationException("consent_required")) }
+            cloudRequests.forEach(requests::remove)
+            return
+        }
+        if (profile.onboarded && profile.consentStatus == ConsentStatus.CURRENT && uploadSession == null) {
             val activated = uploads?.activate(profile.profileId)
             try {
                 if (activated != null) ownership?.activateAccount(profile.profileId, activated)
@@ -176,14 +208,14 @@ class CloudSessionGate internal constructor(
         coroutineScope {
             requireCurrent(lease)
             val job = currentCoroutineContext().job
-            requests += job
+            requests[job] = lease.requiresConsent
             try {
                 val result = block()
                 currentCoroutineContext().ensureActive()
                 requireCurrent(lease)
                 result
             } finally {
-                requests -= job
+                requests.remove(job)
             }
         }
 
@@ -192,6 +224,7 @@ class CloudSessionGate internal constructor(
         limit: Int,
     ): CloudUploadSnapshot {
         requireCurrent(lease)
+        requireCloudProfile()
         return requireNotNull(uploads).capture(requireNotNull(uploadSession), limit)
     }
 
@@ -200,6 +233,7 @@ class CloudSessionGate internal constructor(
         snapshot: CloudUploadSnapshot,
     ) {
         requireCurrent(lease)
+        requireCloudProfile()
         requireNotNull(uploads).requireCurrent(snapshot)
     }
 

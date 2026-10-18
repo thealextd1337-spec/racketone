@@ -58,7 +58,7 @@ class MetadataUploadBoundaryTest {
             val data = LocalData(driver)
             prepare(data)
             val gate = CloudSessionGate({ CloudCredentials("alice", "session", "token") }, data.cloudUploads)
-            gate.publish(gate.capture(false), CloudSession("alice", true))
+            gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
             val sent = CompletableDeferred<PushBatch>()
             val release = CompletableDeferred<Unit>()
             val http =

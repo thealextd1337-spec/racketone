@@ -21,9 +21,9 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 
 | Paket | Besitz | Abnahme | Status |
 |---|---|---|---|
-| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Umsetzung läuft |
+| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Kern `751bca8` geliefert, Review 1 `fix-first`; Korrektur der drei Befunde läuft |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | `2721f84` implementiert; Entwurfs-PR #62, unabhängiges Sicherheitsreview und CI offen; K4-App-Bedienung folgt |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Umsetzung läuft; freigegebene Dokumente separat offen |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `41f3702` geliefert, unabhängiges Review läuft; freigegebene Dokumente separat offen |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -79,6 +79,10 @@ Brief einschließlich früherer Befunde und Antworten.
 - Server/K4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server_k4-impl-r1`
 - K1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-impl-r1`
 - Server/K4 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r1`
+- Server/K4 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-k4-fix-r1`
+- U3 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r1`
+- U3 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u3-fix-r1`
+- K1 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -90,6 +94,46 @@ sind lokal nicht verfügbar. Realtime-App-Broadcasts/private Kanäle/Cloud-Publi
 geschlossen, die Control-Plane verlangt zusätzlich `private_only` und das Trennen vorhandener
 Sockets. Kein Deployment oder Cloud-/Pilotfreigabe. Die Consent-Seams für 003 heißen
 `private.require_cloud_profile()` und `private.cloud_profile_allowed(uuid)`.
+
+Review 1: `fix-first`. Zwei P1-Rennen sind vor Integration zu reproduzieren und zu beheben:
+direkte Tabellenmutation mit altem Statement-Snapshot nach wartendem Widerruf sowie Legacy-Pull
+nach wartendem Löschantrag ohne frische Profilprüfung. P2: effektives libpq-Ziel inklusive
+`hostaddr`/Umgebung auf Loopback begrenzen und HTTP-Redirects im Live-Harness abschalten.
+Echter Supabase-CI-Lauf `39125048131`: 748/749 Tests bestanden; 170/Test 176 (direkte
+Realtime-Tabelle, erwarteter SQLSTATE 42501 blieb aus) fehlgeschlagen. Die vorher im lokalen
+Harness fehlenden Cron-Checks waren dort grün. Sicherheitskorrektur läuft beim Implementierer;
+kein Merge vor neuer unabhängiger Reviewrunde und grüner CI.
+
+### U3/K1 – gemeinsame lokale Integration
+
+Kerne als `ba7fdb1` und `0764bd1` auf den Integrationszweig übernommen, noch keine Integration
+nach `main`. U3 meldet 77 data-/51 cloud-Tests und Migration/Gradle-Check grün. K1 meldet
+55 cloud-/22 AuthVM-/217 Phone-Tests, vollständigen Check und 62 neue SQL-Tests grün;
+Gesamtlauf im isolierten PG17-Harness 613/615 (nur zwei fehlende Cron-Nachweise).
+Echte parallele PG-Verbindungen für Löschantrag/-rücknahme bestanden laut K1.
+Der separate U3-K1-Patch wird nun gegen beide tatsächlichen Commits kompiliert und getestet;
+seine zuvor reine Patchprüfung ist kein gemeinsamer Laufnachweis.
+
+Gemeinsamer fokussierter Lauf nach Integration bestanden: `data:jvmTest`,
+`cloud-sync:jvmTest`, `presentation-auth:jvmTest` und `ui-phone:desktopTest`.
+Drei ältere Auth-Lifecycle-Fixtures erhielten ausdrücklich `CURRENT`; ein zusätzlicher
+Regressionstest belegt, dass eine verifizierte Profilantwort ohne Zustimmungsstatus
+Cloud-Zugriffe weiterhin verweigert und unabhängige Kontorechte nicht pauschal sperrt.
+Vollständiger integrierter Gradle-Check mit 690 Tasks bestanden. Dies ist keine
+Freigabe der noch offenen U3-/K1-Reviewbefunde.
+
+U3 Review 1 (`fix-first`) reproduzierte zusätzlich mit kompilierten Klassen:
+
+- P1: Ein nachgelieferter Spieler ändert den dynamischen Teilnehmernamen ohne neue
+  Teilnehmerrevision; ein alter Ack kann die Änderung verlieren. Insert-Trigger und Migration korrigieren.
+- P2: Ungeklärte Altgäste werden als `playerId` referenziert, ohne zulässigen Spieler-Upload.
+  Das führt zu `player_not_owned` und dauerhaftem Retry. Ohne belegte Cloud-Berechtigung
+  nur Slot/Snapshotname übertragen; keine pauschale Eigentumsübernahme.
+- P2: Matchübernahme erkennt belegte eigene Self-Aliase anderer eigener Quellen nicht.
+  Beide Quellen nachweisen, fremde und lediglich behauptete Aliase weiter ausschließen.
+
+Der ursprüngliche Implementierer ergänzt Fail→Pass-Regressionen und einen separaten
+Korrekturcommit. Neue unabhängige Reviewrunde vor Freigabe erforderlich.
 
 ## Folgewellen – nach erfüllten Abhängigkeiten starten
 
