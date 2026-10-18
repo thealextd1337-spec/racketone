@@ -12,6 +12,7 @@ import eu.advantly.presentation.auth.PhoneExportAction
 import eu.advantly.presentation.auth.PhoneExportError
 import eu.advantly.presentation.auth.PhoneExportPhase
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -161,44 +162,108 @@ internal class ExportSerialDispatcher(
     }
 }
 
-/** Hält die Main-Publication direkt nach dem tatsächlichen Rename an. */
+/** Hält nur den Rückweg des erfassten Exports nach nachgewiesenem Dateiwechsel an. */
 private class PromotionGate(
     private val delegate: CoroutineDispatcher,
+    private val ioBeforeSuspend: Boolean,
 ) : CoroutineDispatcher() {
+    private val owner = Thread.currentThread()
     private val lock = Any()
     private var paused = false
     private val pending = mutableListOf<Pair<CoroutineContext, Runnable>>()
+    private var part: File? = null
+    private var promoted: File? = null
+    private var expectedAction: Job? = null
+    private var watching = false
+    private var resultBarrier: CompletableJob? = null
+    val moved = CompletableDeferred<Boolean>()
     val queued = CompletableDeferred<Unit>()
-    var ioBeforePause: Int? = null
+
+    fun arm(
+        part: File,
+        promoted: File,
+        action: Job,
+    ) {
+        check(Thread.currentThread() === owner)
+        check(part.isFile && !promoted.exists())
+        synchronized(lock) {
+            this.part = part
+            this.promoted = promoted
+            expectedAction = action
+            watching = true
+        }
+    }
+
     val io =
         object : CoroutineDispatcher() {
             override fun dispatch(
                 context: CoroutineContext,
                 block: Runnable,
             ) {
-                val pause =
-                    ioBeforePause?.let { remaining ->
-                        if (remaining == 0) {
-                            ioBeforePause = null
-                            true
+                check(Thread.currentThread() === owner)
+                val candidate =
+                    synchronized(lock) {
+                        if (watching && expectedAction!!.children.any { it === context[Job] }) {
+                            requireNotNull(part) to requireNotNull(promoted)
                         } else {
-                            ioBeforePause = remaining - 1
-                            false
+                            null
                         }
-                    } == true
-                Dispatchers.IO.dispatch(context) {
-                    if (pause) synchronized(lock) { paused = true }
-                    block.run()
+                    }
+                // Nur dieser withContext-Aufruf erhält ein Testkind; Host-/Cleanupjobs bleiben frei.
+                val child = candidate?.let { Job(requireNotNull(context[Job])) }
+                val finished = CountDownLatch(1)
+                val ownerSuspended = CountDownLatch(if (ioBeforeSuspend) 0 else 1)
+                if (!ioBeforeSuspend) {
+                    // Läuft erst, nachdem der aktuelle Owner-Aufruf bis zu withContext suspendiert ist.
+                    delegate.dispatch(context) { ownerSuspended.countDown() }
+                }
+                try {
+                    Dispatchers.IO.dispatch(context) {
+                        var retained = false
+                        try {
+                            check(ownerSuspended.await(10, TimeUnit.SECONDS))
+                            val existedBefore = candidate?.second?.isFile == true
+                            block.run()
+                            if (candidate != null && !existedBefore && candidate.second.isFile && !candidate.first.exists()) {
+                                synchronized(lock) {
+                                    if (watching) {
+                                        paused = true
+                                        watching = false
+                                        resultBarrier = child
+                                        retained = true
+                                    }
+                                }
+                                if (retained) moved.complete(ioBeforeSuspend)
+                            }
+                        } finally {
+                            if (!retained) child?.complete()
+                            finished.countDown()
+                        }
+                    }
+                    // Erzwingt das schnelle IO-Ende vor dispatch-Rückkehr und vor getResult/await.
+                    if (ioBeforeSuspend) check(finished.await(10, TimeUnit.SECONDS))
+                } catch (failure: Throwable) {
+                    child?.complete()
+                    throw failure
                 }
             }
         }
+
+    suspend fun queueOwnerReturn() {
+        withTimeout(10_000) { moved.await() }
+        val barrier = synchronized(lock) { requireNotNull(resultBarrier) }
+        check(barrier.isActive)
+        Dispatchers.IO.dispatch(EmptyCoroutineContext) { barrier.complete() }
+        withTimeout(10_000) { queued.await() }
+        check(barrier.isCompleted)
+    }
 
     override fun dispatch(
         context: CoroutineContext,
         block: Runnable,
     ) {
         synchronized(lock) {
-            if (paused) {
+            if (paused && context[Job] === expectedAction) {
                 pending += context to block
                 queued.complete(Unit)
             } else {
@@ -208,11 +273,14 @@ private class PromotionGate(
     }
 
     fun resume() {
-        val tasks =
+        val (barrier, tasks) =
             synchronized(lock) {
                 paused = false
-                pending.toList().also { pending.clear() }
+                watching = false
+                resultBarrier to pending.toList().also { pending.clear() }
             }
+        // Auch fehlgeschlagene Assertions vor queueOwnerReturn dürfen das Testkind nie zurücklassen.
+        barrier?.complete()
         tasks.forEach { (context, block) -> delegate.dispatch(context, block) }
     }
 }
@@ -322,6 +390,80 @@ internal class ExportHostFixture(
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class PhoneExportHostTest {
+    @Test fun promotionGateHoldsTheOwnerWhenIoFinishesBeforeSuspension() = heldPromotion(true)
+
+    @Test fun promotionGateHoldsTheOwnerWhenIoFinishesAfterSuspension() = heldPromotion(false)
+
+    private fun heldPromotion(ioBeforeSuspend: Boolean) =
+        runBlocking {
+            val gate = PromotionGate(coroutineContext[ContinuationInterceptor] as CoroutineDispatcher, ioBeforeSuspend)
+            val port = TestExportPort()
+            val f = ExportHostFixture(this, port, gate.io, gate)
+            try {
+                f.start()
+                port.stream = { sink ->
+                    sink.write(port.bytes, 0, port.bytes.size)
+                    val part = f.files().single()
+                    gate.arm(
+                        part,
+                        File(f.application.cacheDir, "account-exports/${part.nameWithoutExtension}/advantly-data.zip"),
+                        requireNotNull(currentCoroutineContext()[Job]),
+                    )
+                }
+                f.host.requestExport()
+                f.await(PhoneExportPhase.READY)
+                f.host.download()
+                assertEquals(ioBeforeSuspend, withTimeout(10_000) { gate.moved.await() })
+                assertEquals("advantly-data.zip", f.files().single().name)
+                assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
+                gate.queueOwnerReturn()
+                assertEquals("advantly-data.zip", f.files().single().name)
+                assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
+            } finally {
+                gate.resume()
+                f.close()
+            }
+        }
+
+    @Test fun aPromotionReleasedBeforeTheIntentIsLegitimatelyLocal() =
+        runBlocking {
+            for (ioBeforeSuspend in listOf(true, false)) {
+                val gate = PromotionGate(coroutineContext[ContinuationInterceptor] as CoroutineDispatcher, ioBeforeSuspend)
+                val port = TestExportPort()
+                val f = ExportHostFixture(this, port, gate.io, gate)
+                try {
+                    f.start()
+                    port.stream = { sink ->
+                        sink.write(port.bytes, 0, port.bytes.size)
+                        val part = f.files().single()
+                        gate.arm(
+                            part,
+                            File(f.application.cacheDir, "account-exports/${part.nameWithoutExtension}/advantly-data.zip"),
+                            requireNotNull(currentCoroutineContext()[Job]),
+                        )
+                    }
+                    f.host.requestExport()
+                    f.await(PhoneExportPhase.READY)
+                    f.host.download()
+                    assertEquals(ioBeforeSuspend, withTimeout(10_000) { gate.moved.await() })
+                    gate.queueOwnerReturn()
+                    assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
+                    gate.resume()
+                    f.await(PhoneExportPhase.LOCAL_FILE)
+                    assertEquals("advantly-data.zip", f.files().single().name)
+                    assertEquals(digest(port.bytes), digest(f.files().single().readBytes()))
+                    assertTrue(PhoneExportAction.SHARE in f.host.state.value.allowedActions)
+                    assertEquals(1, port.calls.size)
+                    f.host.discard()
+                    withTimeout(10_000) { f.host.state.first { PhoneExportAction.REQUEST in it.allowedActions } }
+                    assertTrue(f.files().isEmpty())
+                } finally {
+                    gate.resume()
+                    f.close()
+                }
+            }
+        }
+
     @Test fun closeAndParentCancellationBeforeLazyStartStillDrainOnTheOwner() =
         runBlocking {
             for (transition in listOf("close", "parent", "foreign-parent")) {
@@ -600,57 +742,77 @@ class PhoneExportHostTest {
 
     @Test fun aCompletedRenameCannotPublishAfterCancelDiscardAccountChangeOrClose() =
         runBlocking {
-            for (transition in listOf("cancel", "discard", "account", "close")) {
-                val gate = PromotionGate(coroutineContext[ContinuationInterceptor] as CoroutineDispatcher)
-                val port = TestExportPort()
-                val f = ExportHostFixture(this, port, gate.io, gate)
-                try {
-                    f.start()
-                    port.stream = { sink ->
-                        sink.write(port.bytes, 0, port.bytes.size)
-                        // Erst Close/Hash-IO passieren lassen, dann die Rename-Rückkehr halten.
-                        gate.ioBeforePause = 1
-                    }
-                    f.host.requestExport()
-                    f.await(PhoneExportPhase.READY)
-                    f.host.download()
-                    withTimeout(10_000) { gate.queued.await() }
-                    assertEquals("advantly-data.zip", f.files().single().name)
-                    assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
-                    val closed = CompletableDeferred<Unit>()
-                    when (transition) {
-                        "cancel" -> {
-                            f.host.cancel()
+            for (ioBeforeSuspend in listOf(true, false)) {
+                for (transition in listOf("cancel", "discard", "account", "close")) {
+                    val gate = PromotionGate(coroutineContext[ContinuationInterceptor] as CoroutineDispatcher, ioBeforeSuspend)
+                    val port = TestExportPort()
+                    val f = ExportHostFixture(this, port, gate.io, gate)
+                    var download: Job? = null
+                    var observer: Job? = null
+                    val published = mutableListOf<PhoneExportPhase>()
+                    try {
+                        f.start()
+                        port.stream = { sink ->
+                            sink.write(port.bytes, 0, port.bytes.size)
+                            val part = f.files().single()
+                            download = requireNotNull(currentCoroutineContext()[Job])
+                            gate.arm(
+                                part,
+                                File(f.application.cacheDir, "account-exports/${part.nameWithoutExtension}/advantly-data.zip"),
+                                requireNotNull(download),
+                            )
                         }
+                        f.host.requestExport()
+                        f.await(PhoneExportPhase.READY)
+                        f.host.download()
+                        assertEquals(ioBeforeSuspend, withTimeout(10_000) { gate.moved.await() })
+                        assertEquals("advantly-data.zip", f.files().single().name)
+                        assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
+                        gate.queueOwnerReturn()
+                        assertEquals("advantly-data.zip", f.files().single().name)
+                        assertEquals(PhoneExportPhase.DOWNLOADING, f.host.state.value.phase)
+                        observer =
+                            launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                                f.host.state.collect { published += it.phase }
+                            }
+                        val closed = CompletableDeferred<Unit>()
+                        when (transition) {
+                            "cancel" -> {
+                                f.host.cancel()
+                            }
 
-                        "discard" -> {
-                            f.host.discard()
-                        }
+                            "discard" -> {
+                                f.host.discard()
+                            }
 
-                        "account" -> {
-                            port.context.value = CloudDataExportContext("bob", 2, 1)
-                            f.host.refreshStatus()
-                        }
+                            "account" -> {
+                                port.context.value = CloudDataExportContext("bob", 2, 1)
+                                f.host.refreshStatus()
+                            }
 
-                        else -> {
-                            f.parent.cancel()
-                            f.host.close { closed.complete(Unit) }
-                            assertFalse(closed.isCompleted)
+                            else -> {
+                                f.parent.cancel()
+                                f.host.close { closed.complete(Unit) }
+                                assertFalse(closed.isCompleted)
+                            }
                         }
+                        assertFalse(PhoneExportAction.SHARE in f.host.state.value.allowedActions)
+                        gate.resume()
+                        when (transition) {
+                            "cancel" -> f.await(PhoneExportPhase.READY)
+                            "close" -> withTimeout(10_000) { closed.await() }
+                            else -> f.await(PhoneExportPhase.IDLE)
+                        }
+                        assertTrue(f.files().isEmpty())
+                        assertTrue(requireNotNull(download).isCompleted)
+                        assertFalse(PhoneExportPhase.LOCAL_FILE in published)
+                        assertFalse(PhoneExportAction.SHARE in f.host.state.value.allowedActions)
+                        assertEquals(1, port.calls.size)
+                    } finally {
+                        observer?.cancel()
+                        gate.resume()
+                        f.close()
                     }
-                    assertFalse(PhoneExportAction.SHARE in f.host.state.value.allowedActions)
-                    gate.resume()
-                    when (transition) {
-                        "cancel" -> f.await(PhoneExportPhase.READY)
-                        "close" -> withTimeout(10_000) { closed.await() }
-                        else -> f.await(PhoneExportPhase.IDLE)
-                    }
-                    assertTrue(f.files().isEmpty())
-                    assertFalse(PhoneExportAction.SHARE in f.host.state.value.allowedActions)
-                    assertEquals(1, port.calls.size)
-                } finally {
-                    gate.resume()
-                    f.close()
                 }
             }
         }
