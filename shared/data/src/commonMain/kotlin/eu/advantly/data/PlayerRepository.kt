@@ -37,6 +37,7 @@ data class LocalPlayer(
 class PlayerRepository internal constructor(
     private val queries: PlayerQueries,
     private val locallyCreated: (String) -> Unit = {},
+    private val sourcePlayerCreated: (String) -> Unit = {},
 ) {
     /** Der Self-Player oder `null`, wenn noch keiner angelegt ist. */
     fun self(): LocalPlayer? = queries.selectSelf().executeAsOneOrNull()?.toLocal()
@@ -96,6 +97,7 @@ class PlayerRepository internal constructor(
             when {
                 existing == null -> {
                     queries.insertOrIgnore(player.id.value, player.displayName, PlayerKind.GUEST.name, nowMs, null)
+                    sourcePlayerCreated(player.id.value)
                 }
 
                 (existing.kind == PlayerKind.GUEST || (existing.kind == PlayerKind.ARCHIVED && existing.displayName.isBlank())) &&
@@ -135,6 +137,7 @@ class PlayerRepository internal constructor(
             current?.let { queries.updateKind(PlayerKind.GUEST.name, it.id.value) }
             if (get(owner.id) == null) {
                 queries.insertOrIgnore(owner.id.value, owner.displayName, PlayerKind.SELF.name, nowMs, null)
+                sourcePlayerCreated(owner.id.value)
             } else {
                 queries.updateKind(PlayerKind.SELF.name, owner.id.value)
                 queries.rename(owner.displayName, owner.id.value)
@@ -150,8 +153,12 @@ class PlayerRepository internal constructor(
         nowMs: Long,
     ) {
         if (Placeholders.isPlaceholder(id) || get(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
-        queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
-        queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
+        queries.transaction {
+            val exists = get(id) != null
+            queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
+            if (!exists) sourcePlayerCreated(id.value)
+            queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
+        }
     }
 
     fun canMarkPlaceholder(id: PlayerId): Boolean =
@@ -220,7 +227,9 @@ class PlayerRepository internal constructor(
     ) {
         if (Placeholders.isPlaceholder(id)) return
         queries.transaction {
+            val exists = get(id) != null
             queries.insertOrIgnore(id.value, "", PlayerKind.ARCHIVED.name, nowMs, null)
+            if (!exists) sourcePlayerCreated(id.value)
             if (get(id)?.kind == PlayerKind.GUEST) queries.deleteGuest(id.value)
         }
     }
