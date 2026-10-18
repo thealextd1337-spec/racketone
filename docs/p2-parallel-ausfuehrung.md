@@ -22,7 +22,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 | Paket | Besitz | Abnahme | Status |
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Umsetzung läuft |
-| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Umsetzung läuft; K4-App-Bedienung folgt |
+| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | `2721f84` implementiert; Entwurfs-PR #62, unabhängiges Sicherheitsreview und CI offen; K4-App-Bedienung folgt |
 | K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Umsetzung läuft; freigegebene Dokumente separat offen |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
@@ -35,6 +35,13 @@ Freigegebene additive Erweiterung: K1 ergänzt in `CloudHttp.kt` ausschließlich
 Fehler-Whitelist um `consent_required`, `consent_unavailable`, `consent_version_changed`,
 `consent_documents_invalid`, `consent_language_invalid`, `no_deletion_pending` samt
 gezieltem Mapping-Test. Der übrige HTTP-Vertrag bleibt unverändert.
+
+K1 darf außerdem die bestehenden positiven Onboarding-Fixtures in
+`020_onboarding_profile.test.sql` und `140_auth_age_gate.test.sql` minimal um testlokal
+freigegebene Dokumente und bewusste Zustimmung ergänzen. Transaktionaler Rollback,
+Altersgate-Negativtests und die Verweigerung ohne Zustimmung bleiben erhalten;
+Produktionsdokumente werden dadurch nicht freigegeben. Der lokale PG17-Harness ersetzt
+keine Supabase-/HTTP-/Cron-Abnahme. Fehlende `pg_cron`-Prüfungen bleiben offene Nachweise.
 
 ### Abgestimmte Zustimmungsschnittstelle
 
@@ -55,6 +62,12 @@ gezieltem Mapping-Test. Der übrige HTTP-Vertrag bleibt unverändert.
   Keine Rechtstexte, Versionsfreigaben oder fehlenden Terms-Links erfinden.
 - K1 darf bestehende Export-/Lösch-RPCs minimal erreichbar machen; ZIP-Auslieferung und
   tatsächlicher Löschjob bleiben K2/K3. Ein Rohdatenabruf ist keine K2-Abnahme.
+- Unabhängige Kontorechte gelten auch für eigene noch nicht vollständig eingerichtete
+  Profile. K1 darf dafür `deletion_requested` ohne Alias zulassen; aktive Profile bleiben
+  aliaspflichtig. Eine private atomare Ursprungsmarkierung stellt bei Löschrücknahme den
+  tatsächlichen vorherigen Onboarding-Status wieder her. Wiederholte Anträge ändern weder
+  Ursprung noch laufende Karenzfrist; Recovery umgeht weder Onboarding/Zustimmung noch
+  Kontosperren. Löschjob und Anonymisierung bleiben im bestehenden K3-Folgeumfang.
 
 ### Aufgabenregister
 
@@ -65,6 +78,18 @@ Brief einschließlich früherer Befunde und Antworten.
 - U3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-impl-r1`
 - Server/K4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server_k4-impl-r1`
 - K1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-impl-r1`
+- Server/K4 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r1`
+
+### Server/K4 – erste Übergabe
+
+Entwurfs-PR [#62](https://github.com/thealextd1337-spec/racketone/pull/62), Commit `2721f84`.
+Gradle-Check bestanden; lokaler PG17-Ersatzharness laut Implementierer mit 196 neuen Tests
+und Parallelitätsprüfungen bestanden. Gesamtlauf 747/749, zwei fehlende `pg_cron`-Prüfungen
+auf der Basis reproduziert. Echter Supabase-/HTTP-/WebSocket-Nachweis steht aus; Docker/Podman
+sind lokal nicht verfügbar. Realtime-App-Broadcasts/private Kanäle/Cloud-Publikationen sind
+geschlossen, die Control-Plane verlangt zusätzlich `private_only` und das Trennen vorhandener
+Sockets. Kein Deployment oder Cloud-/Pilotfreigabe. Die Consent-Seams für 003 heißen
+`private.require_cloud_profile()` und `private.cloud_profile_allowed(uuid)`.
 
 ## Folgewellen – nach erfüllten Abhängigkeiten starten
 
