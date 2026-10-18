@@ -13,6 +13,24 @@ PR #70 auf `5e5a408` hat einen belegten Ubuntu-Testfehler: Die Rename-Barriere e
 die tatsächliche Dispatcherreihenfolge; Produktcode wird ohne belegten Produktfehler nicht geändert.
 Der vorherige Upload-ACK-Testfix bleibt erhalten. Neue CI und unabhängiger Review bleiben Pflicht.
 
+Der Fix `786c0c8` ist inzwischen ohne Befund unabhängig geprüft: tatsächlicher Dateiwechsel,
+schnelle und verzögerte IO-Rückkehr und ausschließlich der erfasste Action-Rückweg werden gehalten.
+58 App-Tests einschließlich 32 Exporttests frisch grün; Gesamtcheck/APKs 771 Tasks grün.
+Produktdateien sind unverändert. PR #70 ist auf diesem Head gepusht; aktuelle CI bleibt erforderlich.
+
+Das Engine-Paket `3a73905` ist in Review R2 freigegeben. Der R1-P2 zum Legacy-Null-Roundtrip
+ist rot→grün behoben; 169 frische JVM-Tests und 223 unveränderte Golden-Vektoren bestehen.
+Root führt die fünf Engine-Dateien und den separaten PR70-Testfix jeweils bytegleich zusammen:
+gemeinsamer Gesamtcheck samt beiden APKs 771 Tasks grün (1m35s). V2-Producer und Protokoll 4
+bleiben inaktiv. Der Server-Slice `56bf5fa` erhält vor Integration den belegten R1-P1-Fix:
+kanonische Genesis-Teams heißen im Wire-Vertrag `A/B`, nicht `a/b`.
+
+Root besitzt außerdem die minimale Inventurergänzung von 32 auf 33 RPCs mit explizitem
+Redaktions-RPC-Nachweis in den bestehenden `181`-Tests und deren CI-Anschluss neben `210`.
+SQL: 253 Assertions grün. Der anschließende Rennlauf erreicht 82 erfolgreiche RC-Lockrennen,
+stoppt aber im weiteren Isolationspfad an äußeren Harnessgrenzen; separate Diagnose läuft.
+Diese Gesamtprüfung wird ausdrücklich nicht als bestanden ausgegeben.
+
 Zwei weitere Pakete starten isoliert auf exakt `5e5a408`, ohne Dateien der CI-Lane zu besitzen:
 
 | Paket | Besitz | Ergebnis und Akzeptanz | Abhängigkeit danach |
