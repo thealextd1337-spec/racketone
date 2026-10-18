@@ -184,11 +184,38 @@ select throws_ok(query,'42501','device_not_authorized','Auth-Logout entfernt Zei
 select throws_ok($$select public.cloud_list_installations_v1()$$,'42501','device_not_authorized','Auch K4 verlangt existierende Auth-Sitzung');
 
 -- Realtime bleibt durchgängig geschlossen; keine Annahme, dass REST-Proof auf WebSockets existiert.
+reset role;
+-- Echte Supabase-Grants gehören dem Realtime-Owner und können auch nach einer App-Migration
+-- bestehen/erneuert werden. Vorhandene Nutzdaten + permissive Gegenpolicy verhindern leere Negativnachweise.
+grant select, insert, update on realtime.messages to anon, authenticated;
+do $$
+declare v_sequence text := pg_get_serial_sequence('realtime.messages','id');
+begin
+  if v_sequence is not null then execute format('grant usage on sequence %s to anon, authenticated',v_sequence); end if;
+end;
+$$;
+create policy cloud_test_allow_all on realtime.messages for all to anon, authenticated using (true) with check (true);
+select realtime.send('{"fixture":"cloud-binding-sentinel"}'::jsonb,'cloud-test','cloud-binding-sentinel',true);
+select ok(exists(select 1 from realtime.messages where topic='cloud-binding-sentinel'),
+  'Positivkontrolle: Realtime enthält tatsächlich eine Nachricht');
+select ok((select relrowsecurity from pg_class where oid='realtime.messages'::regclass),
+  'Realtime-RLS tatsächlich aktiv');
+select ok(exists(select 1 from pg_policies where schemaname='realtime' and tablename='messages'
+  and policyname='cloud_realtime_closed' and permissive='RESTRICTIVE' and cmd='ALL'
+  and qual='false' and with_check='false'),'Restriktive Realtime-Sperre gilt für alle Operationen');
+select pg_temp.identify(4,2);
 select ok(not private.can_receive_realtime('match:17300000-0000-4000-8000-000000000001:1'),'Match-Broadcast geschlossen');
-select throws_ok($$select * from realtime.messages$$,'42501',null,'Keine direkte Realtime-Tabelle');
+select ok(has_table_privilege('authenticated','realtime.messages','SELECT'),
+  'Negativtest läuft mit effektivem Supabase-SELECT-Grant');
+select is_empty($$select * from realtime.messages$$,'Keine Realtime-Daten trotz Grant, Nutzdaten und permissiver Policy');
 select throws_ok($$insert into realtime.messages(topic,extension,payload,event,private)
   values('match:17300000-0000-4000-8000-000000000001:1','presence','{}','test',true)$$,
   '42501',null,'Presence-/Broadcast-Schreibzugang geschlossen');
+select tests.authenticate_anon();
+select is_empty($$select * from realtime.messages$$,'Auch anon liest trotz Grant keine vorhandenen Nachrichten');
+select throws_ok($$insert into realtime.messages(topic,extension,payload,event,private)
+  values('cloud-binding-sentinel','broadcast','{}','test',true)$$,
+  '42501',null,'Auch anon darf keine Nachrichten einspeisen');
 reset role;
 select is_empty($$select * from pg_publication_tables where pubname='supabase_realtime'
   and schemaname in ('public','private','ops')$$,'Keine App-Tabellen in Realtime-Publikation');

@@ -9,7 +9,24 @@ $$;
 create function private.require_cloud_profile()
 returns uuid language plpgsql security definer set search_path = '' as $$
 begin
+  -- Eigene VOLATILE-Anweisung NACH dem Warten: require_active prüft bisher VOR seinem Lock.
+  -- K1/003 muss seine Consent-Prüfung ebenfalls erst nach diesem Lock ausführen.
+  perform private.lock_sync();
   return private.require_active();
+end;
+$$;
+
+-- Ein STABLE-RLS-Prädikat sieht bei wartenden direkten Writes den alten Statement-Snapshot.
+-- Der VOLATILE-Statement-Trigger nimmt die Sperre und prüft danach in einer neuen SPI-Anweisung.
+-- SECURITY INVOKER unterscheidet direkte API-Writes von bereits geprüften DEFINER-RPCs:
+-- Bind/Onboarding/Recovery dürfen ihre internen Tabellenänderungen weiterhin selbst autorisieren.
+create function private.authorize_cloud_write()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    perform private.require_cloud_binding();
+  end if;
+  return null;
 end;
 $$;
 
@@ -329,6 +346,8 @@ begin
   loop
     execute format('create policy cloud_binding_required on public.%I as restrictive for all to authenticated
       using ((select private.has_cloud_binding())) with check ((select private.has_cloud_binding()))', v_table);
+    execute format('create trigger zy_cloud_authorize_write before insert or update or delete on public.%I
+      for each statement execute function private.authorize_cloud_write()', v_table);
   end loop;
 end;
 $$;
@@ -428,9 +447,13 @@ do $$
 declare v_table record;
 begin
   if to_regclass('realtime.messages') is not null then
+    if not (select relrowsecurity from pg_class where oid = 'realtime.messages'::regclass) then
+      raise exception 'Realtime-RLS muss vor Anwendung der Cloud-Sperre aktiv sein';
+    end if;
     execute 'create policy cloud_realtime_closed on realtime.messages as restrictive for all to anon, authenticated
       using (false) with check (false)';
-    execute 'revoke all on realtime.messages from public, anon, authenticated';
+    -- Realtime verwaltet Owner-/Default-Grants selbst; postgres kann fremde Grantor-ACLs nicht
+    -- zuverlässig entziehen. Die restriktive Policy sperrt auch bei weiterhin effektiven Grants.
   end if;
   -- Auch DELETE-Replikation ohne RLS-Zeilenprüfung darf keine Cloud-Daten verraten.
   for v_table in select schemaname, tablename from pg_publication_tables
@@ -444,7 +467,7 @@ $$;
 -- Betreiber zusätzlich private_only=true setzen und bestehende Sockets trennen (Control Plane, kein SQL-RPC).
 -- Diese Migration sendet keinerlei App-Broadcasts und gibt keine Postgres-Changes-Publikation frei.
 
-revoke all on function private.cloud_profile_allowed(uuid), private.require_cloud_profile(),
+revoke all on function private.authorize_cloud_write(), private.cloud_profile_allowed(uuid), private.require_cloud_profile(),
   private.cloud_auth_session(), private.cloud_capability(), private.require_cloud_binding(), private.has_cloud_binding()
   from public, anon, authenticated, service_role;
 grant execute on function private.has_cloud_binding(), private.require_cloud_binding() to authenticated;

@@ -68,7 +68,7 @@ select ok(not private.is_active((select id from no_hook)), 'Auch Status active g
 select tests.authenticate_as_id((select id from no_hook));
 select throws_ok($$ select public.register_device(gen_random_uuid(),'phone','android') $$,'42501','profile_not_active','require_active prüft Altersnachweis unabhängig vom Status');
 select throws_ok($$ insert into public.tournaments(director_id,name,sport) values(auth.uid(),'No age','tennis') $$,
-  '42501','new row violates row-level security policy for table "tournaments"','Aktive RLS-Rechte ohne Altersnachweis verweigert');
+  '42501','profile_not_active','Statement-Autorisierung verweigert aktive Rechte ohne Altersnachweis');
 reset role;
 -- adminUserCreate/Invite umgehen den Hook: SQL-Insert modelliert genau diesen Weg.
 create temp table admin_bypass as select gen_random_uuid() id;
