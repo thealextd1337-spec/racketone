@@ -868,6 +868,14 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+K2-Integrationsreview 1 auf `79b5faa`: ein belegter P2. Der tatsächlich installierte
+Deno-2.9.7-Formatter liest `.editorconfig` (vier Leerzeichen); bisherige lokale Deno-2.5.4-
+Prüfung tat das nicht. Erste Service-CI stoppt deshalb vor Stackstart. Enge Root-Korrektur:
+Deno 2.9.7 im zentralen Versionskatalog pinnen, CI liest diesen Wert; Formatcheck verlangt
+ausdrücklich zwei Leerzeichen. Beide Functions unter genau 2.9.7 mit Typen/Format/Lint und
+19 Tests grün; vollständiger Root-Check 692 Tasks grün (4m30s). Servercode/SQL unverändert.
+Erneute tatsächliche Service-CI und frisches Integrationsreview 2 bleiben vor Merge nötig.
+
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
 Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
 
