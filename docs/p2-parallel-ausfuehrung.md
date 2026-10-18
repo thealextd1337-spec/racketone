@@ -889,6 +889,27 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+PR #68 auf `6da7517`: Ubuntu-Job `117723125763` scheitert in einem von 19 Androidtests.
+CI-XML wurde gelesen: nicht der `runBlocking`-Einstieg 591, sondern `assertFalse` für
+`canRefreshStatus` in `PhoneUploadHostTest.kt:627`. Der Test wartet zuvor auf ein
+MockEngine-Cancellationsignal, danach prüft er den Hostzustand. Ursache noch nicht
+festgelegt: kausale Reihenfolge von Auth-/Gate-Entwertung, Transportabbruch und serieller
+Host-Publikation muss deterministisch belegt werden. Enger Diagnose-/Korrekturauftrag
+im bestehenden Android-Worktree, Besitz nur `PhoneUploadHost.kt` und direkter Test;
+keine Sleeps, Wiederholungen oder abgeschwächten Sicherheitsassertionen. Rot→Grün,
+alle bestehenden Transitions-/Drain-/Refreshfälle und vollständiger Check/APKs erforderlich.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-android-ci-fix-r1`.
+
+D2/D3-Erkundung abgeschlossen, ausschließlich lesend. Benötigt reversiblen Zugriffszustand
+statt `deleteMatch`-Tombstone, dauerhafte Offline-Zustellung unabhängig vom Event-Ack,
+Redaktionsnachweis bis zur speziellen Store-Operation und koordiniertes Protokoll 4.
+Konkrete vorhandene Seams und Tests liegen im Taskresultat. Vor Umsetzung Root-Verträge
+für monotone Zugriffsgeneration bei vollständigem Verschwinden, autorisierte Personen-
+Whitelist und neue namenfreie Assignmentdarstellung festlegen. Persistenz-/Engine-/Protokoll-
+Besitz kann danach teilweise parallel laufen; `MatchSession.kt` bleibt bei genau einem
+Integrator. D1 und seine aktuelle `MatchEvent.sq`-Korrektur zuerst abschließen; keine
+überlappende Persistenzumsetzung gestartet. Reale Offline-Uhr-/G8-Abnahme bleibt offen.
+
 D1 Review 3 auf `b44c5ab` hält sämtliche R1-/R2-Befunde geschlossen, findet aber einen
 neuen P2 in wiederverwendetem Downloadcode: pro Duplikat lädt `storeDownloaded` das
 vollständige Matchlog. Bei 10.000 Bestandsereignissen lädt eine Zweierseite 20.000,
