@@ -13,6 +13,40 @@ import kotlin.test.assertTrue
 
 class CloudMetadataMigrationTest {
     @Test
+    fun schemaFiveMigrationInstallsPlayerInsertInvalidationForExistingParticipants() {
+        val file = File.createTempFile("advantly-schema-five-insert", ".db")
+        try {
+            File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
+            val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+            try {
+                AdvantlyDatabase.Schema.migrate(driver, 1, 5).value
+                driver.execute(
+                    null,
+                    """INSERT INTO match_header(id,sport,discipline,format_json,lineup_json,meta_json,created_at_ms,updated_at_ms,status)
+                    VALUES ('old','TENNIS','SINGLES','{}','{"a":["late-player"]}','{}',1,1,'IN_PROGRESS')""",
+                    0,
+                )
+                driver.execute(null, "INSERT INTO setting VALUES ('assignments.projectionVersion','2')", 0)
+                AdvantlyDatabase.Schema.migrate(driver, 5, LocalData.SCHEMA_VERSION).value
+                val data = LocalData(driver)
+                val before = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "old")!!
+                data.players.upsertRemote(
+                    eu.advantly.core.model
+                        .Player(PlayerId("late-player"), "Beatrice"),
+                    2,
+                )
+                val after = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "old")!!
+                assertEquals(before.selected.revision + 1, after.selected.revision)
+                assertEquals(before.uploadedRevision, after.uploadedRevision)
+            } finally {
+                driver.close()
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun schemaFiveKeepsOldRowsOwnershipPayloadsAndSeparateReceiptsAfterReopen() {
         val file = File.createTempFile("advantly-schema-five", ".db")
         try {
