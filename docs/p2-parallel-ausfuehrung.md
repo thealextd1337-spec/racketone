@@ -810,6 +810,29 @@ Test-Surface. Vorbestehender Kontrastfehler übriger Kontotexte bleibt separat f
 Integrationsprüfung erfasst, kein breiter Theme-/Accountumbau im Worker. Screenshotbeleg
 und DE/EN-200%-Prüfung mit finalem Fullcheck vor Commit erforderlich.
 
+K2 Fix1 `ff13429` ist fertig: sieben freigegebene Dateien. Explizite fachliche Nullwerte
+bleiben im SQL→ZIP→JSON/CSV-Rundlauf erhalten; andere aktive Request-ID ergibt 409
+`export_busy`/Retry-After 3, dieselbe ID bleibt 202 abrufbar; falsche ID-Typen 400 ohne
+Backendaufruf. Baseline rot, Fix mit 19 Deno-/65 SQL-Fachassertions, acht Parallelrennen und
+Gesamtcheck 688 Tasks grün. Harte Plattformlücken unverändert. Frisches Review 2:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-review-r2`.
+
+U4 Android Feature `2e135ac` auf Dependency `7fd1f69` fertig: 17 Dateien, 506 Fokusprüfungen,
+Migration und Gesamtcheck/APK mit 740 Tasks grün. Root hat Host/Decorator/UI/VM-Diff und
+Desktop-Screenshots gesichtet: Uploadbereich lesbar; bestehende übrige Kontotexte im echten
+Host ohne ContentColor schlecht lesbar. Keine Android-Geräteabnahme aus Desktopbildern.
+Gezielte native Impeccable-Prüfung nutzt bestehende Material-Tokens/Komponenten, kein Redesign
+oder neues Produkt-/Designdokument. Frisches unabhängiges Host-/Retry-/Lifecycle-/UI-Review:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-review-r1`.
+
+D1 darf ausschließlich im atomaren Eventdownload entstandene PARTICIPANTS-Projektionsrevision
+als empfangene Cloud-Basis sauberstellen, wenn vorher sauber, Herkunft CLOUD und demselben
+materialisierten Empfangsprofil zugeordnet. Exakte Vor-/Nachrevision und Profil prüfen;
+vorher dirty/local/peer/anderes Konto sowie Event-/Geräte-Acks/Rejections bleiben unverändert.
+Positive anschließende versionierte Kopfaktualisierung und alle Negativkontrollen beweisen;
+kein pauschales Upload-Ack. Änderung innerhalb CloudPullStore/Mappingtest, anschließend
+erneut Fokus und Gesamtcheck vor Commit.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
