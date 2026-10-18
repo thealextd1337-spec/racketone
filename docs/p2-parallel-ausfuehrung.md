@@ -53,6 +53,13 @@ Gesamtcheck samt beiden APKs: 771 Tasks grün in 1m52s, Exitcode 0. Review-Task:
 `advantly-20261018-d2d3-protocol-review-r1` (gleicher unten dokumentierter Task-ID-Präfix).
 
 U2/U3 bleiben Herkunftsautorität; nur ein payloadfreier dauerhafter Cloud-Marker kommt hinzu.
+DATA besitzt zusätzlich ausschließlich `CloudSyncMetadata.kt::uploadParticipants`: ID-Projektionen
+werden über das bestehende Spieler-Verzeichnis gelesen, echte Legacyzeilen weiterhin über ihr
+JSON. `MatchAssignment.sq::forMatch` erhält keine JSON1-Abhängigkeit und erzeugt keine künstlichen
+Spieler-JSONs. Referenzberechtigung, Herkunft, Revisionen und Acks bleiben erhalten; redigierte IDs
+dürfen auch über den Legacy-Fallback keine Namen wieder offenlegen. Direkte Data-Regressionen
+decken beide Formen und fehlende/redigierte Verzeichniseinträge ab. Weitere Funktionen der Datei
+bleiben Root; bis zur Übergabe gibt es keine konkurrierenden Root-Edits an dieser Stelle.
 Globale Daten werden einmal gespeichert, aber Aufbewahrung für B gewährt A keinen Zugriff.
 Die Data-Schnittstelle behält `serverSeq` je Redaktionszeile zur H-/Cursorprüfung ausdrücklich bei.
 Eine enge persistente Aktivierungsseam dient nur der gemeinsamen Root-Umstellung; kein neues
