@@ -29,6 +29,8 @@ android {
 }
 
 dependencies {
+    testImplementation(libs.ktor.mock)
+    testImplementation(libs.sqldelight.sqlite.driver)
     implementation(projects.shared.uiPhone)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play)
