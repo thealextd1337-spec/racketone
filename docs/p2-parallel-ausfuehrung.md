@@ -24,14 +24,18 @@ aktueller SDK-/Kontoprüfung; der Windows-Befund wird nicht als Android-Defekt a
 Root übernimmt alle zehn C-Dateien bytegleich zu `b6f5c25`; gemeinsame Konto-UI, Cloudadapter,
 Server und CI unverändert. Gemeinsamer Gesamtcheck samt beiden APKs: 771 Tasks grün (1m2s).
 
-K2-D2 ist als `fac1345` umgesetzt, ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
+K2-D2 ist einschließlich Fix `0019d83` umgesetzt, ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
 direkten Kompositionstest. Dieselbe Auth-Instanz liefert den Exportport; die aktuelle Activity
 besitzt den Sharecallback, der langlebige Host hält sie nicht. C-Dateien bleiben unberührt;
 spätere C-Korrekturen übernimmt Root. Vier neue Kompositionstests und Worker-Gesamtcheck samt APKs
-771 Tasks grün. Kompositionsreview R1 bestätigt den Produktpfad, findet aber einen P2 im
-neuen Test: bedingungslose leere BuildConfig verletzt unterstützte lokale Backendproperties.
-Gezielte Korrektur ausschließlich Factory-Testseam und bestehendem Kompositionstest läuft;
-Produktionsdefaults bleiben aus BuildConfig. Danach frischer Review R2. Kein Push/PR aus den Umsetzungsagenten,
+771 Tasks grün. Der Test-P2 aus R1 ist mit expliziten Factory-Testwerten geschlossen;
+öffentliche Nullargument-API und Produktionsdefaults aus BuildConfig bleiben erhalten.
+Review R2 gibt frei: vier Kompositions- und 27 Hosttests mit nichtleeren Fake-Properties,
+zusätzlich 23 Auth-/Lifecycle- und 13 Konto-UI-Tests frisch grün, keine Skips.
+Root übernimmt die drei Kompositionsdateien bytegleich zu `0019d83`, C weiterhin bytegleich
+zum freigegebenen `b6f5c25`. Gemeinsamer Gesamtcheck samt beiden APKs: 767 Tasks grün (47s),
+54 App-Tests ohne Fehler oder Skips. Frischer Gesamtintegrationsreview und PR-CI stehen aus.
+Kein Push/PR aus den Umsetzungsagenten,
 keine automatische Exportabfrage. Gesamtfreigabe erst nach Kompositionsreview, gemeinsamer
 Integration und relevanter CI. PR #68 ist inzwischen als `6c45ac5` auf main; dessen Baum ist
 bytegleich zur bereits enthaltenen Basis `868a3a2`. Squash-Abgleich `78c4301` erhält alle Exportdateien.
@@ -40,8 +44,9 @@ bytegleich zur bereits enthaltenen Basis `868a3a2`. Squash-Abgleich `78c4301` er
 - C-Review nach Fix: `advantly-20261018-k2-phone-host-review-r2`.
 - D2-Umsetzung: `advantly-20261018-k2-android-composition-impl-r1`.
 - D2-Review: `advantly-20261018-k2-android-composition-review-r1`.
+- D2-Review nach Fix: `advantly-20261018-k2-android-composition-review-r2`.
 
-Beide IDs haben den vollständigen T3-Taskpräfix, der unterhalb dieser Übersicht dokumentiert ist.
+Diese IDs haben den vollständigen T3-Taskpräfix, der unterhalb dieser Übersicht dokumentiert ist.
 
 - K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
   einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.

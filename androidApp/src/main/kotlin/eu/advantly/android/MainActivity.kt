@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.ViewModelProvider
+import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
 import eu.advantly.android.auth.createPhoneAccount
 import eu.advantly.android.auth.googleCredential
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
                 buildTimeUtc = getString(R.string.build_time_utc),
                 debugTools = BuildConfig.DEBUG,
                 authModel = auth,
+                onShareExport = this@MainActivity.phoneExportShareCallback(auth),
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =
@@ -78,3 +80,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** Gehört der aktuellen Activity/Composition; niemals im ViewModel oder mit remember halten. */
+internal fun ComponentActivity.phoneExportShareCallback(auth: AuthViewModel?): (() -> Unit)? =
+    (auth?.export as? PhoneExportHost)?.let { host -> { host.share(this) } }
