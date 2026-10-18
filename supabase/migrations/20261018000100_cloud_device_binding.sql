@@ -1,6 +1,17 @@
 -- U1-v1/K4: Auth-Sitzung + kontogebundene Installations-Capability, keine Hardwareattestierung.
 -- auth.sessions wird ausschließlich gelesen. Kein FK darauf: Auth-Logout darf Tombstones nicht löschen.
 -- K1/003 erweitert ausschließlich require_cloud_profile()/cloud_profile_allowed(uuid) um Zustimmung.
+-- Der Cloud-Vertrag unterstützt ausschließlich READ COMMITTED mit neuem Snapshot nach Lock-Wait. Andere Modi bleiben
+-- für Cloud-Zugriffe geschlossen; unabhängige Konto-/Support-RPCs verwenden diesen Helfer nicht.
+create function private.require_cloud_isolation()
+returns void language plpgsql stable security definer set search_path = '' as $$
+begin
+  if current_setting('transaction_isolation', true) is distinct from 'read committed' then
+    perform private.fail('device_not_authorized', '42501');
+  end if;
+end;
+$$;
+
 create function private.cloud_profile_allowed(p_profile uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select private.is_active(p_profile);
@@ -11,6 +22,7 @@ returns uuid language plpgsql security definer set search_path = '' as $$
 begin
   -- Eigene VOLATILE-Anweisung NACH dem Warten: require_active prüft bisher VOR seinem Lock.
   -- K1/003 muss seine Consent-Prüfung ebenfalls erst nach diesem Lock ausführen.
+  perform private.require_cloud_isolation();
   perform private.lock_sync();
   return private.require_active();
 end;
@@ -69,6 +81,7 @@ declare
   v_uid uuid;
   v_sid uuid;
 begin
+  perform private.require_cloud_isolation();
   begin
     v_uid := (v_claims ->> 'sub')::uuid;
     v_sid := (v_claims ->> 'session_id')::uuid;
@@ -149,6 +162,7 @@ declare
   v_auth record;
   v_cap record;
 begin
+  perform private.require_cloud_isolation();
   select * into strict v_auth from private.cloud_auth_session();
   select * into strict v_cap from private.cloud_capability();
   return private.cloud_profile_allowed(v_auth.profile_id) and exists (
@@ -467,7 +481,8 @@ $$;
 -- Betreiber zusätzlich private_only=true setzen und bestehende Sockets trennen (Control Plane, kein SQL-RPC).
 -- Diese Migration sendet keinerlei App-Broadcasts und gibt keine Postgres-Changes-Publikation frei.
 
-revoke all on function private.authorize_cloud_write(), private.cloud_profile_allowed(uuid), private.require_cloud_profile(),
+revoke all on function private.require_cloud_isolation(), private.authorize_cloud_write(),
+  private.cloud_profile_allowed(uuid), private.require_cloud_profile(),
   private.cloud_auth_session(), private.cloud_capability(), private.require_cloud_binding(), private.has_cloud_binding()
   from public, anon, authenticated, service_role;
 grant execute on function private.has_cloud_binding(), private.require_cloud_binding() to authenticated;

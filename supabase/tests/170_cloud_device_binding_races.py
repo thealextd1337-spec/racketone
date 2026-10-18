@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["psycopg[binary]>=3.2,<4", "websockets>=15,<17"]
 # ///
-"""U1-R1: reproduzierbare Sperr-/Snapshot-Rennen auf einer lokalen wegwerfbaren DB.
+"""U1-R1/R2: reproduzierbare Sperr-/Snapshot-Rennen auf einer lokalen wegwerfbaren DB.
 
 ADVANTLY_CLOUD_TEST_DB_URL=... uv run supabase/tests/170_cloud_device_binding_races.py --confirm-disposable
 Alle Fälle werden ausgeführt; jeder unerlaubte Commit/jede Cloud-Antwort macht den Lauf rot.
@@ -21,6 +21,7 @@ import time
 from uuid import uuid4
 
 import psycopg
+from psycopg import sql
 
 sys.dont_write_bytecode = True
 
@@ -28,7 +29,9 @@ sys.dont_write_bytecode = True
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--confirm-disposable", action="store_true", required=True)
-    parser.parse_args()
+    parser.add_argument("--isolation", choices=["read committed", "repeatable read", "serializable", "read uncommitted"],
+                        default="read committed")
+    args = parser.parse_args()
     params = import_module("170_cloud_device_binding_live").local_connection_parameters(os.environ["ADVANTLY_CLOUD_TEST_DB_URL"])
 
     def connect():
@@ -37,8 +40,10 @@ def main():
         return conn
 
     @contextmanager
-    def identity(conn, uid, sid, installation, proof):
+    def identity(conn, uid, sid, installation, proof, isolation="read committed"):
         with conn.transaction():
+            # Ausschließlich feste argparse-Choices; muss vor der ersten Snapshot-Anweisung stehen.
+            conn.execute("set transaction isolation level " + isolation)
             conn.execute("set local role authenticated")
             conn.execute("select set_config('request.jwt.claims',%s,true)",
                          (json.dumps({"sub": str(uid), "session_id": str(sid), "role": "authenticated"}),))
@@ -71,13 +76,15 @@ def main():
 
                     def waiting_statement():
                         try:
-                            with identity(client, uid, sid, installation, proof):
+                            with identity(client, uid, sid, installation, proof, args.isolation):
                                 cursor = client.execute(statement, parameters)
                                 rows = cursor.fetchall() if cursor.description else []
                                 return "allowed" if rows else "empty"
                         except psycopg.Error as exc:
                             if exc.sqlstate == "42501":
                                 return "denied"
+                            if exc.sqlstate == "40001":
+                                return "serialization failure"
                             raise AssertionError(f"{label}: SQLSTATE {exc.sqlstate}") from None
 
                     with identity(owner, uid, sid, installation, proof):
@@ -90,13 +97,17 @@ def main():
                             if blocked:
                                 break
                             time.sleep(0.01)
-                        assert blocked, f"{label}: wartende SQL-Anweisung nicht nachgewiesen"
+                        if args.isolation == "read committed":
+                            assert blocked, f"{label}: wartende SQL-Anweisung nicht nachgewiesen"
+                        elif not blocked:
+                            assert future.done(), f"{label}: weder Lock-Wait noch frühe Ablehnung nachgewiesen"
                     result = future.result(timeout=8)
                 if result == "allowed":
                     failures.append(label)
-                    print(f"FAIL {label}: wartende Anweisung nach Sperrfreigabe erfolgreich committet")
+                    print(f"FAIL {args.isolation} {label}: Anweisung erfolgreich committet")
                 else:
-                    print(f"PASS {label}: nachgewiesener Lock-Wait, danach {result}")
+                    boundary = "nachgewiesener Lock-Wait" if blocked else "frühe Ablehnung"
+                    print(f"PASS {args.isolation} {label}: {boundary}, {result}")
             finally:
                 owner.execute("reset role")
                 owner.execute("delete from auth.users where id=%s", (uid,))
@@ -122,9 +133,75 @@ def main():
             "v1 sync_pull": "select public.cloud_sync_pull_v1(0,200)",
         }.items():
             run_case("P1b " + label, statement, deletion)
+        if args.isolation != "read committed" and not failures:
+            # Zusätzlich ohne Widerruf: gültige Sitzung/Capability, tatsächlich vorhandene Daten.
+            # So beweist eine Ablehnung die Isolationsgrenze statt lediglich fehlende Fachrechte.
+            uid, sid, installation, device, match, tournament, court, event = (uuid4() for _ in range(8))
+            proof = secrets.token_hex(32)
+            owner.execute("insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data,aud,role,created_at,updated_at) "
+                          "values(%s,%s,'{}','{}','authenticated','authenticated',now(),now())", (uid, f"isolation-{uid}@test.advantly.eu"))
+            try:
+                owner.execute("update public.profiles set status='active',alias='Isolation Test' where id=%s", (uid,))
+                owner.execute("update public.profile_settings set age_confirmed_at=now(),country='AT',age_rule_min_age=14 where profile_id=%s", (uid,))
+                owner.execute("insert into auth.sessions(id,user_id,created_at,updated_at) values(%s,%s,now(),now())", (sid, uid))
+                with identity(owner, uid, sid, installation, proof):
+                    owner.execute("select public.bind_cloud_session_v1(%s,%s)", (installation, device))
+                owner.execute("insert into public.tournaments(id,director_id,name,sport) values(%s,%s,'Isolation','tennis')", (tournament, uid))
+                owner.execute("insert into public.tournament_courts(id,tournament_id,name) values(%s,%s,'Isolation')", (court, tournament))
+                owner.execute("insert into public.matches(id,created_by,sport,discipline,format,meta,started_at) "
+                              "values(%s,%s,'tennis','singles','{}','{}',now())", (match, uid))
+                owner.execute("insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) "
+                              "values(%s,%s,%s,1,1,1,'MatchCreated','{\"type\":\"MatchCreated\"}',%s)", (event, match, device, uid))
+                values = {"uuid": uid, "jsonb": "{}", "text": "isolation-test", "boolean": False, "bigint": 0, "integer": 1}
+                overrides = {"bind_cloud_session_v1": [installation, device],
+                             "cloud_revoke_installation_v1": [installation], "cloud_revoke_session_v1": [sid],
+                             "cloud_revoke_device_v1": [device], "cloud_get_visitor_match_v1": [match],
+                             "get_visitor_match": [match], "tournament_overview": [tournament]}
+                functions = owner.execute("select p.proname, array(select format_type(t,null) from unnest(p.proargtypes::oid[]) t) "
+                                          "from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and "
+                                          "(strpos(p.prosrc,'private.require_cloud_binding()')>0 or p.proname='bind_cloud_session_v1' "
+                                          "or p.proname like 'cloud_%%_v1') order by p.proname").fetchall()
+                with connect() as client:
+                    for name, types in functions:
+                        parameters = overrides.get(name, [values[t] for t in types])
+                        arguments = sql.SQL(",").join(sql.SQL("%s::{} ").format(sql.SQL(t)) for t in types)
+                        query = sql.SQL("select * from {}({})").format(sql.Identifier("public", name), arguments)
+                        try:
+                            with identity(client, uid, sid, installation, proof, args.isolation):
+                                client.execute(query, parameters).fetchall()
+                        except psycopg.Error as exc:
+                            assert exc.sqlstate == "42501" and exc.diag.message_primary == "device_not_authorized", (
+                                f"{name}: erwartete Isolationsablehnung fehlt, SQLSTATE {exc.sqlstate}")
+                        else:
+                            raise AssertionError(f"{name}: nicht unterstützte Isolation erlaubt")
+                    print(f"PASS {args.isolation}: {len(functions)} Bind-/v1-/Legacy-/K4-RPCs mit 42501 device_not_authorized verweigert")
+                    tables = owner.execute("select tablename from pg_policies where schemaname='public' "
+                                           "and policyname='cloud_binding_required' order by tablename").fetchall()
+                    populated = 0
+                    for (table,) in tables:
+                        query = sql.SQL("select 1 from {} limit 1").format(sql.Identifier("public", table))
+                        with identity(client, uid, sid, installation, proof):
+                            populated += bool(client.execute(query).fetchall())
+                        with identity(client, uid, sid, installation, proof, args.isolation):
+                            assert not client.execute(query).fetchall(), f"{table}: RLS unter nicht unterstützter Isolation offen"
+                    assert populated >= 7, "RLS-Positivkontrolle enthält nicht genug reale Daten"
+                    with identity(client, uid, sid, installation, proof, args.isolation):
+                        assert client.execute("select private.has_cloud_binding()").fetchone() == (False,)
+                        for name in ["pull_match_events", "match_event_watermarks"]:
+                            query = sql.SQL("select * from {}(%s)").format(sql.Identifier("public", name))
+                            assert not client.execute(query, (match,)).fetchall(), f"{name}: Legacy-RLS-Pfad offen"
+                    print(f"PASS {args.isolation}: {len(tables)} direkte Tabellen + Legacy-RLS-Pfade geschlossen; {populated} RC-Positivkontrollen")
+                    # Die Isolationsvorgabe ist ausschließlich eine Cloud-Grenze.
+                    for name in ["export_my_data", "my_support_tickets", "my_auth_profile", "request_account_deletion", "cancel_account_deletion"]:
+                        with identity(client, uid, sid, installation, proof, args.isolation):
+                            client.execute(sql.SQL("select {}()").format(sql.Identifier("public", name))).fetchall()
+                    print(f"PASS {args.isolation}: Export/Support/Auth-Profil/Löschung/Recovery weiterhin nutzbar")
+            finally:
+                owner.execute("reset role")
+                owner.execute("delete from auth.users where id=%s", (uid,))
     if failures:
         raise SystemExit(f"FAIL {len(failures)} reproduzierte Snapshot-Rennen")
-    print("PASS alle zwölf Rennen; PostgreSQL-Nachweis, kein Auth-/HTTP-Live-Nachweis")
+    print(f"PASS alle zwölf Rennen ({args.isolation}); PostgreSQL-Nachweis, kein Auth-/HTTP-Live-Nachweis")
 
 
 if __name__ == "__main__":
