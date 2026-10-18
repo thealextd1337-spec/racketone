@@ -17,6 +17,18 @@ Der unabhängige Stack-CI-Review R2 bestätigt den Drei-Dateien-Fix ohne neue Be
 zehn Harness-Tests, Actionlint und der vollständige Gradle-Check (692 Tasks, 6m4s) sind frisch
 grün. Der aktuelle Linux-Stacklauf bleibt Pflicht.
 
+Der Folgelauf auf `ff55c4e` passiert das SDK-Setup und die K2-Serviceprüfungen. Danach
+endet Gradle mit Exit 0, aber das XML-Gate lehnt die Reportform ab: KMP verwendet als
+Suite `CloudPullStackTest[jvm]` und den Methodennamen mit `[jvm]`, während `classname`
+vollständig qualifiziert bleibt. Die lokale Originalreportform reproduziert diesen Fehler.
+Das Gate wird auf genau diese JVM-Form korrigiert; genau ein Test, null Fehler und null
+Skips bleiben zwingend. Zusätzliche Diagnostik gibt nur feste Wahrheitswerte aus, keine
+XML-Inhalte. Die korrigierte Testfixture ist gegen das vorherige Gate rot und mit dem
+Fix grün; ein echter erfolgreicher CI-Stacktest ist damit weiterhin nicht vorweggenommen.
+Review R3 bestätigt ohne Befund: elf Harness-Tests und acht zusätzliche negative XML-Proben
+grün, realer lokaler Skip ausdrücklich abgewiesen, übriger Harness per AST unverändert.
+Gesamtcheck: 688 Tasks grün (51s). Neue CI muss den ausgeführten Stacktest bestätigen.
+
 ## Ausgangspunkt und Arbeitsweise
 
 U1 und U2 sind integriert. Drei Implementierer arbeiten in getrennten Git-Worktrees;

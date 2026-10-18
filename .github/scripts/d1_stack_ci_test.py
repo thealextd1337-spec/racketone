@@ -72,10 +72,11 @@ class XmlTest(unittest.TestCase):
         self.path = Path(self.directory.name) / "result.xml"
 
     def xml(self, **changes):
-        values = {"tests": "1", "failures": "0", "errors": "0", "skipped": "0", "name": d1.CLASS}
+        # Tatsächliche Gradle-KMP-JUnit-Form; classname bleibt vollständig qualifiziert.
+        values = {"tests": "1", "failures": "0", "errors": "0", "skipped": "0", "name": "CloudPullStackTest[jvm]"}
         values.update(changes)
         attrs = " ".join(f'{k}="{v}"' for k, v in values.items())
-        return f'<testsuite {attrs}><testcase classname="{d1.CLASS}" name="{d1.METHOD}" /></testsuite>'
+        return f'<testsuite {attrs}><testcase classname="{d1.CLASS}" name="{d1.METHOD}[jvm]" /></testsuite>'
 
     def test_only_exact_executed_method_passes(self):
         self.path.write_text(self.xml())
@@ -86,6 +87,9 @@ class XmlTest(unittest.TestCase):
             d1.verify_xml(self.path)
         variants = ["<invalid", self.xml(tests="0"), self.xml(tests="2"), self.xml(failures="1"),
                     self.xml(errors="1"), self.xml(skipped="1"), self.xml(name="Other"),
+                    self.xml(name=d1.CLASS), self.xml(name="CloudPullStackTest[android]"),
+                    self.xml().replace(f'{d1.METHOD}[jvm]', d1.METHOD),
+                    self.xml().replace(f'{d1.METHOD}[jvm]', f'{d1.METHOD}[android]'),
                     self.xml().replace(d1.METHOD, "otherMethod"),
                     self.xml().replace(f'classname="{d1.CLASS}"', 'classname="Other"'),
                     self.xml().replace(" /></testsuite>", "><skipped /></testcase></testsuite>"),
@@ -96,6 +100,16 @@ class XmlTest(unittest.TestCase):
             with self.subTest(xml=xml), self.assertRaises(Exception):
                 self.path.write_text(xml)
                 d1.verify_xml(self.path)
+
+    def test_mismatch_diagnostics_never_emit_xml_values(self):
+        self.path.write_text(self.xml(name="SECRET_SUITE").replace(d1.METHOD, "SECRET_METHOD"))
+        output = io.StringIO()
+        with contextlib.redirect_stderr(output), self.assertRaises(RuntimeError):
+            d1.verify_xml(self.path)
+        self.assertNotIn("SECRET", output.getvalue())
+        self.assertIn("suite_ok=False", output.getvalue())
+        self.assertIn("method_ok=False", output.getvalue())
+        self.assertIn("counters_ok=True", output.getvalue())
 
 
 class LifecycleTest(unittest.TestCase):

@@ -53,13 +53,19 @@ def verify_xml(path=XML):
     suite = ET.parse(path).getroot()
     expected = {"tests": "1", "failures": "0", "errors": "0", "skipped": "0"}
     cases = suite.findall("testcase")
-    if (suite.tag != "testsuite" or suite.get("name") != CLASS
+    if (suite.tag != "testsuite" or suite.get("name") != "CloudPullStackTest[jvm]"
             or any(suite.get(k) != v for k, v in expected.items())
             or len(cases) != 1 or cases[0].get("classname") != CLASS
-            or cases[0].get("name") != METHOD
+            or cases[0].get("name") != METHOD + "[jvm]"
             or suite.find(".//skipped") is not None or suite.find(".//failure") is not None
             or suite.find(".//error") is not None):
-        raise RuntimeError("D1 XML requires exactly one successful, executed method")
+        # Nur feste Prüfergebnisse ausgeben, keine unkontrollierten XML-Inhalte.
+        print("D1 XML mismatch: "
+              f"suite_ok={suite.tag == 'testsuite' and suite.get('name') == 'CloudPullStackTest[jvm]'}, "
+              f"method_ok={len(cases) == 1 and cases[0].get('classname') == CLASS and cases[0].get('name') == METHOD + '[jvm]'}, "
+              f"counters_ok={all(suite.get(k) == v for k, v in expected.items())}, "
+              f"has_skip={suite.find('.//skipped') is not None}", file=sys.stderr)
+        raise RuntimeError("D1 XML requires exactly one successful, executed JVM method")
 
 
 def write_fixture(temp, fixture):
