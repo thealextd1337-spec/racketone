@@ -1,6 +1,7 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.data.CloudMetadataRevision
+import eu.advantly.data.CloudUploadInventory
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.CloudUploadSnapshot
 import eu.advantly.data.CloudUploadStore
@@ -305,6 +306,19 @@ class CloudSessionGate internal constructor(
         requireCurrent(lease)
         requireCloudProfile()
         requireNotNull(uploads).requireCurrent(snapshot)
+    }
+
+    /** Direkter Status derselben Upload-Sitzung; Kontorechte-/Profil-Leases erteilen keine Upload-Freigabe. */
+    internal fun uploadInventory(lease: CloudLease): CloudUploadInventory {
+        requireCurrent(lease)
+        if (!lease.requiresConsent) changed()
+        requireCloudProfile()
+        val active = uploadSession ?: changed()
+        val inventory = requireNotNull(uploads).inventory(active)
+        requireCurrent(lease)
+        requireCloudProfile()
+        if (uploadSession !== active) changed()
+        return inventory
     }
 
     internal fun acknowledge(

@@ -93,6 +93,20 @@ SELECT * FROM cloud_metadata WHERE kind = ? AND entity_id = ?;
 unknownMatches:
 SELECT entity_id FROM cloud_metadata WHERE kind = 'HEADER' AND origin = 'UNKNOWN';
 
+-- Nur Kandidaten mit belegter kontoeigener Quelle; die tatsächliche Genesis prüft weiterhin Kotlin.
+-- Vollständig quittierte Historie ist keine erneute Auflösungsarbeit.
+unknownMatchesForProfilePage:
+SELECT m.entity_id FROM cloud_metadata m
+WHERE m.kind = 'HEADER' AND m.origin = 'UNKNOWN' AND (:afterId IS NULL OR m.entity_id > :afterId)
+AND EXISTS (SELECT 1 FROM cloud_metadata pending WHERE pending.entity_id = m.entity_id
+    AND pending.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') AND pending.revision > pending.uploaded_revision)
+AND EXISTS (
+    SELECT 1 FROM match_event e JOIN local_source s ON s.device_id = e.device_id
+    JOIN cloud_device_owner o ON o.device_id = s.device_id
+    WHERE e.match_id = m.entity_id AND (e.type = 'MatchCreated' OR e.type = '') AND o.profile_id = :profile
+)
+ORDER BY m.entity_id LIMIT 500;
+
 unknownPlayers:
 SELECT entity_id FROM cloud_metadata WHERE kind = 'PLAYER' AND origin = 'UNKNOWN';
 
@@ -119,6 +133,19 @@ AND (m.kind != 'PROJECTION' OR NOT EXISTS (
 ORDER BY CASE m.kind WHEN 'PLAYER' THEN 0 WHEN 'HEADER' THEN 1 WHEN 'PARTICIPANTS' THEN 2 ELSE 3 END, m.entity_id
 LIMIT :limit;
 
+-- Der Restbestand enthält auch durch offene/abgewiesene Events blockierte Projektionen.
+-- Ausschließlich zählen: keine Entitäten/JSON-Spalten oder unbeschränkten ID-Listen an den Host liefern.
+pendingCountForProfile:
+SELECT count(*) FROM cloud_metadata m
+WHERE m.revision > m.uploaded_revision AND (m.writer_profile_id = :profile OR EXISTS (
+    SELECT 1 FROM cloud_device_owner o WHERE o.device_id = m.source_device_id AND o.profile_id = :profile
+))
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id AND m.kind != 'PLAYER')
+AND CASE
+    WHEN m.kind = 'PLAYER' THEN EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind != 'PLACEHOLDER')
+    WHEN m.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') THEN EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id)
+    ELSE 0 END;
+
 acknowledge:
 UPDATE cloud_metadata SET uploaded_revision = max(uploaded_revision, :selectedRevision)
 WHERE kind = :kind AND entity_id = :id AND revision >= :selectedRevision;
@@ -128,6 +155,17 @@ SELECT i.device_id FROM local_identity i JOIN setting s ON s.key = 'identity.sco
 
 sourceForSelf:
 SELECT device_id FROM local_source WHERE self_id = ? ORDER BY local DESC, device_id LIMIT 1;
+
+-- Dieselbe Quellenwahl wie sourceForSelf; vorhandene Herkunft und Acks bleiben unverändert.
+resolvePlayerSources:
+UPDATE cloud_metadata SET
+    source_device_id = (SELECT s.device_id FROM local_source s WHERE s.self_id = cloud_metadata.entity_id
+        ORDER BY s.local DESC, s.device_id LIMIT 1),
+    origin = CASE (SELECT s.local FROM local_source s WHERE s.self_id = cloud_metadata.entity_id
+        ORDER BY s.local DESC, s.device_id LIMIT 1) WHEN 1 THEN 'LOCAL' ELSE 'PEER' END
+WHERE kind = 'PLAYER' AND origin = 'UNKNOWN'
+AND (:playerId IS NULL OR entity_id = :playerId)
+AND EXISTS (SELECT 1 FROM local_source s WHERE s.self_id = cloud_metadata.entity_id);
 
 ownedSelfAlias:
 SELECT count(*) FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id

@@ -859,6 +859,13 @@ oder neuen Skips. Lokaler Root-Gesamtcheck: 692 Tasks grün; Deno 19/19, Typen/F
 TOML und Actionlint grün. Docker fehlt lokal; Service-CI noch ausstehend, separater PR/Review folgt.
 Periodischer Cronbetrieb, Hosted-Limits und Phone-ZIP bleiben eigene offene Abnahmen.
 
+Konkreter K2-Integrationsstand `79b5faa` ist als Draft-PR #67 angelegt, verknüpft und überwacht.
+Die 20 Serverdateien bleiben bytegleich zum geprüften `ff13429`. Neue unabhängige Prüfung
+der Root-Konfiguration/Service-CI:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-integration-review-r1`.
+Der aktuelle Integrationszweig übernimmt main `cb14420`; ausschließlich der add/add-Konflikt
+im Ausführungsplan wird durch den vollständigeren eigenen Plan aufgelöst, Produktbaum unverändert.
+
 D1 Feature `68d23de` gegen Dependency `4a95352` fertig: 19 Dateien, Schema 6→7, dauerhafte
 Metadaten-/Eventseiten, Vollscan und Empfangslückenreparatur. Worker 235 Fokusprüfungen,
 Migration und 688 Gesamtcheck-Tasks grün; echter Stacktest ausdrücklich 1× SKIPPED mangels
@@ -867,6 +874,21 @@ Neues unabhängiges Review:
 `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r1`.
 
 ### Nächste isolierte Umsetzungspakete
+
+K2-Mainabgleich nach PR #66: `origin/main 870792a` bringt ausschließlich den unabhängig
+geprüften U4-Kern in diese Serverintegration. Konflikte nur im Plan; beide Nachweise bleiben
+erhalten. Shared-/Android-/Wear-Baum bytegleich zu main, K2-Server/CI/Katalog unverändert
+gegen `8e49ccc`. Gemeinsamer Gesamtcheck vor Mergecommit mit 688 Tasks grün (2m10s,
+`advantly-k2-main-u4-merge-check.log`); neue CI danach erforderlich.
+
+K2-Integrationsreview 4 bestätigt `8e49ccc` ohne offene Befunde und mit 21 unabhängig
+grünen Deno-Tests/Typen/Format/Lint. Die echte Service-CI desselben Heads ist erfolgreich
+(Run `39143114803`, Job `117721530287`): 1.299 pgTAP-Prüfungen in 35 Dateien, Parallelrennen,
+vollständiger ZIP-/CSV-/JSON-Rundlauf, private Storage-/Fremd-/Anonymzugriffe, Ablauf und
+physische Bereinigung einschließlich verspätetem Upload, Teilnehmer-/Owner-Purge sowie
+echter Auth-Logout mit Abweisung des alten JWT. Tatsächlicher ACK liefert 204; Vault→pg_net→
+Cleanup-Function→Storage ebenfalls grün. Periodischer Cronbetrieb, Hosted und Phone-Ausgabe
+bleiben getrennte Nachweise; übrige CI auf dem neuen Mergehead bleibt vor Merge nötig.
 
 K2-Diagnose-CI `425c094` lokalisiert den Fehler exakt in `cleanup()` nach Ablaufprüfung,
 auch während finally-Cleanup. Glaubwürdiger Mechanismus durch offizielles PostgREST-
@@ -893,6 +915,11 @@ Deno 2.9.7 im zentralen Versionskatalog pinnen, CI liest diesen Wert; Formatchec
 ausdrücklich zwei Leerzeichen. Beide Functions unter genau 2.9.7 mit Typen/Format/Lint und
 19 Tests grün; vollständiger Root-Check 692 Tasks grün (4m30s). Servercode/SQL unverändert.
 Erneute tatsächliche Service-CI und frisches Integrationsreview 2 bleiben vor Merge nötig.
+PR #66 nach PR65-Squash erneut auf main `cb14420` abgeglichen. Ausschließlich add/add im
+Plan; der neuere vollständige Orchestratorplan bleibt erhalten. Gate und sämtliche übrigen
+Produkt-/SQL-/Testdateien unverändert zu `270782b` und zum unabhängig geprüften U4-Kandidaten.
+Der grüne vollständige 692-Task-Check dieses identischen Produktbaums gilt fort; CI wird
+auf dem neuen Mergehead erneut ausgeführt, kein Force-Push und keine fremden Worktreeedits.
 
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
 Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
