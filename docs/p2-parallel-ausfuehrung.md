@@ -21,7 +21,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 
 | Paket | Besitz | Abnahme | Status |
 |---|---|---|---|
-| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | `fbca22d` auf Entwurfs-PR #63; Review 3 `ship`, Android-/Apple-CI läuft |
+| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Review 3 `ship`, Android-/Apple-CI grün auf `fbca22d`; PR #63 als `1575d58` nach main gemergt |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
 | K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `d11da1c` auf Entwurfs-PR #64; Review 3 bestätigt R1/R2, neuer P2 bei verlorener Recovery-Antwort wird korrigiert |
 
@@ -349,6 +349,14 @@ Für K1 Fix3 zusätzlich freigegeben: reine JVM-Testabhängigkeit auf `match-ses
 `presentation-auth/build.gradle.kts` und `RecoveryIntentIntegrationTest.kt` für echte
 VM-/Adapter-/lokale Ownership-Regressionen. Unerwartete Adoptionsfehler dürfen nicht pauschal
 verschluckt werden; erwartete lokale Cloud-Sperre darf Kontostatus/Consent nicht verstecken.
+
+PR #63 ist nach Review 3 und CI auf genau `fbca22d` als `1575d58` gemergt. Gradle,
+Android/Wear sowie native Apple-Tests und iOS/watchOS-Simulator-Builds bestanden;
+Admin/Supabase wurden pfadbedingt übersprungen. Die echte Geräteabnahme bleibt offen.
+Parent gleicht diesen Mainstand ab und erhält bei den beiden neuen HTTP-Testfixtures
+ausdrückliches CURRENT. K1 übernimmt den neuen Mainstand nach seinem separaten Fix3-Commit,
+bevor Review 4 beginnt; U3-Metadaten-Acks und seine Retention-/Intent-Prüfungen bleiben erhalten.
+Der vollständige Parent-Check nach diesem Mainabgleich ist mit 686 Tasks grün.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
