@@ -559,6 +559,20 @@ Die unabhängige Wiederholung bestätigt alle bisherigen Korrekturen und 598 Kot
 SQL 878/880 bleibt ausschließlich wegen der zwei bekannten Cron-Stubfehler offen.
 PR #64 bleibt Entwurf; Supabase-CI auf `4ba0880` ist grün, Android/Apple laufen noch.
 
+U4 Review 3 auf `c1b4322`: No-Ship wegen eines belegten P2-Seiteneffekts. `refresh()` ruft
+die Spielerherkunftsauflösung auf; deren UPDATE aktiviert korrekt den U3-Revisionstrigger.
+Unabhängiges Repro: ohne Upload/Fachänderung steigt PARTICIPANTS von Revision 1 auf 2,
+PLAYER wechselt UNKNOWN→LOCAL. Drei skalare Reads allein beweisen keine Schreibfreiheit.
+Fix3 verlagert die nötige Auflösung an passende bestehende Schreib-/Bindungsstellen oder
+berechnet die Inventur rein lesend. Der Trigger bleibt erhalten. Neue Regression vergleicht
+vollständige persistierte Herkunfts-, Revisions- und Ackstände vor/nach Statuslesen;
+initiale Zählgleichheit, späte Quellenbelege und bisherige Laufzeit-/Uploadbeweise erhalten.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r3`.
+Review bestätigt separat 89 Cloud-/100 Data-Tests, Migration, vollständigen Check mit
+690 Tasks und 20.000er-Inventur in 3,20 ms. Weitere Proben für 501/1001 Events,
+Projektion zuletzt, fremde Antwort-IDs sowie alte Retry-Versuche nach Rebind/Sitzungswechsel
+und Suspend grün. U4 wird erst nach Korrektur und neuem Review integriert.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
