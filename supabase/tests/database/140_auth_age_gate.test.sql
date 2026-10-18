@@ -2,6 +2,16 @@
 begin;
 set local app.settings.trust_xff = 'on';
 select plan(67);
+
+-- Ausschließlich transaktionale Testfassungen für die Consent-Voraussetzung; keine Textfreigabe.
+update private.consent_versions set is_current = false;
+insert into private.consent_versions(document_type,version,is_current)
+  values ('TERMS','onboarding-test',true),('PRIVACY','onboarding-test',true);
+insert into private.consent_translations(document_type,version,language,url)
+  select document_type,version,l.language,'https://advantly.eu/app-datenschutz.html'
+  from private.consent_versions cross join (values('de'),('en')) l(language)
+  where version='onboarding-test';
+update private.consent_versions set approved_at=now() where version='onboarding-test';
 select is(private.age_result('AT','2012-10-16','2026-10-15 22:00:00+00'), 'ok', 'AT: 14 am Geburtstag, Wien bereits 16.10.');
 select is(private.age_result('AT','2012-10-16','2026-10-15 21:59:59+00'), 'age_below_minimum', 'AT: Sekunde vor Mitternacht zu jung');
 select is(private.age_result('DE','2010-10-16','2026-10-16 12:00+00'), 'ok', 'DE: genau 16');
@@ -55,7 +65,8 @@ select is((select age_rule_min_age::int from public.profile_settings where profi
 select is_empty($$ select * from private.age_tickets where token_hash=private.age_hash((select token from ticket)) $$, 'Verbrauchte Bindung entfernt');
 select ok(not (select raw_user_meta_data ? 'age_ticket' from auth.users where id=(select id from accepted_id)),
   'OTP-Ticket nach erfolgreichem Verbrauch aus Auth-Metadaten entfernt');
-select tests.authenticate_as_id((select id from accepted_id));
+select tests.authenticate_session((select id from accepted_id),tests.create_auth_session((select id from accepted_id)));
+select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select throws_ok($$ select public.finish_onboarding('Alias','support') $$, 'P0001','username_reserved','Reservierung durch Server');
 select throws_ok($$ select public.finish_onboarding('','valid_name') $$, 'P0001','invalid_alias','Leerer Alias abgelehnt');
 select throws_ok($$ select public.finish_onboarding('Alias','x') $$, 'P0001','invalid_username','Benutzername validiert');
@@ -64,6 +75,7 @@ reset role;
 select tests.create_user('other_adult', false);
 update public.profile_settings set country='AT',age_confirmed_at=now(),age_rule_min_age=14 where profile_id=tests.uid('other_adult');
 select tests.authenticate_as('other_adult');
+select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select throws_ok($$ select public.finish_onboarding('Zwei','adult_user') $$, 'P0001','username_taken','Benutzername eindeutig');
 select tests.authenticate_as_id(gen_random_uuid());
 select throws_ok($$ select public.my_auth_profile() $$, 'P0001','profile_missing','Bereinigtes Onboarding verlangt neue Anmeldung');
@@ -120,6 +132,7 @@ select public.issue_age_ticket('AT','2000-01-01',repeat('s',64));
 select is(public.bind_age_ticket((select token from replace_ticket),'google','old-sub')->>'error','age_ticket_expired','Neuer Versuch widerruft altes Installationsticket');
 select tests.create_user('unchecked', false);
 select tests.authenticate_as('unchecked');
+select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select throws_ok($$ select public.finish_onboarding('Alias','unchecked') $$,'P0001','age_ticket_required','Kein Onboarding ohne serverseitigen Nachweis');
 reset role;
 -- Geräte- und IP-Budgets separat; wechselnde Installationen umgehen das IP-Budget nicht.

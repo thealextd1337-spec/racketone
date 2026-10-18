@@ -132,6 +132,12 @@ class MatchSession(
     private var activeOwnership: CloudUploadSession? = null
     private val pairing = AccountPairing(data, config.kind) { ids.newUuid7(clock.nowMs()).value }
 
+    override val retainedProfileId: String?
+        get() {
+            checkThread()
+            return data.accountIdentities.profile
+        }
+
     private fun initializeIdentity() {
         val self = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }
         data.accountIdentities.initialize(deviceId.value, self.id.value, config.kind.name)

@@ -128,6 +128,12 @@ internal class CloudHttp(
                 "invalid_alias",
                 "already_onboarded",
                 "otp_expired",
+                "consent_required",
+                "consent_unavailable",
+                "consent_version_changed",
+                "consent_documents_invalid",
+                "consent_language_invalid",
+                "no_deletion_pending",
             )
     }
 }

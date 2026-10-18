@@ -4,6 +4,10 @@ import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.ConsentDocument
+import eu.advantly.cloud.sync.ConsentDocumentType
+import eu.advantly.cloud.sync.ConsentSnapshot
+import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +23,38 @@ class FakePhoneAuth : CloudAuthPort {
     var failure: String? = null
     var sources: List<CloudAdoptionSource> = emptyList()
     val adopted = mutableListOf<Set<String>>()
+    var consentStatus = ConsentStatus.CURRENT
+    var consentSnapshot: ConsentSnapshot? = null
+    var duringConsent: (() -> Unit)? = null
+
+    override suspend fun consent(language: String): ConsentSnapshot =
+        consentSnapshot ?: ConsentSnapshot(session.value!!.profileId, consentStatus)
+
+    override suspend fun decideConsent(
+        snapshot: ConsentSnapshot,
+        accept: Boolean,
+    ): ConsentSnapshot {
+        call("consent:$accept")
+        duringConsent?.invoke()
+        consentStatus = if (accept) ConsentStatus.CURRENT else ConsentStatus.DECLINED
+        consentSnapshot = snapshot.copy(status = consentStatus)
+        return consentSnapshot!!
+    }
+
+    override suspend fun exportData(): String {
+        call("export")
+        return "{\"consentHistory\":[]}"
+    }
+
+    override suspend fun requestDeletion() {
+        call("delete")
+        session.value = session.value!!.copy(deletionRequested = true)
+    }
+
+    override suspend fun cancelDeletion() {
+        call("recover")
+        session.value = session.value!!.copy(deletionRequested = false)
+    }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
 
@@ -94,6 +130,94 @@ class FakePhoneAuth : CloudAuthPort {
 }
 
 class AuthViewModelTest {
+    @Test fun failedDeclineDoesNotPreventIndependentAccountRights() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents())
+            }
+        val model = AuthViewModel(auth, scope)
+        auth.failure = "connection_failed"
+        model.decideConsent(false)
+        assertEquals("connection_failed", model.state.value.error)
+        auth.failure = null
+        model.exportData()
+        assertEquals("export", auth.calls.last())
+        assertEquals("{\"consentHistory\":[]}", model.state.value.exportedData)
+        model.requestDeletion()
+        model.cancelDeletion()
+        assertEquals("recover", auth.calls.last())
+    }
+
+    private fun documents(version: String = "v1") =
+        ConsentDocumentType.entries.map { ConsentDocument(it, version, "en", "https://advantly.eu/document", approved = true) }
+
+    @Test fun missingReleaseCannotBeAcceptedAndRightsRemainAvailable() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentStatus = ConsentStatus.UNAVAILABLE
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        model.decideConsent(true)
+        assertEquals("consent_unavailable", model.state.value.error)
+        assertFalse(auth.calls.contains("consent:true"))
+        model.exportData()
+        assertEquals("{\"consentHistory\":[]}", model.state.value.exportedData)
+        model.requestDeletion()
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+        model.cancelDeletion()
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+    }
+
+    @Test fun requiredVersionNeedsExplicitDecisionAndDeclineDoesNotFinishOnboarding() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", false)
+                it.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents())
+            }
+        val model = AuthViewModel(auth, scope)
+        model.finish("Alias", "alias")
+        assertEquals("consent_required", model.state.value.error)
+        assertFalse(auth.calls.contains("finish"))
+        model.decideConsent(false)
+        assertEquals(
+            ConsentStatus.DECLINED,
+            model.state.value.consent
+                ?.status,
+        )
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        model.decideConsent(true)
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        model.finish("Alias", "alias")
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+        auth.consentSnapshot = ConsentSnapshot("id", ConsentStatus.REQUIRED, documents("v2"))
+        model.refresh()
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        assertEquals(
+            "v2",
+            model.state.value.consent!!
+                .documents
+                .first()
+                .version,
+        )
+    }
+
+    @Test fun delayedDecisionCannotPublishAcrossSessionChangeEvenForSameAccount() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true, generation = 1)
+                it.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents())
+                it.duringConsent = { it.session.value = CloudSession("alice", true, generation = 2) }
+            }
+        val model = AuthViewModel(auth, scope)
+        model.decideConsent(true)
+        assertEquals("cloud_session_changed", model.state.value.error)
+        assertNull(model.state.value.consent)
+        assertNull(model.state.value.exportedData)
+    }
+
     @Test fun calendarValidationRejectsInvalidDatesBeforeTransport() {
         assertFalse(validBirthDate("2001-02-29"))
         assertFalse(validBirthDate("2000-13-01"))

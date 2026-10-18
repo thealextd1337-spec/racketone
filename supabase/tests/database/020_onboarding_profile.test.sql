@@ -2,6 +2,16 @@
 begin;
 select plan(20);
 
+-- Ausschließlich transaktionale Testfassungen für die Consent-Voraussetzung; keine Textfreigabe.
+update private.consent_versions set is_current = false;
+insert into private.consent_versions(document_type,version,is_current)
+  values ('TERMS','onboarding-test',true),('PRIVACY','onboarding-test',true);
+insert into private.consent_translations(document_type,version,language,url)
+  select document_type,version,l.language,'https://advantly.eu/app-datenschutz.html'
+  from private.consent_versions cross join (values('de'),('en')) l(language)
+  where version='onboarding-test';
+update private.consent_versions set approved_at=now() where version='onboarding-test';
+
 select tests.world();
 select tests.create_user('neu_at', false);
 select tests.create_user('neu_de', false);
@@ -15,6 +25,7 @@ update public.profile_settings set country = 'DE', age_confirmed_at = now(), age
 
 -- Onboarding ---------------------------------------------------------------------------------------------
 select tests.authenticate_as('neu_at');
+select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select throws_ok($$ select public.send_friend_request(tests.uid('alice')) $$, '42501', 'profile_not_active',
                  'Ohne Onboarding keine sozialen Funktionen');
 select is(public.issue_age_ticket('AT', (current_date - interval '13 years 11 months')::date, repeat('x',64))->>'error',
@@ -28,6 +39,7 @@ select throws_ok($$ select public.finish_onboarding('Nina') $$, 'P0001', 'alread
                  'Onboarding nur einmal');
 
 select tests.authenticate_as('neu_de');
+select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select is(public.issue_age_ticket('DE', (current_date - interval '15 years')::date, repeat('y',64))->>'error',
           'age_below_minimum', 'DE: 15 Jahre werden vor Auth abgelehnt');
 select throws_ok($$ select public.finish_onboarding('Dirk', 'alice') $$,

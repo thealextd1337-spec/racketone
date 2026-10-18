@@ -642,4 +642,24 @@
     <string name="auth_adoption_watch">Uhr: %1$d Events</string>
     <string name="auth_adoption_accept">Auswahl übernehmen</string>
     <string name="auth_adoption_cancel">Ohne Zuordnung lassen</string>
+    <string name="consent_language">de</string>
+    <string name="consent_title">Nutzungsbedingungen und Datenschutz</string>
+    <string name="consent_terms">Nutzungsbedingungen</string>
+    <string name="consent_privacy">App-Datenschutzerklärung</string>
+    <string name="consent_version">Version %1$s · %2$s</string>
+    <string name="consent_unavailable">Die erforderlichen Dokumente sind noch nicht für Konto und Cloud freigegeben. Du kannst weiter offline zählen und Support sowie deine Kontorechte nutzen.</string>
+    <string name="consent_required">Bitte prüfe die aktuellen Dokumente und entscheide bewusst über deine Zustimmung, bevor du Konto- und Cloudfunktionen nutzt.</string>
+    <string name="consent_declined">Du hast abgelehnt. Die Cloud bleibt pausiert. Offline-Zählen, Support und deine Kontorechte bleiben verfügbar.</string>
+    <string name="consent_current">Deine Zustimmung zu den aktuellen Versionen ist gespeichert.</string>
+    <string name="consent_confirm">Ich habe das Dokument geprüft und stimme zu: %1$s</string>
+    <string name="consent_accept">Den ausgewählten Dokumentversionen zustimmen</string>
+    <string name="consent_decline">Ablehnen und weiter offline zählen</string>
+    <string name="consent_changed">Die Dokumentversionen haben sich geändert. Bitte aktualisieren und erneut prüfen.</string>
+    <string name="account_export">Kontodaten anzeigen (JSON)</string>
+    <string name="account_delete">Kontolöschung beantragen</string>
+    <string name="account_delete_explanation">Dein Konto wird sofort ausgeblendet. Innerhalb der 14-tägigen Karenz kannst du den Antrag zurücknehmen. Lokales Zählen bleibt verfügbar.</string>
+    <string name="account_recover">Löschantrag zurücknehmen</string>
+    <string name="account_cancel">Abbrechen</string>
+    <string name="account_close">Schließen</string>
+    <string name="auth_refresh">Kontostatus aktualisieren</string>
 </resources>

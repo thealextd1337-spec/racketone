@@ -9,5 +9,7 @@ kotlin {
             api(projects.shared.cloudSync)
             api(libs.lifecycle.viewmodel)
         }
+        commonTest.dependencies { implementation(libs.ktor.mock) }
+        jvmTest.dependencies { implementation(projects.shared.matchSession) }
     }
 }

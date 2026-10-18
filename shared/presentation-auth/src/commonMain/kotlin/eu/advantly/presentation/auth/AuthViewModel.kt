@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
+import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.ConsentSnapshot
+import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -11,7 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-enum class AuthStep { AGE, PROVIDER, CODE, ALIAS, ACCOUNT }
+enum class AuthStep { AGE, PROVIDER, CODE, CONSENT, ALIAS, ACCOUNT }
 
 data class AdoptionChoice(
     val key: String,
@@ -26,6 +29,9 @@ data class AuthState(
     val deletionRequested: Boolean = false,
     val adoptionSources: List<AdoptionChoice> = emptyList(),
     val selectedSources: Set<String> = emptySet(),
+    val authenticated: Boolean = false,
+    val consent: ConsentSnapshot? = null,
+    val exportedData: String? = null,
 )
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -45,9 +51,20 @@ class AuthViewModel(
     private var ticket: String? = null
     private var email: String = ""
     private var adoptionGeneration: Long? = null
+    private var displayedSession: CloudSession? = null
+    private var consentLanguage = "en"
+    private var actionRevision = 0L
     private val scope get() = workScope ?: viewModelScope
 
     init {
+        scope.launch {
+            auth.accountSession.collect { session ->
+                if (displayedSession != null && !sameSession(displayedSession, session)) {
+                    displayedSession = null
+                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed")
+                }
+            }
+        }
         refresh()
     }
 
@@ -104,12 +121,60 @@ class AuthViewModel(
         alias: String,
         username: String,
     ) = runAction {
+        requireDisplayedSession()
+        if (mutable.value.consent?.status != ConsentStatus.CURRENT) throw CloudException("consent_required", true)
         auth.completeOnboarding(alias, username.ifBlank { null })
         showSession()
     }
 
+    fun setConsentLanguage(language: String) {
+        if (language !in setOf("de", "en") || language == consentLanguage || mutable.value.busy) return
+        consentLanguage = language
+        if (auth.accountSession.value != null) refresh()
+    }
+
+    fun decideConsent(accept: Boolean) =
+        runAction {
+            val before = requireDisplayedSession()
+            val snapshot = mutable.value.consent ?: throw CloudException("consent_unavailable", false)
+            if (accept && !snapshot.canAccept) throw CloudException("consent_unavailable", false)
+            val result = auth.decideConsent(snapshot, accept)
+            auth.requireAccountSession(before)
+            if (result.profileId != before.profileId) {
+                throw CloudException("cloud_session_changed", true)
+            }
+            showSession()
+        }
+
+    fun exportData() =
+        runAction {
+            val before = requireDisplayedSession()
+            val data = auth.exportData()
+            auth.requireAccountSession(before)
+            mutable.value = mutable.value.copy(exportedData = data)
+        }
+
+    fun dismissExport() {
+        mutable.value = mutable.value.copy(exportedData = null)
+    }
+
+    fun requestDeletion() =
+        runAction {
+            requireDisplayedSession()
+            auth.requestDeletion()
+            showSession()
+        }
+
+    fun cancelDeletion() =
+        runAction {
+            requireDisplayedSession()
+            auth.cancelDeletion()
+            showSession()
+        }
+
     fun signOut() =
         runAction {
+            displayedSession = null
             try {
                 auth.signOut()
             } finally {
@@ -156,25 +221,72 @@ class AuthViewModel(
             mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
         }
 
-    private fun showSession() {
-        val session = auth.session.value
-        val candidates = if (session?.onboarded == true && !session.deletionRequested) auth.adoptionSources() else emptyList()
-        adoptionGeneration = session?.generation
+    private fun sameSession(
+        before: CloudSession?,
+        after: CloudSession?,
+    ): Boolean = before?.profileId == after?.profileId && before?.generation == after?.generation
+
+    private fun requireDisplayedSession(): CloudSession {
+        val session = displayedSession ?: throw CloudException("cloud_session_changed", true)
+        auth.requireAccountSession(session)
+        return session
+    }
+
+    private suspend fun showSession() {
+        val session = auth.accountSession.value
+        displayedSession = session
+        mutable.value =
+            AuthState(
+                step = if (session == null) AuthStep.AGE else AuthStep.ACCOUNT,
+                busy = mutable.value.busy,
+                authenticated = session != null,
+                deletionRequested = session?.deletionRequested == true,
+            )
+        val consent = session?.let { auth.consent(consentLanguage) }
+        if (session != null) auth.requireAccountSession(session)
+        if (!sameSession(session, auth.accountSession.value) || (consent != null && consent.profileId != session?.profileId)) {
+            throw CloudException("cloud_session_changed", true)
+        }
+        displayedSession = session
+        adoptionGeneration = null
         mutable.value =
             AuthState(
                 step =
                     when {
                         session == null -> AuthStep.AGE
-                        session.onboarded || session.deletionRequested -> AuthStep.ACCOUNT
+                        session.deletionRequested -> AuthStep.ACCOUNT
+                        consent?.status != ConsentStatus.CURRENT -> AuthStep.CONSENT
+                        session.onboarded -> AuthStep.ACCOUNT
                         else -> AuthStep.ALIAS
                     },
+                busy = mutable.value.busy,
                 deletionRequested = session?.deletionRequested == true,
-                adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
+                authenticated = session != null,
+                consent = consent,
             )
+        if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+            val candidates =
+                try {
+                    auth.adoptionSources()
+                } catch (error: CloudException) {
+                    if (!error.permission ||
+                        error.reason !in setOf("profile_not_active", "consent_required", "consent_unavailable")
+                    ) {
+                        throw error
+                    }
+                    emptyList()
+                }
+            auth.requireAccountSession(session)
+            adoptionGeneration = auth.session.value?.generation
+            mutable.value =
+                mutable.value.copy(adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) })
+        }
     }
 
     private fun runAction(block: suspend () -> Unit) {
         if (mutable.value.busy) return
+        check(actionRevision < Long.MAX_VALUE)
+        val revision = ++actionRevision
         mutable.value = mutable.value.copy(busy = true, error = null)
         scope.launch {
             try {
@@ -182,6 +294,7 @@ class AuthViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (revision != actionRevision) return@launch
                 val reason = (e as? CloudException)?.reason ?: "connection_failed"
                 val reset =
                     reason in setOf("age_ticket_expired", "age_ticket_bound", "age_ticket_required", "age_retry_later", "age_below_minimum")
@@ -192,7 +305,7 @@ class AuthViewModel(
                         error = reason.takeUnless { it == "auth_cancelled" },
                     )
             } finally {
-                mutable.value = mutable.value.copy(busy = false)
+                if (revision == actionRevision) mutable.value = mutable.value.copy(busy = false)
             }
         }
     }

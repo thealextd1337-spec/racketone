@@ -50,6 +50,7 @@ data class CloudSession(
     val deletionRequested: Boolean = false,
     /** Prozesslokale Auth-Generation; neue Anmeldung ist auch beim selben Konto eine neue Sitzung. */
     val generation: Long = 0,
+    val consentStatus: ConsentStatus = ConsentStatus.UNAVAILABLE,
 )
 
 enum class IdTokenProvider { GOOGLE, APPLE }
@@ -62,6 +63,33 @@ data class CloudAdoptionSource(
 )
 
 interface CloudAuthPort {
+    /** Verifizierte Kontositzung unabhängig von lokaler Cloud-Sperre; Generation ändert sich nur bei Auth-Wechseln. */
+    val accountSession: StateFlow<CloudSession?> get() = session
+
+    /** Liest im Adapter zusätzlich synchron die SDK-Identität, damit ein verzögerter Flow nicht genügt. */
+    fun requireAccountSession(expected: CloudSession) {
+        val current = accountSession.value
+        if (current?.profileId != expected.profileId || current.generation != expected.generation) {
+            throw CloudException("cloud_session_changed", true)
+        }
+    }
+
+    /** Ohne Implementierung bleibt die Freigabe aus; alte Hosts bestätigen niemals implizit. */
+    suspend fun consent(language: String): ConsentSnapshot = throw CloudException("consent_unavailable", false)
+
+    /** Antwort und erneute Profilprüfung gehören zur selben Auth-Sitzung; Ablehnen sperrt lokale Cloud-Arbeit sofort. */
+    suspend fun decideConsent(
+        snapshot: ConsentSnapshot,
+        accept: Boolean,
+    ): ConsentSnapshot = throw CloudException("consent_unavailable", false)
+
+    /** Unabhängige Kontorechte, auch ohne aktuelle Zustimmung und bei Löschkarenz. */
+    suspend fun exportData(): String = throw CloudException("connection_failed", false)
+
+    suspend fun requestDeletion(): Unit = throw CloudException("connection_failed", false)
+
+    suspend fun cancelDeletion(): Unit = throw CloudException("connection_failed", false)
+
     fun adoptionSources(): List<CloudAdoptionSource> = emptyList()
 
     fun adoptSources(ids: Set<String>) {}
