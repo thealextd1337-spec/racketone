@@ -1,15 +1,21 @@
 package eu.advantly.cloud.sync
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
+import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.Url
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -104,7 +110,74 @@ internal class CloudHttp(
             throw CloudException("cloud_connection_failed", false)
         }
 
-    fun close() = http.close()
+    private var exportClient: HttpClient? = null
+
+    /** Separater Edge-Zweig: RPC-Limits und Fehlerauswertung bleiben unveraendert. */
+    internal suspend fun <T> export(
+        suffix: String,
+        method: HttpMethod,
+        accessToken: String,
+        body: String?,
+        timeout: Long,
+        checkCurrent: () -> Unit,
+        receive: suspend (Int, String?, String?, String?, suspend (CloudDataExportSink, Long) -> Unit) -> T,
+    ): T {
+        val edge =
+            exportClient ?: http
+                .config {
+                    followRedirects = false
+                    install(HttpTimeout)
+                }.also { exportClient = it }
+
+        suspend fun fence() {
+            currentCoroutineContext().ensureActive()
+            checkCurrent()
+        }
+        return edge
+            .prepareRequest("${url.trimEnd('/')}/functions/v1/export-my-data$suffix") {
+                this.method = method
+                header("apikey", publicKey)
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
+                timeout {
+                    requestTimeoutMillis = timeout
+                    connectTimeoutMillis = minOf(timeout, 20_000)
+                    socketTimeoutMillis = minOf(timeout, 20_000)
+                }
+                if (body != null) {
+                    header(HttpHeaders.ContentType, ContentType.Application.Json)
+                    setBody(body)
+                }
+            }.execute { response ->
+                fence()
+                receive(
+                    response.status.value,
+                    response.headers[HttpHeaders.ContentType],
+                    response.headers[HttpHeaders.ContentLength],
+                    response.headers[HttpHeaders.RetryAfter],
+                ) { sink, maximum ->
+                    val channel = response.bodyAsChannel()
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        fence()
+                        val count = channel.readAvailable(buffer)
+                        fence()
+                        if (count == -1) break
+                        total += count
+                        if (total > maximum) throw CloudException("export_response_invalid", false)
+                        if (count > 0) {
+                            sink.write(buffer, 0, count)
+                            fence()
+                        }
+                    }
+                }.also { fence() }
+            }
+    }
+
+    fun close() {
+        exportClient?.close()
+        http.close()
+    }
 
     private companion object {
         val ERRORS =
