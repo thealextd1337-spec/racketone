@@ -283,7 +283,7 @@ data class PointDetail(
 )
 
 /** Personenzuweisung eines unbesetzten Platzes (F20). Keine Zähloperation; nicht rückgängig machbar. */
-@Serializable
+@Serializable(with = PlayerAssignedSerializer::class)
 @SerialName("PlayerAssigned")
 data class PlayerAssigned(
     val slot: PlayerId,
@@ -291,4 +291,17 @@ data class PlayerAssigned(
     val assignedBy: PlayerId,
     val legacySlot: Boolean = false,
     val creatorAlias: PlayerId? = null,
-) : EventPayload
+    val assignmentVersion: Int = 1,
+    val playerId: PlayerId? = null,
+) : EventPayload {
+    companion object {
+        /** Namensfreie Referenz; `null` hebt die aktuelle Zuweisung auf. */
+        fun reference(
+            slot: PlayerId,
+            playerId: PlayerId?,
+            assignedBy: PlayerId,
+            legacySlot: Boolean = false,
+            creatorAlias: PlayerId? = null,
+        ): PlayerAssigned = PlayerAssigned(slot, null, assignedBy, legacySlot, creatorAlias, 2, playerId)
+    }
+}
