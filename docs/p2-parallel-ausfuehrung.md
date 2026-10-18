@@ -889,6 +889,32 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+K2-A-Nativfix `d73f372` fertig, Parent `c58a96f`, genau neun freigegebene Dateien.
+Android-Transport pro Aufruf besitzt Client/Dispatcher/Pool/Listener; Ktor-Join, native
+Terminalevents und Dispatcher-idle gemeinsam vor Operationsabschluss. Öffentliche API,
+Zeitlimits und RPC-Pfad unverändert. JVM/iOS und uninstrumentierte Injection verweigern
+ZIP vor Netzwerk mit `export_unavailable`. 137 JVM-/85 Android-Host-Tests einschließlich
+16 nativer Tests, ktlint und Gesamtcheck/APKs grün; alle bisherigen 133 JVM-Tests erhalten.
+Root hat tatsächlichen Produktdiff gelesen, frisches unabhängiges Review 3 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r3`.
+
+D1-Stack-CI-Abhängigkeit `2307a3a` vorbereitet und sauber: D1 `25dc96b` plus geprüfte
+K2-Service-CI `ba90a1d`, danach aktueller Rootplan; ausschließlich Plankonflikte.
+Gemeinsamer Gesamtcheck 692 Tasks grün (3m29s), zusätzlicher Planmerge produktidentisch.
+Isolierter Harnessauftrag läuft im eigenen Worktree `t3-1bf18c5e`, Branch
+`t3/d1-stack-ci-harness`; vorbereitete Basis als Vorfahr bestätigt. Exklusiver Besitz:
+neuer Harness/gezielte Guardtests, CI-Anschluss und minimale Stacktest-Fixturekorrektur.
+Keine D1-Produkt-/Serveränderung. Genau ein echter Test ohne Skip als hartes XML-Gate.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-impl-r1`.
+
+D2/D3-Vertragsentwurf liegt vor: vollständig geordnete serverseitige `visibilityEpoch`
+auch für Grants, dauerhafter Personen-ID-Redaktionsnachweis und explizite ID-only-
+Assignmentversion. Vor Umsetzungsvergabe noch eng präzisieren: P1-Gast-/Offline-/Peer-
+Matches ohne Cloudsnapshot dürfen keinen Freigabebypass und keinen Funktionsverlust
+erzeugen; Legacy-API/Goldens müssen erhalten bleiben; Manifest-/Eventtransfer begrenzen
+und nach Neustart fortsetzen. Ausschließlich lesende Ergänzung, keine Implementierung:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d2d3-contract-refine-r1`.
+
 D1 ist separat auf `25dc96b` integriert, eigener Root-Worktree `p2-d1-pull-integration`,
 Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`. R4 bestätigt `89a6adb` ohne
 offene Befunde. Einziger Mergekonflikt: `CloudPullPort` zusätzlich zu Upload-/Backend-Port;
