@@ -22,6 +22,11 @@ bleiben bytegleich zum bereits gemeinsam geprüften Integrationsstand (771 Tasks
 
 ### D2/D3: geprüfte Grundlage und zweite Umsetzungswelle
 
+PR #72 ist auf exakt `86f7a00` als `b375c02` nach Main integriert. Lauf `39162771195`:
+Changes, Ubuntu/APKs, Apple-Native/Simulator und Supabase erfolgreich; Admin nach Pfadfilter
+übersprungen. Der folgende Protokoll-Integrationszweig erhält diesen Main-Abgleich mit unverändertem
+Produkt-/Konfigurationsbaum; sein grüner gemeinsamer 771-Task-Check wird deshalb nicht wiederholt.
+
 Engine-Slice `3a73905` und Export-Testfix `786c0c8` sind lokal als `803a38a` integriert;
 beide Slices bytegleich zu ihren unabhängigen Freigaben. Gemeinsamer Check und Phone-/Wear-APKs:
 771 Tasks grün. Der ID-only-Producer und Protokoll 4 sind noch nicht aktiviert.
