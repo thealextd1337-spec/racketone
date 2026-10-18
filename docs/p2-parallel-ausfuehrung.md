@@ -45,7 +45,11 @@ Die laufende Parallelwelle startete auf exakt `803a38a`:
 
 Die Protokoll-Lane ist als `f5d07b1` übergeben: zwölf neue Codec-Tests und Gesamtcheck grün,
 V3-Konstanten und öffentliche Ablehnung von V4-Nicht-Hello bleiben erhalten. Frischer unabhängiger
-Review R1 läuft; Data bleibt parallel in Umsetzung. Review-Task:
+Review R1 ist ohne Befunde freigegeben: 34 zusätzliche Temp-Assertions grün, darunter Control samt
+Envelope exakt 65.536 Byte erlaubt und ab 65.537 Byte verweigert. Data bleibt parallel in Umsetzung.
+Root integriert im eigenen Worktree `p2-d2d3-protocol-integration` auf Basis `86f7a00`; die fünf
+Dateien sowie Produkt/Konfiguration sind bytegleich zur geprüften Protokollübergabe. Gemeinsamer
+Gesamtcheck samt beiden APKs: 771 Tasks grün in 1m52s, Exitcode 0. Review-Task:
 `advantly-20261018-d2d3-protocol-review-r1` (gleicher unten dokumentierter Task-ID-Präfix).
 
 U2/U3 bleiben Herkunftsautorität; nur ein payloadfreier dauerhafter Cloud-Marker kommt hinzu.
