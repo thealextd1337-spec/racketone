@@ -247,14 +247,8 @@ class AuthViewModel(
         if (!sameSession(session, auth.accountSession.value) || (consent != null && consent.profileId != session?.profileId)) {
             throw CloudException("cloud_session_changed", true)
         }
-        val candidates =
-            if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
-                auth.adoptionSources()
-            } else {
-                emptyList()
-            }
         displayedSession = session
-        adoptionGeneration = auth.session.value?.generation
+        adoptionGeneration = null
         mutable.value =
             AuthState(
                 step =
@@ -267,10 +261,26 @@ class AuthViewModel(
                     },
                 busy = mutable.value.busy,
                 deletionRequested = session?.deletionRequested == true,
-                adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
                 authenticated = session != null,
                 consent = consent,
             )
+        if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+            val candidates =
+                try {
+                    auth.adoptionSources()
+                } catch (error: CloudException) {
+                    if (!error.permission ||
+                        error.reason !in setOf("profile_not_active", "consent_required", "consent_unavailable")
+                    ) {
+                        throw error
+                    }
+                    emptyList()
+                }
+            auth.requireAccountSession(session)
+            adoptionGeneration = auth.session.value?.generation
+            mutable.value =
+                mutable.value.copy(adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) })
+        }
     }
 
     private fun runAction(block: suspend () -> Unit) {
