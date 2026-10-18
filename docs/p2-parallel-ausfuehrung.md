@@ -723,6 +723,29 @@ PR als bereit markiert. Merge wartet auf Vorläufer #64, dessen Apple-Job zum Pr
 noch läuft; Ubuntu und Supabase dort bereits grün. Keine Pollschleife oder Freigabe aufgrund
 eines anderen Heads. Beide PR-Watches bleiben aktiv.
 
+### Nächste konkrete Clientaufträge
+
+| Paket | Exklusiver Besitz | Begrenztes Ergebnis / Abnahme |
+|---|---|---|
+| U4 Android-Host | `PhoneAccount.kt`, neuer `PhoneUploadHost`, schmaler `PhoneUploadPort` und optionaler AuthViewModel-Anschluss, neuer Account-Uploadbereich/Einbindung, nur `cloud_upload_*` und `auth_ready` DE/EN, lesender Quellenkatalog in `AccountIdentityRepository`/`LocalIdentity.sq`, neuer Uploadport-Decorator, passende Tests | Explizite Bindung/Upload nur nach Nutzeraktion mit aktueller Phone-ID und CURRENT; Retry bindet nicht neu; ehrlicher unbekannter/ausstehender/abgewiesener Status; Main-Kontext, eigenes Upload-Busy, Cancel+Join vor Authclose; gemeinsame DB bleibt prozessweit erhalten. Keine Pull-/K2-/K3-UI-/Gateänderung. |
+| D1 Pullkern | Neue Pull-Runner/Port/State/Mapping und CloudPullStore/SQL/Tests, ausschließlich Pull-Seams im Backend, versionierte Cloud-Aktualisierung in CloudSyncMetadata, `6.sqm`→Schema 7 und minimale LocalData-Schemaanbindung | Bestehende v1-RPCs, Cursor und Downloadpersistenz nutzen. Metadatenseite samt dauerhafter Eventarbeit/Cursor atomar; Eventseiten/Empfangsnachweise/Cursor getrennt atomar. Begrenzte Läufe, Wasserstandheilung auch ohne neue Kopfversion, Neustart und Epochenvollabgleich. Lokale/Peer-Bestände schützen, D2/D3 nur als offene Arbeit vormerken. Keine Backend-/Android-/Auth-/Gate-/Engineänderung. |
+
+Beide neuen Worktrees übernehmen `9ecb8d2` ausschließlich als geprüfte Abhängigkeit; danach
+eigene Featurecommits. Keine Root-/fremden Worktreeedits. Android besitzt AccountIdentity-
+Leseseam; D1 besitzt CloudSyncMetadata und LocalData-Schema, keine gegenseitige Dateiänderung.
+K2 besitzt weiterhin allein neue Backend-/Edge-Dateien. Zusätzlich nötige Dateien vorab melden.
+Tests gegen reale Gate-/DB-/HTTP-Seams, Migration, Main-/Cancellation-/Lifecyclegrenzen und
+DE/EN bei 200 Prozent; jeweils vollständiger Check vor Commit, unabhängiges Review danach.
+Lokale Tests sind keine echte Hosted-/Socket-/K4-/Pilotabnahme.
+
+- U4 Android-Implementierung: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-impl-r1`.
+- D1 Implementierung: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-impl-r1`.
+
+K2 meldet erste lokale Nachweise: 59 SQL-Fachassertions, acht echte Parallelrennen und neun
+Deno-Tests grün; Gesamtcheck 692 Tasks grün. Harte 200-Plattformprüfungen für Storage/Cron/
+pg_net fehlen im lokalen PG17-Harness ausdrücklich. Root integriert nach finalem Commit
+beide Function-Konfigurationen und echte Storage-/Edge-CI; keine Ersatzdienste oder Skips.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
