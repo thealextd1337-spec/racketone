@@ -6,7 +6,7 @@ Tennis, Padel, Pickleball, Badminton und Tischtennis zählen: auf dem Handy (And
 
 **Status (18.10.2026):** Offline-Scoring und lokale Handy-/Uhren-Synchronisierung sind implementiert. P2-Kontotrennung, Zustimmung, Sitzungs-/Gerätebindung, Widerruf und Löschjob sind integriert. Manueller Android-Upload und privater ZIP-Serverexport sind nach unabhängigen Reviews und relevanter CI gemergt; die Serverabnahme verwendet echte lokale Supabase-, Storage- und Scheduler-Dienste.
 
-Dauerhafter Pull und Android-ZIP-Export sind implementiert und unabhängig geprüft; ihre aktuellen Integrations-/CI-Abnahmen stehen noch aus. ZIP-Transport auf iOS/JVM bleibt bis zum eigenen Plattformnachweis ausdrücklich nicht verfügbar. Automatischer Cloud-Betrieb und Online-Pilot sind noch nicht freigegeben; Hosted-, Geräte-, Rechts- und reale Apple-Abnahmen bleiben separat offen.
+Der dauerhafte Pull ist nach unabhängigen Reviews und echter lokaler Auth-/PostgREST-Abnahme integriert; er startet nicht automatisch. Android-ZIP-Export ist implementiert und unabhängig geprüft, seine aktuelle Integrations-CI steht noch aus. ZIP-Transport auf iOS/JVM bleibt bis zum eigenen Plattformnachweis ausdrücklich nicht verfügbar. Automatischer Cloud-Betrieb und Online-Pilot sind noch nicht freigegeben; Hosted-, Geräte-, Rechts- und reale Apple-Abnahmen bleiben separat offen.
 
 - [Gesamtplan & Roadmap](docs/PLAN.md)
 - [Ausführungsplan für Cloud und Pilot](docs/p2-parallel-ausfuehrung.md)

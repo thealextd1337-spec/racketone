@@ -10,7 +10,10 @@ plugins {
 kotlin {
     sourceSets {
         commonTest.dependencies { implementation(libs.ktor.mock) }
-        jvmTest.dependencies { implementation(projects.shared.matchSession) }
+        jvmTest.dependencies {
+            implementation(projects.shared.matchSession)
+            implementation(libs.sqldelight.sqlite.driver)
+        }
         androidMain.dependencies {
             implementation(libs.ktor.okhttp)
             implementation(libs.androidx.security.crypto)
