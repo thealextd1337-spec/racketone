@@ -875,6 +875,32 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+Android Review 1 auf `2e135ac`: funktional `ship`, 506 Fokusprüfungen und 14 zusätzliche
+nicht kooperative Bind-/Push-/Close-Rennen grün. Ein P3: Refresh vor erster Bindung aktiv,
+aber ohne Wirkung. Fix `31620a7` ergänzt ausschließlich `canRefreshStatus=false` als Default,
+Freigabe erst mit aktuellem gebundenem Runner; UI sperrt zusätzlich während Busy.
+Worker 507 Fokusprüfungen und 740 Gesamtcheck/APK-Tasks grün; frisches Review 2 folgt.
+
+Root behebt separat den vorbestehenden Account-Kontrastfehler in `AccountScreen.kt` und
+`AccountScreenTest.kt`: Hintergrund-ContentColor aus Material-Token nur für die Kontospalte,
+keine globale Theme-/Text-/Layoutänderung; Einrückungen mechanisch. Regression im tatsächlichen
+Box-background-Host ohne kaschierendes Surface: vorher 1,0737:1, nach Fix mindestens 4,5:1,
+DE/EN, Hell/Dunkel, 200 %, Kontoaktionen erreichbar. Baseline-XML und Screenshots lokal erhalten.
+
+D1 Review 1 auf `68d23de`: vier belegte P2, fünf rote eigene Regressionen. Fehlerhafter
+erster Eventauftrag verhungert Folgeaufträge; Prüfrunde startet bei jedem Aufruf neu und
+wird im größeren ruhenden Bestand nie vollständig; Einseitenbudget verhindert Eventarbeit;
+gültiges Server-`scheduled` scheitert am Engine-Status. Korrektur innerhalb bestehender
+D1-Dateien beauftragt: faire dauerhafte Auswahl, fortsetzbare begrenzte Prüfrunde/Phase,
+geplanter Match als Snapshot ohne erfundenen Engine-Status. Cursor/Receipts erst bei Erfolg,
+Fehler sichtbar. Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d1-fix-r1`.
+
+K2-Integrationsreview 1 findet Deno-Formatfehler vor echtem Stackstart. Root-Fix `990179f`
+pinnt 2.9.7 im zentralen Katalog und verlangt zwei Leerzeichen; mit genau dieser Runtime
+19 Tests/Typen/Format/Lint und Gesamtcheck 692 Tasks grün. Neue Service-CI und Review 2
+laufen. PR66 nach PR65-Squash im eigenen Hilfsworktree auf `09bdd1b` abgeglichen; ausschließlich
+Plan-Konflikt, Produktcode/SQL/Tests unverändert. Neue CI erforderlich.
+
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
 Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
 
