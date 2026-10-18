@@ -96,6 +96,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1 Korrektur 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r3`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
+- Server-Consent 003 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-consent-fix-r1`
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 - U4-Kern Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r1`
 
@@ -332,6 +333,22 @@ Worker meldet 83 Cloud- und 90 Data-Tests (14 neue Runner-Integrationstests) und
 Check mit 686 Tasks grün. Parent hat den Produktivdiff gelesen; unabhängiges Review 1 läuft.
 Android-Bedienung und echter Supabase-Lauf stehen weiter aus. Die Bestandszählung liest aktuell
 den lokalen Bestand vollständig; das Review prüft die Kosten und Fortschrittsgarantien.
+
+Server-Consent Review 1: `fix-first`, ein belegter P2 in der Testintegration, kein belegter
+P0/P1 im Produktionsdiff. Die älteren Python-Nachweise `170_cloud_device_binding_live.py`
+(`--sql-only`) und `170_cloud_device_binding_races.py` liefern im positiven Bindungssetup
+noch keine `exp`-Claims und keine TESTzustimmung. Beide brechen vor ihren eigentlichen
+Parallelitäts-/Widerrufprüfungen ab; die neuen 181-Rennen ersetzen diese Fälle nicht.
+Der Implementierer darf ausschließlich diese beiden zusätzlichen Testdateien minimal
+anpassen. Standalone-Verwendbarkeit, Loopback-/DSN-/Redirectschutz und alle Negativassertions
+bleiben erhalten; Produktionsmigrationen unverändert. Danach vollständige Wiederholung und
+neues unabhängiges Review 2. Reviewer wiederholte 1.126/1.128 SQL-Assertions, 248/248 neue
+Consenttests, 80 Lock-Rennen und die unabhängigen K1-Rennen erfolgreich (nur lokale Cron-Lücken).
+
+Für K1 Fix3 zusätzlich freigegeben: reine JVM-Testabhängigkeit auf `match-session` in
+`presentation-auth/build.gradle.kts` und `RecoveryIntentIntegrationTest.kt` für echte
+VM-/Adapter-/lokale Ownership-Regressionen. Unerwartete Adoptionsfehler dürfen nicht pauschal
+verschluckt werden; erwartete lokale Cloud-Sperre darf Kontostatus/Consent nicht verstecken.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
