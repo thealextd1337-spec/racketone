@@ -761,6 +761,18 @@ U4 Android: zusätzlich ausschließlich `testImplementation(libs.ktor.mock)` und
 keine neue Version/Produktionsdependency. Serielle injizierte Testgrenze ersetzt keine
 Android-Geräteabnahme; produktiv Main.immediate und Looper-Guard erhalten.
 
+K2 Server `d02c7a8` ab Parent `7fefc43` fertig, sauberer Worktree `t3-95f9b0da`.
+20 ausschließlich neue freigegebene Dateien; kein Kotlin/Root/Docs-Edit. Zwölf Deno-Tests
+samt Typprüfung/Lint/Format, 59 SQL-Fachassertions, acht echte Parallelrennen und voller
+Gradle-Check 692 Tasks grün. Plattformlücken bleiben harte Fehler: fünf lokale SQL-Fehler
+aus fehlendem Storage/Cron/pg_net, drei bestehende K3-Cron-Skips unverändert; echter
+HTTP-/Storage-Test lokal ausdrücklich nicht erfolgreich. Keine K2-Abnahme daraus ableiten.
+Budgets 4 MiB JSON, 16 MiB ZIP, 100.000 CSV-Zeilen, 750ms Serializer; sichtbarer 413 statt
+Teilarchiv. Unabhängiges Review 1 auf exakt diesem Head läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-review-r1`.
+Root ergänzt nach Review Function-Konfiguration und echte Storage-/Edge-CI; keine automatische
+Live-Auslieferung oder Secrets im Repo. K2/UI und Konten oberhalb der Budgets bleiben offen.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
