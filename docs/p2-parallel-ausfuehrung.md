@@ -23,7 +23,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Review 3 `ship`, Android-/Apple-CI grün auf `fbca22d`; PR #63 als `1575d58` nach main gemergt |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `d11da1c` auf Entwurfs-PR #64; Review 3 bestätigt R1/R2, neuer P2 bei verlorener Recovery-Antwort wird korrigiert |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `025efc5` auf Entwurfs-PR #64; Review 6 Ship ohne offene Befunde, finale CI läuft |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -626,6 +626,34 @@ grün, 32 Dateien/1228 Tests PASS einschließlich aller sechs 190-Dateien und Cr
 Damit ist die frühere PG17-Stub-Lücke für Migration/Katalogplanung in diesem Stack geschlossen;
 periodische tatsächliche Jobausführung und gehosteter Betrieb bleiben offen. Gradle plus
 Android-/Wear-APKs ebenfalls grün; Apple-CI zu diesem Prüfzeitpunkt noch laufend.
+
+### Aktuelle Abnahmen und isolierte Fortsetzung
+
+K1 Review 6 auf `025efc5`: Ship ohne belegte P1/P2/P3 oder offene R1–R5-Einwände.
+Unabhängig 170 Cloud-/Auth-/UI-Fokustests grün, ursprünglicher R5-Repro rot→grün und
+Callbackfehler bestätigt. PR #64 bleibt bis zur grünen CI auf genau diesem Head Entwurf.
+
+Gemeinsames Integrationsreview 1 auf `33c1b8b`: Ship ohne Befund für zusätzliches Root-Gate
+und Zusammenspiel 001–004. Eigene 34 bestehende Tests plus 15 reale Integrationsproben grün,
+auch verspätete Antworten trotz Cancellation, unabhängiger Export und unveränderte Peer-Acks.
+Retentions-/Kontowechsel-/Hostgrenzen erhalten. Task:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-joint-gate-review-r1`.
+PR #65 wartet noch auf die finale CI; Supabase ist bereits grün. Der ältere Workflow auf
+`c6703b1` wurde durch den neuen Head abgebrochen; dessen einzelner Supabase-Job bleibt ein
+gültiger bestandener SQL-Nachweis, kein grüner Gesamtworkflow.
+
+U4 Review 4 auf `06c264c`: Ship ohne Befund. Unabhängiger Fokus, Migration und Gesamtcheck
+690 Tasks grün; Status ohne SQL-Schreibaufruf, initiale Zählgleichheit und Quellenreihenfolgen
+bestätigt. Integration mit aktuellem K1 wird in einem neuen isolierten Worktree ab `33c1b8b`
+ausgeführt, um den parallel geprüften Rootstand unverändert zu halten. Besitz ausschließlich
+17 U4-Dateien plus nötigenfalls ein gemeinsamer JVM-Grenztest. Root-Gatefences, Authadapter
+und Backend-SQL erhalten; volle gemeinsame Tests und unabhängige Prüfung vor PR/Merge.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-k1-integration-impl-r1`.
+
+Parallel grenzt ein lesender Auftrag den K2-Serverteilschnitt anhand der bestehenden
+Export-Whitelist ab: private ZIP-Ausgabe, Ablauf/Aufräumen und idempotente Anforderung;
+noch keine Implementierung oder API-Erweiterung. Clientbedienung bleibt eigener Folgeschritt.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-scope-r1`.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
