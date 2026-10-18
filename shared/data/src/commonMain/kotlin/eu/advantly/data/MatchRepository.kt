@@ -133,6 +133,7 @@ class MatchRepository internal constructor(
     private val queries: MatchHeaderQueries,
     private val tombstones: MatchTombstoneQueries,
     private val assignments: (MatchId) -> Map<PlayerId, PlayerId>,
+    private val created: (String) -> Unit = {},
 ) {
     /**
      * Legt den Kopf an, falls [id] noch unbekannt ist (idempotent – Genesis und `MatchMeta` können beide zuerst
@@ -167,6 +168,7 @@ class MatchRepository internal constructor(
                 status = MatchStatus.IN_PROGRESS.name,
                 previous_match_id = previousMatchId?.value,
             )
+            created(id.value)
             true
         }
 
@@ -187,6 +189,14 @@ class MatchRepository internal constructor(
             updated_at_ms = updatedAtMs,
             id = id.value,
         )
+    }
+
+    /** Metadaten ändern ohne Event-Payloads oder den Ergebnis-Cache umzuschreiben. */
+    fun updateMeta(
+        id: MatchId,
+        meta: MatchMeta,
+    ) {
+        queries.updateMeta(DataJson.encodeToString(MatchMeta.serializer(), meta), meta.surface?.name, meta.environment?.name, id.value)
     }
 
     fun get(id: MatchId): MatchRecord? = queries.selectById(id.value).executeAsOneOrNull()?.toRecord()

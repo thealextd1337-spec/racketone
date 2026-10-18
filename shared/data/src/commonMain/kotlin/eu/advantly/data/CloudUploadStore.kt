@@ -16,10 +16,29 @@ class CloudUploadSession internal constructor(
 class CloudUploadSnapshot internal constructor(
     internal val session: CloudUploadSession,
     events: List<StoredEvent>,
+    headers: List<CloudRevisioned<CloudMatchHeader>> = emptyList(),
+    participants: List<CloudRevisioned<CloudParticipants>> = emptyList(),
+    players: List<CloudRevisioned<CloudPlayer>> = emptyList(),
+    projections: List<CloudRevisioned<CloudProjection>> = emptyList(),
+    completeEventMatches: Set<String> = emptySet(),
 ) {
     private val selected = events.associateBy { it.id }
+    private val selectedHeaders = headers.toList()
+    private val selectedParticipants = participants.toList()
+    private val selectedPlayers = players.toList()
+    private val selectedProjections = projections.toList()
+    private val complete = completeEventMatches.toSet()
     val profileId: String get() = session.profileId
     val events: List<StoredEvent> get() = selected.values.toList()
+    val headers: List<CloudRevisioned<CloudMatchHeader>> get() = selectedHeaders.toList()
+    val participants: List<CloudRevisioned<CloudParticipants>> get() = selectedParticipants.toList()
+    val players: List<CloudRevisioned<CloudPlayer>> get() = selectedPlayers.toList()
+    val projections: List<CloudRevisioned<CloudProjection>> get() = selectedProjections.toList()
+    val completeEventMatches: Set<String> get() = complete.toSet()
+    val metadataRevisions: Set<CloudMetadataRevision>
+        get() =
+            (headers.map { it.version } + participants.map { it.version } + players.map { it.version } + projections.map { it.version })
+                .toSet()
 
     internal fun selectedEvent(id: String): StoredEvent? = selected[id]
 }
@@ -111,7 +130,42 @@ class CloudUploadStore internal constructor(
                     ) { id, match, device, seq, lamport, at, parent, type, payload, confirmed ->
                         StoredEvent(id, match, device, seq, lamport, payload, at, parent, type, confirmed == 1L)
                     }.executeAsList()
-            CloudUploadSnapshot(session, events)
+            cloud.resolveMetadataSources()
+            val headers = mutableListOf<CloudRevisioned<CloudMatchHeader>>()
+            val participants = mutableListOf<CloudRevisioned<CloudParticipants>>()
+            val players = mutableListOf<CloudRevisioned<CloudPlayer>>()
+            val projections = mutableListOf<CloudRevisioned<CloudProjection>>()
+            database.cloudMetadataQueries.pendingForProfile(session.profileId, limit.toLong()).executeAsList().forEach { row ->
+                val version = row.version()
+                when (version.kind) {
+                    CloudMetadataKind.HEADER -> {
+                        cloud.uploadHeader(version.id)?.let { headers += CloudRevisioned(version, it) }
+                    }
+
+                    CloudMetadataKind.PARTICIPANTS -> {
+                        cloud.uploadParticipants(version.id)?.let {
+                            participants +=
+                                CloudRevisioned(version, it)
+                        }
+                    }
+
+                    CloudMetadataKind.PLAYER -> {
+                        cloud.uploadPlayer(version.id)?.let { players += CloudRevisioned(version, it) }
+                    }
+
+                    CloudMetadataKind.PROJECTION -> {
+                        cloud.uploadProjection(version.id)?.let { projections += CloudRevisioned(version, it) }
+                    }
+                }
+            }
+            val selectedIds = events.mapTo(mutableSetOf()) { it.id }
+            val complete =
+                projections
+                    .map { it.value.matchId }
+                    .filter { id ->
+                        queries.outstandingForMatch(id).executeAsList().all { it in selectedIds }
+                    }.toSet()
+            CloudUploadSnapshot(session, events, headers, participants, players, projections, complete)
         }
     }
 
@@ -129,12 +183,14 @@ class CloudUploadStore internal constructor(
         snapshot: CloudUploadSnapshot,
         uploaded: Set<String>,
         rejected: Map<String, String> = emptyMap(),
+        metadata: Set<CloudMetadataRevision> = emptySet(),
     ) {
         require(uploaded.intersect(rejected.keys).isEmpty())
         require(rejected.values.all { it.isNotBlank() })
         val ids = uploaded + rejected.keys
         database.transaction {
             requireCurrent(snapshot)
+            require(metadata.all { it in snapshot.metadataRevisions }) { "Antwort enthält eine nicht ausgewählte Metadatenrevision" }
             val existingIds = mutableSetOf<String>()
             ids.forEach { id ->
                 val selected = requireNotNull(snapshot.selectedEvent(id)) { "Antwort enthält ein nicht ausgewähltes Event" }
@@ -149,6 +205,9 @@ class CloudUploadStore internal constructor(
                 }
             }
             cloud.acknowledge(uploaded.intersect(existingIds), rejected.filterKeys { it in existingIds })
+            metadata.forEach { version ->
+                database.cloudMetadataQueries.acknowledge(version.revision, version.kind.name, version.id)
+            }
         }
     }
 }

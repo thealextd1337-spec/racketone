@@ -36,6 +36,7 @@ data class LocalPlayer(
 /** Lokale Spieler: Self-Player, Gäste, von anderen Geräten übernommene Namen (P1 ohne Account). */
 class PlayerRepository internal constructor(
     private val queries: PlayerQueries,
+    private val locallyCreated: (String) -> Unit = {},
 ) {
     /** Der Self-Player oder `null`, wenn noch keiner angelegt ist. */
     fun self(): LocalPlayer? = queries.selectSelf().executeAsOneOrNull()?.toLocal()
@@ -53,6 +54,7 @@ class PlayerRepository internal constructor(
             self() ?: run {
                 val id = newId()
                 queries.insertOrIgnore(id.value, displayName, PlayerKind.SELF.name, nowMs, null)
+                locallyCreated(id.value)
                 checkNotNull(get(id))
             }
         }
@@ -65,7 +67,9 @@ class PlayerRepository internal constructor(
     ): LocalPlayer =
         queries.transactionWithResult {
             require(!Placeholders.isPlaceholder(id)) { "Ein Platzhalter ist kein Gast" }
+            val exists = get(id) != null
             queries.insertOrIgnore(id.value, displayName, PlayerKind.GUEST.name, nowMs, null)
+            if (!exists) locallyCreated(id.value)
             checkNotNull(get(id))
         }
 
