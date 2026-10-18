@@ -441,6 +441,11 @@ Worker: 89 Cloud-/93 Data-Tests und Migration grün, vollständiger Check mit 68
 Median bei 20.000 quittierten Köpfen 1.300,2 → 3,2 ms, zusätzlich struktureller Drei-Reads-Beweis.
 Parent hat den Korrekturdiff gelesen; neues unabhängiges Review 2 auf `ddba960` läuft.
 
+Parent integriert Busy-/Recovery-Fixes konfliktfrei unter Erhalt des CURRENT-/Consent-
+Generationsschutzes. Vollständiger Check des gemeinsamen Standes mit 692 Tasks grün.
+Die Backend-SQL-Dateien bleiben dabei unverändert. Der neue CI-Head von PR #64 ist
+`bc283f4`; dessen Review 4 und die neue CI bleiben vor Merge abzuwarten.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
