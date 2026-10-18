@@ -902,17 +902,24 @@ und 222 Desktoptests grün; vollständiger Check samt Phone-/Wear-APK mit 761 Ta
 12 Phasen und neun Fehler DE/EN, Hell/Dunkel, 360×640 bei 200 Prozent geprüft;
 24 Desktopbilder. Fehlertext nutzt lokal `onBackground` plus Fehlersemantik, weil das
 bestehende Material-Fehlerrot auf hellem Apphintergrund nur 4,463:1 erreichte.
-Unabhängiges UI-Review ist der nächste freie Reviewplatz; noch keine Account-/Androidabnahme.
+Frisches unabhängiges UI-Review 1 läuft; noch keine Account-/Androidabnahme:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-ui-review-r1`.
 
 K2-Serverkorrektur `8e49ccc`: echter PostgREST-ACK für `void` liefert 204 ohne JSON-Body.
 Der Backendadapter akzeptiert ausschließlich diesen zusätzlichen Erfolgsfall; leerer 200
 bleibt fehlerhaft. Zwei neue Regressionen gegen Original rot, mit Fix insgesamt 21
 Deno-Tests sowie Typen/Format/Lint und vollständiger 688-Task-Check grün. Der Liveharness
 behält sämtliche Cleanup-Negativprüfungen und verlangt zusätzlich den echten ACK204.
-Frisches Integrationsreview 4 läuft parallel zur echten Service-CI:
+Frisches Integrationsreview 4 bestätigt `8e49ccc` ohne neue Befunde, unabhängig 21
+Deno-Tests/Typen/Format/Lint und sichere Diagnose geprüft. Echte Service-CI bleibt offen:
 `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-integration-review-r4`.
-Kein Merge vor beiden Nachweisen. D1-Korrektur 2 bleibt unabhängig aktiv; C konsumiert
-A/B erst nach ihren Reviews. Keine gemeinsame Besitzdatei wird parallel editiert.
+Kein Merge vor beiden Nachweisen. D1-Korrektur 2 ist auf `b44c5ab` abgeschlossen:
+neun autorisierte Dateien, beide R2-Repros rot→grün, R1-Regressionen erhalten, 258 Tests
+und Migration grün sowie ein ausdrücklich offener Stackskip; Gesamtcheck 688 Tasks grün.
+Persistierte Quote von zwölf Eventversuchen erzwingt eine Metadatenseite; erster vollständiger
+Rundenkatalog bleibt Voraussetzung, spätere Seiten wechseln mit Events. Frisches Review 3:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r3`.
+C konsumiert A/B erst nach ihren Reviews. Keine gemeinsame Besitzdatei wird parallel editiert.
 
 Root-Androidintegration `ba1f37d` unabhängig `ship`, keine offenen Befunde; 20 Tests frisch
 plus zwei aus Cache und zusätzliche gemeinsame DE/EN-Hell/Dunkel-200%-Probe grün.
