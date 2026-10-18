@@ -868,6 +868,15 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+Echte K2-Service-CI auf `84ee8fc`, Run `39141216108`: Stackstart, beide Handler, sämtliche
+1.299 pgTAP-Assertions in 35 Dateien und acht Parallelrennen samt SQL-ZIP-Rundlauf grün.
+Live-HTTP bestätigt vollständiges ZIP/CRC/JSON/CSV und Idempotenz/409-Vertrag; danach harter
+Fehler im Storage-Negativ-/Ablauf-/Cleanup-Abschnitt. Scheduler und Lint deshalb noch nicht
+ausgeführt. Keine grüne Gesamtabnahme. Die bewusst generische Fehlerausgabe lässt die
+exakte Testzeile offen. Root ergänzt nur Typ und eigene Testpositionen (keine Inhalte,
+Exceptiontexte oder Variablen), Assertions und Produktcode unverändert. Lokaler Diagnose-
+Fehlerpfad bleibt hart rot ohne Dienste; Syntax und vollständiger Check 692 Tasks grün.
+
 K2-Integrationsreview 1 auf `79b5faa`: ein belegter P2. Der tatsächlich installierte
 Deno-2.9.7-Formatter liest `.editorconfig` (vier Leerzeichen); bisherige lokale Deno-2.5.4-
 Prüfung tat das nicht. Erste Service-CI stoppt deshalb vor Stackstart. Enge Root-Korrektur:

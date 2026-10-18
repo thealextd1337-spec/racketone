@@ -20,7 +20,9 @@ import ipaddress
 import json
 import os
 import secrets
+import sys
 import time
+import traceback
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -210,5 +212,12 @@ def main():
 
 if __name__=="__main__":
     try: main()
-    except Exception:
+    except Exception as error:
+        # Nur Typ und eigene Testpositionen, niemals Exceptiontexte, HTTP-Inhalte oder lokale Variablen.
+        for _ in range(3):
+            positions = [f"{frame.name}:{frame.lineno}" for frame in traceback.extract_tb(error.__traceback__)
+                         if frame.filename.endswith("200_private_data_exports_live.py")]
+            print(f"K2 test failure {type(error).__name__} at {' -> '.join(positions)}", file=sys.stderr)
+            if error.__context__ is None: break
+            error = error.__context__
         raise SystemExit("K2 HTTP/Storage proof FAILED or unavailable; no provider/credential details emitted") from None
