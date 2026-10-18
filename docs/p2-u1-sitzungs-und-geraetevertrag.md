@@ -1,6 +1,6 @@
 # U1 – Sitzungsgrenze und Gerätevertrag
 
-Stand: 17.10.2026. Umsetzungsschnitt zum [Cloud-Pilot-Lieferplan](p2-cloud-pilot-lieferplan.md).
+Stand: 18.10.2026. Umsetzungsschnitt zum [Cloud-Pilot-Lieferplan](p2-cloud-pilot-lieferplan.md).
 
 ## Lieferumfang und Freigabe
 
@@ -8,13 +8,15 @@ U1 implementiert die lokale Sitzungsgrenze bis zum tatsächlichen HTTP-Request u
 Auswahl/Quittierung im vorhandenen `CloudUploadStore`. Der Android-Auth-Host verwendet dafür
 dieselbe `LocalData`-Instanz wie `AndroidMatchSessions`; alle Zugriffe bleiben auf Main.
 Die Geräteberechtigung ist als versionierter Client-/Serververtrag festgelegt und clientseitig
-ausführbar. **Die dazugehörigen Server-RPCs und deren Rechteprüfung sind noch nicht implementiert.**
-Der bestehende Server kann deshalb keinen Upload oder Download über diesen Adapter aktivieren.
-Es gibt weder automatische Registrierung noch einen Worker, Retry-Loop oder automatischen Pull.
+ausführbar. Die dazugehörigen Server-RPCs und deren Rechteprüfung sind seit PR #62
+(`6537ac6`) integriert, einschließlich Schutz alter Cloud-Zugänge und dauerhafter Widerrufe.
+Der gemeinsame Zustimmungsvertrag und U4-Upload-Lauf werden separat integriert.
+Es gibt weiterhin weder automatische Registrierung noch automatischen Cloud-Betrieb oder Pull.
 
 U4/D1 dürfen erst nach Implementierung des folgenden Serververtrags und K4-Abnahme freigegeben
 werden. Ein erfolgreicher MockEngine-Test ist kein Nachweis für reale Supabase-Gerätesicherheit.
-U2 (Eigentumsübernahme/Identitätswechsel), U3 (Metadatenrevisionen), U4, D1 und B4 bleiben eigene Pakete.
+U2 (Eigentumsübernahme/Identitätswechsel) ist integriert; U3 (Metadatenrevisionen), U4, D1
+und B4 bleiben eigene Pakete. Aktueller Ausführungsstand: [Parallelplan](p2-parallel-ausfuehrung.md).
 
 ## Lokale Sicherheitsgrenze
 
@@ -134,12 +136,16 @@ SQLDelight-Datenbank: gesendete Bearer-/Proof-Header, A→B, A→A, Refresh, Log
 verzögerte Profilantwort, Wiederherstellung vor Profilbestätigung, Löschsperre, ausstehende
 Outbox bei verspätetem Upload, fehlende/falsche Gerätebestätigung, Timeout und Antwortgrößenlimit.
 Sie prüfen keinen echten Supabase-Stack und ersetzen keine serverseitige Rechteabnahme.
-Lokal bestanden: `gradlew.bat check` (einschließlich 45 Cloud-JVM-Tests, Android-Tests,
+Im ursprünglichen U1-Stand lokal bestanden: `gradlew.bat check` (einschließlich 45 Cloud-JVM-Tests, Android-Tests,
 Lint und Apple-Kotlin-Kompilierung). Native Apple-Ausführung und echte Provider-/Gerätetests
 bleiben der macOS-/Pilot-Abnahme vorbehalten.
 
 Für das Serverpaket sind pgTAP-Tests mit echten Auth-Session-Fixtures und zusätzlich HTTP-/Realtime-
 Negativtests erforderlich: fehlende/fremde Session, falscher Proof, anderer Account, widerrufenes
 Gerät bei gültigem JWT, Neuregistrierung mit alter oder neuer behaupteter ID, Tombstone-DELETE,
-direkte Tabellenzugänge sowie weiterhin nutzbarer Support/Export/Recovery. Diese Tests und die
-K4-Abnahme stehen aus; der Live-Pilot wird durch U1 nicht freigegeben.
+direkte Tabellenzugänge sowie weiterhin nutzbarer Support/Export/Recovery. HTTP-/Realtime-Nachweise
+und K4-Live-Abnahme stehen weiterhin aus. Die pgTAP-Migrationssuite ist für den Serverstand aus
+PR #62 in echter lokaler Supabase-CI grün; READ COMMITTED und geschlossene Verweigerung anderer
+Isolationsmodi sind zusätzlich durch Lock-Warterennen geprüft. Hosted-Gateway, effektives
+`private_only` und Trennen bereits bestehender WebSockets bleiben separate Nachweise;
+der Live-Pilot wird durch diese Implementierung nicht freigegeben.

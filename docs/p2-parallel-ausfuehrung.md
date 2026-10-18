@@ -23,7 +23,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | `fbca22d` auf Entwurfs-PR #63; Review 3 `ship`, Android-/Apple-CI läuft |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Korrektur `21c6d20` auf Entwurfs-PR #64; Review 2 `fix-first`, zwei lokale Zustandsrennen werden korrigiert |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Fix2 `0edd992` und getesteter Main-Merge `d11da1c` auf Entwurfs-PR #64; Review 3 und neue CI laufen |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -92,6 +92,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - U3 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r3`
 - K1 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r2`
 - K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
+- K1 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r3`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 
@@ -276,6 +277,36 @@ Sitzungsverträge. Keine U3-/CURRENT-Übernahme auf den eigenständigen K1-Branc
 erneut prüfen und neue unabhängige Reviewrunde auf dem tatsächlich mergebaren Stand starten.
 Profilrace-Regressionen akzeptieren sichere Cancellation oder `cloud_session_changed`;
 beide müssen veraltete Veröffentlichung und lokale Quittierung verhindern.
+
+Fix2 ist als `0edd992` geliefert: lesender Retention-Seam, behaltene Identität unabhängig
+von Uploadfreigabe und monotone Mutationsrevision. Implementierer meldet 73 Cloud-,
+25 Auth-, 135 Match- und 217 UI-Tests sowie vollständigen Check mit 700 Tasks grün.
+Der separate `main`-Merge läuft; Review 3 wartet ausdrücklich auf dessen getesteten Head.
+Parent übernimmt Fix2 unter Erhalt des Request-Typs (Cloud/Kontorecht), der CURRENT-Prüfung,
+Consent-Generation und der U3-Metadatenquittierung; gemeinsame Prüfung folgt.
+
+K1-Mergehead `d11da1c` ist fertig, sauber und auf PR #64 gepusht. Er verbindet Fix2 mit
+Server/K4 aus `main`; die drei gemeinsamen SQL-Fixtures entsprechen exakt der geprüften
+Parent-Auflösung. Worker meldet vollständigen Merge-Check mit 686 Tasks grün und SQL
+878/880 (nur die zwei lokalen Cron-Lücken). Review 3 ist als neuer unabhängiger Task
+auf genau diesem Head gestartet; die PR-CI startet ebenfalls neu.
+
+Parent hat den tatsächlichen Fix2-Diff geprüft und integriert die Retention gemeinsam
+mit dem bestehenden typisierten Request-Verzeichnis und Consent-Generationsschutz.
+Fokus gegen den gemeinsamen Stand: 82 Cloud-, 25 Auth- und 135 Match-Tests ohne Fehler,
+SQLDelight-Migrationsprüfung ebenfalls grün. Der vollständige Parent-Check läuft.
+
+Der vollständige Parent-Check nach Fix2 ist mit 690 Tasks grün (3:38 Minuten).
+Damit sind die gemeinsame CURRENT-/Retention-/Intent-Integration und die vorhandenen
+U3-Regressionen lokal ausführbar geprüft; unabhängige Freigabe steht weiterhin aus.
+
+Server-Consent 003 ist als `20f0e43` aus `t3/server-consent-gate` geliefert. Der Worker
+meldet 248 neue SQL-Assertions und 80 echte Lock-Warterennen bestanden; Gesamtlauf
+1.126/1.128 (nur lokale Cron-Lücken), vollständiger Gradle-Check grün. Neben den beiden
+Cloud-Seams prüft `require_current_consents` die unabhängige Auth-Sitzung nach dem Lock
+erneut. Historische Produktionsmigrationen 001/002 und die 180-K1-Tests bleiben unverändert.
+Positive Legacy-Suites erhalten explizite TESTzustimmung. Parent prüft den tatsächlichen
+Diff und beauftragt unabhängiges Review vor Übernahme/Freigabe.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,

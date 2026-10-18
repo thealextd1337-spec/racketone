@@ -4,7 +4,7 @@
 
 Tennis, Padel, Pickleball, Badminton und Tischtennis zählen: auf dem Handy (Android/iOS) und der Smartwatch (Apple Watch, Wear OS). Statistik, Cloud-Funktionen und Garmin folgen gemäß Roadmap.
 
-**Status (18.10.2026):** Offline-Scoring und lokale Handy-/Uhren-Synchronisierung sind implementiert. Phase P2 ist im Aufbau: Android-Auth, lokale Cloud-Outbox sowie U1-Sitzungsbindung und U2-Kontotrennung sind integriert. U3, serverseitige Gerätebindung/Widerruf und versionierte Zustimmung werden parallel umgesetzt. Automatischer Cloud-Betrieb und Online-Pilot sind noch nicht freigegeben; Apple-Geräteabnahme bleibt separat offen.
+**Status (18.10.2026):** Offline-Scoring und lokale Handy-/Uhren-Synchronisierung sind implementiert. Phase P2 ist im Aufbau: Android-Auth, lokale Cloud-Outbox, U1-Sitzungsbindung, U2-Kontotrennung sowie serverseitige Gerätebindung und Widerruf sind integriert. U3-Metadaten und K1-Zustimmung sind in Review/CI; gemeinsames Server-Zustimmungsgate und begrenzter Upload-Lauf entstehen parallel. Automatischer Cloud-Betrieb und Online-Pilot sind noch nicht freigegeben; Apple-Geräteabnahme bleibt separat offen.
 
 - [Gesamtplan & Roadmap](docs/PLAN.md)
 - [Ausführungsplan für Cloud und Pilot](docs/p2-parallel-ausfuehrung.md)
