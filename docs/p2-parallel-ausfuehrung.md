@@ -545,6 +545,20 @@ Hosted-/Cron-/UI-/D3-Abnahme daraus ableiten. Unabhängiges Review 1 läuft vor 
 
 Alle drei Reviews laufen parallel mit eigenem Task; keine Worker-Pushes oder Live-Deployments.
 
+K1 Review 5 auf `4ba0880`: No-Ship wegen eines belegten P2-Rennens. Ein während laufender
+Ablehnung gestarteter Profilabruf mit bisherigem `DECLINED` quittiert das lokale Ablehnungsflag
+vorzeitig. Eine ältere Annahme kann danach serverseitig CURRENT setzen, obwohl ihre Antwort
+lokal korrekt verworfen wird; die neuere Ablehnung scheitert ohne Commit und ein späterer
+Refresh öffnet unerwünscht Cloud/Identität. Ohne Zwischenabruf bleibt der Kontrollfall gesperrt.
+Fix5 ist ausschließlich für Authadapter und bestehende Recovery-Integrationstests beauftragt:
+abgeschlossene Mutation beim Profilstart erfassen, nicht erst bei Antwort prüfen. Auch verzögerte
+Profilantwort nach RPC-Ende muss den fehlenden Startnachweis erhalten. Bisherige Matrix,
+Retention-, Busy- und Altantwortbeweise erhalten; Rot→Grün plus vollständiger Check vor Commit.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r5`.
+Die unabhängige Wiederholung bestätigt alle bisherigen Korrekturen und 598 Kotlin-Tests;
+SQL 878/880 bleibt ausschließlich wegen der zwei bekannten Cron-Stubfehler offen.
+PR #64 bleibt Entwurf; Supabase-CI auf `4ba0880` ist grün, Android/Apple laufen noch.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
