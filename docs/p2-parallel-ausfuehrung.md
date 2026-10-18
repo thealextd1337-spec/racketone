@@ -97,8 +97,10 @@ Brief einschließlich früherer Befunde und Antworten.
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
 - Server-Consent 003 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-consent-fix-r1`
+- Server-Consent 003 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r2`
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 - U4-Kern Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r1`
+- U4-Kern Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -357,6 +359,28 @@ Parent gleicht diesen Mainstand ab und erhält bei den beiden neuen HTTP-Testfix
 ausdrückliches CURRENT. K1 übernimmt den neuen Mainstand nach seinem separaten Fix3-Commit,
 bevor Review 4 beginnt; U3-Metadaten-Acks und seine Retention-/Intent-Prüfungen bleiben erhalten.
 Der vollständige Parent-Check nach diesem Mainabgleich ist mit 686 Tasks grün.
+
+CI von PR #64 auf `d11da1c`: Supabase bestanden; Ubuntu scheitert an einem einzelnen
+AndroidHost-Test in `ConsentAccountIntegrationTest`, nach simuliertem Widerruf erwartetes
+`accountSession=null`, tatsächlich noch Alice/Generation 1/REQUIRED (Zeile 120).
+JVM-Gegenstück und übrige AndroidHost-Tests bestanden. Parent hat Joblog und XML-Artefakt
+gelesen und an K1 zur deterministischen Ursachenprüfung gegeben; kein blindes Retry und
+keine Assertionschwächung. Der Fix3-Pfad und dessen getrennte Mainintegration laufen weiter.
+
+U4 Review 1: `fix-first`, belegter P2 zur Main-Thread-Arbeit. Bei 20.000 bereits quittierten
+Historienköpfen braucht `refresh()` laut unabhängigem Repro rund 2.001 statt 3,6 ms, obwohl
+keine Arbeit aussteht. Vollständiges Materialisieren plus N+1-Abfragen und doppelte Zählung
+umgehen das Batchbudget. Korrektur 1 darf schmale kontogebundene SQL-Aggregatqueries in
+CloudUpload/CloudMetadata und direkte einmalige Inventory-Lesung ergänzen; keine neue
+Schema-/Ownershipänderung. Fachregeln und alle 14 Runnerregressionen bleiben erhalten.
+
+Server-Consent-Korrektur `2efa021` verändert ausschließlich die beiden freigegebenen
+Python-Fixtures (+58/−8). Gültige Ablaufclaims, explizite TESTzustimmung und Cleanup ohne
+000-Schema ergänzt; positive unabhängige Kontorechte verwenden ihren RC-Vertrag.
+Worker meldet beide ursprünglichen Repros rot→grün, Standalone ohne `tests`-Schema,
+vier Isolationsmodi, 5 Harnessgruppen, 248 Consentassertions/80 Lock-Rennen und vollständigen
+Gradle-Check grün; SQL nur die bekannten zwei Cron-Lücken. Parent hat den Korrekturdiff
+gelesen und neues unabhängiges Review 2 auf genau `2efa021` gestartet.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
