@@ -95,6 +95,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r3`
 - K1 Korrektur 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r3`
 - K1 Review 4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r4`
+- K1 Korrektur 4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r4`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
 - Server-Consent 003 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-consent-fix-r1`
@@ -103,6 +104,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - U4-Kern Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r1`
 - U4-Kern Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r1`
 - U4-Kern Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r2`
+- U4-Kern Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r2`
 
 ### Server/K4 – erste Übergabe
 
@@ -445,6 +447,28 @@ Parent integriert Busy-/Recovery-Fixes konfliktfrei unter Erhalt des CURRENT-/Co
 Generationsschutzes. Vollständiger Check des gemeinsamen Standes mit 692 Tasks grün.
 Die Backend-SQL-Dateien bleiben dabei unverändert. Der neue CI-Head von PR #64 ist
 `bc283f4`; dessen Review 4 und die neue CI bleiben vor Merge abzuwarten.
+
+K1 Review 4 bestätigt die bisherigen Korrekturen einschließlich Busyfix, findet aber P2:
+Recovery mit verlorener Antwort, danach erfolgreiche Zustimmung und frisches CURRENT-Profil
+bleiben lokal gesperrt, weil eine globale Mutationsrevision die noch bestätigbare Recovery
+entwertet. Korrektur 4 trennt diese beiden Verantwortungen und prüft angrenzende REQUEST/
+RECOVERY-/ACCEPT-/DECLINE-Folgen. Neuere Lösch-/Ablehnungsabsichten bleiben geschlossen.
+
+U4 Review 2 bestätigt Performancekorrektur und misst 3,45 ms bei 20.000 quittierten Köpfen.
+Neuer P2: Initiales direktes Refresh zählt einen eigenen Self-Spieler noch nicht mit, dessen
+belegbare Herkunft erst die nachfolgende Auswahl auflöst (4→5 Metadaten ohne Fachdatenänderung).
+Korrektur 2 vereinheitlicht Herkunftsregeln von Status und Auswahl ohne Rückkehr zu Snapshot-
+oder vollständigen Listenabfragen. Beide Implementierer arbeiten isoliert weiter.
+
+### K3-Server – frühes Folgepaket
+
+Der Backendvertrag von K1 (Sitzungsprüfung, Deletion-Ursprungsmarker und Recovery) blieb über
+alle Clientkorrekturen unverändert und wurde unabhängig geprüft. Darauf kann der separate
+K3-Serverteil aufbauen: neue Migration `20261018000400_account_deletion_job.sql` und eigene
+`190_account_deletion*`-Tests. Ergebnis: serverautoritärer Frist-/Rücknahmevertrag, begrenzter
+idempotenter Löschlauf über den vorhandenen Purge-/Redaktionspfad und überprüfbare Planung/
+Jobzustände. Keine Kotlin-/UI-/Protokoll-/001–003-Änderung, keine Liveaktivierung. Eigene
+Testkonten und Recovery-/Job-Rennen; echtes Cron und Apple-Token-Widerruf separat nachweisen.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
