@@ -93,6 +93,15 @@ import eu.advantly.ui.phone.resources.consent_version
 import eu.advantly.ui.phone.resources.support_open
 import org.jetbrains.compose.resources.stringResource
 
+/** Erhält bestehende Aufrufe mit nachgestellter Schließen-Lambda. */
+@Composable
+fun AccountScreen(
+    model: AuthViewModel,
+    google: (suspend () -> GoogleCredential)?,
+    onSupport: (() -> Unit)? = null,
+    onClose: () -> Unit,
+) = AccountScreen(model, google, onSupport, onClose, onShareExport = null)
+
 /** Optionaler Kontobereich; kein Zugriff auf lokale Matches und kein Login auf der Uhr. */
 @Composable
 fun AccountScreen(
@@ -100,6 +109,7 @@ fun AccountScreen(
     google: (suspend () -> GoogleCredential)?,
     onSupport: (() -> Unit)? = null,
     onClose: () -> Unit,
+    onShareExport: (() -> Unit)? = null,
 ) {
     val state by model.state.collectAsState()
     val uriHandler = LocalUriHandler.current
@@ -291,8 +301,13 @@ fun AccountScreen(
                         ) { Text(stringResource(Res.string.consent_decline)) }
                     }
                 }
-                TextButton(model::exportData, enabled = !state.busy, modifier = Modifier.testTag("account_export")) {
-                    Text(stringResource(Res.string.account_export))
+                val export = model.export
+                if (export != null) {
+                    CloudExportSection(export, onShareExport)
+                } else {
+                    TextButton(model::exportData, enabled = !state.busy, modifier = Modifier.testTag("account_export")) {
+                        Text(stringResource(Res.string.account_export))
+                    }
                 }
                 if (state.deletionRequested) {
                     TextButton(model::cancelDeletion, enabled = !state.busy, modifier = Modifier.testTag("account_recover")) {
@@ -369,13 +384,15 @@ fun AccountScreen(
             dismissButton = { TextButton({ confirmDeletion = false }) { Text(stringResource(Res.string.account_cancel)) } },
         )
     }
-    state.exportedData?.let { data ->
-        AlertDialog(
-            onDismissRequest = model::dismissExport,
-            title = { Text(stringResource(Res.string.account_export)) },
-            text = { SelectionContainer { Text(data, Modifier.verticalScroll(rememberScrollState()).testTag("account_export_data")) } },
-            confirmButton = { TextButton(model::dismissExport) { Text(stringResource(Res.string.account_close)) } },
-        )
+    if (model.export == null) {
+        state.exportedData?.let { data ->
+            AlertDialog(
+                onDismissRequest = model::dismissExport,
+                title = { Text(stringResource(Res.string.account_export)) },
+                text = { SelectionContainer { Text(data, Modifier.verticalScroll(rememberScrollState()).testTag("account_export_data")) } },
+                confirmButton = { TextButton(model::dismissExport) { Text(stringResource(Res.string.account_close)) } },
+            )
+        }
     }
 }
 

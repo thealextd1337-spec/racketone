@@ -1,15 +1,24 @@
 package eu.advantly.cloud.sync
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
+import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.Url
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -21,6 +30,7 @@ internal class CloudHttp(
     private val publicKey: String,
     private val http: HttpClient,
     private val timeoutMillis: Long = 20_000,
+    private val exportFactory: ExportHttpTransportFactory? = null,
 ) {
     init {
         val parsed = Url(url)
@@ -104,7 +114,81 @@ internal class CloudHttp(
             throw CloudException("cloud_connection_failed", false)
         }
 
-    fun close() = http.close()
+    /** Separater Edge-Zweig: RPC-Limits und Fehlerauswertung bleiben unveraendert. */
+    internal suspend fun <T> export(
+        suffix: String,
+        method: HttpMethod,
+        accessToken: String,
+        body: String?,
+        timeout: Long,
+        checkCurrent: () -> Unit,
+        receive: suspend (Int, String?, String?, String?, suspend (CloudDataExportSink, Long) -> Unit) -> T,
+    ): T {
+        val lease = exportFactory?.open() ?: throw CloudException("export_unavailable", false)
+        val edge = lease.client
+
+        suspend fun fence() {
+            currentCoroutineContext().ensureActive()
+            checkCurrent()
+        }
+        // Ktor haengt Lifecycle-/Call-Jobs darunter ein, auch bevor eine Response existiert.
+        // execute-Cleanup kann bei Cancellation abbrechen; native Callbacks brauchen eine eigene Barriere.
+        var requestLifetime: Job? = null
+        try {
+            return edge
+                .prepareRequest("${url.trimEnd('/')}/functions/v1/export-my-data$suffix") {
+                    requestLifetime = executionContext
+                    this.method = method
+                    header("apikey", publicKey)
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    timeout {
+                        requestTimeoutMillis = timeout
+                        connectTimeoutMillis = minOf(timeout, 20_000)
+                        socketTimeoutMillis = minOf(timeout, 20_000)
+                    }
+                    if (body != null) {
+                        header(HttpHeaders.ContentType, ContentType.Application.Json)
+                        setBody(body)
+                    }
+                }.execute { response ->
+                    fence()
+                    receive(
+                        response.status.value,
+                        response.headers[HttpHeaders.ContentType],
+                        response.headers[HttpHeaders.ContentLength],
+                        response.headers[HttpHeaders.RetryAfter],
+                    ) { sink, maximum ->
+                        val channel = response.bodyAsChannel()
+                        val buffer = ByteArray(8192)
+                        var total = 0L
+                        while (true) {
+                            fence()
+                            val count = channel.readAvailable(buffer)
+                            fence()
+                            if (count == -1) break
+                            total += count
+                            if (total > maximum) throw CloudException("export_response_invalid", false)
+                            if (count > 0) {
+                                sink.write(buffer, 0, count)
+                                fence()
+                            }
+                        }
+                    }.also { fence() }
+                }
+        } finally {
+            withContext(NonCancellable) {
+                requestLifetime?.cancel()
+                lease.cancel()
+                requestLifetime?.join()
+                lease.awaitCompletion()
+                lease.close()
+            }
+        }
+    }
+
+    fun close() {
+        http.close()
+    }
 
     private companion object {
         val ERRORS =

@@ -4,6 +4,21 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
+## Bestätigter Stand nach D1-Merge
+
+PR #69 ist auf exakt `637f8ba` mit fünf erfolgreichen Checks als `08bece9` nach main gemergt.
+Echte lokale Auth-/PostgREST-Abnahme besteht das strikte D1-XML-Gate: genau ein ausgeführter
+Test, null Fehler/Skips; 1299 pgTAP-Assertions und die vorhandenen K2-Service-/Schedulerprüfungen
+ebenfalls grün. Das ersetzt keine Hosted- oder Geräteabnahme und startet keinen Pull automatisch.
+
+Root gleicht den Phone-Exportzweig danach mit diesem Mainstand ab. Einziger Konflikt ist dieser
+Ausführungsplan; beide Nachweisketten bleiben erhalten. Phone-Produktcode und CI-Testfix `5f165d0`
+bleiben unverändert; D1-Code, Schema 7, CI und Versionskatalog werden bytegleich aus Main
+übernommen. Der gemeinsame Gesamtcheck samt Phone-/Wear-APKs ist mit 771 Tasks grün (4m10s);
+55 App-Tests ohne Fehler oder Skips. Die CI dieses neuen Mergeheads bleibt erforderlich.
+Der kurze Claude-Abschlussreview ist auf ausdrücklichen Nutzerwunsch vor der abschließenden
+Übergabe des stabilen Stands eingeplant.
+
 ### D1-CI: SDK-Paketkennung korrigiert
 
 Der erste Lauf von PR #69 auf `6d9d651` endet vor Stackstart beim SDK-Setup:
@@ -30,6 +45,47 @@ grün, realer lokaler Skip ausdrücklich abgewiesen, übriger Harness per AST un
 Gesamtcheck: 688 Tasks grün (51s). Neue CI muss den ausgeführten Stacktest bestätigen.
 ## Aktueller Integrationsstand und laufende Pakete
 
+### K2-Phone: geprüfte Basis und Android-Endkomposition
+
+Die gemeinsame Konto-UI `01a3e6f` ist unabhängig ohne Befunde freigegeben (39 frische Tests,
+neun Aufrufformen, vier DE/EN-Hell/Dunkel-Bilder bei 200 Prozent). Root integriert sie unverändert
+als `cbc4022`; Gesamtcheck samt Phone-/Wear-APKs: 767 Tasks grün. Die A+B-Dateien bleiben
+unverändert, der gemergte K2-Server bleibt auf der bestehenden Mainbasis.
+
+Android-Host einschließlich Fix `b6f5c25` ist im vollständigen Review R2 ohne Befund freigegeben:
+29 Repository-Exporttests plus vier unveränderte externe Reproduktionen frisch grün, null Skips.
+Worker-Gesamtcheck samt beiden APKs: 767 Tasks grün. Der frühere Provider-P1 (alter Grant vor
+Collectorfortschritt) ist durch drei rote, danach grüne Regressionen und den seriellen
+`ExportAccessGateway` geschlossen. Der R1-P2 (Abbruch vor LAZY-Start blockiert den Host) ist durch
+identitätsgebundenen Abschluss vor Publication behoben; auch nie gestartete Jobs und tatsächliche
+Kindjob-Enden sind berücksichtigt. Der enge Provider öffnet nur registrierte private Dateien nach
+aktueller SDK-/Kontoprüfung; der Windows-Befund wird nicht als Android-Defekt ausgegeben.
+Root übernimmt alle zehn C-Dateien bytegleich zu `b6f5c25`; gemeinsame Konto-UI, Cloudadapter,
+Server und CI unverändert. Gemeinsamer Gesamtcheck samt beiden APKs: 771 Tasks grün (1m2s).
+
+K2-D2 ist einschließlich Fix `0019d83` umgesetzt, ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
+direkten Kompositionstest. Dieselbe Auth-Instanz liefert den Exportport; die aktuelle Activity
+besitzt den Sharecallback, der langlebige Host hält sie nicht. C-Dateien bleiben unberührt;
+spätere C-Korrekturen übernimmt Root. Vier neue Kompositionstests und Worker-Gesamtcheck samt APKs
+771 Tasks grün. Der Test-P2 aus R1 ist mit expliziten Factory-Testwerten geschlossen;
+öffentliche Nullargument-API und Produktionsdefaults aus BuildConfig bleiben erhalten.
+Review R2 gibt frei: vier Kompositions- und 27 Hosttests mit nichtleeren Fake-Properties,
+zusätzlich 23 Auth-/Lifecycle- und 13 Konto-UI-Tests frisch grün, keine Skips.
+Root übernimmt die drei Kompositionsdateien bytegleich zu `0019d83`, C weiterhin bytegleich
+zum freigegebenen `b6f5c25`. Gemeinsamer Gesamtcheck samt beiden APKs: 767 Tasks grün (47s),
+54 App-Tests ohne Fehler oder Skips. Frischer Gesamtintegrationsreview und PR-CI stehen aus.
+Kein Push/PR aus den Umsetzungsagenten,
+keine automatische Exportabfrage. Gesamtfreigabe erst nach Kompositionsreview, gemeinsamer
+Integration und relevanter CI. PR #68 ist inzwischen als `6c45ac5` auf main; dessen Baum ist
+bytegleich zur bereits enthaltenen Basis `868a3a2`. Squash-Abgleich `78c4301` erhält alle Exportdateien.
+
+- C-Gesamtreview: `advantly-20261018-k2-phone-host-review-r1`.
+- C-Review nach Fix: `advantly-20261018-k2-phone-host-review-r2`.
+- D2-Umsetzung: `advantly-20261018-k2-android-composition-impl-r1`.
+- D2-Review: `advantly-20261018-k2-android-composition-review-r1`.
+- D2-Review nach Fix: `advantly-20261018-k2-android-composition-review-r2`.
+
+Diese IDs haben den vollständigen T3-Taskpräfix, der unterhalb dieser Übersicht dokumentiert ist.
 PR #68 ist nach erfolgreicher Ubuntu- und Apple-CI auf `868a3a2` als `6c45ac5` nach main
 gemergt. Admin und Supabase waren in diesem Lauf ausdrücklich per Pfadfilter übersprungen;
 ihre frühere K2-Abnahme aus #67 bleibt getrennt belegt. D1 übernimmt den Mainstand nach den

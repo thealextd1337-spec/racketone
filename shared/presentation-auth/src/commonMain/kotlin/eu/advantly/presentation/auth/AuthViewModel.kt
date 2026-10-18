@@ -40,11 +40,32 @@ class AuthViewModel(
     private val workScope: CoroutineScope? = null,
     val support: eu.advantly.presentation.support.SupportViewModel? = null,
     val upload: PhoneUploadPort? = null,
+    val export: PhoneExportPort? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
-        val uploads = upload
-        if (uploads == null) auth.close() else uploads.close(auth::close)
+        var closesStarted = false
+        var uploadDrained = upload == null
+        var exportDrained = export == null
+        var authClosed = false
+
+        fun closeAuthWhenDrained() {
+            if (closesStarted && uploadDrained && exportDrained && !authClosed) {
+                authClosed = true
+                auth.close()
+            }
+        }
+        // Auch synchrone Drain-Callbacks dürfen den zweiten Port nicht überholen.
+        upload?.close {
+            uploadDrained = true
+            closeAuthWhenDrained()
+        }
+        export?.close {
+            exportDrained = true
+            closeAuthWhenDrained()
+        }
+        closesStarted = true
+        closeAuthWhenDrained()
         super.onCleared()
     }
 
