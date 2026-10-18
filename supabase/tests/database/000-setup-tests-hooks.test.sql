@@ -13,6 +13,34 @@ create table if not exists tests.users (
 );
 grant select on tests.users to anon, authenticated, service_role;
 
+-- Nur Testsetup: explizit erzeugte Sitzung bleibt auch nach einem Widerruf dieselbe Fixture-ID.
+create table if not exists tests.account_sessions(
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  session_id uuid not null
+);
+grant select on tests.account_sessions to anon, authenticated, service_role;
+create or replace function tests.create_auth_session(p_profile uuid) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare v_session uuid := gen_random_uuid();
+begin
+  insert into auth.sessions(id,user_id,created_at,updated_at,not_after)
+    values(v_session,p_profile,now(),now(),now()+interval '1 day');
+  insert into tests.account_sessions values(p_profile,v_session)
+    on conflict(profile_id) do update set session_id=excluded.session_id;
+  return v_session;
+end;
+$$;
+revoke all on function tests.create_auth_session(uuid) from public, anon, authenticated;
+
+create or replace function tests.authenticate_session(p_profile uuid, p_session uuid) returns void
+language plpgsql set search_path = '' as $$
+begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',p_profile,'role','authenticated',
+    'session_id',p_session,'exp',extract(epoch from now()+interval '1 hour')::bigint)::text,true);
+end;
+$$;
+
 -- Auth-Nutzer anlegen (Trigger erzeugt Profil + Einstellungen); optional Onboarding als erledigt markieren.
 create or replace function tests.create_user(p_identifier text, p_onboard boolean default true,
                                              p_country text default 'AT')
@@ -27,6 +55,7 @@ begin
   insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data, aud, role, created_at, updated_at)
   values (v_id, p_identifier || '@test.advantly.eu', jsonb_build_object('test_identifier', p_identifier),
           '{}'::jsonb, 'authenticated', 'authenticated', now(), now());
+  perform tests.create_auth_session(v_id);
   insert into tests.users (identifier, id) values (p_identifier, v_id)
   on conflict (identifier) do update set id = excluded.id;
   if p_onboard then
@@ -52,19 +81,21 @@ $$;
 -- Negative Sitzungs-/Proof-Fälle werden ausdrücklich in 170 ohne diese Komfortfixture geprüft.
 create table if not exists tests.cloud_context (
   profile_id uuid primary key references auth.users(id) on delete cascade,
-  session_id uuid not null default gen_random_uuid(),
+  session_id uuid not null,
   installation_id uuid not null default gen_random_uuid(),
   device_id uuid not null default gen_random_uuid()
 );
 grant select on tests.cloud_context to authenticated;
 create or replace function tests.prepare_cloud_context(p_profile uuid)
 returns tests.cloud_context language plpgsql security definer set search_path = '' as $$
-declare v_context tests.cloud_context;
+declare
+  v_context tests.cloud_context;
+  v_session uuid;
 begin
-  insert into tests.cloud_context(profile_id) values (p_profile) on conflict do nothing;
+  select session_id into strict v_session from tests.account_sessions where profile_id=p_profile;
+  insert into tests.cloud_context(profile_id,session_id) values (p_profile,v_session)
+    on conflict(profile_id) do update set session_id=excluded.session_id;
   select * into strict v_context from tests.cloud_context where profile_id = p_profile;
-  insert into auth.sessions(id, user_id, created_at, updated_at)
-    values (v_context.session_id, p_profile, now(), now()) on conflict do nothing;
   insert into public.devices(id, profile_id) values (v_context.device_id, p_profile) on conflict do nothing;
   insert into private.cloud_installations(profile_id, installation_id, device_id, proof_digest)
     values (p_profile, v_context.installation_id, v_context.device_id, sha256(decode(repeat('a1',32),'hex')))
@@ -89,9 +120,7 @@ begin
     raise exception 'Testnutzer % fehlt', p_identifier;
   end if;
   v_context := tests.prepare_cloud_context(v_id);
-  perform set_config('role', 'authenticated', true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_id, 'role', 'authenticated',
-    'session_id', v_context.session_id)::text, true);
+  perform tests.authenticate_session(v_id,v_context.session_id);
   perform set_config('request.headers', (coalesce(nullif(current_setting('request.headers',true),'')::jsonb,'{}'::jsonb)
     || jsonb_build_object('x-advantly-installation-id', v_context.installation_id,
       'x-advantly-installation-proof', repeat('a1',32)))::text, true);

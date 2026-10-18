@@ -29,9 +29,12 @@ def main():
         return connection
 
     def authenticate(connection, identifier):
+        session_id = connection.execute("select session_id from tests.account_sessions where profile_id=%s",
+                                        (identifier,)).fetchone()[0]
         connection.execute("set local role authenticated")
         connection.execute("select set_config('request.jwt.claims', %s, true)",
-                           (json.dumps({"sub": str(identifier), "role": "authenticated"}),))
+                           (json.dumps({"sub": str(identifier), "role": "authenticated", "session_id": str(session_id),
+                                        "exp": int(time.time()) + 3600}),))
 
     with connect() as owner, connect() as first, connect() as second, ThreadPoolExecutor(max_workers=1) as pool:
         fixtures = []
@@ -86,6 +89,44 @@ def main():
                 assert status == "deletion_requested" and origin == expected and current > started
                 assert not owner.execute("select private.has_current_consents(%s)", (identifier,)).fetchone()[0]
                 print("PASS", expected, "parallel request/request, request/cancel, cancel/request; Consent unverändert")
+
+            for isolation in ("read committed", "repeatable read", "serializable"):
+                name = "k1race_" + secrets.token_hex(6)
+                identifier = owner.execute("select tests.create_user(%s)", (name,)).fetchone()[0]
+                fixtures.append((name, identifier))
+                session_id = owner.execute("select session_id from tests.account_sessions where profile_id=%s",
+                                           (identifier,)).fetchone()[0]
+
+                def revoked_reader():
+                    with second.transaction():
+                        second.execute("set transaction isolation level " + isolation)
+                        authenticate(second, identifier)
+                        second.execute("select count(*) from tests.account_sessions")
+                        try:
+                            second.execute("select public.my_consent_v1('en')")
+                        except psycopg.errors.InsufficientPrivilege as error:
+                            assert str(error).splitlines()[0] == "cloud_session_changed"
+                            return
+                        raise AssertionError("Alter Session-Snapshot autorisiert widerrufene Sitzung")
+
+                with first.transaction():
+                    first.execute("select private.lock_sync()")
+                    pending = pool.submit(revoked_reader)
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        waiting = owner.execute("select wait_event from pg_stat_activity where pid=%s",
+                                                (second.info.backend_pid,)).fetchone()[0]
+                        if waiting == "advisory":
+                            break
+                        if pending.done():
+                            pending.result()
+                            raise AssertionError("RPC wartet nicht am globalen Lock")
+                        time.sleep(0.01)
+                    else:
+                        raise AssertionError("Lock-Wartezustand fehlt")
+                    owner.execute("delete from auth.sessions where id=%s", (session_id,))
+                pending.result(timeout=5)
+                print("PASS", isolation, "Sessionwiderruf während Lock-Wartezeit wird nicht übergangen")
         finally:
             for name, identifier in fixtures:
                 owner.execute("select private.purge_account(%s)", (identifier,))

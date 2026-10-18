@@ -17,6 +17,7 @@ select is((select previous_status from private.consent_deletion_origins where pr
 update public.profile_settings set deletion_requested_at=now()-interval '1 day' where profile_id=tests.uid('rights_new');
 select tests.authenticate_as('rights_new');
 select lives_ok($$select public.request_account_deletion()$$,'Doppelter Antrag idempotent');
+reset role;
 select is((select deletion_requested_at from public.profile_settings where profile_id=tests.uid('rights_new')),
   now()-interval '1 day','Wiederholung verlängert die Karenz nicht');
 select tests.authenticate_as('rights_other');
@@ -52,12 +53,13 @@ update public.profile_settings set deletion_requested_at=now()-interval '14 days
 select tests.authenticate_as('rights_active');
 select throws_ok($$select public.cancel_account_deletion()$$,'P0001','no_deletion_pending','Karenzgrenze erlaubt keine verspätete Rücknahme');
 select public.request_account_deletion();
+reset role;
 select is((select deletion_requested_at from public.profile_settings where profile_id=tests.uid('rights_active')),
   now()-interval '14 days','Wiederholung nach Ablauf öffnet kein neues Fenster');
 reset role;
 select private.purge_account(tests.uid('rights_active'));
 select is((select count(*)::int from private.consent_deletion_origins where profile_id=tests.uid('rights_active')),0,'Profil-Lifecycle entfernt privaten Marker');
-select tests.authenticate_as_id(current_setting('tests.rights_new')::uuid);
+select tests.authenticate_as('rights_new');
 select public.request_account_deletion();
 reset role;
 update public.profile_settings set deletion_requested_at=null where profile_id=tests.uid('rights_new');

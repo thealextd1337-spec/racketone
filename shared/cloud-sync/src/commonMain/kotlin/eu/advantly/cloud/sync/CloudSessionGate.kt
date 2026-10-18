@@ -26,6 +26,9 @@ internal class CloudLease(
     val credentials: CloudCredentials,
     val requiresConsent: Boolean = false,
     val consentGeneration: Long = 0,
+    val profileRevision: Long? = null,
+    val cloudRevision: Long = 0,
+    val canResumeCloud: Boolean = false,
 )
 
 /**
@@ -44,6 +47,9 @@ class CloudSessionGate internal constructor(
     private var consentGeneration = 0L
     private var identity: CloudCredentials? = null
     private var acceptSdkSession = true
+    private var cloudSuspended = false
+    private var profileRevision = 0L
+    private var cloudRevision = 0L
     private var uploadSession: CloudUploadSession? = null
     private var ownershipActive = false
     private val requests = mutableMapOf<Job, Boolean>()
@@ -57,6 +63,9 @@ class CloudSessionGate internal constructor(
         confined()
         check(generation < Long.MAX_VALUE)
         generation++
+        profileRevision++
+        cloudRevision++
+        cloudSuspended = false
         val shouldLeave = leaveIdentity && (ownershipActive || forceLeave)
         ownershipActive = false
         identity = null
@@ -77,6 +86,48 @@ class CloudSessionGate internal constructor(
         acceptSdkSession = false
         invalidate(leaveIdentity, forceLeave = true)
         return generation
+    }
+
+    /** Sperrt Cloud-Arbeit, erhält aber die Auth-Identität für serververifizierte Kontorechte. */
+    internal fun suspendCloud(leaveIdentity: Boolean = false) {
+        confined()
+        synchronize()
+        cloudSuspended = true
+        check(profileRevision < Long.MAX_VALUE)
+        profileRevision++
+        check(cloudRevision < Long.MAX_VALUE)
+        cloudRevision++
+        check(consentGeneration < Long.MAX_VALUE)
+        consentGeneration++
+        val shouldLeave = leaveIdentity && ownershipActive
+        ownershipActive = false
+        uploadSession = null
+        mutable.value = null
+        try {
+            uploads?.deactivate()
+        } finally {
+            val cloudRequests = requests.filterValues { it }.keys.toList()
+            cloudRequests.forEach { it.cancel(CancellationException("cloud_session_changed")) }
+            cloudRequests.forEach(requests::remove)
+            ownership?.detachAccountSession()
+            if (shouldLeave) ownership?.leaveAccount()
+        }
+    }
+
+    /** Ein neuer Profilversuch entwertet ältere Antworten, auch ohne Auth-Kontowechsel. */
+    internal fun captureProfile(canResumeCloud: Boolean = true): CloudLease {
+        val lease = capture(requireProfile = false)
+        check(profileRevision < Long.MAX_VALUE)
+        profileRevision++
+        return CloudLease(
+            lease.generation,
+            lease.credentials,
+            requiresConsent = false,
+            consentGeneration = lease.consentGeneration,
+            profileRevision = profileRevision,
+            cloudRevision = cloudRevision,
+            canResumeCloud = canResumeCloud,
+        )
     }
 
     internal fun completeTransition(expected: Long) {
@@ -116,11 +167,17 @@ class CloudSessionGate internal constructor(
         if (!acceptSdkSession) changed()
         val sdk = credentials() ?: changed()
         if (requireProfile) requireCloudProfile()
-        return CloudLease(generation, sdk, requiresConsent = requireProfile, consentGeneration = consentGeneration)
+        return CloudLease(
+            generation,
+            sdk,
+            requiresConsent = requireProfile,
+            consentGeneration = consentGeneration,
+            cloudRevision = cloudRevision,
+        )
     }
 
     private fun requireCloudProfile() {
-        if (mutable.value?.onboarded != true || mutable.value?.deletionRequested != false) {
+        if (cloudSuspended || mutable.value?.onboarded != true || mutable.value?.deletionRequested != false) {
             throw CloudException("profile_not_active", true)
         }
         if (mutable.value?.consentStatus != ConsentStatus.CURRENT) {
@@ -135,9 +192,10 @@ class CloudSessionGate internal constructor(
         ) {
             changed()
         }
+        if (lease.profileRevision != null && lease.profileRevision != profileRevision) changed()
         if (lease.requiresConsent) {
             requireCloudProfile()
-            if (lease.consentGeneration != consentGeneration) changed()
+            if (lease.consentGeneration != consentGeneration || lease.cloudRevision != cloudRevision) changed()
         }
     }
 
@@ -153,9 +211,16 @@ class CloudSessionGate internal constructor(
             consentGeneration++
         }
         if (profile.deletionRequested) {
-            stop()
+            suspendCloud(leaveIdentity = true)
             mutable.value = profile.copy(generation = generation)
             return
+        }
+        if (cloudSuspended) {
+            if (lease.profileRevision == null || !lease.canResumeCloud || profile.consentStatus != ConsentStatus.CURRENT) {
+                mutable.value = profile.copy(generation = generation)
+                return
+            }
+            cloudSuspended = false
         }
         if (profile.onboarded && profile.consentStatus != ConsentStatus.CURRENT) {
             mutable.value = profile.copy(generation = generation)

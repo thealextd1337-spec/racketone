@@ -1,5 +1,47 @@
 -- K1: Fachliche Versionen kommen vom Betreiber nach Textprüfung, niemals vom Client.
 -- Die Platzhalter sind ausdrücklich NICHT freigegeben. Es gibt bisher keinen Nutzungsbedingungen-Link.
+create function private.require_account_read_committed() returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if current_setting('transaction_isolation') <> 'read committed' then
+    perform private.fail('cloud_session_changed', '42501');
+  end if;
+end;
+$$;
+revoke all on function private.require_account_read_committed() from public, anon, authenticated;
+
+-- Unabhängiger Kontorechte-Prüfer: keine Kopplung an Gerätebindung, Consent oder aktive Cloud-Profile.
+create function private.require_account_session() returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_claims jsonb := auth.jwt();
+  v_session uuid;
+  v_exp numeric;
+begin
+  perform private.require_account_read_committed();
+  if jsonb_typeof(v_claims->'exp') is distinct from 'number' then
+    perform private.fail('cloud_session_changed', '42501');
+  end if;
+  begin
+    v_session := nullif(v_claims->>'session_id','')::uuid;
+    v_exp := (v_claims->>'exp')::numeric;
+  exception when invalid_text_representation or numeric_value_out_of_range then
+    perform private.fail('cloud_session_changed', '42501');
+  end;
+  if v_uid is null or v_session is null or v_exp is null
+    or not (v_exp > extract(epoch from clock_timestamp())) then
+    perform private.fail('cloud_session_changed', '42501');
+  end if;
+  if not exists (select 1 from auth.sessions s where s.id = v_session and s.user_id = v_uid
+      and (s.not_after is null or s.not_after > clock_timestamp())) then
+    perform private.fail('cloud_session_changed', '42501');
+  end if;
+  return v_uid;
+end;
+$$;
+revoke all on function private.require_account_session() from public, anon, authenticated;
+
 create table private.consent_versions (
   document_type text not null check (document_type in ('TERMS', 'PRIVACY')),
   version text not null check (length(version) between 1 and 100),
@@ -100,7 +142,8 @@ create trigger zz_lock_sync before insert or update or delete on private.consent
 
 create function private.has_current_consents(p_profile uuid default auth.uid()) returns boolean
 language sql stable security definer set search_path = '' as $$
-  select count(*) = 2 and bool_and(v.approved_at is not null and coalesce(h.accepted, false))
+  select current_setting('transaction_isolation') = 'read committed'
+    and count(*) = 2 and bool_and(v.approved_at is not null and coalesce(h.accepted, false))
   from private.consent_versions v
   left join lateral (select accepted from private.consent_history h where h.profile_id = p_profile
     and h.document_type = v.document_type and h.version = v.version order by h.id desc limit 1) h on true
@@ -111,6 +154,7 @@ create function private.require_current_consents() returns uuid
 language plpgsql security definer set search_path = '' as $$
 declare v_uid uuid := auth.uid();
 begin
+  perform private.require_account_read_committed();
   perform private.lock_sync();
   if v_uid is null or not private.has_current_consents(v_uid) then
     perform private.fail('consent_required', '42501');
@@ -147,6 +191,7 @@ begin
   -- Wie my_auth_profile: Katalogwechsel und Kontostand gemeinsam serialisieren.
   perform private.lock_sync();
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then perform private.fail('not_authenticated', '42501'); end if;
+  perform private.require_account_session();
   if p_language is null or p_language not in ('de', 'en') then perform private.fail('consent_language_invalid'); end if;
   return private.consent_state(v_uid, p_language);
 end;
@@ -158,6 +203,7 @@ declare v_uid uuid := auth.uid(); v_doc jsonb; v_language text; v_previous boole
 begin
   perform private.lock_sync();
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then perform private.fail('not_authenticated', '42501'); end if;
+  perform private.require_account_session();
   if p_accept is null or jsonb_typeof(p_documents) is distinct from 'array' then perform private.fail('consent_documents_invalid'); end if;
   if jsonb_array_length(p_documents) <> 2 then perform private.fail('consent_documents_invalid'); end if;
   if (select count(distinct d->>'type') from jsonb_array_elements(p_documents) d) <> 2 then
@@ -198,6 +244,7 @@ begin
   if v_uid is null then perform private.fail('not_authenticated', '42501'); end if;
   select * into v_profile from public.profiles where id = v_uid;
   if not found then perform private.fail('profile_missing'); end if;
+  perform private.require_account_session();
   return jsonb_build_object('profileId', v_uid, 'onboarded', v_profile.status = 'active',
     'deletionRequested', v_profile.status = 'deletion_requested',
     'consentStatus', private.consent_state(v_uid, 'en')->>'status');
@@ -218,6 +265,7 @@ begin
   if not exists (select 1 from public.profile_settings where profile_id = v_uid and age_confirmed_at is not null) then
     perform private.fail('age_ticket_required');
   end if;
+  perform private.require_account_session();
   perform private.require_current_consents();
   if length(v_alias) not between 1 and 40 or v_alias ~ '[[:cntrl:]]' then perform private.fail('invalid_alias'); end if;
   if v_username is not null and v_username !~ '^[a-z0-9_.]{3,20}$' then perform private.fail('invalid_username'); end if;
@@ -248,6 +296,7 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.require_account_session();
   return jsonb_build_object(
     'support', coalesce((select jsonb_agg(private.support_ticket_json(t.id,false) - 'assignee' - 'related_id' - 'owner_id' order by t.created_at, t.id) from ops.support_tickets t where t.owner_id=v_uid),'[]'::jsonb),
     'consentHistory', (select coalesce(jsonb_agg(jsonb_build_object(
@@ -333,6 +382,7 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     perform private.fail('not_authenticated', '42501');
   end if;
+  perform private.require_account_session();
   select status into v_status from public.profiles where id = v_uid for update;
   if v_status = 'deletion_requested' then return; end if;
   if v_status not in ('onboarding', 'active') then perform private.fail('profile_not_active', '42501'); end if;
@@ -355,6 +405,7 @@ returns void language plpgsql security definer set search_path = '' as $$
 declare v_uid uuid := auth.uid(); v_previous text;
 begin
   perform private.lock_sync();
+  perform private.require_account_session();
   select o.previous_status into v_previous from private.consent_deletion_origins o
     join public.profiles p on p.id = o.profile_id join public.profile_settings s on s.profile_id = p.id
     where p.id = v_uid and p.status = 'deletion_requested' and s.deletion_requested_at > now() - interval '14 days'

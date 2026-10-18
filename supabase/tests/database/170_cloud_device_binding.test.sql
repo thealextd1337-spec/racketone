@@ -12,6 +12,8 @@ select ('17000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid,
   tests.uid(case when n = 9 then 'binding_bob' else 'binding_alice' end),
   clock_timestamp() - case when n = 2 then interval '6 minutes' else interval '0 seconds' end, now()
 from generate_series(1,9) n;
+select set_config('tests.alice_session_count',
+  (select count(*) from auth.sessions where user_id=tests.uid('binding_alice'))::text,true);
 
 create function pg_temp.identify(p_session integer default 1, p_installation integer default 1,
   p_proof text default repeat('ab',32), p_user text default 'binding_alice')
@@ -20,7 +22,8 @@ begin
   perform set_config('role','authenticated',true);
   perform set_config('request.jwt.claims',jsonb_build_object('sub',tests.uid(p_user),'role','authenticated',
     'session_id', '17000000-0000-4000-8000-' || lpad(p_session::text,12,'0'),
-    'iat',extract(epoch from clock_timestamp())::bigint)::text,true);
+    'iat',extract(epoch from clock_timestamp())::bigint,
+    'exp',extract(epoch from clock_timestamp()+interval '1 hour')::bigint)::text,true);
   perform set_config('request.headers',jsonb_build_object(
     'x-advantly-installation-id','17100000-0000-4000-8000-' || lpad(p_installation::text,12,'0'),
     'x-advantly-installation-proof',p_proof)::text,true);
@@ -178,7 +181,8 @@ select lives_ok($$select public.cloud_revoke_device_v1('17200000-0000-4000-8000-
 reset role;
 select ok((select push_token is null and push_provider is null and revoked_at is not null from public.devices
   where id='17200000-0000-4000-8000-000000000002'),'Widerruf entfernt Push-Credentials');
-select is((select count(*) from auth.sessions where user_id=tests.uid('binding_alice')),8::bigint,
+select is((select count(*) from auth.sessions where user_id=tests.uid('binding_alice')),
+  current_setting('tests.alice_session_count')::bigint,
   'Cloud-Widerruf mutiert auth.sessions nicht');
 delete from auth.sessions where id='17000000-0000-4000-8000-000000000004';
 select is((select count(*) from private.cloud_session_bindings where session_id='17000000-0000-4000-8000-000000000004'),

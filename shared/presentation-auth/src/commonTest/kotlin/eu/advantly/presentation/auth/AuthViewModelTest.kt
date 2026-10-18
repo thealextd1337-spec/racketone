@@ -130,6 +130,25 @@ class FakePhoneAuth : CloudAuthPort {
 }
 
 class AuthViewModelTest {
+    @Test fun failedDeclineDoesNotPreventIndependentAccountRights() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents())
+            }
+        val model = AuthViewModel(auth, scope)
+        auth.failure = "connection_failed"
+        model.decideConsent(false)
+        assertEquals("connection_failed", model.state.value.error)
+        auth.failure = null
+        model.exportData()
+        assertEquals("export", auth.calls.last())
+        assertEquals("{\"consentHistory\":[]}", model.state.value.exportedData)
+        model.requestDeletion()
+        model.cancelDeletion()
+        assertEquals("recover", auth.calls.last())
+    }
+
     private fun documents(version: String = "v1") =
         ConsentDocumentType.entries.map { ConsentDocument(it, version, "en", "https://advantly.eu/document", approved = true) }
 

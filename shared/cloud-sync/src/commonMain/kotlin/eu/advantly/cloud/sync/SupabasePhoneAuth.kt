@@ -17,6 +17,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,16 +59,23 @@ class SupabasePhoneAuth(
     private var closed = false
     private var accountEpoch = 0L
     private var accountIdentity: Pair<String, String>? = null
+    private val verifiedAccount = MutableStateFlow<CloudSession?>(null)
+    override val accountSession = verifiedAccount.asStateFlow()
+    private var pendingAccountMutations = 0
+    private var unconfirmedDecline = false
+    private var unconfirmedDeletion = false
+
+    private class RejectedAccount(
+        val credentials: CloudCredentials,
+        val epoch: Long,
+        val rejection: CloudException,
+    ) : Exception()
 
     init {
         lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
             client.auth.sessionStatus.collect {
                 sessions.synchronize()
-                val identity = credentials()?.let { it.profileId to it.sessionId }
-                if (identity != accountIdentity) {
-                    accountIdentity = identity
-                    accountEpoch++
-                }
+                synchronizeAccount()
             }
         }
     }
@@ -94,7 +103,32 @@ class SupabasePhoneAuth(
     fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend = SupabaseCloudBackend(sessions, transport, installation)
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
-    fun stopForDeletion() = sessions.stop()
+    fun stopForDeletion() {
+        unconfirmedDeletion = true
+        sessions.suspendCloud(leaveIdentity = true)
+    }
+
+    private fun synchronizeAccount() {
+        val identity = credentials()?.let { it.profileId to it.sessionId }
+        if (identity != accountIdentity) {
+            accountIdentity = identity
+            invalidateAccount()
+        }
+    }
+
+    private fun invalidateAccount() {
+        accountEpoch++
+        verifiedAccount.value = null
+        unconfirmedDecline = false
+        unconfirmedDeletion = false
+    }
+
+    override fun requireAccountSession(expected: CloudSession) {
+        synchronizeAccount()
+        if (closed || verifiedAccount.value?.profileId != expected.profileId || expected.generation != accountEpoch) {
+            throw CloudException("cloud_session_changed", true)
+        }
+    }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sessions.adoptionSources()
 
@@ -103,7 +137,7 @@ class SupabasePhoneAuth(
     override fun close() {
         if (closed) return
         closed = true
-        accountEpoch++
+        invalidateAccount()
         sessions.stop(leaveIdentity = false)
         lifecycle.cancel()
         client.auth.stopAutoRefreshForCurrentSession()
@@ -170,7 +204,7 @@ class SupabasePhoneAuth(
         email: String,
         ticket: String,
     ) {
-        accountEpoch++
+        invalidateAccount()
         val transition = sessions.stop()
         guarded {
             mutations.withLock {
@@ -215,19 +249,23 @@ class SupabasePhoneAuth(
         guarded {
             client.auth.awaitInitialization()
             sessions.synchronize()
+            synchronizeAccount()
             if (client.auth.currentSessionOrNull() == null) {
                 sessions.verifiedAbsent()
                 return@guarded
             }
-            val lease = sessions.capture(requireProfile = false)
+            val epoch = accountEpoch
+            val lease =
+                sessions.captureProfile(
+                    canResumeCloud = pendingAccountMutations == 0 && !unconfirmedDecline && !unconfirmedDeletion,
+                )
             val profile =
                 sessions.request(lease) {
                     Json.parseToJsonElement(
-                        transport.rpc("my_auth_profile", buildJsonObject {}, lease.credentials.accessToken),
+                        accountRequest("my_auth_profile", buildJsonObject {}, lease.credentials, epoch),
                     ) as JsonObject
                 }
-            sessions.publish(
-                lease,
+            val verified =
                 CloudSession(
                     profile.getValue("profileId").jsonPrimitive.content,
                     profile.getValue("onboarded").jsonPrimitive.boolean,
@@ -238,12 +276,16 @@ class SupabasePhoneAuth(
                             ?.content
                             ?.let { runCatching { ConsentStatus.valueOf(it) }.getOrNull() }
                             ?: ConsentStatus.UNAVAILABLE,
-                ),
-            )
+                )
+            requireAccountCurrent(lease.credentials, epoch)
+            sessions.publish(lease, verified)
+            verifiedAccount.value = verified.copy(generation = epoch)
+            if (verified.deletionRequested) unconfirmedDeletion = false
+            if (verified.consentStatus != ConsentStatus.CURRENT) unconfirmedDecline = false
         }
 
     private suspend fun newLogin(block: suspend () -> Unit) {
-        accountEpoch++
+        invalidateAccount()
         val transition = sessions.stop()
         guarded {
             mutations.withLock {
@@ -256,7 +298,7 @@ class SupabasePhoneAuth(
     }
 
     override suspend fun signOut() {
-        accountEpoch++
+        invalidateAccount()
         val transition = sessions.stop()
         try {
             boundedAuth {
@@ -286,12 +328,13 @@ class SupabasePhoneAuth(
         accept: Boolean,
     ): ConsentSnapshot =
         guarded {
+            synchronizeAccount()
             if (credentials()?.profileId != snapshot.profileId) throw CloudException("cloud_session_changed", true)
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
-            val transition = if (!accept) sessions.stop(leaveIdentity = false) else null
-            try {
-                val result =
+            if (!accept) unconfirmedDecline = true
+            val result =
+                cloudMutation {
                     accountRpc(
                         "record_consent_v1",
                         buildJsonObject {
@@ -312,41 +355,35 @@ class SupabasePhoneAuth(
                             )
                         },
                     )
-                val decoded = decodeConsent(result)
-                if (transition != null) sessions.completeTransition(transition)
-                refreshProfile()
-                requireAccountCurrent(expected, epoch)
-                decoded
-            } finally {
-                // Fehler lassen Cloud gesperrt, eine erneute serverseitige Profilprüfung bleibt aber möglich.
-                if (transition != null && sessions.isTransitionCurrent(transition)) sessions.completeTransition(transition)
-            }
+                }
+            val decoded = decodeConsent(result)
+            unconfirmedDecline = false
+            refreshProfile()
+            requireAccountCurrent(expected, epoch)
+            decoded
         }
 
     override suspend fun exportData(): String = guarded { accountRpc("export_my_data", buildJsonObject {}) }
 
     override suspend fun requestDeletion() =
         guarded {
+            synchronizeAccount()
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
-            val transition = sessions.stop()
-            try {
-                accountRpc("request_account_deletion", buildJsonObject {})
-                sessions.completeTransition(transition)
-                refreshProfile()
-                requireAccountCurrent(expected, epoch)
-            } finally {
-                if (sessions.isTransitionCurrent(transition)) sessions.completeTransition(transition)
-            }
+            unconfirmedDeletion = true
+            cloudMutation(leaveIdentity = true) { accountRpc("request_account_deletion", buildJsonObject {}) }
+            unconfirmedDeletion = false
+            refreshProfile()
+            requireAccountCurrent(expected, epoch)
         }
 
     override suspend fun cancelDeletion() =
         guarded {
+            synchronizeAccount()
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
-            accountRpc("cancel_account_deletion", buildJsonObject {})
-            val transition = sessions.stop()
-            sessions.completeTransition(transition)
+            cloudMutation { accountRpc("cancel_account_deletion", buildJsonObject {}) }
+            unconfirmedDeletion = false
             refreshProfile()
             requireAccountCurrent(expected, epoch)
         }
@@ -356,17 +393,47 @@ class SupabasePhoneAuth(
         name: String,
         params: JsonObject,
     ): String {
-        val before = credentials() ?: throw CloudException("cloud_session_changed", true)
+        synchronizeAccount()
+        val before = sessions.capture(requireProfile = false).credentials
         val epoch = accountEpoch
-        val result = transport.rpc(name, params, before.accessToken)
+        val result = accountRequest(name, params, before, epoch)
         requireAccountCurrent(before, epoch)
         return result
     }
+
+    private suspend fun <T> cloudMutation(
+        leaveIdentity: Boolean = false,
+        block: suspend () -> T,
+    ): T {
+        pendingAccountMutations++
+        try {
+            sessions.suspendCloud(leaveIdentity)
+            return block()
+        } finally {
+            pendingAccountMutations--
+        }
+    }
+
+    private suspend fun accountRequest(
+        name: String,
+        params: JsonObject,
+        credentials: CloudCredentials,
+        epoch: Long,
+    ): String =
+        try {
+            transport.rpc(name, params, credentials.accessToken)
+        } catch (error: CloudException) {
+            if (error.permission && error.reason in setOf("cloud_session_changed", "profile_missing")) {
+                throw RejectedAccount(credentials, epoch, error)
+            }
+            throw error
+        }
 
     private fun requireAccountCurrent(
         before: CloudCredentials,
         epoch: Long,
     ) {
+        synchronizeAccount()
         val after = credentials()
         if (closed || epoch != accountEpoch || before.profileId != after?.profileId || before.sessionId != after.sessionId) {
             throw CloudException("cloud_session_changed", true)
@@ -416,6 +483,15 @@ class SupabasePhoneAuth(
             block()
         } catch (e: CancellationException) {
             throw e
+        } catch (e: RejectedAccount) {
+            val current = credentials()
+            if (accountEpoch == e.epoch && current?.profileId == e.credentials.profileId &&
+                current.sessionId == e.credentials.sessionId
+            ) {
+                invalidateAccount()
+                sessions.suspendCloud()
+            }
+            throw e.rejection
         } catch (e: CloudException) {
             if (e.reason == "cloud_connection_failed") throw CloudException("connection_failed", e.permission)
             throw e
