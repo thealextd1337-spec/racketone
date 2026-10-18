@@ -4,6 +4,35 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
+## Aktueller Integrationsstand und laufende Pakete
+
+- K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
+  einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.
+- Android-Upload PR #68 ist auf `8981791` mit diesem Mainstand abgeglichen. Upload-Kotlin,
+  Android und Wear bleiben unverändert; Gesamtcheck plus beide APKs erneut 761 Tasks grün.
+  Die CI des aktuellen Heads bleibt Mergebedingung.
+- D1 ist im abhängigen Draft [PR #69](https://github.com/thealextd1337-spec/racketone/pull/69),
+  Head `6d9d651`. Vier Fachreviewrunden, Root-Integrationsreview und Stack-Harness-Review sind
+  ohne offene Befunde abgeschlossen. Der echte Auth-/PostgREST-Pull läuft erstmals in dieser CI;
+  das Gate verlangt genau einen bestandenen Test ohne Skip. Erst #68, dann D1 integrieren.
+- K2-A und K2-B sind ohne Produktabweichung im isolierten Root-Zweig
+  `p2/k2-phone-integration` als `6b798fa` kombiniert: 767 Tasks samt Phone-/Wear-APKs grün.
+  Android besitzt nachgewiesenen nativen HTTP-Abschluss; iOS/JVM-ZIP melden bis zu einem
+  eigenen Plattformnachweis vor Netzwerkzugriff ausdrücklich `export_unavailable`.
+
+| Laufendes Paket | Exklusiver Besitz | Abhängigkeit und prüfbares Ende | Task-ID |
+|---|---|---|---|
+| K2-C Android-Exporthost | Neue `PhoneExportHost`, `PrivateExportCache`, `ExportShare` und direkte Tests; dedizierter Manifest-Provider/Path; nur nötige bestehende Robolectric-Testkonfiguration | Geprüfte A+B-Basis übernehmen; exakte Länge, SHA und EOF vor privater atomarer Promotion; nur Lesefreigabe; Kontogrenzen, Ablauf und tatsächlicher Ressourcenabschluss; Gesamtcheck/APKs | `advantly-20261018-k2-phone-host-impl-r1` |
+| K2-D1 gemeinsame Konto-UI | `AuthViewModel`, `AccountScreen`, `AdvantlyApp` und direkte neue Tests | Dieselbe A+B-Basis; optionaler Exportport; Authclose erst nach Upload- und Exportdrain; echte Kontoaktionen und Export unabhängig bedienbar, DE/EN bei 200 Prozent; Gesamtcheck/APKs | `advantly-20261018-k2-phone-account-impl-r1` |
+| Root-Endintegration | Danach ausschließlich Android-`PhoneAccount`/`MainActivity`, Zusammenführung und unabhängige Reviews | Erst C und D1 prüfen, dann aktuellen Activity-Sharecallback und gemeinsamen Lifecycle integrieren; keine gehaltene Activity, keine automatische Exportabfrage | Noch nicht gestartet |
+
+Die beiden laufenden IDs verwenden den vollständigen Präfix
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3A`.
+Ihre Dateigrenzen überschneiden sich nicht. Root besitzt Dokumentation, Push/PR/CI und die spätere
+Android-Komposition; Worker verändern diese Integrationsdateien nicht. D2/D3 sind weiterhin
+vorbereitete Folgepakete ohne aktivierte Protokolländerung; B4 folgt erst auf belastbarem Pull und
+Rechte-/Redaktionsvertrag. Echte Sharesheet-, Geräte-, Apple- und Rechtsnachweise bleiben offen.
+
 ## Ausgangspunkt und Arbeitsweise
 
 U1 und U2 sind integriert. Drei Implementierer arbeiten in getrennten Git-Worktrees;
