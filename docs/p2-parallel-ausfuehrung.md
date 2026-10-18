@@ -875,6 +875,26 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+Android Review 2 bestätigt `31620a7` und den separaten Root-Kontrastfix `1f830dc` jeweils
+ohne offene Befunde. Unabhängig 21 gezielte Tests grün: elf Host-, zwei Präsentations-,
+ein Upload-UI-Matrix- und sieben Kontotests. Root übernimmt den Androidkandidaten in den
+eigenen Integrationszweig. Einziger Produktkonflikt: die einzeilige Upload-Einhängung muss
+innerhalb der bereits korrigierten Kontospalte bleiben. Alle anderen Android-/Cloud-/Data-/
+Präsentationsdateien und Ressourcen bleiben bytegleich zu `31620a7`; Root-Kontrasttest bleibt
+zusätzlich erhalten. Keine Änderungen am Authadapter, Backend-SQL oder D1.
+Gemeinsamer vollständiger Check plus Android-APK: 744 Tasks grün (1m48s),
+`advantly-android-root-integration-check.log`. Frisches Review der Integrationsauflösung folgt.
+
+K2 Integrationsreview 3 bestätigt `84ee8fc` ohne offene Befunde, einschließlich zentralem
+Deno-Pfadfilter. PR #67 ist kein Draft mehr; vollständige Service-CI auf genau diesem Head
+bleibt vor Merge erforderlich. Veraltete CI-Meldungen zu `79b5faa` und `270782b` wurden
+geprüft, nicht als Fehler beziehungsweise Freigabe des aktuellen Heads behandelt.
+
+Nächster begrenzter K2-Schnitt wird parallel lesend abgegrenzt: echter privater ZIP-Download
+auf Android mit Dateiausgabe/Freigabe, unabhängigen Kontorechten und Kontowechselfences.
+Noch kein Implementierungsbesitz vergeben; keine UI-Kollision mit der Androidintegration.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-scope-r1`.
+
 Android Review 1 auf `2e135ac`: funktional `ship`, 506 Fokusprüfungen und 14 zusätzliche
 nicht kooperative Bind-/Push-/Close-Rennen grün. Ein P3: Refresh vor erster Bindung aktiv,
 aber ohne Wirkung. Fix `31620a7` ergänzt ausschließlich `canRefreshStatus=false` als Default,

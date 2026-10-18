@@ -49,8 +49,15 @@ class AccountIdentityRepository internal constructor(
                         previous.local == if (local) 1L else 0L
                 ),
         )
-        queries.putSource(deviceId, selfId, kind, scope, if (local) 1L else 0L)
-        queries.reportSourceCount(eventCount, deviceId)
+        database.transaction {
+            queries.putSource(deviceId, selfId, kind, scope, if (local) 1L else 0L)
+            queries.reportSourceCount(eventCount, deviceId)
+            data.cloud.resolvePlayerMetadataSources(selfId)
+            // Auch die neue Self-Aliasquelle kann Matches einer anderen eigenen Genesisquelle belegen.
+            database.cloudUploadQueries.deviceOwner(deviceId).executeAsOneOrNull()?.let {
+                data.cloud.resolveOwnedMatchMetadataSources(it)
+            }
+        }
     }
 
     fun localSources(): List<LocalSourceIdentity> =
@@ -59,6 +66,12 @@ class AccountIdentityRepository internal constructor(
         }
 
     fun sourceScope(deviceId: String): String? = queries.source(deviceId).executeAsOneOrNull()?.scope_id
+
+    /** Nur belegte Herkunft mit unveränderlichem Eigentümer; weder Kontobereich noch Events beweisen Eigentum. */
+    fun ownedSources(expectedProfile: String): List<OwnedSourceIdentity> {
+        require(expectedProfile.isNotBlank())
+        return queries.ownedSourceCatalog(expectedProfile).executeAsList().map { OwnedSourceIdentity(it.device_id, it.kind) }
+    }
 
     /** Generierung außen; Transaktion verändert weder historische Spieler-IDs noch Event-Payloads. */
     fun select(
@@ -175,4 +188,9 @@ data class LocalSourceIdentity(
     val scope: String,
     val kind: String,
     val eventCount: Long,
+)
+
+data class OwnedSourceIdentity(
+    val deviceId: String,
+    val kind: String,
 )

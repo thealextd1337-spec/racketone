@@ -231,6 +231,7 @@ fun AccountScreen(
                 }
             }
             if (state.authenticated) {
+                model.upload?.let { CloudUploadSection(it) }
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(
