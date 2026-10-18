@@ -573,6 +573,19 @@ Review bestätigt separat 89 Cloud-/100 Data-Tests, Migration, vollständigen Ch
 Projektion zuletzt, fremde Antwort-IDs sowie alte Retry-Versuche nach Rebind/Sitzungswechsel
 und Suspend grün. U4 wird erst nach Korrektur und neuem Review integriert.
 
+K3 Review 1 auf `683f6db`: Ship für den begrenzten Serverteilschnitt, keine belegten
+P1/P2/P3. Unabhängige frische Migration und vollständiger SQL-Lauf im eigenen Harness:
+1223 Assertions bestanden, ausschließlich bekannte zwei 110-Cronfehler und drei explizite
+190-Cron-Skips. Frist-/Authwiderruf-/Job-/Recoveryrennen bestätigt. Zusätzlicher Timeout
+während der zweiten Löschung rollt beide Konten vollständig zurück; stabiler Fehlerstatus,
+Retry löscht genau zwei. UTC-/Fristkorrektur erhält Owner/ACL/Signatur und übrigen Körper.
+
+Der Orchestrator übernimmt ausschließlich die acht geprüften K3-Dateien unverändert.
+Entwurfs-PR des gemeinsamen Integrationszweigs liefert als nächsten Nachweis die echte
+Supabase-CI für 003/004 und deren Scheduler-Katalogtests. K1 Fix5 und U4 Fix3 bleiben
+getrennte laufende Aufträge; der Integrations-PR ist vor deren Abschluss und gemeinsamer
+Abnahme nicht mergebereit. Reale Cron-Ausführung, Hosted, K3-UI, D3 und Apple bleiben offen.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
