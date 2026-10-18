@@ -53,6 +53,7 @@ class AuthViewModel(
     private var adoptionGeneration: Long? = null
     private var displayedSession: CloudSession? = null
     private var consentLanguage = "en"
+    private var actionRevision = 0L
     private val scope get() = workScope ?: viewModelScope
 
     init {
@@ -246,14 +247,8 @@ class AuthViewModel(
         if (!sameSession(session, auth.accountSession.value) || (consent != null && consent.profileId != session?.profileId)) {
             throw CloudException("cloud_session_changed", true)
         }
-        val candidates =
-            if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
-                auth.adoptionSources()
-            } else {
-                emptyList()
-            }
         displayedSession = session
-        adoptionGeneration = auth.session.value?.generation
+        adoptionGeneration = null
         mutable.value =
             AuthState(
                 step =
@@ -264,15 +259,34 @@ class AuthViewModel(
                         session.onboarded -> AuthStep.ACCOUNT
                         else -> AuthStep.ALIAS
                     },
+                busy = mutable.value.busy,
                 deletionRequested = session?.deletionRequested == true,
-                adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
                 authenticated = session != null,
                 consent = consent,
             )
+        if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+            val candidates =
+                try {
+                    auth.adoptionSources()
+                } catch (error: CloudException) {
+                    if (!error.permission ||
+                        error.reason !in setOf("profile_not_active", "consent_required", "consent_unavailable")
+                    ) {
+                        throw error
+                    }
+                    emptyList()
+                }
+            auth.requireAccountSession(session)
+            adoptionGeneration = auth.session.value?.generation
+            mutable.value =
+                mutable.value.copy(adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) })
+        }
     }
 
     private fun runAction(block: suspend () -> Unit) {
         if (mutable.value.busy) return
+        check(actionRevision < Long.MAX_VALUE)
+        val revision = ++actionRevision
         mutable.value = mutable.value.copy(busy = true, error = null)
         scope.launch {
             try {
@@ -280,6 +294,7 @@ class AuthViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (revision != actionRevision) return@launch
                 val reason = (e as? CloudException)?.reason ?: "connection_failed"
                 val reset =
                     reason in setOf("age_ticket_expired", "age_ticket_bound", "age_ticket_required", "age_retry_later", "age_below_minimum")
@@ -290,7 +305,7 @@ class AuthViewModel(
                         error = reason.takeUnless { it == "auth_cancelled" },
                     )
             } finally {
-                mutable.value = mutable.value.copy(busy = false)
+                if (revision == actionRevision) mutable.value = mutable.value.copy(busy = false)
             }
         }
     }

@@ -1,5 +1,6 @@
 package eu.advantly.presentation.auth
 
+import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudInstallation
 import eu.advantly.cloud.sync.ConsentStatus
@@ -13,11 +14,14 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.io.encoding.Base64
@@ -25,8 +29,122 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ConsentAccountIntegrationTest {
+    @Test fun previousActionFinallyCannotFinishNewEmailRequest(): Unit =
+        runBlocking {
+            val sent = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val auth =
+                object : CloudAuthPort by FakePhoneAuth() {
+                    override suspend fun sendEmailCode(
+                        email: String,
+                        ticket: String,
+                    ) {
+                        sent.complete(Unit)
+                        release.await()
+                    }
+                }
+            val scope = CoroutineScope(coroutineContext + SupervisorJob())
+            val model = AuthViewModel(auth, scope)
+            try {
+                withTimeout(5_000) { model.state.first { !it.busy } }
+                var armed = true
+                scope.launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                    model.state.collect { state ->
+                        if (armed && !state.busy && state.step == AuthStep.PROVIDER) {
+                            armed = false
+                            model.sendCode("alex@test.advantly.eu")
+                        }
+                    }
+                }
+                model.checkAge("AT", "2000-01-01")
+                withTimeout(5_000) { sent.await() }
+                assertTrue(model.state.value.busy, "The previous action must not complete the pending email request")
+                release.complete(Unit)
+                val result = withTimeout(5_000) { model.state.first { !it.busy } }
+                assertEquals(AuthStep.CODE, result.step)
+                assertNull(result.error)
+            } finally {
+                release.complete(Unit)
+                scope.cancel()
+            }
+        }
+
+    @Test fun settledStateCannotFinishNextExportBeforeItsRevocationResponse(): Unit =
+        runBlocking {
+            val sent = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var profiles = 0
+            val sdk =
+                createSupabaseClient("https://auth.test", "public-key") {
+                    defaultLogLevel = LogLevel.NONE
+                    install(Auth) { minimalConfig() }
+                    httpEngine =
+                        MockEngine { request ->
+                            val name = request.url.encodedPath.substringAfterLast('/')
+                            val (body, status) =
+                                when (name) {
+                                    "my_auth_profile" -> {
+                                        profiles++
+                                        """
+                                        {"profileId":"alice","onboarded":true,"deletionRequested":false,"consentStatus":"REQUIRED"}
+                                        """.trimIndent() to HttpStatusCode.OK
+                                    }
+
+                                    "my_consent_v1" -> {
+                                        """{"profileId":"alice","status":"REQUIRED","documents":[]}""" to HttpStatusCode.OK
+                                    }
+
+                                    "export_my_data" -> {
+                                        sent.complete(Unit)
+                                        release.await()
+                                        """{"message":"cloud_session_changed"}""" to HttpStatusCode.Forbidden
+                                    }
+
+                                    else -> {
+                                        error(name)
+                                    }
+                                }
+                            respond(body, status, headersOf("Content-Type", "application/json"))
+                        }
+                }
+            sdk.auth.awaitInitialization()
+            sdk.auth.importAuthToken(token(), autoRefresh = false)
+            val scope = CoroutineScope(coroutineContext + SupervisorJob())
+            val auth = SupabasePhoneAuth(sdk, "secret", scope = scope)
+            val model = AuthViewModel(auth, scope)
+            try {
+                withTimeout(5_000) { model.state.first { !it.busy } }
+                var armed = false
+                scope.launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                    model.state.collect { state ->
+                        if (armed && !state.busy && state.consent != null) {
+                            armed = false
+                            model.exportData()
+                        }
+                    }
+                }
+                armed = true
+                model.refresh()
+                withTimeout(5_000) { sent.await() }
+                assertEquals(2, profiles)
+                assertTrue(model.state.value.busy, "Only the export response may complete this action")
+                assertEquals("alice", auth.accountSession.value?.profileId)
+                release.complete(Unit)
+                withTimeout(5_000) { model.state.first { !it.busy } }
+                assertNull(auth.accountSession.value)
+                assertFalse(model.state.value.authenticated)
+                assertEquals(2, profiles, "No stale profile request follows the revocation")
+            } finally {
+                release.complete(Unit)
+                auth.close()
+                scope.cancel()
+            }
+        }
+
     private fun token(
         owner: String = "alice",
         session: String = "session-a",
@@ -88,7 +206,7 @@ class ConsentAccountIntegrationTest {
                 }
             sdk.auth.awaitInitialization()
             sdk.auth.importAuthToken(token(), autoRefresh = false)
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val scope = CoroutineScope(coroutineContext + SupervisorJob())
             val auth = SupabasePhoneAuth(sdk, "secret", scope = scope)
             val model = AuthViewModel(auth, scope)
 
@@ -141,7 +259,7 @@ class ConsentAccountIntegrationTest {
                 }
             sdk.auth.awaitInitialization()
             sdk.auth.importAuthToken(token(), autoRefresh = false)
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val scope = CoroutineScope(coroutineContext + SupervisorJob())
             val auth = SupabasePhoneAuth(sdk, "secret", scope = scope)
             try {
                 auth.refreshProfile()

@@ -159,8 +159,6 @@ class AccountMutationRevisionTest {
                 assertFailsWith<CloudException> { auth.sessions.capture() }
                 auth.requireAccountSession(account)
                 assertEquals("exported", auth.exportData())
-                auth.refreshProfile()
-                assertFailsWith<CloudException> { auth.sessions.capture() }
                 if (older == Intent.DELETE || newer == Intent.DELETE) {
                     assertNull(data.accountIdentities.profile)
                     assertNotEquals(originalDevice, phone.deviceId)
@@ -177,6 +175,18 @@ class AccountMutationRevisionTest {
                 }
                 assertEquals(historical, data.events.eventsFor(match.value))
                 assertEquals(originalScope, data.accountIdentities.sourceScope(originalDevice.value))
+                auth.refreshProfile()
+                if (newer == Intent.CANCEL) {
+                    // Erst dieser frische Beweis darf die neueste, bereits beendete Rücknahme quittieren.
+                    assertEquals(
+                        "alice",
+                        auth.sessions
+                            .capture()
+                            .credentials.profileId,
+                    )
+                } else {
+                    assertFailsWith<CloudException> { auth.sessions.capture() }
+                }
                 failNewer = false
                 perform(auth, if (newer == Intent.DECLINE) Intent.ACCEPT else Intent.CANCEL)
                 assertEquals(

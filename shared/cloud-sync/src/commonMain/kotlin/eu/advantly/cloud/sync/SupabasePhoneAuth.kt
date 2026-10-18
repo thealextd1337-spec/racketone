@@ -64,7 +64,15 @@ class SupabasePhoneAuth(
     private var pendingAccountMutations = 0
     private var mutationRevision = 0L
     private var unconfirmedDecline = false
-    private var unconfirmedDeletion = false
+
+    private enum class DeletionIntent { REQUEST, RECOVERY }
+
+    private data class PendingDeletion(
+        val intent: DeletionIntent,
+        val revision: Long,
+    )
+
+    private var pendingDeletion: PendingDeletion? = null
 
     private class RejectedAccount(
         val credentials: CloudCredentials,
@@ -105,8 +113,7 @@ class SupabasePhoneAuth(
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() {
-        reserveMutation()
-        unconfirmedDeletion = true
+        pendingDeletion = PendingDeletion(DeletionIntent.REQUEST, reserveMutation())
         sessions.suspendCloud(leaveIdentity = true)
     }
 
@@ -122,7 +129,7 @@ class SupabasePhoneAuth(
         accountEpoch++
         verifiedAccount.value = null
         unconfirmedDecline = false
-        unconfirmedDeletion = false
+        pendingDeletion = null
     }
 
     override fun requireAccountSession(expected: CloudSession) {
@@ -261,9 +268,13 @@ class SupabasePhoneAuth(
             }
             val epoch = accountEpoch
             val revision = mutationRevision
+            // Nur ein nach beendetem Rücknahmeversuch gestarteter Profilabruf kann dessen Verlust quittieren.
+            val recoveryProof =
+                pendingAccountMutations == 0 &&
+                    pendingDeletion == PendingDeletion(DeletionIntent.RECOVERY, revision)
             val lease =
                 sessions.captureProfile(
-                    canResumeCloud = pendingAccountMutations == 0 && !unconfirmedDecline && !unconfirmedDeletion,
+                    canResumeCloud = pendingAccountMutations == 0 && !unconfirmedDecline && (pendingDeletion == null || recoveryProof),
                 )
             val profile =
                 sessions.request(lease) {
@@ -287,7 +298,14 @@ class SupabasePhoneAuth(
             requireMutationCurrent(revision)
             sessions.publish(lease, verified)
             verifiedAccount.value = verified.copy(generation = epoch)
-            if (verified.deletionRequested) unconfirmedDeletion = false
+            if (pendingAccountMutations == 0 &&
+                (
+                    (verified.deletionRequested && pendingDeletion == PendingDeletion(DeletionIntent.REQUEST, revision)) ||
+                        (!verified.deletionRequested && recoveryProof)
+                )
+            ) {
+                pendingDeletion = null
+            }
             if (verified.consentStatus != ConsentStatus.CURRENT) unconfirmedDecline = false
         }
 
@@ -381,11 +399,11 @@ class SupabasePhoneAuth(
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
             val revision = reserveMutation()
-            unconfirmedDeletion = true
+            pendingDeletion = PendingDeletion(DeletionIntent.REQUEST, revision)
             cloudMutation(leaveIdentity = true) { accountRpc("request_account_deletion", buildJsonObject {}) }
             requireAccountCurrent(expected, epoch)
             requireMutationCurrent(revision)
-            unconfirmedDeletion = false
+            pendingDeletion = null
             refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
         }
@@ -396,11 +414,11 @@ class SupabasePhoneAuth(
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
             val revision = reserveMutation()
-            unconfirmedDeletion = true
+            pendingDeletion = PendingDeletion(DeletionIntent.RECOVERY, revision)
             cloudMutation { accountRpc("cancel_account_deletion", buildJsonObject {}) }
             requireAccountCurrent(expected, epoch)
             requireMutationCurrent(revision)
-            unconfirmedDeletion = false
+            pendingDeletion = null
             refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
         }
