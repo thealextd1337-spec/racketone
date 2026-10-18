@@ -36,6 +36,75 @@ internal class AfterPullPort(
 }
 
 class CloudPullBoundaryTest {
+    @Test
+    fun invalidatedNonCooperativeWatermarkCannotAcknowledgeOrPublishOldSuccess() =
+        runBlocking {
+            for (mode in listOf("account", "relogin", "consent", "consent-regain", "logout", "deletion", "rebind")) {
+                PullFixture().use { f ->
+                    f.bind()
+                    f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
+                    f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
+                    f.watermarks = {
+                        withContext(NonCancellable) {
+                            when (mode) {
+                                "account" -> {
+                                    f.credentials = CloudCredentials("bob", "session-bob", "token-bob")
+                                }
+
+                                "relogin" -> {
+                                    f.credentials = CloudCredentials("alice", "new-session", "new-token")
+                                }
+
+                                "consent" -> {
+                                    f.publish(ConsentStatus.REQUIRED)
+                                }
+
+                                "consent-regain" -> {
+                                    f.publish(ConsentStatus.REQUIRED)
+                                    f.publish()
+                                }
+
+                                "logout" -> {
+                                    f.gate.stop()
+                                    f.credentials = null
+                                }
+
+                                "deletion" -> {
+                                    f.publish(deleting = true)
+                                }
+
+                                "rebind" -> {
+                                    f.backend.bindDevice("phone")
+                                }
+                            }
+                            delay(5)
+                            listOf(EventWatermark("remote", 1, 1))
+                        }
+                    }
+                    val runner = CloudPullRunner(f.backend, f.data)
+                    val result =
+                        try {
+                            runner.pullNow()
+                        } catch (_: CancellationException) {
+                            runner.state.value
+                        }
+                    assertFalse(result.outcome == CloudPullOutcome.COMPLETE, mode)
+                    assertNull(result.profileId, mode)
+                    val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                    assertEquals(1L, work.cursor, mode)
+                    assertEquals(0L, work.checkedRound, mode)
+                    assertTrue(work.needsVerification, mode)
+                    assertEquals(
+                        1L,
+                        f.data.cloudPulls
+                            .receivedWatermarks(work)
+                            .sumOf { it.eventCount },
+                        mode,
+                    )
+                }
+            }
+        }
+
     private val transitions: List<Pair<String, suspend (PullFixture) -> Unit>> =
         listOf(
             "account" to { f -> f.credentials = CloudCredentials("bob", "session-bob", "token-bob") },

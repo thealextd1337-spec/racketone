@@ -23,6 +23,8 @@ class CloudPullStore internal constructor(
             row?.metadata_complete == 1L,
             row?.check_round ?: 0,
             row?.round_active == 1L,
+            row?.round_catalog_ready == 1L,
+            row?.event_requests_since_metadata ?: 0,
         )
     }
 
@@ -138,6 +140,13 @@ class CloudPullStore internal constructor(
                         }
                     }
                     queries.ensureEventWork(profileId, match.id)
+                    if (old != null && (
+                            match.serverVersion > old.serverVersion || match.access != old.access ||
+                                match.accessEpoch != old.accessEpoch || match.redactionEpoch != old.redactionObserved
+                        )
+                    ) {
+                        queries.invalidateEventCheck(profileId, match.id)
+                    }
                     // Ohne Kopf ist noch kein Download-Herkunftsbeleg vor einer möglichen Genesis vorhanden.
                     val pending = database.matchHeaderQueries.countById(match.id).executeAsOne() == 0L
                     queries.setMaterializationPending(if (pending) 1 else 0, profileId, match.id)
@@ -151,6 +160,7 @@ class CloudPullStore internal constructor(
             }
             // Erst dieser Cursor bestätigt sämtliche Snapshots, Scanmarken und dauerhaften Eventaufträge.
             data.cloud.saveCursor(profileId, METADATA_STREAM, page.cursor)
+            queries.metadataTurnStored(profileId)
             fence()
             true
         }
@@ -190,9 +200,22 @@ class CloudPullStore internal constructor(
         runSerial: Long,
     ): CloudPullEventWork? {
         val state = progress(profileId)
-        if (!state.roundActive || !state.metadataComplete) return null
+        if (!state.roundActive || !state.roundCatalogReady) return null
         requireRun(profileId, runSerial)
         return queries.nextEventWork(profileId, state.checkRound).executeAsOneOrNull()?.let { eventWork(it.profile_id, it.match_id) }
+    }
+
+    /** Vor Versand gezählt: auch erfolglose Versuche dürfen die nächste Metadatenseite nicht verdrängen. */
+    fun recordEventRequest(
+        work: CloudPullEventWork,
+        runSerial: Long,
+        fence: () -> Unit,
+    ) = data.transaction {
+        fence()
+        requireWork(work, runSerial)
+        check(progress(work.profileId).eventRequestsSinceMetadata < EVENT_REQUESTS_PER_METADATA_TURN)
+        queries.recordEventRequest(work.profileId)
+        fence()
     }
 
     /** Auswahl ist dauerhaft fair, auch wenn die folgende Seite fehlschlägt oder der Prozess abbricht. Kein Wasserstands-Ack. */
@@ -270,7 +293,7 @@ class CloudPullStore internal constructor(
     ) {
         requireRun(work.profileId, runSerial)
         val progress = progress(work.profileId)
-        check(progress.roundActive && progress.metadataComplete && !work.materializationPending)
+        check(progress.roundActive && progress.roundCatalogReady && !work.materializationPending)
         check(eventWork(work.profileId, work.matchId) == work)
         val match = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId))
         check(match.access == "member" && !match.removalPending)
@@ -378,6 +401,7 @@ class CloudPullStore internal constructor(
 
     companion object {
         const val METADATA_STREAM: String = "pull"
+        const val EVENT_REQUESTS_PER_METADATA_TURN: Long = 12
 
         fun eventStream(matchId: String): String = "pull:events:$matchId"
     }

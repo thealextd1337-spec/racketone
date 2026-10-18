@@ -157,6 +157,334 @@ internal fun pullEvent(
 
 class CloudPullRunnerTest {
     @Test
+    fun movingRepairObservesRepeatedEpochChangesAndFinishesSameRoundWhenUploadsStop() =
+        runBlocking {
+            val file = databaseFile()
+            var max = 1L
+            var metadataCalls = 0
+            val observedEpochs = mutableSetOf<Long?>()
+            var complete = false
+            try {
+                for (execution in 0..95) {
+                    reopen(file).use { f ->
+                        f.bind()
+                        val epoch =
+                            if (execution < 14) {
+                                1L
+                            } else if (execution < 29) {
+                                2L
+                            } else {
+                                3L
+                            }
+                        val matches =
+                            listOf(pullMatch("live", 1)) +
+                                (if (execution > 0) listOf(pullMatch("later", 2)) else emptyList()) +
+                                (if (epoch == 3L) listOf(pullMatch("latest", 3)) else emptyList())
+                        f.metadata = { cursor, _ ->
+                            metadataCalls++
+                            PullResponse(
+                                matches.filter { it.serverVersion > cursor },
+                                cursor = matches.maxOf { it.serverVersion },
+                                visibilityEpoch = epoch,
+                            )
+                        }
+                        f.events = { id, after, limit ->
+                            if (id == "live") (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                        }
+                        f.watermarks = { id ->
+                            if (id == "live") {
+                                if (execution < 60) max++
+                                listOf(EventWatermark("remote", max, max))
+                            } else {
+                                emptyList()
+                            }
+                        }
+                        val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
+                        assertTrue(result.rpcCount <= 1)
+                        assertTrue(result.completedMetadataPages + result.completedEventPages <= 1)
+                        val progress = f.data.cloudPulls.progress("alice")
+                        observedEpochs += progress.visibilityEpoch
+                        assertEquals(1, progress.checkRound)
+                        if (execution < 60) assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
+                        if (result.outcome == CloudPullOutcome.COMPLETE) {
+                            assertTrue(execution >= 60)
+                            assertEquals(3, progress.visibilityEpoch)
+                            assertNull(progress.targetEpoch)
+                            assertTrue(progress.metadataComplete && !progress.roundActive)
+                            for (id in listOf("live", "later", "latest")) {
+                                val work = f.data.cloudPulls.eventWork("alice", id)!!
+                                assertEquals(1, work.checkedRound)
+                                assertFalse(work.repairing)
+                                assertFalse(
+                                    f.data.cloudPulls
+                                        .snapshot("alice", CloudPullEntityKind.MATCH, id)!!
+                                        .removalPending,
+                                )
+                            }
+                            val live = f.data.cloudPulls.eventWork("alice", "live")!!
+                            assertEquals(max, live.cursor)
+                            assertEquals(
+                                max,
+                                f.data.cloudPulls
+                                    .receivedWatermarks(live)
+                                    .single()
+                                    .eventCount,
+                            )
+                            complete = true
+                        }
+                    }
+                    if (complete) break
+                }
+                assertTrue(complete)
+                assertTrue(metadataCalls >= 4)
+                assertTrue(setOf(1L, 2L, 3L).all { it in observedEpochs })
+            } finally {
+                file.delete()
+            }
+        }
+
+    @Test
+    fun metadataPagesAndLongEventHistoryBothProgressWithinPersistedQuotaAfterReopen() =
+        runBlocking {
+            val file = databaseFile()
+            val calls = mutableListOf<String>()
+            var checkedCalls = 0
+            var metadataCalls = 0
+            try {
+                repeat(60) { execution ->
+                    reopen(file).use { f ->
+                        f.bind()
+                        f.metadata = { cursor, _ ->
+                            calls += "metadata"
+                            metadataCalls++
+                            if (cursor == 0L) {
+                                PullResponse(listOf(pullMatch("a-checked", 1), pullMatch("live", 2)), cursor = 2, visibilityEpoch = 1)
+                            } else {
+                                val next = cursor + 1
+                                PullResponse(listOf(pullMatch("later-$next", next)), cursor = next, hasMore = true, visibilityEpoch = 1)
+                            }
+                        }
+                        f.events = { id, after, limit ->
+                            calls += "events"
+                            if (id == "live") (1L..1000L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                        }
+                        f.watermarks = { id ->
+                            calls += "watermarks"
+                            if (id == "a-checked") checkedCalls++
+                            emptyList()
+                        }
+                        val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1, eventPageSize = 1).pullNow()
+                        assertTrue(result.rpcCount <= 1)
+                        assertTrue(result.completedMetadataPages + result.completedEventPages <= 1)
+                        assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
+                        if (execution == 59) {
+                            val progress = f.data.cloudPulls.progress("alice")
+                            assertEquals(1, progress.checkRound)
+                            assertTrue(progress.roundActive && progress.roundCatalogReady)
+                            assertFalse(progress.metadataComplete)
+                            assertTrue(progress.eventRequestsSinceMetadata <= CloudPullStore.EVENT_REQUESTS_PER_METADATA_TURN)
+                            assertEquals(
+                                1,
+                                f.data.cloudPulls
+                                    .eventWork("alice", "a-checked")!!
+                                    .checkedRound,
+                            )
+                            assertEquals(
+                                0,
+                                f.data.cloudPulls
+                                    .eventWork("alice", "live")!!
+                                    .checkedRound,
+                            )
+                            assertTrue(
+                                f.data.cloudPulls
+                                    .eventWork("alice", "live")!!
+                                    .cursor > 35,
+                            )
+                            assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later-3"))
+                            assertFalse(
+                                f.data.cloudPulls
+                                    .snapshot("alice", CloudPullEntityKind.MATCH, "a-checked")!!
+                                    .removalPending,
+                            )
+                        }
+                    }
+                }
+                assertTrue(metadataCalls >= 4)
+                assertEquals(1, checkedCalls)
+                var eventRequests = 0
+                for (call in calls) {
+                    if (call == "metadata") eventRequests = 0 else eventRequests++
+                    assertTrue(eventRequests <= CloudPullStore.EVENT_REQUESTS_PER_METADATA_TURN)
+                }
+            } finally {
+                file.delete()
+            }
+        }
+
+    @Test
+    fun callbackFailuresDoNotPreventFiniteTailDownloadAndWatermarkAfterReopen() =
+        runBlocking {
+            val file = File.createTempFile("d1-r2-callback", ".db")
+            JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { AdvantlyDatabase.Schema.create(it).value }
+            var callbacks = 0
+            val outcomes = mutableListOf<CloudPullOutcome>()
+            try {
+                repeat(8) {
+                    PullFixture(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")).use { f ->
+                        f.bind()
+                        f.metadata =
+                            { cursor, _ ->
+                                PullResponse(
+                                    if (cursor ==
+                                        0L
+                                    ) {
+                                        listOf(pullMatch())
+                                    } else {
+                                        emptyList()
+                                    },
+                                    cursor = 1,
+                                    visibilityEpoch = 1,
+                                )
+                            }
+                        f.events = { _, after, limit -> (1L..5L).filter { it > after }.take(limit).map { pullEvent(it) } }
+                        f.watermarks = { listOf(EventWatermark("remote", 5, 5)) }
+                        val result =
+                            CloudPullRunner(
+                                f.backend,
+                                f.data,
+                                eventPageSize = 2,
+                                maxPagesPerRun = 1,
+                                eventsCommitted = {
+                                    callbacks++
+                                    error("notification unavailable")
+                                },
+                            ).pullNow()
+                        outcomes += result.outcome
+                        if (result.outcome == CloudPullOutcome.FAILED) assertEquals(1L, result.failedEventJobs)
+                        if (it == 7) {
+                            println("R2 callback tail: outcomes=$outcomes, callbacks=$callbacks, events=${f.data.events.count("match")}")
+                            assertEquals(5L, f.data.events.count("match"))
+                            assertTrue(CloudPullOutcome.COMPLETE in outcomes)
+                            assertEquals(0L, f.data.cloudPulls.failedEventJobs("alice"))
+                        }
+                    }
+                }
+            } finally {
+                file.delete()
+            }
+        }
+
+    @Test
+    fun movingWatermarkMustNotPermanentlyStarveMetadataAndNewMatchesAcrossReopen() =
+        runBlocking {
+            val file = File.createTempFile("d1-r2-live", ".db")
+            JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { AdvantlyDatabase.Schema.create(it).value }
+            var max = 1L
+            var metadataCalls = 0
+            val outcomes = mutableListOf<CloudPullOutcome>()
+            try {
+                repeat(18) { execution ->
+                    PullFixture(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")).use { f ->
+                        f.bind()
+                        f.metadata = { cursor, _ ->
+                            metadataCalls++
+                            val all =
+                                if (execution == 0) {
+                                    listOf(pullMatch("live", 1))
+                                } else {
+                                    listOf(pullMatch("live", 1), pullMatch("later", 2))
+                                }
+                            PullResponse(
+                                all.filter { it.serverVersion > cursor },
+                                cursor = if (execution == 0) 1 else 2,
+                                visibilityEpoch = if (execution == 0) 1 else 2,
+                            )
+                        }
+                        f.events = { id, after, limit ->
+                            if (id == "live") {
+                                (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) }
+                            } else {
+                                emptyList()
+                            }
+                        }
+                        f.watermarks = { id ->
+                            // Ein legaler neuer Upload zwischen Eventseite und separat ausgeführtem Wasserstands-RPC.
+                            if (id == "live") {
+                                max++
+                                listOf(EventWatermark("remote", max, max))
+                            } else {
+                                emptyList()
+                            }
+                        }
+                        val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
+                        outcomes += result.outcome
+                        assertTrue(result.rpcCount <= 1)
+                        assertFalse(result.outcome == CloudPullOutcome.COMPLETE)
+                        if (execution == 17) {
+                            val progress = f.data.cloudPulls.progress("alice")
+                            val work = f.data.cloudPulls.eventWork("alice", "live")!!
+                            println(
+                                "R2 live repair: outcomes=$outcomes, metadataCalls=$metadataCalls, max=$max, " +
+                                    "progress=$progress, work=$work",
+                            )
+                            assertNotNull(
+                                f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later"),
+                                "Laufende Eventuploads dürfen neue Metadaten/Epochen nicht dauerhaft verdrängen",
+                            )
+                        }
+                    }
+                }
+            } finally {
+                file.delete()
+            }
+        }
+
+    @Test
+    fun movingWatermarkAlsoStarvesMetadataWithDefaultBudget() =
+        runBlocking<Unit> {
+            PullFixture().use { f ->
+                f.bind()
+                var max = 1L
+                var newMatch = false
+                var metadataCalls = 0
+                f.metadata = { cursor, _ ->
+                    metadataCalls++
+                    val all = if (newMatch) listOf(pullMatch("live", 1), pullMatch("later", 2)) else listOf(pullMatch("live", 1))
+                    PullResponse(all.filter { it.serverVersion > cursor }, cursor = if (newMatch) 2 else 1, visibilityEpoch = 1)
+                }
+                f.events = { id, after, limit ->
+                    if (id == "live") (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                }
+                f.watermarks = { id ->
+                    if (id == "live") {
+                        max++
+                        listOf(EventWatermark("remote", max, max))
+                    } else {
+                        emptyList()
+                    }
+                }
+                val runner = CloudPullRunner(f.backend, f.data)
+                val outcomes =
+                    (1..12).map {
+                        val result = runner.pullNow()
+                        newMatch = true
+                        assertTrue(result.rpcCount <= 8)
+                        result.outcome
+                    }
+                println(
+                    "R2 default live repair: outcomes=$outcomes, metadataCalls=$metadataCalls, max=$max, " +
+                        "progress=${f.data.cloudPulls.progress(
+                            "alice",
+                        )}",
+                )
+                assertNotNull(
+                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later"),
+                    "Auch das Standardbudget benötigt eine von erfolgreicher Reparatur unabhängige Metadatenfairness",
+                )
+            }
+        }
+
+    @Test
     fun deadlineFailureDoesNotFreezeTheRoundOrLaterMetadataAfterReopen() =
         runBlocking {
             val file = databaseFile()

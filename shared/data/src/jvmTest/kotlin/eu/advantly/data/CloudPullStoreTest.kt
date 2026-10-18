@@ -48,6 +48,103 @@ internal fun storePage(
 
 class CloudPullStoreTest {
     @Test
+    fun metadataRefreshPreservesRepairsReceiptsFailuresAndChecksExceptChangedMatch() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver)
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val original = storePage()
+            val matches =
+                listOf("stable", "changed", "repair", "failed", "scheduled").map { id ->
+                    original.matches.single().copy(id = id, record = if (id == "scheduled") null else pullRecord(id))
+                }
+            data.cloudPulls.commitMetadata("alice", run, 0, original.copy(matches = matches)) {}
+            for (id in listOf("stable", "changed")) {
+                assertTrue(data.cloudPulls.verifyEvents(data.cloudPulls.eventWork("alice", id)!!, run, emptyList()) {})
+            }
+            val receipt =
+                CloudPullReceipt(
+                    StoredEvent("received", "repair", "remote", 1, 1, """{"type":"PointWon","side":"A"}""", type = "PointWon"),
+                    1,
+                )
+            data.cloudPulls.commitEvents(data.cloudPulls.eventWork("alice", "repair")!!, run, listOf(receipt), {})
+            assertTrue(
+                !data.cloudPulls.verifyEvents(
+                    data.cloudPulls.eventWork("alice", "repair")!!,
+                    run,
+                    listOf(CloudPullWatermark("remote", 2, 2)),
+                    {},
+                ),
+            )
+            data.cloudPulls.recordEventFailure("alice", "failed", run, false) {}
+            val before = matches.associate { it.id to data.cloudPulls.eventWork("alice", it.id)!! }
+            repeat(12) { data.cloudPulls.recordEventRequest(before.getValue("repair"), run) {} }
+            val refreshed = matches.map { if (it.id == "changed") it.copy(serverVersion = 2, json = """{"version":2}""") else it }
+            data.cloudPulls.commitMetadata("alice", run, 1, original.copy(matches = refreshed, cursor = 2, hasMore = true)) {}
+            for (id in listOf("stable", "repair", "failed", "scheduled")) {
+                assertEquals(before.getValue(id), data.cloudPulls.eventWork("alice", id), id)
+            }
+            assertEquals(before.getValue("changed").copy(checkedRound = 0), data.cloudPulls.eventWork("alice", "changed"))
+            val state = data.cloudPulls.progress("alice")
+            assertEquals(1, state.checkRound)
+            assertTrue(state.roundCatalogReady)
+            assertTrue(!state.metadataComplete)
+            assertEquals(0, state.eventRequestsSinceMetadata)
+            assertEquals(1, data.cloudPulls.failedEventJobs("alice"))
+            assertEquals(1, data.cloudPulls.pendingMaterializations("alice"))
+            val repair = data.cloudPulls.eventWork("alice", "repair")!!
+            assertTrue(repair.repairing)
+            assertEquals(0, repair.cursor)
+            assertEquals(1, data.events.count("repair"))
+            assertEquals(listOf(CloudPullWatermark("remote", 1, 1)), data.cloudPulls.receivedWatermarks(repair.copy(repairing = false)))
+            assertTrue(data.cloudPulls.receivedWatermarks(repair).isEmpty())
+            assertNotNull(data.cloudPulls.nextEventWork("alice", run))
+            assertFailsWith<IllegalStateException> { data.cloudPulls.finishRound("alice", run) {} }
+        }
+    }
+
+    @Test
+    fun requestQuotaAndMetadataResetAreFencedAndEpochRestartKeepsMetadataDue() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver)
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
+            val work = data.cloudPulls.eventWork("alice", "match")!!
+            repeat(11) { data.cloudPulls.recordEventRequest(work, run) {} }
+            val before = data.cloudPulls.progress("alice")
+            var fences = 0
+            assertFailsWith<IllegalStateException> {
+                data.cloudPulls.recordEventRequest(work, run) { check(++fences == 1) }
+            }
+            assertEquals(before, data.cloudPulls.progress("alice"))
+            data.cloudPulls.recordEventRequest(work, run) {}
+            assertEquals(12, data.cloudPulls.progress("alice").eventRequestsSinceMetadata)
+            assertFailsWith<IllegalStateException> { data.cloudPulls.recordEventRequest(work, run) {} }
+            val due = data.cloudPulls.progress("alice")
+            fences = 0
+            assertFailsWith<IllegalStateException> {
+                data.cloudPulls.commitMetadata("alice", run, 1, storePage(version = 2)) { check(++fences == 1) }
+            }
+            assertEquals(due, data.cloudPulls.progress("alice"))
+            assertEquals(work, data.cloudPulls.eventWork("alice", "match"))
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 1, storePage(version = 2, epoch = 2)) {})
+            val scan = data.cloudPulls.progress("alice")
+            assertEquals(0, scan.cursor)
+            assertEquals(12, scan.eventRequestsSinceMetadata)
+            assertEquals(1, scan.visibilityEpoch)
+            assertEquals(2, scan.targetEpoch)
+            assertTrue(!scan.metadataComplete && scan.roundCatalogReady)
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage(version = 2, epoch = 2).copy(hasMore = true)) {}
+            assertEquals(0, data.cloudPulls.progress("alice").eventRequestsSinceMetadata)
+            assertEquals(2, data.cloudPulls.progress("alice").targetEpoch)
+            assertTrue(!data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")!!.removalPending)
+            assertNotNull(data.cloudPulls.nextEventWork("alice", run))
+            assertFailsWith<IllegalStateException> { data.cloudPulls.finishRound("alice", run) {} }
+            data.cloudPulls.recordEventRequest(data.cloudPulls.eventWork("alice", "match")!!, run) {}
+            assertEquals(1, data.cloudPulls.progress("alice").eventRequestsSinceMetadata)
+        }
+    }
+
+    @Test
     fun attemptAndFailureFencesRollbackWithoutAcknowledgingUnverifiedWork() {
         createInMemoryJvmDriver().use { driver ->
             val data = LocalData(driver)

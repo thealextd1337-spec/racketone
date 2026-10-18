@@ -6,6 +6,8 @@ CREATE TABLE cloud_pull_profile (
     run_serial INTEGER NOT NULL DEFAULT 0,
     check_round INTEGER NOT NULL DEFAULT 0,
     round_active INTEGER NOT NULL DEFAULT 0,
+    round_catalog_ready INTEGER NOT NULL DEFAULT 0,
+    event_requests_since_metadata INTEGER NOT NULL DEFAULT 0,
     metadata_complete INTEGER NOT NULL DEFAULT 0
 );
 
@@ -67,7 +69,14 @@ beginRun:
 UPDATE cloud_pull_profile SET run_serial = run_serial + 1 WHERE profile_id = ?;
 
 startCheckRound:
-UPDATE cloud_pull_profile SET check_round = check_round + 1, round_active = 1, metadata_complete = 0 WHERE profile_id = ?;
+UPDATE cloud_pull_profile SET check_round = check_round + 1, round_active = 1, metadata_complete = 0,
+    round_catalog_ready = 0, event_requests_since_metadata = 0 WHERE profile_id = ?;
+
+recordEventRequest:
+UPDATE cloud_pull_profile SET event_requests_since_metadata = event_requests_since_metadata + 1 WHERE profile_id = ?;
+
+metadataTurnStored:
+UPDATE cloud_pull_profile SET event_requests_since_metadata = 0 WHERE profile_id = ?;
 
 finishCheckRound:
 UPDATE cloud_pull_profile SET round_active = 0 WHERE profile_id = ?;
@@ -76,7 +85,7 @@ startScan:
 UPDATE cloud_pull_profile SET target_epoch = ?, scan_run = scan_run + 1, metadata_complete = 0 WHERE profile_id = ?;
 
 completeMetadata:
-UPDATE cloud_pull_profile SET visibility_epoch = ?, target_epoch = NULL, metadata_complete = 1 WHERE profile_id = ?;
+UPDATE cloud_pull_profile SET visibility_epoch = ?, target_epoch = NULL, metadata_complete = 1, round_catalog_ready = 1 WHERE profile_id = ?;
 
 incompleteMetadata:
 UPDATE cloud_pull_profile SET metadata_complete = 0 WHERE profile_id = ?;
@@ -108,6 +117,9 @@ SELECT profile_id FROM cloud_pull_snapshot WHERE kind = ? AND entity_id = ? AND 
 
 ensureEventWork:
 INSERT OR IGNORE INTO cloud_pull_event_work(profile_id,match_id) VALUES (?,?);
+
+invalidateEventCheck:
+UPDATE cloud_pull_event_work SET last_checked = 0 WHERE profile_id = ? AND match_id = ?;
 
 setMaterializationPending:
 UPDATE cloud_pull_event_work SET materialization_pending = ? WHERE profile_id = ? AND match_id = ?;

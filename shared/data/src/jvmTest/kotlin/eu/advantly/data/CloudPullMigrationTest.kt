@@ -72,6 +72,8 @@ class CloudPullMigrationTest {
                 assertEquals(42, data.cloudPulls.progress("alice").cursor)
                 assertEquals(77, data.cloudPulls.progress("bob").cursor)
                 assertEquals(0, data.cloudPulls.progress("alice").checkRound)
+                assertEquals(0, data.cloudPulls.progress("alice").eventRequestsSinceMetadata)
+                assertTrue(!data.cloudPulls.progress("alice").roundCatalogReady)
                 assertTrue(!data.cloudPulls.progress("alice").roundActive)
                 assertEquals(0, data.cloudPulls.failedEventJobs("alice"))
                 assertEquals(0, data.cloudPulls.pendingMaterializations("alice"))

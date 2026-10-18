@@ -1,6 +1,7 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.data.CloudPullEventWork
+import eu.advantly.data.CloudPullStore
 import eu.advantly.data.CloudPullWatermark
 import eu.advantly.data.LocalData
 import kotlinx.coroutines.CancellationException
@@ -83,20 +84,29 @@ class CloudPullRunner(
                         val run = progress.runSerial
                         runSerial = run
                         val budget = Budget(fence)
-                        if (!progress.metadataComplete) pullMetadata(selected, run, budget)
                         var jobs = 0
                         while (true) {
                             fence()
-                            val work = data.cloudPulls.nextEventWork(selected.profileId, run) ?: break
+                            val phase = data.cloudPulls.progress(selected.profileId)
+                            val work = data.cloudPulls.nextEventWork(selected.profileId, run)
+                            // Nach zwölf Eventversuchen eine Katalogseite; danach wieder Events, auch bei hasMore.
+                            // Ohne ersten vollständigen Rundenscan bleibt Eventarbeit gesperrt.
+                            if ((!phase.metadataComplete && (!phase.roundCatalogReady || work == null)) ||
+                                (work != null && phase.eventRequestsSinceMetadata >= CloudPullStore.EVENT_REQUESTS_PER_METADATA_TURN)
+                            ) {
+                                pullMetadataPage(selected, run, budget)
+                                continue
+                            }
+                            if (work == null) break
                             if (jobs >= maxEventJobsPerRun) throw StopPull(CloudPullOutcome.LIMIT_REACHED)
                             budget.requireRequest(page = !work.needsVerification)
                             val claimed = data.cloudPulls.claimEventWork(work, run, fence)
                             processingMatch = work.matchId
                             jobs++
                             try {
-                                pullEvents(selected, run, claimed, budget)
+                                val complete = pullEvents(selected, run, claimed, budget)
                                 processingMatch = null
-                                mutable.value = mutable.value.copy(completedEventJobs = mutable.value.completedEventJobs + 1)
+                                if (complete) mutable.value = mutable.value.copy(completedEventJobs = mutable.value.completedEventJobs + 1)
                             } catch (stop: StopPull) {
                                 throw stop
                             } catch (error: CancellationException) {
@@ -165,21 +175,18 @@ class CloudPullRunner(
             }
         }
 
-    private suspend fun pullMetadata(
+    private suspend fun pullMetadataPage(
         attempt: CloudPullAttempt,
         run: Long,
         budget: Budget,
     ) {
-        while (true) {
-            val cursor = data.cloudPulls.progress(attempt.profileId).cursor
-            budget.page()
-            val response = pulls.pullPage(attempt, cursor, matchPageSize)
-            budget.fence()
-            val page = PullMapping.metadata(response, cursor, matchPageSize)
-            val applied = data.cloudPulls.commitMetadata(attempt.profileId, run, cursor, page, budget.fence)
-            if (applied) mutable.value = mutable.value.copy(completedMetadataPages = mutable.value.completedMetadataPages + 1)
-            if (applied && !page.hasMore) return
-        }
+        val cursor = data.cloudPulls.progress(attempt.profileId).cursor
+        budget.page()
+        val response = pulls.pullPage(attempt, cursor, matchPageSize)
+        budget.fence()
+        val page = PullMapping.metadata(response, cursor, matchPageSize)
+        val applied = data.cloudPulls.commitMetadata(attempt.profileId, run, cursor, page, budget.fence)
+        if (applied) mutable.value = mutable.value.copy(completedMetadataPages = mutable.value.completedMetadataPages + 1)
     }
 
     private suspend fun pullEvents(
@@ -187,11 +194,15 @@ class CloudPullRunner(
         run: Long,
         initial: CloudPullEventWork,
         budget: Budget,
-    ) {
+    ): Boolean {
         var work = initial
         while (true) {
+            if (data.cloudPulls.progress(attempt.profileId).eventRequestsSinceMetadata >= CloudPullStore.EVENT_REQUESTS_PER_METADATA_TURN) {
+                return false
+            }
             if (!work.needsVerification) {
                 budget.page()
+                data.cloudPulls.recordEventRequest(work, run, budget.fence)
                 val response = pulls.pullEventPage(attempt, work.matchId, work.cursor, eventPageSize)
                 budget.fence()
                 val received = PullMapping.events(response, work.matchId, work.cursor, eventPageSize)
@@ -208,7 +219,11 @@ class CloudPullRunner(
                 work = requireNotNull(data.cloudPulls.eventWork(attempt.profileId, work.matchId))
                 if (!work.needsVerification) continue
             }
+            if (data.cloudPulls.progress(attempt.profileId).eventRequestsSinceMetadata >= CloudPullStore.EVENT_REQUESTS_PER_METADATA_TURN) {
+                return false
+            }
             budget.rpc()
+            data.cloudPulls.recordEventRequest(work, run, budget.fence)
             val watermarks = pulls.pullWatermarks(attempt, work.matchId)
             budget.fence()
             val complete =
@@ -218,7 +233,7 @@ class CloudPullRunner(
                     watermarks.map { CloudPullWatermark(it.deviceId, it.maxSeq, it.eventCount) },
                     budget.fence,
                 )
-            if (complete) return
+            if (complete) return true
             work = requireNotNull(data.cloudPulls.eventWork(attempt.profileId, work.matchId))
         }
     }

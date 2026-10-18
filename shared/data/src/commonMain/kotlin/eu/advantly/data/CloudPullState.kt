@@ -13,6 +13,10 @@ data class CloudPullProgress(
     /** Bleibt über Budgetabbrüche und Wiederöffnung erhalten; nur eine neue Prüfrunde erhöht diesen Wert. */
     val checkRound: Long,
     val roundActive: Boolean,
+    /** Mindestens eine Endseite dieser Runde ist gespeichert; spätere Katalogseiten dürfen mit Eventarbeit wechseln. */
+    val roundCatalogReady: Boolean,
+    /** Dauerhafte faire Phasenwahl, kein Nachweis eines erfolgreichen Eventempfangs. */
+    val eventRequestsSinceMetadata: Long,
 )
 
 enum class CloudPullEntityKind { MATCH, PLAYER, FRIENDSHIP }
