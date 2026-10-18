@@ -28,6 +28,41 @@ Fix grün; ein echter erfolgreicher CI-Stacktest ist damit weiterhin nicht vorwe
 Review R3 bestätigt ohne Befund: elf Harness-Tests und acht zusätzliche negative XML-Proben
 grün, realer lokaler Skip ausdrücklich abgewiesen, übriger Harness per AST unverändert.
 Gesamtcheck: 688 Tasks grün (51s). Neue CI muss den ausgeführten Stacktest bestätigen.
+## Aktueller Integrationsstand und laufende Pakete
+
+PR #68 ist nach erfolgreicher Ubuntu- und Apple-CI auf `868a3a2` als `6c45ac5` nach main
+gemergt. Admin und Supabase waren in diesem Lauf ausdrücklich per Pfadfilter übersprungen;
+ihre frühere K2-Abnahme aus #67 bleibt getrennt belegt. D1 übernimmt den Mainstand nach den
+geprüften SDK-/XML-Korrekturen `ff55c4e`/`b1d50df`: ausschließlich Plankonflikte, sämtliche
+Produkt-, Test-, Workflow- und Serverdateien bytegleich zu `b1d50df`. Der grüne 688-Task-Check
+bleibt dafür gültig. Neue CI auf dem Mergehead bleibt vor D1-Freigabe erforderlich.
+
+- K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
+  einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.
+- Android-Upload PR #68 ist auf `8981791` mit diesem Mainstand abgeglichen. Upload-Kotlin,
+  Android und Wear bleiben unverändert; Gesamtcheck plus beide APKs erneut 761 Tasks grün.
+  Die CI des aktuellen Heads bleibt Mergebedingung.
+- D1 ist im abhängigen Draft [PR #69](https://github.com/thealextd1337-spec/racketone/pull/69),
+  Head `6d9d651`. Vier Fachreviewrunden, Root-Integrationsreview und Stack-Harness-Review sind
+  ohne offene Befunde abgeschlossen. Der echte Auth-/PostgREST-Pull läuft erstmals in dieser CI;
+  das Gate verlangt genau einen bestandenen Test ohne Skip. Erst #68, dann D1 integrieren.
+- K2-A und K2-B sind ohne Produktabweichung im isolierten Root-Zweig
+  `p2/k2-phone-integration` als `6b798fa` kombiniert: 767 Tasks samt Phone-/Wear-APKs grün.
+  Android besitzt nachgewiesenen nativen HTTP-Abschluss; iOS/JVM-ZIP melden bis zu einem
+  eigenen Plattformnachweis vor Netzwerkzugriff ausdrücklich `export_unavailable`.
+
+| Laufendes Paket | Exklusiver Besitz | Abhängigkeit und prüfbares Ende | Task-ID |
+|---|---|---|---|
+| K2-C Android-Exporthost | Neue `PhoneExportHost`, `PrivateExportCache`, `ExportShare` und direkte Tests; dedizierter Manifest-Provider/Path; nur nötige bestehende Robolectric-Testkonfiguration | Geprüfte A+B-Basis übernehmen; exakte Länge, SHA und EOF vor privater atomarer Promotion; nur Lesefreigabe; Kontogrenzen, Ablauf und tatsächlicher Ressourcenabschluss; Gesamtcheck/APKs | `advantly-20261018-k2-phone-host-impl-r1` |
+| K2-D1 gemeinsame Konto-UI | `AuthViewModel`, `AccountScreen`, `AdvantlyApp` und direkte neue Tests | Dieselbe A+B-Basis; optionaler Exportport; Authclose erst nach Upload- und Exportdrain; echte Kontoaktionen und Export unabhängig bedienbar, DE/EN bei 200 Prozent; Gesamtcheck/APKs | `advantly-20261018-k2-phone-account-impl-r1` |
+| Root-Endintegration | Danach ausschließlich Android-`PhoneAccount`/`MainActivity`, Zusammenführung und unabhängige Reviews | Erst C und D1 prüfen, dann aktuellen Activity-Sharecallback und gemeinsamen Lifecycle integrieren; keine gehaltene Activity, keine automatische Exportabfrage | Noch nicht gestartet |
+
+Die beiden laufenden IDs verwenden den vollständigen Präfix
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3A`.
+Ihre Dateigrenzen überschneiden sich nicht. Root besitzt Dokumentation, Push/PR/CI und die spätere
+Android-Komposition; Worker verändern diese Integrationsdateien nicht. D2/D3 sind weiterhin
+vorbereitete Folgepakete ohne aktivierte Protokolländerung; B4 folgt erst auf belastbarem Pull und
+Rechte-/Redaktionsvertrag. Echte Sharesheet-, Geräte-, Apple- und Rechtsnachweise bleiben offen.
 
 ## Ausgangspunkt und Arbeitsweise
 
@@ -970,6 +1005,53 @@ für diesen Android-Pilotschnitt ausdrücklich `export_unavailable`. Bestehende 
 Funktionalität bleibt; Apple-/JVM-Nativabschluss ist eine spätere separate Lieferung.
 Mocktests erhalten eine explizite interne Factory-Capability, keine Engine-Namensheuristik.
 Native DNS-/Header-/Body-/Fehlerbarrieren sowie alle bisherigen Fences/Tests erforderlich.
+PR #67 ist nach exakt grünem `ba90a1d` zusammengeführt; main `8660716`, Run
+`39144135593` mit fünf erfolgreichen Prüfungen einschließlich echter Service-CI und
+Apple-Native-/Simulator-Builds. Root gleicht PR #68 danach ab: nur Plankonflikt,
+Kotlin/Android/Wear unverändert zur geprüften Basis, Server/CI/Katalog bytegleich main.
+Gesamtcheck vor Mergecommit und neue CI danach; keine automatische Livebereitstellung.
+
+K2-A Review 3 bestätigt `d73f372` ohne Befunde. 137 JVM-/85 Android-Host-Tests frisch
+grün; unabhängige native Probe hält DNS, Terminalcallback und offenen Body getrennt
+zurück: Export und Register bleiben offen, erst nach Freigabe native Calls/Pool null
+und eigener Executor beendet. Android-Schnitt damit zur Integration freigegeben;
+JVM/iOS-ZIP bleibt ausdrücklich vor Netzwerk gesperrt. A/B-Verträge sind unabhängig
+geprüft; gemeinsame Basis und Android-Dateihost können als nächste eigene Lane folgen.
+
+D2/D3-Ergänzung verlangt einen expliziten Herkunftsstamp neben Cloudstamp, ohne fehlenden
+Stamp als Freigabe zu deuten. Bestehende Provenienz und U2-Sourcebelege zuerst wiederverwenden;
+historische unbewiesene Importe dürfen keinen Cloudentzug umgehen. ID-only-Assignment über
+nachgestellte Defaultparameter und eigenen serialization-core-Serializer, Legacyform und
+Goldens erhalten. Redaktionsmanifest maximal 200 IDs/500 Events pro Seite plus Bytebudget,
+durabler Transfer und atomarer Abschluss statt unbegrenzter Liste. Root legt die endgültigen
+kleinen Lane-Verträge vor Umsetzung fest; noch kein Protokollwechsel aktiviert.
+
+K2-A-Nativfix `d73f372` fertig, Parent `c58a96f`, genau neun freigegebene Dateien.
+Android-Transport pro Aufruf besitzt Client/Dispatcher/Pool/Listener; Ktor-Join, native
+Terminalevents und Dispatcher-idle gemeinsam vor Operationsabschluss. Öffentliche API,
+Zeitlimits und RPC-Pfad unverändert. JVM/iOS und uninstrumentierte Injection verweigern
+ZIP vor Netzwerk mit `export_unavailable`. 137 JVM-/85 Android-Host-Tests einschließlich
+16 nativer Tests, ktlint und Gesamtcheck/APKs grün; alle bisherigen 133 JVM-Tests erhalten.
+Root hat tatsächlichen Produktdiff gelesen, frisches unabhängiges Review 3 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r3`.
+
+D1-Stack-CI-Abhängigkeit `2307a3a` vorbereitet und sauber: D1 `25dc96b` plus geprüfte
+K2-Service-CI `ba90a1d`, danach aktueller Rootplan; ausschließlich Plankonflikte.
+Gemeinsamer Gesamtcheck 692 Tasks grün (3m29s), zusätzlicher Planmerge produktidentisch.
+Isolierter Harnessauftrag läuft im eigenen Worktree `t3-1bf18c5e`, Branch
+`t3/d1-stack-ci-harness`; vorbereitete Basis als Vorfahr bestätigt. Exklusiver Besitz:
+neuer Harness/gezielte Guardtests, CI-Anschluss und minimale Stacktest-Fixturekorrektur.
+Keine D1-Produkt-/Serveränderung. Genau ein echter Test ohne Skip als hartes XML-Gate.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-impl-r1`.
+
+D2/D3-Vertragsentwurf liegt vor: vollständig geordnete serverseitige `visibilityEpoch`
+auch für Grants, dauerhafter Personen-ID-Redaktionsnachweis und explizite ID-only-
+Assignmentversion. Vor Umsetzungsvergabe noch eng präzisieren: P1-Gast-/Offline-/Peer-
+Matches ohne Cloudsnapshot dürfen keinen Freigabebypass und keinen Funktionsverlust
+erzeugen; Legacy-API/Goldens müssen erhalten bleiben; Manifest-/Eventtransfer begrenzen
+und nach Neustart fortsetzen. Ausschließlich lesende Ergänzung, keine Implementierung:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d2d3-contract-refine-r1`.
+
 D1 ist separat auf `25dc96b` integriert, eigener Root-Worktree `p2-d1-pull-integration`,
 Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`. R4 bestätigt `89a6adb` ohne
 offene Befunde. Einziger Mergekonflikt: `CloudPullPort` zusätzlich zu Upload-/Backend-Port;
