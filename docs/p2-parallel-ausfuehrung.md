@@ -803,6 +803,13 @@ wird im Drain-Test durch einen suspendierten Host-Child-finally ergänzt, damit 
 vollständiger Abschluss vor Authclose bewiesen wird; ein Ktor-Engine-Job allein genügt nicht.
 Keine neue Datei/Produktionsdependency oder Gate-/Backendänderung.
 
+U4-UI-Visualprüfung: tatsächlicher Account-Host nutzt `Box.background` ohne ContentColor-
+Bereitstellung. Neuer Uploadbereich darf deshalb gezielt `LocalContentColor` aus bestehendem
+`MaterialTheme.onBackground` bereitstellen; Test nutzt denselben Host statt kaschierendem
+Test-Surface. Vorbestehender Kontrastfehler übriger Kontotexte bleibt separat für Root-
+Integrationsprüfung erfasst, kein breiter Theme-/Accountumbau im Worker. Screenshotbeleg
+und DE/EN-200%-Prüfung mit finalem Fullcheck vor Commit erforderlich.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
