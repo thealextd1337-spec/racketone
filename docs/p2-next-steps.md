@@ -9,7 +9,9 @@ Dieser Arbeitsplan konkretisiert [P2](p2-plan.md); fachlich gilt weiterhin [PLAN
   PR #58 ergänzt das optionale Merken einer MFA-Sitzung für 30 Tage und ist auf Staging veröffentlicht.
   [Betrieb und offene Live-Abnahme](support-admin-betrieb.md). Die beauftragten Punkte 2–4 sind im
   [Cloud-/Pilot-Lieferplan](p2-cloud-pilot-lieferplan.md) in Upload, Download/Entzug und Datenschutz/
-  Kontosupport zerlegt. Nächster Umsetzungsschnitt ist U1 (Auth-Kontext bis zum HTTP-Request).
+  Kontosupport zerlegt. U1 und U2 sind inzwischen integriert (#60/#61). Ab 18.10. laufen U3,
+  Server-Gerätevertrag/K4 und K1 parallel; Zuständigkeiten und Folgewellen stehen im
+  [Ausführungsplan](p2-parallel-ausfuehrung.md). Ältere Fortschrittsabschnitte unten sind historische Nachweise.
   Planung durch ChatGPT und ergänzend Claude; Umsetzung primär mit OpenAI-Modellen.
 
 - Ausgangspunkt: `main` bei `5e3db67`, PRs #43–#49 integriert. Kein offener PR bei Übernahme.

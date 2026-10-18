@@ -1,7 +1,8 @@
 # Cloud-Synchronisierung und Online-Pilot: Lieferplan
 
-Stand: 17.10.2026. Konkretisierung der beauftragten Punkte 2 (Upload), 3 (Download)
-und 4 (Pilot, Datenschutz, Kontosupport). **Planung, noch keine Umsetzung dieser Pakete.**
+Stand: 18.10.2026. Konkretisierung der beauftragten Punkte 2 (Upload), 3 (Download)
+und 4 (Pilot, Datenschutz, Kontosupport). **U1/U2 integriert; weitere Umsetzung beauftragt.**
+Der [Ausführungsplan](p2-parallel-ausfuehrung.md) hält laufende Aufträge, Besitzgrenzen und Folgewellen fest.
 Grundlage: [PLAN](PLAN.md), [P2](p2-plan.md), [Upload-Vertrag](p2-upload.md)
 und [Feedback/Admin](plan-feedback-admin.md). Bei Widersprüchen gilt `PLAN.md`.
 ChatGPT hat den Cloud-Pfad untersucht, Claude die Pilot-/Betriebsfunktionen; die folgende
@@ -16,9 +17,9 @@ Reihenfolge führt beide Berichte zusammen und hält bestehende Produktentscheid
 - Auth/Onboarding und Support-Inbox sind vorhanden. Staging verwendet Supabase, Resend
   und Cloudflare; Betreiber-Login mit MFA und Passwort-Recovery wurden im Projektthread bestätigt.
   PR #58 ist integriert. Deployment und Grenzen: [Betriebsnachweis](support-admin-betrieb.md).
-- PR #57 enthält den Home-Feedbackknopf und die korrigierte Uhren-Erreichbarkeit, zuletzt
-  `b2aa40d`. Auf Pixel 9 Pro XL und Pixel Watch 3 installiert; drei Meldekategorien laut
-  Nutzer erfolgreich. CI/Integration dieses PR separat abschließen, nichts doppelt implementieren.
+- PR #57 ist integriert und enthält den Home-Feedbackknopf und die korrigierte Uhren-Erreichbarkeit.
+  Auf Pixel 9 Pro XL und Pixel Watch 3 installiert; drei Meldekategorien laut Nutzer erfolgreich.
+  Diese Teilabnahme ersetzt nicht die vollständige Support-Live-Matrix.
 - SQL für Export, Löschantrag, Abbruch, Anonymisierung und endgültige Löschung existiert.
   App-Bedienung, ZIP-Auslieferung und geplanter Kontolöschjob fehlen. Vorhandene SQL-Funktionen
   sind kein Nachweis eines automatischen gehosteten Ablaufs.
@@ -46,8 +47,8 @@ Standard; zusätzliches Claude-Kontingent gezielt für unabhängige Fachprüfung
 | K4–K6 | Backend, Admin-Web, Betriebsdaten | siehe unten | Begrenzter Kontosupport und Betriebsansicht |
 | K7 | Orchestrator und reale Geräteprüfung | Cloud-Pfad, K1–K6, externe Nachweise | Dokumentierte Pilotentscheidung |
 
-**Erster Umsetzungsschnitt: U1 (Clientgrenze umgesetzt, Serverfreigabe offen).** Danach U2/U3;
-parallel kann K1 vorbereitet werden. K3-Serververtrag früh
+**Laufende erste Parallelwelle: U3, Server-Gerätevertrag/K4 und K1.** U1 und U2 sind integriert
+(#60/#61); die Serverfreigabe bleibt offen. K3-Serververtrag früh
 festlegen, damit D3 nicht auf eine spätere UI warten muss. B4 darf die Begrenzung und den
 Abbruch eines einzelnen Upload-/Pull-Laufs nicht aufschieben: diese gehören bereits zu U1/U4/D1.
 Apple-Host und echte Apple-Abnahme sind getrennte Lieferungen; ein BGTask allein stellt keine iOS-Parität her.
@@ -214,6 +215,7 @@ Backup-/Wiederherstellungskonzept vor Fremdnutzer-Pilot bewerten. Keine Rechtsfr
   Fremdzugriff, fehlende MFA und widerrufene Mitgliedschaft bleiben als vollständige Live-Matrix offen.
 - Android-Teilgate getrennt von Apple: iOS-Konto-Host, Apple-Account, Token-Widerruf und reale Geräte
   zusätzlich nachweisen. P2-Pilot ist keine öffentliche Produktionsfreigabe.
-- Nächster ausführbarer Auftrag nach U1-Review: U2/U3 für Eigentum, neue Identitäten und
-  Metadatenrevisionen. Serverdurchsetzung des U1-Vertrags mit U4/D1 und K4 nachweisen.
-  Dieser Plan löst noch keine Cloud-Uploads, neuen Admin-Rechte oder Pilot-Verteilung aus.
+- Die Umsetzung läuft gemäß [Ausführungsplan](p2-parallel-ausfuehrung.md) mit isolierten
+  Arbeitsbäumen, unabhängiger Prüfung und anschließender Integration. Serverdurchsetzung des
+  U1-Vertrags mit U4/D1 und K4 nachweisen. Der Umsetzungsauftrag erteilt keine automatische
+  Cloud-, Admin- oder Pilotfreigabe.

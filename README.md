@@ -2,11 +2,12 @@
 
 # Advantly
 
-Tennis, Padel und Pickleball zählen und auswerten: auf dem Handy (Android/iOS) und der Smartwatch (Apple Watch, Wear OS, Garmin), gleichwertig und live synchron. Dazu Statistik, Herzfrequenz und Freunde.
+Tennis, Padel, Pickleball, Badminton und Tischtennis zählen: auf dem Handy (Android/iOS) und der Smartwatch (Apple Watch, Wear OS). Statistik, Cloud-Funktionen und Garmin folgen gemäß Roadmap.
 
-**Status:** Phase 0 – Monorepo-Gerüst steht (Welle 0a), noch keine Fachlogik.
+**Status (18.10.2026):** Offline-Scoring und lokale Handy-/Uhren-Synchronisierung sind implementiert. Phase P2 ist im Aufbau: Android-Auth, lokale Cloud-Outbox sowie U1-Sitzungsbindung und U2-Kontotrennung sind integriert. U3, serverseitige Gerätebindung/Widerruf und versionierte Zustimmung werden parallel umgesetzt. Automatischer Cloud-Betrieb und Online-Pilot sind noch nicht freigegeben; Apple-Geräteabnahme bleibt separat offen.
 
 - [Gesamtplan & Roadmap](docs/PLAN.md)
+- [Ausführungsplan für Cloud und Pilot](docs/p2-parallel-ausfuehrung.md)
 - [Grundsatzentscheidungen](docs/00-entscheidungen.md)
 - [Architektur](docs/01-architektur.md)
 - [Klickbarer Mockup](docs/mockups/index.html)
@@ -23,6 +24,8 @@ shared/
   sync-protocol/      pure Kotlin: Wire-DTOs, Anti-Entropy
   data/               lokale Datenbank, EventStore, Outbox
   device-link/        Transport Uhr <-> Handy
+  cloud-sync/         Auth, Cloud-Verträge und Upload-Sitzungsgrenze (P2)
+  presentation-auth/  Konto-/Onboarding- und Support-Präsentation
   entitlements/       Freemium-Vorbereitung
   presentation/       ViewModels + UI-State (Phone + Wear)
   ui-phone/           Compose-Multiplatform-UI (Android, iOS, Desktop-Preview)
@@ -35,8 +38,8 @@ watchApp/             SwiftUI-Quellen der watchOS-App (Target in iosApp/project.
 docs/, site/          Planung und Website advantly.eu
 ```
 
-Folgen in späteren Wellen: `shared/cloud-sync` (P2, Supabase), `shared/health` (P3), `shared/device-link-garmin` und
-`garminApp/` (P4, Monkey C), `backend/supabase/`, `testvectors/`.
+Backend-Migrationen und Tests liegen unter `supabase/`, Testvektoren unter `testvectors/`.
+Später folgen `shared/health` (P3), `shared/device-link-garmin` und `garminApp/` (P4, Monkey C).
 
 ## Bauen unter Windows
 

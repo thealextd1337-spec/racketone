@@ -1,0 +1,109 @@
+# Cloud und Pilot – parallele Ausführung
+
+Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85ad78`
+(U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
+[Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
+
+## Ausgangspunkt und Arbeitsweise
+
+U1 und U2 sind integriert. Drei Implementierer arbeiten in getrennten Git-Worktrees;
+der Integrationszweig heißt `p2/cloud-pilot-parallel`. Der Orchestrator besitzt Dokumentation,
+Integrationsänderungen, Reviews und PRs. Umsetzung primär mit GPT-6.1 Sol, unabhängige Reviews
+nach tatsächlichem Diff. Keine gehosteten Deployments, automatische Cloudaktivierung oder
+behaupteten realen Geräte-/Datenschutzabnahmen aus diesem Auftrag ableiten.
+
+Jedes Paket liefert Commit, Worktree, Schnittstellen und Testnachweise. Vor Commit gilt
+`gradlew check`; zusätzlich fachlich passende SQL-/HTTP-/UI-Tests. Reviewer implementieren
+ihre eigenen Befunde nicht. Nach Korrekturen neue unabhängige Reviewrunde; Integration nur
+nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abstimmen.
+
+## Welle 1 – parallel gestartet
+
+| Paket | Besitz | Abnahme | Status |
+|---|---|---|---|
+| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Umsetzung läuft |
+| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Umsetzung läuft; K4-App-Bedienung folgt |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Umsetzung läuft; freigegebene Dokumente separat offen |
+
+Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
+getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
+K1 besitzt in `Ports.kt` den Auth-Vertrag sowie `SupabasePhoneAuth.kt`; U3 besitzt
+`CloudSessionGate.kt` und `SupabaseCloudBackend.kt`. Zusätzliche gemeinsame Änderungen
+werden als Integrationsarbeit behandelt.
+
+Freigegebene additive Erweiterung: K1 ergänzt in `CloudHttp.kt` ausschließlich die
+Fehler-Whitelist um `consent_required`, `consent_unavailable`, `consent_version_changed`,
+`consent_documents_invalid`, `consent_language_invalid`, `no_deletion_pending` samt
+gezieltem Mapping-Test. Der übrige HTTP-Vertrag bleibt unverändert.
+
+### Abgestimmte Zustimmungsschnittstelle
+
+- K1 liefert `ConsentStatus` mit `UNAVAILABLE`, `REQUIRED`, `DECLINED`, `CURRENT` und
+  `CloudSession.consentStatus` mit sicherem Default `UNAVAILABLE`.
+- `CloudAuthPort.consent(language)` liest einen `ConsentSnapshot`;
+  `decideConsent(snapshot, accept)` speichert die bewusste Entscheidung.
+  Snapshot und Dokumente enthalten Profil, Status, Dokumenttyp, Version, Sprache, URL,
+  Freigabe, Annahme und Entscheidungszeit. K1 liefert die Typen in eigener `Consent.kt`.
+- U3/Integration erlauben Capture, Cloud-Requests und Ack nur bei `CURRENT`. Profilprüfung,
+  Zustimmung, Export, Löschung und Support behalten ihre unabhängigen Berechtigungen.
+  Historische gültige Testfixtures bekommen ausdrücklich `CURRENT`.
+- K1 liefert `private.has_current_consents(uuid)` und `private.require_current_consents()`.
+  Die 001-Migration darf noch nicht von 002 abhängen. Nach beiden Paketen ergänzt eine
+  neue `20261018000300_cloud_consent_gate.sql` den zentralen Server-Cloud-Gate-Seam und
+  prüft das Zusammenspiel einschließlich alter Cloud-Zugänge.
+- Ohne fachlich freigegebene Terms-/Privacy-Versionen bleibt die Zustimmung nicht erfüllbar.
+  Keine Rechtstexte, Versionsfreigaben oder fehlenden Terms-Links erfinden.
+- K1 darf bestehende Export-/Lösch-RPCs minimal erreichbar machen; ZIP-Auslieferung und
+  tatsächlicher Löschjob bleiben K2/K3. Ein Rohdatenabruf ist keine K2-Abnahme.
+
+### Aufgabenregister
+
+Die folgenden T3-IDs gehören zu diesem Hauptthread. Ergebnisse wecken den Orchestrator;
+keine Poll-/Watcher-Schleifen. Neue Reviewrunde erhält eine neue Task-ID und den vollständigen
+Brief einschließlich früherer Befunde und Antworten.
+
+- U3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-impl-r1`
+- Server/K4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server_k4-impl-r1`
+- K1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-impl-r1`
+
+## Folgewellen – nach erfüllten Abhängigkeiten starten
+
+| Welle | Parallel nutzbare Pakete | Voraussetzung und Abnahme |
+|---|---|---|
+| 2 | U4 Upload; K2 Export; K3 Server-/Redaktionsvertrag und Löschablauf | U4 nach U3 und stabilem Serververtrag; K2/K3 nach K1-Vertrag. Eigene Dateibesitze festlegen. Upload begrenzt, idempotent, Retry nach verlorener Antwort, mehr als 500 Events, parallele Änderung. Export private ZIP-Ausgabe mit Historie, Ablauf und Aufräumen. Löschung mit 14 Tagen Karenz, Rücknahme und überprüfbarem Job; Vertrag früh für D3 bereitstellen. |
+| 3 | D1 Pull; K4 Konto-/Gerätebedienung; K5 Kontosupport | D1 nach U4: atomare Seiten/Cursor, Wasserstände, Neustart, Epochenwechsel und getrennte Konten. K4 nutzt geprüfte Server-RPCs, globale Auth-Abmeldung bleibt getrennt. K5 minimale Suche/Aktionen mit AAL2, serverseitiger Rolle und Audit, kein Match-/Health-Zugriff. |
+| 4 | D2 Entzug, danach D3 Redaktion; B4 vorbereiten; K6 Betriebsansicht | D2/D3 teilen Datenhaltung/Protokoll und werden nacheinander integriert. D3 benötigt K3-Vertrag. Offline-Uhr verliert entzogene/redigierte Inhalte dauerhaft, alte Pakete beleben sie nicht wieder. B4 nutzt stabile U4/D1-Schnittstellen; Freigabe erst nach D2/D3. K6 verwendet echte Betriebsdaten, fehlende Telemetrie bleibt unbekannt. |
+| 5 | Gemeinsame Regressionen und K7 Pilotnachweise | Integrierten Kandidaten prüfen, Konto-/Geräte-/Support-Live-Matrix und externe Nachweise getrennt dokumentieren. Keine Freigabe aus Mock-/Simulator-/lokalen SQL-Tests ableiten. |
+
+U4 und D1 dürfen nicht vor vollständiger K4-Abnahme freigegeben werden. Eine lokale
+Implementierung kann bis dahin fertiggestellt und getestet werden, ohne Cloud-Betrieb
+zu aktivieren. Zustimmungsversionen und Geräteschutz werden gemeinsam geprüft, ohne
+Export/Recovery/Löschung/Support versehentlich mitzuschließen.
+
+## Konkrete gemeinsame Integrationsprüfungen
+
+1. U3 allein gegen seine Basis prüfen; K1 allein gegen seine Basis; Server/K4 allein gegen
+   seinen tatsächlichen Stack. Gemeinsame Änderungen dann in kontrollierter Reihenfolge übernehmen.
+2. K1 und U3: nicht aktuelle Zustimmung vor/während Request, Ablehnung, verspätete Antwort,
+   Konto A→B und A→A, keine falsche lokale Quittierung. Lokale Matches weiter nutzbar.
+3. Server/K4 und K1: Migrationen 001→002→003 in frischem echten Supabase; gültiger Token ohne
+   aktuelle Zustimmung oder nach Gerätewiderruf auf sämtlichen Cloud-Wegen verweigert.
+   Profil/Zustimmung/Export/Löschantrag/Recovery/Support bleiben nach eigener Prüfung erreichbar.
+4. Gesamter Gradle-Check, passende pgTAP-/HTTP-Tests und unabhängiges Review vor PR/Merge.
+   Apple-Linking und native Ausführung separat über macOS-CI. Kein Teststub ersetzt Hosted-Abnahme.
+5. Nach jedem Merge Folgepakete auf aktualisierter Basis starten. Nicht auf veralteter
+   Integrationsbasis parallel neue Migrationen oder gemeinsame UI-/Protokolldateien ändern.
+
+## Verbleibende externe Abnahmen
+
+- Fachlich freigegebene Terms-/Privacy-Texte DE/EN samt belastbarem Versionsbezug;
+  Anbieter-/Datenflussnachweise, Data safety, VVT und Prüferzugang gemäß P2-Gate.
+- Gehosteter Auth-/Gateway-Negativtest, echte Provider-Anmeldung, Cron-Ausführung,
+  Backup-/Wiederherstellung sowie vollständige Support-Live-Matrix.
+- Reale Geräte mit Commit/OS/Soll/Ist: Pixel und kleine Galaxy Watch, DE/EN und große Schrift;
+  Kontowechsel, Offline/Reconnect, Datenübernahme und später Entzug/Redaktion.
+- iOS-Konto-Host, Apple-Developer-Account und reale iPhone-/Apple-Watch-Abnahme getrennt.
+  Öffentliche Produktion bleibt erst nach P3 und den bestehenden Release-Gates vorgesehen.
+
+Freunde/Cloud-Live/eigenständige Wear-Sitzungen bauen anschließend auf dem belastbaren Cloud-Pfad
+auf; P3 Health/Tracker und P4 Garmin bleiben in ihrer bestehenden Phasenreihenfolge.
