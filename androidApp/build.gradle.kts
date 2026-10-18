@@ -16,6 +16,7 @@ fun authValue(key: String): String = providers.gradleProperty(key).orNull ?: aut
 
 android {
     namespace = "eu.advantly.android"
+    testOptions.unitTests.isIncludeAndroidResources = true
     defaultConfig {
         mapOf(
             "SUPABASE_URL" to "advantly.supabase.url",
@@ -29,6 +30,7 @@ android {
 }
 
 dependencies {
+    testImplementation(libs.robolectric)
     testImplementation(libs.ktor.mock)
     testImplementation(libs.sqldelight.sqlite.driver)
     implementation(projects.shared.uiPhone)

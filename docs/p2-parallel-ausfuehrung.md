@@ -13,21 +13,33 @@ neun Aufrufformen, vier DE/EN-Hell/Dunkel-Bilder bei 200 Prozent). Root integrie
 als `cbc4022`; Gesamtcheck samt Phone-/Wear-APKs: 767 Tasks grün. Die A+B-Dateien bleiben
 unverändert, der gemergte K2-Server bleibt auf der bestehenden Mainbasis.
 
-Android-Host `e0f3310` ist ein geprüfter Buildkandidat, noch keine Reviewfreigabe: 771 Tasks
-und beide APKs grün; 22 neue Exporttests ohne Skips, darunter echte Default-SDK-/Socketfälle.
-Der frühere Provider-P1 (alter Grant vor Collectorfortschritt) ist durch drei rote, danach grüne
-Regressionen und den seriellen `ExportAccessGateway` eingegrenzt. Der vollständige unabhängige
-C-Review läuft. Der enge Provider öffnet nur registrierte private Dateien nach aktueller
-SDK-/Kontoprüfung; der Windows-Befund wird nicht als Android-Defekt ausgegeben.
+Android-Host einschließlich Fix `b6f5c25` ist im vollständigen Review R2 ohne Befund freigegeben:
+29 Repository-Exporttests plus vier unveränderte externe Reproduktionen frisch grün, null Skips.
+Worker-Gesamtcheck samt beiden APKs: 767 Tasks grün. Der frühere Provider-P1 (alter Grant vor
+Collectorfortschritt) ist durch drei rote, danach grüne Regressionen und den seriellen
+`ExportAccessGateway` geschlossen. Der R1-P2 (Abbruch vor LAZY-Start blockiert den Host) ist durch
+identitätsgebundenen Abschluss vor Publication behoben; auch nie gestartete Jobs und tatsächliche
+Kindjob-Enden sind berücksichtigt. Der enge Provider öffnet nur registrierte private Dateien nach
+aktueller SDK-/Kontoprüfung; der Windows-Befund wird nicht als Android-Defekt ausgegeben.
+Root übernimmt alle zehn C-Dateien bytegleich zu `b6f5c25`; gemeinsame Konto-UI, Cloudadapter,
+Server und CI unverändert. Gemeinsamer Gesamtcheck samt beiden APKs: 771 Tasks grün (1m2s).
 
-Parallel startet K2-D2 ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
+K2-D2 ist als `fac1345` umgesetzt, ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
 direkten Kompositionstest. Dieselbe Auth-Instanz liefert den Exportport; die aktuelle Activity
 besitzt den Sharecallback, der langlebige Host hält sie nicht. C-Dateien bleiben unberührt;
-spätere C-Korrekturen übernimmt Root. Kein Push/PR aus den Umsetzungsagenten, keine automatische
-Exportabfrage. Gesamtfreigabe erst nach C- und Kompositionsreview sowie relevanter CI.
+spätere C-Korrekturen übernimmt Root. Vier neue Kompositionstests und Worker-Gesamtcheck samt APKs
+771 Tasks grün. Kompositionsreview R1 bestätigt den Produktpfad, findet aber einen P2 im
+neuen Test: bedingungslose leere BuildConfig verletzt unterstützte lokale Backendproperties.
+Gezielte Korrektur ausschließlich Factory-Testseam und bestehendem Kompositionstest läuft;
+Produktionsdefaults bleiben aus BuildConfig. Danach frischer Review R2. Kein Push/PR aus den Umsetzungsagenten,
+keine automatische Exportabfrage. Gesamtfreigabe erst nach Kompositionsreview, gemeinsamer
+Integration und relevanter CI. PR #68 ist inzwischen als `6c45ac5` auf main; dessen Baum ist
+bytegleich zur bereits enthaltenen Basis `868a3a2`. Squash-Abgleich `78c4301` erhält alle Exportdateien.
 
 - C-Gesamtreview: `advantly-20261018-k2-phone-host-review-r1`.
+- C-Review nach Fix: `advantly-20261018-k2-phone-host-review-r2`.
 - D2-Umsetzung: `advantly-20261018-k2-android-composition-impl-r1`.
+- D2-Review: `advantly-20261018-k2-android-composition-review-r1`.
 
 Beide IDs haben den vollständigen T3-Taskpräfix, der unterhalb dieser Übersicht dokumentiert ist.
 
