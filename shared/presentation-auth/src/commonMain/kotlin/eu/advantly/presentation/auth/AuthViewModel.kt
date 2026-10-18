@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
+import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.ConsentSnapshot
+import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -11,7 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-enum class AuthStep { AGE, PROVIDER, CODE, ALIAS, ACCOUNT }
+enum class AuthStep { AGE, PROVIDER, CODE, CONSENT, ALIAS, ACCOUNT }
 
 data class AdoptionChoice(
     val key: String,
@@ -26,6 +29,9 @@ data class AuthState(
     val deletionRequested: Boolean = false,
     val adoptionSources: List<AdoptionChoice> = emptyList(),
     val selectedSources: Set<String> = emptySet(),
+    val authenticated: Boolean = false,
+    val consent: ConsentSnapshot? = null,
+    val exportedData: String? = null,
 )
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -45,9 +51,19 @@ class AuthViewModel(
     private var ticket: String? = null
     private var email: String = ""
     private var adoptionGeneration: Long? = null
+    private var displayedSession: CloudSession? = null
+    private var consentLanguage = "en"
     private val scope get() = workScope ?: viewModelScope
 
     init {
+        scope.launch {
+            auth.session.collect { session ->
+                if (displayedSession != null && !sameSession(displayedSession, session)) {
+                    displayedSession = null
+                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed")
+                }
+            }
+        }
         refresh()
     }
 
@@ -104,12 +120,63 @@ class AuthViewModel(
         alias: String,
         username: String,
     ) = runAction {
+        requireDisplayedSession()
+        if (mutable.value.consent?.status != ConsentStatus.CURRENT) throw CloudException("consent_required", true)
         auth.completeOnboarding(alias, username.ifBlank { null })
         showSession()
     }
 
+    fun setConsentLanguage(language: String) {
+        if (language !in setOf("de", "en") || language == consentLanguage || mutable.value.busy) return
+        consentLanguage = language
+        if (auth.session.value != null) refresh()
+    }
+
+    fun decideConsent(accept: Boolean) =
+        runAction {
+            val before = requireDisplayedSession()
+            val snapshot = mutable.value.consent ?: throw CloudException("consent_unavailable", false)
+            if (accept && !snapshot.canAccept) throw CloudException("consent_unavailable", false)
+            // Ablehnen sperrt Cloud-Arbeit sofort und darf dafür die lokale Generation wechseln.
+            if (!accept) displayedSession = null
+            val result = auth.decideConsent(snapshot, accept)
+            if (result.profileId != before.profileId || before.profileId != auth.session.value?.profileId ||
+                (accept && !sameSession(before, auth.session.value))
+            ) {
+                throw CloudException("cloud_session_changed", true)
+            }
+            showSession()
+        }
+
+    fun exportData() =
+        runAction {
+            val before = requireDisplayedSession()
+            val data = auth.exportData()
+            if (!sameSession(before, auth.session.value)) throw CloudException("cloud_session_changed", true)
+            mutable.value = mutable.value.copy(exportedData = data)
+        }
+
+    fun dismissExport() {
+        mutable.value = mutable.value.copy(exportedData = null)
+    }
+
+    fun requestDeletion() =
+        runAction {
+            requireDisplayedSession()
+            auth.requestDeletion()
+            showSession()
+        }
+
+    fun cancelDeletion() =
+        runAction {
+            requireDisplayedSession()
+            auth.cancelDeletion()
+            showSession()
+        }
+
     fun signOut() =
         runAction {
+            displayedSession = null
             try {
                 auth.signOut()
             } finally {
@@ -156,20 +223,53 @@ class AuthViewModel(
             mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
         }
 
-    private fun showSession() {
+    private fun sameSession(
+        before: CloudSession?,
+        after: CloudSession?,
+    ): Boolean = before?.profileId == after?.profileId && before?.generation == after?.generation
+
+    private fun requireDisplayedSession(): CloudSession {
+        val session = displayedSession ?: throw CloudException("cloud_session_changed", true)
+        if (!sameSession(session, auth.session.value)) throw CloudException("cloud_session_changed", true)
+        return session
+    }
+
+    private suspend fun showSession() {
         val session = auth.session.value
-        val candidates = if (session?.onboarded == true && !session.deletionRequested) auth.adoptionSources() else emptyList()
+        displayedSession = session
+        mutable.value =
+            AuthState(
+                step = if (session == null) AuthStep.AGE else AuthStep.ACCOUNT,
+                busy = mutable.value.busy,
+                authenticated = session != null,
+                deletionRequested = session?.deletionRequested == true,
+            )
+        val consent = session?.let { auth.consent(consentLanguage) }
+        if (!sameSession(session, auth.session.value) || (consent != null && consent.profileId != session?.profileId)) {
+            throw CloudException("cloud_session_changed", true)
+        }
+        val candidates =
+            if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+                auth.adoptionSources()
+            } else {
+                emptyList()
+            }
+        displayedSession = session
         adoptionGeneration = session?.generation
         mutable.value =
             AuthState(
                 step =
                     when {
                         session == null -> AuthStep.AGE
-                        session.onboarded || session.deletionRequested -> AuthStep.ACCOUNT
+                        session.deletionRequested -> AuthStep.ACCOUNT
+                        consent?.status != ConsentStatus.CURRENT -> AuthStep.CONSENT
+                        session.onboarded -> AuthStep.ACCOUNT
                         else -> AuthStep.ALIAS
                     },
                 deletionRequested = session?.deletionRequested == true,
                 adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
+                authenticated = session != null,
+                consent = consent,
             )
     }
 
