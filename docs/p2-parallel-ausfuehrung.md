@@ -902,6 +902,12 @@ bereits offene Dateideskriptoren sind nicht nachträglich fernlöschbar.
 
 A und B starten isoliert auf demselben geprüften Rootstand nach `ba1f37d`; keine
 gegenseitigen Imports. C konsumiert anschließend beide geprüften Verträge.
+Tatsächliche gemeinsame Basis `7ff695e`. A arbeitet im eigenen Git-Worktree
+`p2-k2-a-export-http`, B im eigenen `p2-k2-phone-ui`; B meldet T3-`already_in_worktree`
+und nutzt deshalb für sämtliche Datei-/Buildoperationen explizit seinen eigenen Workdir.
+Root-/fremde Worktrees bleiben unverändert. Tasks:
+- A: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-impl-r1`
+- B: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-ui-impl-r1`
 
 Verbindlicher A-Vertrag: `CloudDataExportPort.context` ist
 `StateFlow<CloudDataExportContext?>`; Context enthält ausschließlich Profil-ID, verifizierte
