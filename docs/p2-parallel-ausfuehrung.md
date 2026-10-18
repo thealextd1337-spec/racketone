@@ -21,9 +21,9 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 
 | Paket | Besitz | Abnahme | Status |
 |---|---|---|---|
-| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Kern `751bca8` geliefert, Review 1 `fix-first`; Korrektur der drei Befunde läuft |
-| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Korrektur `0912e27` auf Entwurfs-PR #62; Sicherheitsreview 2 und neue CI laufen; K4-App-Bedienung folgt |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `41f3702` geliefert, Review 1 `fix-first`; Korrektur läuft, freigegebene Dokumente separat offen |
+| U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | `fbca22d` auf Entwurfs-PR #63; Review 3 `ship`, Android-/Apple-CI läuft |
+| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Korrektur `21c6d20` auf Entwurfs-PR #64; Review 2 `fix-first`, zwei lokale Zustandsrennen werden korrigiert |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -81,10 +81,17 @@ Brief einschließlich früherer Befunde und Antworten.
 - Server/K4 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r1`
 - Server/K4 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-k4-fix-r1`
 - Server/K4 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r2`
+- Server/K4 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-k4-fix-r2`
 - U3 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r1`
 - U3 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u3-fix-r1`
+- U3 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r2`
+- U3 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u3-fix-r2`
 - K1 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r1`
 - K1 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r1`
+- Server/K4 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-review-r3`
+- U3 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r3`
+- K1 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r2`
+- K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
 
 ### Server/K4 – erste Übergabe
 
@@ -118,7 +125,10 @@ SQL-Parallelitätsprüfung und zwölf nachweislich wartende Widerruf-/Löschrenn
 Dies bleibt lokale PostgreSQL-Evidenz, kein HTTP-/WebSocket-/Hosted-Nachweis.
 PR #62 ist aktualisiert. CI `39126397938` für exakt `0912e27` ist grün, einschließlich
 echter Supabase-Migrationen/pgTAP und Gradle-/Android-/Wear-Builds; Admin und Apple wurden
-pfadbedingt übersprungen. Unabhängiges Review 2 läuft noch, daher kein Merge.
+pfadbedingt übersprungen. Review 2 bestätigt die R1-Korrekturen unter READ COMMITTED,
+fand aber einen P2: REPEATABLE READ behält trotz erneuter Sperre den alten Snapshot.
+Elf von zwölf Fällen waren dabei unsicher. Korrektur 2 erzwingt unterstützte Isolation
+auch im RLS-Pfad; andere Modi müssen geschlossen verweigert werden. Kein Merge vor Review 3.
 
 ### U3/K1 – gemeinsame lokale Integration
 
@@ -151,6 +161,20 @@ U3 Review 1 (`fix-first`) reproduzierte zusätzlich mit kompilierten Klassen:
 Der ursprüngliche Implementierer ergänzt Fail→Pass-Regressionen und einen separaten
 Korrekturcommit. Neue unabhängige Reviewrunde vor Freigabe erforderlich.
 
+U3-Korrektur `ce4e5df` behebt laut Implementierer alle drei Befunde, einschließlich späterer
+Herkunfts-/Quellbindung während eines Uploads. Acht ursprüngliche und zwei ergänzende
+Regressionen wurden rot→grün gezeigt; 86 data-/53 cloud-Tests und vollständiger Check
+bestanden. Öffentliche API und Gate bleiben unverändert. Als `92acc2b` lokal integriert;
+der Orchestrator wiederholt Fokus/Migrationsprüfung gegen den gemeinsamen K1-Stand.
+Entwurfs-PR [#63](https://github.com/thealextd1337-spec/racketone/pull/63) startet CI parallel
+zum unabhängigen Review 2.
+
+Review 2 bestätigt alle drei U3-R1-Korrekturen und erneut 86 data-/53 cloud-Tests samt
+Migration. Neuer belegter P2: Nicht uploadbare PLAYER-Platzhalter belegen vor dem Mapping
+die begrenzte Metadatenauswahl; ein Platzhalter bei Limit 1 beziehungsweise 500 bei Limit 500
+blockiert echte Änderungen dauerhaft. Korrektur 2 muss diese Kandidaten vor LIMIT ausschließen
+oder kontrolliert nachfüllen, ohne künstliche Erfolgs-Acks. Regressionen und Review 3 vor Freigabe.
+
 K1 Review 1 (`fix-first`) fand einen P1 und zwei reproduzierte P2:
 
 - Server-Consent und Kontorechte prüfen noch keine weiterhin gültige Auth-Sitzungszeile.
@@ -181,6 +205,69 @@ deren gespeicherte ID und Claims einschließlich `exp`; keine Ersatzsitzung nach
 `authenticate_as_id` bleibt für Negativfälle ohne Sitzung. Bei Integration muss
 `tests.cloud_context.session_id` diese kanonische ID verwenden; `prepare_cloud_context`
 darf eine gelöschte Auth-Sitzung nicht wieder anlegen.
+
+K1 präzisiert den Korrekturvertrag um `private.require_account_read_committed()`;
+Session-/Zustimmungsprüfung verwenden ihn, `has_current_consents` bleibt bei anderen
+Isolationsmodi falsch. K1 meldet 45 Sitzungsfälle, Isolationsfälle und echte Lock-Warterennen
+mit entfernten Auth-Sitzungen bestanden. Gate: `captureProfile(canResumeCloud)` erfasst
+Profilrevision, alte Cloud-Leases erhalten eine eigene monotone Cloud-Revision.
+Die Integration bewahrt den CURRENT-/Consent-Generationsschutz einschließlich Invalidierung
+bei Suspend mit unverändertem Status. K1-Korrekturcommit und unabhängige Prüfung stehen noch aus.
+
+Beim U3-Korrekturlauf gegen K1 benötigte die neu hinzugekommene HTTP-Regression ebenfalls
+eine explizite CURRENT-Fixture. Der erste gemeinsame Lauf verweigerte korrekt mit
+`consent_required`; nach Anpassung sind data-/cloud-Fokus und Migration gegen den
+gemeinsamen K1-Stand grün. Das ersetzt nicht den offenen U3-R2-Fortschrittsbefund.
+
+### Aktuelle Review- und Integrationsergebnisse
+
+Server/K4 Review 3 bestätigt `5e15128` ohne offene belegte P0/P1/P2-Befunde:
+204 neue pgTAP-Prüfungen, 48 Lock-Rennen in vier Isolationsmodi und fünf Harness-Testgruppen.
+Die relevante CI auf genau diesem Stand ist grün, einschließlich echtem Supabase und
+Android/Wear. PR #62 wurde als `6537ac6` gemergt. Hosted-Gateway, `private_only` und das
+Trennen bestehender WebSockets bleiben gesonderte Nachweise.
+
+U3 Review 3 bestätigt `fbca22d` mit `ship`. Nicht sendbare PLAYER-Platzhalter und
+unvollständige Projektionen werden vor LIMIT ausgeschlossen; kein Fake-Ack und keine
+unbegrenzte Nachladeschleife. Unabhängig erneut 90 Data- und 53 Cloud-Tests grün,
+einschließlich Migration und 502-Event-Fall. PR #63 wartet auf relevante CI.
+
+K1-Korrektur `21c6d20` wurde mit den CURRENT-/Consent-Generationen integriert.
+`captureProfile` behält die Consent-Generation; Suspend invalidiert Profil-, Cloud- und
+Consent-Revisionen, ohne unabhängige Kontorechte pauschal abzubrechen. Die zentrale SQL-Fixture
+verwendet eine kanonische Auth-Sitzung und legt widerrufene Sitzungen nicht wieder an.
+Gemeinsamer Gradle-Check mit 690 Tasks grün; gemeinsame SQL-Suite bis auf die beiden
+bekannten fehlenden lokalen pg_cron-Nachweise grün. Lokaler PG17 ersetzt keinen echten Stack.
+
+K1 Review 2 bestätigt die bisherigen Korrekturen, reproduziert aber zwei neue Befunde:
+
+- P1: Suspend verliert die Information über eine lokal behaltene Kontoidentität.
+  Löschbeginn oder echter Kontowechsel müssen auch nach Suspend beziehungsweise frischem
+  Host die lokale Identität trennen und das aktuelle Gerät wechseln.
+- P2: Eine ältere erfolgreiche Zustimmung kann eine neuere fehlgeschlagene Ablehnung
+  quittieren und Cloud-Arbeit erneut freigeben. Monotone Intent-Revision vor jedem
+  Zustimmung-/Lösch-/Recovery-Aufruf; Altantworten quittieren keine neueren Sperren.
+
+K1 korrigiert beide Befunde mit realen Ownership- und Parallelitätsregressionen. Freigegeben
+ist dafür ausschließlich ein lesender U2-Seam: `LocalAccountOwnership.retainedProfileId`
+(Default null), in `MatchSession` unter `checkThread` aus `accountIdentities.profile` gelesen.
+Die Cloud-JVM-Tests dürfen `match-session` als reine Testabhängigkeit nutzen. Keine Herkunfts-,
+Payload- oder Metadatenänderung. Neue unabhängige Reviewrunde vor Freigabe.
+
+### Nächste isolierte Umsetzungspakete
+
+Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
+Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
+
+| Paket | Besitz | Begrenztes Ergebnis und Abhängigkeit |
+|---|---|---|
+| Server-Consent-Integration | Neue Migration `20261018000300_cloud_consent_gate.sql`, neue `181_cloud_consent_gate*`-Tests, minimale explizite positive SQL-Fixtures | Nach 001/002 verlangen zentrale Cloud-Seams aktuelle Zustimmung, auch auf alten RPC-/Tabellenwegen. Lock-Rennen und unabhängige Kontorechte prüfen; Produktionsseed bleibt UNAVAILABLE. Keine Kotlin-/Auth-/Uploadänderung. |
+| U4-Kern | Neue Runner-/Uploadzustände und Tests in `cloud-sync`, Backend-/Mapping-Seams, nötigenfalls schmale Upload-Statusprimitive in `data` | Expliziter endlicher Lauf über `captureUpload`/`pushSelected`, ≤500 Events je Batch, begrenzte Batches, Retry/Teilantworten/Paralleländerungen und ehrlicher Restbestand. Kein Gate-/Auth-/Ownership-/SQL-Besitz. Android-Bedienung und echter Supabase-Lauf sind anschließende eigene Integrationsschritte. |
+
+Beide Pakete starten isoliert vom geprüften lokalen Integrationscommit. K1 behält Gate/Auth
+und den freigegebenen lesenden U2-Seam. Der Orchestrator integriert die Diffs nach separatem
+Review; keine gemeinsame Datei wird parallel durch mehrere Implementierer bearbeitet.
+U4 startet keine Gerätebindung, Reauthentifizierung, Proofrotation oder Hintergrundplanung.
 
 ## Folgewellen – nach erfüllten Abhängigkeiten starten
 
