@@ -4,7 +4,38 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
+### D1-CI: SDK-Paketkennung korrigiert
+
+Der erste Lauf von PR #69 auf `6d9d651` endet vor Stackstart beim SDK-Setup:
+`platforms;37` ist keine Paketkennung. Die Plattformfassung `37.0` wird nun separat im
+zentralen Versionskatalog geführt und als `platforms;android-37.0` an den SDK-Manager
+übergeben; die ganzzahlige Compile-API bleibt 37. Lokale Paketmetadaten und der aktuelle
+Paketkatalog bestätigen diese Fassung. Der neue lokale CLI-Nachfolger akzeptiert die
+entsprechende Slash-Schreibweise; die CI verwendet die dokumentierte sdkmanager-Syntax.
+Keine Pull-/Server-/Fachteständerung und noch kein neuer Live-Stacknachweis.
+Der unabhängige Stack-CI-Review R2 bestätigt den Drei-Dateien-Fix ohne neue Befunde;
+zehn Harness-Tests, Actionlint und der vollständige Gradle-Check (692 Tasks, 6m4s) sind frisch
+grün. Der aktuelle Linux-Stacklauf bleibt Pflicht.
+
+Der Folgelauf auf `ff55c4e` passiert das SDK-Setup und die K2-Serviceprüfungen. Danach
+endet Gradle mit Exit 0, aber das XML-Gate lehnt die Reportform ab: KMP verwendet als
+Suite `CloudPullStackTest[jvm]` und den Methodennamen mit `[jvm]`, während `classname`
+vollständig qualifiziert bleibt. Die lokale Originalreportform reproduziert diesen Fehler.
+Das Gate wird auf genau diese JVM-Form korrigiert; genau ein Test, null Fehler und null
+Skips bleiben zwingend. Zusätzliche Diagnostik gibt nur feste Wahrheitswerte aus, keine
+XML-Inhalte. Die korrigierte Testfixture ist gegen das vorherige Gate rot und mit dem
+Fix grün; ein echter erfolgreicher CI-Stacktest ist damit weiterhin nicht vorweggenommen.
+Review R3 bestätigt ohne Befund: elf Harness-Tests und acht zusätzliche negative XML-Proben
+grün, realer lokaler Skip ausdrücklich abgewiesen, übriger Harness per AST unverändert.
+Gesamtcheck: 688 Tasks grün (51s). Neue CI muss den ausgeführten Stacktest bestätigen.
 ## Aktueller Integrationsstand und laufende Pakete
+
+PR #68 ist nach erfolgreicher Ubuntu- und Apple-CI auf `868a3a2` als `6c45ac5` nach main
+gemergt. Admin und Supabase waren in diesem Lauf ausdrücklich per Pfadfilter übersprungen;
+ihre frühere K2-Abnahme aus #67 bleibt getrennt belegt. D1 übernimmt den Mainstand nach den
+geprüften SDK-/XML-Korrekturen `ff55c4e`/`b1d50df`: ausschließlich Plankonflikte, sämtliche
+Produkt-, Test-, Workflow- und Serverdateien bytegleich zu `b1d50df`. Der grüne 688-Task-Check
+bleibt dafür gültig. Neue CI auf dem Mergehead bleibt vor D1-Freigabe erforderlich.
 
 - K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
   einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.
@@ -918,6 +949,62 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+D1-Stack-Harness `fb91858` unabhängig ohne Befund freigegeben: vier Dateien, zehn
+Guard-/XML-/Cleanup-Tests, Actionlint/Syntax und Gesamtcheck 692 Tasks grün. Zusätzlich
+isolierte SQL-Probe bestätigt 201 Matches/402 Teilnehmer/701 Events/501 im Hauptmatch;
+kein Ersatz für echten Auth/PostgREST. Root übernimmt per Fast-forward und gleicht mit
+nach PR #67 gemergtem main `8660716` ab. CI-Konflikte erhalten exakt den geprüften
+D1-Workflow (dessen `gradle/**` auch den bisherigen Katalogfilter abdeckt), Plan erhält
+beide Nachweise. Gesamter Produkt-/Test-/Workflow-/Serverbaum bytegleich `fb91858`;
+grüner 692-Task-Check gilt fort. Eigener Draft-PR für tatsächliche CI, vor Merge weiterhin
+Android-Vorläufer #68 und echte erfolgreiche Stackprüfung ohne Skip erforderlich.
+
+Die gemeinsame D1-/K2-Abhängigkeit `139f8ee` besteht den Gesamtcheck mit 692 Tasks
+(3m29s, `advantly-d1-k2-stack-dependency-check.log`). Der zusätzliche Abgleich mit
+Root-Planstand `5cd8169` betrifft ausschließlich Dokumentation; Produktbaum unverändert,
+grüner Check gilt fort. Damit kann die neue isolierte Harness-Lane vom aktuellen Root-
+Elterncommit ohne Produktkonflikt auf die vorbereitete Basis vorspulen.
+D1-Integrationsreview bestätigt `25dc96b` ohne Befunde, 140 Fokusprüfungen und Migration
+grün. Die Stackrecherche ist abgeschlossen; eigentliche Harnessumsetzung folgt auf dieser
+Basis. Kein neuer Produktiv-/Hosted-/Gerätenachweis durch den Abhängigkeitsmerge.
+
+Für die echte D1-Stack-CI ist ein weiterer eigener Root-Worktree `p2-d1-stack-ci`, Branch
+`p2/d1-stack-ci`, ab D1-Integration `25dc96b` vorbereitet. Er übernimmt K2-Service-CI
+`ba90a1d` als geprüfte Abhängigkeit; ausschließlich Plankonflikt, beide Nachweise erhalten.
+Kotlin/Android/Wear bytegleich `25dc96b`, Server/CI/Katalog bytegleich `ba90a1d`.
+Noch keine Harness-/Workflow-/Stackteständerung. Folgender enger Schnitt: eigener
+`d1_stack_ci.py`, minimaler Anschluss im vorhandenen echten Supabase-Job, gültiger
+64-Hex-Installation-Proof im bestehenden Stacktest und genau ein Test ohne Skip als
+hartes XML-Gate. 201 enginefähige Matches/501 Events im Hauptmatch mit zwei echten
+Auth-Konten; keine synthetischen JWTs oder Authsessions. Reale CI bleibt erforderlich.
+
+D1 Review 4 bestätigt `89a6adb` ohne neue Befunde; R1–R3 geschlossen. Unabhängig 285
+Prüfungen grün, vollständige 10.000er-Reparatur mit Wiederöffnung und alle 28 lokalen
+Fence-Abbrüche atomar geprüft. Originale 1-s-Probe jetzt 31–36 ms je Seite mit Cursorfortschritt.
+Genau ein echter Supabase-Stacktest bleibt offen. Root integriert in eigenem Worktree
+`p2-d1-pull-integration` auf Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`.
+Einziger Konflikt: zusätzliche `CloudPullPort`-Schnittstelle in `SupabaseCloudBackend`;
+beide Ports bleiben. Alle 22 D1-Dateien nach Auflösung bytegleich zum geprüften Worker,
+Android-/Auth-/Gate-/AccountIdentity-/Backend-SQL-/CI-Dateien unverändert zur Rootbasis.
+Gemeinsamer Gesamtcheck samt Phone-/Wear-APK 761 Tasks grün (2m49s,
+`advantly-d1-root-integration-check.log`); frisches Integrationsreview vor eigenem PR.
+PR #68 bleibt eng und benötigt seine eigene CI.
+Die fehlende echte Stackabnahme wird separat lesend abgegrenzt: vorhandenen
+`CloudPullStackTest` mit wegwerfbarem echtem Auth/PostgREST und 201 Matches/501 Events
+aktivieren, bestehende K2-Service-CI nutzen, fehlendes Setup in CI hart abweisen und
+keinen lokalen Ersatzdienst oder neuen Skip einführen. Noch keine Workflowänderung.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-scope-r1`.
+
+Root gibt den konkreten K2-A-Nativschnitt für Android frei: pro Export-HTTP-Aufruf eigener
+OkHttp-Client/Dispatcher/Pool/Listener, FastFallback nur dort aus; Request-Join plus native
+Terminalevents und eigener Dispatcher-idle vor Operationsabschluss. Neun konkrete Dateien
+im bestehenden A-Worktree (vier bestehende, gemeinsame Transportseam, drei Plattformdateien,
+Android-Host-Test), öffentliche Port-/Auth-API unverändert, keine Build-/Versionänderung.
+Uninstrumentierte native Injection vor Netzwerk verweigert; iOS- und produktives JVM-ZIP
+für diesen Android-Pilotschnitt ausdrücklich `export_unavailable`. Bestehende Auth-/RPC-
+Funktionalität bleibt; Apple-/JVM-Nativabschluss ist eine spätere separate Lieferung.
+Mocktests erhalten eine explizite interne Factory-Capability, keine Engine-Namensheuristik.
+Native DNS-/Header-/Body-/Fehlerbarrieren sowie alle bisherigen Fences/Tests erforderlich.
 PR #67 ist nach exakt grünem `ba90a1d` zusammengeführt; main `8660716`, Run
 `39144135593` mit fünf erfolgreichen Prüfungen einschließlich echter Service-CI und
 Apple-Native-/Simulator-Builds. Root gleicht PR #68 danach ab: nur Plankonflikt,

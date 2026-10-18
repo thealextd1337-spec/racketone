@@ -34,6 +34,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 countById:
 SELECT count(*) FROM match_event WHERE id = ?;
 
+eventById:
+SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
+FROM match_event WHERE id = ?;
+
 countBySequence:
 SELECT count(*) FROM match_event WHERE match_id = ? AND device_id = ? AND device_seq = ?;
 
