@@ -889,6 +889,19 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+D1 Review 3 auf `b44c5ab` hält sämtliche R1-/R2-Befunde geschlossen, findet aber einen
+neuen P2 in wiederverwendetem Downloadcode: pro Duplikat lädt `storeDownloaded` das
+vollständige Matchlog. Bei 10.000 Bestandsereignissen lädt eine Zweierseite 20.000,
+eine 500er-Seite fünf Millionen Payloadzeilen; ein Lauf mit 1-s-Frist dauerte etwa
+5,9 s und rollte ohne Cursorfortschritt zurück. Zwei Strukturregressionen belegen den Fehler.
+Enger zusätzlicher Besitz freigegeben: `CloudSyncRepository.kt`, ausschließlich additive
+Einzelquery in `MatchEvent.sq` (vorhandener ID-Primärschlüssel, keine Migration) und bei
+Bedarf bestehender `CloudSyncRepositoryTest.kt`. Tatsächlichen Einzelinhalt prüfen,
+Fences zwischen begrenzten Einheiten; Konflikt-/Ack-/Tombstone-/Batchrollbackregeln erhalten.
+Keine EventStore-/Peer-/Engine-/Backend-/Auth-/U4-Erweiterung. Korrektur im bestehenden
+isolierten D1-Worktree mit Originalrepros, Fokus/Migration und Gesamtcheck beauftragt:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d1-fix-r3`.
+
 PR #67 ist nach Mainabgleich auf `ba90a1d` konfliktbereinigt und gepusht; gemeinsamer
 Gesamtcheck 688 Tasks grün (2m10s). K2-Server/CI unverändert zu `8e49ccc`, U4-Dateien
 bytegleich main `870792a`. Echte Service-CI auf `8e49ccc` vollständig grün, einschließlich
