@@ -889,6 +889,27 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+PR #67 ist nach Mainabgleich auf `ba90a1d` konfliktbereinigt und gepusht; gemeinsamer
+Gesamtcheck 688 Tasks grün (2m10s). K2-Server/CI unverändert zu `8e49ccc`, U4-Dateien
+bytegleich main `870792a`. Echte Service-CI auf `8e49ccc` vollständig grün, einschließlich
+Storage-Bereinigung, altem JWT nach Auth-Logout und Vault→pg_net→Cleanup. CI auf dem
+neuen Mergehead bleibt nötig. Kein Hosted-/periodischer Cron-/Phone-Beweis daraus abgeleitet.
+
+K2-A Review 1 meldet einen P1: Exportoperation kann unter Cancellation/Timeout bereits
+enden, während der tatsächliche Transport noch abbaut. Belegt vor Headern, bei Metadaten-
+Timeout und während Body-Lesen; alte Erfolge bleiben gefenct, Close-/Drain-Barriere verletzt.
+Enge Korrektur im bestehenden A-Worktree beauftragt, öffentliche API und sechs Besitzdateien
+beibehalten. Tests müssen vor separater Transportfreigabe einen noch offenen Exportjob
+beweisen; danach cancellationfest tatsächlichen Abschluss abwarten. C wartet auf Review 2.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r1`.
+
+K2-B Review 1 bestätigt `99f19cf` ohne Befunde: sechs Dateien, Port-/Aktionsvertrag und
+DE/EN-Hell/Dunkel-200-Prozent-Bilder geprüft. Ausschließlich isolierte UI-Lane freigegeben;
+Host-/Account-/Datei-/Freigabevertrag bleibt C/D. Der nächste freie unabhängige Arbeitsstrang
+bereitet D2/D3 ausschließlich lesend vor: konkrete Store-/Peer-/Protokoll-4-Grenzen und
+prüfbare Pakete, keine vorgezogene Umsetzung oder Änderung an D1.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-scope-r1`.
+
 K2-A ist sauber auf `acdd93e` abgeschlossen (Basis `7ff695e`), genau sechs autorisierte
 Cloud-Dateien. 126 Cloud-JVM-Tests einschließlich 21 neuer Exporttests und vollständiger
 Check mit Phone-/Wear-APK grün. Eigenständige Exportrevision, Kontogrenzen, begrenzter
