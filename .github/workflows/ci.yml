@@ -408,10 +408,10 @@ jobs:
           import tomllib
           versions = tomllib.load(open("gradle/libs.versions.toml", "rb"))["versions"]
           print("deno=" + versions["deno"])
-          print("sdk=" + versions["android-compileSdk"])
+          print("sdk=platforms;android-" + versions["android-sdk-platform"])
           PY
       - name: Android-Plattform für D1 installieren
-        run: '"${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" "platforms;${{ steps.export-tools.outputs.sdk }}" > /dev/null'
+        run: '"${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" "${{ steps.export-tools.outputs.sdk }}" > /dev/null'
       - uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ steps.export-tools.outputs.deno }}

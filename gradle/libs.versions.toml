@@ -7,6 +7,8 @@
 deno = "2.9.7"
 # --- App / SDK ---
 android-compileSdk = "37"
+# Paketfassung des SDK-Managers; compileSdk bleibt die ganzzahlige API-Stufe.
+android-sdk-platform = "37.0"
 android-targetSdk = "36"
 android-minSdk = "28"
 android-minSdk-wear = "34"

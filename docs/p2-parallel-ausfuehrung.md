@@ -4,6 +4,19 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
+### D1-CI: SDK-Paketkennung korrigiert
+
+Der erste Lauf von PR #69 auf `6d9d651` endet vor Stackstart beim SDK-Setup:
+`platforms;37` ist keine Paketkennung. Die Plattformfassung `37.0` wird nun separat im
+zentralen Versionskatalog geführt und als `platforms;android-37.0` an den SDK-Manager
+übergeben; die ganzzahlige Compile-API bleibt 37. Lokale Paketmetadaten und der aktuelle
+Paketkatalog bestätigen diese Fassung. Der neue lokale CLI-Nachfolger akzeptiert die
+entsprechende Slash-Schreibweise; die CI verwendet die dokumentierte sdkmanager-Syntax.
+Keine Pull-/Server-/Fachteständerung und noch kein neuer Live-Stacknachweis.
+Der unabhängige Stack-CI-Review R2 bestätigt den Drei-Dateien-Fix ohne neue Befunde;
+zehn Harness-Tests, Actionlint und der vollständige Gradle-Check (692 Tasks, 6m4s) sind frisch
+grün. Der aktuelle Linux-Stacklauf bleibt Pflicht.
+
 ## Ausgangspunkt und Arbeitsweise
 
 U1 und U2 sind integriert. Drei Implementierer arbeiten in getrennten Git-Worktrees;
