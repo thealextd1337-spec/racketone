@@ -773,13 +773,65 @@ Teilarchiv. Unabhängiges Review 1 auf exakt diesem Head läuft:
 Root ergänzt nach Review Function-Konfiguration und echte Storage-/Edge-CI; keine automatische
 Live-Auslieferung oder Secrets im Repo. K2/UI und Konten oberhalb der Budgets bleiben offen.
 
-PR #66 nach K1-Merge historisch konfliktbehaftet. Der Orchestrator erstellt dafür den eigenen
-Hilfsworktree `p2-u4-main-sync` auf Branch `p2/u4-main-sync`, führt aktuellen Root/Mainstand
-mit `9ecb8d2` zusammen und erhält beide Historien. Merge konfliktfrei; sämtlicher Code,
-Tests und SQL bytegleich zum abgenommenen U4-Kandidaten, nur README/Plan neuer.
-Vollständiger Check im Hilfsworktree 692 Tasks grün (1m05s, Exit 0). Normaler Fast-forward
-auf bestehenden PR-Headbranch, kein Force-Push und keine fremden Worktreeedits.
-Neue CI auf diesem zusammengeführten Head bleibt vor Merge erforderlich.
+PR #66 wurde im eigenen Orchestrator-Hilfsworktree `p2-u4-main-sync` abgeglichen und per
+normalem Fast-forward auf `270782b` gepusht. Code, Tests und SQL bytegleich zum geprüften
+`9ecb8d2`; nur README/Plan neuer. Vollständiger Check 692 Tasks grün, neue CI läuft.
+Keine fremden Worktreeedits/History-Rewrites. Der Hilfsworktree enthält den eigenen Merge.
+
+D1: für echten Runner-/DB-Close-Reopen-Test zusätzlich ausschließlich
+`jvmTest.dependencies { implementation(libs.sqldelight.sqlite.driver) }` in
+`shared/cloud-sync/build.gradle.kts` freigegeben. Bestehender Katalogeintrag, keine neue
+Version oder Produktionsdependency. Dependencycommit `4a95352` enthält unverändert U4;
+dessen Gesamtcheck 692 Tasks grün. Schema-7-/Pullimplementierung und eigene Abnahme laufen.
+
+K2 Review 1 auf `d02c7a8`: No-Ship, zwei belegte P2 und ein P3. Rekursives Null-Stripping
+entfernt fachlich relevante explizite Nullwerte in MatchCreated-Regeln; im entpackten ZIP
+bestätigt. Unterschiedliche Request-ID B wird während A fälschlich als Pending angekündigt,
+obwohl kein B existiert und GET dauerhaft 404 liefert. Array als Request-ID passiert den
+Regex durch implizite Konvertierung und führt zu 503 statt 400.
+Fix1 innerhalb K2-Besitz beauftragt: Whitelist und vorhandene erlaubte Nullwerte semantisch
+erhalten, Typ vor Regex prüfen; kontoweite Belegung durch andere Request-ID ausdrücklich
+als `409 export_busy` mit Retry-After melden. Dieselbe existierende Pending-ID bleibt
+202/pollbar; kein zweiter Produzent oder neues Queueframework. Diese technische HTTP-Ergänzung
+ist freigegeben, Client noch unverdrahtet. SQL-/Deno-/ZIP-Rot→Grün, echte Parallelfälle und
+vollständiger Check vor separatem Commit, danach neue unabhängige Reviewrunde.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-server-fix-r1`.
+
+U4-Host interne Schnittstelle präzisiert: `CloudUploadPort` plus suspendierende
+`bindDevice(String)`-Funktion kommen aus derselben Backendinstanz. Der reale Backendaufruf
+wird im Drain-Test durch einen suspendierten Host-Child-finally ergänzt, damit dessen
+vollständiger Abschluss vor Authclose bewiesen wird; ein Ktor-Engine-Job allein genügt nicht.
+Keine neue Datei/Produktionsdependency oder Gate-/Backendänderung.
+
+U4-UI-Visualprüfung: tatsächlicher Account-Host nutzt `Box.background` ohne ContentColor-
+Bereitstellung. Neuer Uploadbereich darf deshalb gezielt `LocalContentColor` aus bestehendem
+`MaterialTheme.onBackground` bereitstellen; Test nutzt denselben Host statt kaschierendem
+Test-Surface. Vorbestehender Kontrastfehler übriger Kontotexte bleibt separat für Root-
+Integrationsprüfung erfasst, kein breiter Theme-/Accountumbau im Worker. Screenshotbeleg
+und DE/EN-200%-Prüfung mit finalem Fullcheck vor Commit erforderlich.
+
+K2 Fix1 `ff13429` ist fertig: sieben freigegebene Dateien. Explizite fachliche Nullwerte
+bleiben im SQL→ZIP→JSON/CSV-Rundlauf erhalten; andere aktive Request-ID ergibt 409
+`export_busy`/Retry-After 3, dieselbe ID bleibt 202 abrufbar; falsche ID-Typen 400 ohne
+Backendaufruf. Baseline rot, Fix mit 19 Deno-/65 SQL-Fachassertions, acht Parallelrennen und
+Gesamtcheck 688 Tasks grün. Harte Plattformlücken unverändert. Frisches Review 2:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-review-r2`.
+
+U4 Android Feature `2e135ac` auf Dependency `7fd1f69` fertig: 17 Dateien, 506 Fokusprüfungen,
+Migration und Gesamtcheck/APK mit 740 Tasks grün. Root hat Host/Decorator/UI/VM-Diff und
+Desktop-Screenshots gesichtet: Uploadbereich lesbar; bestehende übrige Kontotexte im echten
+Host ohne ContentColor schlecht lesbar. Keine Android-Geräteabnahme aus Desktopbildern.
+Gezielte native Impeccable-Prüfung nutzt bestehende Material-Tokens/Komponenten, kein Redesign
+oder neues Produkt-/Designdokument. Frisches unabhängiges Host-/Retry-/Lifecycle-/UI-Review:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-review-r1`.
+
+D1 darf ausschließlich im atomaren Eventdownload entstandene PARTICIPANTS-Projektionsrevision
+als empfangene Cloud-Basis sauberstellen, wenn vorher sauber, Herkunft CLOUD und demselben
+materialisierten Empfangsprofil zugeordnet. Exakte Vor-/Nachrevision und Profil prüfen;
+vorher dirty/local/peer/anderes Konto sowie Event-/Geräte-Acks/Rejections bleiben unverändert.
+Positive anschließende versionierte Kopfaktualisierung und alle Negativkontrollen beweisen;
+kein pauschales Upload-Ack. Änderung innerhalb CloudPullStore/Mappingtest, anschließend
+erneut Fokus und Gesamtcheck vor Commit.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
@@ -787,7 +839,47 @@ JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Wider
 Danach vollständiger Gradle-Check mit 686 Tasks grün und SQL-Gesamtlauf erneut bis auf
 die zwei bekannten lokalen pg_cron-Nachweise grün.
 
+### K2-Serviceintegration und D1-Review
+
+PR #65 auf `3265c6f` vollständig CI-grün (Run `39137204547` einschließlich Apple und
+echtem Supabase); als `cb14420` nach main gemergt. Kein Deployment ausgelöst.
+
+K2 Review 2 auf `ff13429`: `ship`, alle drei Vorbefunde geschlossen. Unabhängig 19 Deno-Tests,
+65 SQL-Fachassertions, acht Parallelrennen, SQL→ZIP/CRC→JSON/CSV-Rundlauf und zusätzliche
+Lease-/Downloadablauf-Lockproben grün. Plattformnachweise bleiben bis zur echten Service-CI offen.
+Root integriert ausschließlich diesen Kandidaten im eigenen Worktree `p2-k2-server-integration`
+auf Branch `p2/k2-server-integration`; keine fremden Worktrees bearbeitet.
+
+Root besitzt zusätzlich `supabase/config.toml`, `.github/workflows/ci.yml`, neuen lokalen
+CI-Helfer `.github/scripts/export_stack_ci.py` und Dokumentation. Beide Functions prüfen ihre
+eigene Berechtigung bei `verify_jwt=false`. CI startet echte Storage-/Edge-Dienste, erzeugt
+einen ausschließlich lokalen Zufallsschlüssel, verbindet Vault und prüft pgTAP, den
+SQL-ZIP-Rundlauf, echte Auth-/HTTP-/Storage-Wege sowie Vault→pg_net→Cleanup. Keine Ersatzdienste
+oder neuen Skips. Lokaler Root-Gesamtcheck: 692 Tasks grün; Deno 19/19, Typen/Format/Lint,
+TOML und Actionlint grün. Docker fehlt lokal; Service-CI noch ausstehend, separater PR/Review folgt.
+Periodischer Cronbetrieb, Hosted-Limits und Phone-ZIP bleiben eigene offene Abnahmen.
+
+Konkreter K2-Integrationsstand `79b5faa` ist als Draft-PR #67 angelegt, verknüpft und überwacht.
+Die 20 Serverdateien bleiben bytegleich zum geprüften `ff13429`. Neue unabhängige Prüfung
+der Root-Konfiguration/Service-CI:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-integration-review-r1`.
+Der aktuelle Integrationszweig übernimmt main `cb14420`; ausschließlich der add/add-Konflikt
+im Ausführungsplan wird durch den vollständigeren eigenen Plan aufgelöst, Produktbaum unverändert.
+
+D1 Feature `68d23de` gegen Dependency `4a95352` fertig: 19 Dateien, Schema 6→7, dauerhafte
+Metadaten-/Eventseiten, Vollscan und Empfangslückenreparatur. Worker 235 Fokusprüfungen,
+Migration und 688 Gesamtcheck-Tasks grün; echter Stacktest ausdrücklich 1× SKIPPED mangels
+Wegwerfstack. Root hat Scope, additive Backend-Leases und Runner/Projektionsseams gesichtet.
+Neues unabhängiges Review:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r1`.
+
 ### Nächste isolierte Umsetzungspakete
+
+PR #66 nach PR65-Squash erneut auf main `cb14420` abgeglichen. Ausschließlich add/add im
+Plan; der neuere vollständige Orchestratorplan bleibt erhalten. Gate und sämtliche übrigen
+Produkt-/SQL-/Testdateien unverändert zu `270782b` und zum unabhängig geprüften U4-Kandidaten.
+Der grüne vollständige 692-Task-Check dieses identischen Produktbaums gilt fort; CI wird
+auf dem neuen Mergehead erneut ausgeführt, kein Force-Push und keine fremden Worktreeedits.
 
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
 Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURRENT` ausdrücklich.
