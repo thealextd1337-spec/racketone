@@ -18,6 +18,8 @@ select is((select provolatile::text from pg_proc where oid = 'private.sanitize_p
           's', 'sanitize_projection ist STABLE');
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 select tests.authenticate_as('alice');
 select public.sync_push(jsonb_build_object('matches', jsonb_build_array(tests.match(
   'a1300000-0000-7000-8000-000000000001', jsonb_build_array(

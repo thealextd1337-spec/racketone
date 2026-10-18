@@ -39,7 +39,7 @@ class CloudUploadBoundaryTest {
             data.cloudUploads.bindOwnedDevices(previous, setOf("phone"))
             data.cloudUploads.deactivate()
             val gate = CloudSessionGate({ CloudCredentials("alice", "session-a", "token-a") }, data.cloudUploads)
-            gate.publish(gate.capture(false), CloudSession("alice", true))
+            gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
             val http = http()
             try {
                 val backend = SupabaseCloudBackend(gate, http, CloudInstallation("installation", "a".repeat(64)))
@@ -64,7 +64,7 @@ class CloudUploadBoundaryTest {
             val previous = data.cloudUploads.activate("alice")
             data.cloudUploads.bindOwnedDevices(previous, setOf("phone"))
             val gate = CloudSessionGate({ CloudCredentials("alice", "session-a", "token-a") }, data.cloudUploads)
-            gate.publish(gate.capture(false), CloudSession("alice", true))
+            gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
             val sent = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
             val http =
@@ -99,7 +99,7 @@ class CloudUploadBoundaryTest {
             data.cloudUploads.bindOwnedDevices(previous, setOf("phone"))
             var credentials = CloudCredentials("alice", "session-a", "token-a")
             val gate = CloudSessionGate({ credentials }, data.cloudUploads)
-            gate.publish(gate.capture(false), CloudSession("alice", true))
+            gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
             val http = http()
             try {
                 val backend = SupabaseCloudBackend(gate, http, CloudInstallation("installation", "a".repeat(64)))
@@ -109,7 +109,7 @@ class CloudUploadBoundaryTest {
                 gate.requireUpload(selected.lease, selected.snapshot)
                 val transition = gate.stop()
                 gate.completeTransition(transition)
-                gate.publish(gate.capture(false), CloudSession("alice", true))
+                gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
                 assertFailsWith<CloudException> { backend.pushSelected(selected, PushBatch(events = selected.events)) }
                 assertEquals(1, data.cloud.pendingCount())
             } finally {
@@ -127,7 +127,7 @@ class CloudUploadBoundaryTest {
             val previous = data.cloudUploads.activate("alice")
             data.cloudUploads.bindOwnedDevices(previous, setOf("phone"))
             val gate = CloudSessionGate({ CloudCredentials("alice", "session-a", "token-a") }, data.cloudUploads)
-            gate.publish(gate.capture(false), CloudSession("alice", true))
+            gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
             var pushes = 0
             val http = http { pushes++ }
             try {

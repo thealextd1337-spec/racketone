@@ -25,7 +25,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SupabaseSessionLifecycleTest {
-    private val profile = """{"profileId":"alice","onboarded":true,"deletionRequested":false}"""
+    private val profile = """{"profileId":"alice","onboarded":true,"deletionRequested":false,"consentStatus":"CURRENT"}"""
 
     private fun token(
         owner: String = "alice",
@@ -52,6 +52,21 @@ class SupabaseSessionLifecycleTest {
         auth.awaitInitialization()
         auth.importAuthToken(value, autoRefresh = false)
     }
+
+    @Test fun verifiedProfileWithoutConsentStatusCannotAuthorizeCloud(): Unit =
+        runBlocking {
+            val sdk = client { profile.replace(",\"consentStatus\":\"CURRENT\"", "") to HttpStatusCode.OK }
+            sdk.restore()
+            val auth = SupabasePhoneAuth(sdk, "age-secret", scope = this)
+            try {
+                auth.refreshProfile()
+                assertEquals(ConsentStatus.UNAVAILABLE, auth.session.value?.consentStatus)
+                assertEquals("consent_required", assertFailsWith<CloudException> { auth.sessions.capture() }.reason)
+                auth.sessions.capture(requireProfile = false)
+            } finally {
+                auth.close()
+            }
+        }
 
     @Test fun authDeadlineBecomesVisibleConnectionFailure(): Unit =
         runBlocking {

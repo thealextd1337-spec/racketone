@@ -2,6 +2,8 @@
 begin;
 select plan(22);
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 
 -- Vollständige Schreibmatrix, damit zusätzliche Spalten nicht unbemerkt schreibbar werden.
 create temporary table expected_writes (tbl text, col text, priv text);

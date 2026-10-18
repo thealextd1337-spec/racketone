@@ -6,6 +6,8 @@ begin;
 select plan(11);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 select tests.authenticate_as('alice');
 select set_config('tests.push', public.sync_push(jsonb_build_object(
   'devices', jsonb_build_array(jsonb_build_object('id', tests.device('a1'), 'kind', 'phone', 'platform', 'android')),

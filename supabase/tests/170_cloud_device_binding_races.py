@@ -32,7 +32,8 @@ def main():
     parser.add_argument("--isolation", choices=["read committed", "repeatable read", "serializable", "read uncommitted"],
                         default="read committed")
     args = parser.parse_args()
-    params = import_module("170_cloud_device_binding_live").local_connection_parameters(os.environ["ADVANTLY_CLOUD_TEST_DB_URL"])
+    live = import_module("170_cloud_device_binding_live")
+    params = live.local_connection_parameters(os.environ["ADVANTLY_CLOUD_TEST_DB_URL"])
 
     def connect():
         conn = psycopg.connect(**params, autocommit=True)
@@ -46,13 +47,14 @@ def main():
             conn.execute("set transaction isolation level " + isolation)
             conn.execute("set local role authenticated")
             conn.execute("select set_config('request.jwt.claims',%s,true)",
-                         (json.dumps({"sub": str(uid), "session_id": str(sid), "role": "authenticated"}),))
+                         (json.dumps({"sub": str(uid), "session_id": str(sid), "role": "authenticated",
+                                      "exp": int(time.time()) + 3600}),))
             conn.execute("select set_config('request.headers',%s,true)", (json.dumps({
                 "x-advantly-installation-id": str(installation), "x-advantly-installation-proof": proof}),))
             yield conn
 
     failures = []
-    with connect() as owner, connect() as observer:
+    with connect() as owner, connect() as observer, live.test_consent_catalog(owner) as consent_version:
         def run_case(label, statement, revoke):
             uid, sid, installation, device, tournament, court = (uuid4() for _ in range(6))
             proof = secrets.token_hex(32)
@@ -63,6 +65,7 @@ def main():
                 owner.execute("update public.profiles set status='active',alias='Race Test' where id=%s", (uid,))
                 owner.execute("update public.profile_settings set age_confirmed_at=now(),country='AT',age_rule_min_age=14 where profile_id=%s", (uid,))
                 owner.execute("insert into auth.sessions(id,user_id,created_at,updated_at) values(%s,%s,now(),now())", (sid, uid))
+                live.accept_test_consents(owner, uid, consent_version)
                 with identity(owner, uid, sid, installation, proof):
                     owner.execute("select public.bind_cloud_session_v1(%s,%s)", (installation, device))
                 owner.execute("insert into public.tournaments(id,director_id,name,sport) values(%s,%s,'Before','tennis')", (tournament, uid))
@@ -144,6 +147,7 @@ def main():
                 owner.execute("update public.profiles set status='active',alias='Isolation Test' where id=%s", (uid,))
                 owner.execute("update public.profile_settings set age_confirmed_at=now(),country='AT',age_rule_min_age=14 where profile_id=%s", (uid,))
                 owner.execute("insert into auth.sessions(id,user_id,created_at,updated_at) values(%s,%s,now(),now())", (sid, uid))
+                live.accept_test_consents(owner, uid, consent_version)
                 with identity(owner, uid, sid, installation, proof):
                     owner.execute("select public.bind_cloud_session_v1(%s,%s)", (installation, device))
                 owner.execute("insert into public.tournaments(id,director_id,name,sport) values(%s,%s,'Isolation','tennis')", (tournament, uid))
@@ -191,11 +195,11 @@ def main():
                             query = sql.SQL("select * from {}(%s)").format(sql.Identifier("public", name))
                             assert not client.execute(query, (match,)).fetchall(), f"{name}: Legacy-RLS-Pfad offen"
                     print(f"PASS {args.isolation}: {len(tables)} direkte Tabellen + Legacy-RLS-Pfade geschlossen; {populated} RC-Positivkontrollen")
-                    # Die Isolationsvorgabe ist ausschließlich eine Cloud-Grenze.
+                    # Unabhängige Kontowege benutzen ihren eigenen RC-Sitzungsvertrag aus K1/002.
                     for name in ["export_my_data", "my_support_tickets", "my_auth_profile", "request_account_deletion", "cancel_account_deletion"]:
-                        with identity(client, uid, sid, installation, proof, args.isolation):
+                        with identity(client, uid, sid, installation, proof):
                             client.execute(sql.SQL("select {}()").format(sql.Identifier("public", name))).fetchall()
-                    print(f"PASS {args.isolation}: Export/Support/Auth-Profil/Löschung/Recovery weiterhin nutzbar")
+                    print(f"PASS {args.isolation}: unabhängige Export-/Support-/Kontowege unter RC weiterhin nutzbar")
             finally:
                 owner.execute("reset role")
                 owner.execute("delete from auth.users where id=%s", (uid,))

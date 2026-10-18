@@ -3,6 +3,8 @@ begin;
 select plan(37);
 
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 select set_config('tests.alice', tests.uid('alice')::text, true);
 
 -- Ausgangslage: geteiltes Match alice/bob, Gäste-Match von alice, bobs Dummy „Kim“ ist alice zugewiesen

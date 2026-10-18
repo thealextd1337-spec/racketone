@@ -7,6 +7,8 @@ select is_empty($$select role from unnest(array['anon','authenticated','service_
   'Isolationshelfer bleibt privat und nur intern aufrufbar');
 select tests.create_user('binding_alice');
 select tests.create_user('binding_bob');
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 insert into auth.sessions(id,user_id,created_at,updated_at)
 select ('17000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid,
   tests.uid(case when n = 9 then 'binding_bob' else 'binding_alice' end),

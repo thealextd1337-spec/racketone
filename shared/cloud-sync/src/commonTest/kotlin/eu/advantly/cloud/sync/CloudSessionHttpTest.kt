@@ -281,7 +281,9 @@ class CloudSessionHttpTest {
         }
 
     private fun gate(credentials: () -> CloudCredentials? = { CloudCredentials("alice", "session-a", "token-a") }): CloudSessionGate =
-        CloudSessionGate(credentials).also { it.publish(it.capture(requireProfile = false), CloudSession("alice", true)) }
+        CloudSessionGate(credentials).also {
+            it.publish(it.capture(requireProfile = false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
+        }
 
     private fun http(reply: suspend (HttpRequestData) -> Pair<String, HttpStatusCode>): CloudHttp {
         val engine =

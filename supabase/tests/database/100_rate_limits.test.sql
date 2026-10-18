@@ -2,6 +2,8 @@
 begin;
 select plan(26);
 select tests.world();
+select tests.publish_consent_documents();
+select tests.accept_current_consents(id) from tests.users;
 select tests.create_user('pending_rate', false);
 select tests.authenticate_as('alice');
 

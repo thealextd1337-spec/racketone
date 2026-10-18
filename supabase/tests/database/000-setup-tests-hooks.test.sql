@@ -68,6 +68,33 @@ begin
 end;
 $$;
 
+-- Explizites Opt-in positiver Cloud-Suites; niemals aus authenticate_as/create_user aufrufen.
+-- Nur TESTlokale Fassungen, ausschließlich innerhalb der jeweiligen Rollback-Transaktion.
+create or replace function tests.publish_consent_documents(p_version text default 'cloud-test-v1')
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  update private.consent_versions set is_current=false where is_current;
+  insert into private.consent_versions(document_type,version,is_current)
+    values ('TERMS',p_version,true),('PRIVACY',p_version,true);
+  insert into private.consent_translations(document_type,version,language,url)
+    select document_type,p_version,language,'https://advantly.eu/test-only/' || lower(document_type) || '/' || language
+    from (values('TERMS'),('PRIVACY')) d(document_type) cross join (values('de'),('en')) l(language);
+  update private.consent_versions set approved_at=clock_timestamp() where version=p_version;
+end;
+$$;
+
+create or replace function tests.accept_current_consents(p_profile uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if (select count(*) <> 2 or not bool_and(approved_at is not null)
+      from private.consent_versions where is_current) then
+    raise exception 'Testfassungen müssen ausdrücklich freigegeben werden';
+  end if;
+  insert into private.consent_history(profile_id,document_type,version,language,accepted)
+    select p_profile,document_type,version,'en',true from private.consent_versions where is_current;
+end;
+$$;
+
 create or replace function tests.uid(p_identifier text)
 returns uuid
 language sql
@@ -237,6 +264,8 @@ as $$
 $$;
 
 grant execute on all functions in schema tests to anon, authenticated, service_role;
+revoke all on function tests.publish_consent_documents(text), tests.accept_current_consents(uuid)
+  from public, anon, authenticated, service_role;
 
 begin;
 select plan(2);
