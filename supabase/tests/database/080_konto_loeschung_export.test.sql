@@ -83,7 +83,7 @@ select ok((public.export_my_data() -> 'devices' -> 0) ? 'id' and not ((public.ex
 -- Löschung beantragen: sofort unsichtbar, keine Schreibrechte, abbrechbar
 select lives_ok($$ select public.request_account_deletion() $$, 'alice beantragt die Löschung');
 select throws_ok($$ select public.sync_push('{}'::jsonb) $$, '42501', 'profile_not_active', 'in der Karenz keine Uploads');
-select isnt_empty($$ select 1 from public.profiles where id = tests.uid('alice') $$, 'eigenes Profil bleibt lesbar (Abbruch möglich)');
+select is_empty($$ select 1 from public.profiles where id = tests.uid('alice') $$, 'U1: direkte Tabellen während Löschung gesperrt; Recovery nutzt RPC');
 select tests.authenticate_as('bob');
 select is_empty($$ select 1 from public.profiles where id = tests.uid('alice') $$, 'Freunde sehen das Profil nicht mehr');
 select is_empty($$ select 1 from public.find_profile('alice') $$, 'nicht mehr auffindbar');
@@ -127,7 +127,7 @@ select ok(public.export_my_data()::text !~ 'Alice Klarname', 'Klarname taucht au
 -- Veraltetes JWT des gelöschten Accounts
 select tests.authenticate_as_id(current_setting('tests.alice')::uuid);
 select is_empty($$ select 1 from public.matches $$, 'gelöschter Account liest nichts mehr');
-select throws_ok($$ select public.sync_pull(0) $$, '42501', 'not_authenticated', 'gelöschter Account: kein Pull');
+select throws_ok($$ select public.sync_pull(0) $$, '42501', 'profile_not_active', 'gelöschter Account: kein Pull');
 select throws_ok($$ select public.sync_push('{}'::jsonb) $$, '42501', 'profile_not_active', 'gelöschter Account: kein Upload');
 
 select * from finish();

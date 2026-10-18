@@ -49,7 +49,7 @@ select throws_ok($$ insert into public.tournament_courts (tournament_id, name) v
 select isnt_empty($$ select 1 from public.matches where id = 'a9000000-0000-7000-8000-000000000001' $$, 'Helfer sieht das Turnier-Match');
 select is(public.tournament_overview('f9000000-0000-7000-8000-000000000001') ->> 'channel',
           'tournament:f9000000-0000-7000-8000-000000000001:1', 'Übersicht nennt den versionierten Turnier-Kanal');
-select ok(private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001:1'), 'Helfer empfängt den Turnier-Kanal');
+select ok(not private.can_receive_realtime('tournament:f9000000-0000-7000-8000-000000000001:1'), 'U1: Turnierkanal bleibt auch für Helfer geschlossen');
 select lives_ok($$ select public.respond_scorer_invitation('a9000000-0000-7000-8000-000000000001', true, tests.device('b1')) $$,
                 'bob nimmt die Zuweisung an');
 select is(tests.result(public.sync_push(jsonb_build_object(
@@ -72,20 +72,18 @@ select is((select r ->> 'status' from jsonb_array_elements(public.sync_pull(0) -
                                       jsonb_array_elements(m -> 'roles') r),
           'accepted', 'sync_pull liefert die Zähler-Rolle');
 
--- Realtime-Broadcast aus Triggern (privater Kanal). Falls lokal keine Realtime-Partition existiert, übersprungen.
+-- U1: Realtime ist gesperrt, auch bereits offene Kanäle erhalten keine neuen App-Broadcasts.
 reset role;
--- Strikt (kein Überspringen): fehlende Partition oder fehlende Rechte sollen in der CI auffallen.
-select ok(exists (select 1 from realtime.messages
+select ok(not exists (select 1 from realtime.messages
                   where topic = 'match:a9000000-0000-7000-8000-000000000001:' ||
                                 (select m.access_epoch from public.matches m where m.id = 'a9000000-0000-7000-8000-000000000001')
                     and event = 'event'),
-          'Event-Insert sendet auf match:<id>:<epoch>');
-select ok(exists (select 1 from realtime.messages
-                  where topic like 'match-live:a9000000-0000-7000-8000-000000000001:%' and event = 'live'
-                    and payload::text !~ 'profileId|deviceId'),
-          'Projektion sendet bereinigt auf match-live:<id>:<epoch>');
-select ok(exists (select 1 from realtime.messages where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1'),
-          'Turnier-Kanal erhält Platz-Updates');
+          'U1: Event-Insert sendet keine Broadcasts');
+select ok(not exists (select 1 from realtime.messages
+                  where topic like 'match-live:a9000000-0000-7000-8000-000000000001:%' and event = 'live'),
+          'U1: Projektion sendet keine Broadcasts');
+select ok(not exists (select 1 from realtime.messages where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1'),
+          'U1: Turnier-Kanal erhält keine Platz-Updates');
 
 -- Commit-geordneter Cursor (Review P2 #6): Cursor = höchste vergebene Version unter der Versionssperre
 select tests.authenticate_as('bob');
@@ -101,9 +99,9 @@ select is((select access_epoch from public.tournaments where id = 'f9000000-0000
           'Entfernen eines Helfers erhöht die Turnier-Kanalversion');
 select ok((select visibility_epoch from public.profile_settings where profile_id = tests.uid('bob'))
           > current_setting('tests.bob_epoch')::bigint, 'entfernter Helfer bekommt das Signal zum Vollabgleich');
-select ok(exists (select 1 from realtime.messages
-                  where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1' and event = 'rotate' and (payload - 'id') = '{}'::jsonb),
-          'alter Turnier-Kanal erhält nur den inhaltslosen Hinweis „rotate“');
+select ok(not exists (select 1 from realtime.messages
+                  where topic = 'tournament:f9000000-0000-7000-8000-000000000001:1'),
+          'U1: auch der alte Turnier-Kanal erhält keine Broadcasts');
 
 select * from finish();
 rollback;
