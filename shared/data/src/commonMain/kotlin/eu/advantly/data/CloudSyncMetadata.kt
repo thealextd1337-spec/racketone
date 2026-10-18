@@ -26,8 +26,13 @@ internal fun Cloud_metadata.version() = CloudMetadataRevision(CloudMetadataKind.
 
 /** Lokale Anlage ist ein eigener Herkunftsbeleg; Umbenennen eines empfangenen Gastes erteilt keine Rechte. */
 internal fun CloudSyncRepository.recordLocalPlayer(id: String) {
-    val source = database.cloudMetadataQueries.currentSource().executeAsOneOrNull() ?: return
-    database.cloudMetadataQueries.recordSource("LOCAL", source, id, listOf("PLAYER"))
+    val source = database.cloudMetadataQueries.currentSource().executeAsOneOrNull()
+    if (source == null) {
+        // Ohne aktive lokale Identität zählt weiterhin ausschließlich ein bereits vorhandener U3-Quellenbeleg.
+        resolvePlayerMetadataSources(id)
+    } else {
+        database.cloudMetadataQueries.recordSource("LOCAL", source, id, listOf("PLAYER"))
+    }
 }
 
 /**
@@ -38,20 +43,20 @@ internal fun CloudSyncRepository.recordLocalPlayer(id: String) {
 internal fun CloudSyncRepository.resolveMetadataSources() {
     val queries = database.cloudMetadataQueries
     queries.unknownMatches().executeAsList().forEach(::resolveMatchMetadataSource)
-    queries.unknownPlayers().executeAsList().forEach { id ->
-        val source = queries.sourceForSelf(id).executeAsOneOrNull() ?: return@forEach
-        val origin =
-            if (database.localIdentityQueries
-                    .source(source)
-                    .executeAsOne()
-                    .local == 1L
-            ) {
-                "LOCAL"
-            } else {
-                "PEER"
-            }
-        queries.recordSource(origin, source, id, listOf("PLAYER"))
-    }
+    resolvePlayerMetadataSources()
+}
+
+/** Quellenbelege wie bisher auflösen, ohne Spielerlisten oder Einzelabfragen je Spieler zu laden. */
+internal fun CloudSyncRepository.resolvePlayerMetadataSources(id: String? = null) = database.cloudMetadataQueries.resolvePlayerSources(id)
+
+/** Nur bei belegter Quellen-/Kontobindung; ungeklärte Kandidaten blockieren den fortschreitenden Cursor nicht. */
+internal fun CloudSyncRepository.resolveOwnedMatchMetadataSources(profileId: String) {
+    var after: String? = null
+    do {
+        val ids = database.cloudMetadataQueries.unknownMatchesForProfilePage(after, profileId).executeAsList()
+        ids.forEach(::resolveMatchMetadataSource)
+        after = ids.lastOrNull() ?: return
+    } while (ids.size == 500)
 }
 
 internal fun CloudSyncRepository.resolveMatchMetadataSource(id: String) {

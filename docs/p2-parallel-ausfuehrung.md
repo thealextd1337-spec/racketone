@@ -773,6 +773,14 @@ Teilarchiv. Unabhängiges Review 1 auf exakt diesem Head läuft:
 Root ergänzt nach Review Function-Konfiguration und echte Storage-/Edge-CI; keine automatische
 Live-Auslieferung oder Secrets im Repo. K2/UI und Konten oberhalb der Budgets bleiben offen.
 
+PR #66 nach K1-Merge historisch konfliktbehaftet. Der Orchestrator erstellt dafür den eigenen
+Hilfsworktree `p2-u4-main-sync` auf Branch `p2/u4-main-sync`, führt aktuellen Root/Mainstand
+mit `9ecb8d2` zusammen und erhält beide Historien. Merge konfliktfrei; sämtlicher Code,
+Tests und SQL bytegleich zum abgenommenen U4-Kandidaten, nur README/Plan neuer.
+Vollständiger Check im Hilfsworktree 692 Tasks grün (1m05s, Exit 0). Normaler Fast-forward
+auf bestehenden PR-Headbranch, kein Force-Push und keine fremden Worktreeedits.
+Neue CI auf diesem zusammengeführten Head bleibt vor Merge erforderlich.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.

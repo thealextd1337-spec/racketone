@@ -21,6 +21,7 @@ class CloudUploadSnapshot internal constructor(
     players: List<CloudRevisioned<CloudPlayer>> = emptyList(),
     projections: List<CloudRevisioned<CloudProjection>> = emptyList(),
     completeEventMatches: Set<String> = emptySet(),
+    val inventory: CloudUploadInventory = CloudUploadInventory(0, 0, 0),
 ) {
     private val selected = events.associateBy { it.id }
     private val selectedHeaders = headers.toList()
@@ -69,7 +70,10 @@ class CloudUploadStore internal constructor(
         require(profileId.isNotBlank())
         return database
             .transactionWithResult {
-                CloudUploadSession(profileId, advanceGeneration())
+                val session = CloudUploadSession(profileId, advanceGeneration())
+                cloud.resolvePlayerMetadataSources()
+                cloud.resolveOwnedMatchMetadataSources(profileId)
+                session
             }.also { active = it }
     }
 
@@ -110,6 +114,8 @@ class CloudUploadStore internal constructor(
                 check(owner == null || owner == session.profileId) { "Gerät gehört bereits einem anderen Konto" }
                 queries.bindDevice(deviceId, session.profileId)
             }
+            cloud.resolvePlayerMetadataSources()
+            cloud.resolveOwnedMatchMetadataSources(session.profileId)
         }
     }
 
@@ -165,9 +171,26 @@ class CloudUploadStore internal constructor(
                     .filter { id ->
                         queries.outstandingForMatch(id).executeAsList().all { it in selectedIds }
                     }.toSet()
-            CloudUploadSnapshot(session, events, headers, participants, players, projections, complete)
+            CloudUploadSnapshot(session, events, headers, participants, players, projections, complete, readInventory(session))
+                .also { requireActive(session) }
         }
     }
+
+    /** Ausschließlich lesende skalare Aggregate; Herkunft und Revisionen entstehen an Schreib-/Bindungsstellen. */
+    fun inventory(session: CloudUploadSession): CloudUploadInventory {
+        requireOutsideTransaction()
+        return database.transactionWithResult {
+            requireActive(session)
+            readInventory(session).also { requireActive(session) }
+        }
+    }
+
+    private fun readInventory(session: CloudUploadSession): CloudUploadInventory =
+        CloudUploadInventory(
+            queries.pendingCountForProfile(session.profileId).executeAsOne(),
+            queries.rejectedCountForProfile(session.profileId).executeAsOne(),
+            database.cloudMetadataQueries.pendingCountForProfile(session.profileId).executeAsOne(),
+        )
 
     /** Vor dem Netzwerkversand erneut prüfen; B2b muss zusätzlich die verwendeten Credentials binden. */
     fun requireCurrent(snapshot: CloudUploadSnapshot) {
