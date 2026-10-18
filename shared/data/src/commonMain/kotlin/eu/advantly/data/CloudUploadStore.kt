@@ -135,7 +135,8 @@ class CloudUploadStore internal constructor(
             val participants = mutableListOf<CloudRevisioned<CloudParticipants>>()
             val players = mutableListOf<CloudRevisioned<CloudPlayer>>()
             val projections = mutableListOf<CloudRevisioned<CloudProjection>>()
-            database.cloudMetadataQueries.pendingForProfile(session.profileId, limit.toLong()).executeAsList().forEach { row ->
+            val selectedIds = events.mapTo(mutableSetOf()) { it.id }
+            database.cloudMetadataQueries.pendingForProfile(session.profileId, selectedIds, limit.toLong()).executeAsList().forEach { row ->
                 val version = row.version()
                 when (version.kind) {
                     CloudMetadataKind.HEADER -> {
@@ -158,7 +159,6 @@ class CloudUploadStore internal constructor(
                     }
                 }
             }
-            val selectedIds = events.mapTo(mutableSetOf()) { it.id }
             val complete =
                 projections
                     .map { it.value.matchId }
