@@ -839,6 +839,33 @@ JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Wider
 Danach vollständiger Gradle-Check mit 686 Tasks grün und SQL-Gesamtlauf erneut bis auf
 die zwei bekannten lokalen pg_cron-Nachweise grün.
 
+### K2-Serviceintegration und D1-Review
+
+PR #65 auf `3265c6f` vollständig CI-grün (Run `39137204547` einschließlich Apple und
+echtem Supabase); als `cb14420` nach main gemergt. Kein Deployment ausgelöst.
+
+K2 Review 2 auf `ff13429`: `ship`, alle drei Vorbefunde geschlossen. Unabhängig 19 Deno-Tests,
+65 SQL-Fachassertions, acht Parallelrennen, SQL→ZIP/CRC→JSON/CSV-Rundlauf und zusätzliche
+Lease-/Downloadablauf-Lockproben grün. Plattformnachweise bleiben bis zur echten Service-CI offen.
+Root integriert ausschließlich diesen Kandidaten im eigenen Worktree `p2-k2-server-integration`
+auf Branch `p2/k2-server-integration`; keine fremden Worktrees bearbeitet.
+
+Root besitzt zusätzlich `supabase/config.toml`, `.github/workflows/ci.yml`, neuen lokalen
+CI-Helfer `.github/scripts/export_stack_ci.py` und Dokumentation. Beide Functions prüfen ihre
+eigene Berechtigung bei `verify_jwt=false`. CI startet echte Storage-/Edge-Dienste, erzeugt
+einen ausschließlich lokalen Zufallsschlüssel, verbindet Vault und prüft pgTAP, den
+SQL-ZIP-Rundlauf, echte Auth-/HTTP-/Storage-Wege sowie Vault→pg_net→Cleanup. Keine Ersatzdienste
+oder neuen Skips. Lokaler Root-Gesamtcheck: 692 Tasks grün; Deno 19/19, Typen/Format/Lint,
+TOML und Actionlint grün. Docker fehlt lokal; Service-CI noch ausstehend, separater PR/Review folgt.
+Periodischer Cronbetrieb, Hosted-Limits und Phone-ZIP bleiben eigene offene Abnahmen.
+
+D1 Feature `68d23de` gegen Dependency `4a95352` fertig: 19 Dateien, Schema 6→7, dauerhafte
+Metadaten-/Eventseiten, Vollscan und Empfangslückenreparatur. Worker 235 Fokusprüfungen,
+Migration und 688 Gesamtcheck-Tasks grün; echter Stacktest ausdrücklich 1× SKIPPED mangels
+Wegwerfstack. Root hat Scope, additive Backend-Leases und Runner/Projektionsseams gesichtet.
+Neues unabhängiges Review:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r1`.
+
 ### Nächste isolierte Umsetzungspakete
 
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
