@@ -586,6 +586,19 @@ Supabase-CI für 003/004 und deren Scheduler-Katalogtests. K1 Fix5 und U4 Fix3 b
 getrennte laufende Aufträge; der Integrations-PR ist vor deren Abschluss und gemeinsamer
 Abnahme nicht mergebereit. Reale Cron-Ausführung, Hosted, K3-UI, D3 und Apple bleiben offen.
 
+U4 Fix3: Nach Codeprüfung zusätzlich zwei minimale Schreibseams freigegeben:
+`PlayerRepository.kt` meldet tatsächliche Neuanlage durch Remote-/Adoptions-/Archiv-/
+Platzhalterpfade intern, `LocalData.kt` verdrahtet gezielte UNKNOWN-only-Auflösung genau
+dieser Spieler-ID anhand bestehender U3-Quellenbelege. Alles in derselben Transaktion;
+kein Herkunftsbeweis aus Spielerart, keine Änderung vorhandener CLOUD-/PEER-/LOCAL-Herkunft,
+Writer oder Acks. `ensureSelf`/`addGuest` behalten ihren eigenen lokalen Herkunftsbeleg.
+So bleiben auch nach Quellenbindung eintreffende Spieler vor dem ersten Status korrekt,
+ohne Statusschreibeffekt. Reihenfolge, fremde/unbelegte Aliase und Rollback gezielt testen.
+
+Gemeinsamer Entwurfs-PR [#65](https://github.com/thealextd1337-spec/racketone/pull/65)
+auf `c6703b1` ist verknüpft und wird durch T3 überwacht. Er enthält K3 unverändert;
+gemeinsamer Gradle-Check 688 Tasks grün. PR #64 bleibt separater K1-Entwurf.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
