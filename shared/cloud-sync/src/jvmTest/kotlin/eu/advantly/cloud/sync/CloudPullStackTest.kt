@@ -87,7 +87,11 @@ class CloudPullStackTest {
         }
         val credentials = login(field("email"), field("password"))
         val noConsent = login(field("noConsentEmail"), field("noConsentPassword"))
-        val installation = CloudInstallation(UUID.randomUUID().toString(), UUID.randomUUID().toString() + UUID.randomUUID())
+        val installation =
+            CloudInstallation(
+                UUID.randomUUID().toString(),
+                UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""),
+            )
         val device = UUID.randomUUID().toString()
         val file = File.createTempFile("d1-real-stack", ".db")
         try {
@@ -198,7 +202,10 @@ class CloudPullStackTest {
                             )
                         for ((name, body) in requests) {
                             assertFailsWith<CloudException> { http.rpc(name, body, null, installation) }
-                            assertFailsWith<CloudException> { http.rpc(name, body, noConsent.accessToken, installation) }
+                            assertEquals(
+                                "consent_required",
+                                assertFailsWith<CloudException> { http.rpc(name, body, noConsent.accessToken, installation) }.reason,
+                            )
                             assertFailsWith<CloudException> { http.rpc(name, body, credentials.accessToken, null) }
                         }
                         http.rpc(

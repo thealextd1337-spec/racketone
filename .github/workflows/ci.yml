@@ -42,9 +42,16 @@ jobs:
               - '.github/scripts/**'
             supabase:
               - 'supabase/**'
-              - 'gradle/libs.versions.toml'
+              - 'shared/**'
+              - 'testvectors/**'
+              - 'build-logic/**'
+              - 'gradle/**'
+              - '*.gradle.kts'
+              - 'gradle.properties'
+              - 'gradlew*'
               - '.github/workflows/ci.yml'
               - '.github/scripts/export_stack_ci.py'
+              - '.github/scripts/d1_stack_ci*.py'
             admin:
               - 'admin/**'
               - '.github/workflows/ci.yml'
@@ -375,25 +382,42 @@ jobs:
           retention-days: 7
 
   # P2-Backend (Spike): Migrationen + pgTAP-RLS-Tests gegen den lokalen Supabase-Stack (Docker auf ubuntu).
-  # Nur bei Änderungen unter supabase/ (oder an dieser Datei). Befehle wie lokal, siehe supabase/README.md.
+  # D1 nutzt denselben echten Stack nach den bestehenden K2-Prüfungen.
   supabase-db:
     name: Supabase – Migrationen + pgTAP (ubuntu)
     needs: changes
     if: needs.changes.outputs.supabase == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - uses: supabase/setup-cli@v1
         with:
           version: 2.121.0
-      - name: Deno-Version aus dem zentralen Katalog lesen
+      - name: Deno und Android-SDK aus dem zentralen Katalog lesen
         id: export-tools
-        run: python3 -c 'import tomllib; print("deno=" + tomllib.load(open("gradle/libs.versions.toml", "rb"))["versions"]["deno"])' >> "$GITHUB_OUTPUT"
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          versions = tomllib.load(open("gradle/libs.versions.toml", "rb"))["versions"]
+          print("deno=" + versions["deno"])
+          print("sdk=" + versions["android-compileSdk"])
+          PY
+      - name: Android-Plattform für D1 installieren
+        run: '"${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" "platforms;${{ steps.export-tools.outputs.sdk }}" > /dev/null'
       - uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ steps.export-tools.outputs.deno }}
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: D1-Schranken, XML-Gate und Fehler-Cleanup prüfen
+        run: uv run .github/scripts/d1_stack_ci_test.py
       - name: Edge Functions prüfen (Typen, Format, Lint, Tests)
         run: |
           for function in export-my-data cleanup-data-exports; do
@@ -419,6 +443,8 @@ jobs:
         run: uv run supabase/tests/200_private_data_exports_live.py --confirm-disposable
       - name: Vault-Scheduler über pg_net und Edge prüfen
         run: uv run .github/scripts/export_stack_ci.py scheduler
+      - name: D1 über echte Auth und PostgREST samt Paging und Reparatur prüfen
+        run: uv run .github/scripts/d1_stack_ci.py --confirm-disposable
       # Warnungen sichtbar machen; SQL-/Typfehler lassen den Job scheitern. Auch interne Helfer prüfen.
       - name: Datenbank-Lint (Fehler sind fatal)
         run: supabase db lint --local --schema public,private,ops --level warning --fail-on error
