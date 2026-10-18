@@ -92,6 +92,8 @@ Brief einschließlich früherer Befunde und Antworten.
 - U3 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r3`
 - K1 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r2`
 - K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
+- Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
+- U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -264,7 +266,7 @@ Gradle-Check mit 686 Tasks. Die neu hinzugekommene U3-HTTP-Fixture setzt `CURREN
 | Server-Consent-Integration | Neue Migration `20261018000300_cloud_consent_gate.sql`, neue `181_cloud_consent_gate*`-Tests, minimale explizite positive SQL-Fixtures | Nach 001/002 verlangen zentrale Cloud-Seams aktuelle Zustimmung, auch auf alten RPC-/Tabellenwegen. Lock-Rennen und unabhängige Kontorechte prüfen; Produktionsseed bleibt UNAVAILABLE. Keine Kotlin-/Auth-/Uploadänderung. |
 | U4-Kern | Neue Runner-/Uploadzustände und Tests in `cloud-sync`, Backend-/Mapping-Seams, nötigenfalls schmale Upload-Statusprimitive in `data` | Expliziter endlicher Lauf über `captureUpload`/`pushSelected`, ≤500 Events je Batch, begrenzte Batches, Retry/Teilantworten/Paralleländerungen und ehrlicher Restbestand. Kein Gate-/Auth-/Ownership-/SQL-Besitz. Android-Bedienung und echter Supabase-Lauf sind anschließende eigene Integrationsschritte. |
 
-Beide Pakete starten isoliert vom geprüften lokalen Integrationscommit. K1 behält Gate/Auth
+Beide Pakete laufen isoliert ab dem geprüften lokalen Integrationscommit `6ba0386`. K1 behält Gate/Auth
 und den freigegebenen lesenden U2-Seam. Der Orchestrator integriert die Diffs nach separatem
 Review; keine gemeinsame Datei wird parallel durch mehrere Implementierer bearbeitet.
 U4 startet keine Gerätebindung, Reauthentifizierung, Proofrotation oder Hintergrundplanung.
