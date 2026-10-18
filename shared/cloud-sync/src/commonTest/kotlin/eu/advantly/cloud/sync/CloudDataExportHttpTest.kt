@@ -2,6 +2,7 @@ package eu.advantly.cloud.sync
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpMethod
@@ -10,19 +11,35 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.DisposableHandle
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resume
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -445,4 +462,193 @@ class CloudDataExportHttpTest {
                 http.close()
             }
         }
+
+    /** Fuehrt ausschliesslich die Export-/Engine-Tasks aus; Zeit vergeht nur durch advanceBy. */
+    @OptIn(InternalCoroutinesApi::class)
+    private class ExportDispatcher :
+        CoroutineDispatcher(),
+        Delay {
+        private val pending = ArrayDeque<Runnable>()
+
+        private data class Timer(
+            val at: Long,
+            val action: Runnable,
+        )
+
+        private val timers = mutableListOf<Timer>()
+        private var now = 0L
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) {
+            pending.addLast(block)
+        }
+
+        fun runUntilIdle() {
+            while (pending.isNotEmpty()) pending.removeFirst().run()
+        }
+
+        fun advanceBy(millis: Long) {
+            val target = now + millis
+            while (true) {
+                val next = timers.filter { it.at <= target }.minByOrNull { it.at } ?: break
+                timers.remove(next)
+                now = next.at
+                next.action.run()
+                runUntilIdle()
+            }
+            now = target
+            runUntilIdle()
+        }
+
+        override fun scheduleResumeAfterDelay(
+            timeMillis: Long,
+            continuation: CancellableContinuation<Unit>,
+        ) {
+            val handle = invokeOnTimeout(timeMillis, Runnable { continuation.resume(Unit) }, continuation.context)
+            continuation.invokeOnCancellation { handle.dispose() }
+        }
+
+        override fun invokeOnTimeout(
+            timeMillis: Long,
+            block: Runnable,
+            context: CoroutineContext,
+        ): DisposableHandle {
+            val timer = Timer(now + timeMillis, block)
+            timers += timer
+            return object : DisposableHandle {
+                override fun dispose() {
+                    timers.remove(timer)
+                }
+            }
+        }
+    }
+
+    private enum class TransportPhase { HEADERS, BODY, HEADER_FAILURE, SINK_FAILURE, MIME_FAILURE }
+
+    @OptIn(io.ktor.utils.io.InternalAPI::class)
+    private fun transportDrainRace(
+        phase: TransportPhase,
+        timeout: Boolean,
+        cancelCaller: Boolean = false,
+    ) = runBlocking {
+        val dispatcher = ExportDispatcher()
+        val scope = CoroutineScope(dispatcher + SupervisorJob())
+        val requestEntered = CompletableDeferred<Unit>()
+        val cancellationObserved = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val transportCompleted = CompletableDeferred<Unit>()
+        val bodyReceived = CompletableDeferred<Unit>()
+        val never = CompletableDeferred<Unit>()
+        var engineRequest: Job? = null
+        val channel = ByteChannel(autoFlush = true)
+        val engine =
+            MockEngine(
+                MockEngineConfig().apply {
+                    this.dispatcher = dispatcher
+                    addHandler {
+                        suspend fun holdCleanup() {
+                            withContext(NonCancellable) {
+                                cancellationObserved.complete(Unit)
+                                releaseCleanup.await()
+                                transportCompleted.complete(Unit)
+                            }
+                        }
+                        engineRequest = it.executionContext
+                        requestEntered.complete(Unit)
+                        if (phase == TransportPhase.HEADERS) {
+                            try {
+                                never.await()
+                            } finally {
+                                holdCleanup()
+                            }
+                            error("Headers must not be delivered")
+                        } else {
+                            CoroutineScope(
+                                io.ktor.client.engine
+                                    .callContext(),
+                            ).launch(start = CoroutineStart.UNDISPATCHED) {
+                                try {
+                                    never.await()
+                                } finally {
+                                    holdCleanup()
+                                }
+                            }
+                            if (phase == TransportPhase.HEADER_FAILURE) error("Pre-header transport failure")
+                            channel.writeFully(byteArrayOf(1))
+                            val mime = if (phase == TransportPhase.MIME_FAILURE) "text/plain" else "application/zip"
+                            respond(channel, headers = headersOf("Content-Type", mime))
+                        }
+                    }
+                },
+            )
+        val http = http(engine)
+        val api = adapter(http)
+        var failure: Throwable? = null
+        val export =
+            scope.launch {
+                failure =
+                    runCatching {
+                        if (phase == TransportPhase.HEADERS) {
+                            api.request(context, id)
+                        } else {
+                            api.download(
+                                context,
+                                ready,
+                                CloudDataExportSink { _, _, _ ->
+                                    bodyReceived.complete(Unit)
+                                    if (phase == TransportPhase.SINK_FAILURE) error("Sink failure")
+                                },
+                            )
+                        }
+                    }.exceptionOrNull()
+            }
+        try {
+            dispatcher.runUntilIdle()
+            assertTrue(requestEntered.isCompleted)
+            if (phase == TransportPhase.BODY) assertTrue(bodyReceived.isCompleted)
+            assertFalse(export.isCompleted)
+            if (timeout) {
+                dispatcher.advanceBy(20_000)
+            } else if (cancelCaller) {
+                export.cancel()
+                dispatcher.runUntilIdle()
+            } else if (phase == TransportPhase.HEADERS || phase == TransportPhase.BODY) {
+                api.invalidate()
+                dispatcher.runUntilIdle()
+            }
+            assertTrue(cancellationObserved.isCompleted, "Transport must observe cancellation before its teardown is released")
+            assertFalse(transportCompleted.isCompleted)
+            assertFalse(engineRequest!!.isCompleted)
+            assertFalse(export.isCompleted, "Export completed while transport cleanup was still held")
+        } finally {
+            releaseCleanup.complete(Unit)
+            dispatcher.runUntilIdle()
+            assertTrue(transportCompleted.isCompleted)
+            assertTrue(engineRequest!!.isCompleted)
+            assertTrue(export.isCompleted)
+            if (phase != TransportPhase.HEADERS && phase != TransportPhase.HEADER_FAILURE) assertTrue(channel.isClosedForRead)
+            assertTrue(failure != null)
+            if (timeout) assertEquals("export_timeout", assertIs<CloudException>(failure).reason)
+            channel.cancel(null)
+            http.close()
+            scope.cancel()
+            dispatcher.runUntilIdle()
+        }
+    }
+
+    @Test fun invalidationBeforeHeadersWaitsForTransportCleanup() = transportDrainRace(TransportPhase.HEADERS, false)
+
+    @Test fun metadataTimeoutWaitsForTransportCleanup() = transportDrainRace(TransportPhase.HEADERS, true)
+
+    @Test fun invalidationDuringBodyWaitsForTransportCleanup() = transportDrainRace(TransportPhase.BODY, false)
+
+    @Test fun callerCancellationBeforeHeadersWaitsForTransportCleanup() = transportDrainRace(TransportPhase.HEADERS, false, true)
+
+    @Test fun failureBeforeHeadersWaitsForTransportCleanup() = transportDrainRace(TransportPhase.HEADER_FAILURE, false)
+
+    @Test fun sinkFailureWaitsForTransportCleanup() = transportDrainRace(TransportPhase.SINK_FAILURE, false)
+
+    @Test fun invalidMimeWaitsForTransportCleanup() = transportDrainRace(TransportPhase.MIME_FAILURE, false)
 }
