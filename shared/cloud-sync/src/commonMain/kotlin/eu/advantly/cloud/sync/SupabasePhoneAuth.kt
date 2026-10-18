@@ -51,6 +51,7 @@ class SupabasePhoneAuth(
                 ?.let { HttpClient(it) { followRedirects = false } }
                 ?: HttpClient { followRedirects = false },
             requestTimeoutMillis,
+            exportFactory = exportHttpTransportFactory(client.config.networkConfig.httpEngine),
         )
     val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership)
     override val session = sessions.session

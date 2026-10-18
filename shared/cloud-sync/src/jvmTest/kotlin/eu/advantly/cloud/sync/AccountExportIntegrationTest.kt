@@ -50,6 +50,7 @@ class AccountExportIntegrationTest {
 
     private class Fixture(
         scope: CoroutineScope,
+        instrumentExport: Boolean = true,
     ) {
         var profileId = "alice"
         var consent = ConsentStatus.REQUIRED
@@ -103,7 +104,7 @@ class AccountExportIntegrationTest {
                         } else {
                             respond("{}", headers = headersOf("Content-Type", "application/json"))
                         }
-                    }
+                    }.let { if (instrumentExport) ExportMockEngine(it) else it }
             }
         val data = LocalData(createInMemoryJvmDriver())
         val phone = MatchSession(data, null, ManualScheduler(), SessionConfig(MatchSessions.deviceId(data), PeerKind.PHONE))
@@ -133,6 +134,27 @@ class AccountExportIntegrationTest {
             phone.close()
         }
     }
+
+    @Test fun unsupportedJvmPlatformNeverConstructsAnExportClient(): Unit =
+        runBlocking {
+            assertEquals("export_unavailable", assertFailsWith<CloudException> { platformExportHttpTransport() }.reason)
+        }
+
+    @Test fun uninstrumentedSdkInjectionPreservesAccountRightsAndRpcWithoutExportNetwork(): Unit =
+        runBlocking {
+            val fixture = Fixture(this, instrumentExport = false)
+            try {
+                fixture.start(token())
+                val account = fixture.auth.accountSession.value!!
+                val context = fixture.api.context.value!!
+                assertEquals("export_unavailable", assertFailsWith<CloudException> { fixture.api.request(context, id) }.reason)
+                fixture.auth.requireAccountSession(account)
+                assertEquals("{}", fixture.auth.exportData())
+                assertTrue(fixture.requests.none { it.url.encodedPath.startsWith("/functions/") })
+            } finally {
+                fixture.close()
+            }
+        }
 
     @Test fun accountRightsDoNotRequireConsentOnboardingOrCloudDeviceBinding(): Unit =
         runBlocking {

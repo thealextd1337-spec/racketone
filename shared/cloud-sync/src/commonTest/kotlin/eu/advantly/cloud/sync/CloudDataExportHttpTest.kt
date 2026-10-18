@@ -1,9 +1,11 @@
 package eu.advantly.cloud.sync
 
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
@@ -34,6 +36,8 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resume
 import kotlin.test.Test
@@ -59,7 +63,13 @@ class CloudDataExportHttpTest {
         SupabaseDataExport(http, { CloudCredentials("alice", "session", "fixed-token") }, {}, timeout, timeout)
             .also { it.publish(CloudSession("alice", false, false, generation = 7)) }
 
-    private fun http(engine: MockEngine) = CloudHttp("https://auth.test", "public-key", HttpClient(engine) { followRedirects = false })
+    private fun http(engine: MockEngine) =
+        CloudHttp(
+            "https://auth.test",
+            "public-key",
+            HttpClient(engine) { followRedirects = false },
+            exportFactory = ExportMockEngine(engine),
+        )
 
     @Test fun methodsPathsAndBearerAreExplicitAndRetriesKeepTheId(): Unit =
         runBlocking {
@@ -463,6 +473,67 @@ class CloudDataExportHttpTest {
             }
         }
 
+    @Test fun uninstrumentedInjectedEngineNeverStartsExportButKeepsRpc(): Unit =
+        runBlocking {
+            var requests = 0
+            val engine =
+                MockEngine {
+                    requests++
+                    respond("{}", headers = headersOf("Content-Type", "application/json"))
+                }
+            val http =
+                CloudHttp(
+                    "https://auth.test",
+                    "public-key",
+                    HttpClient(engine),
+                    exportFactory = exportHttpTransportFactory(engine),
+                )
+            try {
+                assertEquals("export_unavailable", assertFailsWith<CloudException> { adapter(http).request(context, id) }.reason)
+                assertEquals(0, requests)
+                assertEquals("{}", http.rpc("export_my_data", buildJsonObject {}, "fixed-token"))
+                assertEquals(1, requests)
+            } finally {
+                http.close()
+            }
+        }
+
+    @Test fun exportCancellationAndLeaseCloseDoNotCancelParallelRpc(): Unit =
+        runBlocking {
+            val rpcEntered = CompletableDeferred<Unit>()
+            val releaseRpc = CompletableDeferred<Unit>()
+            val pending = """{"contractVersion":1,"requestId":"$id","status":"pending","retryAfterSeconds":3}"""
+            val http =
+                http(
+                    MockEngine { request ->
+                        if (request.url.encodedPath.startsWith("/rest/")) {
+                            rpcEntered.complete(Unit)
+                            releaseRpc.await()
+                            respond("{}", headers = headersOf("Content-Type", "application/json"))
+                        } else {
+                            respond(
+                                pending,
+                                HttpStatusCode.Accepted,
+                                headersOf("Content-Type" to listOf("application/json"), "Retry-After" to listOf("3")),
+                            )
+                        }
+                    },
+                )
+            val rpc = async { http.rpc("export_my_data", buildJsonObject {}, "rpc-token") }
+            try {
+                withTimeout(5_000) { rpcEntered.await() }
+                val api = adapter(http)
+                assertEquals(CloudDataExportStatus.Pending(id, 3), api.request(context, id))
+                api.invalidate()
+                assertFalse(rpc.isCompleted)
+                releaseRpc.complete(Unit)
+                assertEquals("{}", withTimeout(5_000) { rpc.await() })
+            } finally {
+                releaseRpc.complete(Unit)
+                http.close()
+            }
+        }
+
     /** Fuehrt ausschliesslich die Export-/Engine-Tasks aus; Zeit vergeht nur durch advanceBy. */
     @OptIn(InternalCoroutinesApi::class)
     private class ExportDispatcher :
@@ -651,4 +722,25 @@ class CloudDataExportHttpTest {
     @Test fun sinkFailureWaitsForTransportCleanup() = transportDrainRace(TransportPhase.SINK_FAILURE, false)
 
     @Test fun invalidMimeWaitsForTransportCleanup() = transportDrainRace(TransportPhase.MIME_FAILURE, false)
+}
+
+/** Nur MockHTTP: dessen Arbeit ist vollstaendig unter dem von R1 gejointen Request-Job strukturiert. */
+internal class ExportMockEngine(
+    private val mock: MockEngine,
+) : HttpClientEngine by mock,
+    ExportHttpTransportFactory {
+    override fun open(): ExportHttpTransport =
+        object : ExportHttpTransport {
+            override val client =
+                HttpClient(mock) {
+                    followRedirects = false
+                    install(HttpTimeout)
+                }
+
+            override fun cancel() = Unit
+
+            override suspend fun awaitCompletion() = Unit
+
+            override fun close() = client.close()
+        }
 }

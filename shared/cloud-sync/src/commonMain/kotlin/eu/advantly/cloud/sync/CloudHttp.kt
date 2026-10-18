@@ -1,7 +1,6 @@
 package eu.advantly.cloud.sync
 
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
@@ -16,7 +15,7 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -31,6 +30,7 @@ internal class CloudHttp(
     private val publicKey: String,
     private val http: HttpClient,
     private val timeoutMillis: Long = 20_000,
+    private val exportFactory: ExportHttpTransportFactory? = null,
 ) {
     init {
         val parsed = Url(url)
@@ -114,8 +114,6 @@ internal class CloudHttp(
             throw CloudException("cloud_connection_failed", false)
         }
 
-    private var exportClient: HttpClient? = null
-
     /** Separater Edge-Zweig: RPC-Limits und Fehlerauswertung bleiben unveraendert. */
     internal suspend fun <T> export(
         suffix: String,
@@ -126,19 +124,15 @@ internal class CloudHttp(
         checkCurrent: () -> Unit,
         receive: suspend (Int, String?, String?, String?, suspend (CloudDataExportSink, Long) -> Unit) -> T,
     ): T {
-        val edge =
-            exportClient ?: http
-                .config {
-                    followRedirects = false
-                    install(HttpTimeout)
-                }.also { exportClient = it }
+        val lease = exportFactory?.open() ?: throw CloudException("export_unavailable", false)
+        val edge = lease.client
 
         suspend fun fence() {
             currentCoroutineContext().ensureActive()
             checkCurrent()
         }
         // Ktor haengt Lifecycle-/Call-Jobs darunter ein, auch bevor eine Response existiert.
-        // execute-Cleanup kann bei Cancellation abbrechen; erst dieser Join belegt den Drain.
+        // execute-Cleanup kann bei Cancellation abbrechen; native Callbacks brauchen eine eigene Barriere.
         var requestLifetime: Job? = null
         try {
             return edge
@@ -183,13 +177,16 @@ internal class CloudHttp(
                 }
         } finally {
             withContext(NonCancellable) {
-                requestLifetime?.cancelAndJoin()
+                requestLifetime?.cancel()
+                lease.cancel()
+                requestLifetime?.join()
+                lease.awaitCompletion()
+                lease.close()
             }
         }
     }
 
     fun close() {
-        exportClient?.close()
         http.close()
     }
 
