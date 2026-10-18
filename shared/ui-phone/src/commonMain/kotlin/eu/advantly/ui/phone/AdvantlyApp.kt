@@ -89,6 +89,7 @@ fun AdvantlyApp(
     buildTimeUtc: String = "",
     supportModel: SupportViewModel? = null,
     supportDiagnostics: Map<String, String> = emptyMap(),
+    onShareExport: (() -> Unit)? = null,
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -128,6 +129,7 @@ fun AdvantlyApp(
                                 buildTimeUtc,
                                 supportModel,
                                 supportDiagnostics,
+                                onShareExport,
                             )
                         }
                     }
@@ -222,6 +224,7 @@ private fun TabLayer(
     buildTimeUtc: String,
     supportModel: SupportViewModel?,
     supportDiagnostics: Map<String, String>,
+    onShareExport: (() -> Unit)?,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
@@ -266,7 +269,9 @@ private fun TabLayer(
                                     } else {
                                         null
                                     },
-                            ) { showAccount = false }
+                                onClose = { showAccount = false },
+                                onShareExport = onShareExport,
+                            )
                         } else {
                             Column {
                                 if (supportModel != null) {
