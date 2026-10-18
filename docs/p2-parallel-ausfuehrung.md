@@ -889,6 +889,28 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+D1 ist separat auf `25dc96b` integriert, eigener Root-Worktree `p2-d1-pull-integration`,
+Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`. R4 bestätigt `89a6adb` ohne
+offene Befunde. Einziger Mergekonflikt: `CloudPullPort` zusätzlich zu Upload-/Backend-Port;
+alle 22 D1-Dateien nach Auflösung bytegleich Worker, Android-/Auth-/Gate-/SQL-/CI-Stand
+unverändert. Gemeinsamer Gesamtcheck samt beiden APKs 761 Tasks grün (2m49s).
+Frisches unabhängiges Integrationsreview läuft, eigener PR folgt getrennt von #68:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-root-integration-review-r1`.
+Echte D1-Stackabnahme noch offen; konkrete Wiederverwendung der K2-Service-CI wird lesend geprüft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-scope-r1`.
+
+Root hat den konkreten K2-A-Nativschnitt freigegeben: Android erhält pro Export-HTTP-
+Aufruf eigenen instrumentierten OkHttp-Client/Dispatcher/Pool/Listener. Ktor-Join,
+native Terminalevents und eigener Dispatcher-idle gemeinsam vor Operationsabschluss.
+Neun festgelegte Dateien im A-Worktree, öffentlicher Port unverändert, keine neue Version
+oder globale SDK-/RPCänderung. iOS- und produktives JVM-ZIP sowie uninstrumentierte
+native Injection werden für diesen Android-Pilotschnitt vor Netzwerk ausdrücklich mit
+`export_unavailable` verweigert. Bestehende Auth-/RPC-/Kontorechte bleiben erhalten;
+Apple-/JVM-Nativabschluss als getrennte spätere Lieferung. Keine Engine-Namensheuristik,
+kein unbewiesener Ktor-Job-Drain. DNS-/Header-/Body-/Fehlerbarrieren und bisherige Fences
+vor Gesamtcheck und frischem Review 3 erforderlich. Umsetzung läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r2-impl`.
+
 Android-CI-Review 1 bestätigt `15f08cf` ohne Befunde; 13 Hosttests unabhängig grün.
 Transportcancel ist nachgewiesen keine Host-Publikationsbarriere, der 15-s-StateFlow-Wait
 erhält alle ursprünglichen Assertions und verhindert über `IDLE` Scheinerfüllung.
