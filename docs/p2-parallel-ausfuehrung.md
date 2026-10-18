@@ -382,6 +382,13 @@ vier Isolationsmodi, 5 Harnessgruppen, 248 Consentassertions/80 Lock-Rennen und 
 Gradle-Check grün; SQL nur die bekannten zwei Cron-Lücken. Parent hat den Korrekturdiff
 gelesen und neues unabhängiges Review 2 auf genau `2efa021` gestartet.
 
+U4-Korrektur 1 darf zusätzlich ausschließlich die interne Gate-Lesemethode
+`uploadInventory(lease)` ergänzen: Cloud-/CURRENT-/Generationsprüfung, skalare Zählung mit
+der aktiven vom Gate ausgestellten Uploadsession, danach erneute Prüfung. Keine Ausgabe
+einer ungebundenen Uploadsession und kein Profillease als Cloudfreigabe; Backend prüft die
+Gerätebindung zusätzlich. So entfällt die bisherige Snapshotauswahl zur bloßen Zählung.
+K1 Fix3 bearbeitet das Gate nicht; die übrige Gate-/Auth-/Retention-Logik bleibt bei Parent/K1.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
