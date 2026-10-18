@@ -63,7 +63,7 @@ select is(jsonb_array_length(public.my_visitor_matches()), 1, 'Live-Liste des Vi
 select set_config('tests.channel', public.get_visitor_match('a6000000-0000-7000-8000-000000000001') ->> 'channel', true);
 select ok(current_setting('tests.channel') ~ '^match-live:a6000000-0000-7000-8000-000000000001:[0-9]+$',
           'Visitor-Sicht nennt den aktuellen versionierten Kanal');
-select ok(private.can_receive_realtime(current_setting('tests.channel')), 'Realtime: Visitor empfängt den Live-Kanal');
+select ok(not private.can_receive_realtime(current_setting('tests.channel')), 'U1: Realtime bleibt auch für berechtigte Visitor geschlossen');
 select ok(not private.can_receive_realtime(replace(current_setting('tests.channel'), 'match-live:', 'match:')),
           'Realtime: Visitor empfängt NICHT den Event-Kanal');
 select ok(not private.can_receive_realtime('match-live:a6000000-0000-7000-8000-000000000001'),
@@ -96,8 +96,8 @@ select tests.authenticate_as('vera');
 select ok(not private.can_receive_realtime(current_setting('tests.channel')), 'alte Kanalversion ist ungültig (Rotation)');
 select isnt(public.get_visitor_match('a6000000-0000-7000-8000-000000000001') ->> 'channel', current_setting('tests.channel'),
             'neue Kanalversion nach Rechteentzug');
-select ok(private.can_receive_realtime(public.get_visitor_match('a6000000-0000-7000-8000-000000000001') ->> 'channel'),
-          'berechtigter Visitor tritt dem neuen Kanal bei');
+select ok(not private.can_receive_realtime(public.get_visitor_match('a6000000-0000-7000-8000-000000000001') ->> 'channel'),
+          'U1: auch neue Kanalversion bleibt ohne WebSocket-Capability geschlossen');
 
 -- Dauerhaft bis Widerruf (F25): auch lange nach Matchende sichtbar
 reset role;
@@ -121,8 +121,8 @@ select throws_ok($$ select public.revoke_match_visitor('a6000000-0000-7000-8000-
 
 reset role;
 select is((select count(*)::int from realtime.messages
-           where topic = current_setting('tests.channel') and event = 'rotate'), 1,
-          'altes Kanalabo erhält nur den inhaltslosen Hinweis „rotate“');
+           where topic = current_setting('tests.channel') and event = 'rotate'), 0,
+          'U1: auch bestehende Kanalabos erhalten keine neuen Broadcasts');
 
 select * from finish();
 rollback;
