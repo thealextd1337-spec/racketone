@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["psycopg[binary]>=3.2,<4", "websockets>=14,<17"]
+# dependencies = ["psycopg[binary]>=3.2,<4", "websockets>=15,<17"]
 # ///
 """U1: lokale Parallelitäts- und echte HTTP/WebSocket-Negativtests, niemals Hosted.
 
@@ -11,6 +11,9 @@ ADVANTLY_CLOUD_TEST_API_KEY, ADVANTLY_CLOUD_TEST_JWT_SECRET (lokaler HS256-Tests
 Voraussetzung: alle Migrationen angewandt; HTTP-Modus verlangt echte Supabase-Dienste.
 Öffentliche Channels müssen über Realtime private_only=true geschlossen sein: andernfalls
 schlägt die Abnahme ausdrücklich fehl. Keine automatische Konfigurationsänderung/Deployments.
+OFFENE FREIGABEGATES: vor der Migration bereits offene Sockets sowie Postgres-Changes
+(INSERT/UPDATE/DELETE, einschließlich nach Widerruf) sind hier nicht nachgewiesen.
+Der vollständige Live-Modus endet deshalb auch bei bestandenen Teilprüfungen ungleich null.
 """
 
 import argparse
@@ -20,13 +23,14 @@ from contextlib import contextmanager
 import hashlib
 import hmac
 import json
+import ipaddress
 import os
 import secrets
 import threading
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
 import psycopg
@@ -35,7 +39,73 @@ from psycopg.types.json import Jsonb
 from websockets.sync.client import connect as websocket_connect
 
 
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+def loopback_address(host):
+    try:
+        address = ipaddress.ip_address("127.0.0.1" if host == "localhost" else host or "")
+    except ValueError:
+        raise ValueError("Numerisches Loopback oder localhost erforderlich") from None
+    if not address.is_loopback:
+        raise ValueError("Nur numerisches Loopback oder localhost erlaubt")
+    return str(address)
+
+
+def local_connection_parameters(dsn):
+    # Libpq darf weder Services lesen noch fehlende Parameter aus PG*-Variablen ergänzen.
+    # Keine Werte in Fehlermeldungen: DSNs und Environment können Passwörter enthalten.
+    if any(key.startswith("PG") for key in os.environ):
+        raise ValueError("PG*-Umgebungsparameter sind im lokalen Test-Harness nicht erlaubt")
+    try:
+        params = conninfo_to_dict(dsn)
+    except psycopg.Error:
+        raise ValueError("Ungültige lokale DSN") from None
+    allowed = {"host", "hostaddr", "port", "dbname", "user", "password", "connect_timeout", "application_name"}
+    if set(params) - allowed:
+        raise ValueError("Nicht freigegebene DSN-Option (insbesondere Services) im lokalen Test-Harness")
+    host = loopback_address(params.get("host"))
+    if params.get("hostaddr") is not None and loopback_address(params["hostaddr"]) != host:
+        raise ValueError("DSN-hostaddr muss zum expliziten Loopback-Ziel passen")
+    # Verhindert auch verschachtelte Verbindungsstrings/URIs als dbname.
+    database = params.get("dbname", "")
+    if not database or not all(c.isascii() and (c.isalnum() or c == "_") for c in database):
+        raise ValueError("Expliziter einfacher Datenbankname erforderlich")
+    try:
+        port = int(params.get("port", "5432"))
+    except ValueError:
+        raise ValueError("Ungültiger lokaler Port") from None
+    if not 1 <= port <= 65535:
+        raise ValueError("Ungültiger lokaler Port")
+    return {**params, "host": host, "hostaddr": host, "port": port,
+            "sslmode": "disable", "gssencmode": "disable", "connect_timeout": 5}
+
+
+def local_http_url(url):
+    parts = urlsplit(url)
+    if parts.scheme != "http" or parts.username is not None or parts.password is not None or parts.fragment:
+        raise ValueError("Nur lokale HTTP-Testdienste ohne Benutzerinfo/Fragment erlaubt")
+    host = loopback_address(parts.hostname)
+    authority = f"[{host}]" if ":" in host else host
+    if parts.port is not None:
+        authority += f":{parts.port}"
+    return urlunsplit(("http", authority, parts.path, parts.query, ""))
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def local_http_json(url, headers, body=None, method="POST"):
+    request = Request(local_http_url(url), data=None if body is None else json.dumps(body).encode(),
+                      headers=headers, method=method)
+    # Proxy-Umgebung und Redirects dürfen Credentials niemals an ein anderes Ziel tragen.
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+    try:
+        with opener.open(request, timeout=10) as response:
+            return response.status, json.load(response)
+    except HTTPError as exc:
+        if 300 <= exc.code < 400:
+            raise AssertionError(f"HTTP-Redirect verweigert ({exc.code})") from None
+        return exc.code, json.loads(exc.read())
 
 
 def main():
@@ -43,19 +113,22 @@ def main():
     parser.add_argument("--confirm-disposable", action="store_true", required=True)
     parser.add_argument("--sql-only", action="store_true")
     args = parser.parse_args()
-    dsn = os.environ["ADVANTLY_CLOUD_TEST_DB_URL"]
-    if conninfo_to_dict(dsn).get("host") not in LOCAL_HOSTS:
-        parser.error("Nur explizit lokale, wegwerfbare Datenbanken sind erlaubt")
-    api = os.environ.get("ADVANTLY_CLOUD_TEST_API_URL", "http://127.0.0.1:54321").rstrip("/")
+    if not args.sql_only:
+        print("OFFENE FREIGABEGATES: bereits offene Realtime-Sockets und Postgres-Changes werden nicht abgenommen")
+    try:
+        connection_parameters = local_connection_parameters(os.environ["ADVANTLY_CLOUD_TEST_DB_URL"])
+        api = local_http_url(os.environ.get("ADVANTLY_CLOUD_TEST_API_URL", "http://127.0.0.1:54321")).rstrip("/")
+    except ValueError as exc:
+        parser.error(str(exc))
     api_parts = urlsplit(api)
-    if api_parts.hostname not in LOCAL_HOSTS or api_parts.scheme != "http" or api_parts.username:
-        parser.error("Nur lokale HTTP-Testdienste sind erlaubt")
+    if api_parts.path or api_parts.query:
+        parser.error("Die lokale API-Basis darf keinen Pfad/Query enthalten")
     api_key = None if args.sql_only else os.environ["ADVANTLY_CLOUD_TEST_API_KEY"]
     jwt_secret = None if args.sql_only else os.environ["ADVANTLY_CLOUD_TEST_JWT_SECRET"]
     users = []
 
     def connect():
-        conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5)
+        conn = psycopg.connect(**connection_parameters, autocommit=True)
         conn.execute("set statement_timeout='8s'")
         conn.execute("set lock_timeout='5s'")
         return conn
@@ -126,13 +199,7 @@ def main():
         headers = {"apikey": api_key, "Authorization": "Bearer " + bearer, "Content-Type": "application/json"}
         if cap:
             headers.update({"X-Advantly-Installation-Id": str(cap[0]), "X-Advantly-Installation-Proof": cap[2]})
-        data = None if body is None else json.dumps(body).encode()
-        request = Request(api + path, data=data, headers=headers, method=method)
-        try:
-            with urlopen(request, timeout=10) as response:
-                return response.status, json.load(response)
-        except HTTPError as exc:
-            return exc.code, json.loads(exc.read())
+        return local_http_json(api + path, headers, body, method)
 
     def rpc(name, bearer, cap=None, body=None):
         return http("/rest/v1/rpc/" + name, bearer, cap, body or {})
@@ -145,7 +212,7 @@ def main():
     def expect_channel_denied(bearer, topic, private, presence):
         url = urlunsplit(("ws", api_parts.netloc, "/realtime/v1/websocket",
                          urlencode({"apikey": api_key, "vsn": "1.0.0"}), ""))
-        with websocket_connect(url, open_timeout=8, close_timeout=2) as ws:
+        with websocket_connect(url, open_timeout=8, close_timeout=2, proxy=None) as ws:
             ws.send(json.dumps({"topic": "realtime:" + topic, "event": "phx_join", "ref": "1",
                                 "payload": {"config": {"private": private,
                                                         "broadcast": {"ack": True, "self": True},
@@ -311,6 +378,7 @@ def main():
             owner.execute("reset role")
             for uid in users:
                 owner.execute("delete from auth.users where id=%s", (uid,))
+    raise SystemExit("OFFENE FREIGABEGATES: bereits offene Realtime-Sockets und Postgres-Changes separat nachweisen")
 
 
 if __name__ == "__main__":
