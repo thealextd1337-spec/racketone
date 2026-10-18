@@ -6,6 +6,31 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 
 ## Aktueller Integrationsstand und laufende Pakete
 
+### K2-Phone: geprüfte Basis und Android-Endkomposition
+
+Die gemeinsame Konto-UI `01a3e6f` ist unabhängig ohne Befunde freigegeben (39 frische Tests,
+neun Aufrufformen, vier DE/EN-Hell/Dunkel-Bilder bei 200 Prozent). Root integriert sie unverändert
+als `cbc4022`; Gesamtcheck samt Phone-/Wear-APKs: 767 Tasks grün. Die A+B-Dateien bleiben
+unverändert, der gemergte K2-Server bleibt auf der bestehenden Mainbasis.
+
+Android-Host `e0f3310` ist ein geprüfter Buildkandidat, noch keine Reviewfreigabe: 771 Tasks
+und beide APKs grün; 22 neue Exporttests ohne Skips, darunter echte Default-SDK-/Socketfälle.
+Der frühere Provider-P1 (alter Grant vor Collectorfortschritt) ist durch drei rote, danach grüne
+Regressionen und den seriellen `ExportAccessGateway` eingegrenzt. Der vollständige unabhängige
+C-Review läuft. Der enge Provider öffnet nur registrierte private Dateien nach aktueller
+SDK-/Kontoprüfung; der Windows-Befund wird nicht als Android-Defekt ausgegeben.
+
+Parallel startet K2-D2 ausschließlich auf `PhoneAccount.kt`, `MainActivity.kt` und einem neuen
+direkten Kompositionstest. Dieselbe Auth-Instanz liefert den Exportport; die aktuelle Activity
+besitzt den Sharecallback, der langlebige Host hält sie nicht. C-Dateien bleiben unberührt;
+spätere C-Korrekturen übernimmt Root. Kein Push/PR aus den Umsetzungsagenten, keine automatische
+Exportabfrage. Gesamtfreigabe erst nach C- und Kompositionsreview sowie relevanter CI.
+
+- C-Gesamtreview: `advantly-20261018-k2-phone-host-review-r1`.
+- D2-Umsetzung: `advantly-20261018-k2-android-composition-impl-r1`.
+
+Beide IDs haben den vollständigen T3-Taskpräfix, der unterhalb dieser Übersicht dokumentiert ist.
+
 - K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
   einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.
 - Android-Upload PR #68 ist auf `8981791` mit diesem Mainstand abgeglichen. Upload-Kotlin,
