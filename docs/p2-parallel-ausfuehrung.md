@@ -389,6 +389,15 @@ einer ungebundenen Uploadsession und kein Profillease als Cloudfreigabe; Backend
 Gerätebindung zusätzlich. So entfällt die bisherige Snapshotauswahl zur bloßen Zählung.
 K1 Fix3 bearbeitet das Gate nicht; die übrige Gate-/Auth-/Retention-Logik bleibt bei Parent/K1.
 
+K1 grenzt den CI-Widerruf auf einen Busy-Zustandsfehler ein: `showSession` veröffentlichte
+`busy=false` vor dem `finally` der laufenden Aktion. Ein StateFlow-Beobachter startet darauf
+den Folge-Export, dessen `busy=true` durch das alte `finally` wieder gelöscht wird. Das
+Test-`settled()` kann damit vor der tatsächlichen Widerrufsantwort zurückkehren. Die Korrektur
+erhält den laufenden Busy-Zustand; deterministische gemeinsame JVM-/AndroidHost-Regression
+startet den Export genau an dieser Veröffentlichung und hält die Antwort per Deferred zurück.
+Keine Sleeps oder abgeschwächten Widerrufsassertions. Rot→Grün-Nachweis steht noch aus;
+Busy-/Recovery-Deltas bleiben in Diff und Nachweisen getrennt erkennbar.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
