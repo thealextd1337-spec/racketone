@@ -94,6 +94,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
 - K1 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r3`
 - K1 Korrektur 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r3`
+- K1 Review 4: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r4`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
 - Server-Consent 003 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-consent-fix-r1`
@@ -101,6 +102,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
 - U4-Kern Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r1`
 - U4-Kern Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r1`
+- U4-Kern Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r2`
 
 ### Server/K4 – erste Übergabe
 
@@ -397,6 +399,47 @@ erhält den laufenden Busy-Zustand; deterministische gemeinsame JVM-/AndroidHost
 startet den Export genau an dieser Veröffentlichung und hält die Antwort per Deferred zurück.
 Keine Sleeps oder abgeschwächten Widerrufsassertions. Rot→Grün-Nachweis steht noch aus;
 Busy-/Recovery-Deltas bleiben in Diff und Nachweisen getrennt erkennbar.
+
+Server-Consent Review 2 auf `2efa021`: `ship`, keine belegten offenen P0/P1/P2.
+Reviewer wiederholte beide ursprünglichen Python-Repros vollständig, alle vier Isolationsmodi,
+Standalone ohne `tests`-Schema, Cleanup-Ausnahmen und Fremddatenerhalt. AST-Vergleich bestätigt
+alle 34 Assertions und fünf Verbindungsschutzfunktionen unverändert; 248 Consentassertions,
+80 Lock-Rennen und Gesamtsuite bis auf lokale Cron-Lücken grün. Parent übernimmt 003 und
+Fixturekorrektur nun gemeinsam; vollständiger Gradle-Check mit 686 Tasks grün, eigene
+SQL-/Legacy-/Consent-Rennen laufen. Echt-Supabase-CI für 003 steht noch aus.
+
+K1 hat den CI-Busyfehler deterministisch nachgewiesen: Original-ViewModel und Adapter aus
+`d11da1c` mit neuen Tests ergeben jeweils JVM/AndroidHost 2/4 Fehler. Isolierter Busy-Produktivfix
+auf unverändertem Adapter ergibt beide Male 4/4 grün. Finale Statusveröffentlichung behält Busy;
+monotone `actionRevision` schützt gegen catch/finally älterer Aktionen. Dieser Diff wird
+eigenständig vom Recovery-Fix committet.
+
+Zusätzlich belegte alte Adapterfixture verletzte den seriellen Hostvertrag durch eigenen
+`Dispatchers.Unconfined`-Scope: Widerruf hatte die Kontositzung bereits gelöscht, während
+UI-Collector noch ausstand. Zwei alte Fixtures dürfen auf den gemeinsamen `coroutineContext`
+mit eigenem SupervisorJob wechseln; alle Widerrufs-/UIassertions bleiben unverändert.
+Explizit Unconfined bleibt nur der deterministische Reentry-Beobachter. Finale Prüfung läuft.
+
+Eigene Server-Integration abschließend geprüft: volle SQL-Suite bis auf die beiden lokalen
+Cron-Assertions grün; Legacy-Standalone, 48 ursprüngliche Rennen in vier Isolationsmodi,
+80 Consent-Lock-Rennen, K1-Request-/Recovery-Rennen und fünf Harness-Schutztests bestanden.
+Der erste eigene Lauf hing im temporären Windows-Harness: synchrone Kindprozesse blockierten
+den Eventloop zur Leerung der Embedded-Postgres-Logpipes. Nach asynchronem Prozessaufruf
+lief dieselbe Prüfung vollständig durch. Keine Produktivänderung dafür; abgebrochener
+Teillauf bleibt getrennte Evidenz. Migration 003 und Testkorrekturen sind lokal integriert.
+
+K1 liefert drei getrennte Commits: Busy `5ad1c6d`, Recovery `f8d4cb0`, U3-Merge `bc283f4`.
+Worker meldet final Cloud 78, Data 90, Auth JVM 39/AndroidHost 27, Match 135 und UI 217 grün;
+vollständiger Merge-Check mit 688 Tasks/Exit 0, SQL nur lokale Cron-Lücken. Parent hat die
+Produktivdiffs gelesen und PR #64 auf `bc283f4` gepusht. Neue CI und unabhängiges Review 4
+laufen auf genau diesem Head; die Root-CURRENT-/Consent-Generation bleibt separate Integration.
+
+U4-Korrektur `ddba960` ersetzt vollständige Listen durch drei skalare Aggregate und direkte
+Statuslesung. Ein Refresh zählt genau einmal, ohne Batchauswahl; Gate und Backend prüfen
+Cloud-Lease, aktive Uploadsession und Gerätebindung. Keine DDL/Index-/Ownershipänderung.
+Worker: 89 Cloud-/93 Data-Tests und Migration grün, vollständiger Check mit 686 Tasks grün;
+Median bei 20.000 quittierten Köpfen 1.300,2 → 3,2 ms, zusätzlich struktureller Drei-Reads-Beweis.
+Parent hat den Korrekturdiff gelesen; neues unabhängiges Review 2 auf `ddba960` läuft.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
