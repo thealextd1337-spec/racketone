@@ -33,3 +33,6 @@ ORDER BY e.match_id, e.lamport, e.device_id, e.id LIMIT :limit;
 eventById:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload, confirmed
 FROM match_event WHERE id = ?;
+
+outstandingForMatch:
+SELECT id FROM match_event WHERE match_id = ? AND cloud_state != 1 ORDER BY id;

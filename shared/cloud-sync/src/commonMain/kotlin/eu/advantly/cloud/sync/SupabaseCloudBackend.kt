@@ -14,6 +14,7 @@ class CloudUploadAttempt internal constructor(
     internal val deviceBinding: CloudDeviceBinding,
 ) {
     val events: List<EventRow> get() = snapshot.events.map(EventRows::toRow)
+    val batch: PushBatch get() = snapshot.toPushBatch()
 }
 
 internal class CloudDeviceBinding(
@@ -117,7 +118,7 @@ class SupabaseCloudBackend internal constructor(
         return CloudUploadAttempt(lease, sessions.captureUpload(lease, limit), current)
     }
 
-    /** Genau eine Auswahl senden und quittieren. Metadaten-Revisionsschutz und Wiederholungen folgen mit U3/U4. */
+    /** Genau den eingefrorenen Stand senden; jüngere lokale Metadaten bleiben nach dem Ack ausstehend. */
     suspend fun pushSelected(
         attempt: CloudUploadAttempt,
         batch: PushBatch,
@@ -125,11 +126,15 @@ class SupabaseCloudBackend internal constructor(
         sessions.requireUpload(attempt.lease, attempt.snapshot)
         if (binding !== attempt.deviceBinding) throw CloudException("device_not_authorized", true)
         require(batch.events == attempt.events)
-        val response = push(attempt.lease, batch)
+        val selected = attempt.batch
+        require(batch.players == selected.players && batch.matches == selected.matches)
+        val sent = selected.copy(devices = batch.devices.toList())
+        val response = push(attempt.lease, sent)
         val ids = response.events.map { it.id }
-        require(ids.size == ids.toSet().size && ids.all { id -> batch.events.any { it.id == id } })
-        val update = OutboxPlanner.evaluate(batch, response)
-        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected)
+        require(ids.size == ids.toSet().size && ids.all { id -> sent.events.any { it.id == id } })
+        val update = OutboxPlanner.evaluate(sent, response)
+        val metadata = attempt.snapshot.acknowledgedMetadata(sent, response)
+        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata)
         return response
     }
 
