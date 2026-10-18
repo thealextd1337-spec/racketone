@@ -875,6 +875,60 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+### K2 Phone – konkrete parallele Verträge
+
+Root-Androidintegration `ba1f37d` unabhängig `ship`, keine offenen Befunde; 20 Tests frisch
+plus zwei aus Cache und zusätzliche gemeinsame DE/EN-Hell/Dunkel-200%-Probe grün.
+PR #68 wartet auf Vorläufer #66 und eigene CI. K2-Server auf `84ee8fc` besteht echte
+1.299 pgTAP-Prüfungen/35 Dateien, Parallelrennen, ZIP- und Idempotenz-HTTP-Proben; spätere
+Storage-Negativ-/Cleanup-Probe scheitert noch. Root-Diagnose `425c094` ändert nur sichere
+Testpositionen, keine Assertion/Produktlogik. Service-CI läuft erneut, keine Gesamtabnahme.
+
+D1 Fix `8305254` gegen `68d23de` fertig: zwölf autorisierte Dateien, fünf Originalrepros
+rot→grün, 250 Fokusprüfungen plus ein offener Stackskip, Migration/Gesamtcheck 688 Tasks grün.
+Persistierte faire Prüfrunde/Phase, Minimalbudget und `scheduled`-Snapshots gehen ins frische
+Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r2`.
+
+K2-Phone-Erkundung bestätigt den kleinsten vollständigen Androidpfad: manuell anfordern,
+Status prüfen, in privaten Cache laden/verifizieren, ausdrücklich per Sharesheet teilen.
+Kein zusätzliches SAF-Speicherframework oder automatisches Polling. Empfängerkopien und
+bereits offene Dateideskriptoren sind nicht nachträglich fernlöschbar.
+
+| Lane | Exklusiver Besitz | Prüfbares Ergebnis |
+|---|---|---|
+| K2-A Cloudadapter | Neue `CloudDataExportPort.kt`/`SupabaseDataExport.kt`, nur additive Exportseams in `CloudHttp.kt`/`SupabasePhoneAuth.kt`, direkte neue Cloudtests | Frische unabhängige Kontositzung, echter fester Bearer, strikte Methoden/ID-/Status-/Pfadvalidierung, begrenztes Streaming; keine Änderung an Gate, Upload, D1 oder SQL. |
+| K2-B Präsentation/UI | Neue `PhoneExportPort.kt`, `CloudExportSection.kt` und direkte Tests; ausschließlich neue `cloud_export_*` in beiden Stringdateien | Eigenständige Zustände/Aktionen ohne SDK/Dateipfad/Androidtypen, DE/EN bei 360×640/200 %, keine AccountScreen-/VM-/Hosteinbindung. |
+| K2-C Android, danach Integration | Nach A/B-Review eigener Auftrag für Cache/Provider/Host; Root vergibt AuthViewModel/PhoneAccount/MainActivity/AdvantlyApp/AccountScreen einmalig | Teilarchiv nie freigebbar; Hash/Größe/Frist/Account vor Promotion und Teilen; Upload und Export beide synchron sperren und drainen, danach Auth genau einmal schließen. |
+
+A und B starten isoliert auf demselben geprüften Rootstand nach `ba1f37d`; keine
+gegenseitigen Imports. C konsumiert anschließend beide geprüften Verträge.
+
+Verbindlicher A-Vertrag: `CloudDataExportPort.context` ist
+`StateFlow<CloudDataExportContext?>`; Context enthält ausschließlich Profil-ID, verifizierte
+Kontogeneration und eigene Exportrevision. `requireCurrent(context)` prüft synchron auch die
+SDK-Identität. Suspendierende `request(context, requestId)` und `status(context, requestId)`
+liefern `CloudDataExportStatus` (Pending mit bestätigter ID/Retry-After, Ready mit ID/
+exportedAtMs/expiresAtMs/byteLength/sha256, Busy mit Retry-After ohne fremde ID).
+`download(context, ready, sink)` streamt höchstens 16 MiB und exakt die bestätigte Länge;
+`CloudDataExportSink.write(bytes, offset, length)` erhält kleine Blöcke. HTTP prüft MIME,
+Route, EOF und native Zeitlimits; C prüft SHA-256 vor Dateipromotion. Kein öffentlicher Token-
+Getter und kein behaupteter Hashbeweis allein durch HTTP-Abschluss.
+
+Exportrevision entwertet laufende Arbeit/Dateifreigabe bei Konto-/SDK-Grenze, Logout,
+Close und Beginn eines Löschantrags (`requestDeletion`/`stopForDeletion`). Eine danach
+ausdrücklich neu gestartete Exportaktion bleibt in der Karenz zulässig. Consent-/reine
+Cloud-Sperren entziehen dieses Kontorecht nicht. Alle bestehenden K1-Mutations-/Antwortfences
+bleiben erhalten; neue Exportjobs werden getrennt verwaltet.
+
+B-Vertrag: `PhoneExportPort.state: StateFlow<PhoneExportState>`, Methoden `requestExport`,
+`retry`, `refreshStatus`, `download`, `cancel`, `discard`, `close(onDrained)`.
+State enthält ausschließlich Phase, erlaubte Aktionen, stabile Fehlerklasse und optionale
+Zeit-/Größen-/Retryangaben; keine Request-ID, Cloudtypen, Pfade oder Uri. Die Sektion bekommt
+einen optionalen `onShare`-Callback statt einer gespeicherten Activity. Primäraktion je
+Zustand plus nötiges Anhalten/Verwerfen; kein Prozentfortschritt ohne Beleg, „Teilen geöffnet“
+ist kein bestätigtes Speichern. Cancel hält nur lokale Arbeit an, kein erfundener Serverabbruch.
+Retry/Status behalten dieselbe Request-ID im späteren Host; 409 kündigt keine Pending-ID an.
+
 Android Review 2 bestätigt `31620a7` und den separaten Root-Kontrastfix `1f830dc` jeweils
 ohne offene Befunde. Unabhängig 21 gezielte Tests grün: elf Host-, zwei Präsentations-,
 ein Upload-UI-Matrix- und sieben Kontotests. Root übernimmt den Androidkandidaten in den
