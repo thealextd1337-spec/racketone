@@ -889,6 +889,17 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+K2-A Drainkorrektur `c58a96f` gegen `acdd93e` fertig, sauber und genau zwei Dateien:
+`CloudHttp.kt` plus bestehender Export-HTTP-Test. Request-Lifetime ab Requestaufbau erfassen,
+im `finally` cancellationfest canceln und vollständig joinen; öffentliche API unverändert.
+Drei Originalrepros rot→grün, sieben Drainfälle einschließlich Pre-Header-/Body-/Timeout-/
+Caller-/Sink-/MIME-Fehler mit separater Transportbarriere grün. Vor Freigabe bleiben Export
+und Transport unvollendet; danach beide beendet. 133 Cloud-JVM-Tests, ktlint, Gesamtcheck
+und Phone-/Wear-APK grün. Dauerhaft blockierter Transportabbau hält die Operation bewusst
+offen; kein falscher Drain. Root hat Produktdiff geprüft; frisches unabhängiges Review 2 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r2`.
+Android-C bleibt bis zu diesem Review ungestartet; D1-/Android-CI-Korrekturen laufen getrennt.
+
 PR #68 auf `6da7517`: Ubuntu-Job `117723125763` scheitert in einem von 19 Androidtests.
 CI-XML wurde gelesen: nicht der `runBlocking`-Einstieg 591, sondern `assertFalse` für
 `canRefreshStatus` in `PhoneUploadHostTest.kt:627`. Der Test wartet zuvor auf ein
