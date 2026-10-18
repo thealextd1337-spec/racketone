@@ -784,6 +784,25 @@ D1: für echten Runner-/DB-Close-Reopen-Test zusätzlich ausschließlich
 Version oder Produktionsdependency. Dependencycommit `4a95352` enthält unverändert U4;
 dessen Gesamtcheck 692 Tasks grün. Schema-7-/Pullimplementierung und eigene Abnahme laufen.
 
+K2 Review 1 auf `d02c7a8`: No-Ship, zwei belegte P2 und ein P3. Rekursives Null-Stripping
+entfernt fachlich relevante explizite Nullwerte in MatchCreated-Regeln; im entpackten ZIP
+bestätigt. Unterschiedliche Request-ID B wird während A fälschlich als Pending angekündigt,
+obwohl kein B existiert und GET dauerhaft 404 liefert. Array als Request-ID passiert den
+Regex durch implizite Konvertierung und führt zu 503 statt 400.
+Fix1 innerhalb K2-Besitz beauftragt: Whitelist und vorhandene erlaubte Nullwerte semantisch
+erhalten, Typ vor Regex prüfen; kontoweite Belegung durch andere Request-ID ausdrücklich
+als `409 export_busy` mit Retry-After melden. Dieselbe existierende Pending-ID bleibt
+202/pollbar; kein zweiter Produzent oder neues Queueframework. Diese technische HTTP-Ergänzung
+ist freigegeben, Client noch unverdrahtet. SQL-/Deno-/ZIP-Rot→Grün, echte Parallelfälle und
+vollständiger Check vor separatem Commit, danach neue unabhängige Reviewrunde.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-server-fix-r1`.
+
+U4-Host interne Schnittstelle präzisiert: `CloudUploadPort` plus suspendierende
+`bindDevice(String)`-Funktion kommen aus derselben Backendinstanz. Der reale Backendaufruf
+wird im Drain-Test durch einen suspendierten Host-Child-finally ergänzt, damit dessen
+vollständiger Abschluss vor Authclose bewiesen wird; ein Ktor-Engine-Job allein genügt nicht.
+Keine neue Datei/Produktionsdependency oder Gate-/Backendänderung.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
