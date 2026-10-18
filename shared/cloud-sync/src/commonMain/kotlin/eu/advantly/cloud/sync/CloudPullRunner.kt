@@ -50,12 +50,28 @@ class CloudPullRunner(
                 check(!closed) { "Pull-Runner geschlossen" }
                 active = currentCoroutineContext().job
                 var attempt: CloudPullAttempt? = null
+                var runSerial: Long? = null
+                var processingMatch: String? = null
+                val context = currentCoroutineContext()
+
+                fun recordDeadlineFailure() {
+                    val current = attempt ?: return
+                    val serial = runSerial ?: return
+                    val match = processingMatch ?: return
+                    // Nur den Fehlerfortschritt nach Ablauf vermerken, niemals eine alte Seite quittieren.
+                    runCatching {
+                        data.cloudPulls.recordEventFailure(current.profileId, match, serial, false) {
+                            confined()
+                            context.ensureActive()
+                            pulls.requireCurrentPull(current)
+                        }
+                    }
+                }
                 try {
                     val selected = pulls.capturePull()
                     attempt = selected
                     mutable.value = CloudPullState(CloudPullOutcome.RUNNING, selected.profileId, selected.generation)
                     val started = TimeSource.Monotonic.markNow()
-                    val context = currentCoroutineContext()
                     val fence = {
                         confined()
                         context.ensureActive()
@@ -63,31 +79,71 @@ class CloudPullRunner(
                         pulls.requireCurrentPull(selected)
                     }
                     withTimeout(deadlineMillis) {
-                        val run = data.cloudPulls.beginRun(selected.profileId, fence).runSerial
+                        val progress = data.cloudPulls.beginRun(selected.profileId, fence)
+                        val run = progress.runSerial
+                        runSerial = run
                         val budget = Budget(fence)
-                        pullMetadata(selected, run, budget)
+                        if (!progress.metadataComplete) pullMetadata(selected, run, budget)
                         var jobs = 0
                         while (true) {
                             fence()
                             val work = data.cloudPulls.nextEventWork(selected.profileId, run) ?: break
                             if (jobs >= maxEventJobsPerRun) throw StopPull(CloudPullOutcome.LIMIT_REACHED)
-                            pullEvents(selected, run, work, budget)
+                            budget.requireRequest(page = !work.needsVerification)
+                            val claimed = data.cloudPulls.claimEventWork(work, run, fence)
+                            processingMatch = work.matchId
                             jobs++
-                            mutable.value = mutable.value.copy(completedEventJobs = jobs)
+                            try {
+                                pullEvents(selected, run, claimed, budget)
+                                processingMatch = null
+                                mutable.value = mutable.value.copy(completedEventJobs = mutable.value.completedEventJobs + 1)
+                            } catch (stop: StopPull) {
+                                throw stop
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                data.cloudPulls.recordEventFailure(
+                                    selected.profileId,
+                                    work.matchId,
+                                    run,
+                                    error is PullNotificationFailure,
+                                    fence,
+                                )
+                                throw error
+                            }
                         }
                         fence()
+                        data.cloudPulls.finishRound(selected.profileId, run, fence)
                         val removals = data.cloudPulls.pendingRemovals(selected.profileId)
                         val redactions = data.cloudPulls.pendingRedactions(selected.profileId)
+                        val failures = data.cloudPulls.failedEventJobs(selected.profileId)
+                        val materializations = data.cloudPulls.pendingMaterializations(selected.profileId)
+                        fence()
                         mutable.value =
                             mutable.value.copy(
-                                outcome = if (removals > 0 || redactions > 0) CloudPullOutcome.BLOCKED else CloudPullOutcome.COMPLETE,
+                                outcome =
+                                    when {
+                                        failures > 0 -> CloudPullOutcome.FAILED
+                                        removals > 0 || redactions > 0 || materializations > 0 -> CloudPullOutcome.BLOCKED
+                                        else -> CloudPullOutcome.COMPLETE
+                                    },
                                 pendingRemovals = removals,
                                 pendingRedactions = redactions,
+                                failedEventJobs = failures,
+                                pendingMaterializations = materializations,
+                                failure =
+                                    when {
+                                        failures > 0 -> "cloud_pull_event_work_failed"
+                                        materializations > 0 -> "cloud_pull_materialization_pending"
+                                        else -> null
+                                    },
                             )
                     }
                 } catch (stop: StopPull) {
+                    if (stop.outcome == CloudPullOutcome.DEADLINE_REACHED) recordDeadlineFailure()
                     finish(attempt, stop.outcome)
                 } catch (_: TimeoutCancellationException) {
+                    recordDeadlineFailure()
                     finish(attempt, CloudPullOutcome.DEADLINE_REACHED)
                 } catch (error: CancellationException) {
                     finish(attempt, CloudPullOutcome.CANCELLED)
@@ -134,14 +190,24 @@ class CloudPullRunner(
     ) {
         var work = initial
         while (true) {
-            budget.page()
-            val response = pulls.pullEventPage(attempt, work.matchId, work.cursor, eventPageSize)
-            budget.fence()
-            val received = PullMapping.events(response, work.matchId, work.cursor, eventPageSize)
-            data.cloudPulls.commitEvents(work, run, received, budget.fence) { eventsCommitted(work.matchId) }
-            mutable.value = mutable.value.copy(completedEventPages = mutable.value.completedEventPages + 1)
-            work = requireNotNull(data.cloudPulls.eventWork(attempt.profileId, work.matchId))
-            if (response.size == eventPageSize) continue
+            if (!work.needsVerification) {
+                budget.page()
+                val response = pulls.pullEventPage(attempt, work.matchId, work.cursor, eventPageSize)
+                budget.fence()
+                val received = PullMapping.events(response, work.matchId, work.cursor, eventPageSize)
+                data.cloudPulls.commitEvents(work, run, received, budget.fence, endOfStream = response.size < eventPageSize) {
+                    try {
+                        eventsCommitted(work.matchId)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        throw PullNotificationFailure(error)
+                    }
+                }
+                mutable.value = mutable.value.copy(completedEventPages = mutable.value.completedEventPages + 1)
+                work = requireNotNull(data.cloudPulls.eventWork(attempt.profileId, work.matchId))
+                if (!work.needsVerification) continue
+            }
             budget.rpc()
             val watermarks = pulls.pullWatermarks(attempt, work.matchId)
             budget.fence()
@@ -162,16 +228,21 @@ class CloudPullRunner(
     ) {
         private var pages = 0
 
-        fun page() {
+        fun requireRequest(page: Boolean) {
             fence()
-            if (pages >= maxPagesPerRun) throw StopPull(CloudPullOutcome.LIMIT_REACHED)
+            if (mutable.value.rpcCount >= maxRpcsPerRun || (page && pages >= maxPagesPerRun)) {
+                throw StopPull(CloudPullOutcome.LIMIT_REACHED)
+            }
+        }
+
+        fun page() {
+            requireRequest(page = true)
             rpc()
             pages++
         }
 
         fun rpc() {
-            fence()
-            if (mutable.value.rpcCount >= maxRpcsPerRun) throw StopPull(CloudPullOutcome.LIMIT_REACHED)
+            requireRequest(page = false)
             mutable.value = mutable.value.copy(rpcCount = mutable.value.rpcCount + 1)
         }
     }
@@ -192,6 +263,8 @@ class CloudPullRunner(
                     failure = failure,
                     pendingRemovals = data.cloudPulls.pendingRemovals(attempt.profileId),
                     pendingRedactions = data.cloudPulls.pendingRedactions(attempt.profileId),
+                    failedEventJobs = data.cloudPulls.failedEventJobs(attempt.profileId),
+                    pendingMaterializations = data.cloudPulls.pendingMaterializations(attempt.profileId),
                 )
             }
     }
@@ -207,4 +280,8 @@ class CloudPullRunner(
     private class StopPull(
         val outcome: CloudPullOutcome,
     ) : Exception()
+
+    private class PullNotificationFailure(
+        cause: Exception,
+    ) : Exception(cause)
 }

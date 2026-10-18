@@ -6,9 +6,13 @@ data class CloudPullProgress(
     val visibilityEpoch: Long?,
     val targetEpoch: Long?,
     val scanRun: Long,
+    /** Einzelne Ausführung; schützt lokale Commits gegen eine jüngere Ausführung. */
     val runSerial: Long,
     val cursor: Long,
     val metadataComplete: Boolean,
+    /** Bleibt über Budgetabbrüche und Wiederöffnung erhalten; nur eine neue Prüfrunde erhöht diesen Wert. */
+    val checkRound: Long,
+    val roundActive: Boolean,
 )
 
 enum class CloudPullEntityKind { MATCH, PLAYER, FRIENDSHIP }
@@ -71,6 +75,15 @@ data class CloudPullEventWork(
     val repairing: Boolean,
     val repairRun: Long,
     val cursor: Long,
+    /** Faire Versuchsauswahl, ausdrücklich unabhängig von einer erfolgreichen Wasserstandsquittierung. */
+    val lastAttempt: Long,
+    /** Ausschließlich erfolgreich gegen Empfangsnachweise geprüfte Runde. */
+    val checkedRound: Long,
+    val failedRound: Long,
+    val failure: String?,
+    /** Die letzte Eventseite ist atomar gespeichert; ihr Wasserstandsvergleich steht noch aus. */
+    val needsVerification: Boolean,
+    val materializationPending: Boolean,
 )
 
 /** Kein Payloadduplikat und kein Geräte-Ack: nur Empfang in diesem Kontokontext. */

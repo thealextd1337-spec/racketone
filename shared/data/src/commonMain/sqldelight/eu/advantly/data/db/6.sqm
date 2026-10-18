@@ -5,6 +5,8 @@ CREATE TABLE cloud_pull_profile (
     target_epoch INTEGER,
     scan_run INTEGER NOT NULL DEFAULT 0,
     run_serial INTEGER NOT NULL DEFAULT 0,
+    check_round INTEGER NOT NULL DEFAULT 0,
+    round_active INTEGER NOT NULL DEFAULT 0,
     metadata_complete INTEGER NOT NULL DEFAULT 0
 );
 
@@ -33,9 +35,14 @@ CREATE TABLE cloud_pull_event_work (
     repairing INTEGER NOT NULL DEFAULT 0,
     repair_run INTEGER NOT NULL DEFAULT 0,
     last_checked INTEGER NOT NULL DEFAULT 0,
+    last_attempt INTEGER NOT NULL DEFAULT 0,
+    failed_round INTEGER NOT NULL DEFAULT 0,
+    last_failure TEXT,
+    needs_verification INTEGER NOT NULL DEFAULT 0,
+    materialization_pending INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(profile_id, match_id)
 );
-CREATE INDEX cloud_pull_work_queue ON cloud_pull_event_work(profile_id, last_checked, match_id);
+CREATE INDEX cloud_pull_work_queue ON cloud_pull_event_work(profile_id, last_attempt, match_id);
 
 CREATE TABLE cloud_pull_receipt (
     profile_id TEXT NOT NULL,

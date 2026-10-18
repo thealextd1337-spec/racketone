@@ -3,9 +3,11 @@ package eu.advantly.cloud.sync
 import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.LocalData
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -167,6 +169,79 @@ class CloudPullBoundaryTest {
                 f.publish(ConsentStatus.UNAVAILABLE)
                 assertEquals(CloudPullOutcome.BLOCKED, CloudPullRunner(f.backend, f.data).pullNow().outcome)
                 assertEquals(listOf("bind_cloud_session_v1"), f.calls.map { it.first })
+            }
+        }
+
+    @Test
+    fun nonCooperativeHttpCannotCommitAfterInvalidation() =
+        runBlocking {
+            for (eventPage in listOf(false, true)) {
+                for (mode in listOf("account", "relogin", "consent", "consent-regain", "logout", "deletion", "rebind")) {
+                    PullFixture().use { f ->
+                        f.bind()
+
+                        suspend fun invalidate() =
+                            withContext(NonCancellable) {
+                                when (mode) {
+                                    "account" -> {
+                                        f.credentials = CloudCredentials("bob", "session-bob", "token-bob")
+                                    }
+
+                                    "relogin" -> {
+                                        f.credentials = CloudCredentials("alice", "new-session", "new-token")
+                                    }
+
+                                    "consent" -> {
+                                        f.publish(ConsentStatus.REQUIRED)
+                                    }
+
+                                    "consent-regain" -> {
+                                        f.publish(ConsentStatus.REQUIRED)
+                                        f.publish()
+                                    }
+
+                                    "logout" -> {
+                                        f.gate.stop()
+                                        f.credentials = null
+                                    }
+
+                                    "deletion" -> {
+                                        f.publish(deleting = true)
+                                    }
+
+                                    "rebind" -> {
+                                        f.backend.bindDevice("phone")
+                                    }
+                                }
+                                delay(5)
+                            }
+                        f.metadata = { _, _ ->
+                            if (!eventPage) invalidate()
+                            PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1)
+                        }
+                        f.events = { _, _, _ ->
+                            invalidate()
+                            listOf(pullEvent(1))
+                        }
+                        val runner = CloudPullRunner(f.backend, f.data)
+                        val result =
+                            try {
+                                runner.pullNow()
+                            } catch (_: CancellationException) {
+                                runner.state.value
+                            }
+                        assertFalse(result.outcome == CloudPullOutcome.COMPLETE, "$mode / $eventPage")
+                        assertNull(result.profileId, "$mode / $eventPage")
+                        assertEquals(0L, f.data.events.count("match"), "$mode / $eventPage")
+                        assertEquals(
+                            if (eventPage) 1L else 0L,
+                            f.data.cloudPulls
+                                .progress("alice")
+                                .cursor,
+                            "$mode / $eventPage",
+                        )
+                    }
+                }
             }
         }
 }

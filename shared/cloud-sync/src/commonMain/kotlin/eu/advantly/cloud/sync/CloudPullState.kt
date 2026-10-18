@@ -13,6 +13,8 @@ data class CloudPullState(
     val rpcCount: Int = 0,
     val pendingRemovals: Long = 0,
     val pendingRedactions: Long = 0,
+    val failedEventJobs: Long = 0,
+    val pendingMaterializations: Long = 0,
     val failure: String? = null,
 ) {
     val running: Boolean get() = outcome == CloudPullOutcome.RUNNING

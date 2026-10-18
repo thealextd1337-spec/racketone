@@ -4,6 +4,8 @@ CREATE TABLE cloud_pull_profile (
     target_epoch INTEGER,
     scan_run INTEGER NOT NULL DEFAULT 0,
     run_serial INTEGER NOT NULL DEFAULT 0,
+    check_round INTEGER NOT NULL DEFAULT 0,
+    round_active INTEGER NOT NULL DEFAULT 0,
     metadata_complete INTEGER NOT NULL DEFAULT 0
 );
 
@@ -32,9 +34,14 @@ CREATE TABLE cloud_pull_event_work (
     repairing INTEGER NOT NULL DEFAULT 0,
     repair_run INTEGER NOT NULL DEFAULT 0,
     last_checked INTEGER NOT NULL DEFAULT 0,
+    last_attempt INTEGER NOT NULL DEFAULT 0,
+    failed_round INTEGER NOT NULL DEFAULT 0,
+    last_failure TEXT,
+    needs_verification INTEGER NOT NULL DEFAULT 0,
+    materialization_pending INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(profile_id, match_id)
 );
-CREATE INDEX cloud_pull_work_queue ON cloud_pull_event_work(profile_id, last_checked, match_id);
+CREATE INDEX cloud_pull_work_queue ON cloud_pull_event_work(profile_id, last_attempt, match_id);
 
 CREATE TABLE cloud_pull_receipt (
     profile_id TEXT NOT NULL,
@@ -58,6 +65,12 @@ SELECT * FROM cloud_pull_profile WHERE profile_id = ?;
 
 beginRun:
 UPDATE cloud_pull_profile SET run_serial = run_serial + 1 WHERE profile_id = ?;
+
+startCheckRound:
+UPDATE cloud_pull_profile SET check_round = check_round + 1, round_active = 1, metadata_complete = 0 WHERE profile_id = ?;
+
+finishCheckRound:
+UPDATE cloud_pull_profile SET round_active = 0 WHERE profile_id = ?;
 
 startScan:
 UPDATE cloud_pull_profile SET target_epoch = ?, scan_run = scan_run + 1, metadata_complete = 0 WHERE profile_id = ?;
@@ -96,21 +109,48 @@ SELECT profile_id FROM cloud_pull_snapshot WHERE kind = ? AND entity_id = ? AND 
 ensureEventWork:
 INSERT OR IGNORE INTO cloud_pull_event_work(profile_id,match_id) VALUES (?,?);
 
+setMaterializationPending:
+UPDATE cloud_pull_event_work SET materialization_pending = ? WHERE profile_id = ? AND match_id = ?;
+
 eventWork:
 SELECT * FROM cloud_pull_event_work WHERE profile_id = ? AND match_id = ?;
 
 nextEventWork:
 SELECT w.* FROM cloud_pull_event_work w
 JOIN cloud_pull_snapshot s ON s.profile_id = w.profile_id AND s.entity_id = w.match_id AND s.kind = 'MATCH'
-WHERE w.profile_id = :profile AND w.last_checked < :runSerial AND s.access = 'member' AND s.removal_pending = 0
+WHERE w.profile_id = :profile AND w.last_checked < :checkRound AND w.failed_round < :checkRound
+AND w.materialization_pending = 0 AND s.access = 'member' AND s.removal_pending = 0
 AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = w.match_id)
-ORDER BY w.last_checked, w.match_id LIMIT 1;
+ORDER BY w.last_attempt, w.match_id LIMIT 1;
+
+recordEventAttempt:
+UPDATE cloud_pull_event_work SET last_attempt = ? WHERE profile_id = ? AND match_id = ?;
+
+recordEventFailure:
+UPDATE cloud_pull_event_work SET failed_round = ?, last_failure = ? WHERE profile_id = ? AND match_id = ?;
+
+setNeedsVerification:
+UPDATE cloud_pull_event_work SET needs_verification = ? WHERE profile_id = ? AND match_id = ?;
 
 startRepair:
-UPDATE cloud_pull_event_work SET repairing = 1, repair_run = repair_run + 1 WHERE profile_id = ? AND match_id = ?;
+UPDATE cloud_pull_event_work SET repairing = 1, repair_run = repair_run + 1, needs_verification = 0 WHERE profile_id = ? AND match_id = ?;
 
 completeEventWork:
-UPDATE cloud_pull_event_work SET repairing = 0, last_checked = ? WHERE profile_id = ? AND match_id = ?;
+UPDATE cloud_pull_event_work SET repairing = 0, last_checked = ?, last_failure = NULL, failed_round = 0, needs_verification = 0
+WHERE profile_id = ? AND match_id = ?;
+
+eventFailureCount:
+SELECT count(*) FROM cloud_pull_snapshot s
+JOIN cloud_pull_event_work w ON s.profile_id = w.profile_id AND s.entity_id = w.match_id
+WHERE s.kind = 'MATCH' AND w.profile_id = ? AND w.last_failure IS NOT NULL AND w.materialization_pending = 0
+AND s.access = 'member' AND s.removal_pending = 0
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = w.match_id);
+
+pendingMaterializationCount:
+SELECT count(*) FROM cloud_pull_snapshot s
+JOIN cloud_pull_event_work w ON s.profile_id = w.profile_id AND s.entity_id = w.match_id
+WHERE s.kind = 'MATCH' AND w.profile_id = ? AND w.materialization_pending = 1 AND s.access = 'member' AND s.removal_pending = 0
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = w.match_id);
 
 receipt:
 SELECT * FROM cloud_pull_receipt WHERE profile_id = ? AND match_id = ? AND event_id = ?;

@@ -48,6 +48,47 @@ internal fun storePage(
 
 class CloudPullStoreTest {
     @Test
+    fun attemptAndFailureFencesRollbackWithoutAcknowledgingUnverifiedWork() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver)
+            val first = data.cloudPulls.beginRun("alice") {}
+            data.cloudPulls.commitMetadata("alice", first.runSerial, 0, storePage()) {}
+            val original = data.cloudPulls.eventWork("alice", "match")!!
+            assertFailsWith<IllegalStateException> { data.cloudPulls.finishRound("alice", first.runSerial) {} }
+            var fences = 0
+            assertFailsWith<IllegalStateException> {
+                data.cloudPulls.claimEventWork(original, first.runSerial) { check(++fences == 1) }
+            }
+            assertEquals(original, data.cloudPulls.eventWork("alice", "match"))
+            val claimed = data.cloudPulls.claimEventWork(original, first.runSerial) {}
+            assertEquals(first.runSerial, claimed.lastAttempt)
+            assertEquals(0, claimed.checkedRound)
+            fences = 0
+            assertFailsWith<IllegalStateException> {
+                data.cloudPulls.recordEventFailure("alice", "match", first.runSerial, false) { check(++fences == 1) }
+            }
+            assertEquals(claimed, data.cloudPulls.eventWork("alice", "match"))
+            data.cloudPulls.recordEventFailure("alice", "match", first.runSerial, false) {}
+            val failed = data.cloudPulls.eventWork("alice", "match")!!
+            assertEquals(0, failed.checkedRound)
+            assertEquals(0, failed.cursor)
+            assertTrue(data.cloudPulls.receivedWatermarks(failed).isEmpty())
+            assertEquals(1, data.cloudPulls.failedEventJobs("alice"))
+            data.cloudPulls.finishRound("alice", first.runSerial) {}
+            val second = data.cloudPulls.beginRun("alice") {}
+            assertEquals(first.checkRound + 1, second.checkRound)
+            assertEquals(null, data.cloudPulls.nextEventWork("alice", second.runSerial))
+            data.cloudPulls.commitMetadata("alice", second.runSerial, 1, storePage()) {}
+            val retry = data.cloudPulls.claimEventWork(data.cloudPulls.nextEventWork("alice", second.runSerial)!!, second.runSerial) {}
+            assertNotNull(retry.failure)
+            assertEquals(0, retry.checkedRound)
+            assertTrue(data.cloudPulls.verifyEvents(retry, second.runSerial, emptyList()) {})
+            assertEquals(0, data.cloudPulls.failedEventJobs("alice"))
+            assertEquals(second.checkRound, data.cloudPulls.eventWork("alice", "match")?.checkedRound)
+        }
+    }
+
+    @Test
     fun downloadedAssignmentProjectionStaysCleanOnlyForCleanCloudMaterializationOfReceivingProfile() {
         for (mode in listOf("clean", "dirty", "local", "peer", "other-profile")) {
             createInMemoryJvmDriver().use { driver ->

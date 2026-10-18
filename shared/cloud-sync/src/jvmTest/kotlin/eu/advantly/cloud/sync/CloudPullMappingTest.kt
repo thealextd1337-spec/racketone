@@ -19,11 +19,125 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CloudPullMappingTest {
+    @Test
+    fun allServerStatusesAreExplicitAndScheduledSnapshotWaitsForRealEngineMaterialization() =
+        runBlocking {
+            val engineStatuses =
+                mapOf(
+                    "scheduled" to null,
+                    "in_progress" to eu.advantly.core.scoring.MatchStatus.IN_PROGRESS,
+                    "paused" to eu.advantly.core.scoring.MatchStatus.PAUSED,
+                    "awaiting_decision" to eu.advantly.core.scoring.MatchStatus.AWAITING_DECISION,
+                    "finished" to eu.advantly.core.scoring.MatchStatus.FINISHED,
+                )
+            for ((server, engine) in engineStatuses) {
+                val mapped = PullMapping.metadata(PullResponse(listOf(pullMatch().copy(status = server)), cursor = 1), 0, 200)
+                assertEquals(
+                    engine,
+                    mapped.matches
+                        .single()
+                        .record
+                        ?.status,
+                    server,
+                )
+            }
+            for (access in listOf("member", "feed")) {
+                assertFailsWith<IllegalArgumentException> {
+                    PullMapping.metadata(
+                        PullResponse(listOf(pullMatch(access = access).copy(status = "future_status")), cursor = 1),
+                        0,
+                        200,
+                    )
+                }
+            }
+            PullFixture().use { f ->
+                f.bind()
+                var row = pullMatch().copy(status = "scheduled", scheduledAt = "2026-10-19T12:00:00Z")
+                f.metadata = { _, _ -> PullResponse(listOf(row), cursor = row.serverVersion, visibilityEpoch = 1) }
+                f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
+                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                val runner = CloudPullRunner(f.backend, f.data)
+                val scheduled = runner.pullNow()
+                assertEquals(CloudPullOutcome.BLOCKED, scheduled.outcome)
+                assertEquals(1, scheduled.pendingMaterializations)
+                assertNull(f.data.matches.get(MatchId("match")))
+                val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")!!
+                assertTrue(snapshot.json.contains("scheduled"))
+                assertNull(snapshot.materializedVersion)
+                val waiting = f.data.cloudPulls.eventWork("alice", "match")!!
+                assertTrue(waiting.materializationPending)
+                assertEquals(0, waiting.checkedRound)
+                assertEquals(0, waiting.cursor)
+                assertFalse(f.calls.any { it.first in setOf("cloud_pull_match_events_v1", "cloud_match_event_watermarks_v1") })
+                row = row.copy(status = "in_progress", serverVersion = 2)
+                val active = runner.pullNow()
+                assertEquals(CloudPullOutcome.COMPLETE, active.outcome)
+                assertEquals(0, active.pendingMaterializations)
+                assertEquals(1, f.data.events.count("match"))
+                assertEquals(
+                    eu.advantly.core.scoring.MatchStatus.IN_PROGRESS,
+                    f.data.matches
+                        .get(MatchId("match"))
+                        ?.status,
+                )
+                assertEquals(
+                    CloudMetadataOrigin.CLOUD,
+                    f.data.cloud
+                        .metadataState(CloudMetadataKind.HEADER, "match")
+                        ?.origin,
+                )
+                assertNull(
+                    f.data.cloud
+                        .metadataState(CloudMetadataKind.HEADER, "match")
+                        ?.writerProfileId,
+                )
+                assertEquals(
+                    2,
+                    f.data.cloudPulls
+                        .snapshot("alice", CloudPullEntityKind.MATCH, "match")
+                        ?.materializedVersion,
+                )
+            }
+        }
+
+    @Test
+    fun scheduledSnapshotNeverReplacesExistingLocalEngineStatus() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val record =
+                    PullMapping
+                        .metadata(PullResponse(listOf(pullMatch()), cursor = 1), 0, 200)
+                        .matches
+                        .single()
+                        .record!!
+                f.data.matches.insertIfAbsent(record.id, record.format, record.lineup, record.meta, 1)
+                f.data.matches.updateProgress(record.id, eu.advantly.core.scoring.MatchStatus.PAUSED, record.score, 1)
+                f.driver.execute(null, "UPDATE cloud_metadata SET origin='LOCAL', source_device_id='original' WHERE entity_id='match'", 0)
+                val before = f.data.cloud.metadataState(CloudMetadataKind.HEADER, "match")
+                f.metadata = { _, _ -> PullResponse(listOf(pullMatch().copy(status = "scheduled")), cursor = 1, visibilityEpoch = 1) }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertEquals(
+                    eu.advantly.core.scoring.MatchStatus.PAUSED,
+                    f.data.matches
+                        .get(record.id)
+                        ?.status,
+                )
+                assertEquals(before, f.data.cloud.metadataState(CloudMetadataKind.HEADER, "match"))
+                assertNull(
+                    f.data.cloudPulls
+                        .snapshot("alice", CloudPullEntityKind.MATCH, "match")
+                        ?.materializedVersion,
+                )
+            }
+        }
+
     @Test
     fun legacyFormatFailsStrictlyButFeedSummaryRemainsRawAndNeverCreatesEventWork() =
         runBlocking {
@@ -180,6 +294,41 @@ class CloudPullMappingTest {
                     f.data.matches
                         .deleted()
                         .isEmpty(),
+                )
+            }
+        }
+
+    @Test
+    fun validScheduledServerRowMustNotPoisonMetadataPage() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                f.metadata =
+                    {
+                        _,
+                        _,
+                        ->
+                        PullResponse(
+                            listOf(pullMatch().copy(status = "scheduled", scheduledAt = "2026-10-19T12:00:00Z")),
+                            cursor = 1,
+                            visibilityEpoch = 1,
+                        )
+                    }
+                val result = CloudPullRunner(f.backend, f.data).pullNow()
+                println(
+                    "R1 scheduled: outcome=${result.outcome}, failure=${result.failure}, cursor=${f.data.cloudPulls.progress(
+                        "alice",
+                    ).cursor}",
+                )
+                assertNotNull(
+                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match"),
+                    "Gültigen Serverzustand vollständig als Snapshot aufbewahren",
+                )
+                assertEquals(
+                    1L,
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .cursor,
                 )
             }
         }

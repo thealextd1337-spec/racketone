@@ -21,6 +21,8 @@ class CloudPullStore internal constructor(
             row?.run_serial ?: 0,
             data.cloud.cursor(profileId, METADATA_STREAM),
             row?.metadata_complete == 1L,
+            row?.check_round ?: 0,
+            row?.round_active == 1L,
         )
     }
 
@@ -32,8 +34,13 @@ class CloudPullStore internal constructor(
             fence()
             require(profileId.isNotBlank())
             queries.ensureProfile(profileId)
-            check(progress(profileId).runSerial < Long.MAX_VALUE)
+            val state = progress(profileId)
+            check(state.runSerial < Long.MAX_VALUE)
             queries.beginRun(profileId)
+            if (!state.roundActive) {
+                check(state.checkRound < Long.MAX_VALUE)
+                queries.startCheckRound(profileId)
+            }
             fence()
             progress(profileId)
         }
@@ -123,12 +130,17 @@ class CloudPullStore internal constructor(
                     )
                 queries.markSeen(state.scanRun, profileId, match.id)
                 if (saved && match.access == "member" && !match.deleted) {
-                    val record = requireNotNull(match.record)
-                    require(record.id.value == match.id)
-                    if (data.cloud.materializePullMatch(record, profileId, old?.materializedVersion)) {
-                        queries.materialized(match.serverVersion, profileId, "MATCH", match.id)
+                    val record = match.record
+                    if (record != null) {
+                        require(record.id.value == match.id)
+                        if (data.cloud.materializePullMatch(record, profileId, old?.materializedVersion)) {
+                            queries.materialized(match.serverVersion, profileId, "MATCH", match.id)
+                        }
                     }
                     queries.ensureEventWork(profileId, match.id)
+                    // Ohne Kopf ist noch kein Download-Herkunftsbeleg vor einer möglichen Genesis vorhanden.
+                    val pending = database.matchHeaderQueries.countById(match.id).executeAsOne() == 0L
+                    queries.setMaterializationPending(if (pending) 1 else 0, profileId, match.id)
                 }
             }
             if (!page.hasMore) {
@@ -176,14 +188,80 @@ class CloudPullStore internal constructor(
     fun nextEventWork(
         profileId: String,
         runSerial: Long,
-    ): CloudPullEventWork? = queries.nextEventWork(profileId, runSerial).executeAsOneOrNull()?.let { eventWork(it.profile_id, it.match_id) }
+    ): CloudPullEventWork? {
+        val state = progress(profileId)
+        if (!state.roundActive || !state.metadataComplete) return null
+        requireRun(profileId, runSerial)
+        return queries.nextEventWork(profileId, state.checkRound).executeAsOneOrNull()?.let { eventWork(it.profile_id, it.match_id) }
+    }
+
+    /** Auswahl ist dauerhaft fair, auch wenn die folgende Seite fehlschlägt oder der Prozess abbricht. Kein Wasserstands-Ack. */
+    fun claimEventWork(
+        work: CloudPullEventWork,
+        runSerial: Long,
+        fence: () -> Unit,
+    ): CloudPullEventWork =
+        data.transaction {
+            fence()
+            requireWork(work, runSerial)
+            queries.recordEventAttempt(runSerial, work.profileId, work.matchId)
+            fence()
+            requireNotNull(eventWork(work.profileId, work.matchId))
+        }
+
+    /** Fehler bleiben sichtbar, quittieren aber weder Events, Cursor noch den Wasserstand. */
+    fun recordEventFailure(
+        profileId: String,
+        matchId: String,
+        runSerial: Long,
+        notificationOnly: Boolean,
+        fence: () -> Unit,
+    ) = data.transaction {
+        fence()
+        val work = requireNotNull(eventWork(profileId, matchId))
+        requireWork(work, runSerial)
+        val failedRound = if (notificationOnly) work.failedRound else progress(profileId).checkRound
+        queries.recordEventFailure(
+            failedRound,
+            if (notificationOnly) "cloud_pull_notification_failed" else "cloud_pull_event_work_failed",
+            profileId,
+            matchId,
+        )
+        fence()
+    }
+
+    /** Eine Runde endet erst nach allen erreichbaren Prüfungen; Fehler/Materialisierungsarbeit sind kein Erfolg. */
+    fun finishRound(
+        profileId: String,
+        runSerial: Long,
+        fence: () -> Unit,
+    ) = data.transaction {
+        fence()
+        requireRun(profileId, runSerial)
+        check(progress(profileId).metadataComplete)
+        check(nextEventWork(profileId, runSerial) == null)
+        queries.finishCheckRound(profileId)
+        fence()
+    }
 
     fun eventWork(
         profileId: String,
         matchId: String,
     ): CloudPullEventWork? =
         queries.eventWork(profileId, matchId).executeAsOneOrNull()?.let {
-            CloudPullEventWork(profileId, matchId, it.repairing == 1L, it.repair_run, data.cloud.cursor(profileId, eventStream(matchId)))
+            CloudPullEventWork(
+                profileId,
+                matchId,
+                it.repairing == 1L,
+                it.repair_run,
+                data.cloud.cursor(profileId, eventStream(matchId)),
+                it.last_attempt,
+                it.last_checked,
+                it.failed_round,
+                it.last_failure,
+                it.needs_verification == 1L,
+                it.materialization_pending == 1L,
+            )
         }
 
     private fun requireWork(
@@ -191,6 +269,8 @@ class CloudPullStore internal constructor(
         runSerial: Long,
     ) {
         requireRun(work.profileId, runSerial)
+        val progress = progress(work.profileId)
+        check(progress.roundActive && progress.metadataComplete && !work.materializationPending)
         check(eventWork(work.profileId, work.matchId) == work)
         val match = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId))
         check(match.access == "member" && !match.removalPending)
@@ -203,6 +283,7 @@ class CloudPullStore internal constructor(
         runSerial: Long,
         received: List<CloudPullReceipt>,
         fence: () -> Unit,
+        endOfStream: Boolean = false,
         afterCommit: () -> Unit = {},
     ) = data.transaction {
         fence()
@@ -251,6 +332,7 @@ class CloudPullStore internal constructor(
             }
         }
         data.cloud.saveCursor(work.profileId, eventStream(work.matchId), cursor)
+        queries.setNeedsVerification(if (endOfStream) 1 else 0, work.profileId, work.matchId)
         fence()
         if (received.isNotEmpty()) data.afterCommit(afterCommit)
     }
@@ -276,7 +358,7 @@ class CloudPullStore internal constructor(
             val matches = receivedWatermarks(work).toSet() == server.toSet()
             if (matches) {
                 if (work.repairing) queries.finishRepair(work.profileId, work.matchId, work.repairRun)
-                queries.completeEventWork(runSerial, work.profileId, work.matchId)
+                queries.completeEventWork(progress(work.profileId).checkRound, work.profileId, work.matchId)
             } else {
                 check(work.repairRun < Long.MAX_VALUE)
                 queries.startRepair(work.profileId, work.matchId)
@@ -289,6 +371,10 @@ class CloudPullStore internal constructor(
     fun pendingRemovals(profileId: String): Long = queries.pendingRemovalCount(profileId).executeAsOne()
 
     fun pendingRedactions(profileId: String): Long = queries.pendingRedactionCount(profileId).executeAsOne()
+
+    fun failedEventJobs(profileId: String): Long = queries.eventFailureCount(profileId).executeAsOne()
+
+    fun pendingMaterializations(profileId: String): Long = queries.pendingMaterializationCount(profileId).executeAsOne()
 
     companion object {
         const val METADATA_STREAM: String = "pull"

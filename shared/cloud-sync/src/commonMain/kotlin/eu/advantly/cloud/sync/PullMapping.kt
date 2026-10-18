@@ -59,6 +59,15 @@ internal object PullMapping {
     }
 
     private fun match(row: PulledMatch): CloudPullMatch {
+        val engineStatus =
+            when (row.status) {
+                "scheduled" -> null
+                "in_progress" -> MatchStatus.IN_PROGRESS
+                "paused" -> MatchStatus.PAUSED
+                "awaiting_decision" -> MatchStatus.AWAITING_DECISION
+                "finished" -> MatchStatus.FINISHED
+                else -> throw IllegalArgumentException("Unbekannter Cloud-Matchstatus")
+            }
         require(row.serverVersion > 0 && row.access in setOf("member", "feed"))
         require(row.redactionEpoch >= 0 && (row.accessEpoch == null || row.accessEpoch >= 0))
         require(row.projectionEventCount >= 0)
@@ -76,7 +85,7 @@ internal object PullMapping {
                     it.status in setOf("invited", "accepted", "declined", "revoked")
             },
         )
-        val record = if (row.access == "member" && !row.deleted) memberRecord(row) else null
+        val record = if (row.access == "member" && !row.deleted && engineStatus != null) memberRecord(row, engineStatus) else null
         // Feedprojektionen sind bereinigte JSON-Snapshots, niemals Engine-Köpfe oder Eventberechtigungen.
         return CloudPullMatch(
             row.id,
@@ -90,7 +99,10 @@ internal object PullMapping {
         )
     }
 
-    private fun memberRecord(row: PulledMatch): MatchRecord {
+    private fun memberRecord(
+        row: PulledMatch,
+        status: MatchStatus,
+    ): MatchRecord {
         val format = CloudJson.decodeFromJsonElement(MatchFormat.serializer(), row.format)
         require(MatchFormatValidator.validate(format).isValid)
         require(CloudNames.of(format.sport.name) == row.sport && CloudNames.of(format.discipline.name) == row.discipline)
@@ -115,7 +127,7 @@ internal object PullMapping {
             CloudJson.decodeFromJsonElement(MatchMeta.serializer(), row.meta),
             started,
             updated,
-            MatchStatus.valueOf(CloudNames.toEngine(row.status)),
+            status,
             row.summary?.let { CloudJson.decodeFromJsonElement(ScoreSummary.serializer(), it) } ?: ScoreSummary.EMPTY,
             row.previousMatchId?.let(::MatchId),
         )
