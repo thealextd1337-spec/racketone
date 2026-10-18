@@ -256,6 +256,17 @@ ist dafür ausschließlich ein lesender U2-Seam: `LocalAccountOwnership.retained
 Die Cloud-JVM-Tests dürfen `match-session` als reine Testabhängigkeit nutzen. Keine Herkunfts-,
 Payload- oder Metadatenänderung. Neue unabhängige Reviewrunde vor Freigabe.
 
+K1-Korrektur 2 deckt außerdem den belegten SameAccount-Fall ab: Nach Sitzungswechsel darf
+ein Profillease mit `canResumeCloud=false` auch bei zurückgesetztem `cloudSuspended` weder
+Ownership noch Uploads aktivieren. Parent bewahrt diesen Schutz neben CURRENT und
+Consent-Generation; der Callback-Fehlervertrag bleibt erhalten.
+
+Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
+Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
+JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
+Danach vollständiger Gradle-Check mit 686 Tasks grün und SQL-Gesamtlauf erneut bis auf
+die zwei bekannten lokalen pg_cron-Nachweise grün.
+
 ### Nächste isolierte Umsetzungspakete
 
 Der gemeinsame Stand nach U3-Korrektur 2 und K1-Korrektur 1 besteht den vollständigen
