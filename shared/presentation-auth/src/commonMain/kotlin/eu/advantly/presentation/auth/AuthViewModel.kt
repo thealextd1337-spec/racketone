@@ -53,6 +53,7 @@ class AuthViewModel(
     private var adoptionGeneration: Long? = null
     private var displayedSession: CloudSession? = null
     private var consentLanguage = "en"
+    private var actionRevision = 0L
     private val scope get() = workScope ?: viewModelScope
 
     init {
@@ -264,6 +265,7 @@ class AuthViewModel(
                         session.onboarded -> AuthStep.ACCOUNT
                         else -> AuthStep.ALIAS
                     },
+                busy = mutable.value.busy,
                 deletionRequested = session?.deletionRequested == true,
                 adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) },
                 authenticated = session != null,
@@ -273,6 +275,8 @@ class AuthViewModel(
 
     private fun runAction(block: suspend () -> Unit) {
         if (mutable.value.busy) return
+        check(actionRevision < Long.MAX_VALUE)
+        val revision = ++actionRevision
         mutable.value = mutable.value.copy(busy = true, error = null)
         scope.launch {
             try {
@@ -280,6 +284,7 @@ class AuthViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (revision != actionRevision) return@launch
                 val reason = (e as? CloudException)?.reason ?: "connection_failed"
                 val reset =
                     reason in setOf("age_ticket_expired", "age_ticket_bound", "age_ticket_required", "age_retry_later", "age_below_minimum")
@@ -290,7 +295,7 @@ class AuthViewModel(
                         error = reason.takeUnless { it == "auth_cancelled" },
                     )
             } finally {
-                mutable.value = mutable.value.copy(busy = false)
+                if (revision == actionRevision) mutable.value = mutable.value.copy(busy = false)
             }
         }
     }
