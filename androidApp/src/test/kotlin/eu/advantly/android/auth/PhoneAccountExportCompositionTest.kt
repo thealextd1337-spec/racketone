@@ -7,6 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.SqlPreparedStatement
 import com.sun.net.httpserver.HttpServer
 import eu.advantly.android.phoneExportShareCallback
 import eu.advantly.cloud.sync.CloudAuthPort
@@ -14,10 +17,12 @@ import eu.advantly.cloud.sync.CloudDataExportContext
 import eu.advantly.cloud.sync.CloudDataExportPort
 import eu.advantly.cloud.sync.CloudDataExportSink
 import eu.advantly.cloud.sync.CloudDataExportStatus
+import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudInstallation
 import eu.advantly.cloud.sync.CloudJson
 import eu.advantly.cloud.sync.CloudUploadAttempt
 import eu.advantly.cloud.sync.CloudUploadPort
+import eu.advantly.cloud.sync.ConsentSnapshot
 import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.ItemResult
 import eu.advantly.cloud.sync.PushBatch
@@ -68,8 +73,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
@@ -78,6 +85,13 @@ import kotlin.io.encoding.Base64
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class PhoneAccountExportCompositionTest {
+    /** Hält die echte HTTP-Antwort vor Headers und Body, nicht nur den späteren Host-Child. */
+    private class UploadResponseHold {
+        val entered = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val ended = CompletableDeferred<Unit>()
+    }
+
     private class Fixture(
         scope: CoroutineScope,
     ) {
@@ -86,7 +100,21 @@ class PhoneAccountExportCompositionTest {
         private val work = CoroutineScope(scope.coroutineContext + lifecycle)
         private val application: Application = RuntimeEnvironment.getApplication()
         private val databaseName = "account-export-composition.db"
-        private val driver = createAndroidDriver(application, databaseName)
+        val trace = CopyOnWriteArrayList<String>()
+        private val rawDriver = createAndroidDriver(application, databaseName)
+        private val driver =
+            object : SqlDriver by rawDriver {
+                override fun execute(
+                    identifier: Int?,
+                    sql: String,
+                    parameters: Int,
+                    binders: (SqlPreparedStatement.() -> Unit)?,
+                ): QueryResult<Long> {
+                    val result = rawDriver.execute(identifier, sql, parameters, binders)
+                    if (sql.startsWith("UPDATE match_event SET cloud_state = 1")) trace += "sql-ack"
+                    return result
+                }
+            }
         val data = LocalData(driver)
         val session = MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE))
         val requests = CopyOnWriteArrayList<String>()
@@ -97,6 +125,11 @@ class PhoneAccountExportCompositionTest {
         @Volatile var deletion = false
         var exportHold: ExportHold? = null
         var uploadHold: ExportHold? = null
+
+        @Volatile var uploadResponseHold: UploadResponseHold? = null
+        val backendCompleted = CompletableDeferred<Unit>()
+        val backendEnded = CompletableDeferred<Unit>()
+        private lateinit var uploadAttempt: CloudUploadAttempt
         var closes = 0
         val closeReadiness = mutableListOf<List<Boolean>>()
         val closed = CompletableDeferred<Unit>()
@@ -106,6 +139,7 @@ class PhoneAccountExportCompositionTest {
             HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
                 this.executor = this@Fixture.executor
                 createContext("/") { exchange ->
+                    var heldResponse: UploadResponseHold? = null
                     try {
                         val path = exchange.requestURI.path
                         requests += path
@@ -185,11 +219,27 @@ class PhoneAccountExportCompositionTest {
                                 }
                             }
                         val output = response.encodeToByteArray()
+                        if (path.endsWith("cloud_sync_push_v1")) {
+                            trace += "http-push-entered"
+                            heldResponse = uploadResponseHold
+                            heldResponse?.let { hold ->
+                                hold.entered.complete(Unit)
+                                check(hold.release.await(10, TimeUnit.SECONDS))
+                            }
+                            trace += "http-push-response"
+                        }
                         exchange.responseHeaders.add("Content-Type", "application/json")
                         exchange.sendResponseHeaders(200, output.size.toLong())
                         exchange.responseBody.write(output)
+                    } catch (failure: IOException) {
+                        // Nach Rechteentzug kann die native Gegenstelle bereits geschlossen sein.
+                        if (heldResponse == null) throw failure
                     } finally {
                         exchange.close()
+                        heldResponse?.let { hold ->
+                            trace += "http-push-ended"
+                            hold.ended.complete(Unit)
+                        }
                     }
                 }
                 start()
@@ -231,9 +281,18 @@ class PhoneAccountExportCompositionTest {
                     batch: PushBatch,
                 ): PushResponse =
                     coroutineScope {
+                        uploadAttempt = attempt
                         // Der Child gehört zum tatsächlichen Host-Lauf, unabhängig vom HTTP-Request-Job.
                         uploadHold?.let { hold -> launch { hold.await() } }
-                        backend.pushSelected(attempt, batch)
+                        try {
+                            backend.pushSelected(attempt, batch).also {
+                                trace += "backend-completed"
+                                backendCompleted.complete(Unit)
+                            }
+                        } finally {
+                            trace += "backend-ended"
+                            backendEnded.complete(Unit)
+                        }
                     }
             }
         val upload =
@@ -243,6 +302,26 @@ class PhoneAccountExportCompositionTest {
             })
         private val observedAuth =
             object : CloudAuthPort by auth {
+                override suspend fun decideConsent(
+                    snapshot: ConsentSnapshot,
+                    accept: Boolean,
+                ): ConsentSnapshot {
+                    trace += "consent-port-start"
+                    return auth.decideConsent(snapshot, accept).also { trace += "consent-port-end" }
+                }
+
+                override suspend fun requestDeletion() {
+                    trace += "deletion-port-start"
+                    auth.requestDeletion()
+                    trace += "deletion-port-end"
+                }
+
+                override suspend fun signOut() {
+                    trace += "logout-port-start"
+                    auth.signOut()
+                    trace += "logout-port-end"
+                }
+
                 override fun close() {
                     closeReadiness +=
                         listOf(
@@ -262,6 +341,8 @@ class PhoneAccountExportCompositionTest {
         }
 
         private fun consentJson() = """{"profileId":"alice","status":"$consent","documents":[]}"""
+
+        fun requireCurrentUpload() = backend.requireCurrentUpload(uploadAttempt)
 
         fun model(
             target: ViewModelStore = store,
@@ -322,6 +403,7 @@ class PhoneAccountExportCompositionTest {
         }
 
         suspend fun close() {
+            uploadResponseHold?.release?.countDown()
             exportHold?.release?.complete(Unit)
             uploadHold?.release?.complete(Unit)
             store.clear()
@@ -342,6 +424,52 @@ class PhoneAccountExportCompositionTest {
             application.deleteDatabase(databaseName)
         }
     }
+
+    @Test fun completedUploadMayAcknowledgeBeforeTheAccountIntentStarts() =
+        runBlocking {
+            val f = Fixture(this)
+            val response = UploadResponseHold()
+            try {
+                f.start()
+                f.uploadResponseHold = response
+                f.blockBoth()
+                withTimeout(10_000) { response.entered.await() }
+                val pendingBefore = f.data.cloud.pendingCount()
+                assertEquals(1L, pendingBefore)
+                assertFalse("sql-ack" in f.trace)
+                f.trace += "pending-before"
+                response.release.countDown()
+                withTimeout(10_000) {
+                    f.backendCompleted.await()
+                    response.ended.await()
+                }
+                assertEquals(0L, f.data.cloud.pendingCount())
+                assertTrue(f.upload.state.value.busy)
+                f.trace += "consent-intent"
+                f.vm.decideConsent(false)
+                f.idle()
+                withTimeout(10_000) { f.uploadHold!!.cancelled.await() }
+                f.uploadHold!!.release.complete(Unit)
+                f.exportHold!!.release.complete(Unit)
+                withTimeout(10_000) { f.upload.state.first { !it.busy } }
+                val ownerOrder =
+                    listOf(
+                        "pending-before",
+                        "sql-ack",
+                        "backend-completed",
+                        "backend-ended",
+                        "consent-intent",
+                        "consent-port-start",
+                        "consent-port-end",
+                    )
+                assertEquals(ownerOrder, f.trace.filter { it in ownerOrder })
+                assertEquals(0L, f.data.cloud.pendingCount())
+                assertNull(f.vm.state.value.error)
+                println("ACK-before-intent: ${f.trace}; pendingBefore=$pendingBefore; pendingAfter=${f.data.cloud.pendingCount()}")
+            } finally {
+                f.close()
+            }
+        }
 
     @Test fun clearWaitsForBothActualHostDrainsInEitherOrderBeforeClosingAuthOnce() =
         runBlocking {
@@ -401,12 +529,18 @@ class PhoneAccountExportCompositionTest {
         runBlocking {
             for (transition in listOf("consent", "deletion", "logout")) {
                 val f = Fixture(this)
+                val response = UploadResponseHold()
                 try {
                     f.start()
+                    f.uploadResponseHold = response
                     f.blockBoth()
+                    withTimeout(10_000) { response.entered.await() }
                     val pendingBefore = f.data.cloud.pendingCount()
-                    assertTrue(pendingBefore > 0)
+                    assertEquals(1L, pendingBefore)
+                    assertFalse("sql-ack" in f.trace)
+                    f.requireCurrentUpload()
                     val exportContext = f.api.context.value
+                    f.trace += "$transition-intent"
                     when (transition) {
                         "consent" -> f.vm.decideConsent(false)
                         "deletion" -> f.vm.requestDeletion()
@@ -419,6 +553,12 @@ class PhoneAccountExportCompositionTest {
                     assertFalse(f.upload.state.value.available)
                     assertNull(f.upload.state.value.pendingEvents)
                     assertNull(f.upload.state.value.observedAtMs)
+                    assertTrue(assertThrows(CloudException::class.java) { f.requireCurrentUpload() }.permission)
+                    assertTrue(f.upload.state.value.busy)
+                    assertFalse(f.backendCompleted.isCompleted)
+                    assertFalse("sql-ack" in f.trace)
+                    assertEquals(pendingBefore, f.data.cloud.pendingCount())
+                    f.trace += "$transition-revoked"
                     if (transition == "consent") {
                         assertEquals(
                             ConsentStatus.DECLINED,
@@ -432,6 +572,13 @@ class PhoneAccountExportCompositionTest {
                         assertFalse(PhoneExportAction.SHARE in f.export.host.state.value.allowedActions)
                         assertNull(f.export.host.state.value.byteLength)
                     }
+                    response.release.countDown()
+                    withTimeout(10_000) {
+                        response.ended.await()
+                        f.backendEnded.await()
+                    }
+                    assertFalse(f.backendCompleted.isCompleted)
+                    assertTrue(f.upload.state.value.busy)
                     f.uploadHold!!.release.complete(Unit)
                     f.exportHold!!.release.complete(Unit)
                     withTimeout(10_000) {
@@ -453,6 +600,21 @@ class PhoneAccountExportCompositionTest {
                     assertNull(f.upload.state.value.result)
                     assertNull(f.upload.state.value.lastResponseAtMs)
                     assertEquals(pendingBefore, f.data.cloud.pendingCount())
+                    assertFalse("sql-ack" in f.trace)
+                    val boundaryOrder =
+                        listOf(
+                            "http-push-entered",
+                            "$transition-intent",
+                            "$transition-port-start",
+                            "$transition-port-end",
+                            "$transition-revoked",
+                            "http-push-response",
+                            "http-push-ended",
+                        )
+                    assertEquals(boundaryOrder, f.trace.filter { it in boundaryOrder })
+                    println(
+                        "revocation-before-response ($transition): ${f.trace}; pendingBefore=$pendingBefore; pendingAfter=${f.data.cloud.pendingCount()}",
+                    )
                     if (transition != "consent") {
                         // UNAVAILABLE darf schon vor Ende des abgebrochenen Sinks erscheinen; Dateien erst nach Drain prüfen.
                         val drained = CompletableDeferred<Unit>()
