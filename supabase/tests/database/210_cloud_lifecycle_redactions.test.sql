@@ -32,6 +32,17 @@ returns jsonb language sql as $$
     (p_previous->>'nextPlayerId')::uuid,coalesce((p_previous->>'nextServerSeq')::bigint,0),
     (p_previous->>'highWatermark')::bigint,p_players,p_events)
 $$;
+-- Vollständige MatchCreated-Payload aus SyncCodec.json/EventPayload.serializer(),
+-- Format aus TENNIS_BO3_MTB10; Lineup.kt serialisiert die Seiten ausdrücklich als A/B.
+create function pg_temp.genesis(p_a jsonb,p_b jsonb) returns jsonb language sql as $$
+  select jsonb_build_object('type','MatchCreated','config',
+    '{"formatVersion":1,"presetId":"TENNIS_BO3_MTB10","sport":"TENNIS","discipline":"DOUBLES",
+      "match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},
+      "set":{"gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":6}}},
+      "decidingSet":{"kind":"MATCH_TIEBREAK","pointsToWin":10,"winBy":2,"endChange":{"first":6,"every":6}},"matchTiebreak":null}'::jsonb
+      || jsonb_build_object('discipline',case when jsonb_array_length(p_a)=1 then 'SINGLES' else 'DOUBLES' end),
+    'lineup',jsonb_build_object('A',p_a,'B',p_b,'firstServer',p_a->0))
+$$;
 
 insert into public.matches(id,created_by,sport,discipline,format,started_at)
   values('21000000-0000-4000-8000-000000000001',tests.uid('alice'),'tennis','singles','{}',now());
@@ -111,7 +122,7 @@ insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_cl
   (gen_random_uuid(),'21000000-0000-4000-8000-000000000006',tests.device('b1'),1,1,1,'PlayerAssigned',
     '{"type":"PlayerAssigned","assignmentVersion":2,"playerId":"21010000-0000-4000-8000-000000000002"}'),
   (gen_random_uuid(),'21000000-0000-4000-8000-000000000007',tests.device('b1'),1,1,1,'MatchCreated',
-    jsonb_build_object('type','MatchCreated','lineup',jsonb_build_object('a',jsonb_build_array(tests.uid('alice')),'b',null)));
+    pg_temp.genesis(jsonb_build_array(tests.uid('alice')),'["21010000-0000-4000-8000-000000000004"]'));
 insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload)
   values
  ('21020000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000001',tests.device('b1'),2,2,2,'PlayerAssigned',
@@ -119,10 +130,11 @@ insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_cl
  ('21020000-0000-4000-8000-000000000002','21000000-0000-4000-8000-000000000001',tests.device('b1'),3,3,3,'PlayerAssigned',
   '{"type":"PlayerAssigned","assignmentVersion":2,"playerId":"21010000-0000-4000-8000-000000000002"}'),
  ('21020000-0000-4000-8000-000000000003','21000000-0000-4000-8000-000000000002',tests.device('b1'),1,1,1,'MatchCreated',
-  '{"type":"MatchCreated","lineup":{"a":["21010000-0000-4000-8000-000000000002"],"b":["21010000-0000-4000-8000-000000000004"]}}'),
+  pg_temp.genesis('["21010000-0000-4000-8000-000000000002"]','["21010000-0000-4000-8000-000000000004"]')),
  ('21020000-0000-4000-8000-000000000004','21000000-0000-4000-8000-000000000001',tests.device('b1'),4,4,4,'PlayerAssigned',
   '{"type":"PlayerAssigned","player":{"id":"21010000-0000-4000-8000-000000000004","displayName":"Identical"}}'),
  ('21020000-0000-4000-8000-000000000005','21000000-0000-4000-8000-000000000004',tests.device('b1'),1,1,1,'MatchCreated',
+  -- Bewusst ungültige Null-Lineup als Robustheitsfall, kein Codec-/Genesis-Nachweis.
   '{"type":"MatchCreated","lineup":null}');
 -- 205 weitere Self-IDs und 505 Legacy-Events testen beide Maximalgrenzen wirklich.
 insert into public.players(id,owner_id,kind,display_name)
@@ -267,5 +279,73 @@ select is_empty($$select 1 from information_schema.role_table_grants where table
 select ok(not has_function_privilege('service_role','public.cloud_pull_match_redaction_v1(uuid,bigint,integer,uuid,bigint,bigint,integer,integer)','execute'),'No service fallback');
 select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc
   where oid='public.cloud_pull_match_redaction_v1(uuid,bigint,integer,uuid,bigint,bigint,integer,integer)'::regprocedure),'Definer with empty search_path');
+
+-- R1: ausschließliche kanonische Genesis-Referenzen, ohne Teilnehmer oder PlayerAssigned.
+-- Zwei Self-IDs, direkte Profil-ID und ein gleichnamiger eigener Gast bleiben getrennt.
+select tests.create_user('genesis_owner');
+insert into public.players(id,owner_id,kind,display_name) values
+ ('21110000-0000-4000-8000-000000000001',tests.uid('genesis_owner'),'self','Identical'),
+ ('21110000-0000-4000-8000-000000000002',tests.uid('genesis_owner'),'self','Identical'),
+ ('21110000-0000-4000-8000-000000000003',tests.uid('genesis_owner'),'guest','Identical');
+insert into public.matches(id,created_by,sport,discipline,format,started_at)
+  select ('21100000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,tests.uid('carol'),'tennis',
+    case when n=4 then 'singles' else 'doubles' end,
+    pg_temp.genesis('["A1"]','["B1"]')->'config',now() from generate_series(1,4) n;
+insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload) values
+ (gen_random_uuid(),'21100000-0000-4000-8000-000000000001',tests.device('c1'),1,1,1,'MatchCreated',
+  pg_temp.genesis('["21110000-0000-4000-8000-000000000001","21110000-0000-4000-8000-000000000002"]',
+    jsonb_build_array('21010000-0000-4000-8000-000000000004',tests.uid('genesis_owner')))),
+ (gen_random_uuid(),'21100000-0000-4000-8000-000000000002',tests.device('c1'),1,1,1,'MatchCreated',
+  pg_temp.genesis('["21010000-0000-4000-8000-000000000004","21110000-0000-4000-8000-000000000099"]',
+    '["21110000-0000-4000-8000-000000000002","21110000-0000-4000-8000-000000000098"]')),
+ (gen_random_uuid(),'21100000-0000-4000-8000-000000000003',tests.device('c1'),1,1,1,'MatchCreated',
+  pg_temp.genesis('["21010000-0000-4000-8000-000000000004","21110000-0000-4000-8000-000000000099"]',
+    '["21110000-0000-4000-8000-000000000003","21110000-0000-4000-8000-000000000098"]')),
+ (gen_random_uuid(),'21100000-0000-4000-8000-000000000004',tests.device('c1'),1,1,1,'MatchCreated',
+  pg_temp.genesis('["21010000-0000-4000-8000-000000000004"]',jsonb_build_array(tests.uid('genesis_owner'))));
+update public.matches m set format=e.payload->'config' from public.match_events e
+  where e.match_id=m.id and m.id::text like '21100000-%';
+select is_empty($$select 1 from public.match_participants where match_id::text like '21100000-%'$$,
+  'R1: no participant path can mask missing canonical genesis IDs');
+select is((select count(*) from public.match_events where match_id::text like '21100000-%' and type<>'MatchCreated'),
+  0::bigint,'R1: no assignment event can mask missing canonical genesis IDs');
+create temp table genesis_before as select id,to_jsonb(e) as original from public.match_events e where match_id::text like '21100000-%';
+delete from auth.users where id=tests.uid('genesis_owner');
+select is((select count(*) from public.players where owner_id=tests.uid('genesis_owner')),0::bigint,
+  'R1: self IDs survive only in immutable events and manifest after cascade');
+select is_empty($$select 1 from public.match_events e join genesis_before b using(id) where to_jsonb(e)<>b.original$$,
+  'R1: entire genesis rows remain immutable, including payload and metadata');
+select is((select count(*) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000001'),
+  3::bigint,'R1: multiple slots on both canonical sides captured');
+select is((select count(*) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000002'),
+  1::bigint,'R1: same self ID also captured in another match');
+select is((select count(*) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000003'),
+  0::bigint,'R1: foreign IDs and unrelated same-name owner guest are excluded');
+select tests.authenticate_as('carol');
+insert into pages values
+ (11,pg_temp.page('21100000-0000-4000-8000-000000000001')),
+ (12,pg_temp.page('21100000-0000-4000-8000-000000000002')),
+ (13,pg_temp.page('21100000-0000-4000-8000-000000000003')),
+ (14,pg_temp.page('21100000-0000-4000-8000-000000000004'));
+select is((select p->'redactedPlayerIds' from pages where n=11),
+  (select jsonb_agg(id order by id) from unnest(array['21110000-0000-4000-8000-000000000001'::uuid,
+    '21110000-0000-4000-8000-000000000002'::uuid,tests.uid('genesis_owner')]) id),
+  'R1: RPC returns exactly self and profile IDs from canonical double lineup');
+select is((select p->'redactedPlayerIds' from pages where n=12),'["21110000-0000-4000-8000-000000000002"]'::jsonb,
+  'R1: RPC returns B-side-only self reference in another match');
+select is((select p->'redactedPlayerIds' from pages where n=14),jsonb_build_array(tests.uid('genesis_owner')),
+  'R1: RPC returns direct profile reference without participant or assignment');
+select is((select p->'redactedPlayerIds' from pages where n=13),'[]'::jsonb,'R1: unrelated match RPC has no redacted IDs');
+select ok((select bool_and((p->>'redactionEpoch')::integer=1) from pages where n in (11,12,14)),
+  'R1: RPC epochs rise once per affected match, not per ID');
+select is((select (p->>'redactionEpoch')::integer from pages where n=13),0,'R1: unrelated match epoch stays zero');
+select ok((select bool_and(p->'events'='[]'::jsonb) from pages where n between 11 and 14),
+  'R1: manifest carries genesis redaction independently of legacy event mutation');
+select ok((select bool_and(not (p->>'hasMorePlayers')::boolean and not (p->>'hasMoreEvents')::boolean)
+  from pages where n between 11 and 14),'R1: both streams terminate for genesis-only matches');
+select throws_ok($$select public.cloud_pull_match_redaction_v1('21100000-0000-4000-8000-000000000001',
+  (select visibility_epoch from public.profile_settings where profile_id=auth.uid()),0)$$,
+  '40001','restart_required','R1: pre-deletion epoch cannot hide canonical genesis redaction');
+reset role;
 select * from finish();
 rollback;

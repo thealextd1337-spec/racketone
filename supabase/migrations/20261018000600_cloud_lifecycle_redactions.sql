@@ -122,8 +122,8 @@ begin
         (e.payload->>'assignmentVersion'='2' and not (e.payload ? 'player') and e.payload->>'playerId'=i.id::text)))
       or (e.type='MatchCreated' and exists (
         select 1 from jsonb_array_elements(
-          case when jsonb_typeof(e.payload#>'{lineup,a}')='array' then e.payload#>'{lineup,a}' else '[]'::jsonb end ||
-          case when jsonb_typeof(e.payload#>'{lineup,b}')='array' then e.payload#>'{lineup,b}' else '[]'::jsonb end
+          case when jsonb_typeof(e.payload#>'{lineup,A}')='array' then e.payload#>'{lineup,A}' else '[]'::jsonb end ||
+          case when jsonb_typeof(e.payload#>'{lineup,B}')='array' then e.payload#>'{lineup,B}' else '[]'::jsonb end
         ) x where x#>>'{}'=i.id::text or x->>'id'=i.id::text))
     union select mp.match_id,i.id from public.match_participants mp join ids i on
       mp.player_id=i.id or mp.slot_id=i.id::text
