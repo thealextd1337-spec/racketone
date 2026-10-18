@@ -6,6 +6,40 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 
 ## Bestätigter Stand nach D1-Merge
 
+### D2/D3: geprüfte Grundlage und zweite Umsetzungswelle
+
+Engine-Slice `3a73905` und Export-Testfix `786c0c8` sind lokal als `803a38a` integriert;
+beide Slices bytegleich zu ihren unabhängigen Freigaben. Gemeinsamer Check und Phone-/Wear-APKs:
+771 Tasks grün. Der ID-only-Producer und Protokoll 4 sind noch nicht aktiviert.
+
+Server `9fb1fab` ist nach dem kanonischen `A/B`-Fix in Review R2 freigegeben. Root integriert ihn
+als `5f81f4f` mit vollständiger 33-RPC-Inventur und neuen CI-Aufrufen für die bestehenden
+Consent- sowie D2/D3-Rennen; Integrationsreview ohne Befund, Check/APKs 771 Tasks grün.
+Frisch lokal: 253 Consent- und 191 Lifecycle-Assertions, 82 Consent- und acht Lifecycle-Lockrennen,
+drei zusätzliche Isolation-Denials. Die frühere äußere Harnessblockade ist erklärt:
+`spawnSync` hinderte denselben Node-Prozess am Leeren der PostgreSQL-stderr-Pipe.
+Asynchrones Abwarten beseitigt sie; individuelle Testgrenzen blieben unverändert.
+Diese Nachweise ersetzen weiterhin keine echte Stack-CI, Hosted- oder D3/G8-Abnahme.
+
+Die nächste Parallelwelle startet auf exakt `803a38a`:
+
+| Lane | Exklusiver Besitz | Abnahme / Übergabe |
+|---|---|---|
+| DATA | `shared/data`: Schema 8 (`7.sqm`), Lifecycle-/Redaktions-/Zustellspeicher, Repositories und zentrale Lesesperren; `LocalData`-Verdrahtung und schmale U2-Auswahlrevision | Zwei Konten, Reopen/Migration, Entzug/Regrant ohne Datenverlust, begrenzte persistente Transfers, Redaktionswhitelist, Lost ACK; Gesamttests. Bis Übergabe keine konkurrierenden Root-Data-Edits. |
+| PROTOCOL | `shared/sync-protocol`: neue DTOs und Codec, direkte Tests; in `MatchSession` ausschließlich Import und exhaustiver Ablehnungszweig für neue Controlgruppe | Legacy-Bytes, Stamps und unabhängige ACKs, tatsächliches 64-KiB-Paketbudget inklusive Envelope, negative Formen; Gesamttests. Versionskonstanten bleiben Root. |
+| Root | Dokumente, Reviews, Server-/CI-Integration; danach D1/Upload-/Session-/Namensresolver-/Facade-Anschlüsse | Erst gemeinsam aktivieren, nachdem dauerhafter Entzug, Wiederfreigabe und Redaktion durchgängig nachgewiesen sind; B4 bleibt abhängig. |
+
+U2/U3 bleiben Herkunftsautorität; nur ein payloadfreier dauerhafter Cloud-Marker kommt hinzu.
+Globale Daten werden einmal gespeichert, aber Aufbewahrung für B gewährt A keinen Zugriff.
+Die Data-Schnittstelle behält `serverSeq` je Redaktionszeile zur H-/Cursorprüfung ausdrücklich bei.
+Eine enge persistente Aktivierungsseam dient nur der gemeinsamen Root-Umstellung; kein neues
+Produkt-Featureflag und kein Rückfall auf alte Rechte nach Aktivierung.
+
+```text
+node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-data-impl-r1
+node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-protocol-impl-r1
+```
+
 ### Neue Parallelwelle: CI-Korrektur und D2/D3-Grundlagen
 
 PR #70 auf `5e5a408` hat einen belegten Ubuntu-Testfehler: Die Rename-Barriere erwartet
