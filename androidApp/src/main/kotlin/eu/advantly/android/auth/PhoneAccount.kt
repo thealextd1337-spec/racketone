@@ -52,6 +52,7 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
     return AuthViewModel(
         auth,
         upload = PhoneUploadHost(auth, session, backend, backend::bindDevice),
+        export = PhoneExportHost(auth.dataExports(), applicationContext),
         support =
             SupportViewModel(
                 SupabaseSupport(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, client),
