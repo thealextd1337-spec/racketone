@@ -28,6 +28,7 @@ from uuid import uuid4
 import zipfile
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
+from psycopg.types.json import Jsonb
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args): return None
@@ -97,13 +98,20 @@ def main():
         try:
             a,ta=user();b,tb=user()
             sql("update public.profiles set alias=%s where id=%s",('=HYPERLINK("bad")',a))
-            ticket=str(uuid4());match=str(uuid4()); own=str(uuid4());foreign=str(uuid4());device=str(uuid4())
+            ticket=str(uuid4());match=str(uuid4()); own=str(uuid4());foreign=str(uuid4());device=str(uuid4());genesis=str(uuid4())
+            for invalid in [[str(uuid4())],[],{},123,None,True]:
+                code,_,invalid_body=http("/functions/v1/export-my-data","POST",{"requestId":invalid},ta)
+                assert code==400 and invalid_body["error"]=="invalid_request"
+            format={"formatVersion":1,"sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3},"game":{"deuceMode":"ADVANTAGE"},
+                "set":{"kind":"REGULAR","gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":None,"deviceId":"STRUCTURED_SECRET"}}},
+                "decidingSet":{"kind":"REGULAR","gamesToWin":6,"tiebreakAt":None,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6}}},"token":"STRUCTURED_SECRET"}
             sql("insert into ops.support_tickets(id,owner_id,receipt_hash,payload_hash,category,title,body) values(%s,%s,'\\x01','\\x02','bug','Titel',%s)",(ticket,a,'\t=1+1, München 🏸\n"Zitat"'))
             sql("insert into ops.support_messages(id,ticket_id,body,internal) values(%s,%s,'Antwort 雪',false),(%s,%s,'INTERNAL_SECRET',true)",(uuid4(),ticket,uuid4(),ticket))
             sql("insert into private.consent_history(profile_id,document_type,version,language,accepted) select %s,document_type,version,'en',false from private.consent_versions where is_current",(a,))
-            sql("insert into public.matches(id,created_by,sport,discipline,started_at,format,meta) values(%s,%s,'tennis','singles',now(),'{\"sport\":\"TENNIS\",\"token\":\"STRUCTURED_SECRET\"}','{\"venue\":\"Halle\",\"token\":\"STRUCTURED_SECRET\"}')",(match,a))
+            sql("insert into public.matches(id,created_by,sport,discipline,started_at,format,meta) values(%s,%s,'tennis','singles',now(),%s,%s)",(match,a,Jsonb(format),Jsonb({"venue":"Halle","token":"STRUCTURED_SECRET"})))
             sql("insert into public.match_participants(match_id,slot_id,team,position,display_name,profile_id,link_status) values(%s,'own','A',1,'Ich',%s,'self'),(%s,'other','B',1,'Mitspieler',%s,'linked')",(match,a,match,b))
-            sql("insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values(%s,%s,%s,1,1,1,'PointWon','{\"type\":\"PointWon\",\"side\":\"A\",\"detail\":{\"kind\":\"ACE\",\"by\":\"STRUCTURED_SECRET\",\"token\":\"STRUCTURED_SECRET\"}}',%s),(%s,%s,%s,2,2,2,'PointWon','{\"type\":\"PointWon\",\"side\":\"B\",\"token\":\"FOREIGN_SECRET\"}',%s)",(own,match,device,a,foreign,match,device,b))
+            sql("insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values(%s,%s,%s,2,2,2,'PointWon','{\"type\":\"PointWon\",\"side\":\"A\",\"detail\":{\"kind\":\"ACE\",\"by\":\"STRUCTURED_SECRET\",\"token\":\"STRUCTURED_SECRET\"}}',%s),(%s,%s,%s,3,3,3,'PointWon','{\"type\":\"PointWon\",\"side\":\"B\",\"token\":\"FOREIGN_SECRET\"}',%s)",(own,match,device,a,foreign,match,device,b))
+            sql("insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values(%s,%s,%s,1,1,1,'MatchCreated',%s,%s)",(genesis,match,device,Jsonb({"type":"MatchCreated","config":format,"meta":{"venue":None,"token":"STRUCTURED_SECRET"}}),a))
             key=str(uuid4())
             with ThreadPoolExecutor(max_workers=2) as pool:
                 responses=list(pool.map(lambda _:http("/functions/v1/export-my-data","POST",{"requestId":key},ta),range(2)))
@@ -121,17 +129,46 @@ def main():
                 assert set(z.namelist())=={"data.json"}|{k+".csv" for k in expected}
                 data=json.loads(z.read("data.json"));text=json.dumps(data)
                 assert not any(s in text for s in ["STRUCTURED_SECRET","FOREIGN_SECRET","INTERNAL_SECRET",b])
-                assert len(data["matches"][0]["events"])==2 and len(data["matches"][0]["participants"])==2
+                assert len(data["matches"][0]["events"])==3 and len(data["matches"][0]["participants"])==2
                 assert len(data["consentHistory"])==2 and len(data["support"][0]["messages"])==1
                 for table in expected:
                     parsed=list(csv.reader(io.StringIO(z.read(table+".csv").decode())))
                     assert parsed and all(len(row)==len(parsed[0]) for row in parsed)
-                    count={"export":1,"profile":1,"settings":1,"participants":2,"events":2,"supportMessages":1}.get(table)
+                    count={"export":1,"profile":1,"settings":1,"participants":2,"events":3,"supportMessages":1}.get(table)
                     if count is None: count=len(data[table])
                     assert len(parsed)-1==count
                 assert "'=HYPERLINK" in z.read("profile.csv").decode()
                 assert "'\t=1+1" in z.read("support.csv").decode()
+                event=next(e for e in data["matches"][0]["events"] if e["id"]==genesis)
+                event_rows=list(csv.DictReader(io.StringIO(z.read("events.csv").decode())))
+                event_csv=json.loads(next(e for e in event_rows if e["id"]==genesis)["payload"])
+                for payload in [event["payload"],event_csv]:
+                    rules=payload["config"]
+                    assert "every" in rules["set"]["tiebreak"]["endChange"] and rules["set"]["tiebreak"]["endChange"]["every"] is None
+                    assert "tiebreakAt" in rules["decidingSet"] and rules["decidingSet"]["tiebreakAt"] is None
+                    assert "every" not in rules["decidingSet"]["tiebreak"]["endChange"]
+                    assert payload["meta"]["venue"] is None
+                assert event["payload"]==event_csv
             print("PASS real ZIP/CRC, complete JSON/CSV, Unicode, formula protection and negative whitelist")
+            # Kontrollierter echter Produzent: A reservieren, HTTP waehrend der Lease pruefen,
+            # vollstaendiges bereits geprueftes Archiv hochladen und A bestaetigt finalisieren.
+            key_a,key_b=str(uuid4()),str(uuid4())
+            code,_,reservation=http("/rest/v1/rpc/request_data_export_v1","POST",{"p_request_id":key_a},ta)
+            assert code==200 and reservation["producer"]
+            for pending_url,pending_method,pending_body in [("/functions/v1/export-my-data","POST",{"requestId":key_a}),(f"/functions/v1/export-my-data/{key_a}","GET",None)]:
+                code,pending_headers,pending=http(pending_url,pending_method,pending_body,ta)
+                assert code==202 and pending_headers["Retry-After"]=="3" and pending["requestId"]==key_a
+            code,busy_headers,busy=http("/functions/v1/export-my-data","POST",{"requestId":key_b},ta)
+            assert code==409 and busy_headers["Retry-After"]=="3" and busy=={"contractVersion":1,"error":"export_busy"}
+            assert http(f"/functions/v1/export-my-data/{key_b}",token=ta)[0]==404
+            assert http("/storage/v1/object/private-data-exports/"+reservation["objectPath"],"POST",content,admin=True,extra={"Content-Type":"application/zip"},raw=True)[0]==200
+            code,_,finalized=http("/rest/v1/rpc/finalize_data_export_v1","POST",{"p_attempt_id":reservation["attemptId"],"p_result":"ready","p_exported_at":ready["exportedAt"],"p_byte_length":len(content),"p_sha256":ready["sha256"]},admin=True)
+            assert code==200 and finalized is True
+            assert http(f"/functions/v1/export-my-data/{key_a}",token=ta)[0]==200
+            assert http(f"/functions/v1/export-my-data/{key_b}",token=ta)[0]==404
+            _,retry_b=make_ready(ta,key_b)
+            assert retry_b["requestId"]==key_b
+            print("PASS same-ID 202/polling, different-ID 409/no leak, absent B after A finalize, explicit POST retry B")
             for path in [f"/functions/v1/export-my-data/{key}",url]:
                 assert http(path,token=tb)[0]==404
             assert http(url)[0]==401

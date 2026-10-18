@@ -9,7 +9,8 @@ select is(current_setting('tests.k2_res')::jsonb->>'status','pending','ohne Cons
 select is(current_setting('tests.k2_res')::jsonb->>'producer','true','erste Anfrage bekommt Produzent');
 select ok((current_setting('tests.k2_res')::jsonb->>'objectPath') !~ tests.uid('alice')::text,'zufälliger Pfad ohne Konto-ID');
 select is(public.request_data_export_v1(current_setting('tests.k2_request')::uuid)->>'producer',null,'Wiederholung startet keinen zweiten Produzenten');
-select is(public.request_data_export_v1('20000000-0000-4000-8000-000000000002')->>'producer',null,'anderer Schlüssel startet keinen zweiten Kontoproduzenten');
+select is(public.request_data_export_v1('20000000-0000-4000-8000-000000000002'),'{"error":"export_busy"}'::jsonb,'anderer Schluessel: feste Busy-Ablehnung ohne erfundenes Pending oder Requestdaten');
+select is(public.data_export_status_v1('20000000-0000-4000-8000-000000000002')->>'error','not_found','Busy legt keinen Request B an');
 select ok(public.data_export_snapshot_v1(current_setting('tests.k2_request')::uuid,(current_setting('tests.k2_res')::jsonb->>'attemptId')::uuid) ? 'data','vollständiger Snapshot ohne Consent');
 select is(public.data_export_snapshot_v1(current_setting('tests.k2_request')::uuid,gen_random_uuid())->>'error','export_unavailable','falscher Versuch erhält keine Daten');
 select is(public.data_export_status_v1(current_setting('tests.k2_request')::uuid)->>'status','pending','eigener Status');

@@ -11,7 +11,7 @@ insert into public.matches(id,created_by,sport,discipline,started_at,format,meta
  '{"setsWonA":1,"setsWonB":0,"sets":[{"a":6,"b":4,"tiebreakA":null,"matchTiebreak":false,"token":"SECRET"}],"completedSets":[{"kind":"REGULAR","games":{"A":6,"B":4,"profileId":"SECRET"},"tiebreak":null,"points":null,"winner":"A"}],"currentState":{"setIndex":1,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":1,"B":0},"display":{"A":"15","B":"0","token":"SECRET"},"callout":null,"deuceCount":0,"decidingPoint":false,"deviceId":"SECRET"},"lastEventAtMs":42,"eventCount":9,"token":"SECRET"}');
 insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values
  ('20000000-0000-4000-8000-000000000011','20000000-0000-4000-8000-000000000010',tests.device('a1'),1,1,1,'MatchCreated',
- '{"type":"MatchCreated","config":{"sport":"TENNIS","match":{"mode":"BEST_OF","bestOf":3,"token":"SECRET"},"game":{"deuceMode":"ADVANTAGE","token":"SECRET"}},"meta":{"venue":"Halle","token":"SECRET"},"lineup":{"A":[{"id":"SECRET"}]},"scorerDeviceId":"SECRET"}',tests.uid('alice')),
+ '{"type":"MatchCreated","config":{"sport":"TENNIS","match":{"mode":"BEST_OF","bestOf":3,"token":"SECRET"},"game":{"deuceMode":"ADVANTAGE","token":"SECRET"},"set":{"kind":"REGULAR","gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":null,"profileId":"SECRET"}}},"decidingSet":{"kind":"REGULAR","gamesToWin":6,"tiebreakAt":null,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6}}}},"meta":{"venue":"Halle","token":"SECRET"},"lineup":{"A":[{"id":"SECRET"}]},"scorerDeviceId":"SECRET"}',tests.uid('alice')),
  ('20000000-0000-4000-8000-000000000012','20000000-0000-4000-8000-000000000010',tests.device('a1'),2,2,2,'PointWon',
  '{"type":"PointWon","side":"A","detail":{"kind":"ACE","by":"SECRET","serve":"FIRST_SERVE_IN","secondServe":false,"token":"SECRET"}}',tests.uid('alice')),
  ('20000000-0000-4000-8000-000000000013','20000000-0000-4000-8000-000000000010',tests.device('b1'),1,3,3,'PointWon',
@@ -35,6 +35,9 @@ select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,meta,venue}','M�
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,summary,currentState,display,A}','15','vollst채ndiger ScoreSummary-Cache erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,summary,completedSets,0,games,A}','6','abgeschlossene S채tze erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,events,0,payload,config,game,deuceMode}','ADVANTAGE','Genesis fachlich erhalten');
+select is(current_setting('tests.k2_data')::jsonb#>'{matches,0,events,0,payload,config,set,tiebreak,endChange,every}','null'::jsonb,'Genesis: every:null bedeutet einmaliger Seitenwechsel');
+select is(current_setting('tests.k2_data')::jsonb#>'{matches,0,events,0,payload,config,decidingSet,tiebreakAt}','null'::jsonb,'Genesis: tiebreakAt:null bleibt ausdr체cklich vorhanden');
+select ok(not ((current_setting('tests.k2_data')::jsonb#>'{matches,0,events,0,payload,config,decidingSet,tiebreak,endChange}') ? 'every'),'Genesis: fehlendes every bleibt fehlend (Default 6)');
 select is(current_setting('tests.k2_data')::jsonb#>'{matches,0,events,1,payload,detail}','{"kind":"ACE","serve":"FIRST_SERVE_IN","secondServe":false}'::jsonb,'Punktdetail vollst채ndig ohne Personenbezug');
 select is(current_setting('tests.k2_data')::jsonb#>'{matches,0,events,2,payload}',null,'fremde Events ohne Payload');
 select is(current_setting('tests.k2_data')::jsonb#>>'{support,0,messages,0,body}','sichtbare Antwort','sichtbare Supportantwort bleibt');
@@ -45,6 +48,8 @@ select is(private.export_format('[]'),'null'::jsonb,'Format falscher Objekttyp')
 select is(private.export_meta('null'),'null'::jsonb,'Meta Null sicher');
 select is(private.export_summary('{"sets":{},"currentState":false}'),'{"sets":null,"currentState":null}'::jsonb,'Summary falsche Container sicher');
 select is(private.export_payload('Correction','{"kind":{"token":"SECRET"},"side":"A","serverNumber":{"token":"SECRET"}}'),'{"type":"Correction","side":"A"}'::jsonb,'auch skalare Eventfelder typsicher');
+select is(private.export_payload('MatchCreated','{"config":[],"meta":false,"token":"SECRET"}'),'{"type":"MatchCreated"}'::jsonb,'nichtobjektartige Genesis-Felder geben keine unbekannten Daten frei');
+select is(private.export_payload('PointWon','{"side":"A","detail":{"kind":null,"serve":null,"secondServe":null,"by":"SECRET","token":"SECRET"}}'),'{"type":"PointWon","side":"A","detail":{"kind":null,"serve":null,"secondServe":null}}'::jsonb,'auch erlaubte Nullwerte im Punktdetail bleiben vorhanden');
 -- Vollst채ndiger Bestand 체ber dem Bytebudget liefert expliziten Fehler, niemals limitierte Zeilen.
 insert into ops.support_tickets(id,owner_id,receipt_hash,payload_hash,category,title,body)
  select gen_random_uuid(),tests.uid('alice'),'\x01','\x02','bug','Budget',repeat('x',8000) from generate_series(1,550);

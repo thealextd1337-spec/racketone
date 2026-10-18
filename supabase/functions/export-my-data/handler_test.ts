@@ -158,3 +158,86 @@ Deno.test("upload/finalize aborts retain cleanup registration and budget errors 
     assert(uploads === (mode === "budget" ? 0 : 1));
   }
 });
+
+for (
+  const [name, value] of [
+    ["UUID array", [id]],
+    ["empty array", []],
+    ["object", { id }],
+    ["number", 123],
+    ["null", null],
+    ["boolean", true],
+  ] as const
+) {
+  Deno.test(`POST rejects requestId ${name} before any backend call`, async () => {
+    let calls = 0;
+    const response = await handler(() => {
+      calls++;
+      throw new Error("backend must not run");
+    })(req("", "POST", { requestId: value }));
+    assert(response.status === 400);
+    assert((await response.json()).error === "invalid_request");
+    assert(calls === 0);
+  });
+}
+Deno.test("same request stays pollable while different request is busy and can retry after finalization", async () => {
+  const other = "23456789-2345-2345-2345-234567890123";
+  let active = true;
+  let createdOther = false;
+  let readyOther = false;
+  const api = mock((name, body) => {
+    if (name === "request_data_export_v1") {
+      if (body.p_request_id === id) {
+        return Promise.resolve({
+          status: active ? "pending" : "ready",
+          requestId: id,
+        });
+      }
+      if (active) return Promise.resolve({ error: "export_busy" });
+      createdOther = true;
+      return Promise.resolve({
+        producer: true,
+        attemptId: other,
+        objectPath: "new-path",
+      });
+    }
+    if (name === "data_export_snapshot_v1") {
+      return Promise.resolve({ data: { exportedAt: "2026-10-18T00:00:00Z" } });
+    }
+    if (name === "finalize_data_export_v1") {
+      if (body.p_attempt_id === id) active = false;
+      else readyOther = true;
+      return Promise.resolve(true);
+    }
+    return Promise.resolve(
+      body.p_request_id === id
+        ? { status: active ? "pending" : "ready", requestId: id }
+        : !createdOther
+        ? { error: "not_found" }
+        : { status: readyOther ? "ready" : "pending", requestId: other },
+    );
+  });
+  const invoke = handler(() => api);
+  for (const request of [req("", "POST", { requestId: id }), req(`/${id}`)]) {
+    const response = await invoke(request);
+    assert(
+      response.status === 202 && response.headers.get("Retry-After") === "3",
+    );
+    assert((await response.json()).requestId === id);
+  }
+  const busy = await invoke(req("", "POST", { requestId: other }));
+  assert(busy.status === 409 && busy.headers.get("Retry-After") === "3");
+  assert(
+    JSON.stringify(await busy.json()) ===
+      JSON.stringify({ contractVersion: 1, error: "export_busy" }),
+  );
+  assert((await invoke(req(`/${other}`))).status === 404);
+  await api.rpc("finalize_data_export_v1", {
+    p_attempt_id: id,
+    p_result: "ready",
+  });
+  assert((await invoke(req(`/${other}`))).status === 404);
+  assert((await invoke(req(`/${id}`))).status === 200);
+  const retry = await invoke(req("", "POST", { requestId: other }));
+  assert(retry.status === 200 && (await retry.json()).requestId === other);
+});

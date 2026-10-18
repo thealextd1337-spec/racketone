@@ -22,6 +22,11 @@ export async function digest(bytes: Uint8Array): Promise<string> {
   ).join("");
 }
 function stateResponse(state: State): Response {
+  if (state.error === "export_busy") {
+    const response = error(409, "export_busy");
+    response.headers.set("Retry-After", "3");
+    return response;
+  }
   if (state.error === "not_found") return error(404, "not_found");
   if (state.status === "expired") return error(410, "export_expired");
   if (state.status === "too_large") return error(413, "export_too_large");
@@ -90,7 +95,8 @@ export function handler(makeBackend: () => Backend) {
         }
         if (
           !body || typeof body !== "object" || Array.isArray(body) ||
-          Object.keys(body).join() !== "requestId" || !UUID.test(body.requestId)
+          Object.keys(body).join() !== "requestId" ||
+          typeof body.requestId !== "string" || !UUID.test(body.requestId)
         ) return error(400, "invalid_request");
         id = body.requestId.toLowerCase();
         api = makeBackend();

@@ -46,7 +46,10 @@ language sql
 immutable
 set search_path = ''
 as $$
-  select jsonb_strip_nulls(case p_type
+  -- Nur optionale Felder der bisherigen Eventhülle auslassen. Fachobjekte behalten
+  -- ausdrückliches Null (every:null ist semantisch verschieden vom Default 6).
+  select coalesce(jsonb_object_agg(e.key,e.value),'{}'::jsonb)
+  from jsonb_each(case p_type
     when 'MatchCreated' then jsonb_build_object('type', p_type, 'config', private.export_format(p_payload -> 'config'), 'meta', private.export_meta(p_payload -> 'meta'))
     when 'PointWon' then jsonb_build_object('type', p_type, 'side', private.export_shape(p_payload -> 'side', '"string"'::jsonb),
                                             'detail', private.export_detail(p_payload -> 'detail'))
@@ -60,7 +63,8 @@ as $$
                                                   'detail', private.export_detail(p_payload -> 'detail'))
     when 'ServerChosen' then jsonb_build_object('type', p_type, 'set', private.export_shape(p_payload -> 'set', '"number"'::jsonb), 'side', private.export_shape(p_payload -> 'side', '"string"'::jsonb))
     else jsonb_build_object('type', p_type)   -- Paused, Resumed, ScorerChanged, PlayerAssigned: nur der Typ
-  end);
+  end) e
+  where e.value <> 'null'::jsonb;
 $$;
 create function private.export_support_ticket(p_id uuid) returns jsonb
 language sql stable security definer set search_path = '' as $$
@@ -242,7 +246,7 @@ begin
   -- Pro Konto genau ein aktiver Produzent, auch mit verschiedenen Request-IDs.
   if exists(select 1 from private.data_exports where owner_id=v_uid and status='pending'
     and lease_until>clock_timestamp() and expires_at>clock_timestamp()) then
-    return jsonb_build_object('contractVersion',1,'requestId',p_request_id,'status','pending');
+    return jsonb_build_object('error','export_busy');
   end if;
   v_attempt:=gen_random_uuid(); v_path:=gen_random_uuid()::text||'/'||gen_random_uuid()::text||'.zip';
   select epoch into v_epoch from private.data_export_epoch;
