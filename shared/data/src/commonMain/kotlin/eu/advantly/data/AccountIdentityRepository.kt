@@ -49,8 +49,15 @@ class AccountIdentityRepository internal constructor(
                         previous.local == if (local) 1L else 0L
                 ),
         )
-        queries.putSource(deviceId, selfId, kind, scope, if (local) 1L else 0L)
-        queries.reportSourceCount(eventCount, deviceId)
+        database.transaction {
+            queries.putSource(deviceId, selfId, kind, scope, if (local) 1L else 0L)
+            queries.reportSourceCount(eventCount, deviceId)
+            data.cloud.resolvePlayerMetadataSources(selfId)
+            // Auch die neue Self-Aliasquelle kann Matches einer anderen eigenen Genesisquelle belegen.
+            database.cloudUploadQueries.deviceOwner(deviceId).executeAsOneOrNull()?.let {
+                data.cloud.resolveOwnedMatchMetadataSources(it)
+            }
+        }
     }
 
     fun localSources(): List<LocalSourceIdentity> =

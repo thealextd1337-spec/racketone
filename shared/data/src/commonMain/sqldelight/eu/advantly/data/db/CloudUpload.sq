@@ -36,3 +36,13 @@ FROM match_event WHERE id = ?;
 
 outstandingForMatch:
 SELECT id FROM match_event WHERE match_id = ? AND cloud_state != 1 ORDER BY id;
+
+pendingCountForProfile:
+SELECT count(*) FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id
+WHERE e.cloud_state = 0 AND o.profile_id = :profileId
+  AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = e.match_id);
+
+rejectedCountForProfile:
+SELECT count(*) FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id
+WHERE e.cloud_state = 2 AND o.profile_id = :profileId
+  AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = e.match_id);

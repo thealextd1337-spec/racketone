@@ -1,6 +1,7 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.data.CloudUploadSnapshot
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -15,6 +16,9 @@ class CloudUploadAttempt internal constructor(
 ) {
     val events: List<EventRow> get() = snapshot.events.map(EventRows::toRow)
     val batch: PushBatch get() = snapshot.toPushBatch()
+    val inventory get() = snapshot.inventory
+    val profileId: String get() = snapshot.profileId
+    val generation: Long get() = lease.generation
 }
 
 internal class CloudDeviceBinding(
@@ -23,14 +27,15 @@ internal class CloudDeviceBinding(
 )
 
 /**
- * Ausführbare U1-Grenze, noch ohne Worker/Retry/Pull-Anwendung. Ausschließlich versionierte RPCs.
- * Der aktuelle Server bietet diese noch nicht an: ohne bestätigte Bindung bleibt jeder Sync-Aufruf gesperrt.
+ * Ausführbare Upload-Grenze und versionierte Lese-RPCs, ohne lokale Pull-Anwendung.
+ * Ohne ausdrücklich bestätigte Gerätebindung bleibt jeder Sync-Aufruf gesperrt.
  */
 class SupabaseCloudBackend internal constructor(
     private val sessions: CloudSessionGate,
     private val http: CloudHttp,
     private val installation: CloudInstallation,
-) : CloudBackend {
+) : CloudBackend,
+    CloudUploadPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -111,29 +116,65 @@ class SupabaseCloudBackend internal constructor(
         )
     }
 
-    fun captureUpload(limit: Int = PushBatch.MAX_EVENTS_PER_PUSH): CloudUploadAttempt {
+    override fun captureUpload(limit: Int): CloudUploadAttempt {
         require(limit in 1..PushBatch.MAX_EVENTS_PER_PUSH)
         val lease = sessions.capture()
         val current = requireBinding(lease)
-        return CloudUploadAttempt(lease, sessions.captureUpload(lease, limit), current)
+        return CloudUploadAttempt(lease, sessions.captureUpload(lease, limit), current).also(::requireCurrentUpload)
+    }
+
+    override fun requireCurrentUpload(attempt: CloudUploadAttempt) {
+        sessions.requireUpload(attempt.lease, attempt.snapshot)
+        if (binding !== attempt.deviceBinding) throw CloudException("device_not_authorized", true)
+    }
+
+    override fun nextUpload(
+        attempt: CloudUploadAttempt,
+        limit: Int,
+    ): CloudUploadAttempt {
+        requireCurrentUpload(attempt)
+        return captureUpload(limit)
+    }
+
+    override fun uploadInventory(attempt: CloudUploadAttempt) = readUploadStatus(attempt).inventory
+
+    override fun readUploadStatus(attempt: CloudUploadAttempt?): CloudUploadStatus {
+        val lease = attempt?.lease ?: sessions.capture()
+        val current = requireBinding(lease)
+        if (attempt != null) requireCurrentUpload(attempt)
+        val inventory = sessions.uploadInventory(lease)
+        if (requireBinding(lease) !== current) throw CloudException("device_not_authorized", true)
+        if (attempt != null) requireCurrentUpload(attempt)
+        return CloudUploadStatus(lease.credentials.profileId, lease.generation, inventory)
     }
 
     /** Genau den eingefrorenen Stand senden; jüngere lokale Metadaten bleiben nach dem Ack ausstehend. */
-    suspend fun pushSelected(
+    override suspend fun pushSelected(
         attempt: CloudUploadAttempt,
         batch: PushBatch,
     ): PushResponse {
-        sessions.requireUpload(attempt.lease, attempt.snapshot)
-        if (binding !== attempt.deviceBinding) throw CloudException("device_not_authorized", true)
+        requireCurrentUpload(attempt)
         require(batch.events == attempt.events)
         val selected = attempt.batch
         require(batch.players == selected.players && batch.matches == selected.matches)
         val sent = selected.copy(devices = batch.devices.toList())
-        val response = push(attempt.lease, sent)
-        val ids = response.events.map { it.id }
-        require(ids.size == ids.toSet().size && ids.all { id -> sent.events.any { it.id == id } })
+        val response =
+            try {
+                push(attempt.lease, sent)
+            } catch (_: SerializationException) {
+                throw CloudException("cloud_response_invalid", false)
+            }
+        val metadata =
+            try {
+                val ids = response.events.map { it.id }
+                require(ids.size == ids.toSet().size && ids.all { id -> sent.events.any { it.id == id } })
+                val deviceIds = response.devices.map { it.id }
+                require(deviceIds.size == deviceIds.toSet().size && deviceIds.all { id -> sent.devices.any { it.id == id } })
+                attempt.snapshot.acknowledgedMetadata(sent, response)
+            } catch (_: IllegalArgumentException) {
+                throw CloudException("cloud_response_invalid", false)
+            }
         val update = OutboxPlanner.evaluate(sent, response)
-        val metadata = attempt.snapshot.acknowledgedMetadata(sent, response)
         sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata)
         return response
     }
