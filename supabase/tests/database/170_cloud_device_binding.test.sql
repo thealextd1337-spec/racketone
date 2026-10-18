@@ -1,6 +1,10 @@
 -- U1/K4: echte auth.sessions-Fixtures; keine Auth-/Gateway-Simulation als Live-Nachweis.
 begin;
 select no_plan();
+select lives_ok('select private.require_cloud_isolation()', 'Read Committed ist für Cloud zugelassen');
+select is_empty($$select role from unnest(array['anon','authenticated','service_role']) role
+  where has_function_privilege(role,'private.require_cloud_isolation()','EXECUTE')$$,
+  'Isolationshelfer bleibt privat und nur intern aufrufbar');
 select tests.create_user('binding_alice');
 select tests.create_user('binding_bob');
 insert into auth.sessions(id,user_id,created_at,updated_at)
