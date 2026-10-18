@@ -61,6 +61,8 @@ class RecoveryIntentIntegrationTest {
         LOST_UNCOMMITTED(false, false),
     }
 
+    private enum class ProfileTiming { NONE, WHILE_PENDING, START_PENDING_REPLY_AFTER_END, FRESH_AFTER_END }
+
     private class Scenario(
         val scope: CoroutineScope,
     ) {
@@ -78,6 +80,8 @@ class RecoveryIntentIntegrationTest {
         var delayDecision = false
         var delayRecovery = false
         var delayProfile = false
+        var beforeDecision: (suspend (Boolean) -> Unit)? = null
+        var afterRequestCommit: (suspend () -> Unit)? = null
         val sent = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val paths = mutableListOf<String>()
@@ -129,6 +133,7 @@ class RecoveryIntentIntegrationTest {
 
                                 "request_account_deletion" -> {
                                     if (commitRequest) deleted = true
+                                    afterRequestCommit?.invoke()
                                     if (requestSucceeds) "{}" to HttpStatusCode.OK else "offline" to HttpStatusCode.ServiceUnavailable
                                 }
 
@@ -139,9 +144,12 @@ class RecoveryIntentIntegrationTest {
                                             .jsonObject
                                             .getValue("p_accept")
                                             .jsonPrimitive.boolean
-                                    if (commitDecision) consentStatus = if (accept) ConsentStatus.CURRENT else ConsentStatus.DECLINED
+                                    val commit = commitDecision
+                                    val succeeds = decisionSucceeds
+                                    beforeDecision?.invoke(accept)
+                                    if (commit) consentStatus = if (accept) ConsentStatus.CURRENT else ConsentStatus.DECLINED
                                     val result =
-                                        consentBody() to if (decisionSucceeds) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable
+                                        consentBody() to if (succeeds) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable
                                     if (delayDecision) {
                                         delayDecision = false
                                         sent.complete(Unit)
@@ -264,6 +272,146 @@ class RecoveryIntentIntegrationTest {
             assertNull(data.accountIdentities.profile)
         }
     }
+
+    private fun pendingDeclineProof(
+        timing: ProfileTiming,
+        olderAcceptance: Boolean = true,
+    ) = scenario {
+        val originalDevice = phone.deviceId
+        val match = create()
+        val historical = data.events.eventsFor(match.value)
+        consentStatus = ConsentStatus.DECLINED
+        enterGrace()
+        model.cancelDeletion()
+        assertEquals("connection_failed", settled().error)
+        val acceptanceSent = CompletableDeferred<Unit>()
+        val releaseAcceptance = CompletableDeferred<Unit>()
+        val declineSent = CompletableDeferred<Unit>()
+        val releaseDecline = CompletableDeferred<Unit>()
+        try {
+            beforeDecision = { accept ->
+                if (accept) {
+                    acceptanceSent.complete(Unit)
+                    releaseAcceptance.await()
+                } else {
+                    declineSent.complete(Unit)
+                    releaseDecline.await()
+                }
+            }
+            val acceptance =
+                if (olderAcceptance) {
+                    commitDecision = true
+                    decisionSucceeds = true
+                    scope.async { runCatching { auth.decideConsent(model.state.value.consent!!, true) } }.also {
+                        withTimeout(5_000) { acceptanceSent.await() }
+                    }
+                } else {
+                    null
+                }
+            commitDecision = false
+            decisionSucceeds = false
+            model.decideConsent(false)
+            withTimeout(5_000) { declineSent.await() }
+            val delayedProfile =
+                when (timing) {
+                    ProfileTiming.WHILE_PENDING -> {
+                        auth.refreshProfile()
+                        assertEquals(ConsentStatus.DECLINED, auth.accountSession.value?.consentStatus)
+                        null
+                    }
+
+                    ProfileTiming.START_PENDING_REPLY_AFTER_END -> {
+                        delayProfile = true
+                        scope.async { runCatching { auth.refreshProfile() } }.also { withTimeout(5_000) { sent.await() } }
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+            assertBlocked()
+            val profiles = paths.count { it == "my_auth_profile" }
+            if (acceptance != null) {
+                releaseAcceptance.complete(Unit)
+                assertEquals("cloud_session_changed", (acceptance.await().exceptionOrNull() as CloudException).reason)
+                assertEquals(profiles, paths.count { it == "my_auth_profile" })
+            }
+            releaseDecline.complete(Unit)
+            assertEquals("connection_failed", settled().error)
+            assertBlocked()
+            if (delayedProfile != null) {
+                release.complete(Unit)
+                assertTrue(delayedProfile.await().isSuccess, "Account profile reads remain independently available")
+            }
+            if (timing == ProfileTiming.FRESH_AFTER_END) {
+                consentStatus = ConsentStatus.DECLINED
+                auth.refreshProfile()
+            }
+            consentStatus = ConsentStatus.CURRENT
+            repeat(2) { verifyPermission(timing == ProfileTiming.FRESH_AFTER_END) }
+            model.exportData()
+            assertEquals("exported", settled().exportedData)
+            if (timing != ProfileTiming.FRESH_AFTER_END) {
+                // Erst dieser nach Abschluss gestartete DECLINED-Beweis darf die Absicht quittieren.
+                consentStatus = ConsentStatus.DECLINED
+                verifyPermission(false)
+                consentStatus = ConsentStatus.CURRENT
+                verifyPermission(true)
+            }
+            assertEquals(originalDevice, phone.deviceId)
+            assertEquals(historical, data.events.eventsFor(match.value))
+        } finally {
+            releaseAcceptance.complete(Unit)
+            releaseDecline.complete(Unit)
+        }
+    }
+
+    @Test fun pendingDeclineWithoutIntermediateProfileKeepsNewerIntentBlocked() = pendingDeclineProof(ProfileTiming.NONE)
+
+    @Test fun declinedProfileWhileBothMutationsRunCannotAcknowledgeNewerDecline() = pendingDeclineProof(ProfileTiming.WHILE_PENDING)
+
+    @Test fun declinedProfileStartedPendingCannotAcknowledgeAfterBothAttemptsEnd() =
+        pendingDeclineProof(ProfileTiming.START_PENDING_REPLY_AFTER_END)
+
+    @Test fun declinedProfileStartedAfterBothAttemptsEndCanAcknowledgeDecline() = pendingDeclineProof(ProfileTiming.FRESH_AFTER_END)
+
+    @Test fun declinedProfileWhileOnlyDeclineRunsCannotAcknowledgeIt() = pendingDeclineProof(ProfileTiming.WHILE_PENDING, false)
+
+    @Test fun declinedProfileStartedDuringSinglePendingDeclineCannotAcknowledgeAfterItsEnd() =
+        pendingDeclineProof(ProfileTiming.START_PENDING_REPLY_AFTER_END, false)
+
+    @Test fun requestProfileStartedPendingCannotAcknowledgeRequestAfterItsEnd() =
+        scenario {
+            val requestSent = CompletableDeferred<Unit>()
+            val releaseRequest = CompletableDeferred<Unit>()
+            try {
+                commitRequest = true
+                afterRequestCommit = {
+                    requestSent.complete(Unit)
+                    releaseRequest.await()
+                }
+                model.requestDeletion()
+                withTimeout(5_000) { requestSent.await() }
+                delayProfile = true
+                val profile = scope.async { runCatching { auth.refreshProfile() } }
+                withTimeout(5_000) { sent.await() }
+                releaseRequest.complete(Unit)
+                assertEquals("connection_failed", settled().error)
+                release.complete(Unit)
+                assertTrue(profile.await().isSuccess)
+                deleted = false
+                verifyPermission(false)
+                model.exportData()
+                assertEquals("exported", settled().exportedData)
+                deleted = true
+                model.refresh()
+                assertTrue(settled().deletionRequested)
+                deleted = false
+                verifyPermission(true)
+            } finally {
+                releaseRequest.complete(Unit)
+            }
+        }
 
     private fun intentConsentMatrix(
         recovery: Boolean,

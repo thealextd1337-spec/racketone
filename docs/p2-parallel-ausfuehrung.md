@@ -599,6 +599,34 @@ Gemeinsamer Entwurfs-PR [#65](https://github.com/thealextd1337-spec/racketone/pu
 auf `c6703b1` ist verknüpft und wird durch T3 überwacht. Er enthält K3 unverändert;
 gemeinsamer Gradle-Check 688 Tasks grün. PR #64 bleibt separater K1-Entwurf.
 
+K1 Fix5 `025efc5` ist fertig und auf PR #64 gepusht. Genau Authadapter und bestehende
+Recovery-Integrationstests: `mutationsFinishedAtStart` verhindert eine nachträgliche
+Quittierung durch während Pending gestartete Profilabrufe. Dies gilt für DECLINED sowie
+REQUEST/RECOVERY; unabhängige Profilabfrage und Export bleiben erreichbar. Sieben zusätzliche
+echte Integrationstests: Original `4ba0880` mit 31 Fällen 5 rot/26 grün, Fix 31/31 grün.
+Alle bisherigen 24 Fälle und 36 Matrixzellen bleiben erhalten. Fokus JVM/AndroidHost und
+Worker-Gesamtcheck mit 688 Tasks grün; 605 Kotlin-Tests ohne Fehler. SQL unverändert und
+wie beauftragt nicht erneut ausgeführt. Gemeinsamer Gesamtcheck nach Übernahme ebenfalls
+688 Tasks grün (1m16s, Exit 0), gemeinsames Gate und 003/004 dabei unverändert erhalten.
+Frisches unabhängiges Review 6 auf exakt `025efc5`:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r6`.
+Root-CURRENT-/Consent-Generationsgate und Server-003/004 erfordern weiterhin eigene gemeinsame
+Abnahme. Beide PRs bleiben bis zu deren erfüllten Bedingungen Entwürfe.
+
+U4 Fix3 `06c264c` ist fertig: Status verwendet ausschließlich drei Counts ohne SQL-Schreiben;
+Herkunft wird an freigegebenen Schreib-/Bindungsstellen nachgeführt. Vollständiger Datenbank-
+vergleich vor/nach Refresh einschließlich Payloads, Ownership, Herkunft, Revisionen und Acks
+grün, initiale `(1,0,5)`-Zählgleichheit erhalten. Worker-Fokus 89 Cloud/104 Data, Migration
+und Gesamtcheck 690 Tasks grün. 20.000er-Statusmessung 3,98 ms, Aktivierung/Bindung ohne
+erneute Historien-Payloadladung. Frisches unabhängiges Review 4 auf exaktem Head:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r4`.
+
+Echte Supabase-CI für gemeinsamen Head `c6703b1`: Run `39133816941`, Job `117694203206`
+grün, 32 Dateien/1228 Tests PASS einschließlich aller sechs 190-Dateien und Cron-Katalogtests.
+Damit ist die frühere PG17-Stub-Lücke für Migration/Katalogplanung in diesem Stack geschlossen;
+periodische tatsächliche Jobausführung und gehosteter Betrieb bleiben offen. Gradle plus
+Android-/Wear-APKs ebenfalls grün; Apple-CI zu diesem Prüfzeitpunkt noch laufend.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
