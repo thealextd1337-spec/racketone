@@ -889,6 +889,35 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+D1 Review 4 bestätigt `89a6adb` ohne neue Befunde; R1–R3 geschlossen. Unabhängig 285
+Prüfungen grün, vollständige 10.000er-Reparatur mit Wiederöffnung und alle 28 lokalen
+Fence-Abbrüche atomar geprüft. Originale 1-s-Probe jetzt 31–36 ms je Seite mit Cursorfortschritt.
+Genau ein echter Supabase-Stacktest bleibt offen. Root integriert in eigenem Worktree
+`p2-d1-pull-integration` auf Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`.
+Einziger Konflikt: zusätzliche `CloudPullPort`-Schnittstelle in `SupabaseCloudBackend`;
+beide Ports bleiben. Alle 22 D1-Dateien nach Auflösung bytegleich zum geprüften Worker,
+Android-/Auth-/Gate-/AccountIdentity-/Backend-SQL-/CI-Dateien unverändert zur Rootbasis.
+Gemeinsamer Gesamtcheck samt Phone-/Wear-APK 761 Tasks grün (2m49s,
+`advantly-d1-root-integration-check.log`); frisches Integrationsreview vor eigenem PR.
+PR #68 bleibt eng und benötigt seine eigene CI.
+Die fehlende echte Stackabnahme wird separat lesend abgegrenzt: vorhandenen
+`CloudPullStackTest` mit wegwerfbarem echtem Auth/PostgREST und 201 Matches/501 Events
+aktivieren, bestehende K2-Service-CI nutzen, fehlendes Setup in CI hart abweisen und
+keinen lokalen Ersatzdienst oder neuen Skip einführen. Noch keine Workflowänderung.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-scope-r1`.
+
+Root gibt den konkreten K2-A-Nativschnitt für Android frei: pro Export-HTTP-Aufruf eigener
+OkHttp-Client/Dispatcher/Pool/Listener, FastFallback nur dort aus; Request-Join plus native
+Terminalevents und eigener Dispatcher-idle vor Operationsabschluss. Neun konkrete Dateien
+im bestehenden A-Worktree (vier bestehende, gemeinsame Transportseam, drei Plattformdateien,
+Android-Host-Test), öffentliche Port-/Auth-API unverändert, keine Build-/Versionänderung.
+Uninstrumentierte native Injection vor Netzwerk verweigert; iOS- und produktives JVM-ZIP
+für diesen Android-Pilotschnitt ausdrücklich `export_unavailable`. Bestehende Auth-/RPC-
+Funktionalität bleibt; Apple-/JVM-Nativabschluss ist eine spätere separate Lieferung.
+Mocktests erhalten eine explizite interne Factory-Capability, keine Engine-Namensheuristik.
+Native DNS-/Header-/Body-/Fehlerbarrieren sowie alle bisherigen Fences/Tests erforderlich.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r2-impl`.
+
 Android-CI-Review 1 bestätigt `15f08cf` ohne Befunde; 13 Hosttests unabhängig grün.
 Transportcancel ist nachgewiesen keine Host-Publikationsbarriere, der 15-s-StateFlow-Wait
 erhält alle ursprünglichen Assertions und verhindert über `IDLE` Scheinerfüllung.

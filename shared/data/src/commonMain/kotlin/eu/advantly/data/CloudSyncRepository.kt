@@ -48,18 +48,29 @@ class CloudSyncRepository internal constructor(
      * Abweichender Inhalt unter gleicher ID oder eine belegte Gerätesequenz bricht den ganzen Batch ab.
      * Events lokal gelöschter Matches werden verworfen, damit ein später Download sie nicht wiederherstellt.
      * Cursor muss der Aufrufer in derselben [LocalData.transaction] wie den vollständigen Empfang speichern.
+     * [fence] prüft den Kontext zwischen begrenzten lokalen Einheiten; ein Abbruch rollt den ganzen Batch zurück.
      */
-    fun storeDownloaded(downloaded: List<StoredEvent>) {
+    fun storeDownloaded(
+        downloaded: List<StoredEvent>,
+        fence: () -> Unit = {},
+    ) {
         database.transaction {
+            fence()
             downloaded.forEach { event ->
+                fence()
                 if (database.matchTombstoneQueries.countById(event.matchId).executeAsOne() > 0) return@forEach
                 val payload = DataJson.parseToJsonElement(event.payload).jsonObject
                 val received = event.copy(confirmed = false, type = effectiveType(event, payload))
+                fence()
                 when (events.append(received)) {
                     AppendResult.INSERTED -> {}
 
                     AppendResult.DUPLICATE -> {
-                        val existing = events.eventsFor(event.matchId).firstOrNull { it.id == event.id }
+                        val existing =
+                            database.matchEventQueries
+                                .eventById(event.id) { id, match, device, seq, lamport, at, parent, type, json ->
+                                    StoredEvent(id, match, device, seq, lamport, json, at, parent, type)
+                                }.executeAsOneOrNull()
                         require(existing != null && sameContent(existing, received, payload)) { "Cloud-Event-ID mit abweichendem Inhalt" }
                     }
 
@@ -67,8 +78,11 @@ class CloudSyncRepository internal constructor(
                         error("Cloud-Event mit belegter Gerätesequenz")
                     }
                 }
+                fence()
                 queries.markUploaded(event.id)
+                fence()
             }
+            fence()
         }
     }
 

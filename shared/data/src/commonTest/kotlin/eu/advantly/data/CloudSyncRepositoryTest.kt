@@ -16,6 +16,46 @@ class CloudSyncRepositoryTest {
     ) = StoredEvent(id, match, "phone", seq, seq, """{"type":"PointWon","side":"A"}""", type = "PointWon")
 
     @Test
+    fun everyDownloadFenceRollsBackRowsAcknowledgementsAndOuterCursor() {
+        fun prepare(): LocalData {
+            val local = LocalData(createTestDriver())
+            local.events.appendAll(listOf(event("confirmed").copy(confirmed = true), event("rejected", 2)))
+            local.cloud.acknowledge(setOf("confirmed"), mapOf("rejected" to "forbidden"))
+            local.cloud.saveCursor("alice", "pull", 7)
+            local.deleteMatch(MatchId("deleted"))
+            return local
+        }
+        val downloaded = listOf(event("new", 3), event("confirmed"), event("rejected", 2), event("deleted", match = "deleted"))
+        val probe = prepare()
+        var boundaryCount = 0
+        probe.cloud.storeDownloaded(downloaded) { boundaryCount++ }
+        assertTrue(boundaryCount >= downloaded.size)
+        assertEquals(3, probe.events.count("match"))
+        assertEquals(0, probe.events.count("deleted"))
+        assertEquals(0, probe.cloud.pendingCount())
+        assertTrue(probe.cloud.rejectedEvents().isEmpty())
+        assertEquals(listOf("rejected", "new"), probe.events.unconfirmedEvents("match").map { it.id })
+        for (abortAt in 1..boundaryCount) {
+            val local = prepare()
+            val rows = local.events.eventsFor("match")
+            var boundaries = 0
+            assertFailsWith<IllegalStateException> {
+                local.transaction {
+                    local.cloud.saveCursor("alice", "pull", 8)
+                    local.cloud.storeDownloaded(downloaded) { check(++boundaries != abortAt) }
+                }
+            }
+            assertEquals(abortAt, boundaries)
+            assertEquals(rows, local.events.eventsFor("match"))
+            assertEquals(0, local.events.count("deleted"))
+            assertEquals(0, local.cloud.pendingCount())
+            assertEquals(mapOf("rejected" to "forbidden"), local.cloud.rejectedEvents())
+            assertEquals(listOf("rejected"), local.events.unconfirmedEvents("match").map { it.id })
+            assertEquals(7, local.cloud.cursor("alice", "pull"))
+        }
+    }
+
+    @Test
     fun deviceAndCloudAcknowledgementsAreIndependentAndSurviveReopening() {
         val driver = createTestDriver()
         val first = LocalData(driver)
