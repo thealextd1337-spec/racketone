@@ -39,7 +39,7 @@ class SupabasePhoneAuth(
     private val deviceSecret: String,
     uploads: CloudUploadStore? = null,
     private val scope: CoroutineScope,
-    threadGuard: () -> Boolean = { true },
+    private val threadGuard: () -> Boolean = { true },
     private val requestTimeoutMillis: Long = 20_000,
     ownership: LocalAccountOwnership? = null,
 ) : CloudAuthPort {
@@ -51,6 +51,7 @@ class SupabasePhoneAuth(
                 ?.let { HttpClient(it) { followRedirects = false } }
                 ?: HttpClient { followRedirects = false },
             requestTimeoutMillis,
+            exportFactory = exportHttpTransportFactory(client.config.networkConfig.httpEngine),
         )
     val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership)
     override val session = sessions.session
@@ -61,6 +62,24 @@ class SupabasePhoneAuth(
     private var accountIdentity: Pair<String, String>? = null
     private val verifiedAccount = MutableStateFlow<CloudSession?>(null)
     override val accountSession = verifiedAccount.asStateFlow()
+    private val exports =
+        SupabaseDataExport(
+            transport,
+            capture = { expected ->
+                requireExportAccount(expected)
+                sessions.capture(requireProfile = false).credentials.also { requireExportAccount(expected) }
+            },
+            checkAccount = ::requireExportAccount,
+        )
+
+    /** Privater ZIP-Transport; keine zusaetzliche Cloud-Aktivierung oder Profilabfrage. */
+    fun dataExports(): CloudDataExportPort = exports
+
+    private fun requireExportAccount(expected: CloudDataExportContext) {
+        check(threadGuard()) { "Export nur auf dem seriellen Host-Kontext verwenden" }
+        requireAccountSession(CloudSession(expected.profileId, false, false, generation = expected.generation))
+    }
+
     private var pendingAccountMutations = 0
     private var mutationRevision = 0L
     private var unconfirmedDecline = false
@@ -113,6 +132,7 @@ class SupabasePhoneAuth(
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() {
+        exports.invalidate(verifiedAccount.value)
         pendingDeletion = PendingDeletion(DeletionIntent.REQUEST, reserveMutation())
         sessions.suspendCloud(leaveIdentity = true)
     }
@@ -126,6 +146,7 @@ class SupabasePhoneAuth(
     }
 
     private fun invalidateAccount() {
+        exports.invalidate()
         accountEpoch++
         verifiedAccount.value = null
         unconfirmedDecline = false
@@ -301,6 +322,7 @@ class SupabasePhoneAuth(
             requireMutationCurrent(revision)
             sessions.publish(lease, verified)
             verifiedAccount.value = verified.copy(generation = epoch)
+            exports.publish(verified.copy(generation = epoch))
             if (mutationsFinishedAtStart && revision == mutationRevision && pendingAccountMutations == 0 && pendingDeletion == deletion &&
                 (
                     (verified.deletionRequested && pendingDeletion == PendingDeletion(DeletionIntent.REQUEST, revision)) ||
@@ -400,6 +422,7 @@ class SupabasePhoneAuth(
 
     override suspend fun requestDeletion() =
         guarded {
+            exports.invalidate(verifiedAccount.value)
             synchronizeAccount()
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
