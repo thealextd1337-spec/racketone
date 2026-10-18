@@ -512,6 +512,39 @@ Job verwendet ebenfalls frische Zeit. API, Grants, SecurityDefiner, search_path 
 Session-/Ursprungs-/Consentregeln erhalten. Rot→Grün muss Status/Rücknahme/Job konsistent
 belegen; 001/002/003-Dateien bleiben unverändert.
 
+### Aktuelle Prüfstände: K1 Fix4, U4 Fix2 und K3
+
+K1 Fix4 `4ba0880` ist auf PR #64 gepusht und im gemeinsamen Stand zur Prüfung übernommen.
+Nur Authadapter und bestehende Recovery-Integrationstests ändern sich; das gemeinsame
+CURRENT-/Consent-Generationsgate, U3-Acks und Server-003 bleiben erhalten. Worker-Check:
+688 Tasks grün, 24 Recoveryfälle einschließlich 36 Übergangszellen; Originaladapter mit
+denselben Tests 7 rot/17 Kontrollen grün. Auch der gemeinsame vollständige Check ist mit
+688 Tasks grün (1m15s, Exit 0); Gate und SQL bleiben durch diesen Fix unverändert.
+Unabhängiges Review 5 prüft den exakten Worker-Head; CI läuft auf diesem Head neu.
+
+U4 Fix2 `c1b4322` ist fertig: erste Inventur und spätere Auswahl zählen dieselben belegten
+Metadaten. UNKNOWN-Herkunft wird nur an den drei freigegebenen Bindungsstellen mit
+Kotlin-validierter Genesis aufgelöst, Kandidatenseiten bleiben auf 500 begrenzt. Worker:
+89 Cloud-/100 Data-Tests und Migration grün, vollständiger Check 686 Tasks. Messung bei
+20.000 quittierten Köpfen: Status 4,4 ms, Aktivierung 11,8 ms, Bindung 15,7 ms; kein
+erneutes Kopf-/Payload-Laden. Review 3 prüft den gesamten U4-Schnitt vor Integration.
+
+K3 Server `683f6db` ist fertig, ausschließlich additive 004 und neue 190-Tests. Eigener
+Status bleibt unabhängig von Consent/Gerätebindung; der Servicejob verwendet den vorhandenen
+Purgepfad in maximal 100er-Batches. Worker: vollständiger Check 688 Tasks grün;
+1223 SQL-Assertions bestanden, zwei bekannte 110-Cronfehler und drei ausdrücklich übersprungene
+190-Cronkatalogprüfungen im PG17-Ersatzharness. Echte Lock-/Recovery-/Jobrennen und Frist-Wait
+grün; Owner, ACL, Signatur und übriger Rücknahmekörper gegenüber 002 erhalten. Keine
+Hosted-/Cron-/UI-/D3-Abnahme daraus ableiten. Unabhängiges Review 1 läuft vor Integration.
+
+| Laufender Auftrag | Task-ID | Ziel und Abnahme |
+|---|---|---|
+| K1 Review 5 | `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r5` | Read-only auf `4ba0880`, alle bisherigen Befunde plus Intentmatrix, Ship/No-Ship |
+| U4 Review 3 | `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r3` | Read-only auf `c1b4322`, Inventar/Herkunft/Leistung und Runner-Invarianten |
+| K3 Server Review 1 | `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k3-server-review-r1` | Read-only auf `683f6db`, Rechte, Fristen, atomare Löschung, Rennen und Scheduler |
+
+Alle drei Reviews laufen parallel mit eigenem Task; keine Worker-Pushes oder Live-Deployments.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.

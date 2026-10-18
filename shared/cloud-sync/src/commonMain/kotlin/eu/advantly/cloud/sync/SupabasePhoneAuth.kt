@@ -268,10 +268,11 @@ class SupabasePhoneAuth(
             }
             val epoch = accountEpoch
             val revision = mutationRevision
+            val deletion = pendingDeletion
             // Nur ein nach beendetem Rücknahmeversuch gestarteter Profilabruf kann dessen Verlust quittieren.
+            // Eine spätere Consent-Annahme entwertet alte Antworten, aber nicht die noch offene Recovery-Absicht.
             val recoveryProof =
-                pendingAccountMutations == 0 &&
-                    pendingDeletion == PendingDeletion(DeletionIntent.RECOVERY, revision)
+                pendingAccountMutations == 0 && !unconfirmedDecline && deletion?.intent == DeletionIntent.RECOVERY
             val lease =
                 sessions.captureProfile(
                     canResumeCloud = pendingAccountMutations == 0 && !unconfirmedDecline && (pendingDeletion == null || recoveryProof),
@@ -298,7 +299,7 @@ class SupabasePhoneAuth(
             requireMutationCurrent(revision)
             sessions.publish(lease, verified)
             verifiedAccount.value = verified.copy(generation = epoch)
-            if (pendingAccountMutations == 0 &&
+            if (revision == mutationRevision && pendingAccountMutations == 0 && pendingDeletion == deletion &&
                 (
                     (verified.deletionRequested && pendingDeletion == PendingDeletion(DeletionIntent.REQUEST, revision)) ||
                         (!verified.deletionRequested && recoveryProof)
@@ -306,7 +307,7 @@ class SupabasePhoneAuth(
             ) {
                 pendingDeletion = null
             }
-            if (verified.consentStatus != ConsentStatus.CURRENT) unconfirmedDecline = false
+            if (revision == mutationRevision && verified.consentStatus == ConsentStatus.DECLINED) unconfirmedDecline = false
         }
 
     private suspend fun newLogin(block: suspend () -> Unit) {
