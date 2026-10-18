@@ -23,7 +23,7 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | `fbca22d` auf Entwurfs-PR #63; Review 3 `ship`, Android-/Apple-CI läuft |
 | Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Review 3 `ship`, relevante CI grün; PR #62 als `6537ac6` nach main gemergt. Live-Gateway-/Socket-Abnahme bleibt offen |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | Fix2 `0edd992` und getesteter Main-Merge `d11da1c` auf Entwurfs-PR #64; Review 3 und neue CI laufen |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `d11da1c` auf Entwurfs-PR #64; Review 3 bestätigt R1/R2, neuer P2 bei verlorener Recovery-Antwort wird korrigiert |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -93,9 +93,11 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r2`
 - K1 Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r2`
 - K1 Review 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r3`
+- K1 Korrektur 3: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r3`
 - Server-Consent 003: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-impl-r1`
 - Server-Consent 003 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-consent-review-r1`
 - U4-Kern: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-impl-r1`
+- U4-Kern Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -313,6 +315,23 @@ Das unabhängige Server-Consent-Review ist auf exakt `20f0e43` gestartet, einsch
 der bekannten Statement-Snapshot-/Isolations-/Sitzungswiderruf-Risiken aus früheren Reviews.
 Währenddessen läuft U4 weiter. Neue Umsetzungspakete werden erst nach stabilen Verträgen
 und ohne Überschneidung mit den laufenden Review-/Uploaddateien gestartet.
+
+K1 Review 3 bestätigt alle R1/R2-Korrekturen, bewertet den Stand aber als `fix-first`:
+Bei serverseitig erfolgreicher Recovery mit verlorener Antwort bleibt `unconfirmedDeletion`
+gesetzt. Retry liefert `no_deletion_pending`; ein frisches aktives Profil löst die Sperre
+nicht auf. Der Konto-ViewModel-Pfad verliert zudem Consent/Recovery-Anzeige, wenn die noch
+gesperrte Adoption wirft. Export bleibt erreichbar. Der Implementierer korrigiert getrennte
+Delete-/Recovery-Intents und die Profilbestätigung unter neuester Mutationsrevision, ohne
+eine spätere Delete-/Decline-Sperre zu quittieren. Reale VM-/Adapter-Regressionen und Review 4
+sind vor Merge erforderlich. Supabase-CI auf `d11da1c` ist grün; Android/Apple laufen noch.
+
+U4-Kern ist als `dda679d` geliefert: expliziter serialisierter Runner mit maximal vier
+Batches à 500 Events als Standard, eingefrorenem prozesslokalem Retry und ehrlichem
+Pending-/Rejected-/Metadatenstatus. Sieben geänderte Dateien, keine Gate-/Auth-/SQL-Änderung.
+Worker meldet 83 Cloud- und 90 Data-Tests (14 neue Runner-Integrationstests) und vollständigen
+Check mit 686 Tasks grün. Parent hat den Produktivdiff gelesen; unabhängiges Review 1 läuft.
+Android-Bedienung und echter Supabase-Lauf stehen weiter aus. Die Bestandszählung liest aktuell
+den lokalen Bestand vollständig; das Review prüft die Kosten und Fortschrittsgarantien.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
