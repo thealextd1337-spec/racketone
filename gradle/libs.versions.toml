@@ -3,6 +3,8 @@
 # Geprüft gegen Maven Central / Google Maven / Gradle Plugin Portal am 2026-10-14 (SQLDelight, Wearable: 2026-10-15).
 
 [versions]
+# Edge-/CI-Werkzeug, kein Bestandteil der App.
+deno = "2.9.7"
 # --- App / SDK ---
 android-compileSdk = "37"
 android-targetSdk = "36"

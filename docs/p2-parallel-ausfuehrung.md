@@ -889,6 +889,16 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+Für die echte D1-Stack-CI ist ein weiterer eigener Root-Worktree `p2-d1-stack-ci`, Branch
+`p2/d1-stack-ci`, ab D1-Integration `25dc96b` vorbereitet. Er übernimmt K2-Service-CI
+`ba90a1d` als geprüfte Abhängigkeit; ausschließlich Plankonflikt, beide Nachweise erhalten.
+Kotlin/Android/Wear bytegleich `25dc96b`, Server/CI/Katalog bytegleich `ba90a1d`.
+Noch keine Harness-/Workflow-/Stackteständerung. Folgender enger Schnitt: eigener
+`d1_stack_ci.py`, minimaler Anschluss im vorhandenen echten Supabase-Job, gültiger
+64-Hex-Installation-Proof im bestehenden Stacktest und genau ein Test ohne Skip als
+hartes XML-Gate. 201 enginefähige Matches/501 Events im Hauptmatch mit zwei echten
+Auth-Konten; keine synthetischen JWTs oder Authsessions. Reale CI bleibt erforderlich.
+
 D1 Review 4 bestätigt `89a6adb` ohne neue Befunde; R1–R3 geschlossen. Unabhängig 285
 Prüfungen grün, vollständige 10.000er-Reparatur mit Wiederöffnung und alle 28 lokalen
 Fence-Abbrüche atomar geprüft. Originale 1-s-Probe jetzt 31–36 ms je Seite mit Cursorfortschritt.
@@ -1154,6 +1164,46 @@ pinnt 2.9.7 im zentralen Katalog und verlangt zwei Leerzeichen; mit genau dieser
 19 Tests/Typen/Format/Lint und Gesamtcheck 692 Tasks grün. Neue Service-CI und Review 2
 laufen. PR66 nach PR65-Squash im eigenen Hilfsworktree auf `09bdd1b` abgeglichen; ausschließlich
 Plan-Konflikt, Produktcode/SQL/Tests unverändert. Neue CI erforderlich.
+K2-Mainabgleich nach PR #66: `origin/main 870792a` bringt ausschließlich den unabhängig
+geprüften U4-Kern in diese Serverintegration. Konflikte nur im Plan; beide Nachweise bleiben
+erhalten. Shared-/Android-/Wear-Baum bytegleich zu main, K2-Server/CI/Katalog unverändert
+gegen `8e49ccc`. Gemeinsamer Gesamtcheck vor Mergecommit mit 688 Tasks grün (2m10s,
+`advantly-k2-main-u4-merge-check.log`); neue CI danach erforderlich.
+
+K2-Integrationsreview 4 bestätigt `8e49ccc` ohne offene Befunde und mit 21 unabhängig
+grünen Deno-Tests/Typen/Format/Lint. Die echte Service-CI desselben Heads ist erfolgreich
+(Run `39143114803`, Job `117721530287`): 1.299 pgTAP-Prüfungen in 35 Dateien, Parallelrennen,
+vollständiger ZIP-/CSV-/JSON-Rundlauf, private Storage-/Fremd-/Anonymzugriffe, Ablauf und
+physische Bereinigung einschließlich verspätetem Upload, Teilnehmer-/Owner-Purge sowie
+echter Auth-Logout mit Abweisung des alten JWT. Tatsächlicher ACK liefert 204; Vault→pg_net→
+Cleanup-Function→Storage ebenfalls grün. Periodischer Cronbetrieb, Hosted und Phone-Ausgabe
+bleiben getrennte Nachweise; übrige CI auf dem neuen Mergehead bleibt vor Merge nötig.
+
+K2-Diagnose-CI `425c094` lokalisiert den Fehler exakt in `cleanup()` nach Ablaufprüfung,
+auch während finally-Cleanup. Glaubwürdiger Mechanismus durch offizielles PostgREST-
+Protokoll und zwei rote Regressionen belegt: `ack_data_export_cleanup_v1` liefert als
+void-RPC HTTP 204; Backend parst trotzdem JSON. Root ergänzt ausschließlich No-Content-
+Behandlung im Backend (zwei Zeilen), reale Backend→Handler-Regression und strikten
+Gegenbeweis für ungültiges leeres HTTP 200. 21 Deno-Tests/Typen/Format/Lint grün; Live-Test
+prüft zusätzlich tatsächliches RPC-204. Produktfreigabe erst nach frischem Review und
+vollständiger echter Service-CI, bisherige Sicherheits-/Cleanup-Assertions unverändert.
+
+Echte K2-Service-CI auf `84ee8fc`, Run `39141216108`: Stackstart, beide Handler, sämtliche
+1.299 pgTAP-Assertions in 35 Dateien und acht Parallelrennen samt SQL-ZIP-Rundlauf grün.
+Live-HTTP bestätigt vollständiges ZIP/CRC/JSON/CSV und Idempotenz/409-Vertrag; danach harter
+Fehler im Storage-Negativ-/Ablauf-/Cleanup-Abschnitt. Scheduler und Lint deshalb noch nicht
+ausgeführt. Keine grüne Gesamtabnahme. Die bewusst generische Fehlerausgabe lässt die
+exakte Testzeile offen. Root ergänzt nur Typ und eigene Testpositionen (keine Inhalte,
+Exceptiontexte oder Variablen), Assertions und Produktcode unverändert. Lokaler Diagnose-
+Fehlerpfad bleibt hart rot ohne Dienste; Syntax und vollständiger Check 692 Tasks grün.
+
+K2-Integrationsreview 1 auf `79b5faa`: ein belegter P2. Der tatsächlich installierte
+Deno-2.9.7-Formatter liest `.editorconfig` (vier Leerzeichen); bisherige lokale Deno-2.5.4-
+Prüfung tat das nicht. Erste Service-CI stoppt deshalb vor Stackstart. Enge Root-Korrektur:
+Deno 2.9.7 im zentralen Versionskatalog pinnen, CI liest diesen Wert; Formatcheck verlangt
+ausdrücklich zwei Leerzeichen. Beide Functions unter genau 2.9.7 mit Typen/Format/Lint und
+19 Tests grün; vollständiger Root-Check 692 Tasks grün (4m30s). Servercode/SQL unverändert.
+Erneute tatsächliche Service-CI und frisches Integrationsreview 2 bleiben vor Merge nötig.
 PR #66 nach PR65-Squash erneut auf main `cb14420` abgeglichen. Ausschließlich add/add im
 Plan; der neuere vollständige Orchestratorplan bleibt erhalten. Gate und sämtliche übrigen
 Produkt-/SQL-/Testdateien unverändert zu `270782b` und zum unabhängig geprüften U4-Kandidaten.
