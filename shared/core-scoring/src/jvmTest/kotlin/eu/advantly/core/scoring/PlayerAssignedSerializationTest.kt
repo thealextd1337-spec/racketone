@@ -46,6 +46,7 @@ class PlayerAssignedSerializationTest {
 
     @Test
     fun legacyBytesAndElementsMatchGeneratedOldContractForEveryDefaultAndNullOption() {
+        var cases = 0
         for (defaults in listOf(false, true)) {
             for (nulls in listOf(false, true)) {
                 val json =
@@ -53,7 +54,7 @@ class PlayerAssignedSerializationTest {
                         encodeDefaults = defaults
                         explicitNulls = nulls
                     }
-                for (player in listOf(null, person, person.copy(isPlaceholder = true))) {
+                for (player in listOf(null, person, person.copy(displayName = ""), person.copy(isPlaceholder = true))) {
                     for (legacySlot in listOf(false, true)) {
                         for (alias in listOf(null, PlayerId("watch-self"))) {
                             val old = LegacyPlayerAssigned(slot, player, owner, legacySlot, alias)
@@ -64,16 +65,39 @@ class PlayerAssignedSerializationTest {
                             assertEquals(json.encodeToJsonElement(LegacyPlayerAssigned.serializer(), old), element)
                             assertFalse("assignmentVersion" in element.jsonObject)
                             assertFalse("playerId" in element.jsonObject)
-                            if (nulls) assertEquals(event, json.decodeFromString(PlayerAssigned.serializer(), expected))
+                            assertEquals(old, json.decodeFromString(LegacyPlayerAssigned.serializer(), expected))
+                            assertEquals(old, json.decodeFromJsonElement(LegacyPlayerAssigned.serializer(), element))
+                            assertEquals(event, json.decodeFromString(PlayerAssigned.serializer(), expected))
+                            assertEquals(event, json.decodeFromJsonElement(PlayerAssigned.serializer(), element))
+                            cases++
                         }
                     }
                 }
             }
         }
+        assertEquals(64, cases)
         assertEquals(
             """{"type":"PlayerAssigned","slot":"placeholder:opponent","player":null,"assignedBy":"owner"}""",
             codec.encodeToString(EventPayload.serializer(), PlayerAssigned(slot, null, owner)),
         )
+    }
+
+    @Test
+    fun versionlessLegacyWithoutPlayerMeansNullForEveryDecoderPolicy() {
+        val raw = """{"slot":"placeholder:opponent","assignedBy":"owner"}"""
+        val value = PlayerAssigned(slot, null, owner)
+        for (nulls in listOf(false, true)) {
+            for (unknownKeys in listOf(false, true)) {
+                val json =
+                    Json(codec) {
+                        explicitNulls = nulls
+                        ignoreUnknownKeys = unknownKeys
+                    }
+                // Pure-Core kann die Null-Policy nicht lesen; nur versionsloses Legacy erlaubt das fehlende nullable Feld.
+                assertEquals(value, json.decodeFromString(PlayerAssigned.serializer(), raw))
+                assertEquals(value, json.decodeFromJsonElement(PlayerAssigned.serializer(), json.parseToJsonElement(raw)))
+            }
+        }
     }
 
     @Test
@@ -136,7 +160,6 @@ class PlayerAssignedSerializationTest {
     fun mixedMissingAndUnknownVersionsFailEvenWithUnknownKeysIgnored() {
         val invalidFields =
             listOf(
-                "",
                 """, "playerId":null""",
                 """, "player":null,"playerId":null""",
                 """, "assignmentVersion":1,"player":null,"playerId":"bea"""",
@@ -174,6 +197,23 @@ class PlayerAssignedSerializationTest {
         assertEquals(value, codec.decodeFromString(PlayerAssigned.serializer(), extra))
         assertFailsWith<SerializationException> { strict.decodeFromString(PlayerAssigned.serializer(), extra) }
         assertFalse("assignmentVersion" in codec.encodeToString(PlayerAssigned.serializer(), value))
+        val missingPlayer = """{"slot":"placeholder:opponent","assignedBy":"owner","assignmentVersion":1}"""
+        for (nulls in listOf(false, true)) {
+            for (unknownKeys in listOf(false, true)) {
+                val json =
+                    Json(codec) {
+                        explicitNulls = nulls
+                        ignoreUnknownKeys = unknownKeys
+                    }
+                // Explizite Version 1 stammt nicht aus dem Legacy-Encoder; ihr Anwesenheitscheck bleibt erhalten.
+                assertEquals(value, json.decodeFromString(PlayerAssigned.serializer(), legacy))
+                assertEquals(value, json.decodeFromJsonElement(PlayerAssigned.serializer(), json.parseToJsonElement(legacy)))
+                assertFailsWith<SerializationException> { json.decodeFromString(PlayerAssigned.serializer(), missingPlayer) }
+                assertFailsWith<SerializationException> {
+                    json.decodeFromJsonElement(PlayerAssigned.serializer(), json.parseToJsonElement(missingPlayer))
+                }
+            }
+        }
     }
 
     @Test

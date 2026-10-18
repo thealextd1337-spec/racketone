@@ -79,9 +79,10 @@ object PlayerAssignedSerializer : KSerializer<PlayerAssigned> {
                 }
             }
             if (slot == null || assignedBy == null) throw SerializationException("PlayerAssigned benötigt slot und assignedBy")
+            // Legacy ohne Versionsfeld lässt nullable player aus; explizite Version 1 bleibt strenger.
             val validFields =
                 when (version) {
-                    1 -> 1 in present && 6 !in present
+                    1 -> 6 !in present && (1 in present || 5 !in present)
                     2 -> 5 in present && 6 in present && 1 !in present
                     else -> false
                 }
