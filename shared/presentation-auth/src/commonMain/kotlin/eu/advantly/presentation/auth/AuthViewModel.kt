@@ -39,10 +39,12 @@ class AuthViewModel(
     private val auth: CloudAuthPort,
     private val workScope: CoroutineScope? = null,
     val support: eu.advantly.presentation.support.SupportViewModel? = null,
+    val upload: PhoneUploadPort? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
-        auth.close()
+        val uploads = upload
+        if (uploads == null) auth.close() else uploads.close(auth::close)
         super.onCleared()
     }
 

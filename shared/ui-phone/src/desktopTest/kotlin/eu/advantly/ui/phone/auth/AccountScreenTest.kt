@@ -1,19 +1,35 @@
 package eu.advantly.ui.phone.auth
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
@@ -30,7 +46,9 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.File
 import java.util.Locale
+import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -149,6 +167,50 @@ class FakePhoneAuth : CloudAuthPort {
 
 @OptIn(ExperimentalTestApi::class)
 class AccountScreenTest {
+    @Test fun accountCopyKeepsThemeContrastWithoutAParentSurfaceInBothLanguagesAtLargeFont() {
+        val original = Locale.getDefault()
+        try {
+            for (language in listOf("de", "en")) {
+                Locale.setDefault(Locale.forLanguageTag(language))
+                for (dark in listOf(true, false)) {
+                    runDesktopComposeUiTest(width = 360, height = 640) {
+                        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
+                        val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                        var background = Color.Unspecified
+                        setContent {
+                            CompositionLocalProvider(LocalDensity provides Density(1f, 2f), LocalContentColor provides Color.Black) {
+                                AdvantlyTheme(darkTheme = dark) {
+                                    background = MaterialTheme.colorScheme.background
+                                    Box(Modifier.fillMaxSize().background(background)) { AccountScreen(model, null) {} }
+                                }
+                            }
+                        }
+                        val layouts = mutableListOf<TextLayoutResult>()
+                        onNodeWithText(if (language == "de") "Konto" else "Account")
+                            .assertIsDisplayed()
+                            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                        val foreground =
+                            layouts
+                                .single()
+                                .layoutInput.style.color
+                        val ratio =
+                            (maxOf(foreground.luminance(), background.luminance()) + 0.05f) /
+                                (minOf(foreground.luminance(), background.luminance()) + 0.05f)
+                        val directory = File("build/reports/account-contrast").also { it.mkdirs() }
+                        ImageIO.write(onRoot().captureToImage().toAwtImage(), "png", File(directory, "account-$language-$dark-200.png"))
+                        assertTrue(ratio >= 4.5f, "Account foreground contrast: $ratio (dark=$dark)")
+                        onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
+                        onNodeWithTag("account_delete").performScrollTo().assertIsEnabled()
+                        onNodeWithTag("auth_sign_out").performScrollTo().assertIsEnabled()
+                        onNodeWithTag("auth_local").performScrollTo().assertIsEnabled()
+                    }
+                }
+            }
+        } finally {
+            Locale.setDefault(original)
+        }
+    }
+
     @Test fun consentNeedsBothChecksAndNewVersionResetsThemInBothLanguagesWithLargeFont() {
         val original = Locale.getDefault()
         try {

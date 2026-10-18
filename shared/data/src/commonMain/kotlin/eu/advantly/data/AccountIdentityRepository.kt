@@ -67,6 +67,12 @@ class AccountIdentityRepository internal constructor(
 
     fun sourceScope(deviceId: String): String? = queries.source(deviceId).executeAsOneOrNull()?.scope_id
 
+    /** Nur belegte Herkunft mit unveränderlichem Eigentümer; weder Kontobereich noch Events beweisen Eigentum. */
+    fun ownedSources(expectedProfile: String): List<OwnedSourceIdentity> {
+        require(expectedProfile.isNotBlank())
+        return queries.ownedSourceCatalog(expectedProfile).executeAsList().map { OwnedSourceIdentity(it.device_id, it.kind) }
+    }
+
     /** Generierung außen; Transaktion verändert weder historische Spieler-IDs noch Event-Payloads. */
     fun select(
         scope: String,
@@ -182,4 +188,9 @@ data class LocalSourceIdentity(
     val scope: String,
     val kind: String,
     val eventCount: Long,
+)
+
+data class OwnedSourceIdentity(
+    val deviceId: String,
+    val kind: String,
 )

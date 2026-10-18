@@ -4,6 +4,35 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
+## Aktueller Integrationsstand und laufende Pakete
+
+- K2-Serverexport ist mit PR #67 als `8660716` nach main gemergt; alle fünf Checks grün,
+  einschließlich echtem lokalen Supabase-/Storage-/Scheduler-Lauf. Keine Hosted-Freigabe.
+- Android-Upload PR #68 ist auf `8981791` mit diesem Mainstand abgeglichen. Upload-Kotlin,
+  Android und Wear bleiben unverändert; Gesamtcheck plus beide APKs erneut 761 Tasks grün.
+  Die CI des aktuellen Heads bleibt Mergebedingung.
+- D1 ist im abhängigen Draft [PR #69](https://github.com/thealextd1337-spec/racketone/pull/69),
+  Head `6d9d651`. Vier Fachreviewrunden, Root-Integrationsreview und Stack-Harness-Review sind
+  ohne offene Befunde abgeschlossen. Der echte Auth-/PostgREST-Pull läuft erstmals in dieser CI;
+  das Gate verlangt genau einen bestandenen Test ohne Skip. Erst #68, dann D1 integrieren.
+- K2-A und K2-B sind ohne Produktabweichung im isolierten Root-Zweig
+  `p2/k2-phone-integration` als `6b798fa` kombiniert: 767 Tasks samt Phone-/Wear-APKs grün.
+  Android besitzt nachgewiesenen nativen HTTP-Abschluss; iOS/JVM-ZIP melden bis zu einem
+  eigenen Plattformnachweis vor Netzwerkzugriff ausdrücklich `export_unavailable`.
+
+| Laufendes Paket | Exklusiver Besitz | Abhängigkeit und prüfbares Ende | Task-ID |
+|---|---|---|---|
+| K2-C Android-Exporthost | Neue `PhoneExportHost`, `PrivateExportCache`, `ExportShare` und direkte Tests; dedizierter Manifest-Provider/Path; nur nötige bestehende Robolectric-Testkonfiguration | Geprüfte A+B-Basis übernehmen; exakte Länge, SHA und EOF vor privater atomarer Promotion; nur Lesefreigabe; Kontogrenzen, Ablauf und tatsächlicher Ressourcenabschluss; Gesamtcheck/APKs | `advantly-20261018-k2-phone-host-impl-r1` |
+| K2-D1 gemeinsame Konto-UI | `AuthViewModel`, `AccountScreen`, `AdvantlyApp` und direkte neue Tests | Dieselbe A+B-Basis; optionaler Exportport; Authclose erst nach Upload- und Exportdrain; echte Kontoaktionen und Export unabhängig bedienbar, DE/EN bei 200 Prozent; Gesamtcheck/APKs | `advantly-20261018-k2-phone-account-impl-r1` |
+| Root-Endintegration | Danach ausschließlich Android-`PhoneAccount`/`MainActivity`, Zusammenführung und unabhängige Reviews | Erst C und D1 prüfen, dann aktuellen Activity-Sharecallback und gemeinsamen Lifecycle integrieren; keine gehaltene Activity, keine automatische Exportabfrage | Noch nicht gestartet |
+
+Die beiden laufenden IDs verwenden den vollständigen Präfix
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3A`.
+Ihre Dateigrenzen überschneiden sich nicht. Root besitzt Dokumentation, Push/PR/CI und die spätere
+Android-Komposition; Worker verändern diese Integrationsdateien nicht. D2/D3 sind weiterhin
+vorbereitete Folgepakete ohne aktivierte Protokolländerung; B4 folgt erst auf belastbarem Pull und
+Rechte-/Redaktionsvertrag. Echte Sharesheet-, Geräte-, Apple- und Rechtsnachweise bleiben offen.
+
 ## Ausgangspunkt und Arbeitsweise
 
 U1 und U2 sind integriert. Drei Implementierer arbeiten in getrennten Git-Worktrees;
@@ -875,6 +904,325 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+### U4-Kern auf main abgeschlossen
+
+PR #66 wurde auf exakt `09bdd1b` nach grüner Ubuntu-/APK- und Apple-Simulator-CI
+(Run `39140546089`) zusammengeführt; main ist `870792a`.
+Der anschließende Root-Abgleich löst ausschließlich den Plankonflikt und erhält beide
+Nachweise. Produktbaum gegen Root `eb187f5` unverändert; der vollständige grüne
+744-Task-Check mit Android-APK gilt fort. PR #68 benötigt wegen seines konkreten
+Plankonflikts diesen Mainabgleich und anschließend CI auf dem neuen Head.
+K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
+
+### K2 Phone – konkrete parallele Verträge
+
+#### Aktueller Abschluss und Reviewbesitz
+
+PR #67 ist nach exakt grünem `ba90a1d` zusammengeführt; main `8660716`, Run
+`39144135593` mit fünf erfolgreichen Prüfungen einschließlich echter Service-CI und
+Apple-Native-/Simulator-Builds. Root gleicht PR #68 danach ab: nur Plankonflikt,
+Kotlin/Android/Wear unverändert zur geprüften Basis, Server/CI/Katalog bytegleich main.
+Gesamtcheck vor Mergecommit und neue CI danach; keine automatische Livebereitstellung.
+
+K2-A Review 3 bestätigt `d73f372` ohne Befunde. 137 JVM-/85 Android-Host-Tests frisch
+grün; unabhängige native Probe hält DNS, Terminalcallback und offenen Body getrennt
+zurück: Export und Register bleiben offen, erst nach Freigabe native Calls/Pool null
+und eigener Executor beendet. Android-Schnitt damit zur Integration freigegeben;
+JVM/iOS-ZIP bleibt ausdrücklich vor Netzwerk gesperrt. A/B-Verträge sind unabhängig
+geprüft; gemeinsame Basis und Android-Dateihost können als nächste eigene Lane folgen.
+
+D2/D3-Ergänzung verlangt einen expliziten Herkunftsstamp neben Cloudstamp, ohne fehlenden
+Stamp als Freigabe zu deuten. Bestehende Provenienz und U2-Sourcebelege zuerst wiederverwenden;
+historische unbewiesene Importe dürfen keinen Cloudentzug umgehen. ID-only-Assignment über
+nachgestellte Defaultparameter und eigenen serialization-core-Serializer, Legacyform und
+Goldens erhalten. Redaktionsmanifest maximal 200 IDs/500 Events pro Seite plus Bytebudget,
+durabler Transfer und atomarer Abschluss statt unbegrenzter Liste. Root legt die endgültigen
+kleinen Lane-Verträge vor Umsetzung fest; noch kein Protokollwechsel aktiviert.
+
+K2-A-Nativfix `d73f372` fertig, Parent `c58a96f`, genau neun freigegebene Dateien.
+Android-Transport pro Aufruf besitzt Client/Dispatcher/Pool/Listener; Ktor-Join, native
+Terminalevents und Dispatcher-idle gemeinsam vor Operationsabschluss. Öffentliche API,
+Zeitlimits und RPC-Pfad unverändert. JVM/iOS und uninstrumentierte Injection verweigern
+ZIP vor Netzwerk mit `export_unavailable`. 137 JVM-/85 Android-Host-Tests einschließlich
+16 nativer Tests, ktlint und Gesamtcheck/APKs grün; alle bisherigen 133 JVM-Tests erhalten.
+Root hat tatsächlichen Produktdiff gelesen, frisches unabhängiges Review 3 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r3`.
+
+D1-Stack-CI-Abhängigkeit `2307a3a` vorbereitet und sauber: D1 `25dc96b` plus geprüfte
+K2-Service-CI `ba90a1d`, danach aktueller Rootplan; ausschließlich Plankonflikte.
+Gemeinsamer Gesamtcheck 692 Tasks grün (3m29s), zusätzlicher Planmerge produktidentisch.
+Isolierter Harnessauftrag läuft im eigenen Worktree `t3-1bf18c5e`, Branch
+`t3/d1-stack-ci-harness`; vorbereitete Basis als Vorfahr bestätigt. Exklusiver Besitz:
+neuer Harness/gezielte Guardtests, CI-Anschluss und minimale Stacktest-Fixturekorrektur.
+Keine D1-Produkt-/Serveränderung. Genau ein echter Test ohne Skip als hartes XML-Gate.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-impl-r1`.
+
+D2/D3-Vertragsentwurf liegt vor: vollständig geordnete serverseitige `visibilityEpoch`
+auch für Grants, dauerhafter Personen-ID-Redaktionsnachweis und explizite ID-only-
+Assignmentversion. Vor Umsetzungsvergabe noch eng präzisieren: P1-Gast-/Offline-/Peer-
+Matches ohne Cloudsnapshot dürfen keinen Freigabebypass und keinen Funktionsverlust
+erzeugen; Legacy-API/Goldens müssen erhalten bleiben; Manifest-/Eventtransfer begrenzen
+und nach Neustart fortsetzen. Ausschließlich lesende Ergänzung, keine Implementierung:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d2d3-contract-refine-r1`.
+
+D1 ist separat auf `25dc96b` integriert, eigener Root-Worktree `p2-d1-pull-integration`,
+Branch `p2/d1-pull-integration`, Basis Android `dbb7ed1`. R4 bestätigt `89a6adb` ohne
+offene Befunde. Einziger Mergekonflikt: `CloudPullPort` zusätzlich zu Upload-/Backend-Port;
+alle 22 D1-Dateien nach Auflösung bytegleich Worker, Android-/Auth-/Gate-/SQL-/CI-Stand
+unverändert. Gemeinsamer Gesamtcheck samt beiden APKs 761 Tasks grün (2m49s).
+Frisches unabhängiges Integrationsreview läuft, eigener PR folgt getrennt von #68:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-root-integration-review-r1`.
+Echte D1-Stackabnahme noch offen; konkrete Wiederverwendung der K2-Service-CI wird lesend geprüft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-stack-ci-scope-r1`.
+
+Root hat den konkreten K2-A-Nativschnitt freigegeben: Android erhält pro Export-HTTP-
+Aufruf eigenen instrumentierten OkHttp-Client/Dispatcher/Pool/Listener. Ktor-Join,
+native Terminalevents und eigener Dispatcher-idle gemeinsam vor Operationsabschluss.
+Neun festgelegte Dateien im A-Worktree, öffentlicher Port unverändert, keine neue Version
+oder globale SDK-/RPCänderung. iOS- und produktives JVM-ZIP sowie uninstrumentierte
+native Injection werden für diesen Android-Pilotschnitt vor Netzwerk ausdrücklich mit
+`export_unavailable` verweigert. Bestehende Auth-/RPC-/Kontorechte bleiben erhalten;
+Apple-/JVM-Nativabschluss als getrennte spätere Lieferung. Keine Engine-Namensheuristik,
+kein unbewiesener Ktor-Job-Drain. DNS-/Header-/Body-/Fehlerbarrieren und bisherige Fences
+vor Gesamtcheck und frischem Review 3 erforderlich. Umsetzung läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r2-impl`.
+
+Android-CI-Review 1 bestätigt `15f08cf` ohne Befunde; 13 Hosttests unabhängig grün.
+Transportcancel ist nachgewiesen keine Host-Publikationsbarriere, der 15-s-StateFlow-Wait
+erhält alle ursprünglichen Assertions und verhindert über `IDLE` Scheinerfüllung.
+Root übernimmt exakt diese einzelne Testdatei ohne Konflikt; Produktcode und öffentliche
+API unverändert. Gemeinsamer Gesamtcheck mit Phone-/Wear-APK vor Integrationscommit
+761 Tasks grün (1m1s, `advantly-android-ci-root-integration-check.log`), danach neuer
+CI-Head für PR #68. Kein Merge des fehlgeschlagenen `6da7517`.
+
+K2-A Review 2 auf `c58a96f` bestätigt alle sieben Ktor-Drainfälle, findet aber einen
+neuen P1 am nativen OkHttp-Callback: blockierte DNS-Auflösung bleibt aktiv, obwohl der
+Request-Job beendet und die Exportoperation aus dem Register entfernt ist. Eigene Probe
+mit echtem Ktor 3.5.1/OkHttp 5.3.2 bestätigt dies vor separater DNS-Freigabe. Keine alte
+Veröffentlichung, aber weiterhin falsche Close-Barriere. Vor Produktänderung ist im
+bestehenden A-Worktree die minimale instrumentierte native Engine-/Call-Completion-Seam
+abzugrenzen; Android/JVM/iOS und injizierte Engines ausdrücklich behandeln, keine
+unbelegte Parität aus Ktor-Jobabschluss ableiten. Öffentlicher Port und RPC/Authpfad bleiben.
+Konkrete Dateien/API gehen vor Edit an Root, keine Nutzerrückfrage und kein neues Framework.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r2-scope`.
+
+D1-Korrektur 3 `89a6adb` fertig, sechs autorisierte Dateien; indizierte Einzelquery und
+Fences ohne Schema-/Index-/EventStoreänderung. Originalrepros rot→grün, genau 2/500
+Payloadzeilen bei 1.000/10.000 Bestandsereignissen, 10.000er-Reparatur über Wiederöffnungen
+und lokale Abbrüche/Teil-Receipts atomar geprüft. 268 Tests plus Migration grün, ein realer
+Stacktest bleibt ausdrücklich offen; Gesamtcheck 692 Tasks grün. Root-Produktdiff gelesen,
+frisches unabhängiges Review 4 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r4`.
+
+Android-CI-Fix `15f08cf` fertig: ausschließlich `PhoneUploadHostTest.kt`, keine Produkt-
+oder APIänderung. Anhalten nur des Hostdispatchs beweist Transportcancel vor Hostpublikation;
+alter Wait deterministisch rot, explizite StateFlow-Resetbarriere grün. 13 Host-/21 App-Tests,
+Main.immediate-Owner-Vertragsprobe und Gesamtcheck samt APKs 761 Tasks grün. Alle ursprünglichen
+zehn Transitions-/History-/Ack-/Altantwortassertionen erhalten. Root hat Diff/Übergabe gelesen;
+frisches Review vor Integration in PR #68:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-ci-review-r1`.
+
+K2-A Drainkorrektur `c58a96f` gegen `acdd93e` fertig, sauber und genau zwei Dateien:
+`CloudHttp.kt` plus bestehender Export-HTTP-Test. Request-Lifetime ab Requestaufbau erfassen,
+im `finally` cancellationfest canceln und vollständig joinen; öffentliche API unverändert.
+Drei Originalrepros rot→grün, sieben Drainfälle einschließlich Pre-Header-/Body-/Timeout-/
+Caller-/Sink-/MIME-Fehler mit separater Transportbarriere grün. Vor Freigabe bleiben Export
+und Transport unvollendet; danach beide beendet. 133 Cloud-JVM-Tests, ktlint, Gesamtcheck
+und Phone-/Wear-APK grün. Dauerhaft blockierter Transportabbau hält die Operation bewusst
+offen; kein falscher Drain. Root hat Produktdiff geprüft; frisches unabhängiges Review 2 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r2`.
+Android-C bleibt bis zu diesem Review ungestartet; D1-/Android-CI-Korrekturen laufen getrennt.
+
+PR #68 auf `6da7517`: Ubuntu-Job `117723125763` scheitert in einem von 19 Androidtests.
+CI-XML wurde gelesen: nicht der `runBlocking`-Einstieg 591, sondern `assertFalse` für
+`canRefreshStatus` in `PhoneUploadHostTest.kt:627`. Der Test wartet zuvor auf ein
+MockEngine-Cancellationsignal, danach prüft er den Hostzustand. Ursache noch nicht
+festgelegt: kausale Reihenfolge von Auth-/Gate-Entwertung, Transportabbruch und serieller
+Host-Publikation muss deterministisch belegt werden. Enger Diagnose-/Korrekturauftrag
+im bestehenden Android-Worktree, Besitz nur `PhoneUploadHost.kt` und direkter Test;
+keine Sleeps, Wiederholungen oder abgeschwächten Sicherheitsassertionen. Rot→Grün,
+alle bestehenden Transitions-/Drain-/Refreshfälle und vollständiger Check/APKs erforderlich.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-android-ci-fix-r1`.
+
+D2/D3-Erkundung abgeschlossen, ausschließlich lesend. Benötigt reversiblen Zugriffszustand
+statt `deleteMatch`-Tombstone, dauerhafte Offline-Zustellung unabhängig vom Event-Ack,
+Redaktionsnachweis bis zur speziellen Store-Operation und koordiniertes Protokoll 4.
+Konkrete vorhandene Seams und Tests liegen im Taskresultat. Vor Umsetzung Root-Verträge
+für monotone Zugriffsgeneration bei vollständigem Verschwinden, autorisierte Personen-
+Whitelist und neue namenfreie Assignmentdarstellung festlegen. Persistenz-/Engine-/Protokoll-
+Besitz kann danach teilweise parallel laufen; `MatchSession.kt` bleibt bei genau einem
+Integrator. D1 und seine aktuelle `MatchEvent.sq`-Korrektur zuerst abschließen; keine
+überlappende Persistenzumsetzung gestartet. Reale Offline-Uhr-/G8-Abnahme bleibt offen.
+
+D1 Review 3 auf `b44c5ab` hält sämtliche R1-/R2-Befunde geschlossen, findet aber einen
+neuen P2 in wiederverwendetem Downloadcode: pro Duplikat lädt `storeDownloaded` das
+vollständige Matchlog. Bei 10.000 Bestandsereignissen lädt eine Zweierseite 20.000,
+eine 500er-Seite fünf Millionen Payloadzeilen; ein Lauf mit 1-s-Frist dauerte etwa
+5,9 s und rollte ohne Cursorfortschritt zurück. Zwei Strukturregressionen belegen den Fehler.
+Enger zusätzlicher Besitz freigegeben: `CloudSyncRepository.kt`, ausschließlich additive
+Einzelquery in `MatchEvent.sq` (vorhandener ID-Primärschlüssel, keine Migration) und bei
+Bedarf bestehender `CloudSyncRepositoryTest.kt`. Tatsächlichen Einzelinhalt prüfen,
+Fences zwischen begrenzten Einheiten; Konflikt-/Ack-/Tombstone-/Batchrollbackregeln erhalten.
+Keine EventStore-/Peer-/Engine-/Backend-/Auth-/U4-Erweiterung. Korrektur im bestehenden
+isolierten D1-Worktree mit Originalrepros, Fokus/Migration und Gesamtcheck beauftragt:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d1-fix-r3`.
+
+PR #67 ist nach Mainabgleich auf `ba90a1d` konfliktbereinigt und gepusht; gemeinsamer
+Gesamtcheck 688 Tasks grün (2m10s). K2-Server/CI unverändert zu `8e49ccc`, U4-Dateien
+bytegleich main `870792a`. Echte Service-CI auf `8e49ccc` vollständig grün, einschließlich
+Storage-Bereinigung, altem JWT nach Auth-Logout und Vault→pg_net→Cleanup. CI auf dem
+neuen Mergehead bleibt nötig. Kein Hosted-/periodischer Cron-/Phone-Beweis daraus abgeleitet.
+
+K2-A Review 1 meldet einen P1: Exportoperation kann unter Cancellation/Timeout bereits
+enden, während der tatsächliche Transport noch abbaut. Belegt vor Headern, bei Metadaten-
+Timeout und während Body-Lesen; alte Erfolge bleiben gefenct, Close-/Drain-Barriere verletzt.
+Enge Korrektur im bestehenden A-Worktree beauftragt, öffentliche API und sechs Besitzdateien
+beibehalten. Tests müssen vor separater Transportfreigabe einen noch offenen Exportjob
+beweisen; danach cancellationfest tatsächlichen Abschluss abwarten. C wartet auf Review 2.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r1`.
+
+K2-B Review 1 bestätigt `99f19cf` ohne Befunde: sechs Dateien, Port-/Aktionsvertrag und
+DE/EN-Hell/Dunkel-200-Prozent-Bilder geprüft. Ausschließlich isolierte UI-Lane freigegeben;
+Host-/Account-/Datei-/Freigabevertrag bleibt C/D. Der nächste freie unabhängige Arbeitsstrang
+bereitet D2/D3 ausschließlich lesend vor: konkrete Store-/Peer-/Protokoll-4-Grenzen und
+prüfbare Pakete, keine vorgezogene Umsetzung oder Änderung an D1.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-scope-r1`.
+
+K2-A ist sauber auf `acdd93e` abgeschlossen (Basis `7ff695e`), genau sechs autorisierte
+Cloud-Dateien. 126 Cloud-JVM-Tests einschließlich 21 neuer Exporttests und vollständiger
+Check mit Phone-/Wear-APK grün. Eigenständige Exportrevision, Kontogrenzen, begrenzter
+Stream und native Zeitlimits; SHA-256 und Dateipromotion bleiben ausdrücklich beim
+folgenden Androidhost. Frisches unabhängiges Review 1 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r1`.
+
+K2-B ist sauber auf `99f19cf` abgeschlossen (dieselbe Basis), genau sechs autorisierte
+Präsentations-/UI-/Test-/Stringdateien. 38 neue Schlüssel je Sprache, 62 Präsentations-
+und 222 Desktoptests grün; vollständiger Check samt Phone-/Wear-APK mit 761 Tasks grün.
+12 Phasen und neun Fehler DE/EN, Hell/Dunkel, 360×640 bei 200 Prozent geprüft;
+24 Desktopbilder. Fehlertext nutzt lokal `onBackground` plus Fehlersemantik, weil das
+bestehende Material-Fehlerrot auf hellem Apphintergrund nur 4,463:1 erreichte.
+Frisches unabhängiges UI-Review 1 läuft; noch keine Account-/Androidabnahme:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-ui-review-r1`.
+
+K2-Serverkorrektur `8e49ccc`: echter PostgREST-ACK für `void` liefert 204 ohne JSON-Body.
+Der Backendadapter akzeptiert ausschließlich diesen zusätzlichen Erfolgsfall; leerer 200
+bleibt fehlerhaft. Zwei neue Regressionen gegen Original rot, mit Fix insgesamt 21
+Deno-Tests sowie Typen/Format/Lint und vollständiger 688-Task-Check grün. Der Liveharness
+behält sämtliche Cleanup-Negativprüfungen und verlangt zusätzlich den echten ACK204.
+Frisches Integrationsreview 4 bestätigt `8e49ccc` ohne neue Befunde, unabhängig 21
+Deno-Tests/Typen/Format/Lint und sichere Diagnose geprüft. Echte Service-CI bleibt offen:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-integration-review-r4`.
+Kein Merge vor beiden Nachweisen. D1-Korrektur 2 ist auf `b44c5ab` abgeschlossen:
+neun autorisierte Dateien, beide R2-Repros rot→grün, R1-Regressionen erhalten, 258 Tests
+und Migration grün sowie ein ausdrücklich offener Stackskip; Gesamtcheck 688 Tasks grün.
+Persistierte Quote von zwölf Eventversuchen erzwingt eine Metadatenseite; erster vollständiger
+Rundenkatalog bleibt Voraussetzung, spätere Seiten wechseln mit Events. Frisches Review 3:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r3`.
+C konsumiert A/B erst nach ihren Reviews. Keine gemeinsame Besitzdatei wird parallel editiert.
+
+Root-Androidintegration `ba1f37d` unabhängig `ship`, keine offenen Befunde; 20 Tests frisch
+plus zwei aus Cache und zusätzliche gemeinsame DE/EN-Hell/Dunkel-200%-Probe grün.
+PR #68 wartet auf Vorläufer #66 und eigene CI. K2-Server auf `84ee8fc` besteht echte
+1.299 pgTAP-Prüfungen/35 Dateien, Parallelrennen, ZIP- und Idempotenz-HTTP-Proben; spätere
+Storage-Negativ-/Cleanup-Probe scheitert noch. Root-Diagnose `425c094` ändert nur sichere
+Testpositionen, keine Assertion/Produktlogik. Service-CI läuft erneut, keine Gesamtabnahme.
+
+D1 Fix `8305254` gegen `68d23de` fertig: zwölf autorisierte Dateien, fünf Originalrepros
+rot→grün, 250 Fokusprüfungen plus ein offener Stackskip, Migration/Gesamtcheck 688 Tasks grün.
+Persistierte faire Prüfrunde/Phase, Minimalbudget und `scheduled`-Snapshots gehen ins frische
+Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r2`.
+
+K2-Phone-Erkundung bestätigt den kleinsten vollständigen Androidpfad: manuell anfordern,
+Status prüfen, in privaten Cache laden/verifizieren, ausdrücklich per Sharesheet teilen.
+Kein zusätzliches SAF-Speicherframework oder automatisches Polling. Empfängerkopien und
+bereits offene Dateideskriptoren sind nicht nachträglich fernlöschbar.
+
+| Lane | Exklusiver Besitz | Prüfbares Ergebnis |
+|---|---|---|
+| K2-A Cloudadapter | Neue `CloudDataExportPort.kt`/`SupabaseDataExport.kt`, nur additive Exportseams in `CloudHttp.kt`/`SupabasePhoneAuth.kt`, direkte neue Cloudtests | Frische unabhängige Kontositzung, echter fester Bearer, strikte Methoden/ID-/Status-/Pfadvalidierung, begrenztes Streaming; keine Änderung an Gate, Upload, D1 oder SQL. |
+| K2-B Präsentation/UI | Neue `PhoneExportPort.kt`, `CloudExportSection.kt` und direkte Tests; ausschließlich neue `cloud_export_*` in beiden Stringdateien | Eigenständige Zustände/Aktionen ohne SDK/Dateipfad/Androidtypen, DE/EN bei 360×640/200 %, keine AccountScreen-/VM-/Hosteinbindung. |
+| K2-C Android, danach Integration | Nach A/B-Review eigener Auftrag für Cache/Provider/Host; Root vergibt AuthViewModel/PhoneAccount/MainActivity/AdvantlyApp/AccountScreen einmalig | Teilarchiv nie freigebbar; Hash/Größe/Frist/Account vor Promotion und Teilen; Upload und Export beide synchron sperren und drainen, danach Auth genau einmal schließen. |
+
+A und B starten isoliert auf demselben geprüften Rootstand nach `ba1f37d`; keine
+gegenseitigen Imports. C konsumiert anschließend beide geprüften Verträge.
+Tatsächliche gemeinsame Basis `7ff695e`. A arbeitet im eigenen Git-Worktree
+`p2-k2-a-export-http`, B im eigenen `p2-k2-phone-ui`; B meldet T3-`already_in_worktree`
+und nutzt deshalb für sämtliche Datei-/Buildoperationen explizit seinen eigenen Workdir.
+Root-/fremde Worktrees bleiben unverändert. Tasks:
+- A: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-impl-r1`
+- B: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-ui-impl-r1`
+
+Verbindlicher A-Vertrag: `CloudDataExportPort.context` ist
+`StateFlow<CloudDataExportContext?>`; Context enthält ausschließlich Profil-ID, verifizierte
+Kontogeneration und eigene Exportrevision. `requireCurrent(context)` prüft synchron auch die
+SDK-Identität. Suspendierende `request(context, requestId)` und `status(context, requestId)`
+liefern `CloudDataExportStatus` (Pending mit bestätigter ID/Retry-After, Ready mit ID/
+exportedAtMs/expiresAtMs/byteLength/sha256, Busy mit Retry-After ohne fremde ID).
+`download(context, ready, sink)` streamt höchstens 16 MiB und exakt die bestätigte Länge;
+`CloudDataExportSink.write(bytes, offset, length)` erhält kleine Blöcke. HTTP prüft MIME,
+Route, EOF und native Zeitlimits; C prüft SHA-256 vor Dateipromotion. Kein öffentlicher Token-
+Getter und kein behaupteter Hashbeweis allein durch HTTP-Abschluss.
+
+Exportrevision entwertet laufende Arbeit/Dateifreigabe bei Konto-/SDK-Grenze, Logout,
+Close und Beginn eines Löschantrags (`requestDeletion`/`stopForDeletion`). Eine danach
+ausdrücklich neu gestartete Exportaktion bleibt in der Karenz zulässig. Consent-/reine
+Cloud-Sperren entziehen dieses Kontorecht nicht. Alle bestehenden K1-Mutations-/Antwortfences
+bleiben erhalten; neue Exportjobs werden getrennt verwaltet.
+
+B-Vertrag: `PhoneExportPort.state: StateFlow<PhoneExportState>`, Methoden `requestExport`,
+`retry`, `refreshStatus`, `download`, `cancel`, `discard`, `close(onDrained)`.
+State enthält ausschließlich Phase, erlaubte Aktionen, stabile Fehlerklasse und optionale
+Zeit-/Größen-/Retryangaben; keine Request-ID, Cloudtypen, Pfade oder Uri. Die Sektion bekommt
+einen optionalen `onShare`-Callback statt einer gespeicherten Activity. Primäraktion je
+Zustand plus nötiges Anhalten/Verwerfen; kein Prozentfortschritt ohne Beleg, „Teilen geöffnet“
+ist kein bestätigtes Speichern. Cancel hält nur lokale Arbeit an, kein erfundener Serverabbruch.
+Retry/Status behalten dieselbe Request-ID im späteren Host; 409 kündigt keine Pending-ID an.
+
+Android Review 2 bestätigt `31620a7` und den separaten Root-Kontrastfix `1f830dc` jeweils
+ohne offene Befunde. Unabhängig 21 gezielte Tests grün: elf Host-, zwei Präsentations-,
+ein Upload-UI-Matrix- und sieben Kontotests. Root übernimmt den Androidkandidaten in den
+eigenen Integrationszweig. Einziger Produktkonflikt: die einzeilige Upload-Einhängung muss
+innerhalb der bereits korrigierten Kontospalte bleiben. Alle anderen Android-/Cloud-/Data-/
+Präsentationsdateien und Ressourcen bleiben bytegleich zu `31620a7`; Root-Kontrasttest bleibt
+zusätzlich erhalten. Keine Änderungen am Authadapter, Backend-SQL oder D1.
+Gemeinsamer vollständiger Check plus Android-APK: 744 Tasks grün (1m48s),
+`advantly-android-root-integration-check.log`. Frisches Review der Integrationsauflösung folgt.
+
+K2 Integrationsreview 3 bestätigt `84ee8fc` ohne offene Befunde, einschließlich zentralem
+Deno-Pfadfilter. PR #67 ist kein Draft mehr; vollständige Service-CI auf genau diesem Head
+bleibt vor Merge erforderlich. Veraltete CI-Meldungen zu `79b5faa` und `270782b` wurden
+geprüft, nicht als Fehler beziehungsweise Freigabe des aktuellen Heads behandelt.
+
+Nächster begrenzter K2-Schnitt wird parallel lesend abgegrenzt: echter privater ZIP-Download
+auf Android mit Dateiausgabe/Freigabe, unabhängigen Kontorechten und Kontowechselfences.
+Noch kein Implementierungsbesitz vergeben; keine UI-Kollision mit der Androidintegration.
+Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-scope-r1`.
+
+Android Review 1 auf `2e135ac`: funktional `ship`, 506 Fokusprüfungen und 14 zusätzliche
+nicht kooperative Bind-/Push-/Close-Rennen grün. Ein P3: Refresh vor erster Bindung aktiv,
+aber ohne Wirkung. Fix `31620a7` ergänzt ausschließlich `canRefreshStatus=false` als Default,
+Freigabe erst mit aktuellem gebundenem Runner; UI sperrt zusätzlich während Busy.
+Worker 507 Fokusprüfungen und 740 Gesamtcheck/APK-Tasks grün; frisches Review 2 folgt.
+
+Root behebt separat den vorbestehenden Account-Kontrastfehler in `AccountScreen.kt` und
+`AccountScreenTest.kt`: Hintergrund-ContentColor aus Material-Token nur für die Kontospalte,
+keine globale Theme-/Text-/Layoutänderung; Einrückungen mechanisch. Regression im tatsächlichen
+Box-background-Host ohne kaschierendes Surface: vorher 1,0737:1, nach Fix mindestens 4,5:1,
+DE/EN, Hell/Dunkel, 200 %, Kontoaktionen erreichbar. Baseline-XML und Screenshots lokal erhalten.
+
+D1 Review 1 auf `68d23de`: vier belegte P2, fünf rote eigene Regressionen. Fehlerhafter
+erster Eventauftrag verhungert Folgeaufträge; Prüfrunde startet bei jedem Aufruf neu und
+wird im größeren ruhenden Bestand nie vollständig; Einseitenbudget verhindert Eventarbeit;
+gültiges Server-`scheduled` scheitert am Engine-Status. Korrektur innerhalb bestehender
+D1-Dateien beauftragt: faire dauerhafte Auswahl, fortsetzbare begrenzte Prüfrunde/Phase,
+geplanter Match als Snapshot ohne erfundenen Engine-Status. Cursor/Receipts erst bei Erfolg,
+Fehler sichtbar. Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-d1-fix-r1`.
+
+K2-Integrationsreview 1 findet Deno-Formatfehler vor echtem Stackstart. Root-Fix `990179f`
+pinnt 2.9.7 im zentralen Katalog und verlangt zwei Leerzeichen; mit genau dieser Runtime
+19 Tests/Typen/Format/Lint und Gesamtcheck 692 Tasks grün. Neue Service-CI und Review 2
+laufen. PR66 nach PR65-Squash im eigenen Hilfsworktree auf `09bdd1b` abgeglichen; ausschließlich
+Plan-Konflikt, Produktcode/SQL/Tests unverändert. Neue CI erforderlich.
 K2-Mainabgleich nach PR #66: `origin/main 870792a` bringt ausschließlich den unabhängig
 geprüften U4-Kern in diese Serverintegration. Konflikte nur im Plan; beide Nachweise bleiben
 erhalten. Shared-/Android-/Wear-Baum bytegleich zu main, K2-Server/CI/Katalog unverändert

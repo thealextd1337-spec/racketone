@@ -38,15 +38,20 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
             install(Auth) { sessionManager = storage }
             install(Postgrest)
         }
-    return AuthViewModel(
+    val session = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
+    val auth =
         SupabasePhoneAuth(
             client,
             storage.deviceSecret,
-            uploads = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE).data.cloudUploads,
-            ownership = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE),
+            uploads = session.data.cloudUploads,
+            ownership = session,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
             threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
-        ),
+        )
+    val backend = auth.cloudBackend(storage.cloudInstallation)
+    return AuthViewModel(
+        auth,
+        upload = PhoneUploadHost(auth, session, backend, backend::bindDevice),
         support =
             SupportViewModel(
                 SupabaseSupport(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, client),

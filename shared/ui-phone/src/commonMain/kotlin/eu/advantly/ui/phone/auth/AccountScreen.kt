@@ -12,10 +12,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -111,236 +114,243 @@ fun AccountScreen(
     var code by remember(state.step) { mutableStateOf("") }
     var alias by remember(state.step) { mutableStateOf("") }
     var username by remember(state.step) { mutableStateOf("") }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(Res.string.auth_title))
-        Text(stringResource(Res.string.auth_optional))
-        onSupport?.let {
-            TextButton(it, modifier = Modifier.testTag("account_support")) { Text(stringResource(Res.string.support_open)) }
-        }
-        TextButton(model::refresh, enabled = !state.busy, modifier = Modifier.testTag("auth_refresh")) {
-            Text(stringResource(Res.string.auth_refresh))
-        }
-        when (state.step) {
-            AuthStep.AGE -> {
-                Text(stringResource(Res.string.auth_birth_privacy))
-                OutlinedTextField(
-                    country,
-                    { country = it.uppercase().take(2) },
-                    label = { Text(stringResource(Res.string.auth_country)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_country"),
-                )
-                OutlinedTextField(
-                    birthDate,
-                    { birthDate = it.take(10) },
-                    label = { Text(stringResource(Res.string.auth_birth)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_birth"),
-                )
-                Button(
-                    { model.checkAge(country, birthDate) },
-                    enabled =
-                        !state.busy && birthDate.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")),
-                    modifier = Modifier.testTag("auth_age_next"),
-                ) { Text(stringResource(Res.string.auth_continue)) }
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(Res.string.auth_title))
+            Text(stringResource(Res.string.auth_optional))
+            onSupport?.let {
+                TextButton(it, modifier = Modifier.testTag("account_support")) { Text(stringResource(Res.string.support_open)) }
             }
-
-            AuthStep.PROVIDER -> {
-                google?.let {
-                    Button({ model.google(it) }, enabled = !state.busy, modifier = Modifier.testTag("auth_google")) {
-                        Text(stringResource(Res.string.auth_google))
-                    }
+            TextButton(model::refresh, enabled = !state.busy, modifier = Modifier.testTag("auth_refresh")) {
+                Text(stringResource(Res.string.auth_refresh))
+            }
+            when (state.step) {
+                AuthStep.AGE -> {
+                    Text(stringResource(Res.string.auth_birth_privacy))
+                    OutlinedTextField(
+                        country,
+                        { country = it.uppercase().take(2) },
+                        label = { Text(stringResource(Res.string.auth_country)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_country"),
+                    )
+                    OutlinedTextField(
+                        birthDate,
+                        { birthDate = it.take(10) },
+                        label = { Text(stringResource(Res.string.auth_birth)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_birth"),
+                    )
+                    Button(
+                        { model.checkAge(country, birthDate) },
+                        enabled =
+                            !state.busy && birthDate.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")),
+                        modifier = Modifier.testTag("auth_age_next"),
+                    ) { Text(stringResource(Res.string.auth_continue)) }
                 }
-                OutlinedTextField(
-                    email,
-                    { email = it },
-                    label = { Text(stringResource(Res.string.auth_email)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_email"),
-                )
-                Button({ model.sendCode(email) }, enabled = !state.busy && email.contains('@'), modifier = Modifier.testTag("auth_send")) {
-                    Text(stringResource(Res.string.auth_send))
-                }
-                TextButton(model::restart, enabled = !state.busy) { Text(stringResource(Res.string.auth_restart)) }
-            }
 
-            AuthStep.CODE -> {
-                OutlinedTextField(
-                    code,
-                    { code = it.filter(Char::isDigit).take(10) },
-                    label = { Text(stringResource(Res.string.auth_code)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_code"),
-                )
-                Button(
-                    { model.verifyCode(code) },
-                    enabled = !state.busy && code.length >= 6,
-                    modifier = Modifier.testTag("auth_verify"),
-                ) {
-                    Text(stringResource(Res.string.auth_continue))
-                }
-                TextButton(model::restart, enabled = !state.busy) { Text(stringResource(Res.string.auth_restart)) }
-            }
-
-            AuthStep.ALIAS -> {
-                OutlinedTextField(
-                    alias,
-                    { alias = it.take(40) },
-                    label = { Text(stringResource(Res.string.auth_alias)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_alias"),
-                )
-                OutlinedTextField(
-                    username,
-                    { username = it.take(20) },
-                    label = { Text(stringResource(Res.string.auth_username)) },
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth().testTag("auth_username"),
-                )
-                Button(
-                    { model.finish(alias, username) },
-                    enabled = !state.busy && alias.isNotBlank(),
-                    modifier = Modifier.testTag("auth_finish"),
-                ) {
-                    Text(stringResource(Res.string.auth_finish))
-                }
-            }
-
-            AuthStep.CONSENT -> {
-                Unit
-            }
-
-            AuthStep.ACCOUNT -> {
-                Text(stringResource(if (state.deletionRequested) Res.string.auth_deletion else Res.string.auth_ready))
-                if (!state.deletionRequested) {
+                AuthStep.PROVIDER -> {
                     google?.let {
-                        Button(
-                            { model.google(it, link = true) },
-                            enabled = !state.busy,
-                        ) { Text(stringResource(Res.string.auth_link_google)) }
+                        Button({ model.google(it) }, enabled = !state.busy, modifier = Modifier.testTag("auth_google")) {
+                            Text(stringResource(Res.string.auth_google))
+                        }
+                    }
+                    OutlinedTextField(
+                        email,
+                        { email = it },
+                        label = { Text(stringResource(Res.string.auth_email)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_email"),
+                    )
+                    Button(
+                        { model.sendCode(email) },
+                        enabled = !state.busy && email.contains('@'),
+                        modifier = Modifier.testTag("auth_send"),
+                    ) {
+                        Text(stringResource(Res.string.auth_send))
+                    }
+                    TextButton(model::restart, enabled = !state.busy) { Text(stringResource(Res.string.auth_restart)) }
+                }
+
+                AuthStep.CODE -> {
+                    OutlinedTextField(
+                        code,
+                        { code = it.filter(Char::isDigit).take(10) },
+                        label = { Text(stringResource(Res.string.auth_code)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_code"),
+                    )
+                    Button(
+                        { model.verifyCode(code) },
+                        enabled = !state.busy && code.length >= 6,
+                        modifier = Modifier.testTag("auth_verify"),
+                    ) {
+                        Text(stringResource(Res.string.auth_continue))
+                    }
+                    TextButton(model::restart, enabled = !state.busy) { Text(stringResource(Res.string.auth_restart)) }
+                }
+
+                AuthStep.ALIAS -> {
+                    OutlinedTextField(
+                        alias,
+                        { alias = it.take(40) },
+                        label = { Text(stringResource(Res.string.auth_alias)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_alias"),
+                    )
+                    OutlinedTextField(
+                        username,
+                        { username = it.take(20) },
+                        label = { Text(stringResource(Res.string.auth_username)) },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("auth_username"),
+                    )
+                    Button(
+                        { model.finish(alias, username) },
+                        enabled = !state.busy && alias.isNotBlank(),
+                        modifier = Modifier.testTag("auth_finish"),
+                    ) {
+                        Text(stringResource(Res.string.auth_finish))
                     }
                 }
-            }
-        }
-        if (state.authenticated) {
-            state.consent?.let { consent ->
-                Text(stringResource(Res.string.consent_title))
-                Text(
-                    stringResource(
-                        when (consent.status) {
-                            ConsentStatus.UNAVAILABLE -> Res.string.consent_unavailable
-                            ConsentStatus.REQUIRED -> Res.string.consent_required
-                            ConsentStatus.DECLINED -> Res.string.consent_declined
-                            ConsentStatus.CURRENT -> Res.string.consent_current
-                        },
-                    ),
-                    modifier = Modifier.testTag("consent_status"),
-                )
-                consent.documents.forEach { document ->
-                    val title =
-                        stringResource(
-                            if (document.type ==
-                                ConsentDocumentType.TERMS
-                            ) {
-                                Res.string.consent_terms
-                            } else {
-                                Res.string.consent_privacy
-                            },
-                        )
-                    Text(title)
-                    Text(stringResource(Res.string.consent_version, document.version, document.language))
-                    document.url?.takeIf { it.startsWith("https://advantly.eu/") }?.let { url ->
-                        TextButton(
-                            { uriHandler.openUri(url) },
-                            modifier = Modifier.testTag("consent_link_${document.type}"),
-                        ) { Text(title) }
-                    }
-                    if (consent.status != ConsentStatus.CURRENT && document.approved) {
-                        Row {
-                            Checkbox(
-                                checked = document.type in confirmed,
-                                onCheckedChange = {
-                                    confirmed = if (it) confirmed + document.type else confirmed - document.type
-                                },
+
+                AuthStep.CONSENT -> {
+                    Unit
+                }
+
+                AuthStep.ACCOUNT -> {
+                    Text(stringResource(if (state.deletionRequested) Res.string.auth_deletion else Res.string.auth_ready))
+                    if (!state.deletionRequested) {
+                        google?.let {
+                            Button(
+                                { model.google(it, link = true) },
                                 enabled = !state.busy,
-                                modifier = Modifier.testTag("consent_confirm_${document.type}"),
-                            )
-                            Text(stringResource(Res.string.consent_confirm, title), modifier = Modifier.weight(1f))
+                            ) { Text(stringResource(Res.string.auth_link_google)) }
                         }
                     }
                 }
-                if (consent.status != ConsentStatus.CURRENT) {
-                    Button(
-                        { model.decideConsent(true) },
-                        enabled = !state.busy && consent.canAccept && confirmed.size == 2,
-                        modifier = Modifier.fillMaxWidth().testTag("consent_accept"),
-                    ) { Text(stringResource(Res.string.consent_accept)) }
-                    TextButton(
-                        { model.decideConsent(false) },
-                        enabled = !state.busy,
-                        modifier = Modifier.testTag("consent_decline"),
-                    ) { Text(stringResource(Res.string.consent_decline)) }
-                }
             }
-            TextButton(model::exportData, enabled = !state.busy, modifier = Modifier.testTag("account_export")) {
-                Text(stringResource(Res.string.account_export))
-            }
-            if (state.deletionRequested) {
-                TextButton(model::cancelDeletion, enabled = !state.busy, modifier = Modifier.testTag("account_recover")) {
-                    Text(stringResource(Res.string.account_recover))
-                }
-            } else {
-                TextButton({ confirmDeletion = true }, enabled = !state.busy, modifier = Modifier.testTag("account_delete")) {
-                    Text(stringResource(Res.string.account_delete))
-                }
-            }
-        }
-        if (state.adoptionSources.isNotEmpty()) {
-            Text(stringResource(Res.string.auth_adoption_title))
-            state.adoptionSources.forEachIndexed { index, source ->
-                Row {
-                    Checkbox(
-                        checked = source.key in state.selectedSources,
-                        onCheckedChange = { model.selectSource(source.key) },
-                        enabled = !state.busy,
-                        modifier = Modifier.testTag("auth_adoption_source_$index"),
-                    )
+            if (state.authenticated) {
+                model.upload?.let { CloudUploadSection(it) }
+                state.consent?.let { consent ->
+                    Text(stringResource(Res.string.consent_title))
                     Text(
                         stringResource(
-                            if (source.watch) Res.string.auth_adoption_watch else Res.string.auth_adoption_phone,
-                            source.eventCount,
+                            when (consent.status) {
+                                ConsentStatus.UNAVAILABLE -> Res.string.consent_unavailable
+                                ConsentStatus.REQUIRED -> Res.string.consent_required
+                                ConsentStatus.DECLINED -> Res.string.consent_declined
+                                ConsentStatus.CURRENT -> Res.string.consent_current
+                            },
                         ),
+                        modifier = Modifier.testTag("consent_status"),
                     )
+                    consent.documents.forEach { document ->
+                        val title =
+                            stringResource(
+                                if (document.type ==
+                                    ConsentDocumentType.TERMS
+                                ) {
+                                    Res.string.consent_terms
+                                } else {
+                                    Res.string.consent_privacy
+                                },
+                            )
+                        Text(title)
+                        Text(stringResource(Res.string.consent_version, document.version, document.language))
+                        document.url?.takeIf { it.startsWith("https://advantly.eu/") }?.let { url ->
+                            TextButton(
+                                { uriHandler.openUri(url) },
+                                modifier = Modifier.testTag("consent_link_${document.type}"),
+                            ) { Text(title) }
+                        }
+                        if (consent.status != ConsentStatus.CURRENT && document.approved) {
+                            Row {
+                                Checkbox(
+                                    checked = document.type in confirmed,
+                                    onCheckedChange = {
+                                        confirmed = if (it) confirmed + document.type else confirmed - document.type
+                                    },
+                                    enabled = !state.busy,
+                                    modifier = Modifier.testTag("consent_confirm_${document.type}"),
+                                )
+                                Text(stringResource(Res.string.consent_confirm, title), modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                    if (consent.status != ConsentStatus.CURRENT) {
+                        Button(
+                            { model.decideConsent(true) },
+                            enabled = !state.busy && consent.canAccept && confirmed.size == 2,
+                            modifier = Modifier.fillMaxWidth().testTag("consent_accept"),
+                        ) { Text(stringResource(Res.string.consent_accept)) }
+                        TextButton(
+                            { model.decideConsent(false) },
+                            enabled = !state.busy,
+                            modifier = Modifier.testTag("consent_decline"),
+                        ) { Text(stringResource(Res.string.consent_decline)) }
+                    }
+                }
+                TextButton(model::exportData, enabled = !state.busy, modifier = Modifier.testTag("account_export")) {
+                    Text(stringResource(Res.string.account_export))
+                }
+                if (state.deletionRequested) {
+                    TextButton(model::cancelDeletion, enabled = !state.busy, modifier = Modifier.testTag("account_recover")) {
+                        Text(stringResource(Res.string.account_recover))
+                    }
+                } else {
+                    TextButton({ confirmDeletion = true }, enabled = !state.busy, modifier = Modifier.testTag("account_delete")) {
+                        Text(stringResource(Res.string.account_delete))
+                    }
                 }
             }
-            Button(
-                model::acceptAdoption,
-                enabled = !state.busy && state.selectedSources.isNotEmpty(),
-                modifier = Modifier.testTag("auth_adoption_accept"),
-            ) { Text(stringResource(Res.string.auth_adoption_accept)) }
-            TextButton(
-                model::cancelAdoption,
-                enabled = !state.busy,
-                modifier = Modifier.testTag("auth_adoption_cancel"),
-            ) { Text(stringResource(Res.string.auth_adoption_cancel)) }
-        }
-        state.error?.let { error -> Text(stringResource(authError(error)), modifier = Modifier.testTag("auth_error")) }
-        if (state.error == "profile_missing") {
-            Button(model::signOut, enabled = !state.busy, modifier = Modifier.testTag("auth_reauthenticate")) {
-                Text(stringResource(Res.string.auth_restart))
+            if (state.adoptionSources.isNotEmpty()) {
+                Text(stringResource(Res.string.auth_adoption_title))
+                state.adoptionSources.forEachIndexed { index, source ->
+                    Row {
+                        Checkbox(
+                            checked = source.key in state.selectedSources,
+                            onCheckedChange = { model.selectSource(source.key) },
+                            enabled = !state.busy,
+                            modifier = Modifier.testTag("auth_adoption_source_$index"),
+                        )
+                        Text(
+                            stringResource(
+                                if (source.watch) Res.string.auth_adoption_watch else Res.string.auth_adoption_phone,
+                                source.eventCount,
+                            ),
+                        )
+                    }
+                }
+                Button(
+                    model::acceptAdoption,
+                    enabled = !state.busy && state.selectedSources.isNotEmpty(),
+                    modifier = Modifier.testTag("auth_adoption_accept"),
+                ) { Text(stringResource(Res.string.auth_adoption_accept)) }
+                TextButton(
+                    model::cancelAdoption,
+                    enabled = !state.busy,
+                    modifier = Modifier.testTag("auth_adoption_cancel"),
+                ) { Text(stringResource(Res.string.auth_adoption_cancel)) }
             }
-        }
-        if (state.authenticated) {
-            TextButton(model::signOut, enabled = !state.busy, modifier = Modifier.testTag("auth_sign_out")) {
-                Text(stringResource(Res.string.auth_sign_out))
+            state.error?.let { error -> Text(stringResource(authError(error)), modifier = Modifier.testTag("auth_error")) }
+            if (state.error == "profile_missing") {
+                Button(model::signOut, enabled = !state.busy, modifier = Modifier.testTag("auth_reauthenticate")) {
+                    Text(stringResource(Res.string.auth_restart))
+                }
             }
-        }
-        if (state.busy) CircularProgressIndicator()
-        TextButton({
-            model.restart()
-            onClose()
-        }, enabled = !state.busy, modifier = Modifier.testTag("auth_local")) {
-            Text(stringResource(Res.string.auth_local))
+            if (state.authenticated) {
+                TextButton(model::signOut, enabled = !state.busy, modifier = Modifier.testTag("auth_sign_out")) {
+                    Text(stringResource(Res.string.auth_sign_out))
+                }
+            }
+            if (state.busy) CircularProgressIndicator()
+            TextButton({
+                model.restart()
+                onClose()
+            }, enabled = !state.busy, modifier = Modifier.testTag("auth_local")) {
+                Text(stringResource(Res.string.auth_local))
+            }
         }
     }
     if (confirmDeletion && state.authenticated) {

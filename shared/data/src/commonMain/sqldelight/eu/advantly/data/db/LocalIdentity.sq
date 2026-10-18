@@ -43,6 +43,10 @@ SELECT s.self_id FROM local_source s JOIN cloud_device_owner o ON o.device_id = 
 ownedSource:
 SELECT s.device_id FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id WHERE o.profile_id = ?;
 
+ownedSourceCatalog:
+SELECT s.device_id, s.kind FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id
+WHERE o.profile_id = ? ORDER BY s.device_id;
+
 CREATE TABLE local_scope_source (
     device_id TEXT NOT NULL PRIMARY KEY,
     scope_id TEXT NOT NULL
