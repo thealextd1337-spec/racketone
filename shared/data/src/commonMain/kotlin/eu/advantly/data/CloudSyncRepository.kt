@@ -11,7 +11,7 @@ import kotlinx.serialization.json.jsonObject
  * dort müssen Kontozuordnung und Upload-Rechte vor der Auswahl der Events geprüft werden.
  */
 class CloudSyncRepository internal constructor(
-    private val database: AdvantlyDatabase,
+    internal val database: AdvantlyDatabase,
     private val events: EventStore,
 ) {
     private val queries = database.cloudSyncQueries
