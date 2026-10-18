@@ -14,6 +14,8 @@ import eu.advantly.presentation.auth.PhoneExportPhase
 import eu.advantly.presentation.auth.PhoneExportPort
 import eu.advantly.presentation.auth.PhoneExportState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,7 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 import java.lang.ref.WeakReference
 import java.util.UUID
+import kotlin.coroutines.ContinuationInterceptor
 
 /** Ein expliziter Export je Konto-Host; besitzt weder Auth noch Upload und hält keine Activity. */
 internal class PhoneExportHost(
@@ -109,8 +112,8 @@ internal class PhoneExportHost(
     }
 
     private fun reset() {
+        val running = action
         revision++
-        action?.cancel()
         timer?.cancel()
         timer = null
         invalidateFile()
@@ -121,6 +124,8 @@ internal class PhoneExportHost(
         cancelledLocally = false
         error = null
         phase = PhoneExportPhase.IDLE
+        // Ein bereits abgeschlossener LAZY-Job darf erst den vollständig zurückgesetzten Stand publizieren.
+        running?.cancel()
     }
 
     private fun invalidateFile() {
@@ -328,7 +333,7 @@ internal class PhoneExportHost(
         val id = requestId
         error = null
         cancelledLocally = false
-        action =
+        val running =
             work.launch(start = CoroutineStart.LAZY) {
                 val job = currentCoroutineContext()[Job]!!
                 val fence = {
@@ -353,7 +358,17 @@ internal class PhoneExportHost(
                             }
                         if (local != null) invalidateFile()
                     }
-                } finally {
+                }
+            }
+        action = running
+        val finished = CompletableDeferred<Unit>()
+        cleanupJobs += finished
+
+        fun completeAction() {
+            confined()
+            var changed = false
+            try {
+                if (action === running) {
                     action = null
                     if (!closed && synchronize() == expected && requestId == id && cancelledLocally) {
                         phase =
@@ -364,11 +379,26 @@ internal class PhoneExportHost(
                             }
                         cancelledLocally = false
                     }
-                    publish()
+                    changed = true
                 }
+            } finally {
+                cleanupJobs.remove(finished)
+                finished.complete(Unit)
             }
+            if (changed) publish()
+        }
+        // Gilt auch ohne Body-Eintritt und erst nach sämtlichen Kindern sowie deren tatsächlichem Abbau.
+        running.invokeOnCompletion {
+            if (threadGuard()) {
+                completeAction()
+            } else {
+                // Kein Caller-Job: Close wartet im vorhandenen Register auf diesen seriellen Abschluss.
+                val hostContext = cleanup.coroutineContext
+                (hostContext[ContinuationInterceptor] as CoroutineDispatcher).dispatch(hostContext, Runnable { completeAction() })
+            }
+        }
         publish()
-        action?.start()
+        running.start()
     }
 
     override fun cancel() {

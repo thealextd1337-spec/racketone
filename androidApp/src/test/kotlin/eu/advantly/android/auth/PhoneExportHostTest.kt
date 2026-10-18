@@ -14,13 +14,18 @@ import eu.advantly.presentation.auth.PhoneExportPhase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -29,6 +34,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -316,6 +322,282 @@ internal class ExportHostFixture(
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class PhoneExportHostTest {
+    @Test fun closeAndParentCancellationBeforeLazyStartStillDrainOnTheOwner() =
+        runBlocking {
+            for (transition in listOf("close", "parent", "foreign-parent")) {
+                val port = TestExportPort()
+                val f = ExportHostFixture(this, port)
+                val drained = CompletableDeferred<Unit>()
+                val actionField = PhoneExportHost::class.java.getDeclaredField("action").apply { isAccessible = true }
+                var triggered = false
+                var observer: Job? = null
+                try {
+                    f.start()
+                    observer =
+                        launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                            f.host.state.collect { state ->
+                                if (!triggered && state.phase == PhoneExportPhase.REQUESTING) {
+                                    triggered = true
+                                    when (transition) {
+                                        "close" -> {
+                                            f.host.close { drained.complete(Unit) }
+                                        }
+
+                                        "parent" -> {
+                                            f.parent.cancel()
+                                        }
+
+                                        else -> {
+                                            val cancelled = CountDownLatch(1)
+                                            Thread {
+                                                try {
+                                                    f.parent.cancel()
+                                                } finally {
+                                                    cancelled.countDown()
+                                                }
+                                            }.start()
+                                            assertTrue(cancelled.await(10, TimeUnit.SECONDS))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    f.host.requestExport()
+                    assertTrue(triggered)
+                    assertTrue(port.calls.isEmpty())
+                    f.host.close { drained.complete(Unit) }
+                    withTimeout(10_000) { drained.await() }
+                    assertNull(actionField.get(f.host))
+                    assertEquals(PhoneExportPhase.CLOSED, f.host.state.value.phase)
+                    assertTrue(
+                        f.host.state.value.allowedActions
+                            .isEmpty(),
+                    )
+                    f.host.requestExport()
+                    assertTrue(port.calls.isEmpty())
+                } finally {
+                    observer?.cancel()
+                    f.close()
+                }
+            }
+        }
+
+    @Test fun aReentrantReplacementSurvivesThePreviousJobsCompletionAndDoubleClicks() =
+        runBlocking {
+            val port = TestExportPort()
+            val hold = ExportHold()
+            val f = ExportHostFixture(this, port)
+            val actionField = PhoneExportHost::class.java.getDeclaredField("action").apply { isAccessible = true }
+            var previous: Job? = null
+            var replacement: Job? = null
+            var triggered = false
+            var observer: Job? = null
+            try {
+                f.start()
+                port.metadata = { _, id ->
+                    if (port.calls.size == 2) hold.await()
+                    port.ready(id)
+                }
+                observer =
+                    launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                        f.host.state.collect { state ->
+                            if (state.phase == PhoneExportPhase.REQUESTING && previous == null) {
+                                previous = actionField.get(f.host) as Job
+                            }
+                            if (!triggered && state.phase == PhoneExportPhase.READY) {
+                                triggered = true
+                                assertTrue(previous!!.isCompleted)
+                                f.host.discard()
+                                f.host.requestExport()
+                                replacement = actionField.get(f.host) as Job
+                                f.host.requestExport()
+                                f.host.retry()
+                            }
+                        }
+                    }
+                f.host.requestExport()
+                withTimeout(10_000) { hold.entered.await() }
+                assertTrue(triggered)
+                assertNotNull(replacement)
+                assertTrue(previous!!.isCompleted)
+                assertFalse(replacement!!.isCompleted)
+                assertSame(replacement, actionField.get(f.host))
+                assertEquals(2, port.calls.size)
+                f.host.requestExport()
+                f.host.retry()
+                assertEquals(2, port.calls.size)
+                hold.release.complete(Unit)
+                f.await(PhoneExportPhase.READY)
+                assertTrue(replacement.isCompleted)
+                assertNull(actionField.get(f.host))
+            } finally {
+                observer?.cancel()
+                hold.release.complete(Unit)
+                f.close()
+            }
+        }
+
+    @Test fun completionWaitsForActionChildrenAfterTheBodyHasReturned() =
+        runBlocking {
+            for (transition in listOf("complete", "cancel", "discard", "close")) {
+                val port = TestExportPort()
+                val hold = ExportHold()
+                val f = ExportHostFixture(this, port)
+                val actionField = PhoneExportHost::class.java.getDeclaredField("action").apply { isAccessible = true }
+                try {
+                    f.start()
+                    port.metadata = { _, id ->
+                        CoroutineScope(currentCoroutineContext()).launch(start = CoroutineStart.UNDISPATCHED) { hold.await() }
+                        port.ready(id)
+                    }
+                    f.host.requestExport()
+                    withTimeout(10_000) { hold.entered.await() }
+                    val running = actionField.get(f.host) as Job?
+                    assertNotNull(running)
+                    assertFalse(running!!.isCompleted)
+                    assertEquals(PhoneExportPhase.REQUESTING, f.host.state.value.phase)
+                    f.host.requestExport()
+                    assertEquals(1, port.calls.size)
+                    val drained = CompletableDeferred<Unit>()
+                    when (transition) {
+                        "cancel" -> {
+                            f.host.cancel()
+                        }
+
+                        "discard" -> {
+                            f.host.discard()
+                        }
+
+                        "close" -> {
+                            f.parent.cancel()
+                            f.host.close { drained.complete(Unit) }
+                        }
+                    }
+                    if (transition != "complete") withTimeout(10_000) { hold.cancelled.await() }
+                    assertFalse(running.isCompleted)
+                    assertSame(running, actionField.get(f.host))
+                    assertFalse(drained.isCompleted)
+                    f.host.requestExport()
+                    assertEquals(1, port.calls.size)
+                    hold.release.complete(Unit)
+                    when (transition) {
+                        "discard" -> f.await(PhoneExportPhase.IDLE)
+                        "close" -> withTimeout(10_000) { drained.await() }
+                        else -> f.await(PhoneExportPhase.READY)
+                    }
+                    assertTrue(hold.ended.isCompleted)
+                    assertTrue(running.isCompleted)
+                    assertNull(actionField.get(f.host))
+                } finally {
+                    hold.release.complete(Unit)
+                    f.close()
+                }
+            }
+        }
+
+    @Test fun cancelBeforeLazyStartMustReleaseAction() = probe("cancel")
+
+    @Test fun discardBeforeLazyStartMustReleaseAction() = probe("discard")
+
+    @Test fun contextChangeBeforeLazyStartMustReleaseAction() = probe("context")
+
+    @Test fun contextResetMustNotExposePreviousRequestToReentrantRetry() =
+        runBlocking {
+            val owner = Thread.currentThread()
+            val delegate = coroutineContext[kotlin.coroutines.ContinuationInterceptor] as CoroutineDispatcher
+            val immediate =
+                object : CoroutineDispatcher() {
+                    override fun isDispatchNeeded(context: kotlin.coroutines.CoroutineContext) = Thread.currentThread() !== owner
+
+                    override fun dispatch(
+                        context: kotlin.coroutines.CoroutineContext,
+                        block: Runnable,
+                    ) = delegate.dispatch(context, block)
+                }
+            val port = TestExportPort()
+            val f = ExportHostFixture(this, port, publication = immediate)
+            val response = CompletableDeferred<Unit>()
+            var triggered = false
+            var observer: Job? = null
+            try {
+                f.start()
+                port.metadata = { _, id ->
+                    response.await()
+                    port.ready(id)
+                }
+                f.host.requestExport()
+                assertEquals(1, port.calls.size)
+                observer =
+                    launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                        f.host.state.collect { state ->
+                            if (!triggered && port.context.value?.profileId == "bob" && PhoneExportAction.RETRY in state.allowedActions) {
+                                triggered = true
+                                println("RESET exposed $state under ${port.context.value}")
+                                f.host.retry()
+                            }
+                        }
+                    }
+                port.context.value = CloudDataExportContext("bob", 2, 1)
+                println("RESET triggered=$triggered calls=${port.calls} state=${f.host.state.value}")
+                assertFalse("Reset published previous account's retry before clearing requestId", triggered)
+            } finally {
+                observer?.cancel()
+                f.close()
+            }
+        }
+
+    private fun probe(transition: String): Unit =
+        runBlocking {
+            val port = TestExportPort()
+            val f = ExportHostFixture(this, port)
+            var triggered = false
+            var observer: Job? = null
+            try {
+                f.start()
+                observer =
+                    launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                        f.host.state.collect { state ->
+                            if (!triggered && state.phase == PhoneExportPhase.REQUESTING) {
+                                triggered = true
+                                when (transition) {
+                                    "cancel" -> {
+                                        f.host.cancel()
+                                    }
+
+                                    "discard" -> {
+                                        f.host.discard()
+                                    }
+
+                                    else -> {
+                                        port.context.value = CloudDataExportContext("bob", 2, 1)
+                                        f.host.refreshStatus()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                f.host.requestExport()
+                assertTrue(triggered)
+                val field = PhoneExportHost::class.java.getDeclaredField("action").apply { isAccessible = true }
+                val action = field.get(f.host) as Job?
+                println("REPRO $transition: state=${f.host.state.value}, actionCompleted=${action?.isCompleted}, calls=${port.calls.size}")
+                assertTrue(port.calls.isEmpty())
+                assertTrue(action == null || action.isCompleted)
+                observer.cancelAndJoin()
+                f.host.discard()
+                assertEquals(
+                    "Completed pre-start job still blocks requests after $transition and discard",
+                    setOf(PhoneExportAction.REQUEST),
+                    f.host.state.value.allowedActions,
+                )
+                f.host.requestExport()
+                f.await(PhoneExportPhase.READY)
+            } finally {
+                observer?.cancel()
+                f.close()
+            }
+        }
+
     @Test fun aCompletedRenameCannotPublishAfterCancelDiscardAccountChangeOrClose() =
         runBlocking {
             for (transition in listOf("cancel", "discard", "account", "close")) {
