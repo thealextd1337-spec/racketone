@@ -689,6 +689,20 @@ Expiry, echte parallele Reservierung/Leaseübernahme, Upload-/Finalizefehler, Pu
 physischer Cleanup; Deno-/SQL-/HTTP-Tests plus vollständiger Gradle-Check vor Commit.
 Task: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-server-impl-r1`.
 
+U4/K1-Integration ist als `9ecb8d2` auf Parent `33c1b8b` fertig, eigener sauberer Worktree
+`t3-72b6c4c1`, Branch `t3/u4-k1-integration`. Alle 16 U4-Dateien außer Gate sind bytegleich
+zum abgenommenen `06c264c`; Gate ergänzt ausschließlich Import/Inventory-Methode.
+Authadapter und Backend-SQL sind bytegleich zum geprüften Parent. Ein neuer realer
+Runner-/Auth-/Gate-/MatchSession-/SQLDelight-/HTTP-Test prüft Consentverlust, alte Retries/Acks,
+unabhängige Kontorechte, Retention und Kontoisolation. 691 Fokusprüfungen mit Migrationsprüfung
+und vollständiger Check 692 Tasks grün. Keine Abschwächung bestehender Tests.
+Frisches unabhängiges Integrationsreview:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-k1-integration-review-r1`.
+[Entwurfs-PR #66](https://github.com/thealextd1337-spec/racketone/pull/66) ist verknüpft;
+CI prüft diesen kombinierten Head. Vorläufer #64/#65 sind bis zu deren Merge enthalten.
+Root übernimmt U4 erst nach Integrationsreview; Android-Host und echte Stack-/Socketabnahme
+bleiben eigene anschließende Umsetzung beziehungsweise Nachweise.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
