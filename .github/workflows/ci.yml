@@ -42,6 +42,7 @@ jobs:
               - '.github/scripts/**'
             supabase:
               - 'supabase/**'
+              - 'gradle/libs.versions.toml'
               - '.github/workflows/ci.yml'
               - '.github/scripts/export_stack_ci.py'
             admin:
