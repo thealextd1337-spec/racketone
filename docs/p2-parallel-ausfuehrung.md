@@ -105,6 +105,7 @@ Brief einschließlich früherer Befunde und Antworten.
 - U4-Kern Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r1`
 - U4-Kern Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-core-review-r2`
 - U4-Kern Korrektur 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u4-core-fix-r2`
+- K3-Server: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k3-server-impl-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -469,6 +470,12 @@ K3-Serverteil aufbauen: neue Migration `20261018000400_account_deletion_job.sql`
 idempotenter Löschlauf über den vorhandenen Purge-/Redaktionspfad und überprüfbare Planung/
 Jobzustände. Keine Kotlin-/UI-/Protokoll-/001–003-Änderung, keine Liveaktivierung. Eigene
 Testkonten und Recovery-/Job-Rennen; echtes Cron und Apple-Token-Widerruf separat nachweisen.
+
+K3-Server läuft isoliert ab `3ad5f0a`: eigene Status-RPC mit beantragtem Zeitpunkt/frühester
+Löschung/Rücknahme, regulärer fester 14-Tage-Lauf mit höchstens 100 Konten, benannter Cronjob
+und minimaler aggregierter Laufnachweis. Bestehende Purge-/Redaktions-/Support-Auditpfade
+wiederverwenden, keine neue Redaktion oder öffentliche Diagnosedaten. Eigener Harnessport
+54587; D3, UI, echte Cronausführung und Apple-Widerruf bleiben getrennte Abnahmen.
 
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
