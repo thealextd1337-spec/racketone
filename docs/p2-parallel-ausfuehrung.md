@@ -4,7 +4,21 @@ Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85a
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.
 
-## Bestätigter Stand nach D1-Merge
+## Bestätigter Stand nach Android-Export-Merge
+
+### K2 abgeschlossen, D2/D3 in Arbeit
+
+PR #70 ist auf exakt `786c0c8` mit Main-Commit `fd0b297` integriert. CI-Lauf
+`39159262257`: Changes, Ubuntu/APKs, Apple-Native/Simulator und Supabase erfolgreich;
+Admin wurde aufgrund der Pfadfilter übersprungen. Claude Opus 5.5 hat denselben Head
+abschließend unabhängig ohne neue Befunde freigegeben. Keine Tests wurden dafür wiederholt.
+Der konfigurierte Android-ZIP-Pfad benötigt vor Auslieferung die bereitgestellte Edge Function
+`export-my-data`; ein Live-Deployment wurde nicht ausgeführt. Hosted-, Cross-UID-Geräte-,
+Apple-Real- und fachliche Rechtsabnahmen bleiben offen.
+
+Die folgenden früheren Zwischenstände dokumentieren die Nachweiskette; maßgeblich ist dieser
+aktuelle Stand. Der Main-Abgleich verändert ausschließlich Dokumentation: Produkt und Konfiguration
+bleiben bytegleich zum bereits gemeinsam geprüften Integrationsstand (771 Tasks samt beiden APKs).
 
 ### D2/D3: geprüfte Grundlage und zweite Umsetzungswelle
 
@@ -21,13 +35,18 @@ drei zusätzliche Isolation-Denials. Die frühere äußere Harnessblockade ist e
 Asynchrones Abwarten beseitigt sie; individuelle Testgrenzen blieben unverändert.
 Diese Nachweise ersetzen weiterhin keine echte Stack-CI, Hosted- oder D3/G8-Abnahme.
 
-Die nächste Parallelwelle startet auf exakt `803a38a`:
+Die laufende Parallelwelle startete auf exakt `803a38a`:
 
 | Lane | Exklusiver Besitz | Abnahme / Übergabe |
 |---|---|---|
 | DATA | `shared/data`: Schema 8 (`7.sqm`), Lifecycle-/Redaktions-/Zustellspeicher, Repositories und zentrale Lesesperren; `LocalData`-Verdrahtung und schmale U2-Auswahlrevision | Zwei Konten, Reopen/Migration, Entzug/Regrant ohne Datenverlust, begrenzte persistente Transfers, Redaktionswhitelist, Lost ACK; Gesamttests. Bis Übergabe keine konkurrierenden Root-Data-Edits. |
-| PROTOCOL | `shared/sync-protocol`: neue DTOs und Codec, direkte Tests; in `MatchSession` ausschließlich Import und exhaustiver Ablehnungszweig für neue Controlgruppe | Legacy-Bytes, Stamps und unabhängige ACKs, tatsächliches 64-KiB-Paketbudget inklusive Envelope, negative Formen; Gesamttests. Versionskonstanten bleiben Root. |
+| PROTOCOL | `shared/sync-protocol`: neue DTOs und Codec, direkte Tests; in `MatchSession` ausschließlich Import und exhaustive Ablehnungszweige in Empfang und `route()` für die neue Controlgruppe | Legacy-Bytes, Stamps und unabhängige ACKs, tatsächliches 64-KiB-Paketbudget inklusive Envelope, negative Formen; Gesamttests. Versionskonstanten bleiben Root. |
 | Root | Dokumente, Reviews, Server-/CI-Integration; danach D1/Upload-/Session-/Namensresolver-/Facade-Anschlüsse | Erst gemeinsam aktivieren, nachdem dauerhafter Entzug, Wiederfreigabe und Redaktion durchgängig nachgewiesen sind; B4 bleibt abhängig. |
+
+Die Protokoll-Lane ist als `f5d07b1` übergeben: zwölf neue Codec-Tests und Gesamtcheck grün,
+V3-Konstanten und öffentliche Ablehnung von V4-Nicht-Hello bleiben erhalten. Frischer unabhängiger
+Review R1 läuft; Data bleibt parallel in Umsetzung. Review-Task:
+`advantly-20261018-d2d3-protocol-review-r1` (gleicher unten dokumentierter Task-ID-Präfix).
 
 U2/U3 bleiben Herkunftsautorität; nur ein payloadfreier dauerhafter Cloud-Marker kommt hinzu.
 Globale Daten werden einmal gespeichert, aber Aufbewahrung für B gewährt A keinen Zugriff.
@@ -40,7 +59,7 @@ node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adeleg
 node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d2d3-protocol-impl-r1
 ```
 
-### Neue Parallelwelle: CI-Korrektur und D2/D3-Grundlagen
+### Frühere Parallelwelle: CI-Korrektur und D2/D3-Grundlagen
 
 PR #70 auf `5e5a408` hat einen belegten Ubuntu-Testfehler: Die Rename-Barriere erwartet
 `DOWNLOADING`, beobachtet aber bereits `LOCAL_FILE`. Die Korrekturlane untersucht zuerst

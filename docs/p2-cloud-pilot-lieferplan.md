@@ -2,7 +2,7 @@
 
 Stand: 18.10.2026. Konkretisierung der beauftragten Punkte 2 (Upload), 3 (Download)
 und 4 (Pilot, Datenschutz, Kontosupport). **U1–U4, D1 sowie K1/K3-Server und K2-Server integriert;
-Android-ZIP-Export in abschließender Integrations-CI, D2/D3-Grundlagen in Umsetzung.**
+Android-ZIP-Export nach aktueller CI und Claude-Prüfung integriert, D2/D3-Grundlagen in Umsetzung.**
 Der [Ausführungsplan](p2-parallel-ausfuehrung.md) hält laufende Aufträge, Besitzgrenzen und Folgewellen fest.
 Grundlage: [PLAN](PLAN.md), [P2](p2-plan.md), [Upload-Vertrag](p2-upload.md)
 und [Feedback/Admin](plan-feedback-admin.md). Bei Widersprüchen gilt `PLAN.md`.
@@ -13,8 +13,8 @@ Reihenfolge führt beide Berichte zusammen und hält bestehende Produktentscheid
 
 - B1 und B2a sind integriert: lokale Outbox, getrennte Geräte-/Cloud-Acks, kontogebundene
   Cursor, unveränderliche Geräte-Eigentümer und sitzungsgebundene Upload-Auswahl.
-  `CloudUploadStore` ist vorhanden; `CloudBackend`, `CloudOutboxStore` und `CloudSyncPort`
-  sind noch keine ausführbare Netzwerkanbindung der App.
+  `CloudUploadStore`, Backendadapter und der manuelle Android-Host bilden den ausführbaren,
+  begrenzten Uploadpfad. Automatischer Hintergrundbetrieb bleibt B4.
 - Auth/Onboarding und Support-Inbox sind vorhanden. Staging verwendet Supabase, Resend
   und Cloudflare; Betreiber-Login mit MFA und Passwort-Recovery wurden im Projektthread bestätigt.
   PR #58 ist integriert. Deployment und Grenzen: [Betriebsnachweis](support-admin-betrieb.md).
@@ -22,8 +22,8 @@ Reihenfolge führt beide Berichte zusammen und hält bestehende Produktentscheid
   Auf Pixel 9 Pro XL und Pixel Watch 3 installiert; drei Meldekategorien laut Nutzer erfolgreich.
   Diese Teilabnahme ersetzt nicht die vollständige Support-Live-Matrix.
 - SQL für Export, Löschantrag, Abbruch, Anonymisierung und endgültige Löschung existiert.
-  App-Bedienung, ZIP-Auslieferung und geplanter Kontolöschjob fehlen. Vorhandene SQL-Funktionen
-  sind kein Nachweis eines automatischen gehosteten Ablaufs.
+  App-Bedienung, Android-ZIP-Auslieferung und Kontolöschjob sind integriert und lokal/CI geprüft.
+  Diese Nachweise sind keine Abnahme eines automatischen gehosteten Ablaufs.
 - Freunde, Cloud-Live, eigenständige Wear-Sitzungen, Health/Tracker und Garmin folgen in ihren
   bestehenden Phasen. Tizen bleibt ausgeschlossen. Öffentliche Veröffentlichung erst nach P3.
 
@@ -49,7 +49,8 @@ Standard; zusätzliches Claude-Kontingent gezielt für unabhängige Fachprüfung
 | K7 | Orchestrator und reale Geräteprüfung | Cloud-Pfad, K1–K6, externe Nachweise | Dokumentierte Pilotentscheidung |
 
 **Erste Parallelwelle integriert:** U3, Server-Gerätevertrag/K4 und K1; anschließend U4,
-K3-Server, K2-Server und D1. Der Android-ZIP-Export wartet auf die korrigierte aktuelle CI von #70.
+K3-Server, K2-Server und D1. Der Android-ZIP-Export ist mit #70 integriert; der konfigurierte Pfad setzt vor Auslieferung
+die bereitgestellte Edge Function `export-my-data` voraus. Kein Live-Deployment wurde ausgeführt.
 D2/D3 beginnen mit getrennten Server- und Enginepaketen; ihre Geräte-/Session-Integration folgt
 nach unabhängigen Reviews. Dies erteilt keine Hosted-/Pilotfreigabe. B4 darf die Begrenzung und den
 Abbruch eines einzelnen Upload-/Pull-Laufs nicht aufschieben: diese gehören bereits zu U1/U4/D1.
