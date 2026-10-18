@@ -1,0 +1,8 @@
+{
+  "imports": { "fflate": "npm:fflate@0.8.2" },
+  "compilerOptions": { "strict": true },
+  "tasks": {
+    "check": "deno check --frozen index.ts handler_test.ts archive_test.ts backend_test.ts",
+    "test": "deno test --frozen --allow-env handler_test.ts archive_test.ts backend_test.ts"
+  }
+}

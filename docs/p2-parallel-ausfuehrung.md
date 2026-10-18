@@ -889,6 +889,27 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+PR #67 ist nach exakt grünem `ba90a1d` zusammengeführt; main `8660716`, Run
+`39144135593` mit fünf erfolgreichen Prüfungen einschließlich echter Service-CI und
+Apple-Native-/Simulator-Builds. Root gleicht PR #68 danach ab: nur Plankonflikt,
+Kotlin/Android/Wear unverändert zur geprüften Basis, Server/CI/Katalog bytegleich main.
+Gesamtcheck vor Mergecommit und neue CI danach; keine automatische Livebereitstellung.
+
+K2-A Review 3 bestätigt `d73f372` ohne Befunde. 137 JVM-/85 Android-Host-Tests frisch
+grün; unabhängige native Probe hält DNS, Terminalcallback und offenen Body getrennt
+zurück: Export und Register bleiben offen, erst nach Freigabe native Calls/Pool null
+und eigener Executor beendet. Android-Schnitt damit zur Integration freigegeben;
+JVM/iOS-ZIP bleibt ausdrücklich vor Netzwerk gesperrt. A/B-Verträge sind unabhängig
+geprüft; gemeinsame Basis und Android-Dateihost können als nächste eigene Lane folgen.
+
+D2/D3-Ergänzung verlangt einen expliziten Herkunftsstamp neben Cloudstamp, ohne fehlenden
+Stamp als Freigabe zu deuten. Bestehende Provenienz und U2-Sourcebelege zuerst wiederverwenden;
+historische unbewiesene Importe dürfen keinen Cloudentzug umgehen. ID-only-Assignment über
+nachgestellte Defaultparameter und eigenen serialization-core-Serializer, Legacyform und
+Goldens erhalten. Redaktionsmanifest maximal 200 IDs/500 Events pro Seite plus Bytebudget,
+durabler Transfer und atomarer Abschluss statt unbegrenzter Liste. Root legt die endgültigen
+kleinen Lane-Verträge vor Umsetzung fest; noch kein Protokollwechsel aktiviert.
+
 K2-A-Nativfix `d73f372` fertig, Parent `c58a96f`, genau neun freigegebene Dateien.
 Android-Transport pro Aufruf besitzt Client/Dispatcher/Pool/Listener; Ktor-Join, native
 Terminalevents und Dispatcher-idle gemeinsam vor Operationsabschluss. Öffentliche API,
@@ -1173,6 +1194,46 @@ pinnt 2.9.7 im zentralen Katalog und verlangt zwei Leerzeichen; mit genau dieser
 19 Tests/Typen/Format/Lint und Gesamtcheck 692 Tasks grün. Neue Service-CI und Review 2
 laufen. PR66 nach PR65-Squash im eigenen Hilfsworktree auf `09bdd1b` abgeglichen; ausschließlich
 Plan-Konflikt, Produktcode/SQL/Tests unverändert. Neue CI erforderlich.
+K2-Mainabgleich nach PR #66: `origin/main 870792a` bringt ausschließlich den unabhängig
+geprüften U4-Kern in diese Serverintegration. Konflikte nur im Plan; beide Nachweise bleiben
+erhalten. Shared-/Android-/Wear-Baum bytegleich zu main, K2-Server/CI/Katalog unverändert
+gegen `8e49ccc`. Gemeinsamer Gesamtcheck vor Mergecommit mit 688 Tasks grün (2m10s,
+`advantly-k2-main-u4-merge-check.log`); neue CI danach erforderlich.
+
+K2-Integrationsreview 4 bestätigt `8e49ccc` ohne offene Befunde und mit 21 unabhängig
+grünen Deno-Tests/Typen/Format/Lint. Die echte Service-CI desselben Heads ist erfolgreich
+(Run `39143114803`, Job `117721530287`): 1.299 pgTAP-Prüfungen in 35 Dateien, Parallelrennen,
+vollständiger ZIP-/CSV-/JSON-Rundlauf, private Storage-/Fremd-/Anonymzugriffe, Ablauf und
+physische Bereinigung einschließlich verspätetem Upload, Teilnehmer-/Owner-Purge sowie
+echter Auth-Logout mit Abweisung des alten JWT. Tatsächlicher ACK liefert 204; Vault→pg_net→
+Cleanup-Function→Storage ebenfalls grün. Periodischer Cronbetrieb, Hosted und Phone-Ausgabe
+bleiben getrennte Nachweise; übrige CI auf dem neuen Mergehead bleibt vor Merge nötig.
+
+K2-Diagnose-CI `425c094` lokalisiert den Fehler exakt in `cleanup()` nach Ablaufprüfung,
+auch während finally-Cleanup. Glaubwürdiger Mechanismus durch offizielles PostgREST-
+Protokoll und zwei rote Regressionen belegt: `ack_data_export_cleanup_v1` liefert als
+void-RPC HTTP 204; Backend parst trotzdem JSON. Root ergänzt ausschließlich No-Content-
+Behandlung im Backend (zwei Zeilen), reale Backend→Handler-Regression und strikten
+Gegenbeweis für ungültiges leeres HTTP 200. 21 Deno-Tests/Typen/Format/Lint grün; Live-Test
+prüft zusätzlich tatsächliches RPC-204. Produktfreigabe erst nach frischem Review und
+vollständiger echter Service-CI, bisherige Sicherheits-/Cleanup-Assertions unverändert.
+
+Echte K2-Service-CI auf `84ee8fc`, Run `39141216108`: Stackstart, beide Handler, sämtliche
+1.299 pgTAP-Assertions in 35 Dateien und acht Parallelrennen samt SQL-ZIP-Rundlauf grün.
+Live-HTTP bestätigt vollständiges ZIP/CRC/JSON/CSV und Idempotenz/409-Vertrag; danach harter
+Fehler im Storage-Negativ-/Ablauf-/Cleanup-Abschnitt. Scheduler und Lint deshalb noch nicht
+ausgeführt. Keine grüne Gesamtabnahme. Die bewusst generische Fehlerausgabe lässt die
+exakte Testzeile offen. Root ergänzt nur Typ und eigene Testpositionen (keine Inhalte,
+Exceptiontexte oder Variablen), Assertions und Produktcode unverändert. Lokaler Diagnose-
+Fehlerpfad bleibt hart rot ohne Dienste; Syntax und vollständiger Check 692 Tasks grün.
+
+K2-Integrationsreview 1 auf `79b5faa`: ein belegter P2. Der tatsächlich installierte
+Deno-2.9.7-Formatter liest `.editorconfig` (vier Leerzeichen); bisherige lokale Deno-2.5.4-
+Prüfung tat das nicht. Erste Service-CI stoppt deshalb vor Stackstart. Enge Root-Korrektur:
+Deno 2.9.7 im zentralen Versionskatalog pinnen, CI liest diesen Wert; Formatcheck verlangt
+ausdrücklich zwei Leerzeichen. Beide Functions unter genau 2.9.7 mit Typen/Format/Lint und
+19 Tests grün; vollständiger Root-Check 692 Tasks grün (4m30s). Servercode/SQL unverändert.
+Erneute tatsächliche Service-CI und frisches Integrationsreview 2 bleiben vor Merge nötig.
 PR #66 nach PR65-Squash erneut auf main `cb14420` abgeglichen. Ausschließlich add/add im
 Plan; der neuere vollständige Orchestratorplan bleibt erhalten. Gate und sämtliche übrigen
 Produkt-/SQL-/Testdateien unverändert zu `270782b` und zum unabhängig geprüften U4-Kandidaten.

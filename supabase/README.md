@@ -7,7 +7,8 @@ Datenmodell: [`docs/03-backend-datenmodell.md`](../docs/03-backend-datenmodell.m
 > Status: **P2-A Code umgesetzt** – Spike gehärtet, staging-Deploy vorbereitet. Gehostetes Projekt, DPA und
 > Dashboard-Abnahme stehen noch aus. **P2-C ergänzt Android-Handy-Auth und das serverseitige Altersgate**;
 > Einrichtung und Abnahme: [docs/p2c-auth.md](../docs/p2c-auth.md). Keine Secrets im Repo, kein Deploy durch P2-C.
-> Edge Functions und der Cloud-Sync-Client bleiben separate Pakete.
+> K2 ergänzt private ZIP-Exports und Cleanup-Functions; lokale Integration und echte Service-CI laufen.
+> Die gehostete Einrichtung und die Phone-ZIP-Abnahme bleiben offen.
 
 ## Inhalt
 
@@ -295,11 +296,41 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
 
 ## Noch nicht enthalten (siehe Plan)
 
-Edge Functions (`push-dispatch`, `export-my-data`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
-pg_cron-Jobs für reguläre Kontolöschung und Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
+Weitere Edge Functions (`push-dispatch`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
+Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
 (staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
 P2-C liefert den Auth-Hook; produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben manuell
 beziehungsweise Folgepakete.
+
+## K2: privater ZIP-Export und Cleanup
+
+Migration `20261018000500_private_data_exports.sql` und Functions `export-my-data` /
+`cleanup-data-exports` liefern vollständige JSON-/CSV-ZIP-Archive innerhalb expliziter Grenzen:
+4 MiB JSON, 16 MiB ZIP, 100.000 CSV-Zeilen, 750 ms Serializer. Ein Überschreiten liefert einen
+sichtbaren Fehler, kein Teilarchiv. Noch keine Abnahme für größere Konten oder Phone-Dateiöffnung.
+
+Beide Functions nutzen `verify_jwt=false`: Der Export prüft die aktuelle Auth-Sitzung über
+die Owner-RPCs; Cleanup verlangt ausschließlich den eigenen Scheduler-Schlüssel.
+Supabase stellt `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` bereit.
+`DATA_EXPORTS_CLEANUP_SECRET` (mindestens 32 Zeichen) gehört ausschließlich in die Function-
+Umgebung und identisch als Vault-Secret `data_exports_cleanup_secret`. Vault
+`data_exports_project_url` enthält die aus der Datenbank erreichbare API-Basis, lokal
+`http://kong:8000`. Keine echten Schlüssel im Repo oder in Shell-Historien hinterlegen.
+Lokale eigene Werte werden über eine ignorierte `supabase/functions/.env` und bei
+`supabase functions serve --env-file supabase/functions/.env` geladen; siehe
+[Supabase-Umgebungsvariablen](https://supabase.com/docs/guides/functions/secrets).
+
+Der benannte Cronjob ruft alle fünf Minuten nur `private.schedule_data_export_cleanup_v1()`
+auf, der Schlüssel bleibt im Vault. Fehlendes Setup ergibt `export_scheduler_unavailable`.
+Der private Bucket gewährt Clients weder Lesen noch Schreiben; Downloads laufen nach
+erneuter Sitzungsprüfung über die Function. Archive laufen nach 24 Stunden ab.
+
+Die CI verwendet ausschließlich ihren lokalen Wegwerfstack: Deno-Typen/Format/Lint/Tests,
+pgTAP einschließlich harter Plattformassertions, `200_private_data_exports_concurrency.py
+--confirm-disposable --archive-roundtrip`, `200_private_data_exports_live.py
+--confirm-disposable` und einen echten Vault→pg_net→Cleanup-Aufruf. Keine Provider-Schlüssel
+oder unbereinigten Function-Logs werden als Artefakte veröffentlicht. Periodischer Cronbetrieb,
+Hosted-CPU-/Speichergrenzen und reale Phone-Dateinutzung bleiben getrennte Nachweise.
 
 
 ## P2-C: Auth und Altersgate
