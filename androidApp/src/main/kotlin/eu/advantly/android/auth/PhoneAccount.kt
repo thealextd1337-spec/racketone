@@ -28,11 +28,17 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Konfiguration fehlt im Standardbuild: P1 funktioniert ohne Konto und ohne Netzwerk unverändert. */
-fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
-    if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_KEY.isBlank()) return null
+fun ComponentActivity.createPhoneAccount(): AuthViewModel? = createPhoneAccount(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+
+/** Explizite Konfiguration für Kompositionstests; die öffentliche Factory liefert die BuildConfig-Werte. */
+internal fun ComponentActivity.createPhoneAccount(
+    apiUrl: String,
+    apiKey: String,
+): AuthViewModel? {
+    if (apiUrl.isBlank() || apiKey.isBlank()) return null
     val storage = PhoneAuthStorage(applicationContext)
     val client =
-        createSupabaseClient(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY) {
+        createSupabaseClient(apiUrl, apiKey) {
             // SDK-Debuglogs enthalten Session-Objekte: auch im Debug-Build ausdrücklich abschalten.
             defaultLogLevel = LogLevel.NONE
             install(Auth) { sessionManager = storage }
@@ -55,7 +61,7 @@ fun ComponentActivity.createPhoneAccount(): AuthViewModel? {
         export = PhoneExportHost(auth.dataExports(), applicationContext),
         support =
             SupportViewModel(
-                SupabaseSupport(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, client),
+                SupabaseSupport(apiUrl, apiKey, client),
                 storage,
             ),
     )

@@ -8,7 +8,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.sun.net.httpserver.HttpServer
-import eu.advantly.android.BuildConfig
 import eu.advantly.android.phoneExportShareCallback
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudDataExportContext
@@ -523,12 +522,10 @@ class PhoneAccountExportCompositionTest {
 
     @Test fun missingBackendAndTrailingNullExportRemainCompatibleWithoutStartingAccountWork() =
         runBlocking {
-            assertTrue(BuildConfig.SUPABASE_URL.isBlank())
-            assertTrue(BuildConfig.SUPABASE_KEY.isBlank())
             val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
             val f = Fixture(this)
             try {
-                assertNull(activity.get().createPhoneAccount())
+                assertNull(activity.get().createPhoneAccount(apiUrl = "", apiKey = ""))
                 assertNull(activity.get().phoneExportShareCallback(null))
                 val vm = f.model(withHosts = false)
                 withTimeout(10_000) { vm.state.first { !it.busy } }
