@@ -25,6 +25,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -54,10 +55,19 @@ class SupabasePhoneAuth(
     private val mutations = Mutex()
     private val lifecycle = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private var closed = false
+    private var accountEpoch = 0L
+    private var accountIdentity: Pair<String, String>? = null
 
     init {
         lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
-            client.auth.sessionStatus.collect { sessions.synchronize() }
+            client.auth.sessionStatus.collect {
+                sessions.synchronize()
+                val identity = credentials()?.let { it.profileId to it.sessionId }
+                if (identity != accountIdentity) {
+                    accountIdentity = identity
+                    accountEpoch++
+                }
+            }
         }
     }
 
@@ -93,6 +103,7 @@ class SupabasePhoneAuth(
     override fun close() {
         if (closed) return
         closed = true
+        accountEpoch++
         sessions.stop(leaveIdentity = false)
         lifecycle.cancel()
         client.auth.stopAutoRefreshForCurrentSession()
@@ -159,6 +170,7 @@ class SupabasePhoneAuth(
         email: String,
         ticket: String,
     ) {
+        accountEpoch++
         val transition = sessions.stop()
         guarded {
             mutations.withLock {
@@ -220,11 +232,18 @@ class SupabasePhoneAuth(
                     profile.getValue("profileId").jsonPrimitive.content,
                     profile.getValue("onboarded").jsonPrimitive.boolean,
                     profile.getValue("deletionRequested").jsonPrimitive.boolean,
+                    consentStatus =
+                        profile["consentStatus"]
+                            ?.jsonPrimitive
+                            ?.content
+                            ?.let { runCatching { ConsentStatus.valueOf(it) }.getOrNull() }
+                            ?: ConsentStatus.UNAVAILABLE,
                 ),
             )
         }
 
     private suspend fun newLogin(block: suspend () -> Unit) {
+        accountEpoch++
         val transition = sessions.stop()
         guarded {
             mutations.withLock {
@@ -237,6 +256,7 @@ class SupabasePhoneAuth(
     }
 
     override suspend fun signOut() {
+        accountEpoch++
         val transition = sessions.stop()
         try {
             boundedAuth {
@@ -253,6 +273,110 @@ class SupabasePhoneAuth(
                 }
             }
         }
+    }
+
+    override suspend fun consent(language: String): ConsentSnapshot =
+        guarded {
+            val result = accountRpc("my_consent_v1", buildJsonObject { put("p_language", language) })
+            decodeConsent(result)
+        }
+
+    override suspend fun decideConsent(
+        snapshot: ConsentSnapshot,
+        accept: Boolean,
+    ): ConsentSnapshot =
+        guarded {
+            if (credentials()?.profileId != snapshot.profileId) throw CloudException("cloud_session_changed", true)
+            val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
+            val epoch = accountEpoch
+            val transition = if (!accept) sessions.stop(leaveIdentity = false) else null
+            try {
+                val result =
+                    accountRpc(
+                        "record_consent_v1",
+                        buildJsonObject {
+                            put("p_accept", accept)
+                            put(
+                                "p_documents",
+                                buildJsonArray {
+                                    snapshot.documents.forEach { document ->
+                                        add(
+                                            buildJsonObject {
+                                                put("type", document.type.name)
+                                                put("version", document.version)
+                                                put("language", document.language)
+                                            },
+                                        )
+                                    }
+                                },
+                            )
+                        },
+                    )
+                val decoded = decodeConsent(result)
+                if (transition != null) sessions.completeTransition(transition)
+                refreshProfile()
+                requireAccountCurrent(expected, epoch)
+                decoded
+            } finally {
+                // Fehler lassen Cloud gesperrt, eine erneute serverseitige Profilprüfung bleibt aber möglich.
+                if (transition != null && sessions.isTransitionCurrent(transition)) sessions.completeTransition(transition)
+            }
+        }
+
+    override suspend fun exportData(): String = guarded { accountRpc("export_my_data", buildJsonObject {}) }
+
+    override suspend fun requestDeletion() =
+        guarded {
+            val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
+            val epoch = accountEpoch
+            val transition = sessions.stop()
+            try {
+                accountRpc("request_account_deletion", buildJsonObject {})
+                sessions.completeTransition(transition)
+                refreshProfile()
+                requireAccountCurrent(expected, epoch)
+            } finally {
+                if (sessions.isTransitionCurrent(transition)) sessions.completeTransition(transition)
+            }
+        }
+
+    override suspend fun cancelDeletion() =
+        guarded {
+            val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
+            val epoch = accountEpoch
+            accountRpc("cancel_account_deletion", buildJsonObject {})
+            val transition = sessions.stop()
+            sessions.completeTransition(transition)
+            refreshProfile()
+            requireAccountCurrent(expected, epoch)
+        }
+
+    /** Kontorechte bleiben auch bei lokal gesperrtem Cloud-Gate erreichbar, stets mit festem Bearer. */
+    private suspend fun accountRpc(
+        name: String,
+        params: JsonObject,
+    ): String {
+        val before = credentials() ?: throw CloudException("cloud_session_changed", true)
+        val epoch = accountEpoch
+        val result = transport.rpc(name, params, before.accessToken)
+        requireAccountCurrent(before, epoch)
+        return result
+    }
+
+    private fun requireAccountCurrent(
+        before: CloudCredentials,
+        epoch: Long,
+    ) {
+        val after = credentials()
+        if (closed || epoch != accountEpoch || before.profileId != after?.profileId || before.sessionId != after.sessionId) {
+            throw CloudException("cloud_session_changed", true)
+        }
+    }
+
+    private fun decodeConsent(result: String): ConsentSnapshot {
+        val snapshot = CloudJson.decodeFromString<ConsentSnapshot>(result)
+        if (snapshot.profileId != credentials()?.profileId) throw CloudException("cloud_session_changed", true)
+        return snapshot
     }
 
     private suspend fun bind(
