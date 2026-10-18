@@ -703,6 +703,19 @@ CI prüft diesen kombinierten Head. Vorläufer #64/#65 sind bis zu deren Merge e
 Root übernimmt U4 erst nach Integrationsreview; Android-Host und echte Stack-/Socketabnahme
 bleiben eigene anschließende Umsetzung beziehungsweise Nachweise.
 
+U4/K1-Integrationsreview 1 auf `9ecb8d2`: Ship ohne belegte P1/P2/P3. Unabhängig 691
+JVM-/AndroidHost-Tests plus Migration grün, fünf weitere Testmethoden mit neun Abläufen
+einschließlich nicht kooperativ verzögerter HTTP-Antworten. Aktuelle Rootfences erhalten,
+Inventur lehnt Konto-/Profil-Leases ab, Runner-Close beendet ausschließlich den Runner-Child.
+Auth/LocalData und unabhängiger Export bleiben nutzbar; Peer-Acks unverändert.
+PR #66 wartet auf CI; keine erneute vollständige SQL-Suite bei unverändertem Backend.
+
+Nachfolgende Android-Hostverdrahtung und D1-Pullkern werden parallel rein lesend abgegrenzt,
+damit gemeinsame Dateigrenzen vor Implementierung feststehen. K2 bleibt alleiniger Besitzer
+neuer Backend-005-/200-/Edge-Dateien. Keine Host-/Pulländerung vor konkretem Briefing.
+- U4 Android-Scope: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-scope-r1`.
+- D1 Scope: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-scope-r1`.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
