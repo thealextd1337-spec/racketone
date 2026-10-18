@@ -887,6 +887,33 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 ### K2 Phone – konkrete parallele Verträge
 
+#### Aktueller Abschluss und Reviewbesitz
+
+K2-A ist sauber auf `acdd93e` abgeschlossen (Basis `7ff695e`), genau sechs autorisierte
+Cloud-Dateien. 126 Cloud-JVM-Tests einschließlich 21 neuer Exporttests und vollständiger
+Check mit Phone-/Wear-APK grün. Eigenständige Exportrevision, Kontogrenzen, begrenzter
+Stream und native Zeitlimits; SHA-256 und Dateipromotion bleiben ausdrücklich beim
+folgenden Androidhost. Frisches unabhängiges Review 1 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-phone-http-review-r1`.
+
+K2-B ist sauber auf `99f19cf` abgeschlossen (dieselbe Basis), genau sechs autorisierte
+Präsentations-/UI-/Test-/Stringdateien. 38 neue Schlüssel je Sprache, 62 Präsentations-
+und 222 Desktoptests grün; vollständiger Check samt Phone-/Wear-APK mit 761 Tasks grün.
+12 Phasen und neun Fehler DE/EN, Hell/Dunkel, 360×640 bei 200 Prozent geprüft;
+24 Desktopbilder. Fehlertext nutzt lokal `onBackground` plus Fehlersemantik, weil das
+bestehende Material-Fehlerrot auf hellem Apphintergrund nur 4,463:1 erreichte.
+Unabhängiges UI-Review ist der nächste freie Reviewplatz; noch keine Account-/Androidabnahme.
+
+K2-Serverkorrektur `8e49ccc`: echter PostgREST-ACK für `void` liefert 204 ohne JSON-Body.
+Der Backendadapter akzeptiert ausschließlich diesen zusätzlichen Erfolgsfall; leerer 200
+bleibt fehlerhaft. Zwei neue Regressionen gegen Original rot, mit Fix insgesamt 21
+Deno-Tests sowie Typen/Format/Lint und vollständiger 688-Task-Check grün. Der Liveharness
+behält sämtliche Cleanup-Negativprüfungen und verlangt zusätzlich den echten ACK204.
+Frisches Integrationsreview 4 läuft parallel zur echten Service-CI:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k2-integration-review-r4`.
+Kein Merge vor beiden Nachweisen. D1-Korrektur 2 bleibt unabhängig aktiv; C konsumiert
+A/B erst nach ihren Reviews. Keine gemeinsame Besitzdatei wird parallel editiert.
+
 Root-Androidintegration `ba1f37d` unabhängig `ship`, keine offenen Befunde; 20 Tests frisch
 plus zwei aus Cache und zusätzliche gemeinsame DE/EN-Hell/Dunkel-200%-Probe grün.
 PR #68 wartet auf Vorläufer #66 und eigene CI. K2-Server auf `84ee8fc` besteht echte
