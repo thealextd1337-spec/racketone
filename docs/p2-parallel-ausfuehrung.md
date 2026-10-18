@@ -22,8 +22,8 @@ nach bestandener Prüfung und relevanter CI. Gemeinsame Dateigrenzen zuerst abst
 | Paket | Besitz | Abnahme | Status |
 |---|---|---|---|
 | U3 | `shared/data`, Cloud-Upload-Snapshot-/Gate-/Backend-Seams; keine Auth/UI- oder Backend-SQL-Änderungen | Änderung während Upload bleibt ausstehend; fremde Metadaten werden nicht zurückgeschrieben; Migration ab Schema 5 erhält historische Daten und unabhängige Geräte-/Cloud-Acks | Kern `751bca8` geliefert, Review 1 `fix-first`; Korrektur der drei Befunde läuft |
-| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | `2721f84` implementiert; Entwurfs-PR #62, unabhängiges Sicherheitsreview und CI offen; K4-App-Bedienung folgt |
-| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `41f3702` geliefert, unabhängiges Review läuft; freigegebene Dokumente separat offen |
+| Server/K4 | Neue `20261018000100_cloud_device_binding.sql`, eigene `170_cloud_device_binding*`-Tests | Auth-Sitzung, Konto, Installation/Proof und Gerät auf allen Cloud-Wegen geprüft; Widerruf/Tombstone nicht umgehbar; alte RPCs, direkte Tabellen und Realtime geschützt oder geschlossen | Korrektur `0912e27` auf Entwurfs-PR #62; Sicherheitsreview 2 und neue CI laufen; K4-App-Bedienung folgt |
+| K1 | Neue `20261018000200_consent_versions.sql`, `180_consent_versions*`-Tests, Auth-Port/Host, `presentation-auth`, Account-UI DE/EN | Version/Sprache/Zeit/Historie serverautoritativ; bewusste Zustimmung/Ablehnung; Export, Löschung, Recovery und Support erreichbar | `41f3702` geliefert, Review 1 `fix-first`; Korrektur läuft, freigegebene Dokumente separat offen |
 
 Historische Migrationen werden nicht umgeschrieben. Zwei neue Migrationen haben bewusst
 getrennte Namen und Tests. Der lokale Datenbank-/Upload-Besitz liegt vollständig bei U3.
@@ -80,9 +80,11 @@ Brief einschließlich früherer Befunde und Antworten.
 - K1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-impl-r1`
 - Server/K4 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r1`
 - Server/K4 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-server-k4-fix-r1`
+- Server/K4 Review 2: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-server-k4-review-r2`
 - U3 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u3-review-r1`
 - U3 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-u3-fix-r1`
 - K1 Review 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-k1-review-r1`
+- K1 Korrektur 1: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k1-fix-r1`
 
 ### Server/K4 – erste Übergabe
 
@@ -103,6 +105,20 @@ Echter Supabase-CI-Lauf `39125048131`: 748/749 Tests bestanden; 170/Test 176 (di
 Realtime-Tabelle, erwarteter SQLSTATE 42501 blieb aus) fehlgeschlagen. Die vorher im lokalen
 Harness fehlenden Cron-Checks waren dort grün. Sicherheitskorrektur läuft beim Implementierer;
 kein Merge vor neuer unabhängiger Reviewrunde und grüner CI.
+
+Korrektur `0912e27`: VOLATILE-Statement-Trigger prüft direkte Writes nach Lock erneut;
+Cloud-Profilprüfung nimmt Lock vor Aktivstatusprüfung. Realtime-Test prüft vorhandene
+Nachrichten trotz effektiver Grants und permissiver Gegenpolicy. Harness pinnt numerisches
+Loopback, weist Service-/Umgebungs-Overrides zurück und folgt weder Redirects noch Proxys.
+Implementierer: zehn unsichere Rennen auf altem Stand reproduziert, nach Korrektur alle zwölf
+wartenden Fälle verweigert; 202 neue pgTAP-Prüfungen und vollständiger Gradle-Check bestanden.
+Orchestrator hat die fünf Harness-Testgruppen eigenständig erfolgreich wiederholt.
+Zusätzlich im separaten lokalen PostgreSQL-Harness: alle 202 neuen pgTAP-Prüfungen,
+SQL-Parallelitätsprüfung und zwölf nachweislich wartende Widerruf-/Löschrennen bestanden.
+Dies bleibt lokale PostgreSQL-Evidenz, kein HTTP-/WebSocket-/Hosted-Nachweis.
+PR #62 ist aktualisiert. CI `39126397938` für exakt `0912e27` ist grün, einschließlich
+echter Supabase-Migrationen/pgTAP und Gradle-/Android-/Wear-Builds; Admin und Apple wurden
+pfadbedingt übersprungen. Unabhängiges Review 2 läuft noch, daher kein Merge.
 
 ### U3/K1 – gemeinsame lokale Integration
 
@@ -134,6 +150,37 @@ U3 Review 1 (`fix-first`) reproduzierte zusätzlich mit kompilierten Klassen:
 
 Der ursprüngliche Implementierer ergänzt Fail→Pass-Regressionen und einen separaten
 Korrekturcommit. Neue unabhängige Reviewrunde vor Freigabe erforderlich.
+
+K1 Review 1 (`fix-first`) fand einen P1 und zwei reproduzierte P2:
+
+- Server-Consent und Kontorechte prüfen noch keine weiterhin gültige Auth-Sitzungszeile.
+  Ein unabhängiger Prüfer muss gültige, fremde/fehlende und global widerrufene Sitzungen
+  unterscheiden, ohne Gerätebindung oder aktuelle Zustimmung vorauszusetzen.
+- Nach fehlgeschlagener Ablehnung verliert das ViewModel die Identität für angezeigte
+  unabhängige Kontorechte. Identität getrennt von der Cloud-Sperre erhalten, echte Wechsel verwerfen.
+- Während der Löschkarenz verhindert die lokale Gate-Sperre weitere verifizierte Profilabfragen.
+  Sicheren eigenen Abfrageweg ergänzen, ohne Upload/Logout/Consent-Schutz aufzuheben.
+
+Für den letzten Punkt darf K1 `CloudSessionGate.kt` minimal erweitern; U3-Korrektur
+bearbeitet diese Datei nicht. Der Orchestrator vereinigt den neuen Profilweg anschließend
+mit der bereits getesteten CURRENT-/Consent-Generation-Integration aus `e4188cc`.
+
+Abgestimmter K1-Korrekturvertrag: eigene serververifizierte `accountSession` und synchrone
+Kontositzungsprüfung für unabhängige Rechte; im Gate begrenzte Cloud-Sperre und eigener
+Profilabfrageweg mit monotoner Profilrevision. Login/Logout-Übergänge bleiben getrennt.
+Veraltete Profilantworten dürfen weder Konto- noch Cloud-Zustand wiederherstellen.
+K1 darf die zentrale Testfixture `000-setup-tests-hooks.test.sql` minimal um echte
+Testsitzungen und Claims mit `session_id`/`exp` ergänzen. Server/K4 hat dort bereits
+Gerätebindungs-Fixtures; beide Deltas werden vom Orchestrator mit konsistenter Auth-Sitzung
+vereinigt. Fehlende/fremde/widerrufene/abgelaufene Sitzungen bleiben echte Negativfälle.
+
+Konkrete zentrale Fixture: `tests.account_sessions(profile_id, session_id)`,
+`tests.create_auth_session(uuid)` und `tests.authenticate_session(uuid, uuid)`.
+`create_user` erstellt einmal die Testsitzung, `authenticate_as` verwendet ausschließlich
+deren gespeicherte ID und Claims einschließlich `exp`; keine Ersatzsitzung nach Widerruf.
+`authenticate_as_id` bleibt für Negativfälle ohne Sitzung. Bei Integration muss
+`tests.cloud_context.session_id` diese kanonische ID verwenden; `prepare_cloud_context`
+darf eine gelöschte Auth-Sitzung nicht wieder anlegen.
 
 ## Folgewellen – nach erfüllten Abhängigkeiten starten
 
