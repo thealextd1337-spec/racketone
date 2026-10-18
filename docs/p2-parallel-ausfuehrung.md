@@ -716,6 +716,13 @@ neuer Backend-005-/200-/Edge-Dateien. Keine Host-/Pulländerung vor konkretem Br
 - U4 Android-Scope: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-scope-r1`.
 - D1 Scope: `node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-scope-r1`.
 
+PR #65 auf exakt `33c1b8b` vollständig CI-grün: Run `39134584961`, Ubuntu-Check/APKs,
+Apple-Native-/Simulator-Builds und Supabase erfolgreich; Admin unverändert übersprungen.
+Gemeinsames Review auf demselben Head Ship, keine Kommentare/offenen Reviewbefunde.
+PR als bereit markiert. Merge wartet auf Vorläufer #64, dessen Apple-Job zum Prüfzeitpunkt
+noch läuft; Ubuntu und Supabase dort bereits grün. Keine Pollschleife oder Freigabe aufgrund
+eines anderen Heads. Beide PR-Watches bleiben aktiv.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
