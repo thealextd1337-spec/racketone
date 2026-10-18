@@ -186,6 +186,8 @@ def main():
             sql("update private.data_exports set expires_at=clock_timestamp()-interval '1 second' where owner_id=%s",(a,))
             sql("update private.data_export_objects set next_cleanup_at=clock_timestamp()-interval '1 second' where object_path=%s",(path,))
             assert http(url,token=ta)[0]==410
+            assert http("/rest/v1/rpc/ack_data_export_cleanup_v1","POST",{"p_paths":[]},admin=True)[0]==204
+            print("PASS real PostgREST void acknowledgement is HTTP 204")
             cleanup();assert http(object_url,admin=True,raw=True)[0] in {400,404}
             # Nach bestätigtem Delete verspätet hochgeladener Produzent wird erneut entfernt.
             assert http(object_url,"POST",content,admin=True,extra={"Content-Type":"application/zip"},raw=True)[0]==200

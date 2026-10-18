@@ -16,6 +16,28 @@ Deno.test("backend fails closed on missing environment", () => {
   }
   assert(failed);
 });
+Deno.test("backend accepts PostgREST void 204 but rejects an empty JSON 200", async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const status of [204, 200]) {
+      globalThis.fetch = () => Promise.resolve(new Response(null, { status }));
+      let failed = false;
+      let result: unknown;
+      try {
+        result = await backend((n) => values[n]).rpc(
+          "ack_data_export_cleanup_v1",
+          { p_paths: [] },
+        );
+      } catch {
+        failed = true;
+      }
+      assert(failed === (status === 200));
+      if (status === 204) assert(result === undefined);
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+});
 Deno.test("backend separates user RPC credentials and server Storage credentials and closes response bodies", async () => {
   const original = globalThis.fetch;
   const calls: { url: string; init: RequestInit; response: Response }[] = [];

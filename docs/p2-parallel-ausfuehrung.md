@@ -868,6 +868,15 @@ Neues unabhängiges Review:
 
 ### Nächste isolierte Umsetzungspakete
 
+K2-Diagnose-CI `425c094` lokalisiert den Fehler exakt in `cleanup()` nach Ablaufprüfung,
+auch während finally-Cleanup. Glaubwürdiger Mechanismus durch offizielles PostgREST-
+Protokoll und zwei rote Regressionen belegt: `ack_data_export_cleanup_v1` liefert als
+void-RPC HTTP 204; Backend parst trotzdem JSON. Root ergänzt ausschließlich No-Content-
+Behandlung im Backend (zwei Zeilen), reale Backend→Handler-Regression und strikten
+Gegenbeweis für ungültiges leeres HTTP 200. 21 Deno-Tests/Typen/Format/Lint grün; Live-Test
+prüft zusätzlich tatsächliches RPC-204. Produktfreigabe erst nach frischem Review und
+vollständiger echter Service-CI, bisherige Sicherheits-/Cleanup-Assertions unverändert.
+
 Echte K2-Service-CI auf `84ee8fc`, Run `39141216108`: Stackstart, beide Handler, sämtliche
 1.299 pgTAP-Assertions in 35 Dateien und acht Parallelrennen samt SQL-ZIP-Rundlauf grün.
 Live-HTTP bestätigt vollständiges ZIP/CRC/JSON/CSV und Idempotenz/409-Vertrag; danach harter

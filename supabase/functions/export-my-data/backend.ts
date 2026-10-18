@@ -61,6 +61,8 @@ export function backend(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }, bearer);
+      // PostgREST liefert für void-RPCs 204 ohne JSON-Body.
+      if (response.status === 204) return undefined;
       return await response.json();
     },
     async upload(path, bytes) {
