@@ -261,6 +261,22 @@ ein Profillease mit `canResumeCloud=false` auch bei zurückgesetztem `cloudSuspe
 Ownership noch Uploads aktivieren. Parent bewahrt diesen Schutz neben CURRENT und
 Consent-Generation; der Callback-Fehlervertrag bleibt erhalten.
 
+K1 meldet für die finalen 13 Real-Ownership-/Adapter-Regressionen: Gegen die ursprünglichen
+Gate-/Auth-Quellen aus `21c6d20` scheitern neun Fälle, vier Kontrollen bestehen; mit Fix
+bestehen 13/13. Fokusprüfungen für Cloud/Auth/Match sind grün, der finale vollständige Check
+läuft nach Bereinigung eines lokalen Kotlin-Inkrementalcachefehlers. SQL bleibt unverändert:
+674/676 Assertions grün, nur 110/Cron 15–16 fehlen im lokalen Harness; echte Request-/Recovery-
+und Sessionwiderruf-Lock-Rennen unter RC/RR/Serializable bestanden laut Implementierer.
+Dies ist noch keine unabhängige Reviewfreigabe.
+
+PR #64 kollidiert nach dem Server/K4-Merge mit `main` in der zentralen SQL-Testfixture.
+Nach dem separaten Fix2-Commit übernimmt K1 den ausdrücklich freigegebenen `origin/main`-Merge
+in einem eigenen Commit. Die geprüften Vorlagen aus `fbbeefb` für 000/170/180 erhalten beide
+Sitzungsverträge. Keine U3-/CURRENT-Übernahme auf den eigenständigen K1-Branch. Anschließend
+erneut prüfen und neue unabhängige Reviewrunde auf dem tatsächlich mergebaren Stand starten.
+Profilrace-Regressionen akzeptieren sichere Cancellation oder `cloud_session_changed`;
+beide müssen veraltete Veröffentlichung und lokale Quittierung verhindern.
+
 Der Integrationszweig ist mit Server/K4 aus `origin/main` abgeglichen. Die beiden
 Testfixture-Konflikte erhalten die bereits gemeinsam geprüften kanonischen Sitzungen,
 JWT-Ablaufclaims und die relative Sessionzählung; keine Sitzung wird nach Widerruf neu angelegt.
