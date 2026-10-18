@@ -43,11 +43,16 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainCoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -65,9 +70,62 @@ import org.junit.Test
 import java.io.IOException
 import java.util.Properties
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
 import kotlin.io.encoding.Base64
 
 class PhoneUploadHostTest {
+    /** Hält ausschließlich Host-Dispatches an; Auth und der getrennte MockEngine-Job laufen weiter. */
+    private class PausedHostDispatcher(
+        private val delegate: CoroutineDispatcher,
+    ) : CoroutineDispatcher() {
+        private val owner = Thread.currentThread()
+        private val lock = Any()
+        private var paused = false
+        private val pending = mutableListOf<Pair<CoroutineContext, Runnable>>()
+
+        override fun isDispatchNeeded(context: CoroutineContext) = delegate.isDispatchNeeded(context)
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) {
+            synchronized(lock) {
+                if (paused) pending += context to block else delegate.dispatch(context, block)
+            }
+        }
+
+        fun pause() {
+            check(Thread.currentThread() === owner)
+            synchronized(lock) { paused = true }
+        }
+
+        fun resume() {
+            check(Thread.currentThread() === owner)
+            val queued =
+                synchronized(lock) {
+                    paused = false
+                    pending.toList().also { pending.clear() }
+                }
+            queued.forEach { (context, block) -> delegate.dispatch(context, block) }
+        }
+    }
+
+    /** Main.immediate-Vertrag ohne Android-Runtime: lokal inline, fremde Threads zurück auf denselben Owner. */
+    private class OwnerMainDispatcher(
+        private val delegate: CoroutineDispatcher,
+    ) : MainCoroutineDispatcher() {
+        private val owner = Thread.currentThread()
+        override val immediate get() = this
+
+        override fun isDispatchNeeded(context: CoroutineContext) = Thread.currentThread() !== owner
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) = delegate.dispatch(context, block)
+    }
+
     private class RecordingDriver(
         private val delegate: SqlDriver,
     ) : SqlDriver by delegate {
@@ -106,6 +164,7 @@ class PhoneUploadHostTest {
 
     private class Fixture(
         scope: CoroutineScope,
+        publicationDispatcher: CoroutineDispatcher? = null,
     ) {
         val thread = Thread.currentThread()
         val driver = RecordingDriver(JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties(), AdvantlyDatabase.Schema))
@@ -243,13 +302,21 @@ class PhoneUploadHostTest {
                     }
             }
         val host =
-            PhoneUploadHost(auth, phone, uploads, {
-                try {
-                    backend.bindDevice(it)
-                } finally {
-                    bindingDrain?.waitForRelease()
-                }
-            }, hostScope, { 1000L }, { Thread.currentThread() === thread })
+            PhoneUploadHost(
+                auth,
+                phone,
+                uploads,
+                {
+                    try {
+                        backend.bindDevice(it)
+                    } finally {
+                        bindingDrain?.waitForRelease()
+                    }
+                },
+                publicationDispatcher?.let { CoroutineScope(hostScope.coroutineContext + it) } ?: hostScope,
+                { 1000L },
+                { Thread.currentThread() === thread },
+            )
 
         init {
             phone.start()
@@ -276,6 +343,18 @@ class PhoneUploadHostTest {
 
         suspend fun idle() {
             withTimeout(15_000) { while (host.state.value.busy) yield() }
+        }
+
+        suspend fun awaitCloudReset(hold: Hold) {
+            withTimeout(15_000) {
+                // MockEngine-Cancel bestätigt nur den getrennten Engine-Job, nicht die Host-Veröffentlichung.
+                hold.cancelled.await()
+                host.state.first {
+                    // Während erster Bindung ist canRefreshStatus ohnehin false; IDLE verlangt den echten Reset.
+                    it.phase == PhoneUploadPhase.IDLE && !it.canRefreshStatus &&
+                        it.pendingEvents == null && it.observedAtMs == null && it.lastResponseAtMs == null && it.result == null
+                }
+            }
         }
 
         suspend fun close() {
@@ -587,6 +666,87 @@ class PhoneUploadHostTest {
             }
         }
 
+    @Test fun cloudResetBarrierWaitsForHostPublicationAfterTransportCancellation() =
+        runBlocking {
+            val dispatcher = PausedHostDispatcher(requireNotNull(coroutineContext[ContinuationInterceptor] as? CoroutineDispatcher))
+            assertTrue(dispatcher.isDispatchNeeded(coroutineContext))
+            val f = Fixture(this, dispatcher)
+            try {
+                f.signIn()
+                val match = f.match()
+                val oldEvents = f.data.events.eventsFor(match.value)
+                val hold = Hold().also { f.holdPush = it }
+                f.host.uploadNow()
+                withTimeout(15_000) { hold.entered.await() }
+                assertTrue(f.host.state.value.canRefreshStatus)
+                dispatcher.pause()
+                f.consent = ConsentStatus.REQUIRED
+                f.auth.refreshProfile()
+                withTimeout(15_000) { hold.cancelled.await() }
+                assertEquals(
+                    ConsentStatus.REQUIRED,
+                    f.auth.session.value!!
+                        .consentStatus,
+                )
+                assertTrue(hold.cancelled.isCompleted)
+                // Der Transport ist bereits gecancelt; die Host-Veröffentlichung ist absichtlich noch nicht ausgeführt.
+                assertTrue(f.host.state.value.canRefreshStatus)
+                launch { dispatcher.resume() }
+                f.awaitCloudReset(hold)
+                assertFalse("Transport-Cancel ersetzt keine Host-Publication-Barriere", f.host.state.value.canRefreshStatus)
+                assertNull(f.host.state.value.pendingEvents)
+                assertNull(f.host.state.value.lastResponseAtMs)
+                hold.release.complete(Unit)
+                f.idle()
+                assertEquals(oldEvents, f.data.events.eventsFor(match.value))
+                assertEquals(oldEvents.size.toLong(), f.data.cloud.pendingCount())
+                assertNull(f.host.state.value.result)
+            } finally {
+                dispatcher.resume()
+                f.close()
+            }
+        }
+
+    @Test fun mainImmediateContractKeepsAuthHostAndResetOnTheGuardedOwnerThread() =
+        runBlocking {
+            val owner = Thread.currentThread()
+            val main = OwnerMainDispatcher(requireNotNull(coroutineContext[ContinuationInterceptor] as? CoroutineDispatcher))
+            assertFalse(main.immediate.isDispatchNeeded(coroutineContext))
+            withContext(Dispatchers.Default) {
+                assertTrue(main.immediate.isDispatchNeeded(coroutineContext))
+                withContext(main.immediate) { assertSame(owner, Thread.currentThread()) }
+            }
+            withContext(main.immediate) {
+                for (binding in listOf(true, false)) {
+                    val f = Fixture(this)
+                    try {
+                        assertSame(owner, f.thread)
+                        f.signIn()
+                        val match = f.match()
+                        val oldEvents = f.data.events.eventsFor(match.value)
+                        val hold = Hold()
+                        if (binding) f.holdBinding = hold else f.holdPush = hold
+                        f.host.uploadNow()
+                        withTimeout(15_000) { hold.entered.await() }
+                        f.consent = ConsentStatus.REQUIRED
+                        f.auth.refreshProfile()
+                        f.awaitCloudReset(hold)
+                        assertSame(owner, Thread.currentThread())
+                        assertFalse(f.host.state.value.canRefreshStatus)
+                        assertNull(f.host.state.value.pendingEvents)
+                        assertNull(f.host.state.value.lastResponseAtMs)
+                        hold.release.complete(Unit)
+                        f.idle()
+                        assertEquals(oldEvents, f.data.events.eventsFor(match.value))
+                        assertEquals(oldEvents.size.toLong(), f.data.cloud.pendingCount())
+                        assertNull(f.host.state.value.result)
+                    } finally {
+                        f.close()
+                    }
+                }
+            }
+        }
+
     @Test fun consentDeletionAndAccountChangesFenceBindingAndPushAndNeverLeakOldUiOrAcks() =
         runBlocking {
             for (binding in listOf(true, false)) {
@@ -622,7 +782,7 @@ class PhoneUploadHostTest {
                                 f.signIn()
                             }
                         }
-                        withTimeout(15_000) { hold.cancelled.await() }
+                        f.awaitCloudReset(hold)
                         assertNull(f.host.state.value.pendingEvents)
                         assertFalse(f.host.state.value.canRefreshStatus)
                         assertNull(f.host.state.value.lastResponseAtMs)

@@ -889,6 +889,14 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+Android-CI-Review 1 bestätigt `15f08cf` ohne Befunde; 13 Hosttests unabhängig grün.
+Transportcancel ist nachgewiesen keine Host-Publikationsbarriere, der 15-s-StateFlow-Wait
+erhält alle ursprünglichen Assertions und verhindert über `IDLE` Scheinerfüllung.
+Root übernimmt exakt diese einzelne Testdatei ohne Konflikt; Produktcode und öffentliche
+API unverändert. Gemeinsamer Gesamtcheck mit Phone-/Wear-APK vor Integrationscommit
+761 Tasks grün (1m1s, `advantly-android-ci-root-integration-check.log`), danach neuer
+CI-Head für PR #68. Kein Merge des fehlgeschlagenen `6da7517`.
+
 K2-A Review 2 auf `c58a96f` bestätigt alle sieben Ktor-Drainfälle, findet aber einen
 neuen P1 am nativen OkHttp-Callback: blockierte DNS-Auflösung bleibt aktiv, obwohl der
 Request-Job beendet und die Exportoperation aus dem Register entfernt ist. Eigene Probe
