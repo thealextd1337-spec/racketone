@@ -48,6 +48,49 @@ internal fun storePage(
 
 class CloudPullStoreTest {
     @Test
+    fun fenceAfterPartialReceiptWritesRollsBackEventsCloudAcksAndCursorTogether() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver)
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
+            val first =
+                StoredEvent("first", "match", "remote", 1, 1, """{"type":"PointWon","side":"A"}""", type = "PointWon", confirmed = true)
+            val second = first.copy(id = "second", deviceSeq = 2, lamport = 2, confirmed = false)
+            val third = first.copy(id = "third", deviceSeq = 3, lamport = 3, confirmed = false)
+            data.events.appendAll(listOf(first, second))
+            data.cloud.acknowledge(emptySet(), mapOf("second" to "forbidden"))
+            val work = data.cloudPulls.eventWork("alice", "match")!!
+            val metadata = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")
+            val page = listOf(first, second, third).mapIndexed { index, event -> CloudPullReceipt(event, index + 1L) }
+            var notifications = 0
+            var reachedReceipts = false
+            assertFailsWith<IllegalStateException> {
+                data.cloudPulls.commitEvents(work, run, page, {
+                    val stored = data.cloudPulls.receivedWatermarks(work).sumOf { it.eventCount }
+                    if (stored == 2L) reachedReceipts = true
+                    check(stored < 2)
+                }) { notifications++ }
+            }
+            assertTrue(reachedReceipts)
+            assertEquals(work, data.cloudPulls.eventWork("alice", "match"))
+            assertEquals(listOf(first.copy(confirmed = false), second), data.events.eventsFor("match"))
+            assertEquals(listOf(second), data.events.unconfirmedEvents("match"))
+            assertEquals(1, data.cloud.pendingCount())
+            assertEquals(mapOf("second" to "forbidden"), data.cloud.rejectedEvents())
+            assertEquals(metadata, data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match"))
+            assertTrue(data.cloudPulls.receivedWatermarks(work).isEmpty())
+            assertEquals(0, notifications)
+            data.cloudPulls.commitEvents(work, run, page, {}) { notifications++ }
+            assertEquals(3, data.cloudPulls.eventWork("alice", "match")!!.cursor)
+            assertEquals(3, data.cloudPulls.receivedWatermarks(work).sumOf { it.eventCount })
+            assertEquals(listOf(second, third), data.events.unconfirmedEvents("match"))
+            assertEquals(0, data.cloud.pendingCount())
+            assertTrue(data.cloud.rejectedEvents().isEmpty())
+            assertEquals(1, notifications)
+        }
+    }
+
+    @Test
     fun metadataRefreshPreservesRepairsReceiptsFailuresAndChecksExceptChangedMatch() {
         createInMemoryJvmDriver().use { driver ->
             val data = LocalData(driver)

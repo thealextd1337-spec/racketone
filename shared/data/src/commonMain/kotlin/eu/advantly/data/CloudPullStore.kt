@@ -313,10 +313,12 @@ class CloudPullStore internal constructor(
         requireWork(work, runSerial)
         var cursor = work.cursor
         received.forEach {
+            fence()
             require(it.serverSeq > cursor && it.event.matchId == work.matchId)
             require(it.event.deviceSeq > 0 && it.event.id.isNotBlank() && it.event.deviceId.isNotBlank())
             it.event.toScoreEvent() // Keine still übersprungenen Engine-Payloads als Vollständigkeitsbeweis.
             cursor = it.serverSeq
+            fence()
         }
         val materializedVersion = snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId)?.materializedVersion
         val participants =
@@ -325,7 +327,7 @@ class CloudPullStore internal constructor(
                     it.sourceDeviceId == null && materializedVersion != null &&
                     queries.materializedOwner("MATCH", work.matchId).executeAsOneOrNull() == work.profileId
             }
-        data.cloud.storeDownloaded(received.map { it.event })
+        data.cloud.storeDownloaded(received.map { it.event }, fence)
         // Die lokale Assignment-Projektion dieser Serverevents ist keine ungeklärte lokale Bearbeitung.
         // Ausschließlich einen vorher sauberen Cloud-Teilnehmerstand quittieren; andere Revisionen/Acks bleiben erhalten.
         if (participants != null) {
@@ -345,6 +347,7 @@ class CloudPullStore internal constructor(
             }
         }
         received.forEach {
+            fence()
             val event = it.event
             val old = queries.receipt(work.profileId, work.matchId, event.id).executeAsOneOrNull()
             if (old == null) {
@@ -353,6 +356,7 @@ class CloudPullStore internal constructor(
                 check(old.server_seq == it.serverSeq && old.device_id == event.deviceId && old.device_seq == event.deviceSeq)
                 queries.markReceiptRepair(work.repairRun, work.profileId, work.matchId, event.id)
             }
+            fence()
         }
         data.cloud.saveCursor(work.profileId, eventStream(work.matchId), cursor)
         queries.setNeedsVerification(if (endOfStream) 1 else 0, work.profileId, work.matchId)
