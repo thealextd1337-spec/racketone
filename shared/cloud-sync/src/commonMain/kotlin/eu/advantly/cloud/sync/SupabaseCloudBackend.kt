@@ -35,6 +35,7 @@ class SupabaseCloudBackend internal constructor(
     private val http: CloudHttp,
     private val installation: CloudInstallation,
 ) : CloudBackend,
+    CloudPullPort,
     CloudUploadPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
@@ -177,6 +178,75 @@ class SupabaseCloudBackend internal constructor(
         val update = OutboxPlanner.evaluate(sent, response)
         sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata)
         return response
+    }
+
+    override fun capturePull(): CloudPullAttempt {
+        val lease = sessions.capture()
+        return CloudPullAttempt(lease, requireBinding(lease)).also(::requireCurrentPull)
+    }
+
+    override fun requireCurrentPull(attempt: CloudPullAttempt) {
+        sessions.requireCurrent(attempt.lease)
+        if (requireBinding(attempt.lease) !== attempt.deviceBinding) throw CloudException("device_not_authorized", true)
+    }
+
+    private suspend fun pullRpc(
+        attempt: CloudPullAttempt,
+        name: String,
+        body: JsonObject,
+    ): String {
+        requireCurrentPull(attempt)
+        val response = rpc(attempt.lease, name, body)
+        requireCurrentPull(attempt)
+        return response
+    }
+
+    override suspend fun pullPage(
+        attempt: CloudPullAttempt,
+        cursor: Long,
+        limit: Int,
+    ): PullResponse {
+        require(cursor >= 0 && limit in 1..200)
+        return CloudJson.decodeFromString(
+            pullRpc(
+                attempt,
+                "cloud_sync_pull_v1",
+                buildJsonObject {
+                    put("p_cursor", cursor)
+                    put("p_limit", limit)
+                },
+            ),
+        )
+    }
+
+    override suspend fun pullEventPage(
+        attempt: CloudPullAttempt,
+        matchId: String,
+        afterServerSeq: Long,
+        limit: Int,
+    ): List<PulledEvent> {
+        require(matchId.isNotBlank() && afterServerSeq >= 0 && limit in 1..500)
+        return CloudJson.decodeFromString(
+            pullRpc(
+                attempt,
+                "cloud_pull_match_events_v1",
+                buildJsonObject {
+                    put("p_match_id", matchId)
+                    put("p_after_server_seq", afterServerSeq)
+                    put("p_limit", limit)
+                },
+            ),
+        )
+    }
+
+    override suspend fun pullWatermarks(
+        attempt: CloudPullAttempt,
+        matchId: String,
+    ): List<EventWatermark> {
+        require(matchId.isNotBlank())
+        return CloudJson.decodeFromString(
+            pullRpc(attempt, "cloud_match_event_watermarks_v1", buildJsonObject { put("p_match_id", matchId) }),
+        )
     }
 
     override suspend fun pull(

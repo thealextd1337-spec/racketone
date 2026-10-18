@@ -214,3 +214,79 @@ fun CloudSyncRepository.storeDownloadedPlayer(
         database.cloudMetadataQueries.recordDownload(receivingProfileId.takeIf { owned }, "PLAYER", player.id.value)
     }
 }
+
+/** Nur vom selben Konto materialisierte, vollständig saubere Cloud-Köpfe aktualisieren. */
+internal fun CloudSyncRepository.materializePullMatch(
+    record: MatchRecord,
+    profileId: String,
+    previousMaterializedVersion: Long?,
+): Boolean {
+    val id = record.id.value
+    if (database.matchTombstoneQueries.countById(id).executeAsOne() > 0) return false
+    val exists = database.matchHeaderQueries.countById(id).executeAsOne() > 0
+    if (!exists) {
+        storeDownloadedMatch(record, profileId, writable = emptySet())
+        return true
+    }
+    val kinds = listOf(CloudMetadataKind.HEADER, CloudMetadataKind.PARTICIPANTS, CloudMetadataKind.PROJECTION)
+    if (previousMaterializedVersion == null ||
+        database.cloudPullQueries.materializedOwner("MATCH", id).executeAsOneOrNull() != profileId ||
+        kinds.any {
+            val state = metadataState(it, id)
+            state == null || state.origin != CloudMetadataOrigin.CLOUD || state.selected.revision != state.uploadedRevision
+        }
+    ) {
+        return false
+    }
+    database.cloudPullQueries.updateDownloadedMatch(
+        record.sport.name,
+        record.discipline.name,
+        DataJson.encodeToString(MatchFormat.serializer(), record.format),
+        DataJson.encodeToString(Lineup.serializer(), record.lineup),
+        DataJson.encodeToString(MatchMeta.serializer(), record.meta),
+        record.meta.surface?.name,
+        record.meta.environment?.name,
+        record.status.name,
+        record.previousMatchId?.value,
+        record.updatedAtMs,
+        record.score.winner?.name,
+        record.score.reason?.name,
+        record.score.setsWonA.toLong(),
+        record.score.setsWonB.toLong(),
+        DataJson.encodeToString(ScoreSummary.serializer(), record.score),
+        id,
+    )
+    kinds.forEach { database.cloudMetadataQueries.recordDownload(null, it.name, id) }
+    return true
+}
+
+/** `owned` ist die einzige Schreibrechtsquelle; auch ein Cloud-Self bleibt lokal ein Gast. */
+internal fun CloudSyncRepository.materializePullPlayer(
+    downloaded: CloudPullPlayer,
+    profileId: String,
+    previousMaterializedVersion: Long?,
+): Boolean {
+    val player = downloaded.player
+    require(player.kind != PlayerKind.SELF && downloaded.id == player.id.value)
+    if (database.playerQueries.selectById(downloaded.id).executeAsOneOrNull() == null) {
+        storeDownloadedPlayer(player, profileId, downloaded.owned)
+        return true
+    }
+    val state = metadataState(CloudMetadataKind.PLAYER, downloaded.id) ?: return false
+    if (previousMaterializedVersion == null || state.origin != CloudMetadataOrigin.CLOUD ||
+        database.cloudPullQueries.materializedOwner("PLAYER", downloaded.id).executeAsOneOrNull() != profileId ||
+        database.playerQueries
+            .selectById(downloaded.id)
+            .executeAsOne()
+            .kind == PlayerKind.SELF.name
+    ) {
+        return false
+    }
+    // Rechte folgen dem geprüften Serverstand auch dann, wenn ein lokaler Namenskonflikt offen bleibt.
+    database.cloudPullQueries.updatePullPlayerWriter(profileId.takeIf { downloaded.owned }, downloaded.id)
+    if (state.selected.revision != state.uploadedRevision) return false
+    database.playerQueries.rename(player.displayName, downloaded.id)
+    database.playerQueries.updateKind(player.kind.name, downloaded.id)
+    database.cloudMetadataQueries.recordDownload(profileId.takeIf { downloaded.owned }, "PLAYER", downloaded.id)
+    return true
+}

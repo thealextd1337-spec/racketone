@@ -1,0 +1,156 @@
+CREATE TABLE cloud_pull_profile (
+    profile_id TEXT NOT NULL PRIMARY KEY,
+    visibility_epoch INTEGER,
+    target_epoch INTEGER,
+    scan_run INTEGER NOT NULL DEFAULT 0,
+    run_serial INTEGER NOT NULL DEFAULT 0,
+    metadata_complete INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE cloud_pull_snapshot (
+    profile_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    server_version INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    access TEXT,
+    access_epoch INTEGER,
+    redaction_observed INTEGER NOT NULL DEFAULT 0,
+    redaction_applied INTEGER NOT NULL DEFAULT 0,
+    materialized_version INTEGER,
+    seen_run INTEGER NOT NULL DEFAULT 0,
+    removal_pending INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(profile_id, kind, entity_id)
+);
+
+CREATE INDEX cloud_pull_materialized ON cloud_pull_snapshot(kind, entity_id, materialized_version);
+CREATE INDEX cloud_pull_scan ON cloud_pull_snapshot(profile_id, kind, seen_run);
+
+CREATE TABLE cloud_pull_event_work (
+    profile_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    repairing INTEGER NOT NULL DEFAULT 0,
+    repair_run INTEGER NOT NULL DEFAULT 0,
+    last_checked INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(profile_id, match_id)
+);
+CREATE INDEX cloud_pull_work_queue ON cloud_pull_event_work(profile_id, last_checked, match_id);
+
+CREATE TABLE cloud_pull_receipt (
+    profile_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    server_seq INTEGER NOT NULL CHECK(server_seq > 0),
+    device_id TEXT NOT NULL,
+    device_seq INTEGER NOT NULL CHECK(device_seq > 0),
+    repair_run INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(profile_id, match_id, event_id),
+    UNIQUE(profile_id, match_id, server_seq),
+    UNIQUE(profile_id, match_id, device_id, device_seq)
+);
+CREATE INDEX cloud_pull_receipt_watermarks ON cloud_pull_receipt(profile_id, match_id, repair_run, device_id, device_seq);
+
+ensureProfile:
+INSERT OR IGNORE INTO cloud_pull_profile(profile_id) VALUES (?);
+
+profile:
+SELECT * FROM cloud_pull_profile WHERE profile_id = ?;
+
+beginRun:
+UPDATE cloud_pull_profile SET run_serial = run_serial + 1 WHERE profile_id = ?;
+
+startScan:
+UPDATE cloud_pull_profile SET target_epoch = ?, scan_run = scan_run + 1, metadata_complete = 0 WHERE profile_id = ?;
+
+completeMetadata:
+UPDATE cloud_pull_profile SET visibility_epoch = ?, target_epoch = NULL, metadata_complete = 1 WHERE profile_id = ?;
+
+incompleteMetadata:
+UPDATE cloud_pull_profile SET metadata_complete = 0 WHERE profile_id = ?;
+
+snapshot:
+SELECT * FROM cloud_pull_snapshot WHERE profile_id = ? AND kind = ? AND entity_id = ?;
+
+insertSnapshot:
+INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json,access,access_epoch,
+    redaction_observed,seen_run,removal_pending) VALUES (?,?,?,?,?,?,?,?,?,?);
+
+updateSnapshot:
+UPDATE cloud_pull_snapshot SET server_version = ?, snapshot_json = ?, access = ?, access_epoch = ?,
+    redaction_observed = max(redaction_observed, ?), seen_run = ?, removal_pending = max(removal_pending, ?)
+WHERE profile_id = ? AND kind = ? AND entity_id = ?;
+
+markSeen:
+UPDATE cloud_pull_snapshot SET seen_run = ? WHERE profile_id = ? AND kind = 'MATCH' AND entity_id = ?;
+
+markMissing:
+UPDATE cloud_pull_snapshot SET removal_pending = 1
+WHERE profile_id = ? AND kind = 'MATCH' AND seen_run != ?;
+
+materialized:
+UPDATE cloud_pull_snapshot SET materialized_version = ? WHERE profile_id = ? AND kind = ? AND entity_id = ?;
+
+materializedOwner:
+SELECT profile_id FROM cloud_pull_snapshot WHERE kind = ? AND entity_id = ? AND materialized_version IS NOT NULL LIMIT 1;
+
+ensureEventWork:
+INSERT OR IGNORE INTO cloud_pull_event_work(profile_id,match_id) VALUES (?,?);
+
+eventWork:
+SELECT * FROM cloud_pull_event_work WHERE profile_id = ? AND match_id = ?;
+
+nextEventWork:
+SELECT w.* FROM cloud_pull_event_work w
+JOIN cloud_pull_snapshot s ON s.profile_id = w.profile_id AND s.entity_id = w.match_id AND s.kind = 'MATCH'
+WHERE w.profile_id = :profile AND w.last_checked < :runSerial AND s.access = 'member' AND s.removal_pending = 0
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = w.match_id)
+ORDER BY w.last_checked, w.match_id LIMIT 1;
+
+startRepair:
+UPDATE cloud_pull_event_work SET repairing = 1, repair_run = repair_run + 1 WHERE profile_id = ? AND match_id = ?;
+
+completeEventWork:
+UPDATE cloud_pull_event_work SET repairing = 0, last_checked = ? WHERE profile_id = ? AND match_id = ?;
+
+receipt:
+SELECT * FROM cloud_pull_receipt WHERE profile_id = ? AND match_id = ? AND event_id = ?;
+
+saveReceipt:
+INSERT INTO cloud_pull_receipt(profile_id,match_id,event_id,server_seq,device_id,device_seq,repair_run)
+VALUES (?,?,?,?,?,?,?);
+
+markReceiptRepair:
+UPDATE cloud_pull_receipt SET repair_run = ? WHERE profile_id = ? AND match_id = ? AND event_id = ?;
+
+receiptWatermarks:
+SELECT r.device_id, max(r.device_seq) AS max_seq, count(*) AS event_count FROM cloud_pull_receipt r
+JOIN match_event e ON e.id = r.event_id AND e.match_id = r.match_id AND e.device_id = r.device_id AND e.device_seq = r.device_seq
+WHERE r.profile_id = :profile AND r.match_id = :match AND (:repairing = 0 OR r.repair_run = :repairRun)
+GROUP BY r.device_id;
+
+finishRepair:
+DELETE FROM cloud_pull_receipt WHERE profile_id = ? AND match_id = ? AND repair_run != ?;
+
+pendingRemovalCount:
+SELECT count(*) FROM cloud_pull_snapshot WHERE profile_id = ? AND removal_pending = 1;
+
+pendingRedactionCount:
+SELECT count(*) FROM cloud_pull_snapshot WHERE profile_id = ? AND redaction_observed > redaction_applied;
+
+updateDownloadedMatch:
+UPDATE match_header SET sport = ?, discipline = ?, format_json = ?, lineup_json = ?, meta_json = ?, surface = ?, environment = ?,
+    status = ?, previous_match_id = ?, updated_at_ms = ?, winner = ?, result_reason = ?, sets_won_a = ?, sets_won_b = ?, score_json = ?
+WHERE id = ?;
+
+updatePullPlayerWriter:
+UPDATE cloud_metadata SET writer_profile_id = ? WHERE kind = 'PLAYER' AND entity_id = ? AND origin = 'CLOUD';
+
+-- Nur die exakt in diesem Download erzeugte Assignment-Projektion; keine anderen Metadaten-/Event-/Geräte-Acks.
+cleanDownloadedParticipants:
+UPDATE cloud_metadata SET uploaded_revision = :downloadedRevision
+WHERE kind = 'PARTICIPANTS' AND entity_id = :matchId AND origin = 'CLOUD' AND source_device_id IS NULL
+AND writer_profile_id IS :writerProfile AND revision = :downloadedRevision AND uploaded_revision = :previousRevision
+AND EXISTS (SELECT 1 FROM cloud_pull_snapshot s WHERE s.profile_id = :profileId AND s.kind = 'MATCH'
+    AND s.entity_id = :matchId AND s.materialized_version = :materializedVersion)
+AND NOT EXISTS (SELECT 1 FROM cloud_pull_snapshot s WHERE s.profile_id != :profileId AND s.kind = 'MATCH'
+    AND s.entity_id = :matchId AND s.materialized_version IS NOT NULL);

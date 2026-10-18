@@ -1,0 +1,86 @@
+package eu.advantly.data
+
+/** Dauerhafter D1-Stand; ein Metadatencursor bestätigt keine Eventvollständigkeit. */
+data class CloudPullProgress(
+    val profileId: String,
+    val visibilityEpoch: Long?,
+    val targetEpoch: Long?,
+    val scanRun: Long,
+    val runSerial: Long,
+    val cursor: Long,
+    val metadataComplete: Boolean,
+)
+
+enum class CloudPullEntityKind { MATCH, PLAYER, FRIENDSHIP }
+
+/** Vollständiger Serverstand bleibt auch bei geschütztem lokalem Inhalt erhalten. */
+data class CloudPullSnapshot(
+    val profileId: String,
+    val kind: CloudPullEntityKind,
+    val id: String,
+    val serverVersion: Long,
+    val json: String,
+    val access: String?,
+    val accessEpoch: Long?,
+    val redactionObserved: Long,
+    val redactionApplied: Long,
+    val materializedVersion: Long?,
+    val seenRun: Long,
+    val removalPending: Boolean,
+) {
+    val redactionPending: Boolean get() = redactionObserved > redactionApplied
+}
+
+data class CloudPullMatch(
+    val id: String,
+    val serverVersion: Long,
+    val json: String,
+    val access: String,
+    val accessEpoch: Long?,
+    val redactionEpoch: Long,
+    val deleted: Boolean,
+    val record: MatchRecord?,
+)
+
+data class CloudPullPlayer(
+    val id: String,
+    val serverVersion: Long,
+    val json: String,
+    val owned: Boolean,
+    val player: LocalPlayer,
+)
+
+data class CloudPullFriendship(
+    val id: String,
+    val serverVersion: Long,
+    val json: String,
+)
+
+data class CloudPullMetadataPage(
+    val matches: List<CloudPullMatch>,
+    val players: List<CloudPullPlayer>,
+    val friendships: List<CloudPullFriendship>,
+    val cursor: Long,
+    val hasMore: Boolean,
+    val visibilityEpoch: Long,
+)
+
+data class CloudPullEventWork(
+    val profileId: String,
+    val matchId: String,
+    val repairing: Boolean,
+    val repairRun: Long,
+    val cursor: Long,
+)
+
+/** Kein Payloadduplikat und kein Geräte-Ack: nur Empfang in diesem Kontokontext. */
+data class CloudPullReceipt(
+    val event: StoredEvent,
+    val serverSeq: Long,
+)
+
+data class CloudPullWatermark(
+    val deviceId: String,
+    val maxSeq: Long,
+    val eventCount: Long,
+)
