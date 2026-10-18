@@ -47,6 +47,10 @@ END;
 
 CREATE TRIGGER cloud_player_insert AFTER INSERT ON player BEGIN
     INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PLAYER', new.id);
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.id || '"') > 0
+    );
 END;
 
 CREATE TRIGGER cloud_player_update AFTER UPDATE OF display_name, kind ON player
@@ -62,6 +66,25 @@ END;
 CREATE TRIGGER cloud_assignment_update AFTER UPDATE OF player_json ON match_assignment
 WHEN old.player_json IS NOT new.player_json BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
+
+-- Auch eine erst später belegte Spielerreferenz ist eine neue Teilnehmerauswahl.
+CREATE TRIGGER cloud_player_authority_update AFTER UPDATE OF origin, source_device_id, writer_profile_id ON cloud_metadata
+WHEN new.kind = 'PLAYER' AND (old.origin IS NOT new.origin OR old.source_device_id IS NOT new.source_device_id
+    OR old.writer_profile_id IS NOT new.writer_profile_id) BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.entity_id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.entity_id || '"') > 0
+    );
+END;
+
+CREATE TRIGGER cloud_player_source_binding AFTER INSERT ON cloud_device_owner BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT h.id FROM match_header h JOIN cloud_metadata p
+            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND instr(h.lineup_json, '"' || p.entity_id || '"') > 0
+        UNION SELECT a.match_id FROM match_assignment a JOIN cloud_metadata p
+            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND instr(a.player_json, '"' || p.entity_id || '"') > 0
+    );
 END;
 
 byKey:
@@ -98,6 +121,17 @@ SELECT i.device_id FROM local_identity i JOIN setting s ON s.key = 'identity.sco
 
 sourceForSelf:
 SELECT device_id FROM local_source WHERE self_id = ? ORDER BY local DESC, device_id LIMIT 1;
+
+ownedSelfAlias:
+SELECT count(*) FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id
+WHERE s.self_id = :selfId AND o.profile_id = :profileId;
+
+playerReferenceAllowed:
+SELECT count(*) FROM cloud_metadata m
+LEFT JOIN local_source s ON s.device_id = m.source_device_id
+LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
+WHERE m.kind = 'PLAYER' AND m.entity_id = :id AND m.origin != 'UNKNOWN'
+AND (m.writer_profile_id = :profileId OR o.profile_id = :profileId);
 
 genesisForMatch:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload

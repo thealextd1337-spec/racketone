@@ -143,7 +143,7 @@ class CloudUploadStore internal constructor(
                     }
 
                     CloudMetadataKind.PARTICIPANTS -> {
-                        cloud.uploadParticipants(version.id)?.let {
+                        cloud.uploadParticipants(version.id, session.profileId)?.let {
                             participants +=
                                 CloudRevisioned(version, it)
                         }

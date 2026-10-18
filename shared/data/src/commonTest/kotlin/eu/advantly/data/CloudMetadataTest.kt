@@ -85,12 +85,20 @@ class CloudMetadataTest {
             assertEquals(it.revision, data.cloud.metadataState(it.kind, it.id)?.uploadedRevision)
         }
         assertEquals(
-            "replacement",
+            null,
             pending.participants
                 .single()
                 .value.participants
                 .last()
                 .playerId,
+        )
+        assertEquals(
+            "Cem",
+            pending.participants
+                .single()
+                .value.participants
+                .last()
+                .displayName,
         )
         assertEquals(
             payloads.single().payload,

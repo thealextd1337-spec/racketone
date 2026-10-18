@@ -31,7 +31,8 @@ internal fun CloudSyncRepository.recordLocalPlayer(id: String) {
 }
 
 /**
- * Genesis allein ist kein Eigentumsbeleg. Zusätzlich muss U2 die Quelle UND deren Self-ID direkt belegt haben.
+ * Genesis allein ist kein Eigentumsbeleg. U2 muss die Quelle und die Self-ID direkt belegen;
+ * bei abweichendem Self-Alias müssen beide Quellen zusätzlich demselben Konto gehören.
  * Downloads behalten ihre explizite Herkunft und können durch einen eigenen Scorer nicht zu eigenen Köpfen werden.
  */
 internal fun CloudSyncRepository.resolveMetadataSources() {
@@ -63,7 +64,11 @@ internal fun CloudSyncRepository.resolveMatchMetadataSource(id: String) {
             .firstNotNullOfOrNull { it.toScoreEventOrNull()?.takeIf { event -> event.payload is MatchCreated } } ?: return
     val created = genesis.payload as MatchCreated
     val source = database.localIdentityQueries.source(genesis.deviceId.value).executeAsOneOrNull() ?: return
-    if ((created.createdBy ?: created.lineup.a.first()).value != source.self_id) return
+    val creator = (created.createdBy ?: created.lineup.a.first()).value
+    if (creator != source.self_id) {
+        val owner = database.cloudUploadQueries.deviceOwner(source.device_id).executeAsOneOrNull() ?: return
+        if (database.cloudMetadataQueries.ownedSelfAlias(creator, owner).executeAsOne() == 0L) return
+    }
     database.cloudMetadataQueries.recordSource(
         if (source.local ==
             1L
@@ -83,7 +88,10 @@ internal fun CloudSyncRepository.uploadHeader(id: String): CloudMatchHeader? =
         CloudMatchHeader(it.id, it.sport, it.discipline, it.format_json, it.meta_json, it.created_at_ms, it.previous_match_id)
     }
 
-internal fun CloudSyncRepository.uploadParticipants(id: String): CloudParticipants? {
+internal fun CloudSyncRepository.uploadParticipants(
+    id: String,
+    profileId: String,
+): CloudParticipants? {
     val header = database.matchHeaderQueries.selectById(id).executeAsOneOrNull() ?: return null
     val lineup = DataJson.decodeFromString(Lineup.serializer(), header.lineup_json)
     val assigned =
@@ -97,7 +105,13 @@ internal fun CloudSyncRepository.uploadParticipants(id: String): CloudParticipan
                 val assignment = assigned[slot.value]?.let { DataJson.decodeFromString(Player.serializer(), it) }
                 val playerId = assignment?.id ?: slot.takeUnless { assigned.containsKey(it.value) || Placeholders.isPlaceholder(it) }
                 val player = playerId?.let { database.playerQueries.selectById(it.value).executeAsOneOrNull() }
-                CloudParticipant(slot.value, team, index + 1, player?.display_name ?: assignment?.displayName.orEmpty(), playerId?.value)
+                // Ungeklärte oder fremde Gäste bleiben benannte Slots, ohne eine Cloud-Spielerzuordnung zu behaupten.
+                val reference =
+                    playerId?.value?.takeIf {
+                        player != null && player.kind != PlayerKind.PLACEHOLDER.name &&
+                            database.cloudMetadataQueries.playerReferenceAllowed(it, profileId).executeAsOne() > 0
+                    }
+                CloudParticipant(slot.value, team, index + 1, player?.display_name ?: assignment?.displayName.orEmpty(), reference)
             }
         }
     return CloudParticipants(id, people)
