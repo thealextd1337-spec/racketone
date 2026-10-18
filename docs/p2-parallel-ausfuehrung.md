@@ -22,6 +22,11 @@ bleiben bytegleich zum bereits gemeinsam geprüften Integrationsstand (771 Tasks
 
 ### D2/D3: geprüfte Grundlage und zweite Umsetzungswelle
 
+PR #72 ist auf exakt `86f7a00` als `b375c02` nach Main integriert. Lauf `39162771195`:
+Changes, Ubuntu/APKs, Apple-Native/Simulator und Supabase erfolgreich; Admin nach Pfadfilter
+übersprungen. Der folgende Protokoll-Integrationszweig erhält diesen Main-Abgleich mit unverändertem
+Produkt-/Konfigurationsbaum; sein grüner gemeinsamer 771-Task-Check wird deshalb nicht wiederholt.
+
 Engine-Slice `3a73905` und Export-Testfix `786c0c8` sind lokal als `803a38a` integriert;
 beide Slices bytegleich zu ihren unabhängigen Freigaben. Gemeinsamer Check und Phone-/Wear-APKs:
 771 Tasks grün. Der ID-only-Producer und Protokoll 4 sind noch nicht aktiviert.
@@ -45,10 +50,21 @@ Die laufende Parallelwelle startete auf exakt `803a38a`:
 
 Die Protokoll-Lane ist als `f5d07b1` übergeben: zwölf neue Codec-Tests und Gesamtcheck grün,
 V3-Konstanten und öffentliche Ablehnung von V4-Nicht-Hello bleiben erhalten. Frischer unabhängiger
-Review R1 läuft; Data bleibt parallel in Umsetzung. Review-Task:
+Review R1 ist ohne Befunde freigegeben: 34 zusätzliche Temp-Assertions grün, darunter Control samt
+Envelope exakt 65.536 Byte erlaubt und ab 65.537 Byte verweigert. Data bleibt parallel in Umsetzung.
+Root integriert im eigenen Worktree `p2-d2d3-protocol-integration` auf Basis `86f7a00`; die fünf
+Dateien sowie Produkt/Konfiguration sind bytegleich zur geprüften Protokollübergabe. Gemeinsamer
+Gesamtcheck samt beiden APKs: 771 Tasks grün in 1m52s, Exitcode 0. Review-Task:
 `advantly-20261018-d2d3-protocol-review-r1` (gleicher unten dokumentierter Task-ID-Präfix).
 
 U2/U3 bleiben Herkunftsautorität; nur ein payloadfreier dauerhafter Cloud-Marker kommt hinzu.
+DATA besitzt zusätzlich ausschließlich `CloudSyncMetadata.kt::uploadParticipants`: ID-Projektionen
+werden über das bestehende Spieler-Verzeichnis gelesen, echte Legacyzeilen weiterhin über ihr
+JSON. `MatchAssignment.sq::forMatch` erhält keine JSON1-Abhängigkeit und erzeugt keine künstlichen
+Spieler-JSONs. Referenzberechtigung, Herkunft, Revisionen und Acks bleiben erhalten; redigierte IDs
+dürfen auch über den Legacy-Fallback keine Namen wieder offenlegen. Direkte Data-Regressionen
+decken beide Formen und fehlende/redigierte Verzeichniseinträge ab. Weitere Funktionen der Datei
+bleiben Root; bis zur Übergabe gibt es keine konkurrierenden Root-Edits an dieser Stelle.
 Globale Daten werden einmal gespeichert, aber Aufbewahrung für B gewährt A keinen Zugriff.
 Die Data-Schnittstelle behält `serverSeq` je Redaktionszeile zur H-/Cursorprüfung ausdrücklich bei.
 Eine enge persistente Aktivierungsseam dient nur der gemeinsamen Root-Umstellung; kein neues

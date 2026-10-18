@@ -43,7 +43,10 @@ object SyncCodec {
             classDiscriminator = "type"
         }
 
-    fun encodeToString(message: SyncMessage): String = json.encodeToString(SyncMessage.serializer(), message)
+    fun encodeToString(message: SyncMessage): String {
+        require(message !is ReplicaControlMessage) { "ReplicaControlMessage requires IdentityEnvelope" }
+        return serialize(message).also { requireWireBudget(message.v, it.encodeToByteArray().size) }
+    }
 
     fun encode(message: SyncMessage): ByteArray = encodeToString(message).encodeToByteArray()
 
@@ -51,35 +54,55 @@ object SyncCodec {
         message: SyncMessage,
         identity: IdentityEnvelope,
     ): ByteArray {
-        val original = json.parseToJsonElement(encodeToString(message)) as JsonObject
+        val original = json.parseToJsonElement(serialize(message)) as JsonObject
         return JsonObject(
             original + ("identity" to json.encodeToJsonElement(IdentityEnvelope.serializer(), identity)),
-        ).toString().encodeToByteArray()
+        ).toString().encodeToByteArray().also { requireWireBudget(message.v, it.size) }
     }
 
-    fun decode(bytes: ByteArray): DecodeResult = decode(bytes.decodeToString())
+    private fun serialize(message: SyncMessage): String = json.encodeToString(SyncMessage.serializer(), message)
 
-    fun decode(text: String): DecodeResult {
+    fun decode(bytes: ByteArray): DecodeResult = decodePacket(bytes.decodeToString(), bytes.size)
+
+    fun decode(text: String): DecodeResult = decodePacket(text, text.encodeToByteArray().size)
+
+    private fun decodePacket(
+        text: String,
+        byteCount: Int,
+    ): DecodeResult {
         val element =
             try {
                 json.parseToJsonElement(text)
-            } catch (e: IllegalArgumentException) {
-                return DecodeResult.Malformed("kein JSON: ${e.message}")
+            } catch (_: IllegalArgumentException) {
+                return DecodeResult.Malformed("kein JSON")
             }
         val obj = element as? JsonObject ?: return DecodeResult.Malformed("kein JSON-Objekt")
         val v = (obj["v"] as? JsonPrimitive)?.intOrNull ?: return DecodeResult.Malformed("Feld 'v' fehlt")
         val type = (obj["type"] as? JsonPrimitive)?.contentOrNull
+        if (v >= 4 && byteCount > MAX_V4_PACKET_BYTES) return DecodeResult.Malformed("Wirepaket zu groß")
         // Hello immer lesen: Versionsprüfung braucht genau diese Nachricht
         if (type != HELLO && !ProtocolVersion.accepts(v)) return DecodeResult.Unsupported(v, type)
         return try {
-            DecodeResult.Ok(
-                json.decodeFromJsonElement(SyncMessage.serializer(), obj),
-                obj["identity"]?.let { json.decodeFromJsonElement(IdentityEnvelope.serializer(), it) },
-            )
-        } catch (e: IllegalArgumentException) {
-            if (!ProtocolVersion.accepts(v)) DecodeResult.Unsupported(v, type) else DecodeResult.Malformed(e.message ?: "unlesbar")
+            val message = json.decodeFromJsonElement(SyncMessage.serializer(), obj)
+            val identity = obj["identity"]?.let { json.decodeFromJsonElement(IdentityEnvelope.serializer(), it) }
+            // Gilt auch nach der späteren V4-Aktivierung; lokale Legacy-Daten bleiben separat zulässig.
+            if (message is ReplicaControlMessage && identity == null) {
+                DecodeResult.Malformed("ReplicaControlMessage requires IdentityEnvelope")
+            } else {
+                DecodeResult.Ok(message, identity)
+            }
+        } catch (_: IllegalArgumentException) {
+            if (!ProtocolVersion.accepts(v)) DecodeResult.Unsupported(v, type) else DecodeResult.Malformed("unlesbare Nachricht")
         }
     }
 
+    private fun requireWireBudget(
+        version: Int,
+        byteCount: Int,
+    ) {
+        require(version < 4 || byteCount <= MAX_V4_PACKET_BYTES) { "Wirepaket zu groß" }
+    }
+
+    private const val MAX_V4_PACKET_BYTES = 64 * 1024
     private const val HELLO = "Hello"
 }

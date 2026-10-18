@@ -76,7 +76,18 @@ data class Summary(
     val matches: Map<String, VersionVector>,
     val reply: Boolean = false,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    val lifecycle: Map<String, LifecycleSummary> = emptyMap(),
+    val stamps: Map<String, MatchDataStamp> = emptyMap(),
 ) : SyncMessage {
+    init {
+        require(v >= 4 || (lifecycle.isEmpty() && stamps.isEmpty()))
+        require(lifecycle.size <= 200)
+        if (v >= 4) {
+            (matches.keys + lifecycle.keys + stamps.keys).forEach(::requireWireId)
+            require(stamps.keys.containsAll(matches.keys))
+        }
+    }
+
     /** Vektor für [matchId] oder [VersionVector.EMPTY]. */
     fun vector(matchId: MatchId): VersionVector = matches[matchId.value] ?: VersionVector.EMPTY
 }
@@ -96,7 +107,17 @@ data class Events(
     val events: List<ScoreEvent>,
     val more: Boolean = false,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
-) : SyncMessage
+    val stamp: MatchDataStamp? = null,
+) : SyncMessage {
+    init {
+        require(v >= 4 || stamp == null)
+        if (v >= 4) {
+            requireWireId(matchId.value)
+            require(events.isEmpty() || stamp != null)
+            require(events.all { it.matchId == matchId })
+        }
+    }
+}
 
 /**
  * Match-Kopf und Favoriten-Lineups (01 §4.3), damit die Uhr ein Match anzeigen, starten oder fortsetzen kann.
@@ -134,7 +155,16 @@ data class MatchMetaMessage(
     /** Additiv in Protokoll 3 (P2-J): ältere Geräte ignorieren das unbekannte Feld (`ignoreUnknownKeys`). */
     val telemetry: TelemetrySetting? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
-) : SyncMessage
+    val stamp: MatchDataStamp? = null,
+) : SyncMessage {
+    init {
+        require(v >= 4 || stamp == null)
+        if (v >= 4) {
+            require(match == null || stamp != null)
+            match?.let { requireWireId(it.matchId.value) }
+        }
+    }
+}
 
 /**
  * Telemetrie-Sichtbarkeit auf dem Draht (P2-J). [visibility] bleibt bewusst ein Text (`share`/`private`/`off`): Ein
@@ -206,7 +236,17 @@ data class WatchAssignment(
 data class Deleted(
     val matches: List<DeletedMatch>,
     @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
-) : SyncMessage
+    val stamps: Map<String, MatchDataStamp> = emptyMap(),
+) : SyncMessage {
+    init {
+        require(v >= 4 || stamps.isEmpty())
+        if (v >= 4) {
+            stamps.keys.forEach(::requireWireId)
+            matches.forEach { requireWireId(it.matchId.value) }
+            require(matches.all { it.matchId.value in stamps })
+        }
+    }
+}
 
 /** Ein gelöschtes Match mit Zeitpunkt der Löschung (Wanduhr des löschenden Geräts). */
 @Serializable

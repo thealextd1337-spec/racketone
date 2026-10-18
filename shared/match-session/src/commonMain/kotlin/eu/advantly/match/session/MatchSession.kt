@@ -76,6 +76,7 @@ import eu.advantly.sync.protocol.MatchMetaMessage
 import eu.advantly.sync.protocol.OwnSource
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.ProtocolVersion
+import eu.advantly.sync.protocol.ReplicaControlMessage
 import eu.advantly.sync.protocol.SeqRange
 import eu.advantly.sync.protocol.Summary
 import eu.advantly.sync.protocol.SyncCodec
@@ -1397,12 +1398,14 @@ class MatchSession(
         deviceStatuses[peer]?.let { deviceStatuses[peer] = it.copy(lastSeenAtMs = clock.nowMs()) }
         val touched =
             try {
+                // ReplicaControlMessage wird vor der echten V4-Aktivierung bereits vom Codec abgewiesen.
                 when (message) {
                     is Hello -> onHello(peer, message, pairing.revision != pairingRevision).let { null }
                     is Summary -> onSummary(peer, message).let { null }
                     is Events -> onEvents(peer, message)
                     is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
+                    is ReplicaControlMessage -> null
                 }
             } catch (e: IllegalArgumentException) {
                 // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) â†’ verwerfen; der Rest bleibt konsistent
@@ -2064,6 +2067,10 @@ class MatchSession(
 
             is Hello, is Deleted -> {
                 message
+            }
+
+            is ReplicaControlMessage -> {
+                null
             }
         }
 
