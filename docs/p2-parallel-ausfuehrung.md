@@ -889,6 +889,33 @@ K2-A/B und D1-Korrektur 2 arbeiten weiterhin in ihren getrennten Worktrees.
 
 #### Aktueller Abschluss und Reviewbesitz
 
+K2-A Review 2 auf `c58a96f` bestätigt alle sieben Ktor-Drainfälle, findet aber einen
+neuen P1 am nativen OkHttp-Callback: blockierte DNS-Auflösung bleibt aktiv, obwohl der
+Request-Job beendet und die Exportoperation aus dem Register entfernt ist. Eigene Probe
+mit echtem Ktor 3.5.1/OkHttp 5.3.2 bestätigt dies vor separater DNS-Freigabe. Keine alte
+Veröffentlichung, aber weiterhin falsche Close-Barriere. Vor Produktänderung ist im
+bestehenden A-Worktree die minimale instrumentierte native Engine-/Call-Completion-Seam
+abzugrenzen; Android/JVM/iOS und injizierte Engines ausdrücklich behandeln, keine
+unbelegte Parität aus Ktor-Jobabschluss ableiten. Öffentlicher Port und RPC/Authpfad bleiben.
+Konkrete Dateien/API gehen vor Edit an Root, keine Nutzerrückfrage und kein neues Framework.
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Athread-send%3Aadvantly-20261018-k2-phone-http-fix-r2-scope`.
+
+D1-Korrektur 3 `89a6adb` fertig, sechs autorisierte Dateien; indizierte Einzelquery und
+Fences ohne Schema-/Index-/EventStoreänderung. Originalrepros rot→grün, genau 2/500
+Payloadzeilen bei 1.000/10.000 Bestandsereignissen, 10.000er-Reparatur über Wiederöffnungen
+und lokale Abbrüche/Teil-Receipts atomar geprüft. 268 Tests plus Migration grün, ein realer
+Stacktest bleibt ausdrücklich offen; Gesamtcheck 692 Tasks grün. Root-Produktdiff gelesen,
+frisches unabhängiges Review 4 läuft:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-d1-review-r4`.
+
+Android-CI-Fix `15f08cf` fertig: ausschließlich `PhoneUploadHostTest.kt`, keine Produkt-
+oder APIänderung. Anhalten nur des Hostdispatchs beweist Transportcancel vor Hostpublikation;
+alter Wait deterministisch rot, explizite StateFlow-Resetbarriere grün. 13 Host-/21 App-Tests,
+Main.immediate-Owner-Vertragsprobe und Gesamtcheck samt APKs 761 Tasks grün. Alle ursprünglichen
+zehn Transitions-/History-/Ack-/Altantwortassertionen erhalten. Root hat Diff/Übergabe gelesen;
+frisches Review vor Integration in PR #68:
+`node:delegated-task:command%3Amcp%3A2455d11b-46b1-487c-82f0-bc3d3b9480ee%3Adelegate-task%3Aadvantly-20261018-u4-android-ci-review-r1`.
+
 K2-A Drainkorrektur `c58a96f` gegen `acdd93e` fertig, sauber und genau zwei Dateien:
 `CloudHttp.kt` plus bestehender Export-HTTP-Test. Request-Lifetime ab Requestaufbau erfassen,
 im `finally` cancellationfest canceln und vollständig joinen; öffentliche API unverändert.
