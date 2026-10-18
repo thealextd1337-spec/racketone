@@ -63,6 +63,17 @@ data class CloudAdoptionSource(
 )
 
 interface CloudAuthPort {
+    /** Verifizierte Kontositzung unabhängig von lokaler Cloud-Sperre; Generation ändert sich nur bei Auth-Wechseln. */
+    val accountSession: StateFlow<CloudSession?> get() = session
+
+    /** Liest im Adapter zusätzlich synchron die SDK-Identität, damit ein verzögerter Flow nicht genügt. */
+    fun requireAccountSession(expected: CloudSession) {
+        val current = accountSession.value
+        if (current?.profileId != expected.profileId || current.generation != expected.generation) {
+            throw CloudException("cloud_session_changed", true)
+        }
+    }
+
     /** Ohne Implementierung bleibt die Freigabe aus; alte Hosts bestätigen niemals implizit. */
     suspend fun consent(language: String): ConsentSnapshot = throw CloudException("consent_unavailable", false)
 

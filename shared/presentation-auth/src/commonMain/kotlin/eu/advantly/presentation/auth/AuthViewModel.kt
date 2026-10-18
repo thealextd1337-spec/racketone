@@ -57,7 +57,7 @@ class AuthViewModel(
 
     init {
         scope.launch {
-            auth.session.collect { session ->
+            auth.accountSession.collect { session ->
                 if (displayedSession != null && !sameSession(displayedSession, session)) {
                     displayedSession = null
                     mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed")
@@ -129,7 +129,7 @@ class AuthViewModel(
     fun setConsentLanguage(language: String) {
         if (language !in setOf("de", "en") || language == consentLanguage || mutable.value.busy) return
         consentLanguage = language
-        if (auth.session.value != null) refresh()
+        if (auth.accountSession.value != null) refresh()
     }
 
     fun decideConsent(accept: Boolean) =
@@ -137,12 +137,9 @@ class AuthViewModel(
             val before = requireDisplayedSession()
             val snapshot = mutable.value.consent ?: throw CloudException("consent_unavailable", false)
             if (accept && !snapshot.canAccept) throw CloudException("consent_unavailable", false)
-            // Ablehnen sperrt Cloud-Arbeit sofort und darf dafür die lokale Generation wechseln.
-            if (!accept) displayedSession = null
             val result = auth.decideConsent(snapshot, accept)
-            if (result.profileId != before.profileId || before.profileId != auth.session.value?.profileId ||
-                (accept && !sameSession(before, auth.session.value))
-            ) {
+            auth.requireAccountSession(before)
+            if (result.profileId != before.profileId) {
                 throw CloudException("cloud_session_changed", true)
             }
             showSession()
@@ -152,7 +149,7 @@ class AuthViewModel(
         runAction {
             val before = requireDisplayedSession()
             val data = auth.exportData()
-            if (!sameSession(before, auth.session.value)) throw CloudException("cloud_session_changed", true)
+            auth.requireAccountSession(before)
             mutable.value = mutable.value.copy(exportedData = data)
         }
 
@@ -230,12 +227,12 @@ class AuthViewModel(
 
     private fun requireDisplayedSession(): CloudSession {
         val session = displayedSession ?: throw CloudException("cloud_session_changed", true)
-        if (!sameSession(session, auth.session.value)) throw CloudException("cloud_session_changed", true)
+        auth.requireAccountSession(session)
         return session
     }
 
     private suspend fun showSession() {
-        val session = auth.session.value
+        val session = auth.accountSession.value
         displayedSession = session
         mutable.value =
             AuthState(
@@ -245,7 +242,8 @@ class AuthViewModel(
                 deletionRequested = session?.deletionRequested == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
-        if (!sameSession(session, auth.session.value) || (consent != null && consent.profileId != session?.profileId)) {
+        if (session != null) auth.requireAccountSession(session)
+        if (!sameSession(session, auth.accountSession.value) || (consent != null && consent.profileId != session?.profileId)) {
             throw CloudException("cloud_session_changed", true)
         }
         val candidates =
@@ -255,7 +253,7 @@ class AuthViewModel(
                 emptyList()
             }
         displayedSession = session
-        adoptionGeneration = session?.generation
+        adoptionGeneration = auth.session.value?.generation
         mutable.value =
             AuthState(
                 step =

@@ -13,6 +13,34 @@ create table if not exists tests.users (
 );
 grant select on tests.users to anon, authenticated, service_role;
 
+-- Nur Testsetup: explizit erzeugte Sitzung bleibt auch nach einem Widerruf dieselbe Fixture-ID.
+create table if not exists tests.account_sessions(
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  session_id uuid not null
+);
+grant select on tests.account_sessions to anon, authenticated, service_role;
+create or replace function tests.create_auth_session(p_profile uuid) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare v_session uuid := gen_random_uuid();
+begin
+  insert into auth.sessions(id,user_id,created_at,updated_at,not_after)
+    values(v_session,p_profile,now(),now(),now()+interval '1 day');
+  insert into tests.account_sessions values(p_profile,v_session)
+    on conflict(profile_id) do update set session_id=excluded.session_id;
+  return v_session;
+end;
+$$;
+revoke all on function tests.create_auth_session(uuid) from public, anon, authenticated;
+
+create or replace function tests.authenticate_session(p_profile uuid, p_session uuid) returns void
+language plpgsql set search_path = '' as $$
+begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',p_profile,'role','authenticated',
+    'session_id',p_session,'exp',extract(epoch from now()+interval '1 hour')::bigint)::text,true);
+end;
+$$;
+
 -- Auth-Nutzer anlegen (Trigger erzeugt Profil + Einstellungen); optional Onboarding als erledigt markieren.
 create or replace function tests.create_user(p_identifier text, p_onboard boolean default true,
                                              p_country text default 'AT')
@@ -27,6 +55,7 @@ begin
   insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data, aud, role, created_at, updated_at)
   values (v_id, p_identifier || '@test.advantly.eu', jsonb_build_object('test_identifier', p_identifier),
           '{}'::jsonb, 'authenticated', 'authenticated', now(), now());
+  perform tests.create_auth_session(v_id);
   insert into tests.users (identifier, id) values (p_identifier, v_id)
   on conflict (identifier) do update set id = excluded.id;
   if p_onboard then
@@ -60,8 +89,7 @@ begin
   if v_id is null then
     raise exception 'Testnutzer % fehlt', p_identifier;
   end if;
-  perform set_config('role', 'authenticated', true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_id, 'role', 'authenticated')::text, true);
+  perform tests.authenticate_session(v_id,(select session_id from tests.account_sessions where profile_id=v_id));
 end;
 $$;
 

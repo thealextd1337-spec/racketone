@@ -212,8 +212,10 @@ class SupabaseSessionLifecycleTest {
                 val old = auth.sessions.capture()
                 auth.stopForDeletion()
                 assertFailsWith<CloudException> { auth.sessions.requireCurrent(old) }
-                assertFailsWith<CloudException> { auth.refreshProfile() }
-                assertFalse(auth.session.value?.onboarded == true)
+                auth.refreshProfile()
+                assertFailsWith<CloudException> { auth.sessions.capture() }
+                assertTrue(auth.accountSession.value?.onboarded == true)
+                assertFailsWith<CloudException> { auth.sessions.requireCurrent(old) }
             } finally {
                 auth.close()
             }

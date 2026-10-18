@@ -65,7 +65,7 @@ select is((select age_rule_min_age::int from public.profile_settings where profi
 select is_empty($$ select * from private.age_tickets where token_hash=private.age_hash((select token from ticket)) $$, 'Verbrauchte Bindung entfernt');
 select ok(not (select raw_user_meta_data ? 'age_ticket' from auth.users where id=(select id from accepted_id)),
   'OTP-Ticket nach erfolgreichem Verbrauch aus Auth-Metadaten entfernt');
-select tests.authenticate_as_id((select id from accepted_id));
+select tests.authenticate_session((select id from accepted_id),tests.create_auth_session((select id from accepted_id)));
 select public.record_consent_v1(public.my_consent_v1('de')->'documents',true);
 select throws_ok($$ select public.finish_onboarding('Alias','support') $$, 'P0001','username_reserved','Reservierung durch Server');
 select throws_ok($$ select public.finish_onboarding('','valid_name') $$, 'P0001','invalid_alias','Leerer Alias abgelehnt');

@@ -57,7 +57,7 @@ select is((select deletion_requested_at from public.profile_settings where profi
 reset role;
 select private.purge_account(tests.uid('rights_active'));
 select is((select count(*)::int from private.consent_deletion_origins where profile_id=tests.uid('rights_active')),0,'Profil-Lifecycle entfernt privaten Marker');
-select tests.authenticate_as_id(current_setting('tests.rights_new')::uuid);
+select tests.authenticate_as('rights_new');
 select public.request_account_deletion();
 reset role;
 update public.profile_settings set deletion_requested_at=null where profile_id=tests.uid('rights_new');

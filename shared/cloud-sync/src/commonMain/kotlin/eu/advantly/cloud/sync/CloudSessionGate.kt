@@ -23,6 +23,9 @@ internal class CloudCredentials(
 internal class CloudLease(
     val generation: Long,
     val credentials: CloudCredentials,
+    val profileRevision: Long? = null,
+    val cloudRevision: Long = 0,
+    val canResumeCloud: Boolean = false,
 )
 
 /**
@@ -40,6 +43,9 @@ class CloudSessionGate internal constructor(
     private var generation = 0L
     private var identity: CloudCredentials? = null
     private var acceptSdkSession = true
+    private var cloudSuspended = false
+    private var profileRevision = 0L
+    private var cloudRevision = 0L
     private var uploadSession: CloudUploadSession? = null
     private var ownershipActive = false
     private val requests = mutableSetOf<Job>()
@@ -53,6 +59,9 @@ class CloudSessionGate internal constructor(
         confined()
         check(generation < Long.MAX_VALUE)
         generation++
+        profileRevision++
+        cloudRevision++
+        cloudSuspended = false
         val shouldLeave = leaveIdentity && (ownershipActive || forceLeave)
         ownershipActive = false
         identity = null
@@ -73,6 +82,37 @@ class CloudSessionGate internal constructor(
         acceptSdkSession = false
         invalidate(leaveIdentity, forceLeave = true)
         return generation
+    }
+
+    /** Sperrt Cloud-Arbeit, erhält aber die Auth-Identität für serververifizierte Kontorechte. */
+    internal fun suspendCloud(leaveIdentity: Boolean = false) {
+        confined()
+        synchronize()
+        cloudSuspended = true
+        check(profileRevision < Long.MAX_VALUE)
+        profileRevision++
+        check(cloudRevision < Long.MAX_VALUE)
+        cloudRevision++
+        val shouldLeave = leaveIdentity && ownershipActive
+        ownershipActive = false
+        uploadSession = null
+        mutable.value = null
+        try {
+            uploads?.deactivate()
+        } finally {
+            requests.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
+            requests.clear()
+            ownership?.detachAccountSession()
+            if (shouldLeave) ownership?.leaveAccount()
+        }
+    }
+
+    /** Ein neuer Profilversuch entwertet ältere Antworten, auch ohne Auth-Kontowechsel. */
+    internal fun captureProfile(canResumeCloud: Boolean = true): CloudLease {
+        val lease = capture(requireProfile = false)
+        check(profileRevision < Long.MAX_VALUE)
+        profileRevision++
+        return CloudLease(lease.generation, lease.credentials, profileRevision, cloudRevision, canResumeCloud)
     }
 
     internal fun completeTransition(expected: Long) {
@@ -111,10 +151,11 @@ class CloudSessionGate internal constructor(
         synchronize()
         if (!acceptSdkSession) changed()
         val sdk = credentials() ?: changed()
+        if (requireProfile && cloudSuspended) throw CloudException("profile_not_active", true)
         if (requireProfile && (mutable.value?.onboarded != true || mutable.value?.deletionRequested != false)) {
             throw CloudException("profile_not_active", true)
         }
-        return CloudLease(generation, sdk)
+        return CloudLease(generation, sdk, cloudRevision = cloudRevision)
     }
 
     internal fun requireCurrent(lease: CloudLease) {
@@ -122,6 +163,11 @@ class CloudSessionGate internal constructor(
         if (!acceptSdkSession || lease.generation != generation ||
             lease.credentials.profileId != identity?.profileId || lease.credentials.sessionId != identity?.sessionId
         ) {
+            changed()
+        }
+        if (lease.profileRevision != null) {
+            if (lease.profileRevision != profileRevision) changed()
+        } else if (cloudSuspended || lease.cloudRevision != cloudRevision) {
             changed()
         }
     }
@@ -133,9 +179,16 @@ class CloudSessionGate internal constructor(
         requireCurrent(lease)
         if (profile.profileId != lease.credentials.profileId) changed()
         if (profile.deletionRequested) {
-            stop()
+            suspendCloud(leaveIdentity = true)
             mutable.value = profile.copy(generation = generation)
             return
+        }
+        if (cloudSuspended) {
+            if (lease.profileRevision == null || !lease.canResumeCloud || profile.consentStatus != ConsentStatus.CURRENT) {
+                mutable.value = profile.copy(generation = generation)
+                return
+            }
+            cloudSuspended = false
         }
         if (profile.onboarded && uploadSession == null) {
             val activated = uploads?.activate(profile.profileId)
