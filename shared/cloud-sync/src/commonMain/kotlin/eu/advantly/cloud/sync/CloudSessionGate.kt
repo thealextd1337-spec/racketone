@@ -51,7 +51,7 @@ class CloudSessionGate internal constructor(
     private var profileRevision = 0L
     private var cloudRevision = 0L
     private var uploadSession: CloudUploadSession? = null
-    private var ownershipActive = false
+    private var identityRetained = false
     private val requests = mutableMapOf<Job, Boolean>()
 
     private fun confined() = check(threadGuard()) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
@@ -66,8 +66,7 @@ class CloudSessionGate internal constructor(
         profileRevision++
         cloudRevision++
         cloudSuspended = false
-        val shouldLeave = leaveIdentity && (ownershipActive || forceLeave)
-        ownershipActive = false
+        val shouldLeave = leaveIdentity && (identityRetained || ownership?.retainedProfileId != null || forceLeave)
         identity = null
         mutable.value = null
         uploadSession = null
@@ -77,7 +76,7 @@ class CloudSessionGate internal constructor(
             requests.keys.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
             requests.clear()
             ownership?.detachAccountSession()
-            if (shouldLeave) ownership?.leaveAccount()
+            if (shouldLeave) leaveAccount()
         }
     }
 
@@ -99,8 +98,7 @@ class CloudSessionGate internal constructor(
         cloudRevision++
         check(consentGeneration < Long.MAX_VALUE)
         consentGeneration++
-        val shouldLeave = leaveIdentity && ownershipActive
-        ownershipActive = false
+        val shouldLeave = leaveIdentity && (identityRetained || ownership?.retainedProfileId != null)
         uploadSession = null
         mutable.value = null
         try {
@@ -110,8 +108,13 @@ class CloudSessionGate internal constructor(
             cloudRequests.forEach { it.cancel(CancellationException("cloud_session_changed")) }
             cloudRequests.forEach(requests::remove)
             ownership?.detachAccountSession()
-            if (shouldLeave) ownership?.leaveAccount()
+            if (shouldLeave) leaveAccount()
         }
+    }
+
+    private fun leaveAccount() {
+        identityRetained = false
+        ownership?.leaveAccount()
     }
 
     /** Ein neuer Profilversuch entwertet ältere Antworten, auch ohne Auth-Kontowechsel. */
@@ -152,7 +155,8 @@ class CloudSessionGate internal constructor(
         if (!acceptSdkSession) return
         val sdk = credentials()
         if (sdk?.profileId != identity?.profileId || sdk?.sessionId != identity?.sessionId) {
-            invalidate(leaveIdentity = sdk?.profileId != identity?.profileId, forceLeave = sdk == null && identity != null)
+            val previousProfile = identity?.profileId ?: ownership?.retainedProfileId
+            invalidate(leaveIdentity = sdk?.profileId != previousProfile, forceLeave = sdk == null && identity != null)
             identity = sdk
         }
     }
@@ -215,6 +219,7 @@ class CloudSessionGate internal constructor(
             mutable.value = profile.copy(generation = generation)
             return
         }
+        if (lease.profileRevision != null && !lease.canResumeCloud && !cloudSuspended) suspendCloud()
         if (cloudSuspended) {
             if (lease.profileRevision == null || !lease.canResumeCloud || profile.consentStatus != ConsentStatus.CURRENT) {
                 mutable.value = profile.copy(generation = generation)
@@ -240,7 +245,7 @@ class CloudSessionGate internal constructor(
             try {
                 if (activated != null) ownership?.activateAccount(profile.profileId, activated)
                 uploadSession = activated
-                ownershipActive = ownership != null && activated != null
+                identityRetained = ownership != null && activated != null
             } catch (error: Exception) {
                 invalidate()
                 throw error

@@ -62,6 +62,7 @@ class SupabasePhoneAuth(
     private val verifiedAccount = MutableStateFlow<CloudSession?>(null)
     override val accountSession = verifiedAccount.asStateFlow()
     private var pendingAccountMutations = 0
+    private var mutationRevision = 0L
     private var unconfirmedDecline = false
     private var unconfirmedDeletion = false
 
@@ -104,6 +105,7 @@ class SupabasePhoneAuth(
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() {
+        reserveMutation()
         unconfirmedDeletion = true
         sessions.suspendCloud(leaveIdentity = true)
     }
@@ -245,16 +247,20 @@ class SupabasePhoneAuth(
         refreshProfile()
     }
 
-    override suspend fun refreshProfile() =
+    override suspend fun refreshProfile() = refreshProfileAfterMutation()
+
+    private suspend fun refreshProfileAfterMutation(expectedRevision: Long? = null) =
         guarded {
             client.auth.awaitInitialization()
             sessions.synchronize()
             synchronizeAccount()
+            if (expectedRevision != null) requireMutationCurrent(expectedRevision)
             if (client.auth.currentSessionOrNull() == null) {
                 sessions.verifiedAbsent()
                 return@guarded
             }
             val epoch = accountEpoch
+            val revision = mutationRevision
             val lease =
                 sessions.captureProfile(
                     canResumeCloud = pendingAccountMutations == 0 && !unconfirmedDecline && !unconfirmedDeletion,
@@ -278,6 +284,7 @@ class SupabasePhoneAuth(
                             ?: ConsentStatus.UNAVAILABLE,
                 )
             requireAccountCurrent(lease.credentials, epoch)
+            requireMutationCurrent(revision)
             sessions.publish(lease, verified)
             verifiedAccount.value = verified.copy(generation = epoch)
             if (verified.deletionRequested) unconfirmedDeletion = false
@@ -332,6 +339,7 @@ class SupabasePhoneAuth(
             if (credentials()?.profileId != snapshot.profileId) throw CloudException("cloud_session_changed", true)
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
+            val revision = reserveMutation()
             if (!accept) unconfirmedDecline = true
             val result =
                 cloudMutation {
@@ -356,9 +364,11 @@ class SupabasePhoneAuth(
                         },
                     )
                 }
+            requireAccountCurrent(expected, epoch)
+            requireMutationCurrent(revision)
             val decoded = decodeConsent(result)
             unconfirmedDecline = false
-            refreshProfile()
+            refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
             decoded
         }
@@ -370,10 +380,13 @@ class SupabasePhoneAuth(
             synchronizeAccount()
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
+            val revision = reserveMutation()
             unconfirmedDeletion = true
             cloudMutation(leaveIdentity = true) { accountRpc("request_account_deletion", buildJsonObject {}) }
+            requireAccountCurrent(expected, epoch)
+            requireMutationCurrent(revision)
             unconfirmedDeletion = false
-            refreshProfile()
+            refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
         }
 
@@ -382,11 +395,26 @@ class SupabasePhoneAuth(
             synchronizeAccount()
             val expected = credentials() ?: throw CloudException("cloud_session_changed", true)
             val epoch = accountEpoch
+            val revision = reserveMutation()
+            unconfirmedDeletion = true
             cloudMutation { accountRpc("cancel_account_deletion", buildJsonObject {}) }
+            requireAccountCurrent(expected, epoch)
+            requireMutationCurrent(revision)
             unconfirmedDeletion = false
-            refreshProfile()
+            refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
         }
+
+    /** Vor jedem Intent reservieren; eine ältere Antwort darf keine neuere Sperrabsicht quittieren. */
+    private fun reserveMutation(): Long {
+        check(mutationRevision < Long.MAX_VALUE)
+        mutationRevision++
+        return mutationRevision
+    }
+
+    private fun requireMutationCurrent(revision: Long) {
+        if (revision != mutationRevision) throw CloudException("cloud_session_changed", true)
+    }
 
     /** Kontorechte bleiben auch bei lokal gesperrtem Cloud-Gate erreichbar, stets mit festem Bearer. */
     private suspend fun accountRpc(

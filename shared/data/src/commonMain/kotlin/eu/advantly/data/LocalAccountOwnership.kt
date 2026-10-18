@@ -9,6 +9,9 @@ data class AdoptionSource(
 
 /** Serielle Hostgrenze. Aktivierung erfolgt erst nach verifiziertem Profil, Sperre vor Auth-Netzwerkzugriff. */
 interface LocalAccountOwnership {
+    /** Lokal erhaltene Identität; ausdrücklich keine Aussage über Cloud-Berechtigung. */
+    val retainedProfileId: String? get() = null
+
     fun detachAccountSession() {}
 
     fun leaveAccount()
