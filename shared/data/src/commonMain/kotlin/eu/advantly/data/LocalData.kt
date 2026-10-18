@@ -28,7 +28,12 @@ class LocalData(
             database.matchTombstoneQueries,
             ::assignmentIds,
         ) { cloud.resolveMatchMetadataSource(it) }
-    val players: PlayerRepository = PlayerRepository(database.playerQueries) { cloud.recordLocalPlayer(it) }
+    val players: PlayerRepository =
+        PlayerRepository(
+            database.playerQueries,
+            locallyCreated = { cloud.recordLocalPlayer(it) },
+            sourcePlayerCreated = { cloud.resolvePlayerMetadataSources(it) },
+        )
     val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
     val cloud: CloudSyncRepository = CloudSyncRepository(database, events)
