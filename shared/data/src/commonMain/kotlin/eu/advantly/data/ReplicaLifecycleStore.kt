@@ -344,17 +344,19 @@ class ReplicaLifecycleStore internal constructor(
         ctx: ReplicaContext,
         transferId: String,
         index: Long,
-    ): RedactionPage? {
-        validate(ctx)
-        require(index >= 0)
-        val current = transfer(ctx, transferId)
-        check(current.completed == 1L) { "Unvollständige Redaktion darf nicht exportiert werden" }
-        if (index >= current.next_index) return null
-        return DataJson.decodeFromString(
-            RedactionPage.serializer(),
-            queries.page(transferId, index).executeAsOne(),
-        )
-    }
+        fence: () -> Unit = {},
+    ): RedactionPage? =
+        mutate(ctx, fence) {
+            require(index >= 0)
+            ensureRedactedEventIndex(fence)
+            val current = transfer(ctx, transferId)
+            check(current.completed == 1L) { "Unvollständige Redaktion darf nicht exportiert werden" }
+            if (index >= current.next_index) return@mutate null
+            DataJson.decodeFromString(
+                RedactionPage.serializer(),
+                queries.page(transferId, index).executeAsOne(),
+            )
+        }
 
     fun stageRedaction(
         ctx: ReplicaContext,
@@ -405,6 +407,7 @@ class ReplicaLifecycleStore internal constructor(
         fence: () -> Unit,
     ): Unit =
         mutate(ctx, fence) {
+            ensureRedactedEventIndex(fence)
             val t = transfer(ctx, transferId)
             if (t.completed == 1L) return@mutate
             check(t.ids_done == 1L && t.events_done == 1L)
@@ -431,6 +434,26 @@ class ReplicaLifecycleStore internal constructor(
         }
 
     private fun applyRedactedEvent(event: StoredEvent) {
+        validateRedactedEvent(event)
+        requireRedactedSequence(event)
+        // Die verifizierte Seite autorisiert dieses Event, nicht eine globale Player-ID.
+        // Ohne Rohzeile wird nur der genaue Beleg gespeichert: kein Import, Receipt oder Readiness-Erfolg.
+        val proof = queries.redactedEvent(event.id).executeAsOneOrNull()
+        if (proof == null) {
+            queries.rememberRedactedEvent(
+                event.id,
+                DataJson.encodeToString(StoredEvent.serializer(), event.copy(confirmed = false)),
+                event.matchId,
+                event.deviceId,
+                event.deviceSeq,
+            )
+        } else {
+            requireRedactedEventMatch(event, DataJson.decodeFromString(StoredEvent.serializer(), proof))
+        }
+        queries.redactEventPayload(event.payload, event.id)
+    }
+
+    private fun validateRedactedEvent(event: StoredEvent) {
         check(
             event.id.isNotBlank() && event.matchId.isNotBlank() && event.deviceId.isNotBlank() &&
                 event.deviceSeq > 0 && event.lamport >= 0 && event.parentId?.isNotBlank() != false &&
@@ -463,15 +486,37 @@ class ReplicaLifecycleStore internal constructor(
             val allowed = JsonObject(original + ("player" to JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))))
             check(replacement == allowed) { "Redaktion verändert unveränderliche Eventfelder" }
         }
-        // Die verifizierte Seite autorisiert dieses Event, nicht eine globale Player-ID.
-        // Ohne Rohzeile wird nur der genaue Beleg gespeichert: kein Import, Receipt oder Readiness-Erfolg.
-        val proof = queries.redactedEvent(event.id).executeAsOneOrNull()
-        if (proof == null) {
-            queries.rememberRedactedEvent(event.id, DataJson.encodeToString(StoredEvent.serializer(), event.copy(confirmed = false)))
-        } else {
-            requireRedactedEventMatch(event, DataJson.decodeFromString(StoredEvent.serializer(), proof))
+    }
+
+    /**
+     * Schema-9-Belege bleiben unverändert. Der abgeleitete Index wird innerhalb der aufrufenden
+     * Transaktion vollständig geprüft, bevor eine Sequenzentscheidung getroffen wird. Seiten sind
+     * begrenzt; einmalig werden alle Altbelege geprüft. Konflikte bleiben erhalten und brechen ab.
+     */
+    private fun ensureRedactedEventIndex(fence: () -> Unit) {
+        while (true) {
+            fence()
+            val rows = queries.unindexedRedactedEvents().executeAsList()
+            if (rows.isEmpty()) return
+            for (row in rows) {
+                fence()
+                val event = DataJson.decodeFromString(StoredEvent.serializer(), row.event_json)
+                check(
+                    row.event_id == event.id &&
+                        (row.match_id == null || row.match_id == event.matchId) &&
+                        (row.device_id == null || row.device_id == event.deviceId) &&
+                        (row.device_seq == null || row.device_seq == event.deviceSeq),
+                ) { "Abweichende Koordinaten eines alten Redaktionsbelegs" }
+                validateRedactedEvent(event)
+                requireRedactedSequence(event)
+                queries.indexRedactedEvent(event.matchId, event.deviceId, event.deviceSeq, event.id)
+            }
         }
-        queries.redactEventPayload(event.payload, event.id)
+    }
+
+    private fun requireRedactedSequence(event: StoredEvent) {
+        val id = queries.redactedEventBySequence(event.matchId, event.deviceId, event.deviceSeq).executeAsOneOrNull()
+        check(id == null || id == event.id) { "Gerätesequenz gehört zu einem anderen redigierten Event" }
     }
 
     private fun requireRedactedEventMatch(
@@ -492,7 +537,19 @@ class ReplicaLifecycleStore internal constructor(
         check(clean == DataJson.parseToJsonElement(proof.payload)) { "Abweichender Payload eines redigierten Events" }
     }
 
-    internal fun sanitizeLegacyEvent(event: StoredEvent): StoredEvent {
+    internal fun sanitizeLegacyEvent(
+        event: StoredEvent,
+        fence: () -> Unit = {},
+    ): StoredEvent =
+        database.transactionWithResult {
+            ensureRedactedEventIndex(fence)
+            requireRedactedSequence(event)
+            val result = sanitizeIndexedLegacyEvent(event)
+            fence()
+            result
+        }
+
+    private fun sanitizeIndexedLegacyEvent(event: StoredEvent): StoredEvent {
         queries.redactedEvent(event.id).executeAsOneOrNull()?.let { json ->
             val proof = DataJson.decodeFromString(StoredEvent.serializer(), json)
             requireRedactedEventMatch(event, proof)
@@ -531,7 +588,7 @@ class ReplicaLifecycleStore internal constructor(
                         row.parent_id,
                         row.type,
                     )
-                val clean = sanitizeLegacyEvent(event)
+                val clean = sanitizeLegacyEvent(event, fence)
                 if (event.payload != clean.payload) queries.redactEventPayload(clean.payload, row.id)
             }
             after = rows.last().id

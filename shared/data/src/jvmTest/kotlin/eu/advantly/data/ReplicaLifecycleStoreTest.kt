@@ -171,6 +171,142 @@ class ReplicaLifecycleStoreTest {
     }
 
     @Test
+    fun manifestBeforeRawDownloadRejectsConflictingProofSequencesInOnePage() {
+        Fixture().use { f ->
+            val ctx = f.data.replicas.captureContext()
+            f.data.replicas.applyAccess(ctx, "match", 1, ReplicaAccessLevel.MEMBER, fence)
+            val first = event("first-proof", 2, PlayerAssigned(slot, Player(PlayerId("living"), "Gelöschter Spieler"), owner))
+            val second = first.copy(id = "conflicting-proof")
+            val transfer = RedactionTransfer("proof-conflict", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(
+                    0,
+                    from,
+                    RedactionCursor(null, 3),
+                    emptyList(),
+                    listOf(ReplicaRedactionEvent(first, 2), ReplicaRedactionEvent(second, 3)),
+                    true,
+                    true,
+                ),
+                fence,
+            )
+            assertFails { f.data.replicas.completeRedaction(ctx, transfer.id, fence) }
+            assertEquals(0, f.count("replica_redacted_event"))
+            assertEquals(0, f.count("match_event"))
+            assertEquals(
+                0,
+                f.data.replicas
+                    .access(ctx, "match")!!
+                    .redactionEpoch,
+            )
+            assertFalse(
+                f.data.replicas
+                    .redactionProgress(ctx, "match")!!
+                    .completed,
+            )
+            assertFails { f.data.replicas.exportRedactionPage(ctx, transfer.id, 0) }
+        }
+    }
+
+    @Test
+    fun manifestBeforeRawDownloadRejectsConflictingProofSequenceAfterPurgeAndReopen() {
+        Fixture().use { f ->
+            var ctx = f.member("A")
+            val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+            val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+            val first = RedactionTransfer("before-purge", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, first, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                first.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, first.id, fence)
+            f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.ABSENT, fence)
+            assertEquals(0, f.count("match_event"))
+            assertEquals(1, f.count("replica_redacted_event"))
+            f.reopen()
+            ctx = f.data.replicas.captureContext()
+            f.data.replicas.applyAccess(ctx, "match", 3, ReplicaAccessLevel.MEMBER, fence)
+            val next = RedactionTransfer("after-purge", "match", 3, 2, 3)
+            val nextFrom = f.data.replicas.beginRedaction(ctx, next, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                next.id,
+                RedactionPage(
+                    0,
+                    nextFrom,
+                    RedactionCursor(null, 3),
+                    emptyList(),
+                    listOf(ReplicaRedactionEvent(redacted.copy(id = "reused-sequence"), 3)),
+                    true,
+                    true,
+                ),
+                fence,
+            )
+            assertFails { f.data.replicas.completeRedaction(ctx, next.id, fence) }
+            assertEquals(1, f.count("replica_redacted_event"))
+            assertEquals(0, f.count("match_event"))
+            assertEquals(
+                1,
+                f.data.replicas
+                    .access(ctx, "match")!!
+                    .redactionEpoch,
+            )
+            assertFalse(
+                f.data.replicas
+                    .redactionProgress(ctx, "match")!!
+                    .completed,
+            )
+            assertEquals(redacted, f.data.replicas.sanitizeLegacyEvent(original))
+        }
+    }
+
+    @Test
+    fun rawDownloadCannotReuseRedactedSequenceAfterPurgeAndReopen() {
+        Fixture().use { f ->
+            var ctx = f.member("A")
+            val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+            val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+            val transfer = RedactionTransfer("reserved-sequence", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+            f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.ABSENT, fence)
+            assertEquals(0, f.count("match_event"))
+            f.reopen()
+            ctx = f.data.replicas.captureContext()
+            f.data.replicas.applyAccess(ctx, "match", 3, ReplicaAccessLevel.MEMBER, fence)
+            for (conflict in listOf(original.copy(id = "different-assignment"), event("different-point", 2, PointWon(Side.A)))) {
+                assertFails { f.data.cloud.storeDownloaded(listOf(conflict), fence) }
+                assertEquals(0, f.count("match_event"))
+                assertEquals(1, f.count("replica_redacted_event"))
+            }
+            f.data.cloud.storeDownloaded(listOf(original), fence)
+            assertEquals(
+                redacted.payload,
+                f.db.cloudUploadQueries
+                    .eventById(original.id)
+                    .executeAsOne()
+                    .payload,
+            )
+            val otherDevice = event("other-device-event", 2, PointWon(Side.A)).copy(deviceId = "another-device")
+            val otherMatch = event("other-match-event", 2, PointWon(Side.A)).copy(matchId = "another-match")
+            f.data.cloud.storeDownloaded(listOf(otherDevice, otherMatch), fence)
+            assertEquals(3, f.count("match_event"))
+        }
+    }
+
+    @Test
     fun manifestBeforeRawDownloadPersistsEventProofWithoutGrantingReadinessOrGlobalIdentity() {
         for (active in listOf(false, true)) {
             for (legacyType in listOf("", "PlayerAssigned")) {
@@ -1782,6 +1918,7 @@ class ReplicaLifecycleStoreTest {
                                     .getString(1)!!
                                     .replace(Regex("--[^\\r\\n]*"), "")
                                     .replace(Regex("\\s+"), " ")
+                                    .replace(Regex("\\s+([,)])"), "$1")
                                     .trim()
                         }
                         QueryResult.Value(result)

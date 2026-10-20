@@ -27,8 +27,14 @@ CREATE INDEX replica_redacted_profile_lookup ON replica_redacted_profile(profile
 -- Unveränderliche Eventbindung mit bereinigtem Payload; überlebt den Purge des Rohlogs.
 CREATE TABLE replica_redacted_event (
     event_id TEXT NOT NULL PRIMARY KEY,
-    event_json TEXT NOT NULL
+    event_json TEXT NOT NULL,
+    match_id TEXT,
+    device_id TEXT,
+    device_seq INTEGER
 );
+CREATE UNIQUE INDEX replica_redacted_sequence ON replica_redacted_event(match_id, device_id, device_seq);
+CREATE INDEX replica_redacted_unindexed ON replica_redacted_event(event_id)
+WHERE match_id IS NULL OR device_id IS NULL OR device_seq IS NULL;
 CREATE TABLE replica_transfer (
     id TEXT NOT NULL PRIMARY KEY,
     account_key TEXT NOT NULL, scope_id TEXT NOT NULL,
@@ -170,7 +176,15 @@ UPDATE match_event SET payload = ? WHERE id = ?;
 redactedEvent:
 SELECT event_json FROM replica_redacted_event WHERE event_id = ?;
 rememberRedactedEvent:
-INSERT INTO replica_redacted_event(event_id, event_json) VALUES (?, ?);
+INSERT INTO replica_redacted_event(event_id, event_json, match_id, device_id, device_seq) VALUES (?, ?, ?, ?, ?);
+redactedEventBySequence:
+SELECT event_id FROM replica_redacted_event WHERE match_id = ? AND device_id = ? AND device_seq = ?;
+unindexedRedactedEvents:
+SELECT * FROM replica_redacted_event
+WHERE match_id IS NULL OR device_id IS NULL OR device_seq IS NULL
+ORDER BY event_id LIMIT 200;
+indexRedactedEvent:
+UPDATE replica_redacted_event SET match_id = ?, device_id = ?, device_seq = ? WHERE event_id = ?;
 observeEventRedactions:
 SELECT event_id FROM replica_redacted_event LIMIT 1;
 identityPage:

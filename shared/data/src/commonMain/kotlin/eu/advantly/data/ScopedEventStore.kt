@@ -21,7 +21,7 @@ internal class ScopedEventStore(
                     check(event.deviceId == creationDevice) { "Lokale Genesis autorisiert keine fremde Eventquelle" }
                 }
             }
-            val result = raw.appendAll(events.map(replicas::sanitizeLegacyEvent))
+            val result = raw.appendAll(events.map { event -> replicas.sanitizeLegacyEvent(event) { context?.let(replicas::validate) } })
             context?.let(replicas::validate)
             result
         }

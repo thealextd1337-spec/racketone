@@ -1,0 +1,7 @@
+ALTER TABLE replica_redacted_event ADD COLUMN match_id TEXT;
+ALTER TABLE replica_redacted_event ADD COLUMN device_id TEXT;
+ALTER TABLE replica_redacted_event ADD COLUMN device_seq INTEGER;
+
+CREATE UNIQUE INDEX replica_redacted_sequence ON replica_redacted_event(match_id, device_id, device_seq);
+CREATE INDEX replica_redacted_unindexed ON replica_redacted_event(event_id)
+WHERE match_id IS NULL OR device_id IS NULL OR device_seq IS NULL;

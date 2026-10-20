@@ -13,7 +13,7 @@ import kotlinx.serialization.json.jsonObject
 class CloudSyncRepository internal constructor(
     internal val database: AdvantlyDatabase,
     private val events: EventStore,
-    private val sanitizeDownloaded: (StoredEvent) -> StoredEvent,
+    private val sanitizeDownloaded: (StoredEvent, () -> Unit) -> StoredEvent,
     internal val redactedAssignmentSlots: (String) -> Set<String>,
 ) {
     private val queries = database.cloudSyncQueries
@@ -62,7 +62,7 @@ class CloudSyncRepository internal constructor(
                 fence()
                 if (database.matchTombstoneQueries.countById(event.matchId).executeAsOne() > 0) return@forEach
                 val originalPayload = DataJson.parseToJsonElement(event.payload).jsonObject
-                val received = sanitizeDownloaded(event.copy(confirmed = false, type = effectiveType(event, originalPayload)))
+                val received = sanitizeDownloaded(event.copy(confirmed = false, type = effectiveType(event, originalPayload)), fence)
                 val payload = DataJson.parseToJsonElement(received.payload).jsonObject
                 fence()
                 when (events.append(received)) {
