@@ -10,7 +10,7 @@ CREATE TABLE player (
 );
 
 insertOrIgnore:
-INSERT OR IGNORE INTO player (id, display_name, kind, created_at_ms, last_used_at_ms) VALUES (?, ?, ?, ?, ?);
+INSERT OR IGNORE INTO player (id, display_name, kind, created_at_ms, last_used_at_ms) VALUES (:id, CASE WHEN EXISTS (SELECT 1 FROM replica_redacted_player WHERE player_id = :id) THEN '' ELSE :display_name END, :kind, :created_at_ms, :last_used_at_ms);
 
 selectSelf:
 SELECT * FROM player WHERE kind = 'SELF' ORDER BY created_at_ms, id LIMIT 1;
@@ -22,7 +22,7 @@ selectAll:
 SELECT * FROM player ORDER BY kind DESC, coalesce(last_used_at_ms, 0) DESC, display_name, id;
 
 rename:
-UPDATE player SET display_name = ? WHERE id = ?;
+UPDATE player SET display_name = CASE WHEN :display_name = '' OR EXISTS (SELECT 1 FROM replica_redacted_player WHERE player_id = :id) THEN '' ELSE :display_name END WHERE id = :id;
 
 -- Self-Identität (W1-I): die Uhr übernimmt den Self-Spieler des Handys, ihr bisheriger wird zum Gast-Eintrag (+ Alias)
 updateKind:
@@ -36,3 +36,10 @@ UPDATE player SET kind = 'ARCHIVED' WHERE id = ? AND kind = 'GUEST';
 
 placeholderIds:
 SELECT id FROM player WHERE kind = 'PLACEHOLDER';
+
+selectReadableById:
+SELECT * FROM player WHERE id = ? AND id IN (SELECT id FROM replica_readable_player);
+selectReadableAll:
+SELECT * FROM player WHERE id IN (SELECT id FROM replica_readable_player) ORDER BY kind DESC, coalesce(last_used_at_ms, 0) DESC, display_name, id;
+selectReadableSelf:
+SELECT * FROM player WHERE kind = 'SELF' AND id IN (SELECT id FROM replica_readable_player) ORDER BY created_at_ms, id LIMIT 1;

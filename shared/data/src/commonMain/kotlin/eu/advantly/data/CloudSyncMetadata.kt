@@ -5,6 +5,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.data.db.Cloud_metadata
 
@@ -101,14 +102,21 @@ internal fun CloudSyncRepository.uploadParticipants(
     val lineup = DataJson.decodeFromString(Lineup.serializer(), header.lineup_json)
     val assigned =
         database.matchAssignmentQueries
-            .forMatch(id)
+            .identitiesForMatch(id)
             .executeAsList()
-            .associate { it.slot_id to it.player_json }
+            .associate { it.slot_id to it }
     val people =
         listOf("A" to lineup.a, "B" to lineup.b).flatMap { (team, slots) ->
             slots.mapIndexed { index, slot ->
-                val assignment = assigned[slot.value]?.let { DataJson.decodeFromString(Player.serializer(), it) }
-                val playerId = assignment?.id ?: slot.takeUnless { assigned.containsKey(it.value) || Placeholders.isPlaceholder(it) }
+                val row = assigned[slot.value]
+                val legacy =
+                    row
+                        ?.player_json
+                        ?.let { DataJson.decodeFromString(Player.serializer(), it) }
+                        ?.takeIf { row.player_id == null || row.player_id == it.id.value }
+                val playerId =
+                    row?.player_id?.let(::PlayerId) ?: legacy?.id
+                        ?: slot.takeUnless { row != null || Placeholders.isPlaceholder(it) }
                 val player = playerId?.let { database.playerQueries.selectById(it.value).executeAsOneOrNull() }
                 // Ungeklärte oder fremde Gäste bleiben benannte Slots, ohne eine Cloud-Spielerzuordnung zu behaupten.
                 val reference =
@@ -116,7 +124,9 @@ internal fun CloudSyncRepository.uploadParticipants(
                         player != null && player.kind != PlayerKind.PLACEHOLDER.name &&
                             database.cloudMetadataQueries.playerReferenceAllowed(it, profileId).executeAsOne() > 0
                     }
-                CloudParticipant(slot.value, team, index + 1, player?.display_name ?: assignment?.displayName.orEmpty(), reference)
+                val redacted = playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
+                val name = if (redacted) "" else player?.display_name ?: legacy?.displayName.orEmpty()
+                CloudParticipant(slot.value, team, index + 1, name, reference)
             }
         }
     return CloudParticipants(id, people)
@@ -262,6 +272,43 @@ internal fun CloudSyncRepository.materializePullMatch(
 
 /** `owned` ist die einzige Schreibrechtsquelle; auch ein Cloud-Self bleibt lokal ein Gast. */
 internal fun CloudSyncRepository.materializePullPlayer(
+    downloaded: CloudPullPlayer,
+    profileId: String,
+    previousMaterializedVersion: Long?,
+): Boolean =
+    database.transactionWithResult {
+        // Nur kleine Revisionsbelege, keine Match-/Eventpayloads. Alle Vorherstände liegen vor der einzigen Player-Mutation.
+        val participants = mutableListOf<eu.advantly.data.db.PlayerDownloadParticipantPage>()
+        var afterId: String? = null
+        while (true) {
+            val page = database.cloudMetadataQueries.playerDownloadParticipantPage(profileId, afterId, downloaded.id).executeAsList()
+            if (page.isEmpty()) break
+            participants.addAll(page)
+            afterId = page.last().entity_id
+        }
+        val applied = applyPullPlayer(downloaded, profileId, previousMaterializedVersion)
+        if (applied) {
+            for (before in participants) {
+                val after = metadataState(CloudMetadataKind.PARTICIPANTS, before.entity_id) ?: continue
+                if (after.origin == CloudMetadataOrigin.CLOUD && after.sourceDeviceId == null &&
+                    after.writerProfileId == before.writer_profile_id && after.uploadedRevision == before.revision &&
+                    after.selected.revision > before.revision
+                ) {
+                    database.cloudPullQueries.cleanDownloadedParticipants(
+                        after.selected.revision,
+                        before.entity_id,
+                        before.writer_profile_id,
+                        before.revision,
+                        profileId,
+                        requireNotNull(before.materialized_version),
+                    )
+                }
+            }
+        }
+        applied
+    }
+
+private fun CloudSyncRepository.applyPullPlayer(
     downloaded: CloudPullPlayer,
     profileId: String,
     previousMaterializedVersion: Long?,

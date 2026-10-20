@@ -21,22 +21,39 @@ class LocalData(
     driver: SqlDriver,
 ) {
     private val database = AdvantlyDatabase(driver)
-    val events: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
+    val replicas: ReplicaLifecycleStore = ReplicaLifecycleStore(database, this)
+    private val rawEvents: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
+    val events: EventStore = ScopedEventStore(rawEvents, replicas) { block -> transaction(block) }
     val matches: MatchRepository =
         MatchRepository(
             database.matchHeaderQueries,
             database.matchTombstoneQueries,
             ::assignmentIds,
-        ) { cloud.resolveMatchMetadataSource(it) }
+            requireReadable = { replicas.requireReadable(it) },
+            requireInsert = { replicas.requireHeader(it) },
+            created = {
+                cloud.resolveMatchMetadataSource(it)
+                replicas.noteUnresolvedImport(it)
+            },
+        )
     val players: PlayerRepository =
         PlayerRepository(
             database.playerQueries,
             locallyCreated = { cloud.recordLocalPlayer(it) },
             sourcePlayerCreated = { cloud.resolvePlayerMetadataSources(it) },
+            redacted = { replicas.isRedacted(it) },
+            writable = { replicas.writablePlayer(it) },
         )
-    val favorites: LineupFavoriteRepository = LineupFavoriteRepository(database.lineupFavoriteQueries)
+    val favorites: LineupFavoriteRepository =
+        LineupFavoriteRepository(
+            database.lineupFavoriteQueries,
+            candidates = { sport, limit -> replicas.favoriteCandidates(sport, limit) },
+            readable = { replicas.readableFavorite(it) },
+            readablePlayer = { replicas.readablePlayer(it) },
+            redacted = { replicas.isRedacted(it) },
+        )
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
-    val cloud: CloudSyncRepository = CloudSyncRepository(database, events)
+    val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
     val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver)
     val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
@@ -49,7 +66,8 @@ class LocalData(
     fun observeDirectoryChanges(onChanged: () -> Unit): () -> Unit {
         val queries =
             listOf(
-                database.matchHeaderQueries.recent(1),
+                database.matchHeaderQueries.observeHeaders(),
+                database.replicaLifecycleQueries.observeAccess(),
                 database.matchAssignmentQueries.forMatch(""),
                 database.playerQueries.selectAll(),
             )
@@ -95,7 +113,7 @@ class LocalData(
             .mapNotNull { it.toScoreEventOrNull() }
 
     fun matchCreator(id: MatchId): PlayerId? =
-        identityEvents(id)
+        (if (replicas.readable(id.value)) identityEvents(id) else emptyList())
             .firstOrNull {
                 it.payload is MatchCreated
             }?.let {
@@ -106,24 +124,49 @@ class LocalData(
     fun rebuildAssignments(id: MatchId) {
         transaction {
             cloud.resolveMatchMetadataSource(id.value)
-            val projection = PlayerAssignments.project(identityEvents(id), players.placeholderIds())
-            val previous = storedProjection(id)
-            val next = projection.slots.associateWith { projection.people[it] }
+            val identities = identityEvents(id)
+            val projection = PlayerAssignments.projectIds(identities, players.placeholderIds())
+            val legacy = PlayerAssignments.project(identities, players.placeholderIds())
+            val previous =
+                database.matchAssignmentQueries
+                    .identitiesForMatch(id.value)
+                    .executeAsList()
+                    .associate { row ->
+                        val playerId = row.player_id ?: row.player_json?.let { DataJson.decodeFromString(Player.serializer(), it).id.value }
+                        row.slot_id to (playerId to row.player_json)
+                    }
+            val next =
+                projection.slots.associate { slot ->
+                    val playerId = projection.peopleBySlot[slot]
+                    // Eventnamen sind nur Matchanzeige, niemals ein Verzeichnis- oder Eigentumsbeleg.
+                    val fallback =
+                        legacy.people[slot]
+                            ?.takeIf { player ->
+                                player.id == playerId && !replicas.isRedacted(player.id.value) &&
+                                    database.replicaLifecycleQueries.playerExists(player.id.value).executeAsOne() == 0L
+                            }?.let { DataJson.encodeToString(Player.serializer(), it) }
+                    slot.value to (playerId?.value to fallback)
+                }
             if (previous == next) return@transaction
             database.matchAssignmentQueries.clearMatch(id.value)
-            projection.slots.forEach { slot ->
-                val player = projection.people[slot]
-                database.matchAssignmentQueries.put(id.value, slot.value, player?.let { DataJson.encodeToString(Player.serializer(), it) })
+            next.forEach { (slot, person) ->
+                database.matchAssignmentQueries.putIdentity(id.value, slot, person.first, person.second)
             }
         }
     }
 
-    private fun storedProjection(id: MatchId): Map<PlayerId, Player?> =
-        database.matchAssignmentQueries
-            .forMatch(id.value) { slot, json ->
-                PlayerId(slot) to json?.let { DataJson.decodeFromString(Player.serializer(), it) }
-            }.executeAsList()
-            .toMap()
+    private fun storedProjection(id: MatchId): Map<PlayerId, Player?> {
+        if (!replicas.readable(id.value)) return emptyMap()
+        return database.matchAssignmentQueries.identitiesForMatch(id.value).executeAsList().associate { row ->
+            val legacy =
+                row.player_json
+                    ?.let { DataJson.decodeFromString(Player.serializer(), it) }
+                    ?.takeIf { row.player_id == null || row.player_id == it.id.value }
+            val playerId = row.player_id?.let(::PlayerId) ?: legacy?.id
+            val player = playerId?.let { players.get(it)?.toPlayer() ?: legacy }
+            PlayerId(row.slot_id) to player?.let { if (replicas.isRedacted(it.id.value)) it.copy(displayName = "") else it }
+        }
+    }
 
     internal fun storedAssignments(id: MatchId): Map<PlayerId, Player> =
         storedProjection(id).mapNotNull { (slot, player) -> player?.let { slot to it } }.toMap()
@@ -131,12 +174,18 @@ class LocalData(
     fun isMatchPlaceholder(
         matchId: MatchId,
         slot: PlayerId,
-    ): Boolean = isPlaceholder(slot) || database.matchAssignmentQueries.hasSlot(matchId.value, slot.value).executeAsOne() > 0
+    ): Boolean =
+        replicas.readable(matchId.value) &&
+            (isPlaceholder(slot) || database.matchAssignmentQueries.hasSlot(matchId.value, slot.value).executeAsOne() > 0)
 
-    private fun assignmentIds(id: MatchId) =
-        storedProjection(id).mapValues { (slot, player) ->
-            player?.id ?: if (Placeholders.isPlaceholder(slot)) slot else Placeholders.id(slot.value)
+    private fun assignmentIds(id: MatchId): Map<PlayerId, PlayerId> {
+        if (!replicas.readable(id.value)) return emptyMap()
+        return database.matchAssignmentQueries.identitiesForMatch(id.value).executeAsList().associate { row ->
+            val slot = PlayerId(row.slot_id)
+            val idValue = row.player_id ?: row.player_json?.let { DataJson.decodeFromString(Player.serializer(), it).id.value }
+            slot to (idValue?.let(::PlayerId) ?: if (Placeholders.isPlaceholder(slot)) slot else Placeholders.id(slot.value))
         }
+    }
 
     /** Führt [block] in einer Transaktion aus (alles oder nichts). */
     fun <T> transaction(block: () -> T): T = database.transactionWithResult { block() }
@@ -235,7 +284,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 7: kontogebundene Pull-Snapshots, Vollabgleich und dauerhafte Eventempfangsnachweise. */
-        const val SCHEMA_VERSION: Long = 7
+        /** Schema 8: kontogebundener Replikatzugriff und atomare Redaktionen. */
+        const val SCHEMA_VERSION: Long = 8
     }
 }

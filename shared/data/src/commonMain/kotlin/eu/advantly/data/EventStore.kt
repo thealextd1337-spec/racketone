@@ -10,6 +10,7 @@ package eu.advantly.data
  * @property type Payload-Typ (z. B. `PointWon`) für Abfragen ohne JSON-Parsing
  * @property confirmed beim Speichern: mindestens eine Gegenstelle hat das Event schon (z. B. von dort empfangen)
  */
+@kotlinx.serialization.Serializable
 data class StoredEvent(
     val id: String,
     val matchId: String,

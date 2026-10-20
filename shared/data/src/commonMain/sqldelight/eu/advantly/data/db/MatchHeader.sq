@@ -48,36 +48,36 @@ SELECT * FROM match_header WHERE id = ?;
 
 history:
 SELECT * FROM match_header
-WHERE (:sport IS NULL OR sport = :sport) AND created_at_ms >= :fromMs AND created_at_ms < :toMs
+WHERE id IN (SELECT match_id FROM replica_readable_match) AND (:sport IS NULL OR sport = :sport) AND created_at_ms >= :fromMs AND created_at_ms < :toMs
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit OFFSET :offset;
 
 -- Abgebrochene Matches (ohne Wertung, F21) zählen nicht als „zuletzt gespielt“
 recentLineups:
 SELECT id, lineup_json FROM match_header
-WHERE (:sport IS NULL OR sport = :sport) AND (result_reason IS NULL OR result_reason != 'ABANDONED')
+WHERE id IN (SELECT match_id FROM replica_readable_match) AND (:sport IS NULL OR sport = :sport) AND (result_reason IS NULL OR result_reason != 'ABANDONED')
 ORDER BY created_at_ms DESC, id DESC
 LIMIT :limit;
 
 -- „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung ist (F21) – gefiltert vor dem Limit
 lastRated:
 SELECT * FROM match_header
-WHERE result_reason IS NULL OR result_reason != 'ABANDONED'
+WHERE id IN (SELECT match_id FROM replica_readable_match) AND (result_reason IS NULL OR result_reason != 'ABANDONED')
 ORDER BY created_at_ms DESC, id DESC
 LIMIT 1;
 
 active:
-SELECT * FROM match_header WHERE status != 'FINISHED' ORDER BY updated_at_ms DESC, id;
+SELECT * FROM match_header WHERE id IN (SELECT match_id FROM replica_readable_match) AND status != 'FINISHED' ORDER BY updated_at_ms DESC, id;
 
 recent:
-SELECT * FROM match_header ORDER BY updated_at_ms DESC, id LIMIT ?;
+SELECT * FROM match_header WHERE id IN (SELECT match_id FROM replica_readable_match) ORDER BY updated_at_ms DESC, id LIMIT ?;
 
 followUps:
-SELECT * FROM match_header WHERE previous_match_id = ? ORDER BY created_at_ms, id;
+SELECT * FROM match_header WHERE id IN (SELECT match_id FROM replica_readable_match) AND previous_match_id = ? ORDER BY created_at_ms, id;
 
 lastOfSport:
 SELECT * FROM match_header
-WHERE sport = :sport AND (:discipline IS NULL OR discipline = :discipline)
+WHERE id IN (SELECT match_id FROM replica_readable_match) AND sport = :sport AND (:discipline IS NULL OR discipline = :discipline)
 ORDER BY created_at_ms DESC, id DESC
 LIMIT 1;
 
@@ -86,3 +86,9 @@ DELETE FROM match_header WHERE id = ?;
 
 updateMeta:
 UPDATE match_header SET meta_json = ?, surface = ?, environment = ? WHERE id = ?;
+
+selectReadableById:
+SELECT * FROM match_header WHERE id = ? AND id IN (SELECT match_id FROM replica_readable_match);
+
+observeHeaders:
+SELECT id FROM match_header LIMIT 1;

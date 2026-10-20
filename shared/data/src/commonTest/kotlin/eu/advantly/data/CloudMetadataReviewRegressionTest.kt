@@ -303,4 +303,178 @@ class CloudMetadataReviewRegressionTest {
         assertEquals(3, selected.events.size)
         assertTrue(selected.headers.isEmpty() && selected.participants.isEmpty() && selected.projections.isEmpty())
     }
+
+    @Test
+    fun referenceAssignmentsResolveCurrentDirectoryWithoutChangingProfileAuthority() {
+        phone()
+        session("alice", "phone")
+        val assigned = PlayerId("assigned")
+        data.players.addGuest(assigned, "Before", 0)
+        createMatch("match", "phone", me)
+        data.events.append(
+            ScoreEvent(
+                EventId("assignment"),
+                MatchId("match"),
+                DeviceId("phone"),
+                2,
+                2,
+                2,
+                EventId("match-genesis"),
+                PlayerAssigned.reference(guest, assigned, me, legacySlot = true),
+            ).toStoredEvent(),
+        )
+        val db = AdvantlyDatabase(driver)
+        val row = db.matchAssignmentQueries.identitiesForMatch("match").executeAsOne()
+        assertEquals(assigned.value, row.player_id)
+        assertNull(row.player_json)
+        val before =
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+        assertEquals("Before", before.displayName)
+        assertEquals(assigned.value, before.playerId)
+        assertNull(
+            data.cloud
+                .uploadParticipants("match", "bob")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        data.players.rename(assigned, "After")
+        assertEquals(
+            "After",
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .displayName,
+        )
+        assertEquals(
+            assigned.value,
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        assertNull(
+            data.cloud
+                .uploadParticipants("match", "bob")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        assertNull(
+            db.matchAssignmentQueries
+                .identitiesForMatch("match")
+                .executeAsOne()
+                .player_json,
+        )
+    }
+
+    @Test
+    fun legacyFallbackDoesNotInventDirectoryOwnershipOrRestoreGloballyRedactedNames() {
+        phone()
+        session("alice", "phone")
+        createMatch("match", "phone", me)
+        val db = AdvantlyDatabase(driver)
+        val legacy = Player(PlayerId("legacy"), "Legacy name")
+        db.matchAssignmentQueries.put("match", guest.value, DataJson.encodeToString(Player.serializer(), legacy))
+        assertEquals(
+            "Legacy name",
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .displayName,
+        )
+        assertNull(
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        data.cloud.storeDownloadedPlayer(LocalPlayer(legacy.id, "Directory name", PlayerKind.GUEST, 0, null), "bob", owned = true)
+        assertEquals(
+            "Directory name",
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .displayName,
+        )
+        assertNull(
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        assertEquals(
+            legacy.id.value,
+            data.cloud
+                .uploadParticipants("match", "bob")!!
+                .participants
+                .last()
+                .playerId,
+        )
+        db.replicaLifecycleQueries.redactPlayer("another-account", "another-match", legacy.id.value, 1)
+        assertEquals(
+            "",
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .displayName,
+        )
+        assertEquals(
+            "",
+            data.cloud
+                .uploadParticipants("match", "bob")!!
+                .participants
+                .last()
+                .displayName,
+        )
+        db.matchAssignmentQueries.put("match", guest.value, DataJson.encodeToString(Player.serializer(), legacy))
+        assertEquals(
+            "",
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+                .displayName,
+        )
+    }
+
+    @Test
+    fun missingReferenceAndUnassignedSlotNeverFallBackToAnOldPlayerOrSlot() {
+        phone()
+        session("alice", "phone")
+        data.players.addGuest(guest, "Slot name", 0)
+        createMatch("match", "phone", me)
+        val db = AdvantlyDatabase(driver)
+        db.matchAssignmentQueries.putIdentity("match", guest.value, "missing", null)
+        driver.execute(
+            null,
+            """UPDATE match_assignment SET player_json = '{"id":"guest","displayName":"Stale"}' WHERE match_id='match'""",
+            0,
+        )
+        var person =
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+        assertEquals("", person.displayName)
+        assertNull(person.playerId)
+        db.matchAssignmentQueries.putIdentity("match", guest.value, null, null)
+        person =
+            data.cloud
+                .uploadParticipants("match", "alice")!!
+                .participants
+                .last()
+        assertEquals("", person.displayName)
+        assertNull(person.playerId)
+    }
 }
