@@ -3,6 +3,7 @@ package eu.advantly.data
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Player
 import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.data.db.Replica_transfer
 import kotlinx.serialization.json.JsonArray
@@ -430,23 +431,40 @@ class ReplicaLifecycleStore internal constructor(
         }
 
     private fun applyRedactedEvent(event: StoredEvent) {
-        val row =
-            checkNotNull(
-                database.cloudUploadQueries.eventById(event.id).executeAsOneOrNull(),
-            ) { "Rohlog muss vor Redaktion revalidiert sein" }
         check(
-            event.matchId == row.match_id && event.deviceId == row.device_id && event.deviceSeq == row.device_seq &&
-                event.lamport == row.lamport && event.wallClockMs == row.wall_clock_ms && event.parentId == row.parent_id &&
-                event.type in setOf("", "PlayerAssigned") && row.type in setOf("", "PlayerAssigned"),
+            event.id.isNotBlank() && event.matchId.isNotBlank() && event.deviceId.isNotBlank() &&
+                event.deviceSeq > 0 && event.lamport >= 0 && event.parentId?.isNotBlank() != false &&
+                event.type in setOf("", "PlayerAssigned"),
         )
-        val original = DataJson.parseToJsonElement(row.payload).jsonObject
         val replacement = DataJson.parseToJsonElement(event.payload).jsonObject
-        check(original["type"]?.jsonPrimitive?.content == "PlayerAssigned")
-        val person = original["player"] as? JsonObject ?: error("Kein Legacy-Spielerpayload")
-        check(!person["id"]?.jsonPrimitive?.content.isNullOrBlank())
-        val allowed = JsonObject(original + ("player" to JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))))
-        check(replacement == allowed) { "Redaktion verändert unveränderliche Eventfelder" }
+        val assignment = event.toScoreEvent().payload as? PlayerAssigned ?: error("Kein Legacy-Zuweisungsevent")
+        val player = assignment.player
+        check(
+            assignment.assignmentVersion == 1 && player != null &&
+                player.id.value.isNotBlank() && player.displayName == DELETED_NAME &&
+                assignment.slot.value.isNotBlank() && assignment.assignedBy.value.isNotBlank() &&
+                assignment.creatorAlias?.value?.isNotBlank() != false,
+        )
+        val row = database.cloudUploadQueries.eventById(event.id).executeAsOneOrNull()
+        check(
+            row != null ||
+                database.matchEventQueries.countBySequence(event.matchId, event.deviceId, event.deviceSeq).executeAsOne() == 0L,
+        ) { "Redaktionsbeleg kollidiert mit einer vorhandenen Eventsequenz" }
+        if (row != null) {
+            check(
+                event.matchId == row.match_id && event.deviceId == row.device_id && event.deviceSeq == row.device_seq &&
+                    event.lamport == row.lamport && event.wallClockMs == row.wall_clock_ms && event.parentId == row.parent_id &&
+                    row.type in setOf("", "PlayerAssigned"),
+            )
+            val original = DataJson.parseToJsonElement(row.payload).jsonObject
+            check(original["type"]?.jsonPrimitive?.content == "PlayerAssigned")
+            val person = original["player"] as? JsonObject ?: error("Kein Legacy-Spielerpayload")
+            check(!person["id"]?.jsonPrimitive?.content.isNullOrBlank())
+            val allowed = JsonObject(original + ("player" to JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))))
+            check(replacement == allowed) { "Redaktion verändert unveränderliche Eventfelder" }
+        }
         // Die verifizierte Seite autorisiert dieses Event, nicht eine globale Player-ID.
+        // Ohne Rohzeile wird nur der genaue Beleg gespeichert: kein Import, Receipt oder Readiness-Erfolg.
         val proof = queries.redactedEvent(event.id).executeAsOneOrNull()
         if (proof == null) {
             queries.rememberRedactedEvent(event.id, DataJson.encodeToString(StoredEvent.serializer(), event.copy(confirmed = false)))

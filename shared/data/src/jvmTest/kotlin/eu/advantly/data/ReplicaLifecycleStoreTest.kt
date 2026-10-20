@@ -171,6 +171,210 @@ class ReplicaLifecycleStoreTest {
     }
 
     @Test
+    fun manifestBeforeRawDownloadPersistsEventProofWithoutGrantingReadinessOrGlobalIdentity() {
+        for (active in listOf(false, true)) {
+            for (legacyType in listOf("", "PlayerAssigned")) {
+                Fixture(activate = active).use { f ->
+                    var ctx = f.data.replicas.captureContext()
+                    f.data.replicas.applyAccess(ctx, "match", 1, ReplicaAccessLevel.MEMBER, fence)
+                    f.cloudDirectoryPlayer()
+                    val player = f.data.players.get(PlayerId("deleted"))
+                    val playerMetadata = f.data.cloud.metadataState(CloudMetadataKind.PLAYER, "deleted")
+                    val original =
+                        event("assignment", 2, PlayerAssigned(slot, Player(PlayerId("deleted"), "Sensitive name"), owner))
+                            .copy(type = legacyType)
+                    val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+                    val transfer = RedactionTransfer("before-raw", "match", 1, 1, 3)
+                    val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+                    val first =
+                        RedactionPage(
+                            0,
+                            from,
+                            RedactionCursor(null, 2),
+                            emptyList(),
+                            listOf(ReplicaRedactionEvent(redacted, 2)),
+                            false,
+                            true,
+                        )
+                    f.data.replicas.stageRedaction(ctx, transfer.id, first, fence)
+                    assertFails { f.data.replicas.completeRedaction(ctx, transfer.id, fence) }
+                    assertEquals(original, f.data.replicas.sanitizeLegacyEvent(original))
+                    assertEquals(0, f.count("replica_redacted_event"))
+                    f.reopen()
+                    ctx = f.data.replicas.captureContext()
+                    f.data.replicas.stageRedaction(
+                        ctx,
+                        transfer.id,
+                        RedactionPage(1, first.next, first.next, emptyList(), emptyList(), true, true),
+                        fence,
+                    )
+                    f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+                    assertEquals(redacted, f.data.replicas.sanitizeLegacyEvent(original))
+                    assertEquals(1, f.count("replica_redacted_event"))
+                    assertEquals(0, f.count("replica_redacted_player"))
+                    assertEquals(0, f.count("match_event"))
+                    assertEquals(0, f.count("cloud_pull_receipt"))
+                    assertEquals(0, f.data.cloud.cursor("A", CloudPullStore.eventStream("match")))
+                    assertFalse(
+                        f.data.replicas
+                            .access(ctx, "match")!!
+                            .ready,
+                    )
+                    assertEquals(player, f.data.players.get(PlayerId("deleted")))
+                    assertEquals(playerMetadata, f.data.cloud.metadataState(CloudMetadataKind.PLAYER, "deleted"))
+                    assertEquals(first, f.data.replicas.exportRedactionPage(ctx, transfer.id, 0))
+
+                    f.reopen()
+                    ctx = f.data.replicas.captureContext()
+                    assertTrue(
+                        f.data.replicas
+                            .redactionProgress(ctx, "match")!!
+                            .completed,
+                    )
+                    f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+                    f.cloudMatch(assignment = true)
+                    assertEquals(
+                        redacted.payload,
+                        f.db.cloudUploadQueries
+                            .eventById("assignment")
+                            .executeAsOne()
+                            .payload,
+                    )
+                    assertTrue(
+                        slot.value in
+                            f.db.matchAssignmentQueries
+                                .redactedSlots("match")
+                                .executeAsList(),
+                    )
+                    assertFalse(
+                        f.data.replicas
+                            .access(ctx, "match")!!
+                            .ready,
+                    )
+                    if (active) assertFalse(f.data.replicas.canReadMember(ctx, "match"))
+                    assertEquals(player, f.data.players.get(PlayerId("deleted")))
+                    assertEquals(playerMetadata, f.data.cloud.metadataState(CloudMetadataKind.PLAYER, "deleted"))
+                    val unrelated = original.copy(id = "unrelated-assignment", matchId = "unrelated")
+                    assertEquals(unrelated, f.data.replicas.sanitizeLegacyEvent(unrelated))
+                    assertFails { f.data.cloud.storeDownloaded(listOf(original.copy(lamport = 99)), fence) }
+                    assertFails {
+                        f.data.cloud.storeDownloaded(
+                            listOf(original.copy(payload = original.payload.replace("\"owner\"", "\"outsider\""))),
+                            fence,
+                        )
+                    }
+                    assertEquals(
+                        redacted.payload,
+                        f.db.cloudUploadQueries
+                            .eventById("assignment")
+                            .executeAsOne()
+                            .payload,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun manifestBeforeRawDownloadFinalFenceRollsBackProofAndEpoch() {
+        Fixture().use { f ->
+            val ctx = f.data.replicas.captureContext()
+            f.data.replicas.applyAccess(ctx, "match", 1, ReplicaAccessLevel.MEMBER, fence)
+            val redacted = event("missing", 2, PlayerAssigned(slot, Player(PlayerId("living"), "Gelöschter Spieler"), owner))
+            val transfer = RedactionTransfer("before-raw-rollback", "match", 1, 1, 2)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            var reachedFinalFence = false
+            assertFails {
+                f.data.replicas.completeRedaction(ctx, transfer.id) {
+                    if (f.data.replicas
+                            .redactionProgress(ctx, "match")!!
+                            .completed
+                    ) {
+                        reachedFinalFence = true
+                        error("Autorität nach Belegspeicherung entzogen")
+                    }
+                }
+            }
+            assertTrue(reachedFinalFence)
+            assertEquals(0, f.count("replica_redacted_event"))
+            assertEquals(0, f.count("replica_redacted_player"))
+            assertEquals(0, f.count("match_event"))
+            assertEquals(
+                0,
+                f.data.replicas
+                    .access(ctx, "match")!!
+                    .redactionEpoch,
+            )
+            assertFalse(
+                f.data.replicas
+                    .redactionProgress(ctx, "match")!!
+                    .completed,
+            )
+        }
+    }
+
+    @Test
+    fun manifestBeforeRawDownloadRejectsMalformedAuthorityAtomically() {
+        val clean = event("bad", 3, PlayerAssigned(slot, Player(PlayerId("living"), "Gelöschter Spieler"), owner))
+        val invalid =
+            listOf(
+                clean.copy(id = ""),
+                clean.copy(deviceId = ""),
+                clean.copy(deviceSeq = 0),
+                clean.copy(lamport = -1),
+                clean.copy(type = "PointWon"),
+                clean.copy(payload = clean.payload.replace("Gelöschter Spieler", "Sensitive name")),
+                clean.copy(payload = clean.payload.replace("\"living\"", "\"\"")),
+                clean.copy(payload = clean.payload.replace("\"owner\"", "\"\"")),
+                clean.copy(payload = clean.payload.replace("\"${slot.value}\"", "\"\"")),
+                event("reference", 3, PlayerAssigned.reference(slot, PlayerId("living"), owner)),
+                event("point", 3, PointWon(Side.A)),
+            )
+        for ((index, bad) in invalid.withIndex()) {
+            Fixture().use { f ->
+                val ctx = f.data.replicas.captureContext()
+                f.data.replicas.applyAccess(ctx, "match", 1, ReplicaAccessLevel.MEMBER, fence)
+                val transfer = RedactionTransfer("invalid-missing-$index", "match", 1, 1, 3)
+                val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+                f.data.replicas.stageRedaction(
+                    ctx,
+                    transfer.id,
+                    RedactionPage(
+                        0,
+                        from,
+                        RedactionCursor(null, 3),
+                        emptyList(),
+                        listOf(ReplicaRedactionEvent(clean.copy(id = "valid-first", deviceSeq = 2), 2), ReplicaRedactionEvent(bad, 3)),
+                        true,
+                        true,
+                    ),
+                    fence,
+                )
+                assertFails { f.data.replicas.completeRedaction(ctx, transfer.id, fence) }
+                assertEquals(0, f.count("replica_redacted_event"), "Malformed entry $index must roll back the earlier valid proof")
+                assertEquals(0, f.count("match_event"))
+                assertEquals(
+                    0,
+                    f.data.replicas
+                        .access(ctx, "match")!!
+                        .redactionEpoch,
+                )
+                assertFalse(
+                    f.data.replicas
+                        .redactionProgress(ctx, "match")!!
+                        .completed,
+                )
+            }
+        }
+    }
+
+    @Test
     fun eventOnlyRedactionPreservesLivingDirectoryAndUnrelatedMatchAfterReopenAndPurge() {
         for (active in listOf(false, true)) {
             Fixture(activate = active).use { f ->
