@@ -14,9 +14,8 @@ import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
-import eu.advantly.data.LocalPlayer
+import eu.advantly.data.CloudMetadataKind
 import eu.advantly.data.MatchRecord
-import eu.advantly.data.PlayerKind
 import eu.advantly.data.RedactionCursor
 import eu.advantly.data.RedactionPage
 import eu.advantly.data.RedactionTransfer
@@ -24,8 +23,8 @@ import eu.advantly.data.ReplicaAccessLevel
 import eu.advantly.data.ReplicaRedactionEvent
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.createInMemoryJvmLocalData
+import eu.advantly.data.metadataState
 import eu.advantly.data.storeDownloadedMatch
-import eu.advantly.data.storeDownloadedPlayer
 import eu.advantly.data.toStoredEvent
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -35,21 +34,34 @@ import eu.advantly.sync.protocol.PeerKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PlaceholderPresentationTest {
     @Test
     fun eventOnlyRedactionStaysMaskedInMatchSetupWithoutErasingDirectoryPlayer() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = true)
+    }
+
+    @Test
+    fun eventOnlyRedactionDoesNotCreateBlankDirectoryPlayerDuringAssignment() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = false)
+    }
+
+    private fun checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer: Boolean) {
         val data = createInMemoryJvmLocalData()
         var identityIndex = 0
         data.accountIdentities.select("scope-A", "A", 0, "PHONE") { "A-${identityIndex++}" }
         val ctx = data.replicas.captureContext()
         val owner = data.players.ensureSelf("Alex", 1) { PlayerId("owner") }.id
         val slot = Placeholders.id("opponent")
+        val secondSlot = Placeholders.id("second-opponent")
         val person = Player(PlayerId("living"), "Sensitive name")
+        val partner = data.players.addGuest(PlayerId("partner"), "Partner", 1)
+        val other = data.players.addGuest(PlayerId("other"), "Other", 1)
         val match = MatchId("redacted-match")
-        val format = Presets.BADMINTON_1GAME_15.format()
-        val lineup = Lineup(listOf(owner), listOf(slot), owner)
+        val format = Presets.TENNIS_DOUBLES_MTB10.format()
+        val lineup = Lineup(listOf(owner, partner.id), listOf(slot, secondSlot), owner)
         val genesis =
             ScoreEvent(EventId("genesis"), match, DeviceId("cloud"), 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
         val assigned =
@@ -70,7 +82,7 @@ class PlaceholderPresentationTest {
             ),
             "A",
         )
-        data.cloud.storeDownloadedPlayer(LocalPlayer(person.id, person.displayName, PlayerKind.GUEST, 0, null), "A")
+        if (withDirectoryPlayer) data.players.addGuest(person.id, person.displayName, 1)
         data.cloud.storeDownloaded(listOf(genesis.toStoredEvent(), assigned)) {}
         val transfer = RedactionTransfer("redaction", match.value, 1, 1, 2)
         val cursor = data.replicas.beginRedaction(ctx, transfer) {}
@@ -98,7 +110,16 @@ class PlaceholderPresentationTest {
                 .summary.setup.assignedPlayers[slot]!!
                 .displayName,
         )
-        assertEquals("Sensitive name", data.players.get(person.id)!!.displayName)
+        val directoryBefore = data.players.get(person.id)
+        if (withDirectoryPlayer) {
+            assertEquals("Sensitive name", directoryBefore!!.displayName)
+        } else {
+            assertNull(directoryBefore)
+        }
+        val beforeAssignment = data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value)
+        assertTrue(store.assignPlayer(match, secondSlot, other.id))
+        assertEquals(directoryBefore?.displayName, data.players.get(person.id)?.displayName)
+        assertEquals(beforeAssignment, data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value))
         store.close()
     }
 
