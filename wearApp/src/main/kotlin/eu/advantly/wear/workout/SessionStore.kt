@@ -3,6 +3,7 @@ package eu.advantly.wear.workout
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import eu.advantly.data.AndroidInstallationGuard
 
 /**
  * Persistenter Workout-Zustand (SharedPreferences), damit ein Prozess-Neustart erkannt und die Exercise wieder
@@ -12,7 +13,8 @@ import androidx.core.content.edit
 class SessionStore(
     context: Context,
 ) : WorkoutMarker {
-    private val prefs: SharedPreferences = context.getSharedPreferences("workout_session", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("workout_session_${AndroidInstallationGuard.get(context).cacheNamespace}", Context.MODE_PRIVATE)
 
     override var sessionActive: Boolean
         get() = prefs.getBoolean(KEY_ACTIVE, false)

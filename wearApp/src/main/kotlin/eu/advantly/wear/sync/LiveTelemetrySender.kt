@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import com.google.android.gms.wearable.Wearable
 import eu.advantly.core.model.MatchId
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionState
 import eu.advantly.presentation.live.LiveTelemetryGate
@@ -102,10 +103,13 @@ class LiveTelemetrySender(
     }
 }
 
-private fun androidMessages(context: Context): TelemetryMessageClient {
-    val client = Wearable.getMessageClient(context.applicationContext)
-    return TelemetryMessageClient { nodeId, path, payload ->
-        client.sendMessage(nodeId, path, payload).addOnSuccessListener { DiagnosticLog.log("TELEMETRY_SENT") }
+private fun androidMessages(context: Context): TelemetryMessageClient =
+    TelemetryMessageClient { nodeId, path, payload ->
+        if (AndroidInstallationGuard.get(context).privateTransportAllowed) {
+            Wearable
+                .getMessageClient(context.applicationContext)
+                .sendMessage(nodeId, path, payload)
+                .addOnSuccessListener { DiagnosticLog.log("TELEMETRY_SENT") }
+        }
         // Fehlschlag verwerfen; ausschließlich das nächste frische Exercise-Update entscheidet neu.
     }
-}

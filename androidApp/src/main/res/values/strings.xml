@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="recovery_notice_title">Existing data kept safe</string>
+    <string name="recovery_notice_body">Your previous data is retained separately and has not been restored. Account verification and recovery are not yet available. Device sync and account features remain paused. You can count new matches offline.</string>
+    <string name="recovery_continue_offline">Continue offline</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
 </resources>

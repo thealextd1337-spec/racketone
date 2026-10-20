@@ -9,7 +9,17 @@ import eu.advantly.data.db.AdvantlyDatabase
 fun createAndroidDriver(
     context: Context,
     name: String = DEFAULT_DATABASE_NAME,
-): SqlDriver = AndroidSqliteDriver(AdvantlyDatabase.Schema, context.applicationContext, name)
+): SqlDriver {
+    val selected =
+        if (name == DEFAULT_DATABASE_NAME || name.startsWith("advantly-install-")) {
+            val active = AndroidInstallationGuard.get(context).activeDatabaseName
+            require(name == DEFAULT_DATABASE_NAME || name == active) { "Database is retained for verification" }
+            active
+        } else {
+            name
+        }
+    return AndroidSqliteDriver(AdvantlyDatabase.Schema, context.applicationContext, selected)
+}
 
 /** Datei-basierter [EventStore] im App-Datenverzeichnis (Android Phone + Wear). */
 fun createAndroidEventStore(
@@ -18,7 +28,5 @@ fun createAndroidEventStore(
 ): EventStore = SqlDelightEventStore(createAndroidDriver(context, name))
 
 /** Datei-basierte [LocalData] im App-Datenverzeichnis (eine Instanz je Prozess verwenden). */
-fun createAndroidLocalData(
-    context: Context,
-    name: String = DEFAULT_DATABASE_NAME,
-): LocalData = LocalData(createAndroidDriver(context, name))
+fun createAndroidLocalData(context: Context): LocalData =
+    LocalData(createAndroidDriver(context, AndroidInstallationGuard.get(context).activeDatabaseName))

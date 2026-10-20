@@ -1,0 +1,282 @@
+package eu.advantly.android
+
+import android.app.Application
+import android.database.DefaultDatabaseErrorHandler
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteDatabaseCorruptException
+import android.database.sqlite.SQLiteException
+import android.system.ErrnoException
+import android.system.OsConstants
+import com.google.android.gms.wearable.MessageEvent
+import eu.advantly.android.auth.createPhoneAccount
+import eu.advantly.android.sync.PhoneSyncListenerService
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.Presets
+import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.data.LocalData
+import eu.advantly.data.createAndroidDriver
+import eu.advantly.device.link.WearDataLayerInbound
+import eu.advantly.device.link.WearDataLayerTransport
+import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.MatchSessions
+import eu.advantly.sync.protocol.PeerKind
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowLinux
+import java.io.File
+import java.io.FileDescriptor
+import java.security.MessageDigest
+import java.util.Properties
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = Application::class, shadows = [UnsupportedDirectorySyncLinux::class])
+class AndroidRestoreGuardTest {
+    @Before
+    fun resetProcessSingletons() {
+        AndroidMatchSessions.current()?.close()
+        AndroidMatchSessions::class.java
+            .getDeclaredField("instance")
+            .apply { isAccessible = true }
+            .set(AndroidMatchSessions, null)
+        clearGuardCache()
+    }
+
+    @Test
+    fun serviceColdStartHoldsOldPrivateTrafficAndFreshSessionCountsOffline() {
+        val app = RuntimeEnvironment.getApplication()
+        val driver = createAndroidDriver(app, "seed.db")
+        val old = LocalData(driver)
+        old.settings.put(MatchSessions.DEVICE_ID_KEY, "old-device-source")
+        old.players.ensureSelf("Identical name", 1) { PlayerId("old-self") }
+        val oldSession = MatchSessions.create(old, null, ManualScheduler(), PeerKind.PHONE)
+        oldSession.start()
+        val lineup = Lineup(listOf(PlayerId("old-self")), listOf(PlayerId("old-opponent")), PlayerId("old-self"))
+        oldSession.create(Presets.TENNIS_SINGLES_BO3.format(), lineup)
+        driver.close()
+        val original = app.getDatabasePath("advantly.db")
+        assertTrue(app.getDatabasePath("seed.db").renameTo(original))
+        val originalHash = hash(original)
+        val service = Robolectric.buildService(PhoneSyncListenerService::class.java).create().get()
+        service.onMessageReceived(oldMessage())
+        assertFalse(WearDataLayerInbound.isAttached)
+        var consumed = 0
+        assertFalse(
+            WearDataLayerInbound.deliverQueuedItem(
+                "fresh-node",
+                "old-node",
+                listOf("advantly", "link", "q", "fresh-node", "durable-private-item"),
+                byteArrayOf(1, 2, 3),
+            ) { consumed++ },
+        )
+        assertEquals(0, consumed)
+        val active = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        assertNotEquals("old-device-source", active.deviceId.value)
+        assertFalse(AndroidInstallationGuard.get(app).privateTransportAllowed)
+        assertTrue(
+            active.data.matches
+                .recent(100)
+                .isEmpty(),
+        )
+        assertTrue(
+            active.data.players
+                .all()
+                .none { it.id == PlayerId("old-self") || it.displayName == "Identical name" },
+        )
+        assertTrue(active.data.accountIdentities.managed)
+        assertTrue(
+            active.data.accountIdentities.scope!!
+                .startsWith("installation:"),
+        )
+        assertNotEquals(null, active.data.settings.get("identity.authority"))
+        val self =
+            active.data.players
+                .self()!!
+                .id
+        val fresh = active.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(PlayerId("fresh-opponent")), self))
+        assertTrue(active.recordPoint(Side.A))
+        assertEquals(2L, active.data.events.count(fresh.value))
+        assertEquals(originalHash, hash(original))
+        val activity = Robolectric.buildActivity(androidx.activity.ComponentActivity::class.java).setup().get()
+        assertNull(activity.createPhoneAccount("https://must-never-open.invalid", "key"))
+    }
+
+    @Test
+    fun activeTokenCanBeReadFromPendingWalWithoutOpeningOrCheckpointingOriginal() {
+        val app = RuntimeEnvironment.getApplication()
+        val state = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(state.activeDatabaseName)
+        val jdbc = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as java.sql.Driver
+        jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { database ->
+            database.createStatement().use {
+                it.execute("DELETE FROM setting WHERE key = 'installation.binding.v1'")
+                it.execute("PRAGMA journal_mode=WAL")
+                it.execute("PRAGMA wal_autocheckpoint=0")
+                it.execute("INSERT INTO setting VALUES ('installation.binding.v1', '${state.cacheNamespace}')")
+            }
+            assertTrue(File("${original.absolutePath}-wal").length() > 0)
+            val family = listOf(original, File("${original.absolutePath}-wal"), File("${original.absolutePath}-shm"))
+            val hashes = family.associateWith(::hash)
+            clearGuardCache()
+            assertEquals(state, AndroidInstallationGuard.get(app))
+            hashes.forEach { (file, before) -> assertEquals(before, hash(file)) }
+        }
+    }
+
+    @Test
+    fun knownInstallationKeepsAccountScopeAndSourceAcrossValidatedRestart() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val driver = createAndroidDriver(app)
+        val data = LocalData(driver)
+        var id = 0
+        val device = data.accountIdentities.select("retained-account-scope", "same-uid", 1, "PHONE") { "source-${++id}" }
+        driver.close()
+        clearGuardCache()
+        val next = AndroidInstallationGuard.get(app)
+        assertEquals(first, next)
+        assertTrue(next.privateTransportAllowed)
+        val restartedDriver = createAndroidDriver(app)
+        val restarted = LocalData(restartedDriver)
+        assertEquals(device, restarted.settings.get(MatchSessions.DEVICE_ID_KEY))
+        assertEquals("same-uid", restarted.accountIdentities.profile)
+        assertEquals("retained-account-scope", restarted.accountIdentities.scope)
+        restartedDriver.close()
+    }
+
+    @Test
+    @Config(shadows = [UnsupportedDirectorySyncLinux::class, RejectDefaultCorruptionHandler::class])
+    fun corruptSettingRootPageCannotBeDeletedAndReopenedAsAnEmptyVerifiedCopy() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        val jdbc = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as java.sql.Driver
+        jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { database ->
+            database.createStatement().use {
+                it.execute("PRAGMA writable_schema=ON")
+                it.execute("UPDATE sqlite_master SET rootpage=2147483647 WHERE name='setting'")
+                it.execute("PRAGMA writable_schema=OFF")
+            }
+        }
+        val originalHash = hash(original)
+        val marker = File(app.noBackupFilesDir, "installation-v1")
+        val markerHash = hash(marker)
+        val files = original.parentFile!!.list()!!.sorted()
+        clearGuardCache()
+        assertThrows(SQLiteException::class.java) { AndroidInstallationGuard.get(app) }
+        assertEquals(0, RejectDefaultCorruptionHandler.calls)
+        assertEquals(originalHash, hash(original))
+        assertEquals(markerHash, hash(marker))
+        assertEquals(files, original.parentFile!!.list()!!.sorted())
+    }
+
+    @Test
+    fun failedSqliteOpenCannotPublishAReplacementInstallation() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        original.writeText("not a SQLite database: open failure")
+        val originalHash = hash(original)
+        val marker = File(app.noBackupFilesDir, "installation-v1")
+        val markerHash = hash(marker)
+        val files = original.parentFile!!.list()!!.sorted()
+        clearGuardCache()
+        assertThrows(SQLiteException::class.java) { AndroidInstallationGuard.get(app) }
+        assertEquals(originalHash, hash(original))
+        assertEquals(markerHash, hash(marker))
+        assertEquals(files, original.parentFile!!.list()!!.sorted())
+    }
+
+    @Test
+    fun successfullyInspectedMissingSettingTableIsAnUntrustedDatabase() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        SQLiteDatabase.openDatabase(original.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("DROP TABLE setting")
+        }
+        val before = hash(original)
+        clearGuardCache()
+        val next = AndroidInstallationGuard.get(app)
+        assertFalse(next.privateTransportAllowed)
+        assertNotEquals(first.activeDatabaseName, next.activeDatabaseName)
+        assertEquals(before, hash(original))
+    }
+
+    @Test
+    fun intactMarkerAndSidecarCannotValidateAnAndroidDatabaseWithMissingToken() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        SQLiteDatabase.openDatabase(original.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("DELETE FROM setting WHERE key = 'installation.binding.v1'")
+        }
+        val before = hash(original)
+        clearGuardCache()
+        val next = AndroidInstallationGuard.get(app)
+        assertFalse(next.privateTransportAllowed)
+        assertNotEquals(first.activeDatabaseName, next.activeDatabaseName)
+        assertEquals(before, hash(original))
+    }
+
+    private fun clearGuardCache() {
+        val field = AndroidInstallationGuard::class.java.getDeclaredField("states").apply { isAccessible = true }
+        (field.get(AndroidInstallationGuard) as MutableMap<*, *>).clear()
+    }
+
+    private fun oldMessage(): MessageEvent =
+        object : MessageEvent {
+            override fun getRequestId() = 1
+
+            override fun getPath() = WearDataLayerTransport.MESSAGE_PATH
+
+            override fun getData() = byteArrayOf(1, 2, 3)
+
+            override fun getSourceNodeId() = "old-node"
+        }
+
+    private fun hash(file: File) = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).toList()
+}
+
+/** Der Guard muss einen eigenen werfenden Handler wählen; niemals den löschenden Android-Standardhandler. */
+@Implements(DefaultDatabaseErrorHandler::class)
+class RejectDefaultCorruptionHandler {
+    @Implementation
+    fun onCorruption(database: SQLiteDatabase) {
+        calls++
+        throw SQLiteDatabaseCorruptException("Default corruption handler was selected")
+    }
+
+    companion object {
+        var calls = 0
+    }
+}
+
+/** Robolectric/Windows kann Verzeichnisse nicht öffnen; modelliert gezielt einen nicht unterstützten fsync. */
+@Implements(className = "libcore.io.Linux", isInAndroidSdk = false)
+class UnsupportedDirectorySyncLinux : ShadowLinux() {
+    @Implementation
+    override fun open(
+        path: String,
+        flags: Int,
+        mode: Int,
+    ): FileDescriptor {
+        if (File(path).isDirectory) throw ErrnoException("open", OsConstants.EINVAL)
+        return super.open(path, flags, mode)
+    }
+}

@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
@@ -44,6 +45,7 @@ class PhoneSyncListenerService : WearableListenerService() {
     private val expireTelemetry = Runnable { LiveTelemetryStore.Phone.expire() }
 
     override fun onMessageReceived(event: MessageEvent) {
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
         if (event.path == LiveTelemetry.MESSAGE_PATH) {
             val payload = LiveTelemetryCodec.decode(event.data) ?: return
             onMainAndWait {
@@ -78,6 +80,10 @@ class PhoneSyncListenerService : WearableListenerService() {
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) {
+            events.release()
+            return // Keine Zustellbestätigung und kein Löschen eines nicht gespeicherten Queue-Elements.
+        }
         // Buffer gilt nur während dieses Aufrufs: Items einfrieren, dann freigeben
         val items = events.filter { it.type == DataEvent.TYPE_CHANGED }.map { it.dataItem.freeze() }
         events.release()

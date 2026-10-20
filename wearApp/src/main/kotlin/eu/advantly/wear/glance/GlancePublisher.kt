@@ -58,7 +58,11 @@ class GlancePublisher(
         snapshot = GlanceModel.derive(state, setup, names::get, selfIds::contains)
         if (!initialized) {
             initialized = true
-            if (restoredState == null) holder.prefs.glanceSentState = GlanceStateStorage.encode(snapshot)
+            if (restoredState == null) {
+                // Neue Cache-Generation: auch externe Tile-/Complication-Caches mit der frischen Sicht ersetzen.
+                requestUpdate()
+                return
+            }
         }
         handler.removeCallbacks(update)
         when (val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())) {

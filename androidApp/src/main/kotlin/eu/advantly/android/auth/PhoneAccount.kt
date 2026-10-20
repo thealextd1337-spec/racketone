@@ -12,6 +12,7 @@ import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
 import eu.advantly.cloud.sync.SupabasePhoneAuth
 import eu.advantly.cloud.sync.SupabaseSupport
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
@@ -36,6 +37,8 @@ internal fun ComponentActivity.createPhoneAccount(
     apiKey: String,
 ): AuthViewModel? {
     if (apiUrl.isBlank() || apiKey.isBlank()) return null
+    // Login allein ist kein Wiederherstellungs-/Zugriffsbeleg. Integration folgt nach D2/D3.
+    if (!AndroidInstallationGuard.get(applicationContext).privateTransportAllowed) return null
     val storage = PhoneAuthStorage(applicationContext)
     val client =
         createSupabaseClient(apiUrl, apiKey) {

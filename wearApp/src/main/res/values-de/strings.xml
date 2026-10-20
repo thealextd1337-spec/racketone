@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
+    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Prüfung und Wiederherstellung sind noch nicht verfügbar. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
+    <string name="recovery_continue_offline">Offline fortfahren</string>
     <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->

@@ -2,6 +2,7 @@ package eu.advantly.match.session
 
 import android.content.Context
 import android.os.Looper
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.createAndroidLocalData
 import eu.advantly.device.link.MainLooperScheduler
 import eu.advantly.device.link.createWearDeviceLink
@@ -24,11 +25,25 @@ object AndroidMatchSessions {
     ): MatchSession =
         instance ?: run {
             val app = context.applicationContext
+            val installation = AndroidInstallationGuard.get(app)
+            val data = createAndroidLocalData(app)
+            if (!installation.privateTransportAllowed && !data.accountIdentities.managed) {
+                val scope = "installation:${installation.cacheNamespace}"
+                val ids = RandomIdGenerator()
+                val nowMs = System.currentTimeMillis()
+                data.transaction {
+                    data.accountIdentities.select(scope, null, nowMs, kind.name) { ids.newUuid7(nowMs).value }
+                    data.settings.put("identity.authority", installation.cacheNamespace)
+                    data.settings.put("identity.epoch", "1")
+                    data.settings.put("identity.wireScope", scope)
+                }
+            }
             val scheduler = MainLooperScheduler()
             MatchSessions
                 .create(
-                    createAndroidLocalData(app),
-                    createWearDeviceLink(app, scheduler),
+                    data,
+                    // Kein Transportobjekt: auch interne Queue-Scans und Transport-ACKs bleiben gesperrt.
+                    if (installation.privateTransportAllowed) createWearDeviceLink(app, scheduler) else null,
                     scheduler,
                     kind,
                     appBuild = androidAppBuild(app),

@@ -1,5 +1,6 @@
 package eu.advantly.wear
 
+import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -36,6 +37,7 @@ import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -160,6 +162,14 @@ class MainActivity : ComponentActivity() {
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
         holder = WearSessions.get(this)
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed && savedInstanceState == null) {
+            AlertDialog
+                .Builder(this)
+                .setTitle(R.string.recovery_notice_title)
+                .setMessage(R.string.recovery_notice_body)
+                .setPositiveButton(R.string.recovery_continue_offline, null)
+                .show()
+        }
         permissions.value = Permissions.current(this)
         permissionRequestInFlight = savedInstanceState?.getBoolean(KEY_PERMISSION_IN_FLIGHT) == true
         if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {

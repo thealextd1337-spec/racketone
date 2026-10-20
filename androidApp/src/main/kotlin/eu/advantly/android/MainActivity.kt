@@ -1,5 +1,6 @@
 package eu.advantly.android
 
+import android.app.AlertDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +10,7 @@ import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
 import eu.advantly.android.auth.createPhoneAccount
 import eu.advantly.android.auth.googleCredential
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearCompanionDetector
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
@@ -23,6 +25,7 @@ class MainActivity : ComponentActivity() {
         // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val installation = AndroidInstallationGuard.get(applicationContext)
         // ViewModelStore hält Auth über Rotation; keine Credentials in Bundle oder SavedState.
         val auth =
             if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_KEY.isBlank()) {
@@ -56,7 +59,7 @@ class MainActivity : ComponentActivity() {
                 rememberAdvantlyAppModel {
                     SessionMatchStore(
                         AndroidMatchSessions.get(applicationContext, PeerKind.PHONE),
-                        companion = WearCompanionDetector(applicationContext),
+                        companion = if (installation.privateTransportAllowed) WearCompanionDetector(applicationContext) else null,
                     )
                 }
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
@@ -77,6 +80,14 @@ class MainActivity : ComponentActivity() {
                         { googleCredential() }
                     },
             )
+        }
+        if (!installation.privateTransportAllowed && savedInstanceState == null) {
+            AlertDialog
+                .Builder(this)
+                .setTitle(R.string.recovery_notice_title)
+                .setMessage(R.string.recovery_notice_body)
+                .setPositiveButton(R.string.recovery_continue_offline, null)
+                .show()
         }
     }
 }

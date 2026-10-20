@@ -2,6 +2,7 @@ package eu.advantly.wear
 
 import android.app.ActivityManager
 import android.app.Application
+import android.app.NotificationManager
 import android.content.ComponentCallbacks2
 import android.os.Process
 import eu.advantly.match.session.SessionListener
@@ -10,6 +11,7 @@ import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.FieldTestRecorder
 import eu.advantly.wear.glance.GlancePublisher
 import eu.advantly.wear.sync.MatchNotifier
+import eu.advantly.wear.sync.WearPrefs
 import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.workout.SessionStore
 import eu.advantly.wear.workout.WorkoutAction
@@ -26,6 +28,9 @@ import eu.advantly.wear.workout.WorkoutStateHolder
 class AdvantlyWearApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        WearPrefs(this).initializeOperationalCache {
+            getSystemService(NotificationManager::class.java)?.cancelAll()
+        }
         DiagnosticLog.init(this)
         val store = SessionStore(this)
         DiagnosticLog.log(

@@ -11,6 +11,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
@@ -44,6 +45,7 @@ class SyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
     override fun onMessageReceived(event: MessageEvent) {
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
         if (event.path == LiveTelemetrySubscription.MESSAGE_PATH) {
             // Ohne laufende Exercise wird nie gesendet: Abo verwerfen, ohne IPC oder kalten Session-Aufbau
             if (!WorkoutStateHolder.state.value.telemetryActive) return
@@ -98,6 +100,10 @@ class SyncListenerService : WearableListenerService() {
         }
 
     override fun onDataChanged(events: DataEventBuffer) {
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) {
+            events.release()
+            return // Kein ACK, keine Queue-Löschung und kein alter lokaler Scope als Ausweichweg.
+        }
         // Buffer gilt nur während dieses Aufrufs: Items einfrieren, dann freigeben
         val items = events.filter { it.type == DataEvent.TYPE_CHANGED }.map { it.dataItem.freeze() }
         events.release()
@@ -129,6 +135,7 @@ class SyncListenerService : WearableListenerService() {
     }
 
     override fun onCapabilityChanged(info: CapabilityInfo) {
+        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
         DiagnosticLog.log("SYNC_SERVICE_CAPABILITY", "nodes" to info.nodes.size)
         val cold =
             runOnMain {
