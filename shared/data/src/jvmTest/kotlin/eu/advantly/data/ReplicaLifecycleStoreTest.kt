@@ -133,6 +133,44 @@ class ReplicaLifecycleStoreTest {
         ).toStoredEvent()
 
     @Test
+    fun memberGenerationRefreshRetainsOwnMaterializationProofWhileBlockingReads() {
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            f.cloudMatch()
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json,access,access_epoch,materialized_version)
+                    VALUES ('A','MATCH','match',1,'{}','member',1,1)""",
+            )
+            val previous = f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match")
+            assertNotNull(previous)
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json,access,access_epoch,materialized_version)
+                    VALUES ('B','MATCH','match',7,'{}','member',7,7)""",
+            )
+            val unrelated = f.data.cloudPulls.snapshot("B", CloudPullEntityKind.MATCH, "match")
+            var fenceCalls = 0
+            assertFails {
+                f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.MEMBER) {
+                    if (++fenceCalls == 2) error("Lease changed")
+                }
+            }
+            assertTrue(f.data.replicas.canReadMember(ctx, "match"))
+            assertEquals(previous, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+            f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.MEMBER, fence)
+            assertFalse(f.data.replicas.canReadMember(ctx, "match"))
+            assertNull(f.data.matches.get(MatchId("match")))
+            assertEquals(previous, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+            assertEquals(unrelated, f.data.cloudPulls.snapshot("B", CloudPullEntityKind.MATCH, "match"))
+            f.reopen()
+            val resumed = f.data.replicas.captureContext()
+            assertFalse(f.data.replicas.canReadMember(resumed, "match"))
+            assertEquals(previous, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+            f.data.replicas.applyAccess(resumed, "match", 3, ReplicaAccessLevel.FEED, fence)
+            assertNull(f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+        }
+    }
+
+    @Test
     fun eventOnlyRedactionPreservesLivingDirectoryAndUnrelatedMatchAfterReopenAndPurge() {
         for (active in listOf(false, true)) {
             Fixture(activate = active).use { f ->
@@ -164,6 +202,7 @@ class ReplicaLifecycleStoreTest {
                         .displayName,
                 )
                 assertEquals("", f.data.storedAssignments(MatchId("match"))[slot]!!.displayName)
+                assertEquals("", f.data.assignments(MatchId("match"))[slot]!!.displayName)
                 assertEquals(
                     "",
                     f.data.cloud
@@ -183,6 +222,7 @@ class ReplicaLifecycleStoreTest {
 
                 f.reopen()
                 ctx = f.data.replicas.captureContext()
+                assertEquals("", f.data.assignments(MatchId("match"))[slot]!!.displayName)
                 f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.ABSENT, fence)
                 assertEquals(0, f.count("match_event"))
                 assertEquals(

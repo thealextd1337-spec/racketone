@@ -225,8 +225,11 @@ class ReplicaLifecycleStore internal constructor(
             if (generation != null) queries.recordCloudSeen(matchId)
             queries.putAccess(ctx.accountKey, matchId, generation, access.name)
             clearTransfer(ctx.accountKey, matchId)
+            // Beim Member-Abgleich bleibt der eigene Materialisierungsbeleg erhalten; ready ist bereits zurückgesetzt.
             // Ein alter Member-Snapshot ist niemals eine zulässige Feedkarte. D1 liefert deren bereinigte Fassung neu.
-            queries.removePrivateSnapshot(ctx.accountKey, matchId)
+            if (old?.access != ReplicaAccessLevel.MEMBER || access != ReplicaAccessLevel.MEMBER) {
+                queries.removePrivateSnapshot(ctx.accountKey, matchId)
+            }
             queries.removeWork(ctx.accountKey, matchId)
             if (generation != null) queries.queueAccess(matchId, generation, access.name, old?.redactionEpoch ?: 0, ctx.accountKey)
             if (access != ReplicaAccessLevel.MEMBER) purgeIfUnreferenced(matchId)

@@ -7,10 +7,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 
 /** Materialisierte Zuordnung ohne Log-Zugriff. Die Engine behält ihre stabilen Platz-IDs. */
-fun LocalData.assignments(matchId: MatchId): Map<PlayerId, Player> =
-    storedAssignments(matchId).mapValues { (_, person) ->
-        players.get(person.id)?.toPlayer() ?: person
-    }
+fun LocalData.assignments(matchId: MatchId): Map<PlayerId, Player> = storedAssignments(matchId)
 
 /** Besetzung für neue Matches und „zuletzt gespielt“, einschließlich nachträglicher Zuweisung. */
 fun LocalData.resolvedLineup(record: MatchRecord): Lineup {

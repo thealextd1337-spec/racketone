@@ -301,7 +301,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 8: kontogebundener Replikatzugriff und atomare Redaktionen. */
+        /** Schema 9: kontogebundener Zugriff, atomare Redaktionen und dauerhafte Eventbelege. */
         const val SCHEMA_VERSION: Long = 9
     }
 }
