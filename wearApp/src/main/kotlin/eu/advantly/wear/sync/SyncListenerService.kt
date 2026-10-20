@@ -45,7 +45,7 @@ class SyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
     override fun onMessageReceived(event: MessageEvent) {
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
+        if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         if (event.path == LiveTelemetrySubscription.MESSAGE_PATH) {
             // Ohne laufende Exercise wird nie gesendet: Abo verwerfen, ohne IPC oder kalten Session-Aufbau
             if (!WorkoutStateHolder.state.value.telemetryActive) return
@@ -100,7 +100,7 @@ class SyncListenerService : WearableListenerService() {
         }
 
     override fun onDataChanged(events: DataEventBuffer) {
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) {
+        if (!AndroidInstallationGuard.privateTransportAllowed(this)) {
             events.release()
             return // Kein ACK, keine Queue-Löschung und kein alter lokaler Scope als Ausweichweg.
         }
@@ -135,7 +135,7 @@ class SyncListenerService : WearableListenerService() {
     }
 
     override fun onCapabilityChanged(info: CapabilityInfo) {
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
+        if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         DiagnosticLog.log("SYNC_SERVICE_CAPABILITY", "nodes" to info.nodes.size)
         val cold =
             runOnMain {

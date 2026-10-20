@@ -4,16 +4,57 @@ import android.content.Context
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDatabaseCorruptException
+import android.database.sqlite.SQLiteException
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import eu.advantly.data.db.AdvantlyDatabase
 import java.io.File
+import java.io.IOException
+
+/** Kein Ersatz für eine Installation: Bei Speicherfehlern existiert ausschließlich dieser Fehlerstatus. */
+sealed interface AndroidInstallationAvailability {
+    data class Ready(
+        val installation: AndroidInstallationState,
+    ) : AndroidInstallationAvailability
+
+    data object Unavailable : AndroidInstallationAvailability
+}
 
 /** Prozessweiter Android-Schutz, einschließlich Service-/Tile-Kaltstart. Unbekannte Originale bleiben ungeöffnet. */
 object AndroidInstallationGuard {
     private val states = mutableMapOf<String, AndroidInstallationState>()
+    private val unavailable = mutableSetOf<String>()
+
+    /** Fehlgeschlagene Prüfung bleibt bis zum expliziten Retry gesperrt; Dienste lösen keine Wiederholung aus. */
+    @Synchronized
+    fun check(context: Context): AndroidInstallationAvailability {
+        val key = context.applicationContext.getDatabasePath(DEFAULT_DATABASE_NAME).absolutePath
+        if (key in unavailable) return AndroidInstallationAvailability.Unavailable
+        return try {
+            AndroidInstallationAvailability.Ready(get(context))
+        } catch (_: IOException) {
+            unavailable += key
+            AndroidInstallationAvailability.Unavailable
+        } catch (_: SQLiteException) {
+            unavailable += key
+            AndroidInstallationAvailability.Unavailable
+        } catch (_: ErrnoException) {
+            unavailable += key
+            AndroidInstallationAvailability.Unavailable
+        }
+    }
+
+    /** Wiederholt ausschließlich dieselbe Dateiprüfung; keine Änderung an Generation oder Verifikations-Hold. */
+    @Synchronized
+    fun retry(context: Context): AndroidInstallationAvailability {
+        unavailable -= context.applicationContext.getDatabasePath(DEFAULT_DATABASE_NAME).absolutePath
+        return check(context)
+    }
+
+    fun privateTransportAllowed(context: Context): Boolean =
+        (check(context) as? AndroidInstallationAvailability.Ready)?.installation?.privateTransportAllowed == true
 
     @Synchronized
     fun get(context: Context): AndroidInstallationState {

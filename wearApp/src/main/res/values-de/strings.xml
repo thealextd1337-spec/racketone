@@ -281,4 +281,7 @@
     <string name="phone_status_red">Handy nicht erreichbar</string>
     <string name="phone_status_gray">Kein Handy gekoppelt</string>
     <string name="phone_status_development">Entwicklungsbuild</string>
+    <string name="installation_error_title">Lokale Daten nicht verfügbar</string>
+    <string name="installation_error_body">Die lokalen Daten konnten nicht geprüft werden. Zählen, Gerätesynchronisierung und Kontofunktionen sind pausiert. „Erneut versuchen“ wiederholt diese Prüfung. Vorhandene Matchdaten bleiben erhalten.</string>
+    <string name="installation_error_retry">Erneut versuchen</string>
 </resources>

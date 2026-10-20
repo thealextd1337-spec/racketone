@@ -36,6 +36,8 @@ import androidx.health.services.client.startExercise
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.data.AndroidInstallationAvailability
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.wear.MainActivity
 import eu.advantly.wear.R
 import eu.advantly.wear.diagnostics.DiagLine
@@ -91,6 +93,7 @@ class WorkoutService : Service() {
             WorkoutStateHolder.fail(WorkoutError.INTERNAL, e.message ?: e.javaClass.simpleName)
         }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
+    private var sessionReady = false
     private lateinit var exerciseClient: ExerciseClient
     private lateinit var store: SessionStore
 
@@ -131,6 +134,11 @@ class WorkoutService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) {
+            stopSelf()
+            return
+        }
+        sessionReady = true
         DiagnosticLog.log("SERVICE_CREATE")
         exerciseClient = HealthServices.getClient(this).exerciseClient
         store = SessionStore(this)
@@ -147,6 +155,10 @@ class WorkoutService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
+        if (!sessionReady || AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         DiagnosticLog.log(
             "SERVICE_START_COMMAND",
             "action" to (intent?.action ?: "null(system-restart)"),
@@ -814,6 +826,11 @@ class WorkoutService : Service() {
     }
 
     override fun onDestroy() {
+        if (!sessionReady) {
+            scope.cancel()
+            super.onDestroy()
+            return
+        }
         DiagnosticLog.log("SERVICE_DESTROY", "sessionActive" to store.sessionActive)
         runCatching { unregisterReceiver(screenReceiver) }
         if (callbackRequested) {

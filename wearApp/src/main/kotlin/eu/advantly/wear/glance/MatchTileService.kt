@@ -25,8 +25,7 @@ import eu.advantly.wear.R
 class MatchTileService : TileService() {
     override fun onTileRequest(requestParams: TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { result ->
-            val state = GlancePublisher.snapshot
-            val copy = GlanceText.render(state, AndroidGlanceStrings(this))
+            val (state, copy) = installationGlance(this)
             val device = requestParams.deviceConfiguration
             val metrics =
                 TileLayoutMetrics(device.screenWidthDp, device.screenHeightDp, device.screenShape == SCREEN_SHAPE_ROUND, device.fontScale)

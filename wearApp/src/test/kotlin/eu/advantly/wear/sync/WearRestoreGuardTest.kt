@@ -53,6 +53,8 @@ class WearRestoreGuardTest {
             .set(WearSessions, null)
         val field = AndroidInstallationGuard::class.java.getDeclaredField("states").apply { isAccessible = true }
         (field.get(AndroidInstallationGuard) as MutableMap<*, *>).clear()
+        val failures = AndroidInstallationGuard::class.java.getDeclaredField("unavailable").apply { isAccessible = true }
+        (failures.get(AndroidInstallationGuard) as MutableSet<*>).clear()
         WorkoutStateHolder.reset()
     }
 

@@ -5,6 +5,8 @@ import android.app.Application
 import android.app.NotificationManager
 import android.content.ComponentCallbacks2
 import android.os.Process
+import eu.advantly.data.AndroidInstallationAvailability
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.SessionListener
 import eu.advantly.wear.diagnostics.DiagLine
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -26,8 +28,17 @@ import eu.advantly.wear.workout.WorkoutStateHolder
  * gelöscht). Diagnose (nur Debug): Prozessstarts, unerwartete Neustarts während eines Workouts, frühere Prozessenden.
  */
 class AdvantlyWearApplication : Application() {
+    private var bootstrapped = false
+
     override fun onCreate() {
         super.onCreate()
+        bootstrap()
+    }
+
+    /** Nur eine erfolgreich geprüfte Installation darf prozessweite Session und Beobachter starten. */
+    fun bootstrap(): Boolean {
+        if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) return false
+        if (bootstrapped) return true
         WearPrefs(this).initializeOperationalCache {
             getSystemService(NotificationManager::class.java)?.cancelAll()
         }
@@ -70,6 +81,8 @@ class AdvantlyWearApplication : Application() {
                 if (match == null && WorkoutStateHolder.state.value.countOnly) WorkoutStateHolder.reset()
             },
         )
+        bootstrapped = true
+        return true
     }
 
     private fun logExitReasons(store: SessionStore) {

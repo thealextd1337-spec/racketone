@@ -10,6 +10,7 @@ import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
 import eu.advantly.android.auth.createPhoneAccount
 import eu.advantly.android.auth.googleCredential
+import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearCompanionDetector
 import eu.advantly.match.session.AndroidMatchSessions
@@ -25,7 +26,15 @@ class MainActivity : ComponentActivity() {
         // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val installation = AndroidInstallationGuard.get(applicationContext)
+        val availability = AndroidInstallationGuard.check(applicationContext)
+        if (availability !is AndroidInstallationAvailability.Ready) {
+            showInstallationError()
+            return
+        }
+        val afterInstallationRetry = intent.getBooleanExtra(INSTALLATION_RETRY_COMPLETE, false)
+        intent.removeExtra(INSTALLATION_RETRY_COMPLETE)
+        (application as? AdvantlyPhoneApplication)?.bootstrap()
+        val installation = availability.installation
         // ViewModelStore hält Auth über Rotation; keine Credentials in Bundle oder SavedState.
         val auth =
             if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_KEY.isBlank()) {
@@ -81,7 +90,7 @@ class MainActivity : ComponentActivity() {
                     },
             )
         }
-        if (!installation.privateTransportAllowed && savedInstanceState == null) {
+        if (!installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
             AlertDialog
                 .Builder(this)
                 .setTitle(R.string.recovery_notice_title)

@@ -3,4 +3,7 @@
     <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
     <string name="recovery_notice_body">Deine bisherigen Daten bleiben getrennt erhalten und wurden nicht wiederhergestellt. Kontoprüfung und Wiederherstellung sind noch nicht verfügbar. Gerätesync und Kontofunktionen bleiben pausiert. Neue Matches kannst du offline zählen.</string>
     <string name="recovery_continue_offline">Offline fortfahren</string>
+    <string name="installation_error_title">Lokale Daten nicht verfügbar</string>
+    <string name="installation_error_body">Die lokalen Daten konnten nicht geprüft werden. Zählen, Gerätesynchronisierung und Kontofunktionen sind pausiert. „Erneut versuchen“ wiederholt diese Prüfung. Vorhandene Matchdaten bleiben erhalten.</string>
+    <string name="installation_error_retry">Erneut versuchen</string>
 </resources>

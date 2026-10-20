@@ -5,4 +5,7 @@
     <string name="recovery_continue_offline">Continue offline</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
+    <string name="installation_error_title">Local data unavailable</string>
+    <string name="installation_error_body">Local data could not be checked. Counting, device sync and account features are paused. Try again to repeat this check. Existing match data is kept.</string>
+    <string name="installation_error_retry">Try again</string>
 </resources>

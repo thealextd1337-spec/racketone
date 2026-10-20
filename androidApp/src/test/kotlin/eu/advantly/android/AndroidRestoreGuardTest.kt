@@ -14,6 +14,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
+import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
 import eu.advantly.data.createAndroidDriver
@@ -179,6 +180,8 @@ class AndroidRestoreGuardTest {
         val files = original.parentFile!!.list()!!.sorted()
         clearGuardCache()
         assertThrows(SQLiteException::class.java) { AndroidInstallationGuard.get(app) }
+        assertEquals(AndroidInstallationAvailability.Unavailable, AndroidInstallationGuard.check(app))
+        repeat(2) { assertEquals(AndroidInstallationAvailability.Unavailable, AndroidInstallationGuard.retry(app)) }
         assertEquals(0, RejectDefaultCorruptionHandler.calls)
         assertEquals(originalHash, hash(original))
         assertEquals(markerHash, hash(marker))
@@ -237,6 +240,8 @@ class AndroidRestoreGuardTest {
     private fun clearGuardCache() {
         val field = AndroidInstallationGuard::class.java.getDeclaredField("states").apply { isAccessible = true }
         (field.get(AndroidInstallationGuard) as MutableMap<*, *>).clear()
+        val failures = AndroidInstallationGuard::class.java.getDeclaredField("unavailable").apply { isAccessible = true }
+        (failures.get(AndroidInstallationGuard) as MutableSet<*>).clear()
     }
 
     private fun oldMessage(): MessageEvent =

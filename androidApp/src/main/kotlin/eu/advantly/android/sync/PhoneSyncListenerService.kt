@@ -45,7 +45,7 @@ class PhoneSyncListenerService : WearableListenerService() {
     private val expireTelemetry = Runnable { LiveTelemetryStore.Phone.expire() }
 
     override fun onMessageReceived(event: MessageEvent) {
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) return
+        if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         if (event.path == LiveTelemetry.MESSAGE_PATH) {
             val payload = LiveTelemetryCodec.decode(event.data) ?: return
             onMainAndWait {
@@ -80,7 +80,7 @@ class PhoneSyncListenerService : WearableListenerService() {
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed) {
+        if (!AndroidInstallationGuard.privateTransportAllowed(this)) {
             events.release()
             return // Keine Zustellbestätigung und kein Löschen eines nicht gespeicherten Queue-Elements.
         }

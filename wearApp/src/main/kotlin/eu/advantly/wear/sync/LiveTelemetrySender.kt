@@ -105,7 +105,7 @@ class LiveTelemetrySender(
 
 private fun androidMessages(context: Context): TelemetryMessageClient =
     TelemetryMessageClient { nodeId, path, payload ->
-        if (AndroidInstallationGuard.get(context).privateTransportAllowed) {
+        if (AndroidInstallationGuard.privateTransportAllowed(context)) {
             Wearable
                 .getMessageClient(context.applicationContext)
                 .sendMessage(nodeId, path, payload)

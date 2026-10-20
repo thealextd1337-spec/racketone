@@ -37,6 +37,7 @@ import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
@@ -94,6 +95,7 @@ class WatchViewModel(
  * Vordergrund, 05 §2.2). Die Logik steckt im JVM-getesteten [WatchController].
  */
 class MainActivity : ComponentActivity() {
+    private var sessionReady = false
     private val glanceLaunch = mutableIntStateOf(0)
     private lateinit var glanceConsumption: GlanceIntentConsumption
     private val isAmbient = mutableStateOf(false)
@@ -145,10 +147,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-    private val ambientObserver = AmbientLifecycleObserver(this, ambientCallback)
+    private val ambientObserver by lazy { AmbientLifecycleObserver(this, ambientCallback) }
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (!sessionReady) return@registerForActivityResult
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
             permissions.value = Permissions.current(this)
             permissionRequestInFlight = false
@@ -157,12 +160,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val availability = AndroidInstallationGuard.check(this)
+        if (availability !is AndroidInstallationAvailability.Ready) {
+            showInstallationError()
+            return
+        }
+        val afterInstallationRetry = intent.getBooleanExtra(INSTALLATION_RETRY_COMPLETE, false)
+        intent.removeExtra(INSTALLATION_RETRY_COMPLETE)
+        (application as? AdvantlyWearApplication)?.bootstrap()
+        sessionReady = true
         // Ein restauriertes Task-Intent darf nie erneut einen Schnellstart auslösen.
         glanceConsumption = GlanceIntentConsumption(consumed = savedInstanceState != null)
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
         holder = WearSessions.get(this)
-        if (!AndroidInstallationGuard.get(this).privateTransportAllowed && savedInstanceState == null) {
+        if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
             AlertDialog
                 .Builder(this)
                 .setTitle(R.string.recovery_notice_title)
@@ -238,6 +250,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!sessionReady) return
         controller.effects = ::onEffect
         updatePowerSave()
         ContextCompat.registerReceiver(
@@ -257,6 +270,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!sessionReady) return
         UiVisibility.resumed = true
         controller.setInteractive(!isAmbient.value)
         consumeGlanceAction()
@@ -270,6 +284,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        if (!sessionReady) {
+            super.onPause()
+            return
+        }
         UiVisibility.resumed = false
         controller.setInteractive(false)
         DiagnosticLog.log("ACTIVITY_PAUSE")
@@ -278,6 +296,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (!sessionReady) return
         setIntent(intent)
         glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
@@ -304,6 +323,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (!sessionReady) {
+            super.onStop()
+            return
+        }
         runCatching { unregisterReceiver(powerSaveReceiver) }
         controller.effects = null
         super.onStop()
