@@ -14,6 +14,7 @@ class CloudSyncRepository internal constructor(
     internal val database: AdvantlyDatabase,
     private val events: EventStore,
     private val sanitizeDownloaded: (StoredEvent) -> StoredEvent,
+    internal val redactedAssignmentSlots: (String) -> Set<String>,
 ) {
     private val queries = database.cloudSyncQueries
 

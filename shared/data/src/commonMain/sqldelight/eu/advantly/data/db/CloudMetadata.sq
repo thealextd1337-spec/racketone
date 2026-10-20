@@ -186,12 +186,13 @@ genesisForMatch:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
 FROM match_event WHERE match_id = ? AND (type = 'MatchCreated' OR type = '') ORDER BY lamport, device_id, id;
 
--- Nur vor diesem Player-Download saubere, eindeutig diesem Konto zugeordnete Materialisierungen.
+-- Nur zuvor saubere, eindeutig diesem Konto zugeordnete Materialisierungen ohne eigenen Teilnehmer-Upload.
 playerDownloadParticipantPage:
 SELECT m.entity_id, m.revision, m.writer_profile_id, s.materialized_version
 FROM cloud_metadata m JOIN cloud_pull_snapshot s
 ON s.kind = 'MATCH' AND s.entity_id = m.entity_id AND s.profile_id = :profileId
 WHERE m.kind = 'PARTICIPANTS' AND m.origin = 'CLOUD' AND m.source_device_id IS NULL
+AND m.writer_profile_id IS NULL
 AND m.revision = m.uploaded_revision AND s.materialized_version IS NOT NULL
 AND s.access = 'member' AND s.removal_pending = 0
 AND (:afterId IS NULL OR m.entity_id > :afterId)

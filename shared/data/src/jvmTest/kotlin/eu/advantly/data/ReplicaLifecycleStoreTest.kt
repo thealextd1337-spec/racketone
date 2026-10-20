@@ -133,6 +133,237 @@ class ReplicaLifecycleStoreTest {
         ).toStoredEvent()
 
     @Test
+    fun eventOnlyRedactionPreservesLivingDirectoryAndUnrelatedMatchAfterReopenAndPurge() {
+        for (active in listOf(false, true)) {
+            Fixture(activate = active).use { f ->
+                var ctx = f.member("A")
+                val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+                f.cloudDirectoryPlayer()
+                val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+                val transfer = RedactionTransfer("event-only", "match", 1, 1, 3)
+                val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+                f.data.replicas.stageRedaction(
+                    ctx,
+                    transfer.id,
+                    RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                    fence,
+                )
+                var invalidations = 0
+                val stopObserving = f.data.observeDirectoryChanges { invalidations++ }
+                f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+                assertTrue(invalidations > 0)
+                stopObserving()
+                assertFalse(f.data.replicas.isRedacted("deleted"))
+                assertEquals(0, f.count("replica_redacted_player"))
+                f.data.replicas.markReady(ctx, "match", 1, 1, fence)
+                f.data.rebuildAssignments(MatchId("match"))
+                assertEquals(
+                    "Sensitive name",
+                    f.data.players
+                        .get(PlayerId("deleted"))!!
+                        .displayName,
+                )
+                assertEquals("", f.data.storedAssignments(MatchId("match"))[slot]!!.displayName)
+                assertEquals(
+                    "",
+                    f.data.cloud
+                        .uploadParticipants("match", "A")!!
+                        .participants
+                        .single { it.slotId == slot.value }
+                        .displayName,
+                )
+                assertEquals(
+                    redacted.payload,
+                    f.data.replicas
+                        .sanitizeLegacyEvent(original)
+                        .payload,
+                )
+                val unrelated = original.copy(id = "other-assignment", matchId = "other-match")
+                assertEquals(unrelated, f.data.replicas.sanitizeLegacyEvent(unrelated))
+
+                f.reopen()
+                ctx = f.data.replicas.captureContext()
+                f.data.replicas.applyAccess(ctx, "match", 2, ReplicaAccessLevel.ABSENT, fence)
+                assertEquals(0, f.count("match_event"))
+                assertEquals(
+                    redacted.payload,
+                    f.data.replicas
+                        .sanitizeLegacyEvent(original)
+                        .payload,
+                )
+                assertFails { f.data.replicas.sanitizeLegacyEvent(original.copy(wallClockMs = original.wallClockMs + 1)) }
+                assertFails { f.data.replicas.sanitizeLegacyEvent(original.copy(matchId = "other-match")) }
+                f.data.replicas.applyAccess(ctx, "match", 3, ReplicaAccessLevel.MEMBER, fence)
+                f.data.cloud.storeDownloaded(listOf(original), fence)
+                assertEquals(
+                    redacted.payload,
+                    f.db.cloudUploadQueries
+                        .eventById(original.id)
+                        .executeAsOne()
+                        .payload,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun eventOnlyLegacyEmptyTypeAcceptsCanonicalCloudDuplicateWithoutWeakeningTypeChecks() {
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+            f.sql("UPDATE match_event SET type='' WHERE id='assignment'")
+            val redacted = original.copy(type = "", payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+            val transfer = RedactionTransfer("event-empty-type", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+            f.data.cloud.storeDownloaded(listOf(original), fence)
+            assertEquals(
+                redacted.payload,
+                f.db.cloudUploadQueries
+                    .eventById(original.id)
+                    .executeAsOne()
+                    .payload,
+            )
+            assertFails { f.data.cloud.storeDownloaded(listOf(original.copy(type = "PointWon")), fence) }
+        }
+    }
+
+    @Test
+    fun eventOnlyRedactionFollowsWinningAssignmentWithoutRetiringItsPlayer() {
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+            f.cloudDirectoryPlayer()
+            val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+            val transfer = RedactionTransfer("event-winner", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, transfer.id, fence)
+            f.data.replicas.markReady(ctx, "match", 1, 1, fence)
+            val before = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
+            val invalid = event("invalid-assignment", 4, PlayerAssigned(slot, Player(PlayerId("deleted"), "Other"), PlayerId("outsider")))
+            f.data.cloud.storeDownloaded(listOf(invalid), fence)
+            assertEquals("", f.data.storedAssignments(MatchId("match"))[slot]!!.displayName)
+            assertEquals(before, f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match"))
+            val next = event("new-assignment", 5, PlayerAssigned(slot, Player(PlayerId("deleted"), "Other"), owner))
+            f.data.cloud.storeDownloaded(listOf(next), fence)
+            assertEquals("Sensitive name", f.data.storedAssignments(MatchId("match"))[slot]!!.displayName)
+            val after = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
+            assertTrue(after.selected.revision > before.selected.revision)
+            assertEquals(before.uploadedRevision, after.uploadedRevision)
+            assertEquals(
+                redacted.payload,
+                f.data.replicas
+                    .sanitizeLegacyEvent(original)
+                    .payload,
+            )
+        }
+    }
+
+    @Test
+    fun eventOnlyRedactionRejectsChangedPayloadAndEnvelopeAtomically() {
+        val changes: List<(StoredEvent) -> StoredEvent> =
+            listOf(
+                { it.copy(lamport = it.lamport + 1) },
+                { it.copy(payload = it.payload.replace("\"deleted\"", "\"other\"")) },
+                { it.copy(payload = it.payload.replace("\"owner\"", "\"outsider\"")) },
+            )
+        for ((index, change) in changes.withIndex()) {
+            Fixture().use { f ->
+                val ctx = f.member("A")
+                val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+                val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+                val transfer = RedactionTransfer("invalid-$index", "match", 1, 1, 3)
+                val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+                f.data.replicas.stageRedaction(
+                    ctx,
+                    transfer.id,
+                    RedactionPage(
+                        0,
+                        from,
+                        RedactionCursor(null, 2),
+                        emptyList(),
+                        listOf(ReplicaRedactionEvent(change(redacted), 2)),
+                        true,
+                        true,
+                    ),
+                    fence,
+                )
+                assertFails { f.data.replicas.completeRedaction(ctx, transfer.id, fence) }
+                assertEquals(original, f.data.replicas.sanitizeLegacyEvent(original))
+                assertEquals(
+                    original.payload,
+                    f.db.cloudUploadQueries
+                        .eventById(original.id)
+                        .executeAsOne()
+                        .payload,
+                )
+                assertEquals(0, f.count("replica_redacted_event"))
+                assertEquals(
+                    0,
+                    f.data.replicas
+                        .access(ctx, "match")!!
+                        .redactionEpoch,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun eventOnlyRedactionFinalFenceRollsBackPayloadAndDurableAuthority() {
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            val original = f.cloudMatch(assignment = true).single { it.id == "assignment" }
+            val redacted = original.copy(payload = original.payload.replace("Sensitive name", "Gelöschter Spieler"))
+            val transfer = RedactionTransfer("event-only-rollback", "match", 1, 1, 3)
+            val from = f.data.replicas.beginRedaction(ctx, transfer, fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                transfer.id,
+                RedactionPage(0, from, RedactionCursor(null, 2), emptyList(), listOf(ReplicaRedactionEvent(redacted, 2)), true, true),
+                fence,
+            )
+            var sawCompleted = false
+            assertFails {
+                f.data.replicas.completeRedaction(ctx, transfer.id) {
+                    if (f.data.replicas
+                            .redactionProgress(ctx, "match")!!
+                            .completed
+                    ) {
+                        sawCompleted = true
+                        error("Finaler Autoritätsverlust")
+                    }
+                }
+            }
+            assertTrue(sawCompleted)
+            assertEquals(
+                original.payload,
+                f.db.cloudUploadQueries
+                    .eventById(original.id)
+                    .executeAsOne()
+                    .payload,
+            )
+            assertEquals(original, f.data.replicas.sanitizeLegacyEvent(original))
+            assertFalse(
+                f.data.replicas
+                    .redactionProgress(ctx, "match")!!
+                    .completed,
+            )
+        }
+    }
+
+    @Test
     fun persistedProgressResumesIndependentCursorsAndExportsOnlyCompletedPages() {
         Fixture().use { f ->
             var ctx = f.member("A")
@@ -1316,7 +1547,7 @@ class ReplicaLifecycleStoreTest {
         val file = File.createTempFile("review-parity", ".db")
         File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
         JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { migrated ->
-            AdvantlyDatabase.Schema.migrate(migrated, 1, 8).value
+            AdvantlyDatabase.Schema.migrate(migrated, 1, LocalData.SCHEMA_VERSION).value
             JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { fresh ->
                 AdvantlyDatabase.Schema.create(fresh)
                 assertEquals(schema(migrated), schema(fresh))
@@ -1498,7 +1729,7 @@ class ReplicaLifecycleStoreTest {
                 SqlDelightEventStore(driver).append(assignment)
                 driver.execute(null, "UPDATE match_event SET confirmed=1, cloud_state=1", 0)
                 val stored = AdvantlyDatabase(driver).cloudUploadQueries.eventById("legacy-assignment").executeAsOne()
-                AdvantlyDatabase.Schema.migrate(driver, 7, 8).value
+                AdvantlyDatabase.Schema.migrate(driver, 7, LocalData.SCHEMA_VERSION).value
                 stored
             }
         JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->

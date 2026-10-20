@@ -1,5 +1,6 @@
 package eu.advantly.core.scoring
 
+import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
@@ -31,16 +32,23 @@ object PlayerAssignments {
         legacyPlaceholders: Set<PlayerId> = emptySet(),
     ): Projection = fold(events, legacyPlaceholders).names
 
+    /** Herkunft der aktuell wirksamen Zuweisung; dieselben Gültigkeitsregeln wie für IDs und Namen. */
+    fun assignmentEventIds(
+        events: Collection<ScoreEvent>,
+        legacyPlaceholders: Set<PlayerId> = emptySet(),
+    ): Map<PlayerId, EventId> = fold(events, legacyPlaceholders).sources
+
     private data class Assignments(
         val identities: IdentityProjection,
         val names: Projection,
+        val sources: Map<PlayerId, EventId>,
     )
 
     private fun fold(
         events: Collection<ScoreEvent>,
         legacyPlaceholders: Set<PlayerId>,
     ): Assignments {
-        val empty = Assignments(IdentityProjection(emptySet(), emptyMap()), Projection(emptySet(), emptyMap()))
+        val empty = Assignments(IdentityProjection(emptySet(), emptyMap()), Projection(emptySet(), emptyMap()), emptyMap())
         val analysis = EventLog.analyze(events)
         val genesis = analysis.ordered.firstOrNull { it.payload is MatchCreated } ?: return empty
         if (genesis.id in analysis.rejected) return empty
@@ -62,6 +70,7 @@ object PlayerAssignments {
         val occupied = slots.filterNot { it in eligible }.toMutableSet()
         val result = linkedMapOf<PlayerId, Player>()
         val identities = linkedMapOf<PlayerId, PlayerId>()
+        val sources = linkedMapOf<PlayerId, EventId>()
         for (event in analysis.ordered) {
             val assignment = event.payload as? PlayerAssigned ?: continue
             if (event.matchId != genesis.matchId || event.id in analysis.rejected || EventOrdering.compare(event, genesis) <= 0) continue
@@ -73,6 +82,7 @@ object PlayerAssignments {
             if (personId == null) {
                 identities.remove(slot)?.let { occupied.remove(it) }
                 result.remove(slot)
+                sources.remove(slot)
                 continue
             }
             if (player != null && (player.isPlaceholder || player.displayName.isBlank())) continue
@@ -83,9 +93,10 @@ object PlayerAssignments {
                 continue
             }
             identities.put(slot, personId)?.let { occupied.remove(it) }
+            sources[slot] = event.id
             if (player == null) result.remove(slot) else result[slot] = player
             occupied.add(personId)
         }
-        return Assignments(IdentityProjection(eligible, identities), Projection(eligible, result))
+        return Assignments(IdentityProjection(eligible, identities), Projection(eligible, result), sources)
     }
 }

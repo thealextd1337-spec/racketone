@@ -53,7 +53,7 @@ class LocalData(
             redacted = { replicas.isRedacted(it) },
         )
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
-    val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent)
+    val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent, ::redactedAssignmentSlots)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
     val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver)
     val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
@@ -68,6 +68,7 @@ class LocalData(
             listOf(
                 database.matchHeaderQueries.observeHeaders(),
                 database.replicaLifecycleQueries.observeAccess(),
+                database.replicaLifecycleQueries.observeEventRedactions(),
                 database.matchAssignmentQueries.forMatch(""),
                 database.playerQueries.selectAll(),
             )
@@ -127,10 +128,10 @@ class LocalData(
             val identities = identityEvents(id)
             val projection = PlayerAssignments.projectIds(identities, players.placeholderIds())
             val legacy = PlayerAssignments.project(identities, players.placeholderIds())
+            val sources = PlayerAssignments.assignmentEventIds(identities, players.placeholderIds())
+            val previousRows = database.matchAssignmentQueries.identitiesForMatch(id.value).executeAsList()
             val previous =
-                database.matchAssignmentQueries
-                    .identitiesForMatch(id.value)
-                    .executeAsList()
+                previousRows
                     .associate { row ->
                         val playerId = row.player_id ?: row.player_json?.let { DataJson.decodeFromString(Player.serializer(), it).id.value }
                         row.slot_id to (playerId to row.player_json)
@@ -147,16 +148,29 @@ class LocalData(
                             }?.let { DataJson.encodeToString(Player.serializer(), it) }
                     slot.value to (playerId?.value to fallback)
                 }
-            if (previous == next) return@transaction
-            database.matchAssignmentQueries.clearMatch(id.value)
-            next.forEach { (slot, person) ->
-                database.matchAssignmentQueries.putIdentity(id.value, slot, person.first, person.second)
+            if (previous != next) {
+                database.matchAssignmentQueries.clearMatch(id.value)
+                next.forEach { (slot, person) ->
+                    database.matchAssignmentQueries.putIdentity(id.value, slot, person.first, person.second)
+                }
+            }
+            next.keys.forEach { slot ->
+                val source = sources[PlayerId(slot)]?.value
+                val previousSource = if (previous == next) previousRows.firstOrNull { it.slot_id == slot }?.source_event_id else null
+                if (source != previousSource) database.matchAssignmentQueries.recordSource(source, id.value, slot)
             }
         }
     }
 
+    private fun redactedAssignmentSlots(matchId: String): Set<String> =
+        database.matchAssignmentQueries
+            .redactedSlots(matchId)
+            .executeAsList()
+            .toSet()
+
     private fun storedProjection(id: MatchId): Map<PlayerId, Player?> {
         if (!replicas.readable(id.value)) return emptyMap()
+        val redactedSlots = redactedAssignmentSlots(id.value)
         return database.matchAssignmentQueries.identitiesForMatch(id.value).executeAsList().associate { row ->
             val legacy =
                 row.player_json
@@ -164,7 +178,10 @@ class LocalData(
                     ?.takeIf { row.player_id == null || row.player_id == it.id.value }
             val playerId = row.player_id?.let(::PlayerId) ?: legacy?.id
             val player = playerId?.let { players.get(it)?.toPlayer() ?: legacy }
-            PlayerId(row.slot_id) to player?.let { if (replicas.isRedacted(it.id.value)) it.copy(displayName = "") else it }
+            PlayerId(row.slot_id) to
+                player?.let {
+                    if (row.slot_id in redactedSlots || replicas.isRedacted(it.id.value)) it.copy(displayName = "") else it
+                }
         }
     }
 
@@ -285,6 +302,6 @@ class LocalData(
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
         /** Schema 8: kontogebundener Replikatzugriff und atomare Redaktionen. */
-        const val SCHEMA_VERSION: Long = 8
+        const val SCHEMA_VERSION: Long = 9
     }
 }

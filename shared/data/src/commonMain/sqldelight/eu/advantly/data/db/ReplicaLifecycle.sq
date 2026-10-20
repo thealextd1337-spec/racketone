@@ -24,6 +24,11 @@ CREATE TABLE replica_redacted_profile (
     PRIMARY KEY(player_id, profile_id)
 );
 CREATE INDEX replica_redacted_profile_lookup ON replica_redacted_profile(profile_id);
+-- Unveränderliche Eventbindung mit bereinigtem Payload; überlebt den Purge des Rohlogs.
+CREATE TABLE replica_redacted_event (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    event_json TEXT NOT NULL
+);
 CREATE TABLE replica_transfer (
     id TEXT NOT NULL PRIMARY KEY,
     account_key TEXT NOT NULL, scope_id TEXT NOT NULL,
@@ -162,6 +167,12 @@ WHERE account_key = ? AND peer_id = ? AND match_id = ? AND generation = ? AND re
 
 redactEventPayload:
 UPDATE match_event SET payload = ? WHERE id = ?;
+redactedEvent:
+SELECT event_json FROM replica_redacted_event WHERE event_id = ?;
+rememberRedactedEvent:
+INSERT INTO replica_redacted_event(event_id, event_json) VALUES (?, ?);
+observeEventRedactions:
+SELECT event_id FROM replica_redacted_event LIMIT 1;
 identityPage:
 SELECT * FROM match_event WHERE type IN ('PlayerAssigned','') AND (:afterId IS NULL OR id > :afterId) ORDER BY id LIMIT 200;
 redactedPlayerSnapshotPage:

@@ -70,13 +70,13 @@ class ReplicaLifecycleMigrationTest {
             fun snapshot() =
                 columns.mapValues { (table, names) -> query("SELECT ${names.joinToString(",")} FROM $table ORDER BY rowid", names.size) }
             val before = snapshot()
-            AdvantlyDatabase.Schema.migrate(driver, 7, 8).value
+            AdvantlyDatabase.Schema.migrate(driver, 7, LocalData.SCHEMA_VERSION).value
             assertEquals(before, snapshot())
             driver.close()
             driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
             assertEquals(before, snapshot())
             val data = LocalData(driver)
-            assertEquals(8, AdvantlyDatabase.Schema.version)
+            assertEquals(LocalData.SCHEMA_VERSION, AdvantlyDatabase.Schema.version)
             assertEquals(
                 setOf(
                     "snapshot-match",

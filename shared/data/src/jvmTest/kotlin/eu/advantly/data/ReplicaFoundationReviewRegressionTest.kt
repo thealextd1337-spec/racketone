@@ -547,6 +547,7 @@ class ReplicaFoundationReviewRegressionTest {
     private fun Fixture.pullMatch(
         id: String,
         snapshotProfile: String = "A",
+        writable: Set<CloudMetadataKind> = emptySet(),
     ): MatchRecord {
         val record =
             MatchRecord(
@@ -560,7 +561,7 @@ class ReplicaFoundationReviewRegressionTest {
                 ScoreSummary.EMPTY,
                 null,
             )
-        data.cloud.storeDownloadedMatch(record, snapshotProfile)
+        data.cloud.storeDownloadedMatch(record, snapshotProfile, writable)
         db.cloudPullQueries.insertSnapshot(snapshotProfile, "MATCH", id, 1, "{}", "member", 1, 0, 0, 0)
         db.cloudPullQueries.materialized(1, snapshotProfile, "MATCH", id)
         return record
@@ -779,6 +780,160 @@ class ReplicaFoundationReviewRegressionTest {
             for (id in (0..200).map { "match-${it.toString().padStart(3, '0')}" } + "assignment-only") {
                 val state = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, id)!!
                 assertEquals(state.selected.revision, state.uploadedRevision, id)
+            }
+        }
+    }
+
+    private fun playerPage(
+        version: Long,
+        owned: Boolean,
+    ) = CloudPullMetadataPage(
+        emptyList(),
+        listOf(CloudPullPlayer(guest.value, version, "{}", owned, LocalPlayer(guest, "Cloud name", PlayerKind.GUEST, 1, null))),
+        emptyList(),
+        version,
+        true,
+        1,
+    )
+
+    @Test
+    fun pendingPlayerGrantCleansOnlyReadonlyTriggerRevisionBeforeActivation() = assertPendingPlayerAuthorityChange(false, true)
+
+    @Test
+    fun pendingPlayerGrantCleansOnlyReadonlyTriggerRevisionAfterActivation() = assertPendingPlayerAuthorityChange(true, true)
+
+    @Test
+    fun pendingPlayerRevocationCleansOnlyReadonlyTriggerRevisionBeforeActivation() = assertPendingPlayerAuthorityChange(false, false)
+
+    @Test
+    fun pendingPlayerRevocationCleansOnlyReadonlyTriggerRevisionAfterActivation() = assertPendingPlayerAuthorityChange(true, false)
+
+    private fun assertPendingPlayerAuthorityChange(
+        activated: Boolean,
+        grant: Boolean,
+    ) {
+        Fixture(activated).use { f ->
+            val run =
+                f.data.cloudPulls
+                    .beginRun("A", fence)
+                    .runSerial
+            assertTrue(f.data.cloudPulls.commitMetadata("A", run, 0, playerPage(1, true), fence))
+            f.pullMatch("previously-dirty")
+            f.data.players.rename(guest, "Own pending edit")
+            if (grant) assertTrue(f.data.cloudPulls.commitMetadata("A", run, 1, playerPage(2, false), fence))
+            val cursor = if (grant) 2L else 1L
+            val playerBefore = f.data.cloud.metadataState(CloudMetadataKind.PLAYER, guest.value)!!
+            assertTrue(playerBefore.selected.revision > playerBefore.uploadedRevision)
+            assertEquals(if (grant) null else "A", playerBefore.writerProfileId)
+            val record = f.pullMatch("new-readonly")
+            val cleanBefore = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "new-readonly")!!
+            val dirtyBefore = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "previously-dirty")!!
+            assertEquals(cleanBefore.selected.revision, cleanBefore.uploadedRevision)
+            assertTrue(dirtyBefore.selected.revision > dirtyBefore.uploadedRevision)
+            assertTrue(f.data.cloudPulls.commitMetadata("A", run, cursor, playerPage(cursor + 1, grant), fence))
+            val playerAfter = f.data.cloud.metadataState(CloudMetadataKind.PLAYER, guest.value)!!
+            assertEquals(playerBefore.selected, playerAfter.selected)
+            assertEquals(playerBefore.uploadedRevision, playerAfter.uploadedRevision)
+            assertEquals(if (grant) "A" else null, playerAfter.writerProfileId)
+            assertEquals(
+                "Own pending edit",
+                f.db.playerQueries
+                    .selectById(guest.value)
+                    .executeAsOne()
+                    .display_name,
+            )
+            assertEquals(
+                1,
+                f.data.cloudPulls
+                    .snapshot("A", CloudPullEntityKind.PLAYER, guest.value)!!
+                    .materializedVersion,
+            )
+            val dirtyAfter = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "previously-dirty")!!
+            assertEquals(dirtyBefore.uploadedRevision, dirtyAfter.uploadedRevision)
+            val cleanAfter = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "new-readonly")!!
+            assertEquals(cleanBefore.selected.revision + 1, cleanAfter.selected.revision)
+            assertEquals(cleanAfter.selected.revision, cleanAfter.uploadedRevision)
+            assertTrue(f.data.cloud.materializePullMatch(record.copy(updatedAtMs = 2), "A", 1))
+        }
+    }
+
+    @Test
+    fun writableCloudParticipantReferenceRemainsPendingBeforeActivation() = assertWritableParticipantsRemainPending(false)
+
+    @Test
+    fun writableCloudParticipantReferenceRemainsPendingAfterActivation() = assertWritableParticipantsRemainPending(true)
+
+    private fun assertWritableParticipantsRemainPending(activated: Boolean) {
+        Fixture(activated).use { f ->
+            val run =
+                f.data.cloudPulls
+                    .beginRun("A", fence)
+                    .runSerial
+            assertTrue(f.data.cloudPulls.commitMetadata("A", run, 0, playerPage(1, false), fence))
+            f.pullMatch("writable", writable = setOf(CloudMetadataKind.PARTICIPANTS))
+            val before = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "writable")!!
+            assertEquals("A", before.writerProfileId)
+            assertEquals(before.selected.revision, before.uploadedRevision)
+            assertNull(
+                f.data.cloud
+                    .uploadParticipants("writable", "A")!!
+                    .participants
+                    .last()
+                    .playerId,
+            )
+            assertTrue(f.data.cloudPulls.commitMetadata("A", run, 1, playerPage(2, true), fence))
+            assertEquals(
+                guest.value,
+                f.data.cloud
+                    .uploadParticipants("writable", "A")!!
+                    .participants
+                    .last()
+                    .playerId,
+            )
+            val after = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "writable")!!
+            assertEquals(before.selected.revision + 1, after.selected.revision)
+            assertEquals(before.uploadedRevision, after.uploadedRevision)
+            assertTrue(after.selected.revision > after.uploadedRevision)
+        }
+    }
+
+    @Test
+    fun authorityOnlyDownloadFinalFenceRollsBackWriterAndParticipantAck() {
+        for (activated in listOf(false, true)) {
+            Fixture(activated).use { f ->
+                val run =
+                    f.data.cloudPulls
+                        .beginRun("A", fence)
+                        .runSerial
+                assertTrue(f.data.cloudPulls.commitMetadata("A", run, 0, playerPage(1, true), fence))
+                f.data.players.rename(guest, "Own pending edit")
+                f.pullMatch("new-readonly")
+                val playerBefore = f.data.cloud.metadataState(CloudMetadataKind.PLAYER, guest.value)
+                val participantsBefore = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "new-readonly")
+                val snapshotBefore = f.data.cloudPulls.snapshot("A", CloudPullEntityKind.PLAYER, guest.value)
+                var observedParticipants: CloudMetadataState? = null
+                assertFails {
+                    f.data.cloudPulls.commitMetadata("A", run, 1, playerPage(2, false)) {
+                        if (f.data.cloud
+                                .metadataState(CloudMetadataKind.PLAYER, guest.value)!!
+                                .writerProfileId == null
+                        ) {
+                            observedParticipants = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "new-readonly")
+                            error("Context expired after authority change")
+                        }
+                    }
+                }
+                val observed = assertNotNull(observedParticipants)
+                assertEquals(observed.selected.revision, observed.uploadedRevision)
+                assertEquals(playerBefore, f.data.cloud.metadataState(CloudMetadataKind.PLAYER, guest.value))
+                assertEquals(participantsBefore, f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "new-readonly"))
+                assertEquals(snapshotBefore, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.PLAYER, guest.value))
+                assertEquals(
+                    1,
+                    f.data.cloudPulls
+                        .progress("A")
+                        .cursor,
+                )
             }
         }
     }

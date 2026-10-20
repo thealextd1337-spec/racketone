@@ -100,6 +100,7 @@ internal fun CloudSyncRepository.uploadParticipants(
 ): CloudParticipants? {
     val header = database.matchHeaderQueries.selectById(id).executeAsOneOrNull() ?: return null
     val lineup = DataJson.decodeFromString(Lineup.serializer(), header.lineup_json)
+    val redactedSlots = redactedAssignmentSlots(id)
     val assigned =
         database.matchAssignmentQueries
             .identitiesForMatch(id)
@@ -124,7 +125,9 @@ internal fun CloudSyncRepository.uploadParticipants(
                         player != null && player.kind != PlayerKind.PLACEHOLDER.name &&
                             database.cloudMetadataQueries.playerReferenceAllowed(it, profileId).executeAsOne() > 0
                     }
-                val redacted = playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
+                val redacted =
+                    slot.value in redactedSlots ||
+                        playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
                 val name = if (redacted) "" else player?.display_name ?: legacy?.displayName.orEmpty()
                 CloudParticipant(slot.value, team, index + 1, name, reference)
             }
@@ -287,12 +290,13 @@ internal fun CloudSyncRepository.materializePullPlayer(
             afterId = page.last().entity_id
         }
         val applied = applyPullPlayer(downloaded, profileId, previousMaterializedVersion)
-        if (applied) {
+        if (applied != PullPlayerApplication.UNCHANGED) {
             for (before in participants) {
                 val after = metadataState(CloudMetadataKind.PARTICIPANTS, before.entity_id) ?: continue
                 if (after.origin == CloudMetadataOrigin.CLOUD && after.sourceDeviceId == null &&
                     after.writerProfileId == before.writer_profile_id && after.uploadedRevision == before.revision &&
-                    after.selected.revision > before.revision
+                    after.selected.revision > before.revision &&
+                    (applied == PullPlayerApplication.MATERIALIZED || after.selected.revision - before.revision == 1L)
                 ) {
                     database.cloudPullQueries.cleanDownloadedParticipants(
                         after.selected.revision,
@@ -305,21 +309,24 @@ internal fun CloudSyncRepository.materializePullPlayer(
                 }
             }
         }
-        applied
+        applied == PullPlayerApplication.MATERIALIZED
     }
+
+/** Ein reiner Rechtewechsel bestätigt weder den ausstehenden Player-Payload noch dessen Materialisierungsversion. */
+private enum class PullPlayerApplication { UNCHANGED, AUTHORITY_ONLY, MATERIALIZED }
 
 private fun CloudSyncRepository.applyPullPlayer(
     downloaded: CloudPullPlayer,
     profileId: String,
     previousMaterializedVersion: Long?,
-): Boolean {
+): PullPlayerApplication {
     val player = downloaded.player
     require(player.kind != PlayerKind.SELF && downloaded.id == player.id.value)
     if (database.playerQueries.selectById(downloaded.id).executeAsOneOrNull() == null) {
         storeDownloadedPlayer(player, profileId, downloaded.owned)
-        return true
+        return PullPlayerApplication.MATERIALIZED
     }
-    val state = metadataState(CloudMetadataKind.PLAYER, downloaded.id) ?: return false
+    val state = metadataState(CloudMetadataKind.PLAYER, downloaded.id) ?: return PullPlayerApplication.UNCHANGED
     if (previousMaterializedVersion == null || state.origin != CloudMetadataOrigin.CLOUD ||
         database.cloudPullQueries.materializedOwner("PLAYER", downloaded.id).executeAsOneOrNull() != profileId ||
         database.playerQueries
@@ -327,13 +334,16 @@ private fun CloudSyncRepository.applyPullPlayer(
             .executeAsOne()
             .kind == PlayerKind.SELF.name
     ) {
-        return false
+        return PullPlayerApplication.UNCHANGED
     }
     // Rechte folgen dem geprüften Serverstand auch dann, wenn ein lokaler Namenskonflikt offen bleibt.
-    database.cloudPullQueries.updatePullPlayerWriter(profileId.takeIf { downloaded.owned }, downloaded.id)
-    if (state.selected.revision != state.uploadedRevision) return false
+    val writer = profileId.takeIf { downloaded.owned }
+    database.cloudPullQueries.updatePullPlayerWriter(writer, downloaded.id)
+    if (state.selected.revision != state.uploadedRevision) {
+        return if (state.writerProfileId != writer) PullPlayerApplication.AUTHORITY_ONLY else PullPlayerApplication.UNCHANGED
+    }
     database.playerQueries.rename(player.displayName, downloaded.id)
     database.playerQueries.updateKind(player.kind.name, downloaded.id)
     database.cloudMetadataQueries.recordDownload(profileId.takeIf { downloaded.owned }, "PLAYER", downloaded.id)
-    return true
+    return PullPlayerApplication.MATERIALIZED
 }

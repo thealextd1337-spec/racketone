@@ -1,5 +1,6 @@
 package eu.advantly.data
 
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.Player
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.data.db.AdvantlyDatabase
@@ -417,6 +418,9 @@ class ReplicaLifecycleStore internal constructor(
             pages { page -> page.events.forEach { applyRedactedEvent(it.event) } }
             // Globale Sperrmenge wirkt auch auf andere Konten und bereits bestätigte Altlogs.
             scrubStoredNames(ctx, fence)
+            data.settings.put("replica.redacting", "true")
+            data.rebuildAssignments(MatchId(t.match_id))
+            data.settings.remove("replica.redacting")
             queries.setEpoch(ctx.accountKey, t.match_id, t.epoch)
             queries.finishTransfer(t.id)
             queries.queueRedaction(t.epoch, ctx.accountKey, t.match_id)
@@ -430,20 +434,49 @@ class ReplicaLifecycleStore internal constructor(
         check(
             event.matchId == row.match_id && event.deviceId == row.device_id && event.deviceSeq == row.device_seq &&
                 event.lamport == row.lamport && event.wallClockMs == row.wall_clock_ms && event.parentId == row.parent_id &&
-                event.type == row.type,
+                event.type in setOf("", "PlayerAssigned") && row.type in setOf("", "PlayerAssigned"),
         )
         val original = DataJson.parseToJsonElement(row.payload).jsonObject
         val replacement = DataJson.parseToJsonElement(event.payload).jsonObject
         check(original["type"]?.jsonPrimitive?.content == "PlayerAssigned")
         val person = original["player"] as? JsonObject ?: error("Kein Legacy-Spielerpayload")
-        val id = person["id"]?.jsonPrimitive?.content ?: error("Fehlende Spieler-ID")
-        check(isRedacted(id))
+        check(!person["id"]?.jsonPrimitive?.content.isNullOrBlank())
         val allowed = JsonObject(original + ("player" to JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))))
         check(replacement == allowed) { "Redaktion verändert unveränderliche Eventfelder" }
+        // Die verifizierte Seite autorisiert dieses Event, nicht eine globale Player-ID.
+        val proof = queries.redactedEvent(event.id).executeAsOneOrNull()
+        if (proof == null) {
+            queries.rememberRedactedEvent(event.id, DataJson.encodeToString(StoredEvent.serializer(), event.copy(confirmed = false)))
+        } else {
+            requireRedactedEventMatch(event, DataJson.decodeFromString(StoredEvent.serializer(), proof))
+        }
         queries.redactEventPayload(event.payload, event.id)
     }
 
+    private fun requireRedactedEventMatch(
+        event: StoredEvent,
+        proof: StoredEvent,
+    ) {
+        check(event.type in setOf("", "PlayerAssigned") && proof.type in setOf("", "PlayerAssigned"))
+        check(
+            event.copy(payload = proof.payload, confirmed = false, type = "PlayerAssigned") ==
+                proof.copy(confirmed = false, type = "PlayerAssigned"),
+        ) {
+            "Redaktionsbeleg gehört zu anderen unveränderlichen Eventfeldern"
+        }
+        val payload = DataJson.parseToJsonElement(event.payload).jsonObject
+        check(payload["type"]?.jsonPrimitive?.content == "PlayerAssigned")
+        val player = payload["player"] as? JsonObject ?: error("Kein Legacy-Spielerpayload")
+        val clean = JsonObject(payload + ("player" to JsonObject(player + ("displayName" to JsonPrimitive(DELETED_NAME)))))
+        check(clean == DataJson.parseToJsonElement(proof.payload)) { "Abweichender Payload eines redigierten Events" }
+    }
+
     internal fun sanitizeLegacyEvent(event: StoredEvent): StoredEvent {
+        queries.redactedEvent(event.id).executeAsOneOrNull()?.let { json ->
+            val proof = DataJson.decodeFromString(StoredEvent.serializer(), json)
+            requireRedactedEventMatch(event, proof)
+            return event.copy(payload = proof.payload)
+        }
         val payload = runCatching { DataJson.parseToJsonElement(event.payload).jsonObject }.getOrNull() ?: return event
         if (payload["type"]?.jsonPrimitive?.content != "PlayerAssigned") return event
         val player = payload["player"] as? JsonObject ?: return event
