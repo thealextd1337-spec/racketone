@@ -32,4 +32,9 @@ interface CloudPullPort {
         attempt: CloudPullAttempt,
         matchId: String,
     ): List<EventWatermark>
+
+    suspend fun pullRedactionPage(
+        attempt: CloudPullAttempt,
+        request: CloudRedactionRequest,
+    ): CloudRedactionPage
 }
