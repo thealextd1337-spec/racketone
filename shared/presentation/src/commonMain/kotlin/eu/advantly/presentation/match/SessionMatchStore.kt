@@ -807,7 +807,8 @@ class SessionMatchStore(
         val now = clock.nowMs()
         list
             .filter {
-                !it.isPlaceholder && !data.isPlaceholder(it.id) && data.players.get(it.id) == null
+                // Eine matchlokale Namensmaske ist kein Beleg für eine neue lokale Directory-Identität.
+                it.displayName.isNotBlank() && !it.isPlaceholder && !data.isPlaceholder(it.id) && data.players.get(it.id) == null
             }.forEach { data.players.addGuest(it.id, it.displayName, now) }
     }
 

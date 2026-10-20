@@ -48,7 +48,20 @@ class PlaceholderPresentationTest {
         checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = false)
     }
 
-    private fun checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer: Boolean) {
+    @Test
+    fun eventOnlyRematchDoesNotInventLocalPlayerFromMaskedAssignment() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = false, repeatMatch = true)
+    }
+
+    @Test
+    fun eventOnlyRematchPreservesExistingDirectoryIdentityAndRevision() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = true, repeatMatch = true)
+    }
+
+    private fun checkEventOnlyRedactionDuringAssignment(
+        withDirectoryPlayer: Boolean,
+        repeatMatch: Boolean = false,
+    ) {
         val data = createInMemoryJvmLocalData()
         var identityIndex = 0
         data.accountIdentities.select("scope-A", "A", 0, "PHONE") { "A-${identityIndex++}" }
@@ -117,7 +130,11 @@ class PlaceholderPresentationTest {
             assertNull(directoryBefore)
         }
         val beforeAssignment = data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value)
-        assertTrue(store.assignPlayer(match, secondSlot, other.id))
+        if (repeatMatch) {
+            store.start(store.record(match)!!.summary.setup)
+        } else {
+            assertTrue(store.assignPlayer(match, secondSlot, other.id))
+        }
         assertEquals(directoryBefore?.displayName, data.players.get(person.id)?.displayName)
         assertEquals(beforeAssignment, data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value))
         store.close()
