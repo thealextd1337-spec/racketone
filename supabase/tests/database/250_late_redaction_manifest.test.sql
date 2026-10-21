@@ -1,7 +1,7 @@
 -- Späte Referenzen auf global redigierte Spieler (01000): Gast X mit Profil P verknüpft, P löscht sein Konto,
 -- ERST DANACH lädt ein Gerät neue Matches/Events mit X hoch. Grundlage: Server-Probe late_guest_probe.sql.
 begin;
-select plan(303);
+select plan(318);
 select tests.world();
 select tests.publish_consent_documents('late-manifest-250');
 select tests.accept_current_consents(id) from tests.users;
@@ -245,6 +245,64 @@ select is(pg_temp.epoch((select m from liv)),1,'Living-person match: no further 
 select is(pg_temp.page((select m from liv))->'redactedPlayerIds',jsonb_build_array(pg_temp.id('XA')),
  'Living-person match: manifest keeps XA, transfer delivers only the first event');
 select is(jsonb_array_length(pg_temp.page((select m from liv))->'events'),1,'Living-person match: only the earlier event is redacted');
+
+-- Review 77b6317 P3-1/P3-2: Teilnehmerbezüge zählen nur ohne lebenden Profil-FK (wie 00700 Z. 285–286), und der
+-- UPDATE-Pfad greift nur, wenn player_id auf einen neuen Wert ungleich null wechselt.
+insert into ids values
+ ('Z','5c000000-0000-4000-8000-0000000000a8'),('H','5c000000-0000-4000-8000-0000000000b8'),
+ ('Z2','5c000000-0000-4000-8000-0000000000f3'),('G2','5c000000-0000-4000-8000-0000000000f4'),
+ ('MZ','5d000000-0000-4000-8000-0000000000a8'),('MZ2','5d000000-0000-4000-8000-0000000000f3'),
+ ('MZ3','5d000000-0000-4000-8000-0000000000f4');
+-- Q8: zed löscht; carols lebender Slot trägt Slot-UUID Z (mit zed verknüpfter Gast) und player_id=H (Gast von zed).
+-- anonymize_profile setzt player_id=null; das ist keine späte Referenz und darf E nicht ein zweites Mal erhöhen.
+select tests.create_user('zed');
+select tests.create_user('yan');
+insert into public.players(id,owner_id,kind,display_name,profile_id,assignment_source) values
+ (pg_temp.id('Z'),tests.uid('alice'),'guest','Z Real',tests.uid('zed'),'assignment'),
+ (pg_temp.id('Z2'),tests.uid('alice'),'guest','Z2 Real',tests.uid('yan'),'assignment');
+insert into public.players(id,owner_id,kind,display_name) values
+ (pg_temp.id('H'),tests.uid('zed'),'guest','H'),(pg_temp.id('G2'),tests.uid('alice'),'guest','G2');
+insert into public.matches(id,created_by,sport,discipline,format,started_at)
+ select pg_temp.id(k),tests.uid('alice'),'tennis','singles','{}',now() from unnest(array['MZ','MZ2','MZ3']) k;
+insert into public.match_participants(match_id,slot_id,team,position,player_id,profile_id,link_status,display_name) values
+ (pg_temp.id('MZ'),'zed-slot','A',1,null,tests.uid('zed'),'linked','Zed'),
+ (pg_temp.id('MZ'),pg_temp.id('Z')::text,'B',1,pg_temp.id('H'),tests.uid('carol'),'linked','Carol'),
+ (pg_temp.id('MZ2'),pg_temp.id('Z2')::text,'B',1,null,tests.uid('carol'),'linked','Carol');
+select set_config('advantly.trigger_redaction_matches','',true);
+delete from auth.users where id=tests.uid('zed');
+select ok(private.redacted_player_identity(pg_temp.id('Z')::text),'Q8: Z is a global player proof');
+select is(pg_temp.epoch(pg_temp.id('MZ')),1,'Q8: account deletion raises E once, as before 01000');
+select is(pg_temp.manifest(pg_temp.id('MZ')),'[]'::jsonb,'Q8: deletion capture excludes carol''s slot, the trigger agrees');
+select ok((select profile_id=tests.uid('carol') and player_id is null and not deleted_profile from public.match_participants
+  where match_id=pg_temp.id('MZ') and slot_id=pg_temp.id('Z')::text),'Q8: carol''s slot stays live, only H is dropped');
+-- Q11: carols lebender Slot mit Slot-UUID Z2 (mit yan verknüpfter Gast); die Löschung von yan erfasst MZ2 nicht.
+select set_config('advantly.trigger_redaction_matches','',true);
+delete from auth.users where id=tests.uid('yan');
+select ok(private.redacted_player_identity(pg_temp.id('Z2')::text),'Q11: Z2 is a global player proof');
+select is(pg_temp.epoch(pg_temp.id('MZ2')),0,'Q11: deletion capture excludes the slot with carol''s living profile FK');
+select set_config('advantly.trigger_redaction_matches','',true);
+update public.match_participants set player_id=null where match_id=pg_temp.id('MZ2');  -- = DO UPDATE eines Routine-Uploads
+select is(pg_temp.epoch(pg_temp.id('MZ2')),0,'Q11: routine upsert with player_id=null raises no E');
+select is(pg_temp.manifest(pg_temp.id('MZ2')),'[]'::jsonb,'Q11: routine upsert adds no manifest row');
+update public.match_participants set player_id=pg_temp.id('G2') where match_id=pg_temp.id('MZ2');
+select is(pg_temp.epoch(pg_temp.id('MZ2')),0,'Q11: new player_id under a living profile FK raises no E');
+select is(pg_temp.manifest(pg_temp.id('MZ2')),'[]'::jsonb,'Q11: slot UUID under a living profile FK never enters the manifest');
+select ok((select profile_id=tests.uid('carol') and not deleted_profile and display_name='Carol' from public.match_participants
+  where match_id=pg_temp.id('MZ2')),'Q11: carol''s slot stays live');
+-- INSERT-Pfad: Eine neue Zeile behält keinen lebenden Profil-FK neben einem gesperrten Slot (Guard 00700), sie ist
+-- damit ein redigierter Slot und zählt wie bei der Löscherfassung.
+insert into public.match_participants(match_id,slot_id,team,position,player_id,profile_id,link_status,display_name) values
+ (pg_temp.id('MZ3'),pg_temp.id('Z2')::text,'B',1,null,tests.uid('carol'),'linked','Carol'),
+ (pg_temp.id('MZ3'),'free-slot','A',1,null,null,null,'Free');
+select ok((select profile_id is null and deleted_profile from public.match_participants
+  where match_id=pg_temp.id('MZ3') and slot_id=pg_temp.id('Z2')::text),'Q11 insert: guard drops the profile FK of a new row');
+select is(pg_temp.manifest(pg_temp.id('MZ3')),jsonb_build_array(pg_temp.id('Z2')),'Q11 insert: anonymized slot counts like at deletion');
+-- Gegenprobe UPDATE-Pfad: Wechsel auf eine globale ID ohne Profil-FK bleibt eine späte Referenz.
+select set_config('advantly.trigger_redaction_matches','',true);
+update public.match_participants set player_id=pg_temp.id('XA') where match_id=pg_temp.id('MZ3') and slot_id='free-slot';
+select is(pg_temp.manifest(pg_temp.id('MZ3')),jsonb_build_array(pg_temp.id('XA'),pg_temp.id('Z2')),
+ 'Update control: switch to a global ID without profile FK is captured');
+select is(pg_temp.epoch(pg_temp.id('MZ3')),2,'Update control: one further E step');
 
 select * from finish();
 rollback;

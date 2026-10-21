@@ -1,6 +1,6 @@
 -- Servergrenze: echte Owner-Uploads nach K3, ohne neuen Client-/Releasevertrag.
 begin;
-select plan(1296);
+select plan(1324);
 select tests.world();
 select tests.publish_consent_documents('redaction-write-220');
 select tests.accept_current_consents(id) from tests.users;
@@ -1360,6 +1360,9 @@ begin
  return next is((select p.payload from public.match_events p where id=e),payload,label||': accepted genesis payload preserved exactly');
  -- 01000: Genesis mit global redigiertem Player traegt die ID ins Manifest und erhoeht E einmal.
  return next is((select redaction_epoch from public.matches where id=m),1,label||': late global genesis reference raises E once');
+ -- Nur das Ziel, nie die zufaelligen Lineup-IDs daneben.
+ return next is((select array_agg(player_id) from private.match_redacted_players where match_id=m),
+  array['bb110000-0000-4000-8000-000000000001'::uuid],label||': manifest holds exactly the global target');
  return next ok((select model=label from public.devices where id=d) and exists(select 1 from public.players where id=innocent)
   and exists(select 1 from public.matches where id=healthy),label||': fresh proof commits complete mixed batch');
  -- Ein spaeteres E-Inkrement aendert den bestehenden Event-ID-No-op nicht.
@@ -1403,6 +1406,9 @@ begin
  -- 01000: die gruppierte Schreibweise ist dieselbe global redigierte UUID.
  return next is((select redaction_epoch from public.matches where id=m),case when mode='grouped' then 1 else 0 end,
   label||case when mode='grouped' then ': late global grouped UUID raises E once' else ': fresh target starts E0' end);
+ return next is((select array_agg(player_id) from private.match_redacted_players where match_id=m),
+  case when mode='grouped' then array['bb110000-0000-4000-8000-000000000001'::uuid] end,
+  label||case when mode='grouped' then ': manifest holds exactly the global target' else ': manifest stays empty' end);
 end $$;
 select r.* from (values(true),(false)) rpc(cloud)
  cross join unnest(array['healthy','null','empty','malformed','foreign','grouped']) mode

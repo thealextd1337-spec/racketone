@@ -48,7 +48,8 @@ def backfill_roundtrip(owner):
                                ("match_events", "events_redacted_name"),
                                # 01000 setzt auf 00700 auf und gehört nicht zum 006-Zustand.
                                ("match_events", "events_late_redaction_manifest"),
-                               ("match_participants", "participants_late_redaction_manifest")):
+                               ("match_participants", "participants_late_redaction_manifest"),
+                               ("match_participants", "participants_late_redaction_manifest_upd")):
             owner.execute("drop trigger " + trigger + " on public." + table)
         definition = owner.execute("select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)").fetchone()[0]
         for marker in ("  perform private.guard_push_lifecycle(v_uid,p);\n\n",

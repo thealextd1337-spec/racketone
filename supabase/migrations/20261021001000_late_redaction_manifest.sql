@@ -5,7 +5,9 @@
 -- Jetzt: Beim Einfügen von match_events (Legacy player.id, V2 playerId, Genesis-Lineup A/B) und match_participants
 -- (player_id, UUID-Slot) wird (match,X) in match_redacted_players eingetragen, wenn genau der globale Zweig von
 -- redacted_event_identity gilt: redacted_player_identity(X) and not redaction_live_profile_context(match,X).
--- Dieselben Extraktoren wie die Löscherfassung (00700).
+-- Dieselben Extraktoren wie die Löscherfassung (00700), auch deren Teilnehmerregel (Z. 285–286): Player-/Slot-Bezüge
+-- eines Teilnehmers zählen nur ohne lebenden direkten Profil-FK; ein fremder Profil-FK ist typisierte Autorität.
+-- Bei INSERT entfernt der 00700-Guard einen solchen FK ohnehin; es geht um den Upsert einer bestehenden lebenden Zeile.
 -- Bewusst NICHT in match_redacted_names: das wäre ein dauerhafter matchlokaler Beleg und würde spätere Events einer
 -- lebenden Person mit eindeutigem Profilkontext im selben Match redigieren (die von N1–N7 geschlossene Klasse).
 -- Die Namensbereinigung leistet serverseitig bereits die globale Identität (00700), der Client braucht nur das Manifest.
@@ -13,7 +15,10 @@
 -- direkten lebenden Profil-FK im selben Match. Das Manifest enthält weiter nur positiv belegte globale Player-IDs.
 -- E steigt einmal je Transaktion und Match und nur, wenn eine neue Manifestzeile entsteht. Der Marker ist derselbe
 -- wie in 00900, also kein Doppelschritt, wenn dasselbe Insert auch ein redigiertes Event schreibt.
--- Teilnehmer zählen auch beim Upsert (ON CONFLICT DO UPDATE von player_id): auch das ist eine späte Referenz.
+-- Teilnehmer zählen auch beim Upsert, aber nur, wenn player_id auf einen neuen Wert ungleich null wechselt: nur das ist
+-- eine späte Referenz. player_id=null (anonymize_profile in der Löschtransaktion) und unveränderte Re-Uploads lösen
+-- nichts aus; sonst stiege E beim Löschen ein zweites Mal. slot_id ist Teil des PK und wird nirgends geändert, ein
+-- neuer Slot ist ein INSERT. Ein späteres Entfernen nur des Profil-FK (unlink_player) ist keine neue Referenz.
 -- Bekannte Grenzen: Ein Teilnehmer, dessen playerId der Writer verwirft (player_not_owned), hinterlässt keine
 -- Referenz und damit keinen Eintrag. Altbestand späterer Uploads vor dieser Migration erhält keinen Nachtrag.
 
@@ -41,6 +46,7 @@ language plpgsql security definer set search_path = '' as $$
 declare v_ids uuid[];
 begin
   if tg_table_name='match_participants' then
+    if new.profile_id is not null then return null; end if;
     -- Textslots können keine UUID sein (32–41 Zeichen); spart redaction_uuid den Ausnahmepfad.
     v_ids:=array[new.player_id,case when length(new.slot_id) between 32 and 41 then private.redaction_uuid(new.slot_id) end];
   elsif new.type='MatchCreated' then
@@ -60,8 +66,11 @@ $$;
 
 create trigger events_late_redaction_manifest after insert on public.match_events
   for each row when (new.type in ('PlayerAssigned','MatchCreated')) execute function private.trigger_late_redaction_manifest();
-create trigger participants_late_redaction_manifest after insert or update of player_id,slot_id on public.match_participants
+create trigger participants_late_redaction_manifest after insert on public.match_participants
   for each row execute function private.trigger_late_redaction_manifest();
+create trigger participants_late_redaction_manifest_upd after update of player_id on public.match_participants
+  for each row when (new.player_id is not null and new.player_id is distinct from old.player_id)
+  execute function private.trigger_late_redaction_manifest();
 
 revoke all on function private.capture_late_redacted_players(uuid,uuid[]),private.trigger_late_redaction_manifest()
   from public,anon,authenticated,service_role;
