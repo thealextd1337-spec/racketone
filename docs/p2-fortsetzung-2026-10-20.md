@@ -1565,3 +1565,59 @@ Log `full-r8-trigger.log`. Offene P3:
 - Das Lockrennen und der Marker-Fall gehören als Python-Rennen ins Repo.
 - Der D1+U4-Integrationstest muss „eigenes Match, Server bereinigt, E 0→1“ enthalten.
 - 00900 wird nur zusammen mit 00700 ausgerollt.
+
+CI auf `10dbb6f` (PR #74): alle fünf Jobs grün, darunter Gradle check mit
+Android/Wear-APKs, Kotlin/Native mit iOS/watchOS-Simulator-Builds sowie Supabase
+mit Migrationen, pgTAP, Lockrennen, Export-Rundlauf, echten Auth/HTTP/Storage-Diensten,
+Vault-Scheduler und Datenbank-Lint. Erstmals ist der Stand damit auch auf dem echten
+Stack und den Apple-Pfaden belegt. Integrationspunkt A ist nachgewiesen.
+
+### Integrationspunkt B (begonnen)
+
+- D1-Korrektur `9bea930`: G-Wechsel entzieht Readiness sofort, unveränderte
+  Matches werden ohne RPC übernommen, endliche Runden, Neuscan aus 10.sqm,
+  wiederhergestellter Altbeleg. 7 Reds, 6 erkannte Mutationen, data 221 /
+  cloud-sync 233 grün. 205 Matches sind nach einem G-Wechsel wieder lesbar nach
+  1 statt 61 Läufen; COMPLETE weiterhin nach 61. Migrationstest vom Integrator
+  geprüft: weiterhin exakt bis Schema 10, danach werden nur die zwei
+  zurückgesetzten Tabellen getrennt und exakt geprüft. Frische Review
+  `advantly-20261021-w2-d1-review-r2`.
+- Lokaler Branch `p2/d2d3-integration-b` auf `10dbb6f`: Merges von D1 und U4
+  ohne Konflikt. Voller Check grün in 3m11s (data 221, cloud-sync 258, 1 Stack-Skip).
+- Integratorentscheid: Die U4-Restart-Sperre wird mit dem abgeschlossenen
+  Katalog einer danach begonnenen Runde frei, nicht erst mit dem Rundenabschluss.
+  Gemeinsamer D1+U4-Test mit Mock-Serverregeln 00700/00800/00900:
+  `advantly-20261021-integration-b-joint-r1` (hält den Gradle-Slot).
+- D1-Review r2 auf `9bea930`: **Freigabe**, kein P1/P2, sechs P3. Bericht
+  `review-9bea930/build/review-report.txt`. Die Übernahme ist sicher, weil jede
+  E-Änderung auf dem Server über `touch_row` auch `serverVersion` erhöht. Der
+  Altbeleg ist eng begrenzt, Runden enden endlich, `restart_required` führt in
+  keinen Dauerzustand. Für die U4-Kopplung an metadataComplete gilt: Das
+  angewandte E steigt erst mit dem abgeschlossenen Transfer. U4 muss daher ein
+  Match blockieren, solange das Katalog-E größer ist als das angewandte E. Und
+  die nächste Runde beginnt erst nach der laufenden. Beides wurde an den
+  Integrationsagenten weitergegeben.
+  Offene P3:
+  - Turnier-Staff-Wechsel ohne Beobachtung.
+  - Übernahme prüft weder Tombstone noch `materialization_pending`.
+  - Vollreparaturen durch fremde Live-Matches beim Neuscan.
+  - Spaltenprüfung von `cloud_pull_profile` im Migrationstest.
+  - Keine eigene Mutation für den Altbeleg und keine positive Übernahme bei E>0.
+  - Kein aktiver Test für ein eigenes ungesendetes Event an einem bereiten Match.
+- Gemeinsamer D1+U4-Test `b245a63` (Worktree `t3-87683ce2`) per Fast-Forward
+  auf `p2/d2d3-integration-b` übernommen. Mock-Server mit den Regeln aus
+  00700/00800/00900, sechs Szenarien bei aktiviertem Store grün (a/b waren
+  rot gegen `9beefa6`). U4: Ist das Katalog-E größer als das angewandte E,
+  wird nur dieses Match gesperrt. Die Restart-Sperre endet mit dem Katalog
+  (`roundCatalogReady`) einer danach begonnenen Runde und wird dabei gelöscht.
+  Der Integrator hat den Produktdiff geprüft. Messung bei 205 Matches: Uploads
+  wieder möglich nach 1 statt 62 Läufen bei 40001 zwischen Runden und nach
+  60 statt 120 bei 40001 mitten in einer Runde. Für ~2 Läufe bräuchte es einen
+  monotonen Katalogzähler (nicht gebaut, Vorschlag im Bericht).
+  data 221 / cloud-sync 267 grün, voller Check grün.
+- **Neuer P1 vor Aktivierung:** Ein eigenes LOCAL-Match wird nach dem ersten
+  Pull dauerhaft unlesbar und nimmt keine Events mehr an.
+  `materializePullMatch` überschreibt keinen LOCAL-Kopf, `materializedVersion`
+  bleibt leer, Readiness endet mit STALE_SNAPSHOT. Ohne aktivierten Store gibt
+  es heute keine Nutzerwirkung, die Replikataktivierung bleibt aber gesperrt.
+  Folgeauftrag an D1.
