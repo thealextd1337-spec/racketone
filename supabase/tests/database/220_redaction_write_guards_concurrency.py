@@ -45,7 +45,10 @@ def backfill_roundtrip(owner):
                                ("players", "players_capture_deleted_identity"),
                                ("match_participants", "participants_redacted_name"),
                                ("match_participants", "participants_capture_profile_context"),
-                               ("match_events", "events_redacted_name")):
+                               ("match_events", "events_redacted_name"),
+                               # 01000 setzt auf 00700 auf und gehört nicht zum 006-Zustand.
+                               ("match_events", "events_late_redaction_manifest"),
+                               ("match_participants", "participants_late_redaction_manifest")):
             owner.execute("drop trigger " + trigger + " on public." + table)
         definition = owner.execute("select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)").fetchone()[0]
         for marker in ("  perform private.guard_push_lifecycle(v_uid,p);\n\n",
@@ -636,7 +639,8 @@ def main():
             with identity(owner, caller):
                 page = owner.execute("select public.cloud_pull_match_redaction_v1(%s,%s,%s)",
                                      (new_match, generation, epoch)).fetchone()[0]
-                assert len(page["events"]) == (1 if revocation == "notme" else 2) and page["redactedPlayerIds"] == [], page
+                # 01000: ohne direkten Profilkontext erfüllt das späte Event den globalen Zweig, also steht guest im Manifest.
+                assert len(page["events"]) == (1 if revocation == "notme" else 2) and page["redactedPlayerIds"] == [str(guest)], page
             print("PASS proven Profile-context revocation wait; proof_changed=", changed, "canonical event and original Player retirement preserved:", rpc, revocation)
 
         def genesis_delete_race(rpc, mode, existing):
@@ -710,12 +714,15 @@ def main():
                 result = push(rpc, caller, current_proof())
             assert [item["result"] for item in result["events"]] == ["accepted", "accepted"], result
             assert owner.execute("select payload,redacted_at from public.match_events where id=%s", (event,)).fetchone() == (payload, None)
-            assert owner.execute("select redaction_epoch from public.matches where id=%s", (target,)).fetchone()[0] == 0
+            # 01000: die späte Genesis mit global redigiertem guest trägt ihn ins Manifest und erhöht E genau einmal.
+            assert owner.execute("select redaction_epoch from public.matches where id=%s", (target,)).fetchone()[0] == 1
+            assert owner.execute("select array_agg(player_id) from private.match_redacted_players where match_id=%s",
+                                 (target,)).fetchone()[0] == [guest]
             assert owner.execute("select private.redacted_player_identity(%s)", (str(guest),)).fetchone()[0]
             with connect() as reopened:
                 assert reopened.execute("select payload from public.match_events where id=%s", (event,)).fetchone()[0] == payload
                 assert reopened.execute("select count(*) from public.players where id=%s", (innocent,)).fetchone()[0] == 1
-            print("PASS proven Delete/Genesis wait; no partial mixed batch, fresh G/exact E0, immutable payload:", rpc, mode, existing)
+            print("PASS proven Delete/Genesis wait; no partial mixed batch, fresh G/exact E0 before upload, E1 with manifest after, immutable payload:", rpc, mode, existing)
 
         try:
             owner.execute("select tests.publish_consent_documents(%s)", (prefix,))

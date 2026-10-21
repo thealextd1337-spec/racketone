@@ -1187,7 +1187,8 @@ begin
  return next is(tests.result(r,'events',0),'accepted',n||': Player-domain event accepted canonically');
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler' from public.match_events where id=ey),n||': general Player context never overrides global Player tombstone');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'='[]'::jsonb,n||': real manifest includes justified Player-domain event');
+ -- 01000: Player-FK und Event referenzieren das global redigierte x ohne direkten Profilkontext, also globaler Zweig.
+ return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'=jsonb_build_array(x),n||': real manifest includes justified Player-domain event and late global ID');
  -- Zwei aktuelle lebende Domaenen ohne vorherigen lokalen Loeschbeleg:
  -- der direkte Profil-FK darf den widersprechenden echten Player-FK nicht ueberstimmen.
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(my,jsonb_build_array(
@@ -1202,8 +1203,8 @@ begin
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler'
   from public.match_events where id=ec),n||': current direct Profile FK alone cannot exempt ambiguous Player-domain event');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'='[]'::jsonb,
-  n||': actual manifest includes both justified ambiguous Player events');
+ return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'=jsonb_build_array(x),
+  n||': actual manifest includes both justified ambiguous Player events and the late global ID');
 
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(mb,jsonb_build_array(
   tests.part('bob','A',1,'Bob',null),tests.part('vera-shared','B',1,'Vera',x)))))),cloud);
@@ -1221,7 +1222,8 @@ begin
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler' from public.match_events where id=en)
   and (select redacted_at is null from public.match_events where id=ev),n||': other Match Profile context cannot create global UUID veto');
  page:=pg_temp.context_page(n||'_a',mv);
- return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'='[]'::jsonb,n||': NotMe manifest contains only forward justified redaction');
+ -- 01000: nach NotMe fehlt der direkte Profilkontext, das spaete Event erfuellt den globalen Zweig.
+ return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'=jsonb_build_array(x),n||': NotMe manifest contains only forward justified redaction and the late global ID');
  delete from public.players where id=x;
  return next ok(not private.redaction_live_profile_context(my,x) and private.redaction_live_player_context(my,x),
   n||': historical conflicting Player FK also prevents ambiguous Profile exception');
@@ -1237,8 +1239,9 @@ begin
  return next ok((select count(*)=2 from public.match_events where id in (ey,ec) and redacted_at is not null
   and payload#>>'{player,displayName}'='Gelöschter Spieler'),n||': already authorized local redactions remain irreversible');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'='[]'::jsonb,
-  n||': actual manifest retains masked events without false new Profile event or global promotion');
+ -- 01000: nur die IDs aendern sich, x steht seit dem spaeten Player-FK im Manifest.
+ return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'=jsonb_build_array(x),
+  n||': actual manifest retains masked events without false new Profile event, with the late global ID');
  return next ok(private.redacted_player_identity(x::text) and private.player_write_redacted(x::text),
   n||': revoking contradictory context never revokes original Player retirement');
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id',x,'kind','guest','displayName','Reuse')))),cloud);
@@ -1254,7 +1257,7 @@ begin
  return next is(tests.result(r,'events',0),'accepted',n||': event after actual Profile deletion accepted canonically');
  page:=pg_temp.context_page(n||'_a',mv);
  return next ok(pg_temp.ev_name(ed)='Gelöschter Spieler' and jsonb_array_length(page->'events')=3
-  and page->'redactedPlayerIds'='[]'::jsonb,n||': true Vera deletion remains event-only in unrelated match');
+  and page->'redactedPlayerIds'=jsonb_build_array(x),n||': unrelated match keeps the late global ID from the NotMe event');
  -- Selbst privilegierte Auth-UUID-Wiederanlage widerruft keinen echten Profilbeleg.
  delete from tests.users where identifier=n||'_v';
  perform pg_temp.fixed_profile(n||'_r',x);
@@ -1355,7 +1358,8 @@ begin
  return next is(tests.result(r,'events',1),'accepted',label||': fresh exact proof accepts genesis');
  return next is(tests.result(r,'events',0),'accepted',label||': fresh proof commits earlier healthy event');
  return next is((select p.payload from public.match_events p where id=e),payload,label||': accepted genesis payload preserved exactly');
- return next is((select redaction_epoch from public.matches where id=m),0,label||': new or previously empty match remains E0');
+ -- 01000: Genesis mit global redigiertem Player traegt die ID ins Manifest und erhoeht E einmal.
+ return next is((select redaction_epoch from public.matches where id=m),1,label||': late global genesis reference raises E once');
  return next ok((select model=label from public.devices where id=d) and exists(select 1 from public.players where id=innocent)
   and exists(select 1 from public.matches where id=healthy),label||': fresh proof commits complete mixed batch');
  -- Ein spaeteres E-Inkrement aendert den bestehenden Event-ID-No-op nicht.
@@ -1396,7 +1400,9 @@ begin
  r:=pg_temp.push('genesis_actor',batch,cloud);
  return next is(tests.result(r,'events',0),'accepted',label||': previous healthy/malformed/foreign event contract preserved');
  return next is((select p.payload from public.match_events p where id=e),payload,label||': no extra payload validation or normalization');
- return next is((select redaction_epoch from public.matches where id=m),0,label||': fresh target starts E0');
+ -- 01000: die gruppierte Schreibweise ist dieselbe global redigierte UUID.
+ return next is((select redaction_epoch from public.matches where id=m),case when mode='grouped' then 1 else 0 end,
+  label||case when mode='grouped' then ': late global grouped UUID raises E once' else ': fresh target starts E0' end);
 end $$;
 select r.* from (values(true),(false)) rpc(cloud)
  cross join unnest(array['healthy','null','empty','malformed','foreign','grouped']) mode
