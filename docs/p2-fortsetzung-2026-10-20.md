@@ -1492,3 +1492,76 @@ führt dieses Skript nicht aus. Korrigiert, `cloud_match_readiness_v1` wird
 zusätzlich ausdrücklich erwartet. Lokal 181 und 190 Exit 0
 (`regression-races-r7.log`). Lehre für neue gebundene RPCs: beide Inventare
 (181 SQL und Python) anpassen.
+
+U4-Korrektur r3 `b54d56e` auf `3c3640a`: Die Restart-Sperre greift nur, bis die
+erste nach dem 40001 begonnene Runde beendet ist. Zwei echte Reds (Folgerunde
+BLOCKED, laufender Upload verlor seinen Ack), Gegenprobe grün; final
+CloudUploadLifecycleTest 24/24, cloud-sync 232, data 212 grün. Der Integrator hat
+den Diff selbst geprüft: `checkRound` steigt nur beim Rundenstart ohne aktive
+Runde. Das gilt unverändert auch auf dem D1-Branch (`beginRun`). Damit ist
+`b54d56e` der U4-Endstand für Integrationspunkt B. P3-2 (Seitenrest je blockiertem
+Match) ist als `shortcut:` dokumentiert und wird vor B4 nachgezogen.
+
+D1-Folgefix `24cef57` auf `4ea10a1`: `ReplicaLifecycleStore.markNotReady`
+(mit Integratorfreigabe), Aufruf im selben Commit wie die Katalogseite, sobald E
+bei gleichem G steigt. Ein echter Red (`[true,true]` statt `[false,false]`),
+data 220 / cloud-sync 223 grün, voller Check grün, Slot zurückgegeben.
+Vom Worker gemeldet: Die cloud-sync-PullFixture aktiviert den Replikat-Store nie,
+`canReadMember` ist dort also immer true. Frühere Lesbarkeitstests beweisen deshalb
+möglicherweise nichts. Unabhängige Review `advantly-20261021-w2-d1-review-r1` auf
+`24cef57`, mit Prüfauftrag bei aktiviertem Store. Probe-Merges D1↔Root, U4↔Root
+und D1↔U4 sind konfliktfrei.
+
+Server-Prüfung Triggerbereinigung: Der Befund ist echt. Mit gültigem Beleg und
+E=0 bereinigt der Server Namen in neuen Events still, ohne Signal an den Client.
+Fix `1af7403` (Worktree `t3-d94eeffc`, Basis `f636fda`): Migration 00900 mit
+AFTER-INSERT-Trigger, der E einmal pro Transaktion und Match erhöht, wenn
+`redacted_at` gesetzt ist. Nur Events; Teilnehmer bleiben offen, weil der Client
+eigene Metadaten gewinnen lässt (Welle 3 / D1). Probe 240: 15/43 rot vorher,
+43/43 grün nachher; breite Suite, Python 210/220 und N3 grün. Unabhängige Review
+`advantly-20261021-w2-server-trigger-epoch-review-r1` läuft.
+
+### D1-Review r1 auf `24cef57` und Vertragsergänzung
+
+Ergebnis fix-first: kein P1, zwei P2, sechs P3. Bericht `review-24cef57/build/review-report.txt`.
+Eigene Prüfung mit aktiviertem Store: Bindung an G/E/H und Snapshot, sofortiger
+Leseverlust bei FEED, ABSENT, E-Anstieg und Transferstart, fortsetzbare Transfers,
+korrekte Behandlung eigener ungesendeter Events. Mit erzwungener Aktivierung der
+ganzen Fixture scheitern 16 von 64 Tests, alle nur am Testaufbau.
+
+**Vertragsergänzung D1 (Integrator):**
+- **G-Wechsel (P2-1):** In derselben Transaktion, die einen Scan mit neuem G
+  beginnt, verlieren alle Access-Zeilen mit älterem G sofort `ready`
+  (neue Sammelfunktion in `ReplicaLifecycleStore`, freigegeben).
+- **Übernahme statt neuem RPC (P2-2):** Bestätigt eine Katalogseite unter neuem G
+  ein Match als MEMBER mit unverändertem E und unveränderter `serverVersion` des
+  zuletzt bewiesenen Snapshots, wird Readiness im selben Commit übernommen. Der
+  Readiness-Vektor bis H hängt nicht von G ab. Nur geänderte Matches brauchen
+  einen neuen Readiness-Abruf.
+- **Endliche Runden:** Jede Runde prüft jedes Match gegen ein fest gehaltenes H.
+  Fremde laufende Live-Matches dürfen den Rundenabschluss nicht verhindern.
+  Sonst gibt U4 seine Restart-Sperre nie frei (Querbefund der Review).
+- **Altbestand (P3-1):** `10.sqm` setzt den Katalogcursor zurück, damit ein
+  vollständiger Katalog bei gleichem G die Access-Zeilen anlegt.
+- **Tests:** Die Lesesperre (FEED, ABSENT, G-Wechsel, E=0) wird mit aktiviertem
+  Store belegt. Dazu kommen direkte Tests für die H-Grenze, veraltete Snapshots
+  und die Übernahme, sowohl positiv als auch mit geändertem E bzw. geänderter
+  `serverVersion`.
+- P3-2: Ein bereits lesbares Match bleibt während einer Lückenreparatur lesbar.
+  Das ist vorerst akzeptiert und wird vor V4 erneut bewertet.
+
+Server-Review zu `1af7403`: **Freigabe**, kein P1/P2, fünf P3. Bericht
+`%TEMP%/review-1af7403-20261021/review-report.txt`. Eigene Ausführung: 240 Parent
+15/43 rot, Ziel 43/43; Lockrennen zweier Geräte (B wartet, dann 40001 ohne Writes,
+E steigt genau einmal, kein Deadlock); Marker transaktionslokal, auch bei
+Savepoint-Rollback und mehreren Matches; Transfer liefert bei E+1 genau das
+bereinigte Event; keine messbaren Zusatzkosten ohne Bereinigung. Mit D1 und U4
+bleibt kein Gerät hängen; U4 allein ohne D1-Access-Zeilen würde hängen (Gate P2-B).
+Übernommen in Root als Cherry-Pick. Root-Lauf: 39 SQL-Dateien, nur die fünf
+Plattformlücken rot; 240 43/43; Python 181, 190 und 220 mit Exit 0 (50 Rennen).
+Log `full-r8-trigger.log`. Offene P3:
+- E steigt auch bei bereits kanonischem Namen.
+- Ein privilegiert vorbelegter Marker unterdrückt den Schritt.
+- Das Lockrennen und der Marker-Fall gehören als Python-Rennen ins Repo.
+- Der D1+U4-Integrationstest muss „eigenes Match, Server bereinigt, E 0→1“ enthalten.
+- 00900 wird nur zusammen mit 00700 ausgerollt.

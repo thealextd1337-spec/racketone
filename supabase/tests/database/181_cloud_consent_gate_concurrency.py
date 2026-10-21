@@ -155,7 +155,7 @@ def main():
                 with owner.transaction():
                     owner.execute("set transaction isolation level " + isolation)
                     assert not owner.execute("select private.has_current_consents(%s)", (uid,)).fetchone()[0]
-                print("PASS", isolation, "33 RPCs, 8 Tabellenwrites, 18 RLS-Tabellen geschlossen;", populated, "RC-Positivkontrollen")
+                print("PASS", isolation, "34 RPCs, 8 Tabellenwrites, 18 RLS-Tabellen geschlossen;", populated, "RC-Positivkontrollen")
 
             # Unabhängige Sessionprüfung des Consenthelfers nach echtem Lock-Wait.
             with owner.transaction():
