@@ -18,7 +18,8 @@ class MatchComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener,
     ) {
-        listener.onComplicationData(data(request.complicationType, GlancePublisher.snapshot))
+        val (state, copy) = installationGlance(this)
+        listener.onComplicationData(data(request.complicationType, state, copy))
     }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? =
@@ -40,8 +41,8 @@ class MatchComplicationService : ComplicationDataSourceService() {
     private fun data(
         type: ComplicationType,
         state: GlanceState,
+        copy: GlanceCopy = GlanceText.render(state, AndroidGlanceStrings(this)),
     ): ComplicationData? {
-        val copy = GlanceText.render(state, AndroidGlanceStrings(this))
         val tap =
             PendingIntent.getActivity(
                 this,

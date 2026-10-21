@@ -8,10 +8,12 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.BuildConfig
+import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
 import eu.advantly.cloud.sync.SupabasePhoneAuth
 import eu.advantly.cloud.sync.SupabaseSupport
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
@@ -21,9 +23,6 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -36,6 +35,8 @@ internal fun ComponentActivity.createPhoneAccount(
     apiKey: String,
 ): AuthViewModel? {
     if (apiUrl.isBlank() || apiKey.isBlank()) return null
+    // Login allein ist kein Wiederherstellungs-/Zugriffsbeleg. Integration folgt nach D2/D3.
+    if (!AndroidInstallationGuard.privateTransportAllowed(applicationContext)) return null
     val storage = PhoneAuthStorage(applicationContext)
     val client =
         createSupabaseClient(apiUrl, apiKey) {
@@ -45,20 +46,35 @@ internal fun ComponentActivity.createPhoneAccount(
             install(Postgrest)
         }
     val session = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
+    val runtime = AndroidAccountRuntime(applicationContext, session)
     val auth =
         SupabasePhoneAuth(
             client,
             storage.deviceSecret,
             uploads = session.data.cloudUploads,
             ownership = session,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            scope = runtime.scope,
             threadGuard = { Looper.myLooper() == Looper.getMainLooper() },
+            hostAccessAllowed = { runtime.allowed },
+            hostStorageAction = runtime::storageAction,
         )
     val backend = auth.cloudBackend(storage.cloudInstallation)
     return AuthViewModel(
-        auth,
-        upload = PhoneUploadHost(auth, session, backend, backend::bindDevice),
-        export = PhoneExportHost(auth.dataExports(), applicationContext),
+        object : CloudAuthPort by auth {
+            override fun close() {
+                try {
+                    auth.close()
+                } finally {
+                    runtime.close()
+                }
+            }
+        },
+        workScope = runtime.scope,
+        upload =
+            PhoneUploadHost(auth, session, backend, backend::bindDevice, runtime.scope, hostAccessAllowed = {
+                runtime.allowed
+            }, storageAction = runtime::storageAction),
+        export = PhoneExportHost(auth.dataExports(), applicationContext, runtime.scope),
         support =
             SupportViewModel(
                 SupabaseSupport(apiUrl, apiKey, client),

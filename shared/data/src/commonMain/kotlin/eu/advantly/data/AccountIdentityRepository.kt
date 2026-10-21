@@ -82,6 +82,7 @@ class AccountIdentityRepository internal constructor(
         newId: () -> String,
     ): String =
         database.transactionWithResult {
+            if (this@AccountIdentityRepository.scope != scope || profile != profileId) data.replicas.selectionChanged()
             val identity =
                 queries.identityForScope(scope).executeAsOneOrNull() ?: run {
                     queries.putIdentity(scope, newId(), newId())

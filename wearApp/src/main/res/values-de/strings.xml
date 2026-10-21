@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
+    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Prüfung und Wiederherstellung sind noch nicht verfügbar. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
+    <string name="recovery_continue_offline">Offline fortfahren</string>
     <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->
@@ -278,4 +281,7 @@
     <string name="phone_status_red">Handy nicht erreichbar</string>
     <string name="phone_status_gray">Kein Handy gekoppelt</string>
     <string name="phone_status_development">Entwicklungsbuild</string>
+    <string name="installation_error_title">Lokale Daten nicht verfügbar</string>
+    <string name="installation_error_body">Die lokalen Daten konnten nicht geprüft werden. Zählen, Gerätesynchronisierung und Kontofunktionen sind pausiert. „Erneut versuchen“ wiederholt diese Prüfung. Vorhandene Matchdaten bleiben erhalten.</string>
+    <string name="installation_error_retry">Erneut versuchen</string>
 </resources>

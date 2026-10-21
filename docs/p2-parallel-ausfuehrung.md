@@ -1,5 +1,11 @@
 # Cloud und Pilot – parallele Ausführung
 
+**Fortsetzung 20.10.2026:** Die nach einem Laufzeitfehler liegen gebliebene
+Data-/Server-Arbeit wird in isolierten Worktrees wiederaufgenommen. Aktuelle
+Wellen, Besitzgrenzen, Integrationspunkte und gestartete Aufträge stehen im
+[Fortsetzungsplan](p2-fortsetzung-2026-10-20.md). Die folgenden Abschnitte bleiben
+als historische Nachweiskette erhalten.
+
 Stand: 18.10.2026. Auftrag: planen und möglichst parallel umsetzen. Basis `c85ad78`
 (U2, PR #61). Fachlich gelten [PLAN](PLAN.md) und der
 [Lieferplan](p2-cloud-pilot-lieferplan.md); dieser Ausführungsplan ersetzt keine Pilotabnahme.

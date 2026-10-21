@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Default: Englisch. Deutsch in values-de/ – Android Lint (MissingTranslation) bricht ab, wenn eine Übersetzung fehlt. -->
 <resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="recovery_notice_title">Existing data kept safe</string>
+    <string name="recovery_notice_body">Previous data is retained separately. Verification and recovery are not yet available. Sync is paused. You can count new matches offline.</string>
+    <string name="recovery_continue_offline">Continue offline</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
     <string name="wear_version">v%1$s</string>
@@ -286,4 +289,7 @@
     <string name="phone_status_red">Phone unreachable</string>
     <string name="phone_status_gray">No phone paired</string>
     <string name="phone_status_development">Development build</string>
+    <string name="installation_error_title">Local data unavailable</string>
+    <string name="installation_error_body">Local data could not be checked. Counting, device sync and account features are paused. Try again to repeat this check. Existing match data is kept.</string>
+    <string name="installation_error_retry">Try again</string>
 </resources>

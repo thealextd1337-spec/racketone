@@ -1,16 +1,27 @@
 package eu.advantly.data
 
 import app.cash.sqldelight.db.SqlDriver
+import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.data.db.MatchEventQueries
 
 /** [EventStore] auf SQLDelight. Der [driver] muss das Schema von [AdvantlyDatabase] bereits angelegt haben. */
-class SqlDelightEventStore internal constructor(
+class SqlDelightEventStore private constructor(
+    delegate: EventStore,
+) : EventStore by delegate {
+    internal constructor(queries: MatchEventQueries, identitiesChanged: (String) -> Unit = {}) : this(
+        RawSqlDelightEventStore(queries, identitiesChanged),
+    )
+
+    constructor(driver: SqlDriver) : this(publicEventStore(driver))
+}
+
+/** Ausschließlich innerhalb von Data; öffentliche Konstruktion verwendet immer die Kontextgrenze. */
+private class RawSqlDelightEventStore(
     private val queries: MatchEventQueries,
     private val identitiesChanged: (String) -> Unit = {},
 ) : EventStore {
-    constructor(driver: SqlDriver) : this(AdvantlyDatabase(driver).matchEventQueries)
-
     override fun append(event: StoredEvent): AppendResult = appendAll(listOf(event)).single()
 
     override fun appendAll(events: List<StoredEvent>): List<AppendResult> =
@@ -22,7 +33,16 @@ class SqlDelightEventStore internal constructor(
                 events
                     .zip(results)
                     .filter { (event, result) ->
-                        result == AppendResult.INSERTED && event.type in setOf("MatchCreated", "PlayerAssigned")
+                        result == AppendResult.INSERTED &&
+                            (
+                                event.type in setOf("MatchCreated", "PlayerAssigned") ||
+                                    (
+                                        event.type.isEmpty() &&
+                                            event.toScoreEventOrNull()?.payload.let {
+                                                it is MatchCreated || it is PlayerAssigned
+                                            }
+                                    )
+                            )
                     }.map { it.first.matchId }
                     .distinct()
                     .forEach(identitiesChanged)
@@ -119,4 +139,24 @@ class SqlDelightEventStore internal constructor(
         type: String,
         payload: String,
     ) = StoredEvent(id, match, device, seq, lamport, payload, wallClockMs, parentId, type)
+}
+
+/** Alte Schema-Tests dürfen vor ihrer Migration weiterhin ausschließlich das alte Eventlog verwenden. */
+private fun publicEventStore(driver: SqlDriver): EventStore {
+    val lifecycleExists =
+        driver
+            .executeQuery(
+                null,
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replica_access'",
+                { cursor ->
+                    cursor.next()
+                    app.cash.sqldelight.db.QueryResult
+                        .Value(cursor.getLong(0) == 1L)
+                },
+                0,
+            ).value
+    if (lifecycleExists) return LocalData(driver).events
+    val database = AdvantlyDatabase(driver)
+    check(database.settingQueries.selectValue("replica.activated").executeAsOneOrNull() != "true")
+    return RawSqlDelightEventStore(database.matchEventQueries)
 }

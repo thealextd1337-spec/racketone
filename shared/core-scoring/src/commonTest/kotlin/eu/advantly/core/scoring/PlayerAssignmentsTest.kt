@@ -37,6 +37,18 @@ class PlayerAssignmentsTest {
     )
 
     @Test
+    fun assignmentSourcesFollowOnlyValidWinnersAndClearWithUnassignment() {
+        val genesis = event(0, MatchCreated(format, lineup, createdBy = owner))
+        val first = event(1, PlayerAssigned(slot, person, owner))
+        val invalid = event(2, PlayerAssigned(slot, person, PlayerId("outsider")))
+        assertEquals(mapOf(slot to first.id), PlayerAssignments.assignmentEventIds(listOf(invalid, first, genesis)))
+        val next = event(3, PlayerAssigned.reference(slot, person.id, owner))
+        assertEquals(mapOf(slot to next.id), PlayerAssignments.assignmentEventIds(listOf(next, invalid, genesis, first)))
+        val cleared = event(4, PlayerAssigned(slot, null, owner))
+        assertTrue(PlayerAssignments.assignmentEventIds(listOf(cleared, next, first, genesis)).isEmpty())
+    }
+
+    @Test
     fun assignmentFromDisplayAfterFinishPreservesEveryScoreFieldAndUndoTarget() {
         val base =
             listOf(event(0, MatchCreated(format, lineup, createdBy = owner))) +

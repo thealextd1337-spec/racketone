@@ -67,8 +67,9 @@ class CloudPullMigrationTest {
                 driver.close()
                 driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
                 assertEquals(before, rows())
+                AdvantlyDatabase.Schema.migrate(driver, 7, LocalData.SCHEMA_VERSION).value
                 val data = LocalData(driver)
-                assertEquals(7, AdvantlyDatabase.Schema.version)
+                assertEquals(LocalData.SCHEMA_VERSION, AdvantlyDatabase.Schema.version)
                 assertEquals(42, data.cloudPulls.progress("alice").cursor)
                 assertEquals(77, data.cloudPulls.progress("bob").cursor)
                 assertEquals(0, data.cloudPulls.progress("alice").checkRound)

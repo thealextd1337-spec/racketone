@@ -24,9 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import eu.advantly.android.R
+import eu.advantly.android.showInstallationError
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.LinkStats
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.AndroidSessionAccess
 import eu.advantly.match.session.MatchSession
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.delay
@@ -37,9 +40,25 @@ import kotlinx.coroutines.delay
  * Session stören. Der frühere Ping-Pong-Feldtest (Spike S3) ist damit entfallen.
  */
 class LinkDebugActivity : ComponentActivity() {
+    private var access: AndroidSessionAccess? = null
+
+    override fun onDestroy() {
+        access?.close()
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val session = AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
+        val session =
+            AndroidInstallationGuard.storage(this) { AndroidMatchSessions.get(applicationContext, PeerKind.PHONE) }
+                ?: run {
+                    showInstallationError()
+                    return
+                }
+        access =
+            AndroidSessionAccess(this, session) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { if (!isDestroyed) showInstallationError() }
+            }
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) { SessionLinkScreen(session) }

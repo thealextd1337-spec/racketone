@@ -1313,11 +1313,23 @@ Kaskaden im Detail:
 | Matches, die der Nutzer erstellt hat, **mit anderen Accounts** | `created_by` → anderer verknüpfter Teilnehmer (der mit der niedrigsten Team/Position); Events behalten `author_id` = Platzhalterprofil |
 | Matches **nur mit Gästen** | komplett gelöscht (Events, Sets, Ergebnisse) |
 | Eigene Gast-Spieler | gelöscht, sofern nicht von anderen beansprucht; beanspruchte Gäste gehen an das Profil des Claimers über |
+| Fremde Gast-Spieler, die dem gelöschten Profil aktuell zugewiesen sind | Vor dem Lösen der Zuordnung anonymisieren; belegte Player-IDs dauerhaft stilllegen. Spätere Zuweisung oder Claim derselben stillgelegten ID mit `player_redacted` ablehnen. Ein neuer, unabhängiger Gast benötigt eine neue ID. |
 | `player_match_results` | Zeilen des Gelöschten: `profile_id = null`, `stat_key = player_id` (Statistik der anderen bleibt korrekt, H2H gegen „Gelöschter Spieler“) |
 | `match_roles`, `match_visitors` | Zuweisungen des gelöschten Accounts sowie von ihm erteilte Visitor-Zugriffe kaskadierend löschen; aktive Live-Abos entziehen. Laufender Zählerwechsel bleibt ein Engine-Event, keine stille Neuzuweisung. |
 | `ops.notification_outbox` | cascade |
 | `ops.revenuecat_events` | `app_user_id` wird gehasht (Abrechnung läuft über Apple/Google, wir stellen keine Rechnungen → keine HGB/AO-Aufbewahrung bei uns) |
 | Backups | Daten verschwinden spätestens nach 7 Tagen aus den täglichen Backups (PITR nicht aktivieren oder Retention dokumentieren) |
+
+Die Redaktionsgrundlage `00700` trennt Profil-IDs, belegte Player-IDs und
+matchlokale Slot-/Eventbelege. Namen beweisen keine Identität. Eine alte
+Gastzuweisung in einem Match darf einen inzwischen einem anderen lebenden
+Konto zugeordneten Player nicht global stilllegen. Umgekehrt darf eine
+Player-Zeile mit kollidierender UUID einen belegten gelöschten Profilbezug
+nicht wieder gültig machen. Unauflösbare untypisierte Altbelege wirken nur
+matchlokal; sie werden nicht als globale Player-Manifeste ausgegeben.
+Uploads ohne `lifecycle`-Beleg, die ein Match mit `redaction_epoch > 0` berühren,
+lehnt der Server mit `restart_required` (40001) ohne Teilwrites ab. Clients müssen
+den Beleg senden, bevor diese Migration ausgerollt wird.
 
 **Löschung einzelner Matches:** Teilnehmer, die nicht Creator sind, können ein Match nur für sich ausblenden (`hidden`) oder ihre Verknüpfung lösen („Ich war das nicht“ → `profile_id = null`, Snapshot-Name bleibt). Der Creator kann löschen (Tombstone, nach 30 Tagen hart gelöscht), sofern keine anderen Accounts beteiligt sind; sonst Übergabe wie oben.
 
@@ -1514,7 +1526,7 @@ Fragen am Ende bleiben.)
 | A8 | Profil | `username citext`, `display_name`, `health_visibility_default`, `share_matches_default` im Profil | `profiles`: `alias` (öffentlich, F18), `username` (Kleinbuchstaben per CHECK), `friend_code`, `status` (`onboarding`/`active`/`deletion_requested`); private Werte in `profile_settings` (Land, Altersprüfung, `telemetry_visibility` F19, `share_matches_default`, Löschantrag) | RLS filtert Zeilen, nicht Spalten → private Werte in eigener Tabelle; kein `citext` nötig |
 | A9 | Repo-Pfad | `backend/supabase` | `supabase/` im Repo-Root | CLI ohne `--workdir`, CI-Pfadfilter |
 | A10 | Altersprüfung | Länderabfrage „vor P2 einplanen“ | `country_age_rules` (AT 14, DE 16, CH 16, LI 16, sonst nicht freigeschaltet) + `complete_onboarding`; Geburtsdatum wird nicht gespeichert; ohne Onboarding keine Schreib-/Sozialfunktionen | F13, Datenminimierung |
-| A11 | Kontolöschung | Edge Function `delete-account` führt die Kaskade aus | Kaskade als `BEFORE DELETE`-Trigger auf `profiles` (Ersteller-Wechsel, „Gelöschter Spieler“, Dummy-Zuweisungen lösen); Löschjob `admin_purge_due_accounts` nur für service_role; Edge Function bleibt für Apple-Token-Widerruf und `auth.admin.deleteUser` | Jeder Löschweg erzeugt denselben Zustand |
+| A11 | Kontolöschung | Edge Function `delete-account` führt die Kaskade aus | Kaskade als `BEFORE DELETE`-Trigger auf `profiles` (Ersteller-Wechsel, „Gelöschter Spieler“, aktuell zugewiesene Gäste vor dem Lösen anonymisieren und ihre belegten Player-IDs stilllegen); Löschjob `admin_purge_due_accounts` nur für service_role; Edge Function bleibt für Apple-Token-Widerruf und `auth.admin.deleteUser` | Jeder Löschweg erzeugt denselben Zustand; stillgelegte Gast-IDs werden nicht erneut zugewiesen oder beansprucht |
 | A12 | Rechte | Policies + einzelne `revoke` | Alle Default-Grants entzogen, Grants explizit (`…0990_rechte.sql`), Strukturtest prüft RLS, anon, Schreibrechte, `search_path` | Least Privilege, Regressionen fallen auf |
 | A13 | SQL-Korrektur | `x = any ((select private.my_friend_ids()))` | `x = any ((select private.my_friend_ids())::uuid[])` (in §4.3 korrigiert) | Die Skizze vergleicht sonst `uuid` mit `uuid[]` (Fehler beim Anlegen der Policy) |
 | A14 | Health | Tabellen `health_sessions/series` | **nicht** im Spike (P3); F19 nur als Einstellung `profile_settings.telemetry_visibility` (`share`/`private`/`off`, Standard `private`) | PLAN: Health-Speicherung erst P3 |

@@ -158,6 +158,7 @@ class SupabaseCloudBackend internal constructor(
         require(batch.events == attempt.events)
         val selected = attempt.batch
         require(batch.players == selected.players && batch.matches == selected.matches)
+        require(batch.lifecycle == selected.lifecycle)
         val sent = selected.copy(devices = batch.devices.toList())
         val response =
             try {
@@ -247,6 +248,62 @@ class SupabaseCloudBackend internal constructor(
         return CloudJson.decodeFromString(
             pullRpc(attempt, "cloud_match_event_watermarks_v1", buildJsonObject { put("p_match_id", matchId) }),
         )
+    }
+
+    override suspend fun pullRedactionPage(
+        attempt: CloudPullAttempt,
+        request: CloudRedactionRequest,
+    ): CloudRedactionPage {
+        val response =
+            pullRpc(
+                attempt,
+                "cloud_pull_match_redaction_v1",
+                buildJsonObject {
+                    put("p_match_id", request.matchId)
+                    put("p_generation", request.generation)
+                    put("p_redaction_epoch", request.redactionEpoch)
+                    request.afterPlayerId?.let { put("p_after_player_id", it) }
+                    put("p_after_server_seq", request.afterServerSeq)
+                    request.highWatermark?.let { put("p_high_watermark", it) }
+                    put("p_player_limit", request.playerLimit)
+                    put("p_event_limit", request.eventLimit)
+                },
+            )
+        val page =
+            try {
+                CloudJson.decodeFromString<CloudRedactionPage>(response)
+            } catch (_: SerializationException) {
+                throw CloudException("cloud_response_invalid", false)
+            }
+        page.validate(request)
+        requireCurrentPull(attempt)
+        return page
+    }
+
+    override suspend fun pullReadiness(
+        attempt: CloudPullAttempt,
+        request: CloudReadinessRequest,
+    ): CloudMatchReadiness {
+        val response =
+            pullRpc(
+                attempt,
+                "cloud_match_readiness_v1",
+                buildJsonObject {
+                    put("p_match_id", request.matchId)
+                    put("p_generation", request.generation)
+                    put("p_redaction_epoch", request.redactionEpoch)
+                    request.highWatermark?.let { put("p_high_watermark", it) }
+                },
+            )
+        val readiness =
+            try {
+                CloudJson.decodeFromString<CloudMatchReadiness>(response)
+            } catch (_: SerializationException) {
+                throw CloudException("cloud_response_invalid", false)
+            }
+        readiness.validate(request)
+        requireCurrentPull(attempt)
+        return readiness
     }
 
     override suspend fun pull(

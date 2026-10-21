@@ -90,4 +90,14 @@ class WireFixturesTest {
         val view = CloudJson.decodeFromJsonElement(VisitorView.serializer(), json)
         assertTrue(view.channel.startsWith("match-live:${view.matchId}:"))
     }
+
+    @Test
+    fun matchReadinessResponse() {
+        val json = fixture("cloud_match_readiness.json").jsonObject
+        keysMatch(CloudMatchReadiness.serializer(), listOf(json), "cloud_match_readiness")
+        keysMatch(EventWatermark.serializer(), json.getValue("watermarks").jsonArray.map { it.jsonObject }, "Readiness-Wasserstand")
+        val readiness = CloudJson.decodeFromJsonElement(CloudMatchReadiness.serializer(), json)
+        // Die echte Serverantwort besteht dieselbe Clientprüfung wie im Pull-Pfad.
+        readiness.validate(CloudReadinessRequest(readiness.matchId, readiness.generation, readiness.redactionEpoch))
+    }
 }

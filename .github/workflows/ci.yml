@@ -442,6 +442,7 @@ jobs:
         run: |
           ADVANTLY_CONSENT_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/181_cloud_consent_gate_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/210_cloud_lifecycle_redactions_concurrency.py --confirm-disposable
+          ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/220_redaction_write_guards_concurrency.py --confirm-disposable
       - name: Export-Rennen und SQL-ZIP-CSV-Rundlauf
         run: uv run supabase/tests/database/200_private_data_exports_concurrency.py --confirm-disposable --archive-roundtrip
       - name: Export über echte Auth-, HTTP- und Storage-Dienste

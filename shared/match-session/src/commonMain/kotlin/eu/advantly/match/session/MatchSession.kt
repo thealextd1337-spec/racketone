@@ -1657,7 +1657,8 @@ class MatchSession(
     private fun reconcilePeople(matchId: MatchId) {
         val at = data.matches.get(matchId)?.createdAtMs ?: return
         data.assignments(matchId).values.forEach {
-            data.players.upsertRemote(it, clock.nowMs())
+            // Eine matchlokale Namensmaske ist kein Auftrag, die globale Person umzubenennen oder anzulegen.
+            if (it.displayName.isNotBlank()) data.players.upsertRemote(it, clock.nowMs())
             data.players.markUsed(listOf(it.id), at)
         }
         dataRevision++

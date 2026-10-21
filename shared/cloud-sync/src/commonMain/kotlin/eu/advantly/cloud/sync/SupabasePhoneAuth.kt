@@ -33,7 +33,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.io.encoding.Base64
 
-/** supabase-kt-Adapter. Der Host injiziert Client samt sicherem SessionManager und Installationsgeheimnis. */
+/**
+ * supabase-kt-Adapter. Der Host injiziert Client samt sicherem SessionManager und Installationsgeheimnis.
+ * [hostStorageAction] umfasst die synchrone SDK-Collectorsynchronisation; `false` beendet diesen Durchlauf.
+ * Der Default fuehrt direkt aus, ohne Fehler zu behandeln oder die Nicht-Android-Semantik zu aendern.
+ */
 class SupabasePhoneAuth(
     private val client: SupabaseClient,
     private val deviceSecret: String,
@@ -42,6 +46,11 @@ class SupabasePhoneAuth(
     private val threadGuard: () -> Boolean = { true },
     private val requestTimeoutMillis: Long = 20_000,
     ownership: LocalAccountOwnership? = null,
+    private val hostAccessAllowed: () -> Boolean = { true },
+    private val hostStorageAction: (() -> Unit) -> Boolean = {
+        it()
+        true
+    },
 ) : CloudAuthPort {
     private val transport =
         CloudHttp(
@@ -53,7 +62,7 @@ class SupabasePhoneAuth(
             requestTimeoutMillis,
             exportFactory = exportHttpTransportFactory(client.config.networkConfig.httpEngine),
         )
-    val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership)
+    val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership, hostAccessAllowed)
     override val session = sessions.session
     private val mutations = Mutex()
     private val lifecycle = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
@@ -77,6 +86,7 @@ class SupabasePhoneAuth(
 
     private fun requireExportAccount(expected: CloudDataExportContext) {
         check(threadGuard()) { "Export nur auf dem seriellen Host-Kontext verwenden" }
+        requireHostAccess()
         requireAccountSession(CloudSession(expected.profileId, false, false, generation = expected.generation))
     }
 
@@ -102,8 +112,20 @@ class SupabasePhoneAuth(
     init {
         lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
             client.auth.sessionStatus.collect {
-                sessions.synchronize()
-                synchronizeAccount()
+                if (!hostAccessAllowed()) return@collect
+                val completed =
+                    hostStorageAction {
+                        try {
+                            if (hostAccessAllowed()) {
+                                sessions.synchronize()
+                                if (hostAccessAllowed()) synchronizeAccount()
+                            }
+                        } catch (error: CloudException) {
+                            // Widerruf zwischen Vorprüfung und Gate-Operation bricht nur diesen Durchlauf ab.
+                            if (error.reason != "cloud_session_changed" || !error.permission || hostAccessAllowed()) throw error
+                        }
+                    }
+                if (!completed || !hostAccessAllowed()) return@collect
             }
         }
     }
@@ -138,6 +160,7 @@ class SupabasePhoneAuth(
     }
 
     private fun synchronizeAccount() {
+        requireHostAccess()
         val identity = credentials()?.let { it.profileId to it.sessionId }
         if (identity != accountIdentity) {
             accountIdentity = identity
@@ -167,12 +190,44 @@ class SupabasePhoneAuth(
     override fun close() {
         if (closed) return
         closed = true
-        invalidateAccount()
-        sessions.stop(leaveIdentity = false)
-        lifecycle.cancel()
-        client.auth.stopAutoRefreshForCurrentSession()
-        transport.close()
-        scope.launch(start = CoroutineStart.UNDISPATCHED) { withContext(NonCancellable) { client.close() } }
+        var failure: Exception? = null
+
+        fun cleanup(action: () -> Unit) {
+            try {
+                action()
+            } catch (error: Exception) {
+                val primary = failure
+                if (primary == null) {
+                    failure = error
+                } else if (primary !== error) {
+                    primary.addSuppressed(error)
+                }
+            }
+        }
+        cleanup(::invalidateAccount)
+        cleanup { sessions.stop(leaveIdentity = false) }
+        cleanup { lifecycle.cancel() }
+        cleanup { client.auth.stopAutoRefreshForCurrentSession() }
+        cleanup { transport.close() }
+        // Der Hostjob kann bereits widerrufen sein. Clientabbau bleibt davon unabhängig und greift nicht auf SQL zu.
+        val closing = CoroutineScope(scope.coroutineContext.minusKey(Job) + SupervisorJob())
+        val primary = failure
+        cleanup {
+            closing.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    withContext(NonCancellable) { client.close() }
+                } catch (error: Exception) {
+                    if (primary != null && primary !== error) primary.addSuppressed(error) else throw error
+                } finally {
+                    closing.cancel()
+                }
+            }
+        }
+        failure?.let { throw it }
+    }
+
+    private fun requireHostAccess() {
+        if (!hostAccessAllowed()) throw CloudException("cloud_session_changed", true)
     }
 
     override suspend fun issueAgeTicket(
@@ -495,7 +550,8 @@ class SupabasePhoneAuth(
         epoch: Long,
     ): String =
         try {
-            transport.rpc(name, params, credentials.accessToken)
+            requireHostAccess()
+            transport.rpc(name, params, credentials.accessToken).also { requireHostAccess() }
         } catch (error: CloudException) {
             if (error.permission && error.reason in setOf("cloud_session_changed", "profile_missing")) {
                 throw RejectedAccount(credentials, epoch, error)
@@ -507,6 +563,7 @@ class SupabasePhoneAuth(
         before: CloudCredentials,
         epoch: Long,
     ) {
+        requireHostAccess()
         synchronizeAccount()
         val after = credentials()
         if (closed || epoch != accountEpoch || before.profileId != after?.profileId || before.sessionId != after.sessionId) {
@@ -536,8 +593,10 @@ class SupabasePhoneAuth(
     }
 
     private suspend fun boundedAuth(block: suspend () -> Unit) {
+        requireHostAccess()
         withTimeoutOrNull(requestTimeoutMillis) {
             block()
+            requireHostAccess()
             true
         } ?: throw CloudException("connection_failed", false)
     }
@@ -546,7 +605,9 @@ class SupabasePhoneAuth(
         name: String,
         params: JsonObject,
     ): JsonObject {
+        requireHostAccess()
         val result = Json.parseToJsonElement(transport.rpc(name, params, null)) as JsonObject
+        requireHostAccess()
         result["error"]?.let { throw CloudException(it.jsonPrimitive.content, false) }
         return result
     }
@@ -554,10 +615,12 @@ class SupabasePhoneAuth(
     private suspend fun <T> guarded(block: suspend () -> T): T =
         try {
             if (closed) throw CloudException("cloud_closed", false)
-            block()
+            requireHostAccess()
+            block().also { requireHostAccess() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: RejectedAccount) {
+            requireHostAccess()
             val current = credentials()
             if (accountEpoch == e.epoch && current?.profileId == e.credentials.profileId &&
                 current.sessionId == e.credentials.sessionId

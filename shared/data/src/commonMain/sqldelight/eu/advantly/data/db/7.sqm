@@ -1,0 +1,151 @@
+CREATE TABLE replica_cloud_seen (match_id TEXT NOT NULL PRIMARY KEY);
+CREATE TABLE replica_access (
+    account_key TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    generation INTEGER,
+    access TEXT NOT NULL CHECK(access IN ('UNKNOWN','MEMBER','FEED','ABSENT')),
+    ready INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(account_key, match_id),
+    CHECK(generation IS NOT NULL OR (access = 'UNKNOWN' AND ready = 0))
+);
+CREATE INDEX replica_access_match ON replica_access(match_id, access);
+CREATE TABLE replica_redaction_state (
+    account_key TEXT NOT NULL, match_id TEXT NOT NULL, applied_epoch INTEGER NOT NULL,
+    PRIMARY KEY(account_key, match_id)
+);
+CREATE TABLE replica_redacted_player (
+    account_key TEXT NOT NULL, match_id TEXT NOT NULL, player_id TEXT NOT NULL, epoch INTEGER NOT NULL,
+    PRIMARY KEY(account_key, match_id, player_id)
+);
+CREATE INDEX replica_redacted_global ON replica_redacted_player(player_id);
+-- Ausschließlich positiv belegte Profilbeziehungen redigierter Spieler; niemals ein Grant.
+CREATE TABLE replica_redacted_profile (
+    player_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+    PRIMARY KEY(player_id, profile_id)
+);
+CREATE INDEX replica_redacted_profile_lookup ON replica_redacted_profile(profile_id);
+CREATE TABLE replica_transfer (
+    id TEXT NOT NULL PRIMARY KEY,
+    account_key TEXT NOT NULL, scope_id TEXT NOT NULL,
+    match_id TEXT NOT NULL, generation INTEGER NOT NULL, epoch INTEGER NOT NULL, high_watermark INTEGER NOT NULL,
+    after_player_id TEXT, after_server_seq INTEGER NOT NULL DEFAULT 0,
+    ids_done INTEGER NOT NULL DEFAULT 0, events_done INTEGER NOT NULL DEFAULT 0,
+    next_index INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(account_key, match_id, generation, epoch)
+);
+CREATE TABLE replica_transfer_page (
+    transfer_id TEXT NOT NULL, page_index INTEGER NOT NULL, page_json TEXT NOT NULL,
+    PRIMARY KEY(transfer_id, page_index)
+);
+-- Eine Zeile mit leerer Match-ID registriert den Empfänger; Nutzzeilen haben einen stabilen Match-Schlüssel.
+CREATE TABLE replica_delivery (
+    account_key TEXT NOT NULL, peer_id TEXT NOT NULL, match_id TEXT NOT NULL,
+    generation INTEGER NOT NULL, access TEXT NOT NULL, redaction_epoch INTEGER NOT NULL,
+    access_ack INTEGER NOT NULL DEFAULT 0, redaction_ack INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(account_key, peer_id, match_id)
+);
+ALTER TABLE match_assignment ADD COLUMN player_id TEXT;
+CREATE VIEW replica_current_context AS
+SELECT (SELECT value FROM setting WHERE key = 'identity.scope') AS scope_id,
+    coalesce((SELECT value FROM setting WHERE key = 'identity.profile'),
+        (SELECT value FROM setting WHERE key = 'identity.scope')) AS account_key;
+
+CREATE VIEW replica_local_match AS
+SELECT m.entity_id AS match_id, s.device_id, s.scope_id, o.profile_id
+FROM cloud_metadata m JOIN local_source s ON s.device_id = m.source_device_id
+LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
+WHERE m.kind = 'HEADER' AND m.origin IN ('LOCAL','PEER');
+
+CREATE VIEW replica_readable_match AS
+SELECT m.entity_id AS match_id FROM cloud_metadata m
+WHERE m.kind = 'HEADER' AND (
+    NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.activated' AND value = 'true')
+    OR EXISTS (SELECT 1 FROM replica_access a, replica_current_context c
+        WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
+        AND a.generation IS NOT NULL AND a.access = 'MEMBER' AND a.ready = 1)
+    OR (NOT EXISTS (SELECT 1 FROM replica_cloud_seen s WHERE s.match_id = m.entity_id)
+        AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.match_id = m.entity_id)
+        AND EXISTS (SELECT 1 FROM replica_local_match l, replica_current_context c
+            WHERE l.match_id = m.entity_id AND (l.profile_id = c.account_key
+                OR (l.profile_id IS NULL AND (l.scope_id = c.scope_id OR EXISTS (
+                    SELECT 1 FROM local_scope_source x WHERE x.device_id = l.device_id AND x.scope_id = c.scope_id))))))
+);
+INSERT OR IGNORE INTO replica_cloud_seen SELECT entity_id FROM cloud_pull_snapshot WHERE kind = 'MATCH';
+INSERT OR IGNORE INTO replica_cloud_seen SELECT match_id FROM cloud_pull_receipt;
+INSERT OR IGNORE INTO replica_cloud_seen SELECT entity_id FROM cloud_metadata WHERE kind != 'PLAYER' AND (origin = 'CLOUD' OR uploaded_revision > 0);
+INSERT OR IGNORE INTO replica_cloud_seen SELECT match_id FROM match_event WHERE cloud_state = 1;
+
+DROP TRIGGER cloud_assignment_insert;
+CREATE TRIGGER cloud_assignment_insert AFTER INSERT ON match_assignment
+WHEN NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
+
+DROP TRIGGER cloud_assignment_delete;
+CREATE TRIGGER cloud_assignment_delete AFTER DELETE ON match_assignment
+WHEN NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = old.match_id;
+END;
+
+DROP TRIGGER cloud_assignment_update;
+CREATE TRIGGER cloud_assignment_update AFTER UPDATE OF player_json, player_id ON match_assignment
+WHEN (old.player_json IS NOT new.player_json OR old.player_id IS NOT new.player_id)
+AND NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
+
+DROP TRIGGER cloud_player_insert;
+CREATE TRIGGER cloud_player_insert AFTER INSERT ON player BEGIN
+    INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PLAYER', new.id);
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.id OR instr(player_json, '"' || new.id || '"') > 0
+    );
+END;
+
+DROP TRIGGER cloud_player_update;
+CREATE TRIGGER cloud_player_update AFTER UPDATE OF display_name, kind ON player
+WHEN (old.display_name IS NOT new.display_name OR (old.kind = 'ARCHIVED') != (new.kind = 'ARCHIVED')
+    OR (old.kind = 'PLACEHOLDER') != (new.kind = 'PLACEHOLDER'))
+AND NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PLAYER' AND entity_id = new.id;
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.id OR instr(player_json, '"' || new.id || '"') > 0
+    );
+END;
+
+DROP TRIGGER cloud_player_authority_update;
+CREATE TRIGGER cloud_player_authority_update AFTER UPDATE OF origin, source_device_id, writer_profile_id ON cloud_metadata
+WHEN new.kind = 'PLAYER' AND (old.origin IS NOT new.origin OR old.source_device_id IS NOT new.source_device_id
+    OR old.writer_profile_id IS NOT new.writer_profile_id) BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.entity_id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.entity_id OR instr(player_json, '"' || new.entity_id || '"') > 0
+    );
+END;
+
+DROP TRIGGER cloud_player_source_binding;
+CREATE TRIGGER cloud_player_source_binding AFTER INSERT ON cloud_device_owner BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
+        SELECT h.id FROM match_header h JOIN cloud_metadata p
+            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND instr(h.lineup_json, '"' || p.entity_id || '"') > 0
+        UNION SELECT a.match_id FROM match_assignment a JOIN cloud_metadata p
+            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND (a.player_id = p.entity_id OR instr(a.player_json, '"' || p.entity_id || '"') > 0)
+    );
+END;
+
+CREATE VIEW replica_readable_player AS
+SELECT p.id FROM player p WHERE
+NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.activated' AND value = 'true')
+OR EXISTS (SELECT 1 FROM local_identity i, replica_current_context c WHERE i.scope_id = c.scope_id AND i.self_id = p.id)
+OR EXISTS (SELECT 1 FROM cloud_metadata m, replica_current_context c
+WHERE m.kind = 'PLAYER' AND m.entity_id = p.id AND m.writer_profile_id = c.account_key)
+OR EXISTS (SELECT 1 FROM cloud_metadata m JOIN local_source s ON s.device_id = m.source_device_id
+LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id, replica_current_context c
+WHERE m.kind = 'PLAYER' AND m.entity_id = p.id AND (o.profile_id = c.account_key OR (o.profile_id IS NULL AND s.scope_id = c.scope_id)))
+OR EXISTS (SELECT 1 FROM match_header h JOIN replica_readable_match r ON r.match_id = h.id
+WHERE instr(h.lineup_json, '"' || p.id || '"') > 0)
+OR EXISTS (SELECT 1 FROM match_assignment a JOIN replica_readable_match r ON r.match_id = a.match_id WHERE a.player_id = p.id);
+
+CREATE INDEX match_event_redaction ON match_event(type, id);

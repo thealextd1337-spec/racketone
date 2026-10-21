@@ -139,6 +139,7 @@ data class PushBatch(
     val players: List<PlayerDto> = emptyList(),
     val matches: List<MatchDto> = emptyList(),
     val events: List<EventRow> = emptyList(),
+    val lifecycle: CloudPushLifecycle? = null,
 ) {
     companion object {
         const val MAX_EVENTS_PER_PUSH = 500
