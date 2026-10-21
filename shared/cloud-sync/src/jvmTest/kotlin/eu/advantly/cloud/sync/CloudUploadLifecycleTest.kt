@@ -550,6 +550,101 @@ class CloudUploadLifecycleTest {
             }
         }
 
+    /** 40001, danach eine beendete Freigaberunde mit bestätigtem Upload; liefert den Runner. */
+    private suspend fun Fixture.releasedRestartLock(): CloudUploadRunner {
+        pull(1)
+        event(LOCAL, 1)
+        bind()
+        restartWhen = { true }
+        val runner = runner()
+        assertEquals("restart_required", runner.uploadNow().failure?.reason)
+        restartWhen = { false }
+        pull(1)
+        assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+        assertEquals(2, bodies.size)
+        return runner
+    }
+
+    @Test
+    fun laterPullRoundAfterAReleasedRestartLockDoesNotBlockAgain(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                val runner = f.releasedRestartLock()
+                f.event(LOCAL, 2)
+                // Neue Runde ohne targetEpoch: das letzte abgeschlossene G bleibt gültig, die alte Sperre ist erledigt.
+                f.pull(1, finish = false)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(CloudPushLifecycle(1, mapOf(LOCAL to 0)), f.batches.last().lifecycle)
+                assertEquals(3, f.bodies.size)
+                assertEquals(0, f.data.cloud.pendingCount())
+                // Auch eine neue Instanz liest die erledigte Sperre nicht als offen.
+                f.event(LOCAL, 3)
+                val restarted = LocalData(f.driver)
+                assertEquals(
+                    listOf("$LOCAL-e3"),
+                    restarted.cloudUploads
+                        .capture(restarted.cloudUploads.activate("alice"), 500)
+                        .events
+                        .map { it.id },
+                )
+            }
+        }
+
+    @Test
+    fun uploadInFlightWhileARoundStartsAfterAReleasedRestartLockIsNotResent(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                val runner = f.releasedRestartLock()
+                f.event(LOCAL, 2)
+                f.hold = CompletableDeferred()
+                val upload = async { runner.uploadNow() }
+                withTimeout(5_000) { f.sent.await() }
+                f.pull(1, finish = false)
+                f.hold!!.complete(Unit)
+                assertEquals(CloudUploadOutcome.DRAINED, upload.await().outcome)
+                f.hold = null
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(3, f.bodies.size)
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun roundStartedBeforeTheRestartDoesNotReleaseTheLock(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.bind()
+                // Die Runde läuft schon, bevor der 40001 eintrifft; ihr Ende beweist keinen Pull danach.
+                f.pull(1, finish = false)
+                f.restartWhen = { true }
+                val runner = f.runner()
+                assertEquals("restart_required", runner.uploadNow().failure?.reason)
+                f.restartWhen = { false }
+                f.data.cloudPulls.finishRound(
+                    "alice",
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .runSerial,
+                ) {}
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(1, f.bodies.size)
+                val restarted = LocalData(f.driver)
+                val session = restarted.cloudUploads.activate("alice")
+                val locked = restarted.cloudUploads.capture(session, 500)
+                assertTrue(locked.events.isEmpty() && locked.players.isEmpty())
+                f.pull(1)
+                assertEquals(
+                    listOf("$LOCAL-e1"),
+                    restarted.cloudUploads
+                        .capture(session, 500)
+                        .events
+                        .map { it.id },
+                )
+            }
+        }
+
     @Test
     fun playerOnlyRestartIsNotResentInALoop(): Unit =
         runBlocking {

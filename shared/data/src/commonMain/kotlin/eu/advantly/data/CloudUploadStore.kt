@@ -189,6 +189,8 @@ class CloudUploadStore internal constructor(
                             StoredEvent(id, match, device, seq, lamport, payload, at, parent, type, confirmed == 1L)
                         }.executeAsList()
                 val blocked = page.firstOrNull { !proof.admits(it.matchId) }?.matchId
+                // shortcut: verwirft je blockiertem Match den Seitenrest (bis B × limit Zeilen); Keyset (match, lamport, device, id)
+                // einführen, sobald D1 Access-Zeilen schreibt und viele Matches blockiert sein können (Review r2 P3-2).
                 events += page.takeWhile { it.matchId != blocked }
                 afterMatch = blocked ?: break
             }
@@ -352,6 +354,7 @@ class CloudUploadStore internal constructor(
     /**
      * Profilweite Neustartsperre: gespeichert ist die Pull-Runde beim 40001; erst eine danach begonnene, beendete Runde
      * gibt frei. Ein unlesbarer Wert sperrt bis zur nächsten Runde und wird dafür mit der aktuellen Runde überschrieben.
+     * Nach der Freigabe bleibt der Wert stehen, wirkt aber nicht mehr: spätere Runden lassen das letzte G gültig.
      */
     private fun restartPending(
         profileId: String,
@@ -359,7 +362,8 @@ class CloudUploadStore internal constructor(
     ): Boolean {
         val stored = settings.get(restartKey(profileId)) ?: return false
         val round = stored.toLongOrNull() ?: progress.checkRound.also { settings.putLong(restartKey(profileId), it) }
-        return progress.roundActive || progress.checkRound <= round
+        // beginRun startet nur ohne aktive Runde; checkRound >= round + 2 beweist also, dass round + 1 beendet ist.
+        return progress.checkRound <= round || (progress.roundActive && progress.checkRound == round + 1)
     }
 
     internal fun deferUntilPull(snapshot: CloudUploadSnapshot) {
