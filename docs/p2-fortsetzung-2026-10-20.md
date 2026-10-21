@@ -1810,3 +1810,30 @@ grün bis auf die fünf Plattformlücken; 250 303/303; 181/190 Exit 0.
   bei der Kontolöschung. Der Genesis-Manifestinhalt ist in 220 geprüft (1324).
   6 von 318 neuen 250-Assertions waren gegen 77b6317 rot. Root-SQL-Lauf
   `full-r10-late-p3.log`.
+- CI auf PR #75 (`7799f1c`): alle fünf Jobs grün. Das gilt für D1, U4, eigene
+  Matches, 00800, 00900 und 01000 samt Nachschärfung, für den Lesemustertest mit
+  expliziter Frist, für Kotlin/Native/Apple und für den Supabase-Stack mit pgTAP
+  und allen Rennskripten einschließlich 250.
+- Löschpfad-Performance `b854b9d` (Worktree `t3-b90a697f`): Ursache belegt.
+  `redaction_uuid` lief 100 027-mal im Ausnahmepfad (6,1 von 6,2 s) mit Seq Scans
+  in 00700 Z. 285/303/558, dazu globale Kontextaufrufe je pensionierter ID.
+  Migration 01100: partieller Ausdrucksindex auf UUID-förmige Slots, UNION-Zweige
+  statt OR, Kandidatensuche vor dem unveränderten Kontext-Helfer. DELETE mit
+  2 Self-IDs ~11 ms und mit 205 ~106 ms bis 100 000 Textslots, vorher Timeout ab
+  20 000/50 000. Schattenvergleich alt/neu: 100 Löschungen, 0 Abweichungen, zwei
+  Mutationen erkannt. Keine Erwartungsänderung in 210/220/240/250. Probe-Merge
+  mit `d1f0722` konfliktfrei. Unabhängige Review
+  `advantly-20261021-server-delete-textslot-perf-review-r1` läuft.
+- Review zu `b854b9d`: **Freigabe**, kein P1/P2, vier optionale P3. Bericht
+  `%TEMP%/review-b854b9d-20261021/review-report.txt`. Eigener Schattenvergleich
+  mit 26 Schreibweisen und Grenzfällen (N7, nur über Events erreichbare IDs, leere
+  Matches, Profil-FK auf das Opfer): 180 Löschungen, 360 Vergleiche, 0
+  Abweichungen, mit freiem Planer und mit erzwungenem Index. Mutationen erkannt.
+  Indexgrenze 32–41 per 200 000 Fuzz-Mutationen belegt. Rechte identisch, keine
+  messbaren Upload-Kosten. Per Merge `b238556` übernommen. Root-SQL-Lauf grün bis
+  auf die Plattformlücken; 260 18/18; 181/190 Exit 0.
+- Folgeauftrag mit einem Worker nacheinander:
+  - P3-1 Join-Patch im Epochen-Update von 01100 (unveröffentlicht, direkt korrigiert)
+    sowie die Kommentare P3-2/P3-3;
+  - **vorbestehendes Löschrisiko:** `anonymize_profile` (00800) skaliert mit der
+    eigenen Historie, 7,7 s bei 25 000 eigenen Teilnehmerzeilen, gesamt 10,9 s.
