@@ -11,7 +11,9 @@
 -- unveränderte Helfer nur materialisierte Kandidatenmatches. Keine Prüfung entfällt, keine Budgetänderung,
 -- Owner/ACL/SECURITY DEFINER/search_path wie in 00600/00700 (CREATE OR REPLACE behält Owner und ACL).
 
--- Der Prädikatstest läuft vor dem Indexausdruck: Textslots kosten beim Schreiben keinen Ausnahmepfad.
+-- Der Prädikatstest läuft vor dem Indexausdruck: Textslots außerhalb von 32–41 Zeichen erreichen beim Schreiben den
+-- Ausnahmepfad nie. 32–41 Zeichen lange Nicht-UUIDs laufen bei jedem Insert und Nicht-HOT-Update hinein (≈30 µs/Zeile),
+-- gültige UUID-Slots kosten den Funktionsaufruf (≈17 µs/Zeile). Clientslots ('placeholder:'+UUID, 48 Zeichen) nie.
 create index match_participants_redaction_slot_idx on public.match_participants
   (private.redaction_uuid(slot_id)) where length(slot_id) between 32 and 41;
 
@@ -27,7 +29,11 @@ begin
     select unnest(v_retired) on conflict do nothing;
   -- 01100: statt redaction_other_profile_context(null,…) (ein Scan aller verknüpften Teilnehmer je ID) derselbe
   -- Helfer je Kandidatenmatch. Jede Zeile, die ihn wahr macht, hat einen lebenden fremden Profil-FK und verweist
-  -- per Profil-FK, Player-FK, Kontext oder UUID-Slot auf die ID – genau diese Zweige liefern die Kandidaten.
+  -- per Profil-FK, Player-FK, Kontext oder UUID-Slot auf die ID; die vier Zweige sind eine Obermenge davon.
+  -- Zweig 1 (Profil-FK) und Zweig 4 (UUID-Slot) ändern die Entscheidung nie: Eine lebende Profil-ID schließt
+  -- redaction_identity_is_live vorher aus, und der UUID-Slotbezug im Helfer verlangt Profil-FK = Owner bzw.
+  -- Player-Profil, für pensionierte IDs also old.id, das „<>old.id“ ausfiltert. Zweig 2 (Player-FK) wirkt nur ohne
+  -- Kontextzeile (Altbestand). Alle Zweige bleiben als Absicherung gegen künftige Helferänderungen.
   with candidates as materialized (
     select mp.profile_id as id,mp.match_id from public.match_participants mp
       where mp.profile_id=any(v_retired) and mp.profile_id<>old.id and not mp.deleted_profile
@@ -135,7 +141,11 @@ begin
       and private.redacted_event_identity(e.match_id,e.payload#>>'{player,id}')
       and (e.payload#>>'{player,displayName}' is distinct from 'Gelöschter Spieler' or e.redacted_at is null)
     returning e.match_id
-  ) update public.matches set redaction_epoch=redaction_epoch+1 where id in (select match_id from redacted);
+  -- Primärschlüssel aus der Treffermenge statt IN/Join: Die CTE-Schätzung ist immer 1 Zeile. Bei veralteter
+  -- matches-Statistik wählte der Planer für IN und Join einen Nested Loop über alle Matches (Matches × Treffer).
+  -- Je betroffenem Match weiterhin genau ein Anstieg.
+  ) update public.matches set redaction_epoch=redaction_epoch+1
+    where id=any(array(select distinct match_id from redacted));
   return old;
 end;
 $$;

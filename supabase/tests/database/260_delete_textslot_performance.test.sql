@@ -3,7 +3,7 @@
 -- Textslots laufen dort in den Ausnahmepfad. Hier: 205 Self-IDs und 505 Events wie 210, dazu 50 000 fremde
 -- Textslots (jede vierte mit lebendem Profil-FK) und einige UUID-Slots in allen PostgreSQL-Schreibweisen.
 begin;
-select plan(18);
+select plan(22);
 select tests.create_user('tsp_del');
 select tests.create_user('tsp_keep');
 
@@ -38,10 +38,13 @@ select cmp_ok((select count(*) from public.match_participants where match_id<>pg
 select ok((select i.indisvalid and i.indisready and pg_get_expr(i.indpred,i.indrelid) like '%length(slot_id)%32%41%'
   from pg_index i where i.indexrelid='public.match_participants_redaction_slot_idx'::regclass),
   'Partial UUID-slot index is valid and covers only 32..41 characters');
--- Grenzen des Indexprädikats: 32 und 41 Zeichen sind gültige Eingaben, 31 und 42 nie.
-select is(private.redaction_uuid(s) is not null,valid,'UUID input length bound: '||length(s))
+-- Grenzen des Indexprädikats: 32 und 41 Zeichen sind gültige Eingaben, 31 und 42 nie. uuid_in trimmt keinen
+-- Whitespace; täte es das, lägen gültige Slots mit Leerzeichen außerhalb des Prädikats.
+select is(private.redaction_uuid(s) is not null,valid,'UUID input length bound: '||length(s)||' '||to_json(s))
   from (values (repeat('a',32),true),('{aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa}',true),(repeat('a',31),false),
-    ('{aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa}a',false),(repeat('a',33),false)) v(s,valid);
+    ('{aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa}a',false),(repeat('a',33),false),
+    (' '||repeat('a',32),false),(repeat('a',32)||' ',false),(E'	'||repeat('a',32),false),
+    ('{aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa} ',false)) v(s,valid);
 
 create temp table before_matches as select id,redaction_epoch from public.matches;
 analyze public.match_participants;
