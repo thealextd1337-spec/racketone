@@ -74,6 +74,8 @@ def backfill_roundtrip(owner):
         owner.execute(original("20261018000600_cloud_lifecycle_redactions.sql", "private.capture_profile_redactions"))
         owner.execute("drop index public.match_events_redaction_legacy_idx,public.match_events_redaction_v2_idx,"
                       "public.match_events_redaction_lineup_idx")
+        # 01100 setzt auf 00700 auf (Index über redaction_uuid) und gehört nicht zum 006-Zustand.
+        owner.execute("drop index public.match_participants_redaction_slot_idx")
         for signature in ("redaction_uuid(text)", "redacted_player_identity(text)", "guard_push_lifecycle(uuid,jsonb)",
                           "guard_redacted_names()", "redact_linked_names()", "redacted_profile_identity(text)",
                           "redaction_identity_is_live(uuid)", "redacted_event_identity(uuid,text)",
