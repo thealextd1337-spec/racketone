@@ -228,7 +228,12 @@ fun CloudSyncRepository.storeDownloadedPlayer(
     }
 }
 
-/** Nur vom selben Konto materialisierte, vollständig saubere Cloud-Köpfe aktualisieren. */
+/**
+ * Nur vom selben Konto materialisierte, vollständig saubere Cloud-Köpfe aktualisieren. Ein eigener LOCAL/PEER-Kopf,
+ * dessen Quelle diesem Konto gehört und dessen Stand der Server vollständig per Ack bestätigt hat, gilt wie ein
+ * heruntergeladener: Der Serverstand wird übernommen, Herkunft und Upload-Recht bleiben. Offene lokale Änderungen
+ * werden nie überschrieben.
+ */
 internal fun CloudSyncRepository.materializePullMatch(
     record: MatchRecord,
     profileId: String,
@@ -242,12 +247,20 @@ internal fun CloudSyncRepository.materializePullMatch(
         return true
     }
     val kinds = listOf(CloudMetadataKind.HEADER, CloudMetadataKind.PARTICIPANTS, CloudMetadataKind.PROJECTION)
-    if (previousMaterializedVersion == null ||
-        database.cloudPullQueries.materializedOwner("MATCH", id).executeAsOneOrNull() != profileId ||
-        kinds.any {
-            val state = metadataState(it, id)
-            state == null || state.origin != CloudMetadataOrigin.CLOUD || state.selected.revision != state.uploadedRevision
-        }
+    val states = kinds.map { metadataState(it, id) }
+    val owner = database.cloudPullQueries.materializedOwner("MATCH", id).executeAsOneOrNull()
+    val own =
+        (owner == null || owner == profileId) &&
+            states.all {
+                it != null && (it.origin == CloudMetadataOrigin.LOCAL || it.origin == CloudMetadataOrigin.PEER) &&
+                    it.selected.revision == it.uploadedRevision && it.sourceDeviceId != null &&
+                    database.cloudUploadQueries.deviceOwner(it.sourceDeviceId).executeAsOneOrNull() == profileId
+            }
+    if (!own &&
+        (
+            previousMaterializedVersion == null || owner != profileId ||
+                states.any { it == null || it.origin != CloudMetadataOrigin.CLOUD || it.selected.revision != it.uploadedRevision }
+        )
     ) {
         return false
     }
@@ -269,7 +282,12 @@ internal fun CloudSyncRepository.materializePullMatch(
         DataJson.encodeToString(ScoreSummary.serializer(), record.score),
         id,
     )
-    kinds.forEach { database.cloudMetadataQueries.recordDownload(null, it.name, id) }
+    // Der lokale Kopf entspricht jetzt dem Server; eine eigene Herkunft behält ihr Upload-Recht.
+    if (own) {
+        database.cloudPullQueries.confirmOwnMaterialized(id)
+    } else {
+        kinds.forEach { database.cloudMetadataQueries.recordDownload(null, it.name, id) }
+    }
     return true
 }
 

@@ -1,6 +1,7 @@
 package eu.advantly.cloud.sync
 
 import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
@@ -14,11 +15,14 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.data.CloudMetadataKind
 import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.LocalData
 import eu.advantly.data.ReplicaAccessLevel
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
+import eu.advantly.data.createInMemoryJvmDriver
+import eu.advantly.data.metadataState
 import eu.advantly.data.toStoredEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -73,6 +77,35 @@ private class JointServer {
         var epoch = 0L
         val log = mutableListOf<PulledEvent>()
         val redactedIds = sortedSetOf<String>()
+
+        /** Zuletzt hochgeladener Kopf, Teilnehmer und Projektion (jeweils nur gesendete Teile); null = generischer Fremdkopf. */
+        var uploaded: MatchDto? = null
+    }
+
+    /** Wie `pull_matches`: hochgeladene Köpfe kommen zurück, Teilnehmernamen redigierter Identitäten bereinigt (00700). */
+    private fun pulled(match: Match): PulledMatch {
+        val base = pullMatch(match.id, match.version).copy(redactionEpoch = match.epoch.toInt())
+        val dto = match.uploaded ?: return base
+        val projection = dto.projection
+        return base.copy(
+            sport = dto.sport ?: base.sport,
+            discipline = dto.discipline ?: base.discipline,
+            format = dto.format ?: base.format,
+            meta = dto.meta ?: base.meta,
+            startedAt = dto.startedAt,
+            previousMatchId = dto.previousMatchId,
+            participants =
+                dto.participants?.map {
+                    val name = if (it.playerId in redactedPlayers) DELETED_NAME else it.displayName
+                    PulledParticipant(it.slotId, it.team, it.position, it.playerId, displayName = name)
+                } ?: base.participants,
+            status = projection?.status ?: base.status,
+            winner = projection?.winner,
+            resultReason = projection?.resultReason,
+            endedAt = projection?.endedAt,
+            summary = projection?.summary,
+            projectionEventCount = projection?.eventCount ?: 0,
+        )
     }
 
     private var clock = 0L
@@ -126,7 +159,7 @@ private class JointServer {
             val page = visible.take(limit)
             val more = visible.size > limit
             PullResponse(
-                page.map { pullMatch(it.id, it.version).copy(redactionEpoch = it.epoch.toInt()) },
+                page.map(::pulled),
                 cursor = if (more) page.last().version else maxOf(cursor, clock),
                 hasMore = more,
                 visibilityEpoch = generation(profile()),
@@ -211,7 +244,26 @@ private class JointServer {
         batch: PushBatch,
     ): PushResponse {
         fun match(id: String) = matches.getOrPut(id) { Match(id, mutableSetOf(profile)).also(::touch) }
-        batch.matches.forEach { touch(match(it.id)) }
+        batch.matches.forEach { dto ->
+            val m = match(dto.id)
+            val old = m.uploaded
+            m.uploaded =
+                if (old == null) {
+                    dto
+                } else {
+                    old.copy(
+                        sport = dto.sport ?: old.sport,
+                        discipline = dto.discipline ?: old.discipline,
+                        format = dto.format ?: old.format,
+                        meta = dto.meta ?: old.meta,
+                        startedAt = dto.startedAt ?: old.startedAt,
+                        previousMatchId = dto.previousMatchId ?: old.previousMatchId,
+                        participants = dto.participants ?: old.participants,
+                        projection = dto.projection ?: old.projection,
+                    )
+                }
+            touch(m)
+        }
         val canonicalized = mutableSetOf<String>()
         val events =
             batch.events.map { row ->
@@ -257,10 +309,13 @@ private class JointServer {
 }
 
 /** EINE LocalData (aktivierter Replikat-Store), EIN Mock-Server: D1 über [PullFixture], U4 über dieselbe Sitzung. */
-private class JointFixture : AutoCloseable {
-    val server = JointServer()
+private class JointFixture(
+    driver: SqlDriver = createInMemoryJvmDriver(),
+    /** Neustart: derselbe Server und dieselbe Datenbank, aber neue LocalData, neuer Runner und neue Bindung. */
+    val server: JointServer = JointServer(),
+) : AutoCloseable {
     val pull =
-        PullFixture(select = {
+        PullFixture(driver, select = {
             players.ensureSelf("Alex", 0) { PlayerId("me") }
             accountIdentities.initialize(SOURCE, "me", "PHONE")
             account("alice")
@@ -312,6 +367,48 @@ private class JointFixture : AutoCloseable {
             .value
 
     fun pending() = data.cloud.pendingCount()
+
+    fun ready(match: String) = access(match)?.ready == true
+
+    /** Kopfwerte an der Lesesperre vorbei. */
+    fun headerColumn(
+        match: String,
+        column: String,
+    ): String? =
+        pull.driver
+            .executeQuery(null, "SELECT $column FROM match_header WHERE id = '$match'", { c ->
+                QueryResult.Value(if (c.next().value) c.getString(0) else null)
+            }, 0)
+            .value
+
+    /** (revision, uploaded_revision, origin) einer Metadateneinheit. */
+    fun metadata(
+        kind: String,
+        id: String,
+    ): Triple<Long, Long, String>? =
+        data.cloud
+            .metadataState(
+                CloudMetadataKind.valueOf(kind),
+                id,
+            )?.let { Triple(it.selected.revision, it.uploadedRevision, it.origin.name) }
+
+    /** Zeilen in Events, Spielerverzeichnis, Matchkopf und Zuweisungen, die [text] enthalten (an der Lesesperre vorbei). */
+    fun localRowsContaining(text: String): Long =
+        pull.driver
+            .executeQuery(
+                null,
+                """
+                SELECT (SELECT count(*) FROM match_event WHERE instr(payload, '$text') > 0)
+                    + (SELECT count(*) FROM player WHERE instr(display_name, '$text') > 0)
+                    + (SELECT count(*) FROM match_header WHERE instr(lineup_json || meta_json, '$text') > 0)
+                    + (SELECT count(*) FROM match_assignment WHERE instr(coalesce(player_json, ''), '$text') > 0)
+            """,
+                { c ->
+                    c.next()
+                    QueryResult.Value(requireNotNull(c.getLong(0)))
+                },
+                0,
+            ).value
 
     fun serverEvents(match: String) = server.matches[match]?.log.orEmpty()
 
@@ -415,9 +512,12 @@ class CloudJointLifecycleTest {
                         ?.get(OWN),
                 )
                 assertEquals(0, f.pending())
-                // Produktbefund (Welle 3): ein eigenes LOCAL-Match materialisiert D1 nie, Readiness bleibt STALE_SNAPSHOT.
-                assertFalse(f.access(OWN)!!.ready)
-                assertFalse(f.readable(OWN))
+                // Der vollständig bestätigte eigene Kopf gilt als materialisiert: ready bei (G, E = 1), lesbar und beschreibbar.
+                assertTrue(f.access(OWN)!!.ready)
+                assertTrue(f.readable(OWN))
+                f.point(OWN, 3)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertTrue(f.serverEvents(OWN).any { it.id == "$OWN-e3" })
             }
         }
 
@@ -481,6 +581,13 @@ class CloudJointLifecycleTest {
                 )
                 assertEquals(0, f.pending())
                 assertEquals(1, f.serverEvents(OWN).count { it.id == "$OWN-e2" })
+                // Eigenes Match nach 00900: ready bei E = 1, lokal nur der bereinigte Name, nie der Klarname.
+                f.finishRound()
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                assertEquals(0, f.localRowsContaining("Klara"))
+                assertEquals(1, f.localRowsContaining(DELETED_NAME))
+                assertTrue(f.serverEvents(OWN).none { "Klara" in it.payload.toString() })
             }
         }
 
@@ -645,9 +752,176 @@ class CloudJointLifecycleTest {
                 )
                 assertEquals(0, f.server.restarts)
                 assertEquals(0, f.pending())
-                // Produktbefund (Welle 3): das eigene, schon hochgeladene Match wird nach dem ersten Pull unlesbar.
-                assertFalse(own.ready)
+                // Das eigene, schon hochgeladene Match bleibt nach dem ersten Pull lesbar (bestätigter Kopf, eigene Events).
+                assertTrue(f.access(OWN)!!.ready)
+                assertTrue(f.readable(OWN))
+            }
+        }
+
+    /** P1 Integrationspunkt B: eigenes Match lokal anlegen und zählen, hochladen, Pull, weiter zählen und hochladen. */
+    @Test
+    fun gOwnLocalMatchStaysReadableWritableAndUploadableAcrossUploadAndPull(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                f.point(OWN, 2)
+                assertTrue(f.readable(OWN))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                // Kopfherkunft bleibt eigen (Upload-Recht), Kopf vollständig bestätigt.
+                assertEquals("LOCAL", f.metadata("HEADER", OWN)!!.third)
+                listOf("HEADER", "PARTICIPANTS", "PROJECTION").forEach { kind ->
+                    val (revision, uploaded, _) = f.metadata(kind, OWN)!!
+                    assertEquals(revision, uploaded, kind)
+                }
+                f.point(OWN, 3)
+                assertTrue(f.readable(OWN))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertTrue(f.serverEvents(OWN).any { it.id == "$OWN-e3" })
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                // Ein neues lokales Event an einem bereiten Match ist weder Lücke noch Abdeckung.
+                f.point(OWN, 4)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                assertEquals(1, f.pending())
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertEquals(listOf(1L, 2L, 3L, 4L), f.serverEvents(OWN).map { it.deviceSeq })
+                assertEquals(4, f.data.events.count(OWN))
+                assertEquals(0, f.pending())
+                assertEquals(0, f.server.restarts)
+            }
+        }
+
+    @Test
+    fun hUnconfirmedLocalHeaderChangeIsNotOverwrittenByTheCloudHeader(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                // Neuer lokaler Kopf, noch nicht hochgeladen; der Server kennt den alten.
+                f.data.matches.updateMeta(MatchId(OWN), MatchMeta(venue = "Halle Nord"))
+                val (revision, uploaded, _) = f.metadata("HEADER", OWN)!!
+                assertTrue(revision > uploaded)
+                f.finishRound()
+                assertTrue("Halle Nord" in f.headerColumn(OWN, "meta_json")!!)
+                assertEquals(Triple(revision, uploaded, "LOCAL"), f.metadata("HEADER", OWN))
+                // Unbestätigter Kopf ist kein Snapshotbeweis.
+                assertFalse(f.ready(OWN))
+                // Nach dem Ack liefert der Server genau diesen Kopf; erst jetzt Übernahme und ready.
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                assertTrue("Halle Nord" in f.headerColumn(OWN, "meta_json")!!)
+                assertEquals("LOCAL", f.metadata("HEADER", OWN)!!.third)
+            }
+        }
+
+    @Test
+    fun iForeignDeviceUploadPlusOwnConfirmedEventsGiveExactCoverage(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                f.point(OWN, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                // Ein weiteres Gerät (z. B. Mitzähler) lädt in dasselbe Match hoch.
+                val match = f.server.matches.getValue(OWN)
+                match.log += pullEvent(1, OWN, match.log.size + 1L).copy(id = uuid("remote-1"))
+                f.server.touch(match)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                assertEquals(3, f.data.events.count(OWN))
+            }
+        }
+
+    @Test
+    fun jForgedOwnEventWithWrongIdNeverCountsAsCoverage(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                // Server hat (OWN, SOURCE, 2) unter anderer ID; lokal steht (OWN, SOURCE, 2) mit gefälschtem Ack.
+                val match = f.server.matches.getValue(OWN)
+                match.log += pullEvent(2, OWN, match.log.size + 1L).copy(id = uuid("server-2"), deviceId = SOURCE)
+                f.server.touch(match)
+                f.point(OWN, 2)
+                f.data.cloud.acknowledge(setOf("$OWN-e2"))
+                assertEquals(0, f.pending())
+                f.finishRound()
+                assertFalse(f.ready(OWN))
                 assertFalse(f.readable(OWN))
+                assertTrue(f.data.cloudPulls.failedEventJobs("alice") > 0)
+            }
+        }
+
+    @Test
+    fun kOwnMatchReadinessSurvivesRestartAndKeepsScoring(): Unit =
+        runBlocking {
+            val first = JointFixture()
+            first.pull.bind()
+            first.finishRound()
+            first.createMatch(OWN)
+            assertEquals(CloudUploadOutcome.DRAINED, first.upload().uploadNow().outcome)
+            first.finishRound()
+            assertTrue(first.ready(OWN))
+            // Neustart: neue LocalData, neuer Runner, neue Bindung auf derselben Datenbank.
+            JointFixture(first.pull.driver, first.server).use { f ->
+                f.pull.bind()
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                f.point(OWN, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertEquals(2, f.data.events.count(OWN))
+            }
+        }
+
+    @Test
+    fun lAccountSwitchAToBToANeverLetsBAdoptOrCoverAsOwnMatch(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                // Bob ist Mitglied desselben Matches, aber nicht Eigentümer der Kopfquelle.
+                f.server.matches
+                    .getValue(OWN)
+                    .members += "bob"
+                f.switchTo("bob")
+                assertFalse(f.readable(OWN))
+                f.finishRound("bob")
+                assertFalse(f.ready(OWN))
+                assertFalse(f.readable(OWN))
+                assertNull(
+                    f.data.cloudPulls
+                        .snapshot("bob", CloudPullEntityKind.MATCH, OWN)
+                        ?.materializedVersion,
+                )
+                assertEquals("LOCAL", f.metadata("HEADER", OWN)!!.third)
+                f.switchTo("alice")
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                f.point(OWN, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertTrue(f.serverEvents(OWN).any { it.id == "$OWN-e2" })
             }
         }
 
@@ -664,7 +938,7 @@ class CloudJointLifecycleTest {
                         f.pull.bind()
                         (1..205).forEach { f.server.foreign(uuid("m$it"), 1) }
                         f.createMatch(OWN)
-                        // Nach dem ersten Pull ist das eigene Match nicht mehr beschreibbar (Produktbefund), also vorher anhängen.
+                        // Vor dem Pull anhängen: nur dieses Event bleibt bis zum 40001 ausstehend.
                         f.point(OWN, 2)
                         f.upload(maxEvents = 1).uploadNow()
                         assertTrue(f.serverEvents(OWN).none { it.id == "$OWN-e2" })
@@ -720,4 +994,5 @@ class CloudJointLifecycleTest {
     }
 }
 
-private const val SOURCE = "phone-source"
+// Echte Geräte-IDs sind UUIDs; der Readiness-Vektor weist andere zurück.
+private val SOURCE = uuid("phone-source")
