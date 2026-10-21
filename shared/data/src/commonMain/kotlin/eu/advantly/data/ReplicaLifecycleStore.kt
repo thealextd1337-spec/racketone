@@ -178,8 +178,24 @@ class ReplicaLifecycleStore internal constructor(
         return ids.all { readablePlayer(it.jsonPrimitive.content) }
     }
 
+    /**
+     * Schreibspur eigener Matches (Vertrag P1-1): Die per UID dem aktuellen Konto gebundene Quelle darf an eigenen Matches
+     * unabhängig von ready schreiben (Access fehlt oder MEMBER beim aktuellen G); Events, Projektion und Kopf aus ihr offenbaren
+     * nichts, was die Sitzung nicht schon hält. Der Verification-Hold der Wiederherstellung ist hier nicht sichtbar
+     * (Host-Gate): Pull und Session dürfen vor abgeschlossener Restore-Prüfung nicht laufen, der Beweis stammt aus
+     * `cloud_device_owner`.
+     */
+    private fun ownWritable(
+        matchId: String,
+        deviceId: String?,
+    ): Boolean = queries.ownWritable(matchId, deviceId).executeAsOne() != 0L
+
+    internal fun requireWritable(matchId: String) {
+        check(!activated || readable(matchId) || ownWritable(matchId, null)) { "Replikat ist nicht zum Schreiben freigegeben" }
+    }
+
     internal fun requireAppend(event: StoredEvent) {
-        if (!activated || readable(event.matchId)) return
+        if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return
         // Nur die belegte lokale Erzeugung darf ohne Cloudstand beginnen, kein fremder Punkt.
         check(!isCloudSeen(event.matchId) && queries.hasLifecycle(event.matchId).executeAsOne() == 0L)
         if (database.matchEventQueries.countForMatch(event.matchId).executeAsOne() != 0L) {

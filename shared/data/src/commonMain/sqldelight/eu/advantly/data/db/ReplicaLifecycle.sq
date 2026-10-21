@@ -66,6 +66,18 @@ FROM cloud_metadata m JOIN local_source s ON s.device_id = m.source_device_id
 LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
 WHERE m.kind = 'HEADER' AND m.origin IN ('LOCAL','PEER');
 
+-- Eigene Matches des aktuellen Kontos: Kopfquelle per UID gebunden (nie über Namen), Access fehlt oder ist MEMBER beim
+-- aktuellen G. FEED, ABSENT, UNKNOWN, ein älteres G, fremde Konten und ungebundene Quellen fallen heraus.
+CREATE VIEW replica_own_match AS
+SELECT m.entity_id AS match_id FROM cloud_metadata m
+JOIN local_source s ON s.device_id = m.source_device_id
+JOIN cloud_device_owner o ON o.device_id = s.device_id
+JOIN replica_current_context c ON o.profile_id = c.account_key
+WHERE m.kind = 'HEADER' AND m.origin IN ('LOCAL','PEER')
+AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
+    AND (a.access != 'MEMBER' OR a.generation IS NOT (SELECT coalesce(p.target_epoch, p.visibility_epoch)
+        FROM cloud_pull_profile p WHERE p.profile_id = c.account_key)));
+
 CREATE VIEW replica_readable_match AS
 SELECT m.entity_id AS match_id FROM cloud_metadata m
 WHERE m.kind = 'HEADER' AND (
@@ -73,6 +85,14 @@ WHERE m.kind = 'HEADER' AND (
     OR EXISTS (SELECT 1 FROM replica_access a, replica_current_context c
         WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
         AND a.generation IS NOT NULL AND a.access = 'MEMBER' AND a.ready = 1)
+    -- Lesespur eigener Matches ohne ready: nur ohne ausstehende Redaktion (angewandtes E ≥ Katalog-E, kein offener Transfer).
+    OR EXISTS (SELECT 1 FROM replica_own_match o, replica_current_context c WHERE o.match_id = m.entity_id
+        AND coalesce((SELECT r.applied_epoch FROM replica_redaction_state r
+            WHERE r.account_key = c.account_key AND r.match_id = m.entity_id), 0)
+            >= coalesce((SELECT p.redaction_observed FROM cloud_pull_snapshot p
+            WHERE p.profile_id = c.account_key AND p.kind = 'MATCH' AND p.entity_id = m.entity_id), 0)
+        AND NOT EXISTS (SELECT 1 FROM replica_transfer t
+            WHERE t.account_key = c.account_key AND t.match_id = m.entity_id AND t.completed = 0))
     OR (NOT EXISTS (SELECT 1 FROM replica_cloud_seen s WHERE s.match_id = m.entity_id)
         AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.match_id = m.entity_id)
         AND EXISTS (SELECT 1 FROM replica_local_match l, replica_current_context c
@@ -99,6 +119,11 @@ notReadyBefore:
 UPDATE replica_access SET ready = 0 WHERE account_key = ? AND generation < ? AND ready = 1;
 readable:
 SELECT count(*) FROM replica_readable_match WHERE match_id = ?;
+-- Schreibspur: Event der eigenen Quelle [deviceId] bzw. (ohne Gerät) Kopf/Projektion der aktiven lokalen Quelle.
+ownWritable:
+SELECT count(*) FROM replica_own_match w, local_source s, cloud_device_owner o, replica_current_context c
+WHERE w.match_id = :matchId AND o.device_id = s.device_id AND o.profile_id = c.account_key
+AND s.device_id = coalesce(:deviceId, (SELECT i.device_id FROM local_identity i WHERE i.scope_id = c.scope_id));
 localProof:
 SELECT count(*) FROM replica_local_match l, replica_current_context c
 WHERE l.match_id = :matchId AND (l.profile_id = c.account_key OR (l.profile_id IS NULL

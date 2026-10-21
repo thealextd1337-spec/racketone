@@ -269,10 +269,6 @@ UPDATE match_header SET sport = ?, discipline = ?, format_json = ?, lineup_json 
     status = ?, previous_match_id = ?, updated_at_ms = ?, winner = ?, result_reason = ?, sets_won_a = ?, sets_won_b = ?, score_json = ?
 WHERE id = ?;
 
--- Übernommener Serverstand eines vollständig bestätigten eigenen Kopfs: nichts ausstehend, Herkunft und Schreiber bleiben.
-confirmOwnMaterialized:
-UPDATE cloud_metadata SET uploaded_revision = revision WHERE entity_id = ? AND kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION');
-
 updatePullPlayerWriter:
 UPDATE cloud_metadata SET writer_profile_id = ? WHERE kind = 'PLAYER' AND entity_id = ? AND origin = 'CLOUD';
 

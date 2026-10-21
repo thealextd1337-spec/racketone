@@ -1,0 +1,459 @@
+package eu.advantly.data
+
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.End
+import eu.advantly.core.model.EventId
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ReceiveRight
+import eu.advantly.core.model.StartEnds
+import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoreEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * Vertragsergänzung eigene Matches (Integrator): Schreibspur unabhängig von ready, Lesespur nur bei angewandter Redaktion,
+ * der Pull schreibt den eigenen Kopf nie und belegt ihn nur bei feldgenau getragenem, bestätigtem Stand.
+ */
+class CloudOwnMatchLaneTest {
+    private val format = Presets.TENNIS_SINGLES_BO3.format()
+
+    // Rein lokale Kopffelder: weder firstServer noch receiveRight, startEnds oder updated_at_ms trägt der Server.
+    private val lineup =
+        Lineup(
+            listOf(PlayerId("me")),
+            listOf(PlayerId("guest")),
+            PlayerId("guest"),
+            ReceiveRight(b = PlayerId("guest")),
+            StartEnds(End.END_2),
+        )
+
+    private fun genesis(device: String = PHONE) =
+        ScoreEvent(EventId("genesis"), MatchId(MATCH), DeviceId(device), 1, 1, 1, null, MatchCreated(format, lineup)).toStoredEvent()
+
+    private fun point(
+        id: String,
+        device: String = PHONE,
+        seq: Long,
+    ) = StoredEvent(id, MATCH, device, seq, seq + 10, """{"type":"PointWon","side":"A"}""", type = "PointWon")
+
+    /** Eigenes Match von [creator]; [owned] Geräte werden an alice gebunden, [activateFirst] = Store vor der Anlage aktiv. */
+    private fun ownMatch(
+        driver: SqlDriver,
+        creator: String = PHONE,
+        owned: Set<String> = setOf(PHONE),
+        activateFirst: Boolean = true,
+    ): Pair<LocalData, CloudUploadSession> {
+        val data = LocalData(driver)
+        data.players.ensureSelf("Alex", 0) { PlayerId("me") }
+        data.accountIdentities.initialize(PHONE, "me", "PHONE")
+        data.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+        if (creator != PHONE) data.accountIdentities.recordSource(creator, "me", "WATCH", "legacy:$PHONE", local = false)
+        if (activateFirst) data.replicas.activate(data.replicas.captureContext()) {}
+        val session = data.cloudUploads.activate("alice")
+        if (owned.isNotEmpty()) data.cloudUploads.bindOwnedDevices(session, owned)
+        data.players.addGuest(PlayerId("guest"), "Bea", 0)
+        data.events.append(genesis(creator))
+        data.matches.insertIfAbsent(MatchId(MATCH), format, lineup, MatchMeta(venue = "Lokal"), 1)
+        data.matches.updateProgress(MatchId(MATCH), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 1), 7777)
+        if (!activateFirst) data.replicas.activate(data.replicas.captureContext()) {}
+        return data to session
+    }
+
+    /** Server-Ack für alles Ausgewählte, wie U4 nach erfolgreichem Push. */
+    private fun upload(
+        data: LocalData,
+        session: CloudUploadSession,
+    ) {
+        val snapshot = data.cloudUploads.capture(session, 100)
+        data.cloudUploads.acknowledge(snapshot, snapshot.events.mapTo(mutableSetOf()) { it.id }, metadata = snapshot.metadataRevisions)
+    }
+
+    /** Kopf wie `PullMapping.memberRecord`: firstServer = a.first(), updatedAt aus Start/Ende, nur getragene Felder. */
+    private fun head(
+        venue: String = "Lokal",
+        status: MatchStatus = MatchStatus.IN_PROGRESS,
+        score: ScoreSummary = ScoreSummary(eventCount = 1),
+    ) = MatchRecord(
+        MatchId(MATCH),
+        format,
+        Lineup(lineup.a, lineup.b, lineup.a.first()),
+        MatchMeta(venue = venue),
+        1,
+        1,
+        status,
+        score,
+        null,
+    )
+
+    /** Eine Katalogseite; Rückgabe ist die Laufnummer (null = Epochenwechsel hinter dem Cursor, Seite verworfen). */
+    private fun LocalData.catalog(
+        version: Long,
+        record: MatchRecord = head(),
+        access: String = "member",
+        epoch: Long = 0,
+        generation: Long = 1,
+    ): Long? {
+        val profile = accountIdentities.profile!!
+        val run = cloudPulls.beginRun(profile) {}.runSerial
+        val match =
+            CloudPullMatch(MATCH, version, """{"version":$version}""", access, 1, epoch, false, record.takeIf { access == "member" })
+        val page = CloudPullMetadataPage(listOf(match), emptyList(), emptyList(), version, false, generation)
+        return run.takeIf { cloudPulls.commitMetadata(profile, run, cloudPulls.progress(profile).cursor, page) {} }
+    }
+
+    private fun LocalData.proof() = cloudPulls.snapshot(accountIdentities.profile!!, CloudPullEntityKind.MATCH, MATCH)?.materializedVersion
+
+    private fun LocalData.readable() = replicas.canReadMember(replicas.captureContext(), MATCH)
+
+    private fun LocalData.ready() = replicas.access(replicas.captureContext(), MATCH)?.ready == true
+
+    private fun LocalData.count(
+        seq: Long,
+        device: String = PHONE,
+    ) {
+        events.append(point("p$device$seq", device, seq))
+        matches.updateProgress(MatchId(MATCH), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = seq.toInt()), 8000 + seq)
+    }
+
+    private fun LocalData.assertLocked(seq: Long = 2) {
+        assertFailsWith<IllegalStateException> { events.append(point("locked$seq", seq = seq)) }
+        assertFailsWith<IllegalStateException> {
+            matches.updateProgress(MatchId(MATCH), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 9), 9000)
+        }
+        assertFailsWith<IllegalStateException> { matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Fremd")) }
+        assertFalse(readable())
+        assertNull(matches.get(MatchId(MATCH)))
+    }
+
+    private fun raw(
+        driver: SqlDriver,
+        column: String,
+    ): String =
+        driver
+            .executeQuery(null, "SELECT $column FROM match_header WHERE id = '$MATCH'", { c ->
+                c.next()
+                QueryResult.Value(c.getString(0)!!)
+            }, 0)
+            .value
+
+    private fun row(driver: SqlDriver) =
+        listOf(
+            "lineup_json",
+            "meta_json",
+            "status",
+            "score_json",
+            "updated_at_ms",
+            "format_json",
+        ).associateWith { raw(driver, it) }
+
+    @Test
+    fun countingBetweenCatalogAndReadinessKeepsTheOwnMatchWritableAndReadable() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertEquals(1, data.proof())
+            assertFalse(data.ready())
+            assertTrue(data.readable())
+            data.count(2)
+            data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Halle"))
+            assertEquals(2, data.events.count(MATCH))
+            assertEquals(
+                "Halle",
+                data.matches
+                    .get(MatchId(MATCH))!!
+                    .meta.venue,
+            )
+        }
+    }
+
+    @Test
+    fun unconfirmedProjectionDuringThePullNeitherProvesNorBlocksCounting() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            data.count(2)
+            val before = row(driver)
+            assertNotNull(data.catalog(1))
+            assertNull(data.proof())
+            assertEquals(before, row(driver))
+            assertTrue(data.readable())
+            data.count(3)
+            assertEquals(3, data.events.count(MATCH))
+            assertEquals(
+                3,
+                data.matches
+                    .get(MatchId(MATCH))!!
+                    .score.eventCount,
+            )
+        }
+    }
+
+    /** P2-1: Seite mit älterem Serverstand nach dem Ack eines neueren lokalen Stands. */
+    @Test
+    fun staleCatalogAfterANewerAckNeitherRegressesNorProves() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Neu"))
+            data.matches.updateProgress(MatchId(MATCH), MatchStatus.FINISHED, ScoreSummary(eventCount = 9), 9000)
+            upload(data, session)
+            val before = row(driver)
+            assertNotNull(data.catalog(1, head(venue = "Lokal")))
+            assertEquals(before, row(driver))
+            assertTrue("Neu" in raw(driver, "meta_json"))
+            assertEquals("FINISHED", raw(driver, "status"))
+            assertNull(data.proof())
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .metadataRevisions
+                    .isEmpty(),
+            )
+            assertTrue(data.readable())
+            // Erst die Seite mit genau dem bestätigten Stand belegt den Snapshot.
+            assertNotNull(data.catalog(2, head(venue = "Neu", status = MatchStatus.FINISHED, score = ScoreSummary(eventCount = 9))))
+            assertEquals(2, data.proof())
+            assertEquals(before, row(driver))
+        }
+    }
+
+    /** Ein älterer Beleg wird von einer erneut gelieferten veralteten Seite entzogen, nicht bestätigt. */
+    @Test
+    fun staleRescanAfterANewerAckWithdrawsTheOldProof() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertEquals(1, data.proof())
+            data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Neu"))
+            upload(data, session)
+            // G-Wechsel erzwingt einen Neuscan ab null; derselbe Serverstand 1 kommt mit altem Inhalt zurück.
+            assertNull(data.catalog(1, generation = 2))
+            assertNotNull(data.catalog(1, head(venue = "Lokal"), generation = 2))
+            assertNull(data.proof())
+            assertTrue("Neu" in raw(driver, "meta_json"))
+            assertTrue(data.readable())
+        }
+    }
+
+    /** P2-2: Der Pull lässt lokale Kopffelder unberührt und belegt trotzdem. */
+    @Test
+    fun matchingCatalogKeepsLocalOnlyHeaderFields() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            val before = row(driver)
+            val participants = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, MATCH)
+            assertNotNull(data.catalog(1))
+            assertEquals(1, data.proof())
+            assertEquals(before, row(driver))
+            assertEquals("7777", raw(driver, "updated_at_ms"))
+            assertEquals(lineup, data.matches.get(MatchId(MATCH))!!.lineup)
+            assertEquals(participants, data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, MATCH))
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .metadataRevisions
+                    .isEmpty(),
+            )
+        }
+    }
+
+    @Test
+    fun anotherAccountGetsNeitherWriteNorReadLane() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.cloudUploads.deactivate()
+            data.accountIdentities.select("legacy:$PHONE", "bob", 0, "PHONE") { error("keine neue ID") }
+            data.assertLocked()
+            assertNotNull(data.catalog(1))
+            assertNull(data.proof())
+            data.assertLocked()
+            // A → B → A: zurück bei alice gilt die eigene Spur wieder.
+            data.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+            assertTrue(data.readable())
+            data.count(2)
+        }
+    }
+
+    @Test
+    fun foreignOrUnboundHeaderSourcesGetNoLane() {
+        // Kopfquelle gehört bob, aktiv ist alice: Mitgliedschaft allein öffnet keine Spur.
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver)
+            data.players.ensureSelf("Alex", 0) { PlayerId("me") }
+            data.accountIdentities.initialize(PHONE, "me", "PHONE")
+            data.accountIdentities.recordSource(BOB_DEVICE, "bob-self", "WATCH", "legacy:$PHONE", local = false)
+            data.cloudUploads.bindOwnedDevices(data.cloudUploads.activate("bob"), setOf(BOB_DEVICE))
+            data.cloudUploads.deactivate()
+            data.events.append(
+                ScoreEvent(
+                    EventId("genesis"),
+                    MatchId(MATCH),
+                    DeviceId(BOB_DEVICE),
+                    1,
+                    1,
+                    1,
+                    null,
+                    MatchCreated(format, Lineup(listOf(PlayerId("bob-self")), listOf(PlayerId("me")), PlayerId("bob-self"))),
+                ).toStoredEvent(),
+            )
+            data.matches.insertIfAbsent(MatchId(MATCH), format, lineup, MatchMeta(), 1)
+            data.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+            data.cloudUploads.bindOwnedDevices(data.cloudUploads.activate("alice"), setOf(PHONE))
+            data.replicas.activate(data.replicas.captureContext()) {}
+            assertEquals(BOB_DEVICE, data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH)!!.sourceDeviceId)
+            assertNotNull(data.catalog(1))
+            data.assertLocked()
+        }
+        // Eigene, aber nie gebundene Altquelle nach dem ersten Cloudkontakt.
+        createInMemoryJvmDriver().use { driver ->
+            val (data, _) = ownMatch(driver, owned = emptySet())
+            assertNotNull(data.catalog(1))
+            data.assertLocked()
+        }
+    }
+
+    @Test
+    fun feedAbsentAndAnOutdatedGenerationCloseTheLane() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1, access = "feed"))
+            data.assertLocked()
+        }
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            data.replicas.applyAccess(data.replicas.captureContext(), MATCH, 1, ReplicaAccessLevel.ABSENT) {}
+            data.assertLocked()
+        }
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.count(2)
+            // Neues G gesehen, das Match aber noch nicht neu katalogisiert: MEMBER gilt nur beim aktuellen G.
+            assertNull(data.catalog(2, generation = 2))
+            data.assertLocked(seq = 3)
+        }
+    }
+
+    /** E steigt am eigenen Match: Lesen erst nach vollständigem Transfer, Zählen der eigenen Quellen läuft weiter. */
+    @Test
+    fun redactionEpochRiseBlocksReadingUntilTheTransferButNotWriting() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            data.accountIdentities.recordSource(STRANGER, "stranger-self", "WATCH", "legacy:$PHONE", local = false)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertTrue(data.readable())
+            val run = assertNotNull(data.catalog(2, epoch = 1))
+            assertFalse(data.readable())
+            assertNull(data.matches.get(MatchId(MATCH)))
+            assertEquals(0, data.events.count(MATCH))
+            data.count(2)
+            data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Halle"))
+            // Eine ungebundene Quelle bekommt keine Schreibspur.
+            assertFailsWith<IllegalStateException> { data.events.append(point("stranger", STRANGER, 1)) }
+            val work = assertNotNull(data.cloudPulls.nextEventWork("alice", run))
+            val first = assertNotNull(data.cloudPulls.redactionWork(work, run))
+            assertFalse(data.cloudPulls.stageRedaction(work, run, first, 2, listOf("redacted-id"), emptyList(), true, false) {})
+            // Offener Transfer: weiterhin gesperrt, Zählen weiter möglich.
+            assertFalse(data.readable())
+            data.count(3)
+            val rest = assertNotNull(data.cloudPulls.redactionWork(work, run))
+            assertTrue(data.cloudPulls.stageRedaction(work, run, rest, 2, emptyList(), emptyList(), true, true) {})
+            assertTrue(data.readable())
+            assertFalse(data.ready())
+            assertEquals(3, data.events.count(MATCH))
+            assertEquals(
+                "Halle",
+                data.matches
+                    .get(MatchId(MATCH))!!
+                    .meta.venue,
+            )
+        }
+    }
+
+    /** Uhr als PEER-Kopfquelle des eigenen Kontos und Handy als zweite eigene Quelle im selben Match. */
+    @Test
+    fun watchHeaderAndSeveralOwnSourcesCountDuringThePull() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver, creator = WATCH, owned = setOf(PHONE, WATCH), activateFirst = false)
+            val header = data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH)!!
+            assertEquals(CloudMetadataOrigin.PEER, header.origin)
+            assertEquals(WATCH, header.sourceDeviceId)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertEquals(1, data.proof())
+            assertTrue(data.readable())
+            data.count(2, WATCH)
+            data.count(1, PHONE)
+            data.events.appendAll(listOf(point("w3", WATCH, 3), point("p2", PHONE, 2)))
+            assertEquals(5, data.events.count(MATCH))
+            // Auch bei gesperrtem Lesen (E steigt) schreiben beide eigenen Quellen weiter.
+            assertNotNull(data.catalog(2, epoch = 1))
+            assertFalse(data.readable())
+            data.count(4, WATCH)
+            data.count(3, PHONE)
+        }
+    }
+
+    /** Neustart zwischen Katalog-Commit und Readiness: neue LocalData auf derselben Datenbank. */
+    @Test
+    fun restartInTheMiddleOfThePullKeepsBothLanesAndReadinessCompletes() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            val restarted = LocalData(driver)
+            assertTrue(restarted.readable())
+            assertFalse(restarted.ready())
+            restarted.count(2)
+            // Der neue Prozess bindet einen neuen Lauf; Katalog und Eventaufträge der Runde bleiben.
+            val run = restarted.cloudPulls.beginRun("alice") {}.runSerial
+            val work = assertNotNull(restarted.cloudPulls.nextEventWork("alice", run))
+            restarted.cloudPulls.commitEvents(work, run, listOf(CloudPullReceipt(genesis(), 1)), {}, endOfStream = true)
+            val current = restarted.cloudPulls.eventWork("alice", MATCH)!!
+            assertEquals(
+                CloudPullReadinessResult.READY,
+                restarted.cloudPulls.applyReadiness(
+                    current,
+                    run,
+                    restarted.cloudPulls.readinessWork(current, run)!!,
+                    1,
+                    1,
+                    listOf(CloudPullWatermark(PHONE, 1, 1)),
+                ) {},
+            )
+            assertTrue(restarted.ready())
+            restarted.count(3)
+            assertEquals(3, restarted.events.count(MATCH))
+        }
+    }
+
+    private companion object {
+        const val MATCH = "own-match"
+        const val PHONE = "phone"
+        const val WATCH = "watch"
+        const val BOB_DEVICE = "bob-device"
+        const val STRANGER = "stranger"
+    }
+}

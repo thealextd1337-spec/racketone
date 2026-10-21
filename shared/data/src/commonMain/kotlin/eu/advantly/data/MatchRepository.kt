@@ -135,6 +135,8 @@ class MatchRepository internal constructor(
     private val assignments: (MatchId) -> Map<PlayerId, PlayerId>,
     private val requireInsert: (String) -> Unit = {},
     private val requireReadable: (String) -> Unit = {},
+    /** Schreibspur eigener Matches: Projektion und Kopf auch ohne Lesefreigabe (Vertrag P1-1). */
+    private val requireWritable: (String) -> Unit = requireReadable,
     private val created: (String) -> Unit = {},
 ) {
     /**
@@ -185,7 +187,7 @@ class MatchRepository internal constructor(
         score: ScoreSummary,
         updatedAtMs: Long,
     ) {
-        requireReadable(id.value)
+        requireWritable(id.value)
         queries.updateProgress(
             status = status.name,
             winner = score.winner?.name,
@@ -203,7 +205,7 @@ class MatchRepository internal constructor(
         id: MatchId,
         meta: MatchMeta,
     ) {
-        requireReadable(id.value)
+        requireWritable(id.value)
         queries.updateMeta(DataJson.encodeToString(MatchMeta.serializer(), meta), meta.surface?.name, meta.environment?.name, id.value)
     }
 

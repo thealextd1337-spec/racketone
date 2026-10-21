@@ -230,9 +230,9 @@ fun CloudSyncRepository.storeDownloadedPlayer(
 
 /**
  * Nur vom selben Konto materialisierte, vollständig saubere Cloud-Köpfe aktualisieren. Ein eigener LOCAL/PEER-Kopf,
- * dessen Quelle diesem Konto gehört und dessen Stand der Server vollständig per Ack bestätigt hat, gilt wie ein
- * heruntergeladener: Der Serverstand wird übernommen, Herkunft und Upload-Recht bleiben. Offene lokale Änderungen
- * werden nie überschrieben.
+ * dessen Quelle diesem Konto gehört, wird nie geschrieben: Lokal ist die Autorität, der Server hält nur die Kopie.
+ * Er gilt nur dann als materialisiert, wenn alle drei Teile per Ack bestätigt sind und der Server sie feldgenau trägt
+ * ([carriesOwnHeader]); sonst wird ein älterer Beleg dieses Kontos entzogen. So dreht eine veraltete Seite nie zurück.
  */
 internal fun CloudSyncRepository.materializePullMatch(
     record: MatchRecord,
@@ -248,19 +248,19 @@ internal fun CloudSyncRepository.materializePullMatch(
     }
     val kinds = listOf(CloudMetadataKind.HEADER, CloudMetadataKind.PARTICIPANTS, CloudMetadataKind.PROJECTION)
     val states = kinds.map { metadataState(it, id) }
-    val owner = database.cloudPullQueries.materializedOwner("MATCH", id).executeAsOneOrNull()
     val own =
-        (owner == null || owner == profileId) &&
-            states.all {
-                it != null && (it.origin == CloudMetadataOrigin.LOCAL || it.origin == CloudMetadataOrigin.PEER) &&
-                    it.selected.revision == it.uploadedRevision && it.sourceDeviceId != null &&
-                    database.cloudUploadQueries.deviceOwner(it.sourceDeviceId).executeAsOneOrNull() == profileId
-            }
-    if (!own &&
-        (
-            previousMaterializedVersion == null || owner != profileId ||
-                states.any { it == null || it.origin != CloudMetadataOrigin.CLOUD || it.selected.revision != it.uploadedRevision }
-        )
+        states.all {
+            it != null && (it.origin == CloudMetadataOrigin.LOCAL || it.origin == CloudMetadataOrigin.PEER) &&
+                it.sourceDeviceId != null && database.cloudUploadQueries.deviceOwner(it.sourceDeviceId).executeAsOneOrNull() == profileId
+        }
+    if (own) {
+        val carried = states.all { it!!.selected.revision == it.uploadedRevision } && carriesOwnHeader(record)
+        if (!carried) database.cloudPullQueries.materialized(null, profileId, "MATCH", id)
+        return carried
+    }
+    if (previousMaterializedVersion == null ||
+        database.cloudPullQueries.materializedOwner("MATCH", id).executeAsOneOrNull() != profileId ||
+        states.any { it == null || it.origin != CloudMetadataOrigin.CLOUD || it.selected.revision != it.uploadedRevision }
     ) {
         return false
     }
@@ -282,13 +282,29 @@ internal fun CloudSyncRepository.materializePullMatch(
         DataJson.encodeToString(ScoreSummary.serializer(), record.score),
         id,
     )
-    // Der lokale Kopf entspricht jetzt dem Server; eine eigene Herkunft behält ihr Upload-Recht.
-    if (own) {
-        database.cloudPullQueries.confirmOwnMaterialized(id)
-    } else {
-        kinds.forEach { database.cloudMetadataQueries.recordDownload(null, it.name, id) }
-    }
+    kinds.forEach { database.cloudMetadataQueries.recordDownload(null, it.name, id) }
     return true
+}
+
+/**
+ * Feldgenauer Vergleich des eigenen Kopfs mit dem, was der Server davon trägt (`PullMapping.memberRecord`):
+ * Format (mit Sport und Disziplin), Meta (mit Belag und Umgebung), Vorgänger, Start (= `created_at_ms`), Slot-IDs je Team in
+ * Positionsfolge, Status und Summary (mit Sieger, Grund, Sätzen). Nicht getragen und daher nie verglichen: `firstServer`,
+ * `receiveRight`, `startEnds`, `updated_at_ms`, Teilnehmernamen und Verknüpfungen (00700 bereinigt sie serverseitig, ohne
+ * Slots, Teams oder Positionen zu ändern). Abweichungen durch den Server (Vorgänger ohne Sichtrecht verworfen, Projektion
+ * „stale“ quittiert) ergeben keinen Beleg; die Lesespur eigener Matches hängt davon nicht ab.
+ */
+private fun CloudSyncRepository.carriesOwnHeader(record: MatchRecord): Boolean {
+    val local = database.matchHeaderQueries.selectById(record.id.value).executeAsOneOrNull() ?: return false
+    val lineup = DataJson.decodeFromString(Lineup.serializer(), local.lineup_json)
+    return record.format == DataJson.decodeFromString(MatchFormat.serializer(), local.format_json) &&
+        record.meta == DataJson.decodeFromString(MatchMeta.serializer(), local.meta_json) &&
+        record.previousMatchId?.value == local.previous_match_id &&
+        record.createdAtMs == local.created_at_ms &&
+        record.lineup.a == lineup.a &&
+        record.lineup.b == lineup.b &&
+        record.status.name == local.status &&
+        record.score == runCatching { DataJson.decodeFromString(ScoreSummary.serializer(), local.score_json) }.getOrNull()
 }
 
 /** `owned` ist die einzige Schreibrechtsquelle; auch ein Cloud-Self bleibt lokal ein Gast. */

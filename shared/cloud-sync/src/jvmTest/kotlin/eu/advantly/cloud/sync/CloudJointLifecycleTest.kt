@@ -7,6 +7,7 @@ import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.EventPayload
@@ -412,9 +413,12 @@ private class JointFixture(
 
     fun serverEvents(match: String) = server.matches[match]?.log.orEmpty()
 
-    fun createMatch(id: String) {
+    fun createMatch(
+        id: String,
+        opponent: PlayerId = PlayerId("guest"),
+    ) {
         val format = Presets.TENNIS_SINGLES_BO3.format()
-        val lineup = Lineup(listOf(PlayerId("me")), listOf(PlayerId("guest")), PlayerId("me"))
+        val lineup = Lineup(listOf(PlayerId("me")), listOf(opponent), PlayerId("me"))
         if (data.players.get(PlayerId("guest")) == null) data.players.addGuest(PlayerId("guest"), "Bea", 0)
         data.events.append(
             ScoreEvent(EventId("$id-e1"), MatchId(id), DeviceId(SOURCE), 1, 1, 1, null, MatchCreated(format, lineup)).toStoredEvent(),
@@ -430,12 +434,31 @@ private class JointFixture(
         StoredEvent("$match-e$seq", match, SOURCE, seq, seq, """{"type":"PointWon","side":"A"}""", type = "PointWon"),
     )
 
-    /** Legacy-Zuweisung mit Klarnamen; der Server kennt die Identität bereits als redigiert. */
+    fun progress(
+        match: String,
+        events: Int,
+    ) = data.matches.updateProgress(MatchId(match), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = events), 100L + events)
+
+    /** Zeilen in match_assignment mit Spieler-ID oder Text [text] (an der Lesesperre vorbei). */
+    fun assignmentRows(text: String): Long =
+        pull.driver
+            .executeQuery(
+                null,
+                "SELECT count(*) FROM match_assignment WHERE player_id = '$text' OR instr(coalesce(player_json, ''), '$text') > 0",
+                { c ->
+                    c.next()
+                    QueryResult.Value(requireNotNull(c.getLong(0)))
+                },
+                0,
+            ).value
+
+    /** Legacy-Zuweisung mit Klarnamen auf [slot]; nur ein Platzhalter-Slot ergibt eine echte match_assignment-Zeile. */
     fun assign(
         match: String,
         seq: Long,
         player: String,
         name: String,
+        slot: PlayerId = PlayerId("guest"),
     ) = data.events.append(
         StoredEvent(
             "$match-e$seq",
@@ -445,7 +468,7 @@ private class JointFixture(
             seq,
             CloudJson.encodeToString(
                 EventPayload.serializer(),
-                PlayerAssigned(PlayerId("guest"), Player(PlayerId(player), name), PlayerId("me")),
+                PlayerAssigned(slot, Player(PlayerId(player), name), PlayerId("me")),
             ),
             type = "PlayerAssigned",
         ),
@@ -528,9 +551,11 @@ class CloudJointLifecycleTest {
                 f.pull.bind()
                 f.finishRound()
                 f.server.redactedPlayers += KLARA
-                f.createMatch(OWN)
-                f.assign(OWN, 2, KLARA, "Klara")
+                f.createMatch(OWN, SLOT)
+                f.assign(OWN, 2, KLARA, "Klara", SLOT)
                 f.point(OWN, 3)
+                // Echte Zuweisung: ohne Verzeichniseintrag trägt die Legacy-Zeile den Klarnamen.
+                assertEquals(1, f.assignmentRows("Klara"))
                 val runner = f.upload(maxEvents = 2)
                 // Batch 1: Genesis und Zuweisung; der Server ersetzt den Namen und erhöht E von 0 auf 1 (00900).
                 runner.uploadNow()
@@ -586,7 +611,9 @@ class CloudJointLifecycleTest {
                 assertTrue(f.ready(OWN))
                 assertTrue(f.readable(OWN))
                 assertEquals(0, f.localRowsContaining("Klara"))
-                assertEquals(1, f.localRowsContaining(DELETED_NAME))
+                assertEquals(1, f.assignmentRows(KLARA))
+                assertEquals(1, f.assignmentRows(DELETED_NAME))
+                assertEquals(2, f.localRowsContaining(DELETED_NAME))
                 assertTrue(f.serverEvents(OWN).none { "Klara" in it.payload.toString() })
             }
         }
@@ -864,7 +891,8 @@ class CloudJointLifecycleTest {
                 assertEquals(0, f.pending())
                 f.finishRound()
                 assertFalse(f.ready(OWN))
-                assertFalse(f.readable(OWN))
+                // Lesespur: Abdeckung betrifft am eigenen Match die Integrität (ready), nicht die Lesbarkeit.
+                assertTrue(f.readable(OWN))
                 assertTrue(f.data.cloudPulls.failedEventJobs("alice") > 0)
             }
         }
@@ -922,6 +950,119 @@ class CloudJointLifecycleTest {
                 f.point(OWN, 2)
                 assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
                 assertTrue(f.serverEvents(OWN).any { it.id == "$OWN-e2" })
+            }
+        }
+
+    /** P1-1: Punkte, Projektion und Kopf an einem eigenen Match zwischen Katalogseite und Readiness, auch unbestätigt. */
+    @Test
+    fun mOwnLiveMatchKeepsCountingWhileAPullIsRunning(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                f.point(OWN, 2)
+                f.progress(OWN, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                // Laufende Projektion, noch nicht hochgeladen.
+                f.point(OWN, 3)
+                f.progress(OWN, 3)
+                f.catalogOnly()
+                assertTrue(
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .roundActive,
+                )
+                assertFalse(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                f.point(OWN, 4)
+                f.progress(OWN, 4)
+                f.data.matches.updateMeta(MatchId(OWN), MatchMeta(venue = "Halle"))
+                assertEquals(4, f.data.events.count(OWN))
+                f.finishRound()
+                assertTrue(f.readable(OWN))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue("Halle" in f.headerColumn(OWN, "meta_json")!!)
+                assertEquals("104", f.headerColumn(OWN, "updated_at_ms"))
+                assertEquals(listOf(1L, 2L, 3L, 4L), f.serverEvents(OWN).map { it.deviceSeq })
+                assertEquals(0, f.pending())
+                assertEquals(0, f.server.restarts)
+            }
+        }
+
+    /**
+     * Kontolöschung nach dem Upload (00600/00700): Der Server redigiert Name, Events und Matchidentität, E 0→1. Das eigene
+     * Match ist bis zum Transfer nicht lesbar, zählt aber weiter; danach steht der Klarname nirgends mehr, auch nicht im Verzeichnis.
+     */
+    @Test
+    fun nOwnMatchWithARealGuestIsScrubbedAfterAccountDeletionAndKeepsCounting(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.data.players.addGuest(PlayerId(KLARA), "Klara", 0)
+                f.createMatch(OWN, SLOT)
+                f.assign(OWN, 2, KLARA, "Klara", SLOT)
+                assertEquals(1, f.assignmentRows(KLARA))
+                assertEquals(2, f.localRowsContaining("Klara"))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                val match = f.server.matches.getValue(OWN)
+                f.server.redactedPlayers += KLARA
+                match.redactedIds += KLARA
+                match.log.replaceAll { e ->
+                    val person = e.payload["player"] as? JsonObject
+                    if (person?.get("id")?.jsonPrimitive?.content != KLARA) {
+                        e
+                    } else {
+                        val clean = JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))
+                        e.copy(payload = JsonObject(e.payload + ("player" to clean)), redacted = true)
+                    }
+                }
+                f.server.raiseEpoch(OWN)
+                f.catalogOnly()
+                assertFalse(f.readable(OWN))
+                f.point(OWN, 3)
+                f.progress(OWN, 3)
+                f.finishRound()
+                assertTrue(f.readable(OWN))
+                assertEquals(1, f.access(OWN)!!.redactionEpoch)
+                assertEquals(0, f.localRowsContaining("Klara"))
+                assertEquals(1, f.assignmentRows(KLARA))
+                assertEquals(3, f.data.events.count(OWN))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.serverEvents(OWN).any { it.id == "$OWN-e3" })
+                assertEquals(0, f.server.restarts)
+            }
+        }
+
+    /** Neustart zwischen Katalog-Commit und Readiness: gleiche Datenbank, neuer Runner, Zählen ohne Unterbrechung. */
+    @Test
+    fun oRestartBetweenCatalogAndReadinessKeepsCounting(): Unit =
+        runBlocking {
+            val first = JointFixture()
+            first.pull.bind()
+            first.finishRound()
+            first.createMatch(OWN)
+            assertEquals(CloudUploadOutcome.DRAINED, first.upload().uploadNow().outcome)
+            first.catalogOnly()
+            assertFalse(first.ready(OWN))
+            JointFixture(first.pull.driver, first.server).use { f ->
+                f.pull.bind()
+                assertFalse(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                f.point(OWN, 2)
+                f.progress(OWN, 2)
+                f.finishRound()
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertEquals(listOf(1L, 2L), f.serverEvents(OWN).map { it.deviceSeq })
             }
         }
 
@@ -991,6 +1132,7 @@ class CloudJointLifecycleTest {
         val OTHER = uuid("other")
         val FOREIGN = uuid("foreign")
         val KLARA = uuid("klara")
+        val SLOT = Placeholders.id("opponent")
     }
 }
 

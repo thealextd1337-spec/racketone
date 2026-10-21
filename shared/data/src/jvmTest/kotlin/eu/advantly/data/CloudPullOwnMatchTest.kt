@@ -85,12 +85,16 @@ class CloudPullOwnMatchTest {
     private fun LocalData.meta() = matches.get(MatchId(MATCH))?.meta
 
     @Test
-    fun confirmedOwnHeaderIsTakenOverAndKeepsItsUploadRight() {
+    fun confirmedOwnHeaderIsProvenWithoutBeingOverwrittenAndKeepsItsUploadRight() {
         createInMemoryJvmDriver().use { driver ->
             val (data, session) = ownMatch(driver)
             upload(data, session)
+            // Abweichender Serverstand: kein Beleg, lokal bleibt Autorität.
             data.catalog(1, venue = "Server")
-            assertEquals(1, data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!.materializedVersion)
+            assertNull(data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!.materializedVersion)
+            assertTrue("Lokal" in queryHeaderMeta(driver))
+            data.catalog(2, venue = "Lokal")
+            assertEquals(2, data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!.materializedVersion)
             val header = data.header()
             assertEquals(CloudMetadataOrigin.LOCAL, header.origin)
             assertEquals(PHONE, header.sourceDeviceId)
@@ -106,7 +110,7 @@ class CloudPullOwnMatchTest {
             )
             // Herkunft bleibt eigen: eine spätere lokale Änderung wird wieder für dieses Konto hochgeladen.
             data.replicas.markReady(data.replicas.captureContext(), MATCH, 1, 0) {}
-            assertEquals("Server", data.meta()!!.venue)
+            assertEquals("Lokal", data.meta()!!.venue)
             data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Neu"))
             assertTrue(
                 data.cloudUploads
