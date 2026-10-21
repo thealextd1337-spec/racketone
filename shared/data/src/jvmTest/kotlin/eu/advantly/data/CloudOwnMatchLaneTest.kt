@@ -56,6 +56,7 @@ class CloudOwnMatchLaneTest {
         owned: Set<String> = setOf(PHONE),
         activateFirst: Boolean = true,
         previous: MatchId? = null,
+        localPrevious: Boolean = false,
     ): Pair<LocalData, CloudUploadSession> {
         val data = LocalData(driver)
         data.players.ensureSelf("Alex", 0) { PlayerId("me") }
@@ -66,6 +67,12 @@ class CloudOwnMatchLaneTest {
         val session = data.cloudUploads.activate("alice")
         if (owned.isNotEmpty()) data.cloudUploads.bindOwnedDevices(session, owned)
         data.players.addGuest(PlayerId("guest"), "Bea", 0)
+        if (previous != null && localPrevious) {
+            data.events.append(
+                ScoreEvent(EventId("pred-genesis"), previous, DeviceId(PHONE), 1, 1, 1, null, MatchCreated(format, lineup)).toStoredEvent(),
+            )
+            data.matches.insertIfAbsent(previous, format, lineup, MatchMeta(venue = "Vorher"), 1)
+        }
         data.events.append(genesis(creator))
         data.matches.insertIfAbsent(MatchId(MATCH), format, lineup, MatchMeta(venue = "Lokal"), 1, previous)
         data.matches.updateProgress(MatchId(MATCH), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 1), 7777)
@@ -512,7 +519,48 @@ class CloudOwnMatchLaneTest {
         }
     }
 
-    /** Teil 2, P2-3: Der Server verwirft den Vorgänger (ohne Sichtrecht oder gelöscht): übernommen, danach belegt. */
+    /**
+     * Runde 4, P2-A: Der Server verwirft einen lokal vorhandenen Vorgänger nur, weil er noch nicht hochgeladen war
+     * (rpc_sync: Anlage ohne Sicht). Der Link bleibt lokal, der Kopf gilt trotzdem als getragen; ein späteres Update heilt.
+     */
+    @Test
+    fun predecessorDroppedWhileNotYetUploadedStaysLocalAndIsProven() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver, previous = MatchId(PRED), localPrevious = true)
+            upload(data, session)
+            val before = row(driver)
+            assertNotNull(data.catalog(1))
+            assertEquals(MatchId(PRED), data.matches.get(MatchId(MATCH))!!.previousMatchId)
+            assertEquals(PRED, raw(driver, "previous_match_id"))
+            assertEquals(1, data.proof())
+            assertEquals(before, row(driver))
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .metadataRevisions
+                    .isEmpty(),
+            )
+        }
+    }
+
+    /** Runde 4, P3-A: Auch ohne Ack seit dem Beleg dreht eine Seite mit weniger Events Status und Summary nie zurück. */
+    @Test
+    fun newerServerHeadWithFewerEventsIsNeverAdopted() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            data.matches.updateProgress(MatchId(MATCH), MatchStatus.FINISHED, ScoreSummary(eventCount = 9), 7777)
+            upload(data, session)
+            assertNotNull(data.catalog(1, head(status = MatchStatus.FINISHED, score = ScoreSummary(eventCount = 9))))
+            assertEquals(1, data.proof())
+            val before = row(driver)
+            assertNotNull(data.catalog(2, head(status = MatchStatus.IN_PROGRESS, score = ScoreSummary(eventCount = 5))))
+            assertEquals("FINISHED", raw(driver, "status"))
+            assertEquals(before, row(driver))
+            assertNull(data.proof())
+        }
+    }
+
+    /** Teil 2, P2-3: Der Server verwirft einen lokal nicht (mehr) vorhandenen Vorgänger: übernommen, danach belegt. */
     @Test
     fun predecessorDiscardedByTheServerIsAdopted() {
         createInMemoryJvmDriver().use { driver ->
@@ -632,5 +680,6 @@ class CloudOwnMatchLaneTest {
         const val WATCH = "watch"
         const val BOB_DEVICE = "bob-device"
         const val STRANGER = "stranger"
+        const val PRED = "pred-match"
     }
 }

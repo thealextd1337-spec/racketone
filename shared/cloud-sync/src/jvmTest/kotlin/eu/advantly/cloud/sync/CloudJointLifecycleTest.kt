@@ -245,12 +245,15 @@ private class JointServer {
         batch: PushBatch,
     ): PushResponse {
         fun match(id: String) = matches.getOrPut(id) { Match(id, mutableSetOf(profile)).also(::touch) }
+
+        // rpc_sync: Ein für den Absender unsichtbarer Vorgänger (z. B. noch nicht hochgeladen) wird verworfen, ein Update heilt per coalesce.
+        fun visible(previous: String?) = previous?.takeIf { matches[it]?.members?.contains(profile) == true }
         batch.matches.forEach { dto ->
             val m = match(dto.id)
             val old = m.uploaded
             m.uploaded =
                 if (old == null) {
-                    dto
+                    dto.copy(previousMatchId = visible(dto.previousMatchId))
                 } else {
                     old.copy(
                         sport = dto.sport ?: old.sport,
@@ -258,7 +261,7 @@ private class JointServer {
                         format = dto.format ?: old.format,
                         meta = dto.meta ?: old.meta,
                         startedAt = dto.startedAt ?: old.startedAt,
-                        previousMatchId = dto.previousMatchId ?: old.previousMatchId,
+                        previousMatchId = visible(dto.previousMatchId) ?: old.previousMatchId,
                         participants = dto.participants ?: old.participants,
                         projection = dto.projection ?: old.projection,
                     )
@@ -416,6 +419,7 @@ private class JointFixture(
     fun createMatch(
         id: String,
         opponent: PlayerId = PlayerId("guest"),
+        previous: MatchId? = null,
     ) {
         val format = Presets.TENNIS_SINGLES_BO3.format()
         val lineup = Lineup(listOf(PlayerId("me")), listOf(opponent), PlayerId("me"))
@@ -423,7 +427,7 @@ private class JointFixture(
         data.events.append(
             ScoreEvent(EventId("$id-e1"), MatchId(id), DeviceId(SOURCE), 1, 1, 1, null, MatchCreated(format, lineup)).toStoredEvent(),
         )
-        data.matches.insertIfAbsent(MatchId(id), format, lineup, MatchMeta(), 1)
+        data.matches.insertIfAbsent(MatchId(id), format, lineup, MatchMeta(), 1, previous)
         data.matches.updateProgress(MatchId(id), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 1), 1)
     }
 
@@ -1102,6 +1106,46 @@ class CloudJointLifecycleTest {
                 assertEquals("102", f.headerColumn(OWN, "updated_at_ms"))
                 assertEquals("LOCAL", f.metadata("HEADER", OWN)!!.third)
                 assertEquals(3, f.data.events.count(OWN))
+                assertEquals(0, f.pending())
+            }
+        }
+
+    /**
+     * Runde 4, P2-A: Das Folge-Match wird hochgeladen, bevor sein Vorgänger auf dem Server ist; der Server verwirft den Link.
+     * Lokal bleibt er erhalten (Beleg und ready trotzdem), ein späteres Kopf-Update stellt ihn per coalesce auf dem Server her.
+     */
+    @Test
+    fun qPredecessorDroppedBeforeItsUploadStaysLocalAndAnUpdateRestoresItOnTheServer(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN, previous = MatchId(OTHER))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertNull(
+                    f.server.matches
+                        .getValue(OWN)
+                        .uploaded!!
+                        .previousMatchId,
+                )
+                // Der Vorgänger liegt jetzt lokal vor, ist aber noch nicht hochgeladen.
+                f.createMatch(OTHER)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertEquals(OTHER, f.headerColumn(OWN, "previous_match_id"))
+                assertTrue(f.ready(OWN))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                f.data.matches.updateMeta(MatchId(OWN), MatchMeta(venue = "Halle"))
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(
+                    OTHER,
+                    f.server.matches
+                        .getValue(OWN)
+                        .uploaded!!
+                        .previousMatchId,
+                )
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertEquals(OTHER, f.headerColumn(OWN, "previous_match_id"))
                 assertEquals(0, f.pending())
             }
         }

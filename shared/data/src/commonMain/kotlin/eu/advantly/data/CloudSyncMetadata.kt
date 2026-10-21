@@ -291,8 +291,9 @@ internal fun CloudSyncRepository.materializePullMatch(
 }
 
 /**
- * Teil 2, P2-3: Status, Summary und ein vom Server verworfener Vorgänger eines vollständig bestätigten eigenen Kopfs folgen
- * einer strikt neueren serverVersion; Format, Lineup, Meta, Start und `updated_at_ms` bleiben lokal; der übernommene Stand gilt als hochgeladen.
+ * Teil 2, P2-3: Status, Summary und ein vom Server verworfener, lokal nicht mehr vorhandener Vorgänger ([livePredecessor])
+ * eines vollständig bestätigten eigenen Kopfs folgen einer strikt neueren serverVersion mit mindestens so vielen Events;
+ * Format, Lineup, Meta, Start und `updated_at_ms` bleiben lokal; der übernommene Stand gilt als hochgeladen.
  *
  * Vergleichsstand ist `own_version` am Snapshot: die serverVersion der letzten Seite, die den bestätigten eigenen Stand trug
  * oder übernommen wurde. Der U4-Ack liefert keine serverVersion; deshalb hält `own_revisions` die Summe der Upload-Revisionen
@@ -310,6 +311,8 @@ private fun CloudSyncRepository.adoptOwnDerived(
     val local = database.matchHeaderQueries.selectById(id).executeAsOneOrNull() ?: return
     if (head.server_version <= (head.own_version ?: 0)) return
     val score = localScore(local)
+    // Runde 4, P3-A: nie weniger Events übernehmen, auch ohne Ack seit dem Beleg (nicht nur auf die Servermonotonie verlassen).
+    if (record.score.eventCount < (score?.eventCount ?: 0)) return
     if (head.own_revisions != revisions) {
         val previous = record.previousMatchId == null || record.previousMatchId.value == local.previous_match_id
         val projection =
@@ -319,7 +322,7 @@ private fun CloudSyncRepository.adoptOwnDerived(
     }
     database.cloudPullQueries.adoptOwnDerived(
         record.status.name,
-        local.previous_match_id.takeIf { record.previousMatchId != null },
+        local.previous_match_id.takeIf { record.previousMatchId != null || livePredecessor(it) },
         record.score.winner?.name,
         record.score.reason?.name,
         record.score.setsWonA.toLong(),
@@ -348,10 +351,22 @@ private fun CloudSyncRepository.adoptOwnDerived(
 private fun CloudSyncRepository.carriesOwnHeader(record: MatchRecord): Boolean {
     val local = database.matchHeaderQueries.selectById(record.id.value).executeAsOneOrNull() ?: return false
     return carriesOwnFields(record, local) &&
-        record.previousMatchId?.value == local.previous_match_id &&
+        (
+            record.previousMatchId?.value == local.previous_match_id ||
+                (record.previousMatchId == null && livePredecessor(local.previous_match_id))
+        ) &&
         record.status.name == local.status &&
         record.score == localScore(local)
 }
+
+/**
+ * Runde 4, P2-A: Der Server verwirft einen Vorgänger schon dann, wenn er ihn beim Anlegen nicht sieht, also auch, solange er
+ * nur noch nicht hochgeladen ist; ein späteres Kopf-Update heilt per coalesce. Ein lokal vorhandener, nicht gelöschter
+ * Vorgänger bleibt deshalb und gilt als getragen. Nur ein lokal fehlender oder gelöschter Vorgänger wird übernommen.
+ */
+private fun CloudSyncRepository.livePredecessor(id: String?): Boolean =
+    id != null && database.matchHeaderQueries.countById(id).executeAsOne() > 0 &&
+        database.matchTombstoneQueries.countById(id).executeAsOne() == 0L
 
 /** Vom Server getragene, lokal autoritative Felder: Format, Meta, Start und Slot-IDs. */
 private fun carriesOwnFields(

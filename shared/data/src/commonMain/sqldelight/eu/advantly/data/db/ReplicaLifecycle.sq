@@ -175,8 +175,9 @@ removeReceipts:
 DELETE FROM cloud_pull_receipt WHERE match_id = ?;
 removeEventCursors:
 DELETE FROM cloud_cursor WHERE stream = 'pull:events:' || ?;
+-- Purge: auch own_version/own_revisions vergessen; ein neu angelegter Kopf beginnt mit Revision 1 und nimmt zuerst den strengen Pfad.
 invalidateMaterialization:
-UPDATE cloud_pull_snapshot SET materialized_version = NULL WHERE kind = 'MATCH' AND entity_id = ?;
+UPDATE cloud_pull_snapshot SET materialized_version = NULL, own_version = NULL, own_revisions = NULL WHERE kind = 'MATCH' AND entity_id = ?;
 invalidateWork:
 UPDATE cloud_pull_event_work SET last_checked = 0, repairing = 0, needs_verification = 0, materialization_pending = 1 WHERE match_id = ?;
 
