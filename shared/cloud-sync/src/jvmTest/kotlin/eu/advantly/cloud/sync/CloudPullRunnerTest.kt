@@ -1698,7 +1698,9 @@ class CloudPullRunnerTest {
                     0,
                 )
                 recording.recording = true
-                val result = CloudPullRunner(f.backend, f.data).pullNow()
+                // Geprüft wird das Lesemuster, nicht die Laufzeit: 20 000 ABSENT-Übergänge brauchen auf geteilten CI-Runnern
+                // nahe der Produktionsfrist von 15 s. Fristverhalten decken eigene Tests ab.
+                val result = CloudPullRunner(f.backend, f.data, deadlineMillis = 120_000).pullNow()
                 recording.recording = false
                 // Der vollständige Katalog setzt fehlende Feed-Snapshots begrenzt auf ABSENT; nichts bleibt als D2-Rest.
                 assertEquals(CloudPullOutcome.COMPLETE, result.outcome)

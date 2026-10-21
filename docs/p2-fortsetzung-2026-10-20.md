@@ -1772,3 +1772,13 @@ bleibt Pflicht, weil beide Spuren nur aus der Datenbank aufgehen.
   - P3-C geht an Welle 3: Ändert ein zweites eigenes Gerät Meta oder Teilnehmer,
     entsteht kein Beleg mehr und der Pull meldet dauerhaft BLOCKED (das gehört zur
     MatchMeta-Quellautorität). Lesbar bleibt das Match über die Lesespur.
+
+CI auf PR #75 (`0531c60`): Gradle rot in genau einem Test,
+`emptyPullOverLargeHistoryReadsNeitherGlobalPayloadsNorUnboundedMatchIds`, mit
+`DEADLINE_REACHED` statt `COMPLETE` nach 15,4 s. Auf `16d20b8` brauchte derselbe
+Test auf CI schon 10,9 s, lokal unverändert 3,4–4,2 s. Ursache ist die implizite
+Produktionsfrist von 15 s auf geteilten Runnern, keine Produktregression. Der
+Test prüft Lesemuster und erhält deshalb eine explizite Frist von 120 s. Das
+Fristverhalten decken eigene Tests ab. Der ABSENT-Pfad mit 20 000 Feed-Snapshots
+bleibt als Volumenbeobachtung offen: Er braucht auf CI mehrere Läufe, setzt aber
+korrekt fort.
