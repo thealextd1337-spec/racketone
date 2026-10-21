@@ -59,6 +59,16 @@ CREATE TABLE cloud_pull_receipt (
 );
 CREATE INDEX cloud_pull_receipt_watermarks ON cloud_pull_receipt(profile_id, match_id, repair_run, device_id, device_seq);
 
+-- Festgehaltener Readiness-Wasserstand H je Match; gilt ausschließlich für genau dieses G/E.
+CREATE TABLE cloud_pull_readiness (
+    profile_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    redaction_epoch INTEGER NOT NULL,
+    high_watermark INTEGER NOT NULL CHECK(high_watermark >= 0),
+    PRIMARY KEY(profile_id, match_id)
+);
+
 ensureProfile:
 INSERT OR IGNORE INTO cloud_pull_profile(profile_id) VALUES (?);
 
@@ -186,8 +196,55 @@ DELETE FROM cloud_pull_receipt WHERE profile_id = ? AND match_id = ? AND repair_
 pendingRemovalCount:
 SELECT count(*) FROM cloud_pull_snapshot WHERE profile_id = ? AND removal_pending = 1;
 
+-- Nur Mitgliedsmatches können eine Redaktion übertragen; Feed-/Entzugsstände zählen hier nicht.
 pendingRedactionCount:
-SELECT count(*) FROM cloud_pull_snapshot WHERE profile_id = ? AND redaction_observed > redaction_applied;
+SELECT count(*) FROM cloud_pull_snapshot WHERE profile_id = ? AND kind = 'MATCH' AND access = 'member'
+AND removal_pending = 0 AND redaction_observed > redaction_applied;
+
+redactionApplied:
+UPDATE cloud_pull_snapshot SET redaction_applied = max(redaction_applied, ?) WHERE profile_id = ? AND kind = 'MATCH' AND entity_id = ?;
+
+restartCatalog:
+UPDATE cloud_pull_profile SET metadata_complete = 0, round_catalog_ready = 0, event_requests_since_metadata = 0 WHERE profile_id = ?;
+
+-- Vom letzten vollständigen Katalog bei G nicht mehr geliefert; bereits bei G oder später entschiedene Zeilen bleiben aus.
+missingMatches:
+SELECT s.entity_id FROM cloud_pull_snapshot s
+WHERE s.profile_id = :profile AND s.kind = 'MATCH' AND s.removal_pending = 1 AND s.seen_run != :scanRun
+AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = :profile AND a.match_id = s.entity_id
+    AND a.generation >= :generation)
+ORDER BY s.entity_id LIMIT :pageLimit;
+
+reopenEventWork:
+UPDATE cloud_pull_event_work SET last_checked = 0, needs_verification = 0 WHERE profile_id = ? AND match_id = ?;
+
+-- Nach vollständigem Neuscan bei neuem G: während des Scans verschobene Readiness in derselben Runde nachholen.
+reopenUnready:
+UPDATE cloud_pull_event_work SET last_checked = 0 WHERE profile_id = :profile
+AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = :profile AND a.match_id = cloud_pull_event_work.match_id
+    AND a.access = 'MEMBER' AND a.ready = 1);
+
+readinessMark:
+SELECT * FROM cloud_pull_readiness WHERE profile_id = ? AND match_id = ?;
+
+saveReadinessMark:
+INSERT OR REPLACE INTO cloud_pull_readiness VALUES (?,?,?,?,?);
+
+-- Ausschließlich heruntergeladene, lokal vorhandene Events bis H; eigene ungesendete Events haben keinen Empfangsbeleg.
+readinessWatermarks:
+SELECT r.device_id, max(r.device_seq) AS max_seq, count(*) AS event_count FROM cloud_pull_receipt r
+JOIN match_event e ON e.id = r.event_id AND e.match_id = r.match_id AND e.device_id = r.device_id AND e.device_seq = r.device_seq
+WHERE r.profile_id = :profile AND r.match_id = :match AND r.server_seq <= :highWatermark
+AND (:repairing = 0 OR r.repair_run = :repairRun)
+GROUP BY r.device_id;
+
+pendingReadinessCount:
+SELECT count(*) FROM cloud_pull_snapshot s
+JOIN cloud_pull_event_work w ON s.profile_id = w.profile_id AND s.entity_id = w.match_id
+WHERE s.kind = 'MATCH' AND w.profile_id = :profile AND s.access = 'member' AND s.removal_pending = 0
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = w.match_id)
+AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = :profile AND a.match_id = w.match_id
+    AND a.access = 'MEMBER' AND a.ready = 1);
 
 updateDownloadedMatch:
 UPDATE match_header SET sport = ?, discipline = ?, format_json = ?, lineup_json = ?, meta_json = ?, surface = ?, environment = ?,

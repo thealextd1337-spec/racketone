@@ -101,3 +101,22 @@ data class CloudPullWatermark(
     val maxSeq: Long,
     val eventCount: Long,
 )
+
+/** Offener Redaktionstransfer (G, E); H und Cursor sind erst nach der ersten authentisierten Seite bekannt. */
+data class CloudPullRedactionWork(
+    val matchId: String,
+    val generation: Long,
+    val redactionEpoch: Long,
+    val highWatermark: Long?,
+    val cursor: RedactionCursor,
+)
+
+/** Readiness-Anfrage für (Match, G, E); H = null heißt: Server hält H beim Abruf fest (nur E = 0). */
+data class CloudPullReadinessWork(
+    val matchId: String,
+    val generation: Long,
+    val redactionEpoch: Long,
+    val highWatermark: Long?,
+)
+
+enum class CloudPullReadinessResult { READY, MISSING_EVENTS, GAP, STALE_SNAPSHOT }

@@ -105,7 +105,7 @@ class CloudPullSocketTest {
                     }
                 }.use { server ->
                     createInMemoryJvmDriver().use { driver ->
-                        val data = LocalData(driver)
+                        val data = LocalData(driver).selectPullAccount()
                         val credentials = CloudCredentials("alice", "session-alice", "token")
                         val gate = CloudSessionGate({ credentials }, data.cloudUploads)
                         gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
@@ -142,7 +142,7 @@ class CloudPullSocketTest {
                 }
             }.use { server ->
                 createInMemoryJvmDriver().use { driver ->
-                    val data = LocalData(driver)
+                    val data = LocalData(driver).selectPullAccount()
                     var credentials: CloudCredentials? = CloudCredentials("alice", "session-alice", "token")
                     val gate = CloudSessionGate({ credentials }, data.cloudUploads)
                     gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))

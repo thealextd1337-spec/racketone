@@ -1,0 +1,9 @@
+-- Festgehaltener Readiness-Wasserstand H je Match; gilt ausschließlich für genau dieses G/E.
+CREATE TABLE cloud_pull_readiness (
+    profile_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    redaction_epoch INTEGER NOT NULL,
+    high_watermark INTEGER NOT NULL CHECK(high_watermark >= 0),
+    PRIMARY KEY(profile_id, match_id)
+);

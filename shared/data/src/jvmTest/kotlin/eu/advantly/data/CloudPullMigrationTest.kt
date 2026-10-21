@@ -96,4 +96,52 @@ class CloudPullMigrationTest {
             file.delete()
         }
     }
+
+    @Test
+    fun schemaTenToElevenAddsEmptyReadinessMarksAndKeepsPullRows() {
+        val file = File.createTempFile("pull-schema-ten", ".db")
+        try {
+            File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
+            JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+                AdvantlyDatabase.Schema.migrate(driver, 1, 10).value
+                driver.execute(null, "INSERT INTO cloud_pull_profile(profile_id,visibility_epoch,check_round) VALUES ('alice',3,2)", 0)
+                driver.execute(null, "INSERT INTO cloud_pull_event_work(profile_id,match_id,last_checked) VALUES ('alice','m',2)", 0)
+                driver.execute(null, "INSERT INTO cloud_pull_receipt VALUES ('alice','m','e',7,'d',1,0)", 0)
+                AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
+                val db = AdvantlyDatabase(driver)
+                assertEquals(
+                    3,
+                    db.cloudPullQueries
+                        .profile("alice")
+                        .executeAsOne()
+                        .visibility_epoch,
+                )
+                assertEquals(
+                    2,
+                    db.cloudPullQueries
+                        .eventWork("alice", "m")
+                        .executeAsOne()
+                        .last_checked,
+                )
+                assertEquals(
+                    7,
+                    db.cloudPullQueries
+                        .receipt("alice", "m", "e")
+                        .executeAsOne()
+                        .server_seq,
+                )
+                assertEquals(null, db.cloudPullQueries.readinessMark("alice", "m").executeAsOneOrNull())
+                db.cloudPullQueries.saveReadinessMark("alice", "m", 3, 0, 7)
+                assertEquals(
+                    7,
+                    db.cloudPullQueries
+                        .readinessMark("alice", "m")
+                        .executeAsOne()
+                        .high_watermark,
+                )
+            }
+        } finally {
+            file.delete()
+        }
+    }
 }
