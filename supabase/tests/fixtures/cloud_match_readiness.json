@@ -1,0 +1,14 @@
+{
+  "matchId": "a9500000-0000-7000-8000-000000000001",
+  "generation": 7,
+  "watermarks": [
+    {
+      "maxSeq": 2,
+      "deviceId": "d0000000-0000-7000-8000-0000000000a1",
+      "eventCount": 2
+    }
+  ],
+  "highWatermark": 2,
+  "serverVersion": 22,
+  "redactionEpoch": 0
+}
