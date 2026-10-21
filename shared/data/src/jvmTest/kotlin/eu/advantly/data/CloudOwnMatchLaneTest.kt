@@ -55,6 +55,7 @@ class CloudOwnMatchLaneTest {
         creator: String = PHONE,
         owned: Set<String> = setOf(PHONE),
         activateFirst: Boolean = true,
+        previous: MatchId? = null,
     ): Pair<LocalData, CloudUploadSession> {
         val data = LocalData(driver)
         data.players.ensureSelf("Alex", 0) { PlayerId("me") }
@@ -66,7 +67,7 @@ class CloudOwnMatchLaneTest {
         if (owned.isNotEmpty()) data.cloudUploads.bindOwnedDevices(session, owned)
         data.players.addGuest(PlayerId("guest"), "Bea", 0)
         data.events.append(genesis(creator))
-        data.matches.insertIfAbsent(MatchId(MATCH), format, lineup, MatchMeta(venue = "Lokal"), 1)
+        data.matches.insertIfAbsent(MatchId(MATCH), format, lineup, MatchMeta(venue = "Lokal"), 1, previous)
         data.matches.updateProgress(MatchId(MATCH), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 1), 7777)
         if (!activateFirst) data.replicas.activate(data.replicas.captureContext()) {}
         return data to session
@@ -112,6 +113,19 @@ class CloudOwnMatchLaneTest {
             CloudPullMatch(MATCH, version, """{"version":$version}""", access, 1, epoch, false, record.takeIf { access == "member" })
         val page = CloudPullMetadataPage(listOf(match), emptyList(), emptyList(), version, false, generation)
         return run.takeIf { cloudPulls.commitMetadata(profile, run, cloudPulls.progress(profile).cursor, page) {} }
+    }
+
+    /** Katalogseite in einem neuen Lauf, die das eigene Match nicht enthält (nur ein fremdes Feed-Match). */
+    private fun LocalData.otherPage(
+        version: Long,
+        generation: Long,
+        hasMore: Boolean,
+    ) {
+        val profile = accountIdentities.profile!!
+        val run = cloudPulls.beginRun(profile) {}.runSerial
+        val other = CloudPullMatch("other-match", version, """{"version":$version}""", "feed", null, 0, false, null)
+        val page = CloudPullMetadataPage(listOf(other), emptyList(), emptyList(), version, hasMore, generation)
+        assertTrue(cloudPulls.commitMetadata(profile, run, cloudPulls.progress(profile).cursor, page) {})
     }
 
     private fun LocalData.proof() = cloudPulls.snapshot(accountIdentities.profile!!, CloudPullEntityKind.MATCH, MATCH)?.materializedVersion
@@ -331,7 +345,7 @@ class CloudOwnMatchLaneTest {
     }
 
     @Test
-    fun feedAbsentAndAnOutdatedGenerationCloseTheLane() {
+    fun feedAndAbsentCloseTheLane() {
         createInMemoryJvmDriver().use { driver ->
             val (data, session) = ownMatch(driver)
             upload(data, session)
@@ -344,14 +358,177 @@ class CloudOwnMatchLaneTest {
             data.replicas.applyAccess(data.replicas.captureContext(), MATCH, 1, ReplicaAccessLevel.ABSENT) {}
             data.assertLocked()
         }
+    }
+
+    /**
+     * Teil 2, P2-2: Neues G gesehen, Katalog unvollständig. Die Schreibspur gilt beim zuletzt vollständigen G weiter, auch nach
+     * Abbruch und Neustart mitten im Neuscan; die Lesespur bleibt streng. FEED im neuen Katalog sperrt sofort.
+     */
+    @Test
+    fun runningRescanKeepsTheWriteLaneAtTheLastCompleteGenerationUntilFeed() {
         createInMemoryJvmDriver().use { driver ->
             val (data, session) = ownMatch(driver)
             upload(data, session)
             assertNotNull(data.catalog(1))
             data.count(2)
-            // Neues G gesehen, das Match aber noch nicht neu katalogisiert: MEMBER gilt nur beim aktuellen G.
             assertNull(data.catalog(2, generation = 2))
+            assertFalse(data.readable())
+            data.count(3)
+            data.matches.updateMeta(MatchId(MATCH), MatchMeta(venue = "Halle"))
+            // Abbruch nach der ersten Seite des neuen G (ohne das Match), Neustart auf derselben Datenbank.
+            data.otherPage(2, generation = 2, hasMore = true)
+            val restarted = LocalData(driver)
+            assertFalse(restarted.readable())
+            restarted.count(4)
+            assertEquals(4, restarted.events.maxDeviceSeq(MATCH, PHONE))
+            // Ein fremdes Konto bekommt die Spur auch während des Neuscans nicht.
+            restarted.accountIdentities.select("legacy:$PHONE", "bob", 0, "PHONE") { error("keine neue ID") }
+            restarted.assertLocked(seq = 5)
+            restarted.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+            restarted.count(5)
+            // Seite des neuen G mit FEED: sofort gesperrt.
+            assertNotNull(restarted.catalog(6, access = "feed", generation = 2))
+            restarted.assertLocked(seq = 6)
+        }
+    }
+
+    /** Teil 2, P2-2: Ist der Neuscan ohne das Match vollständig (ABSENT beim neuen G), sperrt die Schreibspur sofort. */
+    @Test
+    fun completedRescanWithoutTheMatchClosesTheWriteLane() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertNull(data.catalog(2, generation = 2))
+            data.count(2)
+            data.otherPage(2, generation = 2, hasMore = false)
             data.assertLocked(seq = 3)
+        }
+    }
+
+    /** Teil 2, P1-1: Bei offener Schreib- und gesperrter Lesespur folgen Seq, Lamport und Bestätigungen der Schreibspur. */
+    @Test
+    fun writeOnlyWindowKeepsSequencesLamportAndConfirmations() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.count(2)
+            val run = assertNotNull(data.catalog(2, epoch = 1))
+            assertFalse(data.readable())
+            assertEquals(2, data.events.maxDeviceSeq(MATCH, PHONE))
+            assertEquals(12, data.events.maxLamport(MATCH))
+            val emitted = StoredEvent("emit", MATCH, PHONE, 3, 13, """{"type":"PointWon","side":"A"}""", type = "PointWon")
+            assertEquals(AppendResult.INSERTED, data.events.append(emitted))
+            data.events.markConfirmed(MATCH, listOf(StoredSequence(PHONE, 3)))
+            data.events.markConfirmedUpTo(MATCH, PHONE, 3)
+            // Inhalte bleiben gesperrt; nur Zähler und Bestätigungen folgen der Schreibspur.
+            assertTrue(data.events.sequences(MATCH).isEmpty())
+            assertTrue(data.events.eventsFor(MATCH).isEmpty())
+            // Nach dem Transfer ist der Punkt lesbar und geht hoch (U4 wartet bis zur angewandten Redaktion).
+            val work = assertNotNull(data.cloudPulls.nextEventWork("alice", run))
+            val page = assertNotNull(data.cloudPulls.redactionWork(work, run))
+            assertTrue(data.cloudPulls.stageRedaction(work, run, page, 2, emptyList(), emptyList(), true, true) {})
+            assertEquals(3, data.events.count(MATCH))
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .events
+                    .any { it.id == "emit" },
+            )
+        }
+    }
+
+    /** Teil 2, P2-1: Ein gemischter Batch zweier eigener Quellen geht bei gesperrtem Lesen durch, eine fremde Quelle nicht. */
+    @Test
+    fun mixedOwnSourceBatchSucceedsInTheWriteOnlyWindow() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver, creator = WATCH, owned = setOf(PHONE, WATCH), activateFirst = false)
+            data.accountIdentities.recordSource(STRANGER, "stranger-self", "WATCH", "legacy:$PHONE", local = false)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertNotNull(data.catalog(2, epoch = 1))
+            assertFalse(data.readable())
+            assertEquals(
+                listOf(AppendResult.INSERTED, AppendResult.INSERTED),
+                data.events.appendAll(listOf(point("w2", WATCH, 2), point("p1", PHONE, 1))),
+            )
+            assertFailsWith<IllegalStateException> {
+                data.events.appendAll(listOf(point("w3", WATCH, 3), point("s1", STRANGER, 1)))
+            }
+            assertEquals(2, data.events.maxDeviceSeq(MATCH, WATCH))
+        }
+    }
+
+    /** Teil 2, P2-3: Ein anderes eigenes Gerät zählte weiter. Status und Summary folgen, lokale Felder bleiben, Beleg entsteht. */
+    @Test
+    fun newerServerHeadFromAnotherOwnDeviceIsAdoptedWithoutTouchingLocalFields() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            assertEquals(1, data.proof())
+            val before = row(driver)
+            val ahead = ScoreSummary(eventCount = 40)
+            assertNotNull(data.catalog(2, head(status = MatchStatus.FINISHED, score = ahead)))
+            assertEquals("FINISHED", raw(driver, "status"))
+            assertEquals(ahead, data.matches.get(MatchId(MATCH))!!.score)
+            assertEquals(2, data.proof())
+            val after = row(driver)
+            listOf("lineup_json", "meta_json", "updated_at_ms", "format_json").forEach { assertEquals(before[it], after[it], it) }
+            assertEquals(lineup, data.matches.get(MatchId(MATCH))!!.lineup)
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .metadataRevisions
+                    .isEmpty(),
+            )
+            // Eine erneut gelieferte ältere Fassung (Neuscan, gleiche serverVersion) dreht nicht zurück.
+            assertNull(data.catalog(2, generation = 2))
+            assertNotNull(data.catalog(2, generation = 2))
+            assertEquals("FINISHED", raw(driver, "status"))
+            assertEquals(after, row(driver))
+        }
+    }
+
+    /** Teil 2, P2-3: Eine unbestätigte lokale Änderung bleibt, bis sie bestätigt ist; danach folgt der neuere Serverstand. */
+    @Test
+    fun unconfirmedLocalProgressIsKeptAgainstANewerServerHead() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.count(2)
+            val before = row(driver)
+            assertNotNull(data.catalog(2, head(status = MatchStatus.FINISHED, score = ScoreSummary(eventCount = 40))))
+            assertEquals(before, row(driver))
+            assertNull(data.proof())
+            upload(data, session)
+            // Erst eine Seite nach dem Ack, die den Stand eines weiter gezählten eigenen Geräts zeigt, wird übernommen.
+            assertNotNull(data.catalog(3, head(status = MatchStatus.FINISHED, score = ScoreSummary(eventCount = 41))))
+            assertEquals("FINISHED", raw(driver, "status"))
+            assertEquals("8002", raw(driver, "updated_at_ms"))
+            assertEquals(3, data.proof())
+        }
+    }
+
+    /** Teil 2, P2-3: Der Server verwirft den Vorgänger (ohne Sichtrecht oder gelöscht): übernommen, danach belegt. */
+    @Test
+    fun predecessorDiscardedByTheServerIsAdopted() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver, previous = MatchId("before"))
+            upload(data, session)
+            val before = row(driver)
+            assertNotNull(data.catalog(1))
+            assertNull(data.matches.get(MatchId(MATCH))!!.previousMatchId)
+            assertEquals(1, data.proof())
+            assertEquals(before, row(driver))
+            assertTrue(
+                data.cloudUploads
+                    .capture(session, 100)
+                    .metadataRevisions
+                    .isEmpty(),
+            )
         }
     }
 

@@ -302,7 +302,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 12: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken und Spuren eigener Matches. */
-        const val SCHEMA_VERSION: Long = 12
+        /** Schema 13: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches. */
+        const val SCHEMA_VERSION: Long = 13
     }
 }

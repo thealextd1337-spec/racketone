@@ -683,6 +683,9 @@ class CloudPullLifecycleTest {
                     driver.execute(null, "DELETE FROM replica_access", 0)
                     driver.execute(null, "DELETE FROM replica_cloud_seen", 0)
                     driver.execute(null, "DROP TABLE cloud_pull_readiness", 0)
+                    // Spalten aus 12.sqm gab es in Schema 10 noch nicht.
+                    driver.execute(null, "ALTER TABLE cloud_pull_snapshot DROP COLUMN own_version", 0)
+                    driver.execute(null, "ALTER TABLE cloud_pull_snapshot DROP COLUMN own_revisions", 0)
                     AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
                 }
                 reopen(file).use { f ->

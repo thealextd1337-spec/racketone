@@ -1067,6 +1067,46 @@ class CloudJointLifecycleTest {
         }
 
     /**
+     * Teil 2, P2-3: Ein zweites eigenes Gerät zählt weiter und beendet das Match. Der Pull lädt dessen Event roh, der eigene
+     * Kopf übernimmt Status und Summary aus der neueren serverVersion (lokale Felder bleiben), danach Beleg und ready.
+     */
+    @Test
+    fun pAnotherOwnDeviceCountsOnAndTheOwnHeaderFollowsUntilReady(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                f.finishRound()
+                f.createMatch(OWN)
+                f.point(OWN, 2)
+                f.progress(OWN, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, f.upload().uploadNow().outcome)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                val match = f.server.matches.getValue(OWN)
+                match.log += pullEvent(1, OWN, match.log.size + 1L).copy(id = uuid("phone-2-e1"), deviceId = uuid("phone-2"))
+                val uploaded = requireNotNull(match.uploaded)
+                val projection = requireNotNull(uploaded.projection)
+                val summary = JsonObject(requireNotNull(projection.summary) + ("eventCount" to JsonPrimitive(3)))
+                match.uploaded = uploaded.copy(projection = projection.copy(status = "finished", eventCount = 3, summary = summary))
+                f.server.touch(match)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(OWN))
+                assertTrue(f.readable(OWN))
+                assertEquals("FINISHED", f.headerColumn(OWN, "status"))
+                assertEquals(
+                    3,
+                    f.data.matches
+                        .get(MatchId(OWN))!!
+                        .score.eventCount,
+                )
+                assertEquals("102", f.headerColumn(OWN, "updated_at_ms"))
+                assertEquals("LOCAL", f.metadata("HEADER", OWN)!!.third)
+                assertEquals(3, f.data.events.count(OWN))
+                assertEquals(0, f.pending())
+            }
+        }
+
+    /**
      * Messung Integrationspunkt B: 205 fremde Matches, Standardbudget des D1-Runners. Gezählt werden D1-Läufe nach dem 40001,
      * bis U4 wieder hochlädt (unbeteiligtes Match) und bis das betroffene Match selbst hochgeladen ist.
      */
