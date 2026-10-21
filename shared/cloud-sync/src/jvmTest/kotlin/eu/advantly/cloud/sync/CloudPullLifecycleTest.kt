@@ -474,6 +474,37 @@ class CloudPullLifecycleTest {
         }
 
     @Test
+    fun higherRedactionEpochAtSameGenerationBlocksReadsWithCatalogPageUntilFreshReadiness() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                // Ohne Aktivierung ist jedes Match lesbar; erst dann zählt ready.
+                f.data.replicas.activate(f.data.replicas.captureContext()) {}
+                val server = ManifestServer(PLAYERS.take(3), (1L..3L).map { redactedEvent(it) })
+                var version = 1L
+                f.serveManifestMatch(server, version = { version })
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 20).pullNow().outcome)
+                assertTrue(f.data.replicas.canReadMember(f.data.replicas.captureContext(), MATCH))
+                server.epoch = 2
+                version = 2
+                val readableAtRedaction = mutableListOf<Boolean>()
+                f.redaction = { body ->
+                    readableAtRedaction += f.data.replicas.canReadMember(f.data.replicas.captureContext(), MATCH)
+                    readableAtRedaction += f.data.access()!!.ready
+                    server.respond(body)
+                }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 20).pullNow().outcome)
+                assertEquals(listOf(false, false), readableAtRedaction)
+                val access = f.data.access()!!
+                assertEquals(1, access.generation)
+                assertEquals(2, access.redactionEpoch)
+                assertTrue(access.ready)
+                assertEquals(2, f.requests("cloud_match_readiness_v1").last().long("p_redaction_epoch"))
+                assertTrue(f.data.replicas.canReadMember(f.data.replicas.captureContext(), MATCH))
+            }
+        }
+
+    @Test
     fun changedVisibilityGenerationBetweenPagesClearsTransferAndRestartsAtNewGeneration() =
         runBlocking {
             PullFixture().use { f ->

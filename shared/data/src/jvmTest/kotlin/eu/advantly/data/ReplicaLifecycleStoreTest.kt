@@ -899,6 +899,42 @@ class ReplicaLifecycleStoreTest {
         }
 
     @Test
+    fun markNotReadyIsIdempotentContextBoundAtomicAndKeepsAccessProofAndTransfer(): Unit =
+        Fixture().use { f ->
+            val ctx = f.member("A", 4)
+            f.cloudMatch()
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json,access,access_epoch,materialized_version)
+                    VALUES ('A','MATCH','match',1,'{}','member',4,1)""",
+            )
+            f.data.replicas.beginRedaction(ctx, RedactionTransfer("t", "match", 4, 1, 0), fence)
+            // Lücke vor dem Fix: ready trotz offenem Transfer eines neueren E.
+            f.sql("UPDATE replica_access SET ready = 1 WHERE account_key = 'A'")
+            val snapshot = f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match")
+            val progress = f.data.replicas.redactionProgress(ctx, "match")
+            var calls = 0
+            assertFails { f.data.replicas.markNotReady(ctx, "match") { if (++calls == 2) error("lost authority") } }
+            assertTrue(f.data.replicas.canReadMember(ctx, "match"))
+            f.member("B", 4)
+            f.select("A")
+            assertFails { f.data.replicas.markNotReady(ctx, "match", fence) }
+            val current = f.data.replicas.captureContext()
+            assertTrue(f.data.replicas.canReadMember(current, "match"))
+            assertEquals(TransitionResult.APPLIED, f.data.replicas.markNotReady(current, "match", fence))
+            assertEquals(TransitionResult.UNCHANGED, f.data.replicas.markNotReady(current, "match", fence))
+            assertEquals(TransitionResult.UNCHANGED, f.data.replicas.markNotReady(current, "unknown", fence))
+            f.reopen()
+            val resumed = f.data.replicas.captureContext()
+            assertFalse(f.data.replicas.canReadMember(resumed, "match"))
+            val access = f.data.replicas.access(resumed, "match")!!
+            assertEquals(4, access.generation)
+            assertEquals(ReplicaAccessLevel.MEMBER, access.access)
+            assertEquals(snapshot, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+            assertEquals(progress, f.data.replicas.redactionProgress(resumed, "match"))
+            assertTrue(f.data.replicas.canReadMember(f.select("B"), "match"))
+        }
+
+    @Test
     fun lowerGenerationIsIgnoredAndSameGenerationConflictsRollback(): Unit =
         Fixture().use { f ->
             val ctx = f.member("A", 4)

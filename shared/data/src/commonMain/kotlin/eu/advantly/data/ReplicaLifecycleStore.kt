@@ -253,6 +253,18 @@ class ReplicaLifecycleStore internal constructor(
             queries.ready(ctx.accountKey, matchId, generation)
         }
 
+    /** Sperrt Mitgliedslesen bis zum nächsten Readiness-Beleg; Materialisierung, Zugriff und Transfer bleiben. */
+    fun markNotReady(
+        ctx: ReplicaContext,
+        matchId: String,
+        fence: () -> Unit,
+    ): TransitionResult =
+        mutate(ctx, fence) {
+            if (access(ctx, matchId)?.ready != true) return@mutate TransitionResult.UNCHANGED
+            queries.notReady(ctx.accountKey, matchId)
+            TransitionResult.APPLIED
+        }
+
     private fun clearTransfer(
         account: String,
         match: String,

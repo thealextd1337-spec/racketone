@@ -184,6 +184,10 @@ class CloudPullStore internal constructor(
                     queries.markSeen(state.scanRun, profileId, match.id)
                     return@forEach
                 }
+                // Neues E bei gleichem G: Namen sind serverseitig schon redigiert, lokal also sofort sperren.
+                if (match.redactionEpoch > (data.replicas.access(ctx, match.id)?.redactionEpoch ?: 0)) {
+                    data.replicas.markNotReady(ctx, match.id, fence)
+                }
                 val retained = database.matchHeaderQueries.countById(match.id).executeAsOne() > 0
                 // Ein vollzogener Entzug hinterlässt nichts; nur zurückgehaltene lokale Daten bleiben als D2-Rest sichtbar.
                 val removal = match.deleted || (old?.access == "member" && match.access != "member" && retained)
