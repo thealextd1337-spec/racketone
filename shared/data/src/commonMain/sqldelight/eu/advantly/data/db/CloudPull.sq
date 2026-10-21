@@ -24,6 +24,10 @@ CREATE TABLE cloud_pull_snapshot (
     materialized_version INTEGER,
     seen_run INTEGER NOT NULL DEFAULT 0,
     removal_pending INTEGER NOT NULL DEFAULT 0,
+    -- Eigener Kopf (Teil 2, P2-3): serverVersion der letzten Seite, die den bestätigten eigenen Stand trug oder übernommen wurde,
+    -- und die Summe der Upload-Revisionen (HEADER+PARTICIPANTS+PROJECTION) zu diesem Zeitpunkt. Ein späterer Ack ändert die Summe.
+    own_version INTEGER,
+    own_revisions INTEGER,
     PRIMARY KEY(profile_id, kind, entity_id)
 );
 
@@ -281,3 +285,14 @@ AND EXISTS (SELECT 1 FROM cloud_pull_snapshot s WHERE s.profile_id = :profileId 
     AND s.entity_id = :matchId AND s.materialized_version = :materializedVersion)
 AND NOT EXISTS (SELECT 1 FROM cloud_pull_snapshot s WHERE s.profile_id != :profileId AND s.kind = 'MATCH'
     AND s.entity_id = :matchId AND s.materialized_version IS NOT NULL);
+
+ownHead:
+SELECT server_version, own_version, own_revisions FROM cloud_pull_snapshot WHERE profile_id = ? AND kind = 'MATCH' AND entity_id = ?;
+
+setOwnHead:
+UPDATE cloud_pull_snapshot SET own_version = ?, own_revisions = ? WHERE profile_id = ? AND kind = 'MATCH' AND entity_id = ?;
+
+-- Nur abgeleitete Kopffelder; format, lineup, meta, created_at_ms und updated_at_ms bleiben lokal.
+adoptOwnDerived:
+UPDATE match_header SET status = ?, previous_match_id = ?, winner = ?, result_reason = ?, sets_won_a = ?, sets_won_b = ?, score_json = ?
+WHERE id = ?;

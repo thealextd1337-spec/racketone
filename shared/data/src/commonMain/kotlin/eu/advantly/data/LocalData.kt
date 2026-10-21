@@ -30,6 +30,7 @@ class LocalData(
             database.matchTombstoneQueries,
             ::assignmentIds,
             requireReadable = { replicas.requireReadable(it) },
+            requireWritable = { replicas.requireWritable(it) },
             requireInsert = { replicas.requireHeader(it) },
             created = {
                 cloud.resolveMatchMetadataSource(it)
@@ -301,7 +302,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 11: kontogebundener Zugriff, atomare Redaktionen, dauerhafte Eventbelege und Readiness-Marken. */
-        const val SCHEMA_VERSION: Long = 11
+        /** Schema 13: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches. */
+        const val SCHEMA_VERSION: Long = 13
     }
 }

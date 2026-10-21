@@ -178,8 +178,28 @@ class ReplicaLifecycleStore internal constructor(
         return ids.all { readablePlayer(it.jsonPrimitive.content) }
     }
 
-    internal fun requireAppend(event: StoredEvent) {
-        if (!activated || readable(event.matchId)) return
+    /**
+     * Schreibspur eigener Matches (Vertrag P1-1): Die per UID dem aktuellen Konto gebundene Quelle darf an eigenen Matches
+     * unabhängig von ready schreiben (Access fehlt oder MEMBER beim aktuellen G, während eines Neuscans auch beim zuletzt
+     * vollständigen G); Events, Projektion und Kopf aus ihr offenbaren nichts, was die Sitzung nicht schon hält. Der
+     * Verification-Hold der Wiederherstellung ist hier nicht sichtbar (Host-Gate): Pull und Session dürfen vor abgeschlossener
+     * Restore-Prüfung nicht laufen, der Beweis stammt aus `cloud_device_owner`.
+     */
+    private fun ownWritable(
+        matchId: String,
+        deviceId: String?,
+    ): Boolean = queries.ownWritable(matchId, deviceId).executeAsOne() != 0L
+
+    /** Lese- oder Schreibspur. Für Zähler und Bestätigungsflags, nie für Inhalte (Teil 2, P1-1). */
+    internal fun writable(matchId: String): Boolean = !activated || readable(matchId) || ownWritable(matchId, null)
+
+    internal fun requireWritable(matchId: String) {
+        check(writable(matchId)) { "Replikat ist nicht zum Schreiben freigegeben" }
+    }
+
+    /** `true` nur nach dem Genesis-Durchlauf einer lokalen Erzeugung; Folgeevents im Batch sind dann an deren Quelle gebunden. */
+    internal fun requireAppend(event: StoredEvent): Boolean {
+        if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return false
         // Nur die belegte lokale Erzeugung darf ohne Cloudstand beginnen, kein fremder Punkt.
         check(!isCloudSeen(event.matchId) && queries.hasLifecycle(event.matchId).executeAsOne() == 0L)
         if (database.matchEventQueries.countForMatch(event.matchId).executeAsOne() != 0L) {
@@ -203,6 +223,7 @@ class ReplicaLifecycleStore internal constructor(
         ) {
             "Ungeklärter Import benötigt autoritativen Lifecycle-Abgleich"
         }
+        return true
     }
 
     fun applyAccess(

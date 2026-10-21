@@ -15,8 +15,7 @@ internal class ScopedEventStore(
             events.forEach { event ->
                 val creationDevice = localCreations[event.matchId]
                 if (creationDevice == null) {
-                    replicas.requireAppend(event)
-                    if (context != null && !replicas.readable(event.matchId)) localCreations[event.matchId] = event.deviceId
+                    if (replicas.requireAppend(event)) localCreations[event.matchId] = event.deviceId
                 } else {
                     check(event.deviceId == creationDevice) { "Lokale Genesis autorisiert keine fremde Eventquelle" }
                 }
@@ -35,14 +34,16 @@ internal class ScopedEventStore(
         toSeq: Long,
     ): List<StoredEvent> = if (replicas.readable(matchId)) raw.eventsInRange(matchId, deviceId, fromSeq, toSeq) else emptyList()
 
+    // Zähler und Bestätigungen folgen der Schreibspur (Teil 2, P1-1): sonst vergibt die Session im Fenster „schreiben ja, lesen
+    // nein“ seq 1 und der Punkt geht still als SEQUENCE_CONFLICT verloren. Inhalte und Sequenzlisten bleiben an der Lesespur.
     override fun sequences(matchId: String): List<StoredSequence> = if (replicas.readable(matchId)) raw.sequences(matchId) else emptyList()
 
-    override fun maxLamport(matchId: String): Long = if (replicas.readable(matchId)) raw.maxLamport(matchId) else 0
+    override fun maxLamport(matchId: String): Long = if (replicas.writable(matchId)) raw.maxLamport(matchId) else 0
 
     override fun maxDeviceSeq(
         matchId: String,
         deviceId: String,
-    ): Long = if (replicas.readable(matchId)) raw.maxDeviceSeq(matchId, deviceId) else 0
+    ): Long = if (replicas.writable(matchId)) raw.maxDeviceSeq(matchId, deviceId) else 0
 
     override fun count(matchId: String): Long = if (replicas.readable(matchId)) raw.count(matchId) else 0
 
@@ -50,7 +51,7 @@ internal class ScopedEventStore(
         matchId: String,
         sequences: Collection<StoredSequence>,
     ) {
-        replicas.requireReadable(matchId)
+        replicas.requireWritable(matchId)
         raw.markConfirmed(matchId, sequences)
     }
 
@@ -59,7 +60,7 @@ internal class ScopedEventStore(
         deviceId: String,
         seq: Long,
     ) {
-        replicas.requireReadable(matchId)
+        replicas.requireWritable(matchId)
         raw.markConfirmedUpTo(matchId, deviceId, seq)
     }
 
