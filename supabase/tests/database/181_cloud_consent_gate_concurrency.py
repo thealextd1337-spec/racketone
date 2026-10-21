@@ -95,8 +95,9 @@ def main():
                                       "from pg_proc p where p.pronamespace='public'::regnamespace and "
                                       "(strpos(p.prosrc,'private.require_cloud_binding()')>0 or p.proname='bind_cloud_session_v1') "
                                       "order by p.proname").fetchall()
-            assert len(functions) == 33
+            assert len(functions) == 34
             assert any(name == "cloud_pull_match_redaction_v1" for name, _ in functions)
+            assert any(name == "cloud_match_readiness_v1" for name, _ in functions)
             statements = [(name, *execute_rpc(name, types)) for name, types in functions]
             statements += [
                 ("tournament INSERT", "insert into public.tournaments(director_id,name,sport) values(%s,'After','tennis') returning id", [uid]),

@@ -1468,3 +1468,27 @@ Fehlende Schnittstelle: `ReplicaLifecycleStore.markNotReady`. Steigt E bei
 gleichem G, bleibt das Match bis zur ersten Redaktionsseite lesbar. Wird vor
 der D1-Review im D1-Worktree mit Integratorfreigabe ergänzt.
 `WireFixturesTest.matchReadinessResponse` ist grün (5/5).
+
+U4-Review r2 auf `3c3640a`: fix-first, kein P1. Alle Befunde aus r1 sind behoben.
+Bericht `review-3c3640a/build/review-report.txt`. Reds echt, E=0 ohne Access-Zeile
+ist sicher (der Server vergleicht E exakt), Sperrfreigabe und Kontotrennung sind korrekt.
+- P2-A: Der Restart-Schlüssel wird nie gelöscht. Dadurch blockiert jede spätere
+  aktive Runde erneut, und laufende Uploads werden doppelt gesendet. Korrektur
+  `advantly-20261021-w2-u4-review-fix-r3`.
+- P2-B, Gate für Integrationspunkt B: Ein Match mit Server-E>0 ohne lokale
+  Access-Zeile stoppt per profilweiter Sperre alle Uploads in jeder Runde.
+  Nachweis: D1 legt für jedes referenzierbare Match Access an und schließt den
+  Transfer ab. Dazu ein gemeinsamer Integrationstest D1 + U4.
+- Einwand (4), BLOCKED ohne Grund: akzeptiert nur mit B4-Syncstatus als Gate vor
+  der Aktivierung.
+- Serverbeobachtung: Die Triggerbereinigung bei E=0 erhöht E nicht, der Schreiber
+  behält den Klarnamen. Prüfung `advantly-20261021-w2-server-trigger-epoch-r1`.
+
+CI auf `f636fda`: Supabase-pgTAP läuft auf dem echten Stack vollständig grün,
+einschließlich 181, 210, 220 und 230. Rot war nur `181_cloud_consent_gate_concurrency.py`:
+Sein eigenes RPC-Inventar erwartete noch 33 statt 34 gebundene RPCs. Der
+Server-Worker hatte nur das SQL-Gegenstück angepasst, und der lokale SQL-Runner
+führt dieses Skript nicht aus. Korrigiert, `cloud_match_readiness_v1` wird
+zusätzlich ausdrücklich erwartet. Lokal 181 und 190 Exit 0
+(`regression-races-r7.log`). Lehre für neue gebundene RPCs: beide Inventare
+(181 SQL und Python) anpassen.
