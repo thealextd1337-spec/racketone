@@ -1327,6 +1327,9 @@ Konto zugeordneten Player nicht global stilllegen. Umgekehrt darf eine
 Player-Zeile mit kollidierender UUID einen belegten gelöschten Profilbezug
 nicht wieder gültig machen. Unauflösbare untypisierte Altbelege wirken nur
 matchlokal; sie werden nicht als globale Player-Manifeste ausgegeben.
+Uploads ohne `lifecycle`-Beleg, die ein Match mit `redaction_epoch > 0` berühren,
+lehnt der Server mit `restart_required` (40001) ohne Teilwrites ab. Clients müssen
+den Beleg senden, bevor diese Migration ausgerollt wird.
 
 **Löschung einzelner Matches:** Teilnehmer, die nicht Creator sind, können ein Match nur für sich ausblenden (`hidden`) oder ihre Verknüpfung lösen („Ich war das nicht“ → `profile_id = null`, Snapshot-Name bleibt). Der Creator kann löschen (Tombstone, nach 30 Tagen hart gelöscht), sofern keine anderen Accounts beteiligt sind; sonst Übergabe wie oben.
 

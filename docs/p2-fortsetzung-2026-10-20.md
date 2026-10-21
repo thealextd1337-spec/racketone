@@ -1377,3 +1377,35 @@ und den CI-Aufruf. D1: `CloudPullRunner`, `CloudPullStore`, `CloudPullState`,
 `CloudPull.sq` und direkte Tests. U4: `CloudUploadStore`, `CloudUpload.sq`,
 Auswahlabfragen in `CloudMetadata.sq`, `CloudUploadRunner` und direkte Tests.
 Gemeinsame Wire-/Port-Dateien und `ReplicaLifecycleStore` gehören dem Integrator.
+
+### Gestartet am 21.10.2026
+
+- Draft-PR #74 (`p2/d2d3-completion` → `main`) für echte CI; Stand `ba97663`.
+- Gesamt-Review des Integrationsstands: `advantly-20261021-integration-a-review-r1` (auf `4705efd`).
+- Welle 2 Server: `advantly-20261021-w2-server-readiness-r1` (Migration 00800, ohne Gradle).
+- Welle 2 D1: `advantly-20261021-w2-d1-readiness-r1` (hält den Gradle-Slot).
+- U4 folgt, sobald ein Agentenplatz frei wird; Gradle-Slot danach seriell.
+
+### Integrationsreview A (r1) auf `4705efd`
+
+Ergebnis fix-first: kein P1, ein P2, drei P3. Bericht
+`review-4705efd/build/review-report.txt`. Alle sechs Nahtstellen sind in Ordnung:
+Restore-Fences vor Schema-Migration und Backfill, Fences am Redaktions-RPC,
+keine Umgehung der Namensmasken über try*-Pfade, Wire-Feldnamen, CI-Verdrahtung
+von 220 und Doku-Aussagen. Eigene SQL-Läufe: 080, 210 und 220 grün, 50 Rennen.
+
+- **P2-1 Release-Gate:** Ohne `lifecycle` lehnt 00700 jeden Batch mit 40001 ab,
+  der ein Match mit E > 0 berührt. Das gilt auch für reine Score-Events. Der
+  heutige Client sendet keinen Beleg und sortiert nach Match-ID, also blockiert
+  ein solches Match alle folgenden Uploads. Entscheidung des Integrators: Die
+  Serverregel bleibt, weil sie Teil des Redaktionsvertrags ist. **00700 und 00800
+  werden erst zusammen mit einem Client nach staging oder prod ausgerollt, der
+  den Beleg sendet (U4).** U4 behebt außerdem den Head-of-Line-Block.
+- P3-1: Fixtures und Vertragstests für Redaktions-RPC, `lifecycle` und 40001 fehlen.
+  `ba97663` deckt die 40001-Abbildung ab; Fixtures folgen mit Server 00800.
+- P3-2: Ein fehlerhafter Alt-Redaktionsbeleg lässt jedes Event-Append scheitern
+  und beendet auf Android den Prozess. Das wird erst bei Aktivierung relevant
+  und gehört vor V4 in die D1-/Session-Abnahme.
+- P3-3: Maskierte leere Namen können über MatchMeta auf das andere Gerät gelangen.
+  Das gehört in Welle 3 (Namensauflösung und MatchMeta-Quellautorität).
+- U4 läuft jetzt: `advantly-20261021-w2-u4-lifecycle-r1`.
