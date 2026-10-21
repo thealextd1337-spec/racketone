@@ -157,6 +157,8 @@ class CloudPullStore internal constructor(
             if (epoch != page.visibilityEpoch) {
                 check(state.scanRun < Long.MAX_VALUE)
                 queries.startScan(page.visibilityEpoch, profileId)
+                // Ready gilt nur für (Match, G): ältere Generationen verlieren es sofort, nicht erst beim Wiedersehen.
+                data.replicas.markNotReadyBefore(ctx, page.visibilityEpoch, fence)
                 data.cloud.saveCursor(profileId, METADATA_STREAM, 0)
                 state = progress(profileId)
                 if (inputCursor != 0L) {
@@ -179,6 +181,7 @@ class CloudPullStore internal constructor(
                 require(match.access in setOf("member", "feed") && match.redactionEpoch >= 0)
                 val old = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)
                 val level = if (match.access == "member") ReplicaAccessLevel.MEMBER else ReplicaAccessLevel.FEED
+                val before = data.replicas.access(ctx, match.id)
                 // Zugriff bei G vor jeder Materialisierung; eine ältere Generation darf nichts mehr materialisieren.
                 if (data.replicas.applyAccess(ctx, match.id, page.visibilityEpoch, level, fence) == TransitionResult.IGNORED) {
                     queries.markSeen(state.scanRun, profileId, match.id)
@@ -191,7 +194,9 @@ class CloudPullStore internal constructor(
                 val retained = database.matchHeaderQueries.countById(match.id).executeAsOne() > 0
                 // Ein vollzogener Entzug hinterlässt nichts; nur zurückgehaltene lokale Daten bleiben als D2-Rest sichtbar.
                 val removal = match.deleted || (old?.access == "member" && match.access != "member" && retained)
-                val materializedVersion = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)?.materializedVersion
+                // Schema-10-Altbestand ohne Access-Zeile: der erste Access löscht den eigenen Snapshot, der Beleg bleibt gültig.
+                val legacyProof = old?.materializedVersion?.takeIf { before == null && level == ReplicaAccessLevel.MEMBER }
+                val materializedVersion = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)?.materializedVersion ?: legacyProof
                 val saved =
                     saveSnapshot(
                         profileId,
@@ -206,6 +211,7 @@ class CloudPullStore internal constructor(
                         removal,
                     )
                 queries.markSeen(state.scanRun, profileId, match.id)
+                if (legacyProof != null) queries.materialized(legacyProof, profileId, "MATCH", match.id)
                 if (match.access == "member" && !match.deleted) {
                     val record = match.record
                     if (saved && record != null) {
@@ -226,6 +232,7 @@ class CloudPullStore internal constructor(
                     // Ohne Kopf ist noch kein Download-Herkunftsbeleg vor einer möglichen Genesis vorhanden.
                     val pending = database.matchHeaderQueries.countById(match.id).executeAsOne() == 0L
                     queries.setMaterializationPending(if (pending) 1 else 0, profileId, match.id)
+                    adoptReadiness(ctx, profileId, match, before, page.visibilityEpoch, fence)
                 }
             }
             if (!page.hasMore) {
@@ -244,6 +251,31 @@ class CloudPullStore internal constructor(
             fence()
             true
         }
+
+    /**
+     * Übernahme bei neuem G: Der Readiness-Vektor bis H hängt nicht von G ab. Galt der letzte Beweis für die vorige
+     * Mitgliedsgeneration und sind E und serverVersion unverändert, wird ready ohne neuen Abruf im selben Commit gesetzt.
+     */
+    private fun adoptReadiness(
+        ctx: ReplicaContext,
+        profileId: String,
+        match: CloudPullMatch,
+        before: ReplicaAccess?,
+        generation: Long,
+        fence: () -> Unit,
+    ) {
+        if (before?.access != ReplicaAccessLevel.MEMBER || before.generation == generation) return
+        val proof = queries.readinessMark(profileId, match.id).executeAsOneOrNull() ?: return
+        val snapshot = requireNotNull(snapshot(profileId, CloudPullEntityKind.MATCH, match.id))
+        if (proof.proof_generation != before.generation || proof.proof_epoch != match.redactionEpoch ||
+            before.redactionEpoch != match.redactionEpoch || proof.proof_version != match.serverVersion ||
+            snapshot.materializedVersion != match.serverVersion || snapshot.removalPending
+        ) {
+            return
+        }
+        data.replicas.markReady(ctx, match.id, generation, match.redactionEpoch, fence)
+        queries.adoptReadinessProof(generation, profileId, match.id)
+    }
 
     private fun saveSnapshot(
         profileId: String,
@@ -490,7 +522,8 @@ class CloudPullStore internal constructor(
         val access = checkNotNull(data.replicas.access(ctx, work.matchId))
         val generation = checkNotNull(access.generation)
         val epoch = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId)).redactionObserved
-        if (epoch == 0L || epoch < access.redactionEpoch) return null
+        // Ready (auch übernommen) belegt angewandtes E; ein höheres E hat ready bereits im Katalog-Commit entzogen.
+        if (epoch == 0L || epoch < access.redactionEpoch || access.ready) return null
         val transfer =
             data.replicas.redactionProgress(ctx, work.matchId)?.takeIf {
                 it.transfer.generation == generation && it.transfer.epoch == epoch
@@ -582,7 +615,9 @@ class CloudPullStore internal constructor(
 
     /**
      * Readiness-Ziel nur für (Match, G) mit Mitgliedszugriff, abgeschlossenem Katalog derselben Epoche und angewandtem E.
-     * H stammt für E > 0 aus dem vollständigen Transfer, für E = 0 aus dem festgehaltenen Serverwert (null = erst abrufen).
+     * Auch ready-Matches prüft jede Runde so. H stammt für noch nicht bereite Matches mit E > 0 aus dem vollständigen
+     * Transfer, sonst aus dem für diese Runde festgehaltenen Serverwert (null = erst abrufen). Laufende Uploads oberhalb
+     * von H verhindern den Rundenabschluss daher nicht.
      */
     fun readinessWork(
         work: CloudPullEventWork,
@@ -593,11 +628,11 @@ class CloudPullStore internal constructor(
         val access = checkNotNull(data.replicas.access(ctx, work.matchId))
         val generation = checkNotNull(access.generation)
         val progress = progress(work.profileId)
-        if (access.ready || progress.targetEpoch != null || progress.visibilityEpoch != generation) return null
+        if (progress.targetEpoch != null || progress.visibilityEpoch != generation) return null
         val epoch = access.redactionEpoch
         if (requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId)).redactionObserved != epoch) return null
         val high =
-            if (epoch > 0) {
+            if (epoch > 0 && !access.ready) {
                 data.replicas
                     .redactionProgress(ctx, work.matchId)
                     ?.takeIf { it.completed && it.transfer.generation == generation && it.transfer.epoch == epoch }
@@ -607,7 +642,7 @@ class CloudPullStore internal constructor(
                 queries
                     .readinessMark(work.profileId, work.matchId)
                     .executeAsOneOrNull()
-                    ?.takeIf { it.generation == generation && it.redaction_epoch == 0L }
+                    ?.takeIf { it.generation == generation && it.redaction_epoch == epoch && it.check_round == progress.checkRound }
                     ?.high_watermark
             }
         return CloudPullReadinessWork(work.matchId, generation, epoch, high)
@@ -634,10 +669,15 @@ class CloudPullStore internal constructor(
             require(server.map { it.deviceId }.distinct().size == server.size)
             require(server.all { it.deviceId.isNotBlank() && it.maxSeq > 0 && it.eventCount in 1..it.maxSeq })
             require(server.sumOf { it.eventCount } <= highWatermark)
-            if (request.highWatermark == null) {
-                check(request.redactionEpoch == 0L)
-                queries.saveReadinessMark(work.profileId, work.matchId, request.generation, 0, highWatermark)
-            }
+            queries.ensureReadinessMark(work.profileId, work.matchId, request.generation, request.redactionEpoch, highWatermark)
+            queries.holdReadinessMark(
+                request.generation,
+                request.redactionEpoch,
+                highWatermark,
+                progress(work.profileId).checkRound,
+                work.profileId,
+                work.matchId,
+            )
             val local =
                 queries
                     .readinessWatermarks(work.profileId, work.matchId, highWatermark, if (work.repairing) 1 else 0, work.repairRun)
@@ -672,6 +712,14 @@ class CloudPullStore internal constructor(
                             request.generation,
                             request.redactionEpoch,
                             fence,
+                        )
+                        queries.saveReadinessProof(
+                            request.generation,
+                            request.redactionEpoch,
+                            highWatermark,
+                            serverVersion,
+                            work.profileId,
+                            work.matchId,
                         )
                         CloudPullReadinessResult.READY
                     }

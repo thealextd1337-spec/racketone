@@ -109,7 +109,8 @@ class CloudPullMappingTest {
     @Test
     fun scheduledSnapshotNeverReplacesExistingLocalEngineStatus() =
         runBlocking {
-            PullFixture().use { f ->
+            // Der lokale Stand vor dem Abgleich wird direkt umgeschrieben; das geht nur im inaktiven Store.
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 val record =
                     PullMapping

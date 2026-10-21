@@ -17,6 +17,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
@@ -100,6 +101,39 @@ class CloudPullLifecycleTest {
 
     private fun reopen(file: File) = PullFixture(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}"))
 
+    /** Vollkatalog je Epoche mit ehrlichem Cursor: Version = base(G) + Position, ein Neuscan ab null liefert alles erneut. */
+    private fun PullFixture.catalog(
+        ids: List<String>,
+        epoch: () -> Long,
+        base: () -> Long,
+        visible: (String) -> Boolean = { true },
+    ) {
+        metadata = { cursor, limit ->
+            val all = ids.filter(visible).mapIndexed { i, id -> id to base() + i + 1 }
+            val rows = all.filter { it.second > cursor }.take(limit)
+            PullResponse(
+                rows.map { pullMatch(it.first, it.second) },
+                cursor = rows.lastOrNull()?.second ?: maxOf(cursor, base()),
+                hasMore = rows.size == limit && rows.last().second < all.last().second,
+                visibilityEpoch = epoch(),
+            )
+        }
+    }
+
+    private suspend fun PullFixture.untilComplete(default: Boolean = false): Int {
+        var runs = 0
+        do {
+            val runner =
+                if (default) {
+                    CloudPullRunner(backend, data)
+                } else {
+                    CloudPullRunner(backend, data, maxRpcsPerRun = 100, maxPagesPerRun = 100, maxEventJobsPerRun = 100)
+                }
+            runs++
+        } while (runner.pullNow().outcome != CloudPullOutcome.COMPLETE && runs < 200)
+        return runs
+    }
+
     private fun PullFixture.serveManifestMatch(
         server: ManifestServer,
         version: () -> Long = { 1 },
@@ -180,7 +214,8 @@ class CloudPullLifecycleTest {
     fun ownUnuploadedEventsNeitherHideNorFakeAGap() =
         runBlocking {
             // Fake: ein eigenes, nie hochgeladenes Event darf den exakten Vektor nicht verfälschen.
-            PullFixture().use { f ->
+            // Im aktiven Store lässt sich an ein nicht-ready Cloudmatch gar kein eigenes Event hängen.
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 val log = listOf(pullEvent(1), pullEvent(2))
                 f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
@@ -205,7 +240,7 @@ class CloudPullLifecycleTest {
                 )
             }
             // Hide: ein lokal vorhandenes, aber nie heruntergeladenes Event schließt die Lücke nicht.
-            PullFixture().use { f ->
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 val delivered = listOf(pullEvent(1), pullEvent(2))
                 f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
@@ -298,6 +333,7 @@ class CloudPullLifecycleTest {
                 assertEquals(ReplicaAccessLevel.ABSENT, revoked.access)
                 assertEquals(2, revoked.generation)
                 assertFalse(revoked.ready)
+                assertFalse(f.readable())
                 assertEquals(0, f.data.events.count(MATCH))
                 assertNull(f.data.matches.get(MatchId(MATCH)))
                 assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH))
@@ -310,6 +346,7 @@ class CloudPullLifecycleTest {
                 assertEquals(ReplicaAccessLevel.MEMBER, regranted.access)
                 assertEquals(3, regranted.generation)
                 assertTrue(regranted.ready)
+                assertTrue(f.readable())
                 assertEquals(3, f.data.events.count(MATCH))
                 val fresh = f.requests("cloud_match_readiness_v1").drop(before)
                 assertEquals(listOf(3L), fresh.map { it.long("p_generation") })
@@ -317,7 +354,7 @@ class CloudPullLifecycleTest {
         }
 
     @Test
-    fun memberToMemberKeepsOwnMaterializationResetsReadyAndRecreatesEventWorkForUnchangedSnapshot() =
+    fun unchangedMemberAtNewGenerationAdoptsReadinessInCatalogCommitAndStillChecksTheRound() =
         runBlocking {
             PullFixture().use { f ->
                 f.bind()
@@ -327,14 +364,17 @@ class CloudPullLifecycleTest {
                 f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
                 f.serverLog = { log }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                assertTrue(f.data.access()!!.ready)
+                assertTrue(f.readable())
                 epoch = 2
-                // Nur die Katalogseiten (Epochenwechsel plus Neuscan): das nicht-ready-Fenster bleibt beobachtbar.
+                val before = f.requests("cloud_match_readiness_v1").size
+                // Nur die Katalogseiten (Epochenwechsel plus Neuscan): E und serverVersion unverändert → Übernahme ohne RPC.
                 assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 2).pullNow().outcome)
                 val window = f.data.access()!!
                 assertEquals(ReplicaAccessLevel.MEMBER, window.access)
                 assertEquals(2, window.generation)
-                assertFalse(window.ready)
+                assertTrue(window.ready)
+                assertTrue(f.readable())
+                assertEquals(before, f.requests("cloud_match_readiness_v1").size)
                 val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!
                 assertEquals(1, snapshot.serverVersion)
                 assertEquals(1, snapshot.materializedVersion)
@@ -343,9 +383,326 @@ class CloudPullLifecycleTest {
                 val work = assertNotNull(f.data.cloudPulls.eventWork("alice", MATCH))
                 assertEquals(0, work.checkedRound)
                 assertEquals(2, work.cursor)
+                // Die Runde prüft das übernommene Match trotzdem gegen ein festgehaltenes H bei G = 2.
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
                 assertTrue(f.data.access()!!.ready)
-                assertEquals(2L, f.requests("cloud_match_readiness_v1").last().long("p_generation"))
+                assertEquals(listOf(2L), f.requests("cloud_match_readiness_v1").drop(before).map { it.long("p_generation") })
+            }
+        }
+
+    @Test
+    fun changedServerVersionAtNewGenerationIsNotAdoptedAndNeedsFreshReadiness() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                var epoch = 1L
+                var version = 1L
+                val log = (1L..2L).map { pullEvent(it) }
+                f.metadata = { cursor, _ ->
+                    PullResponse(listOf(pullMatch(version = version)), cursor = maxOf(cursor, version), visibilityEpoch = epoch)
+                }
+                f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
+                f.serverLog = { log }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.readable())
+                epoch = 2
+                version = 2
+                val before = f.requests("cloud_match_readiness_v1").size
+                assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 2).pullNow().outcome)
+                assertEquals(2, f.data.access()!!.generation)
+                assertFalse(f.data.access()!!.ready)
+                assertFalse(f.readable())
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.readable())
+                assertEquals(listOf(2L), f.requests("cloud_match_readiness_v1").drop(before).map { it.long("p_generation") })
+            }
+        }
+
+    @Test
+    fun changedRedactionEpochAtNewGenerationIsNotAdoptedAndNeedsTransferAndReadiness() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val server = ManifestServer(PLAYERS.take(3), (1L..3L).map { redactedEvent(it) })
+                f.serveManifestMatch(server)
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 20).pullNow().outcome)
+                assertTrue(f.readable())
+                // serverVersion bleibt absichtlich gleich: allein das neue E verhindert die Übernahme.
+                server.generation = 2
+                server.epoch = 2
+                assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 2).pullNow().outcome)
+                assertEquals(2, f.data.access()!!.generation)
+                assertFalse(f.data.access()!!.ready)
+                assertFalse(f.readable())
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 20).pullNow().outcome)
+                val access = f.data.access()!!
+                assertEquals(2, access.redactionEpoch)
+                assertTrue(access.ready)
+                val last = f.requests("cloud_match_readiness_v1").last()
+                assertEquals(2, last.long("p_generation"))
+                assertEquals(2, last.long("p_redaction_epoch"))
+            }
+        }
+
+    @Test
+    fun generationChangeBlocksUnseenAndRevokedMatchesInTheScanCommit() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val ids = (1..205).map { uuid("m-$it") }
+                var epoch = 1L
+                var revoked: String? = null
+                // Versionen ändern sich mit G: keine Übernahme, geprüft wird nur die Sperre selbst.
+                f.catalog(ids, { epoch }, { epoch * 1000 }, { it != revoked })
+                f.untilComplete()
+                assertTrue(ids.all { f.readable(it) })
+                epoch = 2
+                revoked = ids.last()
+                // Epochenwechselseite und erste Neuscanseite: Seite 2 und das entzogene Match sind noch ungesehen.
+                assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 2).pullNow().outcome)
+                assertFalse(f.readable(ids.first()))
+                assertFalse(f.readable(ids[203]))
+                assertFalse(f.data.access(ids[203])!!.ready)
+                assertEquals(1, f.data.access(ids[203])!!.generation)
+                assertFalse(f.readable(ids.last()))
+                assertFalse(f.data.access(ids.last())!!.ready)
+                f.untilComplete()
+                assertTrue(ids.dropLast(1).all { f.readable(it) })
+                assertEquals(ReplicaAccessLevel.ABSENT, f.data.access(ids.last())!!.access)
+                assertFalse(f.readable(ids.last()))
+            }
+        }
+
+    @Test
+    fun generationChangeWith205UnchangedMatchesStaysReadableWithoutReadinessRequests() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val ids = (1..205).map { uuid("m-$it") }
+                var epoch = 1L
+                f.catalog(ids, { epoch }, { 0 })
+                val setupRuns = f.untilComplete(default = true)
+                assertTrue(ids.all { f.readable(it) })
+                epoch = 2
+                val before = f.requests("cloud_match_readiness_v1").size
+                var runs = 0
+                var readableAfter: Int? = null
+                var result: CloudPullState
+                do {
+                    result = CloudPullRunner(f.backend, f.data).pullNow()
+                    runs++
+                    if (readableAfter == null && ids.all { f.readable(it) && f.data.access(it)!!.generation == 2L }) readableAfter = runs
+                } while (result.outcome != CloudPullOutcome.COMPLETE && runs < 200)
+                val checks = f.requests("cloud_match_readiness_v1").drop(before)
+                println(
+                    "MEASURE-205 setupRuns=$setupRuns readableAfterRuns=$readableAfter completeAfterRuns=$runs readinessRpcs=${checks.size}",
+                )
+                assertEquals(1, readableAfter)
+                assertEquals(CloudPullOutcome.COMPLETE, result.outcome)
+                // Die Rundenprüfung bleibt: genau ein Readiness-Vektor je Match bei G = 2, kein zusätzlicher Abruf für ready.
+                assertEquals(ids.toSet(), checks.map { it.text("p_match_id") }.toSet())
+                assertEquals(205, checks.size)
+                assertTrue(checks.all { it.long("p_generation") == 2L })
+            }
+        }
+
+    @Test
+    fun feedAtNewGenerationBlocksReadsInTheCatalogCommit() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                var epoch = 1L
+                var access = "member"
+                f.metadata = { cursor, _ ->
+                    PullResponse(
+                        listOf(pullMatch(version = epoch, access = access)).filter { it.serverVersion > cursor },
+                        cursor = epoch,
+                        visibilityEpoch = epoch,
+                    )
+                }
+                val log = (1L..2L).map { pullEvent(it) }
+                f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
+                f.serverLog = { log }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.readable())
+                epoch = 2
+                access = "feed"
+                CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 2).pullNow()
+                assertEquals(ReplicaAccessLevel.FEED, f.data.access()!!.access)
+                assertEquals(2, f.data.access()!!.generation)
+                assertFalse(f.readable())
+            }
+        }
+
+    @Test
+    fun epochZeroMatchIsNotReadableBeforeItsReadinessProof() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val log = (1L..3L).map { pullEvent(it) }
+                f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
+                f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
+                f.serverLog = { log }
+                val seen = mutableListOf<Boolean>()
+                f.readiness = { body ->
+                    seen += f.readable()
+                    f.servedReadiness(body)
+                }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertEquals(listOf(false), seen)
+                assertTrue(f.readable())
+            }
+        }
+
+    @Test
+    fun readinessCountsOnlyReceiptsUpToTheHeldHighWatermark() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                val log = (1L..3L).map { pullEvent(it) }
+                f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
+                f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
+                f.serverLog = { log }
+                // Der Server hält H = 2 fest; der lokal schon empfangene Beleg 3 liegt darüber und zählt nicht mit.
+                f.readiness = { body ->
+                    f.servedReadiness(
+                        if ("p_high_watermark" in
+                            body
+                        ) {
+                            body
+                        } else {
+                            JsonObject(body + ("p_high_watermark" to JsonPrimitive(2L)))
+                        },
+                    )
+                }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.data.access()!!.ready)
+                assertTrue(f.readable())
+                assertEquals(1, f.requests("cloud_match_readiness_v1").size)
+                assertFalse(
+                    f.data.cloudPulls
+                        .eventWork("alice", MATCH)!!
+                        .repairing,
+                )
+                assertEquals(3, f.data.events.count(MATCH))
+            }
+        }
+
+    @Test
+    fun staleSnapshotIsNeverReadyUntilTheCatalogDeliversTheServerVersion() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                var catalogVersion = 1L
+                val log = (1L..2L).map { pullEvent(it) }
+                f.metadata = { cursor, _ ->
+                    PullResponse(
+                        listOf(pullMatch(version = catalogVersion)).filter { it.serverVersion > cursor },
+                        cursor = catalogVersion,
+                        visibilityEpoch = 1,
+                    )
+                }
+                f.events = { _, after, limit -> log.filter { it.serverSeq > after }.take(limit) }
+                f.serverLog = { log }
+                f.serverVersion = { 2 }
+                val stale = CloudPullRunner(f.backend, f.data).pullNow()
+                assertEquals(CloudPullOutcome.BLOCKED, stale.outcome)
+                assertEquals(1, stale.pendingReadiness)
+                assertFalse(f.data.access()!!.ready)
+                assertFalse(f.readable())
+                assertFalse(
+                    f.data.cloudPulls
+                        .eventWork("alice", MATCH)!!
+                        .repairing,
+                )
+                catalogVersion = 2
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.readable())
+            }
+        }
+
+    @Test
+    fun liveForeignUploadsDuringTheRoundCannotPreventRoundCompletion() =
+        runBlocking {
+            PullFixture().use { f ->
+                f.bind()
+                var log = (1L..3L).map { pullEvent(it) }
+                var live = false
+
+                // Jede Serveranfrage sieht ein weiteres fremdes Event: das Match läuft während der ganzen Runde weiter.
+                fun grow() {
+                    if (live) log = log + pullEvent(log.size + 1L)
+                }
+                f.metadata = { cursor, _ -> PullResponse(listOf(pullMatch()), cursor = maxOf(cursor, 1), visibilityEpoch = 1) }
+                f.events = { _, after, limit ->
+                    grow()
+                    log.filter { it.serverSeq > after }.take(limit)
+                }
+                f.serverLog = { log }
+                f.watermarks = {
+                    grow()
+                    listOf(EventWatermark(REMOTE, log.size.toLong(), log.size.toLong()))
+                }
+                f.readiness = { body ->
+                    grow()
+                    f.servedReadiness(body)
+                }
+                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                assertTrue(f.readable())
+                live = true
+                val outcomes = mutableListOf<CloudPullOutcome>()
+                while (CloudPullOutcome.COMPLETE !in outcomes &&
+                    outcomes.size < 5
+                ) {
+                    outcomes += CloudPullRunner(f.backend, f.data).pullNow().outcome
+                }
+                assertEquals(listOf(CloudPullOutcome.COMPLETE), outcomes)
+                assertFalse(
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .roundActive,
+                )
+                assertTrue(f.readable())
+                assertTrue(log.size > f.data.events.count(MATCH))
+            }
+        }
+
+    @Test
+    fun schemaTenPullRowsWithoutAccessHealAfterUpgradeWithoutLocalFailure() =
+        runBlocking {
+            val file = databaseFile()
+            val ids = listOf(uuid("m-1"), uuid("m-2"))
+            try {
+                reopen(file).use { f ->
+                    f.bind()
+                    f.catalog(ids, { 1 }, { 0 })
+                    assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                }
+                // Schema-10-Stand: Pullzeilen ohne Access/Cloud-Seen und ohne Readiness-Tabelle, danach echtes Upgrade über 10.sqm.
+                JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+                    driver.execute(null, "DELETE FROM replica_access", 0)
+                    driver.execute(null, "DELETE FROM replica_cloud_seen", 0)
+                    driver.execute(null, "DROP TABLE cloud_pull_readiness", 0)
+                    AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
+                }
+                reopen(file).use { f ->
+                    f.bind()
+                    f.catalog(ids, { 1 }, { 0 })
+                    val results = (1..3).map { CloudPullRunner(f.backend, f.data).pullNow() }
+                    assertTrue(
+                        results.none { it.outcome == CloudPullOutcome.FAILED },
+                        results.map { "${it.outcome}/${it.failure}" }.toString(),
+                    )
+                    assertEquals(CloudPullOutcome.COMPLETE, results.first().outcome)
+                    ids.forEach {
+                        val access = f.data.access(it)!!
+                        assertEquals(ReplicaAccessLevel.MEMBER, access.access)
+                        assertEquals(1, access.generation)
+                        assertTrue(access.ready)
+                    }
+                }
+            } finally {
+                file.delete()
             }
         }
 
@@ -478,8 +835,6 @@ class CloudPullLifecycleTest {
         runBlocking {
             PullFixture().use { f ->
                 f.bind()
-                // Ohne Aktivierung ist jedes Match lesbar; erst dann zählt ready.
-                f.data.replicas.activate(f.data.replicas.captureContext()) {}
                 val server = ManifestServer(PLAYERS.take(3), (1L..3L).map { redactedEvent(it) })
                 var version = 1L
                 f.serveManifestMatch(server, version = { version })

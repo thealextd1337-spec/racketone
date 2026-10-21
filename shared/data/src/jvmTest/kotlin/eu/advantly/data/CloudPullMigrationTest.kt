@@ -98,7 +98,7 @@ class CloudPullMigrationTest {
     }
 
     @Test
-    fun schemaTenToElevenAddsEmptyReadinessMarksAndKeepsPullRows() {
+    fun schemaTenToElevenAddsEmptyReadinessMarksKeepsPullRowsAndForcesFullCatalogAtSameGeneration() {
         val file = File.createTempFile("pull-schema-ten", ".db")
         try {
             File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
@@ -107,6 +107,9 @@ class CloudPullMigrationTest {
                 driver.execute(null, "INSERT INTO cloud_pull_profile(profile_id,visibility_epoch,check_round) VALUES ('alice',3,2)", 0)
                 driver.execute(null, "INSERT INTO cloud_pull_event_work(profile_id,match_id,last_checked) VALUES ('alice','m',2)", 0)
                 driver.execute(null, "INSERT INTO cloud_pull_receipt VALUES ('alice','m','e',7,'d',1,0)", 0)
+                driver.execute(null, "UPDATE cloud_pull_profile SET metadata_complete = 1, round_catalog_ready = 1, scan_run = 4", 0)
+                driver.execute(null, "INSERT INTO cloud_cursor VALUES ('alice','pull',42)", 0)
+                driver.execute(null, "INSERT INTO cloud_cursor VALUES ('alice','pull:events:m',7)", 0)
                 AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
                 val db = AdvantlyDatabase(driver)
                 assertEquals(
@@ -130,8 +133,16 @@ class CloudPullMigrationTest {
                         .executeAsOne()
                         .server_seq,
                 )
+                // Alte Pullzeilen ohne Access: Vollkatalog ab null bei gleichem G als Neuscan, Eventcursor bleiben.
+                val profile = db.cloudPullQueries.profile("alice").executeAsOne()
+                assertEquals(3, profile.target_epoch)
+                assertEquals(5, profile.scan_run)
+                assertEquals(0, profile.metadata_complete)
+                assertEquals(0, profile.round_catalog_ready)
+                assertEquals(null, db.cloudSyncQueries.cursor("alice", "pull").executeAsOneOrNull())
+                assertEquals(7, db.cloudSyncQueries.cursor("alice", "pull:events:m").executeAsOne())
                 assertEquals(null, db.cloudPullQueries.readinessMark("alice", "m").executeAsOneOrNull())
-                db.cloudPullQueries.saveReadinessMark("alice", "m", 3, 0, 7)
+                db.cloudPullQueries.ensureReadinessMark("alice", "m", 3, 0, 7)
                 assertEquals(
                     7,
                     db.cloudPullQueries

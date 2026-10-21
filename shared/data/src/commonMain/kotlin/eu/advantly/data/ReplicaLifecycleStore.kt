@@ -265,6 +265,13 @@ class ReplicaLifecycleStore internal constructor(
             TransitionResult.APPLIED
         }
 
+    /** G-Wechsel: alle Zugriffe des Kontos unterhalb von G verlieren ready; Materialisierung, Zugriff und Transfer bleiben. */
+    fun markNotReadyBefore(
+        ctx: ReplicaContext,
+        generation: Long,
+        fence: () -> Unit,
+    ): Unit = mutate(ctx, fence) { queries.notReadyBefore(ctx.accountKey, generation) }
+
     private fun clearTransfer(
         account: String,
         match: String,

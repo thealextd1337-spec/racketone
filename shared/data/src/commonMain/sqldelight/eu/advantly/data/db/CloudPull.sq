@@ -59,13 +59,18 @@ CREATE TABLE cloud_pull_receipt (
 );
 CREATE INDEX cloud_pull_receipt_watermarks ON cloud_pull_receipt(profile_id, match_id, repair_run, device_id, device_seq);
 
--- Festgehaltener Readiness-Wasserstand H je Match; gilt ausschließlich für genau dieses G/E.
+-- Runden-H je Match (gilt nur für genau dieses G/E und diese Prüfrunde) und letzter Readiness-Beweis (G, E, H, serverVersion).
 CREATE TABLE cloud_pull_readiness (
     profile_id TEXT NOT NULL,
     match_id TEXT NOT NULL,
     generation INTEGER NOT NULL,
     redaction_epoch INTEGER NOT NULL,
     high_watermark INTEGER NOT NULL CHECK(high_watermark >= 0),
+    check_round INTEGER NOT NULL DEFAULT 0,
+    proof_generation INTEGER,
+    proof_epoch INTEGER,
+    proof_high_watermark INTEGER,
+    proof_version INTEGER,
     PRIMARY KEY(profile_id, match_id)
 );
 
@@ -227,8 +232,21 @@ AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = :profile AN
 readinessMark:
 SELECT * FROM cloud_pull_readiness WHERE profile_id = ? AND match_id = ?;
 
-saveReadinessMark:
-INSERT OR REPLACE INTO cloud_pull_readiness VALUES (?,?,?,?,?);
+ensureReadinessMark:
+INSERT OR IGNORE INTO cloud_pull_readiness(profile_id,match_id,generation,redaction_epoch,high_watermark) VALUES (?,?,?,?,?);
+
+-- Hält H für diese Runde fest; der letzte Beweis bleibt unberührt.
+holdReadinessMark:
+UPDATE cloud_pull_readiness SET generation = ?, redaction_epoch = ?, high_watermark = ?, check_round = ?
+WHERE profile_id = ? AND match_id = ?;
+
+saveReadinessProof:
+UPDATE cloud_pull_readiness SET proof_generation = ?, proof_epoch = ?, proof_high_watermark = ?, proof_version = ?
+WHERE profile_id = ? AND match_id = ?;
+
+-- Übernahme bei neuem G: derselbe Beweis gilt jetzt für diese Generation.
+adoptReadinessProof:
+UPDATE cloud_pull_readiness SET proof_generation = ? WHERE profile_id = ? AND match_id = ?;
 
 -- Ausschließlich heruntergeladene, lokal vorhandene Events bis H; eigene ungesendete Events haben keinen Empfangsbeleg.
 readinessWatermarks:

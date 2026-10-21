@@ -899,6 +899,40 @@ class ReplicaLifecycleStoreTest {
         }
 
     @Test
+    fun markNotReadyBeforeDropsOnlyOlderGenerationsOfThisAccountAtomically(): Unit =
+        Fixture().use { f ->
+            f.member("B", 3)
+            val ctx = f.member("A", 3)
+            f.cloudMatch()
+            f.data.replicas.applyAccess(ctx, "newer", 4, ReplicaAccessLevel.MEMBER, fence)
+            f.data.replicas.markReady(ctx, "newer", 4, 0, fence)
+            var calls = 0
+            assertFails { f.data.replicas.markNotReadyBefore(ctx, 4) { if (++calls == 2) error("lost authority") } }
+            assertTrue(
+                f.data.replicas
+                    .access(ctx, "match")!!
+                    .ready,
+            )
+            f.data.replicas.markNotReadyBefore(ctx, 4, fence)
+            val old = f.data.replicas.access(ctx, "match")!!
+            assertFalse(old.ready)
+            assertEquals(3, old.generation)
+            assertEquals(ReplicaAccessLevel.MEMBER, old.access)
+            assertTrue(
+                f.data.replicas
+                    .access(ctx, "newer")!!
+                    .ready,
+            )
+            val other = f.select("B")
+            assertTrue(
+                f.data.replicas
+                    .access(other, "match")!!
+                    .ready,
+            )
+            assertFails { f.data.replicas.markNotReadyBefore(ctx, 5, fence) }
+        }
+
+    @Test
     fun markNotReadyIsIdempotentContextBoundAtomicAndKeepsAccessProofAndTransfer(): Unit =
         Fixture().use { f ->
             val ctx = f.member("A", 4)

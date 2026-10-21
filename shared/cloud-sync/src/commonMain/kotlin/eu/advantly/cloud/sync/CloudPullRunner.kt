@@ -323,7 +323,8 @@ class CloudPullRunner(
             }
             budget.rpc()
             data.cloudPulls.recordEventRequest(work, run, budget.fence)
-            // Noch nicht bereit: der an G/E/H gebundene Vektor ersetzt den Wasserstandsvergleich (eine Anfrage genügt).
+            // Der an G/E und das Runden-H gebundene Vektor ersetzt den Wasserstandsvergleich, auch für ready-Matches;
+            // Wasserstände nur, solange kein abgeschlossener Katalog bei G vorliegt (Neuscan).
             val target = data.cloudPulls.readinessWork(work, run)
             if (target != null) {
                 require(target.redactionEpoch <= Int.MAX_VALUE)
