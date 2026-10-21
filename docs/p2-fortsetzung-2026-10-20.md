@@ -1782,3 +1782,24 @@ Test prüft Lesemuster und erhält deshalb eine explizite Frist von 120 s. Das
 Fristverhalten decken eigene Tests ab. Der ABSENT-Pfad mit 20 000 Feed-Snapshots
 bleibt als Volumenbeobachtung offen: Er braucht auf CI mehrere Läufe, setzt aber
 korrekt fort.
+
+Server-Review zu `77b6317`: **Freigabe**, keine P1/P2 im Diff. Bericht
+`%TEMP%/review-77b6317-20261021/review-report.txt`. Eigene Prüfung: 250 auf dem
+Parent 70/303 rot, gegen 4a5b64c 22 rot (echte Gegenprobe), Ziel grün. Alle
+geänderten Alt-Assertions liegen im globalen Zweig. Elf eigene Gegenproben ohne
+Wiederöffnung einer N-Klasse. Kein E-Anstieg durch unveränderte Upserts. Der
+01000-Trigger feuert vor 00900, also kein doppelter Anstieg beim Upload. Inserts
+ohne Treffer kosten etwa 4 % mehr. Per Merge `fee71b3` übernommen. Root-SQL-Lauf
+grün bis auf die fünf Plattformlücken; 250 303/303; 181/190 Exit 0.
+
+**Entscheidungen des Integrators:**
+- P3-1/P3-2: Der UPDATE-Trigger auf Teilnehmern feuert nur, wenn `player_id` auf
+  einen Nicht-null-Wert wechselt. Der Teilnehmer-Extraktor folgt exakt der
+  Löscherfassung in 00700 (Z. 285–286). Die Migration 01000 ist unveröffentlicht
+  und wird direkt korrigiert. P3-3: Genesis-Manifestinhalt in 220 prüfen.
+- **Vorbestehender P1 (Produktionsrisiko für den Löschjob):** Eine Kontolöschung
+  läuft bei vielen Textslot-Teilnehmern ins 10-s-Limit (2 Self-IDs: 6 s bei 20 000
+  Zeilen, Timeout bei 50 000). Vermutete Ursache sind globale Scans mit
+  `redaction_uuid(slot_id)` in 00700 Z. 285/303/558. Wird ein eigener
+  Performance-Auftrag nach dem N3-Muster (Ausdrucksindex/Vorfilter, Budgets
+  unverändert).
