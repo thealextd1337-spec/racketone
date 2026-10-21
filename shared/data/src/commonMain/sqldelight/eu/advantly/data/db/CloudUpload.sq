@@ -23,10 +23,12 @@ SELECT profile_id FROM cloud_device_owner WHERE device_id = ?;
 bindDevice:
 INSERT OR IGNORE INTO cloud_device_owner (device_id, profile_id) VALUES (?, ?);
 
+-- Keyset je Match: Kotlin überspringt blockierte Matches vor dem LIMIT, statt sie in jedem Lauf erneut zu treffen.
 pendingForProfile:
 SELECT e.id, e.match_id, e.device_id, e.device_seq, e.lamport, e.wall_clock_ms, e.parent_id, e.type, e.payload, e.confirmed
 FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id
 WHERE e.cloud_state = 0 AND o.profile_id = :profileId
+  AND (:afterMatch IS NULL OR e.match_id > :afterMatch)
   AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = e.match_id)
 ORDER BY e.match_id, e.lamport, e.device_id, e.id LIMIT :limit;
 
