@@ -1,6 +1,15 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.EventId
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.data.CloudMetadataKind
 import eu.advantly.data.CloudPullMetadataPage
 import eu.advantly.data.LocalData
@@ -8,9 +17,11 @@ import eu.advantly.data.RedactionCursor
 import eu.advantly.data.RedactionPage
 import eu.advantly.data.RedactionTransfer
 import eu.advantly.data.ReplicaAccessLevel
+import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
 import eu.advantly.data.createInMemoryJvmDriver
 import eu.advantly.data.metadataState
+import eu.advantly.data.toStoredEvent
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -28,6 +39,7 @@ import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -42,7 +54,26 @@ class CloudUploadLifecycleTest {
         val bodies = mutableListOf<JsonObject>()
         val batches get() = bodies.map { CloudJson.decodeFromJsonElement(PushBatch.serializer(), it) }
         val committed = mutableSetOf<String>()
+
+        // Nachbildung von 00700: G = profile_settings.visibility_epoch, E je Match, dem Server bekannte Matches.
+        var serverG = 0L
+        val serverE = mutableMapOf<String, Long>()
+        val serverMatches = mutableSetOf<String>()
         var restartWhen: (PushBatch) -> Boolean = { false }
+
+        /** Mit Beleg braucht jedes bekannte referenzierte Match sein aktuelles E; zusätzliche Einträge sind erlaubt. */
+        fun violates00700(batch: PushBatch): Boolean {
+            val lifecycle = batch.lifecycle
+            val referenced =
+                batch.matches.map { it.id } + batch.events.filter { lifecycle != null || it.id !in committed }.map { it.matchId }
+            val known = referenced.filter { it in serverMatches }.toSet()
+            return if (lifecycle == null) {
+                known.any { serverE.getOrDefault(it, 0) > 0 }
+            } else {
+                lifecycle.generation != serverG || known.any { lifecycle.redactionEpochs[it]?.toLong() != serverE.getOrDefault(it, 0) }
+            }
+        }
+
         var loseResponse = false
         var hold: CompletableDeferred<Unit>? = null
         val sent = CompletableDeferred<Unit>()
@@ -65,11 +96,14 @@ class CloudUploadLifecycleTest {
                         val raw = body.getValue("p_batch").jsonObject
                         bodies += raw
                         val batch = CloudJson.decodeFromJsonElement(PushBatch.serializer(), raw)
+                        // Der Server prüft G/E vor jedem Write; eine spätere lokale Änderung trifft den Commit nicht mehr.
+                        val restart = restartWhen(batch) || violates00700(batch)
+                        if (!restart) serverMatches += batch.matches.map { it.id } + batch.events.map { it.matchId }
                         hold?.let {
                             sent.complete(Unit)
                             it.await()
                         }
-                        if (restartWhen(batch)) {
+                        if (restart) {
                             return@MockEngine respond(
                                 """{"code":"40001","message":"restart_required"}""",
                                 HttpStatusCode.Conflict,
@@ -93,6 +127,7 @@ class CloudUploadLifecycleTest {
         init {
             data.players.ensureSelf("Alex", 0) { PlayerId("me") }
             data.accountIdentities.initialize("phone-source", "me", "PHONE")
+            account("alice")
             val session = data.cloudUploads.activate("alice")
             data.cloudUploads.bindOwnedDevices(session, setOf("phone-source"))
             data.cloudUploads.deactivate()
@@ -100,6 +135,18 @@ class CloudUploadLifecycleTest {
         }
 
         suspend fun bind() = backend.bindDevice("caller-phone")
+
+        /** Replikatkonto des Geräts (`identity.profile`); G und E müssen aus demselben Konto stammen. */
+        fun account(profile: String) = data.accountIdentities.select("legacy:phone-source", profile, 0, "PHONE") { error("keine neue ID") }
+
+        suspend fun switchTo(profile: String) {
+            credentials = CloudCredentials(profile, "session", "token")
+            gate.completeTransition(gate.stop())
+            gate.publish(gate.capture(false), CloudSession(profile, true, consentStatus = ConsentStatus.CURRENT))
+            bind()
+        }
+
+        val restartKey = "cloud.upload.restart.alice"
 
         fun runner(maxEvents: Int = 500) = CloudUploadRunner(backend, { 1L }, 1, maxEvents, { Thread.currentThread() === hostThread })
 
@@ -123,6 +170,20 @@ class CloudUploadLifecycleTest {
                 assertTrue(data.cloudPulls.commitMetadata("alice", run, cursor, page(cursor)) {})
             }
             if (finish) data.cloudPulls.finishRound("alice", run) {}
+            serverG = g
+        }
+
+        /** Neue Runde sieht G' ([g]), ist aber noch nicht abgeschlossen: targetEpoch gesetzt. */
+        fun observe(g: Long) {
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val cursor = data.cloudPulls.progress("alice").cursor
+            data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                cursor,
+                CloudPullMetadataPage(emptyList(), emptyList(), emptyList(), cursor + 1, true, g),
+            ) {}
+            assertEquals(g, data.cloudPulls.progress("alice").targetEpoch)
         }
 
         fun member(
@@ -139,6 +200,7 @@ class CloudUploadLifecycleTest {
             complete: Boolean = true,
         ) {
             val ctx = data.replicas.captureContext()
+            serverE[match] = epoch
             val transfer = RedactionTransfer("t-$match-$epoch", match, g, epoch, 0)
             val from = data.replicas.beginRedaction(ctx, transfer) {}
             if (!complete) return
@@ -146,6 +208,18 @@ class CloudUploadLifecycleTest {
             val page = RedactionPage(0, from, RedactionCursor(ids.lastOrNull() ?: from.afterPlayerId, 0), ids, emptyList(), true, true)
             data.replicas.stageRedaction(ctx, transfer.id, page) {}
             data.replicas.completeRedaction(ctx, transfer.id) {}
+        }
+
+        fun createMatch(id: String) {
+            val format = Presets.TENNIS_SINGLES_BO3.format()
+            val lineup = Lineup(listOf(PlayerId("me")), listOf(PlayerId("guest")), PlayerId("me"))
+            if (data.players.get(PlayerId("guest")) == null) data.players.addGuest(PlayerId("guest"), "Bea", 0)
+            data.events.append(
+                ScoreEvent(EventId("$id-genesis"), MatchId(id), DeviceId("phone-source"), 1, 1, 1, null, MatchCreated(format, lineup))
+                    .toStoredEvent(),
+            )
+            data.matches.insertIfAbsent(MatchId(id), format, lineup, MatchMeta(), 1)
+            data.matches.updateProgress(MatchId(id), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 1), 1)
         }
 
         override fun close() {
@@ -157,7 +231,7 @@ class CloudUploadLifecycleTest {
     }
 
     @Test
-    fun lifecycleJsonFollowsContractForCloudAndLocalMatches(): Unit =
+    fun lifecycleJsonCarriesAnEpochForEveryReferencedMatch(): Unit =
         runBlocking {
             Fixture().use { f ->
                 f.pull(7)
@@ -167,7 +241,7 @@ class CloudUploadLifecycleTest {
                 f.bind()
                 assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
                 assertEquals(
-                    """{"generation":7,"redactionEpochs":{"$CLOUD":0}}""",
+                    """{"generation":7,"redactionEpochs":{"$CLOUD":0,"$LOCAL":0}}""",
                     f.bodies
                         .single()
                         .getValue("lifecycle")
@@ -177,7 +251,31 @@ class CloudUploadLifecycleTest {
         }
 
     @Test
-    fun firstUploadBeforeAnyPullSendsNoLifecycleAndDrains(): Unit =
+    fun knownMatchesWithoutAccessRowKeepUploadingAfterTheFirstPull(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                // Altbestand: vor dem ersten Pull ohne Beleg hochgeladen, der Server kennt das Match danach.
+                f.event(OLD, 1)
+                f.bind()
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                f.pull(7)
+                f.event(OLD, 2)
+                // Neues Match über zwei Batches: Batch 1 legt es an, Batch 2 braucht seinen Eintrag E = 0.
+                f.event(LOCAL, 1)
+                f.event(LOCAL, 2)
+                val runner = f.runner(maxEvents = 1)
+                assertEquals(CloudUploadOutcome.LIMIT_REACHED, runner.uploadNow().outcome)
+                assertEquals(CloudUploadOutcome.LIMIT_REACHED, runner.uploadNow().outcome)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(0, f.data.cloud.pendingCount())
+                f.batches.drop(1).forEach { batch ->
+                    assertEquals(CloudPushLifecycle(7, batch.events.associate { it.matchId to 0 }), batch.lifecycle)
+                }
+            }
+        }
+
+    @Test
+    fun noLifecycleBeforeTheFirstRoundThenLastCompletedGenerationDuringANewRound(): Unit =
         runBlocking {
             Fixture().use { f ->
                 f.event(LOCAL, 1)
@@ -185,12 +283,92 @@ class CloudUploadLifecycleTest {
                 assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
                 assertFalse("lifecycle" in f.bodies.single())
                 assertEquals(0, f.data.cloud.pendingCount())
-                // Eine noch laufende, unvollständige Metadatenrunde liefert ebenfalls kein G.
+                // Eine neue Runde ohne targetEpoch macht das zuletzt abgeschlossene G nicht ungültig.
                 f.pull(3)
                 f.data.cloudPulls.beginRun("alice") {}
                 f.event(LOCAL, 2)
-                f.runner().uploadNow()
-                assertFalse("lifecycle" in f.bodies.last())
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(CloudPushLifecycle(3, mapOf(LOCAL to 0)), f.batches.last().lifecycle)
+            }
+        }
+
+    @Test
+    fun targetEpochBlocksLocallyWithoutSendingUntilTheRoundCompletes(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(3)
+                f.event(LOCAL, 1)
+                f.data.players.addGuest(PlayerId("guest"), "Bea", 0)
+                f.observe(4)
+                f.bind()
+                val blocked = f.runner().uploadNow()
+                assertEquals(CloudUploadOutcome.BLOCKED, blocked.outcome)
+                assertTrue(f.bodies.isEmpty())
+                f.pull(4)
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(CloudPushLifecycle(4, mapOf(LOCAL to 0)), f.batches.single().lifecycle)
+            }
+        }
+
+    @Test
+    fun uploadInFlightWhileAPullRoundStartsIsStillAcknowledged(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(5)
+                f.event(LOCAL, 1)
+                f.bind()
+                val runner = f.runner()
+                f.hold = CompletableDeferred()
+                val upload = async { runner.uploadNow() }
+                withTimeout(5_000) { f.sent.await() }
+                f.data.cloudPulls.beginRun("alice") {}
+                f.hold!!.complete(Unit)
+                assertEquals(CloudUploadOutcome.DRAINED, upload.await().outcome)
+                assertEquals(0, f.data.cloud.pendingCount())
+                assertEquals(1, f.bodies.size)
+            }
+        }
+
+    @Test
+    fun knownPositiveEpochWithoutGenerationIsSkippedInsteadOfProvoking40001(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.member(CLOUD, 1)
+                f.redact(CLOUD, 1, 1)
+                f.serverMatches += CLOUD
+                f.event(CLOUD, 1)
+                f.event(LOCAL, 1)
+                f.bind()
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertEquals(
+                    listOf(LOCAL),
+                    f.batches
+                        .single()
+                        .events
+                        .map { it.matchId },
+                )
+                assertNull(f.batches.single().lifecycle)
+                assertEquals(1, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun accountMismatchBetweenGenerationAndReplicaContextBlocks(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(2)
+                f.event(LOCAL, 1)
+                f.bind()
+                // Kontextwechsel zwischen Auswahl und Versand verwirft den Snapshot ohne Request.
+                val selected = f.backend.captureUpload()
+                f.account("mallory")
+                assertTrue(runCatching { f.backend.pushSelected(selected, selected.batch) }.isFailure)
+                assertTrue(f.bodies.isEmpty())
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertTrue(f.bodies.isEmpty())
+                f.account("alice")
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(CloudPushLifecycle(2, mapOf(LOCAL to 0)), f.batches.single().lifecycle)
             }
         }
 
@@ -263,6 +441,9 @@ class CloudUploadLifecycleTest {
                 val state = upload.await()
                 assertEquals(CloudUploadOutcome.FAILED, state.outcome)
                 assertEquals("cloud_lifecycle_changed", state.failure?.reason)
+                // Der Status derselben Sitzung bleibt sichtbar.
+                assertEquals("alice", state.profileId)
+                assertEquals(1L, state.inventory?.pendingEvents)
                 assertEquals(1, f.data.cloud.pendingCount())
                 assertTrue(
                     f.data.cloud
@@ -334,7 +515,7 @@ class CloudUploadLifecycleTest {
         }
 
     @Test
-    fun restartRequiredDefersOnlyAffectedMatchesUntilSuccessfulPull(): Unit =
+    fun restartRequiredBlocksTheWholeProfileUntilALaterPullRoundCompletes(): Unit =
         runBlocking {
             Fixture().use { f ->
                 f.pull(1)
@@ -348,21 +529,13 @@ class CloudUploadLifecycleTest {
                 assertEquals(CloudUploadOutcome.FAILED, restart.outcome)
                 assertEquals(CloudUploadFailure(CloudUploadFailureKind.TRANSIENT, "restart_required"), restart.failure)
                 assertEquals(2, f.data.cloud.pendingCount())
-                // Andere Matches laufen weiter; das betroffene Match wartet auf einen Pull.
-                assertEquals(CloudUploadOutcome.LIMIT_REACHED, runner.uploadNow().outcome)
-                assertEquals(
-                    listOf(LOCAL),
-                    f.batches
-                        .last()
-                        .events
-                        .map { it.matchId },
-                )
+                // Profilweit: auch unbeteiligte Matches warten auf den Pull, statt N Fehlversuche zu kaskadieren.
                 assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
-                assertEquals(2, f.bodies.size)
+                assertEquals(1, f.bodies.size)
                 // Eine nur begonnene Runde genügt nicht.
                 f.pull(1, finish = false)
                 assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
-                assertEquals(2, f.bodies.size)
+                assertEquals(1, f.bodies.size)
                 f.data.cloudPulls.finishRound(
                     "alice",
                     f.data.cloudPulls
@@ -370,15 +543,175 @@ class CloudUploadLifecycleTest {
                         .runSerial,
                 ) {}
                 f.restartWhen = { false }
+                assertEquals(CloudUploadOutcome.LIMIT_REACHED, runner.uploadNow().outcome)
                 assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(listOf(CLOUD, LOCAL), f.batches.drop(1).flatMap { batch -> batch.events.map { it.matchId } })
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun playerOnlyRestartIsNotResentInALoop(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(4)
+                f.data.players.addGuest(PlayerId("guest"), "Bea", 0)
+                f.bind()
+                f.restartWhen = { true }
+                val runner = f.runner()
+                assertEquals("restart_required", runner.uploadNow().failure?.reason)
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(1, f.bodies.size)
+                f.restartWhen = { false }
+                f.pull(4)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(2, f.bodies.size)
+            }
+        }
+
+    @Test
+    fun restartLockSurvivesANewLocalDataInstance(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.bind()
+                f.restartWhen = { true }
                 assertEquals(
-                    listOf(CLOUD),
+                    "restart_required",
+                    f
+                        .runner()
+                        .uploadNow()
+                        .failure
+                        ?.reason,
+                )
+                val restarted = LocalData(f.driver)
+                val session = restarted.cloudUploads.activate("alice")
+                val locked = restarted.cloudUploads.capture(session, 500)
+                assertTrue(locked.events.isEmpty() && locked.players.isEmpty())
+                assertEquals(1L, locked.inventory.pendingEvents)
+                f.pull(1)
+                assertEquals(
+                    listOf("$LOCAL-e1"),
+                    restarted.cloudUploads
+                        .capture(session, 500)
+                        .events
+                        .map { it.id },
+                )
+            }
+        }
+
+    @Test
+    fun corruptRestartLockFailsClosedUntilTheNextRound(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.bind()
+                f.data.settings.put(f.restartKey, "{broken")
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertTrue(f.bodies.isEmpty())
+                f.pull(1)
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun failureWhileLockingNeverEscapesUploadNow(): Unit =
+        runBlocking {
+            for (deactivate in listOf(false, true)) {
+                Fixture().use { f ->
+                    f.pull(1)
+                    f.event(LOCAL, 1)
+                    f.bind()
+                    f.restartWhen = { true }
+                    val runner = f.runner()
+                    f.hold = CompletableDeferred()
+                    val upload = async { runner.uploadNow() }
+                    withTimeout(5_000) { f.sent.await() }
+                    // Beschädigter Wert oder beendete Sitzung genau zwischen 40001 und Sperre.
+                    if (deactivate) f.data.cloudUploads.deactivate() else f.data.settings.put(f.restartKey, "{broken")
+                    f.hold!!.complete(Unit)
+                    val state = upload.await()
+                    assertEquals(CloudUploadOutcome.FAILED, state.outcome)
+                    assertEquals("restart_required", state.failure?.reason)
+                }
+            }
+        }
+
+    @Test
+    fun restartLockStaysWithItsProfileAcrossAccountSwitches(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                val bob = f.data.cloudUploads.activate("bob")
+                f.data.cloudUploads.bindOwnedDevices(bob, setOf("bob-watch"))
+                f.data.cloudUploads.deactivate()
+                f.switchTo("alice")
+                f.data.events.append(
+                    StoredEvent("bob-e1", BOB, "bob-watch", 1, 1, """{"type":"PointWon","side":"A"}""", type = "PointWon"),
+                )
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.restartWhen = { true }
+                assertEquals(
+                    "restart_required",
+                    f
+                        .runner()
+                        .uploadNow()
+                        .failure
+                        ?.reason,
+                )
+                f.restartWhen = { false }
+                f.switchTo("bob")
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(
+                    listOf(BOB),
                     f.batches
                         .last()
                         .events
                         .map { it.matchId },
                 )
-                assertEquals(0, f.data.cloud.pendingCount())
+                f.switchTo("alice")
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertEquals(2, f.bodies.size)
+                f.pull(1)
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(
+                    listOf(LOCAL),
+                    f.batches
+                        .last()
+                        .events
+                        .map { it.matchId },
+                )
+            }
+        }
+
+    @Test
+    fun blockedMatchMetadataBeyondTheLimitIsSkippedFairly(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(6)
+                // Mehr blockierte Matches (Kopf, Teilnehmer, Genesis) vor dem freien Match, als das Limit erlaubt.
+                listOf(CLOUD, BLOCKED_2, BLOCKED_3).forEach {
+                    f.createMatch(it)
+                    f.member(it, 6, ReplicaAccessLevel.FEED)
+                }
+                f.createMatch(LOCAL)
+                f.bind()
+                val runner = f.runner(maxEvents = 1)
+                val outcomes = mutableListOf<CloudUploadOutcome>()
+                while (outcomes.size < 30 && outcomes.lastOrNull() != CloudUploadOutcome.BLOCKED) outcomes += runner.uploadNow().outcome
+                assertEquals(CloudUploadOutcome.BLOCKED, outcomes.last())
+                assertTrue(outcomes.dropLast(1).all { it == CloudUploadOutcome.LIMIT_REACHED })
+                val blocked = setOf(CLOUD, BLOCKED_2, BLOCKED_3)
+                f.batches.forEach { batch ->
+                    assertTrue(batch.events.size <= 1 && batch.matches.size + batch.players.size <= 1)
+                    assertTrue(batch.matches.none { it.id in blocked } && batch.events.none { it.matchId in blocked })
+                }
+                assertTrue(f.batches.any { batch -> batch.matches.any { it.id == LOCAL } })
+                assertNotNull(f.batches.firstOrNull { batch -> batch.events.any { it.matchId == LOCAL } })
+                assertEquals(3, f.data.cloud.pendingCount())
             }
         }
 
@@ -393,7 +726,8 @@ class CloudUploadLifecycleTest {
                 f.event(LOCAL, 1)
                 f.bind()
                 val runner = f.runner(maxEvents = 2)
-                runner.uploadNow()
+                // Bleiben nach dem Batch nur blockierte Reste, meldet schon dieser Lauf BLOCKED statt LIMIT_REACHED.
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
                 assertEquals(
                     listOf(LOCAL),
                     f.batches
@@ -430,7 +764,11 @@ class CloudUploadLifecycleTest {
 
     private companion object {
         const val CLOUD = "00000000-0000-4000-8000-000000000001"
-        const val LOCAL = "00000000-0000-4000-8000-000000000002"
+        const val BLOCKED_2 = "00000000-0000-4000-8000-000000000002"
+        const val BLOCKED_3 = "00000000-0000-4000-8000-000000000003"
+        const val LOCAL = "00000000-0000-4000-8000-0000000000f0"
+        const val OLD = "00000000-0000-4000-8000-0000000000f1"
+        const val BOB = "00000000-0000-4000-8000-0000000000b0"
         const val REDACTED = "00000000-0000-4000-8000-0000000000aa"
     }
 }

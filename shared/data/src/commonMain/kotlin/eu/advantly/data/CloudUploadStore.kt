@@ -11,8 +11,8 @@ class CloudUploadSession internal constructor(
 )
 
 /**
- * U4-Upload-Beleg: [generation] = abgeschlossene Pull-`visibilityEpoch` G, [redactionEpochs] = angewandtes E
- * je ausgewähltem Match mit Cloud-Zugriff. Rein lokale Matches fehlen bewusst; ohne bekanntes G gibt es keinen Beleg.
+ * U4-Upload-Beleg: [generation] = zuletzt abgeschlossene Pull-`visibilityEpoch` G, [redactionEpochs] = E für JEDES
+ * ausgewählte Match (ohne Access-Zeile 0). Ohne je abgeschlossene Runde gibt es keinen Beleg.
  */
 data class CloudUploadLifecycle(
     val generation: Long,
@@ -66,7 +66,12 @@ class CloudUploadSnapshot internal constructor(
 
     internal fun selectedEvent(id: String): StoredEvent? = selected[id]
 
-    /** Nach `restart_required`: diese Matches erst nach einer danach begonnenen, beendeten Pull-Runde erneut senden. */
+    internal val isEmpty: Boolean
+        get() =
+            selected.isEmpty() && selectedHeaders.isEmpty() && selectedParticipants.isEmpty() && selectedPlayers.isEmpty() &&
+                selectedProjections.isEmpty()
+
+    /** Nach `restart_required`: Upload des Profils sperren bis zu einer danach begonnenen, beendeten Pull-Runde. */
     fun deferUntilPull() = store.deferUntilPull(this)
 }
 
@@ -161,6 +166,16 @@ class CloudUploadStore internal constructor(
         return database.transactionWithResult {
             requireActive(session)
             val proof = LifecycleProof(session.profileId)
+            if (proof.blocksAll) {
+                cloud.resolveMetadataSources()
+                return@transactionWithResult CloudUploadSnapshot(
+                    this@CloudUploadStore,
+                    session,
+                    emptyList(),
+                    inventory = readInventory(session),
+                    context = proof.context,
+                ).also { requireActive(session) }
+            }
             val events = mutableListOf<StoredEvent>()
             var afterMatch: String? = null
             while (events.size < limit) {
@@ -265,7 +280,7 @@ class CloudUploadStore internal constructor(
         }
 
     /**
-     * Upload-Beleg nach Vertrag Welle 2 (U4). G nur aus abgeschlossener Metadatenrunde; Data wird ausschließlich über
+     * Upload-Beleg nach Vertrag Welle 2 (U4, korrigiert nach Review r1). Data wird ausschließlich über
      * `CloudPullStore.progress`, `ReplicaLifecycleStore.access` und `redactionProgress` gelesen.
      */
     private inner class LifecycleProof(
@@ -273,11 +288,18 @@ class CloudUploadStore internal constructor(
         snapshotContext: ReplicaContext? = null,
     ) {
         private val progress = pulls.progress(profileId)
-        val generation: Long? = progress.visibilityEpoch?.takeIf { progress.metadataComplete }
+
+        // Eine neue Runde ohne targetEpoch lässt das zuletzt abgeschlossene G gültig; der Server prüft G vor jedem Write.
+        val generation: Long? = progress.visibilityEpoch
 
         // Ohne Owner-Scope existiert kein Replikatzugriff; eine Prüfung verwendet den Kontext ihres Snapshots.
         val context: ReplicaContext? = snapshotContext ?: runCatching { replicas.captureContext() }.getOrNull()
-        private val deferred = deferredMatches(profileId, progress)
+
+        // G stammt aus dem Upload-Profil; E nur aus demselben Konto lesen.
+        private val account = context?.takeIf { it.accountKey == profileId }
+
+        /** Kein Versand: neues G' noch nicht abgeschlossen, E aus fremdem Konto oder Neustart nach 40001 offen. */
+        val blocksAll = progress.targetEpoch != null || (generation != null && account == null) || restartPending(profileId, progress)
         private val epochs = mutableMapOf<String, Long>()
         private val blocked = mutableSetOf<String>()
         private val checked = mutableSetOf<String>()
@@ -288,15 +310,20 @@ class CloudUploadStore internal constructor(
         }
 
         private fun evaluate(matchId: String) {
-            if (matchId in deferred) {
+            val access = account?.let { replicas.access(it, matchId) }
+            val g = generation
+            if (blocksAll || (g == null && (access?.redactionEpoch ?: 0) > 0)) {
+                // Ohne G löste ein bekanntes E > 0 sicher 40001 aus und sperrte das ganze Profil.
                 blocked += matchId
                 return
             }
-            val g = generation ?: return
-            val ctx = context ?: return
-            val access = replicas.access(ctx, matchId)
-            // Rein lokale, nie in der Cloud gesehene Matches erhalten keinen Eintrag.
-            if (access?.generation == null) return
+            if (g == null) return
+            val ctx = checkNotNull(account)
+            // Der Server verlangt einen Eintrag für jedes ihm bekannte Match; ohne Access-Zeile ist E = 0.
+            if (access?.generation == null) {
+                epochs[matchId] = 0
+                return
+            }
             val openTransfer = runCatching { replicas.redactionProgress(ctx, matchId)?.completed == false }.getOrDefault(true)
             if (access.access == ReplicaAccessLevel.MEMBER && access.generation == g && !openTransfer &&
                 access.redactionEpoch <= Int.MAX_VALUE
@@ -308,42 +335,38 @@ class CloudUploadStore internal constructor(
         }
 
         fun lifecycle(matchIds: Set<String>): CloudUploadLifecycle? {
+            if (blocksAll) return null
             matchIds.forEach(::admits)
             return generation?.let { g -> CloudUploadLifecycle(g, epochs.filterKeys { it in matchIds }) }
         }
 
         fun matches(snapshot: CloudUploadSnapshot): Boolean {
+            if (blocksAll) return snapshot.isEmpty
             val ids = snapshot.matchIds
             return ids.all(::admits) && lifecycle(ids) == snapshot.lifecycle
         }
     }
 
-    private fun deferredKey(profileId: String) = "cloud.upload.restart.$profileId"
+    private fun restartKey(profileId: String) = "cloud.upload.restart.$profileId"
 
-    /** Neustartmarken je Match mit der Pull-Runde beim 40001; erst eine danach begonnene, beendete Runde gibt frei. */
-    private fun deferredMatches(
+    /**
+     * Profilweite Neustartsperre: gespeichert ist die Pull-Runde beim 40001; erst eine danach begonnene, beendete Runde
+     * gibt frei. Ein unlesbarer Wert sperrt bis zur nächsten Runde und wird dafür mit der aktuellen Runde überschrieben.
+     */
+    private fun restartPending(
         profileId: String,
         progress: CloudPullProgress,
-    ): Set<String> {
-        val stored = settings.get(deferredKey(profileId)) ?: return emptySet()
-        return DataJson
-            .decodeFromString<Map<String, Long>>(stored)
-            .filterValues { round -> progress.roundActive || progress.checkRound <= round }
-            .keys
+    ): Boolean {
+        val stored = settings.get(restartKey(profileId)) ?: return false
+        val round = stored.toLongOrNull() ?: progress.checkRound.also { settings.putLong(restartKey(profileId), it) }
+        return progress.roundActive || progress.checkRound <= round
     }
 
     internal fun deferUntilPull(snapshot: CloudUploadSnapshot) {
-        val profileId = snapshot.profileId
+        requireOutsideTransaction()
         database.transaction {
-            val progress = pulls.progress(profileId)
-            val stored = settings.get(deferredKey(profileId))?.let { DataJson.decodeFromString<Map<String, Long>>(it) }.orEmpty()
-            val pending = deferredMatches(profileId, progress)
-            val marked = stored.filterKeys { it in pending } + snapshot.matchIds.associateWith { progress.checkRound }
-            if (marked.isEmpty()) {
-                settings.remove(deferredKey(profileId))
-            } else {
-                settings.put(deferredKey(profileId), DataJson.encodeToString(marked))
-            }
+            requireActive(snapshot.session)
+            settings.putLong(restartKey(snapshot.profileId), pulls.progress(snapshot.profileId).checkRound)
         }
     }
 
