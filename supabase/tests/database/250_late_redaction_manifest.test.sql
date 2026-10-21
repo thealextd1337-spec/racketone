@@ -1,7 +1,7 @@
 -- Späte Referenzen auf global redigierte Spieler (01000): Gast X mit Profil P verknüpft, P löscht sein Konto,
 -- ERST DANACH lädt ein Gerät neue Matches/Events mit X hoch. Grundlage: Server-Probe late_guest_probe.sql.
 begin;
-select plan(293);
+select plan(303);
 select tests.world();
 select tests.publish_consent_documents('late-manifest-250');
 select tests.accept_current_consents(id) from tests.users;
@@ -110,7 +110,8 @@ begin
   return next ok(r->'error' is null and coalesce(r->'events'->0->>'result','accepted')='accepted',label||': event accepted');
   return next is(pg_temp.epoch(m),p_epoch,label||': E');
   return next is(pg_temp.manifest(m),p_ids,label||': match_redacted_players');
-  return next ok(pg_temp.names(m) @> p_ids,label||': match_redacted_names carries every manifest ID');
+  -- Integratorentscheid: späte globale IDs sind nie matchlokaler Namensbeleg.
+  return next is(pg_temp.names(m),'[]'::jsonb,label||': no match_redacted_names entry');
   page:=pg_temp.page(m);
   return next is(page->'redactedPlayerIds',p_ids,label||': transfer at new E delivers exactly the expected IDs');
   return next is(jsonb_array_length(page->'events'),p_redacted_events,label||': transfer events');
@@ -156,7 +157,7 @@ select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_ob
  'accepted','Mixed late batch accepted');
 select is(pg_temp.epoch((select m from mixed)),1,'Mixed batch: manifest entry and 00900 canonicalization share one E step');
 select is(pg_temp.manifest((select m from mixed)),jsonb_build_array(pg_temp.id('XA'),pg_temp.id('XD')),'Mixed batch: one manifest row per ID');
-select is((select count(*) from private.match_redacted_names where match_id=(select m from mixed)),2::bigint,'Mixed batch: one name row per ID');
+select is((select count(*) from private.match_redacted_names where match_id=(select m from mixed)),0::bigint,'Mixed batch: no match-local name rows');
 select is(pg_temp.page((select m from mixed))->'redactedPlayerIds',jsonb_build_array(pg_temp.id('XA'),pg_temp.id('XD')),
  'Mixed batch: transfer delivers both IDs');
 
@@ -218,6 +219,32 @@ select ok((select redacted_at is not null from public.match_events where match_i
  'Collision: local evidence redacts the ambiguous event');
 select is(pg_temp.epoch((select m from col)),1,'Collision: only the 00900 step');
 select is(pg_temp.page((select m from col))->'redactedPlayerIds','[]'::jsonb,'Collision: transfer stays event-only');
+
+-- Gegenprobe lebende Person: nach dem späten Manifesteintrag für XA bleibt ein späteres Event mit eindeutigem
+-- direktem Profilkontext (lebendes Profil mit derselben UUID) im selben Match unredigiert.
+create temp table liv(m uuid);
+insert into liv values(gen_random_uuid());
+select set_config('advantly.trigger_redaction_matches','',true);
+select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_object(
+  'matches',jsonb_build_array(tests.match((select m from liv),'[]'::jsonb)),
+  'events',jsonb_build_array(pg_temp.ev((select m from liv),1,'PlayerAssigned',pg_temp.legacy(pg_temp.id('XA')))))),true),'events',0),
+ 'accepted','Living-person match: late XA reference accepted');
+select is(pg_temp.manifest((select m from liv)),jsonb_build_array(pg_temp.id('XA')),'Living-person match: XA in manifest');
+select is(pg_temp.epoch((select m from liv)),1,'Living-person match: one E step');
+select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_object(
+  'matches',jsonb_build_array(tests.match((select m from liv),jsonb_build_array(tests.part('vera','A',1,'Vera',pg_temp.id('XA'))))))),true),
+  'matches',0),'updated','Living-person match: direct profile participant added');
+select ok(private.redaction_live_profile_context((select m from liv),pg_temp.id('XA')),'Living-person match: unambiguous direct profile context');
+select set_config('advantly.trigger_redaction_matches','',true);
+select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_object('events',jsonb_build_array(
+  pg_temp.ev((select m from liv),2,'PlayerAssigned',pg_temp.legacy(pg_temp.id('XA')))))),false),'events',0),
+ 'accepted','Living-person match: later event accepted');
+select ok((select redacted_at is null and payload#>>'{player,displayName}'='Real Name' from public.match_events
+  where match_id=(select m from liv) and device_seq=2),'Living-person match: later event of the living person stays unredacted');
+select is(pg_temp.epoch((select m from liv)),1,'Living-person match: no further E step');
+select is(pg_temp.page((select m from liv))->'redactedPlayerIds',jsonb_build_array(pg_temp.id('XA')),
+ 'Living-person match: manifest keeps XA, transfer delivers only the first event');
+select is(jsonb_array_length(pg_temp.page((select m from liv))->'events'),1,'Living-person match: only the earlier event is redacted');
 
 select * from finish();
 rollback;

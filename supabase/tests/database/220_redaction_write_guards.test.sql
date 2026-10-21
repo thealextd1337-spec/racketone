@@ -1234,14 +1234,14 @@ begin
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('events',jsonb_build_array(tests.event(eu,my,d,9,'PlayerAssigned',
   jsonb_build_object('player',jsonb_build_object('id',x,'displayName','Vera after contradiction revoked')))))),cloud);
  return next is(tests.result(r,'events',0),'accepted',n||': unambiguous Profile event accepted after contradiction revoked');
- -- 01000: der globale Fall bei ey hat (my,x) als matchlokalen Beleg erfasst; wie Z. 1214 gewinnt er im selben Match.
- return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler'
-  from public.match_events where id=eu),n||': local evidence from the late global reference wins over the later direct Profile context');
+ return next ok((select redacted_at is null and payload#>>'{player,displayName}'='Vera after contradiction revoked'
+  from public.match_events where id=eu),n||': revoked Player context cannot permanently poison direct Profile interpretation');
  return next ok((select count(*)=2 from public.match_events where id in (ey,ec) and redacted_at is not null
   and payload#>>'{player,displayName}'='Gelöschter Spieler'),n||': already authorized local redactions remain irreversible');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=3 and page->'redactedPlayerIds'=jsonb_build_array(x),
-  n||': actual manifest retains masked events and the late global ID');
+ -- 01000: nur die IDs aendern sich, x steht seit dem spaeten Player-FK im Manifest.
+ return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'=jsonb_build_array(x),
+  n||': actual manifest retains masked events without false new Profile event, with the late global ID');
  return next ok(private.redacted_player_identity(x::text) and private.player_write_redacted(x::text),
   n||': revoking contradictory context never revokes original Player retirement');
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id',x,'kind','guest','displayName','Reuse')))),cloud);

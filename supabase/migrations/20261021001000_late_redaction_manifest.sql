@@ -3,9 +3,12 @@
 -- die X da schon referenzierten. Ein späterer Upload mit X lieferte redactedPlayerIds=[], obwohl der Server X
 -- als global redigiert kennt; der Client behielt den Verzeichnisnamen.
 -- Jetzt: Beim Einfügen von match_events (Legacy player.id, V2 playerId, Genesis-Lineup A/B) und match_participants
--- (player_id, UUID-Slot) wird (match,X) in match_redacted_names und match_redacted_players eingetragen, wenn genau
--- der globale Zweig von redacted_event_identity gilt: redacted_player_identity(X) and not
--- redaction_live_profile_context(match,X). Dieselben Extraktoren wie die Löscherfassung (00700).
+-- (player_id, UUID-Slot) wird (match,X) in match_redacted_players eingetragen, wenn genau der globale Zweig von
+-- redacted_event_identity gilt: redacted_player_identity(X) and not redaction_live_profile_context(match,X).
+-- Dieselben Extraktoren wie die Löscherfassung (00700).
+-- Bewusst NICHT in match_redacted_names: das wäre ein dauerhafter matchlokaler Beleg und würde spätere Events einer
+-- lebenden Person mit eindeutigem Profilkontext im selben Match redigieren (die von N1–N7 geschlossene Klasse).
+-- Die Namensbereinigung leistet serverseitig bereits die globale Identität (00700), der Client braucht nur das Manifest.
 -- Bleiben event-only: reine player_write_redactions, Profil-IDs, matchlokale Namen und ID-Kollisionen mit einem
 -- direkten lebenden Profil-FK im selben Match. Das Manifest enthält weiter nur positiv belegte globale Player-IDs.
 -- E steigt einmal je Transaktion und Match und nur, wenn eine neue Manifestzeile entsteht. Der Marker ist derselbe
@@ -21,7 +24,6 @@ begin
   select coalesce(array_agg(r.player_id),'{}'::uuid[]) into v_ids from private.redacted_player_identities r
     where r.player_id=any(p_ids) and not private.redaction_live_profile_context(p_match,r.player_id);
   if cardinality(v_ids)=0 then return; end if;
-  insert into private.match_redacted_names(match_id,identity_id) select p_match,unnest(v_ids) on conflict do nothing;
   with added as (
     insert into private.match_redacted_players(match_id,player_id) select p_match,unnest(v_ids)
       on conflict do nothing returning 1

@@ -148,8 +148,9 @@ def main():
                 assert rows == 1, (rpc, kind, order, rows)
                 assert reopened.execute("select count(*) from private.match_redacted_players where match_id=%s",
                                         (match,)).fetchone()[0] == 1
+                # Nur die Löscherfassung schreibt einen matchlokalen Namensbeleg, der späte Upload nie.
                 assert reopened.execute("select count(*) from private.match_redacted_names where match_id=%s and identity_id=%s",
-                                        (match, guest)).fetchone()[0] == 1
+                                        (match, guest)).fetchone()[0] == (1 if order == "upload_first" else 0)
                 epoch = reopened.execute("select redaction_epoch from public.matches where id=%s", (match,)).fetchone()[0]
                 assert epoch == expected_epoch, (rpc, kind, order, epoch)
                 if kind == "legacy":
