@@ -1339,24 +1339,31 @@ Mitgliedschaft vor jeder Epochenauskunft (`forbidden`/42501), Parameterprüfung
 `max(server_seq)`, H > Maximum → `invalid_cursor`, mehr als 256 Geräte →
 `readiness_too_large`. Nur `authenticated` erhält EXECUTE.
 
-**U4 Upload-Beleg:**
-- G = `CloudPullProgress.visibilityEpoch` des Profils, nur wenn die
-  Metadatenrunde abgeschlossen ist. Ohne bekanntes G wird `lifecycle = null`
-  gesendet (prooflose Legacy-Prüfung des Servers, kein Dauerblock).
-- E-Einträge für jedes im Batch referenzierte Match mit Cloud-Zugriff
-  (`ReplicaLifecycleStore.access` mit Generation ≠ null): Access MEMBER,
-  Generation = G, E = lokal angewandte Redaktionsepoche, kein offener Transfer.
-  Sonst ist der Snapshot nicht sendbar (blockiert, nicht DRAINED).
-  Rein lokale, nie in der Cloud gesehene Matches erhalten keinen Eintrag.
-  Player-only: G und leere Map.
-- Prüfung bei Auswahl, unmittelbar vor Versand und vor dem Ack. Abweichung →
-  Snapshot verwerfen, keine Acks, keine Revisionsbestätigung.
-- `restart_required`: keine Acks, Ergebnis „Neustart nach Pull“, kein
-  Rechteverlust. Nächster Versuch erst nach erfolgreicher Pull-Runde.
-- Filter vor SQL-LIMIT; global redigierte Identitäten nie hochladen.
-- Liest Data nur über bestehende öffentliche Funktionen (`access`,
-  `redactionProgress`, `CloudPullStore.progress`); keine Änderung an
+**U4 Upload-Beleg** (korrigiert nach U4-Review r1, P1-1/P2-1/P2-2/P2-3):
+- G = zuletzt abgeschlossenes `CloudPullProgress.visibilityEpoch` des Profils.
+  Eine neu laufende Runde ohne `targetEpoch` macht dieses G nicht ungültig.
+  Ist `targetEpoch` gesetzt, wird lokal BLOCKED gemeldet, ohne Versand.
+  Ohne jemals abgeschlossene Runde wird `lifecycle = null` gesendet.
+  Die targetEpoch-Regel hat Vorrang, auch vor der ersten abgeschlossenen Runde.
+  Ohne G werden lokal bekannte Matches mit E > 0 übersprungen statt sicher 40001.
+- E-Eintrag für JEDES im Batch referenzierte Match. Mit Access-Zeile gilt:
+  MEMBER, Generation = G, E = angewandte Epoche, kein offener Transfer, sonst
+  BLOCKED. Ohne Access-Zeile wird E = 0 gesendet. Der Server weist ein falsches E
+  ohne Writes ab. Zusätzliche Einträge für dem Server unbekannte Matches sind
+  zulässig. Player-only: G und leere Map.
+- G und E stammen aus demselben Konto. Weicht `ReplicaContext.accountKey` vom
+  Upload-Profil bei bekanntem G ab, ist das Ergebnis BLOCKED. Ohne G gibt es
+  kein G/E-Paar; Altinstallationen ohne `identity.profile` laden weiter.
+- Prüfung bei Auswahl, unmittelbar vor Versand und vor dem Ack. Bei Abweichung
+  wird der Snapshot verworfen, ohne Acks und ohne Revisionsbestätigung.
+- `restart_required` sperrt den Upload PROFILWEIT, bis eine danach begonnene
+  Pull-Runde abgeschlossen ist. Kein Rechteverlust. Die Sperre ist persistent,
+  an das Profil gebunden und bei Fehlern fail-closed, aber wiederherstellbar.
+- Filter vor dem SQL-LIMIT. Global redigierte Identitäten werden nie hochgeladen.
+- Data wird nur über öffentliche Funktionen gelesen; keine Änderung an
   `CloudPull.sq` oder `ReplicaLifecycle.sq`.
+- Release-Gate: 00700 und 00800 erst ausrollen, wenn die App U4 und den
+  Pull-Runner tatsächlich betreibt. U4 allein liefert ohne Pull nie ein G.
 
 **D1 Readiness:**
 - Ready für (Match, G) erst, wenn alle vier Bedingungen gelten: (1) Access MEMBER
@@ -1409,3 +1416,55 @@ von 220 und Doku-Aussagen. Eigene SQL-Läufe: 080, 210 und 220 grün, 50 Rennen.
 - P3-3: Maskierte leere Namen können über MatchMeta auf das andere Gerät gelangen.
   Das gehört in Welle 3 (Namensauflösung und MatchMeta-Quellautorität).
 - U4 läuft jetzt: `advantly-20261021-w2-u4-lifecycle-r1`.
+
+Server-Readiness `112a65b` als `9219316` übernommen: Migration 00800,
+230-pgTAP mit 58 Prüfungen, Readiness-Fixture und repariertes `generate.psql`.
+Der Zähler in 181 steigt von 33 auf 34 gebundene RPCs. Das ist nötig, und die
+Consent-Proben erfassen den neuen RPC dynamisch. Worker: Mutationsprobe mit
+8 Reds, EXPLAIN mit Indexnutzung (21 ms bei 10k Events), Python 210 und 220
+Exit 0. Root-SQL-Lauf: 38 Dateien, nur die fünf bekannten Plattformlücken rot,
+181 257/257, 220 1296/1296, 230 58/58. Log
+`%TEMP%/advantly-root-sql-integration-20261020/full-r7-readiness.log`.
+`WireFixturesTest.matchReadinessResponse` ist ergänzt, aber noch nicht gelaufen,
+weil D1 den Gradle-Slot hält. Nicht nachgewiesen: Lock- und Lasttests speziell
+für den Readiness-RPC sowie Matches mit 256 Geräten.
+
+U4 `b659f6c` (Worktree `t3-61493ba9`) liegt vor: Beleg nach Vertrag, Überspringen
+blockierter Matches vor dem LIMIT, 40001 als dauerhafte Sperre bis zur nächsten
+abgeschlossenen Pull-Runde, redigierte Identitäten in SQL gefiltert, keine neue
+Schemanummer, eine Zeile in `LocalData.kt`. Baseline 8/10 rot, final 216 Tests
+grün. Der volle Check steht noch aus, weil D1 den Slot hält. Offene Fragen für
+die Review `advantly-20261021-w2-u4-review-r1`: kein Beleg während laufender
+Pull-Runden, Player-only mit 40001 in Schleife, öffentliches `deferUntilPull()`.
+
+U4-Review r1 auf `b659f6c`: **fix-first**, 1× P1, 4× P2, 5× P3. Bericht
+`review-b659f6c/build/review-report.txt`. Der P1 kam aus dem Vertrag selbst:
+Matches ohne Access-Zeile bekamen keinen E-Eintrag, der Server verlangt ihn aber
+für jedes bekannte Match. Der Integrator hat den U4-Abschnitt oben korrigiert.
+Bestätigt in Ordnung: Ack nur für den gesendeten Stand, U3-Bestätigungen bleiben
+erhalten, BLOCKED ist von DRAINED getrennt, das Keyset nutzt den Index, die Reds
+sind echt. Korrekturrunde `advantly-20261021-w2-u4-review-fix-r2` im selben Worktree.
+Release-Gate erweitert: Ohne Pull-Runner in der App gibt es kein G, also müssen
+U4 und der D1-Host-Anschluss gemeinsam ausgerollt werden.
+
+U4-Korrektur `3c3640a` auf `b659f6c` (nur CloudUploadStore, CloudUploadRunner und
+Test): E-Eintrag für jedes referenzierte Match, Mock mit 00700-Regel, letztes G
+auch während laufender Runden, profilweite Restart-Sperre per Rundennummer,
+Kontoabgleich bei bekanntem G, P3-Fixes. Baseline 16/21 rot, darunter der
+Pflichtfall „zweiter Batch eines neuen Matches“. Final 21/21, cloud-sync 229,
+data 212 grün. Voller Check offen (Slot bei D1). Akzeptierte Einwände, im Vertrag
+ergänzt: targetEpoch vor erster Runde → BLOCKED; Kontoabgleich nur bei bekanntem G;
+ohne G werden lokal bekannte Matches mit E>0 übersprungen; Grundangabe für
+BLOCKED folgt mit dem B4-Syncstatus. Frische Review
+`advantly-20261021-w2-u4-review-r2`.
+
+D1 `4ea10a1` (Worktree `t3-22027d07`, Schema 11 über `10.sqm`) liegt vor.
+Zugriff vor Materialisierung, ABSENT in 200er-Transaktionen nach vollem
+Katalog, an Kontext gebundene Läufe, fortsetzbarer Redaktionstransfer mit
+Seitenaufteilung, Readiness nach allen vier Bedingungen, `restart_required`
+höchstens zweimal pro Lauf neu. 17 echte Baseline-Reds, data 219 / cloud-sync 222
+grün, voller Check grün. Gradle-Slot zurückgegeben.
+Fehlende Schnittstelle: `ReplicaLifecycleStore.markNotReady`. Steigt E bei
+gleichem G, bleibt das Match bis zur ersten Redaktionsseite lesbar. Wird vor
+der D1-Review im D1-Worktree mit Integratorfreigabe ergänzt.
+`WireFixturesTest.matchReadinessResponse` ist grün (5/5).
