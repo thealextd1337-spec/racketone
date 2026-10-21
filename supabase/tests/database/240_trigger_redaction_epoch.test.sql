@@ -88,7 +88,8 @@ select ok((select p->>'displayName'='Gelöschter Spieler' and (p->>'deletedProfi
  from jsonb_array_elements(pg_temp.catalog('24000000-0000-4000-8000-000000000001')->'participants') p)
  and (pg_temp.catalog('24000000-0000-4000-8000-000000000001')->>'serverVersion')::bigint>(select server_version from versions where id='24000000-0000-4000-8000-000000000001'),
  'Catalog delivers canonical participant with new serverVersion');
-select is(pg_temp.epoch('24000000-0000-4000-8000-000000000001'),0,'Participant-only canonicalization keeps E (transfer carries no participants)');
+-- 01000: Teilnehmer-playerId G ist global redigiert, der Eintrag ins Manifest erhoeht E einmal.
+select is(pg_temp.epoch('24000000-0000-4000-8000-000000000001'),1,'Participant with global player ID raises E once via the manifest');
 
 -- Event: Klarname im PlayerAssigned wird still kanonisiert.
 insert into obs values('event',pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_object('events',jsonb_build_array(
@@ -103,7 +104,8 @@ select is(pg_temp.transfer('24000000-0000-4000-8000-000000000002',1)->'events'->
  '24020000-0000-4000-8000-000000000001','Transfer at new E delivers own redacted event');
 select is(pg_temp.transfer('24000000-0000-4000-8000-000000000002',1)->'events'->0#>>'{payload,player,displayName}',
  'Gelöschter Spieler','Transferred payload canonical');
-select is(pg_temp.transfer('24000000-0000-4000-8000-000000000002',1)->'redactedPlayerIds','[]'::jsonb,'Manifest unchanged: event-only as in 220');
+-- 01000: G ist global redigiert und ohne direkten Profilkontext, also steht G im Manifest (kein Zusatzschritt).
+select is(pg_temp.transfer('24000000-0000-4000-8000-000000000002',1)->'redactedPlayerIds','["24010000-0000-4000-8000-000000000001"]'::jsonb,'Manifest carries the late global player ID');
 select is(pg_temp.transfer('24000000-0000-4000-8000-000000000002',0),'{"error":"40001","message":"restart_required"}'::jsonb,'Old E transfer restarts');
 select is(pg_temp.push('alice',jsonb_set(pg_temp.proof('alice',jsonb_build_object('events',jsonb_build_array(
  tests.event('24020000-0000-4000-8000-000000000002','24000000-0000-4000-8000-000000000002',tests.device('a1'),2,'PointWon','{"side":"A"}')))),
