@@ -1803,3 +1803,10 @@ grün bis auf die fünf Plattformlücken; 250 303/303; 181/190 Exit 0.
   `redaction_uuid(slot_id)` in 00700 Z. 285/303/558. Wird ein eigener
   Performance-Auftrag nach dem N3-Muster (Ausdrucksindex/Vorfilter, Budgets
   unverändert).
+- 01000-Nachschärfung `d1f0722` (Worktree `t3-1497f727`), vom Integrator geprüft
+  und per Fast-Forward übernommen: Der UPDATE-Trigger feuert nur bei einem
+  Wechsel von `player_id` auf einen Wert ungleich null, und der Teilnehmerpfad
+  folgt der 00700-Regel (lebender Profil-FK schließt aus). Kein zweiter E-Schritt
+  bei der Kontolöschung. Der Genesis-Manifestinhalt ist in 220 geprüft (1324).
+  6 von 318 neuen 250-Assertions waren gegen 77b6317 rot. Root-SQL-Lauf
+  `full-r10-late-p3.log`.
