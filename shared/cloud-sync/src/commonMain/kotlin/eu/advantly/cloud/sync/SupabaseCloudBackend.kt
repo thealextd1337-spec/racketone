@@ -280,6 +280,32 @@ class SupabaseCloudBackend internal constructor(
         return page
     }
 
+    override suspend fun pullReadiness(
+        attempt: CloudPullAttempt,
+        request: CloudReadinessRequest,
+    ): CloudMatchReadiness {
+        val response =
+            pullRpc(
+                attempt,
+                "cloud_match_readiness_v1",
+                buildJsonObject {
+                    put("p_match_id", request.matchId)
+                    put("p_generation", request.generation)
+                    put("p_redaction_epoch", request.redactionEpoch)
+                    request.highWatermark?.let { put("p_high_watermark", it) }
+                },
+            )
+        val readiness =
+            try {
+                CloudJson.decodeFromString<CloudMatchReadiness>(response)
+            } catch (_: SerializationException) {
+                throw CloudException("cloud_response_invalid", false)
+            }
+        readiness.validate(request)
+        requireCurrentPull(attempt)
+        return readiness
+    }
+
     override suspend fun pull(
         cursor: Long,
         limit: Int,

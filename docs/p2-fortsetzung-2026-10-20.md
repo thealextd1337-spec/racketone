@@ -1314,3 +1314,66 @@ Wasserstands-RPC liefert keinen Vollständigkeitsbeleg. Welle 2 ist damit offen.
    Gradle-Slot seriell zwischen D1 und U4.
 3. Integrationspunkt B: beide Pakete auf gemeinsamer Basis, echte Stackprüfung.
    Protokoll 4 und Hintergrundbetrieb bleiben inaktiv.
+
+## Vertrag Welle 2 (Integrator, verbindlich vor Dispatch)
+
+Umgesetzt in cloud-sync, noch ohne Aufrufer:
+
+- `CloudHttp`: `restart_required` (SQLSTATE 40001) wird zu
+  `CloudException("restart_required", permission = false)`. Bisher wurde der
+  Grund zu einem generischen Fehler. Belegt durch einen echten Red ohne Fix.
+- `CloudPullPort.pullReadiness(attempt, CloudReadinessRequest)` →
+  `cloud_match_readiness_v1(p_match_id, p_generation, p_redaction_epoch,
+  p_high_watermark default null)`. Antwort `CloudMatchReadiness`: matchId, G, E,
+  H, `serverVersion` des Matchkopfs, `watermarks` je Gerät für Events mit
+  `serverSeq <= H`, aufsteigend nach Geräte-ID, höchstens 256 Einträge.
+  Clientprüfung: Kontext gleich Anfrage, H gleich angefragtem H (falls gesetzt),
+  eindeutige kanonische UUIDs, `eventCount >= 1`, Summe der Events `<= H`.
+  Fence vor und nach dem Abruf wie beim Redaktions-RPC.
+
+**Server (Migration 00800):** `cloud_match_readiness_v1` als SECURITY DEFINER mit
+leerem search_path. Reihenfolge: `lock_sync`, `require_cloud_binding`,
+Mitgliedschaft vor jeder Epochenauskunft (`forbidden`/42501), Parameterprüfung
+(`invalid_cursor`), G = `profile_settings.visibility_epoch` und E =
+`matches.redaction_epoch` sonst `restart_required`/40001, H fehlt → aktuelles
+`max(server_seq)`, H > Maximum → `invalid_cursor`, mehr als 256 Geräte →
+`readiness_too_large`. Nur `authenticated` erhält EXECUTE.
+
+**U4 Upload-Beleg:**
+- G = `CloudPullProgress.visibilityEpoch` des Profils, nur wenn die
+  Metadatenrunde abgeschlossen ist. Ohne bekanntes G wird `lifecycle = null`
+  gesendet (prooflose Legacy-Prüfung des Servers, kein Dauerblock).
+- E-Einträge für jedes im Batch referenzierte Match mit Cloud-Zugriff
+  (`ReplicaLifecycleStore.access` mit Generation ≠ null): Access MEMBER,
+  Generation = G, E = lokal angewandte Redaktionsepoche, kein offener Transfer.
+  Sonst ist der Snapshot nicht sendbar (blockiert, nicht DRAINED).
+  Rein lokale, nie in der Cloud gesehene Matches erhalten keinen Eintrag.
+  Player-only: G und leere Map.
+- Prüfung bei Auswahl, unmittelbar vor Versand und vor dem Ack. Abweichung →
+  Snapshot verwerfen, keine Acks, keine Revisionsbestätigung.
+- `restart_required`: keine Acks, Ergebnis „Neustart nach Pull“, kein
+  Rechteverlust. Nächster Versuch erst nach erfolgreicher Pull-Runde.
+- Filter vor SQL-LIMIT; global redigierte Identitäten nie hochladen.
+- Liest Data nur über bestehende öffentliche Funktionen (`access`,
+  `redactionProgress`, `CloudPullStore.progress`); keine Änderung an
+  `CloudPull.sq` oder `ReplicaLifecycle.sq`.
+
+**D1 Readiness:**
+- Ready für (Match, G) erst, wenn alle vier Bedingungen gelten: (1) Access MEMBER
+  bei G; (2) für E > 0 ist der Redaktionstransfer (G, E, H) vollständig angewendet,
+  bei E = 0 ist H aus `pullReadiness(highWatermark = null)` festgehalten;
+  (3) der lokale Eventbestand deckt den Readiness-Vektor bis H exakt ab;
+  (4) der materialisierte Snapshot entspricht `serverVersion`.
+  Erst dann wird `markReady` unter Fence gesetzt.
+- Leere Antworten, `more=false` oder fehlende Wasserstände sind nie Readiness.
+- G/E-Wechsel, `restart_required`, A → B → A, Purge und Neustart invalidieren
+  laufende Handles. Neustart verlangt erneute Quellenautorisierung.
+- ABSENT erst nach vollständigem Katalogabgleich. Eine Cloud-Seite mit bis zu
+  500 Events wird in die bestehenden begrenzten Data-Seiten aufgeteilt.
+  Die 64-KiB-Wiregrenze gehört zur Gerätezustellung in Welle 3.
+
+Besitz: Server nur `supabase/migrations/20261021000800_*`, `supabase/tests/database/230_*`
+und den CI-Aufruf. D1: `CloudPullRunner`, `CloudPullStore`, `CloudPullState`,
+`CloudPull.sq` und direkte Tests. U4: `CloudUploadStore`, `CloudUpload.sq`,
+Auswahlabfragen in `CloudMetadata.sq`, `CloudUploadRunner` und direkte Tests.
+Gemeinsame Wire-/Port-Dateien und `ReplicaLifecycleStore` gehören dem Integrator.

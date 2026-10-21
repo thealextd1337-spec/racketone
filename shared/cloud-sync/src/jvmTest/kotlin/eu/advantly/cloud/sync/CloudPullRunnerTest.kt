@@ -46,6 +46,7 @@ internal class PullFixture(
     var events: suspend (String, Long, Int) -> List<PulledEvent> = { _, _, _ -> emptyList() }
     var watermarks: suspend (String) -> List<EventWatermark> = { emptyList() }
     var redaction: suspend (JsonObject) -> String = { error("Keine Redaktionsantwort eingerichtet") }
+    var readiness: suspend (JsonObject) -> String = { error("Keine Readiness-Antwort eingerichtet") }
     val calls = mutableListOf<Pair<String, JsonObject>>()
     val bearers = mutableListOf<String?>()
     private val client =
@@ -90,6 +91,10 @@ internal class PullFixture(
 
                         "cloud_pull_match_redaction_v1" -> {
                             redaction(body)
+                        }
+
+                        "cloud_match_readiness_v1" -> {
+                            readiness(body)
                         }
 
                         else -> {

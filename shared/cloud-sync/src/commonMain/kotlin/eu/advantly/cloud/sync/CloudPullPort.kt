@@ -37,4 +37,10 @@ interface CloudPullPort {
         attempt: CloudPullAttempt,
         request: CloudRedactionRequest,
     ): CloudRedactionPage
+
+    /** `cloud_match_readiness_v1`: Versionsvektor bis H; nur zusammen mit abgeschlossenem Redaktionstransfer verwenden. */
+    suspend fun pullReadiness(
+        attempt: CloudPullAttempt,
+        request: CloudReadinessRequest,
+    ): CloudMatchReadiness
 }
