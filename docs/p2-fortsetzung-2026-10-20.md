@@ -1621,3 +1621,154 @@ Stack und den Apple-Pfaden belegt. Integrationspunkt A ist nachgewiesen.
   bleibt leer, Readiness endet mit STALE_SNAPSHOT. Ohne aktivierten Store gibt
   es heute keine Nutzerwirkung, die Replikataktivierung bleibt aber gesperrt.
   Folgeauftrag an D1.
+- P1-Fix `51ca91b` (Worktree `t3-a33c2e30`, Basis `b245a63`): Ein eigener
+  LOCAL/PEER-Kopf wird nur dann vom Cloud-Kopf übernommen, wenn die Quelle dem
+  Konto gehört, Kopf, Teilnehmer und Projektion per Ack bestätigt sind und kein
+  anderes Konto materialisiert hat. Ursache war allein der fehlende Snapshotbeleg;
+  die Eventabdeckung war bereits exakt. Joint 13/13 (vorher 8 rot),
+  CloudPullOwnMatchTest 5/5 (vorher 2 rot), data 226 / cloud-sync 273,
+  voller Check grün. Review `advantly-20261021-integration-b-local-match-review-r1`.
+- **Aktivierungsblocker (Vertrag Welle 3):** Zwischen Katalogseite und Readiness
+  ist auch das eigene Match nicht lesbar und nimmt keine Events an. Mit
+  unbestätigten Kopfänderungen, etwa einer laufenden Projektion, dauert die
+  Sperre bis zum Upload und zum nächsten Katalog. Ein eigenes Live-Match wäre
+  während eines Pulls nicht zählbar. Vor V4 braucht es ein Modell, das Live-Zählen
+  an eigenen Matches nie blockiert und trotzdem keine fremden oder unredigierten
+  Daten freigibt.
+- Review zu `51ca91b`: fix-first, 1× P1, 2× P2, 3× P3. Bericht
+  `review-51ca91b/build/review-report.txt`. Bestätigt sind der Fix für ruhende
+  eigene Matches, die UID-basierte Eigentumsprüfung und die Ack-Logik (ein älteres
+  Ack bestätigt nie einen neueren Stand). Die Reds sind echt.
+
+**Vertragsergänzung eigene Matches (Integrator):**
+- **Schreibspur (P1-1):** Die aktive eigene Quelle darf an eigenen Matches
+  unabhängig von `ready` anhängen und Projektion oder Kopf aktualisieren.
+  Voraussetzung: Die Quelle gehört per UID dem aktuellen Konto, und Access
+  fehlt oder ist MEMBER bei aktuellem G. FEED, ABSENT, ein fremdes Konto und
+  der Verification-Hold sperren weiterhin.
+- **Lesespur:** Eigene Matches sind ohne `ready` nur dann lesbar, wenn keine
+  Redaktion aussteht, also angewandtes E ≥ Katalog-E und kein offener Transfer.
+  Abdeckung und Snapshot betreffen dort die Integrität, nicht die Vertraulichkeit.
+- **Kopf nicht überschreiben (P2-1/P2-2):** Im own-Pfad schreibt der Pull den Kopf
+  nicht. Der Snapshot gilt nur dann als materialisiert, wenn die vom Server
+  getragenen Felder dem bestätigten lokalen Stand entsprechen. Eine veraltete
+  Katalogseite dreht nie zurück, und lokale Kopffelder (`firstServer`,
+  `receiveRight`, `startEnds`, `updated_at_ms`) bleiben erhalten.
+- **Host-Gate (P3):** Pull läuft nie vor abgeschlossener Restore-Prüfung, weil
+  der Eigentumsnachweis aus `cloud_device_owner` stammt.
+- CI auf PR #75 (`16d20b8`, Integrationsstand D1+U4 vor dem P1-Fix): alle fünf
+  Jobs grün, einschließlich Kotlin/Native/Apple und Supabase-Stack. Die
+  Korrektur für eigene Matches (`advantly-20261021-integration-b-local-match-fix-r2`)
+  folgt nach ihrer Review.
+- Korrektur eigene Matches `ef23ad6` auf `51ca91b` (nach einer Ratelimit-
+  Unterbrechung automatisch fortgesetzt): Der Pull schreibt eigene Köpfe nie;
+  ein Beleg entsteht nur bei Ack-Bestätigung und feldgenauem Vergleich
+  (`carriesOwnHeader`). Schreib- und Lesespur nach Vertrag, Migration 11.sqm
+  legt die Sichten neu an, Schema 12. Reds: Lane 10/11, Joint 4/16, OwnMatch 1/5.
+  Danach data 237, cloud-sync 276, match-session 135 grün, voller Check grün.
+  Der Verification-Hold ist im Data-Layer nicht sichtbar, also Host-Gate.
+  Offene Punkte:
+  - `appendAll` mehrerer eigener Geräte scheitert bei gesperrtem Lesen an der
+    Genesis-Sperre (Live-Zählen mit Uhr).
+  - Die Lesespur nimmt Events jeder Quelle an.
+  - Die Schreibspur ist nach neuem G bis zur Katalogseite gesperrt.
+  - Möglicher Mock-/Server-Unterschied bei einem nach Kontolöschung hochgeladenen
+    Gast.
+  Review `advantly-20261021-integration-b-local-match-review-r2` und Server-Probe
+  `advantly-20261021-server-late-guest-probe-r1` laufen.
+
+### Vertragsänderung: späte Referenzen auf global redigierte Spieler
+
+Server-Probe `advantly-20261021-server-late-guest-probe-r1` (Belege
+`%TEMP%/advantly-late-guest-probe-20261021/`): Ein Upload, der Gast X erst nach
+der Löschung des verknüpften Profils referenziert, trägt X nie in
+`match_redacted_players` des neuen Matches ein. Der Transfer liefert dann
+`redactedPlayerIds: []`, obwohl der Server X als global redigiert kennt. Der
+Client behält den Verzeichnisnamen, weil nur Manifest-IDs das Verzeichnis
+bereinigen. So ist es heute gewollt (00700 füllt das Manifest nur beim Löschen;
+220 Z. 1190 und 240 erwarten event-only), es verfehlt aber das Löschziel.
+
+**Entscheidung des Integrators:** Beim INSERT von `match_events` (Legacy, V2,
+Genesis-Lineup) und `match_participants` wird (match, X) genau dann in
+`match_redacted_players` (NICHT in `match_redacted_names`) eingetragen und E einmal pro
+Transaktion erhöht, wenn der globale Zweig gilt:
+`redacted_player_identity(X) and not redaction_live_profile_context(match, X)`.
+Reine `player_write_redactions`, Profil-IDs, matchlokale Namen und
+ID-Kollisionen (220 Z. 1214) bleiben event-only. Das Manifest enthält damit
+weiterhin nur positiv belegte globale Spieler-IDs, unabhängig vom Uploadzeitpunkt.
+Der Client bleibt unverändert. Die Erwartungen in 220 und 240 werden gezielt
+angepasst, alle übrigen bleiben bestehen.
+
+Review r2 zu `ef23ad6`: fix-first, 1× P1, 3× P2, 4× P3. Bericht
+`review-ef23ad6/build/review-report.txt`. Bestätigt: Der Kopf wird nicht
+überschrieben, kein Zurückdrehen, Eigentum per UID, Sperren bei FEED, ABSENT,
+fremden Konten und A→B→A, 11.sqm wiederholbar, Reds echt.
+
+**Vertragsergänzung eigene Matches, Teil 2 (Integrator):**
+- **P1-1:** Im Fenster mit offener Schreibspur und geschlossener Lesespur folgen
+  `maxLamport`, `maxDeviceSeq` und `markConfirmed*` der Schreibspur
+  (`readable || ownWritable`). Sonst vergibt die Session seq 1, der Store meldet
+  SEQUENCE_CONFLICT, und der Punkt geht still verloren.
+- **P2-1:** Die Genesis-Sperre in `ScopedEventStore` wird nur nach einem echten
+  Genesis-Durchlauf gesetzt. Gemischte Batches von Uhr und Handy funktionieren.
+- **P2-2:** Während eines laufenden Neuscans akzeptiert die Schreibspur auch
+  MEMBER beim zuletzt vollständigen G. Die Lesespur bleibt streng. Begründung:
+  Ersteller bleiben Mitglied ihrer eigenen Matches; „nie blockieren“ hat beim
+  Live-Zählen Vorrang.
+- **P2-3:** Abgeleitete Kopffelder (Status, Summary, ein vom Server verworfener
+  Vorgänger) werden aus dem Cloud-Kopf übernommen, wenn drei Dinge gelten: die
+  serverVersion ist strikt neuer als der zuletzt bestätigte bzw. belegte Stand,
+  es gibt keine unbestätigten lokalen Änderungen, und lokale Felder
+  (`firstServer`, `receiveRight`, `startEnds`, `updated_at_ms`, meta) bleiben
+  unberührt. Es wird nie zurückgedreht, und unbestätigte Änderungen gehen nie
+  verloren.
+- P3: Fremde Peer-Events an eigenen Matches sind kein Leck, aber eine
+  Integritätslücke; beide Spuren hängen am Host-Gate für den Restore;
+  ein alter Beleg kann nach einer lokalen Kopfänderung stehen bleiben.
+
+Server-Paket `4a5b64c` (Worktree `t3-11e329d8`): Migration 01000 mit
+AFTER-Triggern auf Events und Teilnehmern, gemeinsamer Marker mit 00900, Test
+250 (87 von 293 rot vorher) und ein Rennen mit 16 Läufen ohne Deadlock. Keine
+messbaren Kosten (N3 0,124 s). Jede geänderte Alt-Erwartung ist begründet.
+Integratorentscheid zur Nebenfolge 220 Z. 1235: nur `match_redacted_players`.
+Ein `names`-Eintrag wäre ein dauerhafter matchlokaler Beleg und würde spätere
+Events einer lebenden Person mit eindeutigem Profilkontext redigieren, also
+genau die Klasse aus N1–N7. Korrektur samt roter Gegenprobe läuft im selben
+Worktree. Offen (P3): Ein fremder Gast als Teilnehmer wird vom Writer mit
+`player_not_owned` verworfen und bekommt keinen Eintrag. Altbestand vor 01000
+wird nicht nachgetragen.
+
+Eigene Matches, Korrekturrunde 3 `0e3d6d2` auf `ef23ad6` (Schema 13 über
+`12.sqm`): Sequenz, Lamport und Bestätigung folgen der Schreibspur. Die
+Genesis-Sperre greift nur nach echter Genesis. Die Schreibspur gilt während
+des Neuscans beim zuletzt vollständigen G. Abgeleitete Kopffelder werden nur
+übernommen, wenn `own_version`/`own_revisions` am Snapshot es zulassen.
+Reds: Lane 7/18, Joint 1/17, Session-Test (Handy-Seqs `[1,2]` statt `[1,2,3,4]`).
+Danach data 244, cloud-sync 277, match-session 136 grün, voller Check grün.
+
+**Für Welle 3 (Session, Besitzer `MatchSession.kt`):**
+- `emit` muss `AppendResult` auswerten; ein SEQUENCE_CONFLICT darf nicht stumm bleiben.
+- `onMessage` muss die erwarteten `IllegalStateException`-Fälle des Stores
+  behandeln (fremde Quelle, FEED während eines laufenden Matches).
+- Im Fenster „schreiben ja, lesen nein“ liefert die Anti-Entropie der Uhr keine
+  verpassten Handy-Events.
+- Nach einer Kopfübernahme braucht ein offenes Match einen `refreshHeader`-Hook.
+
+**Host-Vertrag B4:** Pull und U4 laufen je Konto streng nacheinander. Sonst kann
+eine vor einem eigenen Ack geholte, danach committete Seite eine ältere Fassung
+übernehmen (Restlücke P2-3; der nächste Lauf korrigiert sie). Das Restore-Gate
+bleibt Pflicht, weil beide Spuren nur aus der Datenbank aufgehen.
+- Review r3 zu `0e3d6d2`: fix-first nur wegen eines kleinen P2, sonst
+  freigabefähig. Bericht `review-0e3d6d2/build/review-report.txt`. Eigene
+  fokussierte Läufe grün, Reds echt. Kein stiller Punktverlust mehr (auch nach
+  Neustart, bei Uhr-Echo und bei gemischten Batches). Übernahme und Quittieren
+  verlieren auch ohne Host-Serialisierung nie eine unbestätigte Änderung.
+  `current_g` wird bei jedem Lesen neu berechnet.
+  - P2-A: Der vom Server beim Anlegen verworfene Vorgänger überschreibt einen
+    lokal vorhandenen, noch nicht hochgeladenen Vorgänger dauerhaft.
+  - P3-A: Ohne Ack seit dem Beleg wird jede höhere serverVersion übernommen,
+    auch mit weniger Events.
+  Beides geht in die enge Korrekturrunde 4 im selben Worktree.
+  - P3-C geht an Welle 3: Ändert ein zweites eigenes Gerät Meta oder Teilnehmer,
+    entsteht kein Beleg mehr und der Pull meldet dauerhaft BLOCKED (das gehört zur
+    MatchMeta-Quellautorität). Lesbar bleibt das Match über die Lesespur.
