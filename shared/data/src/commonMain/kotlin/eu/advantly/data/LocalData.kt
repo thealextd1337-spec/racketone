@@ -55,7 +55,7 @@ class LocalData(
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
     val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent, ::redactedAssignmentSlots)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
-    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver)
+    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver, replicas, cloudPulls, settings)
     val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
     private val identityListeners = mutableSetOf<() -> Unit>()
 

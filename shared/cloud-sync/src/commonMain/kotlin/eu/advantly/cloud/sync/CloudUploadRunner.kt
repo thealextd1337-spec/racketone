@@ -1,5 +1,6 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.data.CloudUploadLifecycleChangedException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -75,10 +76,13 @@ class CloudUploadRunner(
                         val sources = selected.events.mapTo(mutableSetOf()) { it.deviceId }
                         val batch = selected.copy(devices = sourceDevices.filter { it.id in sources })
                         if (batch.events.isEmpty() && batch.matches.isEmpty() && batch.players.isEmpty()) {
+                            // Blockierte Matches bleiben ausstehend: niemals DRAINED.
                             mutable.value =
                                 mutable.value.copy(
                                     outcome =
-                                        if (current.inventory.pendingMetadata > 0 || current.inventory.rejectedEvents > 0) {
+                                        if (current.inventory.pendingEvents > 0 || current.inventory.pendingMetadata > 0 ||
+                                            current.inventory.rejectedEvents > 0
+                                        ) {
                                             CloudUploadOutcome.BLOCKED
                                         } else {
                                             CloudUploadOutcome.DRAINED
@@ -118,6 +122,11 @@ class CloudUploadRunner(
                                             }
                                         }
 
+                                        next.batch.let { it.events.isEmpty() && it.matches.isEmpty() && it.players.isEmpty() } -> {
+                                            // Nur blockierte Reste: ein sofortiger neuer Lauf brächte nichts.
+                                            CloudUploadOutcome.BLOCKED
+                                        }
+
                                         else -> {
                                             CloudUploadOutcome.LIMIT_REACHED
                                         }
@@ -139,9 +148,22 @@ class CloudUploadRunner(
                             error.permission -> CloudUploadFailureKind.PERMISSION
                             else -> CloudUploadFailureKind.TRANSIENT
                         }
-                    if (kind == CloudUploadFailureKind.PERMISSION) retry = null
+                    val restart = error.reason == RESTART_REQUIRED
+                    // 40001 ohne Teilwrites: Snapshot verwerfen, kein Rechteverlust, Profil erst nach Pull erneut senden.
+                    if (kind == CloudUploadFailureKind.PERMISSION || restart) retry = null
                     val reason = error.reason.takeIf { it in FAILURE_REASONS } ?: "cloud_upload_failed"
                     finishFailure(attempt, CloudUploadOutcome.FAILED, CloudUploadFailure(kind, reason))
+                    // Scheitert die Sperre, liefert der nächste Versuch höchstens erneut 40001.
+                    if (restart) runCatching { attempt?.snapshot?.deferUntilPull() }
+                } catch (_: CloudUploadLifecycleChangedException) {
+                    // Kontext oder G/E zwischen Auswahl, Versand und Ack geändert: keine Acks, neue Auswahl im nächsten Lauf.
+                    retry = null
+                    finishFailure(
+                        attempt,
+                        CloudUploadOutcome.FAILED,
+                        CloudUploadFailure(CloudUploadFailureKind.TRANSIENT, LIFECYCLE_CHANGED),
+                        staleSnapshot = true,
+                    )
                 } catch (error: IllegalStateException) {
                     finishFailure(
                         attempt,
@@ -194,9 +216,20 @@ class CloudUploadRunner(
         attempt: CloudUploadAttempt?,
         outcome: CloudUploadOutcome,
         failure: CloudUploadFailure?,
+        staleSnapshot: Boolean = false,
     ) {
         if (closed) return
-        val inventory = attempt?.let { runCatching { uploads.uploadInventory(it) }.getOrNull() }
+        val inventory =
+            attempt?.let { failed ->
+                runCatching { uploads.uploadInventory(failed) }
+                    .recoverCatching { error ->
+                        // Nur ein veralteter Snapshot einer aktiven Sitzung behält seinen Status; sonst wie bisher leeren.
+                        if (!staleSnapshot) throw error
+                        val status = uploads.readUploadStatus()
+                        check(status.profileId == failed.profileId && status.generation == failed.generation)
+                        status.inventory
+                    }.getOrNull()
+            }
         mutable.value =
             if (inventory == null) {
                 // Ein Kontowechsel darf weder den vorherigen Erfolg noch dessen Restbestand übernehmen.
@@ -217,8 +250,13 @@ class CloudUploadRunner(
     }
 
     private companion object {
+        const val RESTART_REQUIRED = "restart_required"
+        const val LIFECYCLE_CHANGED = "cloud_lifecycle_changed"
+
         val FAILURE_REASONS =
             setOf(
+                RESTART_REQUIRED,
+                LIFECYCLE_CHANGED,
                 "cloud_connection_failed",
                 "cloud_response_invalid",
                 "cloud_session_changed",
