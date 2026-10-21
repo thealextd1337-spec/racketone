@@ -12,6 +12,7 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.presentation.live.LiveTelemetryGate
 import eu.advantly.presentation.live.LiveTelemetryStore
 import eu.advantly.sync.protocol.LiveTelemetry
@@ -87,22 +88,35 @@ class PhoneSyncListenerService : WearableListenerService() {
         // Buffer gilt nur während dieses Aufrufs: Items einfrieren, dann freigeben
         val items = events.filter { it.type == DataEvent.TYPE_CHANGED }.map { it.dataItem.freeze() }
         events.release()
-        onMainAndWait { ensureSession() }
+        if (onMainAndWait {
+                ensureSession()
+                true
+            } != true
+        ) {
+            return
+        }
         if (items.isEmpty()) return
         val localNode = localNodeId() ?: return // ohne eigene Node-ID kein sicheres Zielfiltern; Transport liest beim Start
         val dataClient = Wearable.getDataClient(applicationContext)
         val persisted = CountDownLatch(items.size)
-        onMainAndWait {
-            items.forEach { item ->
-                val uri = item.uri
-                val delivered =
-                    WearDataLayerInbound.deliverQueuedItem(localNode, uri.host, uri.pathSegments, item.data) {
-                        // Session hat den Frame gespeichert → erst jetzt aus der Queue löschen
-                        dataClient.deleteDataItems(uri)
-                        persisted.countDown()
-                    }
-                if (!delivered) persisted.countDown()
-            }
+        if (onMainAndWait {
+                val expected = AndroidMatchSessions.current()
+                items.forEach { item ->
+                    val uri = item.uri
+                    val delivered =
+                        WearDataLayerInbound.deliverQueuedItem(localNode, uri.host, uri.pathSegments, item.data) {
+                            // Session hat den Frame gespeichert → erst jetzt aus der Queue löschen
+                            if (AndroidMatchSessions.current() === expected && AndroidInstallationGuard.privateTransportAllowed(this)) {
+                                dataClient.deleteDataItems(uri)
+                                persisted.countDown()
+                            }
+                        }
+                    if (!delivered) persisted.countDown()
+                }
+                true
+            } != true
+        ) {
+            return
         }
         persisted.await(QUEUE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
     }
@@ -122,20 +136,23 @@ class PhoneSyncListenerService : WearableListenerService() {
         AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
     }
 
-    private fun onMainAndWait(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            block()
-            return
-        }
+    private fun <T> onMainAndWait(block: () -> T): T? {
+        val expected = AndroidMatchSessions.current() ?: return null
+        val boundary =
+            AndroidSessionBoundary(applicationContext, {
+                AndroidMatchSessions.current() === expected && AndroidInstallationGuard.privateTransportAllowed(applicationContext)
+            })
+        if (Looper.myLooper() == Looper.getMainLooper()) return boundary.run(block)
         val done = CountDownLatch(1)
+        var result: T? = null
         main.post {
             try {
-                block()
+                result = boundary.run(block)
             } finally {
                 done.countDown()
             }
         }
-        done.await(MAIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        return if (done.await(MAIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) result else null
     }
 
     private companion object {

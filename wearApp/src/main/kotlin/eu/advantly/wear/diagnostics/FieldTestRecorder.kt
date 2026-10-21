@@ -105,6 +105,19 @@ object FieldTestRecorder {
         if (isEnabled(context)) start("process_start")
     }
 
+    /** Fehlerabbau ohne neue Datei-/DB-Lesevorgänge; die persistierte Feldtestpräferenz bleibt erhalten. */
+    fun uninstall(matchSession: MatchSession) {
+        if (session !== matchSession) return
+        running = false
+        handler.removeCallbacks(tick)
+        session?.removeListener(sessionListener)
+        app?.getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displayListener)
+        display = null
+        lastSession = null
+        session = null
+        app = null
+    }
+
     fun isEnabled(context: Context): Boolean = DebugToolsGate.recording(AVAILABLE) { prefs(context).getBoolean(KEY_ENABLED, false) }
 
     /** Schalter des Startbildschirms (nur Debug). */

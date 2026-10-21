@@ -35,8 +35,9 @@ internal fun Activity.showInstallationError() {
             setText(R.string.installation_error_retry)
             setOnClickListener {
                 isEnabled = false
-                if (AndroidInstallationGuard.retry(this@showInstallationError) is AndroidInstallationAvailability.Ready) {
-                    (application as? AdvantlyWearApplication)?.bootstrap()
+                val ready = AndroidInstallationGuard.retry(this@showInstallationError) is AndroidInstallationAvailability.Ready
+                val bootstrapped = ready && ((application as? AdvantlyWearApplication)?.bootstrap() != false)
+                if (bootstrapped) {
                     intent.putExtra(INSTALLATION_RETRY_COMPLETE, true)
                     recreate()
                 } else {

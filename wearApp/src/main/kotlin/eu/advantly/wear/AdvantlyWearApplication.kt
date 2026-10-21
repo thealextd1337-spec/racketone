@@ -13,7 +13,6 @@ import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.diagnostics.FieldTestRecorder
 import eu.advantly.wear.glance.GlancePublisher
 import eu.advantly.wear.sync.MatchNotifier
-import eu.advantly.wear.sync.WearPrefs
 import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.workout.SessionStore
 import eu.advantly.wear.workout.WorkoutAction
@@ -39,50 +38,61 @@ class AdvantlyWearApplication : Application() {
     fun bootstrap(): Boolean {
         if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) return false
         if (bootstrapped) return true
-        WearPrefs(this).initializeOperationalCache {
-            getSystemService(NotificationManager::class.java)?.cancelAll()
-        }
-        DiagnosticLog.init(this)
-        val store = SessionStore(this)
-        DiagnosticLog.log(
-            "PROCESS_START",
-            "pid" to Process.myPid(),
-            "version" to BuildConfig.VERSION_NAME,
-            "commit" to getString(R.string.build_git_commit),
-            "buildTimeUtc" to getString(R.string.build_time_utc),
-            "sessionActive" to store.sessionActive,
-            "sessionId" to store.sessionId,
-        )
-        if (store.sessionActive) {
-            DiagnosticLog.log("PROCESS_RESTART_DURING_SESSION", "sessionId" to store.sessionId)
-        }
-        logExitReasons(store)
-
-        val holder = WearSessions.get(this)
-        // P1-Gate-Feldtest (nur Debug, Schalter Standard aus): Akku/Display/Sync je Minute, ohne Gesundheitsdaten
-        FieldTestRecorder.install(this, holder.session)
-        holder.session.addListener(GlancePublisher(this, holder))
-        val workoutStore = SessionStore(this)
-        holder.session.addListener(MatchNotifier(this))
-        holder.session.addListener(
-            SessionListener { state ->
-                val match = state.match
-                val inputs =
-                    WorkoutInputs(
-                        enabled = WorkoutCoordinator.enabled(match?.meta, holder.prefs.workoutEnabled),
-                        matchId = match?.id,
-                        sport = match?.format?.sport,
-                        phase = WorkoutStateHolder.state.value.phase,
-                        handledMatchId = holder.prefs.workoutHandledMatchId,
-                        markerActive = workoutStore.sessionActive,
+        return AndroidInstallationGuard.storage(this) {
+            val store = SessionStore(this)
+            WearSessions.prepare(this) { holder, stage ->
+                val publisher = GlancePublisher(this, holder, staged = true)
+                publisher.prepare(holder.session.state.value)
+                stage.onDiscard {
+                    bootstrapped = false
+                    holder.session.removeListener(publisher)
+                    publisher.dispose()
+                    FieldTestRecorder.uninstall(holder.session)
+                }
+                val notifier = MatchNotifier(this)
+                val workout =
+                    SessionListener { state ->
+                        val match = state.match
+                        val inputs =
+                            WorkoutInputs(
+                                enabled = WorkoutCoordinator.enabled(match?.meta, holder.prefs.workoutEnabled),
+                                matchId = match?.id,
+                                sport = match?.format?.sport,
+                                phase = WorkoutStateHolder.state.value.phase,
+                                handledMatchId = holder.prefs.workoutHandledMatchId,
+                                markerActive = store.sessionActive,
+                            )
+                        if (WorkoutCoordinator.decide(inputs) == WorkoutAction.Stop) WorkoutService.stop(this)
+                        if (match == null && WorkoutStateHolder.state.value.countOnly) WorkoutStateHolder.reset()
+                    }
+                stage.onDiscard {
+                    holder.session.removeListener(notifier)
+                    holder.session.removeListener(workout)
+                }
+                stage.afterCommit {
+                    holder.prefs.initializeOperationalCache { getSystemService(NotificationManager::class.java)?.cancelAll() }
+                    DiagnosticLog.init(this)
+                    DiagnosticLog.log(
+                        "PROCESS_START",
+                        "pid" to Process.myPid(),
+                        "version" to BuildConfig.VERSION_NAME,
+                        "commit" to getString(R.string.build_git_commit),
+                        "buildTimeUtc" to getString(R.string.build_time_utc),
+                        "sessionActive" to store.sessionActive,
+                        "sessionId" to store.sessionId,
                     )
-                // Start nur aus der sichtbaren Activity (FGS-Startverbot im Hintergrund); Stoppen geht immer
-                if (WorkoutCoordinator.decide(inputs) == WorkoutAction.Stop) WorkoutService.stop(this)
-                if (match == null && WorkoutStateHolder.state.value.countOnly) WorkoutStateHolder.reset()
-            },
-        )
-        bootstrapped = true
-        return true
+                    if (store.sessionActive) DiagnosticLog.log("PROCESS_RESTART_DURING_SESSION", "sessionId" to store.sessionId)
+                    logExitReasons(store)
+                    publisher.activate()
+                    holder.session.addListener(publisher)
+                    holder.session.addListener(notifier)
+                    holder.session.addListener(workout)
+                    FieldTestRecorder.install(this, holder.session)
+                }
+            }
+            bootstrapped = true
+            true
+        } == true
     }
 
     private fun logExitReasons(store: SessionStore) {

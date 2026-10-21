@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.SharedPreferences
+import android.database.sqlite.SQLiteDiskIOException
 import android.widget.Button
 import com.google.android.gms.wearable.MessageEvent
 import eu.advantly.core.model.Lineup
@@ -47,6 +49,37 @@ import java.security.MessageDigest
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class, shadows = [UnsupportedDirectorySyncLinux::class])
 class InstallationHostFailureTest {
+    @Test
+    fun runningWearActivityCannotResumeClosedGeneration() {
+        val app = RuntimeEnvironment.getApplication()
+        val activity = Robolectric.buildActivity(MainActivity::class.java)
+        MainActivity::class.java.getDeclaredField("ambientObserver\$delegate").apply {
+            isAccessible = true
+            set(
+                activity.get(),
+                lazy {
+                    object : androidx.wear.ambient.AmbientLifecycleObserver {
+                        override val isAmbient = false
+                    }
+                },
+            )
+        }
+        activity.setup()
+        AndroidInstallationGuard.storageFailed(app, SQLiteDiskIOException("runtime revoked"))
+        activity.pause().stop()
+        org.robolectric.Shadows
+            .shadowOf(android.os.Looper.getMainLooper())
+            .idle()
+        activity.start().resume()
+        assertNotNull(
+            activity
+                .get()
+                .window.decorView
+                .findViewWithTag<android.view.View>("installation_error"),
+        )
+        activity.pause().stop().destroy()
+    }
+
     @Before
     fun reset() = resetProcess()
 
@@ -73,6 +106,57 @@ class InstallationHostFailureTest {
             isAccessible = true
             (get(AndroidInstallationGuard) as MutableSet<*>).clear()
         }
+    }
+
+    @Test
+    fun lateWearResumeAndGlanceIoAreUnavailableUntilRetry() {
+        val app = RuntimeEnvironment.getApplication()
+        seedLegacy(app)
+        val first = AndroidInstallationGuard.get(app)
+        val source = WearSessions.get(app).session.deviceId
+        resetProcess()
+        val before = protectedBytes(app)
+        var failedKey: String? = "open_match"
+        val broken =
+            object : ContextWrapper(app) {
+                override fun getApplicationContext(): Context = this
+
+                override fun getSharedPreferences(
+                    name: String,
+                    mode: Int,
+                ): SharedPreferences {
+                    val prefs = super.getSharedPreferences(name, mode)
+                    if (name != "wear_prefs_${first.cacheNamespace}") return prefs
+                    return object : SharedPreferences by prefs {
+                        override fun getString(
+                            key: String?,
+                            defValue: String?,
+                        ): String? {
+                            if (failedKey != null && key == failedKey) throw SQLiteDiskIOException("late Wear storage failed: $key")
+                            return prefs.getString(key, defValue)
+                        }
+                    }
+                }
+            }
+        val product = AdvantlyWearApplication()
+        shadowOf(product).callAttach(broken)
+        for (key in listOf("open_match", "glance_sent_state")) {
+            failedKey = key
+            assertTrue(AndroidInstallationGuard.retry(broken) is AndroidInstallationAvailability.Ready)
+            repeat(2) {
+                assertFalse(product.bootstrap())
+                assertEquals(AndroidInstallationAvailability.Unavailable, AndroidInstallationGuard.check(app))
+                assertNull(AndroidMatchSessions.current())
+                assertFalse(WearDataLayerInbound.isAttached)
+                assertEquals(before, protectedBytes(app))
+            }
+        }
+        failedKey = null
+        assertEquals(first, (AndroidInstallationGuard.retry(broken) as AndroidInstallationAvailability.Ready).installation)
+        assertTrue(product.bootstrap())
+        assertEquals(source, WearSessions.get(app).session.deviceId)
+        assertFalse(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertEquals(legacyBytes, legacyBytes(app))
     }
 
     @Test

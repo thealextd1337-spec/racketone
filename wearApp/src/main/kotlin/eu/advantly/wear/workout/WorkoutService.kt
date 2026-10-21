@@ -13,7 +13,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.annotation.RequiresApi
@@ -30,7 +32,6 @@ import androidx.health.services.client.data.ExerciseConfig
 import androidx.health.services.client.data.ExerciseLapSummary
 import androidx.health.services.client.data.ExerciseState
 import androidx.health.services.client.data.ExerciseUpdate
-import androidx.health.services.client.endExercise
 import androidx.health.services.client.getCurrentExerciseInfo
 import androidx.health.services.client.startExercise
 import androidx.wear.ongoing.OngoingActivity
@@ -38,6 +39,8 @@ import androidx.wear.ongoing.Status
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.match.session.AndroidSessionAccess
+import eu.advantly.match.session.MatchSession
 import eu.advantly.wear.MainActivity
 import eu.advantly.wear.R
 import eu.advantly.wear.diagnostics.DiagLine
@@ -93,7 +96,18 @@ class WorkoutService : Service() {
             WorkoutStateHolder.fail(WorkoutError.INTERNAL, e.message ?: e.javaClass.simpleName)
         }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
-    private var sessionReady = false
+
+    @Volatile private var sessionReady = false
+    private var sessionAccess: AndroidSessionAccess? = null
+    private var healthLease: WorkoutHealthLease? = null
+    private var commandJob: Job? = null
+    private var matchSession: MatchSession? = null
+    private var receiverRegistered = false
+    private var healthAborted = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun currentSession(): Boolean = sessionReady && sessionAccess?.ready == true && healthLease?.current == true
+
     private lateinit var exerciseClient: ExerciseClient
     private lateinit var store: SessionStore
 
@@ -117,7 +131,7 @@ class WorkoutService : Service() {
     private var fallbackStepsTotal = 0L
     private var lastStepEndMs = -1L
     private var updateCount = 0L
-    private val telemetry by lazy { LiveTelemetrySender(this, WearSessions.get(this).session) }
+    private val telemetry by lazy { LiveTelemetrySender(this, requireNotNull(matchSession)) }
 
     private val screenReceiver =
         object : BroadcastReceiver() {
@@ -138,16 +152,35 @@ class WorkoutService : Service() {
             stopSelf()
             return
         }
-        sessionReady = true
         DiagnosticLog.log("SERVICE_CREATE")
+        val local =
+            AndroidInstallationGuard.storage(this) { SessionStore(this) to WearSessions.get(this).session }
+                ?: run {
+                    stopSelf()
+                    return
+                }
+        store = local.first
+        matchSession = local.second
         exerciseClient = HealthServices.getClient(this).exerciseClient
-        store = SessionStore(this)
+        sessionAccess =
+            AndroidSessionAccess(this, requireNotNull(matchSession)) {
+                sessionReady = false
+                scope.cancel()
+                mainHandler.post { abortHealthSession() }
+            }
+        sessionReady = sessionAccess?.ready == true
+        if (!sessionReady) {
+            stopSelf()
+            return
+        }
+        healthLease = WorkoutHealthLease.take()
         val filter =
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
             }
         ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        receiverRegistered = true
     }
 
     override fun onStartCommand(
@@ -155,10 +188,27 @@ class WorkoutService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        if (!sessionReady || AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) {
+        if (!currentSession()) {
             stopSelf()
             return START_NOT_STICKY
         }
+        commandJob?.cancel()
+        commandJob =
+            scope.launch {
+                if (healthLease?.awaitReady() != true || !currentSession()) return@launch
+                AndroidInstallationGuard.storage(this@WorkoutService) {
+                    if (currentSession()) handleCommand(intent, flags, startId)
+                }
+            }
+        // Hoechstens ein wartender Befehl; frisches Zaehlen bleibt unabhaengig von Health moeglich.
+        return if (store.sessionActive) START_STICKY else START_NOT_STICKY
+    }
+
+    private fun handleCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ) {
         DiagnosticLog.log(
             "SERVICE_START_COMMAND",
             "action" to (intent?.action ?: "null(system-restart)"),
@@ -183,8 +233,6 @@ class WorkoutService : Service() {
                 recoverSession()
             }
         }
-        // Nur mit aktiver Session vom System neu starten lassen, sonst keine Neustart-Schleife.
-        return if (store.sessionActive) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -414,7 +462,8 @@ class WorkoutService : Service() {
             }
             if (ExerciseOwnership.needsEnd(before)) {
                 try {
-                    exerciseClient.endExercise()
+                    val end = healthLease?.end { exerciseClient.endExerciseAsync() } ?: return false
+                    end.await()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -476,6 +525,7 @@ class WorkoutService : Service() {
     }
 
     private suspend fun queryTrackedStatus(retries: Int): TrackedStatus {
+        if (healthLease?.awaitReady() != true || !currentSession()) return TrackedStatus.FAILED
         for (attempt in 0..retries) {
             val status =
                 try {
@@ -550,12 +600,7 @@ class WorkoutService : Service() {
     }
 
     /** Spielstand des offenen Matches für die Ongoing Activity (z. B. „6:4 3:2 · 30:15“). */
-    private fun currentScoreText(): String =
-        LiveModel.ongoingText(
-            WearSessions
-                .get(this)
-                .session.state.value.match,
-        )
+    private fun currentScoreText(): String = if (currentSession()) LiveModel.ongoingText(matchSession?.state?.value?.match) else ""
 
     private fun buildStatus(score: String): Status {
         val state = WorkoutStateHolder.state.value
@@ -573,10 +618,10 @@ class WorkoutService : Service() {
         scoreJob?.cancel()
         scoreJob =
             scope.launch {
-                WearSessions
-                    .get(this@WorkoutService)
-                    .session.state
+                requireNotNull(matchSession)
+                    .state
                     .map {
+                        if (!currentSession()) return@map ""
                         val next = stepCounter.forMatch(it.match?.id)
                         if (next != stepCounter) {
                             stepCounter = next
@@ -586,6 +631,7 @@ class WorkoutService : Service() {
                         LiveModel.ongoingText(it.match)
                     }.distinctUntilChanged()
                     .collect { score ->
+                        if (!currentSession()) return@collect
                         // Ohne POST_NOTIFICATIONS läuft der Service weiter, nur der Status im Zifferblatt-Chip bleibt stehen.
                         val granted =
                             ContextCompat.checkSelfPermission(this@WorkoutService, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -614,12 +660,14 @@ class WorkoutService : Service() {
     private val updateCallback =
         object : ExerciseUpdateCallback {
             override fun onRegistered() {
+                if (!currentSession()) return
                 callbackConfirmed = true
                 callbackAttempts = 0
                 DiagnosticLog.log("CALLBACK_REGISTERED")
             }
 
             override fun onRegistrationFailed(throwable: Throwable) {
+                if (!currentSession()) return
                 callbackRequested = false
                 callbackConfirmed = false
                 callbackAttempts++
@@ -640,10 +688,12 @@ class WorkoutService : Service() {
             }
 
             override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
+                if (!currentSession()) return
                 handleUpdate(update)
             }
 
             override fun onLapSummaryReceived(lapSummary: ExerciseLapSummary) {
+                if (!currentSession()) return
                 DiagnosticLog.log("LAP", "count" to lapSummary.lapCount)
             }
 
@@ -651,6 +701,7 @@ class WorkoutService : Service() {
                 dataType: DataType<*, *>,
                 availability: Availability,
             ) {
+                if (!currentSession()) return
                 DiagnosticLog.log("AVAILABILITY", "dataType" to dataType.name, "availability" to availability)
                 if (dataType == DataType.HEART_RATE_BPM) {
                     WorkoutStateHolder.update { it.copy(heartRateAvailability = availability.toString()) }
@@ -660,6 +711,7 @@ class WorkoutService : Service() {
 
     /** Fordert die Anmeldung an; als angemeldet gilt der Callback erst nach `onRegistered()`. */
     private fun registerCallback() {
+        if (!currentSession() || healthLease?.ready != true) return
         if (callbackRequested) return
         callbackRequested = true
         callbackConfirmed = false
@@ -675,6 +727,7 @@ class WorkoutService : Service() {
     }
 
     private fun handleUpdate(update: ExerciseUpdate) {
+        if (!currentSession()) return
         updateCount++
         val state = update.exerciseStateInfo.state
         if (state != lastState) {
@@ -704,10 +757,8 @@ class WorkoutService : Service() {
         DiagnosticLog.logAll(lines)
 
         val calories = metrics.getData(DataType.CALORIES_TOTAL)?.total
-        val sessionState =
-            WearSessions
-                .get(this)
-                .session.state.value
+        if (!currentSession()) return
+        val sessionState = requireNotNull(matchSession).state.value
         val visibility = sessionState.telemetryVisibility
         stepCounter = stepCounter.forMatch(sessionState.match?.id)
         val totalSteps = metrics.getData(DataType.STEPS_TOTAL)?.total
@@ -825,22 +876,67 @@ class WorkoutService : Service() {
         super.onTrimMemory(level)
     }
 
-    override fun onDestroy() {
-        if (!sessionReady) {
-            scope.cancel()
-            super.onDestroy()
-            return
+    /** Widerruf beendet nur die eigene Health-Exercise; keine SQL- oder Recovery-Prefs-Zugriffe. */
+    private fun abortHealthSession() {
+        if (healthAborted) return
+        healthAborted = true
+        if (healthLease?.current == true) {
+            LiveTelemetrySubscriptions.Watch.clear()
+            WorkoutStateHolder.update { WorkoutUiState(telemetryAllowed = false) }
         }
-        DiagnosticLog.log("SERVICE_DESTROY", "sessionActive" to store.sessionActive)
-        runCatching { unregisterReceiver(screenReceiver) }
+        try {
+            detachCallbacks()
+        } catch (error: Exception) {
+            DiagnosticLog.log("STORAGE_ABORT_CALLBACK_FAILED", "error" to error.javaClass.simpleName)
+        }
+        if (::exerciseClient.isInitialized && healthLease?.current == true) {
+            try {
+                val info = exerciseClient.getCurrentExerciseInfoAsync()
+                info.addListener({
+                    try {
+                        if (healthLease?.current == true &&
+                            TrackedStatus.fromHealthServices(info.get().exerciseTrackedStatus) == TrackedStatus.OWNED
+                        ) {
+                            healthLease?.end { exerciseClient.endExerciseAsync() }?.invokeOnCompletion { error ->
+                                if (error != null) DiagnosticLog.log("STORAGE_ABORT_HEALTH_FAILED", "error" to error.javaClass.simpleName)
+                            }
+                        }
+                    } catch (error: Exception) {
+                        DiagnosticLog.log("STORAGE_ABORT_HEALTH_FAILED", "error" to error.javaClass.simpleName)
+                    }
+                }, ContextCompat.getMainExecutor(this))
+            } catch (error: Exception) {
+                DiagnosticLog.log("STORAGE_ABORT_HEALTH_FAILED", "error" to error.javaClass.simpleName)
+            }
+        }
+        if (foregroundStarted) stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundStarted = false
+        ongoingActivity = null
+        stopSelf()
+    }
+
+    private fun detachCallbacks() {
+        if (receiverRegistered) {
+            receiverRegistered = false
+            unregisterReceiver(screenReceiver)
+        }
         if (callbackRequested) {
-            // Exercise läuft in Health Services weiter; nur den Callback lösen (ohne auf das Future zu warten).
-            exerciseClient.clearUpdateCallbackAsync(updateCallback)
             callbackRequested = false
             callbackConfirmed = false
+            exerciseClient.clearUpdateCallbackAsync(updateCallback)
         }
+    }
+
+    override fun onDestroy() {
+        sessionReady = false
+        sessionAccess?.close()
+        sessionAccess = null
         scope.cancel()
-        super.onDestroy()
+        try {
+            detachCallbacks()
+        } finally {
+            super.onDestroy()
+        }
     }
 
     companion object {
@@ -875,10 +971,14 @@ class WorkoutService : Service() {
             sport: WorkoutSport,
         ) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_START).putExtra(EXTRA_SPORT, sport.name))
 
-        fun stop(context: Context) =
-            WorkoutCoordinator.requestStop(SessionStore(context)) {
-                send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
+        fun stop(context: Context) {
+            AndroidInstallationGuard.storage(context) {
+                WorkoutCoordinator.requestStop(SessionStore(context)) {
+                    send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_STOP))
+                }
+                true
             }
+        }
 
         /** Nach einem Prozess-Neustart oder als „Erneut versuchen“: laufende Session wieder übernehmen. */
         fun recover(context: Context) = send(context, Intent(context, WorkoutService::class.java).setAction(ACTION_RECOVER))

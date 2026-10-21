@@ -4,6 +4,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.io.UncheckedIOException
+import java.nio.file.DirectoryIteratorException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -42,7 +44,7 @@ data class AndroidInstallationState internal constructor(
  * Validierung öffnet nur eine vollständige private Kopie; I/O-/SQLite-Fehler brechen ohne Umschaltung ab.
  *
  * Leistungsgrenze dieses Schutzschnitts: Jeder Prozessstart kopiert die aktive Familie synchron, derzeit auch vom
- * Main-Thread. Dafür wird zusätzlicher freier Speicher in Familiengröße benötigt; große Familien können den Start
+ * Main-Thread, einschließlich SQLite-quick_check. Dafür wird zusätzlicher freier Speicher in Familiengröße benötigt; große Familien können den Start
  * blockieren und ein ANR auslösen. Eine asynchrone Initialisierung ist eine separate spätere Arbeit.
  */
 internal class InstallationFiles(
@@ -60,16 +62,25 @@ internal class InstallationFiles(
         val ready: Boolean,
     )
 
-    fun select(): AndroidInstallationState {
-        Files.createDirectories(databases.toPath())
-        Files.createDirectories(noBackup.toPath())
-        return RandomAccessFile(File(noBackup, "installation-v1.lock"), "rw").use { lock ->
-            lock.channel.lock().use {
-                cleanupChecks()
-                selectLocked()
+    fun select(): AndroidInstallationState =
+        try {
+            Files.createDirectories(databases.toPath())
+            Files.createDirectories(noBackup.toPath())
+            RandomAccessFile(File(noBackup, "installation-v1.lock"), "rw").use { lock ->
+                lock.channel.lock().use {
+                    cleanupChecks()
+                    selectLocked()
+                }
             }
+        } catch (error: DirectoryIteratorException) {
+            val cause = error.cause ?: throw error
+            error.suppressed.filter { it !== cause }.forEach(cause::addSuppressed)
+            throw cause
+        } catch (error: UncheckedIOException) {
+            val cause = error.cause ?: throw error
+            error.suppressed.filter { it !== cause }.forEach(cause::addSuppressed)
+            throw cause
         }
-    }
 
     private fun selectLocked(): AndroidInstallationState {
         val inventory = inventory()

@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.google.android.gms.wearable.Wearable
 import eu.advantly.core.model.MatchId
 import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionState
 import eu.advantly.presentation.live.LiveTelemetryGate
@@ -74,7 +75,7 @@ class LiveTelemetrySender(
 ) {
     constructor(context: Context, session: MatchSession) : this(
         state = { session.state.value },
-        messages = androidMessages(context),
+        messages = androidMessages(context, session),
         subscriptions = LiveTelemetrySubscriptions.Watch,
         nowMs = SystemClock::elapsedRealtime,
     )
@@ -103,9 +104,12 @@ class LiveTelemetrySender(
     }
 }
 
-private fun androidMessages(context: Context): TelemetryMessageClient =
+private fun androidMessages(
+    context: Context,
+    session: MatchSession,
+): TelemetryMessageClient =
     TelemetryMessageClient { nodeId, path, payload ->
-        if (AndroidInstallationGuard.privateTransportAllowed(context)) {
+        if (AndroidMatchSessions.current() === session && AndroidInstallationGuard.privateTransportAllowed(context)) {
             Wearable
                 .getMessageClient(context.applicationContext)
                 .sendMessage(nodeId, path, payload)

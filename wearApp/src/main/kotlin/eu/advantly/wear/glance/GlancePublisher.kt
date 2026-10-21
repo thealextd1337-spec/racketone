@@ -20,7 +20,10 @@ import eu.advantly.wear.sync.WearSessions
 class GlancePublisher(
     private val context: Context,
     private val holder: WearSessions.Holder,
+    staged: Boolean = false,
 ) : SessionListener {
+    private var active = !staged
+    private var prepared: GlanceState? = null
     private val handler = Handler(Looper.getMainLooper())
     private val restoredState = GlanceStateStorage.decode(holder.prefs.glanceSentState)
     private val throttle = GlanceUpdateThrottle(initialState = restoredState)
@@ -35,12 +38,30 @@ class GlancePublisher(
     private var selfIds: Set<PlayerId> = emptySet()
     private val update = Runnable { requestUpdate() }
 
-    init {
-        // Prozessweiter Publisher: die Registrierung lebt genauso lange wie LocalData und die Session.
-        holder.data.observeDirectoryChanges(directoryRefresh::invalidate)
+    private val removeDirectoryObserver = holder.data.observeDirectoryChanges(directoryRefresh::invalidate)
+
+    fun prepare(state: SessionState) {
+        prepared = derive(state)
+    }
+
+    fun activate() {
+        active = true
+        publish(checkNotNull(prepared))
+        prepared = null
+    }
+
+    fun dispose() {
+        active = false
+        handler.removeCallbacks(update)
+        removeDirectoryObserver()
+        snapshot = GlanceState()
     }
 
     override fun onStateChanged(state: SessionState) {
+        if (active) publish(derive(state)) else prepare(state)
+    }
+
+    private fun derive(state: SessionState): GlanceState {
         if (directoryRefresh.shouldRefresh(state)) {
             setup = directory.lastSetup()
             val assignments = state.match?.let { holder.data.assignments(it.id) }.orEmpty()
@@ -55,7 +76,12 @@ class GlancePublisher(
             names = ids.associateWith { assignments[it]?.displayName ?: directory.displayName(it) }
             selfIds = ids.filter(directory::isSelf).toSet()
         }
-        snapshot = GlanceModel.derive(state, setup, names::get, selfIds::contains)
+        return GlanceModel.derive(state, setup, names::get, selfIds::contains)
+    }
+
+    private fun publish(value: GlanceState) {
+        if (!active) return
+        snapshot = value
         if (!initialized) {
             initialized = true
             if (restoredState == null) {
@@ -73,6 +99,7 @@ class GlancePublisher(
     }
 
     private fun requestUpdate() {
+        if (!active) return
         TileService.getUpdater(context).requestUpdate(MatchTileService::class.java)
         ComplicationDataSourceUpdateRequester
             .create(context, ComponentName(context, MatchComplicationService::class.java))

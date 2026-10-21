@@ -39,6 +39,8 @@ import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.match.session.AndroidSessionAccess
+import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -95,7 +97,45 @@ class WatchViewModel(
  * Vordergrund, 05 §2.2). Die Logik steckt im JVM-getesteten [WatchController].
  */
 class MainActivity : ComponentActivity() {
-    private var sessionReady = false
+    @Volatile private var sessionReady = false
+    private var sessionAccess: AndroidSessionAccess? = null
+    private var runtimeBoundary: AndroidSessionBoundary? = null
+    private var runtimeJobs = mutableListOf<kotlinx.coroutines.Job>()
+    private var powerReceiverRegistered = false
+    private var runtimeStopped = false
+
+    private fun runtimeUnavailable() {
+        if (runtimeStopped) return
+        runtimeStopped = true
+        sessionReady = false
+        runtimeJobs.forEach { it.cancel() }
+        runtimeJobs.clear()
+        UiVisibility.resumed = false
+        if (powerReceiverRegistered) {
+            unregisterReceiver(powerSaveReceiver)
+            powerReceiverRegistered = false
+        }
+        if (::holder.isInitialized) {
+            activeController?.effects = null
+            activeController?.dispose()
+            activeController = null
+            lifecycle.removeObserver(ambientObserver)
+        }
+        viewModelStore.clear()
+        shownTelemetry.value = null to null
+        if (!isFinishing && !isDestroyed) showInstallationError()
+    }
+
+    private fun currentSession(): Boolean = sessionReady && sessionAccess?.ready == true
+
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (sessionAccess?.ready == false && !runtimeStopped) {
+            runtimeUnavailable()
+            return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     private val glanceLaunch = mutableIntStateOf(0)
     private lateinit var glanceConsumption: GlanceIntentConsumption
     private val isAmbient = mutableStateOf(false)
@@ -123,23 +163,27 @@ class MainActivity : ComponentActivity() {
     private val viewModel: WatchViewModel by viewModels {
         viewModelFactory { initializer { WatchViewModel(createController()) } }
     }
-    private val controller: WatchController get() = viewModel.controller
+    private var activeController: WatchController? = null
+    private val controller: WatchController get() = viewModel.controller.also { activeController = it }
 
     private val ambientCallback =
         object : AmbientLifecycleObserver.AmbientLifecycleCallback {
             override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
+                if (!currentSession()) return
                 isAmbient.value = true
                 controller.setInteractive(false)
                 DiagnosticLog.log("AMBIENT_ENTER", "burnIn" to ambientDetails.burnInProtectionRequired)
             }
 
             override fun onUpdateAmbient() {
+                if (!currentSession()) return
                 // ≤ 1×/min: Staleness und Puls nachziehen (04 §4.3.6)
                 controller.tick()
                 updateTelemetry()
             }
 
             override fun onExitAmbient() {
+                if (!currentSession()) return
                 isAmbient.value = false
                 controller.onWake()
                 updateTelemetry()
@@ -151,7 +195,7 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-            if (!sessionReady) return@registerForActivityResult
+            if (!currentSession()) return@registerForActivityResult
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
             permissions.value = Permissions.current(this)
             permissionRequestInFlight = false
@@ -167,13 +211,29 @@ class MainActivity : ComponentActivity() {
         }
         val afterInstallationRetry = intent.getBooleanExtra(INSTALLATION_RETRY_COMPLETE, false)
         intent.removeExtra(INSTALLATION_RETRY_COMPLETE)
-        (application as? AdvantlyWearApplication)?.bootstrap()
+        if ((application as? AdvantlyWearApplication)?.bootstrap() == false) {
+            showInstallationError()
+            return
+        }
         sessionReady = true
         // Ein restauriertes Task-Intent darf nie erneut einen Schnellstart auslösen.
         glanceConsumption = GlanceIntentConsumption(consumed = savedInstanceState != null)
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
-        holder = WearSessions.get(this)
+        holder = AndroidInstallationGuard.storage(this) { WearSessions.get(this) } ?: run {
+            showInstallationError()
+            return
+        }
+        sessionAccess =
+            AndroidSessionAccess(this, holder.session) {
+                sessionReady = false
+                handler.post { runtimeUnavailable() }
+            }
+        runtimeBoundary = AndroidSessionBoundary(applicationContext, allowed = { currentSession() })
+        if (runtimeBoundary?.run { controller } == null) {
+            runtimeUnavailable()
+            return
+        }
         if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
             AlertDialog
                 .Builder(this)
@@ -191,22 +251,25 @@ class MainActivity : ComponentActivity() {
         DiagnosticLog.log("ACTIVITY_CREATE", "restored" to (savedInstanceState != null))
 
         // Capabilities beim App-Start abfragen und cachen (05 §0.1).
-        lifecycleScope.launch {
-            runCatching { CapabilitiesRepository.load(this@MainActivity) }
-                .onFailure { DiagnosticLog.log("CAPABILITIES_FAILED", "error" to it.javaClass.simpleName, "message" to it.message) }
-        }
+        runtimeJobs +=
+            lifecycleScope.launch {
+                runCatching { CapabilitiesRepository.load(this@MainActivity) }
+                    .onFailure { DiagnosticLog.log("CAPABILITIES_FAILED", "error" to it.javaClass.simpleName, "message" to it.message) }
+            }
         // Workout war aktiv, Prozess wurde aber beendet → evaluateWorkout() (onResume) gleicht über den Marker ab
 
         // Workout an das offene Match koppeln, solange die UI sichtbar ist (FGS-Start nur aus dem Vordergrund)
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                combine(holder.session.state, WorkoutStateHolder.state) { _, workout -> workout }
-                    .collect {
-                        updateTelemetry()
-                        evaluateWorkout()
-                    }
+        runtimeJobs +=
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    combine(holder.session.state, WorkoutStateHolder.state) { _, workout -> workout }
+                        .collect {
+                            if (!currentSession()) return@collect
+                            updateTelemetry()
+                            evaluateWorkout()
+                        }
+                }
             }
-        }
 
         setContent {
             val state by controller.state.collectAsState()
@@ -222,6 +285,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(ambient) {
                 while (!ambient) {
                     kotlinx.coroutines.delay(TICK_MS)
+                    if (!currentSession()) break
                     controller.tick()
                 }
             }
@@ -250,7 +314,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (!sessionReady) return
+        if (!currentSession()) return
         controller.effects = ::onEffect
         updatePowerSave()
         ContextCompat.registerReceiver(
@@ -259,6 +323,7 @@ class MainActivity : ComponentActivity() {
             IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        powerReceiverRegistered = true
     }
 
     /** Energiesparmodus kann die Verbindung zum Handy unterbrechen (Feldtest) → Hinweis auf der Startliste. */
@@ -270,13 +335,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!sessionReady) return
+        if (!currentSession()) return
         UiVisibility.resumed = true
         controller.setInteractive(!isAmbient.value)
         consumeGlanceAction()
         MatchNotifier.cancel(this)
         permissions.value = Permissions.current(this) // Rechte können in den Einstellungen geändert worden sein
-        holder.session.syncNow()
+        runtimeBoundary?.run { holder.session.syncNow() }
         controller.tick()
         evaluateWorkout()
         askNotificationsOnce()
@@ -284,7 +349,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        if (!sessionReady) {
+        if (!currentSession()) {
             super.onPause()
             return
         }
@@ -296,7 +361,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (!sessionReady) return
+        if (!currentSession()) return
         setIntent(intent)
         glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
@@ -304,6 +369,10 @@ class MainActivity : ComponentActivity() {
 
     /** Erst aus der sichtbaren Activity starten; Extra verbrauchen, bevor Session/Rechte-Dialoge reagieren. */
     private fun consumeGlanceAction() {
+        runtimeBoundary?.run { consumeGlanceActionReady() }
+    }
+
+    private fun consumeGlanceActionReady() {
         val value = glanceConsumption.consume(intent.getStringExtra(GlanceLaunch.EXTRA_ACTION)) ?: return
         intent.removeExtra(GlanceLaunch.EXTRA_ACTION)
         // Eine bereits offene Steuerseite beim externen Einstieg wieder auf die Score-Seite setzen.
@@ -323,42 +392,55 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (!sessionReady) {
-            super.onStop()
-            return
-        }
-        runCatching { unregisterReceiver(powerSaveReceiver) }
-        controller.effects = null
+        if (powerReceiverRegistered) unregisterReceiver(powerSaveReceiver)
+        powerReceiverRegistered = false
+        activeController?.effects = null
         super.onStop()
     }
 
     override fun onDestroy() {
+        sessionAccess?.close()
+        runtimeJobs.forEach { it.cancel() }
         handler.removeCallbacks(clearToast)
         DiagnosticLog.log("ACTIVITY_DESTROY", "finishing" to isFinishing)
         super.onDestroy()
     }
 
     private fun createController(): WatchController {
-        val h = WearSessions.get(this)
+        val h = holder
+        val calls = AndroidSessionBoundary.forSession(applicationContext, h.session)
         val ids = RandomIdGenerator()
-        val directory =
-            WatchDirectory(
-                data = h.data,
-                nowMs = System::currentTimeMillis,
-                newId = { PlayerId(ids.newUuid7(System.currentTimeMillis()).value) },
+        try {
+            val directory =
+                WatchDirectory(
+                    data = h.data,
+                    nowMs = System::currentTimeMillis,
+                    newId = { PlayerId(ids.newUuid7(System.currentTimeMillis()).value) },
+                )
+            return WatchController(
+                session = h.session,
+                directory = directory,
+                prefs = h.prefs,
+                wallClock = System::currentTimeMillis,
+                elapsed = SystemClock::elapsedRealtime,
+                uptime = SystemClock::uptimeMillis,
+                today = ::systemLocalDay,
+                operationBoundary = { action ->
+                    calls.run {
+                        action()
+                        true
+                    } == true
+                },
+                disposeBoundary = calls::close,
             )
-        return WatchController(
-            session = h.session,
-            directory = directory,
-            prefs = h.prefs,
-            wallClock = System::currentTimeMillis,
-            elapsed = SystemClock::elapsedRealtime,
-            uptime = SystemClock::uptimeMillis,
-            today = ::systemLocalDay,
-        )
+        } catch (error: Exception) {
+            calls.close()
+            throw error
+        }
     }
 
     private fun onEffect(effect: WatchEffect) {
+        if (!currentSession()) return
         when (effect) {
             is WatchEffect.Haptic -> {
                 if (!isAmbient.value) haptics.play(effect.pattern, effect.attention)
@@ -373,6 +455,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateTelemetry() {
+        if (!currentSession()) return
         val session = holder.session.state.value
         val match = session.match?.id
         if (match != telemetryMatch || !session.telemetryVisibility.allowsLive) {
@@ -389,6 +472,11 @@ class MainActivity : ComponentActivity() {
     // --- Workout ↔ Match --------------------------------------------------------------------------
 
     private fun evaluateWorkout() {
+        runtimeBoundary?.run { evaluateWorkoutReady() }
+    }
+
+    private fun evaluateWorkoutReady() {
+        if (!currentSession()) return
         if (!UiVisibility.resumed) return
         val match = holder.session.state.value.match
         val inputs =
@@ -428,6 +516,11 @@ class MainActivity : ComponentActivity() {
 
     /** Antwort auf einen Rechte-Dialog: ausstehenden Workout-Auftrag abschließen, dann neu bewerten. */
     private fun onPermissionDecision() {
+        runtimeBoundary?.run { onPermissionDecisionReady() }
+    }
+
+    private fun onPermissionDecisionReady() {
+        if (!currentSession()) return
         val pending = holder.prefs.workoutPending
         holder.prefs.workoutPending = null
         if (pending != null) {
@@ -444,6 +537,11 @@ class MainActivity : ComponentActivity() {
 
     /** Benachrichtigungen unabhängig vom Workout einmal anbieten (Hinweis auf Handy-Matches, Zifferblatt-Symbol). */
     private fun askNotificationsOnce() {
+        runtimeBoundary?.run { askNotificationsOnceReady() }
+    }
+
+    private fun askNotificationsOnceReady() {
+        if (!currentSession()) return
         if (holder.prefs.notificationsAsked || permissionRequestInFlight || permissions.value.notifications) return
         holder.prefs.notificationsAsked = true
         launchPermissions(listOf(android.Manifest.permission.POST_NOTIFICATIONS))
@@ -456,6 +554,7 @@ class MainActivity : ComponentActivity() {
 
     /** Mit Puls- oder Aktivitätsrecht Health-FGS + Exercise, sonst Match ohne Workout (Hinweis in der UI). */
     private fun launchWorkout(sport: WorkoutSport) {
+        if (!currentSession()) return
         if (Permissions.current(this).canRunHealthService) {
             WorkoutService.start(this, sport)
         } else {
@@ -466,97 +565,98 @@ class MainActivity : ComponentActivity() {
 
     private val actions =
         object : WatchActions {
-            override fun newMatch() = controller.newMatch()
+            override fun newMatch() = if (currentSession()) controller.newMatch() else Unit
 
-            override fun repeatLast(): Boolean = controller.repeatLast()
+            override fun repeatLast(): Boolean = currentSession() && (controller.repeatLast())
 
-            override fun resume(matchId: MatchId): Boolean = controller.resume(matchId)
+            override fun resume(matchId: MatchId): Boolean = currentSession() && (controller.resume(matchId))
 
-            override fun setWorkoutEnabled(enabled: Boolean) = controller.setWorkoutEnabled(enabled)
+            override fun setWorkoutEnabled(enabled: Boolean) = if (currentSession()) controller.setWorkoutEnabled(enabled) else Unit
 
-            override fun setTelemetryVisibility(visibility: TelemetryVisibility) = controller.setTelemetryVisibility(visibility)
+            override fun setTelemetryVisibility(visibility: TelemetryVisibility) =
+                if (currentSession()) controller.setTelemetryVisibility(visibility) else Unit
 
             override fun selectPlayer(
                 slot: PlayerSlot,
                 player: eu.advantly.core.model.PlayerId?,
-            ) = controller.selectPlayer(slot, player)
+            ) = if (currentSession()) controller.selectPlayer(slot, player) else Unit
 
-            override fun selectSport(sport: Sport) = controller.selectSport(sport)
+            override fun selectSport(sport: Sport) = if (currentSession()) controller.selectSport(sport) else Unit
 
-            override fun selectDiscipline(discipline: Discipline) = controller.selectDiscipline(discipline)
+            override fun selectDiscipline(discipline: Discipline) = if (currentSession()) controller.selectDiscipline(discipline) else Unit
 
-            override fun selectFormat(choice: FormatChoice) = controller.selectFormat(choice)
+            override fun selectFormat(choice: FormatChoice) = if (currentSession()) controller.selectFormat(choice) else Unit
 
             override fun selectServer(
                 server: Side,
                 serverIndex: Int,
-            ): Boolean = controller.selectServer(server, serverIndex)
+            ): Boolean = currentSession() && (controller.selectServer(server, serverIndex))
 
-            override fun back() = controller.back()
+            override fun back() = if (currentSession()) controller.back() else Unit
 
-            override fun point(side: Side): Boolean = !isAmbient.value && controller.point(side)
+            override fun point(side: Side): Boolean = currentSession() && (!isAmbient.value && controller.point(side))
 
-            override fun undo(): Boolean = !isAmbient.value && controller.undo()
+            override fun undo(): Boolean = currentSession() && (!isAmbient.value && controller.undo())
 
-            override fun redo(): Boolean = controller.redo()
+            override fun redo(): Boolean = currentSession() && (controller.redo())
 
-            override fun pause(): Boolean = controller.pause()
+            override fun pause(): Boolean = currentSession() && (controller.pause())
 
-            override fun resumePlay(): Boolean = controller.resumePlay()
+            override fun resumePlay(): Boolean = currentSession() && (controller.resumePlay())
 
-            override fun lock() = controller.lock()
+            override fun lock() = if (currentSession()) controller.lock() else Unit
 
-            override fun unlock() = controller.unlock()
+            override fun unlock() = if (currentSession()) controller.unlock() else Unit
 
-            override fun requestEnd() = controller.requestEnd()
+            override fun requestEnd() = if (currentSession()) controller.requestEnd() else Unit
 
-            override fun requestCorrection() = controller.requestCorrection()
+            override fun requestCorrection() = if (currentSession()) controller.requestCorrection() else Unit
 
-            override fun correctServer(player: PlayerId): Boolean = controller.correctServer(player)
+            override fun correctServer(player: PlayerId): Boolean = currentSession() && (controller.correctServer(player))
 
-            override fun swapPositions(side: Side): Boolean = controller.swapPositions(side)
+            override fun swapPositions(side: Side): Boolean = currentSession() && (controller.swapPositions(side))
 
-            override fun confirmEnd(): Boolean = controller.confirmEnd()
+            override fun confirmEnd(): Boolean = currentSession() && (controller.confirmEnd())
 
-            override fun requestTakeOver() = controller.requestTakeOver()
+            override fun requestTakeOver() = if (currentSession()) controller.requestTakeOver() else Unit
 
-            override fun confirmTakeOver(): Boolean = controller.confirmTakeOver()
+            override fun confirmTakeOver(): Boolean = currentSession() && (controller.confirmTakeOver())
 
-            override fun dismissOverlay() = controller.dismissOverlay()
+            override fun dismissOverlay() = if (currentSession()) controller.dismissOverlay() else Unit
 
             override fun continueDecision(
                 anotherSet: Boolean,
                 matchTiebreak: Boolean,
-            ): Boolean = controller.continueDecision(anotherSet, matchTiebreak)
+            ): Boolean = currentSession() && (controller.continueDecision(anotherSet, matchTiebreak))
 
-            override fun followUp(): Boolean = controller.followUp()
+            override fun followUp(): Boolean = currentSession() && (controller.followUp())
 
-            override fun close() = controller.close()
+            override fun close() = if (currentSession()) controller.close() else Unit
 
-            override fun retryWorkout() = WorkoutService.recover(this@MainActivity)
+            override fun retryWorkout() = if (currentSession()) WorkoutService.recover(this@MainActivity) else Unit
 
-            override fun replaceOtherWorkout() = WorkoutService.replaceOther(this@MainActivity)
+            override fun replaceOtherWorkout() = if (currentSession()) WorkoutService.replaceOther(this@MainActivity) else Unit
 
-            override fun skipWorkout() = WorkoutService.stop(this@MainActivity)
+            override fun skipWorkout() = if (currentSession()) WorkoutService.stop(this@MainActivity) else Unit
 
             // --- Bedienung W2 ---
 
-            override fun selectGamesPerSet(games: Int) = controller.selectGamesPerSet(games)
+            override fun selectGamesPerSet(games: Int) = if (currentSession()) controller.selectGamesPerSet(games) else Unit
 
-            override fun setServeStats(enabled: Boolean) = controller.setServeStats(enabled)
+            override fun setServeStats(enabled: Boolean) = if (currentSession()) controller.setServeStats(enabled) else Unit
 
-            override fun removePoint(side: Side): Boolean = !isAmbient.value && controller.removePoint(side)
+            override fun removePoint(side: Side): Boolean = currentSession() && (!isAmbient.value && controller.removePoint(side))
 
-            override fun setServe(outcome: ServeOutcome): Boolean = !isAmbient.value && controller.setServe(outcome)
+            override fun setServe(outcome: ServeOutcome): Boolean = currentSession() && (!isAmbient.value && controller.setServe(outcome))
 
-            override fun openServerChoice() = controller.openServerChoice()
+            override fun openServerChoice() = if (currentSession()) controller.openServerChoice() else Unit
 
             override fun chooseServer(
                 player: PlayerId,
                 expected: eu.advantly.match.session.ServerChoiceContext,
-            ): Boolean = controller.chooseServer(player, expected)
+            ): Boolean = currentSession() && (controller.chooseServer(player, expected))
 
-            override fun startNextSet(kind: NextSetKind): Boolean = controller.startNextSet(kind)
+            override fun startNextSet(kind: NextSetKind): Boolean = currentSession() && (controller.startNextSet(kind))
         }
 
     private companion object {

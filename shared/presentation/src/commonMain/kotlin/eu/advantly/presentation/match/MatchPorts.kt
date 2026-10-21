@@ -326,6 +326,12 @@ interface LiveMatchPort {
         options: StartOptions = StartOptions(),
     ): MatchId
 
+    /** Host darf die tatsaechliche Operation ablehnen, ohne eine Match-ID zu erfinden. */
+    fun tryStart(
+        setup: MatchSetup,
+        options: StartOptions = StartOptions(),
+    ): MatchId? = start(setup, options)
+
     /** `PointWon(side)`; nur bei `IN_PROGRESS`/`PAUSED` und nur auf dem Zähler. */
     fun recordPoint(side: Side): Boolean
 
@@ -555,8 +561,13 @@ interface PlayersPort {
     /** Legt einen Gast an ([name] wird getrimmt, darf nicht leer sein). */
     fun addGuest(name: String): Player
 
+    /** Nullable Hostvariante; Defaults aendern das Verhalten bestehender Stores nicht. */
+    fun tryAddGuest(name: String): Player? = addGuest(name)
+
     /** Speichert [setup] als Favoriten (ohne `previousMatchId`). */
     fun saveFavorite(setup: MatchSetup): FavoriteLineup
+
+    fun trySaveFavorite(setup: MatchSetup): FavoriteLineup? = saveFavorite(setup)
 
     /** Entfernt den Favoriten [id]; unbekannte IDs sind ein No-op. */
     fun removeFavorite(id: String)

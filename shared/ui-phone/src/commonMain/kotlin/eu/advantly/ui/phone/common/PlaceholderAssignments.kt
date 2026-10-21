@@ -136,7 +136,7 @@ fun PlaceholderAssignments(
             )
             TextButton(
                 enabled = name.isNotBlank(),
-                onClick = { assign(players.addGuest(name).id) },
+                onClick = { players.tryAddGuest(name)?.let { assign(it.id) } },
                 modifier = Modifier.fillMaxWidth().testTag("assign_create"),
             ) { Text(stringResource(Res.string.assign_new_player)) }
             failure?.let { Text(stringResource(it)) }

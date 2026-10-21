@@ -197,7 +197,7 @@ class AdvantlyAppModel(
                 return
             }
         }
-        live.start(setup, options)
+        live.tryStart(setup, options) ?: return
         controller.sync(live.active.value)
         when (navigator.top) {
             Overlay.Wizard, is Overlay.Result -> navigator.replaceTop(Overlay.Live)
@@ -230,14 +230,16 @@ class AdvantlyAppModel(
     fun startBenchmarkMatch(): Boolean {
         if (hasRunningMatch) return false
         val self = players.self.value
-        val opponent = players.guests.value.firstOrNull() ?: players.addGuest(BENCHMARK_OPPONENT)
-        live.start(
-            MatchSetup(
-                format = Presets.TENNIS_SINGLES_BO3.format(Discipline.SINGLES),
-                lineup = Lineup(listOf(self.id), listOf(opponent.id), self.id),
-                players = listOf(self, opponent),
-            ),
-        )
+        val opponent = players.guests.value.firstOrNull() ?: players.tryAddGuest(BENCHMARK_OPPONENT) ?: return false
+        val started =
+            live.tryStart(
+                MatchSetup(
+                    format = Presets.TENNIS_SINGLES_BO3.format(Discipline.SINGLES),
+                    lineup = Lineup(listOf(self.id), listOf(opponent.id), self.id),
+                    players = listOf(self, opponent),
+                ),
+            )
+        if (started == null) return false
         controller.sync(live.active.value)
         return true
     }

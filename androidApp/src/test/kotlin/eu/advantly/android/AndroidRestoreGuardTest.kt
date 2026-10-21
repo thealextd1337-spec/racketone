@@ -5,6 +5,7 @@ import android.database.DefaultDatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDatabaseCorruptException
 import android.database.sqlite.SQLiteException
+import android.os.Looper
 import android.system.ErrnoException
 import android.system.OsConstants
 import com.google.android.gms.wearable.MessageEvent
@@ -28,6 +29,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -36,12 +38,14 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowLinux
 import java.io.File
 import java.io.FileDescriptor
+import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -56,6 +60,204 @@ class AndroidRestoreGuardTest {
             .apply { isAccessible = true }
             .set(AndroidMatchSessions, null)
         clearGuardCache()
+    }
+
+    @Test
+    fun activeDriverCorruptionCannotDeleteOrReplaceIdentity() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        val seed = createAndroidDriver(app)
+        val data = LocalData(seed)
+        data.settings.put(MatchSessions.DEVICE_ID_KEY, "preserved-source")
+        data.settings.put("identity.authority", "preserved-authority")
+        seed.close()
+        val jdbc = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as java.sql.Driver
+        jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { database ->
+            database.createStatement().use {
+                it.execute("PRAGMA writable_schema=ON")
+                it.execute("UPDATE sqlite_master SET rootpage=2147483647 WHERE name='match_event'")
+                it.execute("PRAGMA writable_schema=OFF")
+            }
+        }
+        val family = original.parentFile!!.listFiles()!!.associate { it.name to hash(it) }
+        val marker = File(app.noBackupFilesDir, "installation-v1").readBytes().toList()
+        // Setting bleibt absichtlich lesbar: Die bisherige Guardprüfung allein entdeckt die Eventseite nicht.
+        assertEquals(first, AndroidInstallationGuard.get(app))
+        val driver = createAndroidDriver(app)
+        try {
+            val failure =
+                runCatching {
+                    driver
+                        .executeQuery(
+                            null,
+                            "SELECT payload FROM match_event",
+                            { it.next() },
+                            0,
+                        ).value
+                }.exceptionOrNull()
+            val after = original.parentFile!!.listFiles()!!.associate { it.name to hash(it) }
+            val allowed = AndroidInstallationGuard.privateTransportAllowed(app)
+            println(
+                "Active event corruption: failure=${failure?.javaClass?.simpleName}; familyUnchanged=${family == after}; allowed=$allowed",
+            )
+            assertEquals(family, after)
+            assertTrue(failure is SQLiteDatabaseCorruptException)
+            assertFalse(AndroidInstallationGuard.privateTransportAllowed(app))
+            assertEquals(marker, File(app.noBackupFilesDir, "installation-v1").readBytes().toList())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun corruptionAfterBootstrapRevokesExistingTransport() {
+        val app = RuntimeEnvironment.getApplication()
+        val session = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        val first = AndroidInstallationGuard.get(app)
+        val source = session.deviceId.value
+        val authority = session.data.settings.get("identity.authority")
+        assertTrue(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertTrue(WearDataLayerInbound.isAttached)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        val jdbc = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as java.sql.Driver
+        val offset =
+            jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { db ->
+                db.createStatement().use { statement ->
+                    val page =
+                        statement.executeQuery("SELECT rootpage FROM sqlite_master WHERE name='match_event'").use {
+                            it.next()
+                            it.getLong(1)
+                        }
+                    val size =
+                        statement.executeQuery("PRAGMA page_size").use {
+                            it.next()
+                            it.getLong(1)
+                        }
+                    (page - 1) * size
+                }
+            }
+        RandomAccessFile(original, "rw").use {
+            it.seek(offset)
+            it.writeByte(0)
+        }
+        val before = original.parentFile!!.listFiles()!!.associate { it.name to hash(it) }
+        val driver = createAndroidDriver(app)
+        try {
+            assertThrows(SQLiteDatabaseCorruptException::class.java) {
+                driver.executeQuery(null, "SELECT payload FROM match_event", { it.next() }, 0).value
+            }
+            assertFalse(AndroidInstallationGuard.privateTransportAllowed(app))
+            assertNull(AndroidMatchSessions.current())
+            assertFalse(WearDataLayerInbound.isAttached)
+            var consumed = 0
+            assertFalse(
+                WearDataLayerInbound.deliverQueuedItem(
+                    "node",
+                    "peer",
+                    listOf("advantly", "link", "q", "node", "old"),
+                    byteArrayOf(1),
+                ) {
+                    consumed++
+                },
+            )
+            assertEquals(0, consumed)
+            assertEquals(AndroidInstallationAvailability.Unavailable, AndroidInstallationGuard.check(app))
+            assertEquals(before, original.parentFile!!.listFiles()!!.associate { it.name to hash(it) })
+            jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { db ->
+                db.createStatement().use { statement ->
+                    val actual =
+                        statement.executeQuery("SELECT value FROM setting WHERE key='session.deviceId'").use {
+                            it.next()
+                            it.getString(1)
+                        }
+                    assertEquals(source, actual)
+                    val actualAuthority =
+                        statement.executeQuery("SELECT value FROM setting WHERE key='identity.authority'").use {
+                            if (it.next()) it.getString(1) else null
+                        }
+                    assertEquals(authority, actualAuthority)
+                }
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun copyCheckDetectsEventCorruptionBeforeProductiveOpen() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        val jdbc = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as java.sql.Driver
+        jdbc.connect("jdbc:sqlite:${original.absolutePath}", Properties()).use { db ->
+            db.createStatement().use { statement ->
+                statement.execute("PRAGMA writable_schema=ON")
+                statement.execute("UPDATE sqlite_master SET rootpage=2147483647 WHERE name='match_event'")
+                statement.execute("PRAGMA writable_schema=OFF")
+            }
+        }
+        val family = original.parentFile!!.listFiles()!!.associate { it.name to hash(it) }
+        val marker = File(app.noBackupFilesDir, "installation-v1").readBytes().toList()
+        clearGuardCache()
+        repeat(2) {
+            assertEquals(AndroidInstallationAvailability.Unavailable, AndroidInstallationGuard.retry(app))
+            assertFalse(WearDataLayerInbound.isAttached)
+            assertEquals(family, original.parentFile!!.listFiles()!!.associate { it.name to hash(it) })
+            assertEquals(marker, File(app.noBackupFilesDir, "installation-v1").readBytes().toList())
+        }
+    }
+
+    @Test
+    fun validDatabaseWithoutSettingTableIsStillVerificationMismatch() {
+        val app = RuntimeEnvironment.getApplication()
+        val first = AndroidInstallationGuard.get(app)
+        val original = app.getDatabasePath(first.activeDatabaseName)
+        SQLiteDatabase.openDatabase(original.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { it.execSQL("DROP TABLE setting") }
+        val before = hash(original)
+        clearGuardCache()
+        val result = AndroidInstallationGuard.check(app) as AndroidInstallationAvailability.Ready
+        assertNotEquals(first.activeDatabaseName, result.installation.activeDatabaseName)
+        assertFalse(result.installation.privateTransportAllowed)
+        assertEquals(before, hash(original))
+    }
+
+    @Test
+    fun backgroundFailureRevokesBeforeMainThreadCleanup() {
+        val app = RuntimeEnvironment.getApplication()
+        AndroidMatchSessions.get(app, PeerKind.PHONE)
+        assertTrue(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertTrue(WearDataLayerInbound.isAttached)
+        val reporter =
+            Thread { AndroidInstallationGuard.storageFailed(app, android.database.sqlite.SQLiteDiskIOException("background I/O")) }
+        reporter.start()
+        reporter.join(5_000)
+        assertFalse(reporter.isAlive)
+        assertFalse(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertNull(AndroidMatchSessions.current())
+        var consumed = 0
+        WearDataLayerInbound.deliverQueuedItem(
+            "node",
+            "peer",
+            listOf("advantly", "link", "q", "node", "old"),
+            byteArrayOf(1),
+        ) { consumed++ }
+        assertEquals(0, consumed)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(WearDataLayerInbound.isAttached)
+        assertEquals(0, consumed)
+    }
+
+    @Test
+    fun retryFromStaleErrorViewOnHealthyInstallationKeepsBootstrapRelease() {
+        val app = RuntimeEnvironment.getApplication()
+        val session = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        val state = AndroidInstallationGuard.get(app)
+        assertTrue(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertEquals(AndroidInstallationAvailability.Ready(state), AndroidInstallationGuard.retry(app))
+        assertTrue(AndroidInstallationGuard.privateTransportAllowed(app))
+        assertSame(session, AndroidMatchSessions.get(app, PeerKind.PHONE))
+        assertTrue(WearDataLayerInbound.isAttached)
     }
 
     @Test

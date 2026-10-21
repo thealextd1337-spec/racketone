@@ -2,6 +2,8 @@ package eu.advantly.data
 
 import java.io.File
 import java.io.IOException
+import java.io.UncheckedIOException
+import java.nio.file.DirectoryIteratorException
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.sql.Connection
@@ -71,6 +73,27 @@ class InstallationFilesTest {
 
             fun hash(file: File): String =
                 MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        }
+    }
+
+    @Test
+    fun wrappedDirectoryIoIsStillAnIoFailure() {
+        for (wrap in listOf<(IOException) -> RuntimeException>(::DirectoryIteratorException, ::UncheckedIOException)) {
+            Fixture().use { fixture ->
+                val first = fixture.guard().select()
+                val before = fixture.files()
+                val marker = Fixture.hash(fixture.marker)
+                val cause = IOException("readdir failed")
+                fixture.fileAccess =
+                    object : InstallationFileAccess() {
+                        override fun readMetadata(file: File): String? = throw wrap(cause)
+                    }
+                assertSame(cause, assertFailsWith<IOException> { fixture.guard().select() })
+                fixture.assertPreserved(before)
+                assertEquals(marker, Fixture.hash(fixture.marker))
+                fixture.fileAccess = InstallationFileAccess()
+                assertEquals(first, fixture.guard().select())
+            }
         }
     }
 

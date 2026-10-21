@@ -8,10 +8,11 @@ import android.database.sqlite.SQLiteException
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
-import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import eu.advantly.data.db.AdvantlyDatabase
 import java.io.File
 import java.io.IOException
+import java.io.UncheckedIOException
+import java.nio.file.DirectoryIteratorException
 
 /** Kein Ersatz für eine Installation: Bei Speicherfehlern existiert ausschließlich dieser Fehlerstatus. */
 sealed interface AndroidInstallationAvailability {
@@ -26,47 +27,138 @@ sealed interface AndroidInstallationAvailability {
 object AndroidInstallationGuard {
     private val states = mutableMapOf<String, AndroidInstallationState>()
     private val unavailable = mutableSetOf<String>()
+    private val bootstrapped = mutableSetOf<String>()
 
-    /** Fehlgeschlagene Prüfung bleibt bis zum expliziten Retry gesperrt; Dienste lösen keine Wiederholung aus. */
+    private val failures = mutableMapOf<String, Exception>()
+    private val failureListeners = mutableMapOf<String, MutableSet<(Exception) -> Unit>>()
+
+    private fun key(context: Context) = context.applicationContext.getDatabasePath(DEFAULT_DATABASE_NAME).absolutePath
+
+    /** Nur pro Prozess gesperrt. Ein Prozessneustart prüft neu; Dienste im selben Prozess warten auf expliziten Retry. */
     @Synchronized
     fun check(context: Context): AndroidInstallationAvailability {
-        val key = context.applicationContext.getDatabasePath(DEFAULT_DATABASE_NAME).absolutePath
-        if (key in unavailable) return AndroidInstallationAvailability.Unavailable
-        return try {
-            AndroidInstallationAvailability.Ready(get(context))
-        } catch (_: IOException) {
-            unavailable += key
-            AndroidInstallationAvailability.Unavailable
-        } catch (_: SQLiteException) {
-            unavailable += key
-            AndroidInstallationAvailability.Unavailable
-        } catch (_: ErrnoException) {
-            unavailable += key
-            AndroidInstallationAvailability.Unavailable
-        }
+        if (key(context) in unavailable) return AndroidInstallationAvailability.Unavailable
+        return capture(context) { AndroidInstallationAvailability.Ready(get(context)) }
+            ?: AndroidInstallationAvailability.Unavailable
     }
 
-    /** Wiederholt ausschließlich dieselbe Dateiprüfung; keine Änderung an Generation oder Verifikations-Hold. */
+    /** Wiederholt Datei- und Kopienprüfung, niemals Verifikationsfreigabe oder Generationswechsel als I/O-Fallback. */
     @Synchronized
     fun retry(context: Context): AndroidInstallationAvailability {
-        unavailable -= context.applicationContext.getDatabasePath(DEFAULT_DATABASE_NAME).absolutePath
+        val key = key(context)
+        // Veraltete Fehleransicht auf gesunder Installation: Bootstrap-Freigabe nicht ohne erneutes prepare() verwerfen.
+        if (key !in unavailable) return check(context)
+        unavailable -= key
+        bootstrapped -= key
+        failures.remove(key)
+        states.remove(key)
         return check(context)
     }
 
+    fun requireReady(context: Context): AndroidInstallationState =
+        when (val result = check(context)) {
+            is AndroidInstallationAvailability.Ready -> result.installation
+            AndroidInstallationAvailability.Unavailable -> throw checkNotNull(failures[key(context)])
+        }
+
+    /** Dieselbe Fehlergrenze umfasst auch Bootstrap/Commit und produktive Scheduler-Speicherarbeit. */
+    fun <T : Any> storage(
+        context: Context,
+        block: () -> T,
+    ): T? {
+        if (check(context) !is AndroidInstallationAvailability.Ready) return null
+        return capture(context, block)
+    }
+
+    private fun <T : Any> capture(
+        context: Context,
+        block: () -> T,
+    ): T? =
+        try {
+            block()
+        } catch (error: IOException) {
+            storageFailed(context, error)
+            null
+        } catch (error: ErrnoException) {
+            storageFailed(context, error)
+            null
+        } catch (error: DirectoryIteratorException) {
+            if (!AndroidStorageFailures.isExpected(error)) throw error
+            storageFailed(context, error)
+            null
+        } catch (error: UncheckedIOException) {
+            if (!AndroidStorageFailures.isExpected(error)) throw error
+            storageFailed(context, error)
+            null
+        } catch (error: SQLiteException) {
+            if (!AndroidStorageFailures.isExpected(error)) throw error
+            storageFailed(context, error)
+            null
+        }
+
+    /** Auch vom produktiven Corruption-/Driverpfad aufgerufen: aktive Eingänge sofort entziehen, keine neue DB wählen. */
+    @Synchronized
+    fun storageFailed(
+        context: Context,
+        error: Exception,
+    ) {
+        require(AndroidStorageFailures.isExpected(error))
+        val key = key(context)
+        states.remove(key)
+        bootstrapped -= key
+        failures.putIfAbsent(key, error)
+        if (!unavailable.add(key)) return
+        failureListeners[key]?.toList()?.forEach { listener ->
+            try {
+                listener(error)
+            } catch (cleanup: Exception) {
+                // Aufräumfehler bleiben an der ursprünglichen Ursache sichtbar; niemals einen Erfolgsstatus melden.
+                if (cleanup !== error) error.addSuppressed(cleanup)
+            }
+        }
+    }
+
+    @Synchronized
+    fun onUnavailable(
+        context: Context,
+        listener: (Exception) -> Unit,
+    ): () -> Unit {
+        val key = key(context)
+        val listeners = failureListeners.getOrPut(key) { mutableSetOf() }
+        listeners += listener
+        return { synchronized(this) { listeners -= listener } }
+    }
+
+    @Synchronized
+    fun beginBootstrap(context: Context) {
+        bootstrapped -= key(context)
+    }
+
+    /** Nur die Android-Sessionfactory darf nach erfolgreichem Storage-Commit die Prozessgeneration freigeben. */
+    @Synchronized
+    fun bootstrapCommitted(context: Context) {
+        requireReady(context)
+        bootstrapped += key(context)
+    }
+
+    @Synchronized
     fun privateTransportAllowed(context: Context): Boolean =
-        (check(context) as? AndroidInstallationAvailability.Ready)?.installation?.privateTransportAllowed == true
+        key(context) in bootstrapped &&
+            (check(context) as? AndroidInstallationAvailability.Ready)?.installation?.privateTransportAllowed == true
 
     @Synchronized
     fun get(context: Context): AndroidInstallationState {
         val app = context.applicationContext
         val databases = checkNotNull(app.getDatabasePath(DEFAULT_DATABASE_NAME).parentFile)
-        val key = databases.canonicalPath
+        val key = key(app)
+        // Auch direkte Android-Cache-/Driveraufrufe dürfen einen Prozessfehler nicht durch Dateiauswahl umgehen.
+        if (key in unavailable) throw checkNotNull(failures[key])
         return states.getOrPut(key) {
             InstallationFiles(
                 databases,
                 app.noBackupFilesDir,
                 initialize = { file, token ->
-                    val driver = AndroidSqliteDriver(AdvantlyDatabase.Schema, app, file.name)
+                    val driver = newAndroidSqliteDriver(app, file.name)
                     try {
                         AdvantlyDatabase(driver).settingQueries.put(InstallationFiles.BINDING_KEY, token)
                     } finally {
@@ -83,6 +175,11 @@ object AndroidInstallationGuard {
                             // Der Standardhandler darf die Kopie weder löschen noch als leere DB neu öffnen.
                             DatabaseErrorHandler { throw SQLiteDatabaseCorruptException("Installation verification copy is corrupt") },
                         ).use { database ->
+                            database.rawQuery("PRAGMA quick_check", null).use { result ->
+                                if (!result.moveToFirst() || result.getString(0) != "ok" || result.moveToNext()) {
+                                    throw SQLiteDatabaseCorruptException("Installation verification copy failed quick_check")
+                                }
+                            }
                             val hasSetting =
                                 database
                                     .rawQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'setting'", null)

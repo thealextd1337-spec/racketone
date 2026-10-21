@@ -39,6 +39,11 @@ internal class PhoneUploadHost(
     scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate),
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val threadGuard: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() },
+    private val hostAccessAllowed: () -> Boolean = { true },
+    private val storageAction: (() -> Unit) -> Boolean = {
+        it()
+        true
+    },
 ) : PhoneUploadPort {
     private data class Context(
         val profile: String,
@@ -74,6 +79,12 @@ internal class PhoneUploadHost(
     private fun confined() = check(threadGuard()) { "Phone-Upload nur auf dem Main-Host-Kontext verwenden" }
 
     private fun current(): Context? {
+        var result: Context? = null
+        return if (storageAction { result = readCurrent() }) result else null
+    }
+
+    private fun readCurrent(): Context? {
+        if (!hostAccessAllowed()) return null
         val active = auth.session.value ?: return null
         if (!active.onboarded || active.deletionRequested || active.consentStatus != ConsentStatus.CURRENT) return null
         val identities = session.data.accountIdentities

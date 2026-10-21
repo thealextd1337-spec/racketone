@@ -26,10 +26,17 @@ class AdvantlyPhoneApplication : Application() {
     fun bootstrap(): Boolean {
         if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) return false
         if (bootstrapped) return true
-        val session = AndroidMatchSessions.get(this, PeerKind.PHONE)
-        // „Gar nicht“ (P2-J) leert den flüchtigen Telemetrie-Eingang prozessweit – auch ohne laufende Activity
-        LiveTelemetryStore.Phone.clearWhenTelemetryOff(session)
-        bootstrapped = true
-        return true
+        return AndroidInstallationGuard.storage(this) {
+            AndroidMatchSessions.prepare(this, PeerKind.PHONE) { session, stage ->
+                var removeTelemetry: (() -> Unit)? = null
+                stage.onDiscard {
+                    bootstrapped = false
+                    removeTelemetry?.invoke()
+                }
+                stage.afterCommit { removeTelemetry = LiveTelemetryStore.Phone.clearWhenTelemetryOff(session) }
+            }
+            bootstrapped = true
+            true
+        } == true
     }
 }

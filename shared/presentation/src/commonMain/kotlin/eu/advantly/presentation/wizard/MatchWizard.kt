@@ -172,7 +172,7 @@ class MatchWizard(
     /** Legt einen Gast an und setzt ihn in den nächsten freien Slot. Leere Namen werden ignoriert. */
     fun addGuest(name: String): Player? {
         if (name.isBlank()) return null
-        val guest = players.addGuest(name)
+        val guest = players.tryAddGuest(name) ?: return null
         createdPlayers.add(guest)
         pickPlayer(guest)
         return guest
@@ -207,7 +207,7 @@ class MatchWizard(
         place: PlayerPlace,
     ): Player? {
         if (name.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
-        val guest = players.addGuest(name)
+        val guest = players.tryAddGuest(name) ?: return null
         createdPlayers.add(guest)
         assignPlayer(place, guest)
         return guest
@@ -365,7 +365,7 @@ class MatchWizard(
     fun finish(): MatchSetup? {
         ensureCurrentIdentity()
         val setup = mutableState.value.setup ?: return null
-        if (input.saveAsFavorite) players.saveFavorite(setup)
+        if (input.saveAsFavorite && players.trySaveFavorite(setup) == null) return null
         return setup
     }
 

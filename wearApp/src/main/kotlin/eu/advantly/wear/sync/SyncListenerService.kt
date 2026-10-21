@@ -14,6 +14,8 @@ import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
+import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import eu.advantly.sync.protocol.LiveTelemetrySubscriptionCodec
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -112,21 +114,29 @@ class SyncListenerService : WearableListenerService() {
                 WearSessions.get(this)
                 WearSessions.consumeColdStart()
             }
+        if (cold == null) return
         val localNode = if (items.isEmpty()) null else localNodeId()
         if (localNode != null) {
             val dataClient = Wearable.getDataClient(applicationContext)
             val persisted = CountDownLatch(items.size)
-            runOnMain {
-                items.forEach { item ->
-                    val uri = item.uri
-                    val delivered =
-                        WearDataLayerInbound.deliverQueuedItem(localNode, uri.host, uri.pathSegments, item.data) {
-                            // Session hat den Frame gespeichert → erst jetzt aus der Queue löschen
-                            dataClient.deleteDataItems(uri)
-                            persisted.countDown()
-                        }
-                    if (!delivered) persisted.countDown()
-                }
+            if (runOnMain {
+                    val expected = AndroidMatchSessions.current()
+                    items.forEach { item ->
+                        val uri = item.uri
+                        val delivered =
+                            WearDataLayerInbound.deliverQueuedItem(localNode, uri.host, uri.pathSegments, item.data) {
+                                // Session hat den Frame gespeichert → erst jetzt aus der Queue löschen
+                                if (AndroidMatchSessions.current() === expected && AndroidInstallationGuard.privateTransportAllowed(this)) {
+                                    dataClient.deleteDataItems(uri)
+                                    persisted.countDown()
+                                }
+                            }
+                        if (!delivered) persisted.countDown()
+                    }
+                    true
+                } != true
+            ) {
+                return
             }
             persisted.await(QUEUE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             DiagnosticLog.log("SYNC_SERVICE_QUEUE", "items" to items.size, "open" to persisted.count)
@@ -150,6 +160,7 @@ class SyncListenerService : WearableListenerService() {
         val deadline = SystemClock.elapsedRealtime() + SETTLE_TIMEOUT_MS
         var settled = false
         while (!settled && SystemClock.elapsedRealtime() < deadline) {
+            if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
             Thread.sleep(POLL_MS)
             settled = runOnMain { WearSessions.isSyncSettled() } == true
         }
@@ -169,12 +180,17 @@ class SyncListenerService : WearableListenerService() {
 
     /** Führt [block] auf dem Main-Thread aus und wartet auf das Ergebnis (`null` bei Zeitüberschreitung). */
     private fun <T> runOnMain(block: () -> T): T? {
-        if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        val expected = AndroidMatchSessions.current() ?: return null
+        val boundary =
+            AndroidSessionBoundary(applicationContext, {
+                AndroidMatchSessions.current() === expected && AndroidInstallationGuard.privateTransportAllowed(applicationContext)
+            })
+        if (Looper.myLooper() == Looper.getMainLooper()) return boundary.run(block)
         val done = CountDownLatch(1)
         var result: T? = null
         main.post {
             try {
-                result = block()
+                result = boundary.run(block)
             } finally {
                 done.countDown()
             }
