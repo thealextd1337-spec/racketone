@@ -140,14 +140,14 @@ class CloudPullStackTest {
                     }
                     JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
                         AdvantlyDatabase.Schema.create(driver).value
-                        val data = LocalData(driver)
+                        val data = LocalData(driver).selectPullAccount(credentials.profileId)
                         val backend = backend(data)
                         backend.bindDevice(device)
                         assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(backend, data, maxPagesPerRun = 1).pullNow().outcome)
                         assertTrue(data.cloudPulls.progress(credentials.profileId).cursor > 0)
                     }
                     JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
-                        val data = LocalData(driver)
+                        val data = LocalData(driver).selectPullAccount(credentials.profileId)
                         val backend = backend(data)
                         backend.bindDevice(device)
                         complete(backend, data)
@@ -179,7 +179,7 @@ class CloudPullStackTest {
                         assertEquals(0, data.cloudPulls.eventWork(credentials.profileId, match)?.cursor)
                     }
                     JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
-                        val data = LocalData(driver)
+                        val data = LocalData(driver).selectPullAccount(credentials.profileId)
                         val backend = backend(data)
                         backend.bindDevice(device)
                         complete(backend, data)

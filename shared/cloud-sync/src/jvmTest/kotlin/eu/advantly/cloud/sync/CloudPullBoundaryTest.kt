@@ -44,7 +44,9 @@ class CloudPullBoundaryTest {
                     f.bind()
                     f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
                     f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
-                    f.watermarks = {
+
+                    // Die verspätete Prüfantwort (Readiness vor ready, sonst Wasserstand) kommt erst nach dem Wechsel an.
+                    suspend fun late() =
                         withContext(NonCancellable) {
                             when (mode) {
                                 "account" -> {
@@ -78,8 +80,14 @@ class CloudPullBoundaryTest {
                                 }
                             }
                             delay(5)
-                            listOf(EventWatermark("remote", 1, 1))
                         }
+                    f.watermarks = {
+                        late()
+                        listOf(EventWatermark(REMOTE, 1, 1))
+                    }
+                    f.readiness = {
+                        late()
+                        f.servedReadiness(it)
                     }
                     val runner = CloudPullRunner(f.backend, f.data)
                     val result =
@@ -90,10 +98,16 @@ class CloudPullBoundaryTest {
                         }
                     assertFalse(result.outcome == CloudPullOutcome.COMPLETE, mode)
                     assertNull(result.profileId, mode)
-                    val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                    val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                     assertEquals(1L, work.cursor, mode)
                     assertEquals(0L, work.checkedRound, mode)
                     assertTrue(work.needsVerification, mode)
+                    assertFalse(
+                        f.data.replicas
+                            .access(f.data.replicas.captureContext(), MATCH)!!
+                            .ready,
+                        mode,
+                    )
                     assertEquals(
                         1L,
                         f.data.cloudPulls
@@ -140,8 +154,8 @@ class CloudPullBoundaryTest {
                             .cursor,
                         name,
                     )
-                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match"), name)
-                    assertNull(f.data.cloudPulls.eventWork("alice", "match"), name)
+                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH), name)
+                    assertNull(f.data.cloudPulls.eventWork("alice", MATCH), name)
                 }
             }
         }
@@ -165,8 +179,8 @@ class CloudPullBoundaryTest {
                             .cursor,
                         name,
                     )
-                    assertEquals(0, f.data.events.count("match"), name)
-                    val work = assertNotNull(f.data.cloudPulls.eventWork("alice", "match"))
+                    assertEquals(0, f.data.events.count(MATCH), name)
+                    val work = assertNotNull(f.data.cloudPulls.eventWork("alice", MATCH))
                     assertEquals(0, work.cursor, name)
                     assertTrue(
                         f.data.cloudPulls
@@ -301,7 +315,7 @@ class CloudPullBoundaryTest {
                             }
                         assertFalse(result.outcome == CloudPullOutcome.COMPLETE, "$mode / $eventPage")
                         assertNull(result.profileId, "$mode / $eventPage")
-                        assertEquals(0L, f.data.events.count("match"), "$mode / $eventPage")
+                        assertEquals(0L, f.data.events.count(MATCH), "$mode / $eventPage")
                         assertEquals(
                             if (eventPage) 1L else 0L,
                             f.data.cloudPulls

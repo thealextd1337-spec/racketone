@@ -70,11 +70,16 @@ class ReplicaLifecycleMigrationTest {
             fun snapshot() =
                 columns.mapValues { (table, names) -> query("SELECT ${names.joinToString(",")} FROM $table ORDER BY rowid", names.size) }
             val before = snapshot()
-            AdvantlyDatabase.Schema.migrate(driver, 7, LocalData.SCHEMA_VERSION).value
+            AdvantlyDatabase.Schema.migrate(driver, 7, 10).value
             assertEquals(before, snapshot())
             driver.close()
             driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
             assertEquals(before, snapshot())
+            // 10.sqm erzwingt für Profile mit Pullstand einen Vollkatalog; alle übrigen Zeilen bleiben exakt.
+            AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
+            assertEquals(before - CATALOG_RESET, snapshot() - CATALOG_RESET)
+            assertEquals(listOf(listOf("B", "pull", "29")), query("SELECT profile_id, stream, value FROM cloud_cursor", 3))
+            assertEquals(listOf(listOf("7", "0")), query("SELECT target_epoch, metadata_complete FROM cloud_pull_profile", 2))
             val data = LocalData(driver)
             assertEquals(LocalData.SCHEMA_VERSION, AdvantlyDatabase.Schema.version)
             assertEquals(
@@ -92,10 +97,14 @@ class ReplicaLifecycleMigrationTest {
             assertTrue(!data.replicas.isCloudSeen("local-match"))
             assertEquals(listOf(listOf(null)), query("SELECT player_id FROM match_assignment", 1))
             assertEquals(0, data.replicas.captureContext().contextRevision)
-            assertEquals(before, snapshot())
+            assertEquals(before - CATALOG_RESET, snapshot() - CATALOG_RESET)
         } finally {
             driver.close()
             file.delete()
         }
+    }
+
+    private companion object {
+        val CATALOG_RESET = setOf("cloud_cursor", "cloud_pull_profile")
     }
 }

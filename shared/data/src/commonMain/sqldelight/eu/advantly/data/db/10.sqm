@@ -1,0 +1,21 @@
+-- Runden-H je Match (gilt nur für genau dieses G/E und diese Prüfrunde) und letzter Readiness-Beweis (G, E, H, serverVersion).
+CREATE TABLE cloud_pull_readiness (
+    profile_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    redaction_epoch INTEGER NOT NULL,
+    high_watermark INTEGER NOT NULL CHECK(high_watermark >= 0),
+    check_round INTEGER NOT NULL DEFAULT 0,
+    proof_generation INTEGER,
+    proof_epoch INTEGER,
+    proof_high_watermark INTEGER,
+    proof_version INTEGER,
+    PRIMARY KEY(profile_id, match_id)
+);
+
+-- Schema-10-Pullstände haben keine Access-Zeilen: Vollkatalog bei gleichem G als Neuscan erzwingen,
+-- damit jedes gelieferte Match Access erhält und nicht mehr geliefertes über applyMissing ABSENT wird.
+-- Ein Cursor ohne Profilzeile beginnt ohnehin mit einem Scan ab null (G unbekannt) und bleibt unberührt.
+DELETE FROM cloud_cursor WHERE stream = 'pull' AND profile_id IN (SELECT profile_id FROM cloud_pull_profile);
+UPDATE cloud_pull_profile SET target_epoch = coalesce(target_epoch, visibility_epoch), scan_run = scan_run + 1,
+    metadata_complete = 0, round_catalog_ready = 0;

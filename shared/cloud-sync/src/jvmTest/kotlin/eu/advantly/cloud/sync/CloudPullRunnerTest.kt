@@ -35,9 +35,14 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Gemeinsame echte Gate-/SQLDelight-/HTTP-Fixture; keine nachgebildete Persistenz. */
+/**
+ * Gemeinsame echte Gate-/SQLDelight-/HTTP-Fixture; keine nachgebildete Persistenz.
+ * Aktiviert den Replikat-Store standardmäßig, damit Lesesperren wirklich greifen. `activated = false` nur für Altbestand,
+ * der im aktiven Store gar nicht entstehen kann (fremde lokale Events vor dem ersten Cloudabgleich).
+ */
 internal class PullFixture(
     val driver: SqlDriver = createInMemoryJvmDriver(),
+    activated: Boolean = true,
 ) : AutoCloseable {
     val data = LocalData(driver)
     var credentials: CloudCredentials? = CloudCredentials("alice", "session-alice", "token-alice")
@@ -46,8 +51,64 @@ internal class PullFixture(
     var events: suspend (String, Long, Int) -> List<PulledEvent> = { _, _, _ -> emptyList() }
     var watermarks: suspend (String) -> List<EventWatermark> = { emptyList() }
     var redaction: suspend (JsonObject) -> String = { error("Keine Redaktionsantwort eingerichtet") }
-    var readiness: suspend (JsonObject) -> String = { error("Keine Readiness-Antwort eingerichtet") }
+
+    /** Ausgelieferter Serverstand: neueste Matchversion und jedes gelieferte Event je Match (für ehrliche Readiness-Vektoren). */
+    val servedVersions = mutableMapOf<String, Long>()
+    val servedEvents = mutableMapOf<String, MutableMap<Long, PulledEvent>>()
+
+    /** Vollständiges Serverlog je Match; Tests mit Wiederöffnung setzen es explizit, weil Auslieferungen nicht überleben. */
+    var serverLog: (String) -> Collection<PulledEvent> = { servedEvents[it]?.values.orEmpty() }
+
+    /** Kooperativer Server ohne Kopfänderung seit der letzten Auslieferung, falls in dieser Fixture keine erfolgte. */
+    var serverVersion: (String) -> Long = { match ->
+        servedVersions[match] ?: data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, match)?.serverVersion ?: 1
+    }
+    var readiness: suspend (JsonObject) -> String = { servedReadiness(it) }
     val calls = mutableListOf<Pair<String, JsonObject>>()
+
+    init {
+        data.selectPullAccount()
+        if (activated) data.replicas.activate(data.replicas.captureContext()) {}
+    }
+
+    fun readable(match: String = MATCH): Boolean = data.replicas.canReadMember(data.replicas.captureContext(), match)
+
+    /** Gespeicherte Events an der Lesesperre vorbei; nur für Zwischenstände vor ready. */
+    fun storedEvents(match: String = MATCH): Long =
+        driver
+            .executeQuery(null, "SELECT count(*) FROM match_event WHERE match_id = '$match'", { c ->
+                c.next()
+                QueryResult.Value(requireNotNull(c.getLong(0)))
+            }, 0)
+            .value
+
+    /** Readiness-Vektor bis H aus dem Serverlog; H fehlt → höchste Serversequenz des Logs. */
+    fun servedReadiness(
+        body: JsonObject,
+        version: Long? = null,
+    ): String {
+        val match = body.getValue("p_match_id").jsonPrimitive.content
+        val events = serverLog(match)
+        val high = body["p_high_watermark"]?.jsonPrimitive?.content?.toLong() ?: (events.maxOfOrNull { it.serverSeq } ?: 0)
+        val marks =
+            events
+                .filter { it.serverSeq <= high }
+                .groupBy { it.deviceId }
+                .map { (device, rows) -> EventWatermark(device, rows.maxOf { it.deviceSeq }, rows.size.toLong()) }
+                .sortedBy { it.deviceId }
+        return CloudJson.encodeToString(
+            CloudMatchReadiness.serializer(),
+            CloudMatchReadiness(
+                match,
+                body.long("p_generation"),
+                body.long("p_redaction_epoch").toInt(),
+                high,
+                version ?: serverVersion(match),
+                marks,
+            ),
+        )
+    }
+
     val bearers = mutableListOf<String?>()
     private val client =
         HttpClient(
@@ -65,21 +126,16 @@ internal class PullFixture(
                         }
 
                         "cloud_sync_pull_v1" -> {
-                            CloudJson.encodeToString(
-                                PullResponse.serializer(),
-                                metadata(body.long("p_cursor"), body.long("p_limit").toInt()),
-                            )
+                            val page = metadata(body.long("p_cursor"), body.long("p_limit").toInt())
+                            page.matches.forEach { servedVersions[it.id] = it.serverVersion }
+                            CloudJson.encodeToString(PullResponse.serializer(), page)
                         }
 
                         "cloud_pull_match_events_v1" -> {
-                            CloudJson.encodeToString(
-                                kotlinx.serialization.builtins.ListSerializer(PulledEvent.serializer()),
-                                events(
-                                    body.getValue("p_match_id").jsonPrimitive.content,
-                                    body.long("p_after_server_seq"),
-                                    body.long("p_limit").toInt(),
-                                ),
-                            )
+                            val match = body.getValue("p_match_id").jsonPrimitive.content
+                            val rows = events(match, body.long("p_after_server_seq"), body.long("p_limit").toInt())
+                            rows.forEach { servedEvents.getOrPut(match) { mutableMapOf() }[it.serverSeq] = it }
+                            CloudJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(PulledEvent.serializer()), rows)
                         }
 
                         "cloud_match_event_watermarks_v1" -> {
@@ -130,8 +186,26 @@ internal class PullFixture(
 
 internal fun JsonObject.long(key: String): Long = getValue(key).jsonPrimitive.content.toLong()
 
+/** Ordnungserhaltende kanonische UUID aus einem kurzen Testnamen; Readiness verlangt UUIDs für Match und Gerät. */
+internal fun uuid(name: String): String {
+    val bytes = name.encodeToByteArray()
+    require(bytes.size <= 16)
+    val hex = bytes.joinToString("") { "%02x".format(it) }.padEnd(32, '0')
+    return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}"
+}
+
+/** D1 bindet jeden Lauf an den ausgewählten Replikatkontext; das Cloudprofil ist dessen Kontoschlüssel. */
+internal fun LocalData.selectPullAccount(profile: String = "alice"): LocalData {
+    var index = 0
+    accountIdentities.select("scope-$profile", profile, 0, "PHONE") { "$profile-device-${index++}" }
+    return this
+}
+
+internal val MATCH = uuid("match")
+internal val REMOTE = uuid("remote")
+
 internal fun pullMatch(
-    id: String = "match",
+    id: String = MATCH,
     version: Long = 1,
     access: String = "member",
 ): PulledMatch {
@@ -156,13 +230,13 @@ internal fun pullMatch(
 
 internal fun pullEvent(
     seq: Long,
-    match: String = "match",
+    match: String = MATCH,
     serverSeq: Long = seq,
 ): PulledEvent =
     PulledEvent(
         "event-$seq",
         match,
-        "remote",
+        REMOTE,
         seq,
         seq,
         seq,
@@ -247,9 +321,9 @@ class CloudPullRunnerTest {
     fun localDeadlineFenceStopsBetweenDuplicateUnitsAndRollsBackWholePage() =
         runBlocking {
             val driver = PagePayloadAuditDriver(createInMemoryJvmDriver())
-            PullFixture(driver).use { f ->
+            PullFixture(driver, activated = false).use { f ->
                 seedDuplicateRepair(f, 10000)
-                val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 val run =
                     f.data.cloudPulls
                         .progress("alice")
@@ -264,7 +338,7 @@ class CloudPullRunnerTest {
                     f.data.cloudPulls.commitEvents(work, run, page, { check(!expired) }) { notifications++ }
                 }
                 assertEquals(3, driver.payloadRows)
-                assertEquals(work, f.data.cloudPulls.eventWork("alice", "match"))
+                assertEquals(work, f.data.cloudPulls.eventWork("alice", MATCH))
                 assertEquals(
                     0,
                     f.data.cloudPulls
@@ -282,7 +356,7 @@ class CloudPullRunnerTest {
                 assertEquals(
                     500,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")!!
+                        .eventWork("alice", MATCH)!!
                         .cursor,
                 )
                 assertEquals(
@@ -304,10 +378,10 @@ class CloudPullRunnerTest {
                 for (pageSize in listOf(2, 500)) {
                     val file = databaseFile()
                     try {
-                        reopen(file).use { f -> seedDuplicateRepair(f, history) }
+                        reopen(file, activated = false).use { f -> seedDuplicateRepair(f, history) }
                         repeat(2) { page ->
                             val driver = PagePayloadAuditDriver(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}"))
-                            PullFixture(driver).use { f ->
+                            PullFixture(driver, activated = false).use { f ->
                                 f.bind()
                                 f.events = { _, after, limit -> (1L..history).filter { it > after }.take(limit).map { pullEvent(it) } }
                                 driver.recording = true
@@ -334,7 +408,7 @@ class CloudPullRunnerTest {
                                         }, 1) { bindString(0, pullEvent(1).id) }
                                         .value
                                 assertTrue(plan.contains("SEARCH match_event USING INDEX sqlite_autoindex_match_event_1"), plan)
-                                val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                                val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                                 assertEquals((page + 1L) * pageSize, work.cursor)
                                 assertTrue(work.repairing)
                                 assertEquals(0, work.checkedRound)
@@ -344,7 +418,7 @@ class CloudPullRunnerTest {
                                         .receivedWatermarks(work)
                                         .sumOf { it.eventCount },
                                 )
-                                assertEquals(history, f.data.events.count("match"))
+                                assertEquals(history, f.data.events.count(MATCH))
                                 assertEquals(mapOf("unrelated-rejected" to "forbidden"), f.data.cloud.rejectedEvents())
                                 println(
                                     "R3 indexed page: history=$history page=$pageSize reopen=$page " +
@@ -367,28 +441,29 @@ class CloudPullRunnerTest {
             var complete = false
             var payloadRows = 0L
             try {
-                reopen(file).use { f -> seedDuplicateRepair(f, history) }
+                reopen(file, activated = false).use { f -> seedDuplicateRepair(f, history) }
                 for (execution in 0..29) {
                     val driver = PagePayloadAuditDriver(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}"))
-                    PullFixture(driver).use { f ->
+                    PullFixture(driver, activated = false).use { f ->
                         f.bind()
                         f.metadata = { cursor, _ -> PullResponse(cursor = cursor, visibilityEpoch = 1) }
                         f.events = { _, after, limit -> (1L..history).filter { it > after }.take(limit).map { pullEvent(it) } }
-                        f.watermarks = { listOf(EventWatermark("remote", history, history)) }
+                        f.watermarks = { listOf(EventWatermark(REMOTE, history, history)) }
+                        f.serverLog = { (1L..history).map { pullEvent(it) } }
                         driver.recording = true
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
                         assertTrue(result.rpcCount <= 1)
                         assertTrue(result.completedMetadataPages + result.completedEventPages <= 1)
                         assertTrue(driver.payloadRows <= 500)
                         payloadRows += driver.payloadRows
-                        val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                        val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                         assertEquals(
                             1,
                             f.data.cloudPulls
                                 .progress("alice")
                                 .checkRound,
                         )
-                        assertEquals(history, f.data.events.count("match"))
+                        assertEquals(history, f.data.events.count(MATCH))
                         assertEquals(history - 1000, f.data.events.unconfirmedCount())
                         assertEquals(mapOf("unrelated-rejected" to "forbidden"), f.data.cloud.rejectedEvents())
                         if (result.outcome == CloudPullOutcome.COMPLETE) {
@@ -422,9 +497,9 @@ class CloudPullRunnerTest {
     fun localLeaseInvalidationDuringIndexedDuplicateReadRollsBackPageWithoutAcknowledgingIt() =
         runBlocking {
             val driver = PagePayloadAuditDriver(createInMemoryJvmDriver())
-            PullFixture(driver).use { f ->
+            PullFixture(driver, activated = false).use { f ->
                 seedDuplicateRepair(f, 10000)
-                val before = f.data.cloudPulls.eventWork("alice", "match")!!
+                val before = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 val pending = f.data.cloud.pendingCount()
                 f.events = { _, after, limit -> (1L..10000L).filter { it > after }.take(limit).map { pullEvent(it) } }
                 driver.recording = true
@@ -448,7 +523,7 @@ class CloudPullRunnerTest {
                                 .progress("alice")
                                 .runSerial,
                     ),
-                    f.data.cloudPulls.eventWork("alice", "match"),
+                    f.data.cloudPulls.eventWork("alice", MATCH),
                 )
                 assertEquals(
                     0,
@@ -467,7 +542,7 @@ class CloudPullRunnerTest {
     ) {
         f.bind()
         f.data.events.appendAll((1L..history).map { EventRows.toStored(pullEvent(it).toRow()) })
-        f.data.events.markConfirmedUpTo("match", "remote", minOf(1000, history))
+        f.data.events.markConfirmedUpTo(MATCH, REMOTE, minOf(1000, history))
         f.data.events.append(EventRows.toStored(pullEvent(1, "unrelated").copy(id = "unrelated-rejected").toRow()).copy(confirmed = true))
         f.data.cloud.acknowledge(emptySet(), mapOf("unrelated-rejected" to "forbidden"))
         val run =
@@ -482,9 +557,9 @@ class CloudPullRunnerTest {
         ) {}
         assertFalse(
             f.data.cloudPulls.verifyEvents(
-                f.data.cloudPulls.eventWork("alice", "match")!!,
+                f.data.cloudPulls.eventWork("alice", MATCH)!!,
                 run,
-                listOf(CloudPullWatermark("remote", history, history)),
+                listOf(CloudPullWatermark(REMOTE, history, history)),
             ) {},
         )
     }
@@ -508,21 +583,29 @@ class CloudPullRunnerTest {
                         f.metadata = { cursor, _ ->
                             metadataCalls++
                             PullResponse(
-                                listOf(pullMatch("a-stable", 1), pullMatch("live", version)).filter { it.serverVersion > cursor },
+                                listOf(
+                                    pullMatch(uuid("a-stable"), 1),
+                                    pullMatch(uuid("live"), version),
+                                ).filter { it.serverVersion > cursor },
                                 cursor = version,
                                 visibilityEpoch = epoch,
                             )
                         }
                         f.events = { id, after, limit ->
-                            if (id == "live") (1L..100L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                            if (id == uuid("live")) (1L..100L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                         }
                         f.watermarks = { id ->
-                            if (id == "a-stable") {
+                            if (id == uuid("a-stable")) {
                                 stableChecks++
                                 emptyList()
                             } else {
-                                listOf(EventWatermark("remote", 100, 100))
+                                listOf(EventWatermark(REMOTE, 100, 100))
                             }
+                        }
+                        f.serverLog = { id -> if (id == uuid("live")) (1L..100L).map { pullEvent(it, id) } else emptyList() }
+                        f.readiness = { body ->
+                            if (body.getValue("p_match_id").jsonPrimitive.content == uuid("a-stable")) stableChecks++
+                            f.servedReadiness(body)
                         }
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1, eventPageSize = 1).pullNow()
                         assertTrue(result.rpcCount <= 1)
@@ -531,7 +614,7 @@ class CloudPullRunnerTest {
                         progress.visibilityEpoch?.let { seenEpochs += it }
                         assertEquals(1L, progress.checkRound)
                         if (execution == 74) {
-                            val work = f.data.cloudPulls.eventWork("alice", "live")!!
+                            val work = f.data.cloudPulls.eventWork("alice", uuid("live"))!!
                             println(
                                 "R3 churn: metadata=$metadataCalls epochs=$seenEpochs cursor=${work.cursor} " +
                                     "stableChecks=$stableChecks progress=$progress",
@@ -540,16 +623,17 @@ class CloudPullRunnerTest {
                             assertEquals(0L, work.checkedRound)
                             assertTrue(seenEpochs.size >= 4)
                             assertTrue(metadataCalls >= 8)
-                            assertEquals(1, stableChecks)
+                            // Jeder G-Wechsel setzt ready zurück und verlangt genau eine erneute Prüfung des stabilen Matches.
+                            assertTrue(stableChecks in 1..seenEpochs.size)
                             assertFalse(result.outcome == CloudPullOutcome.COMPLETE)
                         }
                         if (result.outcome == CloudPullOutcome.COMPLETE) {
                             assertTrue(execution > 74)
-                            assertEquals(100L, f.data.events.count("live"))
+                            assertEquals(100L, f.data.events.count(uuid("live")))
                             assertEquals(
                                 100L,
                                 f.data.cloudPulls
-                                    .receivedWatermarks(f.data.cloudPulls.eventWork("alice", "live")!!)
+                                    .receivedWatermarks(f.data.cloudPulls.eventWork("alice", uuid("live"))!!)
                                     .sumOf { it.eventCount },
                             )
                             assertEquals(6L, progress.visibilityEpoch)
@@ -557,7 +641,7 @@ class CloudPullRunnerTest {
                             assertEquals(
                                 1074L,
                                 f.data.cloudPulls
-                                    .snapshot("alice", CloudPullEntityKind.MATCH, "live")!!
+                                    .snapshot("alice", CloudPullEntityKind.MATCH, uuid("live"))!!
                                     .serverVersion,
                             )
                             println("R3 quiescence: completed execution=$execution metadata=$metadataCalls stableChecks=$stableChecks")
@@ -585,11 +669,11 @@ class CloudPullRunnerTest {
                     PullResponse(if (cursor == 0L) listOf(pullMatch()) else emptyList(), cursor = 1, visibilityEpoch = 1)
                 }
                 f.events = { _, after, limit -> (1L..20L).filter { it > after }.take(limit).map { pullEvent(it) } }
-                f.watermarks = { listOf(EventWatermark("remote", 20, 20)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 20, 20)) }
                 val runner = CloudPullRunner(f.backend, f.data, eventPageSize = 1, maxRpcsPerRun = 100, maxPagesPerRun = 100)
                 val failed = runner.pullNow()
                 assertEquals(CloudPullOutcome.FAILED, failed.outcome)
-                val before = f.data.cloudPulls.eventWork("alice", "match")!!
+                val before = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 assertEquals(12L, before.cursor)
                 assertEquals(0L, before.checkedRound)
                 assertEquals(
@@ -606,11 +690,11 @@ class CloudPullRunnerTest {
                 )
                 failRefresh = false
                 assertEquals(CloudPullOutcome.COMPLETE, runner.pullNow().outcome)
-                assertEquals(20L, f.data.events.count("match"))
+                assertEquals(20L, f.data.events.count(MATCH))
                 assertEquals(
                     1L,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")!!
+                        .eventWork("alice", MATCH)!!
                         .checkedRound,
                 )
                 assertEquals(3, metadataCalls)
@@ -621,7 +705,7 @@ class CloudPullRunnerTest {
     fun twoEventRepairPageMustNotMaterializeEntireHistoryPerDuplicate() =
         runBlocking {
             val driver = PayloadCountingDriver(createInMemoryJvmDriver())
-            PullFixture(driver).use { f ->
+            PullFixture(driver, activated = false).use { f ->
                 f.bind()
                 val historySize = 10000L
                 f.data.events.appendAll((1L..historySize).map { EventRows.toStored(pullEvent(it).toRow()) })
@@ -637,19 +721,19 @@ class CloudPullRunnerTest {
                 ) {}
                 assertFalse(
                     f.data.cloudPulls.verifyEvents(
-                        f.data.cloudPulls.eventWork("alice", "match")!!,
+                        f.data.cloudPulls.eventWork("alice", MATCH)!!,
                         run,
-                        listOf(CloudPullWatermark("remote", historySize, historySize)),
+                        listOf(CloudPullWatermark(REMOTE, historySize, historySize)),
                     ) {},
                 )
                 f.events = { _, after, limit -> (1L..historySize).filter { it > after }.take(limit).map { pullEvent(it) } }
-                f.watermarks = { listOf(EventWatermark("remote", historySize, historySize)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, historySize, historySize)) }
                 driver.recording = true
                 val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1, eventPageSize = 2).pullNow()
                 assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
                 assertEquals(1, result.rpcCount)
                 assertEquals(1, result.completedEventPages)
-                val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 assertTrue(work.repairing)
                 assertEquals(2L, work.cursor)
                 assertEquals(0L, work.checkedRound)
@@ -668,7 +752,7 @@ class CloudPullRunnerTest {
     fun defaultSizedDuplicateRepairMustStayWithinLocalWorkBudget() =
         runBlocking {
             val driver = PayloadCountingDriver(createInMemoryJvmDriver())
-            PullFixture(driver).use { f ->
+            PullFixture(driver, activated = false).use { f ->
                 f.bind()
                 val historySize = 10000L
                 f.data.events.appendAll((1L..historySize).map { EventRows.toStored(pullEvent(it).toRow()) })
@@ -684,14 +768,14 @@ class CloudPullRunnerTest {
                 ) {}
                 assertFalse(
                     f.data.cloudPulls.verifyEvents(
-                        f.data.cloudPulls.eventWork("alice", "match")!!,
+                        f.data.cloudPulls.eventWork("alice", MATCH)!!,
                         run,
-                        listOf(CloudPullWatermark("remote", historySize, historySize)),
+                        listOf(CloudPullWatermark(REMOTE, historySize, historySize)),
                     ) {},
                 )
                 f.metadata = { cursor, _ -> PullResponse(cursor = cursor, visibilityEpoch = 1) }
                 f.events = { _, after, limit -> (1L..historySize).filter { it > after }.take(limit).map { pullEvent(it) } }
-                f.watermarks = { listOf(EventWatermark("remote", historySize, historySize)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, historySize, historySize)) }
                 driver.recording = true
                 val runner = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1, deadlineMillis = 1000)
                 repeat(4) { attempt ->
@@ -702,7 +786,7 @@ class CloudPullRunnerTest {
                         "R3 default repair attempt=$attempt outcome=${result.outcome} rpc=${result.rpcCount} " +
                             "elapsedMs=$elapsedMs deadlineMs=1000 cursor=${f.data.cloudPulls.eventWork(
                                 "alice",
-                                "match",
+                                MATCH,
                             )!!.cursor} fullLogQueries=${driver.fullLogQueries} materializedPayloadRows=${driver.payloadRows}",
                     )
                 }
@@ -718,6 +802,7 @@ class CloudPullRunnerTest {
             var metadataCalls = 0
             val observedEpochs = mutableSetOf<Long?>()
             var complete = false
+            var lastRound = 0L
             try {
                 for (execution in 0..95) {
                     reopen(file).use { f ->
@@ -731,9 +816,9 @@ class CloudPullRunnerTest {
                                 3L
                             }
                         val matches =
-                            listOf(pullMatch("live", 1)) +
-                                (if (execution > 0) listOf(pullMatch("later", 2)) else emptyList()) +
-                                (if (epoch == 3L) listOf(pullMatch("latest", 3)) else emptyList())
+                            listOf(pullMatch(uuid("live"), 1)) +
+                                (if (execution > 0) listOf(pullMatch(uuid("later"), 2)) else emptyList()) +
+                                (if (epoch == 3L) listOf(pullMatch(uuid("latest"), 3)) else emptyList())
                         f.metadata = { cursor, _ ->
                             metadataCalls++
                             PullResponse(
@@ -743,31 +828,38 @@ class CloudPullRunnerTest {
                             )
                         }
                         f.events = { id, after, limit ->
-                            if (id == "live") (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                            if (id == uuid("live")) (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                         }
                         f.watermarks = { id ->
-                            if (id == "live") {
+                            if (id == uuid("live")) {
                                 if (execution < 60) max++
-                                listOf(EventWatermark("remote", max, max))
+                                listOf(EventWatermark(REMOTE, max, max))
                             } else {
                                 emptyList()
                             }
                         }
+                        f.serverLog = { id -> if (id == uuid("live")) (1L..max).map { pullEvent(it, id) } else emptyList() }
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
                         assertTrue(result.rpcCount <= 1)
                         assertTrue(result.completedMetadataPages + result.completedEventPages <= 1)
                         val progress = f.data.cloudPulls.progress("alice")
                         observedEpochs += progress.visibilityEpoch
-                        assertEquals(1, progress.checkRound)
-                        if (execution < 60) assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
-                        if (result.outcome == CloudPullOutcome.COMPLETE) {
-                            assertTrue(execution >= 60)
-                            assertEquals(3, progress.visibilityEpoch)
+                        assertTrue(progress.checkRound >= lastRound)
+                        lastRound = progress.checkRound
+                        if (result.outcome != CloudPullOutcome.COMPLETE) assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
+                        // Vor ready ersetzt Readiness bis zum festgehaltenen H den Wasserstandsabgleich und schließt Runden früher ab;
+                        // jeder G-Wechsel setzt ready zurück. Der Endstand bei G = 3 folgt erst nach Ende der Uploads.
+                        if (result.outcome == CloudPullOutcome.COMPLETE && execution >= 60 && progress.visibilityEpoch == 3L) {
+                            assertTrue(
+                                f.data.replicas
+                                    .access(f.data.replicas.captureContext(), uuid("live"))!!
+                                    .ready,
+                            )
                             assertNull(progress.targetEpoch)
                             assertTrue(progress.metadataComplete && !progress.roundActive)
-                            for (id in listOf("live", "later", "latest")) {
+                            for (id in listOf(uuid("live"), uuid("later"), uuid("latest"))) {
                                 val work = f.data.cloudPulls.eventWork("alice", id)!!
-                                assertEquals(1, work.checkedRound)
+                                assertEquals(progress.checkRound, work.checkedRound)
                                 assertFalse(work.repairing)
                                 assertFalse(
                                     f.data.cloudPulls
@@ -775,7 +867,7 @@ class CloudPullRunnerTest {
                                         .removalPending,
                                 )
                             }
-                            val live = f.data.cloudPulls.eventWork("alice", "live")!!
+                            val live = f.data.cloudPulls.eventWork("alice", uuid("live"))!!
                             assertEquals(max, live.cursor)
                             assertEquals(
                                 max,
@@ -812,20 +904,35 @@ class CloudPullRunnerTest {
                             calls += "metadata"
                             metadataCalls++
                             if (cursor == 0L) {
-                                PullResponse(listOf(pullMatch("a-checked", 1), pullMatch("live", 2)), cursor = 2, visibilityEpoch = 1)
+                                PullResponse(
+                                    listOf(pullMatch(uuid("a-checked"), 1), pullMatch(uuid("live"), 2)),
+                                    cursor = 2,
+                                    visibilityEpoch = 1,
+                                )
                             } else {
                                 val next = cursor + 1
-                                PullResponse(listOf(pullMatch("later-$next", next)), cursor = next, hasMore = true, visibilityEpoch = 1)
+                                PullResponse(
+                                    listOf(pullMatch(uuid("later-$next"), next)),
+                                    cursor = next,
+                                    hasMore = true,
+                                    visibilityEpoch = 1,
+                                )
                             }
                         }
                         f.events = { id, after, limit ->
                             calls += "events"
-                            if (id == "live") (1L..1000L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                            if (id == uuid("live")) (1L..1000L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                         }
                         f.watermarks = { id ->
                             calls += "watermarks"
-                            if (id == "a-checked") checkedCalls++
+                            if (id == uuid("a-checked")) checkedCalls++
                             emptyList()
+                        }
+                        // Vor ready ist Readiness die einzige Prüfanfrage eines Matches.
+                        f.readiness = { body ->
+                            calls += "readiness"
+                            if (body.getValue("p_match_id").jsonPrimitive.content == uuid("a-checked")) checkedCalls++
+                            f.servedReadiness(body)
                         }
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1, eventPageSize = 1).pullNow()
                         assertTrue(result.rpcCount <= 1)
@@ -840,24 +947,24 @@ class CloudPullRunnerTest {
                             assertEquals(
                                 1,
                                 f.data.cloudPulls
-                                    .eventWork("alice", "a-checked")!!
+                                    .eventWork("alice", uuid("a-checked"))!!
                                     .checkedRound,
                             )
                             assertEquals(
                                 0,
                                 f.data.cloudPulls
-                                    .eventWork("alice", "live")!!
+                                    .eventWork("alice", uuid("live"))!!
                                     .checkedRound,
                             )
                             assertTrue(
                                 f.data.cloudPulls
-                                    .eventWork("alice", "live")!!
+                                    .eventWork("alice", uuid("live"))!!
                                     .cursor > 35,
                             )
-                            assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later-3"))
+                            assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("later-3")))
                             assertFalse(
                                 f.data.cloudPulls
-                                    .snapshot("alice", CloudPullEntityKind.MATCH, "a-checked")!!
+                                    .snapshot("alice", CloudPullEntityKind.MATCH, uuid("a-checked"))!!
                                     .removalPending,
                             )
                         }
@@ -901,7 +1008,7 @@ class CloudPullRunnerTest {
                                 )
                             }
                         f.events = { _, after, limit -> (1L..5L).filter { it > after }.take(limit).map { pullEvent(it) } }
-                        f.watermarks = { listOf(EventWatermark("remote", 5, 5)) }
+                        f.watermarks = { listOf(EventWatermark(REMOTE, 5, 5)) }
                         val result =
                             CloudPullRunner(
                                 f.backend,
@@ -916,8 +1023,8 @@ class CloudPullRunnerTest {
                         outcomes += result.outcome
                         if (result.outcome == CloudPullOutcome.FAILED) assertEquals(1L, result.failedEventJobs)
                         if (it == 7) {
-                            println("R2 callback tail: outcomes=$outcomes, callbacks=$callbacks, events=${f.data.events.count("match")}")
-                            assertEquals(5L, f.data.events.count("match"))
+                            println("R2 callback tail: outcomes=$outcomes, callbacks=$callbacks, events=${f.data.events.count(MATCH)}")
+                            assertEquals(5L, f.data.events.count(MATCH))
                             assertTrue(CloudPullOutcome.COMPLETE in outcomes)
                             assertEquals(0L, f.data.cloudPulls.failedEventJobs("alice"))
                         }
@@ -944,9 +1051,9 @@ class CloudPullRunnerTest {
                             metadataCalls++
                             val all =
                                 if (execution == 0) {
-                                    listOf(pullMatch("live", 1))
+                                    listOf(pullMatch(uuid("live"), 1))
                                 } else {
-                                    listOf(pullMatch("live", 1), pullMatch("later", 2))
+                                    listOf(pullMatch(uuid("live"), 1), pullMatch(uuid("later"), 2))
                                 }
                             PullResponse(
                                 all.filter { it.serverVersion > cursor },
@@ -955,7 +1062,7 @@ class CloudPullRunnerTest {
                             )
                         }
                         f.events = { id, after, limit ->
-                            if (id == "live") {
+                            if (id == uuid("live")) {
                                 (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) }
                             } else {
                                 emptyList()
@@ -963,26 +1070,38 @@ class CloudPullRunnerTest {
                         }
                         f.watermarks = { id ->
                             // Ein legaler neuer Upload zwischen Eventseite und separat ausgeführtem Wasserstands-RPC.
-                            if (id == "live") {
+                            if (id == uuid("live")) {
                                 max++
-                                listOf(EventWatermark("remote", max, max))
+                                listOf(EventWatermark(REMOTE, max, max))
                             } else {
                                 emptyList()
                             }
                         }
+                        f.serverLog = { id -> if (id == uuid("live")) (1L..max).map { pullEvent(it, id) } else emptyList() }
+                        f.readiness = { body ->
+                            if (body.getValue("p_match_id").jsonPrimitive.content == uuid("live")) max++
+                            f.servedReadiness(body)
+                        }
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
                         outcomes += result.outcome
                         assertTrue(result.rpcCount <= 1)
-                        assertFalse(result.outcome == CloudPullOutcome.COMPLETE)
+                        // Laufende Uploads verhindern den Wasserstandsabgleich, nicht aber Readiness bis zum festgehaltenen H.
+                        if (result.outcome == CloudPullOutcome.COMPLETE) {
+                            assertTrue(
+                                f.data.replicas
+                                    .access(f.data.replicas.captureContext(), uuid("live"))!!
+                                    .ready,
+                            )
+                        }
                         if (execution == 17) {
                             val progress = f.data.cloudPulls.progress("alice")
-                            val work = f.data.cloudPulls.eventWork("alice", "live")!!
+                            val work = f.data.cloudPulls.eventWork("alice", uuid("live"))!!
                             println(
                                 "R2 live repair: outcomes=$outcomes, metadataCalls=$metadataCalls, max=$max, " +
                                     "progress=$progress, work=$work",
                             )
                             assertNotNull(
-                                f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later"),
+                                f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("later")),
                                 "Laufende Eventuploads dürfen neue Metadaten/Epochen nicht dauerhaft verdrängen",
                             )
                         }
@@ -1003,16 +1122,24 @@ class CloudPullRunnerTest {
                 var metadataCalls = 0
                 f.metadata = { cursor, _ ->
                     metadataCalls++
-                    val all = if (newMatch) listOf(pullMatch("live", 1), pullMatch("later", 2)) else listOf(pullMatch("live", 1))
+                    val all =
+                        if (newMatch) {
+                            listOf(
+                                pullMatch(uuid("live"), 1),
+                                pullMatch(uuid("later"), 2),
+                            )
+                        } else {
+                            listOf(pullMatch(uuid("live"), 1))
+                        }
                     PullResponse(all.filter { it.serverVersion > cursor }, cursor = if (newMatch) 2 else 1, visibilityEpoch = 1)
                 }
                 f.events = { id, after, limit ->
-                    if (id == "live") (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                    if (id == uuid("live")) (1L..max).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                 }
                 f.watermarks = { id ->
-                    if (id == "live") {
+                    if (id == uuid("live")) {
                         max++
-                        listOf(EventWatermark("remote", max, max))
+                        listOf(EventWatermark(REMOTE, max, max))
                     } else {
                         emptyList()
                     }
@@ -1032,7 +1159,7 @@ class CloudPullRunnerTest {
                         )}",
                 )
                 assertNotNull(
-                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "later"),
+                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("later")),
                     "Auch das Standardbudget benötigt eine von erfolgreicher Reparatur unabhängige Metadatenfairness",
                 )
             }
@@ -1046,16 +1173,16 @@ class CloudPullRunnerTest {
             fun configure(f: PullFixture) {
                 f.metadata = { cursor, _ ->
                     PullResponse(
-                        if (cursor < 3) listOf(pullMatch("c-later", 3)) else emptyList(),
+                        if (cursor < 3) listOf(pullMatch(uuid("c-later"), 3)) else emptyList(),
                         cursor = 3,
                         visibilityEpoch = 1,
                     )
                 }
                 f.events = { id, after, _ ->
-                    if (id == "a-timeout") delay(1000)
+                    if (id == uuid("a-timeout")) delay(1000)
                     if (after == 0L) listOf(pullEvent(1, id).copy(id = "event-$id")) else emptyList()
                 }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
             }
             try {
                 reopen(file).use { f ->
@@ -1070,7 +1197,7 @@ class CloudPullRunnerTest {
                     val page =
                         PullMapping.metadata(
                             PullResponse(
-                                listOf(pullMatch("a-timeout", 1), pullMatch("b-healthy", 2)),
+                                listOf(pullMatch(uuid("a-timeout"), 1), pullMatch(uuid("b-healthy"), 2)),
                                 cursor = 2,
                                 visibilityEpoch = 1,
                             ),
@@ -1084,13 +1211,13 @@ class CloudPullRunnerTest {
                     assertEquals(
                         0,
                         f.data.cloudPulls
-                            .eventWork("alice", "a-timeout")
+                            .eventWork("alice", uuid("a-timeout"))
                             ?.cursor,
                     )
                     assertEquals(
                         1,
                         f.data.cloudPulls
-                            .eventWork("alice", "a-timeout")
+                            .eventWork("alice", uuid("a-timeout"))
                             ?.failedRound,
                     )
                 }
@@ -1098,7 +1225,7 @@ class CloudPullRunnerTest {
                     f.bind()
                     configure(f)
                     assertEquals(CloudPullOutcome.FAILED, CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1).pullNow().outcome)
-                    assertEquals(1, f.data.events.count("b-healthy"))
+                    assertEquals(1, f.data.events.count(uuid("b-healthy")))
                     assertFalse(
                         f.data.cloudPulls
                             .progress("alice")
@@ -1109,18 +1236,18 @@ class CloudPullRunnerTest {
                     f.bind()
                     configure(f)
                     assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1).pullNow().outcome)
-                    assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "c-later"))
+                    assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("c-later")))
                 }
                 reopen(file).use { f ->
                     f.bind()
                     configure(f)
                     assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1).pullNow().outcome)
-                    assertEquals(1, f.data.events.count("c-later"))
-                    assertEquals(0, f.data.events.count("a-timeout"))
+                    assertEquals(1, f.data.events.count(uuid("c-later")))
+                    assertEquals(0, f.data.events.count(uuid("a-timeout")))
                     assertEquals(
                         0,
                         f.data.cloudPulls
-                            .eventWork("alice", "a-timeout")
+                            .eventWork("alice", uuid("a-timeout"))
                             ?.checkedRound,
                     )
                 }
@@ -1134,29 +1261,38 @@ class CloudPullRunnerTest {
             JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { AdvantlyDatabase.Schema.create(it).value }
         }
 
-    private fun reopen(file: File): PullFixture = PullFixture(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}"))
+    private fun reopen(
+        file: File,
+        activated: Boolean = true,
+    ): PullFixture = PullFixture(JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}"), activated)
 
     @Test
     fun failedSelectionSurvivesReopenAndNeverAcknowledgesConflictWhileHealthyWorkProgresses() =
         runBlocking {
             val file = databaseFile()
-            val bad = pullEvent(1, "a-conflict")
+            val bad = pullEvent(1, uuid("a-conflict"))
 
             fun configure(f: PullFixture) {
                 f.metadata = { cursor, _ ->
                     PullResponse(
-                        if (cursor == 0L) listOf(pullMatch("a-conflict", 1), pullMatch("b-healthy", 2)) else emptyList(),
+                        if (cursor == 0L) listOf(pullMatch(uuid("a-conflict"), 1), pullMatch(uuid("b-healthy"), 2)) else emptyList(),
                         cursor = 2,
                         visibilityEpoch = 1,
                     )
                 }
                 f.events = { id, after, _ ->
-                    if (after == 0L) listOf(pullEvent(1, id).copy(id = if (id == "a-conflict") bad.id else "healthy")) else emptyList()
+                    if (after ==
+                        0L
+                    ) {
+                        listOf(pullEvent(1, id).copy(id = if (id == uuid("a-conflict")) bad.id else "healthy"))
+                    } else {
+                        emptyList()
+                    }
                 }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
             }
             try {
-                reopen(file).use { f ->
+                reopen(file, activated = false).use { f ->
                     f.bind()
                     configure(f)
                     f.data.events.append(EventRows.toStored(bad.copy(wallClockMs = 999).toRow()).copy(confirmed = true))
@@ -1164,7 +1300,7 @@ class CloudPullRunnerTest {
                     val result = CloudPullRunner(f.backend, f.data).pullNow()
                     assertEquals(CloudPullOutcome.FAILED, result.outcome)
                     assertEquals(1, result.failedEventJobs)
-                    val work = f.data.cloudPulls.eventWork("alice", "a-conflict")!!
+                    val work = f.data.cloudPulls.eventWork("alice", uuid("a-conflict"))!!
                     assertEquals(1, work.lastAttempt)
                     assertEquals(1, work.failedRound)
                     assertEquals(0, work.checkedRound)
@@ -1176,22 +1312,22 @@ class CloudPullRunnerTest {
                             .isEmpty(),
                     )
                 }
-                reopen(file).use { f ->
+                reopen(file, activated = false).use { f ->
                     f.bind()
                     configure(f)
                     val result = CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1).pullNow()
                     assertEquals(CloudPullOutcome.FAILED, result.outcome)
                     assertEquals(1, result.failedEventJobs)
-                    assertEquals(1, f.data.events.count("b-healthy"))
+                    assertEquals(1, f.data.events.count(uuid("b-healthy")))
                     assertFalse(f.calls.any { it.first == "cloud_sync_pull_v1" })
-                    val badWork = f.data.cloudPulls.eventWork("alice", "a-conflict")!!
+                    val badWork = f.data.cloudPulls.eventWork("alice", uuid("a-conflict"))!!
                     assertEquals(0, badWork.cursor)
                     assertEquals(0, badWork.checkedRound)
                     assertNotNull(badWork.failure)
                     assertEquals(
                         1,
                         f.data.cloudPulls
-                            .eventWork("alice", "b-healthy")
+                            .eventWork("alice", uuid("b-healthy"))
                             ?.checkedRound,
                     )
                     assertFalse(
@@ -1211,7 +1347,7 @@ class CloudPullRunnerTest {
     fun persistedRoundCompletesAfterReopenThenChecksNewGapsWithoutMetadataChanges() =
         runBlocking {
             val file = databaseFile()
-            var cloud = listOf(pullEvent(1, "m-1"), pullEvent(3, "m-1"))
+            var cloud = listOf(pullEvent(1, uuid("m-1")), pullEvent(3, uuid("m-1")))
             val checks = mutableSetOf<String>()
             var metadataCalls = 0
 
@@ -1222,7 +1358,7 @@ class CloudPullRunnerTest {
                         if (cursor ==
                             0L
                         ) {
-                            (1..4).map { pullMatch("m-$it", it.toLong()) }
+                            (1..4).map { pullMatch(uuid("m-$it"), it.toLong()) }
                         } else {
                             emptyList()
                         },
@@ -1230,17 +1366,23 @@ class CloudPullRunnerTest {
                         visibilityEpoch = 1,
                     )
                 }
-                f.events = { id, after, _ -> if (id == "m-1") cloud.filter { it.serverSeq > after } else emptyList() }
+                f.events = { id, after, _ -> if (id == uuid("m-1")) cloud.filter { it.serverSeq > after } else emptyList() }
                 f.watermarks = { id ->
                     checks += id
-                    if (id == "m-1") listOf(EventWatermark("remote", 3, cloud.size.toLong())) else emptyList()
+                    if (id == uuid("m-1")) listOf(EventWatermark(REMOTE, 3, cloud.size.toLong())) else emptyList()
+                }
+                // Jede Runde prüft per Readiness-Vektor bis zum festgehaltenen H, auch ready-Matches.
+                f.serverLog = { id -> if (id == uuid("m-1")) cloud else emptyList() }
+                f.readiness = { body ->
+                    checks += body.getValue("p_match_id").jsonPrimitive.content
+                    f.servedReadiness(body)
                 }
             }
 
             suspend fun round(): CloudPullState {
                 var result = CloudPullState()
                 for (index in 1..12) {
-                    reopen(file).use { f ->
+                    reopen(file, activated = false).use { f ->
                         f.bind()
                         configure(f)
                         result = CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1).pullNow()
@@ -1254,9 +1396,9 @@ class CloudPullRunnerTest {
             }
             try {
                 assertEquals(CloudPullOutcome.COMPLETE, round().outcome)
-                assertEquals(setOf("m-1", "m-2", "m-3", "m-4"), checks)
+                assertEquals(setOf(uuid("m-1"), uuid("m-2"), uuid("m-3"), uuid("m-4")), checks)
                 assertEquals(1, metadataCalls)
-                reopen(file).use { f ->
+                reopen(file, activated = false).use { f ->
                     assertEquals(
                         1,
                         f.data.cloudPulls
@@ -1268,26 +1410,26 @@ class CloudPullRunnerTest {
                             .progress("alice")
                             .roundActive,
                     )
-                    f.data.events.markConfirmedUpTo("m-1", "remote", 3)
-                    f.data.events.append(EventRows.toStored(pullEvent(2, "m-1").toRow()))
+                    f.data.events.markConfirmedUpTo(uuid("m-1"), REMOTE, 3)
+                    f.data.events.append(EventRows.toStored(pullEvent(2, uuid("m-1")).toRow()))
                     f.data.events.append(EventRows.toStored(pullEvent(1, "unrelated").copy(id = "rejected").toRow()).copy(confirmed = true))
                     f.data.cloud.acknowledge(emptySet(), mapOf("rejected" to "forbidden"))
-                    assertEquals(3, f.data.events.count("m-1"))
-                    assertEquals(3, f.data.events.maxDeviceSeq("m-1", "remote"))
+                    assertEquals(3, f.data.events.count(uuid("m-1")))
+                    assertEquals(3, f.data.events.maxDeviceSeq(uuid("m-1"), REMOTE))
                 }
-                cloud = (1L..3L).map { pullEvent(it, "m-1") }
+                cloud = (1L..3L).map { pullEvent(it, uuid("m-1")) }
                 checks.clear()
                 assertEquals(CloudPullOutcome.COMPLETE, round().outcome)
-                assertEquals(setOf("m-1", "m-2", "m-3", "m-4"), checks)
+                assertEquals(setOf(uuid("m-1"), uuid("m-2"), uuid("m-3"), uuid("m-4")), checks)
                 assertEquals(2, metadataCalls)
-                reopen(file).use { f ->
+                reopen(file, activated = false).use { f ->
                     assertEquals(
                         2,
                         f.data.cloudPulls
                             .progress("alice")
                             .checkRound,
                     )
-                    val work = f.data.cloudPulls.eventWork("alice", "m-1")!!
+                    val work = f.data.cloudPulls.eventWork("alice", uuid("m-1"))!!
                     assertEquals(2, work.checkedRound)
                     assertFalse(work.repairing)
                     assertEquals(
@@ -1323,18 +1465,23 @@ class CloudPullRunnerTest {
                         f.metadata = { cursor, limit ->
                             val rows = (1L..201L).filter { it > cursor }.take(limit)
                             PullResponse(
-                                rows.map { pullMatch("m-$it", it) },
+                                rows.map { pullMatch(uuid("m-$it"), it) },
                                 cursor = rows.lastOrNull() ?: 201,
                                 hasMore = rows.lastOrNull() == 200L,
                                 visibilityEpoch = 1,
                             )
                         }
                         f.events = { id, after, limit ->
-                            if (id == "m-1") (1L..501L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                            if (id == uuid("m-1")) (1L..501L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                         }
                         f.watermarks = { id ->
                             checked += id
-                            if (id == "m-1") listOf(EventWatermark("remote", 501, 501)) else emptyList()
+                            if (id == uuid("m-1")) listOf(EventWatermark(REMOTE, 501, 501)) else emptyList()
+                        }
+                        f.serverLog = { id -> if (id == uuid("m-1")) (1L..501L).map { pullEvent(it, id) } else emptyList() }
+                        f.readiness = { body ->
+                            checked += body.getValue("p_match_id").jsonPrimitive.content
+                            f.servedReadiness(body)
                         }
                         val result =
                             CloudPullRunner(
@@ -1355,7 +1502,7 @@ class CloudPullRunnerTest {
                         if (result.outcome == CloudPullOutcome.COMPLETE) {
                             completed = true
                             assertEquals(201, checked.size)
-                            assertEquals(501, f.data.events.count("m-1"))
+                            assertEquals(501, f.data.events.count(uuid("m-1")))
                         } else {
                             assertEquals(CloudPullOutcome.LIMIT_REACHED, result.outcome)
                         }
@@ -1398,12 +1545,13 @@ class CloudPullRunnerTest {
                                 ->
                                 (1L..501L).filter { it * 2 > after }.take(limit).map { pullEvent(it, serverSeq = it * 2) }
                             }
-                        f.watermarks = { listOf(EventWatermark("remote", 501, 501)) }
+                        f.watermarks = { listOf(EventWatermark(REMOTE, 501, 501)) }
+                        f.serverLog = { (1L..501L).map { pullEvent(it, serverSeq = it * 2) } }
                         val result = CloudPullRunner(f.backend, f.data, maxRpcsPerRun = 1, maxPagesPerRun = 1).pullNow()
                         assertEquals(1, result.rpcCount)
                         assertTrue(result.completedMetadataPages + result.completedEventPages <= 1)
                         assertEquals(if (index == 4) CloudPullOutcome.COMPLETE else CloudPullOutcome.LIMIT_REACHED, result.outcome)
-                        val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                        val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                         assertEquals(if (index == 4) 1 else 0, work.checkedRound)
                         if (index == 1) assertEquals(0, work.lastAttempt)
                         if (index == 3) {
@@ -1411,14 +1559,15 @@ class CloudPullRunnerTest {
                             assertTrue(work.needsVerification)
                         }
                         if (index == 4) {
-                            assertEquals(501, f.data.events.count("match"))
+                            assertEquals(501, f.data.events.count(MATCH))
                             assertFalse(work.needsVerification)
                             assertFalse(
                                 f.data.cloudPulls
                                     .progress("alice")
                                     .roundActive,
                             )
-                            assertEquals(listOf("bind_cloud_session_v1", "cloud_match_event_watermarks_v1"), f.calls.map { it.first })
+                            // Vor ready prüft genau ein an G/E/H gebundener Readiness-Abruf statt des Wasserstands.
+                            assertEquals(listOf("bind_cloud_session_v1", "cloud_match_readiness_v1"), f.calls.map { it.first })
                         }
                     }
                 }
@@ -1454,7 +1603,9 @@ class CloudPullRunnerTest {
                     }
                 }
                 f.events = { _, after, limit -> cloud.filter { it.serverSeq > after }.take(limit) }
-                f.watermarks = { listOf(EventWatermark("remote", 3, cloud.size.toLong())) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 3, cloud.size.toLong())) }
+                // Ready-Matches prüft jede Runde per Readiness-Vektor bis H aus dem vollständigen Serverlog.
+                f.serverLog = { cloud }
             }
             try {
                 val initial = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
@@ -1467,7 +1618,7 @@ class CloudPullRunnerTest {
                     assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxPagesPerRun = 2).pullNow().outcome)
                     assertTrue(
                         f.data.cloudPulls
-                            .eventWork("alice", "match")!!
+                            .eventWork("alice", MATCH)!!
                             .repairing,
                     )
                 }
@@ -1476,11 +1627,11 @@ class CloudPullRunnerTest {
                     configure(f)
                     assertTrue(
                         f.data.cloudPulls
-                            .eventWork("alice", "match")!!
+                            .eventWork("alice", MATCH)!!
                             .repairing,
                     )
                     assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                    assertEquals(3, f.data.events.count("match"))
+                    assertEquals(3, f.data.events.count(MATCH))
                     epoch = 2
                     stagedScan = true
                     assertEquals(CloudPullOutcome.LIMIT_REACHED, CloudPullRunner(f.backend, f.data, maxPagesPerRun = 2).pullNow().outcome)
@@ -1542,9 +1693,13 @@ class CloudPullRunnerTest {
                 recording.recording = true
                 val result = CloudPullRunner(f.backend, f.data).pullNow()
                 recording.recording = false
-                assertEquals(CloudPullOutcome.BLOCKED, result.outcome) // Vollscan meldet fehlende Feed-Snapshots nur als D2-Arbeit.
+                // Der vollständige Katalog setzt fehlende Feed-Snapshots begrenzt auf ABSENT; nichts bleibt als D2-Rest.
+                assertEquals(CloudPullOutcome.COMPLETE, result.outcome)
+                assertEquals(0, result.pendingRemovals)
                 assertEquals(1, result.rpcCount)
-                assertTrue(recording.reads.none { it.contains("FROM match_event", true) })
+                // Erlaubt ist nur die matchgebundene Existenzprüfung des Purge (ohne Payload), kein globaler Logscan.
+                val eventReads = recording.reads.filter { it.contains("FROM match_event", true) }
+                assertTrue(eventReads.all { !it.contains("payload", true) && it.contains("e.match_id = ?") }, eventReads.toString())
                 assertTrue(recording.reads.none { it.contains("snapshot_json", true) })
                 assertTrue(recording.reads.none { it.contains("SELECT") && it.contains("FROM match_header") })
                 assertTrue(recording.reads.filter { it.contains("FROM cloud_pull_event_work") }.all { it.contains("LIMIT 1") })
@@ -1571,8 +1726,8 @@ class CloudPullRunnerTest {
                         )
                     }
                 assertEquals(CloudPullOutcome.FAILED, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                assertEquals(0, f.data.events.count("match"))
-                val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                assertEquals(0, f.data.events.count(MATCH))
+                val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 assertEquals(0, work.cursor)
                 assertTrue(
                     f.data.cloudPulls
@@ -1594,7 +1749,7 @@ class CloudPullRunnerTest {
                     f.metadata = { cursor, limit ->
                         val next = (1L..201L).filter { it > cursor }.take(limit)
                         PullResponse(
-                            matches = next.map { pullMatch("match-$it", it, "feed") },
+                            matches = next.map { pullMatch(uuid("match-$it"), it, "feed") },
                             players = listOf(PulledPlayer("player", "self", "Remote", false, serverVersion = 205)),
                             friendships = listOf(PulledFriendship("friend", status = "accepted", outgoing = false, serverVersion = 206)),
                             cursor = if (next.lastOrNull() == 200L) 200 else 210,
@@ -1619,7 +1774,7 @@ class CloudPullRunnerTest {
                             .progress("alice")
                             .targetEpoch,
                     )
-                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match-201"))
+                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("match-201")))
                 }
                 driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
                 PullFixture(driver).use { f ->
@@ -1643,14 +1798,20 @@ class CloudPullRunnerTest {
                             .progress("alice")
                             .visibilityEpoch,
                     )
-                    assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match-201"))
+                    assertNotNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("match-201")))
                     assertEquals(
                         205,
                         f.data.cloudPulls
                             .snapshot("alice", CloudPullEntityKind.PLAYER, "player")
                             ?.serverVersion,
                     )
-                    assertNull(f.data.players.self())
+                    // Der Cloudspieler "self" eines fremden Kontos wird nie zur eigenen Identität.
+                    assertTrue(
+                        f.data.players
+                            .self()
+                            ?.id
+                            ?.value != "player",
+                    )
                     assertEquals(0, f.data.cloudPulls.pendingRemovals("alice"))
                 }
             } finally {
@@ -1666,7 +1827,7 @@ class CloudPullRunnerTest {
                 f.metadata =
                     { cursor, _ -> PullResponse(if (cursor == 0L) listOf(pullMatch()) else emptyList(), cursor = 1, visibilityEpoch = 1) }
                 f.events = { _, after, limit -> (1L..501L).filter { it * 2 > after }.take(limit).map { pullEvent(it, serverSeq = it * 2) } }
-                f.watermarks = { listOf(EventWatermark("remote", 501, 501)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 501, 501)) }
                 val first = CloudPullRunner(f.backend, f.data, maxPagesPerRun = 2).pullNow()
                 assertEquals(CloudPullOutcome.LIMIT_REACHED, first.outcome)
                 assertEquals(
@@ -1678,19 +1839,20 @@ class CloudPullRunnerTest {
                 assertEquals(
                     1000,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")
+                        .eventWork("alice", MATCH)
                         ?.cursor,
                 )
-                assertEquals(500, f.data.events.count("match"))
+                assertEquals(500, f.storedEvents())
+                assertFalse(f.readable())
                 val second = CloudPullRunner(f.backend, f.data).pullNow()
                 assertEquals(CloudPullOutcome.COMPLETE, second.outcome)
-                assertEquals(501, f.data.events.count("match"))
+                assertEquals(501, f.data.events.count(MATCH))
                 assertEquals(501, f.data.events.unconfirmedCount())
                 assertEquals(0, f.data.cloud.pendingCount())
                 assertEquals(
                     1002,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")
+                        .eventWork("alice", MATCH)
                         ?.cursor,
                 )
             }
@@ -1699,13 +1861,15 @@ class CloudPullRunnerTest {
     @Test
     fun gapBelowCursorIsHealedWithoutChangedMetadataDespiteLocalPendingAndRejectedExtras() =
         runBlocking {
-            PullFixture().use { f ->
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 f.metadata =
                     { cursor, _ -> PullResponse(if (cursor == 0L) listOf(pullMatch()) else emptyList(), cursor = 1, visibilityEpoch = 1) }
                 var cloud = listOf(pullEvent(1), pullEvent(3))
                 f.events = { _, after, limit -> cloud.filter { it.serverSeq > after }.take(limit) }
-                f.watermarks = { listOf(EventWatermark("remote", 3, cloud.size.toLong())) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 3, cloud.size.toLong())) }
+                // Ready-Matches prüft jede Runde per Readiness-Vektor bis H aus dem vollständigen Serverlog.
+                f.serverLog = { cloud }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
                 // Lokal liegen count=3/max=3 vor; trotzdem fehlt der Serverempfang von Event 2.
                 val pending = EventRows.toStored(pullEvent(2).toRow())
@@ -1713,23 +1877,23 @@ class CloudPullRunnerTest {
                 f.data.events.appendAll(listOf(pending, rejected))
                 f.data.cloud.acknowledge(emptySet(), mapOf(rejected.id to "forbidden"))
                 cloud = (1L..3L).map(::pullEvent)
-                assertEquals(3, f.data.events.count("match"))
-                assertEquals(3, f.data.events.maxDeviceSeq("match", "remote"))
+                assertEquals(3, f.data.events.count(MATCH))
+                assertEquals(3, f.data.events.maxDeviceSeq(MATCH, REMOTE))
                 val firstRepair = CloudPullRunner(f.backend, f.data, maxPagesPerRun = 2).pullNow()
                 assertEquals(CloudPullOutcome.LIMIT_REACHED, firstRepair.outcome)
                 assertTrue(
                     f.data.cloudPulls
-                        .eventWork("alice", "match")!!
+                        .eventWork("alice", MATCH)!!
                         .repairing,
                 )
                 assertEquals(
                     0,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")
+                        .eventWork("alice", MATCH)
                         ?.cursor,
                 )
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                assertEquals(3, f.data.events.count("match"))
+                assertEquals(3, f.data.events.count(MATCH))
                 assertEquals(mapOf(rejected.id to "forbidden"), f.data.cloud.rejectedEvents())
                 assertEquals(
                     emptyList(),
@@ -1740,7 +1904,7 @@ class CloudPullRunnerTest {
                 assertEquals(
                     3,
                     f.data.cloudPulls
-                        .receivedWatermarks(f.data.cloudPulls.eventWork("alice", "match")!!)
+                        .receivedWatermarks(f.data.cloudPulls.eventWork("alice", MATCH)!!)
                         .single()
                         .eventCount,
                 )
@@ -1767,8 +1931,8 @@ class CloudPullRunnerTest {
                     }
                     assertEquals(CloudPullOutcome.FAILED, CloudPullRunner(f.backend, f.data).pullNow().outcome)
                     assertEquals(0, f.data.cloud.cursor("alice", CloudPullStore.METADATA_STREAM))
-                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match"))
-                    assertNull(f.data.matches.get(MatchId("match")))
+                    assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH))
+                    assertNull(f.data.matches.get(MatchId(MATCH)))
                 }
             }
         }
@@ -1776,7 +1940,7 @@ class CloudPullRunnerTest {
     @Test
     fun finalEventConflictRollsBackEventsReceiptsCursorAndAfterCommitNotification() =
         runBlocking {
-            PullFixture().use { f ->
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 f.metadata = { _, _ -> PullResponse(listOf(pullMatch()), cursor = 1, visibilityEpoch = 1) }
                 val existing =
@@ -1803,8 +1967,8 @@ class CloudPullRunnerTest {
                         .progress("alice")
                         .cursor,
                 )
-                assertEquals(listOf(existing), f.data.events.eventsFor("match"))
-                val work = f.data.cloudPulls.eventWork("alice", "match")!!
+                assertEquals(listOf(existing), f.data.events.eventsFor(MATCH))
+                val work = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 assertEquals(0, work.cursor)
                 assertTrue(
                     f.data.cloudPulls
@@ -1820,16 +1984,16 @@ class CloudPullRunnerTest {
         runBlocking {
             PullFixture().use { f ->
                 f.bind()
-                f.metadata = { _, _ -> PullResponse(listOf(pullMatch("old", access = "feed")), cursor = 10, visibilityEpoch = 1) }
+                f.metadata = { _, _ -> PullResponse(listOf(pullMatch(uuid("old"), access = "feed")), cursor = 10, visibilityEpoch = 1) }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
                 var call = 0
                 f.metadata = { cursor, _ ->
                     call++
                     when (call) {
                         1 -> PullResponse(cursor = 10, visibilityEpoch = 2)
-                        2 -> PullResponse(listOf(pullMatch("new", 11, "feed")), cursor = 11, hasMore = true, visibilityEpoch = 2)
+                        2 -> PullResponse(listOf(pullMatch(uuid("new"), 11, "feed")), cursor = 11, hasMore = true, visibilityEpoch = 2)
                         3 -> PullResponse(cursor = 11, visibilityEpoch = 3)
-                        4 -> PullResponse(listOf(pullMatch("new", 11, "feed")), cursor = 11, hasMore = true, visibilityEpoch = 3)
+                        4 -> PullResponse(listOf(pullMatch(uuid("new"), 11, "feed")), cursor = 11, hasMore = true, visibilityEpoch = 3)
                         else -> PullResponse(cursor = cursor, visibilityEpoch = 3)
                     }
                 }
@@ -1848,15 +2012,20 @@ class CloudPullRunnerTest {
                         .cursor,
                 )
                 val completed = CloudPullRunner(f.backend, f.data).pullNow()
-                assertEquals(CloudPullOutcome.BLOCKED, completed.outcome)
-                assertEquals(1, completed.pendingRemovals)
+                // Erst der vollständige Katalog bei G = 3 setzt das fehlende Match auf ABSENT; danach bleibt keine Entfernung offen.
+                assertEquals(CloudPullOutcome.COMPLETE, completed.outcome)
+                assertEquals(0, completed.pendingRemovals)
+                val old = f.data.replicas.access(f.data.replicas.captureContext(), uuid("old"))!!
+                assertEquals(eu.advantly.data.ReplicaAccessLevel.ABSENT, old.access)
+                assertEquals(3, old.generation)
+                assertNull(f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, uuid("old")))
                 assertEquals(
                     3,
                     f.data.cloudPulls
                         .progress("alice")
                         .visibilityEpoch,
                 )
-                assertFalse(f.data.matches.isDeleted(MatchId("old")))
+                assertFalse(f.data.matches.isDeleted(MatchId(uuid("old"))))
             }
         }
 
@@ -1868,16 +2037,16 @@ class CloudPullRunnerTest {
                 f.metadata = { cursor, limit ->
                     val rows = (1L..201L).filter { it > cursor }.take(limit)
                     PullResponse(
-                        rows.map { pullMatch("m-$it", it) },
+                        rows.map { pullMatch(uuid("m-$it"), it) },
                         cursor = rows.lastOrNull() ?: 201L,
                         hasMore = rows.lastOrNull() == 200L,
                         visibilityEpoch = 1,
                     )
                 }
                 f.events = { id, after, limit ->
-                    if (id == "m-1") (1L..501L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
+                    if (id == uuid("m-1")) (1L..501L).filter { it > after }.take(limit).map { pullEvent(it, id) } else emptyList()
                 }
-                f.watermarks = { id -> if (id == "m-1") listOf(EventWatermark("remote", 501, 501)) else emptyList() }
+                f.watermarks = { id -> if (id == uuid("m-1")) listOf(EventWatermark(REMOTE, 501, 501)) else emptyList() }
                 val runner =
                     CloudPullRunner(
                         f.backend,
@@ -1890,12 +2059,12 @@ class CloudPullRunnerTest {
                 val outcomes = (1..20).map { runner.pullNow().outcome }
                 val checked =
                     f.calls
-                        .filter { it.first == "cloud_match_event_watermarks_v1" }
+                        .filter { it.first == "cloud_match_readiness_v1" }
                         .map { it.second.getValue("p_match_id").toString() }
                         .toSet()
-                println("R1 stack budget: outcomes=$outcomes, checked=${checked.size}, events=${f.data.events.count("m-1")}")
+                println("R1 stack budget: outcomes=$outcomes, checked=${checked.size}, events=${f.data.events.count(uuid("m-1"))}")
                 assertEquals(201, checked.size)
-                assertEquals(501L, f.data.events.count("m-1"))
+                assertEquals(501L, f.data.events.count(uuid("m-1")))
                 assertTrue(CloudPullOutcome.COMPLETE in outcomes, "Stack-Test complete() bricht nach exakt 20 Versuchen ab")
             }
         }
@@ -1907,7 +2076,7 @@ class CloudPullRunnerTest {
                 f.bind()
                 f.metadata = { cursor, _ ->
                     PullResponse(
-                        if (cursor == 0L) (1..4).map { pullMatch("m-$it", it.toLong()) } else emptyList(),
+                        if (cursor == 0L) (1..4).map { pullMatch(uuid("m-$it"), it.toLong()) } else emptyList(),
                         cursor = 4,
                         visibilityEpoch = 1,
                     )
@@ -1916,7 +2085,7 @@ class CloudPullRunnerTest {
                 val outcomes = (1..12).map { runner.pullNow().outcome }
                 val checked =
                     f.calls
-                        .filter { it.first == "cloud_match_event_watermarks_v1" }
+                        .filter { it.first == "cloud_match_readiness_v1" }
                         .map { it.second.getValue("p_match_id").toString() }
                         .toSet()
                 println("R1 finite inventory: outcomes=$outcomes, checked=$checked")
@@ -1931,32 +2100,36 @@ class CloudPullRunnerTest {
     @Test
     fun failedFirstMatchMustNotPermanentlyStarveHealthyMatch() =
         runBlocking {
-            PullFixture().use { f ->
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 f.metadata = { cursor, _ ->
                     PullResponse(
-                        if (cursor == 0L) listOf(pullMatch("a-conflict", 1), pullMatch("b-healthy", 2)) else emptyList(),
+                        if (cursor == 0L) listOf(pullMatch(uuid("a-conflict"), 1), pullMatch(uuid("b-healthy"), 2)) else emptyList(),
                         cursor = 2,
                         visibilityEpoch = 1,
                     )
                 }
-                val bad = pullEvent(1, "a-conflict")
+                val bad = pullEvent(1, uuid("a-conflict"))
                 f.data.events.append(EventRows.toStored(bad.copy(wallClockMs = 999).toRow()))
                 f.events =
                     { id, after, _ ->
                         if (after ==
                             0L
                         ) {
-                            listOf(pullEvent(1, id).copy(id = if (id == "a-conflict") bad.id else "healthy-event"))
+                            listOf(pullEvent(1, id).copy(id = if (id == uuid("a-conflict")) bad.id else "healthy-event"))
                         } else {
                             emptyList()
                         }
                     }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
                 val runner = CloudPullRunner(f.backend, f.data)
                 val outcomes = (1..8).map { runner.pullNow().outcome }
-                println("R1 conflict fairness: outcomes=$outcomes, healthyEvents=${f.data.events.count("b-healthy")}")
-                assertEquals(1L, f.data.events.count("b-healthy"), "Konflikt darf unabhängige dauerhafte Jobs nicht für immer sperren")
+                println("R1 conflict fairness: outcomes=$outcomes, healthyEvents=${f.data.events.count(uuid("b-healthy"))}")
+                assertEquals(
+                    1L,
+                    f.data.events.count(uuid("b-healthy")),
+                    "Konflikt darf unabhängige dauerhafte Jobs nicht für immer sperren",
+                )
             }
         }
 
@@ -1968,11 +2141,11 @@ class CloudPullRunnerTest {
                 f.metadata =
                     { cursor, _ -> PullResponse(if (cursor == 0L) listOf(pullMatch()) else emptyList(), cursor = 1, visibilityEpoch = 1) }
                 f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
                 val runner = CloudPullRunner(f.backend, f.data, maxPagesPerRun = 1)
                 val outcomes = (1..8).map { runner.pullNow().outcome }
-                println("R1 one-page: outcomes=$outcomes, cursor=${f.data.cloudPulls.eventWork("alice", "match")?.cursor}")
-                assertEquals(1L, f.data.events.count("match"))
+                println("R1 one-page: outcomes=$outcomes, cursor=${f.data.cloudPulls.eventWork("alice", MATCH)?.cursor}")
+                assertEquals(1L, f.data.events.count(MATCH))
             }
         }
 
@@ -1984,14 +2157,15 @@ class CloudPullRunnerTest {
                 f.metadata =
                     { cursor, _ -> PullResponse(if (cursor == 0L) listOf(pullMatch()) else emptyList(), cursor = 1, visibilityEpoch = 1) }
                 f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
                 val runner = CloudPullRunner(f.backend, f.data, eventsCommitted = { error("review callback") })
                 assertEquals(CloudPullOutcome.FAILED, runner.pullNow().outcome)
-                assertEquals(1L, f.data.events.count("match"))
+                assertEquals(1L, f.storedEvents())
+                assertFalse(f.readable())
                 assertEquals(
                     1L,
                     f.data.cloudPulls
-                        .eventWork("alice", "match")
+                        .eventWork("alice", MATCH)
                         ?.cursor,
                 )
                 assertEquals(CloudPullOutcome.COMPLETE, runner.pullNow().outcome)

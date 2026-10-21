@@ -95,6 +95,8 @@ ready:
 UPDATE replica_access SET ready = 1 WHERE account_key = ? AND match_id = ? AND generation = ?;
 notReady:
 UPDATE replica_access SET ready = 0 WHERE account_key = ? AND match_id = ?;
+notReadyBefore:
+UPDATE replica_access SET ready = 0 WHERE account_key = ? AND generation < ? AND ready = 1;
 readable:
 SELECT count(*) FROM replica_readable_match WHERE match_id = ?;
 localProof:
