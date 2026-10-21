@@ -11,6 +11,7 @@ import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.data.CloudMetadataKind
+import eu.advantly.data.CloudPullMatch
 import eu.advantly.data.CloudPullMetadataPage
 import eu.advantly.data.LocalData
 import eu.advantly.data.RedactionCursor
@@ -61,18 +62,8 @@ class CloudUploadLifecycleTest {
         val serverMatches = mutableSetOf<String>()
         var restartWhen: (PushBatch) -> Boolean = { false }
 
-        /** Mit Beleg braucht jedes bekannte referenzierte Match sein aktuelles E; zusätzliche Einträge sind erlaubt. */
-        fun violates00700(batch: PushBatch): Boolean {
-            val lifecycle = batch.lifecycle
-            val referenced =
-                batch.matches.map { it.id } + batch.events.filter { lifecycle != null || it.id !in committed }.map { it.matchId }
-            val known = referenced.filter { it in serverMatches }.toSet()
-            return if (lifecycle == null) {
-                known.any { serverE.getOrDefault(it, 0) > 0 }
-            } else {
-                lifecycle.generation != serverG || known.any { lifecycle.redactionEpochs[it]?.toLong() != serverE.getOrDefault(it, 0) }
-            }
-        }
+        fun violates00700(batch: PushBatch): Boolean =
+            restartRequired00700(batch, serverG, { id -> serverE.getOrDefault(id, 0).takeIf { id in serverMatches } }, { it in committed })
 
         var loseResponse = false
         var hold: CompletableDeferred<Unit>? = null
@@ -161,10 +152,11 @@ class CloudUploadLifecycleTest {
         fun pull(
             g: Long,
             finish: Boolean = true,
+            matches: List<CloudPullMatch> = emptyList(),
         ) {
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             var cursor = data.cloudPulls.progress("alice").cursor
-            val page = { input: Long -> CloudPullMetadataPage(emptyList(), emptyList(), emptyList(), input + 1, false, g) }
+            val page = { input: Long -> CloudPullMetadataPage(matches, emptyList(), emptyList(), input + 1, false, g) }
             if (!data.cloudPulls.commitMetadata("alice", run, cursor, page(cursor)) {}) {
                 cursor = data.cloudPulls.progress("alice").cursor
                 assertTrue(data.cloudPulls.commitMetadata("alice", run, cursor, page(cursor)) {})
@@ -515,7 +507,7 @@ class CloudUploadLifecycleTest {
         }
 
     @Test
-    fun restartRequiredBlocksTheWholeProfileUntilALaterPullRoundCompletes(): Unit =
+    fun restartRequiredBlocksTheWholeProfileUntilALaterRoundCompletesItsCatalog(): Unit =
         runBlocking {
             Fixture().use { f ->
                 f.pull(1)
@@ -532,20 +524,91 @@ class CloudUploadLifecycleTest {
                 // Profilweit: auch unbeteiligte Matches warten auf den Pull, statt N Fehlversuche zu kaskadieren.
                 assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
                 assertEquals(1, f.bodies.size)
-                // Eine nur begonnene Runde genügt nicht.
-                f.pull(1, finish = false)
+                // Eine nur begonnene Runde ohne abgeschlossenen Katalog genügt nicht.
+                f.data.cloudPulls.beginRun("alice") {}
                 assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
                 assertEquals(1, f.bodies.size)
-                f.data.cloudPulls.finishRound(
-                    "alice",
+                // Integratorentscheid: der abgeschlossene Katalog dieser Runde gibt frei, nicht erst das Rundenende.
+                f.pull(1, finish = false)
+                assertTrue(
                     f.data.cloudPulls
                         .progress("alice")
-                        .runSerial,
-                ) {}
+                        .roundActive,
+                )
                 f.restartWhen = { false }
                 assertEquals(CloudUploadOutcome.LIMIT_REACHED, runner.uploadNow().outcome)
                 assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
                 assertEquals(listOf(CLOUD, LOCAL), f.batches.drop(1).flatMap { batch -> batch.events.map { it.matchId } })
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun releasedLockStaysReleasedWhenD1RestartsTheCatalogOfTheReleasingRound(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.bind()
+                f.restartWhen = { true }
+                val runner = f.runner()
+                assertEquals("restart_required", runner.uploadNow().failure?.reason)
+                f.restartWhen = { false }
+                f.pull(1, finish = false)
+                f.hold = CompletableDeferred()
+                val upload = async { runner.uploadNow() }
+                withTimeout(5_000) { f.sent.await() }
+                // D1 erhält in derselben Runde selbst 40001 und holt den Katalog neu: die erteilte Freigabe bleibt.
+                val progress = f.data.cloudPulls.progress("alice")
+                f.data.cloudPulls.restartCatalog("alice", progress.runSerial) {}
+                assertFalse(
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .roundCatalogReady,
+                )
+                f.hold!!.complete(Unit)
+                assertEquals(CloudUploadOutcome.DRAINED, upload.await().outcome)
+                f.hold = null
+                f.event(LOCAL, 2)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(3, f.bodies.size)
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun catalogEpochAboveAppliedEpochBlocksOnlyThatMatchWithout40001(): Unit =
+        runBlocking {
+            Fixture().use { f ->
+                f.pull(1)
+                f.event(CLOUD, 1)
+                f.event(LOCAL, 1)
+                f.bind()
+                // Der Katalog meldet E = 1; Access-Zeile entsteht im selben Commit, angewandt ist E = 0, kein Transfer offen.
+                f.serverMatches += CLOUD
+                f.serverE[CLOUD] = 1
+                f.pull(1, finish = false, matches = listOf(CloudPullMatch(CLOUD, 2, "{}", "member", 1, 1, false, null)))
+                assertEquals(
+                    0,
+                    f.data.replicas
+                        .access(f.data.replicas.captureContext(), CLOUD)
+                        ?.redactionEpoch,
+                )
+                val runner = f.runner()
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(
+                    listOf(LOCAL),
+                    f.batches
+                        .single()
+                        .events
+                        .map { it.matchId },
+                )
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(1, f.bodies.size)
+                // Transfer abgeschlossen: E lokal angewandt, das Match lädt mit E = 1 hoch.
+                f.redact(CLOUD, 1, 1)
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals(CloudPushLifecycle(1, mapOf(CLOUD to 1)), f.batches.last().lifecycle)
                 assertEquals(0, f.data.cloud.pendingCount())
             }
         }

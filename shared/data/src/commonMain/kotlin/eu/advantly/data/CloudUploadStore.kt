@@ -283,10 +283,10 @@ class CloudUploadStore internal constructor(
 
     /**
      * Upload-Beleg nach Vertrag Welle 2 (U4, korrigiert nach Review r1). Data wird ausschließlich über
-     * `CloudPullStore.progress`, `ReplicaLifecycleStore.access` und `redactionProgress` gelesen.
+     * `CloudPullStore.progress`/`snapshot`, `ReplicaLifecycleStore.access` und `redactionProgress` gelesen.
      */
     private inner class LifecycleProof(
-        profileId: String,
+        private val profileId: String,
         snapshotContext: ReplicaContext? = null,
     ) {
         private val progress = pulls.progress(profileId)
@@ -313,9 +313,12 @@ class CloudUploadStore internal constructor(
 
         private fun evaluate(matchId: String) {
             val access = account?.let { replicas.access(it, matchId) }
+            val applied = access?.redactionEpoch ?: 0
+            // Katalog-E über dem angewandten E: D1 hat den Anstieg gesehen, der Transfer fehlt noch (auch ohne offenen Transfer).
+            val catalog = pulls.snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.redactionObserved ?: 0
             val g = generation
-            if (blocksAll || (g == null && (access?.redactionEpoch ?: 0) > 0)) {
-                // Ohne G löste ein bekanntes E > 0 sicher 40001 aus und sperrte das ganze Profil.
+            if (blocksAll || catalog > applied || (g == null && applied > 0)) {
+                // Sonst sicher 40001: ohne G bei bekanntem E > 0, mit G beim alten E; beides sperrte das ganze Profil.
                 blocked += matchId
                 return
             }
@@ -352,9 +355,12 @@ class CloudUploadStore internal constructor(
     private fun restartKey(profileId: String) = "cloud.upload.restart.$profileId"
 
     /**
-     * Profilweite Neustartsperre: gespeichert ist die Pull-Runde beim 40001; erst eine danach begonnene, beendete Runde
-     * gibt frei. Ein unlesbarer Wert sperrt bis zur nächsten Runde und wird dafür mit der aktuellen Runde überschrieben.
-     * Nach der Freigabe bleibt der Wert stehen, wirkt aber nicht mehr: spätere Runden lassen das letzte G gültig.
+     * Profilweite Neustartsperre: gespeichert ist die Pull-Runde beim 40001. Integratorentscheid (Integrationspunkt B):
+     * Frei ist, sobald eine danach begonnene Runde ihren KATALOG abgeschlossen hat (`roundCatalogReady`), nicht erst
+     * nach dem Rundenabschluss. D1 braucht für eine ganze Runde bei 205 Matches 61 Läufe, U4 aber nur frisches G und
+     * frische Access-Zeilen; ein im Katalog gesehener E-Anstieg sperrt danach nur sein Match ([LifecycleProof]).
+     * Ein unlesbarer Wert sperrt bis zur nächsten Runde und wird dafür mit der aktuellen Runde überschrieben.
+     * Die Freigabe löscht den Wert: ein Katalogneustart derselben Runde (D1-eigenes 40001) sperrt nicht erneut.
      */
     private fun restartPending(
         profileId: String,
@@ -363,7 +369,11 @@ class CloudUploadStore internal constructor(
         val stored = settings.get(restartKey(profileId)) ?: return false
         val round = stored.toLongOrNull() ?: progress.checkRound.also { settings.putLong(restartKey(profileId), it) }
         // beginRun startet nur ohne aktive Runde; checkRound >= round + 2 beweist also, dass round + 1 beendet ist.
-        return progress.checkRound <= round || (progress.roundActive && progress.checkRound == round + 1)
+        val pending =
+            progress.checkRound <= round ||
+                (progress.checkRound == round + 1 && progress.roundActive && !progress.roundCatalogReady)
+        if (!pending) settings.remove(restartKey(profileId))
+        return pending
     }
 
     internal fun deferUntilPull(snapshot: CloudUploadSnapshot) {

@@ -43,6 +43,8 @@ import kotlin.test.assertTrue
 internal class PullFixture(
     val driver: SqlDriver = createInMemoryJvmDriver(),
     activated: Boolean = true,
+    /** Konto- und Quellenwahl vor der Aktivierung; der gemeinsame D1/U4-Test braucht eine eigene, gebundene Quelle. */
+    select: LocalData.() -> Unit = { selectPullAccount() },
 ) : AutoCloseable {
     val data = LocalData(driver)
     var credentials: CloudCredentials? = CloudCredentials("alice", "session-alice", "token-alice")
@@ -51,6 +53,7 @@ internal class PullFixture(
     var events: suspend (String, Long, Int) -> List<PulledEvent> = { _, _, _ -> emptyList() }
     var watermarks: suspend (String) -> List<EventWatermark> = { emptyList() }
     var redaction: suspend (JsonObject) -> String = { error("Keine Redaktionsantwort eingerichtet") }
+    var push: suspend (JsonObject) -> String = { error("Kein Push eingerichtet") }
 
     /** Ausgelieferter Serverstand: neueste Matchversion und jedes gelieferte Event je Match (für ehrliche Readiness-Vektoren). */
     val servedVersions = mutableMapOf<String, Long>()
@@ -67,7 +70,7 @@ internal class PullFixture(
     val calls = mutableListOf<Pair<String, JsonObject>>()
 
     init {
-        data.selectPullAccount()
+        data.select()
         if (activated) data.replicas.activate(data.replicas.captureContext()) {}
     }
 
@@ -151,6 +154,10 @@ internal class PullFixture(
 
                         "cloud_match_readiness_v1" -> {
                             readiness(body)
+                        }
+
+                        "cloud_sync_push_v1" -> {
+                            push(body)
                         }
 
                         else -> {
