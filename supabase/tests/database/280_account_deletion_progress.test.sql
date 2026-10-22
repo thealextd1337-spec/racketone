@@ -1,10 +1,10 @@
--- Löschjob kommt auch bei langen Konten voran (20261022000100, Review 0780489 P2-1) und getilgte Profil-IDs
--- werden nicht wieder angelegt (P3-1). Verzögerung über einen Test-Trigger NACH allen Löschtriggern auf profiles:
--- Wenn der Abbruch kommt, ist die Anonymisierung schon gelaufen und muss vollständig zurückrollen.
+-- Löschjob kommt auch bei langen Konten voran (20261022000100, Review 0780489 P2-1; seit 20261022000200 gestaffelt)
+-- und getilgte Profil-IDs werden nicht wieder angelegt (P3-1). Verzögerung über einen Test-Trigger NACH allen
+-- Löschtriggern auf profiles, also in C: Bricht C ab, rollt nur C zurück; A und die Matchblöcke bleiben.
 -- Maßstab 1:12: Joblimit 5 s statt 60 s. A 2,5 s und B 3 s liegen je allein darunter, zusammen darüber;
--- X braucht 8 s und liegt allein über dem Limit; C ohne Verzögerung. Vorher rollte jeder Lauf ganz zurück.
+-- X braucht 8 s und liegt allein über dem Limit; C ohne Verzögerung.
 begin;
-select plan(19);
+select plan(20);
 delete from private.account_deletion_job_state;
 select tests.create_user(n) from unnest(array['dp_a','dp_b','dp_x','dp_c','dp_keep']) n;
 update public.profiles set status='deletion_requested'
@@ -40,32 +40,41 @@ create function pg_temp.alive(p_names text[]) returns text[] language sql as $$
   where t.identifier=any(p_names) and exists(select 1 from auth.users u where u.id=t.id) $$;
 
 set local statement_timeout='5s';
--- Lauf 1: A fertig, B bricht am Limit ab.
+-- Gestaffelt (20261022000200): Ein Aufruf endet nach ~1 s Budget, die Verzögerung liegt in C (Profil-DELETE).
+-- Lauf 1: A für alle vier, dann C von A (2,5 s) - danach ist das Budget verbraucht.
 create temp table run1 as select private.run_account_deletion_job_v1() r;
-select is((select (r->>'deletedCount')::int||' '||(r->>'status')||' '||(r->>'errorCode') from run1),'1 failed statement_canceled',
-  'Run 1 keeps the finished deletion and reports the canceled one');
+select is((select (r->>'deletedCount')::int||' '||(r->>'status') from run1),'1 succeeded',
+  'Run 1 stages all due accounts and finishes A');
 select is(pg_temp.alive(array['dp_a','dp_b','dp_x','dp_c']),array['dp_b','dp_c','dp_x'],'Run 1 deleted A only');
-select is(pg_temp.attempts(tests.uid('dp_b')),1,'B has one failed attempt');
--- Lauf 2: X (ohne Fehlversuch, älter als C) zuerst, bricht ab; B wartet am Ende.
+select is((select array_agg(status order by status) from public.profiles
+  where id in (tests.uid('dp_b'),tests.uid('dp_x'),tests.uid('dp_c'))),array['deleting','deleting','deleting'],
+  'All due accounts are locked out after the first run');
+-- Lauf 2: B (ältester Schritt) braucht 3 s.
 create temp table run2 as select private.run_account_deletion_job_v1() r;
-select is((select (r->>'deletedCount')::int from run2),0,'Run 2 deletes nothing');
-select is(pg_temp.attempts(tests.uid('dp_x')),1,'X has one failed attempt');
-select is((select array[p.status,(s.deletion_requested_at is not null)::text,mp.profile_id::text,mp.deleted_profile::text,mp.display_name]
-  from public.profiles p join public.profile_settings s on s.profile_id=p.id
-  join public.match_participants mp on mp.profile_id=p.id where p.id=tests.uid('dp_x')),
-  array['deletion_requested','true',tests.uid('dp_x')::text,'false','Xaver'],'Canceled deletion leaves no half-deleted account');
-select is_empty($$select 1 from private.redacted_profile_identities where profile_id=tests.uid('dp_x')$$,
-  'Canceled deletion leaves no tombstone');
--- Lauf 3: C und B (je ein Fehlversuch weniger als X bzw. älter) kommen durch, X bricht wieder ab.
+select is((select (r->>'deletedCount')::int from run2),1,'Run 2 deletes B');
+select is(pg_temp.alive(array['dp_a','dp_b','dp_x','dp_c']),array['dp_c','dp_x'],'Run 2 deleted B');
+-- Lauf 3: Matchblock von X, C von C, dann bricht C von X am Limit ab.
 create temp table run3 as select private.run_account_deletion_job_v1() r;
-select is((select (r->>'deletedCount')::int from run3),2,'Run 3 deletes C and B');
+select is((select (r->>'deletedCount')::int||' '||(r->>'status')||' '||(r->>'errorCode') from run3),'1 failed statement_canceled',
+  'Run 3 keeps the finished deletion and reports the canceled one');
 select is(pg_temp.alive(array['dp_a','dp_b','dp_x','dp_c']),array['dp_x'],'Only the overlong account remains');
-select is(pg_temp.attempts(tests.uid('dp_x')),2,'X has two failed attempts');
+select is(pg_temp.attempts(tests.uid('dp_x')),1,'X has one failed attempt');
+select is((select array[p.status,mp.deleted_profile::text,mp.display_name,coalesce(mp.profile_id::text,'null')]
+  from public.profiles p, public.match_participants mp
+  where p.id=tests.uid('dp_x') and mp.match_id='28000000-0000-4000-8000-000000000001' and mp.slot_id='x'),
+  array['deleting','true','Gelöschter Spieler','null'],'Canceled C keeps A and the finished batch');
+select ok(exists(select 1 from public.profiles where id=tests.uid('dp_x'))
+  and exists(select 1 from private.redacted_profile_identities where profile_id=tests.uid('dp_x')),
+  'Canceled C leaves no half-deleted account');
 reset statement_timeout;
 select is((public.account_deletion_job_status_v1()->>'stalledAccountCount')::int,0,'No alarm below three attempts');
--- Lauf 4: dritter Fehlversuch -> Alarm, nur als Anzahl.
+-- Läufe 4 und 5: zweiter und dritter Fehlversuch -> Alarm, nur als Anzahl.
 set local statement_timeout='5s';
 create temp table run4 as select private.run_account_deletion_job_v1() r;
+reset statement_timeout;
+select is(pg_temp.attempts(tests.uid('dp_x')),2,'X has two failed attempts');
+set local statement_timeout='5s';
+create temp table run5 as select private.run_account_deletion_job_v1() r;
 reset statement_timeout;
 select is(pg_temp.attempts(tests.uid('dp_x')),3,'X has three failed attempts');
 select is((public.account_deletion_job_status_v1()->>'stalledAccountCount')::int,1,'Three failed attempts raise the alarm');
