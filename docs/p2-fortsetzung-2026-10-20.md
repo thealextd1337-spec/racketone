@@ -2071,3 +2071,18 @@ Grundlage ist die lesende Analyse `advantly-20261022-w3-contract-analysis-r1` au
 **Reihenfolge:** S, D und P starten parallel auf dem Schnittstellen-Commit. S schaltet
 die Backlog-Tests im Schreibfenster erst nach dem Merge von D-1 scharf. Gradle läuft
 nacheinander: D → S → P. Die Abnahmefälle stehen in Bericht §9.
+
+**D-1 übernommen** (`967e79b` + `a720d301`, Merge `1f2def72`, voller Check grün):
+- Review r1: Freigabe mit Auflagen, kein Datenschutzleck, Reds echt.
+- P2-1 behoben: Ohne Lesespur liest die Zählung nur noch Index und Zähler, keine Payloads
+  mehr. In der Probe (300 fremde Matches × 200 Events) kostet das ca. 70 ms statt 180 ms;
+  die Basis lag bei 40 ms.
+- P3-3 behoben: Tests für mehrere eigene Geräte und ein Gerät eines fremden Kontos.
+- **Hinweis an S:** Bei ausstehender Redaktion meldet der Zähler einen Wert größer 0,
+  `unconfirmedEvents` bleibt aber leer. S behandelt das als „wartet auf Redaktion“, nicht
+  als Fehler.
+- **Hinweis an S (P3-1):** Verborgene Events verursachen ein Ping-Pong aus Events und
+  `Summary(reply)`. Mit D-1 betrifft das nur noch fremde Quellen und ausstehende Redaktion.
+- **Akzeptiertes Restrisiko (P3-4):** Ein neues E wird erst im neuen G sichtbar. Bis dahin
+  gibt das Neuscan-Fenster eigene Events nach dem bekannten E frei, und zwar nur an
+  Gegenstellen desselben Kontos. Das entspricht der normalen Lesespur.
