@@ -43,11 +43,14 @@ class GlanceModelTest {
     }
 
     @Test
-    fun storedSnapshotPreservesSetupScoreServerNamesAndRole() {
+    fun storedSnapshotPreservesSetupScoreServerAndRoleButNoNames() {
         start()
         h.watch.recordPoint(Side.B)
         val snapshot = derive()
-        assertEquals(snapshot, GlanceStateStorage.decode(GlanceStateStorage.encode(snapshot)))
+        assertTrue(snapshot.toString().contains("Bea"))
+        val stored = GlanceStateStorage.encode(snapshot)
+        assertFalse("Namen gehören nicht in SharedPreferences (E5)", stored.contains("Bea"))
+        assertEquals(snapshot.withoutNames(), GlanceStateStorage.decode(stored))
         assertEquals(GlanceState(), GlanceStateStorage.decode(GlanceStateStorage.encode(GlanceState())))
     }
 

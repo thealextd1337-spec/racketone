@@ -15,7 +15,14 @@ import kotlinx.serialization.json.Json
 data class GlanceState(
     val live: GlanceMatch? = null,
     val last: GlanceSetup? = null,
-)
+) {
+    /** Persistierbare Form (E5): ohne Namen, die löst jeder Prozessstart neu aus der Datenbank auf. */
+    fun withoutNames(): GlanceState =
+        GlanceState(
+            live?.copy(server = live.server?.copy(name = null)),
+            last?.copy(players = last.players.map { it.copy(name = null) }),
+        )
+}
 
 @Serializable
 data class GlancePlayer(
@@ -99,6 +106,9 @@ class GlanceUpdateThrottle(
     private var lastSentAt: Long? = null
     private var sent: GlanceState? = initialState
 
+    // Der gespeicherte Stand trägt keine Namen (E5); bis zum ersten Senden wird ohne Namen verglichen.
+    private var sentWithoutNames = initialState != null
+
     /** `null`: unverändert; sonst verbleibende Wartezeit. Zeit kommt monoton vom Aufrufer. */
     fun delayFor(
         state: GlanceState,
@@ -109,7 +119,7 @@ class GlanceUpdateThrottle(
             sent(state, nowMs)
             return null
         }
-        if (state == sent) return null
+        if (state == sent || (sentWithoutNames && state.withoutNames() == sent)) return null
         val last = lastSentAt ?: return 0
         return (intervalMs - (nowMs - last).coerceAtLeast(0)).coerceAtLeast(0)
     }
@@ -119,18 +129,24 @@ class GlanceUpdateThrottle(
         nowMs: Long,
     ) {
         sent = state
+        sentWithoutNames = false
         lastSentAt = nowMs
     }
 }
 
-/** Persistierter Vergleichswert, unabhängig von Locale und Layout; alte/defekte Werte sind eine neue Baseline. */
+/**
+ * Persistierter Vergleichswert, unabhängig von Locale und Layout; alte/defekte Werte sind eine neue Baseline.
+ * Gespeichert werden nur Zustand und Plätze, nie Namen (E5): Werte älterer Versionen mit Namen gelten als defekt.
+ */
 object GlanceStateStorage {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun encode(state: GlanceState): String = json.encodeToString(GlanceState.serializer(), state)
+    fun encode(state: GlanceState): String = json.encodeToString(GlanceState.serializer(), state.withoutNames())
 
     fun decode(value: String?): GlanceState? =
-        value?.let { runCatching { json.decodeFromString(GlanceState.serializer(), it) }.getOrNull() }
+        value
+            ?.let { runCatching { json.decodeFromString(GlanceState.serializer(), it) }.getOrNull() }
+            ?.takeIf { it == it.withoutNames() }
 }
 
 /** Der Verbrauch gehört zur Activity-Instanz; restaurierte Instanzen haben das Intent bereits verbraucht. */

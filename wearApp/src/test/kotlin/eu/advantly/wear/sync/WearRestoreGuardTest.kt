@@ -15,11 +15,14 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.wear.glance.GlancePlayer
 import eu.advantly.wear.glance.GlancePublisher
+import eu.advantly.wear.glance.GlanceSetup
 import eu.advantly.wear.glance.GlanceState
 import eu.advantly.wear.workout.SessionStore
 import eu.advantly.wear.workout.WorkoutService
 import eu.advantly.wear.workout.WorkoutStateHolder
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -119,6 +122,64 @@ class WearRestoreGuardTest {
         val freshId = holder.prefs.openMatchId
         assertTrue(freshId != null && freshId != MatchId("old-private-match"))
         assertEquals(freshId, WearPrefs(app).openMatchId)
+    }
+
+    @Test
+    fun glanceCacheStoresNoNamesAndDropsLegacyValuesWithNames() {
+        val app = RuntimeEnvironment.getApplication()
+        val holder = WearSessions.get(app)
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        val self =
+            holder.data.players
+                .ensureSelf("", 1) { PlayerId("me") }
+                .id
+        val bea =
+            holder.data.players
+                .addGuest(PlayerId("bea"), "Bea", 1)
+                .id
+        val legacy = GlanceState(last = GlanceSetup(format, listOf(GlancePlayer("Bea", false, Side.B, 0))))
+        holder.prefs.glanceSentState = Json.encodeToString(GlanceState.serializer(), legacy)
+        val publisher = GlancePublisher(app, holder)
+        assertNull("alter Wert mit Namen wird beim Start verworfen", holder.prefs.glanceSentState)
+        holder.session.create(format, Lineup(listOf(self), listOf(bea), self))
+        holder.session.addListener(publisher)
+        assertTrue(GlancePublisher.snapshot.toString().contains("Bea"))
+        val stored = holder.prefs.glanceSentState!!
+        assertFalse("Kaltstart löst Namen neu auf, gespeichert werden nur Plätze", stored.contains("Bea"))
+        holder.session.removeListener(publisher)
+        publisher.dispose()
+    }
+
+    @Test
+    fun deferredRedactionUpdateSurvivesProcessDeath() {
+        val app = RuntimeEnvironment.getApplication()
+        val holder = WearSessions.get(app)
+        val self =
+            holder.data.players
+                .ensureSelf("", 1) { PlayerId("me") }
+                .id
+        val bea =
+            holder.data.players
+                .addGuest(PlayerId("bea"), "Bea", 1)
+                .id
+        holder.session.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(bea), self))
+        val publisher = GlancePublisher(app, holder)
+        holder.session.addListener(publisher)
+        assertTrue(GlancePublisher.snapshot.toString().contains("Bea"))
+        assertTrue("ohne aufgeschobenes Update bleibt der Sendestand, ein Neustart sendet nicht", holder.prefs.glanceSentState != null)
+        // Redaktion im Drosselfenster: Update wird nur aufgeschoben, danach endet der Prozess
+        holder.data.players.rename(bea, "")
+        val state = holder.session.state.value
+        publisher.onStateChanged(state.copy(lifecycleRevision = state.lifecycleRevision + 1))
+        assertFalse(GlancePublisher.snapshot.toString().contains("Bea"))
+        holder.session.removeListener(publisher)
+        publisher.dispose()
+        assertNull("Neustart muss das verlorene Update erzwingen", holder.prefs.glanceSentState)
+        val restarted = GlancePublisher(app, holder)
+        holder.session.addListener(restarted)
+        assertTrue(holder.prefs.glanceSentState != null)
+        holder.session.removeListener(restarted)
+        restarted.dispose()
     }
 
     @Test

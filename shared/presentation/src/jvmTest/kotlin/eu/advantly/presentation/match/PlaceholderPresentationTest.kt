@@ -123,6 +123,14 @@ class PlaceholderPresentationTest {
                 .summary.setup.assignedPlayers[slot]!!
                 .displayName,
         )
+        // Ein leerer Name ist nie ein Name: die Oberfläche zeigt den Platzhalter („Gegner“), nicht „Du“.
+        assertTrue(
+            store
+                .record(match)!!
+                .summary.setup
+                .player(slot)!!
+                .isPlaceholder,
+        )
         val directoryBefore = data.players.get(person.id)
         if (withDirectoryPlayer) {
             assertEquals("Sensitive name", directoryBefore!!.displayName)
@@ -132,6 +140,10 @@ class PlaceholderPresentationTest {
         val beforeAssignment = data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value)
         if (repeatMatch) {
             store.start(store.record(match)!!.summary.setup)
+            val rematch = store.active.value!!.setup
+            // Revanche: Name per Spieler-ID aus dem Verzeichnis, nie aus dem historischen Event
+            assertEquals(directoryBefore?.displayName ?: "", rematch.player(person.id)!!.displayName)
+            assertEquals(directoryBefore == null, rematch.player(person.id)!!.isPlaceholder)
         } else {
             assertTrue(store.assignPlayer(match, secondSlot, other.id))
         }

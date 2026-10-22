@@ -25,7 +25,11 @@ class GlancePublisher(
     private var active = !staged
     private var prepared: GlanceState? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val restoredState = GlanceStateStorage.decode(holder.prefs.glanceSentState)
+    private val restoredState =
+        GlanceStateStorage.decode(holder.prefs.glanceSentState).also {
+            // Alter Wert mit Namen (vor E5) oder defekt: sofort verwerfen, nicht erst beim nächsten Senden
+            if (it == null && holder.prefs.glanceSentState != null) holder.prefs.glanceSentState = null
+        }
     private val throttle = GlanceUpdateThrottle(initialState = restoredState)
     private var initialized = false
     private val directoryRefresh = GlanceDirectoryRefresh()
@@ -91,7 +95,10 @@ class GlancePublisher(
             }
         }
         handler.removeCallbacks(update)
-        when (val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())) {
+        val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())
+        // Der namenlose Sendestand verdeckt reine Namensänderungen: endet der Prozess vorher, erzwingt der Neustart das Update
+        if (delay != null && delay > 0) holder.prefs.glanceSentState = null
+        when (delay) {
             null -> Unit
             0L -> requestUpdate()
             else -> handler.postDelayed(update, delay)

@@ -60,6 +60,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     @Published private(set) var phoneStatus = "GRAY"
     @Published private(set) var phoneStatusUpdate = ""
     @Published private(set) var phoneDevelopmentBuild = false
+    /// Lifecycle-Revision der Session (Access, Redaktion, Directory); nur auf Ungleichheit vergleichen.
+    private var lifecycleRevision: Int64 = 0
     /// Telemetrie-Sichtbarkeit (P2-J): `share`, `private` (Standard) oder `off`; mit dem iPhone abgeglichen.
     @Published private(set) var telemetryVisibility = "private"
     /// Ausschließlich nach einem lokalen Punkt sichtbar; Sync-/Ack-Updates verlängern die Frist nicht.
@@ -193,9 +195,15 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         phoneStatus = status.light
         phoneStatusUpdate = status.updateRequired
         phoneDevelopmentBuild = status.developmentBuild
+        // Neue Lifecycle-Revision: abgeleitete Namen und „Wie letztes Mal“ neu laden, sonst nichts
+        let lifecycleChanged = status.lifecycleRevision != lifecycleRevision
+        lifecycleRevision = status.lifecycleRevision
+        if lifecycleChanged {
+            lastSetup = scoring.lastSetup()
+        }
         // Auch eine Änderung der Telemetrie-Sichtbarkeit am iPhone meldet sich hier
         refreshTelemetryVisibility()
-        if snapshot?.matchId != before?.matchId {
+        if snapshot?.matchId != before?.matchId || lifecycleChanged {
             recentPeople = scoring.recentPeople()
         }
         if snapshot?.matchId != before?.matchId || snapshot?.isScorer != true ||

@@ -777,10 +777,13 @@ internal class WatchControllerCore(
         )
     }
 
+    /** Per Spieler-ID; eine redigierte Zuweisung ("") ist kein Name und fällt nicht auf das Verzeichnis zurück. */
     private fun nameOf(id: PlayerId): String? =
-        session.state.value.match
-            ?.id
-            ?.let { session.data.assignments(it)[id]?.displayName } ?: directory.displayName(id)
+        (
+            session.state.value.match
+                ?.id
+                ?.let { session.data.assignments(it)[id]?.displayName } ?: directory.displayName(id)
+        )?.takeIf { it.isNotBlank() }
 
     private fun emit(effect: WatchEffect) {
         effects?.invoke(effect)

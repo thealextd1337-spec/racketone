@@ -77,6 +77,7 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * Kosten: Pro Punkt baut der Adapter nur den Live-Snapshot neu. Historie, „Wie letztes Mal“ und Spielernamen lädt er
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
  * Matches, Spieler, Identität); Ergebnis-Köpfe beendeter Matches sind samt Setup zwischengespeichert; nur Details lesen das Event-Log.
+ * Eine neue `lifecycleRevision` (Access, Redaktion oder Directory aus Data) verwirft alle abgeleiteten Namen, Köpfe und Details.
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
@@ -86,7 +87,8 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * damit das Alter einen Neustart übersteht. Ohne gemerkten Kontakt ist es unbekannt (nicht 0).
  *
  * Identität: Spieler-IDs, die die Datenbank als Alias des Besitzers kennt (z. B. der Self der Uhr vor der Übernahme),
- * zeigt der Adapter als Besitzer – nie als Gast.
+ * zeigt der Adapter als Besitzer – nie als Gast. Namen kommen immer per Spieler-ID aus der Datenbank; eine Person ohne
+ * Namen (redigiert oder unbekannt) erscheint als Platzhalter, nie mit leerem Namen.
  *
  * Nur auf dem Scheduler-Thread der Session (Main-Thread) benutzen; [close] meldet den Listener ab.
  *
@@ -554,7 +556,8 @@ class SessionMatchStore(
         running.firstOrNull()?.takeIf { now - it.updatedAtMs <= RESUME_WINDOW_MS }?.let { session.resume(it.id) }
     }
 
-    private fun onSessionState(state: SessionState) {
+    /** `internal` nur für Tests, die Session-Zustände mit eigener Revision einspielen. */
+    internal fun onSessionState(state: SessionState) {
         val previous = lastState
         lastState = state
         trackScorerContact(state)
@@ -562,7 +565,13 @@ class SessionMatchStore(
         updateRequiredFlow.value = updateRequiredOf(state)
         // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
-        if (storedDataMayHaveChanged(previous, state)) refreshStored()
+        // Nur auf Ungleichheit: der Zähler beginnt nach einem Neustart wieder bei 0.
+        val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision
+        if (lifecycleChanged) {
+            summaries.clear()
+            records.clear()
+        }
+        if (lifecycleChanged || storedDataMayHaveChanged(previous, state)) refreshStored(directoryChanged = lifecycleChanged)
         publishActive(state)
     }
 
@@ -653,7 +662,7 @@ class SessionMatchStore(
         val focused = m.id == state.match?.id
         return LiveMatchSnapshot(
             matchId = m.id,
-            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, data.assignments(m.id)),
+            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, assignmentsOf(m.id)),
             state = m.state,
             canUndo = m.canUndo,
             canRedo = m.canRedo,
@@ -733,10 +742,9 @@ class SessionMatchStore(
     // --- Gespeicherte Daten -------------------------------------------------------------------------
 
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
-    private fun refreshStored() {
+    private fun refreshStored(directoryChanged: Boolean = false) {
         val previousSelf = selfFlow.value.id
         selfFlow.value = ensureSelf()
-        if (previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
         players.clear()
         val previousAliases = aliases
         aliases = data.selfAliases()
@@ -755,6 +763,8 @@ class SessionMatchStore(
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
         historyFlow.value = loadHistory()
+        // Erst nach dem Neuladen: Listener lösen Namen aus den frischen Gästen auf
+        if (directoryChanged || previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
     }
 
     private fun ensureSelf(): Player =
@@ -781,8 +791,14 @@ class SessionMatchStore(
                 } else {
                     data.players.get(id)?.toPlayer()
                 }
-            resolved?.also { players[id] = it } ?: Player(id, "")
+            resolved?.masked()?.also { players[id] = it } ?: Player(id, "").masked()
         }
+
+    /** Ohne Namen (redigiert oder unbekannt) gilt eine Person als Platzhalter; der Besitzer heißt dann „Du“. */
+    private fun Player.masked(): Player =
+        if (displayName.isBlank() && !isPlaceholder && id != selfFlow.value.id && id !in aliases) copy(isPlaceholder = true) else this
+
+    private fun assignmentsOf(matchId: MatchId): Map<PlayerId, Player> = data.assignments(matchId).mapValues { it.value.masked() }
 
     private fun setupOf(record: StoredMatch): MatchSetup =
         MatchSetup(
@@ -791,7 +807,7 @@ class SessionMatchStore(
             record.meta,
             playersOf(record.lineup, record.id),
             record.previousMatchId,
-            data.assignments(record.id),
+            assignmentsOf(record.id),
         )
 
     private fun playersOf(
