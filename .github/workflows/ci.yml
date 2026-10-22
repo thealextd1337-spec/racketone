@@ -415,7 +415,7 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ steps.export-tools.outputs.deno }}
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: D1-Schranken, XML-Gate und Fehler-Cleanup prüfen
         run: uv run .github/scripts/d1_stack_ci_test.py
       - name: Edge Functions prüfen (Typen, Format, Lint, Tests)
