@@ -1,6 +1,8 @@
 -- K3: feste Frist, deterministischer 100er-Batch, atomarer Fehler und wahrer Betriebsnachweis.
 begin;
 set local timezone = 'UTC';
+-- Gestaffelte Löschung (20261022000200): Ein Aufruf endet nach ~1 s. Mit großem Budget bleibt ein Aufruf = bis zu 100 Konten.
+set local advantly.account_deletion_budget = '30s';
 select plan(29);
 delete from private.account_deletion_job_state;
 select is(public.account_deletion_job_status_v1()->'lastCommittedRun', '{"status":"unknown"}'::jsonb,

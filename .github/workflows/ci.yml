@@ -438,12 +438,13 @@ jobs:
       - name: pgTAP-Tests (RLS, RPCs)
         run: supabase test db
       - name: Consent-Gate und D2/D3-Lockrennen prüfen
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
           ADVANTLY_CONSENT_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/181_cloud_consent_gate_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/210_cloud_lifecycle_redactions_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/220_redaction_write_guards_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/250_late_redaction_manifest_concurrency.py --confirm-disposable
+          ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/290_staged_account_deletion_concurrency.py --confirm-disposable
       - name: Export-Rennen und SQL-ZIP-CSV-Rundlauf
         run: uv run supabase/tests/database/200_private_data_exports_concurrency.py --confirm-disposable --archive-roundtrip
       - name: Export über echte Auth-, HTTP- und Storage-Dienste
