@@ -2103,3 +2103,40 @@ nacheinander: D → S → P. Die Abnahmefälle stehen in Bericht §9.
   vorhanden, aber nicht schreibbar ist (`rememberPlayers` → `addGuest`). Das wird erst
   mit V4 relevant.
 - Swift (`ScoringModel.swift`) ist nur in der CI prüfbar.
+
+**S übernommen** (`51faecf`, `b7a3b71`, `90e2746`, Merge `8c8bde95`; `WriteWindowBacklogTest`
+nach D-1 eingeschaltet in `b71f2390`). Der Baum ist identisch mit dem Probe-Merge
+`00850345`, auf dem der volle Check grün lief.
+
+Review r1: Freigabe mit Auflagen. Kein Rechte- oder Namensleck gefunden. 23 von 23
+neuen Tests sind gegen die Basis fachlich rot.
+
+**Vor der V4-Aktivierung Pflicht (Runde 2 `advantly-20261023-w3-session-r2`):**
+- **P2-1:** Ein Handy mit Konto und Bereich 3..4 handelte mit einer v3-Uhr Version 3 aus.
+  Danach flossen nur Events, Access und Redaktion kamen nie an, und das Handy meldete
+  trotzdem `settled`.
+  - **Entscheidung:** Mit Konto sendet das Hello `minV = 4`. Gegenüber v3 entsteht ein
+    Updatezustand, und es fließt nichts mehr.
+  - Ohne Konto bleibt P1 unverändert.
+- **P2-2:** Der Auth-Lease-Teil des Fence ist ungetestet. Die Mutationsproben der Review
+  bleiben grün, wenn die Fence leer ist oder ganz entfällt. Fehlende Tests:
+  - Neustart ohne `activateAccount`;
+  - Wechsel zwischen Empfang und Mutation.
+
+**P3 in Runde 2:**
+- Ein übergroßes Einzelelement wird als blockiert gemeldet.
+- `Summary.lifecycle` läuft im periodischen Takt mit, wegen Probe B (beendetes Match
+  bleibt auf der Uhr bis zum nächsten Hello unbereit).
+- P3-C-Repro und Prüfung der Nebenwirkung „neu installiertes Handy kann in älteren
+  eigenen Matches keine Spieler zuweisen“.
+- Stamp-Logik wandert nach `MatchStamps.kt`.
+
+**Beim Integrator:**
+- Data-Konstante 64 KiB öffentlich machen.
+- UI-Hinweis bei scheiterndem `emit` (mit P-3).
+- `activateAccount` bei jedem App-Start.
+- Der LinkFrame-Overhead liegt außerhalb der 64 KiB. Der Envelope-Spielraum deckt ihn
+  praktisch ab, garantiert ist das aber nicht.
+
+**D-2** (`0d1fdd8e`, Uhr-Match am aktivierten Handy, bestätigt durch Probe D der S-Review)
+ist in Review: `advantly-20261023-w3-data-d2-review-r1`.
