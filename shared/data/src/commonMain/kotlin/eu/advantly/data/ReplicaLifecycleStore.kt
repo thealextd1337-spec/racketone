@@ -1,6 +1,9 @@
 package eu.advantly.data
 
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssigned
@@ -168,6 +171,8 @@ class ReplicaLifecycleStore internal constructor(
     /**
      * Marker nur für einen Kopf über ungeklärtem Event-Bestand. Ein Kopf vor jeder Genesis bleibt unmarkiert und ohne
      * Quelle unlesbar; die Genesis muss dann [requireAppend] bestehen (W3, Anfrage 1: Kopf der eigenen Uhr vor ihrer Genesis).
+     * Sein Inhalt ist bis dahin ungeprüft; [requireAppend] nimmt die Genesis nur an, wenn Format, Lineup, Metadaten und
+     * Erzeugungszeit des Kopfs aus ihr stammen.
      */
     internal fun noteUnresolvedImport(matchId: String) {
         if (!activated || readable(matchId) || database.matchEventQueries.countForMatch(matchId).executeAsOne() == 0L) return
@@ -211,7 +216,10 @@ class ReplicaLifecycleStore internal constructor(
         check(writable(matchId)) { "Replikat ist nicht zum Schreiben freigegeben" }
     }
 
-    /** `true` nur nach dem Genesis-Durchlauf einer lokalen Erzeugung; Folgeevents im Batch sind dann an deren Quelle gebunden. */
+    /**
+     * `true` nur nach dem Genesis-Durchlauf einer eigenen Quelle (lokal im aktuellen Scope oder per `cloud_device_owner` an das
+     * aktuelle Konto gebunden, z. B. die eigene Uhr); Folgeevents im Batch sind dann an genau diese Quelle gebunden.
+     */
     internal fun requireAppend(event: StoredEvent): Boolean {
         if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return false
         // Nur die belegte Erzeugung einer eigenen Quelle darf ohne Cloudstand beginnen, kein fremder Punkt.
@@ -242,6 +250,19 @@ class ReplicaLifecycleStore internal constructor(
         check(ownSource && ownCreator) {
             "Ungeklärter Import benötigt autoritativen Lifecycle-Abgleich"
         }
+        // Ein Kopf vor der Genesis (MatchMeta zuerst) wird nur angenommen, wenn er aus ihr stammt; sonst würde fremder
+        // Kopfinhalt (Lineup, Ort) mit der eigenen Genesis lesbar. Ehrliche Erzeuger legen ihn genau so an (MatchSession).
+        val header = database.matchHeaderQueries.selectById(event.matchId).executeAsOneOrNull()
+        check(
+            header == null ||
+                (
+                    created != null &&
+                        DataJson.decodeFromString(MatchFormat.serializer(), header.format_json) == created.config &&
+                        DataJson.decodeFromString(Lineup.serializer(), header.lineup_json) == created.lineup &&
+                        DataJson.decodeFromString(MatchMeta.serializer(), header.meta_json) == created.meta &&
+                        header.created_at_ms == event.wallClockMs
+                ),
+        ) { "Vorhandener Kopf passt nicht zur Genesis" }
         return true
     }
 
