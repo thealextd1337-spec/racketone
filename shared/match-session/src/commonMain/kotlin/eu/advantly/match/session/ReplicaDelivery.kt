@@ -41,7 +41,7 @@ internal class LifecycleDelivery(
     /** Je Uhr-Gerät und Wire-Transfer: erster unbestätigter Wire-Index. */
     private val nextUnacked = HashMap<Pair<String, String>, Long>()
 
-    /** Wire-Seiten je Transfer, deterministisch aus den gespeicherten Data-Seiten. */
+    /** Wire-Seiten je lokalem Transfer (kontogebunden, A → B → A), deterministisch aus den gespeicherten Data-Seiten. */
     private val chunks = HashMap<String, List<RedactedChunk>>()
 
     /** Zuletzt zugestellter offener Stand je Uhr: Data-Signale lösen nur bei Änderung eine neue Runde aus. */
@@ -148,7 +148,7 @@ internal class LifecycleDelivery(
         val transfer = progress.transfer
         if (!progress.completed || transfer.generation != d.generation || transfer.epoch != d.redactionEpoch) return
         val id = wireTransferId(d)
-        val all = chunks.getOrPut(id) { exportChunks(ctx, transfer, id, fence) }
+        val all = chunks.getOrPut(transfer.id) { exportChunks(ctx, transfer, id, fence) }
         if (all.isEmpty()) return
         // Alles bestätigt, aber kein Abschluss-Ack: die letzte Seite löst ihn idempotent erneut aus
         val from = minOf(nextUnacked[device to id] ?: 0, all.lastIndex.toLong()).toInt()

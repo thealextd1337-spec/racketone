@@ -22,8 +22,8 @@ internal class ReplicaReceiver(
     private val data: LocalData,
     private val send: (peer: String, message: SyncMessage) -> Unit,
 ) {
-    /** Vom Handy gemeldeter Stand je Match (Summary.lifecycle bzw. Transfer), nur im Speicher. */
-    private val reported = HashMap<String, LifecycleSummary>()
+    /** Vom Handy gemeldeter Stand je Konto und Match (Summary.lifecycle bzw. Transfer), nur im Speicher. */
+    private val reported = HashMap<Pair<String, String>, LifecycleSummary>()
 
     /** E2: Die erste gültige Access-Zustellung aktiviert das Replikat im selben Commit. */
     fun onAccessState(
@@ -61,7 +61,7 @@ internal class ReplicaReceiver(
         send(peer, RedactedChunkAck(chunk.transferId, chunk.matchId, chunk.generation, chunk.epoch, chunk.index))
         if (!complete) return
         send(peer, RedactionAck(chunk.transferId, chunk.matchId, chunk.generation, chunk.epoch))
-        remember(match, LifecycleSummary(chunk.generation, MatchAccessLevel.MEMBER, chunk.epoch))
+        remember(ctx, match, LifecycleSummary(chunk.generation, MatchAccessLevel.MEMBER, chunk.epoch))
         markReadyIfDue(ctx, match, fence)
     }
 
@@ -72,7 +72,7 @@ internal class ReplicaReceiver(
         if (lifecycle.isEmpty()) return
         val ctx = data.replicas.captureContext()
         lifecycle.forEach { (match, state) ->
-            remember(match, state)
+            remember(ctx, match, state)
             try {
                 markReadyIfDue(ctx, match, fence)
             } catch (_: IllegalStateException) {
@@ -94,14 +94,16 @@ internal class ReplicaReceiver(
     }
 
     private fun remember(
+        ctx: ReplicaContext,
         match: String,
         state: LifecycleSummary,
     ) {
-        val known = reported[match]
+        val key = ctx.accountKey to match
+        val known = reported[key]
         if (known == null || state.generation > known.generation ||
             (state.generation == known.generation && state.redactionApplied >= known.redactionApplied)
         ) {
-            reported[match] = state
+            reported[key] = state
         }
     }
 
@@ -112,7 +114,7 @@ internal class ReplicaReceiver(
     ) {
         val access = data.replicas.access(ctx, match) ?: return
         val generation = access.generation ?: return
-        val report = reported[match] ?: return
+        val report = reported[ctx.accountKey to match] ?: return
         if (access.access != ReplicaAccessLevel.MEMBER || access.ready || report.generation != generation) return
         if (report.access.name != access.access.name || access.redactionEpoch < report.redactionApplied) return
         if (data.replicas.redactionProgress(ctx, match)?.completed == false) return

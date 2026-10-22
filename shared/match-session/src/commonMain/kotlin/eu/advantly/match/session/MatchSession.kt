@@ -248,6 +248,8 @@ class MatchSession(
         compatibility.clear()
         knownKindsCache = null
         droppedInputs = null
+        genesisCache.clear()
+        blockedMatches.clear()
         telemetry = loadTelemetry()
         dataRevision++
         publish()
