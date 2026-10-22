@@ -2,7 +2,8 @@ package eu.advantly.presentation.auth
 
 import kotlinx.coroutines.flow.StateFlow
 
-enum class PhonePullResult { COMPLETE, LIMIT_REACHED, BLOCKED, FAILED, CANCELLED }
+/** [CONNECTION_FAILED]: Request nicht erfolgreich (offline, Server); [FAILED]: lokaler oder Antwortfehler. */
+enum class PhonePullResult { COMPLETE, LIMIT_REACHED, BLOCKED, CONNECTION_FAILED, FAILED, CANCELLED }
 
 /** Grund eines blockierten Abgleichs; bei mehreren Rückständen der zuerst genannte. */
 enum class PhonePullBlock { PERMISSION, REMOVALS, REDACTIONS, MATERIALIZATION, READINESS }

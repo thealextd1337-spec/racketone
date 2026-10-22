@@ -206,6 +206,7 @@ class PhoneQueuedCloudRevocationTest {
                 scope,
                 threadGuard = { Thread.currentThread() === dispatcher.owner },
                 hostAccessAllowed = { runtime.allowed },
+                lane = PhoneCloudLane(),
             )
 
         init {

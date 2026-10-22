@@ -76,9 +76,11 @@ internal fun ComponentActivity.createPhoneAccount(
                 runtime.allowed
             }, storageAction = runtime::storageAction, lane = lane),
         pull =
-            PhonePullHost(auth, session, backend, backend::bindDevice, lane, runtime.scope, hostAccessAllowed = {
-                runtime.allowed
-            }, storageAction = runtime::storageAction),
+            phonePullHost {
+                PhonePullHost(auth, session, backend, backend::bindDevice, lane, runtime.scope, hostAccessAllowed = {
+                    runtime.allowed
+                }, storageAction = runtime::storageAction)
+            },
         export = PhoneExportHost(auth.dataExports(), applicationContext, runtime.scope),
         support =
             SupportViewModel(

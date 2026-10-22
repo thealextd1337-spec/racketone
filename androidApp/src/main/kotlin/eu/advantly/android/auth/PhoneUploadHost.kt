@@ -44,7 +44,7 @@ internal class PhoneUploadHost(
         it()
         true
     },
-    private val lane: PhoneCloudLane = PhoneCloudLane(),
+    private val lane: PhoneCloudLane,
 ) : PhoneUploadPort {
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
@@ -121,7 +121,7 @@ internal class PhoneUploadHost(
             work.launch(start = CoroutineStart.LAZY) {
                 try {
                     // Host-Vertrag B4: wartet auf einen laufenden Pull desselben Kontos.
-                    lane.mutex.withLock {
+                    lane.mutex(expected.profile).withLock {
                         if (synchronize() != expected) return@launch
                         if (lane.bound != expected) {
                             lane.bound = null

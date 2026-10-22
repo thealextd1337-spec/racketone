@@ -698,7 +698,8 @@
     <string name="cloud_pull_blocked_redactions">Entfernte Spielernamen werden auf diesem Handy noch angewendet.</string>
     <string name="cloud_pull_blocked_materialization">Einige Matches konnten auf diesem Handy noch nicht vorbereitet werden.</string>
     <string name="cloud_pull_blocked_readiness">Einige geteilte Matches sind noch nicht vollständig geprüft.</string>
-    <string name="cloud_pull_failed">Der Download konnte nicht abgeschlossen werden. Versuche es erneut, sobald du online bist.</string>
+    <string name="cloud_pull_connection_failed">Der Download konnte nicht abgeschlossen werden. Versuche es erneut, sobald du online bist.</string>
+    <string name="cloud_pull_failed">Der Download konnte nicht abgeschlossen werden.</string>
     <string name="cloud_pull_cancelled">Der Download wurde unterbrochen.</string>
     <string name="cloud_export_title">Deine Daten als ZIP-Datei</string>
     <string name="cloud_export_timestamp">%1$s um %2$s UTC</string>

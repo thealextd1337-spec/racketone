@@ -51,6 +51,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -79,7 +80,6 @@ class PhonePullHostTest {
     private class Fixture(
         scope: CoroutineScope,
         val driver: SqlDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties(), AdvantlyDatabase.Schema),
-        activateReplica: Boolean = false,
     ) {
         val thread = Thread.currentThread()
         val data = LocalData(driver)
@@ -97,6 +97,13 @@ class PhonePullHostTest {
         var deletion = false
         var offline = false
         var pullStatus = HttpStatusCode.OK
+        var pullBody = """{"cursor":0,"hasMore":false,"visibilityEpoch":1}"""
+        var pullOffline = false
+        var hostAccess = true
+
+        /** Aus: Die Auth übergeht SDK-Wechsel, Sitzungsflow und Konto-Identitäten bleiben auf dem alten Stand. */
+        var authSync = true
+        var afterBind: suspend () -> Unit = {}
         var holdPull: Hold? = null
         var holdPush: Hold? = null
         val sdk =
@@ -136,8 +143,9 @@ class PhonePullHostTest {
 
                                 "cloud_sync_pull_v1" -> {
                                     holdPull?.waitForRelease()
+                                    if (pullOffline) throw IOException("offline")
                                     status = pullStatus
-                                    """{"cursor":0,"hasMore":false,"visibilityEpoch":1}"""
+                                    pullBody
                                 }
 
                                 "cloud_sync_push_v1" -> {
@@ -198,8 +206,9 @@ class PhonePullHostTest {
                 hostScope,
                 threadGuard = { Thread.currentThread() === thread },
                 ownership = ownership,
+                hostAccessAllowed = { authSync },
             )
-        private val backend = auth.cloudBackend(CloudInstallation("installation", "a".repeat(64)))
+        val backend = auth.cloudBackend(CloudInstallation("installation", "a".repeat(64)))
         private val lane = PhoneCloudLane()
         val upload =
             PhoneUploadHost(
@@ -217,11 +226,14 @@ class PhonePullHostTest {
                 auth,
                 phone,
                 backend,
-                backend::bindDevice,
+                {
+                    backend.bindDevice(it)
+                    afterBind()
+                },
                 lane,
                 hostScope,
                 { Thread.currentThread() === thread },
-                activateReplica = activateReplica,
+                hostAccessAllowed = { hostAccess },
             )
 
         init {
@@ -374,19 +386,26 @@ class PhonePullHostTest {
             }
         }
 
-    @Test fun blockedAndFailedPullsAreVisibleWithReason() =
+    @Test fun blockedAndFailedPullsAreVisibleWithReasonAndOnlyRequestFailuresCountAsConnection() =
         runBlocking {
-            for ((status, expected) in listOf(
-                HttpStatusCode.Forbidden to PhonePullResult.BLOCKED,
-                HttpStatusCode.InternalServerError to PhonePullResult.FAILED,
+            for ((case, expected) in listOf(
+                "forbidden" to PhonePullResult.BLOCKED,
+                "server" to PhonePullResult.CONNECTION_FAILED,
+                "offline" to PhonePullResult.CONNECTION_FAILED,
+                "invalid" to PhonePullResult.FAILED,
             )) {
                 val f = Fixture(this)
                 try {
                     f.signIn()
-                    f.pullStatus = status
+                    when (case) {
+                        "forbidden" -> f.pullStatus = HttpStatusCode.Forbidden
+                        "server" -> f.pullStatus = HttpStatusCode.InternalServerError
+                        "offline" -> f.pullOffline = true
+                        "invalid" -> f.pullBody = """{"cursor":-1,"hasMore":false,"visibilityEpoch":1}"""
+                    }
                     f.pull.pullNow()
                     f.idle()
-                    assertEquals(expected, f.pull.state.value.result)
+                    assertEquals(case, expected, f.pull.state.value.result)
                     assertEquals(if (expected == PhonePullResult.BLOCKED) PhonePullBlock.PERMISSION else null, f.pull.state.value.blocked)
                 } finally {
                     f.close()
@@ -394,24 +413,155 @@ class PhonePullHostTest {
             }
         }
 
-    @Test fun replicaActivationStaysBehindItsSwitchAndFollowsTheAccountGate() =
+    @Test fun pullHostExistsOnlyBehindTheReplicaActivationSwitch() {
+        assertFalse(PHONE_REPLICA_ACTIVATION)
+        // Ausgeschaltet: kein Host, also weder Pull-Abschnitt noch Request oder Bind.
+        assertNull(phonePullHost { error("Pull-Host ohne aktiviertes Replikat") })
         runBlocking {
-            assertFalse(PHONE_REPLICA_ACTIVATION)
-            for (enabled in listOf(false, true)) {
-                val f = Fixture(this, activateReplica = enabled)
+            val f = Fixture(this)
+            try {
+                assertSame(f.pull, phonePullHost(replicaActivation = true) { f.pull })
+            } finally {
+                f.close()
+            }
+        }
+    }
+
+    @Test fun pullActivatesTheReplicaOnlyBehindTheAccountGate() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.pull.pullNow()
+                f.idle()
+                // Ohne gültige Kontositzung weder Aktivierung noch Netzwerk.
+                assertNull(f.data.settings.get("replica.activated"))
+                assertTrue(f.trace.isEmpty())
+                f.signIn()
+                f.pull.pullNow()
+                f.idle()
+                assertEquals("true", f.data.settings.get("replica.activated"))
+                assertEquals(PhonePullResult.COMPLETE, f.pull.state.value.result)
+            } finally {
+                f.close()
+            }
+        }
+
+    /** Der Sitzungsflow hinkt dem SDK nach; erst die Auth-Lease im Fence erkennt den Wechsel zu Bob. */
+    @Test fun accountSwitchDuringActivationNeverActivatesUnderTheOldAccount() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.afterBind = {
+                    f.authSync = false
+                    f.owner = "bob"
+                    f.epoch++
+                    f.restoreSession()
+                    delay(50)
+                    f.authSync = true
+                }
+                f.pull.pullNow()
+                f.idle()
+                assertNull(f.data.settings.get("replica.activated"))
+                assertFalse(f.trace.toString(), "start:cloud_sync_pull_v1" in f.trace)
+                assertFalse(
+                    f.data.cloudPulls
+                        .progress("alice")
+                        .metadataComplete,
+                )
+            } finally {
+                f.close()
+            }
+        }
+
+    @Test fun closedRestoreGatePreventsActivationPullAndBinding() =
+        runBlocking {
+            for (closeDuringBind in listOf(false, true)) {
+                val f = Fixture(this)
                 try {
-                    f.pull.pullNow()
-                    f.idle()
-                    // Ohne gültige Kontositzung weder Aktivierung noch Netzwerk.
-                    assertNull(f.data.settings.get("replica.activated"))
-                    assertTrue(f.trace.isEmpty())
                     f.signIn()
+                    if (closeDuringBind) f.afterBind = { f.hostAccess = false } else f.hostAccess = false
                     f.pull.pullNow()
                     f.idle()
-                    assertEquals(if (enabled) "true" else null, f.data.settings.get("replica.activated"))
+                    assertNull(f.data.settings.get("replica.activated"))
+                    assertFalse(f.trace.toString(), "start:cloud_sync_pull_v1" in f.trace)
+                    assertEquals(if (closeDuringBind) 1 else 0, f.bindings.size)
+                    assertFalse(f.pull.state.value.available)
                 } finally {
                     f.close()
                 }
+            }
+        }
+
+    /** Ohne Host-Abbruch wartete der alte Pull nach dem Kontextwechsel weiter auf die Kontosperre. */
+    @Test fun contextChangeCancelsTheHostActionWhileItWaitsForTheAccountLock() =
+        runBlocking {
+            for (transition in listOf("logout", "bob")) {
+                val f = Fixture(this)
+                val lock = PhoneCloudLane().mutex("alice")
+                try {
+                    f.signIn()
+                    lock.lock()
+                    f.pull.pullNow()
+                    yield()
+                    assertTrue(f.pull.state.value.busy)
+                    if (transition == "logout") {
+                        f.auth.signOut()
+                    } else {
+                        f.owner = "bob"
+                        f.epoch++
+                        f.signIn()
+                    }
+                    withTimeout(5_000) { while (f.pull.state.value.busy) yield() }
+                    lock.unlock()
+                    delay(100)
+                    assertTrue(f.trace.toString(), f.trace.isEmpty())
+                } finally {
+                    if (lock.isLocked) lock.unlock()
+                    f.close()
+                }
+            }
+        }
+
+    /** Zwei Konto-ViewModels desselben Kontos (Multi-Window, Drain): je eigene Bindung, aber eine Sperre im Prozess. */
+    @Test fun hostsOfTwoViewModelsOfOneAccountShareTheProcessWideLock() =
+        runBlocking {
+            val f = Fixture(this)
+            val other =
+                PhoneUploadHost(
+                    f.auth,
+                    f.phone,
+                    f.backend,
+                    f.backend::bindDevice,
+                    f.hostScope,
+                    { 1000L },
+                    { Thread.currentThread() === f.thread },
+                    lane = PhoneCloudLane(),
+                )
+            try {
+                f.signIn()
+                f.match()
+                val hold = Hold()
+                f.holdPull = hold
+                f.pull.pullNow()
+                withTimeout(15_000) { hold.entered.await() }
+                other.uploadNow()
+                delay(200)
+                assertEquals(
+                    f.trace.toString(),
+                    listOf("start:bind_cloud_session_v1", "end:bind_cloud_session_v1", "start:cloud_sync_pull_v1"),
+                    f.trace.toList(),
+                )
+                hold.release.complete(Unit)
+                f.idle()
+                withTimeout(15_000) { while (other.state.value.busy) yield() }
+                assertTrue(f.trace.toString(), "start:cloud_sync_push_v1" in f.trace)
+                assertSerial(f.trace)
+            } finally {
+                var drained = false
+                other.close { drained = true }
+                withTimeout(15_000) { while (!drained) yield() }
+                f.close()
             }
         }
 

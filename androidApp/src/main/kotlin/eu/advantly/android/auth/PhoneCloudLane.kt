@@ -13,14 +13,17 @@ internal data class PhoneCloudContext(
 )
 
 /**
- * Host-Vertrag B4: Bindung, Pull und Upload eines Kontos laufen streng nacheinander, nie parallel.
- * Das Backend hält genau eine Gerätebindung; deshalb teilen beide Hosts auch deren Stand.
+ * Host-Vertrag B4: Bindung, Pull und Upload eines Kontos laufen streng nacheinander, nie parallel –
+ * prozessweit, also auch über mehrere Konto-ViewModels (Multi-Window, alte VM im Drain neben der neuen).
  */
-internal class PhoneCloudLane {
-    val mutex = Mutex()
+private val accountLocks = HashMap<String, Mutex>()
 
-    /** Zuletzt erfolgreich gebundener Kontext; nur unter [mutex] schreiben. */
+/** Je Konto-ViewModel und Backend: Pull- und Uploadhost teilen dessen eine Gerätebindung. */
+internal class PhoneCloudLane {
+    /** Zuletzt erfolgreich gebundener Kontext dieses Backends; nur unter [mutex] des Kontos schreiben. */
     var bound: PhoneCloudContext? = null
+
+    fun mutex(profile: String): Mutex = synchronized(accountLocks) { accountLocks.getOrPut(profile) { Mutex() } }
 }
 
 /** Gemeinsame Gates von Pull und Upload: Restore-Gate, Anmeldung, Einwilligung, kein Löschantrag, eigenes Phone. */

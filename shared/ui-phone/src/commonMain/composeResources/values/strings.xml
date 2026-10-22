@@ -698,7 +698,8 @@
     <string name="cloud_pull_blocked_redactions">Removed player names are still being applied to this phone.</string>
     <string name="cloud_pull_blocked_materialization">Some matches could not be prepared on this phone yet.</string>
     <string name="cloud_pull_blocked_readiness">Some shared matches are not fully verified yet.</string>
-    <string name="cloud_pull_failed">The download could not be completed. Try again when you are online.</string>
+    <string name="cloud_pull_connection_failed">The download could not be completed. Try again when you are online.</string>
+    <string name="cloud_pull_failed">The download could not be completed.</string>
     <string name="cloud_pull_cancelled">The download was interrupted.</string>
     <string name="cloud_export_title">Your data as a ZIP file</string>
     <string name="cloud_export_timestamp">%1$s at %2$s UTC</string>

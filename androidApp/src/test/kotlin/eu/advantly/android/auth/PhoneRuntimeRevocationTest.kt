@@ -86,7 +86,10 @@ class PhoneRuntimeRevocationTest {
             }
         return AuthViewModel(
             observed,
-            upload = PhoneUploadHost(auth, session, backend, backend::bindDevice, runtime.scope, hostAccessAllowed = { runtime.allowed }),
+            upload =
+                PhoneUploadHost(auth, session, backend, backend::bindDevice, runtime.scope, hostAccessAllowed = {
+                    runtime.allowed
+                }, lane = PhoneCloudLane()),
             export = PhoneExportHost(auth.dataExports(), activity.applicationContext, scope = runtime.scope),
             workScope = runtime.scope,
         )

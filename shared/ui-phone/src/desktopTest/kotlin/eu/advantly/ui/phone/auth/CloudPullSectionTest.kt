@@ -56,6 +56,21 @@ class CloudPullSectionTest {
                         },
                     )
                     onNodeWithTag("cloud_pull_now").assertIsEnabled()
+                    pull.state.value = PhonePullState(available = true, result = PhonePullResult.CONNECTION_FAILED)
+                    waitForIdle()
+                    onNodeWithTag("cloud_pull_result").assertTextEquals(
+                        if (language == "de") {
+                            "Der Download konnte nicht abgeschlossen werden. Versuche es erneut, sobald du online bist."
+                        } else {
+                            "The download could not be completed. Try again when you are online."
+                        },
+                    )
+                    // Lokale und Antwortfehler versprechen keine Abhilfe durch Netz.
+                    pull.state.value = PhonePullState(available = true, result = PhonePullResult.FAILED)
+                    waitForIdle()
+                    onNodeWithTag("cloud_pull_result").assertTextEquals(
+                        if (language == "de") "Der Download konnte nicht abgeschlossen werden." else "The download could not be completed.",
+                    )
                 }
             }
         } finally {

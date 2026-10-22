@@ -26,6 +26,7 @@ import eu.advantly.ui.phone.resources.cloud_pull_blocked_redactions
 import eu.advantly.ui.phone.resources.cloud_pull_blocked_removals
 import eu.advantly.ui.phone.resources.cloud_pull_cancelled
 import eu.advantly.ui.phone.resources.cloud_pull_complete
+import eu.advantly.ui.phone.resources.cloud_pull_connection_failed
 import eu.advantly.ui.phone.resources.cloud_pull_failed
 import eu.advantly.ui.phone.resources.cloud_pull_limit
 import eu.advantly.ui.phone.resources.cloud_pull_now
@@ -48,6 +49,7 @@ fun CloudPullSection(port: PhonePullPort) {
                         PhonePullResult.COMPLETE -> Res.string.cloud_pull_complete
                         PhonePullResult.LIMIT_REACHED -> Res.string.cloud_pull_limit
                         PhonePullResult.BLOCKED -> Res.string.cloud_pull_blocked
+                        PhonePullResult.CONNECTION_FAILED -> Res.string.cloud_pull_connection_failed
                         PhonePullResult.FAILED -> Res.string.cloud_pull_failed
                         PhonePullResult.CANCELLED -> Res.string.cloud_pull_cancelled
                         null -> null

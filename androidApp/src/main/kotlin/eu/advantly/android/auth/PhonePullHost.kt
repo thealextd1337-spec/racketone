@@ -7,6 +7,7 @@ import eu.advantly.cloud.sync.CloudPullOutcome
 import eu.advantly.cloud.sync.CloudPullPort
 import eu.advantly.cloud.sync.CloudPullRunner
 import eu.advantly.cloud.sync.CloudPullState
+import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.PhonePullBlock
 import eu.advantly.presentation.auth.PhonePullPort
@@ -26,14 +27,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Einziger Schalter für die Einweg-Aktivierung des Phone-Replikats. Bleibt aus, bis der Integrator sie
- * zusammen mit Protokoll 4 einschaltet; danach gelten Lese-/Schreibspuren statt P1-Vollzugriff.
+ * Einziger Schalter für Pull und Einweg-Aktivierung des Phone-Replikats: Pull nur mit aktiviertem Replikat.
+ * Ohne Aktivierung wären gepullte Cloud-Daten (auch geteilte Matches) ohne Lesespur voll lesbar.
+ * Bleibt aus, bis der Integrator ihn zusammen mit Protokoll 4 einschaltet; danach gelten Lese-/Schreibspuren
+ * statt P1-Vollzugriff.
  */
 internal const val PHONE_REPLICA_ACTIVATION = false
 
+/** Fehlercode des Runners für einen gescheiterten Request (BLOCKED bei Rechteverlust, sonst FAILED). */
+private const val REQUEST_FAILED = "cloud_pull_request_failed"
+
+/** Mit ausgeschaltetem [PHONE_REPLICA_ACTIVATION] entsteht kein Pull-Host: kein Button, kein Request, kein Bind. */
+internal fun phonePullHost(
+    replicaActivation: Boolean = PHONE_REPLICA_ACTIVATION,
+    create: () -> PhonePullHost,
+): PhonePullHost? = if (replicaActivation) create() else null
+
 /**
- * Expliziter D1-Abgleich je Konto-ViewModel, an dieselben Gates wie [PhoneUploadHost] gebunden.
- * Keine Hintergrundplanung, kein Backoff, keine Netz-Auslöser (B4, Welle 4).
+ * Expliziter D1-Abgleich je Konto-ViewModel, an dieselben Gates wie [PhoneUploadHost] gebunden; aktiviert vor dem
+ * ersten Lauf das Replikat. Keine Hintergrundplanung, kein Backoff, keine Netz-Auslöser (B4, Welle 4).
  */
 internal class PhonePullHost(
     private val auth: CloudAuthPort,
@@ -48,7 +60,6 @@ internal class PhonePullHost(
         it()
         true
     },
-    private val activateReplica: Boolean = PHONE_REPLICA_ACTIVATION,
 ) : PhonePullPort {
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
@@ -100,7 +111,7 @@ internal class PhonePullHost(
             work.launch(start = CoroutineStart.LAZY) {
                 try {
                     // Host-Vertrag B4: wartet auf einen laufenden Upload desselben Kontos.
-                    lane.mutex.withLock {
+                    lane.mutex(expected.profile).withLock {
                         if (synchronize() != expected) return@launch
                         if (lane.bound != expected) {
                             lane.bound = null
@@ -109,7 +120,7 @@ internal class PhonePullHost(
                             if (synchronize() != expected) return@launch
                             lane.bound = expected
                         }
-                        if (activateReplica) activate(expected)
+                        activate(expected)
                         val active =
                             runner ?: CloudPullRunner(pulls, session.data, threadGuard = threadGuard).also { runner = it }
                         // shortcut: eventsCommitted bleibt leer, bis die Session einen Hook für offene Matches anbietet (Bericht H, Punkt 4).
@@ -125,7 +136,12 @@ internal class PhonePullHost(
                         val permission = (error as? CloudException)?.permission == true
                         mutable.value =
                             mutable.value.copy(
-                                result = if (permission) PhonePullResult.BLOCKED else PhonePullResult.FAILED,
+                                result =
+                                    when {
+                                        permission -> PhonePullResult.BLOCKED
+                                        error is CloudException -> PhonePullResult.CONNECTION_FAILED
+                                        else -> PhonePullResult.FAILED
+                                    },
                                 blocked = if (permission) PhonePullBlock.PERMISSION else null,
                             )
                     }
@@ -137,7 +153,10 @@ internal class PhonePullHost(
         action?.start()
     }
 
-    /** Nach Restore-Gate und gültiger Kontositzung; der Fence verlangt beides bis zum Commit. */
+    /**
+     * Nach Restore-Gate und gültiger Kontositzung; der Fence verlangt beides bis zum Commit. Die Auth-Lease liest
+     * die SDK-Identität synchron, damit ein noch nicht synchronisierter Sitzungswechsel nicht durchrutscht.
+     */
     private fun activate(expected: PhoneCloudContext) {
         val replicas = session.data.replicas
         replicas.activate(replicas.captureContext()) {
@@ -145,10 +164,13 @@ internal class PhonePullHost(
             if (readPhoneCloudContext(auth, session, hostAccessAllowed) != expected) {
                 throw CloudException("cloud_session_changed", true)
             }
+            auth.requireAccountSession(CloudSession(expected.profile, false, generation = expected.generation))
         }
     }
 
     private fun publish(result: CloudPullState) {
+        // Nur Requestfehler sind Verbindungsfehler; lokale, Antwort- und Matchfehler bleiben neutral.
+        val failed = if (result.failure == REQUEST_FAILED) PhonePullResult.CONNECTION_FAILED else PhonePullResult.FAILED
         mutable.value =
             PhonePullState(
                 available = true,
@@ -158,7 +180,7 @@ internal class PhonePullHost(
                         CloudPullOutcome.COMPLETE -> PhonePullResult.COMPLETE
                         CloudPullOutcome.LIMIT_REACHED, CloudPullOutcome.DEADLINE_REACHED -> PhonePullResult.LIMIT_REACHED
                         CloudPullOutcome.BLOCKED -> PhonePullResult.BLOCKED
-                        CloudPullOutcome.FAILED -> PhonePullResult.FAILED
+                        CloudPullOutcome.FAILED -> failed
                         CloudPullOutcome.CANCELLED -> PhonePullResult.CANCELLED
                         else -> null
                     },
@@ -167,7 +189,7 @@ internal class PhonePullHost(
                         result.outcome != CloudPullOutcome.BLOCKED -> null
 
                         // Der Runner meldet Rechteverlust als BLOCKED mit Requestfehler.
-                        result.failure == "cloud_pull_request_failed" -> PhonePullBlock.PERMISSION
+                        result.failure == REQUEST_FAILED -> PhonePullBlock.PERMISSION
 
                         result.pendingRemovals > 0 -> PhonePullBlock.REMOVALS
 
