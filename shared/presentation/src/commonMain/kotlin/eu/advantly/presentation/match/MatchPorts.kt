@@ -533,6 +533,7 @@ data class FavoriteLineup(
 
 /** Spieler und Schnellstart: eigener Spieler, Gäste, Favoriten und „Wie letztes Mal“. */
 interface PlayersPort {
+    /** Besitzer gewechselt oder Verzeichnis neu geladen (neue `lifecycleRevision`); gemeldet nach dem Neuladen. */
     fun observeOwnerIdentity(onChanged: () -> Unit): () -> Unit = {}
 
     /** Nur zur Auswahlfilterung; historische Namen bleiben in den Match-Daten. */

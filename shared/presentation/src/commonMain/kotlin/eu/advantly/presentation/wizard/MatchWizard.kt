@@ -64,7 +64,7 @@ class MatchWizard(
     private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
     private var draftSelfId = players.self.value.id
-    private val detachIdentity = players.observeOwnerIdentity(::ensureCurrentIdentity)
+    private val detachIdentity = players.observeOwnerIdentity(::onDirectoryChanged)
 
     fun close() = detachIdentity()
 
@@ -76,6 +76,19 @@ class MatchWizard(
 
     private fun ensureCurrentIdentity() {
         if (draftSelfId != players.self.value.id) reset()
+    }
+
+    /** Anderer Besitzer: zurücksetzen; sonst gewählte Plätze per ID neu auflösen, Redigierte werden Platzhalter. */
+    private fun onDirectoryChanged() {
+        if (draftSelfId != players.self.value.id) return reset()
+        val current = (guests.value + players.self.value).associateBy { it.id }
+
+        fun fresh(player: Player?) =
+            player?.let {
+                val kept = it.isPlaceholder || it.id in players.archivedPlayerIds.value
+                current[it.id] ?: if (kept) it else Player(it.id, "", isPlaceholder = true)
+            }
+        update { it.copy(teamA = it.teamA.map(::fresh), teamB = it.teamB.map(::fresh)) }
     }
 
     private val input: WizardInput get() {

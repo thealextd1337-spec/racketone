@@ -571,7 +571,7 @@ class SessionMatchStore(
             summaries.clear()
             records.clear()
         }
-        if (lifecycleChanged || storedDataMayHaveChanged(previous, state)) refreshStored()
+        if (lifecycleChanged || storedDataMayHaveChanged(previous, state)) refreshStored(directoryChanged = lifecycleChanged)
         publishActive(state)
     }
 
@@ -742,10 +742,9 @@ class SessionMatchStore(
     // --- Gespeicherte Daten -------------------------------------------------------------------------
 
     /** Spielernamen, Gäste, Favoriten, „Wie letztes Mal“ und Verlauf neu aus der Datenbank. */
-    private fun refreshStored() {
+    private fun refreshStored(directoryChanged: Boolean = false) {
         val previousSelf = selfFlow.value.id
         selfFlow.value = ensureSelf()
-        if (previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
         players.clear()
         val previousAliases = aliases
         aliases = data.selfAliases()
@@ -764,6 +763,8 @@ class SessionMatchStore(
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
         historyFlow.value = loadHistory()
+        // Erst nach dem Neuladen: Listener lösen Namen aus den frischen Gästen auf
+        if (directoryChanged || previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
     }
 
     private fun ensureSelf(): Player =

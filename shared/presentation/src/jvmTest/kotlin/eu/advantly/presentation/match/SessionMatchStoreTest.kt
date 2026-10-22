@@ -8,6 +8,7 @@ import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchSettings
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -1268,6 +1269,13 @@ class SessionMatchStoreTest {
         val wizard = MatchWizard(phone)
         wizard.selectSport(Sport.TENNIS)
         assertTrue(wizard.playerSuggestions().any { it.id == jonas })
+        val draft = MatchWizard(phone)
+        draft.selectSport(Sport.TENNIS)
+        draft.pickPlayer(phone.guests.value.first { it.id == jonas })
+
+        fun drafted() =
+            draft.state.value.input.teamB
+                .single()!!
 
         // Redaktion in Data (gelesener Name wird leer), die Session meldet nur eine neue Lifecycle-Revision
         rig.phoneSession.data.players
@@ -1275,9 +1283,11 @@ class SessionMatchStoreTest {
         val state = rig.phoneSession.state.value
         phone.onSessionState(state.copy())
         assertEquals(List(4) { "Jonas" }, people().map { it.displayName }, "gleiche Revision: Caches bleiben")
+        assertEquals("Jonas", drafted().displayName)
 
         phone.onSessionState(state.copy(lifecycleRevision = state.lifecycleRevision + 1))
         assertTrue(people().all { it.displayName.isEmpty() && it.isPlaceholder }, "kein Name, sondern Platzhalter")
+        assertEquals(Player(jonas, "", isPlaceholder = true), drafted(), "gewählter Platz im offenen Entwurf")
         assertFalse(phone.guests.value.any { it.id == jonas })
         assertFalse(phone.recentPlayers(Sport.TENNIS).any { it.id == jonas })
         assertFalse(wizard.playerSuggestions().any { it.id == jonas }, "Wizard-Vorschlag aus dem Sportwechsel vorher")
@@ -1296,6 +1306,8 @@ class SessionMatchStoreTest {
             .rename(jonas, "Jonas")
         phone.onSessionState(state)
         assertEquals(List(4) { "Jonas" }, people().map { it.displayName })
+        assertEquals(Player(jonas, "Jonas"), drafted(), "Rückkehr des Namens per ID")
+        draft.close()
     }
 
     @Test
