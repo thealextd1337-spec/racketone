@@ -2086,3 +2086,20 @@ nacheinander: D → S → P. Die Abnahmefälle stehen in Bericht §9.
 - **Akzeptiertes Restrisiko (P3-4):** Ein neues E wird erst im neuen G sichtbar. Bis dahin
   gibt das Neuscan-Fenster eigene Events nach dem bekannten E frei, und zwar nur an
   Gegenstellen desselben Kontos. Das entspricht der normalen Lesespur.
+
+**P übernommen** (`29e2b1c8`..`2dcb267c`, Merge `1bafbe96`, voller Check grün):
+- **Review r1:** Freigabe mit Auflagen.
+  - Der vermutete Namensrückweg über `legacy`/`player_json` ist für redigierte Personen
+    nicht erreichbar: Die Redaktion setzt `player_json = NULL`.
+  - Der Wear-Flake `DirectUiBoundaryTest.healthyPointStillCommitsOnce` ließ sich in
+    6 Läufen nicht reproduzieren und ist vorbestehend.
+- **Runde 2:**
+  - P-1: Ein aufgeschobenes Glance-Update übersteht das Prozessende.
+  - P-2: Wizard-Plätze werden per ID neu aufgelöst.
+  - P-4: „Synchron“ gilt auf Wear und watchOS nur bei `SyncStatus.settled`.
+- **Offen beim Integrator (P-3):** Ein blockierter Rückstand bzw. reiner Rückstand anderer
+  Matches erscheint als „1 ausstehend“. Ein eigener DE/EN-Text folgt nach S.
+- **Offen für Data:** `MatchWizard.start()` wirft eine ISE, wenn ein Verzeichniseintrag
+  vorhanden, aber nicht schreibbar ist (`rememberPlayers` → `addGuest`). Das wird erst
+  mit V4 relevant.
+- Swift (`ScoringModel.swift`) ist nur in der CI prüfbar.
