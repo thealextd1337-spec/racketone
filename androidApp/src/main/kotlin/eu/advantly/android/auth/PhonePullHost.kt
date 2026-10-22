@@ -122,8 +122,13 @@ internal class PhonePullHost(
                         }
                         activate(expected)
                         val active =
-                            runner ?: CloudPullRunner(pulls, session.data, threadGuard = threadGuard).also { runner = it }
-                        // shortcut: eventsCommitted bleibt leer, bis die Session einen Hook für offene Matches anbietet (Bericht H, Punkt 4).
+                            runner
+                                ?: CloudPullRunner(
+                                    pulls,
+                                    session.data,
+                                    threadGuard = threadGuard,
+                                    eventsCommitted = session::eventsCommitted,
+                                ).also { runner = it }
                         val result = active.pullNow()
                         currentCoroutineContext().ensureActive()
                         if (synchronize() == expected) publish(result)
