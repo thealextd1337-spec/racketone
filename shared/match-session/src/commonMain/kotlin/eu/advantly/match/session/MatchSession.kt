@@ -354,6 +354,10 @@ class MatchSession(
     @Volatile
     private var directoryChangePosted = false
 
+    /** Wie [directoryChangePosted], für [eventsCommitted]. */
+    @Volatile
+    private var eventsCommittedPosted = false
+
     /** Eigener Kopfstand nach einem Event: ändert weder Rechte noch Namen (sonst Prüfung je Punkt). */
     private var writingProgress = false
 
@@ -662,13 +666,10 @@ class MatchSession(
      */
     fun deleteMatch(matchId: MatchId) {
         checkThread()
+        val now = clock.nowMs()
+        deleteStored(matchId, now)
         closeOpened(matchId)
         forgetAssignment(matchId)
-        devicesInMatch.remove(matchId)
-        val now = clock.nowMs()
-        data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
-        stamps.rememberForDeletion(matchId)
-        data.deleteMatch(matchId, now)
         dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
         publish()
@@ -703,18 +704,17 @@ class MatchSession(
     }
 
     /**
-     * P3-C (E6, Variante a): Mit Konto und Protokoll 4 ändern nur die Genesis-Quelle und das Handy, dessen eigene Uhr das
-     * Match angelegt hat, die Teilnehmer. Eine Uhr im Handy-Match oder ein zweites eigenes Gerät würde dem Pull sonst den
-     * Beleg für den eigenen Kopf nehmen (dauerhaft BLOCKED).
+     * P3-C (E6, Variante a, gelockert in W3 Runde 3): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
+     * Handy desselben Kontos die Teilnehmer (lokal im aktuellen Scope, wie die Kontoregel von D-2) – auch ein neu
+     * installiertes in älteren eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches, fremde
+     * Konten nie ([canAssignPlayer] prüft den Ersteller). Der Belegverlust am Kopf der Genesis-Quelle heilt mit deren
+     * nächstem Upload.
      */
     private fun participantAuthority(matchId: MatchId): Boolean {
         if (!data.accountIdentities.managed || config.protocolVersions.last < 4) return true
         val source = genesisOf(matchId)?.deviceId ?: return false
         return source == deviceId ||
-            (
-                config.kind == PeerKind.PHONE && knownKinds()[source] == PeerKind.WATCH &&
-                    data.accountIdentities.sourceScope(source.value) == data.accountIdentities.scope
-            )
+            (config.kind == PeerKind.PHONE && data.accountIdentities.sourceScope(deviceId.value) == data.accountIdentities.scope)
     }
 
     fun assignmentFailure(
@@ -1408,12 +1408,48 @@ class MatchSession(
     }
 
     /**
-     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
-     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
-     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand, Kopffelder werden übernommen.
+     * Host-Hook für gepullte Events: `CloudPullRunner(…, eventsCommitted = session::eventsCommitted)` ruft ihn aus
+     * `afterCommit`. Von jedem Thread aufrufbar und wirft nie (der Runner buchte sonst einen Fehler): Aufrufe werden wie
+     * Data-Signale zu einem Scheduler-Post zusammengelegt, dort gelten die Regeln von [onDataChanged]. Neu aufgebaut wird
+     * nur ein offenes Match, dessen Store-Stand vom Engine-Stand abweicht. [matchId] ist nur der Anlass: geprüft werden
+     * alle offenen Matches, damit zwischen den Threads kein Zustand außer dem Post-Merker geteilt wird.
      */
+    @Suppress("UNUSED_PARAMETER")
+    fun eventsCommitted(matchId: String) {
+        if (eventsCommittedPosted) return
+        eventsCommittedPosted = true
+        scheduler.post {
+            eventsCommittedPosted = false
+            if (!started) return@post
+            refreshOpened()
+            // neue Quellen auch in nicht offenen Matches (Routing); unveränderter Zustand meldet publish nicht
+            devicesInMatch.clear()
+            neverSentCache.clear()
+            publish()
+        }
+    }
+
+    /** Signal einer Data-Änderung (Rechte, Redaktion, Kopf) auf dem Scheduler: offene Matches und Zustellung nachziehen. */
     private fun onDataChanged() {
         lifecycleRevision++
+        refreshOpened()
+        devicesInMatch.clear()
+        neverSentCache.clear()
+        genesisCache.clear()
+        if (blockedMatches.isNotEmpty()) blockedMatches.retainAll(data.events.unconfirmedMatches().mapTo(HashSet(), ::MatchId))
+        // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
+        targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
+        refreshLifecyclePending()
+        publish()
+    }
+
+    /**
+     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
+     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
+     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand oder von außen gespeicherten Events (Pull), Kopffelder
+     * werden übernommen.
+     */
+    private fun refreshOpened() {
         for (m in opened.values.toList()) {
             val record = data.matches.get(m.id)
             if (record == null) {
@@ -1422,7 +1458,9 @@ class MatchSession(
                 continue
             }
             val lifecycle = lifecycleOf(m.id)
-            if (lifecycle != m.lifecycle) {
+            // Engine = Store ohne Genesis (eigene und empfangene Events landen in beiden); 0 = Lesespur zu
+            val stored = data.events.count(m.id.value)
+            if (lifecycle != m.lifecycle || (stored > 0 && stored != m.engine.events.size + 1L)) {
                 m.lifecycle = lifecycle
                 val engine =
                     try {
@@ -1438,14 +1476,6 @@ class MatchSession(
             // Kopfübernahme (Pull, Vorgänger): Stand und Ergebnis bleiben aus der Engine
             if (record != m.record) m.record = record
         }
-        devicesInMatch.clear()
-        neverSentCache.clear()
-        genesisCache.clear()
-        if (blockedMatches.isNotEmpty()) blockedMatches.retainAll(data.events.unconfirmedMatches().mapTo(HashSet(), ::MatchId))
-        // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
-        targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
-        refreshLifecyclePending()
-        publish()
     }
 
     /** Rechte- und Redaktionsstand eines Matches; ohne Konto-Kontext gibt es keinen. */
@@ -1642,11 +1672,8 @@ class MatchSession(
         val fresh =
             message.matches.filter { tombstone ->
                 if (data.matches.isDeleted(tombstone.matchId)) return@filter false
-                devicesInMatch.remove(tombstone.matchId)
                 try {
-                    data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
-                    stamps.rememberForDeletion(tombstone.matchId)
-                    data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
+                    deleteStored(tombstone.matchId, tombstone.deletedAtMs)
                 } catch (_: IllegalStateException) {
                     return@filter false // gesperrtes Match: nicht löschen, nicht weiterreichen, die übrigen schon
                 }
@@ -1658,6 +1685,28 @@ class MatchSession(
         dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
+    }
+
+    /**
+     * Löscht [matchId] mit Quellen und Beleg für die Löschmarkierung in einer Transaktion: Ein gesperrtes Match (wirft) hinterlässt
+     * nichts. Matchbezogene Settings und Caches der Session fallen mit weg (die Löschmarkierung ist dauerhaft).
+     */
+    private fun deleteStored(
+        matchId: MatchId,
+        deletedAtMs: Long,
+    ) {
+        devicesInMatch.remove(matchId)
+        data.transaction {
+            data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
+            stamps.rememberForDeletion(matchId)
+            data.deleteMatch(matchId, deletedAtMs)
+            data.settings.remove(NEVER_SENT_TO_WATCH_PREFIX + matchId.value)
+            data.settings.remove(DROPPED_PREFIX + matchId.value)
+        }
+        devicesInMatch.remove(matchId)
+        neverSentCache.remove(matchId)
+        genesisCache.remove(matchId)
+        blockedMatches.remove(matchId)
     }
 
     /** Speichert neue Events sofort und wendet sie als Batch an (kein Puffern, `more` ist nur ein Hinweis). */
