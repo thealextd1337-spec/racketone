@@ -27,7 +27,6 @@ import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.ProtocolVersion
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.test.AfterTest
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -92,7 +91,6 @@ class MatchMetaAuthorityTest {
      * Handy der eigenen Uhr ist Teilnehmerautorität für deren Matches. Am aktivierten Handy kommt ein auf der Uhr
      * angelegtes Match heute nicht an (Kopf vor Genesis → UNKNOWN, Genesis einer Fremdquelle abgewiesen; auch Protokoll 3).
      */
-    @Ignore("wartet auf Data: Uhr-Match am aktivierten Handy (Bericht, Anfrage an Integrator)")
     @Test
     fun aWatchCreatedMatchReachesTheActivatedPhoneWhichMayAssign() {
         val pair = managed()

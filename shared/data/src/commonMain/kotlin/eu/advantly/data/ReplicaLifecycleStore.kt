@@ -165,8 +165,12 @@ class ReplicaLifecycleStore internal constructor(
         if (activated && (isCloudSeen(matchId) || access(captureContext(), matchId) != null)) requireReadable(matchId)
     }
 
+    /**
+     * Marker nur für einen Kopf über ungeklärtem Event-Bestand. Ein Kopf vor jeder Genesis bleibt unmarkiert und ohne
+     * Quelle unlesbar; die Genesis muss dann [requireAppend] bestehen (W3, Anfrage 1: Kopf der eigenen Uhr vor ihrer Genesis).
+     */
     internal fun noteUnresolvedImport(matchId: String) {
-        if (!activated || readable(matchId)) return
+        if (!activated || readable(matchId) || database.matchEventQueries.countForMatch(matchId).executeAsOne() == 0L) return
         val ctx = captureContext()
         if (access(ctx, matchId) == null) queries.putAccess(ctx.accountKey, matchId, null, ReplicaAccessLevel.UNKNOWN.name)
     }
@@ -210,7 +214,7 @@ class ReplicaLifecycleStore internal constructor(
     /** `true` nur nach dem Genesis-Durchlauf einer lokalen Erzeugung; Folgeevents im Batch sind dann an deren Quelle gebunden. */
     internal fun requireAppend(event: StoredEvent): Boolean {
         if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return false
-        // Nur die belegte lokale Erzeugung darf ohne Cloudstand beginnen, kein fremder Punkt.
+        // Nur die belegte Erzeugung einer eigenen Quelle darf ohne Cloudstand beginnen, kein fremder Punkt.
         check(!isCloudSeen(event.matchId) && queries.hasLifecycle(event.matchId).executeAsOne() == 0L)
         if (database.matchEventQueries.countForMatch(event.matchId).executeAsOne() != 0L) {
             val existing = database.matchEventQueries.eventById(event.id).executeAsOneOrNull()
@@ -228,9 +232,14 @@ class ReplicaLifecycleStore internal constructor(
                 creator == source.self_id ||
                     (owner != null && database.cloudMetadataQueries.ownedSelfAlias(creator, owner).executeAsOne() > 0)
             )
-        check(
-            source != null && source.local == 1L && source.scope_id == data.accountIdentities.scope && ownCreator,
-        ) {
+        // Eigene Quelle: lokal im aktuellen Scope oder per UID an das aktuelle Konto gebunden (z. B. die eigene Uhr am Handy).
+        val ownSource =
+            source != null &&
+                (
+                    (source.local == 1L && source.scope_id == data.accountIdentities.scope) ||
+                        (owner != null && owner == (data.accountIdentities.profile ?: data.accountIdentities.scope))
+                )
+        check(ownSource && ownCreator) {
             "Ungeklärter Import benötigt autoritativen Lifecycle-Abgleich"
         }
         return true
