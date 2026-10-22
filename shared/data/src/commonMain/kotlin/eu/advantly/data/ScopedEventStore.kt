@@ -1,8 +1,11 @@
 package eu.advantly.data
 
+import eu.advantly.data.db.MatchEventQueries
+
 /** öffentliche Eventgrenze; Rohzugriffe werden ausschließlich von Data-Transaktionen gehalten. */
 internal class ScopedEventStore(
     private val raw: EventStore,
+    private val queries: MatchEventQueries,
     private val replicas: ReplicaLifecycleStore,
     private val transaction: (() -> List<AppendResult>) -> List<AppendResult>,
 ) : EventStore {
@@ -84,11 +87,14 @@ internal class ScopedEventStore(
         raw
             .unconfirmedCountByMatch()
             .mapValues { (matchId, count) ->
-                if (replicas.readable(matchId)) count else ownUnconfirmed(matchId, content = false).size.toLong()
+                if (replicas.readable(matchId)) count else ownUnconfirmed(matchId, content = false).values.sum()
             }.filterValues { it > 0 }
 
-    override fun unconfirmedEvents(matchId: String): List<StoredEvent> =
-        if (replicas.readable(matchId)) raw.unconfirmedEvents(matchId) else ownUnconfirmed(matchId, content = true)
+    override fun unconfirmedEvents(matchId: String): List<StoredEvent> {
+        if (replicas.readable(matchId)) return raw.unconfirmedEvents(matchId)
+        val own = ownUnconfirmed(matchId, content = true).keys
+        return if (own.isEmpty()) emptyList() else raw.unconfirmedEvents(matchId).filter { it.deviceId in own }
+    }
 
     /** D-1: Gerät → eigene Quelle mit offener Schreibspur (je Aufruf zwischengespeichert); fremde Quellen nie. */
     private fun ownSources(
@@ -99,14 +105,17 @@ internal class ScopedEventStore(
         return { device -> own.getOrPut(device) { replicas.ownBacklog(matchId, device, content) } }
     }
 
-    // shortcut: zählt über geladene Events, nur für Matches ohne Lesespur; bei großem Rückstand im Fenster auf SQL-Zählung umstellen.
+    /** Rückstand eigener Quellen eines Matches ohne Lesespur (Gerät → Anzahl); fremde Quellen kosten einen Indexblick, nie Payloads. */
     private fun ownUnconfirmed(
         matchId: String,
         content: Boolean,
-    ): List<StoredEvent> {
-        val own = ownSources(matchId, content)
-        return raw.unconfirmedEvents(matchId).filter { own(it.deviceId) }
-    }
+    ): Map<String, Long> =
+        queries
+            .devicesForMatch(matchId)
+            .executeAsList()
+            .filter { replicas.ownBacklog(matchId, it, content) }
+            .associateWith { queries.unconfirmedCountForDevice(matchId, it).executeAsOne() }
+            .filterValues { it > 0 }
 
     override fun deleteMatch(matchId: String) {
         replicas.requireReadable(matchId)

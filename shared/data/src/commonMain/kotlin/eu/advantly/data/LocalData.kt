@@ -23,7 +23,7 @@ class LocalData(
     private val database = AdvantlyDatabase(driver)
     val replicas: ReplicaLifecycleStore = ReplicaLifecycleStore(database, this)
     private val rawEvents: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
-    val events: EventStore = ScopedEventStore(rawEvents, replicas) { block -> transaction(block) }
+    val events: EventStore = ScopedEventStore(rawEvents, database.matchEventQueries, replicas) { block -> transaction(block) }
     val matches: MatchRepository =
         MatchRepository(
             database.matchHeaderQueries,
