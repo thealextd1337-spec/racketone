@@ -95,7 +95,10 @@ class GlancePublisher(
             }
         }
         handler.removeCallbacks(update)
-        when (val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())) {
+        val delay = throttle.delayFor(snapshot, SystemClock.elapsedRealtime())
+        // Der namenlose Sendestand verdeckt reine Namensänderungen: endet der Prozess vorher, erzwingt der Neustart das Update
+        if (delay != null && delay > 0) holder.prefs.glanceSentState = null
+        when (delay) {
             null -> Unit
             0L -> requestUpdate()
             else -> handler.postDelayed(update, delay)

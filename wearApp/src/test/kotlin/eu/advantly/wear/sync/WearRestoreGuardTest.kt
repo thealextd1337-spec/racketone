@@ -151,6 +151,38 @@ class WearRestoreGuardTest {
     }
 
     @Test
+    fun deferredRedactionUpdateSurvivesProcessDeath() {
+        val app = RuntimeEnvironment.getApplication()
+        val holder = WearSessions.get(app)
+        val self =
+            holder.data.players
+                .ensureSelf("", 1) { PlayerId("me") }
+                .id
+        val bea =
+            holder.data.players
+                .addGuest(PlayerId("bea"), "Bea", 1)
+                .id
+        holder.session.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(bea), self))
+        val publisher = GlancePublisher(app, holder)
+        holder.session.addListener(publisher)
+        assertTrue(GlancePublisher.snapshot.toString().contains("Bea"))
+        assertTrue("ohne aufgeschobenes Update bleibt der Sendestand, ein Neustart sendet nicht", holder.prefs.glanceSentState != null)
+        // Redaktion im Drosselfenster: Update wird nur aufgeschoben, danach endet der Prozess
+        holder.data.players.rename(bea, "")
+        val state = holder.session.state.value
+        publisher.onStateChanged(state.copy(lifecycleRevision = state.lifecycleRevision + 1))
+        assertFalse(GlancePublisher.snapshot.toString().contains("Bea"))
+        holder.session.removeListener(publisher)
+        publisher.dispose()
+        assertNull("Neustart muss das verlorene Update erzwingen", holder.prefs.glanceSentState)
+        val restarted = GlancePublisher(app, holder)
+        holder.session.addListener(restarted)
+        assertTrue(holder.prefs.glanceSentState != null)
+        holder.session.removeListener(restarted)
+        restarted.dispose()
+    }
+
+    @Test
     fun listenerCannotAcknowledgeOrConsumeOldPrivateQueueWhileRecoveryIsHeld() {
         val app = RuntimeEnvironment.getApplication()
         app.getDatabasePath("advantly.db").apply {
