@@ -2,10 +2,10 @@
 -- vollständige Matches samt Epoche, C löscht. Der Job läuft hier mit Budget 0, also genau eine Einheit je Aufruf.
 -- Prüfungen auf neue Objekte laufen über pg_temp.q: gegen den Stand vor der Migration sind sie rot statt abzubrechen.
 -- Review r1: jede Zugriffsänderung mit neuer Generation (P2-2), Fehler eines Kontos halten andere nicht auf (P2-1),
--- zwei Löschungen mit gemeinsamen Matches enden wie zwei nacheinander laufende purge_account (P3), Blockhalbierung.
+-- zwei Löschungen mit gemeinsamen Matches enden wie zwei nacheinander laufende purge_account (P3), Blockgröße.
 begin;
 set local timezone = 'UTC';
-select plan(80);
+select plan(81);
 select tests.world();
 select tests.publish_consent_documents('staged-290');
 select tests.accept_current_consents(id) from tests.users;
@@ -457,5 +457,17 @@ reset statement_timeout;
 select is((select r->>'status' from slow2) || ' ' || pg_temp.q($$select cardinality(pending_matches) - next_match + 1
   from private.account_deletion_progress where profile_id = tests.uid('slow')$$), 'succeeded 35', 'The halved block fits');
 drop trigger zz_test_slow on public.match_participants;
+-- Ohne Last wächst der Block wieder (25 -> 50). C bleibt hier hängen, damit die Fortschrittszeile sichtbar bleibt.
+create function pg_temp.keep_slow() returns trigger language plpgsql as $$
+begin
+  if old.id = tests.uid('slow') then raise exception 'sensitive-keep-detail'; end if;
+  return old;
+end $$;
+create trigger zz_test_keep before delete on auth.users for each row execute function pg_temp.keep_slow();
+create temp table slow3 as select private.run_account_deletion_job_v1() r
+  from (select set_config('advantly.account_deletion_budget', '10s', true)) z;
+select is(pg_temp.q($$select block_size || ' ' || (cardinality(pending_matches) - next_match + 1)
+  from private.account_deletion_progress where profile_id = tests.uid('slow')$$), '50 0', 'A fast block grows back to 50');
+drop trigger zz_test_keep on auth.users;
 select * from finish();
 rollback;

@@ -69,7 +69,8 @@ $$;
 -- pending_matches ist die Arbeitsliste: sortierte Obermenge der Matches, die purge_account matchweise ändert. Ein
 -- zusätzliches oder inzwischen gelöschtes Match bleibt unverändert (jede Anweisung filtert auf Bezüge zum Konto).
 -- B rückt nur next_match vor; als Tabelle kostete allein das Einfügen bei 100 000 Zeilen 0,4–0,6 s in A.
--- block_size: Matches je B-Block; der Job halbiert ihn nach einem Block über Budget oder Statementlimit.
+-- block_size: Matches je B-Block; der Job halbiert ihn nach einem Block über Budget oder Statementlimit und
+-- verdoppelt ihn nach einem schnellen Block wieder (höchstens 50).
 create table private.account_deletion_progress (
   profile_id uuid primary key references public.profiles(id) on delete cascade,
   started_at timestamptz not null,
@@ -433,7 +434,8 @@ $$;
 -- Unterblock je Einheit wie 3701ab9: Ein Fehler rollt nur diese Einheit zurück (A, Matchblock oder C, nie ein halbes
 -- Match), zählt einen Fehlversuch und schließt das Konto für den Rest des Aufrufs aus; eine erfolgreiche Einheit setzt
 -- den Zähler zurück. Nur nach dem Statementlimit endet der Aufruf (danach gäbe es keine Frist mehr). Ein Matchblock über
--- Budget oder Statementlimit läuft beim nächsten Mal halb so groß, bis 1. Ein zurückgestelltes A (gemeinsame Matches mit
+-- Budget oder Statementlimit läuft beim nächsten Mal halb so groß, bis 1; einer unter einem Viertel des Budgets wieder
+-- doppelt so groß, bis 50. Ein zurückgestelltes A (gemeinsame Matches mit
 -- einer laufenden Löschung) zählt nicht als Einheit. advantly.account_deletion_budget überschreibt das Budget (nur Tests).
 create or replace function private.run_account_deletion_job_v1()
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC'
@@ -539,6 +541,10 @@ begin
     if v_kind = 'redact' and (v_failed = 'statement_canceled'
         or (v_budget > interval '0' and clock_timestamp() - v_unit_started > v_budget)) then
       update private.account_deletion_progress set block_size = greatest(block_size / 2, 1) where profile_id = v_id;
+    elsif v_kind = 'redact' and v_failed is null and v_block < 50
+        and clock_timestamp() - v_unit_started < v_budget / 4 then
+      -- Kurzzeitige Last soll den Block nicht dauerhaft klein halten.
+      update private.account_deletion_progress set block_size = least(block_size * 2, 50) where profile_id = v_id;
     end if;
   end loop;
   v_completed := clock_timestamp();
