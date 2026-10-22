@@ -1903,3 +1903,83 @@ eigener Review; die Zwischenzustände sind neu zu testen.
   Löschung erledigt.
 - Root-SQL-Suite auf dem Merge: Rot sind nur die 5 Plattformlücken (110, 200). 260, 270 und 280 sind grün,
   181 und 190 enden mit Exit 0. Log: `%TEMP%/advantly-root-sql-integration-20261020/suite-3701ab9.log`.
+
+**Nutzerentscheide 22.10.2026:** Endgültiges Löschen allein beseitigt den globalen
+Stillstand nicht, weil die Arbeit unter `lock_sync` bleibt. Ein nächtlicher Lauf wurde
+erwogen; entschieden ist „gestaffelt weiterbauen“, Variante **„pro Match atomar“**:
+- **A, Sperren:** kurz und atomar.
+- **B, Abtragen:** je Job-Aufruf (~1 s Budget) werden Blöcke von Matches vollständig
+  redigiert, mit Epochenanstieg in derselben Transaktion.
+- **C, Abschluss:** kurzes `purge_account`.
+- Der Cron läuft alle 5 s.
+
+**Übernahme gestaffelte Kontolöschung (`2bba3c8..b18aa2e`), Merge `904a7c2`:**
+- Neue Migration `20261022000200_staged_account_deletion.sql`, neue Tests 290 (pgTAP,
+  90 Prüfungen) und `290_…_concurrency.py` (in CI). 190 und 280 sind angepasst.
+- **Runde r2** (`2bba3c8`, `2ecefd1`): Grundumsetzung. Ein 100k-Konto hält die Sperre
+  höchstens etwa 1,2 s je Aufruf statt 398–822 s am Stück.
+- **Review r1:** freigegeben mit Auflagen.
+  - P2-1: Ein scheiterndes A hielt alle Löschungen an.
+  - P2-2: Staff verlor in A den Zugriff ohne neues G; der Client wirft bei gleichem G
+    und anderer Stufe.
+  - P3: Zwei gleichzeitige Löschungen mit gemeinsamen Matches wichen im Endzustand ab.
+- **Runde r3** (`c27ecae..bb5b6a2`):
+  - Fehler isoliert, mit gemeinsamer Reihenfolge nach Fehlversuchen.
+  - `bump_visibility` für Staff und Co-Leitung in A.
+  - A wartet auf überlappende laufende Löschungen; `settle` im Dashboard-Weg.
+  - Die Blockgröße halbiert sich bei Überlauf und wächst wieder bis 50.
+- **Review r2:** nicht freigegeben.
+  - P1: `account_deletion_blocker` war quadratisch, weil der Planner einen Nested Loop
+    über `unnest` des Parameters wählte. Zwei überlappende größere Löschungen hielten
+    `lock_sync` bis zu 60 s.
+  - Der Hänger der vollen Schatten-Suite war ein Harness-Artefakt (Ballast in einer
+    stundenlangen Transaktion), kein Produktfehler.
+- **Runde r4** (`9bc754d..b18aa2e`):
+  - Blocker mit `enable_nestloop = off`: 30k × 30k sinkt von 41,5 s auf 14 ms.
+  - Szenario 100k in B, daneben wird ein 20k-Konto fällig: Die längste Sperre je
+    Aufruf sinkt von 21,8 s auf 1,7 s.
+  - Wartestelle `private.account_deletion_waits`; zurückgestellte A zählen aufs Budget.
+  - `settle` arbeitet nur bis zum letzten gemeinsamen Match.
+  - Das Budget zählt ab Erhalt der Sperre, nicht ab dem Aufruf. Diese Änderung war
+    nicht beauftragt; sie ist übernommen, weil sie die Sperrhaltezeit misst, um die es
+    geht.
+- **Review r3:** **freigegeben mit Auflagen.**
+  - Kein P1 und kein P2.
+  - Drei überlappende Konten gleichen `purge_account`; die Gegenprobe ohne Wartestelle
+    weicht ab.
+- **Schatten je Testdatei:** Endzustand gleich `purge_account`, 0 G-Verletzungen in
+  6 011 Prüfschritten.
+- **Integratorentscheid, Ausnahme vom identischen Endzustand:** Hat die überlappende
+  andere Löschung drei oder mehr Fehlversuche, wartet A nicht mehr (Anti-Verhungern).
+  - Garantiert sind dann nur: keine Klarnamen, jede Namensänderung mit höherer
+    Epoche, G-Invariante.
+  - Nicht garantiert sind einzelne Zeilen (`match_redacted_names`, Höhe von
+    `redaction_epoch`).
+  - Der Fall steht unter Alarm (`stalledAccountCount`). Tests 290/82–85.
+- **Für das Betriebshandbuch:**
+  - Ein Dashboard- oder Admin-DELETE neben einer großen laufenden Löschung schließt
+    deren Matches bis zum letzten gemeinsamen Match in EINER Transaktion unter
+    `lock_sync` ab. Gemessen: 9,2 s bei 10k; bei 100k sind Minuten bzw. das
+    60-s-Limit möglich.
+  - Das DELETE scheitert, solange der Block der anderen Löschung scheitert und diese
+    unter drei Fehlversuchen hat.
+  - `admin_purge_due_accounts` bleibt ungestaffelt und sperrt global. Kein Client ruft
+    es auf.
+  - Der Index `match_events_author_idx` entsteht ohne `CONCURRENTLY`; dafür ein
+    Wartungsfenster einplanen.
+- **Bekannte Restpunkte (P3, nicht blockierend):**
+  - Eine veraltete Wartestelle nach Abbruch und Neuantrag verzögert A bis zur alten
+    Position, nie früher. Möglicher Fix: `cancel_account_deletion` räumt die
+    Wartestelle ab.
+  - Kein automatisierter Test für das Budget ab der Sperre.
+  - Kein Test mit drei Konten im Ausnahmepfad.
+  - `tournament_overview` hat keinen Kotlin-Client, Realtime ist seit `20261018000100`
+    geschlossen. Beim Wiederöffnen müssen A und `purge_account` `access_epoch` der
+    Turniermatches mit erhöhen.
+- **Auflage vor der Pilot-Freigabe:** CI auf dem Supabase-Stack muss grün sein. Test 290
+  nutzt im Aufbau `alter table public.matches disable trigger`; das ist lokal belegt,
+  in CI noch nicht.
+- **Release-Gate:** 20261022000200 gehört zum Gate von 00700/00800/00900/01000.
+- Root-SQL-Suite auf `904a7c2`: Rot sind nur die 5 Plattformlücken (110 ×2, 200 ×3).
+  290 hat 90/90, 181 und 190 enden mit Exit 0. Log:
+  `%TEMP%/advantly-root-sql-integration-20261020/root-suite-904a7c2.log`.
