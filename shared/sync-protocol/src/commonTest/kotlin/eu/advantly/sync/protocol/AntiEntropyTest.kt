@@ -80,4 +80,14 @@ class AntiEntropyTest {
         assertFalse(AntiEntropy.isPlausible(ok.copy(deviceSeq = 0), MATCH))
         assertFalse(AntiEntropy.isPlausible(ok.copy(lamport = 0), MATCH))
     }
+
+    @Test
+    fun byteBatchesHalveUntilTheProbeFitsAndKeepOrder() {
+        val items = (1..10).toList()
+        val batches = AntiEntropy.batchesBy(items, maxPerMessage = 8) { _, batch -> batch.sum() <= 20 }
+        assertEquals(items, batches.flatten())
+        assertTrue(batches.all { it.size == 1 || it.sum() <= 20 })
+        assertEquals(listOf(listOf(1, 2, 3, 4), listOf(5, 6, 7), listOf(8), listOf(9, 10)), batches)
+        assertEquals(listOf(listOf(99)), AntiEntropy.batchesBy(listOf(99)) { _, _ -> false }, "Einzelelement bleibt allein")
+    }
 }

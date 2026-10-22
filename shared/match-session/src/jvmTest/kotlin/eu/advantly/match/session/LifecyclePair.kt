@@ -2,6 +2,7 @@ package eu.advantly.match.session
 
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.core.model.PlayerId
+import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.LocalData
 import eu.advantly.data.createInMemoryJvmDriver
 import eu.advantly.device.link.DeviceLink
@@ -13,14 +14,20 @@ import eu.advantly.device.link.testing.InMemoryLinkNetwork
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.sync.protocol.DecodeResult
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.sync.protocol.ProtocolVersion
 import eu.advantly.sync.protocol.SyncCodec
+import eu.advantly.sync.protocol.SyncMessage
 import kotlin.random.Random
 
-/** Link, der jedes gesendete Paket aufzeichnet und Pakete von Hand einspeisen kann (verspätete Envelopes, Replays). */
+/**
+ * Link, der jedes gesendete Paket aufzeichnet und Pakete von Hand einspeisen kann (verspätete Envelopes, Replays).
+ * [lose] verwirft ausgehende Pakete auf App-Ebene (verlorene Acks/Seiten, ohne Wiederholung durch den Link).
+ */
 class RecordingLink(
     private val delegate: DeviceLink,
 ) : DeviceLink by delegate {
     val sent = mutableListOf<ByteArray>()
+    var lose: (SyncMessage) -> Boolean = { false }
     private var receiver: DeviceLinkListener? = null
 
     override fun setListener(listener: DeviceLinkListener?) {
@@ -34,6 +41,8 @@ class RecordingLink(
         callback: SendCallback?,
     ): String {
         sent += payload
+        val message = (SyncCodec.decode(payload, 3..4) as? DecodeResult.Ok)?.message
+        if (message != null && lose(message)) return "lost-${sent.size}"
         return delegate.send(peer, payload, callback)
     }
 
@@ -42,14 +51,17 @@ class RecordingLink(
         payload: ByteArray,
     ) = checkNotNull(receiver).onMessage(peer, "replay", payload)
 
-    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it) as? DecodeResult.Ok }
+    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it, 3..4) as? DecodeResult.Ok }
 }
 
 /**
  * Gekoppeltes Handy und Uhr (vertraute Links, Wear-Puffer bei Trennung) mit je einem dauerhaften Treiber: Neustarts
  * bauen `LocalData` und Session auf derselben Datenbank neu auf.
  */
-class LifecyclePair {
+class LifecyclePair(
+    private val phoneVersions: IntRange = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT,
+    private val watchVersions: IntRange = phoneVersions,
+) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, queueWhenDisconnected = true)
     private val phoneDriver: SqlDriver = createInMemoryJvmDriver()
@@ -81,7 +93,11 @@ class LifecyclePair {
             data,
             link,
             scheduler,
-            SessionConfig(MatchSessions.deviceId(data), kind),
+            SessionConfig(
+                MatchSessions.deviceId(data),
+                kind,
+                protocolVersions = if (kind == PeerKind.PHONE) phoneVersions else watchVersions,
+            ),
             WallClock { 1_760_000_000_000 + scheduler.nowMs() },
             RandomIdGenerator(Random(++seed)),
         )
@@ -103,19 +119,29 @@ class LifecyclePair {
 
     fun settle() = scheduler.advanceBy(2_000)
 
+    /** Upload-Sitzung des angemeldeten Kontos (Auth-Lease des Handys). */
+    var token: CloudUploadSession? = null
+        private set
+
     /** Konto am Handy anmelden und dessen Replikat aktivieren (Integrator-Schritt, hier für die Tests). */
     fun activate(profile: String) {
-        phone.activateAccount(profile, phoneData.cloudUploads.activate(profile))
+        token = phoneData.cloudUploads.activate(profile)
+        phone.activateAccount(profile, token!!)
         settle()
         phoneData.replicas.activate(phoneData.replicas.captureContext()) {}
         settle()
     }
 
+    /** Neustart auf derselben Datenbank; der Host bindet die Kontositzung wie beim App-Start erneut. */
     fun restartPhone() {
         phone.close()
         phoneData = LocalData(phoneDriver)
         phone = session(phoneData, phoneLink, PeerKind.PHONE)
         phone.start()
+        phoneData.accountIdentities.profile?.let { profile ->
+            token = phoneData.cloudUploads.activate(profile)
+            phone.activateAccount(profile, token!!)
+        }
         settle()
     }
 
