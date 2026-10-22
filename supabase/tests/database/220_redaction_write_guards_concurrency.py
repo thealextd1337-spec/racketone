@@ -73,6 +73,8 @@ def backfill_roundtrip(owner):
         owner.execute(original("20261015000800_rpc_konto_export.sql", "private.anonymize_profile"))
         # 20261022000100 liest in bump_visibility redacted_profile_identities, die der 006-Zustand nicht kennt.
         owner.execute(original("20261015000100_profile_freunde_geraete.sql", "private.bump_visibility"))
+        # Ebenso prüft handle_new_user dort die Tombstones; der 006-Zustand legt danach noch Konten an.
+        owner.execute(original("20261016000500_auth_altersgate.sql", "private.handle_new_user"))
         owner.execute(original("20261018000600_cloud_lifecycle_redactions.sql", "private.capture_profile_redactions"))
         owner.execute("drop index public.match_events_redaction_legacy_idx,public.match_events_redaction_v2_idx,"
                       "public.match_events_redaction_lineup_idx")

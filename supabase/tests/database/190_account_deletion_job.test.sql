@@ -62,11 +62,12 @@ end $$;
 create trigger k3_test_reject before delete on auth.users for each row execute function pg_temp.reject_k3_delete();
 select is(private.run_account_deletion_job_v1()->>'status','failed','Fehlschlag wird nicht als Erfolg ausgegeben');
 select is(public.account_deletion_job_status_v1()->'lastCommittedRun'->>'errorCode','account_deletion_failed','Fester Fehlercode gespeichert');
-select is((public.account_deletion_job_status_v1()->'lastCommittedRun'->>'deletedCount')::int,0,'Zurückgerollte Löschungen zählen nicht');
-select is((select count(*)::int from auth.users where id in (tests.uid('k3_atomic_first'),tests.uid('k3_atomic_second'))),2,'Gesamter Batch atomar zurückgerollt');
+select is((public.account_deletion_job_status_v1()->'lastCommittedRun'->>'deletedCount')::int,1,'Nur die abgeschlossene Löschung zählt');
+select is((select array_agg(id) from auth.users where id in (tests.uid('k3_atomic_first'),tests.uid('k3_atomic_second'))),
+  array[tests.uid('k3_atomic_second')],'Abgeschlossene Löschung bleibt, nur die fehlgeschlagene rollt zurück');
 select ok(public.account_deletion_job_status_v1()::text not like '%sensitive-test-detail%','Kein Rawexceptiontext');
 drop trigger k3_test_reject on auth.users;
-select is((private.run_account_deletion_job_v1()->>'deletedCount')::int,2,'Retry nach Fehler ausführbar');
+select is((private.run_account_deletion_job_v1()->>'deletedCount')::int,1,'Retry nach Fehler ausführbar');
 select is(public.account_deletion_job_status_v1()->'lastCommittedRun'->>'status','succeeded','Neuer tatsächlicher Erfolg ersetzt Fehler');
 select results_eq($$select column_name::text collate "C" from information_schema.columns
     where table_schema='private' and table_name='account_deletion_job_state' order by column_name$$,

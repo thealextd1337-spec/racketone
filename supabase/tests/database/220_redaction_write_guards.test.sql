@@ -1077,6 +1077,13 @@ begin
  update public.profile_settings set country='AT',age_confirmed_at=now(),age_rule_min_age=14 where profile_id=x;
  perform tests.accept_current_consents(x);
 end $$;
+-- Liefert den Fehlertext statt abzubrechen (20261022000100 lehnt getilgte Profil-IDs ab).
+create function pg_temp.try_fixed_profile(n text,x uuid) returns text language plpgsql as $$
+begin
+ perform pg_temp.fixed_profile(n,x);
+ return null;
+exception when others then return sqlerrm;
+end $$;
 create function pg_temp.typed_future_profile(mode text,cloud boolean) returns setof text language plpgsql as $$
 declare
  n text:='n7_'||left(mode,8)||case when cloud then '_c' else '_s' end;
@@ -1258,17 +1265,14 @@ begin
  page:=pg_temp.context_page(n||'_a',mv);
  return next ok(pg_temp.ev_name(ed)='Gelöschter Spieler' and jsonb_array_length(page->'events')=3
   and page->'redactedPlayerIds'=jsonb_build_array(x),n||': unrelated match keeps the late global ID from the NotMe event');
- -- Selbst privilegierte Auth-UUID-Wiederanlage widerruft keinen echten Profilbeleg.
+ -- Privilegierte Auth-UUID-Wiederanlage wird abgelehnt (20261022000100); der Profilbeleg bleibt bestehen.
  delete from tests.users where identifier=n||'_v';
- perform pg_temp.fixed_profile(n||'_r',x);
- insert into public.friendships(requester_id,addressee_id,status) values(a,x,'accepted');
- r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(mr,jsonb_build_array(tests.part('revived','A',1,'Revived',x)))))),cloud);
- return next is(tests.result(r,'matches',0),'created',n||': reused Auth UUID creates only canonical match content');
- return next ok((select deleted_profile and profile_id is null from public.match_participants where match_id=mr)
-  and not private.redaction_live_profile_context(mr,x),n||': actual Profile delete guard cannot be reversed by new live row');
- r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('events',jsonb_build_array(tests.event(er,mr,d,7,'PlayerAssigned',jsonb_build_object('player',jsonb_build_object('id',x,'displayName','Revived')))))),cloud);
- return next is(tests.result(r,'events',0),'accepted',n||': stale recreated-Profile event accepted canonically');
- return next is(pg_temp.ev_name(er),'Gelöschter Spieler',n||': recreated Profile row does not undo deletion evidence');
+ return next is(pg_temp.try_fixed_profile(n||'_r',x),'profile_id_retired',n||': reused Auth UUID is rejected');
+ return next ok(private.redacted_profile_identity(x::text) and not exists(select 1 from public.profiles where id=x)
+  and not exists(select 1 from auth.users where id=x),n||': tombstone stays and no live profile reappears');
+ r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('events',jsonb_build_array(tests.event(er,mv,d,7,'PlayerAssigned',jsonb_build_object('player',jsonb_build_object('id',x,'displayName','Revived')))))),cloud);
+ return next is(tests.result(r,'events',0),'accepted',n||': stale event after rejected revival accepted canonically');
+ return next is(pg_temp.ev_name(er),'Gelöschter Spieler',n||': rejected revival does not undo deletion evidence');
 end $$;
 select * from pg_temp.player_profile_split(true);
 select * from pg_temp.player_profile_split(false);

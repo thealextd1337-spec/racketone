@@ -96,9 +96,32 @@ begin
 end;
 $$;
 
--- Löschjob (00400): Mehrere fällige Konten mit eigener Historie überschreiten im selben Lauf das 60-s-Limit
--- (8 Konten × 10 000 eigene Teilnehmerzeilen: Abbruch nach 60 s, deletedCount 0, alle 8 bleiben fällig).
--- Unverändert gegenüber 00400 bis auf die Zeitgrenze; CREATE OR REPLACE behält Owner und ACL.
+-- Löschjob (00400): Fortschritt auch bei langen Konten (Review b854b9d und 0780489, P2-1).
+-- Vorher lief ein ganzer Lauf in einem Unterblock. Brach eine Löschung am 60-s-Limit ab, rollten alle Löschungen
+-- des Laufs zurück, und jeder Folgelauf wählte dieselbe Reihenfolge (8 Konten × 10 000 Zeilen; ebenso 20 s + 45 s):
+-- Dauerstillstand. Jetzt läuft jede Kontolöschung in einem eigenen Unterblock.
+-- Fristmechanik (gemessen, PG 17): statement_timeout meldet query_canceled (57014). PL/pgSQL fängt das nur
+-- ausdrücklich, nicht über „others“; danach läuft dasselbe Statement ohne Timer weiter, ein zweiter Abbruch kommt
+-- nicht. SET LOCAL statement_timeout und das SET der Funktion stellen keinen neuen Timer. Eine Frist je Konto
+-- ist also nicht setzbar; deshalb endet die Schleife beim ersten Fehler, und nach dem Abbruch läuft nur noch die
+-- kurze Buchhaltung. Abgeschlossene Löschungen bleiben, die abgebrochene rollt vollständig zurück (kein halb
+-- gelöschtes Konto). Gescheiterte Konten zählen Fehlversuche und kommen ans Ende der Auswahl.
+create table private.account_deletion_failures (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  attempts integer not null check (attempts > 0),
+  last_failed_at timestamptz not null,
+  last_error_code text not null check (last_error_code in ('lock_timeout', 'statement_canceled', 'account_deletion_failed'))
+);
+alter table private.account_deletion_failures enable row level security;
+revoke all on private.account_deletion_failures from public, anon, authenticated, service_role;
+
+-- Ein Lauf kann jetzt nach abgeschlossenen Löschungen scheitern: deleted_count zählt nur committete Löschungen.
+alter table private.account_deletion_job_state drop constraint account_deletion_job_state_check1;
+alter table private.account_deletion_job_state add constraint account_deletion_job_state_outcome_check
+  check ((status = 'succeeded' and error_code is null) or (status = 'failed' and error_code is not null));
+
+-- Gegenüber 00400: Auswahl vorab als Liste (kein Cursorabruf zwischen den Löschungen), Konten mit wenigen
+-- Fehlversuchen zuerst, Unterblock je Konto. Zeitgrenze 30 s, Fristprüfung, Sperren und Rechte unverändert.
 create or replace function private.run_account_deletion_job_v1()
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC'
 set lock_timeout = '5s' set statement_timeout = '60s' as $$
@@ -106,6 +129,7 @@ declare
   v_started timestamptz := clock_timestamp();
   v_completed timestamptz;
   v_selection_time timestamptz;
+  v_ids uuid[] := '{}';
   v_id uuid;
   v_count integer := 0;
   v_error text;
@@ -116,16 +140,22 @@ begin
     perform private.lock_sync();
     v_selection_time := clock_timestamp();
     -- Auswahl erst NACH der globalen Sperre; alle normalen Recovery-/Schreibwege nehmen dieselbe Sperre.
-    for v_id in
-      select p.id from public.profiles p join public.profile_settings s on s.profile_id = p.id
+    select coalesce(array_agg(c.id order by c.attempts, c.deletion_requested_at, c.id), '{}') into v_ids from (
+      select p.id, coalesce(f.attempts, 0) attempts, s.deletion_requested_at
+      from public.profiles p join public.profile_settings s on s.profile_id = p.id
+      left join private.account_deletion_failures f on f.profile_id = p.id
       where p.status = 'deletion_requested' and s.deletion_requested_at <= v_selection_time - interval '14 days'
-      order by s.deletion_requested_at, p.id limit 100
-      for update of p, s
-    loop
-      -- 0022: Zeitbudget je Lauf. Nach 30 s beginnt keine weitere Löschung; der Rest folgt im nächsten Lauf.
-      -- Sonst bricht das 60-s-Limit den ganzen Lauf ab, alle Löschungen rollen zurück, und jeder Folgelauf
-      -- wählt dieselben ältesten Konten. Mindestens ein Konto je Lauf.
-      exit when v_count > 0 and clock_timestamp() - v_started >= interval '30 seconds';
+      order by coalesce(f.attempts, 0), s.deletion_requested_at, p.id limit 100
+      for update of p, s) c;
+  exception
+    when lock_not_available then v_error := 'lock_timeout';
+    when query_canceled then v_error := 'statement_canceled';
+    when others then v_error := 'account_deletion_failed';
+  end;
+  foreach v_id in array v_ids loop
+    -- Nach 30 s beginnt keine weitere Löschung; der Rest folgt im nächsten Lauf. Mindestens ein Konto je Lauf.
+    exit when v_count > 0 and clock_timestamp() - v_started >= interval '30 seconds';
+    begin
       -- Frische Prüfung direkt vor dem bestehenden Löschpfad, keine Auth-Sitzungsmutation hier.
       if exists (select 1 from public.profiles p join public.profile_settings s on s.profile_id = p.id
           where p.id = v_id and p.status = 'deletion_requested'
@@ -133,14 +163,19 @@ begin
         perform private.purge_account(v_id);
         v_count := v_count + 1;
       end if;
-    end loop;
-  exception
-    -- Der Unterblock rollt ALLE Kontolöschungen zurück; ausschließlich feste Fehlerklassen speichern.
-    when lock_not_available then v_error := 'lock_timeout';
-    when query_canceled then v_error := 'statement_canceled';
-    when others then v_error := 'account_deletion_failed';
-  end;
-  if v_error is not null then v_count := 0; end if;
+    exception
+      -- Rollt nur diese eine Löschung zurück; ausschließlich feste Fehlerklassen speichern.
+      when lock_not_available then v_error := 'lock_timeout';
+      when query_canceled then v_error := 'statement_canceled';
+      when others then v_error := 'account_deletion_failed';
+    end;
+    if v_error is not null then
+      insert into private.account_deletion_failures as f values (v_id, 1, clock_timestamp(), v_error)
+        on conflict (profile_id) do update set attempts = f.attempts + 1, last_failed_at = excluded.last_failed_at,
+          last_error_code = excluded.last_error_code;
+      exit;
+    end if;
+  end loop;
   v_completed := clock_timestamp();
   insert into private.account_deletion_job_state as j
     (singleton, started_at, completed_at, status, deleted_count, error_code)
@@ -151,5 +186,68 @@ begin
   return jsonb_build_object('contractVersion', 1, 'startedAt', v_started, 'completedAt', v_completed,
     'status', case when v_error is null then 'succeeded' else 'failed' end,
     'deletedCount', v_count, 'errorCode', v_error);
+end;
+$$;
+
+-- Alarm: Konten mit mindestens drei Fehlversuchen, nur als Anzahl (keine Kontoreferenz). Sonst wie 00400.
+create or replace function public.account_deletion_job_status_v1()
+returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC'
+set lock_timeout = '5s' as $$
+declare
+  v_run jsonb;
+  v_cron jsonb := jsonb_build_object('status', 'unavailable');
+  v_stalled integer;
+begin
+  perform private.lock_sync();
+  select jsonb_build_object('status', j.status, 'startedAt', j.started_at, 'completedAt', j.completed_at,
+    'deletedCount', j.deleted_count, 'errorCode', j.error_code) into v_run
+    from private.account_deletion_job_state j where singleton;
+  select count(*) into v_stalled from private.account_deletion_failures where attempts >= 3;
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    -- Keine return_message: diese kann SQL-/Providertexte enthalten. Kein Job-/Run-Identifier im Ergebnis.
+    execute $q$select jsonb_build_object('status', case
+          when r.status = 'succeeded' then 'succeeded'
+          when r.status = 'failed' then 'failed'
+          when r.status in ('starting', 'running', 'connecting', 'sending') then 'running' else 'unknown' end,
+        'startedAt', r.start_time, 'completedAt', r.end_time,
+        'errorCode', case when r.status = 'failed' then 'scheduler_failed' end)
+      from cron.job_run_details r join cron.job j on j.jobid = r.jobid
+      where j.jobname = 'advantly-account-deletion-v1' order by r.runid desc limit 1$q$ into v_cron;
+    v_cron := coalesce(v_cron, jsonb_build_object('status', 'unknown'));
+  end if;
+  return jsonb_build_object('contractVersion', 1, 'observedAt', clock_timestamp(),
+    'lastCommittedRun', coalesce(v_run, jsonb_build_object('status', 'unknown')),
+    'scheduler', v_cron, 'stalledAccountCount', v_stalled);
+end;
+$$;
+
+-- Tombstones gelten dauerhaft (Redaktionshelfer, bump_visibility). Eine getilgte Profil-ID darf daher nie wieder
+-- angelegt werden, etwa über die Admin-API mit expliziter id (Review 0780489, P3-1). Sonst wie 00500.
+create or replace function private.handle_new_user()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_provider text := new.raw_app_meta_data ->> 'provider';
+  v_identity text;
+  v_ticket private.age_tickets%rowtype;
+begin
+  perform private.lock_sync();
+  if exists (select 1 from private.redacted_profile_identities where profile_id = new.id) then
+    perform private.fail('profile_id_retired');
+  end if;
+  v_identity := case v_provider when 'email' then lower(btrim(new.email))
+    when 'google' then new.raw_user_meta_data ->> 'sub' end;
+  -- Gleiche verifizierte Provider-Identität wie im Hook, auch wenn GoTrue eine neue UUID erzeugt.
+  delete from private.age_tickets
+    where provider = v_provider and identity_hash = private.age_hash(v_provider || ':' || v_identity)
+      and consumed_at > clock_timestamp() - interval '1 minute' and expires_at > clock_timestamp()
+      and (v_provider = 'google' or token_hash = private.age_hash(new.raw_user_meta_data ->> 'age_ticket'))
+    returning * into v_ticket;
+  insert into public.profiles(id) values (new.id);
+  insert into public.profile_settings(profile_id, country, age_confirmed_at, age_rule_min_age)
+    values (new.id, v_ticket.country, v_ticket.checked_at, v_ticket.min_age);
+  -- AFTER INSERT: NEW zu ändern reicht nicht; das bereits gespeicherte Metadatum gezielt entfernen.
+  update auth.users set raw_user_meta_data = raw_user_meta_data - 'age_ticket'
+    where id = new.id and raw_user_meta_data ? 'age_ticket';
+  return new;
 end;
 $$;
