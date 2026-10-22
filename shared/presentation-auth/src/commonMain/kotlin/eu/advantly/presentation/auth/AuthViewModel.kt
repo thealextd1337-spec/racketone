@@ -41,16 +41,18 @@ class AuthViewModel(
     val support: eu.advantly.presentation.support.SupportViewModel? = null,
     val upload: PhoneUploadPort? = null,
     val export: PhoneExportPort? = null,
+    val pull: PhonePullPort? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
         var closesStarted = false
         var uploadDrained = upload == null
         var exportDrained = export == null
+        var pullDrained = pull == null
         var authClosed = false
 
         fun closeAuthWhenDrained() {
-            if (closesStarted && uploadDrained && exportDrained && !authClosed) {
+            if (closesStarted && uploadDrained && exportDrained && pullDrained && !authClosed) {
                 authClosed = true
                 auth.close()
             }
@@ -62,6 +64,10 @@ class AuthViewModel(
         }
         export?.close {
             exportDrained = true
+            closeAuthWhenDrained()
+        }
+        pull?.close {
+            pullDrained = true
             closeAuthWhenDrained()
         }
         closesStarted = true

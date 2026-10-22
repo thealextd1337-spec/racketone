@@ -59,6 +59,7 @@ internal fun ComponentActivity.createPhoneAccount(
             hostStorageAction = runtime::storageAction,
         )
     val backend = auth.cloudBackend(storage.cloudInstallation)
+    val lane = PhoneCloudLane()
     return AuthViewModel(
         object : CloudAuthPort by auth {
             override fun close() {
@@ -73,7 +74,13 @@ internal fun ComponentActivity.createPhoneAccount(
         upload =
             PhoneUploadHost(auth, session, backend, backend::bindDevice, runtime.scope, hostAccessAllowed = {
                 runtime.allowed
-            }, storageAction = runtime::storageAction),
+            }, storageAction = runtime::storageAction, lane = lane),
+        pull =
+            phonePullHost {
+                PhonePullHost(auth, session, backend, backend::bindDevice, lane, runtime.scope, hostAccessAllowed = {
+                    runtime.allowed
+                }, storageAction = runtime::storageAction)
+            },
         export = PhoneExportHost(auth.dataExports(), applicationContext, runtime.scope),
         support =
             SupportViewModel(

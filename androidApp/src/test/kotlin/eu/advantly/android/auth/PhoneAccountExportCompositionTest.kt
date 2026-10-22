@@ -299,7 +299,7 @@ class PhoneAccountExportCompositionTest {
             PhoneUploadHost(auth, session, observedUploads, backend::bindDevice, work, { 1_000L }, {
                 Thread.currentThread() ===
                     owner
-            })
+            }, lane = PhoneCloudLane())
         private val observedAuth =
             object : CloudAuthPort by auth {
                 override suspend fun decideConsent(

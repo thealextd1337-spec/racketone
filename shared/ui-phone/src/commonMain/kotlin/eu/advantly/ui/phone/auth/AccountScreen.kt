@@ -242,6 +242,7 @@ fun AccountScreen(
             }
             if (state.authenticated) {
                 model.upload?.let { CloudUploadSection(it) }
+                model.pull?.let { CloudPullSection(it) }
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(
