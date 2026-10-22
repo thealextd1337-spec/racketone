@@ -1068,6 +1068,38 @@ class WatchScoringTest {
         assertEquals("RED", rig.watch.phoneStatus().light)
     }
 
+    /** Lifecycle-Revision und Sync-Abschluss als flache Werte, auch ohne offenes Match (kein Flow, kein SKIE). */
+    @Test
+    fun phoneStatusCarriesLifecycleRevisionAndSettledSync() {
+        val rig = Rig()
+        val state = rig.watchSession.state.value
+        val status = rig.watch.phoneStatus()
+        assertEquals(state.lifecycleRevision, status.lifecycleRevision)
+        assertEquals(state.sync.settled, status.syncSettled)
+        val changed = phoneStatusOf(state.copy(lifecycleRevision = state.lifecycleRevision + 1), null)
+        assertEquals(state.lifecycleRevision + 1, changed.lifecycleRevision)
+        assertTrue(phoneStatusOf(state, null).syncSettled)
+        assertFalse(phoneStatusOf(state.copy(sync = state.sync.copy(lifecyclePendingToPeers = 1)), null).syncSettled)
+        assertFalse(phoneStatusOf(state.copy(sync = state.sync.copy(lifecycleBlocked = true)), null).syncSettled)
+    }
+
+    @Test
+    fun lifecycleBacklogCountsAsPendingAndRedactedPeopleAreNotSuggested() {
+        val rig = Rig()
+        rig.watchData.players.addGuest(PlayerId("bea"), "Bea", 1)
+        rig.watchData.players.addGuest(PlayerId("caro"), "Caro", 1)
+        rig.watchData.settings.put("players.recentRemote", "bea,caro")
+        rig.watchData.players.rename(PlayerId("bea"), "")
+        assertEquals(listOf("caro"), rig.watch.recentPeople().map { it.id })
+
+        rig.watch.startMatch("TENNIS_OPEN", false, true, false)
+        val match = assertNotNull(rig.watchSession.state.value.match)
+        val sync = rig.watchSession.state.value.sync
+        assertEquals(0, buildSnapshot(match, sync, 0, pendingToPeers = 0).pendingToPeers)
+        assertEquals(3, buildSnapshot(match, sync.copy(lifecyclePendingToPeers = 2), 0, pendingToPeers = 1).pendingToPeers)
+        assertEquals(1, buildSnapshot(match, sync.copy(lifecycleBlocked = true), 0, pendingToPeers = 0).pendingToPeers)
+    }
+
     @Test
     fun versionMismatchReachesFacadeWithoutAnOpenMatch() {
         for ((version, expected) in listOf(1 to "OTHER_DEVICE", 99 to "THIS_DEVICE")) {

@@ -44,6 +44,7 @@ import eu.advantly.match.session.SyncIndicator
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.match.session.SystemWallClock
 import eu.advantly.match.session.WallClock
+import eu.advantly.sync.protocol.AppBuild
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
@@ -184,36 +185,26 @@ class WatchScoring internal constructor(
         )
     }
 
-    /** Zuletzt gespielte Personen: Handy-Verzeichnis und lokale Historie, ohne Archive; keine Platzhalter/Self. */
+    /** Zuletzt gespielte Personen: Handy-Verzeichnis und lokale Historie, ohne Archive; keine Platzhalter/Self/Redigierten. */
     fun recentPeople(): List<WatchPlayer> {
         error = ""
         val b = backend() ?: return emptyList()
         return call(STORE_READ) {
             b.data
                 .watchPeople()
+                .filter { it.displayName.isNotBlank() }
                 .map { WatchPlayer(it.id.value, it.displayName, "", 0, false) }
         }.orEmpty()
     }
 
-    /** F31: flache Statusdaten ohne UI-Texte; Aufruf und Benachrichtigung bleiben auf der Main-Queue. */
+    /**
+     * F31: flache Statusdaten ohne UI-Texte; Aufruf und Benachrichtigung bleiben auf der Main-Queue. Swift liest sie bei
+     * jedem [WatchScoringListener.onSnapshot] neu und lädt bei geänderter [WatchPhoneStatus.lifecycleRevision] Personen
+     * und „Wie letztes Mal“ neu.
+     */
     fun phoneStatus(): WatchPhoneStatus {
-        val session = backend()?.session ?: return WatchPhoneStatus("GRAY", "", false)
-        val phone =
-            session.state.value.devices
-                .firstOrNull { it.kind == PeerKind.PHONE }
-        val update =
-            when (phone?.compatibility) {
-                CompatibilityStatus.PEER_TOO_OLD -> "OTHER_DEVICE"
-                CompatibilityStatus.PEER_TOO_NEW -> "THIS_DEVICE"
-                else -> ""
-            }
-        return WatchPhoneStatus(
-            phone?.light(session.config.appBuild)?.name ?: "GRAY",
-            update,
-            session.config.appBuild
-                ?.commit
-                ?.endsWith("-dirty") == true || phone?.appBuild?.commit?.endsWith("-dirty") == true,
-        )
+        val session = backend()?.session ?: return WatchPhoneStatus("GRAY", "", false, 0, false)
+        return phoneStatusOf(session.state.value, session.config.appBuild)
     }
 
     /** Versionshinweis auch ohne offenes Match: THIS_DEVICE / OTHER_DEVICE / leer (kompatibel oder unbekannt). */
@@ -886,8 +877,8 @@ class WatchPlayer(
  * @property pointsPlayed wirksam gezählte Ballwechsel
  * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
  * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
- * @property pendingToPeers Events des offenen Matches, die noch keine Gegenstelle bestätigt hat
- *   (0 = „synchron“, sonst „N ausstehend“); nicht der globale Rückstand der Session
+ * @property pendingToPeers Events des offenen Matches, die noch keine Gegenstelle bestätigt hat, plus offene
+ *   Lifecycle-Zustellungen (ein blockierter Rückstand zählt mindestens als 1); 0 = „synchron“, sonst „N ausstehend“
  * @property lastEventReceivedAtMs Wanduhrzeit des zuletzt empfangenen Events (Anzeige: „Stand vor X s“), sonst `0`
  * @property lastSyncAtMs Wanduhrzeit des letzten Abgleichs mit einer Gegenstelle, sonst `0`
  * @property scorerDisconnectedSinceMs Anzeige: seit wann der Zähler nicht erreichbar ist (nach > 30 s Angebot
@@ -1198,7 +1189,7 @@ internal fun buildSnapshot(
         pointsPlayed = match.pointsPlayed,
         linkConnected = sync.indicator != SyncIndicator.LOCAL_ONLY,
         scorerConnected = sync.scorerConnected,
-        pendingToPeers = pendingToPeers,
+        pendingToPeers = (pendingToPeers + sync.lifecyclePendingToPeers).coerceAtLeast(if (sync.lifecycleBlocked) 1 else 0),
         lastEventReceivedAtMs = sync.lastEventReceivedAtMs ?: 0,
         lastSyncAtMs = sync.lastSyncAtMs ?: 0,
         scorerDisconnectedSinceMs = scorerDisconnectedSinceMs,
@@ -1289,9 +1280,37 @@ internal fun updateCode(sync: SyncStatus?): String =
         CompatibilityStatus.COMPATIBLE, null -> ""
     }
 
-/** Status der Handy-Verbindung für SwiftUI; ausschließlich flache Werte. */
+internal fun phoneStatusOf(
+    state: SessionState,
+    appBuild: AppBuild?,
+): WatchPhoneStatus {
+    val phone = state.devices.firstOrNull { it.kind == PeerKind.PHONE }
+    val update =
+        when (phone?.compatibility) {
+            CompatibilityStatus.PEER_TOO_OLD -> "OTHER_DEVICE"
+            CompatibilityStatus.PEER_TOO_NEW -> "THIS_DEVICE"
+            else -> ""
+        }
+    return WatchPhoneStatus(
+        phone?.light(appBuild)?.name ?: "GRAY",
+        update,
+        appBuild?.commit?.endsWith("-dirty") == true || phone?.appBuild?.commit?.endsWith("-dirty") == true,
+        state.lifecycleRevision,
+        state.sync.settled,
+    )
+}
+
+/**
+ * Status der Handy-Verbindung für SwiftUI; ausschließlich flache Werte.
+ *
+ * @property lifecycleRevision wechselt bei Access-, Redaktions- oder Directory-Änderungen; nur auf Ungleichheit
+ *   vergleichen (beginnt nach Neustart wieder bei 0). Bei Wechsel alle abgeleiteten Namen neu laden.
+ * @property syncSettled weder Events noch Lifecycle-Zustellungen ausstehend und nichts blockiert
+ */
 data class WatchPhoneStatus(
     val light: String,
     val updateRequired: String,
     val developmentBuild: Boolean,
+    val lifecycleRevision: Long,
+    val syncSettled: Boolean,
 )
