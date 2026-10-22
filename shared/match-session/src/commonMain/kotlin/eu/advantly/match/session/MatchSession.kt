@@ -703,18 +703,17 @@ class MatchSession(
     }
 
     /**
-     * P3-C (E6, Variante a): Mit Konto und Protokoll 4 ändern nur die Genesis-Quelle und das Handy, dessen eigene Uhr das
-     * Match angelegt hat, die Teilnehmer. Eine Uhr im Handy-Match oder ein zweites eigenes Gerät würde dem Pull sonst den
-     * Beleg für den eigenen Kopf nehmen (dauerhaft BLOCKED).
+     * P3-C (E6, Variante a, gelockert in W3 Runde 3): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
+     * Handy desselben Kontos die Teilnehmer (lokal im aktuellen Scope, wie die Kontoregel von D-2) – auch ein neu
+     * installiertes in älteren eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches, fremde
+     * Konten nie ([canAssignPlayer] prüft den Ersteller). Der Belegverlust am Kopf der Genesis-Quelle heilt mit deren
+     * nächstem Upload.
      */
     private fun participantAuthority(matchId: MatchId): Boolean {
         if (!data.accountIdentities.managed || config.protocolVersions.last < 4) return true
         val source = genesisOf(matchId)?.deviceId ?: return false
         return source == deviceId ||
-            (
-                config.kind == PeerKind.PHONE && knownKinds()[source] == PeerKind.WATCH &&
-                    data.accountIdentities.sourceScope(source.value) == data.accountIdentities.scope
-            )
+            (config.kind == PeerKind.PHONE && data.accountIdentities.sourceScope(deviceId.value) == data.accountIdentities.scope)
     }
 
     fun assignmentFailure(

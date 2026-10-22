@@ -63,11 +63,12 @@ class MatchMetaAuthorityTest {
     }
 
     /**
-     * P3-C: Ändert ein zweites eigenes Gerät die Teilnehmer, fehlt dem Handy danach der Beleg für den eigenen Kopf und der
-     * Pull bleibt BLOCKED. Variante (a): nur Genesis-Quelle und das Handy ihrer eigenen Uhr sind Teilnehmerautorität.
+     * P3-C, Variante (a) gelockert (W3 Runde 3): Teilnehmerautorität sind die Genesis-Quelle und jedes eigene Handy desselben
+     * Kontos. Eine Uhr im Handy-Match und fremde Konten bleiben ausgeschlossen; der Belegverlust am Kopf der Genesis-Quelle
+     * heilt mit deren nächstem Upload ([aSecondOwnPhoneAssigningTakesTheOwnHeaderProofUntilTheOwnUpload]).
      */
     @Test
-    fun participantAuthorityStaysWithTheGenesisSourceAndItsPhone() {
+    fun participantAuthorityIsTheGenesisSourceOrAnOwnPhone() {
         val pair = managed()
         val phoneMatch = pair.phone.create(format, pair.selfLineup())
         pair.settle()
@@ -86,10 +87,16 @@ class MatchMetaAuthorityTest {
         pair.settle()
         assertTrue(pair.watch.canAssignPlayer(watchMatch), "Genesis-Quelle")
 
-        // Match eines zweiten eigenen Handys, per Pull materialisiert: Fremdquelle
+        // Match eines zweiten eigenen Handys, per Pull materialisiert: dieses Handy desselben Kontos darf zuweisen
         val foreign = foreignOwnMatch(pair)
         assertTrue(pair.phoneData.matchCreator(foreign)?.let(pair.phoneData::isSelf) == true, "Ersteller ist der Besitzer selbst")
-        assertFalse(pair.phone.canAssignPlayer(foreign), "zweites eigenes Gerät ist keine Teilnehmerautorität")
+        assertTrue(pair.phone.canAssignPlayer(foreign), "eigenes Handy desselben Kontos")
+
+        // Match eines fremden Kontos (geteilt, MEMBER): nie
+        val bob = PlayerId("bob-self")
+        val shared = foreignOwnMatch(pair, MatchId("0199c82c-0000-7000-8000-00000000b002"), Lineup(listOf(bob), listOf(slot), bob))
+        assertFalse(pair.phone.canAssignPlayer(shared), "fremdes Konto")
+        assertEquals(PlayerAssignmentFailure.NOT_OWNER, pair.phone.assignmentFailure(shared, slot, guest))
     }
 
     /**
@@ -176,15 +183,21 @@ class MatchMetaAuthorityTest {
     }
 
     /**
-     * Nebenwirkung von (a): Ein neu installiertes Handy (neue deviceId, Genesis der früheren Installation) darf in eigenen
-     * älteren Matches nur ohne V4 zuweisen. Mit Konto und Protokoll 3 bleibt alles wie in P1.
+     * Ein neu installiertes Handy (neue deviceId, Genesis der früheren Installation) weist in eigenen älteren Matches zu, mit
+     * und ohne V4 (früher Nebenwirkung von (a) unter V4).
      */
     @Test
-    fun aReinstalledPhoneMayAssignInOwnOlderMatchesOnlyWithoutProtocolFour() {
-        for ((versions, expected) in listOf(3..3 to true, 3..4 to false)) {
+    fun aReinstalledPhoneMayAssignInOwnOlderMatches() {
+        for (versions in listOf(3..3, 3..4)) {
             val pair = managed(versions)
             val older = foreignOwnMatch(pair)
-            assertEquals(expected, pair.phone.canAssignPlayer(older), "Bereich $versions")
+            pair.phoneData.players.addGuest(guest, "Bea", 0)
+            assertTrue(pair.phone.assignPlayer(older, slot, guest), "Bereich $versions")
+            val assigned =
+                pair.phoneData.events
+                    .scoreEvents(older)
+                    .single { it.payload is PlayerAssigned }
+            assertEquals(MatchSessions.deviceId(pair.phoneData), assigned.deviceId)
             pair.close()
             this.pair = null
         }
@@ -207,11 +220,16 @@ class MatchMetaAuthorityTest {
         assertTrue(pair.phone.canAssignPlayer(watchMatch), "Handy der eigenen Uhr")
     }
 
-    /** Match eines anderen eigenen Handys („phone-b“, gleicher Besitzer) über Katalog und Event-Download am Handy. */
-    private fun foreignOwnMatch(pair: LifecyclePair): MatchId {
+    /**
+     * Match eines anderen Handys („phone-b“) über Katalog und Event-Download am Handy; Ersteller ist der erste Spieler von
+     * [lineup] (Standard: der Besitzer selbst).
+     */
+    private fun foreignOwnMatch(
+        pair: LifecyclePair,
+        match: MatchId = MatchId("0199c82c-0000-7000-8000-00000000b001"),
+        lineup: Lineup = pair.selfLineup(),
+    ): MatchId {
         val data = pair.phoneData
-        val match = MatchId("0199c82c-0000-7000-8000-00000000b001")
-        val lineup = pair.selfLineup()
         val record = MatchRecord(match, format, lineup, MatchMeta(), 1, 1, MatchStatus.IN_PROGRESS, ScoreSummary.EMPTY, null)
         val run = data.cloudPulls.beginRun("alice") {}.runSerial
         val page =
@@ -227,7 +245,7 @@ class MatchMetaAuthorityTest {
         data.replicas.markReady(data.replicas.captureContext(), match.value, 1, 0) {}
         val genesis =
             ScoreEvent(
-                EventId("b-genesis"),
+                EventId("b-genesis-${match.value.takeLast(4)}"),
                 match,
                 DeviceId("phone-b"),
                 1,
