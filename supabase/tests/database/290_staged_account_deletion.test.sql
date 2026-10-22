@@ -5,7 +5,7 @@
 -- zwei Löschungen mit gemeinsamen Matches enden wie zwei nacheinander laufende purge_account (P3), Blockgröße.
 begin;
 set local timezone = 'UTC';
-select plan(81);
+select plan(90);
 select tests.world();
 select tests.publish_consent_documents('staged-290');
 select tests.accept_current_consents(id) from tests.users;
@@ -432,26 +432,103 @@ select is((select d from runs where m = 'dash_other'), (select d from runs where
 select is((select d from runs where m = 'dash_self'), (select d from runs where m = 'old'),
   'Out-of-band delete of the staged account during B ends like two purge_account in a row');
 
--- Rückfall: Ein Matchblock über dem Statementlimit läuft beim nächsten Mal halb so groß (50 -> 25). Je Match 50 ms
--- (eine Teilnehmerzeile, danach hat der Guard profile_id schon geleert): 50 Matches 2,5 s, 25 Matches 1,25 s.
+-- Review r2 P3-1, Ausnahmepfad: erins erster Block scheitert dauerhaft, ab drei Fehlversuchen beginnt finn trotzdem.
+-- Der Endzustand ist dann nicht garantiert gleich. Garantiert bleiben: keine Klarnamen, die nicht auch zwei
+-- purge_account hinterlassen, jede Namensänderung eines Matches mit höherer Epoche (E monoton), jede Zugriffsänderung
+-- mit neuem G. Ein Schritt je Job-Aufruf (Budget 0, eine Einheit).
+create function pg_temp.fail_erin() returns trigger language plpgsql as $$
+begin
+  if new.match_id = pg_temp.m(601) and old.profile_id = tests.uid('erin') then raise exception 'sensitive-erin-detail'; end if;
+  return new;
+end $$;
+create function pg_temp.names() returns text language sql as $$
+  select coalesce(string_agg(n, ',' order by n), '') from (
+    select display_name n from public.match_participants where match_id between pg_temp.m(601) and pg_temp.m(612)
+    union all select payload#>>'{player,displayName}' from public.match_events where match_id between pg_temp.m(601) and pg_temp.m(612)
+    union all select display_name from public.players where id::text like '29600000-%') x
+  where n <> 'Gelöschter Spieler' $$;
+create temp table names_log(step integer, id uuid, e bigint, names text);
+create function pg_temp.log_step(p_step integer) returns void language plpgsql as $$
+begin
+  perform pg_temp.snap(p_step);
+  insert into names_log select p_step, m.id, m.redaction_epoch, md5(
+      coalesce((select string_agg(display_name, ',' order by slot_id) from public.match_participants where match_id = m.id), '')
+      || '|' || coalesce((select string_agg(payload#>>'{player,displayName}', ',' order by id) from public.match_events
+        where match_id = m.id), ''))
+    from public.matches m where m.id between pg_temp.m(601) and pg_temp.m(612);
+end $$;
+create function pg_temp.stalled() returns text[] language plpgsql as $f$
+declare v text[]; v_step integer := 100; v_path boolean;
+begin
+  begin
+    create trigger zz_test_fail_erin before update on public.match_participants for each row execute function pg_temp.fail_erin();
+    perform pg_temp.log_step(v_step);
+    while v_step < 160 and exists(select 1 from auth.users where id = tests.uid('finn')) loop
+      perform pg_temp.job();
+      v_step := v_step + 1;
+      perform pg_temp.log_step(v_step);
+    end loop;
+    v_path := not exists(select 1 from auth.users where id = tests.uid('finn'))
+      and (select attempts from private.account_deletion_failures where profile_id = tests.uid('erin')) >= 3
+      and pg_temp.q($$select next_match from private.account_deletion_progress where profile_id = tests.uid('erin')$$) = '1';
+    drop trigger zz_test_fail_erin on public.match_participants;
+    while v_step < 220 and exists(select 1 from auth.users where id = tests.uid('erin')) loop
+      perform pg_temp.job();
+      v_step := v_step + 1;
+      perform pg_temp.log_step(v_step);
+    end loop;
+    v := array[v_path::text, pg_temp.names(),
+      (select count(*)::text from names_log a join names_log b on b.id = a.id and b.step = a.step + 1
+        where b.e < a.e or (b.names <> a.names and b.e = a.e)),
+      (select string_agg(pg_temp.unbumped(s, s + 1), '' order by s) from generate_series(100, v_step - 1) s),
+      (exists(select 1 from auth.users where id in (tests.uid('erin'), tests.uid('finn'))))::text];
+    raise exception using errcode = 'AB001';
+  exception when sqlstate 'AB001' then null;
+    when others then v := array['ERR ' || sqlstate || ' ' || sqlerrm];
+  end;
+  return v;
+end $f$;
+create function pg_temp.old_names() returns text language plpgsql as $f$
+declare v text;
+begin
+  begin
+    delete from auth.users where id = tests.uid('erin');
+    delete from auth.users where id = tests.uid('finn');
+    v := pg_temp.names();
+    raise exception using errcode = 'AB001';
+  exception when sqlstate 'AB001' then null;
+  end;
+  return v;
+end $f$;
+create temp table stalled_run as select pg_temp.stalled() r, pg_temp.old_names() old;
+select is((select r[1] || ' ' || r[5] from stalled_run), 'true false',
+  'Stalled path: the second account finishes while the first still has its shared matches open, then both are gone');
+select ok((select r[2] = old and r[2] !~ '(Erin|Finn) ' from stalled_run),
+  'Stalled path leaves no clear names beyond those of two purge_account in a row');
+select is((select r[3] from stalled_run), '0', 'Stalled path: every name change raises the epoch, which never drops');
+select is((select r[4] from stalled_run), '', 'Stalled path: every pull access change comes with a new generation');
+
+-- Rückfall: Ein Matchblock über dem Statementlimit läuft beim nächsten Mal halb so groß (50 -> 25). Je Match 80 ms
+-- (eine Teilnehmerzeile, danach hat der Guard profile_id schon geleert): 50 Matches 4 s, sicher über der Grenze von
+-- 3,5 s; 25 Matches 2 s, also 1,5 s Reserve für langsame Runner.
 select tests.create_user('slow');
 select pg_temp.history('carol', 'slow', 701, 60, '29100000-0000-4000-8000-000000000007');
 select pg_temp.drain();
 select pg_temp.due('slow', interval '15 days');
 create function pg_temp.slow_rows() returns trigger language plpgsql as $$
 begin
-  if old.profile_id = tests.uid('slow') then perform pg_sleep(0.05); end if;
+  if old.profile_id = tests.uid('slow') then perform pg_sleep(0.08); end if;
   return new;
 end $$;
 create trigger zz_test_slow before update on public.match_participants for each row execute function pg_temp.slow_rows();
 select pg_temp.job();
-set local statement_timeout = '2s';
+set local statement_timeout = '3.5s';
 create temp table slow1 as select pg_temp.job() r;
 reset statement_timeout;
 select is((select r->>'errorCode' from slow1) || ' ' || pg_temp.q($$select block_size || ' ' || (cardinality(pending_matches) - next_match + 1)
   from private.account_deletion_progress where profile_id = tests.uid('slow')$$), 'statement_canceled 25 60',
   'A block over the statement limit halves the next block');
-set local statement_timeout = '2s';
+set local statement_timeout = '3.5s';
 create temp table slow2 as select pg_temp.job() r;
 reset statement_timeout;
 select is((select r->>'status' from slow2) || ' ' || pg_temp.q($$select cardinality(pending_matches) - next_match + 1
@@ -469,5 +546,56 @@ create temp table slow3 as select private.run_account_deletion_job_v1() r
 select is(pg_temp.q($$select block_size || ' ' || (cardinality(pending_matches) - next_match + 1)
   from private.account_deletion_progress where profile_id = tests.uid('slow')$$), '50 0', 'A fast block grows back to 50');
 drop trigger zz_test_keep on auth.users;
+
+-- Review r2 P1-1: zwei große Löschungen ohne gemeinsame Matches. settle (jeder Löschweg außerhalb des Jobs) und A neben
+-- laufendem B vergleichen die Listen per Hash-Join; vorher Nested Loop über das Kreuzprodukt, bei 10 000 × 10 000
+-- rund 4 s unter lock_sync. Feste Grenze 2 s je Anweisung, gebraucht werden wenige 100 ms.
+select pg_temp.drain();
+select tests.create_user('huge1');
+select tests.create_user('huge2');
+-- Eigene Matches genügen für die Arbeitsliste. cloud_access_generation erhöhte G des Erstellers je Zeile, 10 000-mal
+-- dieselbe Zeile in einer Transaktion (quadratisch, Minuten); für die Zeitprüfung unerheblich, daher beim Aufbau aus.
+alter table public.matches disable trigger cloud_access_generation;
+insert into public.matches(id, created_by, sport, discipline, format, started_at)
+  select pg_temp.m(100000 + n), tests.uid(case when n <= 10000 then 'huge1' else 'huge2' end), 'tennis', 'singles', '{}', now()
+    from generate_series(1, 20000) n;
+alter table public.matches enable trigger cloud_access_generation;
+select pg_temp.due('huge1', interval '16 days');
+select pg_temp.job();
+select pg_temp.job();
+create function pg_temp.timed(p_sql text) returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return 'done';
+exception when query_canceled then return 'canceled';
+end $$;
+set local statement_timeout = '2s';
+create temp table huge_settle as select pg_temp.timed(format('select private.account_deletion_settle(%L)', tests.uid('huge2'))) r;
+reset statement_timeout;
+select is((select r from huge_settle), 'done', 'Out-of-band delete next to a large running deletion checks for shared matches in linear time');
+select pg_temp.due('huge2', interval '15 days');
+set local statement_timeout = '2s';
+create temp table huge_a as select pg_temp.job() r;
+reset statement_timeout;
+select is((select r->>'status' from huge_a) || ' ' || (select status from public.profiles where id = tests.uid('huge2')),
+  'succeeded deleting', 'A of a large account next to a large running deletion stays far below the statement limit');
+
+-- Review r2 P3-3: Ein zurückgestelltes A zählt auf das Budget (Budget 0: der Aufruf endet danach) und wird erst wieder
+-- gewählt, wenn huge1 das gemeinsame Match (Position 60 der Liste) abgeschlossen hat. huge1 steht bei 51.
+select tests.create_user('waiter');
+insert into public.match_participants(match_id, slot_id, team, position, display_name, profile_id, link_status)
+  values (pg_temp.m(100060), 'w', 'B', 1, 'Waiter', tests.uid('waiter'), 'linked');
+select pg_temp.due('waiter', interval '15 days');
+select pg_temp.job();
+select is((select status from public.profiles where id = tests.uid('waiter')) || ' ' || (select string_agg(next_match::text, ','
+  order by started_at) from private.account_deletion_progress), 'deletion_requested 51,1', 'A deferred A counts against the budget');
+-- Selbst ohne gemeinsames Match wartet das Konto bis zur Wartestelle: Der Job prüft es bis dahin nicht erneut.
+delete from public.match_participants where match_id = pg_temp.m(100060) and slot_id = 'w';
+select pg_temp.job();
+select is((select status from public.profiles where id = tests.uid('waiter')) || ' ' || (select string_agg(next_match::text, ','
+  order by started_at) from private.account_deletion_progress), 'deletion_requested 101,1',
+  'A deferred A is not examined again before the running deletion has passed the shared match');
+select pg_temp.job();
+select is((select status from public.profiles where id = tests.uid('waiter')), 'deleting', 'Afterwards the deferred A begins');
 select * from finish();
 rollback;

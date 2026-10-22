@@ -15,9 +15,17 @@
 -- (ReplicaLifecycleStore.applyAccess: gleiches G mit anderer Zugriffsstufe ist ein Fehler). Deshalb erhöht jede Phase G
 -- jedes Kontos, dessen Zugriff sie ändert, in derselben Transaktion; A tut das ausdrücklich für den Turnier-Staff.
 -- Mehrere Löschungen zugleich: A eines Kontos wartet, solange eine laufende Löschung noch gemeinsame Matches offen hat
--- (sonst sähe deren B die globalen Änderungen des zweiten Kontos zu früh). Ein Löschweg außerhalb des Jobs schließt
--- diese Matches vorher ab. Der Endzustand gleicht so zwei nacheinander laufenden purge_account. Ausnahme: Hat die
--- laufende Löschung schon drei Fehlversuche, wartet A nicht (kein Verhungern), dann gilt nur „keine Klarnamen“.
+-- (sonst sähe deren B die globalen Änderungen des zweiten Kontos zu früh). Der Endzustand gleicht so zwei nacheinander
+-- laufenden purge_account.
+-- Ausnahme (Review r2 P3-1): Hat die laufende Löschung drei Fehlversuche, wartet A nicht mehr (kein Verhungern), und
+-- ein Löschweg außerhalb des Jobs schließt ihre Matches nicht mehr vorher ab. Dann ist der Endzustand NICHT garantiert
+-- gleich (etwa fehlende match_redacted_names-Zeilen, niedrigere Epoche gemeinsamer Matches). Garantiert bleiben: keine
+-- Klarnamen im Endzustand, jede Namensänderung eines Matches in derselben Transaktion wie eine Erhöhung seiner Epoche
+-- (E monoton), jede Zugriffsänderung mit neuem G (Test 290). stalledAccountCount meldet den Fall.
+-- Löschweg außerhalb des Jobs (Dashboard-DELETE, purge_account) neben laufenden Löschungen (account_deletion_settle,
+-- Review r2 P3-2): schließt in derselben Transaktion erst deren B bis einschließlich des letzten gemeinsamen Matches ab.
+-- Bei einem großen fremden Konto kann das lang werden (Sperrhaltezeit wie früher), und es scheitert mit dem Fehler
+-- des fremden Blocks, solange jenes Konto unter drei Fehlversuchen hat.
 -- public.admin_purge_due_accounts bleibt ungestaffelt (Wartungsweg mit Karenzparameter, kein Client).
 
 alter table public.profiles drop constraint profiles_status_check;
@@ -125,45 +133,74 @@ begin
 end;
 $$;
 
--- Älteste andere laufende Löschung (unter drei Fehlversuchen), deren offene Matches p_matches berühren. Hash-Join
--- über beide Listen; „= any“ wäre bei zwei großen Konten quadratisch.
-create function private.account_deletion_blocker(p_profile uuid, p_matches uuid[]) returns uuid
-language sql stable security definer set search_path = '' as $$
-  select g.profile_id from private.account_deletion_progress g
-    left join private.account_deletion_failures f on f.profile_id = g.profile_id
-   where g.profile_id <> p_profile and coalesce(f.attempts, 0) < 3
-     and exists (select 1 from unnest(g.pending_matches[g.next_match:]) o(id) join unnest(p_matches) n(id) on n.id = o.id)
-   order by g.started_at, g.profile_id limit 1;
+-- Älteste andere laufende Löschung (unter drei Fehlversuchen), deren offene Matches p_matches berühren, und die
+-- Position des letzten gemeinsamen offenen Matches in ihrer Liste. Der Planner schätzt unnest() eines Parameters auf
+-- wenige Zeilen und wählte einen Nested Loop, ohne gemeinsame Matches also das ganze Kreuzprodukt (Review r2 P1-1:
+-- 30 000 × 30 000 = 33 s unter lock_sync). enable_nestloop = off erzwingt den Hash-Join, unabhängig von Schätzungen.
+create function private.account_deletion_blocker(p_profile uuid, p_matches uuid[], out blocker uuid, out last_shared integer)
+language sql stable security definer set search_path = '' set enable_nestloop = off as $$
+  select b.profile_id, b.last_shared from (
+    select g.profile_id, g.started_at, g.next_match - 1 + (select max(o.i)
+        from unnest(g.pending_matches[g.next_match:]) with ordinality o(id, i) join unnest(p_matches) n(id) on n.id = o.id) last_shared
+      from private.account_deletion_progress g
+      left join private.account_deletion_failures f on f.profile_id = g.profile_id
+     where g.profile_id <> p_profile and coalesce(f.attempts, 0) < 3) b
+   where b.last_shared is not null
+   order by b.started_at, b.profile_id limit 1;
 $$;
 
+-- Zurückgestelltes A: Das Konto wartet, bis B von blocker_id das Match an Position until_match abgeschlossen hat.
+-- Bis dahin wählt der Job das A nicht erneut (Review r2 P3-3: sonst Matchliste und Blocker in jedem Aufruf neu).
+-- Verzögert nur; ob A beginnen darf, prüft danach wieder account_deletion_begin vollständig.
+create table private.account_deletion_waits (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  blocker_id uuid not null references public.profiles(id) on delete cascade,
+  until_match integer not null
+);
+alter table private.account_deletion_waits enable row level security;
+revoke all on private.account_deletion_waits from public, anon, authenticated, service_role;
+
 -- Löschweg außerhalb des Jobs (Dashboard, purge_account ohne A): erst die gemeinsamen Matches laufender Löschungen
--- abschließen, wie es nacheinander laufende purge_account täten.
+-- abschließen, wie es nacheinander laufende purge_account täten. B läuft dazu als Präfix der fremden Liste bis
+-- einschließlich des letzten gemeinsamen Matches, nicht nur über die gemeinsamen: B rückt nur next_match vor und
+-- erreichte übersprungene Matches später ein zweites Mal, dann nach dieser Löschung. Das ist nicht idempotent
+-- (redaction_other_profile_context sieht den Kontext dieses Kontos nicht mehr) und änderte den Endzustand.
 create function private.account_deletion_settle(p_profile uuid) returns void
 language plpgsql security definer set search_path = '' as $$
-declare v_matches uuid[]; v_other uuid;
+declare v_matches uuid[]; v_other uuid; v_until integer; v_left integer;
 begin
   if not exists (select 1 from private.account_deletion_progress where profile_id <> p_profile) then return; end if;
   v_matches := private.account_deletion_matches(p_profile);
   loop
-    v_other := private.account_deletion_blocker(p_profile, v_matches);
+    select b.blocker, b.last_shared into v_other, v_until from private.account_deletion_blocker(p_profile, v_matches) b;
     exit when v_other is null;
-    perform private.account_deletion_redact(v_other, 500);
+    loop
+      select v_until - next_match + 1 into v_left from private.account_deletion_progress where profile_id = v_other;
+      exit when coalesce(v_left, 0) < 1;
+      perform private.account_deletion_redact(v_other, least(v_left, 500));
+    end loop;
   end loop;
 end;
 $$;
 
--- Phase A. Aufrufer prüft Status und Frist (Löschjob). Liefert false ohne Änderung, solange eine andere laufende
--- Löschung gemeinsame Matches offen hat (Job versucht es später). Reihenfolge der globalen Schritte wie in purge_account:
+-- Phase A. Aufrufer prüft Status und Frist (Löschjob). Liefert false, solange eine andere laufende Löschung gemeinsame
+-- Matches offen hat, und vermerkt nur die Wartestelle (Job versucht es danach). Reihenfolge der globalen Schritte wie in purge_account:
 -- Grabsteine und Manifestentscheid (capture_profile_redactions, Teil 1, unverändert aus 01100), Umbenennung der
 -- verknüpften Player (redact_linked_names), Entlinken und Gast-Übergabe (anonymize_profile/unlink_player, nur die
 -- Playerzeilen: deren Teilnehmer-Update findet in purge_account nach redact_linked_names keine Zeile mehr).
 create function private.account_deletion_begin(p_profile uuid) returns boolean
 language plpgsql security definer set search_path = '' as $$
-declare v_players uuid[]; v_retired uuid[]; v_matches uuid[];
+declare v_players uuid[]; v_retired uuid[]; v_matches uuid[]; v_blocker uuid; v_until integer;
 begin
   perform private.lock_sync();
   v_matches := private.account_deletion_matches(p_profile);
-  if private.account_deletion_blocker(p_profile, v_matches) is not null then return false; end if;
+  select b.blocker, b.last_shared into v_blocker, v_until from private.account_deletion_blocker(p_profile, v_matches) b;
+  if v_blocker is not null then
+    insert into private.account_deletion_waits values (p_profile, v_blocker, v_until)
+      on conflict (profile_id) do update set blocker_id = excluded.blocker_id, until_match = excluded.until_match;
+    return false;
+  end if;
+  delete from private.account_deletion_waits where profile_id = p_profile;
   insert into private.redacted_profile_identities values(p_profile) on conflict do nothing;
   select coalesce(array_agg(p.id),'{}'::uuid[]) into v_retired from public.players p
     where (p.owner_id=p_profile and p.kind='self') or p.profile_id=p_profile;
@@ -435,8 +472,9 @@ $$;
 -- Match), zählt einen Fehlversuch und schließt das Konto für den Rest des Aufrufs aus; eine erfolgreiche Einheit setzt
 -- den Zähler zurück. Nur nach dem Statementlimit endet der Aufruf (danach gäbe es keine Frist mehr). Ein Matchblock über
 -- Budget oder Statementlimit läuft beim nächsten Mal halb so groß, bis 1; einer unter einem Viertel des Budgets wieder
--- doppelt so groß, bis 50. Ein zurückgestelltes A (gemeinsame Matches mit
--- einer laufenden Löschung) zählt nicht als Einheit. advantly.account_deletion_budget überschreibt das Budget (nur Tests).
+-- doppelt so groß, bis 50. Ein zurückgestelltes A (gemeinsame Matches mit einer laufenden Löschung) zählt als Einheit
+-- auf das Budget und wird erst wieder gewählt, wenn deren B die Wartestelle passiert hat (account_deletion_waits), oder
+-- sobald sie drei Fehlversuche hat. advantly.account_deletion_budget überschreibt das Budget (nur Tests).
 create or replace function private.run_account_deletion_job_v1()
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC'
 set lock_timeout = '5s' set statement_timeout = '60s' as $$
@@ -485,6 +523,10 @@ begin
         left join private.account_deletion_failures f on f.profile_id = p.id
         where p.status = 'deletion_requested' and s.deletion_requested_at <= clock_timestamp() - interval '14 days'
           and p.id <> all (v_skip)
+          and not exists (select 1 from private.account_deletion_waits w
+            join private.account_deletion_progress g on g.profile_id = w.blocker_id and g.next_match <= w.until_match
+            left join private.account_deletion_failures bf on bf.profile_id = w.blocker_id
+            where w.profile_id = p.id and coalesce(bf.attempts, 0) < 3)
         order by coalesce(f.attempts, 0), s.deletion_requested_at, p.id limit 1
         for update of p, s;
       v_kind := 'begin';
@@ -529,7 +571,6 @@ begin
     if v_deferred or v_failed is not null then
       v_skip := v_skip || v_id;
     end if;
-    continue when v_deferred;
     v_units := v_units + 1;
     if v_failed is not null then
       v_error := coalesce(v_error, v_failed);
