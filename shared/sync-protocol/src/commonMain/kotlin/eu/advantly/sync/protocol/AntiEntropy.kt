@@ -196,6 +196,28 @@ object AntiEntropy {
     }
 
     /**
+     * Wie [batches], zusätzlich nach Bytes: Eine Gruppe wird halbiert, bis die Probe [fits] (Startposition in [items],
+     * Gruppe; z. B. kodierte Größe samt Envelope) sie annimmt. Deterministisch, Reihenfolge bleibt. Ein einzelnes
+     * Element, das nie passt, bildet eine eigene Gruppe; der Aufrufer darf es nicht senden.
+     */
+    fun <T> batchesBy(
+        items: List<T>,
+        maxPerMessage: Int = MAX_EVENTS_PER_MESSAGE,
+        fits: (start: Int, batch: List<T>) -> Boolean,
+    ): List<List<T>> {
+        require(maxPerMessage >= 1) { "maxPerMessage ≥ 1" }
+        val result = mutableListOf<List<T>>()
+        var start = 0
+        while (start < items.size) {
+            var size = minOf(maxPerMessage, items.size - start)
+            while (size > 1 && !fits(start, items.subList(start, start + size))) size /= 2
+            result += items.subList(start, start + size).toList()
+            start += size
+        }
+        return result
+    }
+
+    /**
      * Plausibilitätsprüfung empfangener Events vor dem Speichern: richtige Match-ID, `deviceSeq ≥ 1`, `lamport ≥ 1`,
      * keine leeren IDs. Unplausible Events verwirft der Empfänger (sie würden die Anti-Entropie stören).
      */

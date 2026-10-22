@@ -135,6 +135,15 @@ class SyncCodecTest {
         assertEquals(DecodeResult.Unsupported(2, "Events"), SyncCodec.decode("""{"type":"Events","v":2,"matchId":"m1","events":[]}"""))
     }
 
+    /** E1: ein anderer lesbarer Bereich (Session-Konfiguration) macht Protokoll 4 lesbar, ohne die Konstanten zu ändern. */
+    @Test
+    fun acceptedRangeIsAParameterAndConstantsStayTheDefault() {
+        val summary = """{"type":"Summary","v":4,"matches":{}}"""
+        assertEquals(DecodeResult.Ok(Summary(emptyMap(), v = 4)), SyncCodec.decode(summary, 3..4))
+        assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode(summary))
+        assertEquals(DecodeResult.Unsupported(3, "Summary"), SyncCodec.decode("""{"type":"Summary","v":3,"matches":{}}""", 4..4))
+    }
+
     /** Gerät mit Protokoll 1 (W1): sein Hello wird gelesen, alle anderen Nachrichten nicht mehr (kein Halb-Sync). */
     @Test
     fun version1PeerIsReadOnlyForTheHello() {
