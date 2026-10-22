@@ -1503,7 +1503,7 @@ class MatchSession(
         }
         // Ausgehandelt ist genau eine Version: kein Rückfall auf frühere Rechte, kein V4 ohne Aushandlung
         if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
-        if (message.v >= 4) message = verified(message) ?: return
+        if (message.v >= 4) message = stamps.verified(message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
             val own = data.accountIdentities.currentSources()
@@ -2294,7 +2294,7 @@ class MatchSession(
         if (data.accountIdentities.managed && routed is Deleted) {
             routed = routed.copy(matches = routed.matches.filter { inCurrentScope(it.matchId) })
         }
-        if (version(peer) >= 4) routed = stamped(routed) ?: return
+        if (version(peer) >= 4) routed = stamps.stamped(routed, receiver::summaryOf, blockedMatches::add) ?: return
         val bytes =
             try {
                 if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope)
@@ -2327,74 +2327,6 @@ class MatchSession(
             true
         } catch (_: IllegalArgumentException) {
             false
-        }
-
-    /** Protokoll 4: jede Matchangabe mit eigenem Beleg; ohne Beleg wird sie nicht gesendet (Rückstand bleibt blockiert). */
-    private fun stamped(message: SyncMessage): SyncMessage? =
-        when (message) {
-            is Events -> {
-                val stamp = if (message.events.isEmpty()) null else stamps.of(message.matchId)
-                if (message.events.isNotEmpty() && stamp == null) blockedMatches += message.matchId
-                message.takeIf { it.events.isEmpty() || stamp != null }?.copy(v = 4, stamp = stamp)
-            }
-
-            is Summary -> {
-                val own =
-                    message.matches.keys
-                        .mapNotNull { key -> stamps.of(MatchId(key))?.let { key to it } }
-                        .toMap()
-                val lifecycle = if (data.accountIdentities.managed) message.lifecycle + receiver.summaryOf(own.keys) else message.lifecycle
-                message.copy(
-                    v = 4,
-                    matches = message.matches.filterKeys(own::containsKey),
-                    stamps = own,
-                    lifecycle = lifecycle.entries.take(MAX_LIFECYCLE).associate { it.toPair() },
-                )
-            }
-
-            is MatchMetaMessage -> {
-                val stamp = message.match?.let { stamps.of(it.matchId) }
-                message.copy(v = 4, match = message.match?.takeIf { stamp != null }, stamp = stamp)
-            }
-
-            is Deleted -> {
-                val own = message.matches.mapNotNull { m -> stamps.of(m.matchId)?.let { m.matchId.value to it } }.toMap()
-                message.copy(v = 4, matches = message.matches.filter { it.matchId.value in own }, stamps = own)
-            }
-
-            is Hello, is ReplicaControlMessage -> {
-                message
-            }
-        }
-
-    /**
-     * Empfang Protokoll 4: Belege vor jeder Mutation und jedem Ack prüfen; ungültige Matchangaben fallen weg, Events mit
-     * ungültigem Beleg ganz (`null`: kein Speichern, keine Bestätigung).
-     */
-    private fun verified(message: SyncMessage): SyncMessage? =
-        when (message) {
-            is Events -> {
-                message.takeIf {
-                    it.events.isEmpty() || stamps.accepts(it.matchId, it.stamp, it.events, requireGenesis = true)
-                }
-            }
-
-            is Summary -> {
-                message.copy(matches = message.matches.filterKeys { stamps.accepts(MatchId(it), message.stamps[it]) })
-            }
-
-            is MatchMetaMessage -> {
-                val header = message.match
-                if (header == null || stamps.acceptsHeader(header, message.stamp)) message else message.copy(match = null, stamp = null)
-            }
-
-            is Deleted -> {
-                message.copy(matches = message.matches.filter { stamps.accepts(it.matchId, message.stamps[it.matchId.value]) })
-            }
-
-            is Hello, is ReplicaControlMessage -> {
-                message
-            }
         }
 
     private fun genesisOf(matchId: MatchId): ScoreEvent? =
@@ -2759,10 +2691,6 @@ class MatchSession(
     private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
     companion object {
-        private const val MAX_LIFECYCLE = 200
-
-        /** Größter Beleg für Byte-Proben (unabhängig vom tatsächlichen, damit die Aufteilung stabil bleibt). */
-        private val WORST_STAMP = LocalMatchStamp(DeviceId("d".repeat(128)), EventId("g".repeat(128)), "s".repeat(128))
         private const val MAX_DEVICE_STATUSES = 16
         private const val DEVICE_STATUS_SAVE_INTERVAL_MS = 300_000L
         private const val ARCHIVES_IN_META = 200
