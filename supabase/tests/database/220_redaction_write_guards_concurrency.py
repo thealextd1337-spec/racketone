@@ -71,6 +71,8 @@ def backfill_roundtrip(owner):
         owner.execute(definition)
         owner.execute(original("20261015000500_rpc_sync.sql", "private.push_participants"))
         owner.execute(original("20261015000800_rpc_konto_export.sql", "private.anonymize_profile"))
+        # 20261022000100 liest in bump_visibility redacted_profile_identities, die der 006-Zustand nicht kennt.
+        owner.execute(original("20261015000100_profile_freunde_geraete.sql", "private.bump_visibility"))
         owner.execute(original("20261018000600_cloud_lifecycle_redactions.sql", "private.capture_profile_redactions"))
         owner.execute("drop index public.match_events_redaction_legacy_idx,public.match_events_redaction_v2_idx,"
                       "public.match_events_redaction_lineup_idx")
