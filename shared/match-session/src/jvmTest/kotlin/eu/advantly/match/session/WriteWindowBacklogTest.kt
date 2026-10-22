@@ -33,7 +33,6 @@ class WriteWindowBacklogTest {
         assertTrue(data.cloudPulls.commitMetadata("alice", run, data.cloudPulls.progress("alice").cursor, page) {})
     }
 
-    @Ignore("wartet auf D-1")
     @Test
     fun ownPointsInTheWriteWindowCountAsPendingAndReachTheWatch() {
         pair.activate("alice")
