@@ -89,6 +89,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
 /**
@@ -250,6 +251,8 @@ class MatchSession(
         var record: MatchRecord,
         val genesis: ScoreEvent,
         var engine: EngineState,
+        /** Rechte-/Redaktionsstand beim letzten Aufbau der Engine; nur eine Änderung erzwingt einen Replay. */
+        var lifecycle: Any?,
     ) {
         val redo = ArrayDeque<EventId>()
 
@@ -334,6 +337,19 @@ class MatchSession(
     private var lastSyncAtMs: Long? = null
     private var lastEventReceivedAtMs: Long? = null
     private var dataRevision = 0L
+    private var lifecycleRevision = 0L
+    private var removeDirectoryObserver: (() -> Unit)? = null
+
+    /** Ein Post je Signalschwall; vor dem Lesen zurückgesetzt, damit keine Änderung verloren geht. */
+    @Volatile
+    private var directoryChangePosted = false
+
+    /** Eigener Kopfstand nach einem Event: ändert weder Rechte noch Namen (sonst Prüfung je Punkt). */
+    private var writingProgress = false
+
+    /** Engine-Neuaufbauten nach Data-Änderungen (Tests: eigene Punkte lösen keinen aus). */
+    internal var lifecycleReplays = 0
+        private set
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -366,6 +382,7 @@ class MatchSession(
         data.migrateWatchPlaceholders()
         started = true
         saveDeviceStatusesIfNeeded()
+        removeDirectoryObserver = data.observeDirectoryChanges(::directoryChanged)
         link?.setListener(linkListener)
         link?.start()
         peersChanged(link?.peers.orEmpty())
@@ -378,6 +395,8 @@ class MatchSession(
         checkThread()
         if (!started) return
         started = false
+        removeDirectoryObserver?.invoke()
+        removeDirectoryObserver = null
         timer?.cancel()
         timer = null
         link?.setListener(null)
@@ -604,7 +623,7 @@ class MatchSession(
             broadcastMeta(target.record)
             reconcileWatchScorers()
         }
-        if (watchScores && !isWatchDevice(target.scorer)) emit(target, listOf(ScorerChanged(myWatch())))
+        if (watchScores && !isWatchDevice(target.scorer)) emit(target, ScorerChanged(myWatch()))
         publish()
         return true
     }
@@ -688,19 +707,16 @@ class MatchSession(
         val m = opened[matchId] ?: detached(matchId) ?: return false
         val actor = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }.id
         val creator = data.matchCreator(matchId)
-        emit(
+        return emit(
             m,
-            listOf(
-                PlayerAssigned(
-                    slot,
-                    player,
-                    actor,
-                    legacySlot = !Placeholders.isPlaceholder(slot),
-                    creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
-                ),
+            PlayerAssigned(
+                slot,
+                player,
+                actor,
+                legacySlot = !Placeholders.isPlaceholder(slot),
+                creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
             ),
-        )
-        return true
+        ) != null
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
@@ -733,7 +749,7 @@ class MatchSession(
         val assigned = watchAssignment?.matchId
         opened.values
             .filter { it.scorer == PENDING_WATCH && it.status != MatchStatus.FINISHED && (assigned == null || it.id == assigned) }
-            .forEach { emit(it, listOf(ScorerChanged(hello.deviceId))) }
+            .forEach { emit(it, ScorerChanged(hello.deviceId)) }
     }
 
     /**
@@ -753,8 +769,7 @@ class MatchSession(
 
     private fun takeOver(m: OpenMatch): Boolean {
         if (m.status == MatchStatus.FINISHED || m.scorer == deviceId) return false
-        emit(m, listOf(ScorerChanged(deviceId)))
-        return true
+        return emit(m, ScorerChanged(deviceId)) != null
     }
 
     // --- Zählen (nur der Zähler) ------------------------------------------------------------------
@@ -765,8 +780,7 @@ class MatchSession(
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS && m.status != MatchStatus.PAUSED) return false
         m.redo.clear()
-        emit(m, listOf(PointWon(side)))
-        return true
+        return emit(m, PointWon(side)) != null
     }
 
     /** UI-Undo: macht das letzte wirksame Zähl-Event rückgängig (02 §7.3). */
@@ -774,7 +788,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         val target = m.engine.undoTarget ?: return false
-        val undo = emit(m, listOf(Undo(target))).single()
+        val undo = emit(m, Undo(target)) ?: return false
         m.redo.addLast(undo.id)
         publish()
         return true
@@ -786,8 +800,9 @@ class MatchSession(
         val m = scoringMatch() ?: return false
         val undo = validRedo(m) ?: return false
         m.redo.removeLast()
-        emit(m, listOf(Undo(undo)))
-        return true
+        if (emit(m, Undo(undo)) != null) return true
+        m.redo.addLast(undo)
+        return false
     }
 
     /**
@@ -804,8 +819,7 @@ class MatchSession(
             val m = scoringMatch() ?: return false
             if (m.status != MatchStatus.AWAITING_DECISION) return false
             m.redo.clear()
-            emit(m, listOf(ContinueDecision(anotherSet = false)))
-            return true
+            return emit(m, ContinueDecision(anotherSet = false)) != null
         }
         return startNextSet(if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR)
     }
@@ -823,8 +837,7 @@ class MatchSession(
         if (m.status != MatchStatus.AWAITING_DECISION) return false
         val decision = ScoringEngine.nextSetDecision(m.record.format, kind) ?: return false
         m.redo.clear()
-        emit(m, listOf(decision))
-        return true
+        return emit(m, decision) != null
     }
 
     /**
@@ -837,7 +850,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         val target = ScoringEngine.lastEffectivePointOf(m.engine, side) ?: return false
-        val undo = emit(m, listOf(Undo(target))).single()
+        val undo = emit(m, Undo(target)) ?: return false
         m.redo.addLast(undo.id)
         publish()
         return true
@@ -867,8 +880,7 @@ class MatchSession(
         if (!context.accepts(expected, player)) return false
         val side = m.record.lineup.sideOf(player) ?: return false
         if (context.chosen == player) return true
-        emit(m, listOf(ServerChosen(context.setIndex, side, player)))
-        return true
+        return emit(m, ServerChosen(context.setIndex, side, player)) != null
     }
 
     /**
@@ -889,8 +901,7 @@ class MatchSession(
         if (value == ServeOutcome.DOUBLE_FAULT && point.side == point.servingSide) return false
         val detail = PointDetailRules.withServe(point.detail, value)
         if (detail == point.detail) return true
-        emit(m, listOf(PointDetailSet(pointId, detail)))
-        return true
+        return emit(m, PointDetailSet(pointId, detail)) != null
     }
 
     private fun serveInfoEnabled(m: OpenMatch): Boolean = m.record.format.sport.isTennisLike && m.record.meta.serveStats
@@ -902,8 +913,7 @@ class MatchSession(
         if (m.status == MatchStatus.FINISHED) return false
         if (correction.kind == CorrectionKind.INITIAL_SERVER && !canCorrectServerRetroactively(m.engine)) return false
         m.redo.clear()
-        emit(m, listOf(correction))
-        return true
+        return emit(m, correction) != null
     }
 
     /** Geprüfte Aufschlägerkorrektur; rückwirkend nur ohne übersteuernde eröffnende Wahl. Sonst „ab jetzt“ wählen. */
@@ -923,8 +933,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS) return false
-        emit(m, listOf(Paused))
-        return true
+        return emit(m, Paused) != null
     }
 
     /** Fortsetzung nach [pause]. Lässt den Redo-Stapel unberührt. */
@@ -932,8 +941,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.PAUSED) return false
-        emit(m, listOf(Resumed))
-        return true
+        return emit(m, Resumed) != null
     }
 
     /**
@@ -956,8 +964,7 @@ class MatchSession(
                 else -> MatchEnded(reason, side)
             }
         m.redo.clear()
-        emit(m, listOf(payload))
-        return true
+        return emit(m, payload) != null
     }
 
     /** Stößt sofort einen Abgleich mit allen Gegenstellen an (z. B. App im Vordergrund). */
@@ -1014,28 +1021,44 @@ class MatchSession(
         return matchId
     }
 
-    /** Erzeugt, speichert, wendet an und sendet Events für [payloads] (eine Kette, ein Batch). */
+    /**
+     * Erzeugt, speichert, wendet an und sendet ein Event. `null`, wenn der Store es nicht aufnimmt: Dann gilt es nicht als
+     * gezählt (Kommando liefert `false`), Engine und Gegenstellen bleiben unverändert – nie ein Punkt nur im Speicher.
+     */
     private fun emit(
         m: OpenMatch,
-        payloads: List<EventPayload>,
-    ): List<ScoreEvent> {
-        val now = clock.nowMs()
-        var lamport = data.events.maxLamport(m.id.value)
-        var seq = data.events.maxDeviceSeq(m.id.value, deviceId.value)
-        var parent = m.head().id
-        val events =
-            payloads.map { payload ->
-                ScoreEvent(EventId.of(ids.newUuid7(now)), m.id, deviceId, ++seq, ++lamport, now, parent, payload).also { parent = it.id }
-            }
-        data.events.appendAll(events.map { it.toStoredEvent() })
+        payload: EventPayload,
+    ): ScoreEvent? {
+        val event = appendOwn(m, payload) ?: return null
         devicesIn(m.id) += deviceId.value
-        m.engine = ScoringEngine.applyAll(m.engine, events)
-        if (payloads.any { it is PlayerAssigned }) reconcilePeople(m.id)
+        m.engine = ScoringEngine.applyAll(m.engine, listOf(event))
+        if (payload is PlayerAssigned) reconcilePeople(m.id)
         persistProgress(m)
-        broadcast(Events(m.id, events))
+        broadcast(Events(m.id, listOf(event)))
         maybeFollow(null)
         publish()
-        return events
+        return event
+    }
+
+    /** Belegte Sequenz (paralleler Schreiber): einmal mit frisch gelesenem Stand wiederholen, danach `null` statt still verlieren. */
+    private fun appendOwn(
+        m: OpenMatch,
+        payload: EventPayload,
+    ): ScoreEvent? {
+        val now = clock.nowMs()
+        repeat(2) {
+            val seq = data.events.maxDeviceSeq(m.id.value, deviceId.value) + 1
+            val lamport = data.events.maxLamport(m.id.value) + 1
+            val event = ScoreEvent(EventId.of(ids.newUuid7(now)), m.id, deviceId, seq, lamport, now, m.head().id, payload)
+            val result =
+                try {
+                    data.events.append(event.toStoredEvent())
+                } catch (_: IllegalStateException) {
+                    return null // Schreibspur zu (FEED, ABSENT, fremdes Konto): erwartet, kein Absturz bis zur UI
+                }
+            if (result == AppendResult.INSERTED) return event
+        }
+        return null
     }
 
     private fun resumeMatch(
@@ -1074,7 +1097,7 @@ class MatchSession(
                 return false
             }
         if (!config.parallelMatches) opened.clear()
-        opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine)
+        opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine, lifecycleOf(matchId))
         // Handy: im Hintergrund geöffnete Matches (Neustart, Übergabe) bekommen nie automatisch den Fokus
         if (focus || !config.parallelMatches) focusedId = matchId
         return true
@@ -1126,7 +1149,7 @@ class MatchSession(
         val id = watchAssignment?.matchId ?: return
         val m = opened[id] ?: openWithoutFocus(id) ?: return
         if (m.status == MatchStatus.FINISHED || !isWatchDevice(m.scorer)) return
-        if (!watchMayHaveScored(m) || force) emit(m, listOf(ScorerChanged(deviceId)))
+        if (!watchMayHaveScored(m) || force) emit(m, ScorerChanged(deviceId))
     }
 
     /**
@@ -1177,7 +1200,7 @@ class MatchSession(
         opened.values
             .filter { it.id != target && it.status != MatchStatus.FINISHED && isWatchDevice(it.scorer) && !watchMayHaveScored(it) }
             .toList()
-            .forEach { emit(it, listOf(ScorerChanged(deviceId))) }
+            .forEach { emit(it, ScorerChanged(deviceId)) }
     }
 
     /**
@@ -1195,7 +1218,7 @@ class MatchSession(
         for (id in candidates) {
             val m = opened[id] ?: detached(id) ?: continue
             if (m.status == MatchStatus.FINISHED || m.scorer != deviceId || keepsOwnMatch(m, target)) continue
-            emit(m, listOf(ScorerChanged(phone)))
+            emit(m, ScorerChanged(phone))
         }
     }
 
@@ -1223,7 +1246,7 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return null
             }
-        return OpenMatch(record, engine.genesis ?: return null, engine)
+        return OpenMatch(record, engine.genesis ?: return null, engine, null)
     }
 
     /**
@@ -1320,7 +1343,68 @@ class MatchSession(
                         ?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
             )
-        data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
+        writingProgress = true
+        try {
+            data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
+        } finally {
+            writingProgress = false
+        }
+    }
+
+    // --- Data-Änderungen (Pull, Zustellung, Redaktion) ---------------------------------------------------------
+
+    /** Signal von [LocalData.observeDirectoryChanges], ggf. vom Thread des Schreibers: zusammengelegt auf den Scheduler. */
+    private fun directoryChanged() {
+        if (writingProgress && threadGuard.isSchedulerThread()) return
+        if (directoryChangePosted) return
+        directoryChangePosted = true
+        scheduler.post {
+            directoryChangePosted = false
+            if (started) onDataChanged()
+        }
+    }
+
+    /**
+     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
+     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
+     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand, Kopffelder werden übernommen.
+     */
+    private fun onDataChanged() {
+        lifecycleRevision++
+        for (m in opened.values.toList()) {
+            val record = data.matches.get(m.id)
+            if (record == null) {
+                // Schreibspur offen ⇔ Zähler sichtbar (ScopedEventStore): ein offenes Match hat mindestens die Genesis
+                if (data.matches.isDeleted(m.id) || data.events.maxLamport(m.id.value) == 0L) closeOpened(m.id)
+                continue
+            }
+            val lifecycle = lifecycleOf(m.id)
+            if (lifecycle != m.lifecycle) {
+                m.lifecycle = lifecycle
+                val engine =
+                    try {
+                        ScoringEngine.replay(data.events.scoreEvents(m.id))
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                if (engine?.genesis != null) {
+                    m.engine = engine
+                    lifecycleReplays++
+                }
+            }
+            // Kopfübernahme (Pull, Vorgänger): Stand und Ergebnis bleiben aus der Engine
+            if (record != m.record) m.record = record
+        }
+        devicesInMatch.clear()
+        neverSentCache.clear()
+        publish()
+    }
+
+    /** Rechte- und Redaktionsstand eines Matches; ohne Konto-Kontext gibt es keinen. */
+    private fun lifecycleOf(matchId: MatchId): Any? {
+        if (data.accountIdentities.scope == null) return null
+        val ctx = data.replicas.captureContext()
+        return data.replicas.access(ctx, matchId.value) to data.replicas.canReadMember(ctx, matchId.value)
     }
 
     // --- Empfang ----------------------------------------------------------------------------------
@@ -1480,7 +1564,11 @@ class MatchSession(
                 deleted += matchId
                 continue
             }
-            remote.watermarks.forEach { (device, seq) -> data.events.markConfirmedUpTo(key, device.value, seq) }
+            try {
+                remote.watermarks.forEach { (device, seq) -> data.events.markConfirmedUpTo(key, device.value, seq) }
+            } catch (_: IllegalStateException) {
+                continue // gesperrtes Match (Schreibspur zu) blockiert nicht den Abgleich der übrigen
+            }
             val local = sequences(matchId)
             val ranges = AntiEntropy.missingRanges(local, remote)
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
@@ -1495,15 +1583,21 @@ class MatchSession(
         peer: String,
         message: Deleted,
     ) {
-        val fresh = message.matches.filter { !data.matches.isDeleted(it.matchId) }
+        val fresh =
+            message.matches.filter { tombstone ->
+                if (data.matches.isDeleted(tombstone.matchId)) return@filter false
+                devicesInMatch.remove(tombstone.matchId)
+                try {
+                    data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
+                    data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
+                } catch (_: IllegalStateException) {
+                    return@filter false // gesperrtes Match: nicht löschen, nicht weiterreichen, die übrigen schon
+                }
+                closeOpened(tombstone.matchId)
+                forgetAssignment(tombstone.matchId)
+                true
+            }
         if (fresh.isEmpty()) return
-        fresh.forEach { tombstone ->
-            closeOpened(tombstone.matchId)
-            forgetAssignment(tombstone.matchId)
-            devicesInMatch.remove(tombstone.matchId)
-            data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
-            data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
-        }
         dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
@@ -2291,6 +2385,7 @@ class MatchSession(
                         ),
                 )
             },
+            lifecycleRevision,
         )
     }
 
