@@ -409,6 +409,8 @@ class MatchSession(
         link?.start()
         peersChanged(link?.peers.orEmpty())
         scheduleAntiEntropy()
+        // Ausstehendes aus Data sichtbar, auch bevor (oder ohne dass) der Host die Kontositzung bindet
+        refreshLifecyclePending()
         publish()
     }
 
@@ -1559,7 +1561,7 @@ class MatchSession(
                 previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
         if (sessionChanged || forceSync) helloSent.remove(peer)
-        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, config.protocolVersions.first)
+        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, minVersion())
         compatibility[peer] = result
         deviceStatuses[peer] =
             DeviceStatus(
@@ -1577,13 +1579,14 @@ class MatchSession(
         if (data.settings.get(NODE_DEVICE_PREFIX + peer) != hello.deviceId.value) {
             data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
         }
+        // auch bei Inkompatibilität: erst unser Hello zeigt der Gegenstelle den Updatezustand (Pairing nach Kontowechsel)
+        if (peer !in helloSent) sendHello(peer)
         if (!result.isCompatible) {
             earlyOwners.remove(peer)
             return
         }
         // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
         earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
-        if (peer !in helloSent) sendHello(peer)
         // Pro Link-Up und Peer-Session nur einmal abgleichen; alte Peers ohne Session immer bedienen.
         if (!needsSync) return
         handOverToWaitingWatch(hello)
@@ -2079,7 +2082,7 @@ class MatchSession(
                 deviceId,
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
-                minV = if (scoped && known?.identityProtocol != 1) 4 else config.protocolVersions.first,
+                minV = if (scoped && known?.identityProtocol != 1) 4 else minVersion(),
                 v = config.protocolVersions.last,
                 appBuild = config.appBuild,
                 session = sessionId,
@@ -2304,6 +2307,13 @@ class MatchSession(
         link?.send(peer, bytes, callback)
     }
 
+    /**
+     * Kleinste zulässige Version: Mit Konto ist 3 kein Rückfall mehr, sobald 4 lokal geht (Integrator-Entscheidung zu P2-1).
+     * Über 3 flössen Events, Access und Redaktion aber nie; eine v3-Gegenstelle ist daher ein Updatezustand.
+     */
+    private fun minVersion(): Int =
+        if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
+
     /** Ausgehandelte Version mit [peer] (0 = unbekannt). */
     private fun version(peer: String): Int = compatibility[peer]?.version ?: 0
 
@@ -2421,7 +2431,7 @@ class MatchSession(
     }
 
     /** Fence für Mutationen aus einer empfangenen Nachricht: gleiches Pairing, Envelope weiter gültig, Kontositzung am Handy. */
-    private fun incomingFence(
+    internal fun incomingFence(
         peer: String,
         envelope: IdentityEnvelope?,
     ): () -> Unit {
@@ -2437,7 +2447,7 @@ class MatchSession(
     }
 
     /** Fence für eigene Zustellungen: Pairing mit [peer] unverändert und Kontositzung gebunden. */
-    private fun outgoingFence(peer: String): () -> Unit {
+    internal fun outgoingFence(peer: String): () -> Unit {
         val revision = pairing.revision
         val envelope = pairing.envelope(peer)
         return {

@@ -132,17 +132,22 @@ class LifecyclePair(
         settle()
     }
 
-    /** Neustart auf derselben Datenbank; der Host bindet die Kontositzung wie beim App-Start erneut. */
-    fun restartPhone() {
+    /** Neustart auf derselben Datenbank; der Host bindet die Kontositzung wie beim App-Start erneut ([bindAccount]). */
+    fun restartPhone(bindAccount: Boolean = true) {
         phone.close()
         phoneData = LocalData(phoneDriver)
         phone = session(phoneData, phoneLink, PeerKind.PHONE)
         phone.start()
+        if (bindAccount) bindAccount()
+        settle()
+    }
+
+    /** App-Start-Schritt des Hosts: Kontositzung (Auth-Lease) des gespeicherten Kontos wieder binden. */
+    fun bindAccount() {
         phoneData.accountIdentities.profile?.let { profile ->
             token = phoneData.cloudUploads.activate(profile)
             phone.activateAccount(profile, token!!)
         }
-        settle()
     }
 
     fun restartWatch() {

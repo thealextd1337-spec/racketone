@@ -11,16 +11,20 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ReplicaAccess
 import eu.advantly.data.ReplicaAccessLevel
+import eu.advantly.sync.protocol.AccessAck
 import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.DecodeResult
 import eu.advantly.sync.protocol.MatchAccessLevel
 import eu.advantly.sync.protocol.RedactedChunk
 import eu.advantly.sync.protocol.RedactedChunkAck
 import eu.advantly.sync.protocol.RedactionAck
+import eu.advantly.sync.protocol.ReplicaControlMessage
+import eu.advantly.sync.protocol.Summary
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -279,6 +283,62 @@ class ReplicaDeliveryTest {
         // Envelope der Uhr selbst (Absender/Empfänger vertauscht) ist kein Beleg des Handys
         pair.watchLink.replay("phone", SyncCodec.encode(AccessState(match, 9, MatchAccessLevel.FEED), envelope))
         assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, true, 0), pair.watchData.accessOf(match))
+    }
+
+    /** P2-2: Ohne Kontositzung (Neustart ohne `activateAccount`) stellt das Handy nichts zu und bestätigt nichts. */
+    @Test
+    fun aPhoneRestartWithoutItsAccountSessionDeliversAndAcknowledgesNothing() {
+        val match = sharedMatch()
+        pair.watchLink.lose = { it is AccessAck || (it is Summary && it.lifecycle.isNotEmpty()) }
+        catalog(match, 1)
+        pair.settle()
+        assertEquals(ReplicaAccessLevel.MEMBER, pair.watchData.accessOf(match)?.access, "Vorbedingung: Uhr hat angewandt")
+        assertEquals(1, phonePending, "Vorbedingung: Bestätigung der Uhr verloren")
+        pair.watchLink.lose = { false }
+        pair.phoneLink.sent.clear()
+        pair.watchLink.sent.clear()
+
+        pair.restartPhone(bindAccount = false)
+        tick()
+        tick()
+        assertTrue(
+            pair.watchLink.decoded().any { (it.message as? Summary)?.lifecycle?.containsKey(match.value) == true },
+            "Vorbedingung: Stand der Uhr kam an",
+        )
+        assertTrue(pair.phoneLink.decoded().none { it.message is ReplicaControlMessage }, "ohne Kontositzung keine Zustellung")
+        assertEquals(1, phonePending, "ohne Kontositzung bestätigt der Stand der Uhr nichts")
+
+        pair.bindAccount()
+        tick()
+        assertEquals(0, phonePending, "mit Kontositzung wieder bestätigt")
+    }
+
+    /** P2-2: Ein Pairing-, Konto- oder Sitzungswechsel zwischen Empfang und Mutation lässt die Mutation scheitern. */
+    @Test
+    fun aSwitchBetweenReceiptAndMutationFailsTheFence() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+
+        fun lastEnvelope(link: RecordingLink) = link.decoded().last { it.identity != null }.identity!!
+        val phoneIn = pair.phone.incomingFence("watch", lastEnvelope(pair.watchLink))
+        val phoneOut = pair.phone.outgoingFence("watch")
+        val watchIn = pair.watch.incomingFence("phone", lastEnvelope(pair.phoneLink))
+        phoneIn()
+        phoneOut()
+        watchIn()
+
+        pair.phone.detachAccountSession()
+        assertFailsWith<IllegalStateException>("Auth-Lease weg") { phoneIn() }
+        assertFailsWith<IllegalStateException>("Auth-Lease weg") { phoneOut() }
+        pair.bindAccount()
+        phoneIn()
+        phoneOut()
+
+        pair.activate("bob")
+        assertFailsWith<IllegalStateException>("Kontowechsel") { phoneIn() }
+        assertFailsWith<IllegalStateException>("Kontowechsel") { phoneOut() }
+        assertFailsWith<IllegalStateException>("neues Pairing der Uhr") { watchIn() }
     }
 
     @Test
