@@ -190,6 +190,16 @@ class ReplicaLifecycleStore internal constructor(
         deviceId: String?,
     ): Boolean = queries.ownWritable(matchId, deviceId).executeAsOne() != 0L
 
+    /**
+     * D-1: Rückstand der eigenen Quelle [deviceId] an einem Match mit offener Schreibspur. Zähler folgen ihr immer, Inhalte
+     * ([content]) nur ohne ausstehende Redaktion, damit kein noch unbereinigtes Event an eine Gegenstelle geht.
+     */
+    internal fun ownBacklog(
+        matchId: String,
+        deviceId: String,
+        content: Boolean,
+    ): Boolean = ownWritable(matchId, deviceId) && (!content || queries.redactionSettled(matchId).executeAsOne() != 0L)
+
     /** Lese- oder Schreibspur. Für Zähler und Bestätigungsflags, nie für Inhalte (Teil 2, P1-1). */
     internal fun writable(matchId: String): Boolean = !activated || readable(matchId) || ownWritable(matchId, null)
 
