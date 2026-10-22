@@ -9,9 +9,16 @@
 --  C  purge_account wie bisher. Die Trigger sehen die Fortschrittszeile und überspringen die erledigte Arbeit.
 -- Gleicher Endzustand wie purge_account: Die matchlokalen Anweisungen lesen nur Zeilen ihres Matches; die nach A
 -- vorgezogenen globalen Änderungen (Player, Freundschaften, Einladungen, Sitzungen, Support, eigene Turnierrollen)
--- liest keine dieser Anweisungen und keiner der Helfer. Ausnahme ist nur visibility_epoch (G) von Freunden:
--- purge_account erhöht sie über die noch bestehenden Freundschaften mehrfach, hier genügt die Erhöhung beim Löschen
--- der Freundschaft. G ist eine Generation (Vergleich auf Gleichheit, 00700), die Höhe trägt keine Bedeutung.
+-- liest keine dieser Anweisungen und keiner der Helfer. Ausnahme ist nur die Höhe von visibility_epoch (G):
+-- purge_account erhöht G von Freunden über die noch bestehenden Freundschaften mehrfach, hier genügt die Erhöhung beim
+-- Löschen der Freundschaft. Der Client setzt G als monoton und je Generation zugriffsstabil voraus
+-- (ReplicaLifecycleStore.applyAccess: gleiches G mit anderer Zugriffsstufe ist ein Fehler). Deshalb erhöht jede Phase G
+-- jedes Kontos, dessen Zugriff sie ändert, in derselben Transaktion; A tut das ausdrücklich für den Turnier-Staff.
+-- Mehrere Löschungen zugleich: A eines Kontos wartet, solange eine laufende Löschung noch gemeinsame Matches offen hat
+-- (sonst sähe deren B die globalen Änderungen des zweiten Kontos zu früh). Ein Löschweg außerhalb des Jobs schließt
+-- diese Matches vorher ab. Der Endzustand gleicht so zwei nacheinander laufenden purge_account. Ausnahme: Hat die
+-- laufende Löschung schon drei Fehlversuche, wartet A nicht (kein Verhungern), dann gilt nur „keine Klarnamen“.
+-- public.admin_purge_due_accounts bleibt ungestaffelt (Wartungsweg mit Karenzparameter, kein Client).
 
 alter table public.profiles drop constraint profiles_status_check;
 alter table public.profiles add constraint profiles_status_check
@@ -62,6 +69,7 @@ $$;
 -- pending_matches ist die Arbeitsliste: sortierte Obermenge der Matches, die purge_account matchweise ändert. Ein
 -- zusätzliches oder inzwischen gelöschtes Match bleibt unverändert (jede Anweisung filtert auf Bezüge zum Konto).
 -- B rückt nur next_match vor; als Tabelle kostete allein das Einfügen bei 100 000 Zeilen 0,4–0,6 s in A.
+-- block_size: Matches je B-Block; der Job halbiert ihn nach einem Block über Budget oder Statementlimit.
 create table private.account_deletion_progress (
   profile_id uuid primary key references public.profiles(id) on delete cascade,
   started_at timestamptz not null,
@@ -69,7 +77,8 @@ create table private.account_deletion_progress (
   retired_ids uuid[] not null,
   redacted_player_ids uuid[] not null,
   pending_matches uuid[] not null,
-  next_match integer not null default 1
+  next_match integer not null default 1,
+  block_size integer not null default 50 check (block_size >= 1)
 );
 alter table private.account_deletion_progress enable row level security;
 revoke all on private.account_deletion_progress from public, anon, authenticated, service_role;
@@ -78,15 +87,82 @@ revoke all on private.account_deletion_progress from public, anon, authenticated
 -- B setzt author_id matchweise; Arbeitsliste und Restkaskade finden die Zeilen jetzt über diesen Index.
 create index match_events_author_idx on public.match_events(author_id) where author_id is not null;
 
--- Phase A. Aufrufer prüft Status und Frist (Löschjob). Reihenfolge der globalen Schritte wie in purge_account:
+-- Arbeitsliste eines Kontos, vor allen Änderungen: dieselben Bezüge, über die Trigger und Kaskade Matches auswählen
+-- (IDs wie dort: Profil und v_retired, dazu alle eigenen Player). „= any“ und „&&“ nutzen die Ausdrucksindizes (als
+-- Join 2,5 s bei 100 000 Zeilen, so 0,26 s). Liest nichts, was Grabsteine oder Manifest ändern.
+create function private.account_deletion_matches(p_profile uuid) returns uuid[]
+language plpgsql stable security definer set search_path = '' as $$
+declare v_ids uuid[]; v_matches uuid[];
+begin
+  select coalesce(array_agg(p.id), '{}') into v_ids from public.players p
+    where p.owner_id=p_profile or p.profile_id=p_profile;
+  v_ids := v_ids || p_profile;
+  select coalesce(array_agg(x.match_id order by x.match_id), '{}') into v_matches from (
+      select mp.match_id from public.match_participants mp where mp.profile_id=p_profile
+      union select mp.match_id from public.match_participants mp where mp.player_id=any(v_ids)
+      union select mp.match_id from public.match_participants mp
+        where private.redaction_uuid(mp.slot_id)=any(v_ids) and length(mp.slot_id) between 32 and 41
+      union select e.match_id from public.match_events e
+        where private.redaction_uuid(e.payload#>>'{player,id}')=any(v_ids) and e.type='PlayerAssigned'
+      union select e.match_id from public.match_events e
+        where private.redaction_uuid(e.payload->>'playerId')=any(v_ids)
+          and e.type='PlayerAssigned' and e.payload->>'assignmentVersion'='2' and not (e.payload ? 'player')
+      union select e.match_id from public.match_events e
+        where private.redaction_lineup_ids(e.payload) && v_ids and e.type='MatchCreated'
+      union select r.match_id from private.match_redacted_names r where r.identity_id=any(v_ids)
+      union select c.match_id from private.match_player_profile_contexts c where c.profile_id=p_profile
+      union select m.id from public.matches m where m.created_by=p_profile
+      union select e.match_id from public.match_events e where e.author_id=p_profile
+      union select r.match_id from public.match_roles r where r.profile_id=p_profile or r.invited_by=p_profile
+      union select v.match_id from public.match_visitors v where v.profile_id=p_profile or v.invited_by=p_profile
+      union select m.id from public.matches m join public.tournaments t on t.id=m.tournament_id
+        where t.director_id=p_profile
+      union select m.id from public.matches m join public.tournament_courts c on c.id=m.court_id
+        join public.tournaments t on t.id=c.tournament_id where t.director_id=p_profile
+    ) x;
+  return v_matches;
+end;
+$$;
+
+-- Älteste andere laufende Löschung (unter drei Fehlversuchen), deren offene Matches p_matches berühren. Hash-Join
+-- über beide Listen; „= any“ wäre bei zwei großen Konten quadratisch.
+create function private.account_deletion_blocker(p_profile uuid, p_matches uuid[]) returns uuid
+language sql stable security definer set search_path = '' as $$
+  select g.profile_id from private.account_deletion_progress g
+    left join private.account_deletion_failures f on f.profile_id = g.profile_id
+   where g.profile_id <> p_profile and coalesce(f.attempts, 0) < 3
+     and exists (select 1 from unnest(g.pending_matches[g.next_match:]) o(id) join unnest(p_matches) n(id) on n.id = o.id)
+   order by g.started_at, g.profile_id limit 1;
+$$;
+
+-- Löschweg außerhalb des Jobs (Dashboard, purge_account ohne A): erst die gemeinsamen Matches laufender Löschungen
+-- abschließen, wie es nacheinander laufende purge_account täten.
+create function private.account_deletion_settle(p_profile uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare v_matches uuid[]; v_other uuid;
+begin
+  if not exists (select 1 from private.account_deletion_progress where profile_id <> p_profile) then return; end if;
+  v_matches := private.account_deletion_matches(p_profile);
+  loop
+    v_other := private.account_deletion_blocker(p_profile, v_matches);
+    exit when v_other is null;
+    perform private.account_deletion_redact(v_other, 500);
+  end loop;
+end;
+$$;
+
+-- Phase A. Aufrufer prüft Status und Frist (Löschjob). Liefert false ohne Änderung, solange eine andere laufende
+-- Löschung gemeinsame Matches offen hat (Job versucht es später). Reihenfolge der globalen Schritte wie in purge_account:
 -- Grabsteine und Manifestentscheid (capture_profile_redactions, Teil 1, unverändert aus 01100), Umbenennung der
 -- verknüpften Player (redact_linked_names), Entlinken und Gast-Übergabe (anonymize_profile/unlink_player, nur die
 -- Playerzeilen: deren Teilnehmer-Update findet in purge_account nach redact_linked_names keine Zeile mehr).
-create function private.account_deletion_begin(p_profile uuid) returns void
+create function private.account_deletion_begin(p_profile uuid) returns boolean
 language plpgsql security definer set search_path = '' as $$
-declare v_players uuid[]; v_retired uuid[]; v_ids uuid[];
+declare v_players uuid[]; v_retired uuid[]; v_matches uuid[];
 begin
   perform private.lock_sync();
+  v_matches := private.account_deletion_matches(p_profile);
+  if private.account_deletion_blocker(p_profile, v_matches) is not null then return false; end if;
   insert into private.redacted_profile_identities values(p_profile) on conflict do nothing;
   select coalesce(array_agg(p.id),'{}'::uuid[]) into v_retired from public.players p
     where (p.owner_id=p_profile and p.kind='self') or p.profile_id=p_profile;
@@ -110,36 +186,9 @@ begin
   insert into private.redacted_player_identities(player_id)
     select unnest(v_players) on conflict do nothing;
 
-  -- Arbeitsliste vor allen Änderungen: dieselben Bezüge, über die Trigger und Kaskade Matches auswählen (IDs wie dort:
-  -- Profil und v_retired, dazu alle eigenen Player). „= any“ und „&&“ nutzen die Ausdrucksindizes (als Join 2,5 s
-  -- bei 100 000 Zeilen, so 0,26 s).
-  select v_retired || p_profile || coalesce(array_agg(p.id), '{}') into v_ids from public.players p where p.owner_id=p_profile;
   insert into private.account_deletion_progress
     (profile_id, started_at, last_step_at, retired_ids, redacted_player_ids, pending_matches)
-    select p_profile, clock_timestamp(), clock_timestamp(), v_retired, v_players,
-      coalesce(array_agg(x.match_id order by x.match_id), '{}') from (
-      select mp.match_id from public.match_participants mp where mp.profile_id=p_profile
-      union select mp.match_id from public.match_participants mp where mp.player_id=any(v_ids)
-      union select mp.match_id from public.match_participants mp
-        where private.redaction_uuid(mp.slot_id)=any(v_ids) and length(mp.slot_id) between 32 and 41
-      union select e.match_id from public.match_events e
-        where private.redaction_uuid(e.payload#>>'{player,id}')=any(v_ids) and e.type='PlayerAssigned'
-      union select e.match_id from public.match_events e
-        where private.redaction_uuid(e.payload->>'playerId')=any(v_ids)
-          and e.type='PlayerAssigned' and e.payload->>'assignmentVersion'='2' and not (e.payload ? 'player')
-      union select e.match_id from public.match_events e
-        where private.redaction_lineup_ids(e.payload) && v_ids and e.type='MatchCreated'
-      union select r.match_id from private.match_redacted_names r where r.identity_id=any(v_ids)
-      union select c.match_id from private.match_player_profile_contexts c where c.profile_id=p_profile
-      union select m.id from public.matches m where m.created_by=p_profile
-      union select e.match_id from public.match_events e where e.author_id=p_profile
-      union select r.match_id from public.match_roles r where r.profile_id=p_profile or r.invited_by=p_profile
-      union select v.match_id from public.match_visitors v where v.profile_id=p_profile or v.invited_by=p_profile
-      union select m.id from public.matches m join public.tournaments t on t.id=m.tournament_id
-        where t.director_id=p_profile
-      union select m.id from public.matches m join public.tournament_courts c on c.id=m.court_id
-        join public.tournaments t on t.id=c.tournament_id where t.director_id=p_profile
-    ) x;
+    values (p_profile, clock_timestamp(), clock_timestamp(), v_retired, v_players, v_matches);
 
   update public.players set display_name='Gelöschter Spieler' where profile_id=p_profile;
   update public.players set profile_id=null, assigned_by=null, assigned_at=null, assignment_source=null
@@ -167,7 +216,12 @@ begin
       where table_schema='auth' and table_name='users' and column_name='banned_until') then
     execute 'update auth.users set banned_until = now() + interval ''100 years'' where id = $1' using p_profile;
   end if;
+  -- Staff und Co-Leitung der eigenen Turniere verlieren ab jetzt den Zugriff (is_tournament_staff/_director, Pull):
+  -- neue Generation in derselben Transaktion. purge_account erhöht dieselben Profile erst über die Turnierkaskade.
+  perform private.bump_visibility(array(select s.profile_id from public.tournament_staff s
+    join public.tournaments t on t.id = s.tournament_id where t.director_id = p_profile));
   update public.profiles set status='deleting' where id=p_profile;
+  return true;
 end;
 $$;
 
@@ -315,20 +369,24 @@ begin
 end;
 $$;
 
-revoke all on function private.account_deletion_begin(uuid), private.account_deletion_redact(uuid,integer)
+revoke all on function private.account_deletion_begin(uuid), private.account_deletion_redact(uuid,integer),
+  private.account_deletion_matches(uuid), private.account_deletion_blocker(uuid,uuid[]),
+  private.account_deletion_settle(uuid)
   from public, anon, authenticated, service_role;
 
 -- C: Liegt eine Fortschrittszeile vor, ist der globale Teil erledigt. capture_profile_redactions arbeitet nur noch
 -- die Restliste ab (im Löschjob leer; ein Löschweg außerhalb des Jobs, etwa das Dashboard, schließt so B ab),
 -- redact_linked_names hat nichts mehr zu tun. anonymize_profile läuft unverändert und findet nur die eigenen
--- Player. Ohne Fortschrittszeile bleiben beide Trigger byte-gleich.
+-- Player. Ohne Fortschrittszeile bleibt redact_linked_names byte-gleich; capture_profile_redactions schließt vorher nur
+-- gemeinsame Matches anderer laufender Löschungen ab (account_deletion_settle, ohne solche ein Nullschritt).
 do $$
 declare v_definition text; v_fn record;
 begin
   for v_fn in select * from (values
     ('private.capture_profile_redactions()', E'begin\n  insert into private.redacted_profile_identities',
      E'  if exists (select 1 from private.account_deletion_progress where profile_id = old.id) then\n'
-     ||E'    while private.account_deletion_redact(old.id, 500) > 0 loop end loop;\n    return old;\n  end if;\n'),
+     ||E'    while private.account_deletion_redact(old.id, 500) > 0 loop end loop;\n    return old;\n  end if;\n'
+     ||E'  perform private.account_deletion_settle(old.id);\n'),
     ('private.redact_linked_names()', E'begin\n  -- Typisierte',
      E'  if exists (select 1 from private.account_deletion_progress where profile_id = old.id) then\n'
      ||E'    return old;\n  end if;\n')
@@ -369,11 +427,14 @@ end;
 $$;
 
 -- Löschjob: ein Aufruf = eine Transaktion mit höchstens ~1 s Sperrhaltezeit (Budget, danach beginnt keine weitere
--- Einheit). Einheiten: A je fälligem Konto (zuerst, höchstens 100 je Aufruf), sonst reihum über die laufenden
--- Löschungen (ältester letzter Schritt zuerst) ein B-Block von 50 Matches oder C. Unterblock je Einheit wie 3701ab9:
--- Ein Fehler rollt nur diese Einheit zurück (A, Matchblock oder C, nie ein halbes Match), zählt einen Fehlversuch und
--- beendet den Aufruf; Konten mit Fehlversuchen kommen ans Ende, eine erfolgreiche Einheit setzt den Zähler zurück.
--- advantly.account_deletion_budget überschreibt das Budget (nur Tests).
+-- Einheit). Einheiten: A je fälligem Konto (höchstens 100 je Aufruf), ein B-Block (block_size Matches) oder C einer
+-- laufenden Löschung (reihum, ältester letzter Schritt zuerst). Reihenfolge: zuerst weniger Fehlversuche, bei Gleichstand
+-- A vor B/C. Ein scheiterndes Konto kommt so hinter alle anderen Einheiten und hält weder A noch B/C anderer Konten auf.
+-- Unterblock je Einheit wie 3701ab9: Ein Fehler rollt nur diese Einheit zurück (A, Matchblock oder C, nie ein halbes
+-- Match), zählt einen Fehlversuch und schließt das Konto für den Rest des Aufrufs aus; eine erfolgreiche Einheit setzt
+-- den Zähler zurück. Nur nach dem Statementlimit endet der Aufruf (danach gäbe es keine Frist mehr). Ein Matchblock über
+-- Budget oder Statementlimit läuft beim nächsten Mal halb so groß, bis 1. Ein zurückgestelltes A (gemeinsame Matches mit
+-- einer laufenden Löschung) zählt nicht als Einheit. advantly.account_deletion_budget überschreibt das Budget (nur Tests).
 create or replace function private.run_account_deletion_job_v1()
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC'
 set lock_timeout = '5s' set statement_timeout = '60s' as $$
@@ -384,8 +445,18 @@ declare
   v_units integer := 0;
   v_begun integer := 0;
   v_count integer := 0;
+  v_skip uuid[] := '{}';
+  v_stop boolean := false;
+  v_deferred boolean;
   v_id uuid;
   v_kind text;
+  v_tries integer;
+  v_next uuid;
+  v_next_kind text;
+  v_next_tries integer;
+  v_block integer;
+  v_unit_started timestamptz;
+  v_failed text;
   v_error text;
 begin
   -- Kein veralteter Snapshot nach Warten, auch nicht bei direktem Service-Aufruf.
@@ -401,48 +472,73 @@ begin
     when query_canceled then v_error := 'statement_canceled';
     when others then v_error := 'account_deletion_failed';
   end;
-  while v_error is null and (v_units = 0 or clock_timestamp() - v_started < v_budget) loop
+  v_stop := v_error is not null;
+  while not v_stop and (v_units = 0 or clock_timestamp() - v_started < v_budget) loop
     v_id := null;
+    v_next := null;
     -- Auswahl erst NACH der globalen Sperre; alle normalen Recovery-/Schreibwege nehmen dieselbe Sperre.
     if v_begun < 100 then
-      select p.id into v_id from public.profiles p join public.profile_settings s on s.profile_id = p.id
+      select p.id, coalesce(f.attempts, 0) into v_id, v_tries
+        from public.profiles p join public.profile_settings s on s.profile_id = p.id
         left join private.account_deletion_failures f on f.profile_id = p.id
         where p.status = 'deletion_requested' and s.deletion_requested_at <= clock_timestamp() - interval '14 days'
+          and p.id <> all (v_skip)
         order by coalesce(f.attempts, 0), s.deletion_requested_at, p.id limit 1
         for update of p, s;
       v_kind := 'begin';
     end if;
-    if v_id is null and v_count < 100 then
-      select g.profile_id, case when g.next_match <= cardinality(g.pending_matches) then 'redact' else 'purge' end
-        into v_id, v_kind
+    if v_count < 100 then
+      select g.profile_id, coalesce(f.attempts, 0), g.block_size,
+          case when g.next_match <= cardinality(g.pending_matches) then 'redact' else 'purge' end
+        into v_next, v_next_tries, v_block, v_next_kind
         from private.account_deletion_progress g
         left join private.account_deletion_failures f on f.profile_id = g.profile_id
+        where g.profile_id <> all (v_skip)
         order by coalesce(f.attempts, 0), g.last_step_at, g.profile_id limit 1
         for update of g;
+      if v_next is not null and (v_id is null or v_next_tries < v_tries) then
+        v_id := v_next;
+        v_kind := v_next_kind;
+      end if;
     end if;
     exit when v_id is null;
+    v_deferred := false;
+    v_failed := null;
+    v_unit_started := clock_timestamp();
     begin
       if v_kind = 'begin' then
-        perform private.account_deletion_begin(v_id);
-        v_begun := v_begun + 1;
+        v_deferred := not private.account_deletion_begin(v_id);
+        v_begun := v_begun + case when v_deferred then 0 else 1 end;
       elsif v_kind = 'redact' then
-        perform private.account_deletion_redact(v_id, 50);
+        perform private.account_deletion_redact(v_id, v_block);
       else
         perform private.purge_account(v_id);
         v_count := v_count + 1;
       end if;
-      delete from private.account_deletion_failures where profile_id = v_id;
+      if not v_deferred then
+        delete from private.account_deletion_failures where profile_id = v_id;
+      end if;
     exception
       -- Rollt nur diese Einheit zurück; ausschließlich feste Fehlerklassen speichern.
-      when lock_not_available then v_error := 'lock_timeout';
-      when query_canceled then v_error := 'statement_canceled';
-      when others then v_error := 'account_deletion_failed';
+      when lock_not_available then v_failed := 'lock_timeout';
+      when query_canceled then v_failed := 'statement_canceled';
+      when others then v_failed := 'account_deletion_failed';
     end;
+    if v_deferred or v_failed is not null then
+      v_skip := v_skip || v_id;
+    end if;
+    continue when v_deferred;
     v_units := v_units + 1;
-    if v_error is not null then
-      insert into private.account_deletion_failures as f values (v_id, 1, clock_timestamp(), v_error)
+    if v_failed is not null then
+      v_error := coalesce(v_error, v_failed);
+      v_stop := v_failed = 'statement_canceled';
+      insert into private.account_deletion_failures as f values (v_id, 1, clock_timestamp(), v_failed)
         on conflict (profile_id) do update set attempts = f.attempts + 1, last_failed_at = excluded.last_failed_at,
           last_error_code = excluded.last_error_code;
+    end if;
+    if v_kind = 'redact' and (v_failed = 'statement_canceled'
+        or (v_budget > interval '0' and clock_timestamp() - v_unit_started > v_budget)) then
+      update private.account_deletion_progress set block_size = greatest(block_size / 2, 1) where profile_id = v_id;
     end if;
   end loop;
   v_completed := clock_timestamp();
