@@ -1837,3 +1837,69 @@ grün bis auf die fünf Plattformlücken; 250 303/303; 181/190 Exit 0.
     sowie die Kommentare P3-2/P3-3;
   - **vorbestehendes Löschrisiko:** `anonymize_profile` (00800) skaliert mit der
     eigenen Historie, 7,7 s bei 25 000 eigenen Teilnehmerzeilen, gesamt 10,9 s.
+- Folgeauftrag erledigt (Worktree `t3-b90a697f`), noch nicht übernommen:
+  - `a780e7c`: 01100-Feinschliff. Epochen-Update über `id = any(array(select distinct …))`,
+    stabil auch bei veralteter Statistik (1,5 s → 0,12 s). 260 hat 22 Fälle.
+    Schattenvergleich 638/0.
+  - `0780489`: Migration 20261022000100. Die Kontolöschung wuchs **quadratisch** mit
+    der eigenen Historie: Kontext-Helfer ohne Index, wiederholtes `bump_visibility`
+    auf derselben Zeile, fehlender Index auf `previous_match_id`. Jetzt linear:
+    10k 20 s → 10 s, 25k 102 s → 24 s, 50k Abbruch → 46 s. Schattenvergleich der
+    ganzen Löschung 48/0, neue Datei 270 mit Lesezählungen.
+  - Löschjob: Er geriet in einen dauerhaften Stillstand (Abbruch nach 60 s, Rollback,
+    dieselben Konten im nächsten Lauf). Jetzt beginnt er nach 30 s keine weitere
+    Löschung mehr.
+  - **Offen und Architekturentscheidung:** Konten mit mehr als ~10 000 eigenen
+    Teilnehmerzeilen überschreiten 10 s, Konten über ~60 000 auch die 60 s des Jobs.
+    Ein einzelnes solches Konto blockiert die Warteschlange. Rund 1 ms je Zeile
+    entfallen auf die Zeilentrigger; mit identischer Semantik gibt es keinen engen
+    Weg darunter. Die Optionen (gestaffelte Löschung, jobspezifische Frist, …)
+    bewertet die Review `advantly-20261022-server-delete-history-review-r1`.
+- Review zu `a780e7c`/`0780489`: A und die Semantik von B sind freigegeben.
+  Bericht `%TEMP%/review-0780489-20261022/review-report.txt`. Eigener
+  Schattenvergleich 48/0. Ein dynamischer Differenztest über Suite und Rennen
+  verglich 3 865 Helferaufrufe ohne Abweichung. Alle 2 096 übersprungenen
+  `bump_visibility` lagen innerhalb einer laufenden Profillöschung; kein anderes
+  Konto verliert eine Erhöhung. Rechte identisch.
+  - **P2-1:** Die 30-s-Grenze garantiert keinen Fortschritt (A 20 s + B 45 s ergibt
+    einen Dauerstillstand). Enge Korrektur im selben Worktree: Unterblock je
+    Löschung, Fehlversuchszähler, gescheiterte Konten ans Ende, Alarm. Dazu P3-1:
+    Neuanlage einer Profil-ID mit Grabstein ablehnen.
+  - **P2-2, vorbestehend und grundsätzlich:** `lock_sync` ist EIN globaler Lock.
+    Jede Kontolöschung blockiert für ihre ganze Dauer Lesen und Schreiben aller
+    Nutzer. Bei 15 s Löschdauer brachen fremde Pulls nach 8 s ab.
+
+**Integratorentscheid, Zielarchitektur Kontolöschung (vor der Pilot-Freigabe):**
+gestaffelte Löschung (Option a der Review). Zuerst ein kurzer atomarer Schritt:
+Status, Sitzungen, Gerätebindungen und alle Grabsteine bzw. Schreibsperren. Ab da
+ist das Konto nicht mehr nutzbar, und keine Identität ist wiederherstellbar.
+Danach folgen kurze Batches über mehrere Transaktionen, jeder Batch mit nur kurzem
+`lock_sync`. Zum Schluss das kurze DELETE. Zwischenzustände sind für Clients nie
+als halb gelöscht sichtbar und sind fortsetzbar. Gründe: Es ist die einzige Option,
+die den globalen Stillstand (P2-2) beseitigt, sie hat keine Größengrenze und wirkt
+sofort im Sinn der DSGVO. Ein jobspezifisch höheres statement_timeout bleibt
+höchstens eine Notlösung im Wartungsfenster. Das wird ein eigenes Server-Paket mit
+eigener Review; die Zwischenzustände sind neu zu testen.
+
+**Übernahme `3701ab9` (Folgeauftrag P2-1/P3-1), gemergt nach `p2/d2d3-integration-b`:**
+- Löschjob: Auswahl vorab als Liste unter `lock_sync`, sortiert nach Fehlversuchen,
+  Frist und ID. Jede Kontolöschung läuft in einem eigenen Unterblock, die Schleife
+  endet beim ersten Fehler. Abgeschlossene Löschungen bleiben; die abgebrochene rollt
+  vollständig zurück. Neue Tabelle `private.account_deletion_failures`, die mit dem
+  Profil kaskadiert. `account_deletion_job_status_v1` meldet `stalledAccountCount`
+  (Konten ab drei Fehlversuchen), nur als Anzahl.
+- Fristmechanik (gemessen, PG 17): `statement_timeout` feuert einmal je Statement.
+  `SET LOCAL` stellt keinen neuen Timer, eine Frist je Konto ist also nicht setzbar.
+- P3-1: `handle_new_user` lehnt getilgte Profil-IDs ab (`profile_id_retired`), sonst
+  identisch mit 00500.
+- Tests:
+  - 190: erwartet keinen atomaren Batch mehr.
+  - 220: prüft die Ablehnung statt der Wiederbelebung.
+  - 280: neu, Maßstab 1:12; gegen `0780489` sind 14 von 19 Prüfungen rot.
+- Eigene Durchsicht (Integrator): Diff schmal und schlüssig, kein Client liest das
+  Status-RPC, keine neue gebundene RPC (181 unverändert).
+- Bleibt offen: Konten über dem Limit, aber jetzt sichtbar und nicht mehr blockierend.
+  Ebenso Verhungern bei ständigem Zulauf und P2-2. Alles wird mit der gestaffelten
+  Löschung erledigt.
+- Root-SQL-Suite auf dem Merge: Rot sind nur die 5 Plattformlücken (110, 200). 260, 270 und 280 sind grün,
+  181 und 190 enden mit Exit 0. Log: `%TEMP%/advantly-root-sql-integration-20261020/suite-3701ab9.log`.
