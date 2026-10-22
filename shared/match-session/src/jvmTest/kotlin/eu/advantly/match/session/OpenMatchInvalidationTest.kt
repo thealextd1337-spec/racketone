@@ -18,6 +18,7 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -187,6 +188,38 @@ class OpenMatchInvalidationTest {
                 .pointsPlayed,
         )
         assertEquals(3, storedPoints(match))
+    }
+
+    @Test
+    fun aRefusedDeletionLeavesNoStampAndKeepsTheMatchOpen() {
+        val match = ownMatchInTheWindow()
+        assertFailsWith<IllegalStateException> { session.deleteMatch(match) }
+        assertNull(data.settings.get("session.deletedStamp.${match.value}"), "kein Beleg für eine Löschung, die nicht stattfand")
+        assertFalse(data.matches.isDeleted(match))
+        assertEquals(
+            match,
+            session.state.value.match
+                ?.id,
+        )
+        assertTrue(session.recordPoint(Side.A))
+    }
+
+    @Test
+    fun aDeletedMatchLeavesNoSessionSettings() {
+        data.players.ensureSelf("Alex", 0) { PlayerId("phone-self") }
+        session.start()
+        val match = session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        val keys = {
+            data.settings
+                .all()
+                .keys
+                .filter { it.endsWith(match.value) }
+        }
+        assertEquals(listOf("session.neverSentToWatch.${match.value}"), keys())
+
+        session.deleteMatch(match)
+        assertTrue(data.matches.isDeleted(match))
+        assertEquals(emptyList(), keys())
     }
 
     @Test

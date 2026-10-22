@@ -666,13 +666,10 @@ class MatchSession(
      */
     fun deleteMatch(matchId: MatchId) {
         checkThread()
+        val now = clock.nowMs()
+        deleteStored(matchId, now)
         closeOpened(matchId)
         forgetAssignment(matchId)
-        devicesInMatch.remove(matchId)
-        val now = clock.nowMs()
-        data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
-        stamps.rememberForDeletion(matchId)
-        data.deleteMatch(matchId, now)
         dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
         publish()
@@ -1675,11 +1672,8 @@ class MatchSession(
         val fresh =
             message.matches.filter { tombstone ->
                 if (data.matches.isDeleted(tombstone.matchId)) return@filter false
-                devicesInMatch.remove(tombstone.matchId)
                 try {
-                    data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
-                    stamps.rememberForDeletion(tombstone.matchId)
-                    data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
+                    deleteStored(tombstone.matchId, tombstone.deletedAtMs)
                 } catch (_: IllegalStateException) {
                     return@filter false // gesperrtes Match: nicht löschen, nicht weiterreichen, die übrigen schon
                 }
@@ -1691,6 +1685,28 @@ class MatchSession(
         dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
+    }
+
+    /**
+     * Löscht [matchId] mit Quellen und Beleg für die Löschmarkierung in einer Transaktion: Ein gesperrtes Match (wirft) hinterlässt
+     * nichts. Matchbezogene Settings und Caches der Session fallen mit weg (die Löschmarkierung ist dauerhaft).
+     */
+    private fun deleteStored(
+        matchId: MatchId,
+        deletedAtMs: Long,
+    ) {
+        devicesInMatch.remove(matchId)
+        data.transaction {
+            data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
+            stamps.rememberForDeletion(matchId)
+            data.deleteMatch(matchId, deletedAtMs)
+            data.settings.remove(NEVER_SENT_TO_WATCH_PREFIX + matchId.value)
+            data.settings.remove(DROPPED_PREFIX + matchId.value)
+        }
+        devicesInMatch.remove(matchId)
+        neverSentCache.remove(matchId)
+        genesisCache.remove(matchId)
+        blockedMatches.remove(matchId)
     }
 
     /** Speichert neue Events sofort und wendet sie als Batch an (kein Puffern, `more` ist nur ein Hinweis). */
