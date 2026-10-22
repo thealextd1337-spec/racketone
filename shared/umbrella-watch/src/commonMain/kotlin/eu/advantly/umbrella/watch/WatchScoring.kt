@@ -878,7 +878,8 @@ class WatchPlayer(
  * @property linkConnected mindestens eine kompatible Gegenstelle (iPhone) ist verbunden
  * @property scorerConnected die Uhr zählt selbst oder der Zähler ist verbunden
  * @property pendingToPeers Events des offenen Matches, die noch keine Gegenstelle bestätigt hat, plus offene
- *   Lifecycle-Zustellungen (ein blockierter Rückstand zählt mindestens als 1); 0 = „synchron“, sonst „N ausstehend“
+ *   Lifecycle-Zustellungen; 0 = „synchron“ (nur bei `SyncStatus.settled`, wie Wear), sonst „N ausstehend“. Ist der
+ *   globale Stand nicht abgeschlossen (Rückstand anderer Matches, Blockade), zählt er mindestens als 1
  * @property lastEventReceivedAtMs Wanduhrzeit des zuletzt empfangenen Events (Anzeige: „Stand vor X s“), sonst `0`
  * @property lastSyncAtMs Wanduhrzeit des letzten Abgleichs mit einer Gegenstelle, sonst `0`
  * @property scorerDisconnectedSinceMs Anzeige: seit wann der Zähler nicht erreichbar ist (nach > 30 s Angebot
@@ -1189,7 +1190,7 @@ internal fun buildSnapshot(
         pointsPlayed = match.pointsPlayed,
         linkConnected = sync.indicator != SyncIndicator.LOCAL_ONLY,
         scorerConnected = sync.scorerConnected,
-        pendingToPeers = (pendingToPeers + sync.lifecyclePendingToPeers).coerceAtLeast(if (sync.lifecycleBlocked) 1 else 0),
+        pendingToPeers = (pendingToPeers + sync.lifecyclePendingToPeers).coerceAtLeast(if (sync.settled) 0 else 1),
         lastEventReceivedAtMs = sync.lastEventReceivedAtMs ?: 0,
         lastSyncAtMs = sync.lastSyncAtMs ?: 0,
         scorerDisconnectedSinceMs = scorerDisconnectedSinceMs,

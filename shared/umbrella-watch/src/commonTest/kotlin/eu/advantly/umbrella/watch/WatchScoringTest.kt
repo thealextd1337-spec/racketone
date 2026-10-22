@@ -555,7 +555,8 @@ class WatchScoringTest {
         assertEquals(2, assertNotNull(rig.watch.point(sideA = true)).pendingToPeers)
         val id = next.matchId
         rig.watchData.events.markConfirmedUpTo(id, rig.watch.deviceId(), rig.watchData.events.maxDeviceSeq(id, rig.watch.deviceId()))
-        assertEquals(0, assertNotNull(rig.watch.snapshot()).pendingToPeers, "synchron trotz altem Rückstand")
+        // Die Zahl bleibt je Match, „synchron“ aber erst bei SyncStatus.settled (P-4, wie Wear)
+        assertEquals(1, assertNotNull(rig.watch.snapshot()).pendingToPeers, "alter Rückstand: nicht synchron")
     }
 
     @Test
@@ -1094,10 +1095,15 @@ class WatchScoringTest {
 
         rig.watch.startMatch("TENNIS_OPEN", false, true, false)
         val match = assertNotNull(rig.watchSession.state.value.match)
-        val sync = rig.watchSession.state.value.sync
+        val sync =
+            rig.watchSession.state.value.sync
+                .copy(pendingToPeers = 0)
         assertEquals(0, buildSnapshot(match, sync, 0, pendingToPeers = 0).pendingToPeers)
         assertEquals(3, buildSnapshot(match, sync.copy(lifecyclePendingToPeers = 2), 0, pendingToPeers = 1).pendingToPeers)
         assertEquals(1, buildSnapshot(match, sync.copy(lifecycleBlocked = true), 0, pendingToPeers = 0).pendingToPeers)
+        // P-4: „synchron“ heißt auf beiden Plattformen SyncStatus.settled; Rückstand anderer Matches ist nie „synchron“
+        assertEquals(1, buildSnapshot(match, sync.copy(pendingToPeers = 4), 0, pendingToPeers = 0).pendingToPeers)
+        assertEquals(2, buildSnapshot(match, sync.copy(pendingToPeers = 4), 0, pendingToPeers = 2).pendingToPeers)
     }
 
     @Test
