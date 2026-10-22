@@ -2140,3 +2140,38 @@ neuen Tests sind gegen die Basis fachlich rot.
 
 **D-2** (`0d1fdd8e`, Uhr-Match am aktivierten Handy, bestätigt durch Probe D der S-Review)
 ist in Review: `advantly-20261023-w3-data-d2-review-r1`.
+
+**D-2 übernommen** (`0d1fdd8e` + `c5a00389`, Merge `53753d2a`, voller Check grün):
+- Ein Match der eigenen, per `cloud_device_owner` gebundenen Uhr wird am aktivierten
+  Handy angenommen, in beiden Reihenfolgen.
+- Ein vorab gekommener Kopf muss zur Genesis passen (Format, Lineup, Meta,
+  Erzeugungszeit).
+- **Akzeptierter Rest:** `previous_match_id` eines solchen Kopfs wird nicht geprüft. Das
+  ergibt höchstens eine falsche Folge-Verknüpfung, das Vorgänger-Match bleibt gesperrt.
+
+**S Runde 2 übernommen** (`cf3adbed`..`84250307`, Merge `c68aacae`; match-session
+173 Tests, 0 übersprungen):
+- Mit Konto gilt `minV = 4`, dadurch Updatezustand statt Teilsync.
+- Fence-Tests: Die Mutationsproben „leere Fence“ und „ohne Kontositzung“ sind jetzt rot.
+- Ein übergroßes Element wird als blockiert gemeldet. Die Lifecycle-Meldung läuft im Takt
+  mit.
+- P3-C: BLOCKED heilt mit dem nächsten eigenen Upload. Ob der Server den
+  Teilnehmer-Upload annimmt, ist erst gegen den Cloud-Stack prüfbar.
+- **Entscheidung:** Regel (a) wird gelockert. Neben der Genesis-Quelle darf auch ein
+  eigenes Handy desselben Kontos Spieler zuweisen. Umsetzung in Runde 3 zusammen mit
+  dem Hook `eventsCommitted`: `advantly-20261023-w3-session-r3`.
+
+**H übernommen** (`04b84124` + `559e0c8c`, Merge `b3d2fe91`, voller Check grün):
+- Android-Pull-Host mit Kontosperre, prozessweit je Profil. Pull und U4 laufen
+  nacheinander.
+- Der Statusabschnitt zeigt BLOCKED-Gründe und Verbindungsfehler, DE und EN.
+- **Ein Schalter `PHONE_REPLICA_ACTIVATION` (aus) steuert Pull und `activate`
+  gemeinsam.** Ohne Aktivierung gibt es keinen Pull und keinen Button.
+- Die Fence der Aktivierung prüft auch den Auth-Lease.
+- `activateAccount` läuft bei jedem App-Start nach erfolgreicher Profilprüfung; offline
+  erst beim nächsten `refresh()`.
+- Review r1: Freigabe mit Auflagen, alle erledigt.
+- **Offen:**
+  - P3-5 und P3-6 (kosmetisch).
+  - `eventsCommitted` anschließen, nach S Runde 3.
+  - Die Reihenfolge „erst Pull, dann U4“ ist nicht erzwungen. Das gehört zu B4.
