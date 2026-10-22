@@ -674,6 +674,106 @@ class CloudOwnMatchLaneTest {
         }
     }
 
+    private fun LocalData.assertNoBacklogContent() {
+        assertTrue(events.unconfirmedMatches().isEmpty())
+        assertTrue(events.unconfirmedEvents(MATCH).isEmpty())
+        assertTrue(events.sequences(MATCH).isEmpty())
+        assertTrue(events.eventsInRange(MATCH, PHONE, 1, 9).isEmpty())
+    }
+
+    private fun LocalData.assertNoBacklog() {
+        assertEquals(0, events.unconfirmedCount())
+        assertTrue(events.unconfirmedCountByMatch().isEmpty())
+        assertNoBacklogContent()
+    }
+
+    /**
+     * D-1: Im Fenster „schreiben ja, lesen nein“ (laufender Neuscan) zählen und liefern die Rückstandsabfragen die Events
+     * eigener Quellen; eine fremde Quelle im selben Match bleibt an der Lesespur.
+     */
+    @Test
+    fun ownBacklogFollowsTheWriteLaneDuringARescan() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            data.accountIdentities.recordSource(STRANGER, "stranger-self", "WATCH", "legacy:$PHONE", local = false)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.events.append(point("s1", STRANGER, 1))
+            data.count(2)
+            assertNull(data.catalog(2, generation = 2))
+            assertFalse(data.readable())
+            data.count(3)
+            assertEquals(mapOf(MATCH to 3L), data.events.unconfirmedCountByMatch())
+            assertEquals(3, data.events.unconfirmedCount())
+            assertEquals(listOf(MATCH), data.events.unconfirmedMatches())
+            assertEquals(listOf("genesis", "pphone2", "pphone3"), data.events.unconfirmedEvents(MATCH).map { it.id })
+            assertEquals((1L..3L).map { StoredSequence(PHONE, it) }, data.events.sequences(MATCH))
+            assertEquals(listOf("pphone2", "pphone3"), data.events.eventsInRange(MATCH, PHONE, 2, 3).map { it.id })
+            assertTrue(data.events.eventsInRange(MATCH, STRANGER, 1, 1).isEmpty())
+            // Die Bestätigung der Gegenstelle senkt den Rückstand.
+            data.events.markConfirmedUpTo(MATCH, PHONE, 2)
+            assertEquals(1, data.events.unconfirmedCount())
+            assertEquals(listOf("pphone3"), data.events.unconfirmedEvents(MATCH).map { it.id })
+            data.events.markConfirmedUpTo(MATCH, PHONE, 3)
+            assertEquals(0, data.events.unconfirmedCount())
+            assertTrue(data.events.unconfirmedMatches().isEmpty())
+        }
+    }
+
+    /** D-1: Bei ausstehender Redaktion zählt der eigene Rückstand, Inhalte und Sequenzen kommen erst nach dem Transfer heraus. */
+    @Test
+    fun pendingRedactionCountsTheOwnBacklogButReleasesNoContent() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            val run = assertNotNull(data.catalog(2, epoch = 1))
+            assertFalse(data.readable())
+            data.count(2)
+            assertEquals(mapOf(MATCH to 2L), data.events.unconfirmedCountByMatch())
+            assertEquals(2, data.events.unconfirmedCount())
+            data.assertNoBacklogContent()
+            val work = assertNotNull(data.cloudPulls.nextEventWork("alice", run))
+            val first = assertNotNull(data.cloudPulls.redactionWork(work, run))
+            assertFalse(data.cloudPulls.stageRedaction(work, run, first, 2, listOf("redacted-id"), emptyList(), true, false) {})
+            // Offener Transfer: weiterhin keine Inhalte.
+            assertEquals(2, data.events.unconfirmedCount())
+            data.assertNoBacklogContent()
+            val rest = assertNotNull(data.cloudPulls.redactionWork(work, run))
+            assertTrue(data.cloudPulls.stageRedaction(work, run, rest, 2, emptyList(), emptyList(), true, true) {})
+            assertEquals(listOf("genesis", "pphone2"), data.events.unconfirmedEvents(MATCH).map { it.id })
+        }
+    }
+
+    /** D-1: Fremdes Konto, FEED und ABSENT schließen die Schreibspur; dann kommt auch kein eigener Rückstand heraus. */
+    @Test
+    fun closedWriteLaneExposesNoOwnBacklog() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            assertNotNull(data.catalog(1))
+            data.count(2)
+            assertNull(data.catalog(2, generation = 2))
+            data.cloudUploads.deactivate()
+            data.accountIdentities.select("legacy:$PHONE", "bob", 0, "PHONE") { error("keine neue ID") }
+            data.assertNoBacklog()
+        }
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            data.count(2)
+            assertNotNull(data.catalog(1, access = "feed"))
+            data.assertNoBacklog()
+        }
+        createInMemoryJvmDriver().use { driver ->
+            val (data, session) = ownMatch(driver)
+            upload(data, session)
+            data.count(2)
+            data.replicas.applyAccess(data.replicas.captureContext(), MATCH, 1, ReplicaAccessLevel.ABSENT) {}
+            data.assertNoBacklog()
+        }
+    }
+
     private companion object {
         const val MATCH = "own-match"
         const val PHONE = "phone"
