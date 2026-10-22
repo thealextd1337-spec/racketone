@@ -480,6 +480,7 @@ returns jsonb language plpgsql security definer set search_path = '' set timezon
 set lock_timeout = '5s' set statement_timeout = '60s' as $$
 declare
   v_started timestamptz := clock_timestamp();
+  v_locked timestamptz;
   v_completed timestamptz;
   v_budget interval := interval '1 second';
   v_units integer := 0;
@@ -513,7 +514,9 @@ begin
     when others then v_error := 'account_deletion_failed';
   end;
   v_stop := v_error is not null;
-  while not v_stop and (v_units = 0 or clock_timestamp() - v_started < v_budget) loop
+  -- Budget = Sperrhaltezeit: ab der Sperre, nicht ab dem Aufruf (sonst bliebe nach langem Warten nur eine Einheit).
+  v_locked := clock_timestamp();
+  while not v_stop and (v_units = 0 or clock_timestamp() - v_locked < v_budget) loop
     v_id := null;
     v_next := null;
     -- Auswahl erst NACH der globalen Sperre; alle normalen Recovery-/Schreibwege nehmen dieselbe Sperre.
