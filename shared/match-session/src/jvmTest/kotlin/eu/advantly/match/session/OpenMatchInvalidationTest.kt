@@ -154,6 +154,41 @@ class OpenMatchInvalidationTest {
         )
     }
 
+    /** Eigenes Match im Fenster zwischen Katalog und Readiness (Lesespur zu, Schreibspur offen), Zählstand 1:1. */
+    private fun ownMatchInTheWindow(): MatchId {
+        val token = signIn()
+        val match = session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        assertTrue(session.recordPoint(Side.A))
+        val uploaded = data.cloudUploads.capture(token, 100)
+        data.cloudUploads.acknowledge(uploaded, uploaded.events.mapTo(mutableSetOf()) { it.id }, metadata = uploaded.metadataRevisions)
+        val record = data.matches.get(match)!!
+        catalog(1, record, epoch = 0)
+        assertTrue(session.recordPoint(Side.B))
+        catalog(2, record, epoch = 1)
+        scheduler.runUntilIdle()
+        assertFalse(data.replicas.canReadMember(data.replicas.captureContext(), match.value))
+        return match
+    }
+
+    @Test
+    fun aPullCommitInTheWindowNeverClosesTheOwnLiveMatch() {
+        val match = ownMatchInTheWindow()
+        session.eventsCommitted(match.value)
+        scheduler.runUntilIdle()
+        assertEquals(
+            match,
+            session.state.value.match
+                ?.id,
+        )
+        assertTrue(session.recordPoint(Side.A))
+        assertEquals(
+            3,
+            session.state.value.match!!
+                .pointsPlayed,
+        )
+        assertEquals(3, storedPoints(match))
+    }
+
     @Test
     fun headerAdoptionReachesTheOpenMatch() {
         data.players.ensureSelf("Alex", 0) { PlayerId("phone-self") }

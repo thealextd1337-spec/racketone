@@ -354,6 +354,10 @@ class MatchSession(
     @Volatile
     private var directoryChangePosted = false
 
+    /** Wie [directoryChangePosted], für [eventsCommitted]. */
+    @Volatile
+    private var eventsCommittedPosted = false
+
     /** Eigener Kopfstand nach einem Event: ändert weder Rechte noch Namen (sonst Prüfung je Punkt). */
     private var writingProgress = false
 
@@ -1407,12 +1411,48 @@ class MatchSession(
     }
 
     /**
-     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
-     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
-     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand, Kopffelder werden übernommen.
+     * Host-Hook für gepullte Events: `CloudPullRunner(…, eventsCommitted = session::eventsCommitted)` ruft ihn aus
+     * `afterCommit`. Von jedem Thread aufrufbar und wirft nie (der Runner buchte sonst einen Fehler): Aufrufe werden wie
+     * Data-Signale zu einem Scheduler-Post zusammengelegt, dort gelten die Regeln von [onDataChanged]. Neu aufgebaut wird
+     * nur ein offenes Match, dessen Store-Stand vom Engine-Stand abweicht. [matchId] ist nur der Anlass: geprüft werden
+     * alle offenen Matches, damit zwischen den Threads kein Zustand außer dem Post-Merker geteilt wird.
      */
+    @Suppress("UNUSED_PARAMETER")
+    fun eventsCommitted(matchId: String) {
+        if (eventsCommittedPosted) return
+        eventsCommittedPosted = true
+        scheduler.post {
+            eventsCommittedPosted = false
+            if (!started) return@post
+            refreshOpened()
+            // neue Quellen auch in nicht offenen Matches (Routing); unveränderter Zustand meldet publish nicht
+            devicesInMatch.clear()
+            neverSentCache.clear()
+            publish()
+        }
+    }
+
+    /** Signal einer Data-Änderung (Rechte, Redaktion, Kopf) auf dem Scheduler: offene Matches und Zustellung nachziehen. */
     private fun onDataChanged() {
         lifecycleRevision++
+        refreshOpened()
+        devicesInMatch.clear()
+        neverSentCache.clear()
+        genesisCache.clear()
+        if (blockedMatches.isNotEmpty()) blockedMatches.retainAll(data.events.unconfirmedMatches().mapTo(HashSet(), ::MatchId))
+        // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
+        targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
+        refreshLifecyclePending()
+        publish()
+    }
+
+    /**
+     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
+     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
+     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand oder von außen gespeicherten Events (Pull), Kopffelder
+     * werden übernommen.
+     */
+    private fun refreshOpened() {
         for (m in opened.values.toList()) {
             val record = data.matches.get(m.id)
             if (record == null) {
@@ -1421,7 +1461,9 @@ class MatchSession(
                 continue
             }
             val lifecycle = lifecycleOf(m.id)
-            if (lifecycle != m.lifecycle) {
+            // Engine = Store ohne Genesis (eigene und empfangene Events landen in beiden); 0 = Lesespur zu
+            val stored = data.events.count(m.id.value)
+            if (lifecycle != m.lifecycle || (stored > 0 && stored != m.engine.events.size + 1L)) {
                 m.lifecycle = lifecycle
                 val engine =
                     try {
@@ -1437,14 +1479,6 @@ class MatchSession(
             // Kopfübernahme (Pull, Vorgänger): Stand und Ergebnis bleiben aus der Engine
             if (record != m.record) m.record = record
         }
-        devicesInMatch.clear()
-        neverSentCache.clear()
-        genesisCache.clear()
-        if (blockedMatches.isNotEmpty()) blockedMatches.retainAll(data.events.unconfirmedMatches().mapTo(HashSet(), ::MatchId))
-        // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
-        targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
-        refreshLifecyclePending()
-        publish()
     }
 
     /** Rechte- und Redaktionsstand eines Matches; ohne Konto-Kontext gibt es keinen. */
