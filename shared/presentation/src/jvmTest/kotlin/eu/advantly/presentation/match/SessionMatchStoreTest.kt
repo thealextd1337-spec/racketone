@@ -1233,6 +1233,71 @@ class SessionMatchStoreTest {
         )
     }
 
+    /**
+     * Data ändert Namen ohne Session-Ereignis (Pull, Redaktion): erst eine neue `lifecycleRevision` verwirft alle
+     * abgeleiteten Namen in Verlauf, Details, „Wie letztes Mal“ und Live-Ansicht; dieselbe Revision lädt nichts neu.
+     */
+    @Test
+    fun lifecycleRevisionDropsDerivedNamesAndEqualRevisionDoesNotReload() {
+        val rig = Rig(watchOnline = false)
+        val phone = rig.phone
+        val id = phone.start(phone.setupFor(tennis))
+        phone.play("AAAB")
+        assertTrue(phone.endMatch(EndReason.STOPPED))
+        val jonas =
+            phone.guests.value
+                .first { it.displayName == "Jonas" }
+                .id
+
+        fun people() =
+            listOf(
+                phone.matches.value
+                    .single()
+                    .setup
+                    .player(jonas)!!,
+                phone
+                    .record(id)!!
+                    .summary.setup
+                    .player(jonas)!!,
+                phone.lastSetup.value!!.player(jonas)!!,
+                phone.active.value!!
+                    .setup
+                    .player(jonas)!!,
+            )
+        assertEquals(List(4) { "Jonas" }, people().map { it.displayName })
+        val wizard = MatchWizard(phone)
+        wizard.selectSport(Sport.TENNIS)
+        assertTrue(wizard.playerSuggestions().any { it.id == jonas })
+
+        // Redaktion in Data (gelesener Name wird leer), die Session meldet nur eine neue Lifecycle-Revision
+        rig.phoneSession.data.players
+            .rename(jonas, "")
+        val state = rig.phoneSession.state.value
+        phone.onSessionState(state.copy())
+        assertEquals(List(4) { "Jonas" }, people().map { it.displayName }, "gleiche Revision: Caches bleiben")
+
+        phone.onSessionState(state.copy(lifecycleRevision = state.lifecycleRevision + 1))
+        assertTrue(people().all { it.displayName.isEmpty() && it.isPlaceholder }, "kein Name, sondern Platzhalter")
+        assertFalse(phone.guests.value.any { it.id == jonas })
+        assertFalse(phone.recentPlayers(Sport.TENNIS).any { it.id == jonas })
+        assertFalse(wizard.playerSuggestions().any { it.id == jonas }, "Wizard-Vorschlag aus dem Sportwechsel vorher")
+        assertTrue(
+            eu.advantly.presentation.stats
+                .historyPeople(
+                    phone.matches.value
+                        .single()
+                        .setup,
+                    setOf(phone.self.value.id),
+                ).isEmpty(),
+        )
+
+        // Nach einem Neustart beginnt der Zähler wieder bei 0: auch ein kleinerer Wert ist ein Sprung.
+        rig.phoneSession.data.players
+            .rename(jonas, "Jonas")
+        phone.onSessionState(state)
+        assertEquals(List(4) { "Jonas" }, people().map { it.displayName })
+    }
+
     @Test
     fun guestsCanBeRenamedButNotTheOwner() {
         val rig = Rig()

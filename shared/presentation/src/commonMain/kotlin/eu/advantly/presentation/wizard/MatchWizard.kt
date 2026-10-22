@@ -186,15 +186,16 @@ class MatchWizard(
         update { PlayerSelection.remove(it, PlayerPlace(side, index), players.self.value.id) }
     }
 
-    /** Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. */
-    fun playerSuggestions(): List<Player> =
-        PlayerSelection.suggestions(
-            createdPlayers.filterNot { it.id in players.archivedPlayerIds.value },
-            recentPlayers.filterNot { it.id in players.archivedPlayerIds.value },
-            guests.value,
-            input,
-            players.self.value.id,
-        )
+    /**
+     * Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. Namen kommen per
+     * Spieler-ID aus den aktuellen Gästen: umbenannte, redigierte oder archivierte Personen erscheinen nie mit altem Namen.
+     */
+    fun playerSuggestions(): List<Player> {
+        val current = guests.value.associateBy { it.id }
+
+        fun fresh(list: List<Player>) = list.mapNotNull { current[it.id] }.filterNot { it.id in players.archivedPlayerIds.value }
+        return PlayerSelection.suggestions(fresh(createdPlayers), fresh(recentPlayers), guests.value, input, players.self.value.id)
+    }
 
     fun assignPlayer(
         place: PlayerPlace,
