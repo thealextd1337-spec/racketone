@@ -1,7 +1,9 @@
 package eu.advantly.match.session
 
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PointWon
@@ -44,6 +46,45 @@ class ProtocolFourTest {
         val sync = pair.phone.state.value.sync
         assertTrue(sync.pendingToPeers > 0 && sync.lifecycleBlocked && !sync.settled, "Rückstand sichtbar blockiert (Update nötig)")
     }
+
+    /**
+     * P2-1: Mit Konto ist 3 kein Rückfall mehr, sobald eine Seite 4 kann (Hello `minV = 4`). Sonst flössen Events über 3,
+     * Access und Redaktion nie, und die Uhr behielte gelöschte Namen.
+     */
+    private fun mixedWithAccount(
+        phoneVersions: IntRange,
+        watchVersions: IntRange,
+        phoneSees: CompatibilityStatus,
+        watchSees: CompatibilityStatus,
+    ) {
+        val pair = LifecyclePair(phoneVersions, watchVersions).also { pair = it }
+        pair.activate("alice")
+        val self =
+            pair.phoneData.players
+                .self()!!
+                .id
+        pair.phoneData.players.addGuest(GUEST, "Bea Secret", 0)
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(GUEST), self))
+        assertTrue(pair.phone.recordPoint(Side.A))
+        pair.settle()
+        repeat(2) { pair.scheduler.advanceBy(31_000) }
+
+        assertEquals(phoneSees, pair.phone.state.value.sync.versionMismatch)
+        assertEquals(watchSees, pair.watch.state.value.sync.versionMismatch)
+        assertEquals(0L, pair.watchData.events.count(match.value), "keine Events über 3")
+        assertEquals(null, pair.watchData.players.get(GUEST), "keine Namen über 3")
+        assertTrue(pair.phoneLink.decoded().none { (it.message as? Events)?.events?.isNotEmpty() == true }, "nichts auf dem Draht")
+        val sync = pair.phone.state.value.sync
+        assertTrue(sync.pendingToPeers > 0 && sync.lifecycleBlocked && !sync.settled, "Rückstand sichtbar blockiert (Update nötig)")
+    }
+
+    @Test
+    fun withAnAccountANewPhoneAndAnOldWatchAreAnUpdateState() =
+        mixedWithAccount(3..4, 3..3, CompatibilityStatus.PEER_TOO_OLD, CompatibilityStatus.PEER_TOO_NEW)
+
+    @Test
+    fun withAnAccountAnOldPhoneAndANewWatchAreAnUpdateState() =
+        mixedWithAccount(3..3, 3..4, CompatibilityStatus.PEER_TOO_NEW, CompatibilityStatus.PEER_TOO_OLD)
 
     /** Eigenes Match am Handy, per Pull Cloud-Match bei G 1 (MEMBER), an die Uhr zugestellt. */
     private fun cloudMatch(pair: LifecyclePair): MatchId {
@@ -126,5 +167,9 @@ class ProtocolFourTest {
                 .any { it.id == point.id.value },
             "gültiger Beleg (G, E) wird angenommen",
         )
+    }
+
+    private companion object {
+        val GUEST = PlayerId("guest-secret")
     }
 }

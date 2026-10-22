@@ -12,6 +12,7 @@ import eu.advantly.sync.protocol.SyncCodec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Data-Seite nahe 64 KiB → mehrere gültige Wire-Seiten ≤ 64 KiB samt Envelope, lückenlose Cursorkette, deterministisch. */
@@ -56,7 +57,7 @@ class RedactionChunksTest {
                 eu.advantly.sync.protocol
                     .RedactionCursor(PlayerId(page.playerIds.last()), page.next.afterServerSeq),
                 page.playerIds.map(::PlayerId),
-                RedactionChunks.split(page, "m:1:1", transfer, 0).flatMap { it.events },
+                RedactionChunks.split(page, "m:1:1", transfer, 0)!!.flatMap { it.events },
                 idsDone = true,
                 eventsDone = true,
             )
@@ -64,7 +65,7 @@ class RedactionChunksTest {
             SyncCodec.encode(whole, WORST_ENVELOPE)
         }
 
-        val chunks = RedactionChunks.split(page, "m:1:1", transfer, 7)
+        val chunks = RedactionChunks.split(page, "m:1:1", transfer, 7)!!
         assertTrue(chunks.size >= 2)
         assertEquals((7L until 7L + chunks.size).toList(), chunks.map { it.index })
         chunks.forEach {
@@ -83,9 +84,25 @@ class RedactionChunksTest {
     }
 
     @Test
+    fun aSingleItemThatFitsNoWirePageIsNeverSplitIntoOne() {
+        val event = StoredEvent("e-1", "m", "d", 1, 1, "x".repeat(64 * 1024), 1, null, "")
+        val page =
+            RedactionPage(
+                0,
+                RedactionCursor(null, 0),
+                RedactionCursor(null, 1),
+                emptyList(),
+                listOf(ReplicaRedactionEvent(event, 1)),
+                true,
+                true,
+            )
+        assertNull(RedactionChunks.split(page, "m:1:1", transfer, 0))
+    }
+
+    @Test
     fun anEmptyFinalPageIsOneEmptyChunk() {
         val page = RedactionPage(0, RedactionCursor(null, 0), RedactionCursor(null, 0), emptyList(), emptyList(), true, true)
-        val chunk = RedactionChunks.split(page, "m:1:1", transfer, 0).single()
+        val chunk = RedactionChunks.split(page, "m:1:1", transfer, 0)!!.single()
         assertTrue(chunk.idsDone && chunk.eventsDone && chunk.playerIds.isEmpty() && chunk.events.isEmpty())
     }
 }

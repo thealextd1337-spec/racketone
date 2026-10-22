@@ -370,6 +370,9 @@ class MatchSession(
     /** Handy: unbestätigte Access-/Redaktionszustellungen an eigene Uhren (Cache, neu bei Zustellung, Ack, Data-Änderung). */
     private var lifecyclePending = 0
 
+    /** Handy: eine davon ist nie zustellbar (übergroßes Redaktionselement). */
+    private var lifecycleOversized = false
+
     /** Matches mit Rückstand, der gerade nicht zugestellt werden darf (kein gültiger Beleg, Paket zu groß). */
     private val blockedMatches = HashSet<MatchId>()
 
@@ -409,6 +412,8 @@ class MatchSession(
         link?.start()
         peersChanged(link?.peers.orEmpty())
         scheduleAntiEntropy()
+        // Ausstehendes aus Data sichtbar, auch bevor (oder ohne dass) der Host die Kontositzung bindet
+        refreshLifecyclePending()
         publish()
     }
 
@@ -1498,7 +1503,7 @@ class MatchSession(
         }
         // Ausgehandelt ist genau eine Version: kein Rückfall auf frühere Rechte, kein V4 ohne Aushandlung
         if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
-        if (message.v >= 4) message = verified(message) ?: return
+        if (message.v >= 4) message = stamps.verified(message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
             val own = data.accountIdentities.currentSources()
@@ -1559,7 +1564,7 @@ class MatchSession(
                 previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
         if (sessionChanged || forceSync) helloSent.remove(peer)
-        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, config.protocolVersions.first)
+        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, minVersion())
         compatibility[peer] = result
         deviceStatuses[peer] =
             DeviceStatus(
@@ -1577,13 +1582,14 @@ class MatchSession(
         if (data.settings.get(NODE_DEVICE_PREFIX + peer) != hello.deviceId.value) {
             data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
         }
+        // auch bei Inkompatibilität: erst unser Hello zeigt der Gegenstelle den Updatezustand (Pairing nach Kontowechsel)
+        if (peer !in helloSent) sendHello(peer)
         if (!result.isCompatible) {
             earlyOwners.remove(peer)
             return
         }
         // MatchMeta kam vor diesem Hello: Besitzer-Angaben jetzt mit bekannter Geräteart übernehmen
         earlyOwners.remove(peer)?.let { adoptOwnerIdentity(peer, it) }
-        if (peer !in helloSent) sendHello(peer)
         // Pro Link-Up und Peer-Session nur einmal abgleichen; alte Peers ohne Session immer bedienen.
         if (!needsSync) return
         handOverToWaitingWatch(hello)
@@ -2079,7 +2085,7 @@ class MatchSession(
                 deviceId,
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
-                minV = if (scoped && known?.identityProtocol != 1) 4 else config.protocolVersions.first,
+                minV = if (scoped && known?.identityProtocol != 1) 4 else minVersion(),
                 v = config.protocolVersions.last,
                 appBuild = config.appBuild,
                 session = sessionId,
@@ -2280,6 +2286,7 @@ class MatchSession(
     private fun send(
         peer: String,
         message: SyncMessage,
+        callback: SendCallback? = null,
     ) {
         if (!started) return
         val envelope = if (data.accountIdentities.managed && message !is Hello) pairing.envelope(peer) ?: return else null
@@ -2287,7 +2294,7 @@ class MatchSession(
         if (data.accountIdentities.managed && routed is Deleted) {
             routed = routed.copy(matches = routed.matches.filter { inCurrentScope(it.matchId) })
         }
-        if (version(peer) >= 4) routed = stamped(routed) ?: return
+        if (version(peer) >= 4) routed = stamps.stamped(routed, receiver::summaryOf, blockedMatches::add) ?: return
         val bytes =
             try {
                 if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope)
@@ -2300,9 +2307,16 @@ class MatchSession(
             blockedMatches -= routed.matchId
             if (peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
         }
-        val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
-        link?.send(peer, bytes, callback)
+        val ack = callback ?: (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
+        link?.send(peer, bytes, ack)
     }
+
+    /**
+     * Kleinste zulässige Version: Mit Konto ist 3 kein Rückfall mehr, sobald 4 lokal geht (Integrator-Entscheidung zu P2-1).
+     * Über 3 flössen Events, Access und Redaktion aber nie; eine v3-Gegenstelle ist daher ein Updatezustand.
+     */
+    private fun minVersion(): Int =
+        if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
 
     /** Ausgehandelte Version mit [peer] (0 = unbekannt). */
     private fun version(peer: String): Int = compatibility[peer]?.version ?: 0
@@ -2313,74 +2327,6 @@ class MatchSession(
             true
         } catch (_: IllegalArgumentException) {
             false
-        }
-
-    /** Protokoll 4: jede Matchangabe mit eigenem Beleg; ohne Beleg wird sie nicht gesendet (Rückstand bleibt blockiert). */
-    private fun stamped(message: SyncMessage): SyncMessage? =
-        when (message) {
-            is Events -> {
-                val stamp = if (message.events.isEmpty()) null else stamps.of(message.matchId)
-                if (message.events.isNotEmpty() && stamp == null) blockedMatches += message.matchId
-                message.takeIf { it.events.isEmpty() || stamp != null }?.copy(v = 4, stamp = stamp)
-            }
-
-            is Summary -> {
-                val own =
-                    message.matches.keys
-                        .mapNotNull { key -> stamps.of(MatchId(key))?.let { key to it } }
-                        .toMap()
-                val lifecycle = if (data.accountIdentities.managed) message.lifecycle + receiver.summaryOf(own.keys) else message.lifecycle
-                message.copy(
-                    v = 4,
-                    matches = message.matches.filterKeys(own::containsKey),
-                    stamps = own,
-                    lifecycle = lifecycle.entries.take(MAX_LIFECYCLE).associate { it.toPair() },
-                )
-            }
-
-            is MatchMetaMessage -> {
-                val stamp = message.match?.let { stamps.of(it.matchId) }
-                message.copy(v = 4, match = message.match?.takeIf { stamp != null }, stamp = stamp)
-            }
-
-            is Deleted -> {
-                val own = message.matches.mapNotNull { m -> stamps.of(m.matchId)?.let { m.matchId.value to it } }.toMap()
-                message.copy(v = 4, matches = message.matches.filter { it.matchId.value in own }, stamps = own)
-            }
-
-            is Hello, is ReplicaControlMessage -> {
-                message
-            }
-        }
-
-    /**
-     * Empfang Protokoll 4: Belege vor jeder Mutation und jedem Ack prüfen; ungültige Matchangaben fallen weg, Events mit
-     * ungültigem Beleg ganz (`null`: kein Speichern, keine Bestätigung).
-     */
-    private fun verified(message: SyncMessage): SyncMessage? =
-        when (message) {
-            is Events -> {
-                message.takeIf {
-                    it.events.isEmpty() || stamps.accepts(it.matchId, it.stamp, it.events, requireGenesis = true)
-                }
-            }
-
-            is Summary -> {
-                message.copy(matches = message.matches.filterKeys { stamps.accepts(MatchId(it), message.stamps[it]) })
-            }
-
-            is MatchMetaMessage -> {
-                val header = message.match
-                if (header == null || stamps.acceptsHeader(header, message.stamp)) message else message.copy(match = null, stamp = null)
-            }
-
-            is Deleted -> {
-                message.copy(matches = message.matches.filter { stamps.accepts(it.matchId, message.stamps[it.matchId.value]) })
-            }
-
-            is Hello, is ReplicaControlMessage -> {
-                message
-            }
         }
 
     private fun genesisOf(matchId: MatchId): ScoreEvent? =
@@ -2412,16 +2358,18 @@ class MatchSession(
     }
 
     private fun refreshLifecyclePending() {
-        lifecyclePending =
-            if (config.kind == PeerKind.PHONE && data.accountIdentities.managed && data.accountIdentities.scope != null) {
-                delivery.pendingCount(knownKinds().filterValues { it == PeerKind.WATCH }.keys.map { it.value })
-            } else {
-                0
-            }
+        if (config.kind != PeerKind.PHONE || !data.accountIdentities.managed || data.accountIdentities.scope == null) {
+            lifecyclePending = 0
+            lifecycleOversized = false
+            return
+        }
+        val watches = knownKinds().filterValues { it == PeerKind.WATCH }.keys.map { it.value }
+        lifecyclePending = delivery.pendingCount(watches)
+        lifecycleOversized = delivery.blocked(watches)
     }
 
     /** Fence für Mutationen aus einer empfangenen Nachricht: gleiches Pairing, Envelope weiter gültig, Kontositzung am Handy. */
-    private fun incomingFence(
+    internal fun incomingFence(
         peer: String,
         envelope: IdentityEnvelope?,
     ): () -> Unit {
@@ -2437,7 +2385,7 @@ class MatchSession(
     }
 
     /** Fence für eigene Zustellungen: Pairing mit [peer] unverändert und Kontositzung gebunden. */
-    private fun outgoingFence(peer: String): () -> Unit {
+    internal fun outgoingFence(peer: String): () -> Unit {
         val revision = pairing.revision
         val envelope = pairing.envelope(peer)
         return {
@@ -2641,7 +2589,7 @@ class MatchSession(
                 lifecyclePendingToPeers = lifecyclePending,
                 // Update nötig (Versionsunterschied) oder kein gültiger Beleg: eigener Rückstand geht derzeit nicht raus
                 lifecycleBlocked =
-                    blockedMatches.isNotEmpty() ||
+                    blockedMatches.isNotEmpty() || lifecycleOversized ||
                         (pending > 0 && peers.any { it.compatibility != null && it.compatibility != CompatibilityStatus.COMPATIBLE }),
             ),
             dataRevision,
@@ -2743,10 +2691,6 @@ class MatchSession(
     private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
     companion object {
-        private const val MAX_LIFECYCLE = 200
-
-        /** Größter Beleg für Byte-Proben (unabhängig vom tatsächlichen, damit die Aufteilung stabil bleibt). */
-        private val WORST_STAMP = LocalMatchStamp(DeviceId("d".repeat(128)), EventId("g".repeat(128)), "s".repeat(128))
         private const val MAX_DEVICE_STATUSES = 16
         private const val DEVICE_STATUS_SAVE_INTERVAL_MS = 300_000L
         private const val ARCHIVES_IN_META = 200

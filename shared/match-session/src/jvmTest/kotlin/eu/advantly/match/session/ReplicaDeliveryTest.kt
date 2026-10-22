@@ -2,25 +2,37 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudPullMatch
 import eu.advantly.data.CloudPullMetadataPage
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
+import eu.advantly.data.RedactionCursor
+import eu.advantly.data.RedactionPage
 import eu.advantly.data.ReplicaAccess
 import eu.advantly.data.ReplicaAccessLevel
+import eu.advantly.data.ReplicaRedactionEvent
+import eu.advantly.data.StoredEvent
+import eu.advantly.sync.protocol.AccessAck
 import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.DecodeResult
 import eu.advantly.sync.protocol.MatchAccessLevel
 import eu.advantly.sync.protocol.RedactedChunk
 import eu.advantly.sync.protocol.RedactedChunkAck
 import eu.advantly.sync.protocol.RedactionAck
+import eu.advantly.sync.protocol.ReplicaControlMessage
+import eu.advantly.sync.protocol.Summary
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -279,6 +291,141 @@ class ReplicaDeliveryTest {
         // Envelope der Uhr selbst (Absender/Empfänger vertauscht) ist kein Beleg des Handys
         pair.watchLink.replay("phone", SyncCodec.encode(AccessState(match, 9, MatchAccessLevel.FEED), envelope))
         assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, true, 0), pair.watchData.accessOf(match))
+    }
+
+    /** P2-2: Ohne Kontositzung (Neustart ohne `activateAccount`) stellt das Handy nichts zu und bestätigt nichts. */
+    @Test
+    fun aPhoneRestartWithoutItsAccountSessionDeliversAndAcknowledgesNothing() {
+        val match = sharedMatch()
+        pair.watchLink.lose = { it is AccessAck || (it is Summary && it.lifecycle.isNotEmpty()) }
+        catalog(match, 1)
+        pair.settle()
+        assertEquals(ReplicaAccessLevel.MEMBER, pair.watchData.accessOf(match)?.access, "Vorbedingung: Uhr hat angewandt")
+        assertEquals(1, phonePending, "Vorbedingung: Bestätigung der Uhr verloren")
+        pair.watchLink.lose = { false }
+        pair.phoneLink.sent.clear()
+        pair.watchLink.sent.clear()
+
+        pair.restartPhone(bindAccount = false)
+        tick()
+        tick()
+        assertTrue(
+            pair.watchLink.decoded().any { (it.message as? Summary)?.lifecycle?.containsKey(match.value) == true },
+            "Vorbedingung: Stand der Uhr kam an",
+        )
+        assertTrue(pair.phoneLink.decoded().none { it.message is ReplicaControlMessage }, "ohne Kontositzung keine Zustellung")
+        assertEquals(1, phonePending, "ohne Kontositzung bestätigt der Stand der Uhr nichts")
+
+        pair.bindAccount()
+        tick()
+        assertEquals(0, phonePending, "mit Kontositzung wieder bestätigt")
+    }
+
+    /** P2-2: Ein Pairing-, Konto- oder Sitzungswechsel zwischen Empfang und Mutation lässt die Mutation scheitern. */
+    @Test
+    fun aSwitchBetweenReceiptAndMutationFailsTheFence() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+
+        fun lastEnvelope(link: RecordingLink) = link.decoded().last { it.identity != null }.identity!!
+        val phoneIn = pair.phone.incomingFence("watch", lastEnvelope(pair.watchLink))
+        val phoneOut = pair.phone.outgoingFence("watch")
+        val watchIn = pair.watch.incomingFence("phone", lastEnvelope(pair.phoneLink))
+        phoneIn()
+        phoneOut()
+        watchIn()
+
+        pair.phone.detachAccountSession()
+        assertFailsWith<IllegalStateException>("Auth-Lease weg") { phoneIn() }
+        assertFailsWith<IllegalStateException>("Auth-Lease weg") { phoneOut() }
+        pair.bindAccount()
+        phoneIn()
+        phoneOut()
+
+        pair.activate("bob")
+        assertFailsWith<IllegalStateException>("Kontowechsel") { phoneIn() }
+        assertFailsWith<IllegalStateException>("Kontowechsel") { phoneOut() }
+        assertFailsWith<IllegalStateException>("neues Pairing der Uhr") { watchIn() }
+    }
+
+    /** Review P3-2 (Probe B): Das E9-Summary geht verloren, der Access ist bestätigt, das Match beendet. */
+    @Test
+    fun aLostLifecycleReportIsRepeatedByTheTickForAFinishedMatch() {
+        val match = sharedMatch()
+        pair.phone.endMatch(EndReason.ABANDONED)
+        pair.settle()
+        pair.phoneLink.lose = { it is Summary && it.lifecycle.isNotEmpty() }
+        catalog(match, 1)
+        pair.settle()
+        assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, false, 0), pair.watchData.accessOf(match), "Meldung verloren")
+        assertEquals(0, phonePending, "Zustellung selbst bestätigt")
+
+        pair.phoneLink.lose = { false }
+        tick()
+        assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, true, 0), pair.watchData.accessOf(match), "ohne neues Hello")
+        pair.phoneLink.sent.clear()
+        tick()
+        assertTrue(pair.phoneLink.decoded().none { (it.message as? Summary)?.lifecycle?.isNotEmpty() == true }, "nach dem Ack Ruhe im Takt")
+    }
+
+    /** Review P3-5: Ein Redaktionselement, das keine Wire-Seite fasst, geht nie auf den Draht und ist sichtbar blockiert. */
+    @Test
+    fun anOversizedRedactionItemIsBlockedAndNeverSent() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+        val data = pair.phoneData
+        val run = catalog(match, 2, epoch = 1)
+        val work = checkNotNull(data.cloudPulls.nextEventWork(data.accountIdentities.profile!!, run))
+        val request = checkNotNull(data.cloudPulls.redactionWork(work, run))
+        assertTrue(data.cloudPulls.stageRedaction(work, run, request, 1, emptyList(), listOf(oversizedRedaction(match)), true, true) {})
+        pair.settle()
+        tick()
+        val sync = pair.phone.state.value.sync
+        assertTrue(sync.lifecycleBlocked && !sync.settled, "blockiert statt still ausstehend")
+        assertTrue(pair.phoneLink.decoded().none { it.message is RedactedChunk })
+    }
+
+    /** Größtes Redaktionsevent, dessen Data-Seite (≤ 64 KiB ohne Hülle) Data noch annimmt; samt Envelope zu groß. */
+    private fun oversizedRedaction(match: MatchId): ReplicaRedactionEvent {
+        val assigned = PlayerAssigned(PlayerId("slot"), Player(PlayerId("guest-x"), "Gelöschter Spieler"), PlayerId("me"))
+        val payload = SyncCodec.json.encodeToString(EventPayload.serializer(), assigned).dropLast(1)
+
+        fun event(pad: Int) =
+            ReplicaRedactionEvent(
+                StoredEvent("huge", match.value, "phone-x", 1, 1, "$payload,\"pad\":\"${"x".repeat(pad)}\"}", 1, null, "PlayerAssigned"),
+                1,
+            )
+
+        fun pageBytes(pad: Int) =
+            SyncCodec.json
+                .encodeToString(
+                    RedactionPage.serializer(),
+                    RedactionPage(0, RedactionCursor(null, 0), RedactionCursor(null, 1), emptyList(), listOf(event(pad)), true, true),
+                ).encodeToByteArray()
+                .size
+        return event(60_000 + 64 * 1024 - 32 - pageBytes(60_000))
+    }
+
+    /** 90e2746: Wire-Seiten je lokalem Transfer; Konto B bekommt für gleiches Match, G und E seine eigenen Seiten ab 0. */
+    @Test
+    fun anotherAccountGetsItsOwnPagesForTheSameMatchGenerationAndEpoch() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+        redactMany(catalog(match, 2, epoch = 1))
+        pair.settle()
+        assertEquals(true, watchTransferCompleted(match), "Konto A vollständig")
+
+        pair.activate("bob")
+        pair.phoneLink.sent.clear()
+        redactMany(catalog(match, 1, epoch = 1), count = 5)
+        pair.settle()
+        val chunks = pair.phoneLink.decoded().mapNotNull { it.message as? RedactedChunk }
+        assertEquals(listOf(0L), chunks.map { it.index }, "eigener Transfer ab Index 0")
+        assertEquals(5, chunks.single().playerIds.size, "Seiten von B, nicht aus dem Cache von A")
+        assertEquals(true, watchTransferCompleted(match))
     }
 
     @Test
