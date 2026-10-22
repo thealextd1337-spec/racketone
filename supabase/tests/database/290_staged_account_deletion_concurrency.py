@@ -119,7 +119,7 @@ def main():
             owner.execute("analyze public.matches, public.match_participants, public.match_events")
 
             stop = threading.Event()
-            calls, pulls, blocked = [], [], []
+            calls, pulls, blocked, partial = [], [], [], []
             seen = {friend: {}, staff: {}}
             conflicts = []
 
@@ -133,6 +133,10 @@ def main():
                     alive = owner.execute("select count(*) filter (where id=%s), count(*) filter (where id=%s) "
                                           "from auth.users where id in (%s,%s)", (big, small, big, small)).fetchone()
                     calls.append((time.monotonic() - started, alive))
+                    left = owner.execute("select cardinality(pending_matches)-next_match+1 from "
+                                         "private.account_deletion_progress where profile_id=%s", (big,)).fetchone()
+                    if left and 0 < left[0] < MATCHES:
+                        partial.append(left[0])
                     if alive == (0, 0) or len(calls) >= MAX_CALLS:
                         return
 
@@ -199,7 +203,9 @@ def main():
             assert calls[-1][1] == (0, 0), f"Nach {len(calls)} Aufrufen nicht fertig, ein scheiterndes A blockiert"
             small_done = next(i for i, (_, alive) in enumerate(calls) if alive[1] == 0)
             assert not conflicts, f"Gleiches G, andere Zugriffsstufe: {conflicts[:3]} ({len(conflicts)})"
-            assert len(calls) >= 5, f"Erwartet viele Transaktionen, waren {len(calls)}"
+            # Gestaffelt statt einer Transaktion: Zwischen zwei Aufrufen war B des großen Kontos nachweislich halb fertig.
+            # Unabhängig vom Tempo des Runners, solange B länger als ein Budget braucht (lokal rund 5 s).
+            assert partial, f"B des großen Kontos lief in einem Aufruf durch ({len(calls)} Aufrufe)"
             assert blocked, "Kein per pg_blocking_pids nachgewiesener Wait eines Pulls auf den Job"
             assert max(pulls) <= max(durations) + 1.0, (max(pulls), max(durations))
             assert max(durations) <= 5, max(durations)
@@ -215,7 +221,8 @@ def main():
                 assert poisoned is not None and poisoned[0] == "deletion_requested" and poisoned[1] >= 1, poisoned
             levels = sorted({access for access in seen[staff].values()})
             assert levels == ["feed", "member"], levels
-            print(f"PASS {len(calls)} Job-Aufrufe (max {max(durations):.2f} s, Summe {sum(durations):.1f} s), "
+            print(f"PASS {len(calls)} Job-Aufrufe, {len(partial)} davon mit halb fertigem B "
+                  f"(max {max(durations):.2f} s, Summe {sum(durations):.1f} s), "
                   f"{len(pulls)} Pull-Seiten in {rounds} Runden (max {max(pulls):.2f} s), "
                   f"{len(blocked)} Wait-Beobachtungen per pg_blocking_pids")
             print(f"PASS jedes gepullte Match vollständig (E=2) oder unberührt (E=0); kleines Konto nach {small_done + 1} Aufrufen fertig")
