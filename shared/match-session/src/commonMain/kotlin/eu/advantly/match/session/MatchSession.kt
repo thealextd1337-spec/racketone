@@ -8,6 +8,7 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.TelemetryPreference
@@ -62,6 +63,8 @@ import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.LinkStats
 import eu.advantly.device.link.SendCallback
 import eu.advantly.device.link.SendFailure
+import eu.advantly.sync.protocol.AccessAck
+import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.AntiEntropy
 import eu.advantly.sync.protocol.Compatibility
 import eu.advantly.sync.protocol.CompatibilityStatus
@@ -71,11 +74,16 @@ import eu.advantly.sync.protocol.DeletedMatch
 import eu.advantly.sync.protocol.DeviceSeq
 import eu.advantly.sync.protocol.Events
 import eu.advantly.sync.protocol.Hello
+import eu.advantly.sync.protocol.IdentityEnvelope
+import eu.advantly.sync.protocol.LocalMatchStamp
 import eu.advantly.sync.protocol.MatchHeader
 import eu.advantly.sync.protocol.MatchMetaMessage
 import eu.advantly.sync.protocol.OwnSource
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.ProtocolVersion
+import eu.advantly.sync.protocol.RedactedChunk
+import eu.advantly.sync.protocol.RedactedChunkAck
+import eu.advantly.sync.protocol.RedactionAck
 import eu.advantly.sync.protocol.ReplicaControlMessage
 import eu.advantly.sync.protocol.SeqRange
 import eu.advantly.sync.protocol.Summary
@@ -89,6 +97,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
 /**
@@ -239,6 +248,8 @@ class MatchSession(
         compatibility.clear()
         knownKindsCache = null
         droppedInputs = null
+        genesisCache.clear()
+        blockedMatches.clear()
         telemetry = loadTelemetry()
         dataRevision++
         publish()
@@ -250,6 +261,8 @@ class MatchSession(
         var record: MatchRecord,
         val genesis: ScoreEvent,
         var engine: EngineState,
+        /** Rechte-/Redaktionsstand beim letzten Aufbau der Engine; nur eine Änderung erzwingt einen Replay. */
+        var lifecycle: Any?,
     ) {
         val redo = ArrayDeque<EventId>()
 
@@ -334,6 +347,31 @@ class MatchSession(
     private var lastSyncAtMs: Long? = null
     private var lastEventReceivedAtMs: Long? = null
     private var dataRevision = 0L
+    private var lifecycleRevision = 0L
+    private var removeDirectoryObserver: (() -> Unit)? = null
+
+    /** Ein Post je Signalschwall; vor dem Lesen zurückgesetzt, damit keine Änderung verloren geht. */
+    @Volatile
+    private var directoryChangePosted = false
+
+    /** Eigener Kopfstand nach einem Event: ändert weder Rechte noch Namen (sonst Prüfung je Punkt). */
+    private var writingProgress = false
+
+    /** Engine-Neuaufbauten nach Data-Änderungen (Tests: eigene Punkte lösen keinen aus). */
+    internal var lifecycleReplays = 0
+        private set
+
+    /** Genesis nicht offener Matches (Belege, Kopfprüfung); bei Data-Änderungen verworfen. */
+    private val genesisCache = HashMap<MatchId, ScoreEvent>()
+    private val stamps = MatchStamps(data, ::genesisOf)
+    private val delivery = LifecycleDelivery(data, ::send)
+    private val receiver = ReplicaReceiver(data, ::send)
+
+    /** Handy: unbestätigte Access-/Redaktionszustellungen an eigene Uhren (Cache, neu bei Zustellung, Ack, Data-Änderung). */
+    private var lifecyclePending = 0
+
+    /** Matches mit Rückstand, der gerade nicht zugestellt werden darf (kein gültiger Beleg, Paket zu groß). */
+    private val blockedMatches = HashSet<MatchId>()
 
     private val linkListener =
         object : DeviceLinkListener {
@@ -366,6 +404,7 @@ class MatchSession(
         data.migrateWatchPlaceholders()
         started = true
         saveDeviceStatusesIfNeeded()
+        removeDirectoryObserver = data.observeDirectoryChanges(::directoryChanged)
         link?.setListener(linkListener)
         link?.start()
         peersChanged(link?.peers.orEmpty())
@@ -378,6 +417,8 @@ class MatchSession(
         checkThread()
         if (!started) return
         started = false
+        removeDirectoryObserver?.invoke()
+        removeDirectoryObserver = null
         timer?.cancel()
         timer = null
         link?.setListener(null)
@@ -604,7 +645,7 @@ class MatchSession(
             broadcastMeta(target.record)
             reconcileWatchScorers()
         }
-        if (watchScores && !isWatchDevice(target.scorer)) emit(target, listOf(ScorerChanged(myWatch())))
+        if (watchScores && !isWatchDevice(target.scorer)) emit(target, ScorerChanged(myWatch()))
         publish()
         return true
     }
@@ -621,6 +662,7 @@ class MatchSession(
         devicesInMatch.remove(matchId)
         val now = clock.nowMs()
         data.accountIdentities.rememberMatchSources(matchId.value, devicesIn(matchId))
+        stamps.rememberForDeletion(matchId)
         data.deleteMatch(matchId, now)
         dataRevision++
         broadcast(Deleted(listOf(DeletedMatch(matchId, now))))
@@ -652,7 +694,22 @@ class MatchSession(
     fun canAssignPlayer(matchId: MatchId): Boolean {
         checkThread()
         val creator = data.matchCreator(matchId) ?: return false
-        return data.isSelf(creator)
+        return data.isSelf(creator) && participantAuthority(matchId)
+    }
+
+    /**
+     * P3-C (E6, Variante a): Mit Konto und Protokoll 4 ändern nur die Genesis-Quelle und das Handy, dessen eigene Uhr das
+     * Match angelegt hat, die Teilnehmer. Eine Uhr im Handy-Match oder ein zweites eigenes Gerät würde dem Pull sonst den
+     * Beleg für den eigenen Kopf nehmen (dauerhaft BLOCKED).
+     */
+    private fun participantAuthority(matchId: MatchId): Boolean {
+        if (!data.accountIdentities.managed || config.protocolVersions.last < 4) return true
+        val source = genesisOf(matchId)?.deviceId ?: return false
+        return source == deviceId ||
+            (
+                config.kind == PeerKind.PHONE && knownKinds()[source] == PeerKind.WATCH &&
+                    data.accountIdentities.sourceScope(source.value) == data.accountIdentities.scope
+            )
     }
 
     fun assignmentFailure(
@@ -688,19 +745,16 @@ class MatchSession(
         val m = opened[matchId] ?: detached(matchId) ?: return false
         val actor = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }.id
         val creator = data.matchCreator(matchId)
-        emit(
+        return emit(
             m,
-            listOf(
-                PlayerAssigned(
-                    slot,
-                    player,
-                    actor,
-                    legacySlot = !Placeholders.isPlaceholder(slot),
-                    creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
-                ),
+            PlayerAssigned(
+                slot,
+                player,
+                actor,
+                legacySlot = !Placeholders.isPlaceholder(slot),
+                creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
             ),
-        )
-        return true
+        ) != null
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
@@ -733,7 +787,7 @@ class MatchSession(
         val assigned = watchAssignment?.matchId
         opened.values
             .filter { it.scorer == PENDING_WATCH && it.status != MatchStatus.FINISHED && (assigned == null || it.id == assigned) }
-            .forEach { emit(it, listOf(ScorerChanged(hello.deviceId))) }
+            .forEach { emit(it, ScorerChanged(hello.deviceId)) }
     }
 
     /**
@@ -753,8 +807,7 @@ class MatchSession(
 
     private fun takeOver(m: OpenMatch): Boolean {
         if (m.status == MatchStatus.FINISHED || m.scorer == deviceId) return false
-        emit(m, listOf(ScorerChanged(deviceId)))
-        return true
+        return emit(m, ScorerChanged(deviceId)) != null
     }
 
     // --- Zählen (nur der Zähler) ------------------------------------------------------------------
@@ -765,8 +818,7 @@ class MatchSession(
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS && m.status != MatchStatus.PAUSED) return false
         m.redo.clear()
-        emit(m, listOf(PointWon(side)))
-        return true
+        return emit(m, PointWon(side)) != null
     }
 
     /** UI-Undo: macht das letzte wirksame Zähl-Event rückgängig (02 §7.3). */
@@ -774,7 +826,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         val target = m.engine.undoTarget ?: return false
-        val undo = emit(m, listOf(Undo(target))).single()
+        val undo = emit(m, Undo(target)) ?: return false
         m.redo.addLast(undo.id)
         publish()
         return true
@@ -786,8 +838,9 @@ class MatchSession(
         val m = scoringMatch() ?: return false
         val undo = validRedo(m) ?: return false
         m.redo.removeLast()
-        emit(m, listOf(Undo(undo)))
-        return true
+        if (emit(m, Undo(undo)) != null) return true
+        m.redo.addLast(undo)
+        return false
     }
 
     /**
@@ -804,8 +857,7 @@ class MatchSession(
             val m = scoringMatch() ?: return false
             if (m.status != MatchStatus.AWAITING_DECISION) return false
             m.redo.clear()
-            emit(m, listOf(ContinueDecision(anotherSet = false)))
-            return true
+            return emit(m, ContinueDecision(anotherSet = false)) != null
         }
         return startNextSet(if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR)
     }
@@ -823,8 +875,7 @@ class MatchSession(
         if (m.status != MatchStatus.AWAITING_DECISION) return false
         val decision = ScoringEngine.nextSetDecision(m.record.format, kind) ?: return false
         m.redo.clear()
-        emit(m, listOf(decision))
-        return true
+        return emit(m, decision) != null
     }
 
     /**
@@ -837,7 +888,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         val target = ScoringEngine.lastEffectivePointOf(m.engine, side) ?: return false
-        val undo = emit(m, listOf(Undo(target))).single()
+        val undo = emit(m, Undo(target)) ?: return false
         m.redo.addLast(undo.id)
         publish()
         return true
@@ -867,8 +918,7 @@ class MatchSession(
         if (!context.accepts(expected, player)) return false
         val side = m.record.lineup.sideOf(player) ?: return false
         if (context.chosen == player) return true
-        emit(m, listOf(ServerChosen(context.setIndex, side, player)))
-        return true
+        return emit(m, ServerChosen(context.setIndex, side, player)) != null
     }
 
     /**
@@ -889,8 +939,7 @@ class MatchSession(
         if (value == ServeOutcome.DOUBLE_FAULT && point.side == point.servingSide) return false
         val detail = PointDetailRules.withServe(point.detail, value)
         if (detail == point.detail) return true
-        emit(m, listOf(PointDetailSet(pointId, detail)))
-        return true
+        return emit(m, PointDetailSet(pointId, detail)) != null
     }
 
     private fun serveInfoEnabled(m: OpenMatch): Boolean = m.record.format.sport.isTennisLike && m.record.meta.serveStats
@@ -902,8 +951,7 @@ class MatchSession(
         if (m.status == MatchStatus.FINISHED) return false
         if (correction.kind == CorrectionKind.INITIAL_SERVER && !canCorrectServerRetroactively(m.engine)) return false
         m.redo.clear()
-        emit(m, listOf(correction))
-        return true
+        return emit(m, correction) != null
     }
 
     /** Geprüfte Aufschlägerkorrektur; rückwirkend nur ohne übersteuernde eröffnende Wahl. Sonst „ab jetzt“ wählen. */
@@ -923,8 +971,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS) return false
-        emit(m, listOf(Paused))
-        return true
+        return emit(m, Paused) != null
     }
 
     /** Fortsetzung nach [pause]. Lässt den Redo-Stapel unberührt. */
@@ -932,8 +979,7 @@ class MatchSession(
         checkThread()
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.PAUSED) return false
-        emit(m, listOf(Resumed))
-        return true
+        return emit(m, Resumed) != null
     }
 
     /**
@@ -956,8 +1002,7 @@ class MatchSession(
                 else -> MatchEnded(reason, side)
             }
         m.redo.clear()
-        emit(m, listOf(payload))
-        return true
+        return emit(m, payload) != null
     }
 
     /** Stößt sofort einen Abgleich mit allen Gegenstellen an (z. B. App im Vordergrund). */
@@ -1014,28 +1059,44 @@ class MatchSession(
         return matchId
     }
 
-    /** Erzeugt, speichert, wendet an und sendet Events für [payloads] (eine Kette, ein Batch). */
+    /**
+     * Erzeugt, speichert, wendet an und sendet ein Event. `null`, wenn der Store es nicht aufnimmt: Dann gilt es nicht als
+     * gezählt (Kommando liefert `false`), Engine und Gegenstellen bleiben unverändert – nie ein Punkt nur im Speicher.
+     */
     private fun emit(
         m: OpenMatch,
-        payloads: List<EventPayload>,
-    ): List<ScoreEvent> {
-        val now = clock.nowMs()
-        var lamport = data.events.maxLamport(m.id.value)
-        var seq = data.events.maxDeviceSeq(m.id.value, deviceId.value)
-        var parent = m.head().id
-        val events =
-            payloads.map { payload ->
-                ScoreEvent(EventId.of(ids.newUuid7(now)), m.id, deviceId, ++seq, ++lamport, now, parent, payload).also { parent = it.id }
-            }
-        data.events.appendAll(events.map { it.toStoredEvent() })
+        payload: EventPayload,
+    ): ScoreEvent? {
+        val event = appendOwn(m, payload) ?: return null
         devicesIn(m.id) += deviceId.value
-        m.engine = ScoringEngine.applyAll(m.engine, events)
-        if (payloads.any { it is PlayerAssigned }) reconcilePeople(m.id)
+        m.engine = ScoringEngine.applyAll(m.engine, listOf(event))
+        if (payload is PlayerAssigned) reconcilePeople(m.id)
         persistProgress(m)
-        broadcast(Events(m.id, events))
+        broadcast(Events(m.id, listOf(event)))
         maybeFollow(null)
         publish()
-        return events
+        return event
+    }
+
+    /** Belegte Sequenz (paralleler Schreiber): einmal mit frisch gelesenem Stand wiederholen, danach `null` statt still verlieren. */
+    private fun appendOwn(
+        m: OpenMatch,
+        payload: EventPayload,
+    ): ScoreEvent? {
+        val now = clock.nowMs()
+        repeat(2) {
+            val seq = data.events.maxDeviceSeq(m.id.value, deviceId.value) + 1
+            val lamport = data.events.maxLamport(m.id.value) + 1
+            val event = ScoreEvent(EventId.of(ids.newUuid7(now)), m.id, deviceId, seq, lamport, now, m.head().id, payload)
+            val result =
+                try {
+                    data.events.append(event.toStoredEvent())
+                } catch (_: IllegalStateException) {
+                    return null // Schreibspur zu (FEED, ABSENT, fremdes Konto): erwartet, kein Absturz bis zur UI
+                }
+            if (result == AppendResult.INSERTED) return event
+        }
+        return null
     }
 
     private fun resumeMatch(
@@ -1074,7 +1135,7 @@ class MatchSession(
                 return false
             }
         if (!config.parallelMatches) opened.clear()
-        opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine)
+        opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine, lifecycleOf(matchId))
         // Handy: im Hintergrund geöffnete Matches (Neustart, Übergabe) bekommen nie automatisch den Fokus
         if (focus || !config.parallelMatches) focusedId = matchId
         return true
@@ -1126,7 +1187,7 @@ class MatchSession(
         val id = watchAssignment?.matchId ?: return
         val m = opened[id] ?: openWithoutFocus(id) ?: return
         if (m.status == MatchStatus.FINISHED || !isWatchDevice(m.scorer)) return
-        if (!watchMayHaveScored(m) || force) emit(m, listOf(ScorerChanged(deviceId)))
+        if (!watchMayHaveScored(m) || force) emit(m, ScorerChanged(deviceId))
     }
 
     /**
@@ -1177,7 +1238,7 @@ class MatchSession(
         opened.values
             .filter { it.id != target && it.status != MatchStatus.FINISHED && isWatchDevice(it.scorer) && !watchMayHaveScored(it) }
             .toList()
-            .forEach { emit(it, listOf(ScorerChanged(deviceId))) }
+            .forEach { emit(it, ScorerChanged(deviceId)) }
     }
 
     /**
@@ -1195,7 +1256,7 @@ class MatchSession(
         for (id in candidates) {
             val m = opened[id] ?: detached(id) ?: continue
             if (m.status == MatchStatus.FINISHED || m.scorer != deviceId || keepsOwnMatch(m, target)) continue
-            emit(m, listOf(ScorerChanged(phone)))
+            emit(m, ScorerChanged(phone))
         }
     }
 
@@ -1223,7 +1284,7 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return null
             }
-        return OpenMatch(record, engine.genesis ?: return null, engine)
+        return OpenMatch(record, engine.genesis ?: return null, engine, null)
     }
 
     /**
@@ -1320,7 +1381,73 @@ class MatchSession(
                         ?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
             )
-        data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
+        writingProgress = true
+        try {
+            data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
+        } finally {
+            writingProgress = false
+        }
+    }
+
+    // --- Data-Änderungen (Pull, Zustellung, Redaktion) ---------------------------------------------------------
+
+    /** Signal von [LocalData.observeDirectoryChanges], ggf. vom Thread des Schreibers: zusammengelegt auf den Scheduler. */
+    private fun directoryChanged() {
+        if (writingProgress && threadGuard.isSchedulerThread()) return
+        if (directoryChangePosted) return
+        directoryChangePosted = true
+        scheduler.post {
+            directoryChangePosted = false
+            if (started) onDataChanged()
+        }
+    }
+
+    /**
+     * Offene Matches gegen den Store prüfen (Vertrag W3 §3.3): Eine SQL-Lesesperre allein entfernt keinen sichtbaren Stand.
+     * Ohne Lese- **und** Schreibspur schließt das Match; ist nur die Lesespur zu (eigenes Match im Fenster), zählt die
+     * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand, Kopffelder werden übernommen.
+     */
+    private fun onDataChanged() {
+        lifecycleRevision++
+        for (m in opened.values.toList()) {
+            val record = data.matches.get(m.id)
+            if (record == null) {
+                // Schreibspur offen ⇔ Zähler sichtbar (ScopedEventStore): ein offenes Match hat mindestens die Genesis
+                if (data.matches.isDeleted(m.id) || data.events.maxLamport(m.id.value) == 0L) closeOpened(m.id)
+                continue
+            }
+            val lifecycle = lifecycleOf(m.id)
+            if (lifecycle != m.lifecycle) {
+                m.lifecycle = lifecycle
+                val engine =
+                    try {
+                        ScoringEngine.replay(data.events.scoreEvents(m.id))
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                if (engine?.genesis != null) {
+                    m.engine = engine
+                    lifecycleReplays++
+                }
+            }
+            // Kopfübernahme (Pull, Vorgänger): Stand und Ergebnis bleiben aus der Engine
+            if (record != m.record) m.record = record
+        }
+        devicesInMatch.clear()
+        neverSentCache.clear()
+        genesisCache.clear()
+        if (blockedMatches.isNotEmpty()) blockedMatches.retainAll(data.events.unconfirmedMatches().mapTo(HashSet(), ::MatchId))
+        // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
+        targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
+        refreshLifecyclePending()
+        publish()
+    }
+
+    /** Rechte- und Redaktionsstand eines Matches; ohne Konto-Kontext gibt es keinen. */
+    private fun lifecycleOf(matchId: MatchId): Any? {
+        if (data.accountIdentities.scope == null) return null
+        val ctx = data.replicas.captureContext()
+        return data.replicas.access(ctx, matchId.value) to data.replicas.canReadMember(ctx, matchId.value)
     }
 
     // --- Empfang ----------------------------------------------------------------------------------
@@ -1344,8 +1471,8 @@ class MatchSession(
         payload: ByteArray,
     ) {
         checkThread()
-        val decoded = SyncCodec.decode(payload) as? DecodeResult.Ok ?: return
-        val message = decoded.message
+        val decoded = SyncCodec.decode(payload, config.protocolVersions) as? DecodeResult.Ok ?: return
+        var message = decoded.message
         val pairingRevision = pairing.revision
         val responseRevision = pairing.responseRevision
         val scoped = data.accountIdentities.managed || (message is Hello && message.ownerContext != null)
@@ -1369,6 +1496,9 @@ class MatchSession(
         } else if (message !is Hello && !scoped && decoded.identity != null) {
             return
         }
+        // Ausgehandelt ist genau eine Version: kein Rückfall auf frühere Rechte, kein V4 ohne Aushandlung
+        if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
+        if (message.v >= 4) message = verified(message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
             val own = data.accountIdentities.currentSources()
@@ -1398,14 +1528,13 @@ class MatchSession(
         deviceStatuses[peer]?.let { deviceStatuses[peer] = it.copy(lastSeenAtMs = clock.nowMs()) }
         val touched =
             try {
-                // ReplicaControlMessage wird vor der echten V4-Aktivierung bereits vom Codec abgewiesen.
                 when (message) {
                     is Hello -> onHello(peer, message, pairing.revision != pairingRevision).let { null }
-                    is Summary -> onSummary(peer, message).let { null }
+                    is Summary -> onSummary(peer, message).also { onLifecycle(peer, message, decoded.identity) }.let { null }
                     is Events -> onEvents(peer, message)
                     is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
-                    is ReplicaControlMessage -> null
+                    is ReplicaControlMessage -> onControl(peer, message, decoded.identity).let { null }
                 }
             } catch (e: IllegalArgumentException) {
                 // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) â†’ verwerfen; der Rest bleibt konsistent
@@ -1430,7 +1559,7 @@ class MatchSession(
                 previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
         if (sessionChanged || forceSync) helloSent.remove(peer)
-        val result = ProtocolVersion.negotiate(hello.v, hello.minV)
+        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, config.protocolVersions.first)
         compatibility[peer] = result
         deviceStatuses[peer] =
             DeviceStatus(
@@ -1465,6 +1594,11 @@ class MatchSession(
         send(peer, metaMessage(primaryRecord()))
         // jetzt identifiziert: zulässigen Rückstand nachschieben (vorher hielt das Routing alles zurück)
         if (config.parallelMatches || data.accountIdentities.managed) pushBacklog(peer)
+        // E7: die Uhr aus dem bestätigten Hello registrieren, dann offene Zustellungen (Wiederanlauf nach Reconnect)
+        if (deliversTo(peer)) {
+            delivery.register(hello.deviceId.value, outgoingFence(peer))
+            deliverLifecycle(peer)
+        }
     }
 
     private fun onSummary(
@@ -1480,7 +1614,11 @@ class MatchSession(
                 deleted += matchId
                 continue
             }
-            remote.watermarks.forEach { (device, seq) -> data.events.markConfirmedUpTo(key, device.value, seq) }
+            try {
+                remote.watermarks.forEach { (device, seq) -> data.events.markConfirmedUpTo(key, device.value, seq) }
+            } catch (_: IllegalStateException) {
+                continue // gesperrtes Match (Schreibspur zu) blockiert nicht den Abgleich der übrigen
+            }
             val local = sequences(matchId)
             val ranges = AntiEntropy.missingRanges(local, remote)
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
@@ -1495,15 +1633,22 @@ class MatchSession(
         peer: String,
         message: Deleted,
     ) {
-        val fresh = message.matches.filter { !data.matches.isDeleted(it.matchId) }
+        val fresh =
+            message.matches.filter { tombstone ->
+                if (data.matches.isDeleted(tombstone.matchId)) return@filter false
+                devicesInMatch.remove(tombstone.matchId)
+                try {
+                    data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
+                    stamps.rememberForDeletion(tombstone.matchId)
+                    data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
+                } catch (_: IllegalStateException) {
+                    return@filter false // gesperrtes Match: nicht löschen, nicht weiterreichen, die übrigen schon
+                }
+                closeOpened(tombstone.matchId)
+                forgetAssignment(tombstone.matchId)
+                true
+            }
         if (fresh.isEmpty()) return
-        fresh.forEach { tombstone ->
-            closeOpened(tombstone.matchId)
-            forgetAssignment(tombstone.matchId)
-            devicesInMatch.remove(tombstone.matchId)
-            data.accountIdentities.rememberMatchSources(tombstone.matchId.value, devicesIn(tombstone.matchId))
-            data.deleteMatch(tombstone.matchId, tombstone.deletedAtMs)
-        }
         dataRevision++
         val forward = Deleted(fresh)
         targets().filter { it != peer }.forEach { send(it, forward) }
@@ -1578,8 +1723,10 @@ class MatchSession(
             }
         }
         val protectedIds = corrections.map { it.id }.toSet()
+        // P3-3: Namen mit Konto nur vom Handy; ein leerer Name ist nie eine Redaktion (die kommt nur per Transfer)
+        val namesFromPeer = !data.accountIdentities.managed || config.kind != PeerKind.PHONE
         (message.players + message.recentPlayers.orEmpty())
-            .filterNot { it.id in protectedIds }
+            .filter { namesFromPeer && it.id !in protectedIds && it.hasName() }
             .forEach { data.players.upsertRemote(it, now) }
         if (config.kind == PeerKind.PHONE) {
             corrections.chunked(ARCHIVES_IN_META).forEach { players ->
@@ -1932,7 +2079,8 @@ class MatchSession(
                 deviceId,
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
-                minV = if (scoped && known?.identityProtocol != 1) 4 else ProtocolVersion.MIN_SUPPORTED,
+                minV = if (scoped && known?.identityProtocol != 1) 4 else config.protocolVersions.first,
+                v = config.protocolVersions.last,
                 appBuild = config.appBuild,
                 session = sessionId,
                 identityProtocol = 1,
@@ -2071,7 +2219,7 @@ class MatchSession(
             }
 
             is ReplicaControlMessage -> {
-                null
+                message.takeIf { version(peer) >= 4 }
             }
         }
 
@@ -2080,7 +2228,8 @@ class MatchSession(
         matchId: MatchId,
         events: List<ScoreEvent>,
     ) {
-        val batches = AntiEntropy.batches(events)
+        // nach Bytes samt Envelope und Beleg (WatchConnectivity bzw. 64 KiB von Protokoll 4), nicht nur nach Anzahl
+        val batches = AntiEntropy.batchesBy(events) { _, batch -> fitsWire(Events(matchId, batch, true, 4, WORST_STAMP)) }
         batches.forEachIndexed { i, batch -> send(peer, Events(matchId, batch, more = i < batches.lastIndex)) }
     }
 
@@ -2138,9 +2287,211 @@ class MatchSession(
         if (data.accountIdentities.managed && routed is Deleted) {
             routed = routed.copy(matches = routed.matches.filter { inCurrentScope(it.matchId) })
         }
-        if (routed is Events && routed.events.isNotEmpty() && peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
+        if (version(peer) >= 4) routed = stamped(routed) ?: return
+        val bytes =
+            try {
+                if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope)
+            } catch (_: IllegalArgumentException) {
+                // Übergröße bricht nie den Ablauf ab (Hello, Zustellung); der Rückstand bleibt sichtbar blockiert
+                (routed as? Events)?.let { blockedMatches += it.matchId }
+                return
+            }
+        if (routed is Events && routed.events.isNotEmpty()) {
+            blockedMatches -= routed.matchId
+            if (peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
+        }
         val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
-        link?.send(peer, if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope), callback)
+        link?.send(peer, bytes, callback)
+    }
+
+    /** Ausgehandelte Version mit [peer] (0 = unbekannt). */
+    private fun version(peer: String): Int = compatibility[peer]?.version ?: 0
+
+    private fun fitsWire(message: SyncMessage): Boolean =
+        try {
+            SyncCodec.encode(message, WORST_ENVELOPE)
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+
+    /** Protokoll 4: jede Matchangabe mit eigenem Beleg; ohne Beleg wird sie nicht gesendet (Rückstand bleibt blockiert). */
+    private fun stamped(message: SyncMessage): SyncMessage? =
+        when (message) {
+            is Events -> {
+                val stamp = if (message.events.isEmpty()) null else stamps.of(message.matchId)
+                if (message.events.isNotEmpty() && stamp == null) blockedMatches += message.matchId
+                message.takeIf { it.events.isEmpty() || stamp != null }?.copy(v = 4, stamp = stamp)
+            }
+
+            is Summary -> {
+                val own =
+                    message.matches.keys
+                        .mapNotNull { key -> stamps.of(MatchId(key))?.let { key to it } }
+                        .toMap()
+                val lifecycle = if (data.accountIdentities.managed) message.lifecycle + receiver.summaryOf(own.keys) else message.lifecycle
+                message.copy(
+                    v = 4,
+                    matches = message.matches.filterKeys(own::containsKey),
+                    stamps = own,
+                    lifecycle = lifecycle.entries.take(MAX_LIFECYCLE).associate { it.toPair() },
+                )
+            }
+
+            is MatchMetaMessage -> {
+                val stamp = message.match?.let { stamps.of(it.matchId) }
+                message.copy(v = 4, match = message.match?.takeIf { stamp != null }, stamp = stamp)
+            }
+
+            is Deleted -> {
+                val own = message.matches.mapNotNull { m -> stamps.of(m.matchId)?.let { m.matchId.value to it } }.toMap()
+                message.copy(v = 4, matches = message.matches.filter { it.matchId.value in own }, stamps = own)
+            }
+
+            is Hello, is ReplicaControlMessage -> {
+                message
+            }
+        }
+
+    /**
+     * Empfang Protokoll 4: Belege vor jeder Mutation und jedem Ack prüfen; ungültige Matchangaben fallen weg, Events mit
+     * ungültigem Beleg ganz (`null`: kein Speichern, keine Bestätigung).
+     */
+    private fun verified(message: SyncMessage): SyncMessage? =
+        when (message) {
+            is Events -> {
+                message.takeIf {
+                    it.events.isEmpty() || stamps.accepts(it.matchId, it.stamp, it.events, requireGenesis = true)
+                }
+            }
+
+            is Summary -> {
+                message.copy(matches = message.matches.filterKeys { stamps.accepts(MatchId(it), message.stamps[it]) })
+            }
+
+            is MatchMetaMessage -> {
+                val header = message.match
+                if (header == null || stamps.acceptsHeader(header, message.stamp)) message else message.copy(match = null, stamp = null)
+            }
+
+            is Deleted -> {
+                message.copy(matches = message.matches.filter { stamps.accepts(it.matchId, message.stamps[it.matchId.value]) })
+            }
+
+            is Hello, is ReplicaControlMessage -> {
+                message
+            }
+        }
+
+    private fun genesisOf(matchId: MatchId): ScoreEvent? =
+        opened[matchId]?.genesis ?: genesisCache[matchId] ?: data.events
+            .scoreEvents(matchId)
+            .firstOrNull { it.payload is MatchCreated }
+            ?.also { genesisCache[matchId] = it }
+
+    // --- Lifecycle-Zustellung (Protokoll 4, Vertrag W3) ---------------------------------------------------------
+
+    /** Handy → bestätigte, kompatible eigene Uhr mit Protokoll 4 und gebundener Kontositzung (Auth-Lease). */
+    private fun deliversTo(peer: String): Boolean =
+        config.kind == PeerKind.PHONE && data.accountIdentities.managed && activeOwnership != null && version(peer) >= 4 &&
+            hellos[peer]?.kind == PeerKind.WATCH && pairing.envelope(peer) != null
+
+    private fun deliverLifecycle(
+        peer: String,
+        onlyIfChanged: Boolean = false,
+    ) {
+        val device = hellos[peer]?.deviceId?.value ?: return
+        try {
+            delivery.deliver(peer, device, outgoingFence(peer), onlyIfChanged)
+        } catch (_: IllegalStateException) {
+            // Kontext oder Pairing wechselte während der Zustellung: nächster Anlauf (Hello, Takt, Data-Änderung)
+        } catch (_: IllegalArgumentException) {
+            // unzulässige gespeicherte Seite: bleibt ausstehend und sichtbar, nie ein Absturz im Scheduler
+        }
+        refreshLifecyclePending()
+    }
+
+    private fun refreshLifecyclePending() {
+        lifecyclePending =
+            if (config.kind == PeerKind.PHONE && data.accountIdentities.managed && data.accountIdentities.scope != null) {
+                delivery.pendingCount(knownKinds().filterValues { it == PeerKind.WATCH }.keys.map { it.value })
+            } else {
+                0
+            }
+    }
+
+    /** Fence für Mutationen aus einer empfangenen Nachricht: gleiches Pairing, Envelope weiter gültig, Kontositzung am Handy. */
+    private fun incomingFence(
+        peer: String,
+        envelope: IdentityEnvelope?,
+    ): () -> Unit {
+        val revision = pairing.revision
+        return {
+            check(
+                pairing.revision == revision && pairing.accepts(peer, envelope) &&
+                    (config.kind != PeerKind.PHONE || activeOwnership != null),
+            ) {
+                "Pairing oder Kontositzung gewechselt"
+            }
+        }
+    }
+
+    /** Fence für eigene Zustellungen: Pairing mit [peer] unverändert und Kontositzung gebunden. */
+    private fun outgoingFence(peer: String): () -> Unit {
+        val revision = pairing.revision
+        val envelope = pairing.envelope(peer)
+        return {
+            check(
+                envelope != null && pairing.revision == revision && pairing.envelope(peer) == envelope &&
+                    activeOwnership != null,
+            ) {
+                "Pairing oder Kontositzung gewechselt"
+            }
+        }
+    }
+
+    /** Uhr: Access und Redaktion nur vom bestätigten Handy; Handy: nur Zustell-Acks der eigenen Uhr. */
+    private fun onControl(
+        peer: String,
+        message: ReplicaControlMessage,
+        envelope: IdentityEnvelope?,
+    ) {
+        if (!data.accountIdentities.managed || version(peer) < 4) return
+        val hello = hellos[peer] ?: return
+        val fence = incomingFence(peer, envelope)
+        if (config.kind == PeerKind.WATCH && hello.kind == PeerKind.PHONE) {
+            when (message) {
+                is AccessState -> receiver.onAccessState(peer, message, fence)
+                is RedactedChunk -> receiver.onChunk(peer, message, fence)
+                else -> Unit
+            }
+        } else if (config.kind == PeerKind.PHONE && hello.kind == PeerKind.WATCH && activeOwnership != null) {
+            val device = hello.deviceId.value
+            when (message) {
+                is AccessAck -> delivery.onAccessAck(device, message, fence)
+                is RedactedChunkAck -> delivery.onChunkAck(device, message)
+                is RedactionAck -> delivery.onRedactionAck(device, message, fence)
+                else -> Unit
+            }
+            refreshLifecyclePending()
+        }
+    }
+
+    /** Kumulativer Stand der Gegenseite aus `Summary.lifecycle` (Uhr: E9-Meldung des Handys, Handy: E8-Abschluss). */
+    private fun onLifecycle(
+        peer: String,
+        summary: Summary,
+        envelope: IdentityEnvelope?,
+    ) {
+        if (summary.v < 4 || summary.lifecycle.isEmpty() || !data.accountIdentities.managed) return
+        val hello = hellos[peer] ?: return
+        val fence = incomingFence(peer, envelope)
+        if (config.kind == PeerKind.WATCH && hello.kind == PeerKind.PHONE) {
+            receiver.onLifecycle(summary.lifecycle, fence)
+        } else if (config.kind == PeerKind.PHONE && hello.kind == PeerKind.WATCH && activeOwnership != null) {
+            delivery.onLifecycle(hello.deviceId.value, summary.lifecycle, fence)
+            refreshLifecyclePending()
+        }
     }
 
     /** Ack einer `Events`-Nachricht (ReliableDeviceLink, Scheduler-Thread) â†’ Events gelten als bei der Gegenstelle. */
@@ -2177,6 +2528,7 @@ class MatchSession(
                 // Takt nur für Matches mit Replikationsziel (Director-Matches ohne Ziel halten ihn nicht am Laufen)
                 val active = opened.values.any { it.status != MatchStatus.FINISHED && hasReplicationTarget(it.id) }
                 if (active || pendingCount() > 0) sendSummaries()
+                targets().filter(::deliversTo).forEach(::deliverLifecycle)
                 publish()
                 scheduleAntiEntropy()
             }
@@ -2216,7 +2568,12 @@ class MatchSession(
                     record?.takeIf { inCurrentScope(it.id) }?.let {
                         MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId)
                     },
-                players = record?.lineup?.let { (it.a + it.b).distinct().mapNotNull { id -> data.players.get(id)?.toPlayer() } }.orEmpty(),
+                players =
+                    record
+                        ?.lineup
+                        ?.let { (it.a + it.b).distinct().mapNotNull { id -> data.players.get(id)?.toPlayer() } }
+                        .orEmpty()
+                        .filter { it.hasName() },
                 self = data.players.self()?.toPlayer(),
                 watchMatch = watchAssignment?.takeIf { config.parallelMatches },
                 telemetry = TelemetrySetting.of(telemetry),
@@ -2231,9 +2588,9 @@ class MatchSession(
         val playerIds = (lineupPlayers + favorites.flatMap { it.a + it.b }).distinct()
         return MatchMetaMessage(
             match = record?.let { MatchHeader(it.id, it.format, it.lineup, it.meta, it.createdAtMs, it.previousMatchId) },
-            players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() },
+            players = playerIds.filterNot(data::isPlaceholder).mapNotNull { data.players.get(it)?.toPlayer() }.filter { it.hasName() },
             placeholderIds = data.players.placeholderIds().toList(),
-            recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() } else null,
+            recentPlayers = if (config.kind == PeerKind.PHONE) data.recentPeople().map { it.toPlayer() }.filter { it.hasName() } else null,
             archivedPlayerIds = if (config.kind == PeerKind.PHONE) playerIds.filter { it in archived } else emptyList(),
             favorites = favorites.map { it.toWire() },
             self = data.players.self()?.toPlayer(),
@@ -2273,7 +2630,20 @@ class MatchSession(
         val pending = pendingCount()
         return SessionState(
             match,
-            SyncStatus(linkState, peers, indicator, scorerConnected, pending, lastEventReceivedAtMs, lastSyncAtMs),
+            SyncStatus(
+                linkState,
+                peers,
+                indicator,
+                scorerConnected,
+                pending,
+                lastEventReceivedAtMs,
+                lastSyncAtMs,
+                lifecyclePendingToPeers = lifecyclePending,
+                // Update nötig (Versionsunterschied) oder kein gültiger Beleg: eigener Rückstand geht derzeit nicht raus
+                lifecycleBlocked =
+                    blockedMatches.isNotEmpty() ||
+                        (pending > 0 && peers.any { it.compatibility != null && it.compatibility != CompatibilityStatus.COMPATIBLE }),
+            ),
             dataRevision,
             matches,
             watchAssignment?.matchId,
@@ -2291,6 +2661,7 @@ class MatchSession(
                         ),
                 )
             },
+            lifecycleRevision,
         )
     }
 
@@ -2372,6 +2743,10 @@ class MatchSession(
     private fun peerKindKey(device: DeviceId) = PEER_KIND_PREFIX + device.value
 
     companion object {
+        private const val MAX_LIFECYCLE = 200
+
+        /** Größter Beleg für Byte-Proben (unabhängig vom tatsächlichen, damit die Aufteilung stabil bleibt). */
+        private val WORST_STAMP = LocalMatchStamp(DeviceId("d".repeat(128)), EventId("g".repeat(128)), "s".repeat(128))
         private const val MAX_DEVICE_STATUSES = 16
         private const val DEVICE_STATUS_SAVE_INTERVAL_MS = 300_000L
         private const val ARCHIVES_IN_META = 200
@@ -2407,6 +2782,9 @@ class MatchSession(
         val PENDING_WATCH: DeviceId = DeviceId("pending-watch")
     }
 }
+
+/** Leere Namen (Maske, Redaktion) gehen nie auf den Draht und werden nie übernommen; Platzhalter tragen keinen. */
+private fun Player.hasName(): Boolean = isPlaceholder || displayName.isNotBlank()
 
 private fun FavoriteLineup.toWire(): WireFavorite = WireFavorite(id, sport, discipline, a, b, name, lastUsedAtMs, useCount)
 
