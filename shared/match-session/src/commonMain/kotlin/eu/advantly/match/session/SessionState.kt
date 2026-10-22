@@ -33,6 +33,9 @@ import eu.advantly.sync.protocol.PeerKind
  *   der bestätigten Übernahme durch das Handy) – UI-Hinweis „N Eingaben nicht übernommen“
  * @property telemetry Telemetrie-Sichtbarkeit des Besitzers (P2-J, F19/F29) mit Änderungszeit; auf Handy und Uhr gleich,
  *   sobald sie sich gesehen haben ([MatchSession.setTelemetryVisibility])
+ * @property lifecycleRevision steigt bei jeder Access-, Redaktions- oder Directory-Änderung aus Data (auch aus Pull oder
+ *   Zustellung im Hintergrund). Konsumenten verwerfen dann **alle** abgeleiteten Match- und Spielernamen. Zähler im
+ *   Speicher, beginnt nach Neustart bei 0: nur auf Ungleichheit vergleichen, nie auf Größe.
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -43,6 +46,7 @@ data class SessionState(
     val droppedInputs: DroppedInputs? = null,
     val telemetry: TelemetryPreference = TelemetryPreference(),
     val devices: List<DeviceStatus> = emptyList(),
+    val lifecycleRevision: Long = 0,
 ) {
     /** Kurzform für Anzeige und Versandentscheidung. */
     val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility
@@ -155,6 +159,9 @@ enum class SyncIndicator {
  *   Empfang von dort; persistent im Event-Store (übersteht App-Neustarts).
  * @property lastEventReceivedAtMs Wanduhrzeit, zu der zuletzt ein neues Event empfangen wurde (Anzeige: „Stand vor X s“)
  * @property lastSyncAtMs Wanduhrzeit des letzten empfangenen Abgleichs (Summary/Events), sonst `null`
+ * @property lifecyclePendingToPeers Handy: unbestätigte Access- und Redaktionszustellungen an gekoppelte Uhren (Summe)
+ * @property lifecycleBlocked eigener Lifecycle-Rückstand, der derzeit nicht zugestellt werden darf (Stamp oder Kontext
+ *   ungültig, Update nötig)
  */
 data class SyncStatus(
     val link: LinkState,
@@ -164,7 +171,13 @@ data class SyncStatus(
     val pendingToPeers: Int,
     val lastEventReceivedAtMs: Long?,
     val lastSyncAtMs: Long?,
+    val lifecyclePendingToPeers: Int = 0,
+    val lifecycleBlocked: Boolean = false,
 ) {
+    /** Nichts mehr ausstehend: weder Events noch Lifecycle-Zustellungen, und nichts blockiert. */
+    val settled: Boolean
+        get() = pendingToPeers == 0 && lifecyclePendingToPeers == 0 && !lifecycleBlocked
+
     /**
      * Versionsunterschied zu einer erreichbaren Gegenstelle (Hello/`negotiate`, Protokoll 2 seit W2-A): `PEER_TOO_OLD` =
      * die Gegenstelle (z. B. Uhr) muss aktualisiert werden, `PEER_TOO_NEW` = dieses Gerät. Solange er besteht, tauschen
