@@ -8,6 +8,7 @@ import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.ReceiveRight
 import eu.advantly.core.model.StartEnds
@@ -834,6 +835,149 @@ class CloudOwnMatchLaneTest {
             data.count(2)
             data.replicas.applyAccess(data.replicas.captureContext(), MATCH, 1, ReplicaAccessLevel.ABSENT) {}
             data.assertNoBacklog()
+        }
+    }
+
+    /**
+     * Aktiviertes Handy von alice mit der Uhr [source] (peer, Owner [owner]); bei [headerFirst] kommt der Kopf vor der Genesis
+     * und hinterlässt den UNKNOWN-Marker des ungeklärten Imports. Rückgabe: Daten und die Genesis der Uhr.
+     */
+    private fun watchCreated(
+        driver: SqlDriver,
+        source: String,
+        owner: String?,
+        headerFirst: Boolean,
+        beforeActivation: LocalData.() -> Unit = {},
+    ): Pair<LocalData, StoredEvent> {
+        val data = LocalData(driver)
+        data.players.ensureSelf("Alex", 0) { PlayerId("me") }
+        data.accountIdentities.initialize(PHONE, "me", "PHONE")
+        data.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+        data.accountIdentities.recordSource(source, "$source-self", "WATCH", "legacy:$PHONE", local = false)
+        val session = data.cloudUploads.activate("alice")
+        data.cloudUploads.bindOwnedDevices(session, if (owner == "alice") setOf(PHONE, source) else setOf(PHONE))
+        if (owner != null && owner != "alice") driver.execute(null, "INSERT INTO cloud_device_owner VALUES ('$source','$owner')", 0)
+        data.beforeActivation()
+        data.replicas.activate(data.replicas.captureContext()) {}
+        if (headerFirst) data.matches.insertIfAbsent(MatchId(MATCH), format, watchLineup(source), MatchMeta(venue = "Uhr"), 1)
+        val genesis =
+            ScoreEvent(
+                EventId("genesis"),
+                MatchId(MATCH),
+                DeviceId(source),
+                1,
+                1,
+                1,
+                null,
+                MatchCreated(format, watchLineup(source), MatchMeta(venue = "Uhr")),
+            ).toStoredEvent()
+        return data to genesis
+    }
+
+    private fun watchLineup(source: String) = Lineup(listOf(PlayerId("$source-self")), listOf(PlayerId("guest")), PlayerId("$source-self"))
+
+    /** Anfrage 1 (W3): Ein Uhr-Match der eigenen, gebundenen Uhr erreicht das aktivierte Handy, gleich ob Kopf oder Genesis zuerst. */
+    @Test
+    fun aMatchOfTheOwnBoundWatchReachesTheActivatedPhoneInEitherOrder() {
+        for (headerFirst in listOf(true, false)) {
+            createInMemoryJvmDriver().use { driver ->
+                val (data, genesis) = watchCreated(driver, WATCH, "alice", headerFirst)
+                data.events.append(genesis)
+                if (!headerFirst) data.matches.insertIfAbsent(MatchId(MATCH), format, watchLineup(WATCH), MatchMeta(venue = "Uhr"), 1)
+                assertTrue(data.readable(), "headerFirst=$headerFirst")
+                assertNull(data.replicas.access(data.replicas.captureContext(), MATCH), "kein UNKNOWN-Marker")
+                assertEquals(WATCH, data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH)!!.sourceDeviceId)
+                assertEquals(
+                    "Uhr",
+                    data.matches
+                        .get(MatchId(MATCH))!!
+                        .meta.venue,
+                )
+                data.count(2, WATCH)
+                assertEquals(2, data.events.count(MATCH))
+            }
+        }
+    }
+
+    /** Gegenprobe: ungebundene Uhr, Uhr eines fremden Kontos und ein Cloud-Match bleiben in beiden Reihenfolgen gesperrt. */
+    @Test
+    fun foreignWatchesAndCloudMatchesStayLockedOnTheActivatedPhone() {
+        for (headerFirst in listOf(true, false)) {
+            for ((source, owner) in listOf(STRANGER to null, BOB_DEVICE to "bob")) {
+                createInMemoryJvmDriver().use { driver ->
+                    val (data, genesis) = watchCreated(driver, source, owner, headerFirst)
+                    assertFailsWith<IllegalStateException>("$source headerFirst=$headerFirst") { data.events.append(genesis) }
+                    if (!headerFirst) data.matches.insertIfAbsent(MatchId(MATCH), format, watchLineup(source), MatchMeta(), 1)
+                    assertEquals(0, data.events.count(MATCH))
+                    data.assertLocked()
+                }
+            }
+        }
+        createInMemoryJvmDriver().use { driver ->
+            val (data, genesis) = watchCreated(driver, WATCH, "alice", headerFirst = false)
+            data.replicas.recordCloudSeen(data.replicas.captureContext(), MATCH) {}
+            assertFailsWith<IllegalStateException> { data.events.append(genesis) }
+            assertEquals(0, data.events.count(MATCH))
+        }
+    }
+
+    /**
+     * Auflage P2-1 (W3 D-2): Ein Kopf vor der Genesis der eigenen Uhr, der nicht aus ihr stammt (fremde Lineup mit
+     * fremdem Spieler, anderes Format, fremder Ort, andere Erzeugungszeit), sperrt die Genesis; nichts davon wird lesbar.
+     */
+    @Test
+    fun aForeignHeaderBeforeTheOwnGenesisKeepsTheMatchLocked() {
+        val foreign = Lineup(listOf(PlayerId("$WATCH-self")), listOf(PlayerId("secret")), PlayerId("$WATCH-self"))
+        val headers =
+            listOf(
+                Triple(format, foreign, MatchMeta(venue = "Uhr")) to 1L,
+                Triple(Presets.TENNIS_SINGLES_BO5_FS10.format(), watchLineup(WATCH), MatchMeta(venue = "Uhr")) to 1L,
+                Triple(format, watchLineup(WATCH), MatchMeta(venue = "Fremd")) to 1L,
+                Triple(format, watchLineup(WATCH), MatchMeta(venue = "Uhr")) to 2L,
+            )
+        for ((header, createdAt) in headers) {
+            createInMemoryJvmDriver().use { driver ->
+                val (data, genesis) =
+                    watchCreated(
+                        driver,
+                        WATCH,
+                        "alice",
+                        headerFirst = false,
+                    ) { players.upsertRemote(Player(PlayerId("secret"), "Geheim"), 0) }
+                data.matches.insertIfAbsent(MatchId(MATCH), header.first, header.second, header.third, createdAt)
+                assertFailsWith<IllegalStateException>("$header $createdAt") { data.events.append(genesis) }
+                assertEquals(0, data.events.count(MATCH))
+                assertFalse(data.replicas.readablePlayer("secret"))
+                data.assertLocked()
+            }
+        }
+    }
+
+    /** Auflage P3-2: Die Bindung gilt nur unter dem gebundenen Konto – nicht unter B, nicht abgemeldet, wieder unter A. */
+    @Test
+    fun theOwnWatchGenesisFollowsTheCurrentAccount() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, genesis) = watchCreated(driver, WATCH, "alice", headerFirst = false)
+            data.accountIdentities.select("scope-bob", "bob", 0, "PHONE") { "bob-scope" }
+            assertFailsWith<IllegalStateException>("bob") { data.events.append(genesis) }
+            data.accountIdentities.select("legacy:$PHONE", null, 0, "PHONE") { error("keine neue ID") }
+            assertFailsWith<IllegalStateException>("abgemeldet") { data.events.append(genesis) }
+            data.accountIdentities.select("legacy:$PHONE", "alice", 0, "PHONE") { error("keine neue ID") }
+            data.events.append(genesis)
+            data.matches.insertIfAbsent(MatchId(MATCH), format, watchLineup(WATCH), MatchMeta(venue = "Uhr"), 1)
+            assertTrue(data.readable())
+        }
+    }
+
+    /** Auflage P3-2: Eine zunächst ungebundene Uhr wird abgewiesen; nach dem Binden gelingt die erneut zugestellte Genesis. */
+    @Test
+    fun aLateBoundWatchReachesThePhoneOnRedelivery() {
+        createInMemoryJvmDriver().use { driver ->
+            val (data, genesis) = watchCreated(driver, WATCH, owner = null, headerFirst = true)
+            assertFailsWith<IllegalStateException> { data.events.append(genesis) }
+            data.cloudUploads.bindOwnedDevices(data.cloudUploads.activate("alice"), setOf(WATCH))
+            data.events.append(genesis)
+            assertTrue(data.readable())
         }
     }
 

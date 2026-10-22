@@ -1,6 +1,9 @@
 package eu.advantly.data
 
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssigned
@@ -165,8 +168,14 @@ class ReplicaLifecycleStore internal constructor(
         if (activated && (isCloudSeen(matchId) || access(captureContext(), matchId) != null)) requireReadable(matchId)
     }
 
+    /**
+     * Marker nur für einen Kopf über ungeklärtem Event-Bestand. Ein Kopf vor jeder Genesis bleibt unmarkiert und ohne
+     * Quelle unlesbar; die Genesis muss dann [requireAppend] bestehen (W3, Anfrage 1: Kopf der eigenen Uhr vor ihrer Genesis).
+     * Sein Inhalt ist bis dahin ungeprüft; [requireAppend] nimmt die Genesis nur an, wenn Format, Lineup, Metadaten und
+     * Erzeugungszeit des Kopfs aus ihr stammen.
+     */
     internal fun noteUnresolvedImport(matchId: String) {
-        if (!activated || readable(matchId)) return
+        if (!activated || readable(matchId) || database.matchEventQueries.countForMatch(matchId).executeAsOne() == 0L) return
         val ctx = captureContext()
         if (access(ctx, matchId) == null) queries.putAccess(ctx.accountKey, matchId, null, ReplicaAccessLevel.UNKNOWN.name)
     }
@@ -207,10 +216,13 @@ class ReplicaLifecycleStore internal constructor(
         check(writable(matchId)) { "Replikat ist nicht zum Schreiben freigegeben" }
     }
 
-    /** `true` nur nach dem Genesis-Durchlauf einer lokalen Erzeugung; Folgeevents im Batch sind dann an deren Quelle gebunden. */
+    /**
+     * `true` nur nach dem Genesis-Durchlauf einer eigenen Quelle (lokal im aktuellen Scope oder per `cloud_device_owner` an das
+     * aktuelle Konto gebunden, z. B. die eigene Uhr); Folgeevents im Batch sind dann an genau diese Quelle gebunden.
+     */
     internal fun requireAppend(event: StoredEvent): Boolean {
         if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return false
-        // Nur die belegte lokale Erzeugung darf ohne Cloudstand beginnen, kein fremder Punkt.
+        // Nur die belegte Erzeugung einer eigenen Quelle darf ohne Cloudstand beginnen, kein fremder Punkt.
         check(!isCloudSeen(event.matchId) && queries.hasLifecycle(event.matchId).executeAsOne() == 0L)
         if (database.matchEventQueries.countForMatch(event.matchId).executeAsOne() != 0L) {
             val existing = database.matchEventQueries.eventById(event.id).executeAsOneOrNull()
@@ -228,11 +240,29 @@ class ReplicaLifecycleStore internal constructor(
                 creator == source.self_id ||
                     (owner != null && database.cloudMetadataQueries.ownedSelfAlias(creator, owner).executeAsOne() > 0)
             )
-        check(
-            source != null && source.local == 1L && source.scope_id == data.accountIdentities.scope && ownCreator,
-        ) {
+        // Eigene Quelle: lokal im aktuellen Scope oder per UID an das aktuelle Konto gebunden (z. B. die eigene Uhr am Handy).
+        val ownSource =
+            source != null &&
+                (
+                    (source.local == 1L && source.scope_id == data.accountIdentities.scope) ||
+                        (owner != null && owner == (data.accountIdentities.profile ?: data.accountIdentities.scope))
+                )
+        check(ownSource && ownCreator) {
             "Ungeklärter Import benötigt autoritativen Lifecycle-Abgleich"
         }
+        // Ein Kopf vor der Genesis (MatchMeta zuerst) wird nur angenommen, wenn er aus ihr stammt; sonst würde fremder
+        // Kopfinhalt (Lineup, Ort) mit der eigenen Genesis lesbar. Ehrliche Erzeuger legen ihn genau so an (MatchSession).
+        val header = database.matchHeaderQueries.selectById(event.matchId).executeAsOneOrNull()
+        check(
+            header == null ||
+                (
+                    created != null &&
+                        DataJson.decodeFromString(MatchFormat.serializer(), header.format_json) == created.config &&
+                        DataJson.decodeFromString(Lineup.serializer(), header.lineup_json) == created.lineup &&
+                        DataJson.decodeFromString(MatchMeta.serializer(), header.meta_json) == created.meta &&
+                        header.created_at_ms == event.wallClockMs
+                ),
+        ) { "Vorhandener Kopf passt nicht zur Genesis" }
         return true
     }
 
