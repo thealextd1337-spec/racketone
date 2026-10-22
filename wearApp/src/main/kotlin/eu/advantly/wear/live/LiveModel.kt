@@ -278,8 +278,11 @@ object LiveModel {
         if (role == LiveRole.SCORER) {
             val connected = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
             return when {
-                sync.pendingToPeers > 0 -> SyncUi.Pending(sync.pendingToPeers)
+                // Lifecycle-Rückstand zählt mit; ein blockierter Rückstand ohne Zahl gilt als einer
+                !sync.settled -> SyncUi.Pending((sync.pendingToPeers + sync.lifecyclePendingToPeers).coerceAtLeast(1))
+
                 connected -> SyncUi.Synced
+
                 else -> SyncUi.LocalOnly
             }
         }

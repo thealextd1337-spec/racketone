@@ -1,7 +1,12 @@
 package eu.advantly.wear.glance
 
+import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.Presets
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -47,6 +52,33 @@ class GlanceUpdateThrottleTest {
         restarted.sent(latest, 100)
         val nextProcess = GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(GlanceStateStorage.encode(latest)))
         assertNull(nextProcess.delayFor(latest, 0))
+    }
+
+    private fun named(name: String?) =
+        state().copy(
+            live = state().live!!.copy(server = GlancePlayer(name, false, Side.B, 0)),
+            last = GlanceSetup(Presets.TENNIS_SINGLES_BO3.format(), listOf(GlancePlayer(name, false, Side.B, 0))),
+        )
+
+    @Test
+    fun namesAreNeverStoredAndRestartResolvesThemWithoutWakeup() {
+        val stored = GlanceStateStorage.encode(named("Bea"))
+        assertFalse(stored.contains("Bea"))
+        val restarted = GlanceUpdateThrottle(initialState = GlanceStateStorage.decode(stored))
+        // Kaltstart löst den Namen neu auf; derselbe Zustand mit Namen ist keine Änderung
+        assertNull(restarted.delayFor(named("Bea"), 100))
+        // Redaktion nach dem Senden: der leere Name ist eine Änderung
+        restarted.sent(named("Bea"), 100)
+        assertEquals(0L, restarted.delayFor(named(null), 5_100))
+    }
+
+    @Test
+    fun legacyStoredStateWithNamesIsDiscarded() {
+        val legacy =
+            """{"last":{"format":${Json.encodeToString(MatchFormat.serializer(), Presets.TENNIS_SINGLES_BO3.format())},""" +
+                """"players":[{"name":"Bea","isSelf":false,"side":"B","index":0}]}}"""
+        assertNull(GlanceStateStorage.decode(legacy))
+        assertEquals(named(null).last, GlanceStateStorage.decode(legacy.replace("\"Bea\"", "null"))?.last)
     }
 
     @Test

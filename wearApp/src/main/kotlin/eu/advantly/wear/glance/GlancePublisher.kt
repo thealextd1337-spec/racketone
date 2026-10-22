@@ -25,7 +25,11 @@ class GlancePublisher(
     private var active = !staged
     private var prepared: GlanceState? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val restoredState = GlanceStateStorage.decode(holder.prefs.glanceSentState)
+    private val restoredState =
+        GlanceStateStorage.decode(holder.prefs.glanceSentState).also {
+            // Alter Wert mit Namen (vor E5) oder defekt: sofort verwerfen, nicht erst beim nächsten Senden
+            if (it == null && holder.prefs.glanceSentState != null) holder.prefs.glanceSentState = null
+        }
     private val throttle = GlanceUpdateThrottle(initialState = restoredState)
     private var initialized = false
     private val directoryRefresh = GlanceDirectoryRefresh()

@@ -37,6 +37,23 @@ class GlanceDirectoryRefreshTest {
     }
 
     @Test
+    fun lifecycleRevisionReloadsDirectoryWithoutDataRevisionAndEqualRevisionWaits() {
+        val state = h.watch.state.value
+        assertTrue(refresh.shouldRefresh(state))
+        val remove = h.watchData.observeDirectoryChanges(refresh::invalidate)
+        h.watchData.players.addGuest(PlayerId("bea"), "Bea", 1)
+        // Bewusst geändert: „dirty ohne dataRevision-Sprung wartet“ gilt nur, solange die Lifecycle-Revision gleich bleibt.
+        assertFalse(refresh.shouldRefresh(state))
+        val redacted = state.copy(lifecycleRevision = state.lifecycleRevision + 1)
+        assertTrue(refresh.shouldRefresh(redacted))
+        assertFalse(refresh.shouldRefresh(redacted))
+        // Auch ohne Directory-Signal (z. B. Access-Entzug) und nach Neustart (Zähler wieder 0) ist jede Änderung ein Sprung.
+        assertTrue(refresh.shouldRefresh(state))
+        assertFalse(refresh.shouldRefresh(state.copy(dataRevision = state.dataRevision + 1)))
+        remove()
+    }
+
+    @Test
     fun scoreChangesUseSessionStateAndMatchSwitchReloadsDirectory() {
         assertTrue(refresh.shouldRefresh(h.watch.state.value))
         val me = PlayerId("me")
