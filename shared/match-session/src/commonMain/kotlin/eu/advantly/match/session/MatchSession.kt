@@ -370,6 +370,9 @@ class MatchSession(
     /** Handy: unbestätigte Access-/Redaktionszustellungen an eigene Uhren (Cache, neu bei Zustellung, Ack, Data-Änderung). */
     private var lifecyclePending = 0
 
+    /** Handy: eine davon ist nie zustellbar (übergroßes Redaktionselement). */
+    private var lifecycleOversized = false
+
     /** Matches mit Rückstand, der gerade nicht zugestellt werden darf (kein gültiger Beleg, Paket zu groß). */
     private val blockedMatches = HashSet<MatchId>()
 
@@ -2283,6 +2286,7 @@ class MatchSession(
     private fun send(
         peer: String,
         message: SyncMessage,
+        callback: SendCallback? = null,
     ) {
         if (!started) return
         val envelope = if (data.accountIdentities.managed && message !is Hello) pairing.envelope(peer) ?: return else null
@@ -2303,8 +2307,8 @@ class MatchSession(
             blockedMatches -= routed.matchId
             if (peerKindOf(peer) == PeerKind.WATCH) markSentToWatch(routed.matchId)
         }
-        val callback = (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
-        link?.send(peer, bytes, callback)
+        val ack = callback ?: (routed as? Events)?.takeIf { it.events.isNotEmpty() && envelope == null }?.let { ackCallback(it) }
+        link?.send(peer, bytes, ack)
     }
 
     /**
@@ -2422,12 +2426,14 @@ class MatchSession(
     }
 
     private fun refreshLifecyclePending() {
-        lifecyclePending =
-            if (config.kind == PeerKind.PHONE && data.accountIdentities.managed && data.accountIdentities.scope != null) {
-                delivery.pendingCount(knownKinds().filterValues { it == PeerKind.WATCH }.keys.map { it.value })
-            } else {
-                0
-            }
+        if (config.kind != PeerKind.PHONE || !data.accountIdentities.managed || data.accountIdentities.scope == null) {
+            lifecyclePending = 0
+            lifecycleOversized = false
+            return
+        }
+        val watches = knownKinds().filterValues { it == PeerKind.WATCH }.keys.map { it.value }
+        lifecyclePending = delivery.pendingCount(watches)
+        lifecycleOversized = delivery.blocked(watches)
     }
 
     /** Fence für Mutationen aus einer empfangenen Nachricht: gleiches Pairing, Envelope weiter gültig, Kontositzung am Handy. */
@@ -2651,7 +2657,7 @@ class MatchSession(
                 lifecyclePendingToPeers = lifecyclePending,
                 // Update nötig (Versionsunterschied) oder kein gültiger Beleg: eigener Rückstand geht derzeit nicht raus
                 lifecycleBlocked =
-                    blockedMatches.isNotEmpty() ||
+                    blockedMatches.isNotEmpty() || lifecycleOversized ||
                         (pending > 0 && peers.any { it.compatibility != null && it.compatibility != CompatibilityStatus.COMPATIBLE }),
             ),
             dataRevision,

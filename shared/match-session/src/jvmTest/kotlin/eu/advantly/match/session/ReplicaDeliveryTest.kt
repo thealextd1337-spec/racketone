@@ -2,15 +2,23 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudPullMatch
 import eu.advantly.data.CloudPullMetadataPage
 import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
+import eu.advantly.data.RedactionCursor
+import eu.advantly.data.RedactionPage
 import eu.advantly.data.ReplicaAccess
 import eu.advantly.data.ReplicaAccessLevel
+import eu.advantly.data.ReplicaRedactionEvent
+import eu.advantly.data.StoredEvent
 import eu.advantly.sync.protocol.AccessAck
 import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.DecodeResult
@@ -339,6 +347,85 @@ class ReplicaDeliveryTest {
         assertFailsWith<IllegalStateException>("Kontowechsel") { phoneIn() }
         assertFailsWith<IllegalStateException>("Kontowechsel") { phoneOut() }
         assertFailsWith<IllegalStateException>("neues Pairing der Uhr") { watchIn() }
+    }
+
+    /** Review P3-2 (Probe B): Das E9-Summary geht verloren, der Access ist bestätigt, das Match beendet. */
+    @Test
+    fun aLostLifecycleReportIsRepeatedByTheTickForAFinishedMatch() {
+        val match = sharedMatch()
+        pair.phone.endMatch(EndReason.ABANDONED)
+        pair.settle()
+        pair.phoneLink.lose = { it is Summary && it.lifecycle.isNotEmpty() }
+        catalog(match, 1)
+        pair.settle()
+        assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, false, 0), pair.watchData.accessOf(match), "Meldung verloren")
+        assertEquals(0, phonePending, "Zustellung selbst bestätigt")
+
+        pair.phoneLink.lose = { false }
+        tick()
+        assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, true, 0), pair.watchData.accessOf(match), "ohne neues Hello")
+        pair.phoneLink.sent.clear()
+        tick()
+        assertTrue(pair.phoneLink.decoded().none { (it.message as? Summary)?.lifecycle?.isNotEmpty() == true }, "nach dem Ack Ruhe im Takt")
+    }
+
+    /** Review P3-5: Ein Redaktionselement, das keine Wire-Seite fasst, geht nie auf den Draht und ist sichtbar blockiert. */
+    @Test
+    fun anOversizedRedactionItemIsBlockedAndNeverSent() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+        val data = pair.phoneData
+        val run = catalog(match, 2, epoch = 1)
+        val work = checkNotNull(data.cloudPulls.nextEventWork(data.accountIdentities.profile!!, run))
+        val request = checkNotNull(data.cloudPulls.redactionWork(work, run))
+        assertTrue(data.cloudPulls.stageRedaction(work, run, request, 1, emptyList(), listOf(oversizedRedaction(match)), true, true) {})
+        pair.settle()
+        tick()
+        val sync = pair.phone.state.value.sync
+        assertTrue(sync.lifecycleBlocked && !sync.settled, "blockiert statt still ausstehend")
+        assertTrue(pair.phoneLink.decoded().none { it.message is RedactedChunk })
+    }
+
+    /** Größtes Redaktionsevent, dessen Data-Seite (≤ 64 KiB ohne Hülle) Data noch annimmt; samt Envelope zu groß. */
+    private fun oversizedRedaction(match: MatchId): ReplicaRedactionEvent {
+        val assigned = PlayerAssigned(PlayerId("slot"), Player(PlayerId("guest-x"), "Gelöschter Spieler"), PlayerId("me"))
+        val payload = SyncCodec.json.encodeToString(EventPayload.serializer(), assigned).dropLast(1)
+
+        fun event(pad: Int) =
+            ReplicaRedactionEvent(
+                StoredEvent("huge", match.value, "phone-x", 1, 1, "$payload,\"pad\":\"${"x".repeat(pad)}\"}", 1, null, "PlayerAssigned"),
+                1,
+            )
+
+        fun pageBytes(pad: Int) =
+            SyncCodec.json
+                .encodeToString(
+                    RedactionPage.serializer(),
+                    RedactionPage(0, RedactionCursor(null, 0), RedactionCursor(null, 1), emptyList(), listOf(event(pad)), true, true),
+                ).encodeToByteArray()
+                .size
+        return event(60_000 + 64 * 1024 - 32 - pageBytes(60_000))
+    }
+
+    /** 90e2746: Wire-Seiten je lokalem Transfer; Konto B bekommt für gleiches Match, G und E seine eigenen Seiten ab 0. */
+    @Test
+    fun anotherAccountGetsItsOwnPagesForTheSameMatchGenerationAndEpoch() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+        redactMany(catalog(match, 2, epoch = 1))
+        pair.settle()
+        assertEquals(true, watchTransferCompleted(match), "Konto A vollständig")
+
+        pair.activate("bob")
+        pair.phoneLink.sent.clear()
+        redactMany(catalog(match, 1, epoch = 1), count = 5)
+        pair.settle()
+        val chunks = pair.phoneLink.decoded().mapNotNull { it.message as? RedactedChunk }
+        assertEquals(listOf(0L), chunks.map { it.index }, "eigener Transfer ab Index 0")
+        assertEquals(5, chunks.single().playerIds.size, "Seiten von B, nicht aus dem Cache von A")
+        assertEquals(true, watchTransferCompleted(match))
     }
 
     @Test

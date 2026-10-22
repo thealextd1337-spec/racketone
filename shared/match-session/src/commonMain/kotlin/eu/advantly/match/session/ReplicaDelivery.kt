@@ -12,6 +12,8 @@ import eu.advantly.data.ReplicaContext
 import eu.advantly.data.ReplicaDelivery
 import eu.advantly.data.ReplicaRedactionEvent
 import eu.advantly.data.StoredEvent
+import eu.advantly.device.link.SendCallback
+import eu.advantly.device.link.SendFailure
 import eu.advantly.sync.protocol.AccessAck
 import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.AntiEntropy
@@ -36,7 +38,7 @@ import eu.advantly.sync.protocol.RedactionCursor as WireCursor
  */
 internal class LifecycleDelivery(
     private val data: LocalData,
-    private val send: (peer: String, message: SyncMessage) -> Unit,
+    private val send: (peer: String, message: SyncMessage, callback: SendCallback?) -> Unit,
 ) {
     /** Je Uhr-Gerät und Wire-Transfer: erster unbestätigter Wire-Index. */
     private val nextUnacked = HashMap<Pair<String, String>, Long>()
@@ -47,10 +49,33 @@ internal class LifecycleDelivery(
     /** Zuletzt zugestellter offener Stand je Uhr: Data-Signale lösen nur bei Änderung eine neue Runde aus. */
     private val delivered = HashMap<String, List<ReplicaDelivery>>()
 
+    /**
+     * E9-Meldungen je Uhr ohne Transport-Ack: Der Takt wiederholt sie, auch wenn die Zustellung selbst schon bestätigt ist.
+     * Sonst bliebe ein beendetes Match nach einem verlorenen Summary bis zum nächsten Hello unbereit (Review P3-2).
+     */
+    private val reports = HashMap<String, MutableMap<String, LifecycleSummary>>()
+
+    /** Lokale Transfers mit einem Element, das keine Wire-Seite fasst: nie gesendet, sichtbar blockiert (Review P3-5). */
+    private val oversized = HashSet<String>()
+
     /** Unbestätigte Zustellungen an [devices] (Summe), z. B. für `SyncStatus.lifecyclePendingToPeers`. */
     fun pendingCount(devices: Collection<String>): Int {
         val ctx = data.replicas.captureContext()
         return devices.sumOf { pending(ctx, it).size }
+    }
+
+    /** Eine ausstehende Redaktion an [devices] ist nie zustellbar (übergroßes Element). */
+    fun blocked(devices: Collection<String>): Boolean {
+        if (oversized.isEmpty()) return false
+        val ctx = data.replicas.captureContext()
+        return devices.any { device ->
+            pending(ctx, device).any {
+                data.replicas
+                    .redactionProgress(ctx, it.matchId)
+                    ?.transfer
+                    ?.id in oversized
+            }
+        }
     }
 
     /** E7: die Uhr aus dem bestätigten Hello registrieren; bekannte Zugriffe werden für sie eingereiht. */
@@ -70,18 +95,38 @@ internal class LifecycleDelivery(
         val open = pending(ctx, device)
         if (onlyIfChanged && delivered[device] == open) return
         delivered[device] = open
-        if (open.isEmpty()) return
         // E9: gemeldeter Stand vor dem Access, damit die Uhr ready ohne eine weitere Runde setzen kann
-        open.chunked(MAX_LIFECYCLE).forEach { page ->
-            send(peer, Summary(emptyMap(), reply = true, v = 4, lifecycle = page.associate { it.matchId to it.lifecycle() }))
+        val due = reports.getOrPut(device) { HashMap() }
+        open.forEach { due[it.matchId] = it.lifecycle() }
+        due.entries.chunked(MAX_LIFECYCLE).forEach { page ->
+            val sent = page.associate { it.key to it.value }
+            send(peer, Summary(emptyMap(), reply = true, v = 4, lifecycle = sent), reportCallback(due, sent))
         }
         for (d in open) {
             val level = d.access.wire() ?: continue
-            if (!d.accessAcknowledged) send(peer, AccessState(MatchId(d.matchId), d.generation, level))
+            if (!d.accessAcknowledged) send(peer, AccessState(MatchId(d.matchId), d.generation, level), null)
             if (!d.redactionAcknowledged && d.redactionEpoch > 0 && d.access == ReplicaAccessLevel.MEMBER) {
                 sendChunks(peer, device, ctx, d, fence)
             }
         }
+    }
+
+    /** Transport-Ack: die Uhr hat die Meldung; eine spätere Änderung desselben Matches bleibt fällig. */
+    private fun reportCallback(
+        due: MutableMap<String, LifecycleSummary>,
+        sent: Map<String, LifecycleSummary>,
+    ) = object : SendCallback {
+        override fun onAcked(
+            messageId: String,
+            attempts: Int,
+            latencyMs: Long,
+        ) = sent.forEach { (match, state) -> if (due[match] == state) due.remove(match) }
+
+        override fun onFailed(
+            messageId: String,
+            attempts: Int,
+            reason: SendFailure,
+        ) = Unit
     }
 
     /** Kumulativer Stand der Uhr aus ihrem `Summary.lifecycle` (E8): bestätigt genau eingereihte Zustellungen. */
@@ -148,11 +193,14 @@ internal class LifecycleDelivery(
         val transfer = progress.transfer
         if (!progress.completed || transfer.generation != d.generation || transfer.epoch != d.redactionEpoch) return
         val id = wireTransferId(d)
-        val all = chunks.getOrPut(transfer.id) { exportChunks(ctx, transfer, id, fence) }
+        val all =
+            chunks.getOrPut(transfer.id) {
+                exportChunks(ctx, transfer, id, fence) ?: emptyList<RedactedChunk>().also { oversized += transfer.id }
+            }
         if (all.isEmpty()) return
         // Alles bestätigt, aber kein Abschluss-Ack: die letzte Seite löst ihn idempotent erneut aus
         val from = minOf(nextUnacked[device to id] ?: 0, all.lastIndex.toLong()).toInt()
-        all.drop(from).forEach { send(peer, it) }
+        all.drop(from).forEach { send(peer, it, null) }
     }
 
     private fun exportChunks(
@@ -160,12 +208,12 @@ internal class LifecycleDelivery(
         transfer: RedactionTransfer,
         id: String,
         fence: () -> Unit,
-    ): List<RedactedChunk> {
+    ): List<RedactedChunk>? {
         val result = mutableListOf<RedactedChunk>()
         var index = 0L
         while (result.lastOrNull()?.let { it.idsDone && it.eventsDone } != true) {
             val page = data.replicas.exportRedactionPage(ctx, transfer.id, index++, fence) ?: break
-            result += RedactionChunks.split(page, id, transfer, result.size.toLong())
+            result += RedactionChunks.split(page, id, transfer, result.size.toLong()) ?: return null
         }
         return result
     }
@@ -205,7 +253,8 @@ internal fun ReplicaAccessLevel.wire(): MatchAccessLevel? = MatchAccessLevel.ent
  * Deterministischer Aufteiler Data-Seite → Wire-Seiten (Vertrag W3 §6): gleiche gespeicherte Seite ergibt gleiche
  * Seiten, denn die Uhr speichert jede als eigene Data-Seite und verlangt bei Wiederholung identisches JSON. Gemessen
  * wird mit dem größtmöglichen Envelope und Index, nie mit dem aktuellen (sonst verschöbe ein neues Pairing die Grenzen):
- * Wire-Paket samt Envelope und die daraus entstehende Data-Seite der Uhr bleiben je ≤ 64 KiB.
+ * Wire-Paket samt Envelope und die daraus entstehende Data-Seite der Uhr bleiben je ≤ 64 KiB. `null`: ein einzelnes
+ * Element fasst keine Wire-Seite und ist nie zustellbar.
  */
 internal object RedactionChunks {
     private const val MAX_ITEMS = 200
@@ -216,7 +265,7 @@ internal object RedactionChunks {
         transferId: String,
         transfer: RedactionTransfer,
         firstIndex: Long,
-    ): List<RedactedChunk> {
+    ): List<RedactedChunk>? {
         val items: List<Any> = page.playerIds.map(::PlayerId) + page.events.map { it.wire() }
 
         fun chunk(
@@ -249,10 +298,15 @@ internal object RedactionChunks {
             )
         }
         if (items.isEmpty()) return listOf(chunk(0, emptyList(), firstIndex))
+        val result = mutableListOf<RedactedChunk>()
         var start = 0
-        return AntiEntropy
-            .batchesBy(items, MAX_ITEMS) { offset, group -> fits(chunk(offset, group, Long.MAX_VALUE)) }
-            .mapIndexed { i, group -> chunk(start, group, firstIndex + i).also { start += group.size } }
+        for (group in AntiEntropy.batchesBy(items, MAX_ITEMS) { offset, group -> fits(chunk(offset, group, Long.MAX_VALUE)) }) {
+            // batchesBy lässt Einzelelemente ungeprüft durch; eines, das keine Seite fasst, geht nie auf den Draht
+            if (group.size == 1 && !fits(chunk(start, group, Long.MAX_VALUE))) return null
+            result += chunk(start, group, firstIndex + result.size)
+            start += group.size
+        }
+        return result
     }
 
     private fun fits(chunk: RedactedChunk): Boolean {
