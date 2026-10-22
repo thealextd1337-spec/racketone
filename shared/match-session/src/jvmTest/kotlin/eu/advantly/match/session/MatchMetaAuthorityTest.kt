@@ -11,10 +11,15 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.EventPayload
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.CloudPullMatch
 import eu.advantly.data.CloudPullMetadataPage
+import eu.advantly.data.CloudPullReadinessResult
+import eu.advantly.data.CloudPullReceipt
+import eu.advantly.data.CloudPullWatermark
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
@@ -89,6 +94,104 @@ class MatchMetaAuthorityTest {
     }
 
     /**
+     * P3-C-Repro (E6, Data-/Kopfstand ohne Cloud-Stack): Ein zweites eigenes Handy weist im Handy-Match einen Spieler zu.
+     * Sein heruntergeladenes Event macht die Teilnehmer des eigenen Kopfs ungesendet; der nächste Katalog nimmt dem Kopf den
+     * Beleg (materializedVersion = null), Readiness meldet STALE_SNAPSHOT. Ein noch nicht bereites Match (hier neues G) bleibt
+     * damit ausstehend, der Pull meldet BLOCKED. Mit dem integrierten Data-Stand heilt der nächste eigene Upload (U4) das;
+     * dauerhaft wäre es nur, wenn der Server diesen Teilnehmer-Upload abweist (ohne Cloud-Stack nicht prüfbar).
+     */
+    @Test
+    fun aSecondOwnPhoneAssigningTakesTheOwnHeaderProofUntilTheOwnUpload() {
+        val pair = managed()
+        val data = pair.phoneData
+        val match = pair.phone.create(format, pair.selfLineup())
+        pair.settle()
+        val record = data.matches.get(match)!!
+        val genesis = data.events.scoreEvents(match).first()
+
+        fun upload() {
+            val upload = data.cloudUploads.capture(pair.token!!, 100)
+            data.cloudUploads.acknowledge(upload, upload.events.mapTo(mutableSetOf()) { it.id }, metadata = upload.metadataRevisions)
+        }
+        upload()
+        val server = mutableListOf(CloudPullReceipt(genesis.stored(), 1))
+
+        fun round(
+            version: Long,
+            generation: Long = 1,
+        ): CloudPullReadinessResult {
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val entry = CloudPullMatch(match.value, version, """{"version":$version}""", "member", generation, 0, false, record)
+            val page = CloudPullMetadataPage(listOf(entry), emptyList(), emptyList(), version, false, generation)
+            if (!data.cloudPulls.commitMetadata("alice", run, data.cloudPulls.progress("alice").cursor, page) {}) {
+                assertTrue(data.cloudPulls.commitMetadata("alice", run, data.cloudPulls.progress("alice").cursor, page) {})
+            }
+            val work = checkNotNull(data.cloudPulls.nextEventWork("alice", run))
+            val known = data.cloudPulls.receivedWatermarks(work).associate { it.deviceId to it.maxSeq }
+            val missing = server.filter { it.event.deviceSeq > (known[it.event.deviceId] ?: 0) }
+            data.cloudPulls.commitEvents(work, run, missing, {}, endOfStream = true)
+            val current = checkNotNull(data.cloudPulls.eventWork("alice", match.value))
+            val marks =
+                server.groupBy { it.event.deviceId }.map { (d, l) ->
+                    CloudPullWatermark(d, l.maxOf { it.event.deviceSeq }, l.size.toLong())
+                }
+            val target = checkNotNull(data.cloudPulls.readinessWork(current, run))
+            val result = data.cloudPulls.applyReadiness(current, run, target, server.maxOf { it.serverSeq }, version, marks) {}
+            data.cloudPulls.finishRound("alice", run) {}
+            return result
+        }
+
+        fun proof() = data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, match.value)!!.materializedVersion
+        assertEquals(CloudPullReadinessResult.READY, round(1))
+        assertEquals(1, proof())
+
+        val self = data.players.self()!!.id
+        val assign =
+            ScoreEvent(
+                EventId("b-assign"),
+                match,
+                DeviceId("phone-b"),
+                1,
+                5,
+                2,
+                genesis.id,
+                PlayerAssigned(slot, Player(guest, "Bea"), self),
+            )
+        server += CloudPullReceipt(assign.stored("PlayerAssigned"), 2)
+        round(2)
+        assertTrue(
+            data.cloudUploads
+                .capture(pair.token!!, 100)
+                .metadataRevisions
+                .any { it.kind.name == "PARTICIPANTS" },
+            "Teilnehmer ungesendet",
+        )
+        assertEquals(CloudPullReadinessResult.STALE_SNAPSHOT, round(3, generation = 2), "Kopf ohne Beleg")
+        assertNull(proof())
+        assertEquals(1, data.cloudPulls.pendingReadiness("alice"), "neues G bleibt unbereit: Pull BLOCKED")
+
+        upload()
+        assertEquals(CloudPullReadinessResult.READY, round(4, generation = 2), "eigener Upload trägt die Teilnehmer wieder")
+        assertEquals(4, proof())
+        assertEquals(0, data.cloudPulls.pendingReadiness("alice"))
+    }
+
+    /**
+     * Nebenwirkung von (a): Ein neu installiertes Handy (neue deviceId, Genesis der früheren Installation) darf in eigenen
+     * älteren Matches nur ohne V4 zuweisen. Mit Konto und Protokoll 3 bleibt alles wie in P1.
+     */
+    @Test
+    fun aReinstalledPhoneMayAssignInOwnOlderMatchesOnlyWithoutProtocolFour() {
+        for ((versions, expected) in listOf(3..3 to true, 3..4 to false)) {
+            val pair = managed(versions)
+            val older = foreignOwnMatch(pair)
+            assertEquals(expected, pair.phone.canAssignPlayer(older), "Bereich $versions")
+            pair.close()
+            this.pair = null
+        }
+    }
+
+    /**
      * Handy der eigenen Uhr ist Teilnehmerautorität für deren Matches. Am aktivierten Handy kommt ein auf der Uhr
      * angelegtes Match heute nicht an (Kopf vor Genesis → UNKNOWN, Genesis einer Fremdquelle abgewiesen; auch Protokoll 3).
      */
@@ -139,7 +242,7 @@ class MatchMetaAuthorityTest {
         return match
     }
 
-    private fun ScoreEvent.stored() =
+    private fun ScoreEvent.stored(type: String = "MatchCreated") =
         StoredEvent(
             id.value,
             matchId.value,
@@ -149,7 +252,7 @@ class MatchMetaAuthorityTest {
             SyncCodec.json.encodeToString(EventPayload.serializer(), payload),
             wallClockMs,
             parentId?.value,
-            "MatchCreated",
+            type,
         )
 
     @Test
