@@ -1983,3 +1983,91 @@ erwogen; entschieden ist „gestaffelt weiterbauen“, Variante **„pro Match a
 - Root-SQL-Suite auf `904a7c2`: Rot sind nur die 5 Plattformlücken (110 ×2, 200 ×3).
   290 hat 90/90, 181 und 190 enden mit Exit 0. Log:
   `%TEMP%/advantly-root-sql-integration-20261020/root-suite-904a7c2.log`.
+- CI auf PR #75 (`826d29b`, Lauf 39840815447): alle 5 Checks grün. pgTAP 44 Dateien,
+  3 397 Tests; 290 grün inklusive `disable trigger`. Die CI-Auflage ist erfüllt.
+
+## Welle 3 – festgeschriebener Vertrag (22.10.2026)
+
+Grundlage ist die lesende Analyse `advantly-20261022-w3-contract-analysis-r1` auf
+`826d29b`. Bericht mit Datei:Zeile-Belegen: `%TEMP%/advantly-w3-20261022/contract-r1.md`.
+
+**Ist-Stand:**
+- V4 ist modelliert, aber ganz aus (`ProtocolVersion.CURRENT = MIN_SUPPORTED = 3`).
+- Die Data-Zustell-API (`registerPeer`, `pendingDeliveries`, `ackAccess`/`ackRedaction`,
+  Redaktionsseiten, `activate`) hat keinen Produktionsaufrufer.
+- Die Session hört nicht auf Data-Änderungen, `emit` ignoriert `AppendResult`,
+  und `refreshHeader` gilt nur für nicht offene Matches.
+- **Neuer Befund:** `pendingToPeers` zählt nur Events der Lesespur. Eigene
+  ungesendete Punkte im Fenster „schreiben ja, lesen nein“ sind unsichtbar
+  (`ScopedEventStore.kt:67–71`).
+- Eine Data-Redaktionsseite (64 KiB ohne Hülle) ist als Wire-Paket mit Envelope zu groß,
+  und `SyncCodec.encode` wirft dann.
+
+**Schnittstellen-Commit des Integrators** (vor dem Dispatch, `SessionState.kt`):
+- `SessionState.lifecycleRevision: Long`: ein Zähler im Speicher, der nur auf
+  Ungleichheit verglichen wird. Er steigt bei jeder Access-, Redaktions- oder
+  Directory-Änderung aus Data. Konsumenten verwerfen dann alle abgeleiteten Namen.
+- `SyncStatus.lifecyclePendingToPeers: Int` (Handy), `SyncStatus.lifecycleBlocked:
+  Boolean` und `SyncStatus.settled`.
+- Alle Felder haben Defaults. S füllt sie, P konsumiert sie. Ändern darf sie nur der
+  Integrator.
+
+**Entscheidungen des Integrators** (Empfehlungen der Analyse übernommen, wenn nicht anders vermerkt):
+- **E1:** S darf `SyncCodec.decode` und die Session um einen Parameter mit Default
+  für den zulässigen Versionsbereich ergänzen, damit V4 in Tests lesbar ist. Die
+  Konstanten bleiben beim Integrator und auf 3, bis aktiviert wird. Abweichung von der
+  Analyse: kein Vorab-Commit des Integrators nötig.
+- **E2:** Die Uhr aktiviert ihr Replikat in derselben Transaktion wie die erste
+  gültige Access-Zustellung vom bestätigten Handy (S, mit Test). Den Host-Schalter, ob
+  V4 überhaupt läuft, setzt der Integrator.
+- **E3:** Den Seitenstand hält das Handy im Speicher. Nach einem Neustart sendet es ab
+  Index 0 neu; die Uhr verarbeitet wiederholte Seiten idempotent. Keine Wire-Erweiterung.
+- **E4:** `WearSessions.isSyncSettled` setzt P um, über `SyncStatus.settled`.
+- **E5:** Der Glance-Cache speichert keine Namen mehr; der Kaltstart löst sie neu auf.
+- **E6:** P3-C: Zuerst schreibt S einen roten Repro-Test. Danach Variante (a): Teilnehmer-
+  autorität bei Handy bzw. Genesis-Quelle, ohne Data-Edit.
+- **E7:** `registerPeer` erhält die Watch-`deviceId` aus dem bestätigten Hello.
+- **E8:** Bei E=0 bestätigt das Handy die Redaktion mit dem `AccessAck` (MEMBER bei G)
+  oder sobald `Summary.lifecycle.redactionApplied >= E` meldet.
+- **E9:** Die Uhr setzt `markReady(G,E)` erst, wenn drei Bedingungen erfüllt sind:
+  MEMBER bei G, angewandter Stand ≥ gemeldetem E und kein offener Transfer.
+- **D-2** (öffentliches `canAppend`) entfällt; S fängt die erwarteten ISE.
+
+**Pakete** (exklusive Dateien, laut Analyse §7):
+- **S – Session/Zustellung:**
+  - Besitz: `shared/match-session/**`, darin allein `MatchSession.kt`.
+    Neue Logik kommt in eigene Dateien (`ReplicaDelivery.kt`, `ReplicaReceiver.kt`).
+  - Ausnahmen in `sync-protocol`: der E1-Parameter und reine Byte-Batching-Helfer in
+    `AntiEntropy.kt`.
+  - Inhalt:
+    - Zustellung von Access und Redaktion mit Wire-Aufteiler und Acks je Seite.
+    - Stamps und Envelope-Prüfung.
+    - Invalidierung über `observeDirectoryChanges` mit Fingerabdruck je offenem Match;
+      `refreshHeader` auch für offene Matches.
+    - Live-Zählen: schließen nur bei zugesperrter Schreibspur.
+    - `AppendResult`/ISE in `emit` und `receive`.
+    - MatchMeta-Quellautorität (P3-3) und P3-C.
+    - Byte-Batching für Events.
+- **D – Data-Ergänzung D-1:**
+  - `unconfirmedCountByMatch`, `unconfirmedMatches`, `unconfirmedEvents` und
+    `sequences` folgen bei eigenen Quellen der Schreibspur.
+  - Fremde Quellen bleiben streng an der Lesespur.
+  - Besitz: `ScopedEventStore.kt`, nötige `.sq`-Abfragen, internes `ownWritable` in
+    `ReplicaLifecycleStore` (vom Integrator freigegeben) und Data-Tests.
+- **P – Namensauflösung/Präsentation:**
+  - Besitz: `shared/presentation/**`, `shared/umbrella-watch/**`, `wearApp/**` und
+    `watchApp/ScoringModel.swift`.
+  - `lifecycleRevision` leert alle Namens-Caches (`SessionMatchStore`, Glance,
+    `WatchScoring`/`WatchDirectory`).
+  - Keine Namen in Verlauf, Vorschlägen und Rematch.
+  - Kein Data- oder Session-Edit.
+- **Integrator:**
+  - Merge.
+  - Pull-Host Android (`CloudPullRunner` hat bisher keinen Aufrufer).
+  - `activate` auf dem Handy und Host-Schalter.
+  - `assignPlayer` namenfrei, zusammen mit V4 (nach S).
+  - Versionssprung 3 → 4 und Update-Hinweis.
+
+**Reihenfolge:** S, D und P starten parallel auf dem Schnittstellen-Commit. S schaltet
+die Backlog-Tests im Schreibfenster erst nach dem Merge von D-1 scharf. Gradle läuft
+nacheinander: D → S → P. Die Abnahmefälle stehen in Bericht §9.
