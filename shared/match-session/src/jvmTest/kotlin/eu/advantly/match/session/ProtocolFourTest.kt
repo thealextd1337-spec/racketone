@@ -214,6 +214,42 @@ class ProtocolFourTest {
         assertEquals(pair.phoneData.events.count(match.value), pair.watchData.events.count(match.value), "Takt holt nach")
     }
 
+    /**
+     * P3-1 (Review r3): Unter V4↔V4 mit Konto heilt auch ein doppelter Hello-Verlust beim Wiederverbinden mit dem Takt,
+     * ohne neues Link-Up – beide Erst-Hellos oder Erst- und Antwort-Hello derselben Seite. Danach kein weiteres Hello.
+     */
+    @Test
+    fun aDoubleHelloLossUnderFourHealsWithTheTickWithoutPingPong() {
+        for ((phoneLost, watchLost) in listOf(1 to 1, 2 to 0, 0 to 2)) {
+            val case = "verloren: Handy $phoneLost, Uhr $watchLost"
+            val pair = LifecyclePair(3..4).also { pair = it }
+            pair.activate("alice")
+            val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+            pair.settle()
+            pair.network.setConnected("watch", false)
+            pair.settle()
+            assertTrue(pair.phone.recordPoint(Side.A))
+            var phoneHellos = 0
+            var watchHellos = 0
+            pair.phoneLink.lose = { it is Hello && phoneHellos++ < phoneLost }
+            pair.watchLink.lose = { it is Hello && watchHellos++ < watchLost }
+            pair.network.setConnected("watch", true)
+            pair.settle()
+            assertEquals(1L, pair.watchData.events.count(match.value), "$case: ohne Aushandlung fließt nichts")
+
+            repeat(2) { pair.scheduler.advanceBy(31_000) }
+            assertEquals(2L, pair.watchData.events.count(match.value), "$case: der Takt heilt")
+            assertEquals(null, pair.phone.state.value.sync.versionMismatch, case)
+
+            fun hellos() = (pair.phoneLink.decoded() + pair.watchLink.decoded()).count { it.message is Hello }
+            val healed = hellos()
+            repeat(8) { pair.scheduler.advanceBy(31_000) }
+            assertEquals(healed, hellos(), "$case: danach kein weiteres Hello")
+            pair.close()
+            this.pair = null
+        }
+    }
+
     /** Eigenes Match am Handy, per Pull Cloud-Match bei G 1 (MEMBER), an die Uhr zugestellt. */
     private fun cloudMatch(pair: LifecyclePair): MatchId {
         pair.activate("alice")

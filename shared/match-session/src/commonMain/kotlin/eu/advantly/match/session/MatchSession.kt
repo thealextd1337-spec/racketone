@@ -343,6 +343,9 @@ class MatchSession(
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
 
+    /** P3-1: Empfangszeit des letzten Hello je Gegenstelle (Wiederholung erkennen). */
+    private val helloAtMs = HashMap<String, Long>()
+
     /** Besitzer-Angaben aus `MatchMeta`, die vor dem `Hello` der Gegenstelle kamen (Art noch unbekannt). */
     private val earlyOwners = HashMap<String, MatchMetaMessage>()
     private var started = false
@@ -1611,6 +1614,7 @@ class MatchSession(
     ) {
         recordOwnSources(peer, hello)
         val previous = hellos.put(peer, hello)
+        val sinceLastHello = helloAtMs.put(peer, scheduler.nowMs())?.let { scheduler.nowMs() - it }
         val sessionChanged = hello.session != null && previous?.session != hello.session
         val needsSync =
             forceSync || hello.session == null || sessionChanged || previous == null || previous.deviceId != hello.deviceId ||
@@ -1636,8 +1640,12 @@ class MatchSession(
         if (data.settings.get(NODE_DEVICE_PREFIX + peer) != hello.deviceId.value) {
             data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
         }
+        // P3-1: Ein unverändertes Hello frühestens einen halben Takt nach dem vorigen ist die Wiederholung einer Gegenstelle
+        // ohne Aushandlung (unser Antwort-Hello ging verloren). Antwort-Hellos und Link-Duplikate kommen innerhalb einer
+        // Rundreise und lösen nichts aus: kein Ping-Pong.
+        val retried = !needsSync && (sinceLastHello ?: 0) >= config.antiEntropyIntervalMs / 2
         // auch bei Inkompatibilität: erst unser Hello zeigt der Gegenstelle den Updatezustand (Pairing nach Kontowechsel)
-        if (peer !in helloSent) sendHello(peer)
+        if (peer !in helloSent || (retried && data.accountIdentities.managed && config.protocolVersions.last >= 4)) sendHello(peer)
         if (!result.isCompatible) {
             earlyOwners.remove(peer)
             return
@@ -2570,6 +2578,12 @@ class MatchSession(
                 // Takt nur für Matches mit Replikationsziel (Director-Matches ohne Ziel halten ihn nicht am Laufen)
                 val active = opened.values.any { it.status != MatchStatus.FINISHED && hasReplicationTarget(it.id) }
                 if (active || pendingCount() > 0) sendSummaries()
+                // P3-1: Mit Konto und V4 fließt ohne Aushandlung nichts, auch kein Takt; verlorene Hellos begrenzt wiederholen
+                link
+                    ?.peers
+                    .orEmpty()
+                    .filter { compatibility[it] == null && requiresFour(it) }
+                    .forEach(::sendHello)
                 targets().filter(::deliversTo).forEach(::deliverLifecycle)
                 publish()
                 scheduleAntiEntropy()
