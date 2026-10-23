@@ -2202,3 +2202,41 @@ ist in Review: `advantly-20261023-w3-data-d2-review-r1`.
 - **Scheiterndes `emit`:** Handy und Wear quittieren es bereits mit Ablehnungs-Haptik
   (`LiveScoreController.kt:314`, `WatchControllerCore.kt:307`). Kein zusätzliches
   Statusfeld.
+
+**Protokoll 4 aktiviert** (Paket A `f00e948e`..`8990ed0d` + D-3 `0e9e4e79`, `97eb2b9e`;
+Merge `edeb2bee`, voller Check grün):
+- **Versionen:** `CURRENT = 4`, `MIN_SUPPORTED = 3`.
+  - Mit Konto gilt nur v4. Gegenüber v3 entsteht der Updatezustand, Hello ist die
+    einzige Nachricht.
+  - Ohne Konto (P1) spricht die Session nur v3, auch zwischen zwei neuen Geräten.
+  - Ein Gerät mit Konto bleibt dauerhaft kontogebunden (`managed`), auch nach dem
+    Abmelden.
+- **Session-Fixes:**
+  - `Summary(reply)` für ein ganz fehlendes Match trägt den geprüften Stamp zurück.
+  - Bei ausstehender Redaktion gibt es keine Events-/Summary-Schleife mehr: vorher
+    ~6100 Pakete/min, jetzt ~2 je Takt.
+  - Hello wird im Takt wiederholt.
+- **Schalter:** `PHONE_REPLICA_ACTIVATION = true`. Die Uhr aktiviert sich selbst (E2).
+- **D-3:** Der Matchstart überspringt nicht schreibbare Verzeichniseinträge; keine ISE
+  mehr. `CloudPullStore.matchCreatedBy` ersetzt den `shortcut:`.
+- **Review A r1: Freigabe mit Auflagen**, kein P1/P2.
+  - Belegt sind: keine v4-only-Inhalte an v3, auch nach Gast/Bob/Alice; nur ein
+    Sendeweg; keine ungegateten Pfade.
+  - A1 (Bestätigungslücke nach Matchende) und A3 (`MatchStamps.echo` je Gegenstelle)
+    werden behoben in `advantly-20261023-w3-activation-r2`.
+- **A2 im Vertrag (akzeptiert):** Unter V4 erreichen Live-Punkte des Handys im Fenster
+  „schreiben ja, lesen nein“ die Uhr erst nach angewandter Redaktion. Übernimmt die Uhr
+  in diesem Fenster das Zählen, zählt sie auf altem Stand. Die Aussage der D-1-Notiz
+  („gibt eigene Events … frei“) gilt damit für den Draht unter V4 nicht. Data gibt den
+  Inhalt erst nach der Redaktion frei.
+- **iOS** hat noch keinen Konto-Host und bleibt bis zum Apple-Paket bei P1/v3.
+- **Nur auf Geräten, macOS oder dem Cloud-Stack prüfbar (Abnahme vor Release):**
+  - echte alte v3-App aus dem Store, auch im gestaffelten Rollout von Handy- und
+    Wear-App;
+  - Kotlin/Native, watchOS und Swift;
+  - Verluste auf Wear Data Layer und WatchConnectivity;
+  - Pull gegen Supabase mit Unterbrechung zwischen Katalog und Redaktion;
+  - Server-Annahme von `PlayerAssigned.reference` und Teilnehmer-Uploads.
+- **CI:** Test 290 hängt zeitweise auf dem Supabase-Stack (zwei Läufe nach 280 bis zum
+  Abbruch nach ~55 min). Unter `supabase/` gab es keine Änderung. Untersuchung:
+  `advantly-20261023-server-290-hang-r1`.
