@@ -448,7 +448,7 @@ class ReplicaLifecycleStore internal constructor(
             val t = transfer(ctx, transferId)
             require(page.playerIds.size <= 200 && page.events.size <= 500 && page.index >= 0)
             val json = DataJson.encodeToString(RedactionPage.serializer(), page)
-            require(json.encodeToByteArray().size <= 64 * 1024)
+            require(json.encodeToByteArray().size <= MAX_REDACTION_PAGE_BYTES)
             val previous = queries.page(transferId, page.index).executeAsOneOrNull()
             if (previous != null) {
                 check(previous == json) { "Abweichende Wiederholung einer Redaktionsseite" }
@@ -825,7 +825,10 @@ class ReplicaLifecycleStore internal constructor(
             queries.ackRedaction(ctx.accountKey, peerId, matchId, generation, epoch)
         }
 
-    private companion object {
-        const val DELETED_NAME = "Gelöschter Spieler"
+    companion object {
+        /** Höchstgröße einer gespeicherten Redaktionsseite (JSON ohne Wire-Hülle); Pull und Gerätezustellung teilen sie. */
+        const val MAX_REDACTION_PAGE_BYTES: Int = 64 * 1024
+
+        private const val DELETED_NAME = "Gelöschter Spieler"
     }
 }

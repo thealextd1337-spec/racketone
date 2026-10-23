@@ -598,7 +598,7 @@ class CloudPullStore internal constructor(
             var count = 0
             while (count < rest.size) {
                 val extra = DataJson.encodeToString(ReplicaRedactionEvent.serializer(), rest[count]).encodeToByteArray().size + 1
-                if (size + extra > MAX_REDACTION_PAGE_BYTES) break
+                if (size + extra > ReplicaLifecycleStore.MAX_REDACTION_PAGE_BYTES) break
                 size += extra
                 count++
             }
@@ -747,7 +747,6 @@ class CloudPullStore internal constructor(
     companion object {
         const val METADATA_STREAM: String = "pull"
         const val EVENT_REQUESTS_PER_METADATA_TURN: Long = 12
-        private const val MAX_REDACTION_PAGE_BYTES = 64 * 1024
         private const val MISSING_PAGE = 200L
 
         // Platz für wachsende Cursorziffern zwischen Messung und endgültiger Seite.

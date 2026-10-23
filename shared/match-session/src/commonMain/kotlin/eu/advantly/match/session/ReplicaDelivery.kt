@@ -10,6 +10,7 @@ import eu.advantly.data.RedactionTransfer
 import eu.advantly.data.ReplicaAccessLevel
 import eu.advantly.data.ReplicaContext
 import eu.advantly.data.ReplicaDelivery
+import eu.advantly.data.ReplicaLifecycleStore
 import eu.advantly.data.ReplicaRedactionEvent
 import eu.advantly.data.StoredEvent
 import eu.advantly.device.link.SendCallback
@@ -258,7 +259,6 @@ internal fun ReplicaAccessLevel.wire(): MatchAccessLevel? = MatchAccessLevel.ent
  */
 internal object RedactionChunks {
     private const val MAX_ITEMS = 200
-    private const val DATA_PAGE_BYTES = 64 * 1024 // Grenze von ReplicaLifecycleStore.stageRedaction (ohne Hülle)
 
     fun split(
         page: RedactionPage,
@@ -317,7 +317,7 @@ internal object RedactionChunks {
                 return false
             }
         val stored = SyncCodec.json.encodeToString(RedactionPage.serializer(), chunk.page())
-        return wire.isNotEmpty() && stored.encodeToByteArray().size <= DATA_PAGE_BYTES
+        return wire.isNotEmpty() && stored.encodeToByteArray().size <= ReplicaLifecycleStore.MAX_REDACTION_PAGE_BYTES
     }
 }
 
