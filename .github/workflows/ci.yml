@@ -465,7 +465,7 @@ jobs:
         run: |
           uv run tools/pilot-checks/test_stack.py
           failed=""
-          for c in release_gate support revoke export cloud_upload deletion_job auth_negative; do
+          for c in release_gate support revoke account_support export cloud_upload deletion_job auth_negative; do
             ADVANTLY_PILOT_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run "tools/pilot-checks/check_$c.py" || failed="$failed $c"
           done
           if [ -n "$failed" ]; then echo "::error::K7 gescheitert:$failed"; exit 1; fi
