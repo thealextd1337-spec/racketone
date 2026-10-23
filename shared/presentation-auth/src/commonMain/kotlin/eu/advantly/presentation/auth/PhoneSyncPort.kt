@@ -5,8 +5,8 @@ import kotlinx.coroutines.flow.StateFlow
 /** Ergebnis des letzten koordinierten Abgleichs (erst Download, dann Upload) dieses Kontos. */
 enum class PhoneSyncStatus { BACKED_UP, PENDING, BLOCKED, CONNECTION_FAILED, FAILED }
 
-/** Grund einer pausierten Sicherung: die Download-Gründe aus [PhonePullBlock] und die beiden Upload-Reste. */
-enum class PhoneSyncBlock { PERMISSION, REMOVALS, REDACTIONS, MATERIALIZATION, READINESS, UPLOAD_REJECTED, UPLOAD_WAITING }
+/** Grund einer pausierten Sicherung: die Download-Gründe aus [PhonePullBlock], die beiden Upload-Reste und die Kontosperre (K5). */
+enum class PhoneSyncBlock { PERMISSION, REMOVALS, REDACTIONS, MATERIALIZATION, READINESS, UPLOAD_REJECTED, UPLOAD_WAITING, SUSPENDED }
 
 /** Sicherungsstatus des automatischen Abgleichs; BLOCKED nennt immer einen Grund. */
 data class PhoneSyncState(

@@ -143,6 +143,7 @@ class PhoneSyncCoordinatorTest {
         var epoch = 1
         var consent = ConsentStatus.CURRENT
         var deletion = false
+        var suspended = false
         var pullStatus = HttpStatusCode.OK
         var pullOffline = false
         var pushOffline = false
@@ -169,7 +170,8 @@ class PhoneSyncCoordinatorTest {
                         val response =
                             when (path) {
                                 "my_auth_profile" -> {
-                                    """{"profileId":"$owner","onboarded":true,"deletionRequested":$deletion,"consentStatus":"$consent"}"""
+                                    """{"profileId":"$owner","onboarded":true,"deletionRequested":$deletion,"consentStatus":"$consent",""" +
+                                        """"suspended":$suspended}"""
                                 }
 
                                 "bind_cloud_session_v1" -> {
@@ -504,6 +506,36 @@ class PhoneSyncCoordinatorTest {
                 } finally {
                     f.close()
                 }
+            }
+        }
+
+    /** K5: Gesperrtes Konto zeigt BLOCKED mit Grund, bindet/lädt/plant nichts; nach Aufheben läuft der Abgleich. */
+    @Test fun aSuspendedAccountShowsItsReasonAndNeverSyncsUntilTheSuspensionIsLifted() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.suspended = true
+                f.signIn()
+                val state = withTimeout(15_000) { f.sync.state.first { it.blocked != null } }
+                assertEquals(PhoneSyncStatus.BLOCKED, state.status)
+                assertEquals(PhoneSyncBlock.SUSPENDED, state.blocked)
+                assertFalse(state.available)
+                f.match()
+                f.sync.syncNow()
+                f.sync.onForeground()
+                f.sync.onNetworkAvailable()
+                delay(300)
+                assertEquals(0, f.count("start:bind_cloud_session_v1"))
+                assertEquals(0, f.count("start:cloud_sync_pull_v1"))
+                assertEquals(0, f.count("start:cloud_sync_push_v1"))
+                assertTrue(f.scheduler.scheduled.isEmpty())
+                f.suspended = false
+                f.auth.refreshProfile()
+                val lifted = withTimeout(15_000) { f.sync.state.first { it.status == PhoneSyncStatus.BACKED_UP && !it.running } }
+                assertNull(lifted.blocked)
+                assertEquals(1, f.count("start:cloud_sync_push_v1"))
+            } finally {
+                f.close()
             }
         }
 

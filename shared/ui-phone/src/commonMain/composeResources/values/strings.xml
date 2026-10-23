@@ -719,7 +719,7 @@
     <string name="cloud_sync_failed">Syncing failed. It will be retried automatically.</string>
     <string name="cloud_sync_next_attempt">Next automatic attempt: %1$s</string>
     <string name="cloud_sync_now">Sync now</string>
-    <string name="cloud_sync_blocked_permission">Cloud access changed. Check your account and consent.</string>
+    <string name="cloud_sync_blocked_permission">Cloud access changed. Check your account, your consent and, under Devices, whether this phone was revoked.</string>
     <string name="cloud_sync_blocked_rejected">Some events were permanently rejected by the cloud and will not be backed up.</string>
     <string name="cloud_sync_blocked_waiting">Some data is waiting until the cloud check on this phone is complete.</string>
     <string name="cloud_export_title">Your data as a ZIP file</string>
@@ -760,4 +760,17 @@
     <string name="cloud_export_error_integrity">The downloaded file did not pass verification. No file is available to share.</string>
     <string name="cloud_export_error_local_io">The ZIP file could not be saved in the app. Check the free storage and try again.</string>
     <string name="cloud_export_error_timeout">The action took too long. Check the status or try again.</string>
+    <string name="account_suspended">Your account has been suspended by Advantly support. Cloud sync is paused. Export, deletion, devices and support remain available.</string>
+    <string name="cloud_sync_blocked_suspended">Paused: this account is suspended. Please contact support.</string>
+    <string name="account_devices_title">Devices</string>
+    <string name="account_devices_show">Show devices</string>
+    <string name="account_devices_empty">No devices are registered for this account.</string>
+    <string name="account_device_unknown">Unknown device</string>
+    <string name="account_device_last_seen">Last active %1$s</string>
+    <string name="account_device_revoked">Access revoked</string>
+    <string name="account_device_revoke">Revoke access</string>
+    <string name="account_device_revoke_explanation">This device can no longer upload or download cloud data and cannot restore its access by registering again. Data stored on the device stays there.</string>
+    <string name="account_device_current">This device</string>
+    <string name="account_device_current_hint">This is the phone you are using. To disconnect it, sign out (this signs you out on all your devices). You can only revoke it from another device, and a revoked phone cannot use the cloud again.</string>
+    <string name="account_device_current_revoked">Cloud access for this phone was revoked from another device. This cannot be undone for this phone. Your matches stay on this phone and you can keep scoring. Do not clear the app data or reinstall the app, or matches that were not uploaded will be lost. Export, deletion, devices and support remain available here.</string>
 </resources>

@@ -89,6 +89,21 @@ und [E-Mail-Vorlagen](https://supabase.com/docs/guides/auth/auth-email-templates
 
 Interne Notizen sind voreingestellt. Eine Nutzerantwort erfordert eine ausdrückliche Auswahl und Bestätigung. Bei Versionskonflikten wird der aktuelle Vorgang geladen; der Antwortentwurf bleibt erhalten.
 
+## Konten (K5)
+
+Der Umschalter „Konten“ neben „Meldungen“ öffnet die exakte Kontosuche: Konto-UUID, Freundescode oder genauer
+Alias. Kein Teiltreffer, keine Liste; mehrdeutige Aliase liefern kein Ergebnis. Angezeigt wird nur der minimale
+Status (Status, Sperre, Löschfrist, Anzahl aktiver Geräte, letzter Aktivitätstag, Zustimmungsversion). Keine
+E-Mail, Matches, Gesundheits- oder Geburtsdaten, keine Anmeldung als Nutzer.
+
+`support` sieht nur den Status. `admin` kann sperren/entsperren, alle Geräte und Cloud-Sitzungen widerrufen und
+eine Löschung auf Nutzerwunsch zurücknehmen. Dafür ist die UUID einer Meldung Pflicht, die nach dem Löschantrag
+entstand: vom Kontoinhaber oder als Gastmeldung, deren Zuordnung die Begründung belegt (mindestens 20 Zeichen).
+Jede Aktion verlangt eine Begründung (1–500 Zeichen), hat einen eigenen Knopf ohne Enter-Auslösung und läuft erst
+nach einer Rückfrage, die Aktion und Zielkonto nennt. Sie landet im Konto-Audit. Der Server prüft Rolle und AAL2 bei
+jedem Aufruf erneut; die Oberfläche blendet Aktionen für `support` nur aus. Details:
+[`supabase/README.md`](../supabase/README.md#k4k5-gerätewiderruf-und-kontosupport).
+
 ## Prüfungen
 
 ```powershell

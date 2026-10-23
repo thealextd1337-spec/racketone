@@ -211,6 +211,7 @@ class CloudSessionGate internal constructor(
     }
 
     private fun requireCloudProfile() {
+        if (mutable.value?.suspended == true) throw CloudException("account_suspended", true)
         if (cloudSuspended || mutable.value?.onboarded != true || mutable.value?.deletionRequested != false) {
             throw CloudException("profile_not_active", true)
         }

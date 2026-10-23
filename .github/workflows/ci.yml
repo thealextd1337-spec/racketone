@@ -455,6 +455,7 @@ jobs:
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/220_redaction_write_guards_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/250_late_redaction_manifest_concurrency.py --confirm-disposable
           ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/290_staged_account_deletion_concurrency.py --confirm-disposable
+          ADVANTLY_ACCOUNT_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run supabase/tests/database/300_account_support_concurrency.py --confirm-disposable
       - name: Export-Rennen und SQL-ZIP-CSV-Rundlauf
         run: uv run supabase/tests/database/200_private_data_exports_concurrency.py --confirm-disposable --archive-roundtrip
       - name: Export über echte Auth-, HTTP- und Storage-Dienste
@@ -472,7 +473,7 @@ jobs:
         run: |
           uv run tools/pilot-checks/test_stack.py
           failed=""
-          for c in release_gate support revoke export cloud_upload deletion_job auth_negative; do
+          for c in release_gate support revoke account_support export cloud_upload deletion_job auth_negative; do
             ADVANTLY_PILOT_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run "tools/pilot-checks/check_$c.py" || failed="$failed $c"
           done
           if [ -n "$failed" ]; then echo "::error::K7 gescheitert:$failed"; exit 1; fi

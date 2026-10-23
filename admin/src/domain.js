@@ -65,6 +65,38 @@ export function makeMessageOperation(ticketId, body, internal, idGenerator) {
   });
 }
 
+// Kontosuche: genau eine UUID, ein Freundescode oder ein Alias; die Auswertung macht ausschließlich der Server.
+export function validateAccountQuery(query) {
+  const trimmed = String(query ?? "").trim();
+  if (!trimmed) return "account-query-required";
+  if (trimmed.length > 120) return "support_invalid";
+  return null;
+}
+
+const ACCOUNT_ACTIONS = {
+  suspend: "admin_account_set_suspended",
+  unsuspend: "admin_account_set_suspended",
+  revoke: "admin_account_revoke_devices",
+  "cancel-deletion": "admin_account_cancel_deletion",
+};
+
+// Zustandsändernde Kontoaktion: Begründung wie bei Vorgängen; die Löschrücknahme braucht eine Meldungs-UUID (Server prüft
+// Konto, Zeitpunkt und bei Gastmeldungen den Beleg in der Begründung).
+export function buildAccountAction(account, action, fields) {
+  const rpc = ACCOUNT_ACTIONS[action];
+  if (!rpc || !isUuid(account?.profileId)) throw new SupportError("support_invalid");
+  const reason = String(fields?.reason ?? "").trim();
+  if (!reason) throw new SupportError("update-reason-required");
+  if (Array.from(reason).length > 500) throw new SupportError("update-reason-too-long");
+  const ticketId = String(fields?.ticketId ?? "").trim();
+  if (action === "cancel-deletion" && !ticketId) throw new SupportError("account-ticket-required");
+  if (ticketId && (action !== "cancel-deletion" || !isUuid(ticketId))) throw new SupportError("account-ticket-invalid");
+  const args = { p_profile_id: account.profileId, p_reason: reason };
+  if (rpc === "admin_account_set_suspended") args.p_suspended = action === "suspend";
+  if (action === "cancel-deletion") args.p_ticket_id = ticketId;
+  return Object.freeze({ rpc, args: Object.freeze(args) });
+}
+
 export function createRequestEpoch() {
   let current = 0;
   return Object.freeze({
@@ -90,6 +122,14 @@ export function mapSafeError(error) {
     "support_not_found",
     "support_guest_reply_unavailable",
     "support_unavailable",
+    "support_admin_required",
+    "account_not_found",
+    "account_ambiguous",
+    "no_deletion_pending",
+    "deletion_ticket_required",
+    "deletion_ticket_invalid",
+    "deletion_ticket_stale",
+    "deletion_ticket_evidence_required",
   ]);
   const candidates = [error?.code, error?.message];
   for (const candidate of candidates) {

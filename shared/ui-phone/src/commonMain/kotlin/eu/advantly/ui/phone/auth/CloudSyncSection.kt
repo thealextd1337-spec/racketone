@@ -27,6 +27,7 @@ import eu.advantly.ui.phone.resources.cloud_sync_backed_up
 import eu.advantly.ui.phone.resources.cloud_sync_blocked
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_permission
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_rejected
+import eu.advantly.ui.phone.resources.cloud_sync_blocked_suspended
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_waiting
 import eu.advantly.ui.phone.resources.cloud_sync_connection_failed
 import eu.advantly.ui.phone.resources.cloud_sync_failed
@@ -78,6 +79,7 @@ fun CloudSyncSection(port: PhoneSyncPort) {
                         PhoneSyncBlock.READINESS -> Res.string.cloud_pull_blocked_readiness
                         PhoneSyncBlock.UPLOAD_REJECTED -> Res.string.cloud_sync_blocked_rejected
                         PhoneSyncBlock.UPLOAD_WAITING -> Res.string.cloud_sync_blocked_waiting
+                        PhoneSyncBlock.SUSPENDED -> Res.string.cloud_sync_blocked_suspended
                     }
                 Text(stringResource(reason), Modifier.testTag("cloud_sync_blocked"), color = MaterialTheme.colorScheme.error)
             }

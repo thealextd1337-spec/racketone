@@ -198,6 +198,7 @@ internal class CloudHttp(
         val ERRORS =
             setOf(
                 "profile_not_active",
+                "account_suspended",
                 "device_not_authorized",
                 "device_revoked",
                 "cloud_session_changed",

@@ -34,7 +34,7 @@ internal fun readPhoneCloudContext(
 ): PhoneCloudContext? {
     if (!hostAccessAllowed()) return null
     val active = auth.session.value ?: return null
-    if (!active.onboarded || active.deletionRequested || active.consentStatus != ConsentStatus.CURRENT) return null
+    if (!active.onboarded || active.deletionRequested || active.suspended || active.consentStatus != ConsentStatus.CURRENT) return null
     val identities = session.data.accountIdentities
     val device = session.deviceId.value
     if (identities.profile != active.profileId ||

@@ -27,6 +27,20 @@
         </div>
       </form>
     </dialog>
+    <dialog class="confirm-dialog" id="account-confirm" aria-labelledby="account-confirm-title">
+      <form method="dialog" class="confirm-dialog__surface">
+        <div class="confirm-dialog__mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" /><path d="M12 9v4.5M12 17h.01" /></svg>
+        </div>
+        <h2 id="account-confirm-title"></h2>
+        <p id="account-confirm-copy"></p>
+        <p class="confirm-dialog__preview" id="account-confirm-preview"></p>
+        <div class="confirm-dialog__actions">
+          <button class="button button--quiet" value="cancel" data-action="cancel-account-action" id="account-cancel"></button>
+          <button class="button button--accent" value="confirm" data-action="confirm-account-action" id="account-accept"></button>
+        </div>
+      </form>
+    </dialog>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -116,6 +116,12 @@ internal class PhoneSyncCoordinator(
                 launch(next)
             }
         }
+        // K5: Ein gesperrtes Konto hat keinen Cloud-Kontext und plant nichts; der Grund bleibt sichtbar.
+        val suspended = next == null && hostAccessAllowed() && auth.session.value?.suspended == true
+        if (next == null && (mutable.value.blocked == PhoneSyncBlock.SUSPENDED) != suspended) {
+            mutable.value =
+                if (suspended) PhoneSyncState(status = PhoneSyncStatus.BLOCKED, blocked = PhoneSyncBlock.SUSPENDED) else PhoneSyncState()
+        }
         return next
     }
 

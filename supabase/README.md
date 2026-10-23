@@ -333,6 +333,53 @@ oder unbereinigten Function-Logs werden als Artefakte veröffentlicht. Periodisc
 Hosted-CPU-/Speichergrenzen und reale Phone-Dateinutzung bleiben getrennte Nachweise.
 
 
+## K4/K5: Gerätewiderruf und Kontosupport
+
+Migration `20261023000100_account_support.sql`. K4 (Gerätebindung/Widerruf) stammt aus `20261018000100`; neu ist die
+Geräteliste mit Widerruf in der Android-App (`cloud_list_devices_v1`/`cloud_revoke_device_v1`, nur Auth-Sitzung).
+`auth.sessions` wird weiterhin nur gelesen. Die App-Abmeldung ist global (GoTrue, alle Sitzungen des Kontos); ein
+serverseitiger Auth-Admin-Widerruf (Ban/Abmeldung über die Supabase-Admin-API) bleibt ein getrennter Betreiberschritt.
+
+| RPC | Rolle | Wirkung | Audit |
+|---|---|---|---|
+| `admin_account_lookup(p_query)` | `support`, `admin` | exakt UUID, Freundescode oder Alias; minimaler Status; ohne Konten in Löschung und ohne eigenes Konto | – |
+| `admin_account_set_suspended(p_profile_id, p_suspended, p_reason)` | `admin` | Sperre setzen/aufheben | `account_suspend`/`account_unsuspend` |
+| `admin_account_revoke_devices(p_profile_id, p_reason)` | `admin` | alle Installationen, Cloud-Sitzungsbindungen, Geräte, Push-Token | `account_revoke_devices` (nur Zählwerte) |
+| `admin_account_cancel_deletion(p_profile_id, p_ticket_id, p_reason)` | `admin` | Löschrücknahme wie `cancel_account_deletion`, nur mit Meldung nach dem Antrag | `account_cancel_deletion` (Meldungs-UUID, `ticket_kind` `account`/`guest`) |
+
+Alle prüfen bei jedem Aufruf Mitgliedschaft und AAL2 (`support_forbidden`, `support_mfa_required`), schreibende
+zusätzlich `admin` (`support_admin_required`) nach `lock_sync()`. Begründung 1–500 Zeichen (`support_invalid`).
+Weitere Fehler: `account_not_found` (auch Konto in Löschung und eigenes Konto), `account_ambiguous`,
+`no_deletion_pending`. Eigenes Konto ist kein Ziel (`support_invalid`).
+
+**Löschrücknahme (Entscheid 24.10.2026):** Pflicht ist eine Meldung, die nach `deletion_requested_at` entstand,
+entweder vom Zielkonto oder als Gastmeldung. Fehler: `deletion_ticket_required` (keine Meldungs-UUID),
+`deletion_ticket_invalid` (unbekannt oder von einem anderen Konto), `deletion_ticket_stale` (vor dem Antrag),
+`deletion_ticket_evidence_required` (Gastmeldung, Begründung unter 20 Zeichen). Bei einer Gastmeldung belegt die
+Begründung, wie die Meldung dem Konto zugeordnet wurde; der Server prüft nur die Länge, nicht den Inhalt.
+
+**Sperre:** `private.account_suspensions`. `require_active()` meldet `account_suspended` (42501), das RLS-Gate
+schließt direkte Tabellen; damit sind Bind, Push, Pull, Legacy- und Social-RPCs zu. Export, Löschantrag/-status,
+Zustimmung, eigene Geräteliste und Support bleiben erreichbar; `my_auth_profile` liefert `suspended`. Die Sicht
+anderer bleibt unverändert (`is_active` unverändert, keine Epochenänderung). GoTrue-Login bleibt technisch möglich.
+
+**Konto-Audit:** `ops.account_audit`, ein Jahr (über `private.purge_support()`/`advantly-support-cleanup`). Wie
+beim Support-Audit schon in Phase A der gestaffelten Löschung (Status `deleting`): Zielbezug und Begründung werden
+geleert, ein gelöschter Admin verliert den Akteursbezug. Ohne Phase A (direkte Auth-Löschung) setzt die FK den
+Bezug auf null und ein Trigger leert die Begründung.
+
+Tests: pgTAP `300_account_support` (Rolle, AAL1, Begründung, Audit, Entkopplung, Sperrwirkung, Rücknahme samt
+Meldungsregeln);
+Renntest `300_account_support_concurrency.py` (Sperre↔Push/Pull/Bind, Sperre/Rücknahme↔Löschjob, mit
+`pg_blocking_pids`, in CI im Schritt „Consent-Gate und D2/D3-Lockrennen“); K7
+`tools/pilot-checks/check_account_support.py` (lokal Admin-Aktion über Owner-DB, staging durch Betreiber mit MFA).
+
+```powershell
+$env:ADVANTLY_ACCOUNT_TEST_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+uv run supabase/tests/database/300_account_support_concurrency.py --confirm-disposable
+Remove-Item Env:ADVANTLY_ACCOUNT_TEST_DB_URL
+```
+
 ## P2-C: Auth und Altersgate
 
 Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,

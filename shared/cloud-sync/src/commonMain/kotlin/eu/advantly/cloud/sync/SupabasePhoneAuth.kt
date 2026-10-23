@@ -149,8 +149,14 @@ class SupabasePhoneAuth(
         }
     }
 
+    /** Installation dieses Handys; erkennt in der Geräteliste das eigene Gerät (K4). */
+    private var installationId: String? = null
+
     /** Keine automatische Registrierung/Übertragung; der versionierte Serververtrag ist noch ein Release-Gate. */
-    fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend = SupabaseCloudBackend(sessions, transport, installation)
+    fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend {
+        installationId = installation.id
+        return SupabaseCloudBackend(sessions, transport, installation)
+    }
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() {
@@ -372,6 +378,7 @@ class SupabasePhoneAuth(
                             ?.content
                             ?.let { runCatching { ConsentStatus.valueOf(it) }.getOrNull() }
                             ?: ConsentStatus.UNAVAILABLE,
+                    suspended = profile["suspended"]?.jsonPrimitive?.boolean == true,
                 )
             requireAccountCurrent(lease.credentials, epoch)
             requireMutationCurrent(revision)
@@ -504,6 +511,20 @@ class SupabasePhoneAuth(
             pendingDeletion = null
             refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
+        }
+
+    override suspend fun devices(): List<CloudDevice> =
+        guarded {
+            val own = installationId
+            CloudJson
+                .decodeFromString<List<CloudDevice>>(accountRpc("cloud_list_devices_v1", buildJsonObject {}))
+                .map { it.copy(current = own != null && it.installationId == own) }
+        }
+
+    override suspend fun revokeDevice(deviceId: String) =
+        guarded {
+            accountRpc("cloud_revoke_device_v1", buildJsonObject { put("p_device_id", deviceId) })
+            Unit
         }
 
     /** Vor jedem Intent reservieren; eine ältere Antwort darf keine neuere Sperrabsicht quittieren. */

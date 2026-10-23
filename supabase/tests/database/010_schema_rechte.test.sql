@@ -71,7 +71,8 @@ select is_empty($$
   where n.nspname = 'public' and p.prosecdef
     and p.proname not in ('find_profile', 'sync_pull', 'get_visitor_match', 'my_visitor_matches', 'export_my_data',
                           'tournament_overview', 'issue_age_ticket', 'bind_age_ticket', 'cancel_age_ticket', 'before_user_created',
-                          'my_support_tickets', 'admin_support_members', 'admin_support_list', 'admin_support_ticket')
+                          'my_support_tickets', 'admin_support_members', 'admin_support_list', 'admin_support_ticket',
+                          'admin_account_lookup')
     and strpos(p.prosrc, 'private.require_active()') = 0 and strpos(p.prosrc, 'private.lock_sync()') = 0
 $$, 'jede schreibende RPC nimmt die Versionssperre');
 select is_empty($$
