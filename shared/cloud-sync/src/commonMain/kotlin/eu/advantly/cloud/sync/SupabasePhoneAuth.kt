@@ -149,8 +149,14 @@ class SupabasePhoneAuth(
         }
     }
 
+    /** Installation dieses Handys; erkennt in der Geräteliste das eigene Gerät (K4). */
+    private var installationId: String? = null
+
     /** Keine automatische Registrierung/Übertragung; der versionierte Serververtrag ist noch ein Release-Gate. */
-    fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend = SupabaseCloudBackend(sessions, transport, installation)
+    fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend {
+        installationId = installation.id
+        return SupabaseCloudBackend(sessions, transport, installation)
+    }
 
     /** Vor einem späteren Lösch-RPC aufrufen; Netzwerkfehler dürfen die lokale Sperre nicht aufheben. */
     fun stopForDeletion() {
@@ -508,7 +514,12 @@ class SupabasePhoneAuth(
         }
 
     override suspend fun devices(): List<CloudDevice> =
-        guarded { CloudJson.decodeFromString<List<CloudDevice>>(accountRpc("cloud_list_devices_v1", buildJsonObject {})) }
+        guarded {
+            val own = installationId
+            CloudJson
+                .decodeFromString<List<CloudDevice>>(accountRpc("cloud_list_devices_v1", buildJsonObject {}))
+                .map { it.copy(current = own != null && it.installationId == own) }
+        }
 
     override suspend fun revokeDevice(deviceId: String) =
         guarded {

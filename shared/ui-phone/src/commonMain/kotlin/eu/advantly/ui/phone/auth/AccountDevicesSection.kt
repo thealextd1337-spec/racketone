@@ -20,6 +20,9 @@ import eu.advantly.presentation.auth.AuthState
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.account_cancel
+import eu.advantly.ui.phone.resources.account_device_current
+import eu.advantly.ui.phone.resources.account_device_current_hint
+import eu.advantly.ui.phone.resources.account_device_current_revoked
 import eu.advantly.ui.phone.resources.account_device_last_seen
 import eu.advantly.ui.phone.resources.account_device_revoke
 import eu.advantly.ui.phone.resources.account_device_revoke_explanation
@@ -30,7 +33,10 @@ import eu.advantly.ui.phone.resources.account_devices_show
 import eu.advantly.ui.phone.resources.account_devices_title
 import org.jetbrains.compose.resources.stringResource
 
-/** K4: eigene Geräte ansehen und den Zugriff einzelner Geräte endgültig entziehen (mit Rückfrage). */
+/**
+ * K4: eigene Geräte ansehen und den Zugriff einzelner Geräte endgültig entziehen (mit Rückfrage). Das eigene Handy hat
+ * keinen Widerruf: Ein widerrufenes Handy kommt nicht mehr in die Cloud (der Server sperrt Geräte-ID und Installation).
+ */
 @Composable
 internal fun AccountDevicesSection(
     state: AuthState,
@@ -49,16 +55,33 @@ internal fun AccountDevicesSection(
             Text(stringResource(Res.string.account_devices_empty))
         }
         devices?.forEach { device ->
+            val details = listOfNotNull(device.model, device.platform, device.kind).distinct().joinToString(" · ")
+            val current = stringResource(Res.string.account_device_current)
+            val label =
+                if (device.current) {
+                    listOf(current, details).filter { it.isNotBlank() }.joinToString(" · ")
+                } else {
+                    details.ifBlank { stringResource(Res.string.account_device_unknown) }
+                }
+            val revoked = device.revokedAt != null
             Text(
-                listOfNotNull(device.model, device.platform, device.kind).distinct().joinToString(" · ").ifBlank {
-                    stringResource(Res.string.account_device_unknown)
-                },
+                label,
+                Modifier.testTag("account_device_${device.deviceId}"),
+                style = if (device.current) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
             )
             // Nur der Tag: genug zum Wiedererkennen, ohne Uhrzeit-/Zeitzonendetails.
             device.lastSeenAt?.take(10)?.let { Text(stringResource(Res.string.account_device_last_seen, it)) }
-            if (device.revokedAt != null) {
+            if (revoked) {
                 Text(stringResource(Res.string.account_device_revoked), Modifier.testTag("account_device_revoked_${device.deviceId}"))
-            } else {
+            }
+            if (device.current) {
+                val hint = if (revoked) Res.string.account_device_current_revoked else Res.string.account_device_current_hint
+                Text(
+                    stringResource(hint),
+                    Modifier.testTag("account_device_current_hint"),
+                    color = if (revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (!revoked) {
                 TextButton(
                     { confirm = device.deviceId },
                     enabled = !state.busy,

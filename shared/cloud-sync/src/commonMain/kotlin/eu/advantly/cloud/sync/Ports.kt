@@ -73,6 +73,9 @@ data class CloudDevice(
     val model: String? = null,
     val lastSeenAt: String? = null,
     val revokedAt: String? = null,
+    val installationId: String? = null,
+    /** Diese Installation (Abgleich der Installations-ID); nur lokal bestimmt, nie vom Server übernommen. */
+    @kotlinx.serialization.Transient val current: Boolean = false,
 )
 
 interface CloudAuthPort {

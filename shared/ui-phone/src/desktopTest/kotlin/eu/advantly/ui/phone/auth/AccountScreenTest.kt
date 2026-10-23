@@ -18,6 +18,8 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -311,6 +313,61 @@ class AccountScreenTest {
             onNodeWithTag("account_device_revoke_d1").performScrollTo().assertIsEnabled()
             assertEquals(listOf("devices", "revoke:w1", "devices"), auth.calls.filter { it != "refresh" })
         }
+
+    @Test fun theCurrentPhoneIsMarkedAndHasNoRevokeButtonOnlyAHint() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth =
+                    FakePhoneAuth().also {
+                        it.session.value = CloudSession("alice", true)
+                        it.devices[0] = CloudDevice("d1", installationId = "i1", current = true)
+                    }
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+                onNodeWithTag("account_devices_show").performScrollTo().performClick()
+                onNodeWithTag("account_device_d1").performScrollTo().assertTextEquals(if (german) "Dieses Gerät" else "This device")
+                onNodeWithTag("account_device_current_hint")
+                    .performScrollTo()
+                    .assertTextContains(if (german) "melde dich ab" else "sign out", substring = true)
+                onNodeWithTag("account_device_revoke_d1").assertDoesNotExist()
+                onNodeWithTag("account_device_revoke_w1").performScrollTo().assertIsEnabled()
+                onNodeWithTag("account_device_w1").assertTextEquals("wearos · watch")
+            }
+        }
+
+    @Test fun aPhoneRevokedFromElsewhereExplainsWhatStaysAndWhatToAvoid() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth =
+                    FakePhoneAuth().also {
+                        it.session.value = CloudSession("alice", true)
+                        it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
+                    }
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+                onNodeWithTag("account_devices_show").performScrollTo().performClick()
+                onNodeWithTag("account_device_d1")
+                    .performScrollTo()
+                    .assertTextEquals(if (german) "Dieses Gerät · Pixel · android · phone" else "This device · Pixel · android · phone")
+                onNodeWithTag("account_device_revoked_d1").performScrollTo().assertIsDisplayed()
+                onNodeWithTag("account_device_current_hint")
+                    .performScrollTo()
+                    .assertTextContains(if (german) "Lösche keine App-Daten" else "Do not clear the app data", substring = true)
+                onNodeWithTag("account_device_revoke_d1").assertDoesNotExist()
+            }
+        }
+
+    private fun inBothLanguages(block: (german: Boolean) -> Unit) {
+        val previous = Locale.getDefault()
+        try {
+            for (locale in listOf(Locale.ENGLISH, Locale.GERMAN)) {
+                Locale.setDefault(locale)
+                block(locale.language == "de")
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
 
     @Test fun adoptionSelectionUsesLabelsAndCancelHasNoOwnershipEffect() =
         runComposeUiTest {

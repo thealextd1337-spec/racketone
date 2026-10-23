@@ -216,9 +216,10 @@ class AuthViewModel(
             mutable.value = mutable.value.copy(devices = devices)
         }
 
-    /** Endgültig; danach Liste neu laden, damit der Serverzustand sichtbar ist. */
+    /** Endgültig; danach Liste neu laden, damit der Serverzustand sichtbar ist. Nie das eigene Handy (kein Weg zurück). */
     fun revokeDevice(deviceId: String) =
         runAction {
+            if (mutable.value.devices?.any { it.deviceId == deviceId && it.current } == true) return@runAction
             val before = requireDisplayedSession()
             auth.revokeDevice(deviceId)
             val devices = auth.devices()

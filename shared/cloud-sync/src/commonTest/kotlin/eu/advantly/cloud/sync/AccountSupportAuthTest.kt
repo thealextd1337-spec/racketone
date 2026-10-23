@@ -35,7 +35,7 @@ class AccountSupportAuthTest {
                         "cloud_list_devices_v1" -> {
                             """[{"deviceId":"d1","installationId":"i1","kind":"phone","platform":"android","model":"Pixel 9",
                             "appVersion":"1.0","lastSeenAt":"2026-10-22T08:00:00Z","revokedAt":null},
-                            {"deviceId":"d2","kind":"watch","platform":"wearos","revokedAt":"2026-10-23T08:00:00Z"}]"""
+                            {"deviceId":"d2","kind":"watch","platform":"wearos","revokedAt":"2026-10-23T08:00:00Z","current":true}]"""
                         }
 
                         else -> {
@@ -49,12 +49,15 @@ class AccountSupportAuthTest {
             try {
                 auth.refreshProfile()
                 assertEquals(true, auth.session.value?.suspended)
+                assertEquals(listOf(false, false), auth.devices().map { it.current }, "ohne eigene Installation kein eigenes Gerät")
+                auth.cloudBackend(CloudInstallation("i1", "0".repeat(64)))
                 assertEquals("account_suspended", assertFailsWith<CloudException> { auth.sessions.capture() }.reason)
                 val devices = auth.devices()
                 assertEquals(listOf("d1", "d2"), devices.map { it.deviceId })
                 assertEquals("Pixel 9", devices[0].model)
                 assertEquals(null, devices[0].revokedAt)
                 assertEquals("2026-10-23T08:00:00Z", devices[1].revokedAt)
+                assertEquals(listOf(true, false), devices.map { it.current }, "eigenes Gerät über die Installations-ID, nie vom Server")
                 auth.revokeDevice("d1")
                 assertEquals("cloud_revoke_device_v1" to """{"p_device_id":"d1"}""", requests.last())
                 assertTrue(requests.none { it.second.contains("push", ignoreCase = true) })

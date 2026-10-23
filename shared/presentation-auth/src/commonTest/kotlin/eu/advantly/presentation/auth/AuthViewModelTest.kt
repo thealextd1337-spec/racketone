@@ -212,6 +212,22 @@ class AuthViewModelTest {
         )
     }
 
+    @Test fun theCurrentPhoneIsNeverRevokedFromThisPhone() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.devices[0] = it.devices[0].copy(current = true)
+            }
+        val model = AuthViewModel(auth, scope)
+        model.loadDevices()
+        model.revokeDevice("d1")
+        assertFalse(auth.calls.any { it.startsWith("revoke:") }, "kein Weg zurück: eigenes Handy bleibt")
+        assertNull(model.state.value.error)
+        assertFalse(model.state.value.busy)
+        model.revokeDevice("w1")
+        assertEquals("revoke:w1", auth.calls.single { it.startsWith("revoke:") })
+    }
+
     @Test fun deviceListNeedsTheDisplayedSession() {
         val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, generation = 1) }
         val model = AuthViewModel(auth, scope)
