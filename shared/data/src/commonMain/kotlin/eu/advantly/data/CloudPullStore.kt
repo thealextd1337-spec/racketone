@@ -1,6 +1,8 @@
 package eu.advantly.data
 
 import eu.advantly.data.db.AdvantlyDatabase
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /** D1-Persistenz auf demselben seriellen Kontext wie LocalData. Alle Commits verlangen einen synchronen Fence. */
@@ -136,6 +138,16 @@ class CloudPullStore internal constructor(
                 it.removal_pending == 1L,
             )
         }
+
+    /** Serverseitiger Ersteller (`createdBy`) aus dem gezogenen Match-Snapshot; `null` ohne Snapshot oder ohne String-Feld. */
+    fun matchCreatedBy(
+        profileId: String,
+        matchId: String,
+    ): String? {
+        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return null
+        val createdBy = runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
+        return createdBy?.takeIf { it.isString }?.content
+    }
 
     /** false: Epoche wechselte hinter Cursor null; Antwort verwerfen und dauerhaft ab null neu beginnen. */
     fun commitMetadata(

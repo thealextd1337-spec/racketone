@@ -40,7 +40,6 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AdoptionSource
 import eu.advantly.data.AppendResult
-import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalAccountOwnership
@@ -98,8 +97,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
@@ -732,11 +729,7 @@ class MatchSession(
     ): Boolean {
         if (source.value in data.accountIdentities.currentSources()) return true
         val profile = data.accountIdentities.profile ?: return false
-        val pulled = data.cloudPulls.snapshot(profile, CloudPullEntityKind.MATCH, matchId.value) ?: return false
-        // shortcut: liest `createdBy` roh aus dem Server-Snapshot, gegen eine Data-Abfrage tauschen, sobald Data sie anbietet
-        val createdBy =
-            runCatching { (Json.parseToJsonElement(pulled.json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
-        return createdBy?.isString == true && createdBy.content == profile
+        return data.cloudPulls.matchCreatedBy(profile, matchId.value) == profile
     }
 
     fun assignmentFailure(
