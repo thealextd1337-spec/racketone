@@ -4,6 +4,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudPullMatch
 import eu.advantly.data.CloudPullMetadataPage
+import eu.advantly.sync.protocol.Summary
 import kotlin.test.AfterTest
 import kotlin.test.Ignore
 import kotlin.test.Test
@@ -58,6 +59,91 @@ class WriteWindowBacklogTest {
         pair.scheduler.advanceBy(60_000)
         val perMinute = pair.phoneLink.sent.size + pair.watchLink.sent.size - sent
         assertTrue(perMinute < 30, "begrenzt (Takt), nicht im Kreis: $perMinute Pakete pro Minute")
+    }
+
+    /**
+     * Review A1: Die Uhr beendet das Match, solange die Redaktion am Handy aussteht. Danach ist das Handy weder zurück noch
+     * aktiv und tickt nicht; erst die Antwort auf den Takt der Uhr bestätigt deren Events (vorher 4 offen bis zum Link-Up).
+     */
+    @Test
+    fun watchEventsOfAnEndedMatchAreConfirmedAfterTheRedaction() {
+        pair.activate("alice")
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        val upload = pair.phoneData.cloudUploads.capture(pair.token!!, 100)
+        pair.phoneData.cloudUploads.acknowledge(upload, upload.events.mapTo(mutableSetOf()) { it.id }, metadata = upload.metadataRevisions)
+        val record = pair.phoneData.matches.get(match)!!
+        catalog(1, 0, record)
+        pair.settle()
+        val run = catalog(2, 1, record)
+        pair.settle()
+        assertTrue(pair.watch.takeOverScoring())
+        assertTrue(pair.watch.recordPoint(Side.A))
+        assertTrue(pair.watch.recordPoint(Side.A))
+        assertTrue(pair.watch.endMatch())
+        pair.settle()
+        assertTrue((pair.watchData.events.unconfirmedCountByMatch()[match.value] ?: 0) > 0, "verborgen, also unbestätigt")
+
+        val data = pair.phoneData
+        val work = checkNotNull(data.cloudPulls.nextEventWork("alice", run))
+        val redaction = checkNotNull(data.cloudPulls.redactionWork(work, run))
+        assertTrue(data.cloudPulls.stageRedaction(work, run, redaction, 2, emptyList(), emptyList(), true, true) {})
+        pair.settle()
+        repeat(2) { pair.scheduler.advanceBy(31_000) }
+        assertEquals(null, pair.watchData.events.unconfirmedCountByMatch()[match.value], "nach einem Takt bestätigt")
+        assertTrue(pair.watch.state.value.sync.settled)
+    }
+
+    /** Review A1 (Probe LA): Eine verlorene Antwort-Summary nach dem Matchende heilt der nächste Takt, nicht erst ein Link-Up. */
+    @Test
+    fun aLostReplyAfterTheEndIsRepairedByTheNextTick() {
+        pair.activate("alice")
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        assertTrue(pair.watch.takeOverScoring())
+        assertTrue(pair.watch.recordPoint(Side.A))
+        pair.settle()
+        pair.phoneLink.lose = { it is Summary && it.reply }
+        assertTrue(pair.watch.endMatch())
+        pair.settle()
+        pair.phoneLink.lose = { false }
+        assertTrue((pair.watchData.events.unconfirmedCountByMatch()[match.value] ?: 0) > 0)
+
+        repeat(2) { pair.scheduler.advanceBy(31_000) }
+        assertEquals(null, pair.watchData.events.unconfirmedCountByMatch()[match.value])
+        assertTrue(pair.watch.state.value.sync.settled)
+    }
+
+    /**
+     * Die Bestätigungsantwort löst keine Antwort aus: je Takt und Gegenstelle höchstens eine; im aktiven Match bleibt es beim
+     * Takt beider Seiten (2 Pakete), nach dem Ende und bestätigt ist es still.
+     */
+    @Test
+    fun confirmingRepliesCauseNoReplyLoop() {
+        pair.activate("alice")
+        pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        assertTrue(pair.watch.takeOverScoring())
+        assertTrue(pair.watch.recordPoint(Side.A))
+        pair.settle()
+
+        fun replies(link: RecordingLink) = link.decoded().count { (it.message as? Summary)?.reply == true }
+        val ticks = 10
+        val sent = pair.phoneLink.sent.size + pair.watchLink.sent.size
+        val phoneReplies = replies(pair.phoneLink)
+        val watchReplies = replies(pair.watchLink)
+        repeat(ticks) { pair.scheduler.advanceBy(30_000) }
+        assertTrue(replies(pair.phoneLink) - phoneReplies <= ticks, "Handy: höchstens eine Antwort je Takt")
+        assertTrue(replies(pair.watchLink) - watchReplies <= ticks, "Uhr: höchstens eine Antwort je Takt")
+        val perTick = (pair.phoneLink.sent.size + pair.watchLink.sent.size - sent) / ticks
+        assertTrue(perTick <= 2, "aktiv bestätigt der Takt beider Seiten, keine Zusatzantwort: $perTick Pakete je Takt")
+
+        assertTrue(pair.watch.endMatch())
+        pair.settle()
+        repeat(2) { pair.scheduler.advanceBy(30_000) }
+        val quiet = pair.phoneLink.sent.size + pair.watchLink.sent.size
+        repeat(ticks) { pair.scheduler.advanceBy(30_000) }
+        assertEquals(quiet, pair.phoneLink.sent.size + pair.watchLink.sent.size, "nach dem Ende und bestätigt: still")
     }
 
     @Test

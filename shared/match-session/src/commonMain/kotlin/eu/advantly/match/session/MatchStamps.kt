@@ -32,10 +32,11 @@ internal class MatchStamps(
     private val genesisOf: (MatchId) -> ScoreEvent?,
 ) {
     /**
-     * Angenommene Belege der zuletzt geprüften Summary. Fehlt ein Match hier ganz (keine Genesis, kein Access), gibt es
-     * keinen eigenen Beleg; die Antwort „mir fehlt alles“ trägt dann den geprüften Beleg der Gegenstelle zurück.
+     * Angenommene Belege der zuletzt geprüften Summary je Gegenstelle. Fehlt ein Match hier ganz (keine Genesis, kein Access),
+     * gibt es keinen eigenen Beleg; die Antwort „mir fehlt alles“ trägt dann den geprüften Beleg derselben Gegenstelle zurück
+     * (Review A3: nie den einer anderen).
      */
-    private var echo: Map<String, MatchDataStamp> = emptyMap()
+    private val echo = HashMap<String, Map<String, MatchDataStamp>>()
 
     fun of(matchId: MatchId): MatchDataStamp? {
         val scope = data.accountIdentities.scope ?: return null
@@ -99,6 +100,7 @@ internal class MatchStamps(
      * nicht (`null`, [onBlocked]: Rückstand bleibt sichtbar blockiert). [lifecycle]: eigener Stand für `Summary.lifecycle`.
      */
     fun stamped(
+        peer: String,
         message: SyncMessage,
         lifecycle: (Collection<String>) -> Map<String, LifecycleSummary>,
         onBlocked: (MatchId) -> Unit,
@@ -113,7 +115,7 @@ internal class MatchStamps(
             is Summary -> {
                 val own =
                     message.matches.keys
-                        .mapNotNull { key -> (of(MatchId(key)) ?: echo[key]?.takeIf { message.reply })?.let { key to it } }
+                        .mapNotNull { key -> (of(MatchId(key)) ?: echo[peer]?.get(key)?.takeIf { message.reply })?.let { key to it } }
                         .toMap()
                 val states = if (data.accountIdentities.managed) message.lifecycle + lifecycle(own.keys) else message.lifecycle
                 message.copy(
@@ -143,7 +145,10 @@ internal class MatchStamps(
      * Empfang Protokoll 4: Belege vor jeder Mutation und jedem Ack prüfen; ungültige Matchangaben fallen weg, Events mit
      * ungültigem Beleg ganz (`null`: kein Speichern, keine Bestätigung).
      */
-    fun verified(message: SyncMessage): SyncMessage? =
+    fun verified(
+        peer: String,
+        message: SyncMessage,
+    ): SyncMessage? =
         when (message) {
             is Events -> {
                 message.takeIf {
@@ -153,7 +158,7 @@ internal class MatchStamps(
 
             is Summary -> {
                 val accepted = message.matches.filterKeys { accepts(MatchId(it), message.stamps[it]) }
-                echo = accepted.keys.associateWith { message.stamps.getValue(it) }
+                echo[peer] = accepted.keys.associateWith { message.stamps.getValue(it) }
                 message.copy(matches = accepted)
             }
 
