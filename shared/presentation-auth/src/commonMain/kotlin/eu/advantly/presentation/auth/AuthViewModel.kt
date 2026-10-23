@@ -42,6 +42,8 @@ class AuthViewModel(
     val upload: PhoneUploadPort? = null,
     val export: PhoneExportPort? = null,
     val pull: PhonePullPort? = null,
+    /** Gehört dem prozessweiten Konto-Host, nicht diesem ViewModel: kein Abbau in [onCleared]. */
+    val sync: PhoneSyncPort? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()

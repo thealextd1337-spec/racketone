@@ -25,12 +25,14 @@ import eu.advantly.ui.phone.AdvantlyApp
 
 class MainActivity : ComponentActivity() {
     private var sessionAccess: AndroidSessionAccess? = null
+    private var account: AuthViewModel? = null
     private val storageHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun runtimeUnavailable() {
         if (isFinishing || isDestroyed) return
         sessionAccess?.close()
         sessionAccess = null
+        account = null
         // Entfernen der Composition beendet ihre Subscriptions; Kontojobs nicht über Retry behalten.
         viewModelStore.clear()
         showInstallationError()
@@ -42,6 +44,12 @@ class MainActivity : ComponentActivity() {
             return true
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** App-Start bzw. Vordergrund (B4): höchstens ein gedrosselter automatischer Abgleich. */
+    override fun onStart() {
+        super.onStart()
+        account?.sync?.onForeground()
     }
 
     override fun onDestroy() {
@@ -92,6 +100,7 @@ class MainActivity : ComponentActivity() {
                     )[AuthViewModel::class.java]
                 }.getOrNull()
             }
+        account = auth
         val support =
             auth?.support ?: runCatching {
                 ViewModelProvider(

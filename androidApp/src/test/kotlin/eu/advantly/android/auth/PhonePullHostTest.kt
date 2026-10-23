@@ -33,6 +33,7 @@ import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.PhonePullBlock
 import eu.advantly.presentation.auth.PhonePullResult
+import eu.advantly.presentation.auth.PhoneUploadPhase
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
@@ -660,6 +661,45 @@ class PhonePullHostTest {
                 var drained = false
                 other.close { drained = true }
                 withTimeout(15_000) { while (!drained) yield() }
+                f.close()
+            }
+        }
+
+    /** H-Review P3-6: Restore-Gate und Ownership ändern sich ohne neuen Sitzungswert; `available` folgt trotzdem. */
+    @Test fun pullAvailabilityFollowsTheRestoreGateWithoutASessionChange() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                withTimeout(15_000) { f.pull.state.first { it.available } }
+                f.hostAccess = false
+                // Irgendeine lokale Änderung, aber kein neuer Wert im Auth-Sitzungsflow.
+                f.match()
+                assertFalse(f.pull.state.value.available)
+            } finally {
+                f.close()
+            }
+        }
+
+    /** H-Review P3-5: Ein Upload, der auf die Kontosperre eines laufenden Pulls wartet, zeigt „wartet“ statt „lädt hoch“. */
+    @Test fun uploadWaitingForTheAccountLockShowsWaiting() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.match()
+                val hold = Hold()
+                f.holdPull = hold
+                f.pull.pullNow()
+                withTimeout(15_000) { hold.entered.await() }
+                f.upload.uploadNow()
+                assertEquals(PhoneUploadPhase.WAITING, f.upload.state.value.phase)
+                hold.release.complete(Unit)
+                f.idle()
+                assertEquals(PhoneUploadPhase.IDLE, f.upload.state.value.phase)
+                assertTrue(f.trace.toString(), "start:cloud_sync_push_v1" in f.trace)
+                assertSerial(f.trace)
+            } finally {
                 f.close()
             }
         }

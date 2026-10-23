@@ -18,7 +18,7 @@ internal data class PhoneCloudContext(
  */
 private val accountLocks = HashMap<String, Mutex>()
 
-/** Je Konto-ViewModel und Backend: Pull- und Uploadhost teilen dessen eine Gerätebindung. */
+/** Je Konto-Host und Backend: Pull- und Uploadhost teilen dessen eine Gerätebindung. */
 internal class PhoneCloudLane {
     /** Zuletzt erfolgreich gebundener Kontext dieses Backends; nur unter [mutex] des Kontos schreiben. */
     var bound: PhoneCloudContext? = null
