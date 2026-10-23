@@ -2240,3 +2240,29 @@ Merge `edeb2bee`, voller Check grün):
 - **CI:** Test 290 hängt zeitweise auf dem Supabase-Stack (zwei Läufe nach 280 bis zum
   Abbruch nach ~55 min). Unter `supabase/` gab es keine Änderung. Untersuchung:
   `advantly-20261023-server-290-hang-r1`.
+
+**Aktivierung Runde 2 übernommen** (`c4cba036`, `d4fc4a64`, Merge `faceddf1`):
+- A1: Das Handy bestätigt die Takt-Summary einer Gegenstelle auch ohne eigenen Rückstand,
+  höchstens einmal je Takt und nicht für aktive Matches.
+- A3: `MatchStamps.echo` wird je Gegenstelle geführt.
+
+**Hänger pgTAP 290 behoben** (`8863499a`, `8bf27e99`, Merge `067c028e`):
+- **Ursache:** Es ist keine Wartekette und nicht der Cron-Job. 260/270 füllen Tabellen in
+  zurückgerollten Transaktionen, ihr `ANALYZE` bleibt aber stehen. Autovacuum räumt
+  danach, ohne zu kürzen. Ergebnis ist `reltuples = 0` bei vielen Seiten für `matches`
+  und `match_participants`.
+- **Folge:** Der Planner wählt in `private.anonymize_profile()` geschachtelte Schleifen
+  über ganze Tabellen, das dauert bei 20 000 Matches Stunden. Lokal ist der Hänger mit
+  gesetzter Statistik jedes Mal reproduzierbar. In der CI hingen 5 von 8 Läufen.
+- **Fix:**
+  - `vacuum` der drei Tabellen vor 290;
+  - `transaction_timeout = '5min'`;
+  - `timeout-minutes: 15` am pgTAP-Schritt.
+  
+  Ein `statement_timeout` greift hier nicht, weil die Job-Einheiten den Abbruch selbst
+  fangen.
+- **Kein Produktfehler,** weil Auto-Analyze die Statistik in Produktion nach wenigen
+  Änderungen korrigiert.
+- **Restrisiko (P3, Betriebshandbuch):** Die Übergabe-Anweisung in `anonymize_profile`
+  ist bei 1-Zeilen-Schätzungen kubisch. Eine robustere Form wäre `LATERAL` je eigenem
+  Match. Das ist nicht umgesetzt.
