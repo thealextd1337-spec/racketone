@@ -824,8 +824,8 @@ class SessionMatchStore(
         list
             .filter {
                 // Eine matchlokale Namensmaske ist kein Beleg für eine neue lokale Directory-Identität.
-                it.displayName.isNotBlank() && !it.isPlaceholder && !data.isPlaceholder(it.id) && data.players.get(it.id) == null
-            }.forEach { data.players.addGuest(it.id, it.displayName, now) }
+                it.displayName.isNotBlank() && !it.isPlaceholder && !data.isPlaceholder(it.id)
+            }.forEach { data.players.rememberGuest(it.id, it.displayName, now) }
     }
 
     /** „Wie letztes Mal“: jüngstes Match, das kein Abbruch ohne Wertung war (F21). */

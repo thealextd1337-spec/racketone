@@ -1356,6 +1356,33 @@ class ReplicaLifecycleStoreTest {
         }
 
     @Test
+    fun rememberGuestSkipsExistingDirectoryRowOfForeignScopeWithoutRenameOrRevision(): Unit =
+        Fixture().use { f ->
+            val bea = PlayerId("bea")
+            f.data.players.addGuest(bea, "Bea", 1)
+            val revision = assertNotNull(f.data.cloud.metadataState(CloudMetadataKind.PLAYER, bea.value))
+            f.select("B")
+            assertNull(f.data.players.get(bea))
+            assertFails { f.data.players.addGuest(bea, "Renamed", 2) }
+            f.data.players.rememberGuest(bea, "Renamed", 2)
+            f.data.players.rememberGuest(PlayerId("cem"), "Cem", 2)
+            assertEquals(
+                "Bea",
+                f.db.playerQueries
+                    .selectById(bea.value)
+                    .executeAsOne()
+                    .display_name,
+            )
+            assertEquals(revision, f.data.cloud.metadataState(CloudMetadataKind.PLAYER, bea.value))
+            assertEquals(
+                "Cem",
+                f.data.players
+                    .get(PlayerId("cem"))
+                    ?.displayName,
+            )
+        }
+
+    @Test
     fun redactedNamesCannotReturnThroughDirectoryFavoritesOrLegacyAssignmentRebuild(): Unit =
         Fixture().use { f ->
             val ctx = f.member("A")
