@@ -293,8 +293,12 @@ $$;
 
 -- Phase B: höchstens p_limit Matches der Arbeitsliste vollständig. Anweisungen in der Reihenfolge der Trigger
 -- (capture_profile_redactions, redact_linked_names, anonymize_profile) und der Profilkaskade, jeweils unverändert bis
--- auf „Match in der Menge“ (Lineup-Zweig: gleiche Paare, andere Auswertung). Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die
--- Epoche steigt in derselben Transaktion wie die Redaktion. Liefert die Anzahl bearbeiteter Matches (0 = fertig).
+-- auf „Match in der Menge“ (Lineup-Zweig: gleiche Paare, Teilnehmername: gleiche Zeilen, jeweils andere Auswertung).
+-- Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die Epoche steigt in derselben
+-- Transaktion wie die Redaktion. Liefert die Anzahl bearbeiteter Matches (0 = fertig).
+-- Planstabil auch bei reltuples 0 (wie anonymize_profile in 20261022000100): Jeder Zugriff auf Matches, Teilnehmer und
+-- Events trägt die Matchmenge selbst als Indexbedingung oder liest je Zeile über match_id. Joins zwischen diesen
+-- Tabellen ohne eigene Matchbedingung wählten bei geschätzter 1 Zeile Nested Loops bzw. Merge Joins über ganze Tabellen.
 create function private.account_deletion_redact(p_profile uuid, p_limit integer) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare v_retired uuid[]; v_players uuid[]; v_ms uuid[]; v_matches uuid[]; v_next integer;
@@ -338,7 +342,7 @@ begin
       where mp.profile_id=p_profile and mp.player_id is not null and mp.match_id=any(v_ms)
     union select c.match_id,c.player_id from private.match_player_profile_contexts c
       join public.match_participants mp on mp.match_id=c.match_id and mp.slot_id=c.slot_id and mp.profile_id=c.profile_id
-      where c.profile_id=p_profile and c.match_id=any(v_ms)
+      where c.profile_id=p_profile and c.match_id=any(v_ms) and mp.match_id=any(v_ms)
   ), captured as (
     insert into private.match_redacted_names(match_id,identity_id)
       select distinct match_id,id from referenced on conflict do nothing returning match_id
@@ -365,16 +369,10 @@ begin
     union select match_id from private.match_redacted_names
       where (identity_id=p_profile or identity_id=any(v_retired)) and match_id=any(v_ms)
   ) affected;
+  -- Dieselben Zeilen wie dort die Union, verknüpft über den Primärschlüssel, hier ohne Join (planstabil, s. o.).
   update public.match_participants mp set display_name='Gelöschter Spieler',deleted_profile=true
-    from (
-      select match_id,slot_id from public.match_participants where profile_id=p_profile and match_id=any(v_ms)
-      union select match_id,slot_id from public.match_participants
-        where profile_id is null and player_id=any(v_retired) and match_id=any(v_ms)
-      union select match_id,slot_id from public.match_participants
-        where profile_id is null and length(slot_id) between 32 and 41 and private.redaction_uuid(slot_id)=any(v_retired)
-          and match_id=any(v_ms)
-    ) hit
-    where mp.match_id=hit.match_id and mp.slot_id=hit.slot_id;
+    where mp.match_id=any(v_ms) and (mp.profile_id=p_profile or (mp.profile_id is null and (mp.player_id=any(v_retired)
+      or (length(mp.slot_id) between 32 and 41 and private.redaction_uuid(mp.slot_id)=any(v_retired)))));
   with redacted as (
     update public.match_events e set
       payload=jsonb_set(e.payload,'{player,displayName}',to_jsonb('Gelöschter Spieler'::text)),redacted_at=coalesce(e.redacted_at,now())
@@ -386,19 +384,20 @@ begin
     where id=any(array(select distinct match_id from redacted));
 
   -- anonymize_profile (20261022000100), matchlokaler Teil.
-  update public.matches m set created_by = n.profile_id
-    from (select distinct on (mp.match_id) mp.match_id, mp.profile_id
-            from public.matches o join public.match_participants mp on mp.match_id = o.id
-           where o.created_by = p_profile and o.id = any(v_ms) and mp.profile_id is not null and mp.profile_id <> p_profile
-           order by mp.match_id, mp.team, mp.position) n
-   where m.id = n.match_id;
+  update public.matches m set created_by = (select mp.profile_id from public.match_participants mp
+      where mp.match_id = m.id and mp.profile_id is not null and mp.profile_id <> p_profile
+      order by mp.team, mp.position limit 1)
+   where m.id = any(v_ms) and m.created_by = p_profile
+     and (select mp.profile_id from public.match_participants mp
+       where mp.match_id = m.id and mp.profile_id is not null and mp.profile_id <> p_profile limit 1) is not null;
   delete from public.matches where created_by = p_profile and id = any(v_ms);
   update public.match_participants
      set profile_id = null, link_status = null, linked_at = null, share_with_friends = false, hidden = false,
          display_name = 'Gelöschter Spieler', deleted_profile = true, player_id = null
    where profile_id = p_profile and match_id = any(v_ms);
   update public.match_participants mp set player_id = null
-   where mp.player_id in (select p.id from public.players p where p.owner_id = p_profile) and mp.match_id = any(v_ms);
+   where mp.player_id = any (array(select p.id from public.players p where p.owner_id = p_profile))
+     and mp.match_id = any(v_ms);
 
   -- Profilkaskade, matchlokale Anteile: match_roles/match_visitors on delete cascade bzw. set null,
   -- match_events.author_id set null, Turniermatches des Kontos (court_id, dann tournament_id set null).

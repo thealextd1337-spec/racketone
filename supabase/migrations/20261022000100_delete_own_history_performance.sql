@@ -59,6 +59,11 @@ create index matches_previous_match_idx on public.matches (previous_match_id) wh
 -- je Match). Neuer Ersteller wie bisher: erster weiterer Profil-FK nach (team, position). Die Zeilentrigger feuern
 -- je Match wie zuvor; Übergaben und Löschungen betreffen getrennte Matches und lesen nur deren eigene Teilnehmer.
 -- Alles Weitere unverändert gegenüber der Fassung nach 00700 (dort entfiel die frühere Payload-Suche).
+-- Planstabil ohne Join (CI-Lauf 39943705129): Bei reltuples 0 und vielen Seiten (Autovacuum neben offenen oder
+-- zurückgerollten Masseninserts) schätzt der Planner jede Tabelle auf 1 Zeile. Ein Join wählte dann Nested Loops mit
+-- ungefilterten Index-Scans über ganze Tabellen (Matches × Teilnehmer × Matches, bei 20 000 Matches Stunden). Jetzt
+-- liest jede Anweisung genau eine Tabelle: der Nachfolger als korrelierte Unterabfrage je eigenem Match (SubPlan,
+-- match_id als Indexbedingung), die Player-Menge als Array (InitPlan, einmal).
 create or replace function private.anonymize_profile()
 returns trigger
 language plpgsql
@@ -68,12 +73,12 @@ as $$
 declare
   v_p   record;
 begin
-  update public.matches m set created_by = n.profile_id
-    from (select distinct on (mp.match_id) mp.match_id, mp.profile_id
-            from public.matches o join public.match_participants mp on mp.match_id = o.id
-           where o.created_by = old.id and mp.profile_id is not null and mp.profile_id <> old.id
-           order by mp.match_id, mp.team, mp.position) n
-   where m.id = n.match_id;
+  update public.matches m set created_by = (select mp.profile_id from public.match_participants mp
+      where mp.match_id = m.id and mp.profile_id is not null and mp.profile_id <> old.id
+      order by mp.team, mp.position limit 1)
+   where m.created_by = old.id
+     and (select mp.profile_id from public.match_participants mp
+       where mp.match_id = m.id and mp.profile_id is not null and mp.profile_id <> old.id limit 1) is not null;
   delete from public.matches where created_by = old.id;
 
   for v_p in select p.id from public.players p where p.profile_id = old.id and p.owner_id <> old.id loop
@@ -89,7 +94,7 @@ begin
      set owner_id = profile_id, assigned_by = null
    where owner_id = old.id and kind = 'guest' and profile_id is not null and profile_id <> old.id;
   update public.match_participants mp set player_id = null
-   where mp.player_id in (select p.id from public.players p where p.owner_id = old.id);
+   where mp.player_id = any (array(select p.id from public.players p where p.owner_id = old.id));
   delete from public.players where owner_id = old.id;
   update public.players set assigned_by = null where assigned_by = old.id;
   return old;
