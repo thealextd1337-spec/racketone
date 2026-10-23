@@ -4,12 +4,21 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import eu.advantly.cloud.sync.CloudInstallation
 import eu.advantly.cloud.sync.CloudJson
+import eu.advantly.cloud.sync.CloudPullAttempt
+import eu.advantly.cloud.sync.CloudPullPort
 import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.ItemResult
+import eu.advantly.cloud.sync.PullResponse
+import eu.advantly.cloud.sync.PulledEvent
+import eu.advantly.cloud.sync.PulledMatch
+import eu.advantly.cloud.sync.PulledParticipant
 import eu.advantly.cloud.sync.PushBatch
 import eu.advantly.cloud.sync.PushResponse
 import eu.advantly.cloud.sync.SupabasePhoneAuth
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudUploadSession
@@ -19,6 +28,7 @@ import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
+import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.PhonePullBlock
@@ -46,6 +56,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -80,10 +92,13 @@ class PhonePullHostTest {
     private class Fixture(
         scope: CoroutineScope,
         val driver: SqlDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties(), AdvantlyDatabase.Schema),
+        /** Ersetzt einzelne Pull-RPCs (Katalog-/Eventseiten), Rest über den HTTP-Mock. */
+        pulls: (CloudPullPort) -> CloudPullPort = { it },
     ) {
         val thread = Thread.currentThread()
         val data = LocalData(driver)
-        val phone = MatchSession(data, null, ManualScheduler(), SessionConfig(MatchSessions.deviceId(data), PeerKind.PHONE))
+        val scheduler = ManualScheduler()
+        val phone = MatchSession(data, null, scheduler, SessionConfig(MatchSessions.deviceId(data), PeerKind.PHONE))
         val lifecycle = SupervisorJob(scope.coroutineContext[Job])
         val hostScope = CoroutineScope(scope.coroutineContext + lifecycle)
 
@@ -225,7 +240,7 @@ class PhonePullHostTest {
             PhonePullHost(
                 auth,
                 phone,
-                backend,
+                pulls(backend),
                 {
                     backend.bindDevice(it)
                     afterBind()
@@ -295,6 +310,90 @@ class PhonePullHostTest {
             }
         }
     }
+
+    /**
+     * Hook-Verdrahtung (Review r2, P3-1): Ein Pull mit einer Eventseite für das offene Match aktualisiert die Session-Anzeige
+     * (`eventsCommitted = session::eventsCommitted`). Die Signale des Katalogs (Kopf/Access über das Data-Signal) sind vor der
+     * Eventseite abgearbeitet; den Event-Commit meldet allein der Hook.
+     */
+    @Test fun pulledEventsOfTheOpenMatchUpdateTheSessionDisplay() =
+        runBlocking {
+            var match = ""
+            lateinit var f: Fixture
+            val format = Presets.TENNIS_SINGLES_BO3.format()
+            val other = "00000000-0000-7000-8000-0000000000b0"
+            f =
+                Fixture(this) { backend ->
+                    object : CloudPullPort by backend {
+                        override suspend fun pullPage(
+                            attempt: CloudPullAttempt,
+                            cursor: Long,
+                            limit: Int,
+                        ) = PullResponse(
+                            listOf(
+                                PulledMatch(
+                                    match,
+                                    "member",
+                                    sport = "tennis",
+                                    discipline = "singles",
+                                    format = CloudJson.encodeToJsonElement(MatchFormat.serializer(), format).jsonObject,
+                                    meta = JsonObject(emptyMap()),
+                                    status = "in_progress",
+                                    accessEpoch = 1,
+                                    serverVersion = 1,
+                                    participants =
+                                        listOf(
+                                            PulledParticipant("a", "A", 1, displayName = "A"),
+                                            PulledParticipant("b", "B", 1, displayName = "B"),
+                                        ),
+                                ),
+                            ),
+                            cursor = 1,
+                            visibilityEpoch = 1,
+                        )
+
+                        override suspend fun pullEventPage(
+                            attempt: CloudPullAttempt,
+                            matchId: String,
+                            afterServerSeq: Long,
+                            limit: Int,
+                        ): List<PulledEvent> {
+                            f.scheduler.runUntilIdle()
+                            return listOfNotNull(
+                                PulledEvent(
+                                    "00000000-0000-7000-8000-0000000000e1",
+                                    match,
+                                    other,
+                                    1,
+                                    2,
+                                    2,
+                                    type = "PointWon",
+                                    payload = JsonObject(mapOf("type" to JsonPrimitive("PointWon"), "side" to JsonPrimitive("A"))),
+                                    serverSeq = 1,
+                                ).takeIf { afterServerSeq == 0L },
+                            )
+                        }
+                    }
+                }
+            try {
+                f.signIn()
+                val lineup = Lineup(listOf(PlayerId("a")), listOf(PlayerId("b")), PlayerId("a"))
+                match = f.phone.create(format, lineup, scorer = ScorerChoice.Device(DeviceId(other))).value
+
+                fun points() =
+                    f.phone.state.value
+                        .match(MatchId(match))!!
+                        .pointsPlayed
+                f.pull.pullNow()
+                f.idle()
+                assertEquals(2L, f.data.events.count(match))
+                assertEquals("kein Replay im Callback", 0, points())
+                f.scheduler.runUntilIdle()
+                assertEquals("gepullter Punkt in der Anzeige", 1, points())
+            } finally {
+                f.close()
+            }
+        }
 
     @Test fun concurrentPullAndUploadOfOneAccountNeverOverlapAndShareOneBinding() =
         runBlocking {

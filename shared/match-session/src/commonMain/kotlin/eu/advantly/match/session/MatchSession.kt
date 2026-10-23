@@ -40,6 +40,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AdoptionSource
 import eu.advantly.data.AppendResult
+import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalAccountOwnership
@@ -97,6 +98,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
@@ -704,17 +707,33 @@ class MatchSession(
     }
 
     /**
-     * P3-C (E6, Variante a, gelockert in W3 Runde 3): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
-     * Handy desselben Kontos die Teilnehmer (lokal im aktuellen Scope, wie die Kontoregel von D-2) – auch ein neu
-     * installiertes in älteren eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches, fremde
-     * Konten nie ([canAssignPlayer] prüft den Ersteller). Der Belegverlust am Kopf der Genesis-Quelle heilt mit deren
-     * nächstem Upload.
+     * P3-C (E6, Variante a, gelockert in W3 Runde 3/4): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
+     * Handy die Teilnehmer, aber nur in Matches dieses Kontos ([ownedMatch]) – auch ein neu installiertes Handy in älteren
+     * eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches. Der Belegverlust am Kopf der
+     * Genesis-Quelle heilt mit deren nächstem Upload.
      */
     private fun participantAuthority(matchId: MatchId): Boolean {
         if (!data.accountIdentities.managed || config.protocolVersions.last < 4) return true
         val source = genesisOf(matchId)?.deviceId ?: return false
-        return source == deviceId ||
-            (config.kind == PeerKind.PHONE && data.accountIdentities.sourceScope(deviceId.value) == data.accountIdentities.scope)
+        return source == deviceId || (config.kind == PeerKind.PHONE && ownedMatch(matchId, source))
+    }
+
+    /**
+     * Das Match gehört dem aktuellen Konto: Genesis aus einer eigenen Quelle (lokal im Scope oder per `cloud_device_owner`
+     * gebunden, wie D-2) oder laut Pull serverseitig vom eigenen Profil erstellt – genau die Bedingung, unter der `push_event`
+     * ein `PlayerAssigned` annimmt. Das `createdBy` im Payload belegt nichts (kommt vom Ersteller).
+     */
+    private fun ownedMatch(
+        matchId: MatchId,
+        source: DeviceId,
+    ): Boolean {
+        if (source.value in data.accountIdentities.currentSources()) return true
+        val profile = data.accountIdentities.profile ?: return false
+        val pulled = data.cloudPulls.snapshot(profile, CloudPullEntityKind.MATCH, matchId.value) ?: return false
+        // shortcut: liest `createdBy` roh aus dem Server-Snapshot, gegen eine Data-Abfrage tauschen, sobald Data sie anbietet
+        val createdBy =
+            runCatching { (Json.parseToJsonElement(pulled.json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
+        return createdBy?.isString == true && createdBy.content == profile
     }
 
     fun assignmentFailure(
@@ -1413,6 +1432,10 @@ class MatchSession(
      * Data-Signale zu einem Scheduler-Post zusammengelegt, dort gelten die Regeln von [onDataChanged]. Neu aufgebaut wird
      * nur ein offenes Match, dessen Store-Stand vom Engine-Stand abweicht. [matchId] ist nur der Anlass: geprüft werden
      * alle offenen Matches, damit zwischen den Threads kein Zustand außer dem Post-Merker geteilt wird.
+     *
+     * Bewusst schmaler als der Empfang von der Uhr: Gepullte Events gehen nicht sofort an die Uhr weiter (erst mit der
+     * Anti-Entropie), und ein gepullter Zählerwechsel (`ScorerChanged`) wird nicht abgeglichen – kein Uhr-Zähler-Abgleich,
+     * keine verworfenen Eingaben, kein Kopf-Fortschritt (die Listenzeile folgt erst dem nächsten eigenen Event).
      */
     @Suppress("UNUSED_PARAMETER")
     fun eventsCommitted(matchId: String) {
@@ -1533,6 +1556,8 @@ class MatchSession(
         }
         // Ausgehandelt ist genau eine Version: kein Rückfall auf frühere Rechte, kein V4 ohne Aushandlung
         if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
+        // P2-1, Empfang: alte Sender schieben vor dem Hello über 3 nach
+        if (message !is Hello && requiresFour(peer)) return
         if (message.v >= 4) message = stamps.verified(message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
@@ -2021,6 +2046,9 @@ class MatchSession(
             peers.filter { it !in helloSent }.forEach { peer ->
                 // sofort abgleichen (nicht erst im 30-s-Takt): Hello, eigener Stand, unbestätigte Events direkt nachschieben
                 sendHello(peer)
+                // P2-1: mit Konto erst nach der Aushandlung (onHello schiebt Löschungen, Summary, Kopf und Rückstand nach);
+                // der Link garantiert keine Reihenfolge, eine v3-Gegenstelle übernähme sonst, was vor ihrem Hello ankommt
+                if (data.accountIdentities.managed) return@forEach
                 sendDeleted(peer)
                 send(peer, summaryOf(summaryMatches(), reply = false))
                 pushBacklog(peer)
@@ -2338,6 +2366,9 @@ class MatchSession(
         callback: SendCallback? = null,
     ) {
         if (!started) return
+        // P2-1: mit Konto und V4 nur an ausgehandelt kompatible ≥ 4 (Kommandos, Takt, Antworten); ohne Aushandlung liefe es
+        // ungestempelt über 3
+        if (message !is Hello && requiresFour(peer)) return
         val envelope = if (data.accountIdentities.managed && message !is Hello) pairing.envelope(peer) ?: return else null
         var routed = route(peer, message) ?: return
         if (data.accountIdentities.managed && routed is Deleted) {
@@ -2366,6 +2397,10 @@ class MatchSession(
      */
     private fun minVersion(): Int =
         if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
+
+    /** Mit Konto und V4 zählt nur ein ausgehandeltes ≥ 4 ([minVersion]); fehlt es, geht außer `Hello` nichts hin oder her. */
+    private fun requiresFour(peer: String): Boolean =
+        data.accountIdentities.managed && config.protocolVersions.last >= 4 && version(peer) < 4
 
     /** Ausgehandelte Version mit [peer] (0 = unbekannt). */
     private fun version(peer: String): Int = compatibility[peer]?.version ?: 0

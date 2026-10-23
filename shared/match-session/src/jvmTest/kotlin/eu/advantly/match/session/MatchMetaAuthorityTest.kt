@@ -94,9 +94,49 @@ class MatchMetaAuthorityTest {
 
         // Match eines fremden Kontos (geteilt, MEMBER): nie
         val bob = PlayerId("bob-self")
-        val shared = foreignOwnMatch(pair, MatchId("0199c82c-0000-7000-8000-00000000b002"), Lineup(listOf(bob), listOf(slot), bob))
+        val shared =
+            foreignOwnMatch(
+                pair,
+                MatchId("0199c82c-0000-7000-8000-00000000b002"),
+                Lineup(listOf(bob), listOf(slot), bob),
+                serverCreator = "bob",
+            )
         assertFalse(pair.phone.canAssignPlayer(shared), "fremdes Konto")
         assertEquals(PlayerAssignmentFailure.NOT_OWNER, pair.phone.assignmentFailure(shared, slot, guest))
+    }
+
+    /**
+     * P2-2 (Review r2, Probe F): Die Kontobindung hängt am Match (eigene Genesis-Quelle oder serverseitig `created_by` =
+     * eigenes Profil), nie am `createdBy` im Payload. Ein geteiltes Match eines fremden Kontos mit gefälschtem bzw. fehlendem
+     * Payload-Ersteller (Alt-Payload, Besitzer vorn) bleibt gesperrt – der Server wiese die Zuweisung ab (`assignment_forbidden`),
+     * und der Upload hinge dauerhaft auf BLOCKED. Ohne Server-Ersteller im Snapshot: lieber ablehnen.
+     */
+    @Test
+    fun aForeignMatchNeverBecomesOwnByItsPayloadCreator() {
+        val pair = managed()
+        pair.phoneData.players.addGuest(guest, "Bea", 0)
+        val self =
+            pair.phoneData.players
+                .self()!!
+                .id
+        val cases =
+            mapOf(
+                "gefälschtes createdBy" to (self to "bob"),
+                "Alt-Payload ohne createdBy" to (null to "bob"),
+                "kein Server-Ersteller" to (self to null),
+            )
+        cases.entries.forEachIndexed { i, (case, creators) ->
+            val match =
+                foreignOwnMatch(
+                    pair,
+                    MatchId("0199c82c-0000-7000-8000-00000000c00$i"),
+                    createdBy = creators.first,
+                    serverCreator = creators.second,
+                )
+            assertTrue(pair.phoneData.isSelf(pair.phoneData.matchCreator(match)!!), "$case: Payload zeigt auf den Besitzer")
+            assertEquals(PlayerAssignmentFailure.NOT_OWNER, pair.phone.assignmentFailure(match, slot, guest), case)
+            assertFalse(pair.phone.assignPlayer(match, slot, guest), case)
+        }
     }
 
     /**
@@ -221,20 +261,24 @@ class MatchMetaAuthorityTest {
     }
 
     /**
-     * Match eines anderen Handys („phone-b“) über Katalog und Event-Download am Handy; Ersteller ist der erste Spieler von
-     * [lineup] (Standard: der Besitzer selbst).
+     * Match eines anderen Handys („phone-b“) über Katalog und Event-Download am Handy. Im Payload steht [createdBy]
+     * (Standard: erster Spieler von [lineup], hier der Besitzer selbst), im Server-Snapshot [serverCreator] (`created_by`).
      */
     private fun foreignOwnMatch(
         pair: LifecyclePair,
         match: MatchId = MatchId("0199c82c-0000-7000-8000-00000000b001"),
         lineup: Lineup = pair.selfLineup(),
+        createdBy: PlayerId? = lineup.a.first(),
+        serverCreator: String? = "alice",
     ): MatchId {
         val data = pair.phoneData
         val record = MatchRecord(match, format, lineup, MatchMeta(), 1, 1, MatchStatus.IN_PROGRESS, ScoreSummary.EMPTY, null)
         val run = data.cloudPulls.beginRun("alice") {}.runSerial
         val page =
             CloudPullMetadataPage(
-                listOf(CloudPullMatch(match.value, 1, "{}", "member", 1, 0, false, record)),
+                listOf(
+                    CloudPullMatch(match.value, 1, serverCreator?.let { "{\"createdBy\":\"$it\"}" } ?: "{}", "member", 1, 0, false, record),
+                ),
                 emptyList(),
                 emptyList(),
                 1,
@@ -252,7 +296,7 @@ class MatchMetaAuthorityTest {
                 1,
                 1,
                 null,
-                MatchCreated(format, lineup, createdBy = lineup.a.first()),
+                MatchCreated(format, lineup, createdBy = createdBy),
             )
         data.cloud.storeDownloaded(listOf(genesis.stored()))
         return match
