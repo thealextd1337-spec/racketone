@@ -473,5 +473,6 @@ jobs:
         if: always()
         run: |
           if [ -f "$RUNNER_TEMP/export-functions.pid" ]; then kill "$(cat "$RUNNER_TEMP/export-functions.pid")" 2>/dev/null || true; fi
-          supabase stop --no-backup
+          # Aufräumen darf den Job nicht scheitern lassen; der Runner wird ohnehin verworfen.
+          supabase stop --no-backup || echo "::warning::supabase stop fehlgeschlagen"
           rm -f supabase/functions/.env
