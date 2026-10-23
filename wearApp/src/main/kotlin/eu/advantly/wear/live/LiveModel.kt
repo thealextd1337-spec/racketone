@@ -45,6 +45,9 @@ sealed interface SyncUi {
     /** Zähler: alles bestätigt, aber gerade keine Gegenstelle („nur lokal“). */
     data object LocalOnly : SyncUi
 
+    /** Zähler: eigener Lifecycle-Rückstand darf derzeit nicht zugestellt werden („Sync blockiert“). */
+    data object Blocked : SyncUi
+
     /** Zähler: [count] Events noch bei keiner Gegenstelle („N ausstehend“). */
     data class Pending(
         val count: Int,
@@ -278,11 +281,9 @@ object LiveModel {
         if (role == LiveRole.SCORER) {
             val connected = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
             return when {
-                // Lifecycle-Rückstand zählt mit; ein blockierter Rückstand ohne Zahl gilt als einer
-                !sync.settled -> SyncUi.Pending((sync.pendingToPeers + sync.lifecyclePendingToPeers).coerceAtLeast(1))
-
+                sync.lifecycleBlocked -> SyncUi.Blocked
+                !sync.settled -> SyncUi.Pending(sync.pendingToPeers + sync.lifecyclePendingToPeers)
                 connected -> SyncUi.Synced
-
                 else -> SyncUi.LocalOnly
             }
         }

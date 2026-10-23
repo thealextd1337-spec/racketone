@@ -75,6 +75,7 @@
         <item quantity="other">%1$d ausstehend</item>
     </plurals>
     <string name="sync_local">Nur lokal</string>
+    <string name="sync_blocked">Sync blockiert</string>
     <string name="sync_live">Live</string>
     <string name="sync_ago_seconds">vor %1$d s</string>
     <string name="sync_ago_minutes">vor %1$d min</string>
