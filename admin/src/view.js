@@ -105,6 +105,12 @@ function formatDate(value, language) {
   return date.toLocaleString(locale(language), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+// Widerrufenes Gerät ohne Modell: Art, Plattform und ID genügen zum Abgleich mit der Meldung.
+function deviceLabel(language, device) {
+  const kind = [device.kind, device.platform].filter(Boolean).join(" \u00b7 ") || translate(language, "accountDeviceUnknown");
+  return `${kind} \u00b7 ${device.deviceId}`;
+}
+
 function formatDay(value, language) {
   const date = new Date(`${value}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return "";
@@ -158,7 +164,9 @@ export class AdminView {
       else if (target.dataset.action === "workspace") this.emit("workspace", { value: target.dataset.workspace });
       else if (target.dataset.action === "account-action") {
         const field = (name) => this.app.querySelector(`[data-account-field="${name}"]`)?.value ?? "";
-        this.emit("account-action", { action: target.dataset.accountAction, fields: { reason: field("reason"), ticketId: field("ticketId") } });
+        const fields = { reason: field("reason"), ticketId: field("ticketId") };
+        if (target.dataset.deviceId) fields.deviceId = target.dataset.deviceId;
+        this.emit("account-action", { action: target.dataset.accountAction, fields });
       }
       else this.emit(target.dataset.action);
     };
@@ -472,6 +480,7 @@ export class AdminView {
       item("accountEarliestPurge", formatDate(account.earliestPurgeAt, language));
     }
     item("accountDevices", String(account.activeDevices ?? 0));
+    item("accountRevokedDevices", (account.revokedDevices ?? []).map((device) => deviceLabel(language, device)).join("; "));
     item("accountLastActivity", account.lastActivityDay ? formatDay(account.lastActivityDay, language) : "");
     const versions = account.consentVersions ?? {};
     item("accountConsent", `${account.consentStatus ?? ""} \u00b7 ${translate(language, "accountTerms")} ${versions.TERMS ?? "\u2014"} \u00b7 ${translate(language, "accountPrivacy")} ${versions.PRIVACY ?? "\u2014"}`);
@@ -488,23 +497,43 @@ export class AdminView {
     reason.dataset.accountField = "reason";
     form.append(addFieldLabel(translate(language, "updateReason"), reason), node("p", "field-hint", translate(language, "updateReasonHint")));
     const buttons = node("div", "form-actions");
-    const button = (action, key, style = "button button--quiet") => {
+    const button = (action, key, style = "button button--quiet", parent = buttons) => {
       const element = node("button", style, translate(language, state.accountSaving ? "saving" : key));
       element.type = "button"; element.dataset.action = "account-action"; element.dataset.accountAction = action;
       element.disabled = state.accountSaving;
-      buttons.append(element);
+      parent.append(element);
+      return element;
+    };
+    const ticketField = (labelKey, hintKey) => {
+      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "accountTicketPlaceholder"), name: "ticketId", focusKey: "account-ticket", required: true, maxLength: 36 });
+      ticket.dataset.accountField = "ticketId"; ticket.autocapitalize = "none"; ticket.spellcheck = false;
+      form.append(addFieldLabel(translate(language, labelKey), ticket), node("p", "field-hint", translate(language, hintKey)));
     };
     if (account.status !== "deleting") {
       button(account.suspended ? "unsuspend" : "suspend", account.suspended ? "accountUnsuspend" : "accountSuspend", "button button--accent");
       button("revoke", "accountRevoke");
     }
     if (account.canCancelDeletion) {
-      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "accountTicketPlaceholder"), name: "ticketId", focusKey: "account-ticket", required: true, maxLength: 36 });
-      ticket.dataset.accountField = "ticketId"; ticket.autocapitalize = "none"; ticket.spellcheck = false;
-      form.append(addFieldLabel(translate(language, "accountTicket"), ticket), node("p", "field-hint", translate(language, "accountCancelDeletionHint")));
+      ticketField("accountTicket", "accountCancelDeletionHint");
       button("cancel-deletion", "accountCancelDeletion");
     }
     form.append(buttons);
+    // K4-U: Freigabe je widerrufenem Gerät; gesperrte Konten und Konten in Löschung lehnt auch der Server ab.
+    const revoked = account.revokedDevices ?? [];
+    if (revoked.length && account.status !== "deleting") {
+      form.append(node("h3", "section-title", translate(language, "accountRevokedDevices")));
+      if (account.suspended || account.status === "deletion_requested") {
+        form.append(node("p", "field-hint", translate(language, "accountUnrevokeUnavailable")));
+      } else {
+        ticketField("accountUnrevokeTicket", "accountUnrevokeHint");
+        for (const device of revoked) {
+          const row = node("div", "form-actions");
+          row.append(node("p", "field-hint", `${deviceLabel(language, device)} \u00b7 ${formatDate(device.revokedAt, language)}`));
+          button("unrevoke", "accountUnrevoke", "button button--quiet", row).dataset.deviceId = device.deviceId;
+          form.append(row);
+        }
+      }
+    }
     return form;
   }
 
@@ -813,11 +842,12 @@ export class AdminView {
   }
 
   // Vor jeder zustandsändernden Kontoaktion: Aktion, Zielkonto und Begründung nennen.
-  showAccountConfirmation({ actionKey, alias, profileId, reason }) {
+  showAccountConfirmation({ actionKey, alias, profileId, reason, device }) {
     const language = this.currentLanguage ?? "en";
     const text = (selector, value) => { const element = this.accountDialog?.querySelector(selector); if (element) element.textContent = value; };
     text("#account-confirm-title", translate(language, "accountConfirmTitle"));
-    text("#account-confirm-copy", `${translate(language, actionKey)} · ${translate(language, "accountConfirmTarget")} ${alias || "—"} (${profileId})`);
+    const target = `${translate(language, actionKey)} · ${translate(language, "accountConfirmTarget")} ${alias || "—"} (${profileId})`;
+    text("#account-confirm-copy", device ? `${target} · ${translate(language, "accountConfirmDevice")} ${deviceLabel(language, device)}` : target);
     text("#account-confirm-preview", reason ?? "");
     text("#account-cancel", translate(language, "cancel"));
     text("#account-accept", translate(language, actionKey));

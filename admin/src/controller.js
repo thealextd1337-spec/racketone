@@ -8,7 +8,7 @@ import {
   validateMessage,
 } from "./domain.js";
 
-const ACCOUNT_ACTION_LABELS = { suspend: "accountSuspend", unsuspend: "accountUnsuspend", revoke: "accountRevoke", "cancel-deletion": "accountCancelDeletion" };
+const ACCOUNT_ACTION_LABELS = { suspend: "accountSuspend", unsuspend: "accountUnsuspend", revoke: "accountRevoke", "cancel-deletion": "accountCancelDeletion", unrevoke: "accountUnrevoke" };
 
 function messageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -85,6 +85,15 @@ function noticeForError(error, fallback = "genericError") {
     case "deletion_ticket_stale": return "accountTicketStale";
     case "deletion_ticket_evidence_required": return "accountTicketEvidence";
     case "no_deletion_pending": return "accountNoDeletionPending";
+    case "account-device-ticket-required":
+    case "device_ticket_required": return "accountDeviceTicketRequired";
+    case "device_ticket_invalid": return "accountTicketMismatch";
+    case "device_ticket_stale": return "accountDeviceTicketStale";
+    case "device_ticket_evidence_required": return "accountTicketEvidence";
+    case "device_not_found": return "accountDeviceNotFound";
+    case "device_not_revoked": return "accountDeviceNotRevoked";
+    case "account_suspended": return "accountUnrevokeSuspended";
+    case "account_deletion_pending": return "accountUnrevokeDeletionPending";
     default: return fallback;
   }
 }
@@ -768,8 +777,9 @@ export class AdminController {
       return;
     }
     this.state.accountConfirmation = operation;
+    const device = this.state.account.revokedDevices?.find((item) => item.deviceId === operation.args.p_device_id);
     this.view.showAccountConfirmation?.({ actionKey: ACCOUNT_ACTION_LABELS[action], alias: this.state.account.alias,
-      profileId: operation.args.p_profile_id, reason: operation.args.p_reason });
+      profileId: operation.args.p_profile_id, reason: operation.args.p_reason, ...(device ? { device } : {}) });
   }
 
   cancelAccountAction() {

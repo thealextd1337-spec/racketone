@@ -8,6 +8,8 @@ import { AdminView } from "../src/view.js";
 
 const accountId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ticketId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const phoneId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const revokedPhone = { deviceId: phoneId, kind: "phone", platform: "android", revokedAt: "2026-10-24T08:00:00Z" };
 
 function account(overrides = {}) {
   return {
@@ -63,6 +65,18 @@ test("account query and actions are validated before any request", () => {
     { rpc: "admin_account_revoke_devices", args: { p_profile_id: accountId, p_reason: "Lost phone" } });
   assert.deepEqual(buildAccountAction(account(), "cancel-deletion", { reason: "User asked", ticketId: ` ${ticketId} ` }),
     { rpc: "admin_account_cancel_deletion", args: { p_profile_id: accountId, p_reason: "User asked", p_ticket_id: ticketId } });
+  const withRevoked = account({ revokedDevices: [revokedPhone] });
+  assert.equal(code(() => buildAccountAction(withRevoked, "unrevoke", { reason: "Phone back", deviceId: phoneId })),
+    "account-device-ticket-required");
+  assert.equal(code(() => buildAccountAction(withRevoked, "unrevoke", { reason: "Phone back", ticketId: "123", deviceId: phoneId })),
+    "account-ticket-invalid");
+  assert.equal(code(() => buildAccountAction(withRevoked, "unrevoke", { reason: "Phone back", ticketId, deviceId: accountId })),
+    "support_invalid", "only a device the server reported as revoked");
+  assert.equal(code(() => buildAccountAction(account(), "unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId })),
+    "support_invalid");
+  assert.deepEqual(buildAccountAction(withRevoked, "unrevoke", { reason: " Phone back ", ticketId, deviceId: phoneId }),
+    { rpc: "admin_account_unrevoke_device",
+      args: { p_profile_id: accountId, p_reason: "Phone back", p_ticket_id: ticketId, p_device_id: phoneId } });
 });
 
 test("API sends only the account RPCs and maps their stable server errors", async () => {
@@ -79,7 +93,9 @@ test("API sends only the account RPCs and maps their stable server errors", asyn
     (error) => error.code === "support_admin_required");
   assert.throws(() => api.accountAction({ rpc: "admin_support_update", args: {} }), (error) => error.code === "support_invalid");
   for (const code of ["account_not_found", "account_ambiguous", "no_deletion_pending", "deletion_ticket_required",
-    "deletion_ticket_invalid", "deletion_ticket_stale", "deletion_ticket_evidence_required"]) {
+    "deletion_ticket_invalid", "deletion_ticket_stale", "deletion_ticket_evidence_required", "device_ticket_required",
+    "device_ticket_invalid", "device_ticket_stale", "device_ticket_evidence_required", "device_not_found", "device_not_revoked",
+    "account_suspended", "account_deletion_pending"]) {
     const failing = createSupportApi({ async rpc() { return { error: { message: code } }; } });
     await assert.rejects(failing.lookupAccount("x"), (error) => error.code === code);
   }
@@ -165,6 +181,34 @@ test("a running account action keeps its account, so the saved result is shown a
   assert.equal(controller.state.account.activeDevices, 0);
 });
 
+test("restoring a device asks with action, account and device, then shows the server's refusal", async () => {
+  const actions = [];
+  const { controller, view } = await unlocked({
+    async lookupAccount() { return { viewerRole: "admin", account: account({ revokedDevices: [revokedPhone] }) }; },
+    async accountAction(operation) {
+      actions.push(operation);
+      if (actions.length === 1) throw new SupportError("device_ticket_stale");
+      return account({ revokedDevices: [] });
+    },
+  });
+  controller.setWorkspace("accounts");
+  await controller.searchAccount("Alex");
+  controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId: "", deviceId: phoneId });
+  assert.equal(controller.state.accountNotice, "accountDeviceTicketRequired");
+  assert.equal(view.confirmations.length, 0, "no confirmation without a ticket");
+  controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId });
+  assert.deepEqual(view.confirmations.at(-1), { actionKey: "accountUnrevoke", alias: "Alex", profileId: accountId,
+    reason: "Phone back", device: revokedPhone }, "confirmation names action, account and device");
+  assert.equal(actions.length, 0, "nothing is sent before the confirmation");
+  await controller.confirmAccountAction();
+  assert.equal(controller.state.accountNotice, "accountDeviceTicketStale");
+  controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId });
+  await controller.confirmAccountAction();
+  assert.deepEqual(actions.at(-1).args, { p_profile_id: accountId, p_reason: "Phone back", p_ticket_id: ticketId, p_device_id: phoneId });
+  assert.equal(controller.state.accountNotice, "accountActionSaved");
+  assert.deepEqual(controller.state.account.revokedDevices, []);
+});
+
 test("a new lookup drops an open confirmation, so no action reaches another account", async () => {
   const actions = [];
   const { controller, view } = await unlocked({
@@ -215,6 +259,23 @@ test("accounts workspace shows actions only to admins and labels everything in b
 
       const deleting = descendants(view.renderAccounts({ ...base, viewerRole: "admin", account: account({ status: "deleting" }) }));
       assert.deepEqual(deleting.filter((element) => element.dataset.action === "account-action"), [], "no actions on an account being deleted");
+
+      const revoked = descendants(view.renderAccounts({ ...base, viewerRole: "admin", account: account({ revokedDevices: [revokedPhone] }) }));
+      const restore = revoked.filter((element) => element.dataset.accountAction === "unrevoke");
+      assert.equal(restore.length, 1, "one restore button per revoked device");
+      assert.equal(restore[0].dataset.deviceId, phoneId);
+      assert.equal(restore[0].type, "button");
+      assert.equal(restore[0].textContent, translate(language, "accountUnrevoke"));
+      assert.equal(revoked.filter((element) => element.name === "ticketId").length, 1);
+      assert.ok(revoked.some((element) => element.textContent === translate(language, "accountUnrevokeHint")));
+      assert.ok(revoked.some((element) => (element.textContent ?? "").includes(`phone · android · ${phoneId}`)), "device shown");
+      for (const blocked of [{ suspended: true }, { status: "deletion_requested", canCancelDeletion: true }]) {
+        const unavailable = descendants(view.renderAccounts({ ...base, viewerRole: "admin",
+          account: account({ revokedDevices: [revokedPhone], ...blocked }) }));
+        assert.ok(!unavailable.some((element) => element.dataset.accountAction === "unrevoke"), "no restore when the server refuses");
+        assert.ok(unavailable.some((element) => element.textContent === translate(language, "accountUnrevokeUnavailable")));
+        assert.ok(unavailable.filter((element) => element.name === "ticketId").length <= 1);
+      }
     }
   } finally {
     if (previous === undefined) delete globalThis.document;
@@ -233,7 +294,9 @@ test("an action button emits exactly its own action with the typed fields", () =
     const emitted = [];
     view.on("account-action", (payload) => emitted.push(payload));
     handlers.click({ target: { closest: () => ({ dataset: { action: "account-action", accountAction: "cancel-deletion" } }) } });
-    assert.deepEqual(emitted, [{ action: "cancel-deletion", fields: { reason: " Lost phone ", ticketId } }]);
+    handlers.click({ target: { closest: () => ({ dataset: { action: "account-action", accountAction: "unrevoke", deviceId: phoneId } }) } });
+    assert.deepEqual(emitted, [{ action: "cancel-deletion", fields: { reason: " Lost phone ", ticketId } },
+      { action: "unrevoke", fields: { reason: " Lost phone ", ticketId, deviceId: phoneId } }]);
   } finally {
     if (previous === undefined) delete globalThis.document;
     else globalThis.document = previous;
@@ -249,7 +312,10 @@ test("every account text exists in German and English", () => {
     "accountAdminRequired", "accountNotFound", "accountAmbiguous", "accountQueryRequired", "accountTicketInvalid",
     "accountNoDeletionPending", "accountTicketPlaceholder", "accountTicketRequired", "accountTicketMismatch", "accountTicketStale",
     "accountTicketEvidence", "accountConfirmTitle", "accountConfirmTarget", "accountStatusOnboarding", "accountStatusActive", "accountStatusDeletionRequested",
-    "accountStatusDeleting"];
+    "accountStatusDeleting", "accountRevokedDevices", "accountUnrevoke", "accountUnrevokeTicket", "accountUnrevokeHint",
+    "accountUnrevokeUnavailable", "accountConfirmDevice", "accountDeviceUnknown", "accountDeviceTicketRequired",
+    "accountDeviceTicketStale", "accountDeviceNotFound", "accountDeviceNotRevoked", "accountUnrevokeSuspended",
+    "accountUnrevokeDeletionPending"];
   for (const key of keys) {
     assert.notEqual(translate("en", key), key, `en ${key}`);
     assert.notEqual(translate("de", key), translate("en", key) === "Alias" ? "" : translate("en", key), `de ${key}`);
