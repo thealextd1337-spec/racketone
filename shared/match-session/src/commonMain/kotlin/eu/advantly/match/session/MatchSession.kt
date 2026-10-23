@@ -40,6 +40,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AdoptionSource
 import eu.advantly.data.AppendResult
+import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalAccountOwnership
@@ -97,6 +98,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
@@ -704,17 +707,33 @@ class MatchSession(
     }
 
     /**
-     * P3-C (E6, Variante a, gelockert in W3 Runde 3): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
-     * Handy desselben Kontos die Teilnehmer (lokal im aktuellen Scope, wie die Kontoregel von D-2) – auch ein neu
-     * installiertes in älteren eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches, fremde
-     * Konten nie ([canAssignPlayer] prüft den Ersteller). Der Belegverlust am Kopf der Genesis-Quelle heilt mit deren
-     * nächstem Upload.
+     * P3-C (E6, Variante a, gelockert in W3 Runde 3/4): Mit Konto und Protokoll 4 ändern die Genesis-Quelle und jedes eigene
+     * Handy die Teilnehmer, aber nur in Matches dieses Kontos ([ownedMatch]) – auch ein neu installiertes Handy in älteren
+     * eigenen Matches und das Handy der eigenen Uhr. Uhren nur in ihren eigenen Matches. Der Belegverlust am Kopf der
+     * Genesis-Quelle heilt mit deren nächstem Upload.
      */
     private fun participantAuthority(matchId: MatchId): Boolean {
         if (!data.accountIdentities.managed || config.protocolVersions.last < 4) return true
         val source = genesisOf(matchId)?.deviceId ?: return false
-        return source == deviceId ||
-            (config.kind == PeerKind.PHONE && data.accountIdentities.sourceScope(deviceId.value) == data.accountIdentities.scope)
+        return source == deviceId || (config.kind == PeerKind.PHONE && ownedMatch(matchId, source))
+    }
+
+    /**
+     * Das Match gehört dem aktuellen Konto: Genesis aus einer eigenen Quelle (lokal im Scope oder per `cloud_device_owner`
+     * gebunden, wie D-2) oder laut Pull serverseitig vom eigenen Profil erstellt – genau die Bedingung, unter der `push_event`
+     * ein `PlayerAssigned` annimmt. Das `createdBy` im Payload belegt nichts (kommt vom Ersteller).
+     */
+    private fun ownedMatch(
+        matchId: MatchId,
+        source: DeviceId,
+    ): Boolean {
+        if (source.value in data.accountIdentities.currentSources()) return true
+        val profile = data.accountIdentities.profile ?: return false
+        val pulled = data.cloudPulls.snapshot(profile, CloudPullEntityKind.MATCH, matchId.value) ?: return false
+        // shortcut: liest `createdBy` roh aus dem Server-Snapshot, gegen eine Data-Abfrage tauschen, sobald Data sie anbietet
+        val createdBy =
+            runCatching { (Json.parseToJsonElement(pulled.json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
+        return createdBy?.isString == true && createdBy.content == profile
     }
 
     fun assignmentFailure(
