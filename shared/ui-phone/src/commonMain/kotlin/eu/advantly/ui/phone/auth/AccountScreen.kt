@@ -241,8 +241,9 @@ fun AccountScreen(
                 }
             }
             if (state.authenticated) {
-                model.upload?.let { CloudUploadSection(it) }
-                model.pull?.let { CloudPullSection(it) }
+                model.sync?.let { CloudSyncSection(it) }
+                model.upload?.let { CloudUploadSection(it, manual = model.sync == null) }
+                model.pull?.let { CloudPullSection(it, manual = model.sync == null) }
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(
