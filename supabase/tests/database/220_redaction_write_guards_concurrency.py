@@ -376,22 +376,36 @@ def main():
                           "values(%s,%s,%s,1,1,1,'PlayerAssigned',%s)",
                           (event, match, creator[3], json.dumps({"player": {"id": str(guest), "displayName": "Kim"}})))
             batch = {"players": [{"id": str(guest), "kind": "self", "displayName": "Outsider"}]}
+
+            def redactions():
+                return [owner.execute("select count(*) from private." + table + " where player_id=%s", (guest,)).fetchone()[0]
+                        for table in ("redacted_player_identities", "player_write_redactions", "match_redacted_players")]
+
             with owner.transaction():
                 owner.execute("delete from auth.users where id=%s", (creator[0],))
                 expected = state(survivor, match)
-                pending = pool.submit(push, rpc, outsider, batch)
+                # Nutzerentscheid 23.10.2026: Kim ist ein eigener Gast des Erstellers und wird mit ihm stillgelegt. Der
+                # Push ohne Beleg berührt danach eine gesperrte ID und scheitert nach dem Lock-Wait fail-closed.
+                pending = pool.submit(push, rpc, outsider, batch, ("40001", "restart_required"))
                 blocked(pending, owner.info.backend_pid, client.info.backend_pid)
-            result = pending.result(timeout=10)
-            assert result["players"][0]["reason"] == "player_identity_conflict", result
+            assert pending.result(timeout=10) is None
             assert state(survivor, match) == expected
+            # Auch der Neuversuch mit frischem Beleg übernimmt die ID nie.
+            generation = owner.execute("select visibility_epoch from public.profile_settings where profile_id=%s",
+                                       (outsider[0],)).fetchone()[0]
+            result = push(rpc, outsider, {**batch, "lifecycle": {"generation": generation, "redactionEpochs": {}}})
+            assert result["players"][0]["reason"] in ("player_redacted", "player_identity_conflict"), result
+            assert owner.execute("select count(*) from public.players where id=%s", (guest,)).fetchone()[0] == 0
             assert owner.execute("select count(*) from private.deleted_player_identities where player_id=%s", (guest,)).fetchone()[0] == 1
+            assert state(survivor, match) == expected
+            assert owner.execute("select payload#>>'{player,displayName}',redacted_at is not null from public.match_events "
+                                 "where id=%s", (event,)).fetchone() == ("Gelöschter Spieler", True)
+            assert redactions() == [1, 1, 1], redactions()
             owner.execute("delete from auth.users where id=%s", (outsider[0],))
             assert state(survivor, match) == expected, "Fremde Loeschung vergiftet uebernommenes Match"
-            assert owner.execute("select payload#>>'{player,displayName}',redacted_at from public.match_events where id=%s",
-                                 (event,)).fetchone() == ("Kim", None)
-            for table in ("redacted_player_identities", "player_write_redactions", "match_redacted_players"):
-                assert owner.execute("select count(*) from private." + table + " where player_id=%s", (guest,)).fetchone()[0] == 0
-            print("PASS proven delete/reuse lock-wait; outsider rejected, surviving guest unchanged:", rpc)
+            assert redactions() == [1, 1, 1], "Fremde Loeschung aendert die Belege des uebernommenen Matches"
+            print("PASS proven delete/reuse lock-wait; outsider fail-closed and rejected on retry, handed-over match "
+                  "redacted once and untouched by unrelated deletion:", rpc)
 
         def conflicting_context_race(rpc, text_slot=False):
             caller, deleted, living = new_user(), new_user(), new_user()
