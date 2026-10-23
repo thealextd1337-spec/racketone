@@ -24,6 +24,17 @@ begin
 end;
 $$;
 grant execute on function pg_temp.operator(text, text) to authenticated;
+-- Erwartete Erfolge: Ein Fehler (etwa nach einer Mutation) wird zum lesbaren Fehlschlag statt die Datei abzubrechen.
+create function pg_temp.try(p_query text) returns text language plpgsql as $$
+declare v_result text;
+begin
+  execute p_query into v_result;
+  return v_result;
+exception when others then
+  return 'ERROR: ' || sqlerrm;
+end;
+$$;
+grant execute on function pg_temp.try(text) to authenticated;
 
 -- Rechte: nur RPCs, keine Tabellen oder Helfer.
 select ok(not has_table_privilege('authenticated', 'private.account_suspensions', 'SELECT'), 'Keine direkte Sperrtabelle');
@@ -57,6 +68,10 @@ select throws_ok($$select public.admin_account_lookup('Same Alias')$$, 'P0001', 
 select throws_ok($$select public.admin_account_lookup('   ')$$, 'P0001', 'support_invalid', 'Leere Suche');
 select throws_ok($$select public.admin_account_lookup(repeat('x', 121))$$, 'P0001', 'support_invalid', 'Zu lange Suche');
 select is(public.admin_account_lookup('K5_Target')->>'viewerRole', 'support', 'Rolle für die Oberfläche');
+select throws_ok($$select public.admin_account_lookup(tests.uid('k5_support')::text)$$, 'P0001', 'account_not_found',
+  'Eigenes Konto per UUID nicht auffindbar');
+select throws_ok($$select public.admin_account_lookup('K5_Support')$$, 'P0001', 'account_not_found',
+  'Eigenes Konto per Alias nicht auffindbar');
 select is((select array_agg(k order by k) from jsonb_object_keys(public.admin_account_lookup('K5_Target')->'account') k),
   array['activeDevices','alias','canCancelDeletion','consentStatus','consentVersions','deletionRequestedAt',
     'earliestPurgeAt','lastActivityDay','profileId','status','suspended','suspendedAt'],
@@ -73,33 +88,34 @@ select is(current_setting('tests.k5_day'), (select to_char(greatest(max(d.last_s
   where d.profile_id = tests.uid('k5_target')), 'Letzte Aktivität nur auf den Tag genau');
 select pg_temp.operator('k5_support');
 
--- Zustandsändernde Aktionen: nur admin, AAL2, Begründung.
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, 'Missbrauch gemeldet')$$,
+-- Zustandsändernde Aktionen: nur admin, AAL2, Begründung. Ziel ist ein Nebenkonto: Lässt eine Mutation eine Aktion
+-- durch, bleibt das als einzelner Fehlschlag sichtbar und bricht den Ablauf am Zielkonto nicht ab.
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, 'Missbrauch gemeldet')$$,
   'P0001', 'support_admin_required', 'support darf nicht sperren');
-select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_target'), 'Gerät verloren')$$,
+select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_friend'), 'Gerät verloren')$$,
   'P0001', 'support_admin_required', 'support darf keine Geräte widerrufen');
-select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, 'Nutzerwunsch')$$,
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_friend'), gen_random_uuid(), 'Nutzerwunsch')$$,
   'P0001', 'support_admin_required', 'support darf keine Löschung zurücknehmen');
 select pg_temp.operator('k5_admin', 'aal1');
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, 'Missbrauch gemeldet')$$,
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, 'Missbrauch gemeldet')$$,
   'P0001', 'support_mfa_required', 'admin ohne AAL2 sperrt nicht');
-select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_target'), 'Gerät verloren')$$,
+select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_friend'), 'Gerät verloren')$$,
   'P0001', 'support_mfa_required', 'admin ohne AAL2 widerruft nicht');
-select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, 'Nutzerwunsch')$$,
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_friend'), gen_random_uuid(), 'Nutzerwunsch')$$,
   'P0001', 'support_mfa_required', 'admin ohne AAL2 nimmt nicht zurück');
 select pg_temp.operator('k5_revoked');
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, 'Missbrauch gemeldet')$$,
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, 'Missbrauch gemeldet')$$,
   'P0001', 'support_forbidden', 'Widerrufener admin sperrt nicht');
 select pg_temp.operator('k5_admin');
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, null)$$,
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, null)$$,
   'P0001', 'support_invalid', 'Sperre ohne Begründung');
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, ' ' || chr(160) || E'\t')$$,
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, ' ' || chr(160) || E'\t')$$,
   'P0001', 'support_invalid', 'Sperre mit leerer Begründung');
-select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_target'), true, repeat('x', 501))$$,
+select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, repeat('x', 501))$$,
   'P0001', 'support_invalid', 'Sperre mit zu langer Begründung');
-select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_target'), '')$$,
+select throws_ok($$select public.admin_account_revoke_devices(tests.uid('k5_friend'), '')$$,
   'P0001', 'support_invalid', 'Widerruf ohne Begründung');
-select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, null)$$,
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_friend'), gen_random_uuid(), null)$$,
   'P0001', 'support_invalid', 'Rücknahme ohne Begründung');
 select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_admin'), true, 'Selbsttest')$$,
   'P0001', 'support_invalid', 'Kein Eingriff ins eigene Konto');
@@ -120,8 +136,9 @@ select is((public.admin_account_set_suspended(tests.uid('k5_target'), true, 'Dop
 reset role;
 select is((select count(*)::int from ops.account_audit where target_id = tests.uid('k5_target')), 1,
   'Idempotentes Sperren schreibt ein Audit');
-select is((select array[action, reason, actor_id::text] from ops.account_audit where target_id = tests.uid('k5_target')),
-  array['account_suspend', 'Missbrauch laut Ticket', tests.uid('k5_admin')::text], 'Audit: Aktion, getrimmte Begründung, Akteur');
+select results_eq($$select action, reason, actor_id from ops.account_audit where target_id = tests.uid('k5_target')$$,
+  $$values ('account_suspend'::text, 'Missbrauch laut Ticket'::text, tests.uid('k5_admin'))$$,
+  'Audit: Aktion, getrimmte Begründung, Akteur');
 select ok(private.is_active(tests.uid('k5_target')), 'Sichtbarkeit für andere unverändert (kein G-Wechsel)');
 select tests.authenticate_as('k5_target');
 select throws_ok($$select public.cloud_sync_pull_v1(0, 1)$$, '42501', 'account_suspended', 'Gesperrt: Pull');
@@ -170,8 +187,9 @@ select is((public.admin_account_revoke_devices(tests.uid('k5_target'), 'Gerät g
 select is((public.admin_account_revoke_devices(tests.uid('k5_target'), 'Nochmals')->>'activeDevices')::int, 0,
   'Erneuter Widerruf idempotent');
 reset role;
-select is((select changes from ops.account_audit where target_id = tests.uid('k5_target') and action = 'account_revoke_devices'),
-  '{"devices":1,"installations":1,"sessions":1}'::jsonb, 'Audit zählt nur, ohne Gerätedetails');
+select is((select jsonb_agg(changes) from ops.account_audit
+    where target_id = tests.uid('k5_target') and action = 'account_revoke_devices'),
+  '[{"devices":1,"installations":1,"sessions":1}]'::jsonb, 'Audit zählt nur, ohne Gerätedetails');
 select is((select count(*)::int from ops.account_audit where target_id = tests.uid('k5_target') and action = 'account_revoke_devices'),
   1, 'Idempotenter Widerruf schreibt ein Audit');
 select ok((select bool_and(push_token is null and push_provider is null and revoked_at is not null) from public.devices
@@ -186,31 +204,46 @@ select throws_ok($$select public.bind_cloud_session_v1((select installation_id f
 select tests.authenticate_as('k5_twin');
 select lives_ok($$select public.cloud_sync_pull_v1(0, 1)$$, 'Fremdes Konto unberührt');
 
--- Löschrücknahme nur auf dokumentierten Nutzerwunsch; Token-Refresh/Login nimmt nichts zurück.
+-- Löschrücknahme nur mit Meldung nach dem Antrag (Zielkonto oder Gast mit Zuordnungsbeleg); Token-Refresh/Login
+-- nimmt nichts zurück.
 select tests.authenticate_as('k5_target');
-select is(public.submit_support('30000000-0000-4000-8000-000000000101', repeat('a', 64), 'feedback', 'Löschung zurück',
-  'Bitte Löschung zurücknehmen')->>'id', '30000000-0000-4000-8000-000000000101', 'Nutzerwunsch als Meldung');
+select is(public.submit_support('30000000-0000-4000-8000-000000000101', repeat('a', 64), 'bug', 'Alt', 'Zähler hängt')->>'id',
+  '30000000-0000-4000-8000-000000000101', 'Ältere, themenfremde Meldung');
 select tests.authenticate_as('k5_twin');
 select is(public.submit_support('30000000-0000-4000-8000-000000000102', repeat('b', 64), 'feedback', 'Fremd', 'Fremd')->>'id',
   '30000000-0000-4000-8000-000000000102', 'Fremde Meldung');
 select tests.authenticate_as('k5_target');
 select public.request_account_deletion();
 select is(public.my_auth_profile()->>'deletionRequested', 'true', 'Profilabruf (wie Token-Refresh/Login) nimmt nicht zurück');
+select is(public.submit_support('30000000-0000-4000-8000-000000000104', repeat('c', 64), 'feedback', 'Löschung zurück',
+  'Bitte Löschung zurücknehmen')->>'id', '30000000-0000-4000-8000-000000000104', 'Nutzerwunsch nach dem Antrag');
 reset role;
+-- In der Testtransaktion ist now() fest: Antrag und alte Meldung ausdrücklich in die Vergangenheit legen.
+update public.profile_settings set deletion_requested_at = now() - interval '1 hour' where profile_id = tests.uid('k5_target');
+update ops.support_tickets set created_at = now() - interval '2 hours' where id = '30000000-0000-4000-8000-000000000101';
+insert into ops.support_tickets(id, owner_id, receipt_hash, payload_hash, category, title, body)
+  values ('30000000-0000-4000-8000-000000000103', null, sha256('k5'), sha256('k5'), 'feedback', 'Gast', 'Löschung stoppen');
 select is((select status from public.profiles where id = tests.uid('k5_target')), 'deletion_requested', 'Löschung bleibt beantragt');
 select pg_temp.operator('k5_support');
 select is(public.admin_account_lookup('K5_Target')->'account'->>'canCancelDeletion', 'true', 'Status zeigt Rücknahmemöglichkeit');
 select is(public.admin_account_lookup('K5_Target')->'account'->>'status', 'deletion_requested', 'Status zeigt Löschantrag');
 select pg_temp.operator('k5_admin');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, 'Nutzerwunsch')$$,
+  'P0001', 'deletion_ticket_required', 'Ohne Meldung keine Rücknahme');
 select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000102',
-  'Nutzerwunsch')$$, 'P0001', 'support_invalid', 'Meldung eines anderen Kontos belegt nichts');
-select is(public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000101',
-  'Nutzerwunsch per Meldung')->>'status', 'active', 'admin nimmt Löschung zurück');
-select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, 'Nochmals')$$,
-  'P0001', 'no_deletion_pending', 'Keine zweite Rücknahme');
+  'Nutzerwunsch')$$, 'P0001', 'deletion_ticket_invalid', 'Meldung eines anderen Kontos belegt nichts');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-0000000001ff',
+  'Nutzerwunsch')$$, 'P0001', 'deletion_ticket_invalid', 'Unbekannte Meldung belegt nichts');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000101',
+  'Nutzerwunsch')$$, 'P0001', 'deletion_ticket_stale', 'Meldung von vor dem Antrag belegt nichts');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000103',
+  'Gastmeldung')$$, 'P0001', 'deletion_ticket_evidence_required', 'Gastmeldung ohne Zuordnungsbeleg');
+select is(pg_temp.try($$select public.admin_account_cancel_deletion(tests.uid('k5_target'),
+  '30000000-0000-4000-8000-000000000104', 'Nutzerwunsch per Meldung')->>'status'$$), 'active',
+  'admin nimmt Löschung mit eigener Meldung zurück');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000104',
+  'Nochmals')$$, 'P0001', 'no_deletion_pending', 'Keine zweite Rücknahme');
 reset role;
-select is((select changes from ops.account_audit where action = 'account_cancel_deletion'),
-  '{"ticket_id":"30000000-0000-4000-8000-000000000101"}'::jsonb, 'Audit verweist auf den Nutzerwunsch');
 select ok(not exists (select 1 from private.consent_deletion_origins where profile_id = tests.uid('k5_target'))
   and (select deletion_requested_at is null from public.profile_settings where profile_id = tests.uid('k5_target')),
   'Rücknahme räumt wie cancel_account_deletion auf');
@@ -220,34 +253,55 @@ select ok((select strpos(prosrc, 's.deletion_requested_at > clock_timestamp() - 
   'Gleiche UTC-Frist wie cancel_account_deletion');
 select tests.authenticate_as('k5_target');
 select public.request_account_deletion();
+select pg_temp.operator('k5_admin');
+select is(pg_temp.try($$select public.admin_account_cancel_deletion(tests.uid('k5_target'),
+  '30000000-0000-4000-8000-000000000103', '  Gastmeldung nennt Freundescode und Alias  ')->>'status'$$), 'active',
+  'Gastmeldung mit Zuordnungsbeleg genügt');
+reset role;
+select is((select jsonb_agg(changes order by id) from ops.account_audit where action = 'account_cancel_deletion'),
+  '[{"ticket_id":"30000000-0000-4000-8000-000000000104","ticket_kind":"account"},
+    {"ticket_id":"30000000-0000-4000-8000-000000000103","ticket_kind":"guest"}]'::jsonb, 'Audit verweist auf den Nutzerwunsch');
+select tests.authenticate_as('k5_target');
+select public.request_account_deletion();
 reset role;
 update public.profile_settings set deletion_requested_at = clock_timestamp() - interval '336 hours'
   where profile_id = tests.uid('k5_target');
 select pg_temp.operator('k5_admin');
-select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), null, 'Zu spät')$$,
-  'P0001', 'no_deletion_pending', 'Nach 14 Tagen keine Rücknahme');
+select throws_ok($$select public.admin_account_cancel_deletion(tests.uid('k5_target'), '30000000-0000-4000-8000-000000000103',
+  'Gastmeldung nennt Freundescode und Alias')$$, 'P0001', 'no_deletion_pending', 'Nach 14 Tagen keine Rücknahme');
 reset role;
 update public.profiles set status = 'deleting' where id = tests.uid('k5_friend');
 select pg_temp.operator('k5_admin');
 select throws_ok($$select public.admin_account_set_suspended(tests.uid('k5_friend'), true, 'Zu spät')$$,
   'P0001', 'account_not_found', 'Konto in Löschung ist kein Ziel');
 select pg_temp.operator('k5_support');
-select is(public.admin_account_lookup(tests.uid('k5_friend')::text)->'account'->>'status', 'deleting', 'Suche zeigt Löschung');
+select throws_ok($$select public.admin_account_lookup(tests.uid('k5_friend')::text)$$, 'P0001', 'account_not_found',
+  'Suche blendet Konto in Löschung aus');
+select is(pg_temp.try($$select public.admin_account_lookup('Same Alias')->'account'->>'profileId'$$), tests.uid('k5_twin')::text,
+  'Alias eines Kontos in Löschung macht die Suche nicht mehrdeutig');
 
--- Entkopplung: nach Löschung des Zielkontos weder Bezug noch Freitext.
+-- Entkopplung schon in Phase A wie beim Support-Audit: weder Zielbezug noch Freitext, Akteur eines gelöschten Admins weg.
 reset role;
-select is((select count(*)::int from ops.account_audit where target_id = tests.uid('k5_target')), 4, 'Vier Audits vor Löschung');
-delete from auth.users where id = tests.uid('k5_target');
-select is((select count(*)::int from ops.account_audit where target_id is null and reason is null), 4,
+select is((select count(*)::int from ops.account_audit where target_id = tests.uid('k5_target') and reason is not null), 5,
+  'Fünf Audits mit Begründung vor der Löschung');
+select ok(private.account_deletion_begin(tests.uid('k5_target')), 'Phase A des Zielkontos');
+select is((select status from public.profiles where id = tests.uid('k5_target')), 'deleting', 'Ziel in Löschung');
+select is((select count(*)::int from ops.account_audit where target_id is null and reason is null), 5,
+  'Phase A: Zielbezug und Begründung entfernt');
+select is((select count(*)::int from ops.account_audit where actor_id = tests.uid('k5_admin')), 5, 'Akteur bleibt nachvollziehbar');
+update public.profiles set status = 'deletion_requested' where id = tests.uid('k5_admin');
+select ok(private.account_deletion_begin(tests.uid('k5_admin')), 'Phase A des Admins');
+select is((select count(*)::int from ops.account_audit where actor_id is null), 5, 'Phase A: Akteur des Admins entkoppelt');
+-- Ohne Phase A (direkte Auth-Löschung) entkoppelt weiterhin die FK samt Begründung.
+insert into ops.account_audit(target_id, action, reason) values (tests.uid('k5_twin'), 'account_suspend', 'Name im Freitext');
+delete from auth.users where id = tests.uid('k5_twin');
+select is((select count(*)::int from ops.account_audit where target_id is null and reason is null), 6,
   'Gelöschtes Ziel: Bezug und Begründung entfernt');
-select is((select count(*)::int from ops.account_audit where actor_id = tests.uid('k5_admin')), 4, 'Akteur bleibt nachvollziehbar');
-delete from auth.users where id = tests.uid('k5_admin');
-select is((select count(*)::int from ops.account_audit where actor_id is null), 4, 'Gelöschter Akteur entkoppelt');
 
 -- Aufbewahrung ein Jahr über den bestehenden Support-Cleanup.
 insert into ops.account_audit(action, reason, created_at) values ('account_suspend', 'alt', now() - interval '366 days');
 select private.purge_support();
-select is((select count(*)::int from ops.account_audit), 4, 'Audit älter als ein Jahr entfernt');
+select is((select count(*)::int from ops.account_audit), 6, 'Audit älter als ein Jahr entfernt');
 
 select * from finish();
 rollback;

@@ -150,6 +150,11 @@ def main():
                     owner.execute("select public.request_account_deletion()")
                 owner.execute("update public.profile_settings set deletion_requested_at=clock_timestamp()-interval '336 hours'"
                               "+%s*interval '1 second' where profile_id=%s", (seconds_left, account["uid"]))
+                # Rücknahme braucht eine Meldung des Kontos nach dem Antrag.
+                account["ticket"] = owner.execute(
+                    "insert into ops.support_tickets(id,owner_id,receipt_hash,payload_hash,category,title,body) values"
+                    "(gen_random_uuid(),%s,sha256('k5'),sha256('k5'),'feedback','Renntest','Löschung stoppen') returning id",
+                    (account["uid"],)).fetchone()[0]
                 return account
 
             def job(connection):
@@ -159,7 +164,7 @@ def main():
             # Löschjob zuerst: Sperre und Rücknahme finden danach kein Ziel.
             for label, statement, arguments in (
                     ("Sperre", suspend, lambda a: (a["uid"], True)),
-                    ("Rücknahme", "select public.admin_account_cancel_deletion(%s,null,'Renntest')", lambda a: (a["uid"],))):
+                    ("Rücknahme", "select public.admin_account_cancel_deletion(%s,%s,'Renntest')", lambda a: (a["uid"], a["ticket"]))):
                 target = due_user()
                 with owner.transaction():
                     assert job(owner)["status"] == "succeeded"
@@ -173,7 +178,7 @@ def main():
             # Rücknahme kurz vor Fristende zuerst; die Frist läuft ab, während der Job wartet. Er darf nicht löschen.
             target = due_user(1.5)
             with identity(owner, admin, "aal2"):
-                owner.execute("select public.admin_account_cancel_deletion(%s,null,'Renntest')", (target["uid"],))
+                owner.execute("select public.admin_account_cancel_deletion(%s,%s,'Renntest')", (target["uid"], target["ticket"]))
 
                 def waiting_job():
                     with client.transaction():

@@ -44,6 +44,20 @@ create trigger account_audit_decouple before update of target_id on ops.account_
   for each row when (old.target_id is not null and new.target_id is null)
   execute function private.account_audit_decouple();
 
+-- Wie ops.support_audit schon in Phase A: Nur account_deletion_begin setzt 'deleting'. Ziel entkoppeln leert per
+-- account_audit_decouple auch die Begründung; ein gelöschter Admin verliert den Akteursbezug.
+create function private.account_audit_deleting() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  update ops.account_audit set target_id = null where target_id = new.id;
+  update ops.account_audit set actor_id = null where actor_id = new.id;
+  return null;
+end;
+$$;
+create trigger profiles_account_audit_deleting after update of status on public.profiles
+  for each row when (new.status = 'deleting' and old.status is distinct from 'deleting')
+  execute function private.account_audit_deleting();
+
 create function private.is_suspended(p_profile uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from private.account_suspensions s where s.profile_id = p_profile);
@@ -151,7 +165,8 @@ begin
 end;
 $$;
 
--- Exakt: UUID, Freundescode (Schreibweise wie find_profile) oder Alias. Kein Teiltreffer, keine Liste.
+-- Exakt: UUID, Freundescode (Schreibweise wie find_profile) oder Alias. Kein Teiltreffer, keine Liste. Konten in
+-- Löschung (ab Phase A für alle anderen Wege weg) und das eigene Konto gelten als nicht gefunden.
 create function public.admin_account_lookup(p_query text) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare
@@ -161,10 +176,12 @@ declare
 begin
   if v_query is null or length(v_query) not between 1 and 120 then perform private.fail('support_invalid'); end if;
   if v_query ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
-    v_ids := array(select p.id from public.profiles p where p.id = v_query::uuid);
+    v_ids := array(select p.id from public.profiles p
+      where p.id = v_query::uuid and p.status <> 'deleting' and p.id <> v_actor);
   else
     v_ids := array(select p.id from public.profiles p
-      where p.friend_code = upper(replace(v_query, '-', '')) or p.alias = v_query limit 2);
+      where (p.friend_code = upper(replace(v_query, '-', '')) or p.alias = v_query)
+        and p.status <> 'deleting' and p.id <> v_actor limit 2);
   end if;
   if cardinality(v_ids) = 0 then perform private.fail('account_not_found'); end if;
   if cardinality(v_ids) > 1 then perform private.fail('account_ambiguous'); end if;
@@ -233,35 +250,40 @@ begin
 end;
 $$;
 
--- Nur auf dokumentierten Nutzerwunsch: Begründung Pflicht, optional eine Meldung des Zielkontos als Beleg.
--- Frist und Wiederherstellung exakt wie cancel_account_deletion (20261018000400); 300 prüft die gleiche Bedingung.
+-- Nur auf dokumentierten Nutzerwunsch (Entscheid 24.10.2026): Pflicht ist eine Meldung, die nach dem Löschantrag
+-- entstand, vom Zielkonto oder als Gastmeldung. Bei einer Gastmeldung belegt die Begründung die Zuordnung; der Server
+-- prüft dafür nur eine Mindestlänge (Inhalt prüft er nicht). Frist und Wiederherstellung exakt wie
+-- cancel_account_deletion (20261018000400); 300 prüft die gleiche Bedingung.
 create function public.admin_account_cancel_deletion(p_profile_id uuid, p_ticket_id uuid, p_reason text)
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC' as $$
 declare
   v_actor uuid;
   v_reason text;
   v_previous text;
+  v_requested timestamptz;
+  v_ticket ops.support_tickets%rowtype;
 begin
   perform private.lock_sync();
   v_actor := private.require_support_admin();
   v_reason := private.support_reason(p_reason);
   perform private.account_target(p_profile_id, v_actor);
-  if p_ticket_id is not null and not exists (select 1 from ops.support_tickets t
-      where t.id = p_ticket_id and t.owner_id = p_profile_id) then
-    perform private.fail('support_invalid');
-  end if;
-  select o.previous_status into v_previous from private.consent_deletion_origins o
+  if p_ticket_id is null then perform private.fail('deletion_ticket_required'); end if;
+  select o.previous_status, s.deletion_requested_at into v_previous, v_requested from private.consent_deletion_origins o
     join public.profiles p on p.id = o.profile_id join public.profile_settings s on s.profile_id = p.id
     where p.id = p_profile_id and p.status = 'deletion_requested' and s.deletion_requested_at > clock_timestamp() - interval '14 days'
     for update of p, o, s;
   if not found then perform private.fail('no_deletion_pending'); end if;
+  select * into v_ticket from ops.support_tickets t where t.id = p_ticket_id;
+  if not found or v_ticket.owner_id <> p_profile_id then perform private.fail('deletion_ticket_invalid'); end if;
+  if v_ticket.created_at < v_requested then perform private.fail('deletion_ticket_stale'); end if;
+  if v_ticket.owner_id is null and length(v_reason) < 20 then perform private.fail('deletion_ticket_evidence_required'); end if;
   update public.profiles set status = v_previous where id = p_profile_id;
   delete from private.consent_deletion_origins where profile_id = p_profile_id;
   update public.profile_settings set deletion_requested_at = null, updated_at = now() where profile_id = p_profile_id;
   perform private.bump_visibility(private.friend_ids(p_profile_id));
   insert into ops.account_audit(actor_id, target_id, action, reason, changes)
-    values (v_actor, p_profile_id, 'account_cancel_deletion', v_reason,
-      case when p_ticket_id is null then '{}'::jsonb else jsonb_build_object('ticket_id', p_ticket_id) end);
+    values (v_actor, p_profile_id, 'account_cancel_deletion', v_reason, jsonb_build_object('ticket_id', p_ticket_id,
+      'ticket_kind', case when v_ticket.owner_id is null then 'guest' else 'account' end));
   return private.account_status(p_profile_id);
 end;
 $$;
@@ -286,8 +308,8 @@ alter function public.admin_account_revoke_devices(uuid,text) set statement_time
 alter function public.admin_account_cancel_deletion(uuid,uuid,text) set lock_timeout = '2s';
 alter function public.admin_account_cancel_deletion(uuid,uuid,text) set statement_timeout = '5s';
 
-revoke all on function private.account_audit_decouple(), private.is_suspended(uuid), private.require_support_admin(),
-  private.support_reason(text), private.account_status(uuid), private.account_target(uuid,uuid)
+revoke all on function private.account_audit_decouple(), private.account_audit_deleting(), private.is_suspended(uuid),
+  private.require_support_admin(), private.support_reason(text), private.account_status(uuid), private.account_target(uuid,uuid)
   from public, anon, authenticated, service_role;
 revoke all on function public.admin_account_lookup(text), public.admin_account_set_suspended(uuid,boolean,text),
   public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text)
