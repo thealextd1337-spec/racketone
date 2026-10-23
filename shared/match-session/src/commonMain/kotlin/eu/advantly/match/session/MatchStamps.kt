@@ -31,6 +31,12 @@ internal class MatchStamps(
     private val data: LocalData,
     private val genesisOf: (MatchId) -> ScoreEvent?,
 ) {
+    /**
+     * Angenommene Belege der zuletzt geprüften Summary. Fehlt ein Match hier ganz (keine Genesis, kein Access), gibt es
+     * keinen eigenen Beleg; die Antwort „mir fehlt alles“ trägt dann den geprüften Beleg der Gegenstelle zurück.
+     */
+    private var echo: Map<String, MatchDataStamp> = emptyMap()
+
     fun of(matchId: MatchId): MatchDataStamp? {
         val scope = data.accountIdentities.scope ?: return null
         if (data.accountIdentities.managed) {
@@ -107,7 +113,7 @@ internal class MatchStamps(
             is Summary -> {
                 val own =
                     message.matches.keys
-                        .mapNotNull { key -> of(MatchId(key))?.let { key to it } }
+                        .mapNotNull { key -> (of(MatchId(key)) ?: echo[key]?.takeIf { message.reply })?.let { key to it } }
                         .toMap()
                 val states = if (data.accountIdentities.managed) message.lifecycle + lifecycle(own.keys) else message.lifecycle
                 message.copy(
@@ -146,7 +152,9 @@ internal class MatchStamps(
             }
 
             is Summary -> {
-                message.copy(matches = message.matches.filterKeys { accepts(MatchId(it), message.stamps[it]) })
+                val accepted = message.matches.filterKeys { accepts(MatchId(it), message.stamps[it]) }
+                echo = accepted.keys.associateWith { message.stamps.getValue(it) }
+                message.copy(matches = accepted)
             }
 
             is MatchMetaMessage -> {

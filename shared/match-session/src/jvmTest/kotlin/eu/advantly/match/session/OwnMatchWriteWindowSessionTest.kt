@@ -136,7 +136,11 @@ class OwnMatchWriteWindowSessionTest {
         // Genesis, drei Punkte, Rückübernahme (ScorerChanged), ein Punkt.
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L), rows.filter { it.first == phoneDevice }.map { it.second })
         assertEquals(listOf(1L, 2L), rows.filter { it.first == watchDevice }.map { it.second })
-        assertEquals(rows.map { it.third }.distinct(), rows.map { it.third }, "Lamport eindeutig")
+        // Lamport des Handys fortlaufend und über allem, was es beim Schreiben kannte. Die Uhr sieht die Fensterpunkte unter
+        // Protokoll 4 erst nach der Redaktion (Beleg G/E); ihre Events dürfen deren Lamport-Werte tragen (Ordnung übers Gerät).
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L), rows.filter { it.first == phoneDevice }.map { it.third }, "Lamport fortlaufend")
+        val watchLamport = rows.filter { it.first == watchDevice }.maxOf { it.third }
+        assertTrue(rows.filter { it.first == phoneDevice && it.second >= 5 }.all { it.third > watchLamport }, "nach der Rückübernahme")
         assertEquals(
             rows.size,
             phone.state.value.match!!
@@ -151,6 +155,8 @@ class OwnMatchWriteWindowSessionTest {
         assertEquals(rows.size.toLong(), phoneData.events.count(match.value))
         val next = phoneData.cloudUploads.capture(token, 100)
         assertEquals(rows.size - 2, next.events.count { it.matchId == match.value })
+        repeat(2) { scheduler.advanceBy(31_000) }
+        assertEquals(rows.size.toLong(), watchData.events.count(match.value), "nach der Redaktion holt die Uhr die Fensterpunkte nach")
 
         // Neustart auf derselben Datenbank: kein Punkt verloren, der Score stimmt mit dem Log überein.
         phone.close()

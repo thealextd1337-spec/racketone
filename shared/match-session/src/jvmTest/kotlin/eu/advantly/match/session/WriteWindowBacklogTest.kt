@@ -13,7 +13,8 @@ import kotlin.test.assertTrue
 
 /**
  * Eigene ungesicherte Punkte im Fenster „schreiben ja, lesen nein“ (Vertrag W3 §4): Sie zählen als Rückstand und gehen
- * per Backlog an die Uhr. Braucht D-1 (Rückstandsabfragen der Schreibspur für eigene Quellen).
+ * per Backlog an die Uhr. Braucht D-1 (Rückstandsabfragen der Schreibspur für eigene Quellen). Unter Protokoll 4 gibt Data
+ * ihren Inhalt erst nach angewandter Redaktion frei; bis dahin wartet der Rückstand sichtbar.
  */
 class WriteWindowBacklogTest {
     private val pair = LifecyclePair()
@@ -25,12 +26,13 @@ class WriteWindowBacklogTest {
         version: Long,
         epoch: Long,
         record: eu.advantly.data.MatchRecord,
-    ) {
+    ): Long {
         val data = pair.phoneData
         val run = data.cloudPulls.beginRun("alice") {}.runSerial
         val entry = CloudPullMatch(record.id.value, version, """{"version":$version}""", "member", 1, epoch, false, record)
         val page = CloudPullMetadataPage(listOf(entry), emptyList(), emptyList(), version, false, 1)
         assertTrue(data.cloudPulls.commitMetadata("alice", run, data.cloudPulls.progress("alice").cursor, page) {})
+        return run
     }
 
     @Test
@@ -42,7 +44,7 @@ class WriteWindowBacklogTest {
         pair.phoneData.cloudUploads.acknowledge(upload, upload.events.mapTo(mutableSetOf()) { it.id }, metadata = upload.metadataRevisions)
         val record = pair.phoneData.matches.get(match)!!
         catalog(1, 0, record)
-        catalog(2, 1, record)
+        val run = catalog(2, 1, record)
         pair.settle()
         assertFalse(pair.phoneData.replicas.canReadMember(pair.phoneData.replicas.captureContext(), match.value))
 
@@ -55,6 +57,14 @@ class WriteWindowBacklogTest {
 
         pair.network.setConnected("watch", true)
         pair.settle()
+        assertEquals(1L, pair.watchData.events.count(match.value), "vor der Redaktion nur die Genesis auf der Uhr")
+        assertTrue(pair.phone.state.value.sync.pendingToPeers >= 2, "wartet auf Redaktion, nicht verloren")
+
+        val data = pair.phoneData
+        val work = checkNotNull(data.cloudPulls.nextEventWork("alice", run))
+        val redaction = checkNotNull(data.cloudPulls.redactionWork(work, run))
+        assertTrue(data.cloudPulls.stageRedaction(work, run, redaction, 2, emptyList(), emptyList(), true, true) {})
+        repeat(2) { pair.scheduler.advanceBy(31_000) }
         assertEquals(3L, pair.watchData.events.count(match.value), "Genesis und beide Punkte auf der Uhr")
         assertEquals(0, pair.phone.state.value.sync.pendingToPeers)
     }

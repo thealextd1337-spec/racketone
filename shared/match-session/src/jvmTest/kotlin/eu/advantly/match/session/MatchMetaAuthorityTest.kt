@@ -359,8 +359,13 @@ class MatchMetaAuthorityTest {
                 .decoded()
                 .last { it.identity != null }
                 .identity!!
+        // ausgehandelt ist 4: eine v3-Nachricht fiele schon an der Versionsprüfung heraus und prüfte die Namensregel nicht
         val forged =
-            MatchMetaMessage(players = listOf(Player(guest, "Mallory")), recentPlayers = listOf(Player(PlayerId("new-guest"), "Eve")))
+            MatchMetaMessage(
+                players = listOf(Player(guest, "Mallory")),
+                recentPlayers = listOf(Player(PlayerId("new-guest"), "Eve")),
+                v = 4,
+            )
         pair.phoneLink.replay("watch", SyncCodec.encode(forged, envelope))
         assertEquals(
             "Bea",

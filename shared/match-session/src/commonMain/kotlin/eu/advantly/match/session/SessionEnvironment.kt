@@ -63,9 +63,10 @@ class RandomIdGenerator(
  * @property autoFollow ein von einer Gegenstelle gestartetes Match automatisch öffnen (Regeln: `MatchSession.maybeFollow`)
  * @property parallelMatches mehrere Matches gleichzeitig offen halten und das Uhr-Match zuweisen (F22) – Standard nur am
  *   Handy; Uhren halten genau ein Match offen und folgen der Zuweisung des Handys
- * @property protocolVersions gesprochene und lesbare Protokollversionen (E1, Welle 3). Standard sind die Konstanten von
- *   [ProtocolVersion]; ein anderer Bereich (Tests, späterer Host-Schalter) ändert sie nicht. Ab Version 4 gelten Belege
- *   und Lifecycle-Zustellung.
+ * @property protocolVersions lesbare Protokollversionen und höchste gesprochene (E1, Welle 3). Standard sind die
+ *   Konstanten von [ProtocolVersion]; ein anderer Bereich (Tests) ändert sie nicht. Ohne Konto spricht die Session nur
+ *   die älteste Version des Bereichs, mit Konto nur noch ab 4 (`minV = 4`); ab Version 4 gelten Belege und
+ *   Lifecycle-Zustellung.
  */
 data class SessionConfig(
     val deviceId: DeviceId,

@@ -1618,7 +1618,7 @@ class MatchSession(
                 previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
         if (sessionChanged || forceSync) helloSent.remove(peer)
-        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, minVersion())
+        val result = ProtocolVersion.negotiate(hello.v, hello.minV, maxVersion(), minVersion())
         compatibility[peer] = result
         deviceStatuses[peer] =
             DeviceStatus(
@@ -1750,7 +1750,12 @@ class MatchSession(
         data.events.markConfirmed(matchId.value, valid.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
         if (inserted.isEmpty()) {
-            if (data.accountIdentities.managed) send(peer, summaryOf(listOf(matchId), reply = true))
+            // Duplikate nur bestätigen, wenn die eigene Sicht sie zeigt: Verborgene (Redaktion ausstehend) bestätigt erst die
+            // offene Lesespur, sonst schickte der Absender sie endlos neu (Ping-Pong Events ↔ Summary)
+            val own = VersionVector.fromSequences(sequences(matchId))
+            if (data.accountIdentities.managed && valid.all { own[it.deviceId] >= it.deviceSeq }) {
+                send(peer, summaryOf(listOf(matchId), reply = true))
+            }
             return matchId
         }
         lastEventReceivedAtMs = clock.nowMs()
@@ -2162,7 +2167,7 @@ class MatchSession(
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
                 minV = if (scoped && known?.identityProtocol != 1) 4 else minVersion(),
-                v = config.protocolVersions.last,
+                v = maxVersion(),
                 appBuild = config.appBuild,
                 session = sessionId,
                 identityProtocol = 1,
@@ -2396,6 +2401,12 @@ class MatchSession(
      */
     private fun minVersion(): Int =
         if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
+
+    /**
+     * Höchste gesprochene Version: Ohne Konto (P1) nur die älteste des Bereichs (Standard 3). Belege, Lifecycle-Zustellung
+     * und namenfreie Zuweisung gibt es erst mit Konto; P1 bleibt so unverändert und mit v3-Gegenstellen kompatibel.
+     */
+    private fun maxVersion(): Int = if (data.accountIdentities.managed) config.protocolVersions.last else config.protocolVersions.first
 
     /** Mit Konto und V4 zählt nur ein ausgehandeltes ≥ 4 ([minVersion]); fehlt es, geht außer `Hello` nichts hin oder her. */
     private fun requiresFour(peer: String): Boolean =
