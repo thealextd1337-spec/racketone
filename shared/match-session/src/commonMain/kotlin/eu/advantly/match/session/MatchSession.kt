@@ -202,6 +202,29 @@ class MatchSession(
         publish()
     }
 
+    /**
+     * Ausdrückliche Neukopplung (Recovery-Paket): Das Handy erhält eine neue Pairing-Autorität und meldet alle Uhr-Empfänger
+     * ab (V4-Zustellung); die Uhr vergisst die Autorität ihres Handys. Alte Envelopes, Nonces und Zustell-Fences gelten danach
+     * nicht mehr. Historische Quellen, Scopes und Konten bleiben unverändert; erst ein neu bestätigtes Hello koppelt.
+     */
+    fun repairPairing() {
+        checkThread()
+        val repaired =
+            data.transaction {
+                pairing.repair().also { repaired ->
+                    if (repaired && config.kind == PeerKind.PHONE) data.replicas.retirePeers(data.replicas.captureContext()) {}
+                }
+            }
+        if (!repaired) return
+        hellos.clear()
+        helloSent.clear()
+        compatibility.clear()
+        earlyOwners.clear()
+        refreshLifecyclePending()
+        publish()
+        if (started) link?.peers.orEmpty().forEach(::sendHello)
+    }
+
     private fun selectStoredIdentity(
         scope: String,
         profile: String?,
@@ -2736,6 +2759,7 @@ class MatchSession(
                 )
             },
             lifecycleRevision,
+            pairingConflict = pairing.conflict,
         )
     }
 
@@ -2830,7 +2854,7 @@ class MatchSession(
         private const val DROPPED_PREFIX = "session.dropped."
 
         /** Settings: noch nicht quittierter Hinweis „matchId|Anzahl“ (Uhr). */
-        private const val DROPPED_NOTICE_KEY = "session.droppedNotice"
+        internal const val DROPPED_NOTICE_KEY = "session.droppedNotice"
 
         /** Settings: hier angelegtes Match wurde noch nie an eine Uhr gesendet (Handy); fehlt = möglicherweise gesendet. */
         private const val NEVER_SENT_TO_WATCH_PREFIX = "session.neverSentToWatch."
@@ -2842,8 +2866,8 @@ class MatchSession(
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"
 
         /** Settings: Uhr-Match (Handy) bzw. erhaltene Zuweisung (Uhr), leer = keins; dazu ihr Zeitstempel. */
-        private const val WATCH_MATCH_KEY = "session.watchMatch"
-        private const val WATCH_MATCH_AT_KEY = "session.watchMatchAt"
+        internal const val WATCH_MATCH_KEY = "session.watchMatch"
+        internal const val WATCH_MATCH_AT_KEY = "session.watchMatchAt"
 
         /** Handy: empfangene laufende Matches öffnen sich nur, wenn sie höchstens so alt sind (keine Altlasten). */
         const val AUTO_OPEN_WINDOW_MS: Long = 24L * 60 * 60 * 1000

@@ -778,6 +778,14 @@ class ReplicaLifecycleStore internal constructor(
             queries.seedPeer(peerId, ctx.accountKey)
         }
 
+    /** Neukopplung: keine Uhr bleibt Empfänger; erst ein neu bestätigtes Hello registriert sie wieder (E7). */
+    fun retirePeers(
+        ctx: ReplicaContext,
+        fence: () -> Unit,
+    ): Unit = mutate(ctx, fence) { clearDeliveries() }
+
+    internal fun clearDeliveries() = queries.clearDeliveries()
+
     fun pendingDeliveries(
         ctx: ReplicaContext,
         peerId: String,

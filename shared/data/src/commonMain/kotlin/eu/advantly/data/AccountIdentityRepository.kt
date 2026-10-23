@@ -171,6 +171,35 @@ class AccountIdentityRepository internal constructor(
         data.cloudUploads.bindOwnedDevices(session, setOf(source.device_id))
     }
 
+    /**
+     * Recovery-Paket: Ein übernommenes Abbild kann danach keine alte Geräte- oder Pairingidentität mehr wählen.
+     * Scope→Gerät-Zuordnungen, Konto-/Gastzeiger, Pairing-Autorität, Uhr-Zustellungen und lokale Freigaben werden
+     * stillgelegt; Quellen, unveränderliche Eigentümer, Events und Köpfe bleiben unverändert. Ein Altabbild ohne
+     * Quellenbeleg erhält vorher den Beleg seines bisher schreibenden Geräts. Danach muss in derselben Transaktion ein
+     * neuer Scope gewählt werden ([select]).
+     *
+     * @return `true`, wenn das Abbild keinerlei Kontobindung trägt (nur dann ist [releaseRestored] zulässig).
+     */
+    fun retireRestored(kind: String): Boolean =
+        data.transaction {
+            if (scope == null) {
+                val device = data.settings.get("session.deviceId")
+                val self = data.players.self()
+                if (device != null && self != null) initialize(device, self.id.value, kind)
+            }
+            val keys = data.settings.all().keys
+            val unbound = profile == null && queries.ownerCount().executeAsOne() == 0L && keys.none { it.startsWith(ACCOUNT_PREFIX) }
+            queries.retireIdentities()
+            queries.clearAcceptedSources()
+            data.replicas.clearDeliveries()
+            keys.filter { it.startsWith(ACCOUNT_PREFIX) || it in RESTORED_KEYS }.forEach(data.settings::remove)
+            data.cloud.resolveMetadataSources()
+            unbound
+        }
+
+    /** Recovery-Paket: ausdrücklich bestätigte lokale Freigabe eines kontolosen Abbilds; die Quellen bleiben ungebunden. */
+    fun releaseRestored(scope: String) = acceptOwnSources(scope, queries.unboundSourceIds().executeAsList().toSet())
+
     /** Auswahl neu prüfen: Herkunft und unveränderliche Eigentümer gemeinsam atomar übernehmen. */
     fun adopt(
         session: CloudUploadSession,
@@ -180,6 +209,20 @@ class AccountIdentityRepository internal constructor(
         val eligible = adoptionSources().map { it.deviceId }.toSet()
         check(deviceIds.all { it in eligible }) { "Quelle nicht zur Übernahme verfügbar" }
         data.cloudUploads.bindOwnedDevices(session, deviceIds)
+    }
+
+    private companion object {
+        const val ACCOUNT_PREFIX = "identity.account."
+        val RESTORED_KEYS =
+            setOf(
+                "identity.scope",
+                "identity.profile",
+                "identity.guest",
+                "identity.authority",
+                "identity.epoch",
+                "identity.wireScope",
+                "session.deviceId",
+            )
     }
 }
 

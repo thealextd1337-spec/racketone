@@ -36,6 +36,8 @@ import eu.advantly.sync.protocol.PeerKind
  * @property lifecycleRevision steigt bei jeder Access-, Redaktions- oder Directory-Änderung aus Data (auch aus Pull oder
  *   Zustellung im Hintergrund). Konsumenten verwerfen dann **alle** abgeleiteten Match- und Spielernamen. Zähler im
  *   Speicher, beginnt nach Neustart bei 0: nur auf Ungleichheit vergleichen, nie auf Größe.
+ * @property pairingConflict Uhr: ein vertrautes Handy mit anderer Pairing-Autorität wurde abgelehnt (Handy ersetzt,
+ *   wiederhergestellt oder neu gekoppelt). Nur die ausdrückliche Neukopplung ([MatchSession.repairPairing]) löst das.
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -47,6 +49,7 @@ data class SessionState(
     val telemetry: TelemetryPreference = TelemetryPreference(),
     val devices: List<DeviceStatus> = emptyList(),
     val lifecycleRevision: Long = 0,
+    val pairingConflict: Boolean = false,
 ) {
     /** Kurzform für Anzeige und Versandentscheidung. */
     val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility
