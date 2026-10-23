@@ -35,6 +35,31 @@ class WriteWindowBacklogTest {
         return run
     }
 
+    /**
+     * Verborgene Events (Redaktion ausstehend) lösen kein Ping-Pong aus: Das Handy bestätigt Duplikate nur, wenn seine Sicht sie
+     * zeigt. Vorher je Richtung ca. 6100 Pakete pro Minute, sobald die Uhr im Fenster zählte.
+     */
+    @Test
+    fun hiddenEventsInTheWriteWindowCauseNoPingPong() {
+        pair.activate("alice")
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        val upload = pair.phoneData.cloudUploads.capture(pair.token!!, 100)
+        pair.phoneData.cloudUploads.acknowledge(upload, upload.events.mapTo(mutableSetOf()) { it.id }, metadata = upload.metadataRevisions)
+        val record = pair.phoneData.matches.get(match)!!
+        catalog(1, 0, record)
+        pair.settle()
+        catalog(2, 1, record)
+        pair.settle()
+        assertTrue(pair.watch.takeOverScoring())
+        assertTrue(pair.watch.recordPoint(Side.A))
+        pair.settle()
+        val sent = pair.phoneLink.sent.size + pair.watchLink.sent.size
+        pair.scheduler.advanceBy(60_000)
+        val perMinute = pair.phoneLink.sent.size + pair.watchLink.sent.size - sent
+        assertTrue(perMinute < 30, "begrenzt (Takt), nicht im Kreis: $perMinute Pakete pro Minute")
+    }
+
     @Test
     fun ownPointsInTheWriteWindowCountAsPendingAndReachTheWatch() {
         pair.activate("alice")

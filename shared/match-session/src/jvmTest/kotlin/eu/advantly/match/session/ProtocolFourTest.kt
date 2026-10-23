@@ -49,6 +49,32 @@ class ProtocolFourTest {
     }
 
     /**
+     * Ohne Konto (P1) bleibt ein Gerät mit Protokoll 4 mit einer v3-Gegenstelle kompatibel, in beiden Richtungen; auch zwei
+     * neue Geräte sprechen ohne Konto weiter 3 (keine Belege, kein Teilsync-Risiko).
+     */
+    @Test
+    fun withoutAnAccountNewAndOldDevicesStayCompatibleOverThree() {
+        for ((phoneVersions, watchVersions) in listOf(3..4 to 3..3, 3..3 to 3..4, 3..4 to 3..4)) {
+            val case = "Handy $phoneVersions, Uhr $watchVersions"
+            val pair = LifecyclePair(phoneVersions, watchVersions).also { pair = it }
+            val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+            assertTrue(pair.phone.recordPoint(Side.A))
+            pair.settle()
+            assertEquals(null, pair.phone.state.value.sync.versionMismatch, case)
+            assertEquals(null, pair.watch.state.value.sync.versionMismatch, case)
+            assertEquals(2L, pair.watchData.events.count(match.value), case)
+            assertTrue(pair.watch.takeOverScoring(), case)
+            assertTrue(pair.watch.recordPoint(Side.B), case)
+            pair.settle()
+            assertEquals(pair.watchData.events.count(match.value), pair.phoneData.events.count(match.value), case)
+            val wire = pair.phoneLink.decoded() + pair.watchLink.decoded()
+            assertTrue(wire.all { it.message is Hello || it.message.v == 3 }, "$case: nur Protokoll 3 auf dem Draht")
+            pair.close()
+            this.pair = null
+        }
+    }
+
+    /**
      * P2-1: Mit Konto ist 3 kein Rückfall mehr, sobald eine Seite 4 kann (Hello `minV = 4`). Sonst flössen Events über 3,
      * Access und Redaktion nie, und die Uhr behielte gelöschte Namen.
      */
