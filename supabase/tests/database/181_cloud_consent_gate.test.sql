@@ -50,9 +50,11 @@ from pg_proc p where p.pronamespace='public'::regnamespace
 create temp table gated_tables as select tablename from pg_policies
   where schemaname='public' and policyname='cloud_binding_required';
 grant select on gated_rpcs,gated_tables to authenticated;
-select is((select count(*) from gated_rpcs),34::bigint,'Alle Bind-/Push-/Pull-/Legacy-Seams im Inventar');
+select is((select count(*) from gated_rpcs),35::bigint,'Alle Bind-/Push-/Pull-/Legacy-Seams im Inventar');
 select ok(exists(select 1 from gated_rpcs where proname='cloud_pull_match_redaction_v1'),
   'Redaktions-Paging bleibt in jeder Consent-Gate-Probe enthalten');
+select ok(exists(select 1 from gated_rpcs where proname='cloud_unrevoke_device_v1'),
+  'K4-U: Freigabe durch ein anderes Gerät liegt hinter demselben Gate');
 select is((select count(*) from gated_tables),18::bigint,'Alle direkten Cloud-Tabellen im Inventar');
 select is((select count(*) from pg_trigger t join gated_tables g on t.tgrelid=('public.'||g.tablename)::regclass
   where t.tgname='zy_cloud_authorize_write' and t.tgenabled='O'),18::bigint,

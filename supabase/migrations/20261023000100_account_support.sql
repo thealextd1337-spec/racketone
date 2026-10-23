@@ -2,6 +2,8 @@
 -- Rollen nach Planungsstandard K5: `support` liest Status, zustandsändernde Aktionen nur `admin`. Keine neuen Rechte,
 -- Mitglieder provisioniert weiterhin der Betreiber. Jede RPC prüft Mitgliedschaft und AAL2 bei jedem Aufruf frisch
 -- (private.require_support), schreibende zusätzlich erst nach lock_sync (frischer Snapshot).
+-- K4-U (Entscheid 24.10.2026): Widerruf eines Geräts aufheben, durch ein anderes eigenes Gerät oder durch admin mit
+-- Meldung nach dem Widerruf; nie durch das widerrufene Gerät selbst. Geräte- und Installations-ID bleiben erhalten.
 -- Sperre: wirkt auf die eigenen Cloud-/Sync-/Social-Wege des Kontos (require_active, RLS-Gate), nicht auf Export,
 -- Löschantrag, Zustimmung, eigene Geräteverwaltung und Support (DSGVO). Sichtbarkeit für andere bleibt unverändert,
 -- daher keine Epochenänderung. Kein Zugriff auf auth.sessions/auth.users; GoTrue-Ban bleibt ein Betreiberschritt.
@@ -21,7 +23,7 @@ create table ops.account_audit (
   actor_id uuid references auth.users(id) on delete set null,
   target_id uuid references auth.users(id) on delete set null,
   action text not null check (action in
-    ('account_suspend', 'account_unsuspend', 'account_revoke_devices', 'account_cancel_deletion')),
+    ('account_suspend', 'account_unsuspend', 'account_revoke_devices', 'account_cancel_deletion', 'device_unrevoke')),
   reason text,
   changes jsonb not null default '{}'::jsonb check (jsonb_typeof(changes) = 'object'),
   created_at timestamptz not null default now()
@@ -32,11 +34,12 @@ alter table ops.account_audit enable row level security;
 revoke all on ops.account_audit from public, anon, authenticated, service_role;
 grant select on ops.account_audit to service_role;
 
--- Die FK-Aktion ON DELETE SET NULL ist ein UPDATE und löst diesen Trigger aus.
+-- Die FK-Aktion ON DELETE SET NULL ist ein UPDATE und löst diesen Trigger aus. Geräte-IDs fallen mit dem Zielbezug weg.
 create function private.account_audit_decouple() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin
   new.reason := null;
+  new.changes := new.changes - array['device_id', 'caller_device_id'];
   return new;
 end;
 $$;
@@ -130,7 +133,8 @@ begin
 end;
 $$;
 
--- Minimaler Kontostatus: keine E-Mail, kein Land, keine Matches/Health/Freunde/Gerätedetails/Tokens.
+-- Minimaler Kontostatus: keine E-Mail, kein Land, keine Matches/Health/Freunde/Gerätemodelle/Tokens. Widerrufene Geräte
+-- nur mit ID, Art und Zeitpunkt, damit admin das freizugebende Gerät wählen kann (K4-U).
 create function private.account_status(p_profile uuid) returns jsonb
 language sql stable security definer set search_path = '' set timezone = 'UTC' as $$
   select jsonb_build_object('profileId', p.id, 'alias', p.alias, 'status', p.status,
@@ -147,7 +151,14 @@ language sql stable security definer set search_path = '' set timezone = 'UTC' a
     'consentStatus', private.consent_state(p.id, 'en')->>'status',
     'consentVersions', (select jsonb_object_agg(t.document_type, (select h.version from private.consent_history h
         where h.profile_id = p.id and h.document_type = t.document_type and h.accepted order by h.id desc limit 1))
-      from (values ('TERMS'), ('PRIVACY')) t(document_type)))
+      from (values ('TERMS'), ('PRIVACY')) t(document_type)),
+    -- shortcut: höchstens die 20 jüngsten Widerrufe; reicht für den Pilot, sonst Liste blättern.
+    'revokedDevices', (select coalesce(jsonb_agg(jsonb_build_object('deviceId', r.id, 'kind', r.kind,
+        'platform', r.platform, 'revokedAt', r.revoked_at) order by r.revoked_at desc, r.id), '[]'::jsonb)
+      from (select d.id, d.kind, d.platform, greatest(d.revoked_at, i.revoked_at) as revoked_at from public.devices d
+        left join private.cloud_installations i on i.device_id = d.id
+        where d.profile_id = p.id and (d.revoked_at is not null or i.revoked_at is not null)
+        order by 4 desc, d.id limit 20) r))
   from public.profiles p
   left join public.profile_settings s on s.profile_id = p.id
   left join private.account_suspensions su on su.profile_id = p.id
@@ -250,10 +261,25 @@ begin
 end;
 $$;
 
--- Nur auf dokumentierten Nutzerwunsch (Entscheid 24.10.2026): Pflicht ist eine Meldung, die nach dem Löschantrag
--- entstand, vom Zielkonto oder als Gastmeldung. Bei einer Gastmeldung belegt die Begründung die Zuordnung; der Server
--- prüft dafür nur eine Mindestlänge (Inhalt prüft er nicht). Frist und Wiederherstellung exakt wie
--- cancel_account_deletion (20261018000400); 300 prüft die gleiche Bedingung.
+-- Dokumentierter Nutzerwunsch (Entscheide 24.10.2026): Pflicht ist eine Meldung, die nach p_since entstand, vom Zielkonto
+-- oder als Gastmeldung. Bei einer Gastmeldung belegt die Begründung die Zuordnung; der Server prüft dafür nur eine
+-- Mindestlänge (Inhalt prüft er nicht). Fehler mit Präfix je Aktion (deletion_/device_ticket_*); liefert die Meldungsart.
+create function private.account_ticket_kind(p_profile uuid, p_ticket uuid, p_since timestamptz, p_reason text,
+  p_prefix text) returns text
+language plpgsql stable security definer set search_path = '' as $$
+declare v_ticket ops.support_tickets%rowtype;
+begin
+  if p_ticket is null then perform private.fail(p_prefix || '_ticket_required'); end if;
+  select * into v_ticket from ops.support_tickets t where t.id = p_ticket;
+  if not found or v_ticket.owner_id <> p_profile then perform private.fail(p_prefix || '_ticket_invalid'); end if;
+  if v_ticket.created_at < p_since then perform private.fail(p_prefix || '_ticket_stale'); end if;
+  if v_ticket.owner_id is null and length(p_reason) < 20 then perform private.fail(p_prefix || '_ticket_evidence_required'); end if;
+  return case when v_ticket.owner_id is null then 'guest' else 'account' end;
+end;
+$$;
+
+-- Löschrücknahme nur mit Meldung nach dem Löschantrag. Frist und Wiederherstellung exakt wie cancel_account_deletion
+-- (20261018000400); 300 prüft die gleiche Bedingung.
 create function public.admin_account_cancel_deletion(p_profile_id uuid, p_ticket_id uuid, p_reason text)
 returns jsonb language plpgsql security definer set search_path = '' set timezone = 'UTC' as $$
 declare
@@ -261,7 +287,7 @@ declare
   v_reason text;
   v_previous text;
   v_requested timestamptz;
-  v_ticket ops.support_tickets%rowtype;
+  v_kind text;
 begin
   perform private.lock_sync();
   v_actor := private.require_support_admin();
@@ -273,17 +299,102 @@ begin
     where p.id = p_profile_id and p.status = 'deletion_requested' and s.deletion_requested_at > clock_timestamp() - interval '14 days'
     for update of p, o, s;
   if not found then perform private.fail('no_deletion_pending'); end if;
-  select * into v_ticket from ops.support_tickets t where t.id = p_ticket_id;
-  if not found or v_ticket.owner_id <> p_profile_id then perform private.fail('deletion_ticket_invalid'); end if;
-  if v_ticket.created_at < v_requested then perform private.fail('deletion_ticket_stale'); end if;
-  if v_ticket.owner_id is null and length(v_reason) < 20 then perform private.fail('deletion_ticket_evidence_required'); end if;
+  v_kind := private.account_ticket_kind(p_profile_id, p_ticket_id, v_requested, v_reason, 'deletion');
   update public.profiles set status = v_previous where id = p_profile_id;
   delete from private.consent_deletion_origins where profile_id = p_profile_id;
   update public.profile_settings set deletion_requested_at = null, updated_at = now() where profile_id = p_profile_id;
   perform private.bump_visibility(private.friend_ids(p_profile_id));
   insert into ops.account_audit(actor_id, target_id, action, reason, changes)
-    values (v_actor, p_profile_id, 'account_cancel_deletion', v_reason, jsonb_build_object('ticket_id', p_ticket_id,
-      'ticket_kind', case when v_ticket.owner_id is null then 'guest' else 'account' end));
+    values (v_actor, p_profile_id, 'account_cancel_deletion', v_reason,
+      jsonb_build_object('ticket_id', p_ticket_id, 'ticket_kind', v_kind));
+  return private.account_status(p_profile_id);
+end;
+$$;
+
+-- K4-U: Widerrufszeitpunkt (Bezug der Ticketregel) eines eigenen widerrufenen Geräts, sperrt die Gerätezeile. Unbekannt
+-- und fremd ergeben denselben Grund, damit sich fremde Geräte-IDs nicht ausforschen lassen.
+create function private.device_revoked_at(p_profile uuid, p_device uuid) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare v_revoked timestamptz;
+begin
+  perform 1 from public.devices d where d.id = p_device and d.profile_id = p_profile for update;
+  if not found then perform private.fail('device_not_found'); end if;
+  select greatest(d.revoked_at, (select i.revoked_at from private.cloud_installations i where i.device_id = d.id))
+    into v_revoked from public.devices d where d.id = p_device;
+  if v_revoked is null then perform private.fail('device_not_revoked'); end if;
+  return v_revoked;
+end;
+$$;
+
+-- Hebt nur den Widerruf von Gerät und Installation auf; dieselbe Geräte- und Installations-ID samt Proof gelten wieder.
+-- Sitzungsbindungen bleiben Tombstones: Das Gerät braucht eine neue Anmeldung (Fünf-Minuten-Grenze der Erstbindung).
+-- Zugriffsänderung → neue Generation G: Kein Gerät schreibt mit einem Stand von vor der Freigabe weiter
+-- (restart_required, frischer Pull). E bleibt, am Matchinhalt ändert sich nichts. Push-Token setzt erst die App neu.
+create function private.device_restore(p_profile uuid, p_device uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  update public.devices set revoked_at = null where id = p_device and profile_id = p_profile;
+  update private.cloud_installations set revoked_at = null where device_id = p_device and profile_id = p_profile;
+  perform private.bump_visibility(array[p_profile]);
+end;
+$$;
+
+-- K4-U Nutzerweg: ein anderes eigenes, gebundenes und nicht widerrufenes Gerät (Installationsnachweis wie Push/Pull).
+-- Selbst-Aufhebung (dieselbe Installation oder das Gerät der eigenen Sitzungsbindung) hat einen eigenen Grund vor allen
+-- übrigen Prüfungen. require_cloud_binding schließt Sperre, fehlende Zustimmung und ein widerrufenes aufrufendes Gerät.
+create function public.cloud_unrevoke_device_v1(p_device_id uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_auth record;
+  v_cap record;
+  v_caller uuid;
+begin
+  perform private.require_cloud_isolation();
+  perform private.lock_sync();
+  select * into strict v_auth from private.cloud_auth_session();
+  select * into strict v_cap from private.cloud_capability();
+  if exists (select 1 from private.cloud_installations i where i.profile_id = v_auth.profile_id
+               and i.installation_id = v_cap.installation_id and i.device_id = p_device_id)
+     or exists (select 1 from private.cloud_session_bindings b
+               where b.session_id = v_auth.session_id and b.device_id = p_device_id) then
+    perform private.fail('device_unrevoke_self', '42501');
+  end if;
+  if exists (select 1 from public.profiles p where p.id = v_auth.profile_id and p.status = 'deletion_requested') then
+    perform private.fail('account_deletion_pending', '42501');
+  end if;
+  v_caller := private.require_cloud_binding();
+  perform private.device_revoked_at(v_auth.profile_id, p_device_id);
+  perform private.device_restore(v_auth.profile_id, p_device_id);
+  insert into ops.account_audit(actor_id, target_id, action, changes)
+    values (v_auth.profile_id, v_auth.profile_id, 'device_unrevoke',
+      jsonb_build_object('via', 'device', 'device_id', p_device_id, 'caller_device_id', v_caller));
+  return jsonb_build_object('deviceId', p_device_id, 'revoked', false);
+end;
+$$;
+
+-- K4-U Adminweg: admin mit AAL2, Begründung und Meldung nach dem Widerruf (Regel wie die Löschrücknahme). Gesperrte
+-- Konten und Konten in Löschung bleiben ausgeschlossen: erst entsperren bzw. die Löschung zurücknehmen.
+create function public.admin_account_unrevoke_device(p_profile_id uuid, p_device_id uuid, p_ticket_id uuid, p_reason text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_actor uuid;
+  v_reason text;
+  v_kind text;
+begin
+  perform private.lock_sync();
+  v_actor := private.require_support_admin();
+  v_reason := private.support_reason(p_reason);
+  perform private.account_target(p_profile_id, v_actor);
+  if private.is_suspended(p_profile_id) then perform private.fail('account_suspended'); end if;
+  if exists (select 1 from public.profiles p where p.id = p_profile_id and p.status = 'deletion_requested') then
+    perform private.fail('account_deletion_pending');
+  end if;
+  v_kind := private.account_ticket_kind(p_profile_id, p_ticket_id, private.device_revoked_at(p_profile_id, p_device_id),
+    v_reason, 'device');
+  perform private.device_restore(p_profile_id, p_device_id);
+  insert into ops.account_audit(actor_id, target_id, action, reason, changes)
+    values (v_actor, p_profile_id, 'device_unrevoke', v_reason, jsonb_build_object('via', 'admin',
+      'device_id', p_device_id, 'ticket_id', p_ticket_id, 'ticket_kind', v_kind));
   return private.account_status(p_profile_id);
 end;
 $$;
@@ -307,12 +418,18 @@ alter function public.admin_account_revoke_devices(uuid,text) set lock_timeout =
 alter function public.admin_account_revoke_devices(uuid,text) set statement_timeout = '5s';
 alter function public.admin_account_cancel_deletion(uuid,uuid,text) set lock_timeout = '2s';
 alter function public.admin_account_cancel_deletion(uuid,uuid,text) set statement_timeout = '5s';
+alter function public.admin_account_unrevoke_device(uuid,uuid,uuid,text) set lock_timeout = '2s';
+alter function public.admin_account_unrevoke_device(uuid,uuid,uuid,text) set statement_timeout = '5s';
 
 revoke all on function private.account_audit_decouple(), private.account_audit_deleting(), private.is_suspended(uuid),
-  private.require_support_admin(), private.support_reason(text), private.account_status(uuid), private.account_target(uuid,uuid)
+  private.require_support_admin(), private.support_reason(text), private.account_status(uuid), private.account_target(uuid,uuid),
+  private.account_ticket_kind(uuid,uuid,timestamptz,text,text), private.device_revoked_at(uuid,uuid),
+  private.device_restore(uuid,uuid)
   from public, anon, authenticated, service_role;
 revoke all on function public.admin_account_lookup(text), public.admin_account_set_suspended(uuid,boolean,text),
-  public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text)
+  public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text),
+  public.admin_account_unrevoke_device(uuid,uuid,uuid,text), public.cloud_unrevoke_device_v1(uuid)
   from public, anon, authenticated, service_role;
 grant execute on function public.admin_account_lookup(text), public.admin_account_set_suspended(uuid,boolean,text),
-  public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text) to authenticated;
+  public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text),
+  public.admin_account_unrevoke_device(uuid,uuid,uuid,text), public.cloud_unrevoke_device_v1(uuid) to authenticated;
