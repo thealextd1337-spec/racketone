@@ -2266,3 +2266,36 @@ Merge `edeb2bee`, voller Check grün):
 - **Restrisiko (P3, Betriebshandbuch):** Die Übergabe-Anweisung in `anonymize_profile`
   ist bei 1-Zeilen-Schätzungen kubisch. Eine robustere Form wäre `LATERAL` je eigenem
   Match. Das ist nicht umgesetzt.
+
+## Welle 4 – gestartet 23.10.2026
+
+Aufträge:
+- Recovery-Rest: `advantly-20261023-recovery-rest-r1`.
+- B4 Android: `advantly-20261023-b4-android-r1`.
+- K7: `advantly-20261023-k7-pilot-r1`.
+
+**K7 übernommen** (`f575fb20`, `cf0fe8af`, Merge `80c56a2e`):
+- Lieferumfang:
+  - `docs/p2-pilot-nachweise.md` mit Nachweismatrix und Geräte-Bögen;
+  - Prüfskripte unter `tools/pilot-checks/`.
+- CI-Anschluss `29c266ee`: Die Skripte laufen seitdem im Supabase-Job gegen den echten
+  lokalen Stack. Das ist ihr erster Lauf überhaupt.
+- Skriptfix `f7e1a141`: Freundschafts-RPCs brauchen den Installationsnachweis.
+- Ergebnis CI 39921434622 und 39922481919, sechs von sieben grün:
+  - Release-Gate,
+  - Support,
+  - Widerruf,
+  - Export,
+  - Cloud-Upload: `PlayerAssigned.reference` und Teilnehmer vom zweiten eigenen Gerät
+    werden vom Server angenommen, damit belegt,
+  - Auth-Negativtests.
+- **Rot ist der Löschjob, ein echter Produktbefund.** Nach der gestaffelten Löschung von B
+  sieht A den Namen eines von B angelegten Gasts weiter: in `participants[].displayName`
+  und in `PlayerAssigned.player.displayName`. `anonymize_profile` löscht die eigene
+  Gastzeile, lässt den Namen im gemeinsamen Match aber stehen; das galt schon für das
+  alte `purge_account`. B selbst ist korrekt redigiert.
+
+**Nutzerentscheid 23.10.2026:** Gäste des gelöschten Kontos werden auch in gemeinsamen
+Matches entfernt. Sie erscheinen als „Gelöschter Spieler“ und sind in Teilnehmern und
+Verlauf redigiert, E steigt. Beanspruchte Gäste gehen wie bisher über. Die ID wird
+stillgelegt. Umsetzung: `advantly-20261023-server-guest-redaction-r1`.
