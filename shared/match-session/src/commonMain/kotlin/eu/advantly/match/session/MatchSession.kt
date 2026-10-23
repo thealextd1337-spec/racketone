@@ -1432,6 +1432,10 @@ class MatchSession(
      * Data-Signale zu einem Scheduler-Post zusammengelegt, dort gelten die Regeln von [onDataChanged]. Neu aufgebaut wird
      * nur ein offenes Match, dessen Store-Stand vom Engine-Stand abweicht. [matchId] ist nur der Anlass: geprüft werden
      * alle offenen Matches, damit zwischen den Threads kein Zustand außer dem Post-Merker geteilt wird.
+     *
+     * Bewusst schmaler als der Empfang von der Uhr: Gepullte Events gehen nicht sofort an die Uhr weiter (erst mit der
+     * Anti-Entropie), und ein gepullter Zählerwechsel (`ScorerChanged`) wird nicht abgeglichen – kein Uhr-Zähler-Abgleich,
+     * keine verworfenen Eingaben, kein Kopf-Fortschritt (die Listenzeile folgt erst dem nächsten eigenen Event).
      */
     @Suppress("UNUSED_PARAMETER")
     fun eventsCommitted(matchId: String) {
