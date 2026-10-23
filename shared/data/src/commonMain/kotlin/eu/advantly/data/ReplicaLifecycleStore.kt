@@ -749,12 +749,14 @@ class ReplicaLifecycleStore internal constructor(
             }
 
             is JsonObject -> {
+                fun id(key: String) = (value[key] as? JsonPrimitive)?.contentOrNull
+                // Ohne playerId ist die Slot-ID die Identität des Teilnehmers (v1-Gast); sonst gehört der Name der Besetzung.
+                val slot = if (id("playerId") == null && id("player_id") == null) id("slotId") ?: id("slot_id") else null
                 val redacted =
-                    listOf("id", "playerId", "player_id").any { key ->
-                        (value[key] as? JsonPrimitive)?.contentOrNull?.let(::isRedacted) == true
-                    } || (value["profileId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let {
-                        queries.isRedactedProfile(it).executeAsOne()
-                    } == true
+                    listOfNotNull(id("id"), id("playerId"), id("player_id"), slot).any(::isRedacted) ||
+                        (value["profileId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let {
+                            queries.isRedactedProfile(it).executeAsOne()
+                        } == true
                 JsonObject(
                     value.mapValues { (key, child) ->
                         if (redacted && key in setOf("displayName", "display_name", "alias")) JsonPrimitive("") else sanitizeJson(child)

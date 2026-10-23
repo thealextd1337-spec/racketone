@@ -22,9 +22,12 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.ReplicaAccessLevel
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
+import eu.advantly.data.assignments
 import eu.advantly.data.createInMemoryJvmDriver
 import eu.advantly.data.metadataState
+import eu.advantly.data.recentPeople
 import eu.advantly.data.toStoredEvent
+import eu.advantly.data.watchPeople
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -97,7 +100,8 @@ private class JointServer {
             previousMatchId = dto.previousMatchId,
             participants =
                 dto.participants?.map {
-                    val name = if (it.playerId in redactedPlayers) DELETED_NAME else it.displayName
+                    // e592c845: auch eigene Gäste ohne Zuordnung (nur slot_id) tragen danach den Löschnamen.
+                    val name = if ((it.playerId ?: it.slotId) in redactedPlayers) DELETED_NAME else it.displayName
                     PulledParticipant(it.slotId, it.team, it.position, it.playerId, displayName = name)
                 } ?: base.participants,
             status = projection?.status ?: base.status,
@@ -413,6 +417,15 @@ private class JointFixture(
                 },
                 0,
             ).value
+
+    /** Pull-Snapshots aller Konten, die [text] enthalten (an der Lesesperre vorbei). */
+    fun snapshotRowsContaining(text: String): Long =
+        pull.driver
+            .executeQuery(null, "SELECT count(*) FROM cloud_pull_snapshot WHERE instr(snapshot_json, '$text') > 0", { c ->
+                c.next()
+                QueryResult.Value(requireNotNull(c.getLong(0)))
+            }, 0)
+            .value
 
     fun serverEvents(match: String) = server.matches[match]?.log.orEmpty()
 
@@ -1045,6 +1058,114 @@ class CloudJointLifecycleTest {
             }
         }
 
+    /**
+     * Entscheid 23.10.2026: Löscht Bob sein Konto, wird auch sein eigener Gast im gemeinsamen Match redigiert. Die Gast-ID
+     * steht lokal in Teilnehmer-Snapshot (nur `slotId`), Lineup und v1-`PlayerAssigned`; nach Manifest und Epoche E 0→1
+     * zeigt keine Lesefläche den Namen mehr, auch nicht der Upload-Plan oder der Rohspeicher.
+     */
+    @Test
+    fun foreignGuestManifestIdRedactsLocalNamesEndToEnd(): Unit =
+        runBlocking {
+            JointFixture().use { f ->
+                f.pull.bind()
+                val format = Presets.TENNIS_SINGLES_BO3.format()
+                val lineup = Lineup(listOf(PlayerId(BOB)), listOf(PlayerId(GUEST)), PlayerId(BOB))
+                val match = f.server.foreign(FOREIGN, 0)
+
+                fun event(
+                    seq: Long,
+                    payload: EventPayload,
+                ) = ScoreEvent(EventId("$FOREIGN-b$seq"), MatchId(FOREIGN), DeviceId(REMOTE), seq, seq, seq, null, payload)
+                    .toStoredEvent()
+                    .let {
+                        PulledEvent(
+                            it.id,
+                            it.matchId,
+                            it.deviceId,
+                            seq,
+                            seq,
+                            seq,
+                            it.parentId,
+                            it.type,
+                            CloudJson.parseToJsonElement(it.payload).jsonObject,
+                            seq,
+                        )
+                    }
+                match.log += event(1, MatchCreated(format, lineup, createdBy = PlayerId(BOB)))
+                match.log += event(2, PlayerAssigned(PlayerId(GUEST), Player(PlayerId(GUEST), "Gast Geheim"), PlayerId(BOB)))
+                match.uploaded =
+                    MatchDto(
+                        FOREIGN,
+                        participants = listOf(ParticipantDto(BOB, "A", 1, "Bob", BOB), ParticipantDto(GUEST, "B", 1, "Gast Geheim")),
+                    )
+                f.server.touch(match)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.ready(FOREIGN))
+
+                fun surfaces(): String {
+                    val record =
+                        f.data.matches
+                            .history()
+                            .single { it.id.value == FOREIGN }
+                    val session = f.data.cloudUploads.activate("alice")
+                    val plan = f.data.cloudUploads.capture(session, 500)
+                    f.data.cloudUploads.deactivate()
+                    return listOf(
+                        f.data
+                            .assignments(record.id)
+                            .values
+                            .map { it.displayName },
+                        f.data.matches
+                            .recentLineups()
+                            .flatMap { it.a + it.b }
+                            .mapNotNull {
+                                f.data.players
+                                    .get(it)
+                                    ?.displayName
+                            },
+                        f.data.recentPeople().map { it.displayName },
+                        f.data.watchPeople().map { it.displayName },
+                        f.data.players
+                            .all()
+                            .map { it.displayName },
+                        f.data.events
+                            .eventsFor(FOREIGN)
+                            .map { it.payload },
+                        plan.participants.flatMap { p -> p.value.participants.map { it.displayName } },
+                        plan.players.map { it.value.displayName },
+                        plan.events.map { it.payload },
+                        listOfNotNull(
+                            f.data.cloudPulls
+                                .snapshot("alice", CloudPullEntityKind.MATCH, FOREIGN)
+                                ?.json,
+                        ),
+                    ).flatten().joinToString("|")
+                }
+                // Ausgangslage: der Name ist wirklich lokal angekommen (Zuweisung und Rohsnapshot).
+                assertTrue("Gast Geheim" in surfaces())
+                assertTrue(f.localRowsContaining("Gast Geheim") > 0)
+
+                f.server.redactedPlayers += GUEST
+                match.redactedIds += GUEST
+                match.log.replaceAll { e ->
+                    val person = e.payload["player"] as? JsonObject
+                    if (person?.get("id")?.jsonPrimitive?.content != GUEST) {
+                        e
+                    } else {
+                        val clean = JsonObject(person + ("displayName" to JsonPrimitive(DELETED_NAME)))
+                        e.copy(payload = JsonObject(e.payload + ("player" to clean)), redacted = true)
+                    }
+                }
+                f.server.raiseEpoch(FOREIGN)
+                assertEquals(CloudPullOutcome.COMPLETE, f.finishRound().outcome)
+                assertTrue(f.readable(FOREIGN))
+                assertEquals(1, f.access(FOREIGN)!!.redactionEpoch)
+                assertFalse("Gast Geheim" in surfaces(), surfaces())
+                assertEquals(0, f.localRowsContaining("Gast Geheim"))
+                assertEquals(0, f.snapshotRowsContaining("Gast Geheim"))
+            }
+        }
+
     /** Neustart zwischen Katalog-Commit und Readiness: gleiche Datenbank, neuer Runner, Zählen ohne Unterbrechung. */
     @Test
     fun oRestartBetweenCatalogAndReadinessKeepsCounting(): Unit =
@@ -1216,6 +1337,8 @@ class CloudJointLifecycleTest {
         val OTHER = uuid("other")
         val FOREIGN = uuid("foreign")
         val KLARA = uuid("klara")
+        val BOB = uuid("bob")
+        val GUEST = uuid("bob-guest")
         val SLOT = Placeholders.id("opponent")
     }
 }

@@ -2192,6 +2192,40 @@ class ReplicaLifecycleStoreTest {
         }
 
     @Test
+    fun slotOnlyParticipantSnapshotOfRedactedGuestIsScrubbed() =
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            f.cloudMatch()
+            // v1-Gast ohne playerId: die Slot-ID ist seine einzige Identität im Teilnehmer-Snapshot.
+            val pulled =
+                """
+                {"id":"shared","participants":[
+                {"slotId":"deleted","team":"A","position":1,"playerId":null,"displayName":"Sensitive name"},
+                {"slotId":"kept","team":"B","position":1,"displayName":"Kept name"}]}
+                """.trimIndent()
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json)
+                    VALUES ('A','MATCH','shared',1,'$pulled')""",
+            )
+            val start = f.data.replicas.beginRedaction(ctx, RedactionTransfer("slot-t", "match", 1, 1, 3), fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                "slot-t",
+                RedactionPage(0, start, RedactionCursor("deleted", 0), listOf("deleted"), emptyList(), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, "slot-t", fence)
+            val stored =
+                f.data.cloudPulls
+                    .snapshot("A", CloudPullEntityKind.MATCH, "shared")!!
+                    .json
+            assertEquals(DataJson.parseToJsonElement(pulled.replace("Sensitive name", "")), DataJson.parseToJsonElement(stored))
+            // Ein neu besetzter Slot trägt den Namen der lebenden Person; die alte Slot-ID allein maskiert ihn nicht.
+            val reassigned = """{"slotId":"deleted","playerId":"living","displayName":"Living name"}"""
+            assertEquals(DataJson.parseToJsonElement(reassigned), f.data.replicas.sanitizeJson(DataJson.parseToJsonElement(reassigned)))
+        }
+
+    @Test
     fun schemaSevenLegacyTypePayloadRemainsPrivateAfterMigrationAndRedaction() {
         val file = File.createTempFile("review-old-type", ".db")
         File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
