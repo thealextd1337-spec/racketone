@@ -343,6 +343,9 @@ class MatchSession(
     /** P3-1: Empfangszeit des letzten Hello je Gegenstelle (Wiederholung erkennen). */
     private val helloAtMs = HashMap<String, Long>()
 
+    /** Review A1: Sendezeit der letzten reinen Bestätigungsantwort je Gegenstelle (höchstens eine je Takt). */
+    private val confirmedAtMs = HashMap<String, Long>()
+
     /** Besitzer-Angaben aus `MatchMeta`, die vor dem `Hello` der Gegenstelle kamen (Art noch unbekannt). */
     private val earlyOwners = HashMap<String, MatchMetaMessage>()
     private var started = false
@@ -1668,6 +1671,7 @@ class MatchSession(
     ) {
         lastSyncAtMs = clock.nowMs()
         val behind = mutableListOf<MatchId>()
+        val covered = mutableListOf<MatchId>()
         val deleted = mutableListOf<MatchId>()
         for ((key, remote) in summary.matches) {
             val matchId = MatchId(key)
@@ -1683,9 +1687,30 @@ class MatchSession(
             val local = sequences(matchId)
             val ranges = AntiEntropy.missingRanges(local, remote)
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
-            if (AntiEntropy.isBehind(VersionVector.fromSequences(local), remote)) behind += matchId
+            when {
+                AntiEntropy.isBehind(VersionVector.fromSequences(local), remote) -> {
+                    behind += matchId
+                }
+
+                // offen und aktiv: unser eigener Takt bestätigt ohnehin
+                remote.watermarks.isNotEmpty() &&
+                    opened[matchId]?.let { it.status != MatchStatus.FINISHED && hasReplicationTarget(matchId) } != true -> {
+                    covered +=
+                        matchId
+                }
+            }
         }
-        if (!summary.reply && behind.isNotEmpty()) send(peer, summaryOf(behind, reply = true))
+        // Review A1: Mit Konto bestätigt nur eine Antwort (kein Link-Ack). Sehen wir alles Gemeldete, antworten wir trotzdem –
+        // sonst bliebe der Rückstand der Gegenstelle nach dem Matchende (kein eigener Takt) bis zum nächsten Link-Up stehen.
+        // Je Takt und Gegenstelle höchstens einmal; Antworten lösen keine Antworten aus.
+        val now = scheduler.nowMs()
+        val confirm =
+            data.accountIdentities.managed && covered.isNotEmpty() &&
+                (confirmedAtMs[peer]?.let { now - it >= config.antiEntropyIntervalMs / 2 } ?: true)
+        if (!summary.reply && (behind.isNotEmpty() || confirm)) {
+            if (confirm) confirmedAtMs[peer] = now
+            send(peer, summaryOf(if (confirm) behind + covered else behind, reply = true))
+        }
         if (deleted.isNotEmpty()) sendDeleted(peer, deleted)
     }
 
