@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 internal const val SYNC_JOB_ID = 41_001
@@ -51,6 +52,16 @@ internal class AndroidPhoneSyncScheduler(
         // Unverändert lassen: Ein Neuplanen bei jedem App-Start verschöbe den Takt immer weiter.
         if (jobs.getPendingJob(PERIODIC_SYNC_JOB_ID)?.extras?.getString(PROFILE_EXTRA) == profile) return
         jobs.schedule(job(PERIODIC_SYNC_JOB_ID, profile).setPeriodic(PERIODIC_SYNC_MS).build())
+    }
+
+    /** Ein Matchende verkürzt keinen aktiven Backoff: Dessen späterer Termin bleibt, sonst Lauf nach 10 s. */
+    fun scheduleAfterMatchEnd(
+        profile: String,
+        record: PhoneSyncRecord,
+    ) {
+        val pending = jobs.getPendingJob(SYNC_JOB_ID)?.extras?.getString(PROFILE_EXTRA) == profile
+        if (pending && record.failures(profile) > 0) return
+        schedule(profile, MATCH_END_SYNC_DELAY_MS)
     }
 
     override fun cancel() {
@@ -91,6 +102,14 @@ internal class AndroidPhoneSyncRecord(
             .apply()
     }
 
+    override fun forget(profile: String) {
+        prefs
+            .edit()
+            .remove("last_backup.$profile")
+            .remove("failures.$profile")
+            .apply()
+    }
+
     companion object {
         const val FILE = "advantly_sync"
     }
@@ -106,13 +125,14 @@ internal fun scheduleSyncAfterMatchEnd(
 ): () -> Unit {
     if (BuildConfig.SUPABASE_URL.isBlank()) return {}
     val scheduler = AndroidPhoneSyncScheduler(context)
+    val record = AndroidPhoneSyncRecord(context)
     return onMatchFinished(session) {
         AndroidInstallationGuard
             .storage(context) {
                 session.data.accountIdentities.profile
                     .orEmpty()
             }?.takeIf { it.isNotEmpty() }
-            ?.let { scheduler.schedule(it, MATCH_END_SYNC_DELAY_MS) }
+            ?.let { scheduler.scheduleAfterMatchEnd(it, record) }
     }
 }
 
@@ -139,14 +159,21 @@ class PhoneSyncJobService : JobService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val running = HashMap<Int, Job>()
 
+    /** Testnaht; im Produkt immer [runScheduledSync]. */
+    internal var work: suspend (Context, String?) -> Boolean = ::runScheduledSync
+
     override fun onStartJob(params: JobParameters): Boolean {
         val job =
             scope.launch(start = CoroutineStart.LAZY) {
                 var reschedule = false
                 try {
-                    reschedule = runScheduledSync(applicationContext, params.extras.getString(PROFILE_EXTRA))
+                    reschedule = work(applicationContext, params.extras.getString(PROFILE_EXTRA))
                 } finally {
-                    if (running.remove(params.jobId) != null) jobFinished(params, reschedule)
+                    // Ein ersetzter Lauf endet womöglich erst nach dem Start seines Nachfolgers: nur den eigenen Eintrag austragen.
+                    if (running[params.jobId] === coroutineContext.job) {
+                        running.remove(params.jobId)
+                        jobFinished(params, reschedule)
+                    }
                 }
             }
         running[params.jobId] = job

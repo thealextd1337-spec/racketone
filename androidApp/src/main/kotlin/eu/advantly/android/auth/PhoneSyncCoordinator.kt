@@ -48,6 +48,9 @@ internal interface PhoneSyncRecord {
         lastBackupAtMs: Long?,
         failures: Int,
     )
+
+    /** Logout und Löschantrag: Für das Konto bleibt kein Stand liegen. */
+    fun forget(profile: String)
 }
 
 /**
@@ -175,7 +178,7 @@ internal class PhoneSyncCoordinator(
         return job
     }
 
-    /** `true`: fehlerfrei beendet, aber lokale Daten änderten sich während des Uploads. Abbruch plant nichts. */
+    /** `true`: fehlerfrei und vollständig beendet, aber lokale Daten änderten sich während des Uploads. Abbruch plant nichts. */
     private suspend fun run(expected: PhoneCloudContext): Boolean {
         var passes = 0
         while (true) {
@@ -195,7 +198,8 @@ internal class PhoneSyncCoordinator(
                     (uploaded.result == PhoneUploadResult.FAILED && uploaded.error != PhoneUploadError.PERMISSION)
             if (!failed && more && passes < MAX_PASSES) continue
             finish(expected, pulled, uploaded, more, failed)
-            return !failed && uploaded.stale
+            // Nach ausgeschöpften Runden sieht die geplante Fortsetzung die Änderung; kein Folgelauf vor ihrer Pause.
+            return !failed && !more && uploaded.stale
         }
     }
 

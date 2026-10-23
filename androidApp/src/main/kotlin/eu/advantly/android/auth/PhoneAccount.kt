@@ -33,6 +33,9 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -47,15 +50,14 @@ internal fun ComponentActivity.createPhoneAccount(
     val core = PhoneAccountCore.get(applicationContext, apiUrl, apiKey) ?: return null
     lateinit var model: AuthViewModel
     val refresh: () -> Unit = { model.refresh() }
+    val account =
+        PhoneAccountPort(core.auth, core.runtime.scope, core.record) {
+            if (core.refreshAccount === refresh) core.refreshAccount = null
+        }
     model =
         AuthViewModel(
-            object : CloudAuthPort by core.auth {
-                // Der Kern bleibt für geplante Arbeit bestehen; das ViewModel gibt nur seinen Profil-Hook ab.
-                override fun close() {
-                    if (core.refreshAccount === refresh) core.refreshAccount = null
-                }
-            },
-            workScope = core.runtime.scope,
+            account,
+            workScope = account.scope,
             upload =
                 object : PhoneUploadPort by core.upload {
                     override fun close(onDrained: () -> Unit) = onDrained()
@@ -79,6 +81,42 @@ internal fun ComponentActivity.createPhoneAccount(
 }
 
 /**
+ * Konto-Port eines ViewModels über dem prozessweiten Kern. Seine Arbeit (Sitzungs-Collector, Aktionen) läuft in einem
+ * eigenen Kind-Job des Prozess-Scopes: [close] bricht nur diesen ab und gibt den Profil-Hook ab ([release]); der Kern
+ * bleibt für geplante Arbeit bestehen. Logout und Löschantrag entfernen den Sicherungsstand des Kontos.
+ */
+internal class PhoneAccountPort(
+    private val auth: CloudAuthPort,
+    processScope: CoroutineScope,
+    private val record: PhoneSyncRecord,
+    private val release: () -> Unit,
+) : CloudAuthPort by auth {
+    private val work = SupervisorJob(processScope.coroutineContext[Job])
+    val scope = CoroutineScope(processScope.coroutineContext + work)
+
+    override suspend fun signOut() {
+        val profile = auth.accountSession.value?.profileId
+        // Die lokale Sitzung endet auch bei Netzfehler oder Abbruch (SupabasePhoneAuth.signOut).
+        try {
+            auth.signOut()
+        } finally {
+            profile?.let(record::forget)
+        }
+    }
+
+    override suspend fun requestDeletion() {
+        val profile = auth.accountSession.value?.profileId
+        auth.requestDeletion()
+        profile?.let(record::forget)
+    }
+
+    override fun close() {
+        work.cancel()
+        release()
+    }
+}
+
+/**
  * B4: prozessweit genau ein Konto-Host je Android-Session. Konto-ViewModels (auch Multi-Window) und geplante Arbeit teilen
  * SDK-Client, Auth, Hosts und Koordinator: Zwei Clients rotierten Refresh-Tokens gegeneinander, und der Abbau des einen
  * deaktivierte die Upload-Sitzung des anderen. Abgebaut wird erst, wenn die Android-Session widerrufen ist.
@@ -98,6 +136,7 @@ internal class PhoneAccountCore private constructor(
         }
     private val session = AndroidMatchSessions.get(context, PeerKind.PHONE)
     val runtime = AndroidAccountRuntime(context, session)
+    val record = AndroidPhoneSyncRecord(context)
     val auth =
         SupabasePhoneAuth(
             client,
@@ -128,7 +167,7 @@ internal class PhoneAccountCore private constructor(
             pull,
             upload,
             AndroidPhoneSyncScheduler(context),
-            AndroidPhoneSyncRecord(context),
+            record,
             runtime.scope,
             hostAccessAllowed = { runtime.allowed },
             storageAction = runtime::storageAction,

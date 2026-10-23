@@ -7,6 +7,7 @@ import eu.advantly.cloud.sync.CloudInstallation
 import eu.advantly.cloud.sync.CloudJson
 import eu.advantly.cloud.sync.CloudPullAttempt
 import eu.advantly.cloud.sync.CloudPullPort
+import eu.advantly.cloud.sync.CloudUploadAttempt
 import eu.advantly.cloud.sync.CloudUploadPort
 import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.ItemResult
@@ -117,6 +118,11 @@ class PhoneSyncCoordinatorTest {
         ) {
             if (lastBackupAtMs == null) last.remove(profile) else last[profile] = lastBackupAtMs
             this.failures[profile] = failures
+        }
+
+        override fun forget(profile: String) {
+            last.remove(profile)
+            failures.remove(profile)
         }
     }
 
@@ -551,6 +557,42 @@ class PhoneSyncCoordinatorTest {
                 }
             } finally {
                 driver.close()
+            }
+        }
+
+    /** P3-2: Ausgeschöpfte Runden mit lokalen Änderungen starten keinen sofortigen Folgelauf; die 60-s-Pause gilt. */
+    @Test fun exhaustedPassesWithLocalChangesWaitForTheScheduledContinuation() =
+        runBlocking {
+            var runs = 0
+            lateinit var f: Fixture
+            f =
+                Fixture(this, pulls = { backend ->
+                    object : CloudPullPort by backend {
+                        override fun capturePull(): CloudPullAttempt = backend.capturePull().also { runs++ }
+
+                        // Jede Runde endet mit LIMIT_REACHED …
+                        override suspend fun pullPage(
+                            attempt: CloudPullAttempt,
+                            cursor: Long,
+                            limit: Int,
+                        ) = PullResponse(cursor = cursor + 1, hasMore = true, visibilityEpoch = 1)
+                    }
+                }, uploads = { backend ->
+                    object : CloudUploadPort by backend {
+                        // … und jeder Upload sieht eine lokale Änderung.
+                        override fun captureUpload(limit: Int) = backend.captureUpload(limit).also { f.match() }
+                    }
+                })
+            try {
+                f.signIn()
+                assertEquals(PhoneSyncStatus.PENDING, f.firstCycle().status)
+                withTimeout(15_000) { while (f.sync.state.value.running) yield() }
+                delay(200)
+                assertTrue("der Upload sah lokale Änderungen", f.upload.state.value.stale)
+                assertEquals(PhoneSyncCoordinator.MAX_PASSES, runs)
+                assertEquals(listOf("alice" to PhoneSyncCoordinator.CONTINUE_DELAY_MS), f.scheduler.scheduled.toList())
+            } finally {
+                f.close()
             }
         }
 

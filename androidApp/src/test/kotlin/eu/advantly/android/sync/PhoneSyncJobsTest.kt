@@ -2,21 +2,34 @@ package eu.advantly.android.sync
 
 import android.app.Application
 import android.app.job.JobInfo
+import android.app.job.JobParameters
 import android.app.job.JobScheduler
 import android.content.ComponentName
+import android.content.Context
+import android.os.PersistableBundle
+import eu.advantly.android.UnsupportedDirectorySyncLinux
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /** B4: geplante Abgleiche über JobScheduler – Netzbedingung, Neustartfestigkeit und Kontobindung jedes Auftrags. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class)
+// Gleicher Linux-Shadow wie die Restore-Guard-Tests: SharedPreferences-Schreibvorgänge binden sonst das Standard-ShadowLinux
+// an das statische Linux-Objekt der geteilten Sandbox, und läuft diese Klasse zuerst, scheitern jene am Cast.
+@Config(sdk = [35], application = Application::class, shadows = [UnsupportedDirectorySyncLinux::class])
 class PhoneSyncJobsTest {
     private val app: Application = RuntimeEnvironment.getApplication()
     private val jobs = app.getSystemService(JobScheduler::class.java)
@@ -69,5 +82,84 @@ class PhoneSyncJobsTest {
         assertEquals(1, reopened.failures("bob"))
         record.save("alice", null, 0)
         assertNull(reopened.lastBackupAtMs("alice"))
+    }
+
+    /** P3-7: Logout/Löschantrag entfernen beide Schlüssel des Kontos, andere Konten bleiben. */
+    @Test fun forgetRemovesOnlyTheKeysOfTheAccount() {
+        val record = AndroidPhoneSyncRecord(app)
+        record.save("alice", 1_000, 2)
+        record.save("bob", 2_000, 1)
+        record.forget("alice")
+        val prefs = app.getSharedPreferences(AndroidPhoneSyncRecord.FILE, Context.MODE_PRIVATE)
+        assertEquals(setOf("last_backup.bob", "failures.bob"), prefs.all.keys)
+    }
+
+    /** P3-3: Ein Matchende plant nach 10 s, verkürzt aber keinen aktiven Backoff. */
+    @Test fun matchEndKeepsAnActiveBackoffButReplacesOtherPendingWork() {
+        val scheduler = AndroidPhoneSyncScheduler(app)
+        val record = AndroidPhoneSyncRecord(app)
+        scheduler.scheduleAfterMatchEnd("alice", record)
+        assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+        // Fortsetzung ohne Fehlerserie ist kein Backoff: Das Matchende darf früher abgleichen.
+        scheduler.schedule("alice", 60_000)
+        scheduler.scheduleAfterMatchEnd("alice", record)
+        assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+
+        record.save("alice", null, 4)
+        scheduler.schedule("alice", 240_000)
+        scheduler.scheduleAfterMatchEnd("alice", record)
+        assertEquals(240_000, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+        // Ohne geplanten Auftrag (etwa schon gestartet) plant das Matchende trotz Fehlerserie.
+        scheduler.cancel()
+        scheduler.scheduleAfterMatchEnd("alice", record)
+        assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+    }
+
+    /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */
+    @Test fun aReplacedRunNeverFinishesItsSuccessor() {
+        val service = Robolectric.buildService(PhoneSyncJobService::class.java).create().get()
+        val release = CompletableDeferred<Unit>()
+        val successor = CompletableDeferred<Boolean>()
+        var runs = 0
+        service.work = { _, _ ->
+            if (runs++ == 0) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) { release.await() }
+                }
+            } else {
+                successor.await()
+            }
+        }
+        // Main.immediate auf dem Test-Main-Thread setzt sofort fort; kein Looper-idle() nötig.
+        val shadow = shadowOf(service)
+        val first = params(SYNC_JOB_ID)
+        assertTrue(service.onStartJob(first))
+        assertTrue(service.onStopJob(first))
+        assertTrue(service.onStartJob(params(SYNC_JOB_ID)))
+        release.complete(Unit)
+        assertFalse("der ersetzte Lauf trägt den Nachfolger aus", shadow.isJobFinished)
+        successor.complete(true)
+        assertTrue(shadow.isJobFinished)
+        assertTrue(shadow.isRescheduleNeeded)
+        service.onDestroy()
+    }
+
+    /** JobParameters hat keinen öffentlichen Konstruktor; der erste Int ist die jobId. */
+    private fun params(id: Int): JobParameters {
+        val constructor = JobParameters::class.java.declaredConstructors.maxBy { it.parameterCount }
+        var idSet = false
+        val args =
+            constructor.parameterTypes.map {
+                when (it) {
+                    Int::class.javaPrimitiveType -> if (idSet) 0 else id.also { idSet = true }
+                    Boolean::class.javaPrimitiveType -> false
+                    PersistableBundle::class.java -> PersistableBundle().apply { putString(PROFILE_EXTRA, "alice") }
+                    else -> null
+                }
+            }
+        constructor.isAccessible = true
+        return constructor.newInstance(*args.toTypedArray()) as JobParameters
     }
 }
