@@ -23,6 +23,7 @@ import eu.advantly.data.CloudPullWatermark
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.ScoreSummary
 import eu.advantly.data.StoredEvent
+import eu.advantly.data.assignments
 import eu.advantly.data.scoreEvents
 import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.LocalMatchStamp
@@ -77,6 +78,14 @@ class MatchMetaAuthorityTest {
         assertEquals(PlayerAssignmentFailure.NOT_OWNER, pair.watch.assignmentFailure(phoneMatch, slot, guest))
         pair.phoneData.players.addGuest(guest, "Bea", 0)
         assertTrue(pair.phone.assignPlayer(phoneMatch, slot, guest))
+        val assigned =
+            pair.phoneData.events
+                .scoreEvents(phoneMatch)
+                .map { it.payload }
+                .filterIsInstance<PlayerAssigned>()
+                .single()
+        assertEquals(PlayerAssigned.reference(slot, guest, assigned.assignedBy), assigned, "mit Konto und V4 namenfrei")
+        assertEquals("Bea", pair.phoneData.assignments(phoneMatch)[slot]?.displayName, message = "Name kommt aus dem Verzeichnis")
 
         pair.watch.closeMatch()
         val watchSelf =

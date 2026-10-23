@@ -768,17 +768,16 @@ class MatchSession(
         // F22: jedes offene Match (nicht nur das fokussierte), sonst eine Arbeitskopie aus dem Log
         val m = opened[matchId] ?: detached(matchId) ?: return false
         val actor = data.players.ensureSelf("", clock.nowMs()) { PlayerId(ids.newUuid7(clock.nowMs()).value) }.id
-        val creator = data.matchCreator(matchId)
-        return emit(
-            m,
-            PlayerAssigned(
-                slot,
-                player,
-                actor,
-                legacySlot = !Placeholders.isPlaceholder(slot),
-                creatorAlias = creator?.takeIf { it != actor && data.isSelf(it) },
-            ),
-        ) != null
+        val creatorAlias = data.matchCreator(matchId)?.takeIf { it != actor && data.isSelf(it) }
+        val legacySlot = !Placeholders.isPlaceholder(slot)
+        // Mit Konto und V4 namenfrei (p2-plan §5.7): der Name reist nur über das Verzeichnis und ist dort redigierbar
+        val event =
+            if (data.accountIdentities.managed && config.protocolVersions.last >= 4) {
+                PlayerAssigned.reference(slot, playerId, actor, legacySlot, creatorAlias)
+            } else {
+                PlayerAssigned(slot, player, actor, legacySlot, creatorAlias)
+            }
+        return emit(m, event) != null
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
