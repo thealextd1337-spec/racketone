@@ -31,14 +31,17 @@ async function unlocked(api) {
     async signOut() { signOuts += 1; },
     onAuthStateChange() { return () => {}; },
   };
-  const view = { on() {}, off() {}, render(state) { this.state = state; } };
+  const view = {
+    confirmations: [], hidden: 0, on() {}, off() {}, render(state) { this.state = state; },
+    showAccountConfirmation(details) { this.confirmations.push(details); }, hideAccountConfirmation() { this.hidden += 1; },
+  };
   const controller = new AdminController({
     config: { ok: true }, auth, view,
     api: { async listTickets() { return []; }, async listMembers() { return []; }, ...api },
   });
   await controller.signIn("operator@example.test", "password");
   assert.equal(controller.state.phase, "inbox");
-  return { controller, signOuts: () => signOuts };
+  return { controller, view, signOuts: () => signOuts };
 }
 
 test("account query and actions are validated before any request", () => {
@@ -52,6 +55,7 @@ test("account query and actions are validated before any request", () => {
   assert.equal(code(() => buildAccountAction({ profileId: "nope" }, "suspend", { reason: "x" })), "support_invalid");
   assert.equal(code(() => buildAccountAction(account(), "suspend", { reason: "x", ticketId })), "account-ticket-invalid");
   assert.equal(code(() => buildAccountAction(account(), "cancel-deletion", { reason: "x", ticketId: "123" })), "account-ticket-invalid");
+  assert.equal(code(() => buildAccountAction(account(), "cancel-deletion", { reason: "User asked", ticketId: " " })), "account-ticket-required");
   assert.deepEqual(buildAccountAction(account(), "suspend", { reason: "  Abuse report  " }),
     { rpc: "admin_account_set_suspended", args: { p_profile_id: accountId, p_reason: "Abuse report", p_suspended: true } });
   assert.deepEqual(buildAccountAction(account(), "unsuspend", { reason: "Cleared" }).args.p_suspended, false);
@@ -59,7 +63,6 @@ test("account query and actions are validated before any request", () => {
     { rpc: "admin_account_revoke_devices", args: { p_profile_id: accountId, p_reason: "Lost phone" } });
   assert.deepEqual(buildAccountAction(account(), "cancel-deletion", { reason: "User asked", ticketId: ` ${ticketId} ` }),
     { rpc: "admin_account_cancel_deletion", args: { p_profile_id: accountId, p_reason: "User asked", p_ticket_id: ticketId } });
-  assert.equal(buildAccountAction(account(), "cancel-deletion", { reason: "User asked" }).args.p_ticket_id, null);
 });
 
 test("API sends only the account RPCs and maps their stable server errors", async () => {
@@ -75,7 +78,8 @@ test("API sends only the account RPCs and maps their stable server errors", asyn
   await assert.rejects(api.accountAction(buildAccountAction(account(), "suspend", { reason: "x" })),
     (error) => error.code === "support_admin_required");
   assert.throws(() => api.accountAction({ rpc: "admin_support_update", args: {} }), (error) => error.code === "support_invalid");
-  for (const code of ["account_not_found", "account_ambiguous", "no_deletion_pending"]) {
+  for (const code of ["account_not_found", "account_ambiguous", "no_deletion_pending", "deletion_ticket_required",
+    "deletion_ticket_invalid", "deletion_ticket_stale", "deletion_ticket_evidence_required"]) {
     const failing = createSupportApi({ async rpc() { return { error: { message: code } }; } });
     await assert.rejects(failing.lookupAccount("x"), (error) => error.code === code);
   }
@@ -84,7 +88,7 @@ test("API sends only the account RPCs and maps their stable server errors", asyn
 test("lookup shows the minimal status, drops late answers and keeps the session on admin-only errors", async () => {
   const lookups = [];
   const actions = [];
-  const { controller, signOuts } = await unlocked({
+  const { controller, view, signOuts } = await unlocked({
     lookupAccount(query) { const pending = deferred(); lookups.push({ query, ...pending }); return pending.promise; },
     async accountAction(operation) {
       actions.push(operation);
@@ -107,12 +111,22 @@ test("lookup shows the minimal status, drops late answers and keeps the session 
   assert.equal(actions.length, 0, "no request without reason");
   assert.equal(controller.state.accountNotice, "updateReasonRequired");
 
-  await controller.runAccountAction("suspend", { reason: "denied" });
+  controller.runAccountAction("suspend", { reason: "denied" });
+  await controller.confirmAccountAction();
   assert.equal(controller.state.accountNotice, "accountAdminRequired");
   assert.equal(controller.state.phase, "inbox", "admin-only refusal does not end the session");
   assert.equal(signOuts(), 0);
 
-  await controller.runAccountAction("suspend", { reason: "Abuse report" });
+  controller.runAccountAction("suspend", { reason: "Abuse report" });
+  assert.equal(actions.length, 1, "nothing is sent before the confirmation");
+  assert.deepEqual(view.confirmations.at(-1),
+    { actionKey: "accountSuspend", alias: "Alex", profileId: accountId, reason: "Abuse report" }, "confirmation names action and account");
+  controller.cancelAccountAction();
+  await controller.confirmAccountAction();
+  assert.equal(actions.length, 1, "a cancelled confirmation sends nothing");
+  controller.runAccountAction("suspend", { reason: "Abuse report" });
+  await controller.confirmAccountAction();
+  assert.equal(actions.length, 2);
   assert.equal(controller.state.account.suspended, true);
   assert.equal(controller.state.accountNotice, "accountActionSaved");
   assert.equal(controller.state.accountDraft.reason, "", "reason is not reused for the next action");
@@ -130,6 +144,42 @@ test("lookup shows the minimal status, drops late answers and keeps the session 
   assert.equal(controller.state.authError, "mfaRequired");
 });
 
+test("a running account action keeps its account, so the saved result is shown and saving ends", async () => {
+  const pending = deferred();
+  const lookups = [];
+  const { controller } = await unlocked({
+    async lookupAccount(query) { lookups.push(query); return { viewerRole: "admin", account: account() }; },
+    accountAction() { return pending.promise; },
+  });
+  controller.setWorkspace("accounts");
+  await controller.searchAccount("Alex");
+  controller.runAccountAction("revoke", { reason: "Lost phone" });
+  const running = controller.confirmAccountAction();
+  assert.equal(controller.state.accountSaving, true);
+  await controller.searchAccount("Other");
+  assert.deepEqual(lookups, ["Alex"], "no lookup while an action is saving");
+  pending.resolve(account({ activeDevices: 0 }));
+  await running;
+  assert.equal(controller.state.accountSaving, false);
+  assert.equal(controller.state.accountNotice, "accountActionSaved");
+  assert.equal(controller.state.account.activeDevices, 0);
+});
+
+test("a new lookup drops an open confirmation, so no action reaches another account", async () => {
+  const actions = [];
+  const { controller, view } = await unlocked({
+    async lookupAccount(query) { return { viewerRole: "admin", account: account(query === "Other" ? { profileId: ticketId } : {}) }; },
+    async accountAction(operation) { actions.push(operation); return account(); },
+  });
+  controller.setWorkspace("accounts");
+  await controller.searchAccount("Alex");
+  controller.runAccountAction("suspend", { reason: "Abuse report" });
+  await controller.searchAccount("Other");
+  assert.ok(view.hidden > 0, "dialog closed");
+  await controller.confirmAccountAction();
+  assert.deepEqual(actions, []);
+});
+
 test("accounts workspace shows actions only to admins and labels everything in both languages", () => {
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.attributes = new Map(); }
@@ -144,24 +194,46 @@ test("accounts workspace shows actions only to admins and labels everything in b
     for (const language of ["de", "en"]) {
       const base = { language, accountQuery: "Alex", accountLoading: false, accountNotice: null, accountDraft: { reason: "", ticketId: "" }, accountSaving: false };
       const support = descendants(view.renderAccounts({ ...base, viewerRole: "support", account: account() }));
-      assert.ok(!support.some((element) => element.name === "action"), "support sees no actions");
+      assert.ok(!support.some((element) => element.dataset.action === "account-action"), "support sees no actions");
       assert.ok(support.some((element) => element.textContent === translate(language, "accountReadOnly")));
       assert.ok(support.some((element) => element.textContent === accountStatusLabel(language, "active")));
       assert.ok(!support.some((element) => /@/.test(element.textContent ?? "")), "no email address");
 
       const admin = descendants(view.renderAccounts({ ...base, viewerRole: "admin",
         account: account({ suspended: true, status: "deletion_requested", canCancelDeletion: true, deletionRequestedAt: "2026-10-20T10:00:00Z", earliestPurgeAt: "2026-11-03T10:00:00Z" }) }));
-      const actions = admin.filter((element) => element.name === "action").map((element) => element.value);
-      assert.deepEqual(actions, ["unsuspend", "revoke", "cancel-deletion"]);
+      const buttons = admin.filter((element) => element.dataset.action === "account-action");
+      assert.deepEqual(buttons.map((element) => element.dataset.accountAction), ["unsuspend", "revoke", "cancel-deletion"]);
+      // Enter in Begründung oder Meldungsfeld darf keine Aktion absenden: kein Formular, kein Submit-Knopf.
+      assert.ok(buttons.every((element) => element.type === "button"));
+      const actionsRoot = view.renderAccountActions({ ...base, viewerRole: "admin", account: account({ canCancelDeletion: true }) });
+      assert.ok(descendants(actionsRoot).every((element) => element.tagName !== "form" && element.type !== "submit"));
       const reason = admin.find((element) => element.name === "reason");
       assert.equal(reason.required, true);
       assert.equal(reason.maxLength, 500);
-      assert.ok(admin.some((element) => element.name === "ticketId"));
+      assert.equal(admin.find((element) => element.name === "ticketId").required, true);
       assert.ok(admin.some((element) => element.textContent === translate(language, "accountCancelDeletionHint")));
 
       const deleting = descendants(view.renderAccounts({ ...base, viewerRole: "admin", account: account({ status: "deleting" }) }));
-      assert.deepEqual(deleting.filter((element) => element.name === "action"), [], "no actions on an account being deleted");
+      assert.deepEqual(deleting.filter((element) => element.dataset.action === "account-action"), [], "no actions on an account being deleted");
     }
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+});
+
+test("an action button emits exactly its own action with the typed fields", () => {
+  const previous = globalThis.document;
+  const handlers = {};
+  globalThis.document = { addEventListener(type, handler) { handlers[type] = handler; }, removeEventListener() {} };
+  try {
+    const fields = { reason: { value: " Lost phone " }, ticketId: { value: ticketId } };
+    const app = { querySelector: (selector) => fields[/data-account-field="(\w+)"/.exec(selector)?.[1]] ?? null };
+    const view = new AdminView({ app, dialog: null, accountDialog: null });
+    const emitted = [];
+    view.on("account-action", (payload) => emitted.push(payload));
+    handlers.click({ target: { closest: () => ({ dataset: { action: "account-action", accountAction: "cancel-deletion" } }) } });
+    assert.deepEqual(emitted, [{ action: "cancel-deletion", fields: { reason: " Lost phone ", ticketId } }]);
   } finally {
     if (previous === undefined) delete globalThis.document;
     else globalThis.document = previous;
@@ -175,7 +247,8 @@ test("every account text exists in German and English", () => {
     "accountConsent", "accountTerms", "accountPrivacy", "accountYes", "accountNo", "accountSuspend", "accountUnsuspend",
     "accountRevoke", "accountTicket", "accountCancelDeletionHint", "accountCancelDeletion", "accountActionSaved",
     "accountAdminRequired", "accountNotFound", "accountAmbiguous", "accountQueryRequired", "accountTicketInvalid",
-    "accountNoDeletionPending", "accountStatusOnboarding", "accountStatusActive", "accountStatusDeletionRequested",
+    "accountNoDeletionPending", "accountTicketPlaceholder", "accountTicketRequired", "accountTicketMismatch", "accountTicketStale",
+    "accountTicketEvidence", "accountConfirmTitle", "accountConfirmTarget", "accountStatusOnboarding", "accountStatusActive", "accountStatusDeletionRequested",
     "accountStatusDeleting"];
   for (const key of keys) {
     assert.notEqual(translate("en", key), key, `en ${key}`);

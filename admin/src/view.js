@@ -144,9 +144,11 @@ function alertBox(language, key, style = "error") {
 }
 
 export class AdminView {
-  constructor({ app = document.getElementById("app"), dialog = document.getElementById("public-confirm") } = {}) {
+  constructor({ app = document.getElementById("app"), dialog = document.getElementById("public-confirm"),
+    accountDialog = document.getElementById("account-confirm") } = {}) {
     this.app = app;
     this.dialog = dialog;
+    this.accountDialog = accountDialog;
     this.listeners = new Map();
     this.handleClick = (event) => {
       const target = event.target.closest?.("[data-action]");
@@ -154,6 +156,10 @@ export class AdminView {
       if (target.dataset.action === "language") this.emit("language", { language: target.dataset.language });
       else if (target.dataset.action === "select-ticket") this.emit("select-ticket", { id: target.dataset.id });
       else if (target.dataset.action === "workspace") this.emit("workspace", { value: target.dataset.workspace });
+      else if (target.dataset.action === "account-action") {
+        const field = (name) => this.app.querySelector(`[data-account-field="${name}"]`)?.value ?? "";
+        this.emit("account-action", { action: target.dataset.accountAction, fields: { reason: field("reason"), ticketId: field("ticketId") } });
+      }
       else this.emit(target.dataset.action);
     };
     this.handleSubmit = (event) => {
@@ -184,9 +190,6 @@ export class AdminView {
       else if (form.dataset.form === "ticket-update") this.emit("save-ticket", { fields: Object.fromEntries(values.entries()) });
       else if (form.dataset.form === "message") this.emit("send-message");
       else if (form.dataset.form === "account-search") this.emit("account-search", { query: values.get("query") });
-      else if (form.dataset.form === "account-action") {
-        this.emit("account-action", { action: event.submitter?.value, fields: { reason: values.get("reason") ?? "", ticketId: values.get("ticketId") ?? "" } });
-      }
     };
     this.handleInput = (event) => {
       const target = event.target;
@@ -208,6 +211,7 @@ export class AdminView {
     document.addEventListener("input", this.handleInput);
     document.addEventListener("change", this.handleChange);
     this.dialog?.addEventListener("cancel", () => this.emit("cancel-public-send"));
+    this.accountDialog?.addEventListener("cancel", () => this.emit("cancel-account-action"));
   }
 
   on(event, callback) {
@@ -437,7 +441,7 @@ export class AdminView {
     const query = fieldInput({ type: "search", value: state.accountQuery, placeholder: translate(language, "accountQueryPlaceholder"), name: "query", focusKey: "account-query", required: true, maxLength: 120 });
     query.autocapitalize = "none"; query.spellcheck = false;
     const submit = node("button", "button button--accent", translate(language, state.accountLoading ? "accountSearching" : "accountSearch"));
-    submit.type = "submit"; submit.disabled = state.accountLoading;
+    submit.type = "submit"; submit.disabled = state.accountLoading || state.accountSaving;
     const actions = node("div", "form-actions");
     actions.append(node("p", "field-hint", translate(language, "accountQueryHint")), submit);
     search.append(addFieldLabel(translate(language, "accountQuery"), query), actions);
@@ -478,15 +482,16 @@ export class AdminView {
     const language = state.language;
     const account = state.account;
     const draft = state.accountDraft ?? {};
-    const form = node("form", "update-form");
-    form.dataset.form = "account-action";
+    // Kein <form>: Enter in einem Feld löst nie eine Aktion aus (implizites Absenden), jede Aktion hat ihren Knopf.
+    const form = node("div", "update-form");
     const reason = fieldInput({ value: draft.reason, placeholder: translate(language, "updateReasonPlaceholder"), name: "reason", focusKey: "account-reason", required: true, maxLength: 500 });
     reason.dataset.accountField = "reason";
     form.append(addFieldLabel(translate(language, "updateReason"), reason), node("p", "field-hint", translate(language, "updateReasonHint")));
     const buttons = node("div", "form-actions");
     const button = (action, key, style = "button button--quiet") => {
       const element = node("button", style, translate(language, state.accountSaving ? "saving" : key));
-      element.type = "submit"; element.name = "action"; element.value = action; element.disabled = state.accountSaving;
+      element.type = "button"; element.dataset.action = "account-action"; element.dataset.accountAction = action;
+      element.disabled = state.accountSaving;
       buttons.append(element);
     };
     if (account.status !== "deleting") {
@@ -494,7 +499,7 @@ export class AdminView {
       button("revoke", "accountRevoke");
     }
     if (account.canCancelDeletion) {
-      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "relatedPlaceholder"), name: "ticketId", focusKey: "account-ticket", maxLength: 36 });
+      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "accountTicketPlaceholder"), name: "ticketId", focusKey: "account-ticket", required: true, maxLength: 36 });
       ticket.dataset.accountField = "ticketId"; ticket.autocapitalize = "none"; ticket.spellcheck = false;
       form.append(addFieldLabel(translate(language, "accountTicket"), ticket), node("p", "field-hint", translate(language, "accountCancelDeletionHint")));
       button("cancel-deletion", "accountCancelDeletion");
@@ -805,6 +810,22 @@ export class AdminView {
 
   hidePublicConfirmation() {
     if (this.dialog?.open) this.dialog.close();
+  }
+
+  // Vor jeder zustandsändernden Kontoaktion: Aktion, Zielkonto und Begründung nennen.
+  showAccountConfirmation({ actionKey, alias, profileId, reason }) {
+    const language = this.currentLanguage ?? "en";
+    const text = (selector, value) => { const element = this.accountDialog?.querySelector(selector); if (element) element.textContent = value; };
+    text("#account-confirm-title", translate(language, "accountConfirmTitle"));
+    text("#account-confirm-copy", `${translate(language, actionKey)} · ${translate(language, "accountConfirmTarget")} ${alias || "—"} (${profileId})`);
+    text("#account-confirm-preview", reason ?? "");
+    text("#account-cancel", translate(language, "cancel"));
+    text("#account-accept", translate(language, actionKey));
+    if (this.accountDialog && !this.accountDialog.open) this.accountDialog.showModal();
+  }
+
+  hideAccountConfirmation() {
+    if (this.accountDialog?.open) this.accountDialog.close();
   }
 
   dispose() {

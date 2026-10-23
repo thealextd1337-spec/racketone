@@ -8,6 +8,8 @@ import {
   validateMessage,
 } from "./domain.js";
 
+const ACCOUNT_ACTION_LABELS = { suspend: "accountSuspend", unsuspend: "accountUnsuspend", revoke: "accountRevoke", "cancel-deletion": "accountCancelDeletion" };
+
 function messageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   if (!globalThis.crypto?.getRandomValues) throw new SupportError("support_unavailable");
@@ -57,6 +59,7 @@ function initialState(config) {
     accountNotice: null,
     accountDraft: { reason: "", ticketId: "" },
     accountSaving: false,
+    accountConfirmation: null,
   };
 }
 
@@ -76,6 +79,11 @@ function noticeForError(error, fallback = "genericError") {
     case "account_ambiguous": return "accountAmbiguous";
     case "account-query-required": return "accountQueryRequired";
     case "account-ticket-invalid": return "accountTicketInvalid";
+    case "account-ticket-required":
+    case "deletion_ticket_required": return "accountTicketRequired";
+    case "deletion_ticket_invalid": return "accountTicketMismatch";
+    case "deletion_ticket_stale": return "accountTicketStale";
+    case "deletion_ticket_evidence_required": return "accountTicketEvidence";
     case "no_deletion_pending": return "accountNoDeletionPending";
     default: return fallback;
   }
@@ -153,6 +161,8 @@ export class AdminController {
       "account-search": (payload) => this.searchAccount(payload?.query),
       "account-draft": (payload) => this.setAccountDraft(payload?.fields),
       "account-action": (payload) => this.runAccountAction(payload?.action, payload?.fields),
+      "confirm-account-action": () => this.confirmAccountAction(),
+      "cancel-account-action": () => this.cancelAccountAction(),
     };
     for (const [event, callback] of Object.entries(routes)) {
       this.view.on(event, callback);
@@ -706,7 +716,9 @@ export class AdminController {
 
   // Exakte Suche; jede neue Suche verwirft verspätete Antworten und den Entwurf zum vorherigen Konto.
   async searchAccount(query) {
-    if (!this.hasAccess()) return;
+    // Eine laufende Aktion behält ihr Konto, bis ihr Ergebnis angezeigt ist (sonst bliebe „Speichert…“ stehen).
+    if (!this.hasAccess() || this.state.accountSaving) return;
+    this.cancelAccountAction();
     const request = this.accountEpoch.next();
     const session = this.sessionToken;
     this.state.accountQuery = String(query ?? "").trim().slice(0, 120);
@@ -743,7 +755,8 @@ export class AdminController {
     this.state.accountDraft = { ...this.state.accountDraft, ...fields };
   }
 
-  async runAccountAction(action, fields) {
+  // Prüft lokal und fragt dann nach; erst confirmAccountAction sendet.
+  runAccountAction(action, fields) {
     if (!this.hasAccess() || this.state.accountSaving || !this.state.account) return;
     if (fields) this.state.accountDraft = { ...this.state.accountDraft, ...fields };
     let operation;
@@ -754,6 +767,20 @@ export class AdminController {
       this.render();
       return;
     }
+    this.state.accountConfirmation = operation;
+    this.view.showAccountConfirmation?.({ actionKey: ACCOUNT_ACTION_LABELS[action], alias: this.state.account.alias,
+      profileId: operation.args.p_profile_id, reason: operation.args.p_reason });
+  }
+
+  cancelAccountAction() {
+    this.state.accountConfirmation = null;
+    this.view.hideAccountConfirmation?.();
+  }
+
+  async confirmAccountAction() {
+    const operation = this.state.accountConfirmation;
+    this.cancelAccountAction();
+    if (!operation || !this.hasAccess() || this.state.accountSaving || this.state.account?.profileId !== operation.args.p_profile_id) return;
     const request = this.accountEpoch.next();
     const session = this.sessionToken;
     this.state.accountSaving = true;
@@ -808,6 +835,7 @@ export class AdminController {
     this.state.authError = messageKey;
     this.state.authNotice = noticeKey;
     this.view.hidePublicConfirmation?.();
+    this.view.hideAccountConfirmation?.();
     this.render();
     if (hadSession || this.authOperations > 0) {
       await this.enqueueAuth(() => this.auth?.signOut?.());

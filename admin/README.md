@@ -97,8 +97,10 @@ Status (Status, Sperre, Löschfrist, Anzahl aktiver Geräte, letzter Aktivitäts
 E-Mail, Matches, Gesundheits- oder Geburtsdaten, keine Anmeldung als Nutzer.
 
 `support` sieht nur den Status. `admin` kann sperren/entsperren, alle Geräte und Cloud-Sitzungen widerrufen und
-eine Löschung auf dokumentierten Nutzerwunsch zurücknehmen (optional mit Meldungs-UUID des Kontoinhabers). Jede
-Aktion verlangt eine Begründung (1–500 Zeichen) und landet im Konto-Audit. Der Server prüft Rolle und AAL2 bei
+eine Löschung auf Nutzerwunsch zurücknehmen. Dafür ist die UUID einer Meldung Pflicht, die nach dem Löschantrag
+entstand: vom Kontoinhaber oder als Gastmeldung, deren Zuordnung die Begründung belegt (mindestens 20 Zeichen).
+Jede Aktion verlangt eine Begründung (1–500 Zeichen), hat einen eigenen Knopf ohne Enter-Auslösung und läuft erst
+nach einer Rückfrage, die Aktion und Zielkonto nennt. Sie landet im Konto-Audit. Der Server prüft Rolle und AAL2 bei
 jedem Aufruf erneut; die Oberfläche blendet Aktionen für `support` nur aus. Details:
 [`supabase/README.md`](../supabase/README.md#k4k5-gerätewiderruf-und-kontosupport).
 
