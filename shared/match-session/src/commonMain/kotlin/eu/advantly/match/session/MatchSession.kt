@@ -1533,6 +1533,8 @@ class MatchSession(
         }
         // Ausgehandelt ist genau eine Version: kein Rückfall auf frühere Rechte, kein V4 ohne Aushandlung
         if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
+        // P2-1, Empfang: alte Sender schieben vor dem Hello über 3 nach
+        if (message !is Hello && requiresFour(peer)) return
         if (message.v >= 4) message = stamps.verified(message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
@@ -2021,6 +2023,9 @@ class MatchSession(
             peers.filter { it !in helloSent }.forEach { peer ->
                 // sofort abgleichen (nicht erst im 30-s-Takt): Hello, eigener Stand, unbestätigte Events direkt nachschieben
                 sendHello(peer)
+                // P2-1: mit Konto erst nach der Aushandlung (onHello schiebt Löschungen, Summary, Kopf und Rückstand nach);
+                // der Link garantiert keine Reihenfolge, eine v3-Gegenstelle übernähme sonst, was vor ihrem Hello ankommt
+                if (data.accountIdentities.managed) return@forEach
                 sendDeleted(peer)
                 send(peer, summaryOf(summaryMatches(), reply = false))
                 pushBacklog(peer)
@@ -2338,6 +2343,9 @@ class MatchSession(
         callback: SendCallback? = null,
     ) {
         if (!started) return
+        // P2-1: mit Konto und V4 nur an ausgehandelt kompatible ≥ 4 (Kommandos, Takt, Antworten); ohne Aushandlung liefe es
+        // ungestempelt über 3
+        if (message !is Hello && requiresFour(peer)) return
         val envelope = if (data.accountIdentities.managed && message !is Hello) pairing.envelope(peer) ?: return else null
         var routed = route(peer, message) ?: return
         if (data.accountIdentities.managed && routed is Deleted) {
@@ -2366,6 +2374,10 @@ class MatchSession(
      */
     private fun minVersion(): Int =
         if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
+
+    /** Mit Konto und V4 zählt nur ein ausgehandeltes ≥ 4 ([minVersion]); fehlt es, geht außer `Hello` nichts hin oder her. */
+    private fun requiresFour(peer: String): Boolean =
+        data.accountIdentities.managed && config.protocolVersions.last >= 4 && version(peer) < 4
 
     /** Ausgehandelte Version mit [peer] (0 = unbekannt). */
     private fun version(peer: String): Int = compatibility[peer]?.version ?: 0

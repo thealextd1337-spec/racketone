@@ -17,6 +17,7 @@ import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.Deleted
 import eu.advantly.sync.protocol.DeletedMatch
 import eu.advantly.sync.protocol.Events
+import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.LocalMatchStamp
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.test.AfterTest
@@ -85,6 +86,133 @@ class ProtocolFourTest {
     @Test
     fun withAnAccountAnOldPhoneAndANewWatchAreAnUpdateState() =
         mixedWithAccount(3..3, 3..4, CompatibilityStatus.PEER_TOO_NEW, CompatibilityStatus.PEER_TOO_OLD)
+
+    /**
+     * Wiederverbinden mit Konto, bei dem das erste Hello des Handys (und mit [loseWatchHello] auch das der Uhr) verloren geht
+     * – der Link garantiert weder Zustellung noch Reihenfolge. Vorher: ein Match mit Gastnamen und ein Punkt im Rückstand.
+     */
+    private fun reconnectLosingHellos(
+        phoneVersions: IntRange,
+        watchVersions: IntRange,
+        loseWatchHello: Boolean = false,
+    ): LifecyclePair {
+        val pair = LifecyclePair(phoneVersions, watchVersions).also { pair = it }
+        pair.activate("alice")
+        val self =
+            pair.phoneData.players
+                .self()!!
+                .id
+        pair.phoneData.players.addGuest(GUEST, "Bea Secret", 0)
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(GUEST), self))
+        assertTrue(pair.phone.recordPoint(Side.A))
+        pair.settle()
+        assertEquals(0L, pair.watchData.events.count(match.value), "Updatezustand")
+        pair.network.setConnected("watch", false)
+        pair.settle()
+        assertTrue(pair.phone.recordPoint(Side.B))
+        var phoneHellos = 0
+        var watchHellos = 0
+        pair.phoneLink.lose = { it is Hello && phoneHellos++ == 0 }
+        if (loseWatchHello) pair.watchLink.lose = { it is Hello && watchHellos++ == 0 }
+        pair.network.setConnected("watch", true)
+        pair.settle()
+        pair.phoneLink.lose = { false }
+        pair.watchLink.lose = { false }
+        return pair
+    }
+
+    private fun LifecyclePair.assertNothingOverThree() {
+        repeat(3) { scheduler.advanceBy(31_000) }
+        val matches = phoneData.matches.recent(10).map { it.id }
+        assertEquals(0L, matches.sumOf { watchData.events.count(it.value) }, "keine Events über 3")
+        assertTrue(matches.none { watchData.matches.get(it) != null }, "keine Köpfe über 3")
+        assertEquals(null, watchData.players.get(GUEST), "keine Namen über 3")
+    }
+
+    /** P2-1 (Review r2, Probe L): Ohne das Hello des Handys übernähme eine v3-Uhr Rückstand und Namen aus peersChanged. */
+    @Test
+    fun aLostHelloOnReconnectLetsNothingThroughOverThree() {
+        val pair = reconnectLosingHellos(3..4, 3..3)
+        assertEquals(CompatibilityStatus.PEER_TOO_OLD, pair.phone.state.value.sync.versionMismatch)
+        pair.assertNothingOverThree()
+    }
+
+    /** P2-1: Auch Kommandos und der Takt erreichen eine nicht ausgehandelte Gegenstelle nicht (beide Hellos verloren). */
+    @Test
+    fun commandsNeverReachAPeerWithoutNegotiatedFour() {
+        val pair = reconnectLosingHellos(3..4, 3..3, loseWatchHello = true)
+        val sent = pair.phoneLink.sent.size
+        assertTrue(pair.phone.recordPoint(Side.A))
+        pair.assertNothingOverThree()
+        assertTrue(
+            pair.phoneLink
+                .decoded()
+                .drop(sent)
+                .all { it.message is Hello },
+            "nur Hello auf dem Draht",
+        )
+    }
+
+    /**
+     * P2-1, Empfang: Vor der Aushandlung nimmt eine V4-Uhr mit Konto nichts an – auch kein ungestempeltes v3-Event, wie es
+     * ein alter Sender vor dem Hello schiebt (hier V4↔V4, die Hellos des Handys gingen beim Wiederverbinden verloren).
+     */
+    @Test
+    fun aNewWatchAcceptsNothingBeforeTheNegotiation() {
+        val pair = LifecyclePair(3..4).also { pair = it }
+        pair.activate("alice")
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        assertEquals(1L, pair.watchData.events.count(match.value), "ausgehandelt über 4")
+        val envelope =
+            pair.phoneLink
+                .decoded()
+                .last { it.identity != null }
+                .identity!!
+        pair.network.setConnected("watch", false)
+        pair.settle()
+        assertTrue(pair.phone.recordPoint(Side.A))
+        val point =
+            pair.phoneData.events
+                .scoreEvents(match)
+                .last()
+        pair.phoneLink.lose = { it is Hello }
+        pair.network.setConnected("watch", true)
+        pair.settle()
+        assertEquals(1L, pair.watchData.events.count(match.value), "gestempelt, aber an der Uhr nicht ausgehandelt")
+
+        pair.watchLink.replay("phone", SyncCodec.encode(Events(match, listOf(point)), envelope))
+        assertEquals(1L, pair.watchData.events.count(match.value), "kein v3-Event ohne Aushandlung")
+    }
+
+    /**
+     * P2-1 unter Protokoll 3 mit Konto (heutiger Stand): beim Wiederverbinden vor dem Hello der Gegenstelle nur das eigene
+     * Hello; den Rest schiebt die Aushandlung nach, und ohne sie holt der Takt alles nach.
+     */
+    @Test
+    fun withAnAccountOnlyHelloPrecedesTheNegotiation() {
+        val pair = LifecyclePair(3..3).also { pair = it }
+        pair.activate("alice")
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.settle()
+        pair.network.setConnected("watch", false)
+        pair.settle()
+        assertTrue(pair.phone.recordPoint(Side.A))
+        val sent = pair.phoneLink.sent.size
+        pair.watchLink.lose = { true }
+        pair.network.setConnected("watch", true)
+        pair.settle()
+        assertEquals(
+            listOf("Hello"),
+            pair.phoneLink
+                .decoded()
+                .drop(sent)
+                .map { it.message::class.simpleName },
+        )
+        pair.watchLink.lose = { false }
+        repeat(2) { pair.scheduler.advanceBy(31_000) }
+        assertEquals(pair.phoneData.events.count(match.value), pair.watchData.events.count(match.value), "Takt holt nach")
+    }
 
     /** Eigenes Match am Handy, per Pull Cloud-Match bei G 1 (MEMBER), an die Uhr zugestellt. */
     private fun cloudMatch(pair: LifecyclePair): MatchId {
