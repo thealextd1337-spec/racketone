@@ -8,7 +8,8 @@ ADVANTLY_LIFECYCLE_TEST_DB_URL=... uv run supabase/tests/database/290_staged_acc
 Ein Konto mit 4 000 Matches wird mit dem Produktionsbudget über viele Job-Aufrufe gelöscht, ein kleineres, später
 fälliges Konto läuft mit. Ein Freund pullt dabei ununterbrochen alle Seiten. Erwartet: mindestens ein per
 pg_blocking_pids nachgewiesener Wait auf den Job, kein Pull wartet länger als etwa ein Job-Aufruf, jedes gepullte
-Match ist vollständig redigiert (E=2) oder unberührt (E=0), das kleine Konto wird nicht ausgebremst.
+Match ist vollständig redigiert (E=2) oder unberührt (E=0), das kleine Konto wird nicht ausgebremst. Jedes Match
+enthält auch einen eigenen Gast des Kontos (23.10.2026): Sein Name verschwindet im selben Schritt wie der des Kontos.
 Review r1: Ein Konto mit ältester Frist, dessen A dauerhaft scheitert, hält beide nicht auf (P2-1). 200 Matches des
 großen Kontos (die letzten der Arbeitsliste, B erreicht sie erst Aufrufe nach A) liegen in dessen Turnier und sind vom
 Match-Ersteller für Freunde freigegeben; ein Staff-Mitglied (dessen
@@ -70,8 +71,9 @@ def main():
             tournament = owner.execute("insert into public.tournaments(id,director_id,name,sport) "
                                        "values(gen_random_uuid(),%s,'Cup','tennis') returning id", (big,)).fetchone()[0]
             # Vor A zeigt der Pull noch den Profilalias (Status deletion_requested), danach den Teilnehmer-Snapshot.
-            allowed = {("Klar", 0), ("Gelöschter Spieler", 2)} | {(alias, 0) for (alias,) in owner.execute(
-                "select alias from public.profiles where id in (%s,%s)", (big, small)).fetchall()}
+            allowed = {("Klar", "Gast Klar", 0), ("Gelöschter Spieler", "Gelöschter Spieler", 2)} | {
+                (alias, "Gast Klar", 0) for (alias,) in owner.execute(
+                    "select alias from public.profiles where id in (%s,%s)", (big, small)).fetchall()}
             contexts = {who: owner.execute("select session_id,installation_id from tests.prepare_cloud_context(%s)",
                                            (who,)).fetchone() for who in (friend, staff)}
             with owner.transaction():
@@ -79,6 +81,9 @@ def main():
                     player = owner.execute("insert into public.players(id,owner_id,kind,display_name) "
                                            "values(gen_random_uuid(),%s,'self','Klar') returning id", (member,)).fetchone()[0]
                     player_ids.append(player)
+                    guest = owner.execute("insert into public.players(id,owner_id,kind,display_name) "
+                                          "values(gen_random_uuid(),%s,'guest','Gast Klar') returning id", (member,)).fetchone()[0]
+                    player_ids.append(guest)
                     owner.execute("create temp table w290_m on commit drop as "
                                   "select gen_random_uuid() id from generate_series(1,%s)", (count,))
                     owner.execute("insert into public.matches(id,created_by,sport,discipline,format,started_at) "
@@ -90,8 +95,9 @@ def main():
                                   "profile_id,link_status,player_id,share_with_friends) "
                                   "select id,'member','A',1,'Klar',%s,'self',%s,false from w290_m "
                                   "union all select m.id,'friend','B',1,'Freund',%s,'linked',null,m.tournament_id is not null "
-                                  "from w290_m w join public.matches m on m.id=w.id",
-                                  (member, player, friend))
+                                  "from w290_m w join public.matches m on m.id=w.id "
+                                  "union all select id,'guest','B',2,'Gast Klar',null,null,%s,false from w290_m",
+                                  (member, player, friend, guest))
                     owner.execute("insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,"
                                   "payload,author_id) select gen_random_uuid(),id,gen_random_uuid(),1,1,1,'PlayerAssigned',"
                                   "jsonb_build_object('type','PlayerAssigned','slot','member','player',"
@@ -157,7 +163,7 @@ def main():
                     pulls.append(time.monotonic() - started)
                     for match in page["matches"]:
                         names = {p["slotId"]: p["displayName"] for p in match["participants"]}
-                        state = (names.get("member"), match["redactionEpoch"])
+                        state = (names.get("member"), names.get("guest"), match["redactionEpoch"])
                         assert state in allowed, (match["id"], state)
                         # Clientvertrag (ReplicaLifecycleStore.applyAccess): gleiches G, gleiche Stufe.
                         key = (page["visibilityEpoch"], match["id"])
@@ -211,7 +217,7 @@ def main():
             assert max(durations) <= 5, max(durations)
             assert small_done <= 2, f"Kleines Konto erst nach {small_done + 1} Aufrufen fertig"
             with connect() as check:
-                assert check.execute("select count(*) from public.match_participants where display_name='Klar' "
+                assert check.execute("select count(*) from public.match_participants where display_name in ('Klar','Gast Klar') "
                                      "and match_id in (select id from public.matches where created_by=%s)", (friend,)).fetchone()[0] == 0
                 assert check.execute("select count(*) filter (where redaction_epoch<>2) from public.matches where created_by=%s",
                                      (friend,)).fetchone()[0] == 0

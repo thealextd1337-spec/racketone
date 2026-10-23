@@ -86,7 +86,7 @@ select is((select count(*) from public.match_participants where match_id in (sel
 select is_empty($$select 1 from public.match_participants where player_id=any(array[pg_temp.p(1),pg_temp.p(2)])$$,
   'No participant keeps an own player');
 select is((select count(*) from public.match_events where match_id in (select pg_temp.m(n) from generate_series(1,480) n)
-  and redacted_at is not null),480::bigint,'Own self events in handed-over matches are redacted');
+  and redacted_at is not null),580::bigint,'Own self and own guest events in handed-over matches are redacted');
 select ok((select visibility_epoch from public.profile_settings where profile_id=tests.uid('oh_keep'))
   >(select visibility_epoch from before_keep),'The friend still gets visibility bumps');
 select is_empty($$select 1 from public.profile_settings where profile_id=tests.uid('oh_del')$$,'Own settings are gone');
