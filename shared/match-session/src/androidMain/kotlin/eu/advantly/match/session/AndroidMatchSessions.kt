@@ -102,14 +102,21 @@ object AndroidMatchSessions {
                 AdvantlyDatabase(driver).transactionWithResult {
                     val data = runtime.data ?: LocalData(driver).also { runtime.data = it }
                     runtime.requireCurrent()
-                    if (!installation.privateTransportAllowed && !data.accountIdentities.managed) {
+                    if (data.settings.get(AndroidInstallationGuard.RESTORED_KEY) == installation.cacheNamespace) {
+                        // Übernommene Kopie: vor jedem Sessionzugriff neue Identität; nur das Handy gibt kontolose Daten lokal frei.
+                        rekeyRestoredInstallation(data, kind, installation.cacheNamespace, releaseUnbound = kind == PeerKind.PHONE)
+                        data.settings.remove(AndroidInstallationGuard.RESTORED_KEY)
+                    } else if (!installation.privateTransportAllowed && !data.accountIdentities.managed) {
                         val scope = "installation:${installation.cacheNamespace}"
                         val ids = RandomIdGenerator()
                         val nowMs = System.currentTimeMillis()
                         data.accountIdentities.select(scope, null, nowMs, kind.name) { ids.newUuid7(nowMs).value }
-                        data.settings.put("identity.authority", installation.cacheNamespace)
-                        data.settings.put("identity.epoch", "1")
-                        data.settings.put("identity.wireScope", scope)
+                        // Die Uhr bleibt ohne Autorität: sonst lehnte sie nach dem Hold jedes Handy dauerhaft ab.
+                        if (kind == PeerKind.PHONE) {
+                            data.settings.put("identity.authority", installation.cacheNamespace)
+                            data.settings.put("identity.epoch", "1")
+                            data.settings.put("identity.wireScope", scope)
+                        }
                     }
                     val candidate =
                         existing ?: MatchSessions.create(
