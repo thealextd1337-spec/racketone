@@ -394,7 +394,7 @@ def main():
             generation = owner.execute("select visibility_epoch from public.profile_settings where profile_id=%s",
                                        (outsider[0],)).fetchone()[0]
             result = push(rpc, outsider, {**batch, "lifecycle": {"generation": generation, "redactionEpochs": {}}})
-            assert result["players"][0]["reason"] in ("player_redacted", "player_identity_conflict"), result
+            assert result["players"][0]["reason"] == "player_identity_conflict", result
             assert owner.execute("select count(*) from public.players where id=%s", (guest,)).fetchone()[0] == 0
             assert owner.execute("select count(*) from private.deleted_player_identities where player_id=%s", (guest,)).fetchone()[0] == 1
             assert state(survivor, match) == expected

@@ -2340,3 +2340,35 @@ Konflikt mit B4 nur in einem Kommentar in `PhoneAccount.kt`):
 beendet. Ursache ist wieder die Übergabe-Anweisung in `private.anonymize_profile()` bei
 1-Zeilen-Schätzungen; VACUUM reicht nicht. Robuste Formulierung (etwa `LATERAL` je Match)
 als Auflage für die nächste Runde des Gastnamen-Pakets, weil es dieselbe Funktion ändert.
+
+**Gastnamen-Paket übernommen:**
+- Runde 1: `e592c845`, `aafd22e2`, Merge `1c730e63`.
+- Runde 2: `82ef0886`, `4b617096`, `f4cc0fd5`, Merge `325ec789`.
+- D-4 (Client, Slot-ID im Pull-Snapshot): `c8819bfb`, Merge `22bd9e40`.
+
+Umsetzung:
+- Eigene Gäste des gelöschten Kontos werden in gemeinsamen Matches redigiert. Gestaffelt
+  und ungestaffelt ist das Ergebnis gleich.
+- Die Übergabe in `anonymize_profile` und der B-Block laufen ohne schätzungsabhängige
+  Joins. Damit läuft 290 auch mit `reltuples = 0` grün (10,6 s statt Abbruch nach 300 s).
+- `…00100` und `…00200` wurden direkt geändert. Beide liegen nicht auf `main`/staging.
+
+Review r1: **Freigabe mit Auflagen**, keine P1 oder P2.
+- Eigene Probe über alle Namensflächen 24/24.
+- Schatten `AB_EQUAL` und `PAIR_EQUAL` mit Blockgröße 7 und 1.
+- Endzustand Runde 1 gleich Runde 2 in neun Tabellen.
+
+P3-Reste:
+1. 220-Neuversuch geschärft (Integrator).
+2. Kein Renntest für „wartender Push sieht frisch gelöschten Gast gesperrt“.
+3. **Ab Merge nach `main` sind `…00100`/`…00200` eingefroren.** Danach nur neue
+   Migrationen. `check_release_gate.py` prüft nur Namen, nicht Inhalt.
+4. Ein eigener Gast in einem fremd verknüpften Slot wird stillgelegt, aber nicht redigiert
+   (bisheriges Verhalten).
+5. `docs/03-backend-datenmodell.md:1315` und A11 (`:1529`) beschreiben noch den alten
+   Stand; dafür fehlt ein Doku-Auftrag.
+6. Keine CI-Prüfung der Planstabilität (zweiter 290-Lauf mit `zero-stats3.sql`, ~11 s).
+
+CI: `325ec789` ist fachlich ganz grün, inklusive K7 `check_deletion_job.py`. Rot war nur
+„Stack stoppen“ (Runner). `8f37ab7e` macht diesen Schritt nicht fatal; der Supabase-Job ist
+dort grün.
