@@ -333,6 +333,44 @@ oder unbereinigten Function-Logs werden als Artefakte veröffentlicht. Periodisc
 Hosted-CPU-/Speichergrenzen und reale Phone-Dateinutzung bleiben getrennte Nachweise.
 
 
+## K4/K5: Gerätewiderruf und Kontosupport
+
+Migration `20261023000100_account_support.sql`. K4 (Gerätebindung/Widerruf) stammt aus `20261018000100`; neu ist die
+Geräteliste mit Widerruf in der Android-App (`cloud_list_devices_v1`/`cloud_revoke_device_v1`, nur Auth-Sitzung).
+`auth.sessions` wird weiterhin nur gelesen. Die App-Abmeldung ist global (GoTrue, alle Sitzungen des Kontos); ein
+serverseitiger Auth-Admin-Widerruf (Ban/Abmeldung über die Supabase-Admin-API) bleibt ein getrennter Betreiberschritt.
+
+| RPC | Rolle | Wirkung | Audit |
+|---|---|---|---|
+| `admin_account_lookup(p_query)` | `support`, `admin` | exakt UUID, Freundescode oder Alias; minimaler Status | – |
+| `admin_account_set_suspended(p_profile_id, p_suspended, p_reason)` | `admin` | Sperre setzen/aufheben | `account_suspend`/`account_unsuspend` |
+| `admin_account_revoke_devices(p_profile_id, p_reason)` | `admin` | alle Installationen, Cloud-Sitzungsbindungen, Geräte, Push-Token | `account_revoke_devices` (nur Zählwerte) |
+| `admin_account_cancel_deletion(p_profile_id, p_ticket_id, p_reason)` | `admin` | Löschrücknahme wie `cancel_account_deletion` | `account_cancel_deletion` (Meldungs-UUID) |
+
+Alle prüfen bei jedem Aufruf Mitgliedschaft und AAL2 (`support_forbidden`, `support_mfa_required`), schreibende
+zusätzlich `admin` (`support_admin_required`) nach `lock_sync()`. Begründung 1–500 Zeichen (`support_invalid`).
+Weitere Fehler: `account_not_found` (auch Konto in Löschung), `account_ambiguous`, `no_deletion_pending`.
+Eigenes Konto ist kein Ziel.
+
+**Sperre:** `private.account_suspensions`. `require_active()` meldet `account_suspended` (42501), das RLS-Gate
+schließt direkte Tabellen; damit sind Bind, Push, Pull, Legacy- und Social-RPCs zu. Export, Löschantrag/-status,
+Zustimmung, eigene Geräteliste und Support bleiben erreichbar; `my_auth_profile` liefert `suspended`. Die Sicht
+anderer bleibt unverändert (`is_active` unverändert, keine Epochenänderung). GoTrue-Login bleibt technisch möglich.
+
+**Konto-Audit:** `ops.account_audit`, ein Jahr (über `private.purge_support()`/`advantly-support-cleanup`). Beim
+Löschen des Zielkontos setzt die FK den Bezug auf null und ein Trigger leert die Begründung.
+
+Tests: pgTAP `300_account_support` (Rolle, AAL1, Begründung, Audit, Entkopplung, Sperrwirkung, Rücknahme);
+Renntest `300_account_support_concurrency.py` (Sperre↔Push/Pull/Bind, Sperre/Rücknahme↔Löschjob, mit
+`pg_blocking_pids`); K7 `tools/pilot-checks/check_account_support.py` (lokal Admin-Aktion über Owner-DB, staging
+durch Betreiber mit MFA).
+
+```powershell
+$env:ADVANTLY_ACCOUNT_TEST_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+uv run supabase/tests/database/300_account_support_concurrency.py --confirm-disposable
+Remove-Item Env:ADVANTLY_ACCOUNT_TEST_DB_URL
+```
+
 ## P2-C: Auth und Altersgate
 
 Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,

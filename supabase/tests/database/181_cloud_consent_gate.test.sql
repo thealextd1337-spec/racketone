@@ -58,11 +58,12 @@ select is((select count(*) from pg_trigger t join gated_tables g on t.tgrelid=('
   where t.tgname='zy_cloud_authorize_write' and t.tgenabled='O'),18::bigint,
   'Alle bestehenden Statement-Write-Trigger aktiv');
 
-create function pg_temp.assert_closed(p_state text) returns setof text language plpgsql as $$
+create function pg_temp.assert_closed(p_state text, p_reason text default 'consent_required') returns setof text
+language plpgsql as $$
 declare r record;
 begin
   for r in select * from gated_rpcs loop
-    return next throws_ok(r.query,'42501','consent_required',p_state||': '||r.proname);
+    return next throws_ok(r.query,'42501',p_reason,p_state||': '||r.proname);
   end loop;
   for r in select * from gated_tables loop
     return next is_empty(format('select 1 from public.%I',r.tablename),p_state||': RLS '||r.tablename);
@@ -72,7 +73,7 @@ begin
   return next is_empty($q$select * from public.match_event_watermarks('18100000-0000-4000-8000-000000000005')$q$,
     p_state||': Legacy-Wasserstände');
   return next throws_ok($q$update public.tournaments set name='Denied' where id='18100000-0000-4000-8000-000000000003'$q$,
-    '42501','consent_required',p_state||': direkter Tabellenwrite');
+    '42501',p_reason,p_state||': direkter Tabellenwrite');
 end;
 $$;
 
@@ -109,6 +110,17 @@ select is((select count(*) from public.pull_match_events('18100000-0000-4000-800
 select is((select count(*) from public.cloud_match_event_watermarks_v1('18100000-0000-4000-8000-000000000005')),1::bigint,
   'CURRENT erlaubt Wasserstände');
 select is((select count(*) from public.matches),1::bigint,'CURRENT erlaubt direkte Matchdaten');
+-- K5: Kontosperre schließt dieselben Wege trotz CURRENT; Kontorechte bleiben.
+reset role;
+insert into private.account_suspensions(profile_id) values(tests.uid('gate_alice'));
+select pg_temp.identify();
+select * from pg_temp.assert_closed('SUSPENDED','account_suspended');
+select lives_ok($$select public.my_auth_profile()$$,'SUSPENDED: Auth-Profil erreichbar');
+select lives_ok($$select public.export_my_data()$$,'SUSPENDED: Export erreichbar');
+select lives_ok($$select public.cloud_list_devices_v1()$$,'SUSPENDED: K4-Geräteliste erreichbar');
+reset role;
+delete from private.account_suspensions where profile_id=tests.uid('gate_alice');
+select pg_temp.identify();
 select lives_ok($$update public.tournaments set name='Allowed' where id='18100000-0000-4000-8000-000000000003'$$,
   'CURRENT erlaubt direkten Tabellenwrite');
 reset role;
