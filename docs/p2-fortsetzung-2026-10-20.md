@@ -2372,3 +2372,36 @@ P3-Reste:
 CI: `325ec789` ist fachlich ganz grün, inklusive K7 `check_deletion_job.py`. Rot war nur
 „Stack stoppen“ (Runner). `8f37ab7e` macht diesen Schritt nicht fatal; der Supabase-Job ist
 dort grün.
+
+**Server-Nacharbeit übernommen** (`2d68abbb`, `0012d657`, `5fd98d6f`; Merge `647f6c64`, Fix `725f24fc`):
+- 290 läuft in CI zusätzlich mit verfälschter Statistik: 106/106 in 9,4 s. Gegen den Stand
+  vor Runde 2 bricht der Lauf nach 5 min ab.
+- Renntest: wartender Push und frisch stillgelegter Gast.
+- `check_release_gate.py` vergleicht den Inhalt angewandter Migrationen.
+- CI `725f24f` grün, 5/5.
+
+**K4/K5 Runde 1** (`03674a00`..`c83a3fb1`):
+- Migration `20261023000100_account_support.sql` mit vier Admin-RPCs:
+  - `lookup`: support/admin, AAL2, exakt;
+  - sperren/entsperren, Geräte widerrufen, Löschrücknahme: nur admin.
+  Alle mit Begründung und Konto-Audit.
+- Die Sperre gilt auf allen gebundenen Wegen.
+- Admin-Web mit Bereich „Konten“. App mit Geräteliste und BLOCKED „Konto gesperrt“.
+- Review r1: **fix-first.** Der Server wäre mit Auflagen freigabefähig; Rechte, AAL2,
+  Sperre und Rennen sind sauber, 14/14 SQL-Mutationen erkannt.
+  - P1-1: Das eigene Handy ist in der Liste widerrufbar und danach dauerhaft
+    ausgesperrt; Abmelden hilft nicht.
+  - P2-4: Enter im Admin-Formular sperrt das Konto.
+  - P2-1: Löschrücknahme ohne Nachweis möglich.
+  - P2-2: Konto-Audit wird erst in Phase C entkoppelt.
+  - P2-3: Renntest 300 nicht in CI.
+- **Nutzerentscheide 24.10.2026:**
+  - Für eine Löschrücknahme durch den Admin ist ein Ticket Pflicht, das nach dem Antrag
+    entstand: vom Zielkonto oder als Gastmeldung mit Zuordnungsbeleg.
+  - Der Logout bleibt global (G8 entschieden).
+- Runde 2: `advantly-20261024-k45-support-r2`.
+- Offen dokumentiert:
+  - Admin-JWT bleibt nach Logout oder MFA-Entfernung bis zum Ablauf gültig.
+  - Suchen werden nicht protokolliert.
+  - Bisherige `admin`-Mitglieder erhalten Kontorechte. `docs/support-admin-betrieb.md`
+    braucht dafür einen Doku-Auftrag.
