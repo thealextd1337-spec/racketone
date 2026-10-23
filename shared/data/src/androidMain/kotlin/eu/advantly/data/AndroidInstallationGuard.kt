@@ -149,14 +149,15 @@ object AndroidInstallationGuard {
             (check(context) as? AndroidInstallationAvailability.Ready)?.installation?.privateTransportAllowed == true
 
     /**
-     * Recovery-Paket, ausdrückliche Nutzerentscheidung im Hold: [AndroidInstallationState.restorable] als neue private
-     * Kopie übernehmen. Wirkt erst beim nächsten Prozessstart (der Host startet neu); bis dahin bleibt alles gesperrt.
+     * Recovery-Paket, ausdrückliche Nutzerentscheidung im Hold oder später nach [keepWithoutRestore]:
+     * [AndroidInstallationState.restorable] als neue private Kopie übernehmen. Wirkt erst beim nächsten Prozessstart (der
+     * Host startet neu); bis dahin bleibt der Zustand dieses Prozesses unverändert.
      */
     @Synchronized
     fun requestRestore(context: Context) {
         val installation = requireReady(context)
-        check(!installation.privateTransportAllowed) { "Nothing to restore" }
-        files(context.applicationContext).requestRestore(installation.cacheNamespace, checkNotNull(installation.restorable))
+        val source = checkNotNull(installation.restorable) { "Nothing to restore" }
+        files(context.applicationContext).requestRestore(installation.cacheNamespace, source)
     }
 
     /** Ausdrücklich ohne Altbestand weiter; alle Familien bleiben unverändert erhalten. Wirkt beim nächsten Prozessstart. */

@@ -742,28 +742,36 @@ class InstallationFilesTest {
 
     @Test
     fun interruptedRestoreResumesOnlyItsOwnCopyAtEveryStep() {
-        listOf("reservation-pending", "restored", "initialized", "proof-pending", "proof", "marker-pending", "published")
-            .forEach { interruptedAt ->
-                Fixture().use { fixture ->
-                    fixture.legacy()
-                    val held = fixture.guard().select()
-                    fixture.guard().requestRestore(held.cacheNamespace, "advantly.db")
-                    val originals = fixture.files()
-                    assertFailsWith<IllegalStateException>(interruptedAt) {
-                        fixture.guard { if (it == interruptedAt) error("process death") }.select()
-                    }
-                    val resumed = fixture.guard().select()
-                    assertTrue(resumed.privateTransportAllowed, interruptedAt)
-                    assertTrue(resumed.activeDatabaseName !in setOf("advantly.db", held.activeDatabaseName), interruptedAt)
-                    assertEquals(
-                        "private original",
-                        fixture.value(File(fixture.databases, resumed.activeDatabaseName), "private"),
-                        interruptedAt,
-                    )
-                    originals.filterKeys { !it.startsWith(resumed.activeDatabaseName) }.let(fixture::assertPreserved)
-                    assertEquals(resumed, fixture.guard().select(), interruptedAt)
+        listOf(
+            "reservation-pending",
+            "restored",
+            "decided-pending",
+            "initialized",
+            "proof-pending",
+            "proof",
+            "marker-pending",
+            "published",
+        ).forEach { interruptedAt ->
+            Fixture().use { fixture ->
+                fixture.legacy()
+                val held = fixture.guard().select()
+                fixture.guard().requestRestore(held.cacheNamespace, "advantly.db")
+                val originals = fixture.files()
+                assertFailsWith<IllegalStateException>(interruptedAt) {
+                    fixture.guard { if (it == interruptedAt) error("process death") }.select()
                 }
+                val resumed = fixture.guard().select()
+                assertTrue(resumed.privateTransportAllowed, interruptedAt)
+                assertTrue(resumed.activeDatabaseName !in setOf("advantly.db", held.activeDatabaseName), interruptedAt)
+                assertEquals(
+                    "private original",
+                    fixture.value(File(fixture.databases, resumed.activeDatabaseName), "private"),
+                    interruptedAt,
+                )
+                originals.filterKeys { !it.startsWith(resumed.activeDatabaseName) }.let(fixture::assertPreserved)
+                assertEquals(resumed, fixture.guard().select(), interruptedAt)
             }
+        }
     }
 
     @Test
@@ -799,6 +807,7 @@ class InstallationFilesTest {
             assertTrue(kept.privateTransportAllowed)
             assertEquals(held.activeDatabaseName, kept.activeDatabaseName)
             assertEquals(listOf("advantly.db"), kept.retainedFamilies.map { it.databaseName })
+            assertEquals("advantly.db", kept.restorable, "Spätere Übernahme bleibt möglich")
             fixture.assertPreserved(originals)
 
             // Eine später auftauchende Familie (erneuter Restore) ist nicht entschieden.
@@ -806,6 +815,43 @@ class InstallationFilesTest {
             val again = fixture.guard().select()
             assertFalse(again.privateTransportAllowed)
             assertEquals("advantly-install-00000000-0000-4000-8000-000000000001.db", again.restorable)
+        }
+    }
+
+    @Test
+    fun keptFamilyCanStillBeRestoredLaterAndIsThenNoLongerOffered() {
+        Fixture().use { fixture ->
+            fixture.legacy()
+            val held = fixture.guard().select()
+            fixture.guard().keepCurrent(held.cacheNamespace)
+            val kept = fixture.guard().select()
+            val originals = fixture.files()
+
+            fixture.guard().requestRestore(kept.cacheNamespace, "advantly.db")
+            val restored = fixture.guard().select()
+            assertTrue(restored.privateTransportAllowed)
+            assertTrue(restored.activeDatabaseName !in setOf("advantly.db", kept.activeDatabaseName))
+            assertEquals("private original", fixture.value(File(fixture.databases, restored.activeDatabaseName), "private"))
+            assertEquals(null, restored.restorable, "Übernommen ist endgültig entschieden")
+            fixture.assertPreserved(originals)
+        }
+    }
+
+    @Test
+    fun failedLaterRestoreKeepsThePreviousDecisionWithoutAHold() {
+        Fixture().use { fixture ->
+            fixture.legacy()
+            val held = fixture.guard().select()
+            fixture.guard().keepCurrent(held.cacheNamespace)
+            val kept = fixture.guard().select()
+            fixture.guard().requestRestore(kept.cacheNamespace, "advantly.db")
+            fixture.restore = { _, _ -> throw IllegalStateException("corrupt copy") }
+
+            val failed = fixture.guard().select()
+            assertTrue(failed.restoreFailed)
+            assertTrue(failed.privateTransportAllowed, "Ein Fehlschlag darf nicht in den Hold zurückfallen")
+            assertEquals(kept.activeDatabaseName, failed.activeDatabaseName)
+            assertEquals("advantly.db", failed.restorable)
         }
     }
 
