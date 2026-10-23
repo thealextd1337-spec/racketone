@@ -167,6 +167,12 @@ class MainActivity : ComponentActivity() {
                     } else {
                         { googleCredential() }
                     },
+                onRestorePrevious =
+                    if (installation.privateTransportAllowed && installation.restorable != null) {
+                        { showLaterRestore(current) }
+                    } else {
+                        null
+                    },
             )
         }
         if (!installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {

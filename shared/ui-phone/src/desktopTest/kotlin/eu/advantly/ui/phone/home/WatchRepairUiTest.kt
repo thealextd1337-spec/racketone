@@ -14,11 +14,11 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/** Recovery-Paket: Neukopplung ist ein ausdrücklicher Schritt im Uhren-Detailblatt. */
+/** Recovery-Paket: Neukopplung ist ein ausdrücklicher, bestätigter Schritt im Uhren-Detailblatt. */
 @OptIn(ExperimentalTestApi::class)
 class WatchRepairUiTest {
     @Test
-    fun repairIsOfferedForKnownWatchesAndReachesThePort() {
+    fun repairIsOfferedForKnownWatchesAndReachesThePortOnlyAfterConfirmation() {
         val store = InMemoryMatchStore().apply { setDeviceStatuses(listOf(DeviceStatus("pixel", PeerKind.WATCH))) }
         var repairs = 0
         val port =
@@ -31,6 +31,8 @@ class WatchRepairUiTest {
             setContent { AdvantlyTheme(darkTheme = true) { Surface { WatchStatusIndicator(port) } } }
             onNodeWithTag("watch_status_pixel").performClick()
             onNodeWithTag("watch_repair").performScrollTo().performClick()
+            assertEquals(0, repairs, "Erst nach der Rückfrage")
+            onNodeWithTag("watch_repair_confirm").performClick()
             assertEquals(1, repairs)
         }
     }

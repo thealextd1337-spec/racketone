@@ -1,6 +1,11 @@
 package eu.advantly.android
 
+import android.app.Activity
+import android.app.AlertDialog
 import android.app.Application
+import android.graphics.Typeface
+import android.os.Looper
+import android.view.View
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
@@ -17,13 +22,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlertDialog
 import java.io.File
 import java.security.MessageDigest
 
@@ -82,6 +91,23 @@ class AndroidRecoveryTest {
     private fun MatchSession.sees(id: MatchId) = data.matches.get(id) != null
 
     private fun hash(file: File) = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).toList()
+
+    private var resets = 0
+    private val restarts = mutableListOf<Boolean>()
+    private val effects = RecoveryEffects(resetAuth = { resets++ }, restart = { restarts += it })
+
+    private fun activity() = Robolectric.buildActivity(Activity::class.java).setup().get()
+
+    private fun dialog() = ShadowAlertDialog.getLatestAlertDialog() as AlertDialog
+
+    private fun AlertDialog.offers(button: Int) = getButton(button).visibility == View.VISIBLE
+
+    private fun AlertDialog.message() = shadowOf(this).message.toString()
+
+    private fun AlertDialog.tap(button: Int) {
+        getButton(button).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
 
     @Test
     fun restoredImageBeforeLoginIsReleasedOnlyForTheSameUidOnANewDevice() {
@@ -206,5 +232,118 @@ class AndroidRecoveryTest {
         assertEquals(held.activeDatabaseName, kept.activeDatabaseName)
         assertFalse(AndroidMatchSessions.get(app, PeerKind.PHONE).sees(legacyMatch))
         assertEquals(originalHash, hash(original))
+    }
+
+    // --- Recovery-Paket, Runde 2: Dialoge am Host ------------------------------------------------------------------
+
+    @Test
+    fun restoreIsTheEmphasizedDefaultAndDropsTheOldSessionBeforeAnythingIsSwitched() {
+        val legacyMatch = oldDevice { old -> old.match("Alex") }
+        val held = AndroidInstallationGuard.get(app)
+        val interim = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        val reservation = File(app.noBackupFilesDir, "installation-v1.reservation")
+        val ordered =
+            RecoveryEffects(
+                resetAuth = {
+                    check(!reservation.exists()) { "Sitzung zuerst verwerfen" }
+                    resets++
+                },
+                restart = { restarts += it },
+            )
+        activity().showRecoveryDecision(held, interim, ordered)
+        assertSame("Übernehmen ist hervorgehoben", Typeface.DEFAULT_BOLD, dialog().getButton(AlertDialog.BUTTON_POSITIVE).typeface)
+        dialog().tap(AlertDialog.BUTTON_POSITIVE)
+        assertEquals(1, resets)
+        assertEquals(listOf(true), restarts)
+
+        newProcess()
+        assertTrue(AndroidMatchSessions.get(app, PeerKind.PHONE).sees(legacyMatch))
+    }
+
+    @Test
+    fun matchesCountedDuringTheHoldHideTheRestoreChoice() {
+        oldDevice { old -> old.match("Alex") }
+        val held = AndroidInstallationGuard.get(app)
+        val interim = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        interim.match("Sam")
+        activity().showRecoveryDecision(held, interim, effects)
+        assertFalse(dialog().offers(AlertDialog.BUTTON_POSITIVE))
+        assertTrue(dialog().offers(AlertDialog.BUTTON_NEUTRAL))
+        assertEquals(app.getString(R.string.recovery_blocked_body), dialog().message())
+    }
+
+    @Test
+    fun startingFreshNeedsConfirmationAndCanStillBeRestoredLaterUnderTheSameRule() {
+        val legacyMatch = oldDevice { old -> old.match("Alex") }
+        val held = AndroidInstallationGuard.get(app)
+        val interim = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        val activity = activity()
+        activity.showRecoveryDecision(held, interim, effects)
+        dialog().tap(AlertDialog.BUTTON_NEUTRAL)
+        assertTrue("Erst nach der Rückfrage", restarts.isEmpty())
+        assertEquals(app.getString(R.string.recovery_fresh_confirm_body), dialog().message())
+        dialog().tap(AlertDialog.BUTTON_NEGATIVE)
+        assertEquals("Abbrechen führt zur Entscheidung zurück", app.getString(R.string.recovery_decision_body), dialog().message())
+        dialog().tap(AlertDialog.BUTTON_NEUTRAL)
+        dialog().tap(AlertDialog.BUTTON_POSITIVE)
+        assertEquals(listOf(false), restarts)
+        assertEquals(1, resets)
+
+        newProcess()
+        val kept = AndroidInstallationGuard.get(app)
+        assertTrue(kept.privateTransportAllowed)
+        assertEquals("advantly.db", kept.restorable)
+        val session = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        assertFalse(session.sees(legacyMatch))
+        // Später im Profil: dieselbe Sperre wie im Hold, die Übernahme geht erst nach dem Löschen.
+        val counted = session.match("Sam")
+        activity.showLaterRestore(session, effects)
+        assertFalse(dialog().offers(AlertDialog.BUTTON_POSITIVE))
+        assertEquals(app.getString(R.string.recovery_blocked_body), dialog().message())
+        dialog().dismiss()
+        session.deleteMatch(counted)
+        activity.showLaterRestore(session, effects)
+        assertSame(Typeface.DEFAULT_BOLD, dialog().getButton(AlertDialog.BUTTON_POSITIVE).typeface)
+        dialog().tap(AlertDialog.BUTTON_POSITIVE)
+        assertEquals(listOf(false, true), restarts)
+        assertEquals(2, resets)
+
+        newProcess()
+        val restored = AndroidInstallationGuard.get(app)
+        assertTrue(restored.privateTransportAllowed)
+        assertNull(restored.restorable)
+        assertTrue(AndroidMatchSessions.get(app, PeerKind.PHONE).sees(legacyMatch))
+    }
+
+    @Test
+    fun failingSessionResetAbortsTheDecisionAndEverythingStaysInTheHold() {
+        oldDevice { old -> old.match("Alex") }
+        val held = AndroidInstallationGuard.get(app)
+        val interim = AndroidMatchSessions.get(app, PeerKind.PHONE)
+        val activity = activity()
+        // Ohne Keystore (Robolectric) scheitert auch der echte Reset; beides darf nicht fortsetzen.
+        val failing =
+            listOf(
+                RecoveryEffects(resetAuth = { error("commit failed") }, restart = { restarts += it }),
+                RecoveryEffects(resetAuth = activity.recoveryEffects().resetAuth, restart = { restarts += it }),
+            )
+        failing.forEach { broken ->
+            activity.showRecoveryDecision(held, interim, broken)
+            dialog().tap(AlertDialog.BUTTON_POSITIVE)
+            assertTrue(restarts.isEmpty())
+            assertEquals(app.getString(R.string.recovery_save_failed), dialog().message())
+            activity.showRecoveryDecision(held, interim, broken)
+            dialog().tap(AlertDialog.BUTTON_NEUTRAL)
+            dialog().tap(AlertDialog.BUTTON_POSITIVE)
+            assertTrue(restarts.isEmpty())
+            assertEquals(app.getString(R.string.recovery_save_failed), dialog().message())
+        }
+
+        newProcess()
+        val after = AndroidInstallationGuard.get(app)
+        assertFalse(after.privateTransportAllowed)
+        assertEquals(held.activeDatabaseName, after.activeDatabaseName)
+        assertFalse(after.restoreFailed)
+        assertEquals("advantly.db", after.restorable)
     }
 }

@@ -1,6 +1,11 @@
 package eu.advantly.wear.sync
 
+import android.app.Activity
+import android.app.AlertDialog
 import android.app.Application
+import android.graphics.Typeface
+import android.os.Looper
+import android.view.View
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
@@ -12,18 +17,26 @@ import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.wear.R
+import eu.advantly.wear.showLaterRestore
+import eu.advantly.wear.showRecoveryDecision
 import eu.advantly.wear.workout.WorkoutStateHolder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlertDialog
 import java.security.MessageDigest
 
 /** Recovery-Paket auf der Uhr: Entscheidung im Hold; ein neuer Prozess wird über die Prozess-Singletons nachgestellt. */
@@ -71,6 +84,29 @@ class WearRecoveryTest {
 
     private var counter = 0
 
+    private var restarts = 0
+
+    private fun activity() = Robolectric.buildActivity(Activity::class.java).setup().get()
+
+    private fun dialog() = ShadowAlertDialog.getLatestAlertDialog() as AlertDialog
+
+    private fun AlertDialog.offers(button: Int) = getButton(button).visibility == View.VISIBLE
+
+    private fun AlertDialog.message() = shadowOf(this).message.toString()
+
+    private fun AlertDialog.tap(button: Int) {
+        getButton(button).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun countMatch(holder: WearSessions.Holder): MatchId {
+        val self =
+            holder.data.players
+                .ensureSelf("Sam", 0) { PlayerId("new-watch-self") }
+                .id
+        return holder.session.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(self), listOf(PlayerId("new-opponent")), self))
+    }
+
     private fun hash() = MessageDigest.getInstance("SHA-256").digest(app.getDatabasePath("advantly.db").readBytes()).toList()
 
     @Test
@@ -114,5 +150,56 @@ class WearRecoveryTest {
         assertNull(holder.data.settings.get("identity.authority"))
         assertNull(holder.data.matches.get(MatchId(oldMatch)))
         assertEquals(original, hash())
+    }
+
+    // --- Recovery-Paket, Runde 2: Dialoge am Host ------------------------------------------------------------------
+
+    @Test
+    fun matchesCountedDuringTheHoldHideTheRestoreChoice() {
+        oldWatch()
+        val held = AndroidInstallationGuard.get(app)
+        val holder = WearSessions.get(app)
+        activity().showRecoveryDecision(held, holder.session) { restarts++ }
+        assertSame("Übernehmen ist hervorgehoben", Typeface.DEFAULT_BOLD, dialog().getButton(AlertDialog.BUTTON_POSITIVE).typeface)
+        dialog().dismiss()
+        countMatch(holder)
+        activity().showRecoveryDecision(held, holder.session) { restarts++ }
+        assertFalse(dialog().offers(AlertDialog.BUTTON_POSITIVE))
+        assertEquals(app.getString(R.string.recovery_blocked_body), dialog().message())
+    }
+
+    @Test
+    fun startingFreshNeedsConfirmationAndCanStillBeRestoredLaterUnderTheSameRule() {
+        val (oldDevice, oldMatch) = oldWatch()
+        val held = AndroidInstallationGuard.get(app)
+        val activity = activity()
+        activity.showRecoveryDecision(held, WearSessions.get(app).session) { restarts++ }
+        dialog().tap(AlertDialog.BUTTON_NEUTRAL)
+        assertEquals("Erst nach der Rückfrage", 0, restarts)
+        assertEquals(app.getString(R.string.recovery_fresh_confirm_body), dialog().message())
+        dialog().tap(AlertDialog.BUTTON_POSITIVE)
+        assertEquals(1, restarts)
+
+        newProcess()
+        val kept = AndroidInstallationGuard.get(app)
+        assertTrue(kept.privateTransportAllowed)
+        assertNotNull(kept.restorable)
+        val holder = WearSessions.get(app)
+        val counted = countMatch(holder)
+        activity.showLaterRestore(holder.session) { restarts++ }
+        assertFalse(dialog().offers(AlertDialog.BUTTON_POSITIVE))
+        dialog().dismiss()
+        holder.session.deleteMatch(counted)
+        activity.showLaterRestore(holder.session) { restarts++ }
+        dialog().tap(AlertDialog.BUTTON_POSITIVE)
+        assertEquals(2, restarts)
+
+        newProcess()
+        val restored = WearSessions.get(app)
+        assertTrue(AndroidInstallationGuard.get(app).privateTransportAllowed)
+        assertNull(AndroidInstallationGuard.get(app).restorable)
+        assertNotEquals(oldDevice, restored.session.deviceId.value)
+        assertNull("Uhr übernimmt keine alte Handy-Autorität", restored.data.settings.get("identity.authority"))
+        assertNull("Alter Bestand erst über das gekoppelte Handy", restored.data.matches.get(MatchId(oldMatch)))
     }
 }

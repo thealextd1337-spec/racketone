@@ -235,6 +235,8 @@ class MainActivity : ComponentActivity() {
         }
         if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
             showRecoveryDecision(availability.installation, holder.session)
+        } else if (availability.installation.restoreFailed && savedInstanceState == null) {
+            showLaterRestoreFailed()
         }
         runtimeJobs +=
             lifecycleScope.launch {
@@ -304,6 +306,10 @@ class MainActivity : ComponentActivity() {
                 toast = toast.value,
                 actions = actions,
                 glanceLaunch = glanceLaunch.intValue,
+                onRestorePrevious =
+                    availability.installation
+                        .takeIf { it.privateTransportAllowed && it.restorable != null }
+                        ?.let { { showLaterRestore(holder.session) } },
             )
         }
     }
