@@ -11,6 +11,7 @@ import io
 import unittest
 from unittest.mock import patch
 
+import check_release_gate
 import stack
 
 REF = "abcdefghijklmnopqrst"
@@ -80,6 +81,26 @@ class OutcomeTest(unittest.TestCase):
         def unknown(s):
             raise stack.Inconclusive("Signup aus")
         self.assertEqual(self.outcome(unknown)[0], 2)
+
+
+class MigrationContentTest(unittest.TestCase):
+    TEXT = "-- Kopf\ncreate table t(a int);\n\ncreate function f() returns int language sql as $$ select 1; $$;\n"
+    # So zerlegt die CLI (SplitAndTrim): Kommentar gehört zur folgenden Anweisung, ';' und Rand-Leerraum fehlen.
+    STATEMENTS = ["-- Kopf\ncreate table t(a int)", "create function f() returns int language sql as $$ select 1; $$"]
+
+    def test_only_the_exact_file_matches_its_stored_statements(self):
+        same = check_release_gate.same_content
+        self.assertTrue(same(self.TEXT, self.STATEMENTS))
+        self.assertTrue(same(self.TEXT.replace("\n", "\r\n"), [s.replace("\n", "\r\n") for s in self.STATEMENTS]))
+        for text, statements in [(self.TEXT.replace("a int", "b int"), self.STATEMENTS),
+                                 (self.TEXT.replace("a int", "a bigint"), self.STATEMENTS),
+                                 (self.TEXT.replace("-- Kopf", "-- Kopf geändert"), self.STATEMENTS),
+                                 (self.TEXT + "drop table t;\n", self.STATEMENTS),
+                                 (self.TEXT, self.STATEMENTS[:1]),
+                                 (self.TEXT, self.STATEMENTS[::-1]),
+                                 (self.TEXT, None)]:
+            with self.subTest(text=text, statements=statements):
+                self.assertFalse(same(text, statements))
 
 
 if __name__ == "__main__":

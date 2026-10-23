@@ -407,6 +407,45 @@ def main():
             print("PASS proven delete/reuse lock-wait; outsider fail-closed and rejected on retry, handed-over match "
                   "redacted once and untouched by unrelated deletion:", rpc)
 
+        def retired_guest_wait_race(rpc):
+            # Review P3-2: nonreuse_race scheitert seit dem Gäste-Entscheid schon am fehlenden Beleg. Hier wartet ein
+            # Push mit gültigem Beleg auf die Kontolöschung und muss danach Kim als gesperrt sehen: die Playerzeile
+            # wird abgewiesen, ein neuer Slot mit Kims ID nur als „Gelöschter Spieler“ gespeichert.
+            creator, survivor, outsider = new_user(), new_user(), new_user()
+            shared, fresh, guest = uuid4(), uuid4(), uuid4()
+            matches.extend((shared, fresh))
+            player_ids.append(guest)
+            owner.execute("insert into public.players(id,owner_id,kind,display_name) values(%s,%s,'guest','Kim')",
+                          (guest, creator[0]))
+            owner.execute("insert into public.matches(id,created_by,sport,discipline,format,started_at) "
+                          "values(%s,%s,'tennis','singles','{}',now())", (shared, creator[0]))
+            owner.execute("insert into public.match_participants(match_id,slot_id,team,position,player_id,profile_id,"
+                          "link_status,display_name) values(%s,'kim','A',1,%s,null,null,'Kim'),"
+                          "(%s,'survivor','B',1,null,%s,'linked','Survivor')", (shared, guest, shared, survivor[0]))
+            generation = owner.execute("select visibility_epoch from public.profile_settings where profile_id=%s",
+                                       (outsider[0],)).fetchone()[0]
+            slot = {"slotId": "kim", "team": "A", "position": 1, "playerId": str(guest), "displayName": "Kim"}
+            batch = {"players": [{"id": str(guest), "kind": "guest", "displayName": "Kim"}],
+                     "matches": [owner.execute("select tests.match(%s,%s::jsonb)", (fresh, json.dumps([slot]))).fetchone()[0]],
+                     "lifecycle": {"generation": generation, "redactionEpochs": {}}}
+            with owner.transaction():
+                owner.execute("delete from auth.users where id=%s", (creator[0],))
+                pending = pool.submit(push, rpc, outsider, batch)
+                blocked(pending, owner.info.backend_pid, client.info.backend_pid)
+            result = pending.result(timeout=10)
+            # Der Grund ist schon vor dem Gäste-Entscheid derselbe (deleted_player_identities); gesperrt zeigt der Slot.
+            assert result["players"] == [{"id": str(guest), "result": "rejected", "reason": "player_identity_conflict"}], result
+            assert result["matches"] == [{"id": str(fresh), "result": "created",
+                                          "notes": [{"note": "player_not_owned", "slotId": "kim"}]}], result
+            assert owner.execute("select display_name,deleted_profile,player_id,profile_id from public.match_participants "
+                                 "where match_id=%s", (fresh,)).fetchall() == [("Gelöschter Spieler", True, None, None)]
+            assert owner.execute("select count(*) from private.match_redacted_slots where match_id=%s and slot_id='kim'",
+                                 (fresh,)).fetchone()[0] == 1
+            assert owner.execute("select count(*) from private.player_write_redactions where player_id=%s",
+                                 (guest,)).fetchone()[0] == 1
+            print("PASS proven account-delete lock-wait; waiting push with valid proof sees the deleted account's own "
+                  "guest as retired: player_identity_conflict, new slot stored as deleted player:", rpc)
+
         def conflicting_context_race(rpc, text_slot=False):
             caller, deleted, living = new_user(), new_user(), new_user()
             guest, historical, current, old_event, vera_event, new_event, reopened_event, final_event = [uuid4() for _ in range(8)]
@@ -820,6 +859,7 @@ def main():
                 cases += 3
                 print("PASS 3 isolation denials before stale lifecycle:", rpc)
                 nonreuse_race(rpc)
+                retired_guest_wait_race(rpc)
                 conflicting_context_race(rpc)
                 conflicting_context_race(rpc, text_slot=True)
                 direct_profile_collision_race(rpc)
@@ -832,7 +872,7 @@ def main():
                     for mode in ("no proof", "stale", "current"):
                         genesis_delete_race(rpc, mode, existing)
                         cases += 1
-                cases += 8
+                cases += 9
             print(f"PASS {cases} proven races; no live-platform claim")
         finally:
             with owner.transaction():
