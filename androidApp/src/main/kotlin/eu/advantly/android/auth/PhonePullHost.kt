@@ -44,8 +44,8 @@ internal fun phonePullHost(
 ): PhonePullHost? = if (replicaActivation) create() else null
 
 /**
- * Expliziter D1-Abgleich je Konto-ViewModel, an dieselben Gates wie [PhoneUploadHost] gebunden; aktiviert vor dem
- * ersten Lauf das Replikat. Keine Hintergrundplanung, kein Backoff, keine Netz-Auslöser (B4, Welle 4).
+ * Begrenzter D1-Abgleich je Konto, an dieselben Gates wie [PhoneUploadHost] gebunden; aktiviert vor dem ersten Lauf das
+ * Replikat. Planung, Backoff und Auslöser liegen beim [PhoneSyncCoordinator].
  */
 internal class PhonePullHost(
     private val auth: CloudAuthPort,
@@ -69,12 +69,15 @@ internal class PhonePullHost(
     private var runner: CloudPullRunner? = null
     private var action: Job? = null
     private var closed = false
+    private val removeDirectoryListener: () -> Unit
 
     // Eigener Cleanup ohne geerbten Job: ViewModel-Cancellation darf das Join nicht überspringen.
     private val cleanup = CoroutineScope(scope.coroutineContext.minusKey(Job) + SupervisorJob())
 
     init {
         confined()
+        // Ownership und Identität ändern sich auch ohne neuen Sitzungswert: `available` sonst veraltet (H-Review P3-6).
+        removeDirectoryListener = session.data.observeDirectoryChanges { synchronize() }
         work.launch(start = CoroutineStart.UNDISPATCHED) {
             auth.session.collect { synchronize() }
         }
@@ -103,11 +106,17 @@ internal class PhonePullHost(
     }
 
     override fun pullNow() {
+        start()
+    }
+
+    /** Startet einen Pull oder liefert den laufenden; `null` ohne gültigen Kontext. */
+    internal fun start(): Job? {
         confined()
-        val expected = synchronize() ?: return
-        if (closed || action != null) return
+        val expected = synchronize() ?: return null
+        if (closed) return null
+        action?.let { return it }
         mutable.value = mutable.value.copy(busy = true, result = null, blocked = null)
-        action =
+        val job =
             work.launch(start = CoroutineStart.LAZY) {
                 try {
                     // Host-Vertrag B4: wartet auf einen laufenden Upload desselben Kontos.
@@ -155,7 +164,9 @@ internal class PhonePullHost(
                     if (!closed) mutable.value = mutable.value.copy(busy = false)
                 }
             }
-        action?.start()
+        action = job
+        job.start()
+        return job
     }
 
     /**
@@ -212,6 +223,7 @@ internal class PhonePullHost(
         if (closed) return
         closed = true
         mutable.value = PhonePullState()
+        removeDirectoryListener()
         runner?.close()
         lifecycle.cancel()
         cleanup.launch(start = CoroutineStart.UNDISPATCHED) {

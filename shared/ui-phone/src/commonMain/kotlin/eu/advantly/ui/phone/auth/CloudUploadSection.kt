@@ -21,6 +21,7 @@ import eu.advantly.presentation.auth.PhoneUploadError
 import eu.advantly.presentation.auth.PhoneUploadPhase
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.auth.PhoneUploadResult
+import eu.advantly.ui.phone.platform.formatBuildDate
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.cloud_upload_binding
 import eu.advantly.ui.phone.resources.cloud_upload_blocked
@@ -47,12 +48,16 @@ import eu.advantly.ui.phone.resources.cloud_upload_stale
 import eu.advantly.ui.phone.resources.cloud_upload_title
 import eu.advantly.ui.phone.resources.cloud_upload_unavailable
 import eu.advantly.ui.phone.resources.cloud_upload_unknown
+import eu.advantly.ui.phone.resources.cloud_upload_waiting
 import org.jetbrains.compose.resources.stringResource
-import kotlin.time.Instant
 
 /** Eigene Uploadaktionen blockieren keine Kontoaktion. Sämtliche Zahlen bleiben datierte Momentaufnahmen. */
 @Composable
-fun CloudUploadSection(port: PhoneUploadPort) {
+fun CloudUploadSection(
+    port: PhoneUploadPort,
+    /** Ohne eigenen Upload-Knopf, wenn „Jetzt synchronisieren“ Download und Upload in fester Reihenfolge startet. */
+    manual: Boolean = true,
+) {
     val state by port.state.collectAsState()
     val observedAt = state.observedAtMs
     val events = state.pendingEvents
@@ -81,6 +86,10 @@ fun CloudUploadSection(port: PhoneUploadPort) {
             }
             val outcome =
                 when {
+                    state.phase == PhoneUploadPhase.WAITING -> {
+                        Res.string.cloud_upload_waiting
+                    }
+
                     state.phase == PhoneUploadPhase.BINDING -> {
                         Res.string.cloud_upload_binding
                     }
@@ -112,22 +121,24 @@ fun CloudUploadSection(port: PhoneUploadPort) {
                     }
                 Text(stringResource(message), Modifier.testTag("cloud_upload_error"), color = MaterialTheme.colorScheme.error)
             }
-            Button(
-                port::uploadNow,
-                enabled = state.available && !state.busy && state.action != PhoneUploadAction.NONE,
-                modifier = Modifier.fillMaxWidth().testTag("cloud_upload_now"),
-            ) {
-                Text(
-                    stringResource(
-                        if (state.action ==
-                            PhoneUploadAction.RETRY
-                        ) {
-                            Res.string.cloud_upload_retry
-                        } else {
-                            Res.string.cloud_upload_now
-                        },
-                    ),
-                )
+            if (manual) {
+                Button(
+                    port::uploadNow,
+                    enabled = state.available && !state.busy && state.action != PhoneUploadAction.NONE,
+                    modifier = Modifier.fillMaxWidth().testTag("cloud_upload_now"),
+                ) {
+                    Text(
+                        stringResource(
+                            if (state.action ==
+                                PhoneUploadAction.RETRY
+                            ) {
+                                Res.string.cloud_upload_retry
+                            } else {
+                                Res.string.cloud_upload_now
+                            },
+                        ),
+                    )
+                }
             }
             TextButton(
                 port::refreshStatus,
@@ -140,4 +151,5 @@ fun CloudUploadSection(port: PhoneUploadPort) {
     }
 }
 
-private fun timestamp(milliseconds: Long): String = Instant.fromEpochMilliseconds(milliseconds).toString()
+/** Lokale Uhrzeit mit Datum in der Gerätesprache (DE/EN) statt ISO-Instant. */
+internal fun timestamp(milliseconds: Long): String = formatBuildDate(milliseconds)

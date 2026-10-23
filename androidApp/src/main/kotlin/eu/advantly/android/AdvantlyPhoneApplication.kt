@@ -1,6 +1,7 @@
 package eu.advantly.android
 
 import android.app.Application
+import eu.advantly.android.sync.scheduleSyncAfterMatchEnd
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
@@ -29,11 +30,16 @@ class AdvantlyPhoneApplication : Application() {
         return AndroidInstallationGuard.storage(this) {
             AndroidMatchSessions.prepare(this, PeerKind.PHONE) { session, stage ->
                 var removeTelemetry: (() -> Unit)? = null
+                var removeSyncTrigger: (() -> Unit)? = null
                 stage.onDiscard {
                     bootstrapped = false
                     removeTelemetry?.invoke()
+                    removeSyncTrigger?.invoke()
                 }
-                stage.afterCommit { removeTelemetry = LiveTelemetryStore.Phone.clearWhenTelemetryOff(session) }
+                stage.afterCommit {
+                    removeTelemetry = LiveTelemetryStore.Phone.clearWhenTelemetryOff(session)
+                    removeSyncTrigger = scheduleSyncAfterMatchEnd(this, session)
+                }
             }
             bootstrapped = true
             true

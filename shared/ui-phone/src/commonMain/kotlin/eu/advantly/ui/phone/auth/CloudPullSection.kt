@@ -36,7 +36,11 @@ import org.jetbrains.compose.resources.stringResource
 
 /** Ergebnis des letzten expliziten Cloud-Abgleichs; BLOCKED nennt immer einen Grund. */
 @Composable
-fun CloudPullSection(port: PhonePullPort) {
+fun CloudPullSection(
+    port: PhonePullPort,
+    /** Ohne eigenen Download-Knopf, wenn „Jetzt synchronisieren“ Download und Upload in fester Reihenfolge startet. */
+    manual: Boolean = true,
+) {
     val state by port.state.collectAsState()
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
         Column(Modifier.fillMaxWidth().testTag("cloud_pull_section"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -67,11 +71,13 @@ fun CloudPullSection(port: PhonePullPort) {
                     }
                 Text(stringResource(reason), Modifier.testTag("cloud_pull_blocked"), color = MaterialTheme.colorScheme.error)
             }
-            Button(
-                port::pullNow,
-                enabled = state.available && !state.busy,
-                modifier = Modifier.fillMaxWidth().testTag("cloud_pull_now"),
-            ) { Text(stringResource(Res.string.cloud_pull_now)) }
+            if (manual) {
+                Button(
+                    port::pullNow,
+                    enabled = state.available && !state.busy,
+                    modifier = Modifier.fillMaxWidth().testTag("cloud_pull_now"),
+                ) { Text(stringResource(Res.string.cloud_pull_now)) }
+            }
         }
     }
 }

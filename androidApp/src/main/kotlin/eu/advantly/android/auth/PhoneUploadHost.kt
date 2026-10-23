@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 
-/** Ein Host je Konto-ViewModel; die prozessweite MatchSession und ihre Datenbank gehören ihm nicht. */
+/** Ein Host je prozessweitem Konto-Host ([PhoneAccountCore]); die MatchSession und ihre Datenbank gehören ihm nicht. */
 internal class PhoneUploadHost(
     private val auth: CloudAuthPort,
     private val session: MatchSession,
@@ -106,25 +106,38 @@ internal class PhoneUploadHost(
     }
 
     override fun uploadNow() {
+        start()
+    }
+
+    /** Startet einen Upload oder liefert die laufende Aktion (auch [refreshStatus]); `null` ohne gültigen Kontext. */
+    internal fun start(): Job? {
         confined()
-        val expected = synchronize() ?: return
-        if (closed || action != null) return
+        val expected = synchronize() ?: return null
+        if (closed) return null
+        action?.let { return it }
+        val lock = lane.mutex(expected.profile)
         mutable.value =
             mutable.value.copy(
                 busy = true,
-                phase = if (lane.bound == expected) PhoneUploadPhase.UPLOADING else PhoneUploadPhase.BINDING,
+                phase =
+                    when {
+                        lock.isLocked -> PhoneUploadPhase.WAITING
+                        lane.bound == expected -> PhoneUploadPhase.UPLOADING
+                        else -> PhoneUploadPhase.BINDING
+                    },
                 result = null,
                 error = null,
             )
         // LAZY setzt die Referenz auch dann vor Ausführung, wenn Main.immediate sofort weiterläuft.
-        action =
+        val job =
             work.launch(start = CoroutineStart.LAZY) {
                 try {
                     // Host-Vertrag B4: wartet auf einen laufenden Pull desselben Kontos.
-                    lane.mutex(expected.profile).withLock {
+                    lock.withLock {
                         if (synchronize() != expected) return@launch
                         if (lane.bound != expected) {
                             lane.bound = null
+                            mutable.value = mutable.value.copy(phase = PhoneUploadPhase.BINDING)
                             bindDevice(expected.device)
                             currentCoroutineContext().ensureActive()
                             if (synchronize() != expected) return@launch
@@ -167,7 +180,9 @@ internal class PhoneUploadHost(
                     if (!closed) mutable.value = mutable.value.copy(busy = false, phase = PhoneUploadPhase.IDLE)
                 }
             }
-        action?.start()
+        action = job
+        job.start()
+        return job
     }
 
     override fun refreshStatus() {
