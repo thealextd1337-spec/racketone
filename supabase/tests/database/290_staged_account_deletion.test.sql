@@ -3,8 +3,14 @@
 -- Prüfungen auf neue Objekte laufen über pg_temp.q: gegen den Stand vor der Migration sind sie rot statt abzubrechen.
 -- Review r1: jede Zugriffsänderung mit neuer Generation (P2-2), Fehler eines Kontos halten andere nicht auf (P2-1),
 -- zwei Löschungen mit gemeinsamen Matches enden wie zwei nacheinander laufende purge_account (P3), Blockgröße.
+-- 260/270 füllen die drei Tabellen unten in zurückgerollten Transaktionen. Räumt Autovacuum die toten Zeilen ab, während
+-- ein Test sie sperrt, entfällt das Kürzen: reltuples 0 bei vielen Seiten, der Planner schätzt jede Abfrage auf 1 Zeile,
+-- die Übergabe in anonymize_profile läuft kubisch und 290 hing in CI bis zum Jobabbruch. VACUUM vorab kürzt sie.
+vacuum public.matches, public.match_participants, public.match_events;
 begin;
 set local timezone = 'UTC';
+-- Ein Hänger beendet die Sitzung nach 5 min (normal ~15 s); statement_timeout fangen die Job-Einheiten selbst ab.
+set local transaction_timeout = '5min';
 select plan(90);
 select tests.world();
 select tests.publish_consent_documents('staged-290');

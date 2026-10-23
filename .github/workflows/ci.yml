@@ -436,6 +436,8 @@ jobs:
           echo "$!" > "$RUNNER_TEMP/export-functions.pid"
           uv run .github/scripts/export_stack_ci.py ready
       - name: pgTAP-Tests (RLS, RPCs)
+        # Normal ~4,5 min; ein Hänger soll den Schritt beenden, nicht den 60-min-Job.
+        timeout-minutes: 15
         run: supabase test db
       - name: Consent-Gate und D2/D3-Lockrennen prüfen
         timeout-minutes: 8
