@@ -93,6 +93,9 @@ def body(s):
     status, rows = s.rpc("cloud_pull_match_events_v1", {"p_match_id": match["id"]}, a, a["device"])
     check(status == 200, "Events lesbar")
     visible = json.dumps([after[match["id"]], rows])
+    leaks = list(_paths([after[match["id"]], rows], {b["alias"], guest_name}))
+    for path, value in leaks:
+        print(f"INFO Name nach Löschung sichtbar: {path} = {value!r}")
     check(b["alias"] not in visible and guest_name not in visible, "keine Namenwiederkehr nach Löschung")
     print("PASS shared match stays with A, names of B and B's guest gone, E increased")
 
@@ -114,6 +117,18 @@ def body(s):
     check(status == 200 and ready["highWatermark"] == high
           and sum(w["eventCount"] for w in ready["watermarks"]) == len(rows), "Readiness bis H")
     print("PASS interrupted redaction pull resumes to the full set; stale G/E -> 40001; readiness at H")
+
+
+def _paths(node, needles, path="$"):
+    """Fundstellen der Testnamen (nur Wegwerfkonten), damit ein FAIL die Stelle zeigt."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _paths(value, needles, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _paths(value, needles, f"{path}[{index}]")
+    elif isinstance(node, str) and any(n in node for n in needles):
+        yield path, node[:200]
 
 
 if __name__ == "__main__":
