@@ -1553,7 +1553,7 @@ class MatchSession(
         if (message !is Hello && (message.v >= 4) != (version(peer) >= 4)) return
         // P2-1, Empfang: alte Sender schieben vor dem Hello über 3 nach
         if (message !is Hello && requiresFour(peer)) return
-        if (message.v >= 4) message = stamps.verified(message) ?: return
+        if (message.v >= 4) message = stamps.verified(peer, message) ?: return
         if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
         if (message is Summary && scoped) {
             val own = data.accountIdentities.currentSources()
@@ -2379,7 +2379,7 @@ class MatchSession(
         if (data.accountIdentities.managed && routed is Deleted) {
             routed = routed.copy(matches = routed.matches.filter { inCurrentScope(it.matchId) })
         }
-        if (version(peer) >= 4) routed = stamps.stamped(routed, receiver::summaryOf, blockedMatches::add) ?: return
+        if (version(peer) >= 4) routed = stamps.stamped(peer, routed, receiver::summaryOf, blockedMatches::add) ?: return
         val bytes =
             try {
                 if (envelope == null) SyncCodec.encode(routed) else SyncCodec.encode(routed, envelope)
