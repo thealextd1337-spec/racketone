@@ -293,7 +293,7 @@ $$;
 
 -- Phase B: höchstens p_limit Matches der Arbeitsliste vollständig. Anweisungen in der Reihenfolge der Trigger
 -- (capture_profile_redactions, redact_linked_names, anonymize_profile) und der Profilkaskade, jeweils unverändert bis
--- auf „Match in der Menge“. Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die
+-- auf „Match in der Menge“ (Lineup-Zweig: gleiche Paare, andere Auswertung). Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die
 -- Epoche steigt in derselben Transaktion wie die Redaktion. Liefert die Anzahl bearbeiteter Matches (0 = fertig).
 create function private.account_deletion_redact(p_profile uuid, p_limit integer) returns integer
 language plpgsql security definer set search_path = '' as $$
@@ -318,8 +318,10 @@ begin
       where e.type='PlayerAssigned' and e.payload->>'assignmentVersion'='2' and not (e.payload ? 'player')
         and e.match_id=any(v_ms)
     union
-    select e.match_id,i.id from ids i join public.match_events e
-      on private.redaction_lineup_ids(e.payload) @> array[i.id] where e.type='MatchCreated' and e.match_id=any(v_ms)
+    -- Dieselben Paare wie „redaction_lineup_ids(payload) @> array[i.id]“, aber eine Auswertung je Event statt je
+    -- Event und ID (sonst Nested Loop: mit eigenen Gästen 44 IDs × 50 Genesis-Events, rund ein Viertel des Blocks).
+    select e.match_id,x.id from public.match_events e cross join lateral unnest(private.redaction_lineup_ids(e.payload)) x(id)
+      where e.type='MatchCreated' and e.match_id=any(v_ms) and x.id in (select id from ids)
   ), referenced as (
     select e.match_id,e.id from event_refs e
     where (e.id<>p_profile and not private.redaction_other_profile_context(e.match_id,e.id,p_profile))
