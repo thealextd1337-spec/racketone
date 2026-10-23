@@ -2299,3 +2299,44 @@ Aufträge:
 Matches entfernt. Sie erscheinen als „Gelöschter Spieler“ und sind in Teilnehmern und
 Verlauf redigiert, E steigt. Beanspruchte Gäste gehen wie bisher über. Die ID wird
 stillgelegt. Umsetzung: `advantly-20261023-server-guest-redaction-r1`.
+
+**B4 Android übernommen** (`3863bf2e`, `7697e4ef`, `4b281a2b`, `3bcb54d0`; Merge `5a530505`, voller Check grün):
+- Koordinierter Lauf erst Pull, dann U4, unter der prozessweiten Kontosperre.
+- Auslöser:
+  - App-Start bzw. Vordergrund (höchstens 1 je 60 s);
+  - Netz zurück, nur nach einem Verbindungsfehler;
+  - Matchende;
+  - alle 6 h über JobScheduler, persistent, mit Netzbedingung.
+- Backoff von 30 s bis 1 h. Bei BLOCKED keine Schleife, der Grund wird angezeigt.
+- Logout, Kontowechsel, Löschantrag und Einwilligungsentzug brechen laufende und geplante
+  Arbeit ab. Jeder Auftrag trägt sein Konto.
+- Neuer Abschnitt „Sicherung“ mit „Jetzt synchronisieren“.
+- **Architektur:** Der Konto-Host gilt prozessweit. Zwei Supabase-Clients rotierten sonst
+  ihre Refresh-Tokens gegeneinander. Jedes ViewModel hat einen eigenen Kind-Job.
+- Review r1: Freigabe mit Auflage. P2-1 (ViewModel-Leck) und fünf P3 behoben.
+- **Release-Gate:** Die App betreibt Pull und U4 jetzt automatisch.
+- Bekannte Reste: P3-4 bis P3-6. Doze, Standby und Neustart sind nur am Gerät prüfbar.
+
+**Recovery-Paket übernommen** (`f3994fe2`..`6ed66414`, Merge `977ed38d`, voller Check grün;
+Konflikt mit B4 nur in einem Kommentar in `PhoneAccount.kt`):
+- Hold mit ausdrücklicher Entscheidung: „Übernehmen“ (Standard, empfohlen), „Ohne
+  starten“ mit Rückfrage, „Später“.
+- Die Übernahme ist später aus Profil bzw. Startliste nachholbar, solange seit der
+  Entscheidung nichts gezählt wurde.
+- Bei der Übernahme gilt:
+  - Kopie statt Original;
+  - neue Geräte-ID, alte Zuordnungen und Pairing stillgelegt;
+  - Freigabe nur für dieselbe UID oder durch ausdrückliche Adoption.
+- `repairPairing` mit Rückfrage; die Uhr meldet `pairingConflict`.
+- Nach jeder Entscheidung ist ein frischer Login nötig.
+- **Altinstallationen:** Ein sicherer Unterscheider zum Restore fehlt. Deshalb sieht jeder
+  bestehende Nutzer den Dialog beim Update. Begründung:
+  `%TEMP%/advantly-recovery-20261023/r2/unterscheider.md`.
+- Review r1: kein P1, 12/12 Mutationsproben rot. Runde 2: 13/13 Mutationsproben rot.
+- **Rest P3-7:** Kopie und `quick_check` laufen auf dem Main-Thread. Bei 1 MB unter 0,3 s, bei
+  100 MB auf der Uhr bis 8 s. Das gehört zur asynchronen Guard-Initialisierung.
+
+**CI 39943705129:** 290 hing erneut, diesmal nach 5 min durch `transaction_timeout`
+beendet. Ursache ist wieder die Übergabe-Anweisung in `private.anonymize_profile()` bei
+1-Zeilen-Schätzungen; VACUUM reicht nicht. Robuste Formulierung (etwa `LATERAL` je Match)
+als Auflage für die nächste Runde des Gastnamen-Pakets, weil es dieselbe Funktion ändert.
