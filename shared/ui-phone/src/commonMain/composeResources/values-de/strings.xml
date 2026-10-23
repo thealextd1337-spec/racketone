@@ -769,8 +769,15 @@
     <string name="account_device_last_seen">Zuletzt aktiv %1$s</string>
     <string name="account_device_revoked">Zugriff entzogen</string>
     <string name="account_device_revoke">Zugriff entziehen</string>
-    <string name="account_device_revoke_explanation">Dieses Gerät kann danach keine Cloud-Daten mehr hoch- oder herunterladen und sich auch durch erneute Registrierung nicht wieder freischalten. Auf dem Gerät gespeicherte Daten bleiben dort.</string>
+    <string name="account_device_revoke_explanation">Dieses Gerät kann danach keine Cloud-Daten mehr hoch- oder herunterladen und sich nicht selbst wieder freischalten. Freigeben kannst du es später von einem anderen deiner Geräte oder über den Support. Auf dem Gerät gespeicherte Daten bleiben dort.</string>
     <string name="account_device_current">Dieses Gerät</string>
-    <string name="account_device_current_hint">Das ist das Handy, das du gerade nutzt. Um es zu trennen, melde dich ab (das meldet dich auf allen Geräten ab). Widerrufen kannst du es nur von einem anderen Gerät aus, und ein widerrufenes Handy kann die Cloud nicht wieder nutzen.</string>
-    <string name="account_device_current_revoked">Der Cloud-Zugriff dieses Handys wurde von einem anderen Gerät aus widerrufen. Für dieses Handy lässt sich das nicht rückgängig machen. Deine Matches bleiben auf dem Handy, und du kannst weiter zählen. Lösche keine App-Daten und installiere die App nicht neu, sonst gehen noch nicht hochgeladene Matches verloren. Export, Löschung, Geräte und Support bleiben hier erreichbar.</string>
+    <string name="account_device_current_hint">Das ist das Handy, das du gerade nutzt. Um es zu trennen, melde dich ab (das meldet dich auf allen Geräten ab). Widerrufen kannst du es nur von einem anderen Gerät aus; auch eine spätere Freigabe braucht ein anderes Gerät oder den Support.</string>
+    <string name="account_device_current_revoked">Der Cloud-Zugriff dieses Handys wurde widerrufen. Gib es von einem anderen deiner Geräte (Konto, Geräte) oder über den Support frei und melde dich danach auf diesem Handy ab und wieder an (das Abmelden gilt für alle deine Geräte). Deine Matches bleiben auf dem Handy, und du kannst weiter zählen; noch nicht hochgeladene Matches werden danach hochgeladen. Lösche keine App-Daten und installiere die App nicht neu, sonst gehen diese Matches verloren. Export, Löschung, Geräte und Support bleiben hier erreichbar.</string>
+    <string name="account_device_restore">Freigabe wiederherstellen</string>
+    <string name="account_device_restore_explanation">Dieses Gerät behält seine Kennung und kann nach einer erneuten Anmeldung wieder Cloud-Daten hoch- und herunterladen. Noch nicht hochgeladene Matches darauf werden dann hochgeladen. Stelle die Freigabe nur wieder her, wenn das Gerät wieder bei dir ist.</string>
+    <string name="account_device_error_self">Ein Gerät kann seinen eigenen Zugriff nicht wiederherstellen. Nutze ein anderes deiner Geräte oder den Support.</string>
+    <string name="account_device_error_not_found">Dieses Gerät wurde in deinem Konto nicht gefunden.</string>
+    <string name="account_device_error_not_revoked">Dieses Gerät hat bereits Zugriff.</string>
+    <string name="account_device_error_this_phone">Dieses Handy kann gerade keine Freigabe erteilen: Es muss selbst mit der Cloud verbunden und darf nicht widerrufen sein. Versuche es nach der nächsten Synchronisierung erneut.</string>
+    <string name="account_deletion_pending">Dein Konto ist zur Löschung vorgemerkt. Nimm zuerst die Löschung zurück.</string>
 </resources>

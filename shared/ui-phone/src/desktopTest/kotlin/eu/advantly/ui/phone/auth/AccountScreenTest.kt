@@ -107,6 +107,11 @@ class FakePhoneAuth : CloudAuthPort {
         devices.replaceAll { if (it.deviceId == deviceId) it.copy(revokedAt = "2026-10-23T10:00:00Z") else it }
     }
 
+    override suspend fun restoreDevice(deviceId: String) {
+        call("restore:$deviceId")
+        devices.replaceAll { if (it.deviceId == deviceId) it.copy(revokedAt = null) else it }
+    }
+
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
 
     override fun adoptSources(ids: Set<String>) {
@@ -350,10 +355,74 @@ class AccountScreenTest {
                     .performScrollTo()
                     .assertTextEquals(if (german) "Dieses Gerät · Pixel · android · phone" else "This device · Pixel · android · phone")
                 onNodeWithTag("account_device_revoked_d1").performScrollTo().assertIsDisplayed()
-                onNodeWithTag("account_device_current_hint")
-                    .performScrollTo()
-                    .assertTextContains(if (german) "Lösche keine App-Daten" else "Do not clear the app data", substring = true)
+                val hint = onNodeWithTag("account_device_current_hint").performScrollTo()
+                hint.assertTextContains(if (german) "Lösche keine App-Daten" else "Do not clear the app data", substring = true)
+                hint.assertTextContains(
+                    if (german) {
+                        "von einem anderen deiner Geräte (Konto, Geräte) oder über den Support frei"
+                    } else {
+                        "Restore it from another of your devices (Account, Devices) or through support"
+                    },
+                    substring = true,
+                )
+                hint.assertTextContains(if (german) "ab und wieder an" else "sign out and sign in again", substring = true)
                 onNodeWithTag("account_device_revoke_d1").assertDoesNotExist()
+                onNodeWithTag("account_device_restore_d1").assertDoesNotExist()
+            }
+        }
+
+    @Test fun aRevokedOtherDeviceIsRestoredOnlyAfterConfirmationNeverTheCurrentPhone() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth =
+                    FakePhoneAuth().also {
+                        it.session.value = CloudSession("alice", true)
+                        it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
+                        it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
+                    }
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+                onNodeWithTag("account_devices_show").performScrollTo().performClick()
+                onNodeWithTag("account_device_restore_d1").assertDoesNotExist()
+                onNodeWithTag("account_device_restore_w1")
+                    .performScrollTo()
+                    .assertTextEquals(if (german) "Freigabe wiederherstellen" else "Restore access")
+                    .performClick()
+                onNodeWithTag("account_device_restore_cancel").performClick()
+                assertTrue("restore:w1" !in auth.calls, "Abbrechen gibt nichts frei")
+                onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
+                onNodeWithTag("account_device_restore_confirm").performClick()
+                assertEquals(listOf("devices", "restore:w1", "devices"), auth.calls.filter { it != "refresh" })
+                onNodeWithTag("account_device_revoked_w1").assertDoesNotExist()
+                onNodeWithTag("account_device_revoke_w1").performScrollTo().assertIsEnabled()
+            }
+        }
+
+    @Test fun aRejectedRestoreExplainsTheServerReason() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth =
+                    FakePhoneAuth().also {
+                        it.session.value = CloudSession("alice", true)
+                        it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
+                    }
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+                onNodeWithTag("account_devices_show").performScrollTo().performClick()
+                auth.failure = "device_restore_unavailable"
+                onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
+                onNodeWithTag("account_device_restore_confirm").performClick()
+                onNodeWithTag("auth_error")
+                    .performScrollTo()
+                    .assertTextContains(
+                        if (german) {
+                            "Dieses Handy kann gerade keine Freigabe erteilen"
+                        } else {
+                            "This phone cannot restore access right now"
+                        },
+                        substring = true,
+                    )
+                onNodeWithTag("account_device_revoked_w1").performScrollTo().assertIsDisplayed()
             }
         }
 

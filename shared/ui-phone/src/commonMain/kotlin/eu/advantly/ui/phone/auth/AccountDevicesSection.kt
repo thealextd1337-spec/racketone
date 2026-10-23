@@ -24,6 +24,8 @@ import eu.advantly.ui.phone.resources.account_device_current
 import eu.advantly.ui.phone.resources.account_device_current_hint
 import eu.advantly.ui.phone.resources.account_device_current_revoked
 import eu.advantly.ui.phone.resources.account_device_last_seen
+import eu.advantly.ui.phone.resources.account_device_restore
+import eu.advantly.ui.phone.resources.account_device_restore_explanation
 import eu.advantly.ui.phone.resources.account_device_revoke
 import eu.advantly.ui.phone.resources.account_device_revoke_explanation
 import eu.advantly.ui.phone.resources.account_device_revoked
@@ -34,15 +36,17 @@ import eu.advantly.ui.phone.resources.account_devices_title
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * K4: eigene Geräte ansehen und den Zugriff einzelner Geräte endgültig entziehen (mit Rückfrage). Das eigene Handy hat
- * keinen Widerruf: Ein widerrufenes Handy kommt nicht mehr in die Cloud (der Server sperrt Geräte-ID und Installation).
+ * K4: eigene Geräte ansehen und den Zugriff einzelner Geräte entziehen oder wiederherstellen (K4-U), jeweils mit
+ * Rückfrage. Das eigene Handy hat weder Widerruf noch Freigabe: Ein widerrufenes Handy gibt ein anderes Gerät oder der
+ * Support frei, nie es selbst (der Server lehnt das ab).
  */
 @Composable
 internal fun AccountDevicesSection(
     state: AuthState,
     model: AuthViewModel,
 ) {
-    var confirm by remember(state.devices) { mutableStateOf<String?>(null) }
+    // Gerät und ob es um die Freigabe (true) oder den Widerruf geht.
+    var confirm by remember(state.devices) { mutableStateOf<Pair<String, Boolean>?>(null) }
     Column(Modifier.fillMaxWidth().testTag("account_devices"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(stringResource(Res.string.account_devices_title), style = MaterialTheme.typography.titleMedium)
@@ -81,30 +85,44 @@ internal fun AccountDevicesSection(
                     Modifier.testTag("account_device_current_hint"),
                     color = if (revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (!revoked) {
+            } else if (revoked) {
                 TextButton(
-                    { confirm = device.deviceId },
+                    { confirm = device.deviceId to true },
+                    enabled = !state.busy,
+                    modifier = Modifier.testTag("account_device_restore_${device.deviceId}"),
+                ) { Text(stringResource(Res.string.account_device_restore)) }
+            } else {
+                TextButton(
+                    { confirm = device.deviceId to false },
                     enabled = !state.busy,
                     modifier = Modifier.testTag("account_device_revoke_${device.deviceId}"),
                 ) { Text(stringResource(Res.string.account_device_revoke)) }
             }
         }
     }
-    confirm?.let { deviceId ->
+    confirm?.let { (deviceId, restore) ->
+        val action = if (restore) Res.string.account_device_restore else Res.string.account_device_revoke
+        val tag = if (restore) "account_device_restore" else "account_device_revoke"
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(stringResource(Res.string.account_device_revoke)) },
-            text = { Text(stringResource(Res.string.account_device_revoke_explanation)) },
+            title = { Text(stringResource(action)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (restore) Res.string.account_device_restore_explanation else Res.string.account_device_revoke_explanation,
+                    ),
+                )
+            },
             confirmButton = {
                 TextButton({
                     confirm = null
-                    model.revokeDevice(deviceId)
-                }, modifier = Modifier.testTag("account_device_revoke_confirm")) {
-                    Text(stringResource(Res.string.account_device_revoke))
+                    if (restore) model.restoreDevice(deviceId) else model.revokeDevice(deviceId)
+                }, modifier = Modifier.testTag("${tag}_confirm")) {
+                    Text(stringResource(action))
                 }
             },
             dismissButton = {
-                TextButton({ confirm = null }, modifier = Modifier.testTag("account_device_revoke_cancel")) {
+                TextButton({ confirm = null }, modifier = Modifier.testTag("${tag}_cancel")) {
                     Text(stringResource(Res.string.account_cancel))
                 }
             },

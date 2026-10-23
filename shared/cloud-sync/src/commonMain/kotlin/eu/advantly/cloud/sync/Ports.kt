@@ -109,8 +109,14 @@ interface CloudAuthPort {
     /** K4: eigene Geräte; nur Auth-Sitzung, daher auch nach Selbstwiderruf, bei Sperre und ohne Zustimmung. */
     suspend fun devices(): List<CloudDevice> = throw CloudException("connection_failed", false)
 
-    /** K4: widerruft Gerät, Installation, Sitzungsbindungen und Push-Token endgültig; fremde Geräte lehnt der Server ab. */
+    /** K4: widerruft Gerät, Installation, Sitzungsbindungen und Push-Token; fremde Geräte lehnt der Server ab. */
     suspend fun revokeDevice(deviceId: String): Unit = throw CloudException("connection_failed", false)
+
+    /**
+     * K4-U: hebt den Widerruf eines anderen eigenen Geräts auf. Braucht den Installationsnachweis dieses Handys; das
+     * widerrufene Gerät selbst lehnt der Server ab. Es behält seine IDs und bindet nach einer neuen Anmeldung wieder.
+     */
+    suspend fun restoreDevice(deviceId: String): Unit = throw CloudException("connection_failed", false)
 
     fun adoptionSources(): List<CloudAdoptionSource> = emptyList()
 

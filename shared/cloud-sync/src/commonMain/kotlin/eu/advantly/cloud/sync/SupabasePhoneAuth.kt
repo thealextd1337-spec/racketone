@@ -149,12 +149,12 @@ class SupabasePhoneAuth(
         }
     }
 
-    /** Installation dieses Handys; erkennt in der Geräteliste das eigene Gerät (K4). */
-    private var installationId: String? = null
+    /** Installation dieses Handys; erkennt in der Geräteliste das eigene Gerät (K4) und weist Freigaben nach (K4-U). */
+    private var installation: CloudInstallation? = null
 
     /** Keine automatische Registrierung/Übertragung; der versionierte Serververtrag ist noch ein Release-Gate. */
     fun cloudBackend(installation: CloudInstallation): SupabaseCloudBackend {
-        installationId = installation.id
+        this.installation = installation
         return SupabaseCloudBackend(sessions, transport, installation)
     }
 
@@ -515,7 +515,7 @@ class SupabasePhoneAuth(
 
     override suspend fun devices(): List<CloudDevice> =
         guarded {
-            val own = installationId
+            val own = installation?.id
             CloudJson
                 .decodeFromString<List<CloudDevice>>(accountRpc("cloud_list_devices_v1", buildJsonObject {}))
                 .map { it.copy(current = own != null && it.installationId == own) }
@@ -524,6 +524,19 @@ class SupabasePhoneAuth(
     override suspend fun revokeDevice(deviceId: String) =
         guarded {
             accountRpc("cloud_revoke_device_v1", buildJsonObject { put("p_device_id", deviceId) })
+            Unit
+        }
+
+    // Ein eigener Grund, wenn dieses Handy selbst (noch) nicht gebunden oder widerrufen ist: Die Kontositzung gilt weiter.
+    override suspend fun restoreDevice(deviceId: String) =
+        guarded {
+            val own = installation ?: throw CloudException(RESTORE_UNAVAILABLE, true)
+            try {
+                accountRpc("cloud_unrevoke_device_v1", buildJsonObject { put("p_device_id", deviceId) }, own)
+            } catch (e: CloudException) {
+                if (e.reason in setOf("device_revoked", "device_not_authorized")) throw CloudException(RESTORE_UNAVAILABLE, true)
+                throw e
+            }
             Unit
         }
 
@@ -542,11 +555,12 @@ class SupabasePhoneAuth(
     private suspend fun accountRpc(
         name: String,
         params: JsonObject,
+        installation: CloudInstallation? = null,
     ): String {
         synchronizeAccount()
         val before = sessions.capture(requireProfile = false).credentials
         val epoch = accountEpoch
-        val result = accountRequest(name, params, before, epoch)
+        val result = accountRequest(name, params, before, epoch, installation)
         requireAccountCurrent(before, epoch)
         return result
     }
@@ -569,10 +583,11 @@ class SupabasePhoneAuth(
         params: JsonObject,
         credentials: CloudCredentials,
         epoch: Long,
+        installation: CloudInstallation? = null,
     ): String =
         try {
             requireHostAccess()
-            transport.rpc(name, params, credentials.accessToken).also { requireHostAccess() }
+            transport.rpc(name, params, credentials.accessToken, installation).also { requireHostAccess() }
         } catch (error: CloudException) {
             if (error.permission && error.reason in setOf("cloud_session_changed", "profile_missing")) {
                 throw RejectedAccount(credentials, epoch, error)
@@ -660,6 +675,8 @@ class SupabasePhoneAuth(
         }
 
     private companion object {
+        const val RESTORE_UNAVAILABLE = "device_restore_unavailable"
+
         val REASONS =
             listOf(
                 "profile_missing",

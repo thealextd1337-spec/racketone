@@ -216,16 +216,23 @@ class AuthViewModel(
             mutable.value = mutable.value.copy(devices = devices)
         }
 
-    /** Endgültig; danach Liste neu laden, damit der Serverzustand sichtbar ist. Nie das eigene Handy (kein Weg zurück). */
-    fun revokeDevice(deviceId: String) =
-        runAction {
-            if (mutable.value.devices?.any { it.deviceId == deviceId && it.current } == true) return@runAction
-            val before = requireDisplayedSession()
-            auth.revokeDevice(deviceId)
-            val devices = auth.devices()
-            auth.requireAccountSession(before)
-            mutable.value = mutable.value.copy(devices = devices)
-        }
+    /** Danach Liste neu laden, damit der Serverzustand sichtbar ist. Nie das eigene Handy (Freigabe nur von anderswo). */
+    fun revokeDevice(deviceId: String) = changeDevice(deviceId, auth::revokeDevice)
+
+    /** K4-U: Freigabe eines anderen eigenen Geräts; das eigene Handy gibt sich nie selbst frei (der Server lehnt ab). */
+    fun restoreDevice(deviceId: String) = changeDevice(deviceId, auth::restoreDevice)
+
+    private fun changeDevice(
+        deviceId: String,
+        change: suspend (String) -> Unit,
+    ) = runAction {
+        if (mutable.value.devices?.any { it.deviceId == deviceId && it.current } == true) return@runAction
+        val before = requireDisplayedSession()
+        change(deviceId)
+        val devices = auth.devices()
+        auth.requireAccountSession(before)
+        mutable.value = mutable.value.copy(devices = devices)
+    }
 
     fun signOut() =
         runAction {
