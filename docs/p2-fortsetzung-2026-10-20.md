@@ -2175,3 +2175,30 @@ ist in Review: `advantly-20261023-w3-data-d2-review-r1`.
   - P3-5 und P3-6 (kosmetisch).
   - `eventsCommitted` anschließen, nach S Runde 3.
   - Die Reihenfolge „erst Pull, dann U4“ ist nicht erzwungen. Das gehört zu B4.
+
+**S Runde 3 und 4 übernommen** (Merges `0d7894b1`, `91c23684`; match-session 186 Tests):
+- Runde 3:
+  - `eventsCommitted`-Hook; der Pull-Host verdrahtet ihn in `fe71ffa6`.
+  - Atomare Löschung.
+- Review r2 zu Runde 2+3 verlangte vor V4 zwei Fixes, Runde 4 hat beide umgesetzt:
+  - **P2-1:** Mit Konto gehen vor der Aushandlung nur Hellos raus. Eine Sende- und eine
+    Empfangssperre gelten für Gegenstellen unter v4.
+  - **P2-2:** Die Teilnehmerregel ist an das Match gebunden. Belege: die Genesis-Quelle des
+    Kontos oder der Server-Ersteller im Pull-Snapshot. Das Payload-`createdBy` reicht
+    nicht.
+- Review r3: `advantly-20261023-w3-session-review-r3`.
+- **Bekannter Rest:** Unter V4↔V4 bleibt eine Seite nach einem verlorenen Hello bis zum
+  nächsten Link-Up unausgehandelt; kein Wiederholungs-Hello.
+- **`shortcut:`** `createdBy` wird roh aus dem Snapshot-JSON gelesen. Später durch eine
+  Data-Abfrage ersetzen.
+
+**Integrator-Commits:**
+- `78d5684b`: Die Wear-Uhr zeigt „Sync blockiert“ statt „1 ausstehend“ (P-3). Auf watchOS
+  steht weiter „N ausstehend“; ein eigener Text bräuchte Swift.
+- `32141c3b`: `ReplicaLifecycleStore.MAX_REDACTION_PAGE_BYTES` ist die eine Grenze für
+  Pull, `stageRedaction` und Gerätezustellung.
+- `66c2d81c`: `assignPlayer` erzeugt mit Konto und V4 `PlayerAssigned.reference`
+  (assignmentVersion 2, ohne Namen). Ohne Konto oder unter v3 bleibt es wie bisher.
+- **Scheiterndes `emit`:** Handy und Wear quittieren es bereits mit Ablehnungs-Haptik
+  (`LiveScoreController.kt:314`, `WatchControllerCore.kt:307`). Kein zusätzliches
+  Statusfeld.
