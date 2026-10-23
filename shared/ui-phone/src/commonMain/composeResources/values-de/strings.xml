@@ -605,6 +605,8 @@
     <string name="device_update_watch">Advantly auf der Uhr aktualisieren.</string>
     <string name="device_update_phone">Advantly auf dem Handy aktualisieren.</string>
     <string name="device_reconnect">Geräte näher zusammenbringen, Bluetooth prüfen und Advantly auf der Uhr öffnen.</string>
+    <string name="device_repair">Uhren neu koppeln</string>
+    <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_update_recommended">Auf beiden Geräten denselben App-Stand installieren. Ältere Geräte melden ihren Stand eventuell nicht.</string>
     <string name="device_ready">Beide Geräte sind bereit.</string>
     <string name="device_development">Entwicklungsbuild</string>

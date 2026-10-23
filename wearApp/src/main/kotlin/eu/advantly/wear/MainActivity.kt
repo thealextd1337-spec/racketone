@@ -1,6 +1,5 @@
 package eu.advantly.wear
 
-import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -235,13 +234,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
-            AlertDialog
-                .Builder(this)
-                .setTitle(R.string.recovery_notice_title)
-                .setMessage(R.string.recovery_notice_body)
-                .setPositiveButton(R.string.recovery_continue_offline, null)
-                .show()
+            showRecoveryDecision(availability.installation, holder.session)
         }
+        runtimeJobs +=
+            lifecycleScope.launch {
+                holder.session.state
+                    .map { it.pairingConflict }
+                    .distinctUntilChanged()
+                    .collect { conflict -> if (conflict && currentSession()) showPairingRepair(holder.session, ::currentSession) }
+            }
         permissions.value = Permissions.current(this)
         permissionRequestInFlight = savedInstanceState?.getBoolean(KEY_PERMISSION_IN_FLIGHT) == true
         if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {

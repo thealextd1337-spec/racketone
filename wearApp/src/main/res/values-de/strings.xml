@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
-    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Prüfung und Wiederherstellung sind noch nicht verfügbar. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
-    <string name="recovery_continue_offline">Offline fortfahren</string>
+    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
+    <string name="recovery_decision_body">Bisherige Daten gefunden. Übernehmen gibt dieser Uhr eine neue Identität; dein Handy teilt danach, was zu seinem Konto gehört. Oder neu beginnen. Gespeichert bleiben die Daten in jedem Fall.</string>
+    <string name="recovery_blocked_body">Seitdem wurden Matches gezählt. Lösche sie zum Übernehmen oder beginne neu.</string>
+    <string name="recovery_failed_body">Übernahme fehlgeschlagen. Es wurde nichts geändert.</string>
+    <string name="recovery_restore">Übernehmen</string>
+    <string name="recovery_start_fresh">Neu beginnen</string>
+    <string name="recovery_continue_offline">Später</string>
+    <string name="pairing_conflict_title">Handy geändert</string>
+    <string name="pairing_conflict_body">Ein Handy mit neuer Kopplung wurde gefunden. Diese Uhr neu koppeln? Die Daten auf der Uhr bleiben.</string>
+    <string name="pairing_repair">Neu koppeln</string>
+    <string name="pairing_later">Nicht jetzt</string>
     <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->

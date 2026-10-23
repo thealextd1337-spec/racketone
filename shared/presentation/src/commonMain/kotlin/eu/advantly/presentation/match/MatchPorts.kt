@@ -313,6 +313,9 @@ interface LiveMatchPort {
     /** Stand der Uhr sofort neu prüfen (Schritt „Wer zählt?“, App im Vordergrund, „Erneut prüfen“). */
     fun refreshWatchStatus()
 
+    /** Uhren neu koppeln (verlorene oder ersetzte Uhr): neue Pairing-Autorität, jede Uhr bestätigt danach selbst neu. */
+    fun repairWatchPairing() {}
+
     /**
      * Legt ein Match an und macht es aktiv. Laufende Matches bleiben offen und laufen weiter (F22). Zählt mit „Meine Uhr“
      * künftig die Uhr dieses Match, gibt sie ihr bisheriges laufendes Match geordnet ans Handy ab (Director).

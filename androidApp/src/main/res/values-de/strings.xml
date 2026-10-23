@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
-    <string name="recovery_notice_body">Deine bisherigen Daten bleiben getrennt erhalten und wurden nicht wiederhergestellt. Kontoprüfung und Wiederherstellung sind noch nicht verfügbar. Gerätesync und Kontofunktionen bleiben pausiert. Neue Matches kannst du offline zählen.</string>
-    <string name="recovery_continue_offline">Offline fortfahren</string>
+    <string name="recovery_notice_body">Deine bisherigen Daten bleiben getrennt erhalten und wurden nicht wiederhergestellt. Gerätesync und Kontofunktionen bleiben pausiert. Neue Matches kannst du offline zählen.</string>
+    <string name="recovery_decision_body">Diese App wurde wiederhergestellt oder aktualisiert. Deine bisherigen Daten sind sicher aufbewahrt, werden aber noch nicht angezeigt.\n\nÜbernehmen: Die Daten werden für dieses Gerät mit einer neuen Geräteidentität kopiert. Kontogebundene Daten erscheinen erst, wenn du dich mit genau diesem Konto anmeldest; Daten ohne Konto erscheinen auf diesem Gerät. Melde dich danach neu an und bestätige die Kopplung auf deiner Uhr.\n\nOhne sie starten: Die bisherigen Daten bleiben auf diesem Gerät gespeichert, werden aber nicht verwendet.</string>
+    <string name="recovery_blocked_body">Seit dem Update oder der Wiederherstellung wurden auf diesem Gerät schon Matches gezählt. Eine Übernahme würde sie ausblenden. Lösche diese Matches zuerst, um zu übernehmen, oder starte ohne die bisherigen Daten. Deine bisherigen Daten bleiben in jedem Fall gespeichert.</string>
+    <string name="recovery_failed_body">Die Übernahme hat nicht geklappt. Es wurde nichts geändert, deine bisherigen Daten bleiben erhalten. Versuche es später erneut oder starte ohne sie.</string>
+    <string name="recovery_restore">Bisherige Daten übernehmen</string>
+    <string name="recovery_start_fresh">Ohne sie starten</string>
+    <string name="recovery_continue_offline">Später entscheiden</string>
+    <string name="recovery_done_title">Bisherige Daten übernommen</string>
+    <string name="recovery_done_body">Dieses Gerät hat jetzt eine eigene, neue Identität. Kontogebundene Daten erscheinen, sobald du dich mit genau diesem Konto anmeldest – ein anderes Konto sieht davon nichts. Wenn du eine Uhr nutzt, bestätige die Kopplung auf der Uhr neu.</string>
     <string name="installation_error_title">Lokale Daten nicht verfügbar</string>
     <string name="installation_error_body">Die lokalen Daten konnten nicht geprüft werden. Zählen, Gerätesynchronisierung und Kontofunktionen sind pausiert. „Erneut versuchen“ wiederholt diese Prüfung. Vorhandene Matchdaten bleiben erhalten.</string>
     <string name="installation_error_retry">Erneut versuchen</string>

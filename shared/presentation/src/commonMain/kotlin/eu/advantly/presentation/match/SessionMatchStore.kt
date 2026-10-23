@@ -187,6 +187,8 @@ class SessionMatchStore(
         updateWatchStatus(session.state.value)
     }
 
+    override fun repairWatchPairing() = session.repairPairing()
+
     private fun updateWatchStatus(state: SessionState) {
         val status =
             when {

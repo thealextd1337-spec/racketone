@@ -2,8 +2,17 @@
 <!-- Default: Englisch. Deutsch in values-de/ – Android Lint (MissingTranslation) bricht ab, wenn eine Übersetzung fehlt. -->
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="recovery_notice_title">Existing data kept safe</string>
-    <string name="recovery_notice_body">Previous data is retained separately. Verification and recovery are not yet available. Sync is paused. You can count new matches offline.</string>
-    <string name="recovery_continue_offline">Continue offline</string>
+    <string name="recovery_notice_body">Previous data is retained separately. Sync is paused. You can count new matches offline.</string>
+    <string name="recovery_decision_body">Previous data found. Restoring gives this watch a new identity; your phone then shares what belongs to its account. Or start fresh. The data stays stored either way.</string>
+    <string name="recovery_blocked_body">Matches were counted since. Delete them to restore, or start fresh.</string>
+    <string name="recovery_failed_body">Restoring failed. Nothing was changed.</string>
+    <string name="recovery_restore">Restore</string>
+    <string name="recovery_start_fresh">Start fresh</string>
+    <string name="recovery_continue_offline">Later</string>
+    <string name="pairing_conflict_title">Phone changed</string>
+    <string name="pairing_conflict_body">A phone with a new pairing was found. Pair this watch again? Data on the watch stays.</string>
+    <string name="pairing_repair">Pair again</string>
+    <string name="pairing_later">Not now</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
     <string name="wear_version">v%1$s</string>

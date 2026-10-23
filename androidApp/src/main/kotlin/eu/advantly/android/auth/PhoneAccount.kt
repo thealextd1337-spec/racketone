@@ -35,7 +35,7 @@ internal fun ComponentActivity.createPhoneAccount(
     apiKey: String,
 ): AuthViewModel? {
     if (apiUrl.isBlank() || apiKey.isBlank()) return null
-    // Login allein ist kein Wiederherstellungs-/Zugriffsbeleg. Integration folgt nach D2/D3.
+    // Login ist nie ein Wiederherstellungsbeleg: Im Hold gibt es kein Konto, erst die ausdrückliche Entscheidung beendet ihn.
     if (!AndroidInstallationGuard.privateTransportAllowed(applicationContext)) return null
     val storage = PhoneAuthStorage(applicationContext)
     val client =

@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,6 +49,8 @@ import eu.advantly.ui.phone.resources.device_phone_build
 import eu.advantly.ui.phone.resources.device_ready
 import eu.advantly.ui.phone.resources.device_reconnect
 import eu.advantly.ui.phone.resources.device_red
+import eu.advantly.ui.phone.resources.device_repair
+import eu.advantly.ui.phone.resources.device_repair_hint
 import eu.advantly.ui.phone.resources.device_unknown
 import eu.advantly.ui.phone.resources.device_update_phone
 import eu.advantly.ui.phone.resources.device_update_recommended
@@ -136,6 +139,13 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
                             }
                         Text(stringResource(hint), style = AdvantlyTheme.typography.body)
                     }
+                }
+                if (watches.isNotEmpty()) {
+                    Text(stringResource(Res.string.device_repair_hint), style = AdvantlyTheme.typography.body)
+                    TextButton({
+                        port.repairWatchPairing()
+                        details = false
+                    }, modifier = Modifier.testTag("watch_repair")) { Text(stringResource(Res.string.device_repair)) }
                 }
             }
         }
