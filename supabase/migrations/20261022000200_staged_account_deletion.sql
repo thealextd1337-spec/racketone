@@ -27,6 +27,13 @@
 -- Bei einem großen fremden Konto kann das lang werden (Sperrhaltezeit wie früher), und es scheitert mit dem Fehler
 -- des fremden Blocks, solange jenes Konto unter drei Fehlversuchen hat.
 -- public.admin_purge_due_accounts bleibt ungestaffelt (Wartungsweg mit Karenzparameter, kein Client).
+-- Eigene Gäste (Nutzerentscheid 23.10.2026, K7-Befund): Gäste des Kontos ohne Profilzuordnung (kind 'guest',
+-- owner_id = Konto, profile_id null) gehören jetzt zu den pensionierten IDs (v_retired), auf beiden Wegen: A hier,
+-- capture_profile_redactions und redact_linked_names unten per Seam. Sie werden also wie zugewiesene fremde Gäste
+-- stillgelegt (player_redacted), ins Manifest aufgenommen, in gemeinsamen Matches als „Gelöschter Spieler“ geführt
+-- und aus PlayerAssigned-Payloads entfernt, jeweils mit der Epoche in derselben Transaktion. Bisher löschte
+-- anonymize_profile nur ihre Playerzeile; Teilnehmername und Payloads blieben bei den Mitspielern. Beanspruchte Gäste
+-- (profile_id eines anderen Profils) gehen unverändert an den Claimer über.
 
 alter table public.profiles drop constraint profiles_status_check;
 alter table public.profiles add constraint profiles_status_check
@@ -185,7 +192,7 @@ $$;
 
 -- Phase A. Aufrufer prüft Status und Frist (Löschjob). Liefert false, solange eine andere laufende Löschung gemeinsame
 -- Matches offen hat, und vermerkt nur die Wartestelle (Job versucht es danach). Reihenfolge der globalen Schritte wie in purge_account:
--- Grabsteine und Manifestentscheid (capture_profile_redactions, Teil 1, unverändert aus 01100), Umbenennung der
+-- Grabsteine und Manifestentscheid (capture_profile_redactions, Teil 1, aus 01100 mit dem Gäste-Seam), Umbenennung der
 -- verknüpften Player (redact_linked_names), Entlinken und Gast-Übergabe (anonymize_profile/unlink_player, nur die
 -- Playerzeilen: deren Teilnehmer-Update findet in purge_account nach redact_linked_names keine Zeile mehr).
 create function private.account_deletion_begin(p_profile uuid) returns boolean
@@ -202,8 +209,9 @@ begin
   end if;
   delete from private.account_deletion_waits where profile_id = p_profile;
   insert into private.redacted_profile_identities values(p_profile) on conflict do nothing;
+  -- Wie capture_profile_redactions nach dem Seam unten: Self-Player, eigene nicht zugeordnete Gäste, Zugeordnete.
   select coalesce(array_agg(p.id),'{}'::uuid[]) into v_retired from public.players p
-    where (p.owner_id=p_profile and p.kind='self') or p.profile_id=p_profile;
+    where (p.owner_id=p_profile and (p.kind='self' or p.profile_id is null)) or p.profile_id=p_profile;
   insert into private.player_write_redactions(player_id)
     select unnest(v_retired) on conflict do nothing;
   with candidates as materialized (
@@ -285,7 +293,7 @@ $$;
 
 -- Phase B: höchstens p_limit Matches der Arbeitsliste vollständig. Anweisungen in der Reihenfolge der Trigger
 -- (capture_profile_redactions, redact_linked_names, anonymize_profile) und der Profilkaskade, jeweils unverändert bis
--- auf „Match in der Menge“. Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die
+-- auf „Match in der Menge“ (Lineup-Zweig: gleiche Paare, andere Auswertung). Teilnehmerkontext, Epoche und Namen hängen nur von Zeilen desselben Matches ab; die
 -- Epoche steigt in derselben Transaktion wie die Redaktion. Liefert die Anzahl bearbeiteter Matches (0 = fertig).
 create function private.account_deletion_redact(p_profile uuid, p_limit integer) returns integer
 language plpgsql security definer set search_path = '' as $$
@@ -310,8 +318,10 @@ begin
       where e.type='PlayerAssigned' and e.payload->>'assignmentVersion'='2' and not (e.payload ? 'player')
         and e.match_id=any(v_ms)
     union
-    select e.match_id,i.id from ids i join public.match_events e
-      on private.redaction_lineup_ids(e.payload) @> array[i.id] where e.type='MatchCreated' and e.match_id=any(v_ms)
+    -- Dieselben Paare wie „redaction_lineup_ids(payload) @> array[i.id]“, aber eine Auswertung je Event statt je
+    -- Event und ID (sonst Nested Loop: mit eigenen Gästen 44 IDs × 50 Genesis-Events, rund ein Viertel des Blocks).
+    select e.match_id,x.id from public.match_events e cross join lateral unnest(private.redaction_lineup_ids(e.payload)) x(id)
+      where e.type='MatchCreated' and e.match_id=any(v_ms) and x.id in (select id from ids)
   ), referenced as (
     select e.match_id,e.id from event_refs e
     where (e.id<>p_profile and not private.redaction_other_profile_context(e.match_id,e.id,p_profile))
@@ -348,8 +358,8 @@ begin
     where r.identity_id=any(v_players) and r.match_id=any(v_ms)
     on conflict do nothing;
 
-  -- redact_linked_names (01100), matchlokaler Teil. Dessen v_players (aktuell zugeordnet und schreibgesperrt) ist
-  -- genau v_retired: dieselbe Playerauswahl, und A hat alle in player_write_redactions eingetragen.
+  -- redact_linked_names (01100), matchlokaler Teil. Dessen v_players (aktuell zugeordnet bzw. eigener Gast und
+  -- schreibgesperrt) ist genau v_retired: dieselbe Playerauswahl, und A hat alle in player_write_redactions eingetragen.
   select coalesce(array_agg(distinct match_id),'{}'::uuid[]) into v_matches from (
     select match_id from public.match_participants where profile_id=p_profile and match_id=any(v_ms)
     union select match_id from private.match_redacted_names
@@ -434,6 +444,27 @@ begin
       raise exception 'Unerwartete Seam %', v_fn.signature;
     end if;
     execute replace(v_definition, v_fn.marker, E'begin\n' || v_fn.guard || substring(v_fn.marker from 7));
+  end loop;
+end;
+$$;
+
+-- Eigene Gäste ohne Profilzuordnung in die pensionierten IDs beider Löschtrigger aufnehmen, dieselbe Auswahl wie A.
+-- Sonst bleiben die Bodies unverändert; alle Anweisungen, die v_retired bzw. v_players lesen, behandeln sie damit wie
+-- zugewiesene Gäste (Sperre, Manifestentscheid, Belege, Slots, Teilnehmername, PlayerAssigned, Epoche).
+do $$
+declare v_definition text; v_fn record;
+begin
+  for v_fn in select * from (values
+    ('private.capture_profile_redactions()', 'where (p.owner_id=old.id and p.kind=''self'') or p.profile_id=old.id;',
+     'where (p.owner_id=old.id and (p.kind=''self'' or p.profile_id is null)) or p.profile_id=old.id;'),
+    ('private.redact_linked_names()', 'where ((p.owner_id=old.id and p.kind=''self'') or p.profile_id=old.id)',
+     'where ((p.owner_id=old.id and (p.kind=''self'' or p.profile_id is null)) or p.profile_id=old.id)')
+  ) f(signature, marker, replacement) loop
+    select pg_get_functiondef(v_fn.signature::regprocedure) into v_definition;
+    if array_length(string_to_array(v_definition, v_fn.marker), 1) <> 2 then
+      raise exception 'Unerwartete Seam %', v_fn.signature;
+    end if;
+    execute replace(v_definition, v_fn.marker, v_fn.replacement);
   end loop;
 end;
 $$;

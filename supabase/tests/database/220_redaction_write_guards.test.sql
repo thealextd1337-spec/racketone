@@ -580,21 +580,27 @@ insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_cl
 delete from auth.users where id=tests.uid('q_alice');
 select is((select created_by from public.matches where id='55000000-0000-4000-8000-000000000001'),tests.uid('q_vera'),'H1: match transferred to vera');
 select ok(not exists(select 1 from public.players where id='55010000-0000-4000-8000-0000000000a1'),'H1: guest row hard-deleted');
-select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Kim','H1: Kim slot survives in vera match');
--- Dritte Person war niemals Mitglied: die geloeschte Playeridentitaet ist gesperrt.
-select is(tests.result(pg_temp.push('q_mal',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','self','displayName','M')))),'players',0),'rejected:player_identity_conflict','H1: deleted guest UUID cannot become Mallory self');
+-- Nutzerentscheid 23.10.2026: Der eigene Gast der Gelöschten wird auch im Match, das bei vera bleibt, redigiert.
+select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Gelöschter Spieler','H1: own guest Kim is redacted in the match that stays with vera');
+-- Dritte Person war niemals Mitglied: die geloeschte Playeridentitaet ist gesperrt (mit Beleg bis zum Player-Writer).
+select is(tests.result(pg_temp.push('q_mal',pg_temp.proof('q_mal',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','self','displayName','M'))))),'players',0),'rejected:player_identity_conflict','H1: deleted guest UUID cannot become Mallory self');
 select ok(exists(select 1 from private.deleted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),
  'H1: actual deleted Player row creates durable non-reuse evidence');
-select ok(not private.player_write_redacted('55010000-0000-4000-8000-0000000000a1'),
- 'H1: hard-delete evidence alone never authorizes name redaction');
+-- Die Sperre kommt aus der Löschung des Owners (pensionierter eigener Gast), nicht aus dem Harddelete-Beleg.
+select ok(private.player_write_redacted('55010000-0000-4000-8000-0000000000a1')
+ and not private.player_write_redacted('55010000-0000-4000-8000-0000000000a2'),
+ 'H1: owner deletion retires the own guest; hard-delete evidence alone authorizes nothing');
 select is(tests.result(pg_temp.push('q_vera',pg_temp.proof('q_vera',jsonb_build_object('players',jsonb_build_array(
  jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','guest','displayName','Kim'))))),'players',0),
  'rejected:player_identity_conflict','H1: even current match owner cannot reuse the deleted UUID as guest');
+create temp table h1_before as select redaction_epoch from public.matches where id='55000000-0000-4000-8000-000000000001';
 delete from auth.users where id=tests.uid('q_mal');
-select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Kim','H1 EXPECT: vera match Kim slot untouched by unrelated deletion');
-select is(pg_temp.ev_name('55020000-0000-4000-8000-000000000001'),'Kim','H1 EXPECT: vera match Kim event untouched');
-select ok(not exists(select 1 from private.match_redacted_players where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: no global manifest entry in vera match');
-select ok(not exists(select 1 from private.redacted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: no global tombstone');
+select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Gelöschter Spieler','H1 EXPECT: vera match Kim slot stays redacted after unrelated deletion');
+select is(pg_temp.ev_name('55020000-0000-4000-8000-000000000001'),'Gelöschter Spieler','H1 EXPECT: vera match Kim event redacted by the owner deletion');
+select ok((select count(*) from private.match_redacted_players where player_id='55010000-0000-4000-8000-0000000000a1')=1
+ and (select redaction_epoch from public.matches where id='55000000-0000-4000-8000-000000000001')=(select redaction_epoch from h1_before),
+ 'H1 EXPECT: manifest entry only from the owner deletion, unrelated deletion leaves E unchanged');
+select ok(exists(select 1 from private.redacted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: global tombstone from the owner deletion');
 
 -- Review r3, N2: inverse historische Zuordnung: M1 bob via profileId mit Gast X, X danach vera2; VERA2 loescht =====
 insert into public.players(id,owner_id,kind,display_name) values ('56010000-0000-4000-8000-0000000000f1',tests.uid('q_al2'),'guest','X');
@@ -693,8 +699,8 @@ select is(pg_temp.ev_name('56020000-0000-4000-8000-000000000005'),'Bob after ret
  'H2: later Bob event is never globally anonymized');
 select ok(not exists(select 1 from private.match_redacted_players where player_id='56010000-0000-4000-8000-0000000000f1'),
  'H2: no global manifest promotion after new writes');
-select is(tests.result(pg_temp.push('q_vera',jsonb_build_object('players',jsonb_build_array(jsonb_build_object(
- 'id','{55010000-0000-4000-8000-0000000000A1}','kind','self','displayName','Collision')))),'players',0),
+select is(tests.result(pg_temp.push('q_vera',pg_temp.proof('q_vera',jsonb_build_object('players',jsonb_build_array(jsonb_build_object(
+ 'id','{55010000-0000-4000-8000-0000000000A1}','kind','self','displayName','Collision'))))),'players',0),
  'rejected:player_identity_conflict','H1: alternate UUID spelling cannot bypass non-reuse');
 
 -- Auch ein direkter, spaeter zurueckgerollter DELETE liefert keinen dauerhaften

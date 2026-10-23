@@ -3,6 +3,7 @@
 -- Prüfungen auf neue Objekte laufen über pg_temp.q: gegen den Stand vor der Migration sind sie rot statt abzubrechen.
 -- Review r1: jede Zugriffsänderung mit neuer Generation (P2-2), Fehler eines Kontos halten andere nicht auf (P2-1),
 -- zwei Löschungen mit gemeinsamen Matches enden wie zwei nacheinander laufende purge_account (P3), Blockgröße.
+-- Eigene, nicht zugeordnete Gäste des Kontos werden in gemeinsamen Matches redigiert und stillgelegt (K7, 23.10.2026).
 -- 260/270 füllen die drei Tabellen unten in zurückgerollten Transaktionen. Räumt Autovacuum die toten Zeilen ab, während
 -- ein Test sie sperrt, entfällt das Kürzen: reltuples 0 bei vielen Seiten, der Planner schätzt jede Abfrage auf 1 Zeile,
 -- die Übergabe in anonymize_profile läuft kubisch und 290 hing in CI bis zum Jobabbruch. VACUUM vorab kürzt sie.
@@ -11,7 +12,7 @@ begin;
 set local timezone = 'UTC';
 -- Ein Hänger beendet die Sitzung nach 5 min (normal ~15 s); statement_timeout fangen die Job-Einheiten selbst ab.
 set local transaction_timeout = '5min';
-select plan(90);
+select plan(106);
 select tests.world();
 select tests.publish_consent_documents('staged-290');
 select tests.accept_current_consents(id) from tests.users;
@@ -511,8 +512,114 @@ select is((select r[1] || ' ' || r[5] from stalled_run), 'true false',
   'Stalled path: the second account finishes while the first still has its shared matches open, then both are gone');
 select ok((select r[2] = old and r[2] !~ '(Erin|Finn) ' from stalled_run),
   'Stalled path leaves no clear names beyond those of two purge_account in a row');
+select ok((select r[2] !~ 'Gast E2' from stalled_run), 'Stalled path also redacts the own guest of the stalled account');
 select is((select r[3] from stalled_run), '0', 'Stalled path: every name change raises the epoch, which never drops');
 select is((select r[4] from stalled_run), '', 'Stalled path: every pull access change comes with a new generation');
+
+-- Eigene Gäste (Nutzerentscheid 23.10.2026), tools/pilot-checks/check_deletion_job.py als SQL: gina lädt wie der Client
+-- ein Match mit Freund hank hoch (Self-Player, eigener Gast in Teilnehmern und Lineup, namentragende Zuweisung) und
+-- weist hank einen zweiten eigenen Gast zu. Gestaffelt gelöscht sieht hank weder ginas Alias noch den Gastnamen, auch
+-- im inkrementellen Pull; jede Namensänderung kam mit höherem E; die Gast-ID ist stillgelegt; der Gast von hank bleibt.
+select pg_temp.drain();
+select tests.create_user('gina');
+select tests.create_user('hank');
+select tests.accept_current_consents(tests.uid(n)) from unnest(array['gina', 'hank']) n;
+insert into public.friendships(requester_id, addressee_id, status, responded_at)
+  values (tests.uid('gina'), tests.uid('hank'), 'accepted', now());
+create function pg_temp.push(p_name text, p_batch jsonb) returns text language plpgsql as $$
+declare v_life jsonb := jsonb_build_object('generation',
+  (select visibility_epoch from public.profile_settings where profile_id = tests.uid(p_name)),
+  'redactionEpochs', (select coalesce(jsonb_object_agg(id::text, redaction_epoch), '{}') from public.matches));
+begin
+  return pg_temp.as_user(p_name, format('select public.cloud_sync_push_v1(%L)::text', p_batch || jsonb_build_object('lifecycle', v_life)));
+end $$;
+create temp table k7 as select '29700000-0000-4000-8000-000000000001'::uuid mid, '29700000-0000-4000-8000-0000000000a1'::uuid self,
+  '29700000-0000-4000-8000-0000000000a2'::uuid guest, '29700000-0000-4000-8000-0000000000a3'::uuid kept,
+  (select device_id from tests.prepare_cloud_context(tests.uid('gina'))) dev;
+create temp table k7_push as select pg_temp.push('gina', (select jsonb_build_object(
+    'players', jsonb_build_array(jsonb_build_object('id', self, 'kind', 'self', 'displayName', 'Gina'),
+      jsonb_build_object('id', guest, 'kind', 'guest', 'displayName', 'K7 Gast 290'),
+      jsonb_build_object('id', kept, 'kind', 'guest', 'displayName', 'Gast Hank')),
+    'matches', jsonb_build_array(tests.match(mid, jsonb_build_array(tests.part(self::text, 'A', 1, 'Gina', tests.uid('gina'), self),
+      tests.part('s-hank', 'B', 1, 'Hank', tests.uid('hank')), tests.part(guest::text, 'B', 2, 'K7 Gast 290', null, guest),
+      tests.part(kept::text, 'A', 2, 'Gast Hank', null, kept)), '{"discipline":"doubles"}')),
+    'events', jsonb_build_array(
+      tests.event(gen_random_uuid(), mid, dev, 1, 'MatchCreated', jsonb_build_object('lineup', jsonb_build_object(
+        'A', jsonb_build_array(self, kept), 'B', jsonb_build_array('s-hank', guest), 'firstServer', self), 'createdBy', self)),
+      tests.event(gen_random_uuid(), mid, dev, 2, 'PointWon', '{"side":"A"}'),
+      tests.event(gen_random_uuid(), mid, dev, 3, 'PlayerAssigned', jsonb_build_object('slot', guest, 'assignedBy', self,
+        'player', jsonb_build_object('id', guest, 'displayName', 'K7 Gast 290'))),
+      tests.event(gen_random_uuid(), mid, dev, 4, 'PlayerAssigned', jsonb_build_object('slot', kept, 'assignedBy', self,
+        'player', jsonb_build_object('id', kept, 'displayName', 'Gast Hank Klar'))))) from k7)) r;
+select is((select case when r like 'ERR%' then r else (r::jsonb#>>'{matches,0,result}') || ' ' || (select string_agg(e->>'result', ',')
+    from jsonb_array_elements(r::jsonb->'events') e) end from k7_push), 'created accepted,accepted,accepted,accepted',
+  'K7: gina uploads the match with her guest and a named assignment');
+select is(pg_temp.as_user('gina', format('select public.assign_player(%L, %L)', (select kept from k7), tests.uid('hank'))), '0',
+  'K7: gina assigns her second guest to hank');
+create function pg_temp.k7_pull(p_cursor bigint) returns jsonb language sql as $$
+  select pg_temp.as_user('hank', format('select public.cloud_sync_pull_v1(%s, 200)::text', p_cursor))::jsonb $$;
+create function pg_temp.k7_visible() returns text language sql as $$
+  select (select j::text from jsonb_array_elements(pg_temp.k7_pull(0)->'matches') j where j->>'id' = (select mid::text from k7))
+    || pg_temp.as_user('hank', format('select jsonb_agg(e)::text from public.cloud_pull_match_events_v1(%L) e', (select mid from k7))) $$;
+create temp table k7_before as select (select redaction_epoch from public.matches where id = (select mid from k7)) e,
+  (pg_temp.k7_pull(0)->>'cursor')::bigint c, pg_temp.k7_visible() v;
+select ok((select v like '%K7 Gast 290%' and v like '%Gina%' from k7_before), 'K7: hank sees the match with both names');
+create temp table k7_log(step integer, e integer, names text);
+create function pg_temp.k7_step(p_step integer) returns void language sql as $$
+  insert into k7_log select p_step, m.redaction_epoch, md5(
+      coalesce((select string_agg(display_name, ',' order by slot_id) from public.match_participants where match_id = m.id), '')
+      || '|' || coalesce((select string_agg(payload::text, ',' order by id) from public.match_events where match_id = m.id), ''))
+    from public.matches m where m.id = (select mid from k7) $$;
+select pg_temp.k7_step(0);
+select pg_temp.due('gina', interval '15 days');
+do $$ begin
+  for i in 1..10 loop
+    exit when not exists(select 1 from auth.users where id = tests.uid('gina'));
+    perform pg_temp.job();
+    perform pg_temp.k7_step(i);
+  end loop;
+end $$;
+select ok(not exists(select 1 from auth.users where id = tests.uid('gina'))
+  and (select count(*) from k7_log) between 4 and 5, 'K7: the job deletes gina in A, B and C');
+select is((select count(*)::int from k7_log a join k7_log b on b.step = a.step + 1 where b.e < a.e or (b.names <> a.names and b.e <= a.e)), 0,
+  'K7: every name change in the shared match comes with a higher epoch');
+create temp table k7_after as select pg_temp.k7_visible() v, pg_temp.k7_pull((select c from k7_before)) inc;
+select ok((select v not like '%K7 Gast 290%' and v not like '%Gina%' from k7_after),
+  'K7: neither the guest name nor the alias of gina is visible to hank after the deletion');
+select is((select string_agg(p->>'displayName', ',' order by p->>'slotId') from k7_after,
+    jsonb_array_elements(inc->'matches') j, jsonb_array_elements(j->'participants') p
+    where j->>'id' = (select mid::text from k7) and p->>'slotId' in ((select self::text from k7), (select guest::text from k7))),
+  'Gelöschter Spieler,Gelöschter Spieler', 'K7: incremental pull from the old cursor delivers both slots redacted');
+select is((select array[display_name, deleted_profile::text, coalesce(player_id::text, 'null')] from public.match_participants
+  where match_id = (select mid from k7) and slot_id = (select guest::text from k7)),
+  array['Gelöschter Spieler', 'true', 'null'], 'K7: own guest slot is redacted like the deleted account');
+select is((select payload#>>'{player,displayName}' || ' ' || (redacted_at is not null)::text from public.match_events
+  where match_id = (select mid from k7) and payload#>>'{player,id}' = (select guest::text from k7)),
+  'Gelöschter Spieler true', 'K7: PlayerAssigned of the own guest is redacted and marked');
+select is(pg_temp.as_user('hank', format($$select string_agg(x, ',' order by x) from jsonb_array_elements_text(
+    public.cloud_pull_match_redaction_v1(%L, %s, %s)->'redactedPlayerIds') x$$, (select mid from k7),
+    (select visibility_epoch from public.profile_settings where profile_id = tests.uid('hank')),
+    (select redaction_epoch from public.matches where id = (select mid from k7)))),
+  (select string_agg(x::text, ',' order by x::text) from k7, unnest(array[self, guest]) x),
+  'K7: manifest of the shared match lists the self player and the own guest, not the guest of hank');
+select ok(exists(select 1 from private.match_redacted_names where match_id = (select mid from k7) and identity_id = (select guest from k7))
+  and (select redaction_epoch from public.matches where id = (select mid from k7)) > (select e from k7_before),
+  'K7: lineup reference of the own guest is recorded for the device redaction, E increased');
+select is((select array[p.owner_id::text, p.display_name, mp.display_name, e.payload#>>'{player,displayName}']
+  from k7 join public.players p on p.id = k7.kept
+  join public.match_participants mp on mp.match_id = k7.mid and mp.slot_id = k7.kept::text
+  join public.match_events e on e.match_id = k7.mid and e.payload#>>'{player,id}' = k7.kept::text),
+  array[tests.uid('hank')::text, 'Gast Hank', 'Gast Hank', 'Gast Hank Klar'], 'K7: the guest assigned to hank goes to hank and keeps its name');
+-- Stillgelegt: Neuanlage lehnt schon deleted_player_identities ab; eine dennoch vorhandene Zeile mit derselben ID
+-- (Altbestand, Restore) darf weder zugewiesen noch beansprucht werden.
+select ok(private.player_write_redacted((select guest::text from k7)) and not private.player_write_redacted((select kept::text from k7)),
+  'K7: the own guest ID is retired, the assigned guest is not');
+insert into public.players(id, owner_id, kind, display_name) select guest, tests.uid('hank'), 'guest', 'Wieder da' from k7;
+select is(pg_temp.as_user('hank', format('select public.assign_player(%L, %L)', (select guest from k7), tests.uid('vera'))),
+  'ERR P0001 player_redacted', 'K7: a later assignment of the retired guest ID fails');
+select is(pg_temp.as_user('hank', format($$select public.create_invite('claim_player', %L)$$, (select guest from k7))),
+  'ERR P0001 player_redacted', 'K7: a later claim of the retired guest ID fails');
+delete from public.players where id = (select guest from k7);
 
 -- Rückfall: Ein Matchblock über dem Statementlimit läuft beim nächsten Mal halb so groß (50 -> 25). Je Match 80 ms
 -- (eine Teilnehmerzeile, danach hat der Guard profile_id schon geleert): 50 Matches 4 s, sicher über der Grenze von

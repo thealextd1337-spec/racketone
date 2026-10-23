@@ -281,7 +281,7 @@ select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_pro
   where oid='public.cloud_pull_match_redaction_v1(uuid,bigint,integer,uuid,bigint,bigint,integer,integer)'::regprocedure),'Definer with empty search_path');
 
 -- R1: ausschließliche kanonische Genesis-Referenzen, ohne Teilnehmer oder PlayerAssigned.
--- Zwei Self-IDs, direkte Profil-ID und ein gleichnamiger eigener Gast bleiben getrennt.
+-- Zwei Self-IDs, direkte Profil-ID und ein gleichnamiger eigener Gast bleiben getrennt; der Gast zählt als eigener.
 select tests.create_user('genesis_owner');
 insert into public.players(id,owner_id,kind,display_name) values
  ('21110000-0000-4000-8000-000000000001',tests.uid('genesis_owner'),'self','Identical'),
@@ -319,8 +319,9 @@ select is((select count(*) from private.match_redacted_players where match_id='2
   2::bigint,'R1: Beide belegten Self-Spieler werden ohne die Profil-ID erfasst');
 select is((select count(*) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000002'),
   1::bigint,'R1: same self ID also captured in another match');
-select is((select count(*) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000003'),
-  0::bigint,'R1: foreign IDs and unrelated same-name owner guest are excluded');
+-- Nutzerentscheid 23.10.2026: Der eigene, nicht zugeordnete Gast des gelöschten Kontos gehört jetzt dazu.
+select is((select array_agg(player_id) from private.match_redacted_players where match_id='21100000-0000-4000-8000-000000000003'),
+  array['21110000-0000-4000-8000-000000000003'::uuid],'R1: foreign IDs are excluded, the own same-name guest is captured');
 select tests.authenticate_as('carol');
 insert into pages values
  (11,pg_temp.page('21100000-0000-4000-8000-000000000001')),
@@ -335,10 +336,11 @@ select is((select p->'redactedPlayerIds' from pages where n=12),'["21110000-0000
   'R1: RPC returns B-side-only self reference in another match');
 select is((select p->'redactedPlayerIds' from pages where n=14),'[]'::jsonb,
   'R1: Direkte Profilreferenz begründet keinen globalen Spielerbeleg');
-select is((select p->'redactedPlayerIds' from pages where n=13),'[]'::jsonb,'R1: unrelated match RPC has no redacted IDs');
+select is((select p->'redactedPlayerIds' from pages where n=13),'["21110000-0000-4000-8000-000000000003"]'::jsonb,
+  'R1: RPC returns only the own guest for a match with foreign IDs');
 select ok((select bool_and((p->>'redactionEpoch')::integer=1) from pages where n in (11,12,14)),
   'R1: RPC epochs rise once per affected match, not per ID');
-select is((select (p->>'redactionEpoch')::integer from pages where n=13),0,'R1: unrelated match epoch stays zero');
+select is((select (p->>'redactionEpoch')::integer from pages where n=13),1,'R1: own-guest match epoch rises once');
 select ok((select bool_and(p->'events'='[]'::jsonb) from pages where n between 11 and 14),
   'R1: manifest carries genesis redaction independently of legacy event mutation');
 select ok((select bool_and(not (p->>'hasMorePlayers')::boolean and not (p->>'hasMoreEvents')::boolean)
