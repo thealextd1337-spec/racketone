@@ -41,6 +41,7 @@ import eu.advantly.ui.phone.resources.account_delete
 import eu.advantly.ui.phone.resources.account_delete_explanation
 import eu.advantly.ui.phone.resources.account_export
 import eu.advantly.ui.phone.resources.account_recover
+import eu.advantly.ui.phone.resources.account_suspended
 import eu.advantly.ui.phone.resources.auth_adoption_accept
 import eu.advantly.ui.phone.resources.auth_adoption_cancel
 import eu.advantly.ui.phone.resources.auth_adoption_phone
@@ -240,6 +241,13 @@ fun AccountScreen(
                     }
                 }
             }
+            if (state.suspended) {
+                Text(
+                    stringResource(Res.string.account_suspended),
+                    Modifier.testTag("account_suspended"),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             if (state.authenticated) {
                 model.sync?.let { CloudSyncSection(it) }
                 model.upload?.let { CloudUploadSection(it, manual = model.sync == null) }
@@ -320,6 +328,7 @@ fun AccountScreen(
                         Text(stringResource(Res.string.account_delete))
                     }
                 }
+                AccountDevicesSection(state, model)
             }
             if (state.adoptionSources.isNotEmpty()) {
                 Text(stringResource(Res.string.auth_adoption_title))
@@ -413,5 +422,6 @@ private fun authError(error: String) =
         "consent_required" -> Res.string.consent_required
         "consent_unavailable", "consent_documents_invalid", "consent_language_invalid" -> Res.string.consent_unavailable
         "consent_version_changed" -> Res.string.consent_changed
+        "account_suspended" -> Res.string.account_suspended
         else -> Res.string.auth_connection_failed
     }

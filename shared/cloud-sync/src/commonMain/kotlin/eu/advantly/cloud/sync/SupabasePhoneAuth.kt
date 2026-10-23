@@ -372,6 +372,7 @@ class SupabasePhoneAuth(
                             ?.content
                             ?.let { runCatching { ConsentStatus.valueOf(it) }.getOrNull() }
                             ?: ConsentStatus.UNAVAILABLE,
+                    suspended = profile["suspended"]?.jsonPrimitive?.boolean == true,
                 )
             requireAccountCurrent(lease.credentials, epoch)
             requireMutationCurrent(revision)
@@ -504,6 +505,15 @@ class SupabasePhoneAuth(
             pendingDeletion = null
             refreshProfileAfterMutation(revision)
             requireAccountCurrent(expected, epoch)
+        }
+
+    override suspend fun devices(): List<CloudDevice> =
+        guarded { CloudJson.decodeFromString<List<CloudDevice>>(accountRpc("cloud_list_devices_v1", buildJsonObject {})) }
+
+    override suspend fun revokeDevice(deviceId: String) =
+        guarded {
+            accountRpc("cloud_revoke_device_v1", buildJsonObject { put("p_device_id", deviceId) })
+            Unit
         }
 
     /** Vor jedem Intent reservieren; eine ältere Antwort darf keine neuere Sperrabsicht quittieren. */

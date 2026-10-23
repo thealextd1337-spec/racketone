@@ -33,6 +33,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentDocument
@@ -90,6 +91,18 @@ class FakePhoneAuth : CloudAuthPort {
     override suspend fun cancelDeletion() {
         call("recover")
         session.value = session.value!!.copy(deletionRequested = false)
+    }
+
+    val devices = mutableListOf(CloudDevice("d1", "phone", "android", "Pixel"), CloudDevice("w1", "watch", "wearos"))
+
+    override suspend fun devices(): List<CloudDevice> {
+        call("devices")
+        return devices.toList()
+    }
+
+    override suspend fun revokeDevice(deviceId: String) {
+        call("revoke:$deviceId")
+        devices.replaceAll { if (it.deviceId == deviceId) it.copy(revokedAt = "2026-10-23T10:00:00Z") else it }
     }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
@@ -279,6 +292,24 @@ class AccountScreenTest {
             assertTrue(auth.calls.containsAll(listOf("consent:false", "export", "delete", "recover")))
             onNodeWithTag("auth_local").performScrollTo().performClick()
             assertTrue(closed)
+        }
+
+    @Test fun suspendedAccountExplainsTheBlockAndDevicesAreRevokedOnlyAfterConfirmation() =
+        runComposeUiTest {
+            val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, suspended = true) }
+            val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+            setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+            onNodeWithTag("account_suspended").performScrollTo().assertIsDisplayed()
+            onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
+            onNodeWithTag("account_devices_show").performScrollTo().performClick()
+            onNodeWithTag("account_device_revoke_w1").performScrollTo().performClick()
+            onNodeWithTag("account_device_revoke_cancel").performClick()
+            assertTrue("revoke:w1" !in auth.calls, "Abbrechen widerruft nichts")
+            onNodeWithTag("account_device_revoke_w1").performScrollTo().performClick()
+            onNodeWithTag("account_device_revoke_confirm").performClick()
+            onNodeWithTag("account_device_revoked_w1").performScrollTo().assertIsDisplayed()
+            onNodeWithTag("account_device_revoke_d1").performScrollTo().assertIsEnabled()
+            assertEquals(listOf("devices", "revoke:w1", "devices"), auth.calls.filter { it != "refresh" })
         }
 
     @Test fun adoptionSelectionUsesLabelsAndCancelHasNoOwnershipEffect() =

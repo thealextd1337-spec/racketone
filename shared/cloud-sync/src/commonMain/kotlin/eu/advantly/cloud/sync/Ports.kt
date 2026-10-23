@@ -51,6 +51,8 @@ data class CloudSession(
     /** Prozesslokale Auth-Generation; neue Anmeldung ist auch beim selben Konto eine neue Sitzung. */
     val generation: Long = 0,
     val consentStatus: ConsentStatus = ConsentStatus.UNAVAILABLE,
+    /** K5: vom Betreiber gesperrt. Kontorechte (Export, Löschung, Support, Geräte) bleiben, Cloud-Arbeit nicht. */
+    val suspended: Boolean = false,
 )
 
 enum class IdTokenProvider { GOOGLE, APPLE }
@@ -60,6 +62,17 @@ data class CloudAdoptionSource(
     val key: String,
     val kind: String,
     val eventCount: Long,
+)
+
+/** Eigenes Gerät aus `cloud_list_devices_v1`; der Server liefert keine Push-Token. */
+@kotlinx.serialization.Serializable
+data class CloudDevice(
+    val deviceId: String,
+    val kind: String? = null,
+    val platform: String? = null,
+    val model: String? = null,
+    val lastSeenAt: String? = null,
+    val revokedAt: String? = null,
 )
 
 interface CloudAuthPort {
@@ -89,6 +102,12 @@ interface CloudAuthPort {
     suspend fun requestDeletion(): Unit = throw CloudException("connection_failed", false)
 
     suspend fun cancelDeletion(): Unit = throw CloudException("connection_failed", false)
+
+    /** K4: eigene Geräte; nur Auth-Sitzung, daher auch nach Selbstwiderruf, bei Sperre und ohne Zustimmung. */
+    suspend fun devices(): List<CloudDevice> = throw CloudException("connection_failed", false)
+
+    /** K4: widerruft Gerät, Installation, Sitzungsbindungen und Push-Token endgültig; fremde Geräte lehnt der Server ab. */
+    suspend fun revokeDevice(deviceId: String): Unit = throw CloudException("connection_failed", false)
 
     fun adoptionSources(): List<CloudAdoptionSource> = emptyList()
 

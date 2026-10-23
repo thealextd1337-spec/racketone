@@ -263,6 +263,7 @@ class CloudUploadRunner(
                 "device_not_authorized",
                 "device_revoked",
                 "profile_not_active",
+                "account_suspended",
                 "profile_missing",
                 "consent_required",
                 "consent_unavailable",

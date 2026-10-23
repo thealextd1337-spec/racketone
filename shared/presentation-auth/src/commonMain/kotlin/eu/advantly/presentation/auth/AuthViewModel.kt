@@ -3,6 +3,7 @@ package eu.advantly.presentation.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentSnapshot
@@ -32,6 +33,10 @@ data class AuthState(
     val authenticated: Boolean = false,
     val consent: ConsentSnapshot? = null,
     val exportedData: String? = null,
+    /** K5: Konto gesperrt; Kontorechte bleiben, Cloud-Arbeit ist pausiert. */
+    val suspended: Boolean = false,
+    /** K4: zuletzt geladene eigene Geräte; `null` = nicht geladen. */
+    val devices: List<CloudDevice>? = null,
 )
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -203,6 +208,24 @@ class AuthViewModel(
             showSession()
         }
 
+    fun loadDevices() =
+        runAction {
+            val before = requireDisplayedSession()
+            val devices = auth.devices()
+            auth.requireAccountSession(before)
+            mutable.value = mutable.value.copy(devices = devices)
+        }
+
+    /** Endgültig; danach Liste neu laden, damit der Serverzustand sichtbar ist. */
+    fun revokeDevice(deviceId: String) =
+        runAction {
+            val before = requireDisplayedSession()
+            auth.revokeDevice(deviceId)
+            val devices = auth.devices()
+            auth.requireAccountSession(before)
+            mutable.value = mutable.value.copy(devices = devices)
+        }
+
     fun signOut() =
         runAction {
             displayedSession = null
@@ -272,6 +295,7 @@ class AuthViewModel(
                 busy = mutable.value.busy,
                 authenticated = session != null,
                 deletionRequested = session?.deletionRequested == true,
+                suspended = session?.suspended == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
         if (session != null) auth.requireAccountSession(session)
@@ -294,8 +318,9 @@ class AuthViewModel(
                 deletionRequested = session?.deletionRequested == true,
                 authenticated = session != null,
                 consent = consent,
+                suspended = session?.suspended == true,
             )
-        if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+        if (session?.onboarded == true && !session.deletionRequested && !session.suspended && consent?.status == ConsentStatus.CURRENT) {
             val candidates =
                 try {
                     auth.adoptionSources()

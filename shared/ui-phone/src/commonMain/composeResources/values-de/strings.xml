@@ -760,4 +760,14 @@
     <string name="cloud_export_error_integrity">Die heruntergeladene Datei hat die Prüfung nicht bestanden. Es steht keine Datei zum Teilen bereit.</string>
     <string name="cloud_export_error_local_io">Die ZIP-Datei konnte nicht in der App gespeichert werden. Prüfe den freien Speicher und versuche es erneut.</string>
     <string name="cloud_export_error_timeout">Der Vorgang hat zu lange gedauert. Prüfe den Status oder versuche es erneut.</string>
+    <string name="account_suspended">Dein Konto wurde vom Advantly-Support gesperrt. Die Cloud-Synchronisierung ist pausiert. Export, Löschung, Geräte und Support bleiben verfügbar.</string>
+    <string name="cloud_sync_blocked_suspended">Pausiert: Dieses Konto ist gesperrt. Bitte wende dich an den Support.</string>
+    <string name="account_devices_title">Geräte</string>
+    <string name="account_devices_show">Geräte anzeigen</string>
+    <string name="account_devices_empty">Für dieses Konto sind keine Geräte registriert.</string>
+    <string name="account_device_unknown">Unbekanntes Gerät</string>
+    <string name="account_device_last_seen">Zuletzt aktiv %1$s</string>
+    <string name="account_device_revoked">Zugriff entzogen</string>
+    <string name="account_device_revoke">Zugriff entziehen</string>
+    <string name="account_device_revoke_explanation">Dieses Gerät kann danach keine Cloud-Daten mehr hoch- oder herunterladen und sich auch durch erneute Registrierung nicht wieder freischalten. Auf dem Gerät gespeicherte Daten bleiben dort. Ist es das Handy, das du gerade nutzt, melde dich ab und wieder an, um die Cloud zu nutzen.</string>
 </resources>

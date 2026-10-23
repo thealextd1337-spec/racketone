@@ -760,4 +760,14 @@
     <string name="cloud_export_error_integrity">The downloaded file did not pass verification. No file is available to share.</string>
     <string name="cloud_export_error_local_io">The ZIP file could not be saved in the app. Check the free storage and try again.</string>
     <string name="cloud_export_error_timeout">The action took too long. Check the status or try again.</string>
+    <string name="account_suspended">Your account has been suspended by Advantly support. Cloud sync is paused. Export, deletion, devices and support remain available.</string>
+    <string name="cloud_sync_blocked_suspended">Paused: this account is suspended. Please contact support.</string>
+    <string name="account_devices_title">Devices</string>
+    <string name="account_devices_show">Show devices</string>
+    <string name="account_devices_empty">No devices are registered for this account.</string>
+    <string name="account_device_unknown">Unknown device</string>
+    <string name="account_device_last_seen">Last active %1$s</string>
+    <string name="account_device_revoked">Access revoked</string>
+    <string name="account_device_revoke">Revoke access</string>
+    <string name="account_device_revoke_explanation">This device can no longer upload or download cloud data and cannot restore its access by registering again. Data stored on the device stays there. If this is the phone you are using, sign out and in again to use the cloud.</string>
 </resources>
