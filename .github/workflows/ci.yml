@@ -52,6 +52,7 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/scripts/export_stack_ci.py'
               - '.github/scripts/d1_stack_ci*.py'
+              - 'tools/pilot-checks/**'
             admin:
               - 'admin/**'
               - '.github/workflows/ci.yml'
@@ -458,6 +459,14 @@ jobs:
       # Warnungen sichtbar machen; SQL-/Typfehler lassen den Job scheitern. Auch interne Helfer prüfen.
       - name: Datenbank-Lint (Fehler sind fatal)
         run: supabase db lint --local --schema public,private,ops --level warning --fail-on error
+      # K7: Pilotprüfungen über echte Dienste; auth_negative zuletzt, weil es das Ticketbudget bucht.
+      - name: K7-Pilotprüfungen über echte Dienste
+        timeout-minutes: 15
+        run: |
+          uv run tools/pilot-checks/test_stack.py
+          for c in release_gate support revoke export cloud_upload deletion_job auth_negative; do
+            ADVANTLY_PILOT_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL" uv run "tools/pilot-checks/check_$c.py"
+          done
       - name: Stack stoppen
         if: always()
         run: |
