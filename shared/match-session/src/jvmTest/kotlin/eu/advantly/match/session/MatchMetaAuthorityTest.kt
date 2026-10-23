@@ -270,8 +270,33 @@ class MatchMetaAuthorityTest {
     }
 
     /**
-     * Match eines anderen Handys („phone-b“) über Katalog und Event-Download am Handy. Im Payload steht [createdBy]
-     * (Standard: erster Spieler von [lineup], hier der Besitzer selbst), im Server-Snapshot [serverCreator] (`created_by`).
+     * P3-2 (Review r3): Eine lokal bekannte Uhr-Quelle aus einem anderen Scope (früheres Konto B) belegt kein Match des
+     * aktuellen Kontos – nur `currentSources()` zählt. Sonst wiese Handy A in B-Matches zu, der Server lehnte ab, und der
+     * Upload hinge dauerhaft auf BLOCKED. Gegenprobe: dieselbe Quelle im aktuellen Scope belegt das Match.
+     */
+    @Test
+    fun aWatchSourceFromAnotherScopeNeverMakesAMatchOwn() {
+        val pair = managed()
+        val identities = pair.phoneData.accountIdentities
+        identities.recordSource("old-watch", "old-watch-self", "WATCH", "scope-of-b", local = false)
+        identities.recordSource("own-watch", "own-watch-self", "WATCH", identities.scope!!, local = false)
+        assertEquals("scope-of-b", identities.sourceScope("old-watch"), "Quelle lokal bekannt")
+        pair.phoneData.players.addGuest(guest, "Bea", 0)
+
+        val otherScope =
+            foreignOwnMatch(pair, MatchId("0199c82c-0000-7000-8000-00000000d001"), serverCreator = null, source = DeviceId("old-watch"))
+        assertEquals(PlayerAssignmentFailure.NOT_OWNER, pair.phone.assignmentFailure(otherScope, slot, guest))
+        assertFalse(pair.phone.assignPlayer(otherScope, slot, guest))
+
+        val ownScope =
+            foreignOwnMatch(pair, MatchId("0199c82c-0000-7000-8000-00000000d002"), serverCreator = null, source = DeviceId("own-watch"))
+        assertTrue(pair.phone.canAssignPlayer(ownScope), "Uhr-Quelle im aktuellen Scope")
+    }
+
+    /**
+     * Match eines anderen Geräts ([source], Standard „phone-b“) über Katalog und Event-Download am Handy. Im Payload steht
+     * [createdBy] (Standard: erster Spieler von [lineup], hier der Besitzer selbst), im Server-Snapshot [serverCreator]
+     * (`created_by`).
      */
     private fun foreignOwnMatch(
         pair: LifecyclePair,
@@ -279,6 +304,7 @@ class MatchMetaAuthorityTest {
         lineup: Lineup = pair.selfLineup(),
         createdBy: PlayerId? = lineup.a.first(),
         serverCreator: String? = "alice",
+        source: DeviceId = DeviceId("phone-b"),
     ): MatchId {
         val data = pair.phoneData
         val record = MatchRecord(match, format, lineup, MatchMeta(), 1, 1, MatchStatus.IN_PROGRESS, ScoreSummary.EMPTY, null)
@@ -300,7 +326,7 @@ class MatchMetaAuthorityTest {
             ScoreEvent(
                 EventId("b-genesis-${match.value.takeLast(4)}"),
                 match,
-                DeviceId("phone-b"),
+                source,
                 1,
                 1,
                 1,
