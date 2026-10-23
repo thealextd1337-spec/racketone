@@ -440,6 +440,13 @@ jobs:
         # Normal ~4,5 min; ein Hänger soll den Schritt beenden, nicht den 60-min-Job.
         timeout-minutes: 15
         run: supabase test db
+      # Review P3-6: 290 erneut mit reltuples 0 (Owner-Rechte, kein Superuser). Direkt nach pgTAP, solange die Tabellen
+      # leer sind; normal ~15 s, ein Fehlplan endet nach 5 min im transaction_timeout von 290.
+      - name: 290 mit verfälschter Planner-Statistik
+        timeout-minutes: 8
+        run: >-
+          ADVANTLY_LIFECYCLE_TEST_DB_URL="$ADVANTLY_EXPORT_TEST_DB_URL"
+          uv run supabase/tests/database/290_staged_account_deletion_zero_stats.py --confirm-disposable
       - name: Consent-Gate und D2/D3-Lockrennen prüfen
         timeout-minutes: 8
         run: |
