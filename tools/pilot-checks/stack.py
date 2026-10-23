@@ -284,8 +284,9 @@ class Stack:
         return {"id": match, "self": me, "slots": participants, "events": events, "next_seq": 3}
 
     def befriend(self, a, b):
-        check(self.rpc("send_friend_request", {"p_target": b["id"]}, a)[0] == 200, "Freundschaftsanfrage")
-        check(self.rpc("respond_friend_request", {"p_requester": a["id"], "p_accept": True}, b)[0] in {200, 204},
+        # Freundschafts-RPCs verlangen wie alle Cloud-RPCs den Installationsnachweis (20261018000100).
+        check(self.rpc("send_friend_request", {"p_target": b["id"]}, a, a["device"])[0] == 200, "Freundschaftsanfrage")
+        check(self.rpc("respond_friend_request", {"p_requester": a["id"], "p_accept": True}, b, b["device"])[0] in {200, 204},
               "Freundschaft angenommen")
 
     def logout(self, user):
