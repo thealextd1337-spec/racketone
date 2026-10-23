@@ -37,6 +37,10 @@ def body(s):
         row = s.sql("select j.active,j.schedule,(select r.status from cron.job_run_details r where r.jobid=j.jobid "
                     "order by r.runid desc limit 1) from cron.job j where j.jobname=%s", (job,)).fetchone()
         check(row is not None and row[0] and row[1] == schedule, f"Cronjob {job} aktiv mit {schedule}")
+        if row[2] == "failed":
+            message = s.sql("select r.return_message from cron.job_run_details r join cron.job j on j.jobid=r.jobid "
+                            "where j.jobname=%s order by r.runid desc limit 1", (job,)).fetchone()[0]
+            print(f"INFO {job} fehlgeschlagen: {(message or '')[:300]}")
         check(row[2] != "failed", f"letzter Lauf {job} nicht fehlgeschlagen")
         print(f"INFO {job}: {schedule}, letzter Lauf {row[2] or 'noch keiner'}")
     if "20261018000500" in applied:
