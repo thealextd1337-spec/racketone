@@ -49,7 +49,8 @@ class EventBatchBytesTest {
 
     @Test
     fun anOversizedEventNeverAbortsSendingAndStaysVisiblyBlocked() {
-        val pair = LifecyclePair(3..4).also { pair = it }
+        // Protokoll 4 ohne Konto erzwungen: Ohne Konto spricht 3..4 nur 3, mit Konto ist die Zuweisung namenfrei und nie übergroß
+        val pair = LifecyclePair(4..4).also { pair = it }
         val (match, a, _) = pair.matchWithGuests(70_000)
         pair.settle()
         assertTrue(pair.phone.assignPlayer(match, slot, a), "gespeichert, auch wenn das Paket zu groß ist")

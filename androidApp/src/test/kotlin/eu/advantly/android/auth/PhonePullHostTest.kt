@@ -513,13 +513,13 @@ class PhonePullHostTest {
         }
 
     @Test fun pullHostExistsOnlyBehindTheReplicaActivationSwitch() {
-        assertFalse(PHONE_REPLICA_ACTIVATION)
+        assertTrue("mit Protokoll 4 eingeschaltet", PHONE_REPLICA_ACTIVATION)
         // Ausgeschaltet: kein Host, also weder Pull-Abschnitt noch Request oder Bind.
-        assertNull(phonePullHost { error("Pull-Host ohne aktiviertes Replikat") })
+        assertNull(phonePullHost(replicaActivation = false) { error("Pull-Host ohne aktiviertes Replikat") })
         runBlocking {
             val f = Fixture(this)
             try {
-                assertSame(f.pull, phonePullHost(replicaActivation = true) { f.pull })
+                assertSame(f.pull, phonePullHost { f.pull })
             } finally {
                 f.close()
             }

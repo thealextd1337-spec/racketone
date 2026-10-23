@@ -40,7 +40,6 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.AdoptionSource
 import eu.advantly.data.AppendResult
-import eu.advantly.data.CloudPullEntityKind
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.FavoriteLineup
 import eu.advantly.data.LocalAccountOwnership
@@ -98,8 +97,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.concurrent.Volatile
 import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
 
@@ -342,6 +339,9 @@ class MatchSession(
     private val hellos = HashMap<String, Hello>()
     private val compatibility = HashMap<String, Compatibility>()
     private val helloSent = HashSet<String>()
+
+    /** P3-1: Empfangszeit des letzten Hello je Gegenstelle (Wiederholung erkennen). */
+    private val helloAtMs = HashMap<String, Long>()
 
     /** Besitzer-Angaben aus `MatchMeta`, die vor dem `Hello` der Gegenstelle kamen (Art noch unbekannt). */
     private val earlyOwners = HashMap<String, MatchMetaMessage>()
@@ -729,11 +729,7 @@ class MatchSession(
     ): Boolean {
         if (source.value in data.accountIdentities.currentSources()) return true
         val profile = data.accountIdentities.profile ?: return false
-        val pulled = data.cloudPulls.snapshot(profile, CloudPullEntityKind.MATCH, matchId.value) ?: return false
-        // shortcut: liest `createdBy` roh aus dem Server-Snapshot, gegen eine Data-Abfrage tauschen, sobald Data sie anbietet
-        val createdBy =
-            runCatching { (Json.parseToJsonElement(pulled.json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
-        return createdBy?.isString == true && createdBy.content == profile
+        return data.cloudPulls.matchCreatedBy(profile, matchId.value) == profile
     }
 
     fun assignmentFailure(
@@ -1611,6 +1607,7 @@ class MatchSession(
     ) {
         recordOwnSources(peer, hello)
         val previous = hellos.put(peer, hello)
+        val sinceLastHello = helloAtMs.put(peer, scheduler.nowMs())?.let { scheduler.nowMs() - it }
         val sessionChanged = hello.session != null && previous?.session != hello.session
         val needsSync =
             forceSync || hello.session == null || sessionChanged || previous == null || previous.deviceId != hello.deviceId ||
@@ -1618,7 +1615,7 @@ class MatchSession(
                 previous.adoptedSources != hello.adoptedSources
         // Ein neu gestarteter Peer kennt unser Hello nicht mehr, auch wenn der Plattform-Link bestehen blieb.
         if (sessionChanged || forceSync) helloSent.remove(peer)
-        val result = ProtocolVersion.negotiate(hello.v, hello.minV, config.protocolVersions.last, minVersion())
+        val result = ProtocolVersion.negotiate(hello.v, hello.minV, maxVersion(), minVersion())
         compatibility[peer] = result
         deviceStatuses[peer] =
             DeviceStatus(
@@ -1636,8 +1633,12 @@ class MatchSession(
         if (data.settings.get(NODE_DEVICE_PREFIX + peer) != hello.deviceId.value) {
             data.settings.put(NODE_DEVICE_PREFIX + peer, hello.deviceId.value)
         }
+        // P3-1: Ein unverändertes Hello frühestens einen halben Takt nach dem vorigen ist die Wiederholung einer Gegenstelle
+        // ohne Aushandlung (unser Antwort-Hello ging verloren). Antwort-Hellos und Link-Duplikate kommen innerhalb einer
+        // Rundreise und lösen nichts aus: kein Ping-Pong.
+        val retried = !needsSync && (sinceLastHello ?: 0) >= config.antiEntropyIntervalMs / 2
         // auch bei Inkompatibilität: erst unser Hello zeigt der Gegenstelle den Updatezustand (Pairing nach Kontowechsel)
-        if (peer !in helloSent) sendHello(peer)
+        if (peer !in helloSent || (retried && data.accountIdentities.managed && config.protocolVersions.last >= 4)) sendHello(peer)
         if (!result.isCompatible) {
             earlyOwners.remove(peer)
             return
@@ -1750,7 +1751,12 @@ class MatchSession(
         data.events.markConfirmed(matchId.value, valid.map { StoredSequence(it.deviceId.value, it.deviceSeq) })
         val inserted = valid.filterIndexed { i, _ -> results[i] == AppendResult.INSERTED }
         if (inserted.isEmpty()) {
-            if (data.accountIdentities.managed) send(peer, summaryOf(listOf(matchId), reply = true))
+            // Duplikate nur bestätigen, wenn die eigene Sicht sie zeigt: Verborgene (Redaktion ausstehend) bestätigt erst die
+            // offene Lesespur, sonst schickte der Absender sie endlos neu (Ping-Pong Events ↔ Summary)
+            val own = VersionVector.fromSequences(sequences(matchId))
+            if (data.accountIdentities.managed && valid.all { own[it.deviceId] >= it.deviceSeq }) {
+                send(peer, summaryOf(listOf(matchId), reply = true))
+            }
             return matchId
         }
         lastEventReceivedAtMs = clock.nowMs()
@@ -2162,7 +2168,7 @@ class MatchSession(
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
                 minV = if (scoped && known?.identityProtocol != 1) 4 else minVersion(),
-                v = config.protocolVersions.last,
+                v = maxVersion(),
                 appBuild = config.appBuild,
                 session = sessionId,
                 identityProtocol = 1,
@@ -2397,6 +2403,12 @@ class MatchSession(
     private fun minVersion(): Int =
         if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
 
+    /**
+     * Höchste gesprochene Version: Ohne Konto (P1) nur die älteste des Bereichs (Standard 3). Belege, Lifecycle-Zustellung
+     * und namenfreie Zuweisung gibt es erst mit Konto; P1 bleibt so unverändert und mit v3-Gegenstellen kompatibel.
+     */
+    private fun maxVersion(): Int = if (data.accountIdentities.managed) config.protocolVersions.last else config.protocolVersions.first
+
     /** Mit Konto und V4 zählt nur ein ausgehandeltes ≥ 4 ([minVersion]); fehlt es, geht außer `Hello` nichts hin oder her. */
     private fun requiresFour(peer: String): Boolean =
         data.accountIdentities.managed && config.protocolVersions.last >= 4 && version(peer) < 4
@@ -2559,6 +2571,12 @@ class MatchSession(
                 // Takt nur für Matches mit Replikationsziel (Director-Matches ohne Ziel halten ihn nicht am Laufen)
                 val active = opened.values.any { it.status != MatchStatus.FINISHED && hasReplicationTarget(it.id) }
                 if (active || pendingCount() > 0) sendSummaries()
+                // P3-1: Mit Konto und V4 fließt ohne Aushandlung nichts, auch kein Takt; verlorene Hellos begrenzt wiederholen
+                link
+                    ?.peers
+                    .orEmpty()
+                    .filter { compatibility[it] == null && requiresFour(it) }
+                    .forEach(::sendHello)
                 targets().filter(::deliversTo).forEach(::deliverLifecycle)
                 publish()
                 scheduleAntiEntropy()

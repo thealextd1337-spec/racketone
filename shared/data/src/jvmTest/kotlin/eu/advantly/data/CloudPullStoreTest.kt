@@ -432,6 +432,40 @@ class CloudPullStoreTest {
     }
 
     @Test
+    fun matchCreatedByReadsServerCreatorFromPulledSnapshotOnly() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun commit(
+                version: Long,
+                json: String,
+            ) = data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                version - 1,
+                CloudPullMetadataPage(
+                    listOf(CloudPullMatch("match", version, json, "member", 1, 0, false, pullRecord())),
+                    emptyList(),
+                    emptyList(),
+                    version,
+                    false,
+                    1,
+                ),
+            ) {}
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(1, """{"version":1}""")
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(2, """{"version":2,"createdBy":42}""")
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(3, """{"version":3,"createdBy":"alice"}""")
+            assertEquals("alice", data.cloudPulls.matchCreatedBy("alice", "match"))
+            assertNull(data.cloudPulls.matchCreatedBy("bob", "match"))
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "other"))
+        }
+    }
+
+    @Test
     fun versionsAreMonotoneCloudUpdatesAreMaterializedAndLocalChangesKeepTheirOwnContent() {
         createInMemoryJvmDriver().use { driver ->
             val data = LocalData(driver).selectPullAccount()

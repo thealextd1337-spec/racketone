@@ -428,6 +428,56 @@ class ReplicaDeliveryTest {
         assertEquals(true, watchTransferCompleted(match))
     }
 
+    /**
+     * Abnahme W3 auf dem aktivierten Stand: Die Uhr ist während der Löschung offline, beide starten auf ihrer Datenbank neu
+     * (die Uhr noch offline), dann Wiederverbinden und ein zweiter Neustart. Der Klarname kehrt nirgends zurück (Uhr, Handy,
+     * Pakete des Handys), und kein alter Payload geht wieder hoch.
+     */
+    @Test
+    fun aDeletedNameNeverReturnsAcrossRestartsAndIsNeverUploadedAgain() {
+        val match = sharedMatch()
+        catalog(match, 1)
+        pair.settle()
+        pair.network.setConnected("watch", false)
+        redact(catalog(match, 2, epoch = 1), listOf(guest.value))
+        pair.settle()
+        val afterDeletion = pair.phoneLink.sent.size
+        pair.restartWatch()
+        pair.restartPhone()
+        pair.network.setConnected("watch", true)
+        pair.settle()
+        tick()
+        pair.restartPhone()
+        pair.restartWatch()
+        tick()
+
+        assertEquals(ReplicaAccess(match.value, 1, ReplicaAccessLevel.MEMBER, true, 1), pair.watchData.accessOf(match))
+        assertEquals(
+            "",
+            pair.watchData.players
+                .get(guest)
+                ?.displayName,
+            "kein Klarname auf der Uhr",
+        )
+        assertEquals(
+            "",
+            pair.phoneData.players
+                .get(guest)
+                ?.displayName,
+            "kein Klarname am Handy",
+        )
+        assertTrue(
+            pair.phoneLink.sent
+                .drop(afterDeletion)
+                .none { "Bea Secret" in it.decodeToString() },
+            "kein Klarname in Paketen des Handys",
+        )
+        val upload = pair.phoneData.cloudUploads.capture(pair.token!!, 100)
+        assertTrue(upload.events.none { "Bea Secret" in it.payload } && upload.players.none { it.value.displayName == "Bea Secret" })
+        assertEquals(0, phonePending)
+        assertTrue(pair.phone.state.value.sync.settled)
+    }
+
     @Test
     fun anOldWatchStateNeverReuploadsAndCatchesUpAfterTheRedaction() {
         val match = sharedMatch()

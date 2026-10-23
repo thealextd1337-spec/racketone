@@ -78,6 +78,18 @@ class PlayerRepository internal constructor(
         }
 
     /**
+     * Merkt [id] als Gast, falls es noch keinen Verzeichniseintrag gibt. Ein vorhandener Eintrag bleibt unberührt, auch
+     * wenn er im aktuellen Scope weder lesbar noch schreibbar ist (kein Umbenennen, keine Revision, kein Wurf).
+     */
+    fun rememberGuest(
+        id: PlayerId,
+        displayName: String,
+        nowMs: Long,
+    ) {
+        queries.transaction { if (rawGet(id) == null) addGuest(id, displayName, nowMs) }
+    }
+
+    /**
      * Übernimmt einen Spieler von einem anderen Gerät (`MatchMeta`): unbekannt → Gast; bekannt → Name aktualisieren.
      * Der eigene Self-Player wird nie umbenannt.
      */

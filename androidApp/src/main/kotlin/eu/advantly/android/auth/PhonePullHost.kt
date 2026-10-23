@@ -29,10 +29,10 @@ import kotlinx.coroutines.sync.withLock
 /**
  * Einziger Schalter für Pull und Einweg-Aktivierung des Phone-Replikats: Pull nur mit aktiviertem Replikat.
  * Ohne Aktivierung wären gepullte Cloud-Daten (auch geteilte Matches) ohne Lesespur voll lesbar.
- * Bleibt aus, bis der Integrator ihn zusammen mit Protokoll 4 einschaltet; danach gelten Lese-/Schreibspuren
- * statt P1-Vollzugriff.
+ * Seit Welle 3 zusammen mit Protokoll 4 an: Mit Konto gelten Lese-/Schreibspuren statt P1-Vollzugriff. Die Uhr braucht
+ * keinen eigenen Schalter, sie aktiviert ihr Replikat mit der ersten gültigen Access-Zustellung dieses Handys (E2).
  */
-internal const val PHONE_REPLICA_ACTIVATION = false
+internal const val PHONE_REPLICA_ACTIVATION = true
 
 /** Fehlercode des Runners für einen gescheiterten Request (BLOCKED bei Rechteverlust, sonst FAILED). */
 private const val REQUEST_FAILED = "cloud_pull_request_failed"

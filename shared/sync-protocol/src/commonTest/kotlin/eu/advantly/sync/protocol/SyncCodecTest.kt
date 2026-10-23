@@ -37,7 +37,7 @@ class SyncCodecTest {
             val message = Events(MATCH, listOf(ev("e1", device, 2, 2, "g", ServerChosen(0, Side.B, PlayerId("B2")))))
             assertEquals(DecodeResult.Ok(message), SyncCodec.decode(legacy))
             assertEquals(legacy, SyncCodec.encodeToString(message))
-            assertEquals(3, ProtocolVersion.CURRENT)
+            assertEquals(3, ProtocolVersion.MIN_SUPPORTED, "v3 bleibt lesbar")
         }
     }
 
@@ -117,30 +117,30 @@ class SyncCodecTest {
         val events = SyncCodec.encodeToString(Events(MATCH, listOf(point("e1", "phone", 1, 1, null, Side.B))))
         assertTrue(""""payload":{"type":"PointWon","side":"B"}""" in events, events)
         val hello = SyncCodec.encodeToString(Hello(DeviceId("d"), PeerKind.PHONE))
-        assertTrue(""""v":3""" in hello && """"minV":3""" in hello, hello)
+        assertTrue(""""v":4""" in hello && """"minV":3""" in hello, hello)
     }
 
     @Test
     fun unknownFieldsAreIgnored() {
         val decoded = SyncCodec.decode("""{"type":"Hello","v":3,"deviceId":"d","kind":"PHONE","future":{"x":1}}""")
-        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.PHONE)), decoded)
+        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.PHONE, v = 3)), decoded)
     }
 
     @Test
     fun unsupportedVersionIsReportedButHelloIsAlwaysRead() {
-        assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode("""{"type":"Summary","v":4,"matches":{}}"""))
-        val hello = SyncCodec.decode("""{"type":"Hello","v":4,"minV":4,"deviceId":"d","kind":"WATCH","newField":true}""")
-        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 4, v = 4)), hello)
+        assertEquals(DecodeResult.Unsupported(5, "Summary"), SyncCodec.decode("""{"type":"Summary","v":5,"matches":{}}"""))
+        val hello = SyncCodec.decode("""{"type":"Hello","v":5,"minV":5,"deviceId":"d","kind":"WATCH","newField":true}""")
+        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 5, v = 5)), hello)
         // W2-Gerät (Protokoll 2): nur noch sein Hello wird gelesen
         assertEquals(DecodeResult.Unsupported(2, "Events"), SyncCodec.decode("""{"type":"Events","v":2,"matchId":"m1","events":[]}"""))
     }
 
-    /** E1: ein anderer lesbarer Bereich (Session-Konfiguration) macht Protokoll 4 lesbar, ohne die Konstanten zu ändern. */
+    /** E1: ein anderer lesbarer Bereich (Session-Konfiguration, v3-Gerät in Tests) ändert nie die Konstanten (Standard 3..4). */
     @Test
     fun acceptedRangeIsAParameterAndConstantsStayTheDefault() {
         val summary = """{"type":"Summary","v":4,"matches":{}}"""
-        assertEquals(DecodeResult.Ok(Summary(emptyMap(), v = 4)), SyncCodec.decode(summary, 3..4))
-        assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode(summary))
+        assertEquals(DecodeResult.Ok(Summary(emptyMap(), v = 4)), SyncCodec.decode(summary))
+        assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode(summary, 3..3))
         assertEquals(DecodeResult.Unsupported(3, "Summary"), SyncCodec.decode("""{"type":"Summary","v":3,"matches":{}}""", 4..4))
     }
 

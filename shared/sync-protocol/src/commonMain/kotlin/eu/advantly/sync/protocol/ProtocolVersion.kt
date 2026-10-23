@@ -4,9 +4,12 @@ package eu.advantly.sync.protocol
  * Protokollversion des Geräte-Syncs (Feld `v` jeder Nachricht, 01 §4.3).
  *
  * Regeln:
- * - Ein Gerät schreibt immer [CURRENT] und liest Nachrichten mit `v` in [MIN_SUPPORTED]..[CURRENT].
+ * - Ein Gerät liest Nachrichten mit `v` in [MIN_SUPPORTED]..[CURRENT] und schreibt je Gegenstelle die über [negotiate]
+ *   ausgehandelte Version. Datennachrichten (`Summary`, `Events`, `MatchMeta`, `Deleted`) entstehen ohne Angabe in
+ *   [MIN_SUPPORTED] (ohne Belege); erst der Sender hebt sie für die Gegenstelle an (ab 4 mit Belegen).
  * - `Hello` wird unabhängig von `v` gelesen (nur `deviceId`, `kind`, `v`, `minV` sind nötig), damit beide Seiten die
- *   Kompatibilität feststellen können.
+ *   Kompatibilität feststellen können. Der Bereich im `Hello` ist der, den die Session tatsächlich spricht (ohne Konto
+ *   nur 3, siehe unten).
  * - Eine künftige Version N+1 muss gegenüber einem Gerät mit [CURRENT] = N in Version N schreiben (ausgehandelt über
  *   [negotiate]); neue Felder sind für ältere Geräte unsichtbar (`ignoreUnknownKeys`).
  *
@@ -24,18 +27,33 @@ package eu.advantly.sync.protocol
  *
  *   Additiv in Version 3 (P2-J): `MatchMeta.telemetry` (Telemetrie-Sichtbarkeit). Ältere Geräte der Version 3 ignorieren
  *   das Feld; fehlt es, behält der Empfänger seinen Wert. Kein Versionssprung nötig.
+ * - **4** (Welle 3, 2026-10-23, p2-plan §5.7): Konto-Protokoll zwischen Handy und eigener Uhr. Herkunftsbelege
+ *   (`MatchDataStamp`) an `Events`, `Summary`, `MatchMeta` und `Deleted`, geprüft vor jeder Mutation und jedem Ack;
+ *   Lifecycle-Zustellung von Zugriff und Redaktion (`AccessState`, `RedactedChunk` und Acks, nur mit `IdentityEnvelope`);
+ *   `Summary.lifecycle`; 64-KiB-Grenze je Paket inklusive Envelope; `PlayerAssigned` ohne Klarnamen (Referenz).
  *
- * **Warum [MIN_SUPPORTED] = [CURRENT]:** Events lassen sich nicht in eine ältere Version „herunterschreiben“ – ein Log,
- * das die neuen Inhalte enthält, käme bei einem älteren Gerät nur teilweise an (es verwirft die unlesbaren
- * `Events`-Nachrichten still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand mit falschem
- * Spielstand. Deshalb sind aufeinanderfolgende Versionen mit neuen Event-Inhalten **nicht** kompatibel (1/2 wie 2/3):
- * Über `Hello` meldet das neue Gerät die Gegenstelle als `PEER_TOO_OLD`, das alte das neue als `PEER_TOO_NEW` (beide
- * prüfen die Überlappung der Bereiche); beide tauschen danach nichts mehr aus, und die UI zeigt „Bitte Uhr/Handy
- * aktualisieren“. Hello wird unabhängig von `v` gelesen, daher erkennt auch ein älteres Gerät den Unterschied.
+ * **Warum 3↔4 mit Konto inkompatibel ist:** Eine Uhr mit Protokoll 3 versteht weder Belege noch Redaktion. Über 3 kämen
+ * Events an, Zugriffsentzug und Redaktion nie – die Uhr behielte gelöschte Klarnamen (Datenschutzfehler, kein
+ * Anzeigefehler), und das Handy hielte sie trotzdem für synchron. Mit Konto meldet die Session deshalb `minV = 4`: Gegen
+ * ein Gerät mit 3 entsteht auf beiden Seiten ein Updatezustand, außer `Hello` fließt nichts (alte Uhr zählt lokal weiter,
+ * ihre Events kommen nach dem Update per Anti-Entropie).
+ *
+ * **Warum [MIN_SUPPORTED] = 3 bleibt:** Ohne Konto (P1) spricht die Session nur 3 (Belege, Zustellung und namenfreie
+ * Zuweisung gibt es erst mit Konto). Ein P1-Log enthält dann nur Inhalte, die 3 lesen kann; ein Gerät ohne Konto bleibt
+ * mit einer v3-Gegenstelle kompatibel, ohne Teilsync-Risiko. Ein Gerät, das je ein Konto hatte, bleibt kontogebunden
+ * (auch als Gast nach Abmeldung) und damit bei `minV = 4`.
+ *
+ * **Grundregel für Versionen mit neuen Event-Inhalten:** Events lassen sich nicht in eine ältere Version
+ * „herunterschreiben“ – ein Log, das die neuen Inhalte enthält, käme bei einem älteren Gerät nur teilweise an (es verwirft
+ * die unlesbaren `Events`-Nachrichten still, Anti-Entropie schickt sie endlos nach). Das wäre ein halb-synchroner Zustand
+ * mit falschem Spielstand. Deshalb waren 1/2 wie 2/3 **nicht** kompatibel: Über `Hello` meldet das neue Gerät die
+ * Gegenstelle als `PEER_TOO_OLD`, das alte das neue als `PEER_TOO_NEW` (beide prüfen die Überlappung der Bereiche);
+ * beide tauschen danach nichts mehr aus, und die UI zeigt „Bitte Uhr/Handy aktualisieren“. Hello wird unabhängig von `v`
+ * gelesen, daher erkennt auch ein älteres Gerät den Unterschied.
  */
 object ProtocolVersion {
-    /** Version, die dieses Gerät spricht und schreibt. */
-    const val CURRENT: Int = 3
+    /** Höchste Version, die dieses Gerät spricht und schreibt (mit Konto). */
+    const val CURRENT: Int = 4
 
     /** Älteste Version, die dieses Gerät noch lesen kann. */
     const val MIN_SUPPORTED: Int = 3

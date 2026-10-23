@@ -60,8 +60,10 @@ class ReplicaLifecycleCodecTest {
             val wire = directRoundTrip(control)
             assertTrue(wire.startsWith("{\"type\":\"$name\""))
             assertTrue("\"v\":4" in wire)
-            assertEquals(DecodeResult.Unsupported(4, name), SyncCodec.decode(wire))
-            assertEquals(DecodeResult.Unsupported(4, name), SyncCodec.decode(SyncCodec.encode(control, identity)))
+            // ohne Envelope nie lesbar; ein Gerät, das nur 3 liest, meldet Version 4 als nicht unterstützt
+            assertEquals(DecodeResult.Malformed("ReplicaControlMessage requires IdentityEnvelope"), SyncCodec.decode(wire))
+            assertEquals(DecodeResult.Ok(control, identity), SyncCodec.decode(SyncCodec.encode(control, identity)))
+            assertEquals(DecodeResult.Unsupported(4, name), SyncCodec.decode(SyncCodec.encode(control, identity), 3..3))
             assertIs<DecodeResult.Malformed>(SyncCodec.decode(wire.replace("\"v\":4", "\"v\":3")))
             val error = assertFailsWith<IllegalArgumentException> { SyncCodec.encodeToString(control) }
             assertEquals("ReplicaControlMessage requires IdentityEnvelope", error.message)
@@ -90,7 +92,8 @@ class ReplicaLifecycleCodecTest {
                 directRoundTrip(Events(MATCH, listOf(genesis()), true, 4, stamp))
                 directRoundTrip(MatchMetaMessage(match = MatchHeader(MATCH, FORMAT, LINEUP, createdAtMs = 0), v = 4, stamp = stamp))
                 directRoundTrip(Deleted(listOf(DeletedMatch(MATCH, 42)), 4, mapOf("m1" to stamp)))
-                assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode(SyncCodec.encode(summary)))
+                assertEquals(DecodeResult.Ok(summary), SyncCodec.decode(SyncCodec.encode(summary)))
+                assertEquals(DecodeResult.Unsupported(4, "Summary"), SyncCodec.decode(SyncCodec.encode(summary), 3..3))
             }
         }
         directRoundTrip(Summary(emptyMap(), v = 4, lifecycle = mapOf("gone" to LifecycleSummary(0, MatchAccessLevel.ABSENT, 0))))
@@ -221,8 +224,9 @@ class ReplicaLifecycleCodecTest {
                         "Deleted"
                     },
                 ),
-                SyncCodec.decode(SyncCodec.encode(it)),
+                SyncCodec.decode(SyncCodec.encode(it), 3..3),
             )
+            assertEquals(DecodeResult.Ok(it), SyncCodec.decode(SyncCodec.encode(it)))
         }
     }
 
@@ -382,12 +386,15 @@ class ReplicaLifecycleCodecTest {
     }
 
     @Test
-    fun helloNegotiatesUpdateWithoutActivatingVersionFourAndErrorsHideBodies() {
-        assertEquals(3, ProtocolVersion.CURRENT)
+    fun helloNegotiatesTheUpdateStateAndErrorsHideBodies() {
+        assertEquals(4, ProtocolVersion.CURRENT)
         assertEquals(3, ProtocolVersion.MIN_SUPPORTED)
         val hello = assertIs<DecodeResult.Ok>(SyncCodec.decode(SyncCodec.encode(Hello(DeviceId("watch"), PeerKind.WATCH, minV = 4, v = 4))))
-        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(hello.message.v, 4).status)
+        val watch = hello.message as Hello
+        // Uhr mit Konto (minV 4) gegen ein Handy, das nur 3 spricht, und umgekehrt: beidseitig Updatezustand
+        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(watch.v, watch.minV, 3, 3).status)
         assertEquals(CompatibilityStatus.PEER_TOO_OLD, ProtocolVersion.negotiate(3, 3, 4, 4).status)
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 4), ProtocolVersion.negotiate(watch.v, watch.minV))
         val secret = "PRIVATE_RAW_PAYLOAD"
         val malformed =
             listOf(

@@ -33,11 +33,20 @@ class AppBuildCodecTest {
                 session = "phone-process-1",
             )
         val json = SyncCodec.encodeToString(hello)
-        assertEquals(3, hello.v)
+        assertEquals(ProtocolVersion.CURRENT, hello.v)
         assertTrue("\"session\":\"phone-process-1\"" in json)
         assertEquals(hello, assertIs<DecodeResult.Ok>(SyncCodec.decode(json)).message)
         val old = SyncCodec.json.decodeFromString(PreviousHello.serializer(), json)
-        assertEquals(PreviousHello(DeviceId("phone"), PeerKind.PHONE, listOf(MatchId("match")), 3, 3, hello.appBuild), old)
+        val previous =
+            PreviousHello(
+                DeviceId("phone"),
+                PeerKind.PHONE,
+                listOf(MatchId("match")),
+                ProtocolVersion.MIN_SUPPORTED,
+                ProtocolVersion.CURRENT,
+                hello.appBuild,
+            )
+        assertEquals(previous, old)
     }
 
     @Test

@@ -75,8 +75,9 @@ class PlaceholderPresentationTest {
         val match = MatchId("redacted-match")
         val format = Presets.TENNIS_DOUBLES_MTB10.format()
         val lineup = Lineup(listOf(owner, partner.id), listOf(slot, secondSlot), owner)
-        val genesis =
-            ScoreEvent(EventId("genesis"), match, DeviceId("cloud"), 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
+        // Genesis aus einer eigenen Quelle des Kontos: unter Protokoll 4 weist nur das eigene Konto zu (Teilnehmerregel)
+        val source = DeviceId(data.accountIdentities.currentSources().single())
+        val genesis = ScoreEvent(EventId("genesis"), match, source, 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
         val assigned =
             ScoreEvent(EventId("assigned"), match, DeviceId("cloud"), 2, 2, 2, genesis.id, PlayerAssigned(slot, person, owner))
                 .toStoredEvent()

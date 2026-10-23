@@ -49,6 +49,32 @@ class ProtocolFourTest {
     }
 
     /**
+     * Ohne Konto (P1) bleibt ein Gerät mit Protokoll 4 mit einer v3-Gegenstelle kompatibel, in beiden Richtungen; auch zwei
+     * neue Geräte sprechen ohne Konto weiter 3 (keine Belege, kein Teilsync-Risiko).
+     */
+    @Test
+    fun withoutAnAccountNewAndOldDevicesStayCompatibleOverThree() {
+        for ((phoneVersions, watchVersions) in listOf(3..4 to 3..3, 3..3 to 3..4, 3..4 to 3..4)) {
+            val case = "Handy $phoneVersions, Uhr $watchVersions"
+            val pair = LifecyclePair(phoneVersions, watchVersions).also { pair = it }
+            val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+            assertTrue(pair.phone.recordPoint(Side.A))
+            pair.settle()
+            assertEquals(null, pair.phone.state.value.sync.versionMismatch, case)
+            assertEquals(null, pair.watch.state.value.sync.versionMismatch, case)
+            assertEquals(2L, pair.watchData.events.count(match.value), case)
+            assertTrue(pair.watch.takeOverScoring(), case)
+            assertTrue(pair.watch.recordPoint(Side.B), case)
+            pair.settle()
+            assertEquals(pair.watchData.events.count(match.value), pair.phoneData.events.count(match.value), case)
+            val wire = pair.phoneLink.decoded() + pair.watchLink.decoded()
+            assertTrue(wire.all { it.message is Hello || it.message.v == 3 }, "$case: nur Protokoll 3 auf dem Draht")
+            pair.close()
+            this.pair = null
+        }
+    }
+
+    /**
      * P2-1: Mit Konto ist 3 kein Rückfall mehr, sobald eine Seite 4 kann (Hello `minV = 4`). Sonst flössen Events über 3,
      * Access und Redaktion nie, und die Uhr behielte gelöschte Namen.
      */
@@ -212,6 +238,42 @@ class ProtocolFourTest {
         pair.watchLink.lose = { false }
         repeat(2) { pair.scheduler.advanceBy(31_000) }
         assertEquals(pair.phoneData.events.count(match.value), pair.watchData.events.count(match.value), "Takt holt nach")
+    }
+
+    /**
+     * P3-1 (Review r3): Unter V4↔V4 mit Konto heilt auch ein doppelter Hello-Verlust beim Wiederverbinden mit dem Takt,
+     * ohne neues Link-Up – beide Erst-Hellos oder Erst- und Antwort-Hello derselben Seite. Danach kein weiteres Hello.
+     */
+    @Test
+    fun aDoubleHelloLossUnderFourHealsWithTheTickWithoutPingPong() {
+        for ((phoneLost, watchLost) in listOf(1 to 1, 2 to 0, 0 to 2)) {
+            val case = "verloren: Handy $phoneLost, Uhr $watchLost"
+            val pair = LifecyclePair(3..4).also { pair = it }
+            pair.activate("alice")
+            val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+            pair.settle()
+            pair.network.setConnected("watch", false)
+            pair.settle()
+            assertTrue(pair.phone.recordPoint(Side.A))
+            var phoneHellos = 0
+            var watchHellos = 0
+            pair.phoneLink.lose = { it is Hello && phoneHellos++ < phoneLost }
+            pair.watchLink.lose = { it is Hello && watchHellos++ < watchLost }
+            pair.network.setConnected("watch", true)
+            pair.settle()
+            assertEquals(1L, pair.watchData.events.count(match.value), "$case: ohne Aushandlung fließt nichts")
+
+            repeat(2) { pair.scheduler.advanceBy(31_000) }
+            assertEquals(2L, pair.watchData.events.count(match.value), "$case: der Takt heilt")
+            assertEquals(null, pair.phone.state.value.sync.versionMismatch, case)
+
+            fun hellos() = (pair.phoneLink.decoded() + pair.watchLink.decoded()).count { it.message is Hello }
+            val healed = hellos()
+            repeat(8) { pair.scheduler.advanceBy(31_000) }
+            assertEquals(healed, hellos(), "$case: danach kein weiteres Hello")
+            pair.close()
+            this.pair = null
+        }
     }
 
     /** Eigenes Match am Handy, per Pull Cloud-Match bei G 1 (MEMBER), an die Uhr zugestellt. */
