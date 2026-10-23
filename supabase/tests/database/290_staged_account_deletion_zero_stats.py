@@ -64,6 +64,11 @@ def main():
     with psycopg.connect(**params, autocommit=True) as connection:
         try:
             # psql-artig: VACUUM ohne Transaktion, den Testblock als einen Simple-Query-Aufruf.
+            # Wie `supabase test db`: pgTAP liegt im Stack unter extensions und ist ohne Suchpfad unsichtbar.
+            connection.execute("create extension if not exists pgtap with schema extensions")
+            schema = connection.execute("select extnamespace::regnamespace::text from pg_extension "
+                                        "where extname = 'pgtap'").fetchone()[0]
+            connection.execute(f"set search_path = public, {schema}")
             connection.execute(prefix)
             cursor = connection.execute(body)
             while True:
