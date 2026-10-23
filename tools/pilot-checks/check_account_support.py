@@ -10,7 +10,8 @@ mit AAL2-Claims des Betreibers aus (Rolle, AAL2, Begründung und Audit prüft pg
 sie im Admin-Web mit MFA aus; das Skript gibt die Aktion aus und wartet. Über HTTP belegt danach: gesperrtes Konto
 bekommt bei Pull/Push/Bind `account_suspended`, Kontorechte bleiben, das Profil meldet die Sperre, nach Aufheben
 läuft der Abgleich. Widerruf durch admin sperrt alle Geräte samt Push-Token; eine neue Anmeldung bindet eine neue
-Installation, die alte Geräte-ID bleibt gesperrt. Keine Schreibzugriffe auf auth.sessions.
+Installation, die alte Geräte-ID bleibt gesperrt. Die Löschrücknahme gelingt mit einer Meldung des Kontos nach dem
+Antrag. Keine Schreibzugriffe auf auth.sessions.
 """
 import json
 import time
@@ -99,10 +100,23 @@ def body(s):
           "neue Anmeldung mit neuer Installation synchronisiert")
     print("PASS admin revoke: all devices and push tokens revoked, re-login binds a new installation only")
 
+    # Löschrücknahme nur mit Meldung des Kontos nach dem Antrag (pgTAP 300 prüft alte, fremde und Gastmeldungen).
+    check(s.rpc("request_account_deletion", user=a)[0] in {200, 204}, "Löschantrag")
+    ticket = str(uuid4())
+    check(s.rpc("submit_support", {"p_id": ticket, "p_receipt_secret": uuid4().hex * 2, "p_category": "feedback",
+                                   "p_title": "K7 Löschung zurücknehmen", "p_body": f"Bitte zurücknehmen {s.run_tag}"},
+                a)[1] == {"id": ticket, "receipt": "ADV-" + ticket}, "Meldung nach dem Löschantrag")
+    admin(f"Löschung zurücknehmen mit Meldung {ticket}", "select public.admin_account_cancel_deletion(%s,%s,%s)",
+          (a["id"], ticket, f"K7 {s.run_tag}"))
+    wait("Rücknahme innerhalb der Wartezeit",
+         lambda: s.rpc("account_deletion_status_v1", user=a)[1].get("profileStatus") == "active")
+    print("PASS admin cancels a deletion only with a ticket of the account filed after the request")
+
     actions = [row[0] for row in s.sql("select action from ops.account_audit where target_id=%s order by id",
                                        (a["id"],)).fetchall()]
-    check(actions == ["account_suspend", "account_unsuspend", "account_revoke_devices"], "Konto-Audit vollständig")
-    print("PASS account audit records suspend, unsuspend and revoke")
+    check(actions == ["account_suspend", "account_unsuspend", "account_revoke_devices", "account_cancel_deletion"],
+          "Konto-Audit vollständig")
+    print("PASS account audit records suspend, unsuspend, revoke and cancellation")
 
 
 if __name__ == "__main__":
