@@ -1,8 +1,10 @@
 import {
+  buildAccountAction,
   buildTicketUpdateArgs,
   createRequestEpoch,
   makeMessageOperation,
   SupportError,
+  validateAccountQuery,
   validateMessage,
 } from "./domain.js";
 
@@ -47,6 +49,14 @@ function initialState(config) {
     updateDraft: null,
     saving: false,
     publicConfirmation: null,
+    workspace: "tickets",
+    accountQuery: "",
+    account: null,
+    viewerRole: null,
+    accountLoading: false,
+    accountNotice: null,
+    accountDraft: { reason: "", ticketId: "" },
+    accountSaving: false,
   };
 }
 
@@ -61,6 +71,12 @@ function noticeForError(error, fallback = "genericError") {
     case "message-too-long": return "messageTooLong";
     case "update-reason-required": return "updateReasonRequired";
     case "update-reason-too-long": return "updateReasonTooLong";
+    case "support_admin_required": return "accountAdminRequired";
+    case "account_not_found": return "accountNotFound";
+    case "account_ambiguous": return "accountAmbiguous";
+    case "account-query-required": return "accountQueryRequired";
+    case "account-ticket-invalid": return "accountTicketInvalid";
+    case "no_deletion_pending": return "accountNoDeletionPending";
     default: return fallback;
   }
 }
@@ -95,6 +111,7 @@ export class AdminController {
     this.sessionEpoch = createRequestEpoch();
     this.listEpoch = createRequestEpoch();
     this.detailEpoch = createRequestEpoch();
+    this.accountEpoch = createRequestEpoch();
     this.authFlowEpoch = createRequestEpoch();
     this.authQueue = Promise.resolve();
     this.authOperations = 0;
@@ -132,6 +149,10 @@ export class AdminController {
       "retry-message": () => this.retryMessage(),
       "discard-message": () => this.discardMessage(),
       retry: () => this.refresh(),
+      workspace: (payload) => this.setWorkspace(payload?.value),
+      "account-search": (payload) => this.searchAccount(payload?.query),
+      "account-draft": (payload) => this.setAccountDraft(payload?.fields),
+      "account-action": (payload) => this.runAccountAction(payload?.action, payload?.fields),
     };
     for (const [event, callback] of Object.entries(routes)) {
       this.view.on(event, callback);
@@ -677,6 +698,85 @@ export class AdminController {
     this.render();
   }
 
+  setWorkspace(value) {
+    if (!this.hasAccess() || (value !== "tickets" && value !== "accounts") || value === this.state.workspace) return;
+    this.state.workspace = value;
+    this.render();
+  }
+
+  // Exakte Suche; jede neue Suche verwirft verspätete Antworten und den Entwurf zum vorherigen Konto.
+  async searchAccount(query) {
+    if (!this.hasAccess()) return;
+    const request = this.accountEpoch.next();
+    const session = this.sessionToken;
+    this.state.accountQuery = String(query ?? "").trim().slice(0, 120);
+    this.state.account = null;
+    this.state.accountDraft = { reason: "", ticketId: "" };
+    this.state.accountNotice = null;
+    const invalid = validateAccountQuery(this.state.accountQuery);
+    if (invalid) {
+      this.state.accountNotice = noticeForError({ code: invalid }, "invalidFields");
+      this.render();
+      return;
+    }
+    this.state.accountLoading = true;
+    this.render();
+    try {
+      const result = await this.api.lookupAccount(this.state.accountQuery);
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      if (!result?.account?.profileId) throw new SupportError("support_unavailable");
+      this.state.account = result.account;
+      this.state.viewerRole = result.viewerRole === "admin" ? "admin" : "support";
+      this.state.accountLoading = false;
+      this.render();
+    } catch (error) {
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      this.state.accountLoading = false;
+      if (this.handleAccessError(error)) return;
+      this.state.accountNotice = noticeForError(error, "genericError");
+      this.render();
+    }
+  }
+
+  setAccountDraft(fields) {
+    if (!this.hasAccess() || !fields) return;
+    this.state.accountDraft = { ...this.state.accountDraft, ...fields };
+  }
+
+  async runAccountAction(action, fields) {
+    if (!this.hasAccess() || this.state.accountSaving || !this.state.account) return;
+    if (fields) this.state.accountDraft = { ...this.state.accountDraft, ...fields };
+    let operation;
+    try {
+      operation = buildAccountAction(this.state.account, action, this.state.accountDraft);
+    } catch (error) {
+      this.state.accountNotice = noticeForError(error, "invalidFields");
+      this.render();
+      return;
+    }
+    const request = this.accountEpoch.next();
+    const session = this.sessionToken;
+    this.state.accountSaving = true;
+    this.state.accountNotice = null;
+    this.render();
+    try {
+      const account = await this.api.accountAction(operation);
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      if (account?.profileId !== operation.args.p_profile_id) throw new SupportError("support_unavailable");
+      this.state.account = account;
+      this.state.accountDraft = { reason: "", ticketId: "" };
+      this.state.accountNotice = "accountActionSaved";
+      this.state.accountSaving = false;
+      this.render();
+    } catch (error) {
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      this.state.accountSaving = false;
+      if (this.handleAccessError(error)) return;
+      this.state.accountNotice = noticeForError(error, "genericError");
+      this.render();
+    }
+  }
+
   handleAccessError(error) {
     if (["support_forbidden", "support_mfa_required", "session_expired"].includes(error?.code)) {
       const messageKey = error.code === "support_forbidden" ? "noAccess" : error.code === "support_mfa_required" ? "mfaRequired" : "sessionExpired";
@@ -696,6 +796,7 @@ export class AdminController {
     this.sessionEpoch.invalidate();
     this.listEpoch.invalidate();
     this.detailEpoch.invalidate();
+    this.accountEpoch.invalidate();
     this.authFlowEpoch.invalidate();
     const hadSession = this.state.phase !== "login" && this.state.phase !== "missing-config";
     const language = this.state.language;

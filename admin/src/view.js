@@ -1,4 +1,4 @@
-import { categoryLabel, priorityLabel, statusLabel, translate } from "./i18n.js";
+import { accountStatusLabel, categoryLabel, priorityLabel, statusLabel, translate } from "./i18n.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const iconParts = {
@@ -105,6 +105,12 @@ function formatDate(value, language) {
   return date.toLocaleString(locale(language), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatDay(value, language) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(locale(language), { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 function relativeAge(value, language) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -147,6 +153,7 @@ export class AdminView {
       if (!target) return;
       if (target.dataset.action === "language") this.emit("language", { language: target.dataset.language });
       else if (target.dataset.action === "select-ticket") this.emit("select-ticket", { id: target.dataset.id });
+      else if (target.dataset.action === "workspace") this.emit("workspace", { value: target.dataset.workspace });
       else this.emit(target.dataset.action);
     };
     this.handleSubmit = (event) => {
@@ -176,6 +183,10 @@ export class AdminView {
       }
       else if (form.dataset.form === "ticket-update") this.emit("save-ticket", { fields: Object.fromEntries(values.entries()) });
       else if (form.dataset.form === "message") this.emit("send-message");
+      else if (form.dataset.form === "account-search") this.emit("account-search", { query: values.get("query") });
+      else if (form.dataset.form === "account-action") {
+        this.emit("account-action", { action: event.submitter?.value, fields: { reason: values.get("reason") ?? "", ticketId: values.get("ticketId") ?? "" } });
+      }
     };
     this.handleInput = (event) => {
       const target = event.target;
@@ -183,6 +194,7 @@ export class AdminView {
       if (target.dataset.field === "search") this.emit("search", { value: target.value });
       else if (target.dataset.field === "message") this.emit("composer", { body: target.value, mode: this.getComposerMode() });
       else if (target.dataset.ticketField) this.emit("ticket-draft", { fields: { [target.dataset.ticketField]: target.value } });
+      else if (target.dataset.accountField) this.emit("account-draft", { fields: { [target.dataset.accountField]: target.value } });
     };
     this.handleChange = (event) => {
       const target = event.target;
@@ -387,15 +399,108 @@ export class AdminView {
     refresh.disabled = state.listLoading;
     refresh.setAttribute("aria-label", translate(state.language, "refresh"));
     refresh.setAttribute("aria-busy", String(state.listLoading));
-    heading.append(titleGroup, refresh);
-
-    const workspace = node("div", `workspace${state.selectedId ? " has-selection" : ""}`);
-    workspace.append(this.renderList(state), this.renderDetail(state, data));
+    heading.append(titleGroup, this.workspaceToggle(state.language, state.workspace));
+    if (state.workspace !== "accounts") heading.append(refresh);
     shell.append(heading);
     if (state.rememberFailed) shell.append(alertBox(state.language, "rememberDeviceFailed", "warning"));
-    shell.append(workspace);
+    if (state.workspace === "accounts") shell.append(this.renderAccounts(state));
+    else {
+      const workspace = node("div", `workspace${state.selectedId ? " has-selection" : ""}`);
+      workspace.append(this.renderList(state), this.renderDetail(state, data));
+      shell.append(workspace);
+    }
     page.append(shell);
     return page;
+  }
+
+  workspaceToggle(language, current) {
+    const group = node("div", "language-toggle");
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", translate(language, "workspaceLabel"));
+    for (const [value, key] of [["tickets", "tickets"], ["accounts", "accountsTitle"]]) {
+      const button = node("button", `language-toggle__button${current === value ? " is-active" : ""}`, translate(language, key));
+      button.type = "button"; button.dataset.action = "workspace"; button.dataset.workspace = value;
+      button.setAttribute("aria-pressed", String(current === value));
+      group.append(button);
+    }
+    return group;
+  }
+
+  // Kontosupport: exakte Suche, minimaler Status; Aktionen nur für admin (Server prüft Rolle und AAL2 erneut).
+  renderAccounts(state) {
+    const language = state.language;
+    const panel = node("section", "detail-panel");
+    const body = node("div", "ticket-detail");
+    body.append(node("h2", "section-title", translate(language, "accountsTitle")), node("p", "inbox-heading__copy", translate(language, "accountsDescription")));
+    const search = node("form", "update-form");
+    search.dataset.form = "account-search";
+    const query = fieldInput({ type: "search", value: state.accountQuery, placeholder: translate(language, "accountQueryPlaceholder"), name: "query", focusKey: "account-query", required: true, maxLength: 120 });
+    query.autocapitalize = "none"; query.spellcheck = false;
+    const submit = node("button", "button button--accent", translate(language, state.accountLoading ? "accountSearching" : "accountSearch"));
+    submit.type = "submit"; submit.disabled = state.accountLoading;
+    const actions = node("div", "form-actions");
+    actions.append(node("p", "field-hint", translate(language, "accountQueryHint")), submit);
+    search.append(addFieldLabel(translate(language, "accountQuery"), query), actions);
+    body.append(search);
+    if (state.accountNotice) body.append(alertBox(language, state.accountNotice, state.accountNotice === "accountActionSaved" ? "success" : "error"));
+    if (state.account) {
+      body.append(this.renderAccountStatus(language, state.account));
+      body.append(state.viewerRole === "admin" ? this.renderAccountActions(state) : node("p", "field-hint", translate(language, "accountReadOnly")));
+    }
+    panel.append(body);
+    return panel;
+  }
+
+  renderAccountStatus(language, account) {
+    const section = node("section", "metadata-strip");
+    const item = (key, value) => {
+      const entry = node("div", "metadata-item");
+      entry.append(node("span", "metadata-item__label", translate(language, key)), node("span", "metadata-item__value metadata-item__value--contact", value || "\u2014"));
+      section.append(entry);
+    };
+    const yes = (flag) => translate(language, flag ? "accountYes" : "accountNo");
+    item("accountId", account.profileId);
+    item("accountAlias", account.alias ?? "");
+    item("accountStatus", accountStatusLabel(language, account.status));
+    item("accountSuspended", account.suspended ? `${yes(true)} \u00b7 ${formatDate(account.suspendedAt, language)}` : yes(false));
+    if (account.deletionRequestedAt) {
+      item("accountDeletionRequested", formatDate(account.deletionRequestedAt, language));
+      item("accountEarliestPurge", formatDate(account.earliestPurgeAt, language));
+    }
+    item("accountDevices", String(account.activeDevices ?? 0));
+    item("accountLastActivity", account.lastActivityDay ? formatDay(account.lastActivityDay, language) : "");
+    const versions = account.consentVersions ?? {};
+    item("accountConsent", `${account.consentStatus ?? ""} \u00b7 ${translate(language, "accountTerms")} ${versions.TERMS ?? "\u2014"} \u00b7 ${translate(language, "accountPrivacy")} ${versions.PRIVACY ?? "\u2014"}`);
+    return section;
+  }
+
+  renderAccountActions(state) {
+    const language = state.language;
+    const account = state.account;
+    const draft = state.accountDraft ?? {};
+    const form = node("form", "update-form");
+    form.dataset.form = "account-action";
+    const reason = fieldInput({ value: draft.reason, placeholder: translate(language, "updateReasonPlaceholder"), name: "reason", focusKey: "account-reason", required: true, maxLength: 500 });
+    reason.dataset.accountField = "reason";
+    form.append(addFieldLabel(translate(language, "updateReason"), reason), node("p", "field-hint", translate(language, "updateReasonHint")));
+    const buttons = node("div", "form-actions");
+    const button = (action, key, style = "button button--quiet") => {
+      const element = node("button", style, translate(language, state.accountSaving ? "saving" : key));
+      element.type = "submit"; element.name = "action"; element.value = action; element.disabled = state.accountSaving;
+      buttons.append(element);
+    };
+    if (account.status !== "deleting") {
+      button(account.suspended ? "unsuspend" : "suspend", account.suspended ? "accountUnsuspend" : "accountSuspend", "button button--accent");
+      button("revoke", "accountRevoke");
+    }
+    if (account.canCancelDeletion) {
+      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "relatedPlaceholder"), name: "ticketId", focusKey: "account-ticket", maxLength: 36 });
+      ticket.dataset.accountField = "ticketId"; ticket.autocapitalize = "none"; ticket.spellcheck = false;
+      form.append(addFieldLabel(translate(language, "accountTicket"), ticket), node("p", "field-hint", translate(language, "accountCancelDeletionHint")));
+      button("cancel-deletion", "accountCancelDeletion");
+    }
+    form.append(buttons);
+    return form;
   }
 
   renderList(state) {
