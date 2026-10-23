@@ -304,3 +304,6 @@ AND (m.writer_profile_id = c.account_key OR (m.writer_profile_id IS NULL AND m.o
             OR (o.profile_id IS NULL AND (s.scope_id = c.scope_id OR EXISTS (
                 SELECT 1 FROM local_scope_source x WHERE x.device_id = s.device_id AND x.scope_id = c.scope_id)))))))
 AND NOT EXISTS (SELECT 1 FROM cloud_device_owner o WHERE o.device_id = m.source_device_id AND o.profile_id != c.account_key);
+
+clearDeliveries:
+DELETE FROM replica_delivery;

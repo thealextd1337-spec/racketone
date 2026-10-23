@@ -219,7 +219,7 @@ internal class PhoneAccountCore private constructor(
         ): PhoneAccountCore? {
             check(Looper.myLooper() == Looper.getMainLooper()) { "Konto-Host nur auf Main" }
             if (apiUrl.isBlank() || apiKey.isBlank()) return null
-            // Login allein ist kein Wiederherstellungs-/Zugriffsbeleg.
+            // Login ist nie ein Wiederherstellungsbeleg: Im Hold gibt es kein Konto, erst die ausdrückliche Entscheidung beendet ihn.
             if (!AndroidInstallationGuard.privateTransportAllowed(context)) return null
             shared?.let { current ->
                 if (current.runtime.allowed) return current

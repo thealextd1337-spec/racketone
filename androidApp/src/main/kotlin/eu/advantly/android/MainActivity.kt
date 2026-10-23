@@ -1,6 +1,5 @@
 package eu.advantly.android
 
-import android.app.AlertDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -177,16 +176,18 @@ class MainActivity : ComponentActivity() {
                     } else {
                         { googleCredential() }
                     },
+                onRestorePrevious =
+                    if (installation.privateTransportAllowed && installation.restorable != null) {
+                        { showLaterRestore(current) }
+                    } else {
+                        null
+                    },
             )
         }
         if (!installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
-            AlertDialog
-                .Builder(this)
-                .setTitle(R.string.recovery_notice_title)
-                .setMessage(R.string.recovery_notice_body)
-                .setPositiveButton(R.string.recovery_continue_offline, null)
-                .show()
+            showRecoveryDecision(installation, current)
         }
+        if (savedInstanceState == null) showRecoveryDoneOnce(installation)
     }
 }
 

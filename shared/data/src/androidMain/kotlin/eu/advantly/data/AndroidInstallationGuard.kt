@@ -8,6 +8,8 @@ import android.database.sqlite.SQLiteException
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import androidx.sqlite.db.SupportSQLiteDatabase
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import eu.advantly.data.db.AdvantlyDatabase
 import java.io.File
 import java.io.IOException
@@ -146,14 +148,37 @@ object AndroidInstallationGuard {
         key(context) in bootstrapped &&
             (check(context) as? AndroidInstallationAvailability.Ready)?.installation?.privateTransportAllowed == true
 
+    /**
+     * Recovery-Paket, ausdrückliche Nutzerentscheidung im Hold oder später nach [keepWithoutRestore]:
+     * [AndroidInstallationState.restorable] als neue private Kopie übernehmen. Wirkt erst beim nächsten Prozessstart (der
+     * Host startet neu); bis dahin bleibt der Zustand dieses Prozesses unverändert.
+     */
+    @Synchronized
+    fun requestRestore(context: Context) {
+        val installation = requireReady(context)
+        val source = checkNotNull(installation.restorable) { "Nothing to restore" }
+        files(context.applicationContext).requestRestore(installation.cacheNamespace, source)
+    }
+
+    /** Ausdrücklich ohne Altbestand weiter; alle Familien bleiben unverändert erhalten. Wirkt beim nächsten Prozessstart. */
+    @Synchronized
+    fun keepWithoutRestore(context: Context) {
+        val installation = requireReady(context)
+        check(!installation.privateTransportAllowed) { "Nothing to decide" }
+        files(context.applicationContext).keepCurrent(installation.cacheNamespace)
+    }
+
     @Synchronized
     fun get(context: Context): AndroidInstallationState {
         val app = context.applicationContext
-        val databases = checkNotNull(app.getDatabasePath(DEFAULT_DATABASE_NAME).parentFile)
         val key = key(app)
         // Auch direkte Android-Cache-/Driveraufrufe dürfen einen Prozessfehler nicht durch Dateiauswahl umgehen.
         if (key in unavailable) throw checkNotNull(failures[key])
-        return states.getOrPut(key) {
+        return states.getOrPut(key) { files(app).select() }
+    }
+
+    private fun files(app: Context) =
+        checkNotNull(app.getDatabasePath(DEFAULT_DATABASE_NAME).parentFile).let { databases ->
             InstallationFiles(
                 databases,
                 app.noBackupFilesDir,
@@ -196,8 +221,50 @@ object AndroidInstallationGuard {
                         }
                 },
                 syncDirectory = ::syncInstallationDirectory,
-            ).select()
+                restore = { file, token -> restoreInstallationCopy(app, file, token) },
+            )
         }
+
+    /** Setting der übernommenen Kopie: Die Session stellt sie vor ihrem ersten Zugriff einmalig um (Wert = Token). */
+    const val RESTORED_KEY = "installation.restored.v1"
+}
+
+/**
+ * Nur die eigene private Kopie: Integrität prüfen, auf das aktuelle Schema migrieren, an das neue Token binden.
+ * Ohne Guard-Callbacks und ohne Standard-Fehlerhandler, der eine beschädigte Datei löschen und leer neu anlegen würde.
+ */
+private fun restoreInstallationCopy(
+    app: Context,
+    file: File,
+    token: String,
+) {
+    val corrupt = DatabaseErrorHandler { throw SQLiteDatabaseCorruptException("Restored copy is corrupt") }
+    SQLiteDatabase
+        .openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.NO_LOCALIZED_COLLATORS, corrupt)
+        .use { database ->
+            database.rawQuery("PRAGMA quick_check", null).use { result ->
+                if (!result.moveToFirst() || result.getString(0) != "ok" || result.moveToNext()) {
+                    throw SQLiteDatabaseCorruptException("Restored copy failed quick_check")
+                }
+            }
+        }
+    val driver =
+        AndroidSqliteDriver(
+            AdvantlyDatabase.Schema,
+            app,
+            file.name,
+            callback =
+                object : AndroidSqliteDriver.Callback(AdvantlyDatabase.Schema) {
+                    override fun onCorruption(db: SupportSQLiteDatabase): Unit =
+                        throw SQLiteDatabaseCorruptException("Restored copy is corrupt")
+                },
+        )
+    try {
+        val settings = AdvantlyDatabase(driver).settingQueries
+        settings.put(InstallationFiles.BINDING_KEY, token)
+        settings.put(AndroidInstallationGuard.RESTORED_KEY, token)
+    } finally {
+        driver.close()
     }
 }
 

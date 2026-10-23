@@ -592,6 +592,7 @@
     <string name="auth_connection_failed">The account service could not be reached or sign-in was cancelled. Check your connection and try again.</string>
     <string name="auth_deletion">Account deletion has been requested.</string>
     <string name="auth_open">Sign in / account settings</string>
+    <string name="profile_restore_previous">Restore previous data</string>
     <string name="device_details">Watch connection</string>
     <string name="device_green">Connected · same app build</string>
     <string name="device_yellow">Connected · update recommended</string>
@@ -605,6 +606,10 @@
     <string name="device_update_watch">Update Advantly on the watch.</string>
     <string name="device_update_phone">Update Advantly on the phone.</string>
     <string name="device_reconnect">Bring the devices closer, check Bluetooth and open Advantly on the watch.</string>
+    <string name="device_repair">Re-pair watches</string>
+    <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
+    <string name="device_repair_confirm_title">Re-pair all watches?</string>
+    <string name="device_repair_confirm_body">Every watch stops syncing until you confirm pairing again on the watch itself. Data on the watches stays and is synced afterwards.</string>
     <string name="device_update_recommended">Install the same app build on both devices. An older device may not report its build.</string>
     <string name="device_ready">Both devices are ready.</string>
     <string name="device_development">Development build</string>

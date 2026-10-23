@@ -53,6 +53,10 @@ internal class AndroidPhoneMatchStore private constructor(
         calls.run { raw.refreshWatchStatus() }
     }
 
+    override fun repairWatchPairing() {
+        calls.run { raw.repairWatchPairing() }
+    }
+
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) {
         calls.run { raw.setTelemetryVisibility(visibility) }
     }

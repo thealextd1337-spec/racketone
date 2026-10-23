@@ -14,6 +14,7 @@ import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 import java.util.UUID
 
 /** Nur Inventar: zurückgehaltene Dateien werden weder geöffnet noch verschoben oder gelöscht. */
@@ -27,13 +28,23 @@ enum class AndroidRecoveryRequirement {
     VERIFICATION_REQUIRED,
 }
 
-/** Keine Freigabe-API: Konto-/Zugriffsprüfung und explizite lokale Übernahme folgen erst nach D2/D3. */
+/**
+ * Ein Hold endet nur durch ausdrückliche Entscheidung ([AndroidInstallationGuard.requestRestore] bzw.
+ * [AndroidInstallationGuard.keepWithoutRestore]); Login oder Retry heben ihn nie auf. Freigabe übernommener Daten
+ * entscheidet danach die Datenebene (UID, ausdrückliche Adoption).
+ *
+ * @property restorable die zuletzt geschriebene Altfamilie, die übernommen werden kann: im Hold und nach „ohne Altbestand
+ *   weiter“, solange genau dieselben Familien vorhanden sind (späterer Übernahmeweg); nach einer Übernahme nicht mehr
+ * @property restoreFailed die angeforderte Übernahme ist in diesem Prozessstart gescheitert; nichts wurde umgeschaltet
+ */
 @ConsistentCopyVisibility
 data class AndroidInstallationState internal constructor(
     val activeDatabaseName: String,
     val cacheNamespace: String,
     val recovery: AndroidRecoveryRequirement,
     val retainedFamilies: List<RetainedDatabaseFamily>,
+    val restorable: String? = null,
+    val restoreFailed: Boolean = false,
 ) {
     val privateTransportAllowed: Boolean get() = recovery == AndroidRecoveryRequirement.NONE
 }
@@ -46,6 +57,10 @@ data class AndroidInstallationState internal constructor(
  * Leistungsgrenze dieses Schutzschnitts: Jeder Prozessstart kopiert die aktive Familie synchron, derzeit auch vom
  * Main-Thread, einschließlich SQLite-quick_check. Dafür wird zusätzlicher freier Speicher in Familiengröße benötigt; große Familien können den Start
  * blockieren und ein ANR auslösen. Eine asynchrone Initialisierung ist eine separate spätere Arbeit.
+ *
+ * Recovery-Paket: Eine ausdrückliche Übernahme ist eine Reservierung mit Quellfamilie. Die Quelle wird nur kopiert, nie
+ * geöffnet oder verändert; [restore] prüft, migriert und bindet ausschließlich die eigene Kopie. Scheitert das, endet
+ * die Übernahme ohne Umschaltung. Entschiedene Familien bleiben erhalten; ihr Beleg ist an das aktive Token gebunden.
  */
 internal class InstallationFiles(
     private val databases: File,
@@ -55,21 +70,56 @@ internal class InstallationFiles(
     private val checkpoint: (String) -> Unit = {},
     private val files: InstallationFileAccess = InstallationFileAccess(),
     private val syncDirectory: (File) -> Unit = {},
+    private val restore: (File, String) -> Unit = { _, _ -> throw UnsupportedOperationException("restore") },
 ) {
     private data class Reservation(
         val token: String,
         val held: Boolean,
         val ready: Boolean,
+        val source: String? = null,
+        val decided: String? = null,
     )
 
-    fun select(): AndroidInstallationState =
+    private var restoreFailed = false
+
+    fun select(): AndroidInstallationState = locked { selectLocked() }
+
+    /**
+     * Ausdrückliche Übernahme der Altfamilie [source], im Hold oder später nach [keepCurrent]; wirkt beim nächsten [select]
+     * (neuer Prozess). Der Entscheidungsbeleg gilt für die jetzt vorhandenen Familien, geschrieben wird er erst nach
+     * gelungener Kopie: Scheitert sie, bleibt die bisherige Entscheidung bestehen.
+     */
+    fun requestRestore(
+        activeToken: String,
+        source: String,
+    ) = locked {
+        val inventory = inventory()
+        check(readReservation() == null && parseMarker(files.readMetadata(File(noBackup, MARKER)))?.first == activeToken)
+        check(source != databaseName(activeToken) && inventory.any { it.databaseName == source }) { "Unknown restore source" }
+        writeReservation(Reservation(newToken(), held = false, ready = false, source = source, decided = digest(inventory)))
+        syncDirectory(noBackup)
+    }
+
+    /**
+     * Ausdrücklich ohne Altbestand weiter: alle Familien bleiben unverändert erhalten und gelten als entschieden. Solange
+     * genau diese Familien vorhanden sind, bleibt [requestRestore] später möglich.
+     */
+    fun keepCurrent(activeToken: String) =
+        locked {
+            check(readReservation() == null && parseMarker(files.readMetadata(File(noBackup, MARKER)))?.first == activeToken)
+            val retained = inventory().filter { it.databaseName != databaseName(activeToken) }
+            atomicWrite(File(noBackup, DECIDED), "${decision(activeToken, retained)}\n$KEPT")
+            atomicWrite(File(noBackup, MARKER), "$VERSION\n$activeToken\n${mode(false)}")
+        }
+
+    private fun <T> locked(block: () -> T): T =
         try {
             Files.createDirectories(databases.toPath())
             Files.createDirectories(noBackup.toPath())
             RandomAccessFile(File(noBackup, "installation-v1.lock"), "rw").use { lock ->
                 lock.channel.lock().use {
                     cleanupChecks()
-                    selectLocked()
+                    block()
                 }
             }
         } catch (error: DirectoryIteratorException) {
@@ -98,7 +148,7 @@ internal class InstallationFiles(
                 files.attributes(database)?.isRegularFile == true && validateCopy(database, token)
             ) {
                 val retained = inventory.filter { it.databaseName != name }
-                return state(name, token, held || retained.isNotEmpty(), retained)
+                return state(name, token, held || !decided(token, retained), retained)
             }
         }
         val held =
@@ -111,11 +161,7 @@ internal class InstallationFiles(
         held: Boolean,
         inventory: List<RetainedDatabaseFamily>,
     ): AndroidInstallationState {
-        var token: String
-        do {
-            token = UUID.randomUUID().toString()
-        } while (ownedFiles(databaseName(token)).any(::exists))
-        val reservation = Reservation(token, held, ready = false)
+        val reservation = Reservation(newToken(), held, ready = false)
         writeReservation(reservation) // Dauerhafte Herkunft vor createNewFile; der Hold-Intent gehört zum Journal.
         checkpoint("reservation")
         return resume(reservation, inventory)
@@ -146,14 +192,22 @@ internal class InstallationFiles(
             syncDirectory(databases)
             // Eine pending Reservierung zuerst vollständig veröffentlichen, bevor eine Datei erzeugt wird.
             writeReservation(reservation)
-            check(database.createNewFile()) { "Reserved database already exists" }
-            checkpoint("reserved")
-            initialize(database, reservation.token)
+            val source = reservation.source
+            if (source == null) {
+                check(database.createNewFile()) { "Reserved database already exists" }
+                checkpoint("reserved")
+                initialize(database, reservation.token)
+            } else if (!restoreCopy(source, database, reservation.token)) {
+                return abandonRestore(name)
+            } else {
+                checkpoint("restored")
+            }
             familyFiles(name).filter(::exists).forEach { file -> RandomAccessFile(file, "rw").use { it.fd.sync() } }
             syncDirectory(databases)
         }
         val retained = inventory.filter { it.databaseName != name }
-        val held = reservation.held || retained.isNotEmpty()
+        reservation.decided?.let { atomicWrite(File(noBackup, DECIDED), "$VERSION\n${reservation.token}\n$it") }
+        val held = reservation.held || !decided(reservation.token, retained)
         writeReservation(reservation.copy(held = held, ready = true))
         checkpoint("initialized")
         atomicWrite(File(databases, "$name.proof"), "$VERSION\n${reservation.token}")
@@ -186,8 +240,9 @@ internal class InstallationFiles(
     private fun parseReservation(text: String?): Reservation? {
         val parts = text?.split('\n') ?: return null
         val marker = parseMarker(parts.take(3).joinToString("\n")) ?: return null
-        if (parts.size != 4 || parts[3] !in setOf("reserved", "ready")) return null
-        return Reservation(marker.first, marker.second, parts[3] == "ready")
+        if (parts.size !in 4..5 || parts[3] !in setOf("reserved", "ready")) return null
+        val restore = parts.getOrNull(4)?.let { line -> RESTORE_LINE.matchEntire(line)?.groupValues ?: return null }
+        return Reservation(marker.first, marker.second, parts[3] == "ready", restore?.get(1), restore?.get(2))
     }
 
     private fun parseMarker(text: String?): Pair<String, Boolean>? {
@@ -199,7 +254,8 @@ internal class InstallationFiles(
     private fun writeReservation(reservation: Reservation) =
         atomicWrite(
             File(noBackup, RESERVATION),
-            "$VERSION\n${reservation.token}\n${mode(reservation.held)}\n${if (reservation.ready) "ready" else "reserved"}",
+            "$VERSION\n${reservation.token}\n${mode(reservation.held)}\n${if (reservation.ready) "ready" else "reserved"}" +
+                reservation.source?.let { "\nrestore $it ${reservation.decided}" }.orEmpty(),
         )
 
     private fun state(
@@ -212,7 +268,74 @@ internal class InstallationFiles(
         token,
         if (held) AndroidRecoveryRequirement.VERIFICATION_REQUIRED else AndroidRecoveryRequirement.NONE,
         retained,
+        // Zuletzt geschriebene Familie: nach einem Restore ist das die zuletzt aktive des Altgeräts. Eigentum entscheidet erst die UID.
+        restorable =
+            if (held || files.readMetadata(File(noBackup, DECIDED)) == "${decision(token, retained)}\n$KEPT") {
+                retained.maxByOrNull { family -> family.files.maxOf(::modified) }?.databaseName
+            } else {
+                null
+            },
+        restoreFailed = restoreFailed,
     )
+
+    private fun modified(name: String): Long = files.attributes(File(databases, name))?.lastModifiedTime()?.toMillis() ?: 0
+
+    private fun newToken(): String {
+        var token: String
+        do {
+            token = UUID.randomUUID().toString()
+        } while (ownedFiles(databaseName(token)).any(::exists))
+        return token
+    }
+
+    /** Entscheidungsbeleg: genau diese Familienmenge für genau dieses aktive Token; jede neue Familie hält wieder an. */
+    private fun decided(
+        token: String,
+        retained: List<RetainedDatabaseFamily>,
+    ) = retained.isEmpty() || files.readMetadata(File(noBackup, DECIDED)) in decision(token, retained).let { setOf(it, "$it\n$KEPT") }
+
+    private fun decision(
+        token: String,
+        retained: List<RetainedDatabaseFamily>,
+    ) = "$VERSION\n$token\n${digest(retained)}"
+
+    private fun digest(families: List<RetainedDatabaseFamily>): String =
+        MessageDigest
+            .getInstance("SHA-256")
+            .digest(
+                families
+                    .map { it.databaseName }
+                    .sorted()
+                    .joinToString("\n")
+                    .toByteArray(Charsets.UTF_8),
+            ).joinToString("") { "%02x".format(it) }
+
+    /** Nur die eigene Reservierung wird beschrieben; jeder Fehler beim Kopieren, Prüfen oder Migrieren beendet die Übernahme. */
+    private fun restoreCopy(
+        source: String,
+        database: File,
+        token: String,
+    ): Boolean {
+        val sources = familyFiles(source).filter(::exists)
+        if (sources.none { it.name == source } || sources.any { files.attributes(it)?.isRegularFile != true }) return false
+        return try {
+            sources.forEach { files.copy(it, File(databases, database.name + it.name.removePrefix(source))) }
+            restore(database, token)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun abandonRestore(name: String): AndroidInstallationState {
+        ownedFiles(name).forEach { files.delete(it) }
+        syncDirectory(databases)
+        files.delete(File(noBackup, RESERVATION))
+        files.delete(File(noBackup, "$RESERVATION.pending"))
+        syncDirectory(noBackup)
+        restoreFailed = true
+        return selectLocked()
+    }
 
     private fun inventory(): List<RetainedDatabaseFamily> {
         val names = Files.newDirectoryStream(databases.toPath()).use { entries -> entries.map { it.fileName.toString() } }
@@ -291,6 +414,7 @@ internal class InstallationFiles(
             when (file.name) {
                 RESERVATION -> "reservation-pending"
                 MARKER -> "marker-pending"
+                DECIDED -> "decided-pending"
                 else -> "proof-pending"
             }
         checkpoint(point)
@@ -303,6 +427,9 @@ internal class InstallationFiles(
         private const val VERSION = "advantly-installation-v1"
         private const val MARKER = "installation-v1"
         private const val RESERVATION = "installation-v1.reservation"
+        private const val DECIDED = "installation-v1.decided"
+        private const val KEPT = "kept"
+        private val RESTORE_LINE = Regex("restore (advantly(?:-install-[0-9a-f-]{36})?\\.db) ([0-9a-f]{64})")
         private val TOKEN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val FILE_NAME = Regex("(advantly(?:-install-[0-9a-f-]{36})?\\.db)(?:-wal|-shm|-journal|\\.proof(?:\\.pending)?)?")
         private val CHECK_DIRECTORY = Regex("installation-check-[0-9]+")

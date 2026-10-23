@@ -25,7 +25,38 @@ internal class AccountPairing(
     private val localNonces = mutableMapOf<String, String>()
     private val retired = mutableMapOf<String, MutableSet<String>>()
 
+    /** Uhr: ein vertrautes Handy mit anderer Autorität wurde abgelehnt; nur [repair] koppelt neu. */
+    var conflict: Boolean = false
+        private set
+
     fun candidate(peer: String): Hello? = candidates[peer]
+
+    /**
+     * Ausdrückliche Neukopplung. Handy: neue Autorität – jede bisher gekoppelte Uhr muss selbst neu koppeln. Uhr: Autorität,
+     * Epoche und Scope-Bindung vergessen; das nächste vertraute Handy koppelt neu. Beide verwerfen alle Nonces, Sitzungen und
+     * Kandidaten. Quellen, Scopes und Konten bleiben unverändert. `false` ohne bestehende Kopplung.
+     */
+    fun repair(): Boolean {
+        val current = context ?: return false
+        data.transaction {
+            if (kind == PeerKind.PHONE) {
+                persist(OwnerContext(newId(), 1, current.scope))
+            } else {
+                listOf("identity.authority", "identity.epoch", "identity.wireScope").forEach(data.settings::remove)
+                data.afterCommit { context = null }
+            }
+            data.afterCommit {
+                nonce = newId()
+                confirmed.clear()
+                candidates.clear()
+                localNonces.clear()
+                retired.clear()
+                conflict = false
+                revision++
+            }
+        }
+        return true
+    }
 
     fun rotate(scope: String) {
         check(kind == PeerKind.PHONE)
@@ -74,7 +105,10 @@ internal class AccountPairing(
                 return false
             }
         } else {
-            if (incoming != null && current != null && incoming.authority != current.authority) return false
+            if (incoming != null && current != null && incoming.authority != current.authority) {
+                conflict = true
+                return false
+            }
             if (incoming == null || hello.recipientSession != nonce || hello.kind != PeerKind.PHONE) {
                 if (candidates[peer]?.session != hello.session && confirmed[peer] != hello.session) {
                     candidates[peer] = hello
@@ -104,6 +138,7 @@ internal class AccountPairing(
             if (kind != PeerKind.PHONE && incoming == current) nonce = newId()
         }
         if (confirmed[peer] != hello.session || localNonces[peer] != nonce) revision++
+        conflict = false
         candidates[peer] = hello
         confirmed[peer] = checkNotNull(hello.session)
         localNonces[peer] = nonce

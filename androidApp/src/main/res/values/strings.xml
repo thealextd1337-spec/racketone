@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="recovery_notice_title">Existing data kept safe</string>
-    <string name="recovery_notice_body">Your previous data is retained separately and has not been restored. Account verification and recovery are not yet available. Device sync and account features remain paused. You can count new matches offline.</string>
-    <string name="recovery_continue_offline">Continue offline</string>
+    <string name="recovery_notice_body">Your previous data is retained separately and has not been restored. Device sync and account features remain paused. You can count new matches offline.</string>
+    <string name="recovery_decision_body">This app was restored or updated. Your previous data is kept safely but is not shown yet.\n\nRestore (recommended): the data is copied for this device with a new device identity. Data linked to an account only appears after you sign in with that same account; data without an account appears on this device. Sign in again afterwards and confirm pairing on your watch.\n\nStart without it: the previous data stays stored on this device and can still be restored later under Profile.\n\nDecide later: nothing changes for now. If you count new matches in the meantime, restoring is only possible after you delete them.</string>
+    <string name="recovery_blocked_body">Matches were already counted on this device since then. Restoring would hide them. Delete those matches first if you want to restore. Your previous data stays stored either way.</string>
+    <string name="recovery_failed_body">Restoring did not work. Nothing was changed and your previous data is still kept. Try again later.</string>
+    <string name="recovery_restore">Restore previous data</string>
+    <string name="recovery_start_fresh">Start without it</string>
+    <string name="recovery_continue_offline">Decide later</string>
+    <string name="recovery_fresh_confirm_title">Start without previous data?</string>
+    <string name="recovery_fresh_confirm_body">Your previous matches will not be shown or synced on this device. They stay stored here, and you can still restore them later under Profile – as long as you count no new matches on this device or delete them again. You will need to sign in again.</string>
+    <string name="recovery_later_title">Restore previous data</string>
+    <string name="recovery_later_body">Your previous data is copied for this device with a new device identity, and the app restarts. What this device has stored since then stays saved but is no longer shown. Data linked to an account appears after you sign in with that same account. Sign in again afterwards and confirm pairing on your watch.</string>
+    <string name="recovery_save_failed">That did not work. Nothing was switched and your data is unchanged. Try again; you may need to sign in again.</string>
+    <string name="recovery_done_title">Previous data restored</string>
+    <string name="recovery_done_body">This device now has its own new identity. Data linked to an account appears after you sign in with that same account – a different account sees none of it. If you use a watch, confirm pairing again on the watch.</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
     <string name="installation_error_title">Local data unavailable</string>
