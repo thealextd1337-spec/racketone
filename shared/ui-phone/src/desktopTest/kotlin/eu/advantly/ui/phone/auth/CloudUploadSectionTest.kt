@@ -121,7 +121,7 @@ class CloudUploadSectionTest {
                         onNodeWithTag("cloud_upload_events").performScrollTo().assertTextContains("12", substring = true)
                         onNodeWithTag("cloud_upload_metadata").performScrollTo().assertTextContains("3", substring = true)
                         onNodeWithTag("cloud_upload_rejected").performScrollTo().assertTextContains("2", substring = true)
-                        onNodeWithTag("cloud_upload_observed").performScrollTo().assertTextContains("1970-01-01", substring = true)
+                        onNodeWithTag("cloud_upload_observed").performScrollTo().assertTextContains(timestamp(1000), substring = true)
                         onNodeWithTag(
                             "cloud_upload_last_response",
                         ).performScrollTo().assertTextContains(

@@ -21,6 +21,7 @@ import eu.advantly.presentation.auth.PhoneUploadError
 import eu.advantly.presentation.auth.PhoneUploadPhase
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.auth.PhoneUploadResult
+import eu.advantly.ui.phone.platform.formatBuildDate
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.cloud_upload_binding
 import eu.advantly.ui.phone.resources.cloud_upload_blocked
@@ -49,7 +50,6 @@ import eu.advantly.ui.phone.resources.cloud_upload_unavailable
 import eu.advantly.ui.phone.resources.cloud_upload_unknown
 import eu.advantly.ui.phone.resources.cloud_upload_waiting
 import org.jetbrains.compose.resources.stringResource
-import kotlin.time.Instant
 
 /** Eigene Uploadaktionen blockieren keine Kontoaktion. Sämtliche Zahlen bleiben datierte Momentaufnahmen. */
 @Composable
@@ -151,4 +151,5 @@ fun CloudUploadSection(
     }
 }
 
-internal fun timestamp(milliseconds: Long): String = Instant.fromEpochMilliseconds(milliseconds).toString()
+/** Lokale Uhrzeit mit Datum in der Gerätesprache (DE/EN) statt ISO-Instant. */
+internal fun timestamp(milliseconds: Long): String = formatBuildDate(milliseconds)

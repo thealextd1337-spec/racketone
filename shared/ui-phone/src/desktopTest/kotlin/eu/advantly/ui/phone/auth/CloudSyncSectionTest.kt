@@ -20,6 +20,7 @@ import eu.advantly.presentation.auth.PhoneUploadState
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -56,7 +57,10 @@ class CloudSyncSectionTest {
 
     @Test fun backupStatusShowsLastBackupBlockedReasonAndRetryInBothLanguages() {
         val original = Locale.getDefault()
+        val originalZone = TimeZone.getDefault()
         try {
+            // Lokale Zeit statt ISO-Instant: 0 ms ist 01:00 in Paris.
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Paris"))
             for (language in listOf("de", "en")) {
                 val de = language == "de"
                 Locale.setDefault(Locale.forLanguageTag(language))
@@ -86,7 +90,7 @@ class CloudSyncSectionTest {
                         )
                     waitForIdle()
                     onNodeWithTag("cloud_sync_last_backup").assertTextEquals(
-                        if (de) "Zuletzt gesichert: 1970-01-01T00:00:00Z" else "Last backed up: 1970-01-01T00:00:00Z",
+                        if (de) "Zuletzt gesichert: 01.01. 01:00" else "Last backed up: Jan 1, 01:00",
                     )
                     onNodeWithTag("cloud_sync_status").assertTextEquals(
                         if (de) "Die Sicherung pausiert, bis die Ursache behoben ist." else "Backup is paused until the cause is resolved.",
@@ -112,7 +116,7 @@ class CloudSyncSectionTest {
                         },
                     )
                     onNodeWithTag("cloud_sync_next_attempt").assertTextEquals(
-                        if (de) "Nächster automatischer Versuch: 1970-01-01T00:01:00Z" else "Next automatic attempt: 1970-01-01T00:01:00Z",
+                        if (de) "Nächster automatischer Versuch: 01.01. 01:01" else "Next automatic attempt: Jan 1, 01:01",
                     )
 
                     sync.state.value = PhoneSyncState()
@@ -122,6 +126,7 @@ class CloudSyncSectionTest {
             }
         } finally {
             Locale.setDefault(original)
+            TimeZone.setDefault(originalZone)
         }
     }
 
