@@ -223,6 +223,24 @@ class RestoredInstallationTest {
     }
 
     @Test
+    fun restoredImageForgetsKnownPeersSoMyWatchCannotPickAPhantomWatch() {
+        data.settings.put("session.peerKind.old-watch", PeerKind.WATCH.name)
+        data.settings.put("session.nodeDevice.old-node", "old-watch")
+        data.settings.put("session.deviceStatuses", "[{\"peer\":\"old-node\",\"kind\":\"WATCH\"}]")
+        restart()
+        assertEquals(listOf("old-watch"), session.knownDevices(PeerKind.WATCH).map { it.value }, "Vorbedingung")
+
+        restart(rekey = "restored-token")
+        assertTrue(session.knownDevices(PeerKind.WATCH).isEmpty(), "„Meine Uhr“ wartet auf die neu gekoppelte Uhr")
+        assertTrue(
+            data.settings
+                .all()
+                .keys
+                .none { it.startsWith("session.peerKind.") || it.startsWith("session.nodeDevice.") || it == "session.deviceStatuses" },
+        )
+    }
+
+    @Test
     fun restoredWatchImageNeverClonesItsOldSequenceIdentityForTheSameScope() {
         val watch = LocalData(createInMemoryJvmDriver())
         watch.players.ensureSelf("Alex", 0) { PlayerId("watch-self") }

@@ -173,10 +173,10 @@ class AccountIdentityRepository internal constructor(
 
     /**
      * Recovery-Paket: Ein übernommenes Abbild kann danach keine alte Geräte- oder Pairingidentität mehr wählen.
-     * Scope→Gerät-Zuordnungen, Konto-/Gastzeiger, Pairing-Autorität, Uhr-Zustellungen und lokale Freigaben werden
-     * stillgelegt; Quellen, unveränderliche Eigentümer, Events und Köpfe bleiben unverändert. Ein Altabbild ohne
-     * Quellenbeleg erhält vorher den Beleg seines bisher schreibenden Geräts. Danach muss in derselben Transaktion ein
-     * neuer Scope gewählt werden ([select]).
+     * Scope→Gerät-Zuordnungen, Konto-/Gastzeiger, Pairing-Autorität, Uhr-Zustellungen, gemerkte Peer-Geräte (sonst würde
+     * eine alte Uhr-ID Zähler für „Meine Uhr“) und lokale Freigaben werden stillgelegt; Quellen, unveränderliche
+     * Eigentümer, Events und Köpfe bleiben unverändert. Ein Altabbild ohne Quellenbeleg erhält vorher den Beleg seines
+     * bisher schreibenden Geräts. Danach muss in derselben Transaktion ein neuer Scope gewählt werden ([select]).
      *
      * @return `true`, wenn das Abbild keinerlei Kontobindung trägt (nur dann ist [releaseRestored] zulässig).
      */
@@ -192,7 +192,9 @@ class AccountIdentityRepository internal constructor(
             queries.retireIdentities()
             queries.clearAcceptedSources()
             data.replicas.clearDeliveries()
-            keys.filter { it.startsWith(ACCOUNT_PREFIX) || it in RESTORED_KEYS }.forEach(data.settings::remove)
+            keys
+                .filter { key -> key in RESTORED_KEYS || RESTORED_PREFIXES.any(key::startsWith) }
+                .forEach(data.settings::remove)
             data.cloud.resolveMetadataSources()
             unbound
         }
@@ -222,7 +224,9 @@ class AccountIdentityRepository internal constructor(
                 "identity.epoch",
                 "identity.wireScope",
                 "session.deviceId",
+                "session.deviceStatuses",
             )
+        val RESTORED_PREFIXES = listOf(ACCOUNT_PREFIX, "session.peerKind.", "session.nodeDevice.")
     }
 }
 
