@@ -105,6 +105,8 @@ class CloudUploadStore internal constructor(
         return database
             .transactionWithResult {
                 val session = CloudUploadSession(profileId, advanceGeneration())
+                // Jede Anmeldung bindet neu (K4-U: etwa nach der Freigabe dieses Handys).
+                cloud.resetDeviceRejections()
                 cloud.resolvePlayerMetadataSources()
                 cloud.resolveOwnedMatchMetadataSources(profileId)
                 session

@@ -31,6 +31,12 @@ class CloudSyncRepository internal constructor(
     fun rejectedEvents(): Map<String, String> =
         queries.rejectedEvents { id, reason -> id to requireNotNull(reason) }.executeAsList().toMap()
 
+    /**
+     * `device_not_owned` wieder ausstehend: Nach einer neuen Upload-Sitzung oder neuen G kann das Quellgerät (etwa eine
+     * erst später freigegebene Uhr) wieder gelten. Kontoübergreifend; kostet höchstens eine weitere Ablehnungsrunde.
+     */
+    internal fun resetDeviceRejections() = queries.resetDeviceRejections()
+
     /** Nur tatsächlich bestätigte IDs übergeben. Fehlende Antworten bleiben ausstehend; Anwendung ist atomar. */
     fun acknowledge(
         uploaded: Set<String>,
