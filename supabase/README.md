@@ -346,8 +346,8 @@ serverseitiger Auth-Admin-Widerruf (Ban/Abmeldung über die Supabase-Admin-API) 
 | `admin_account_set_suspended(p_profile_id, p_suspended, p_reason)` | `admin` | Sperre setzen/aufheben | `account_suspend`/`account_unsuspend` |
 | `admin_account_revoke_devices(p_profile_id, p_reason)` | `admin` | alle Installationen, Cloud-Sitzungsbindungen, Geräte, Push-Token | `account_revoke_devices` (nur Zählwerte) |
 | `admin_account_cancel_deletion(p_profile_id, p_ticket_id, p_reason)` | `admin` | Löschrücknahme wie `cancel_account_deletion`, nur mit Meldung nach dem Antrag | `account_cancel_deletion` (Meldungs-UUID, `ticket_kind` `account`/`guest`) |
-| `admin_account_unrevoke_device(p_profile_id, p_device_id, p_ticket_id, p_reason)` | `admin` | K4-U: Widerruf eines Geräts aufheben, nur mit Meldung nach dem Widerruf | `device_unrevoke` (`via` `admin`, Gerät, Meldungs-UUID, `ticket_kind`) |
-| `cloud_unrevoke_device_v1(p_device_id)` | Konto mit anderem gebundenem Gerät (Installationsnachweis) | K4-U: Widerruf eines anderen eigenen Geräts aufheben | `device_unrevoke` (`via` `device`, freigegebenes und freigebendes Gerät, ohne Begründung) |
+| `admin_account_unrevoke_device(p_profile_id, p_device_id, p_ticket_id, p_reason)` | `admin` | K4-U: Widerruf eines Geräts aufheben, nur mit Meldung nach dem Widerruf | `device_unrevoke` (`via` `admin`, Gerät, Meldungs-UUID, `ticket_kind`, `ticket_uses`) |
+| `cloud_unrevoke_device_v1(p_device_id)` | Konto mit anderem, schon vor dem Widerruf gebundenem Gerät (Installationsnachweis) | K4-U: Widerruf eines anderen eigenen Geräts aufheben | `device_unrevoke` (`via` `device`, freigegebenes und freigebendes Gerät, ohne Begründung) |
 
 Alle prüfen bei jedem Aufruf Mitgliedschaft und AAL2 (`support_forbidden`, `support_mfa_required`), schreibende
 zusätzlich `admin` (`support_admin_required`) nach `lock_sync()`. Begründung 1–500 Zeichen (`support_invalid`).
@@ -370,14 +370,25 @@ Meldungsregel; ein erneuter Widerruf setzt ihn neu.
 - Nutzerweg (`cloud_unrevoke_device_v1`, Installationsnachweis wie Push/Pull, im Inventar von 181):
   `device_unrevoke_self` (42501, dieselbe Installation oder das Gerät der eigenen Sitzungsbindung, vor allen anderen
   Prüfungen), `account_deletion_pending` (42501), danach `require_cloud_binding` mit `account_suspended`,
-  `consent_required`, `device_revoked` (aufrufendes Gerät widerrufen) und `device_not_authorized`.
+  `consent_required`, `device_revoked` (aufrufendes Gerät widerrufen) und `device_not_authorized`. Nach
+  `device_not_found`/`device_not_revoked` folgt `device_unrevoke_caller_too_new` (42501): Die Installation des
+  aufrufenden Geräts entstand erst nach dem Widerruf, etwa eine zweite App-Instanz mit Mail-Code auf dem widerrufenen
+  Handy oder ein neues Gerät nach `admin_account_revoke_devices`. Dann bleibt nur der Adminweg.
 - Adminweg: Meldungsregel wie bei der Löschrücknahme mit `device_ticket_required`, `device_ticket_invalid`,
   `device_ticket_stale` (vor dem Widerruf), `device_ticket_evidence_required`; außerdem `account_suspended` und
-  `account_deletion_pending` (P0001), `account_not_found` (Phase A).
+  `account_deletion_pending` (P0001), `account_not_found` (Phase A). Eine Kontomeldung zählt nur von einem anderen
+  eigenen Gerät, das beim Melden nicht widerrufen war: `device_ticket_from_revoked_device` (vom Zielgerät oder einem
+  damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden). Das Absendergerät
+  hält ein Trigger beim Anlegen in `private.support_ticket_devices` fest (Bindung der JWT-Sitzung, Widerruf zu dem
+  Zeitpunkt); es erscheint in keiner Nutzer- oder Inbox-Antwort. Gastmeldungen mit Zuordnungsbeleg bleiben gültig.
+  Eine Meldung darf mehrere Geräte freigeben; `ticket_uses` im Audit zählt ihre Verwendungen. Die Löschrücknahme
+  braucht die Geräteregel nicht: `cancel_account_deletion` steht jeder Kontositzung offen, auch der eines widerrufenen
+  Geräts.
 - Beide: `device_not_found` (unbekannt oder fremd, gleicher Grund), `device_not_revoked`.
-- `admin_account_lookup` nennt widerrufene Geräte (`revokedDevices`: ID, Art, Plattform, Zeitpunkt, höchstens 20).
-- Eine Uhr-Event-Ablehnung (`device_not_owned`) speichert das Handy endgültig. Deshalb eine gekoppelte Uhr vor ihrem
-  Handy freigeben (Admin-Web-Hinweis).
+- `admin_account_lookup` nennt widerrufene Geräte (`revokedDevices`: Art, Plattform, Zeitpunkt, höchstens 20; die
+  Geräte-ID nur für `admin`).
+- Ablehnungen `device_not_owned` (Quellgerät widerrufen, etwa eine noch nicht freigegebene Uhr) setzt die App bei
+  jeder neuen Anmeldung und bei jeder neuen G wieder auf ausstehend; die Reihenfolge der Freigaben ist egal.
 
 **Sperre:** `private.account_suspensions`. `require_active()` meldet `account_suspended` (42501), das RLS-Gate
 schließt direkte Tabellen; damit sind Bind, Push, Pull, Legacy- und Social-RPCs zu. Export, Löschantrag/-status,
@@ -391,7 +402,7 @@ Bezug auf null und ein Trigger leert die Begründung. Mit dem Zielbezug fallen a
 
 Tests: pgTAP `300_account_support` (Rolle, AAL1, Begründung, Audit, Entkopplung, Sperrwirkung, Rücknahme samt
 Meldungsregeln) und `310_device_unrevoke` (alle Ablehnungen beider Wege, Freigabe, G, neue Bindung derselben IDs,
-Upload alter Events);
+Upload alter Events, später gebundene Geräte, Absendergerät der Meldung);
 Renntest `300_account_support_concurrency.py` (Sperre↔Push/Pull/Bind, Sperre/Rücknahme↔Löschjob, Freigabe↔erneuter
 Widerruf/Doppelfreigabe/Sperre/Löschjob, mit `pg_blocking_pids`, in CI im Schritt „Consent-Gate und
 D2/D3-Lockrennen“); K7 `tools/pilot-checks/check_account_support.py` (lokal Admin-Aktion über Owner-DB, staging durch

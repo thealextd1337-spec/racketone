@@ -184,6 +184,8 @@ declare
   v_actor uuid := private.require_support();
   v_query text := btrim(p_query);
   v_ids uuid[];
+  v_role text;
+  v_account jsonb;
 begin
   if v_query is null or length(v_query) not between 1 and 120 then perform private.fail('support_invalid'); end if;
   if v_query ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
@@ -196,8 +198,14 @@ begin
   end if;
   if cardinality(v_ids) = 0 then perform private.fail('account_not_found'); end if;
   if cardinality(v_ids) > 1 then perform private.fail('account_ambiguous'); end if;
-  return jsonb_build_object('viewerRole', (select m.role from ops.support_members m where m.id = v_actor),
-    'account', private.account_status(v_ids[1]));
+  v_role := (select m.role from ops.support_members m where m.id = v_actor);
+  v_account := private.account_status(v_ids[1]);
+  -- Geräte-IDs braucht nur admin für die Freigabe; support sieht Art, Plattform und Zeitpunkt.
+  if v_role is distinct from 'admin' then
+    v_account := jsonb_set(v_account, '{revokedDevices}', (select coalesce(jsonb_agg(d.value - 'deviceId' order by d.n),
+      '[]'::jsonb) from jsonb_array_elements(v_account -> 'revokedDevices') with ordinality d(value, n)));
+  end if;
+  return jsonb_build_object('viewerRole', v_role, 'account', v_account);
 end;
 $$;
 
@@ -348,6 +356,7 @@ declare
   v_auth record;
   v_cap record;
   v_caller uuid;
+  v_revoked timestamptz;
 begin
   perform private.require_cloud_isolation();
   perform private.lock_sync();
@@ -363,7 +372,12 @@ begin
     perform private.fail('account_deletion_pending', '42501');
   end if;
   v_caller := private.require_cloud_binding();
-  perform private.device_revoked_at(v_auth.profile_id, p_device_id);
+  v_revoked := private.device_revoked_at(v_auth.profile_id, p_device_id);
+  -- Nur ein Gerät, das schon vor dem Widerruf gebunden war. Sonst gäbe eine zweite App-Instanz mit Mail-Code auf dem
+  -- widerrufenen Handy (oder ein neues Gerät nach dem Widerruf aller Geräte durch admin) den Widerruf still wieder frei.
+  if not exists (select 1 from private.cloud_installations i where i.device_id = v_caller and i.created_at < v_revoked) then
+    perform private.fail('device_unrevoke_caller_too_new', '42501');
+  end if;
   perform private.device_restore(v_auth.profile_id, p_device_id);
   insert into ops.account_audit(actor_id, target_id, action, changes)
     values (v_auth.profile_id, v_auth.profile_id, 'device_unrevoke',
@@ -372,7 +386,43 @@ begin
 end;
 $$;
 
--- K4-U Adminweg: admin mit AAL2, Begründung und Meldung nach dem Widerruf (Regel wie die Löschrücknahme). Gesperrte
+-- K4-U (Entscheid 24.10.2026): Absendergerät einer Kontomeldung aus der Bindung der Sitzung (JWT session_id), beim
+-- Anlegen festgehalten. Eigene Tabelle, damit es weder in Nutzerantworten noch im Inbox-JSON (to_jsonb) erscheint.
+-- Keine Zeile = kein bekanntes Gerät. `revoked`: Bindung, Installation oder Gerät war beim Melden widerrufen.
+create table private.support_ticket_devices (
+  ticket_id uuid primary key references ops.support_tickets(id) on delete cascade,
+  device_id uuid not null,
+  revoked boolean not null
+);
+alter table private.support_ticket_devices enable row level security;
+revoke all on private.support_ticket_devices from public, anon, authenticated, service_role;
+
+-- submit_support bleibt unverändert (läuft schon unter lock_sync); ein Gast oder fremder Owner hinterlässt keine Zeile.
+create function private.support_ticket_device() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare v_session uuid;
+begin
+  if new.owner_id is null or new.owner_id is distinct from auth.uid() then return null; end if;
+  begin
+    v_session := (auth.jwt() ->> 'session_id')::uuid;
+  exception when invalid_text_representation then
+    return null;
+  end;
+  insert into private.support_ticket_devices(ticket_id, device_id, revoked)
+    select new.id, b.device_id, b.revoked_at is not null or i.revoked_at is not null or d.revoked_at is not null
+    from private.cloud_session_bindings b
+    join private.cloud_installations i using (profile_id, installation_id, device_id)
+    join public.devices d on d.id = b.device_id
+    where b.session_id = v_session and b.profile_id = new.owner_id;
+  return null;
+end;
+$$;
+create trigger support_ticket_device after insert on ops.support_tickets
+  for each row execute function private.support_ticket_device();
+
+-- K4-U Adminweg: admin mit AAL2, Begründung und Meldung nach dem Widerruf (Regel wie die Löschrücknahme). Eine
+-- Kontomeldung zählt nur von einem anderen eigenen, beim Melden nicht widerrufenen Gerät; die Löschrücknahme braucht
+-- das nicht (cancel_account_deletion steht jeder Kontositzung offen, auch der des widerrufenen Geräts). Gesperrte
 -- Konten und Konten in Löschung bleiben ausgeschlossen: erst entsperren bzw. die Löschung zurücknehmen.
 create function public.admin_account_unrevoke_device(p_profile_id uuid, p_device_id uuid, p_ticket_id uuid, p_reason text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -380,6 +430,7 @@ declare
   v_actor uuid;
   v_reason text;
   v_kind text;
+  v_source private.support_ticket_devices%rowtype;
 begin
   perform private.lock_sync();
   v_actor := private.require_support_admin();
@@ -391,10 +442,17 @@ begin
   end if;
   v_kind := private.account_ticket_kind(p_profile_id, p_ticket_id, private.device_revoked_at(p_profile_id, p_device_id),
     v_reason, 'device');
+  if v_kind = 'account' then
+    select * into v_source from private.support_ticket_devices s where s.ticket_id = p_ticket_id;
+    if not found then perform private.fail('device_ticket_device_unknown'); end if;
+    if v_source.device_id = p_device_id or v_source.revoked then perform private.fail('device_ticket_from_revoked_device'); end if;
+  end if;
   perform private.device_restore(p_profile_id, p_device_id);
+  -- Eine Meldung darf mehrere Geräte freigeben (Handy und Uhr zurück); ticket_uses > 1 macht das im Audit sichtbar.
   insert into ops.account_audit(actor_id, target_id, action, reason, changes)
     values (v_actor, p_profile_id, 'device_unrevoke', v_reason, jsonb_build_object('via', 'admin',
-      'device_id', p_device_id, 'ticket_id', p_ticket_id, 'ticket_kind', v_kind));
+      'device_id', p_device_id, 'ticket_id', p_ticket_id, 'ticket_kind', v_kind, 'ticket_uses',
+      1 + (select count(*) from ops.account_audit a where a.changes ->> 'ticket_id' = p_ticket_id::text)));
   return private.account_status(p_profile_id);
 end;
 $$;
@@ -424,7 +482,7 @@ alter function public.admin_account_unrevoke_device(uuid,uuid,uuid,text) set sta
 revoke all on function private.account_audit_decouple(), private.account_audit_deleting(), private.is_suspended(uuid),
   private.require_support_admin(), private.support_reason(text), private.account_status(uuid), private.account_target(uuid,uuid),
   private.account_ticket_kind(uuid,uuid,timestamptz,text,text), private.device_revoked_at(uuid,uuid),
-  private.device_restore(uuid,uuid)
+  private.device_restore(uuid,uuid), private.support_ticket_device()
   from public, anon, authenticated, service_role;
 revoke all on function public.admin_account_lookup(text), public.admin_account_set_suspended(uuid,boolean,text),
   public.admin_account_revoke_devices(uuid,text), public.admin_account_cancel_deletion(uuid,uuid,text),

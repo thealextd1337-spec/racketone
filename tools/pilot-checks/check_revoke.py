@@ -7,8 +7,9 @@
 Zwei Sitzungen desselben Kontos binden je ein Telefon. Widerrufenes Gerät kann weder pullen noch
 pushen und sich nicht durch erneute Bindung entsperren; das andere Gerät bleibt nutzbar.
 Fremdes Konto kann nicht widerrufen. Sitzungswiderruf und globale Abmeldung sperren ebenfalls.
-K4-U: Das zweite Handy gibt das erste wieder frei (nie das erste sich selbst, nie ein fremdes Konto). Nach neuer
-Anmeldung bindet das erste Handy dieselbe Geräte- und Installations-ID und lädt sein altes, offenes Event hoch.
+K4-U: Das zweite Handy gibt das erste wieder frei (nie das erste sich selbst, nie ein fremdes Konto, nie ein erst
+nach dem Widerruf gebundenes Gerät). Nach neuer Anmeldung bindet das erste Handy dieselbe Geräte- und
+Installations-ID und lädt sein altes, offenes Event hoch.
 Ergänzt 170_cloud_device_binding_live.py (lokal, deckt cloud_revoke_session/device nicht ab).
 """
 from uuid import uuid4
@@ -63,6 +64,9 @@ def body(s):
           "widerrufenes Handy gibt sich nicht selbst frei")
     status, refused = s.rpc(unrevoke, {"p_device_id": first["device"]}, b, b["device"])
     check(status != 200 and (refused or {}).get("message") == "device_not_found", "fremdes Konto gibt nicht frei (P0001)")
+    late = s.bind(retry)  # wie eine zweite App-Instanz auf dem widerrufenen Handy: erst nach dem Widerruf gebunden
+    check(denied(s.rpc(unrevoke, {"p_device_id": first["device"]}, retry, late), "device_unrevoke_caller_too_new"),
+          "erst nach dem Widerruf gebundenes Gerät gibt nicht frei")
     status, restored = s.rpc(unrevoke, {"p_device_id": first["device"]}, second_session, second)
     check(status == 200 and restored == {"deviceId": first["device"], "revoked": False}, "zweites Handy gibt das erste frei")
     check(denied(pull(a, first), "device_revoked"), "alte Sitzung des ersten Handys bleibt widerrufen")
@@ -83,7 +87,7 @@ def body(s):
     status, revoked = s.rpc("cloud_revoke_session_v1", {"p_session_id": second["session"]}, a)
     check(status == 200 and revoked["revoked"] is True, "Sitzung widerrufen")
     check(denied(pull(second_session, second)), "widerrufene Sitzung: Pull verweigert")
-    third_session, third = retry, s.bind(retry)
+    third_session, third = retry, late
     check(pull(third_session, third)[0] == 200, "neue Sitzung mit neuem Gerät")
     check(s.logout(third_session) in {200, 204}, "globale Abmeldung")
     check(denied(pull(third_session, third)), "alte Sitzung nach Abmeldung: Pull verweigert")
