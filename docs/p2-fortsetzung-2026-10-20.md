@@ -1565,3 +1565,873 @@ Log `full-r8-trigger.log`. Offene P3:
 - Das Lockrennen und der Marker-Fall gehören als Python-Rennen ins Repo.
 - Der D1+U4-Integrationstest muss „eigenes Match, Server bereinigt, E 0→1“ enthalten.
 - 00900 wird nur zusammen mit 00700 ausgerollt.
+
+CI auf `10dbb6f` (PR #74): alle fünf Jobs grün, darunter Gradle check mit
+Android/Wear-APKs, Kotlin/Native mit iOS/watchOS-Simulator-Builds sowie Supabase
+mit Migrationen, pgTAP, Lockrennen, Export-Rundlauf, echten Auth/HTTP/Storage-Diensten,
+Vault-Scheduler und Datenbank-Lint. Erstmals ist der Stand damit auch auf dem echten
+Stack und den Apple-Pfaden belegt. Integrationspunkt A ist nachgewiesen.
+
+### Integrationspunkt B (begonnen)
+
+- D1-Korrektur `9bea930`: G-Wechsel entzieht Readiness sofort, unveränderte
+  Matches werden ohne RPC übernommen, endliche Runden, Neuscan aus 10.sqm,
+  wiederhergestellter Altbeleg. 7 Reds, 6 erkannte Mutationen, data 221 /
+  cloud-sync 233 grün. 205 Matches sind nach einem G-Wechsel wieder lesbar nach
+  1 statt 61 Läufen; COMPLETE weiterhin nach 61. Migrationstest vom Integrator
+  geprüft: weiterhin exakt bis Schema 10, danach werden nur die zwei
+  zurückgesetzten Tabellen getrennt und exakt geprüft. Frische Review
+  `advantly-20261021-w2-d1-review-r2`.
+- Lokaler Branch `p2/d2d3-integration-b` auf `10dbb6f`: Merges von D1 und U4
+  ohne Konflikt. Voller Check grün in 3m11s (data 221, cloud-sync 258, 1 Stack-Skip).
+- Integratorentscheid: Die U4-Restart-Sperre wird mit dem abgeschlossenen
+  Katalog einer danach begonnenen Runde frei, nicht erst mit dem Rundenabschluss.
+  Gemeinsamer D1+U4-Test mit Mock-Serverregeln 00700/00800/00900:
+  `advantly-20261021-integration-b-joint-r1` (hält den Gradle-Slot).
+- D1-Review r2 auf `9bea930`: **Freigabe**, kein P1/P2, sechs P3. Bericht
+  `review-9bea930/build/review-report.txt`. Die Übernahme ist sicher, weil jede
+  E-Änderung auf dem Server über `touch_row` auch `serverVersion` erhöht. Der
+  Altbeleg ist eng begrenzt, Runden enden endlich, `restart_required` führt in
+  keinen Dauerzustand. Für die U4-Kopplung an metadataComplete gilt: Das
+  angewandte E steigt erst mit dem abgeschlossenen Transfer. U4 muss daher ein
+  Match blockieren, solange das Katalog-E größer ist als das angewandte E. Und
+  die nächste Runde beginnt erst nach der laufenden. Beides wurde an den
+  Integrationsagenten weitergegeben.
+  Offene P3:
+  - Turnier-Staff-Wechsel ohne Beobachtung.
+  - Übernahme prüft weder Tombstone noch `materialization_pending`.
+  - Vollreparaturen durch fremde Live-Matches beim Neuscan.
+  - Spaltenprüfung von `cloud_pull_profile` im Migrationstest.
+  - Keine eigene Mutation für den Altbeleg und keine positive Übernahme bei E>0.
+  - Kein aktiver Test für ein eigenes ungesendetes Event an einem bereiten Match.
+- Gemeinsamer D1+U4-Test `b245a63` (Worktree `t3-87683ce2`) per Fast-Forward
+  auf `p2/d2d3-integration-b` übernommen. Mock-Server mit den Regeln aus
+  00700/00800/00900, sechs Szenarien bei aktiviertem Store grün (a/b waren
+  rot gegen `9beefa6`). U4: Ist das Katalog-E größer als das angewandte E,
+  wird nur dieses Match gesperrt. Die Restart-Sperre endet mit dem Katalog
+  (`roundCatalogReady`) einer danach begonnenen Runde und wird dabei gelöscht.
+  Der Integrator hat den Produktdiff geprüft. Messung bei 205 Matches: Uploads
+  wieder möglich nach 1 statt 62 Läufen bei 40001 zwischen Runden und nach
+  60 statt 120 bei 40001 mitten in einer Runde. Für ~2 Läufe bräuchte es einen
+  monotonen Katalogzähler (nicht gebaut, Vorschlag im Bericht).
+  data 221 / cloud-sync 267 grün, voller Check grün.
+- **Neuer P1 vor Aktivierung:** Ein eigenes LOCAL-Match wird nach dem ersten
+  Pull dauerhaft unlesbar und nimmt keine Events mehr an.
+  `materializePullMatch` überschreibt keinen LOCAL-Kopf, `materializedVersion`
+  bleibt leer, Readiness endet mit STALE_SNAPSHOT. Ohne aktivierten Store gibt
+  es heute keine Nutzerwirkung, die Replikataktivierung bleibt aber gesperrt.
+  Folgeauftrag an D1.
+- P1-Fix `51ca91b` (Worktree `t3-a33c2e30`, Basis `b245a63`): Ein eigener
+  LOCAL/PEER-Kopf wird nur dann vom Cloud-Kopf übernommen, wenn die Quelle dem
+  Konto gehört, Kopf, Teilnehmer und Projektion per Ack bestätigt sind und kein
+  anderes Konto materialisiert hat. Ursache war allein der fehlende Snapshotbeleg;
+  die Eventabdeckung war bereits exakt. Joint 13/13 (vorher 8 rot),
+  CloudPullOwnMatchTest 5/5 (vorher 2 rot), data 226 / cloud-sync 273,
+  voller Check grün. Review `advantly-20261021-integration-b-local-match-review-r1`.
+- **Aktivierungsblocker (Vertrag Welle 3):** Zwischen Katalogseite und Readiness
+  ist auch das eigene Match nicht lesbar und nimmt keine Events an. Mit
+  unbestätigten Kopfänderungen, etwa einer laufenden Projektion, dauert die
+  Sperre bis zum Upload und zum nächsten Katalog. Ein eigenes Live-Match wäre
+  während eines Pulls nicht zählbar. Vor V4 braucht es ein Modell, das Live-Zählen
+  an eigenen Matches nie blockiert und trotzdem keine fremden oder unredigierten
+  Daten freigibt.
+- Review zu `51ca91b`: fix-first, 1× P1, 2× P2, 3× P3. Bericht
+  `review-51ca91b/build/review-report.txt`. Bestätigt sind der Fix für ruhende
+  eigene Matches, die UID-basierte Eigentumsprüfung und die Ack-Logik (ein älteres
+  Ack bestätigt nie einen neueren Stand). Die Reds sind echt.
+
+**Vertragsergänzung eigene Matches (Integrator):**
+- **Schreibspur (P1-1):** Die aktive eigene Quelle darf an eigenen Matches
+  unabhängig von `ready` anhängen und Projektion oder Kopf aktualisieren.
+  Voraussetzung: Die Quelle gehört per UID dem aktuellen Konto, und Access
+  fehlt oder ist MEMBER bei aktuellem G. FEED, ABSENT, ein fremdes Konto und
+  der Verification-Hold sperren weiterhin.
+- **Lesespur:** Eigene Matches sind ohne `ready` nur dann lesbar, wenn keine
+  Redaktion aussteht, also angewandtes E ≥ Katalog-E und kein offener Transfer.
+  Abdeckung und Snapshot betreffen dort die Integrität, nicht die Vertraulichkeit.
+- **Kopf nicht überschreiben (P2-1/P2-2):** Im own-Pfad schreibt der Pull den Kopf
+  nicht. Der Snapshot gilt nur dann als materialisiert, wenn die vom Server
+  getragenen Felder dem bestätigten lokalen Stand entsprechen. Eine veraltete
+  Katalogseite dreht nie zurück, und lokale Kopffelder (`firstServer`,
+  `receiveRight`, `startEnds`, `updated_at_ms`) bleiben erhalten.
+- **Host-Gate (P3):** Pull läuft nie vor abgeschlossener Restore-Prüfung, weil
+  der Eigentumsnachweis aus `cloud_device_owner` stammt.
+- CI auf PR #75 (`16d20b8`, Integrationsstand D1+U4 vor dem P1-Fix): alle fünf
+  Jobs grün, einschließlich Kotlin/Native/Apple und Supabase-Stack. Die
+  Korrektur für eigene Matches (`advantly-20261021-integration-b-local-match-fix-r2`)
+  folgt nach ihrer Review.
+- Korrektur eigene Matches `ef23ad6` auf `51ca91b` (nach einer Ratelimit-
+  Unterbrechung automatisch fortgesetzt): Der Pull schreibt eigene Köpfe nie;
+  ein Beleg entsteht nur bei Ack-Bestätigung und feldgenauem Vergleich
+  (`carriesOwnHeader`). Schreib- und Lesespur nach Vertrag, Migration 11.sqm
+  legt die Sichten neu an, Schema 12. Reds: Lane 10/11, Joint 4/16, OwnMatch 1/5.
+  Danach data 237, cloud-sync 276, match-session 135 grün, voller Check grün.
+  Der Verification-Hold ist im Data-Layer nicht sichtbar, also Host-Gate.
+  Offene Punkte:
+  - `appendAll` mehrerer eigener Geräte scheitert bei gesperrtem Lesen an der
+    Genesis-Sperre (Live-Zählen mit Uhr).
+  - Die Lesespur nimmt Events jeder Quelle an.
+  - Die Schreibspur ist nach neuem G bis zur Katalogseite gesperrt.
+  - Möglicher Mock-/Server-Unterschied bei einem nach Kontolöschung hochgeladenen
+    Gast.
+  Review `advantly-20261021-integration-b-local-match-review-r2` und Server-Probe
+  `advantly-20261021-server-late-guest-probe-r1` laufen.
+
+### Vertragsänderung: späte Referenzen auf global redigierte Spieler
+
+Server-Probe `advantly-20261021-server-late-guest-probe-r1` (Belege
+`%TEMP%/advantly-late-guest-probe-20261021/`): Ein Upload, der Gast X erst nach
+der Löschung des verknüpften Profils referenziert, trägt X nie in
+`match_redacted_players` des neuen Matches ein. Der Transfer liefert dann
+`redactedPlayerIds: []`, obwohl der Server X als global redigiert kennt. Der
+Client behält den Verzeichnisnamen, weil nur Manifest-IDs das Verzeichnis
+bereinigen. So ist es heute gewollt (00700 füllt das Manifest nur beim Löschen;
+220 Z. 1190 und 240 erwarten event-only), es verfehlt aber das Löschziel.
+
+**Entscheidung des Integrators:** Beim INSERT von `match_events` (Legacy, V2,
+Genesis-Lineup) und `match_participants` wird (match, X) genau dann in
+`match_redacted_players` (NICHT in `match_redacted_names`) eingetragen und E einmal pro
+Transaktion erhöht, wenn der globale Zweig gilt:
+`redacted_player_identity(X) and not redaction_live_profile_context(match, X)`.
+Reine `player_write_redactions`, Profil-IDs, matchlokale Namen und
+ID-Kollisionen (220 Z. 1214) bleiben event-only. Das Manifest enthält damit
+weiterhin nur positiv belegte globale Spieler-IDs, unabhängig vom Uploadzeitpunkt.
+Der Client bleibt unverändert. Die Erwartungen in 220 und 240 werden gezielt
+angepasst, alle übrigen bleiben bestehen.
+
+Review r2 zu `ef23ad6`: fix-first, 1× P1, 3× P2, 4× P3. Bericht
+`review-ef23ad6/build/review-report.txt`. Bestätigt: Der Kopf wird nicht
+überschrieben, kein Zurückdrehen, Eigentum per UID, Sperren bei FEED, ABSENT,
+fremden Konten und A→B→A, 11.sqm wiederholbar, Reds echt.
+
+**Vertragsergänzung eigene Matches, Teil 2 (Integrator):**
+- **P1-1:** Im Fenster mit offener Schreibspur und geschlossener Lesespur folgen
+  `maxLamport`, `maxDeviceSeq` und `markConfirmed*` der Schreibspur
+  (`readable || ownWritable`). Sonst vergibt die Session seq 1, der Store meldet
+  SEQUENCE_CONFLICT, und der Punkt geht still verloren.
+- **P2-1:** Die Genesis-Sperre in `ScopedEventStore` wird nur nach einem echten
+  Genesis-Durchlauf gesetzt. Gemischte Batches von Uhr und Handy funktionieren.
+- **P2-2:** Während eines laufenden Neuscans akzeptiert die Schreibspur auch
+  MEMBER beim zuletzt vollständigen G. Die Lesespur bleibt streng. Begründung:
+  Ersteller bleiben Mitglied ihrer eigenen Matches; „nie blockieren“ hat beim
+  Live-Zählen Vorrang.
+- **P2-3:** Abgeleitete Kopffelder (Status, Summary, ein vom Server verworfener
+  Vorgänger) werden aus dem Cloud-Kopf übernommen, wenn drei Dinge gelten: die
+  serverVersion ist strikt neuer als der zuletzt bestätigte bzw. belegte Stand,
+  es gibt keine unbestätigten lokalen Änderungen, und lokale Felder
+  (`firstServer`, `receiveRight`, `startEnds`, `updated_at_ms`, meta) bleiben
+  unberührt. Es wird nie zurückgedreht, und unbestätigte Änderungen gehen nie
+  verloren.
+- P3: Fremde Peer-Events an eigenen Matches sind kein Leck, aber eine
+  Integritätslücke; beide Spuren hängen am Host-Gate für den Restore;
+  ein alter Beleg kann nach einer lokalen Kopfänderung stehen bleiben.
+
+Server-Paket `4a5b64c` (Worktree `t3-11e329d8`): Migration 01000 mit
+AFTER-Triggern auf Events und Teilnehmern, gemeinsamer Marker mit 00900, Test
+250 (87 von 293 rot vorher) und ein Rennen mit 16 Läufen ohne Deadlock. Keine
+messbaren Kosten (N3 0,124 s). Jede geänderte Alt-Erwartung ist begründet.
+Integratorentscheid zur Nebenfolge 220 Z. 1235: nur `match_redacted_players`.
+Ein `names`-Eintrag wäre ein dauerhafter matchlokaler Beleg und würde spätere
+Events einer lebenden Person mit eindeutigem Profilkontext redigieren, also
+genau die Klasse aus N1–N7. Korrektur samt roter Gegenprobe läuft im selben
+Worktree. Offen (P3): Ein fremder Gast als Teilnehmer wird vom Writer mit
+`player_not_owned` verworfen und bekommt keinen Eintrag. Altbestand vor 01000
+wird nicht nachgetragen.
+
+Eigene Matches, Korrekturrunde 3 `0e3d6d2` auf `ef23ad6` (Schema 13 über
+`12.sqm`): Sequenz, Lamport und Bestätigung folgen der Schreibspur. Die
+Genesis-Sperre greift nur nach echter Genesis. Die Schreibspur gilt während
+des Neuscans beim zuletzt vollständigen G. Abgeleitete Kopffelder werden nur
+übernommen, wenn `own_version`/`own_revisions` am Snapshot es zulassen.
+Reds: Lane 7/18, Joint 1/17, Session-Test (Handy-Seqs `[1,2]` statt `[1,2,3,4]`).
+Danach data 244, cloud-sync 277, match-session 136 grün, voller Check grün.
+
+**Für Welle 3 (Session, Besitzer `MatchSession.kt`):**
+- `emit` muss `AppendResult` auswerten; ein SEQUENCE_CONFLICT darf nicht stumm bleiben.
+- `onMessage` muss die erwarteten `IllegalStateException`-Fälle des Stores
+  behandeln (fremde Quelle, FEED während eines laufenden Matches).
+- Im Fenster „schreiben ja, lesen nein“ liefert die Anti-Entropie der Uhr keine
+  verpassten Handy-Events.
+- Nach einer Kopfübernahme braucht ein offenes Match einen `refreshHeader`-Hook.
+
+**Host-Vertrag B4:** Pull und U4 laufen je Konto streng nacheinander. Sonst kann
+eine vor einem eigenen Ack geholte, danach committete Seite eine ältere Fassung
+übernehmen (Restlücke P2-3; der nächste Lauf korrigiert sie). Das Restore-Gate
+bleibt Pflicht, weil beide Spuren nur aus der Datenbank aufgehen.
+- Review r3 zu `0e3d6d2`: fix-first nur wegen eines kleinen P2, sonst
+  freigabefähig. Bericht `review-0e3d6d2/build/review-report.txt`. Eigene
+  fokussierte Läufe grün, Reds echt. Kein stiller Punktverlust mehr (auch nach
+  Neustart, bei Uhr-Echo und bei gemischten Batches). Übernahme und Quittieren
+  verlieren auch ohne Host-Serialisierung nie eine unbestätigte Änderung.
+  `current_g` wird bei jedem Lesen neu berechnet.
+  - P2-A: Der vom Server beim Anlegen verworfene Vorgänger überschreibt einen
+    lokal vorhandenen, noch nicht hochgeladenen Vorgänger dauerhaft.
+  - P3-A: Ohne Ack seit dem Beleg wird jede höhere serverVersion übernommen,
+    auch mit weniger Events.
+  Beides geht in die enge Korrekturrunde 4 im selben Worktree.
+  - P3-C geht an Welle 3: Ändert ein zweites eigenes Gerät Meta oder Teilnehmer,
+    entsteht kein Beleg mehr und der Pull meldet dauerhaft BLOCKED (das gehört zur
+    MatchMeta-Quellautorität). Lesbar bleibt das Match über die Lesespur.
+
+CI auf PR #75 (`0531c60`): Gradle rot in genau einem Test,
+`emptyPullOverLargeHistoryReadsNeitherGlobalPayloadsNorUnboundedMatchIds`, mit
+`DEADLINE_REACHED` statt `COMPLETE` nach 15,4 s. Auf `16d20b8` brauchte derselbe
+Test auf CI schon 10,9 s, lokal unverändert 3,4–4,2 s. Ursache ist die implizite
+Produktionsfrist von 15 s auf geteilten Runnern, keine Produktregression. Der
+Test prüft Lesemuster und erhält deshalb eine explizite Frist von 120 s. Das
+Fristverhalten decken eigene Tests ab. Der ABSENT-Pfad mit 20 000 Feed-Snapshots
+bleibt als Volumenbeobachtung offen: Er braucht auf CI mehrere Läufe, setzt aber
+korrekt fort.
+
+Server-Review zu `77b6317`: **Freigabe**, keine P1/P2 im Diff. Bericht
+`%TEMP%/review-77b6317-20261021/review-report.txt`. Eigene Prüfung: 250 auf dem
+Parent 70/303 rot, gegen 4a5b64c 22 rot (echte Gegenprobe), Ziel grün. Alle
+geänderten Alt-Assertions liegen im globalen Zweig. Elf eigene Gegenproben ohne
+Wiederöffnung einer N-Klasse. Kein E-Anstieg durch unveränderte Upserts. Der
+01000-Trigger feuert vor 00900, also kein doppelter Anstieg beim Upload. Inserts
+ohne Treffer kosten etwa 4 % mehr. Per Merge `fee71b3` übernommen. Root-SQL-Lauf
+grün bis auf die fünf Plattformlücken; 250 303/303; 181/190 Exit 0.
+
+**Entscheidungen des Integrators:**
+- P3-1/P3-2: Der UPDATE-Trigger auf Teilnehmern feuert nur, wenn `player_id` auf
+  einen Nicht-null-Wert wechselt. Der Teilnehmer-Extraktor folgt exakt der
+  Löscherfassung in 00700 (Z. 285–286). Die Migration 01000 ist unveröffentlicht
+  und wird direkt korrigiert. P3-3: Genesis-Manifestinhalt in 220 prüfen.
+- **Vorbestehender P1 (Produktionsrisiko für den Löschjob):** Eine Kontolöschung
+  läuft bei vielen Textslot-Teilnehmern ins 10-s-Limit (2 Self-IDs: 6 s bei 20 000
+  Zeilen, Timeout bei 50 000). Vermutete Ursache sind globale Scans mit
+  `redaction_uuid(slot_id)` in 00700 Z. 285/303/558. Wird ein eigener
+  Performance-Auftrag nach dem N3-Muster (Ausdrucksindex/Vorfilter, Budgets
+  unverändert).
+- 01000-Nachschärfung `d1f0722` (Worktree `t3-1497f727`), vom Integrator geprüft
+  und per Fast-Forward übernommen: Der UPDATE-Trigger feuert nur bei einem
+  Wechsel von `player_id` auf einen Wert ungleich null, und der Teilnehmerpfad
+  folgt der 00700-Regel (lebender Profil-FK schließt aus). Kein zweiter E-Schritt
+  bei der Kontolöschung. Der Genesis-Manifestinhalt ist in 220 geprüft (1324).
+  6 von 318 neuen 250-Assertions waren gegen 77b6317 rot. Root-SQL-Lauf
+  `full-r10-late-p3.log`.
+- CI auf PR #75 (`7799f1c`): alle fünf Jobs grün. Das gilt für D1, U4, eigene
+  Matches, 00800, 00900 und 01000 samt Nachschärfung, für den Lesemustertest mit
+  expliziter Frist, für Kotlin/Native/Apple und für den Supabase-Stack mit pgTAP
+  und allen Rennskripten einschließlich 250.
+- Löschpfad-Performance `b854b9d` (Worktree `t3-b90a697f`): Ursache belegt.
+  `redaction_uuid` lief 100 027-mal im Ausnahmepfad (6,1 von 6,2 s) mit Seq Scans
+  in 00700 Z. 285/303/558, dazu globale Kontextaufrufe je pensionierter ID.
+  Migration 01100: partieller Ausdrucksindex auf UUID-förmige Slots, UNION-Zweige
+  statt OR, Kandidatensuche vor dem unveränderten Kontext-Helfer. DELETE mit
+  2 Self-IDs ~11 ms und mit 205 ~106 ms bis 100 000 Textslots, vorher Timeout ab
+  20 000/50 000. Schattenvergleich alt/neu: 100 Löschungen, 0 Abweichungen, zwei
+  Mutationen erkannt. Keine Erwartungsänderung in 210/220/240/250. Probe-Merge
+  mit `d1f0722` konfliktfrei. Unabhängige Review
+  `advantly-20261021-server-delete-textslot-perf-review-r1` läuft.
+- Review zu `b854b9d`: **Freigabe**, kein P1/P2, vier optionale P3. Bericht
+  `%TEMP%/review-b854b9d-20261021/review-report.txt`. Eigener Schattenvergleich
+  mit 26 Schreibweisen und Grenzfällen (N7, nur über Events erreichbare IDs, leere
+  Matches, Profil-FK auf das Opfer): 180 Löschungen, 360 Vergleiche, 0
+  Abweichungen, mit freiem Planer und mit erzwungenem Index. Mutationen erkannt.
+  Indexgrenze 32–41 per 200 000 Fuzz-Mutationen belegt. Rechte identisch, keine
+  messbaren Upload-Kosten. Per Merge `b238556` übernommen. Root-SQL-Lauf grün bis
+  auf die Plattformlücken; 260 18/18; 181/190 Exit 0.
+- Folgeauftrag mit einem Worker nacheinander:
+  - P3-1 Join-Patch im Epochen-Update von 01100 (unveröffentlicht, direkt korrigiert)
+    sowie die Kommentare P3-2/P3-3;
+  - **vorbestehendes Löschrisiko:** `anonymize_profile` (00800) skaliert mit der
+    eigenen Historie, 7,7 s bei 25 000 eigenen Teilnehmerzeilen, gesamt 10,9 s.
+- Folgeauftrag erledigt (Worktree `t3-b90a697f`), noch nicht übernommen:
+  - `a780e7c`: 01100-Feinschliff. Epochen-Update über `id = any(array(select distinct …))`,
+    stabil auch bei veralteter Statistik (1,5 s → 0,12 s). 260 hat 22 Fälle.
+    Schattenvergleich 638/0.
+  - `0780489`: Migration 20261022000100. Die Kontolöschung wuchs **quadratisch** mit
+    der eigenen Historie: Kontext-Helfer ohne Index, wiederholtes `bump_visibility`
+    auf derselben Zeile, fehlender Index auf `previous_match_id`. Jetzt linear:
+    10k 20 s → 10 s, 25k 102 s → 24 s, 50k Abbruch → 46 s. Schattenvergleich der
+    ganzen Löschung 48/0, neue Datei 270 mit Lesezählungen.
+  - Löschjob: Er geriet in einen dauerhaften Stillstand (Abbruch nach 60 s, Rollback,
+    dieselben Konten im nächsten Lauf). Jetzt beginnt er nach 30 s keine weitere
+    Löschung mehr.
+  - **Offen und Architekturentscheidung:** Konten mit mehr als ~10 000 eigenen
+    Teilnehmerzeilen überschreiten 10 s, Konten über ~60 000 auch die 60 s des Jobs.
+    Ein einzelnes solches Konto blockiert die Warteschlange. Rund 1 ms je Zeile
+    entfallen auf die Zeilentrigger; mit identischer Semantik gibt es keinen engen
+    Weg darunter. Die Optionen (gestaffelte Löschung, jobspezifische Frist, …)
+    bewertet die Review `advantly-20261022-server-delete-history-review-r1`.
+- Review zu `a780e7c`/`0780489`: A und die Semantik von B sind freigegeben.
+  Bericht `%TEMP%/review-0780489-20261022/review-report.txt`. Eigener
+  Schattenvergleich 48/0. Ein dynamischer Differenztest über Suite und Rennen
+  verglich 3 865 Helferaufrufe ohne Abweichung. Alle 2 096 übersprungenen
+  `bump_visibility` lagen innerhalb einer laufenden Profillöschung; kein anderes
+  Konto verliert eine Erhöhung. Rechte identisch.
+  - **P2-1:** Die 30-s-Grenze garantiert keinen Fortschritt (A 20 s + B 45 s ergibt
+    einen Dauerstillstand). Enge Korrektur im selben Worktree: Unterblock je
+    Löschung, Fehlversuchszähler, gescheiterte Konten ans Ende, Alarm. Dazu P3-1:
+    Neuanlage einer Profil-ID mit Grabstein ablehnen.
+  - **P2-2, vorbestehend und grundsätzlich:** `lock_sync` ist EIN globaler Lock.
+    Jede Kontolöschung blockiert für ihre ganze Dauer Lesen und Schreiben aller
+    Nutzer. Bei 15 s Löschdauer brachen fremde Pulls nach 8 s ab.
+
+**Integratorentscheid, Zielarchitektur Kontolöschung (vor der Pilot-Freigabe):**
+gestaffelte Löschung (Option a der Review). Zuerst ein kurzer atomarer Schritt:
+Status, Sitzungen, Gerätebindungen und alle Grabsteine bzw. Schreibsperren. Ab da
+ist das Konto nicht mehr nutzbar, und keine Identität ist wiederherstellbar.
+Danach folgen kurze Batches über mehrere Transaktionen, jeder Batch mit nur kurzem
+`lock_sync`. Zum Schluss das kurze DELETE. Zwischenzustände sind für Clients nie
+als halb gelöscht sichtbar und sind fortsetzbar. Gründe: Es ist die einzige Option,
+die den globalen Stillstand (P2-2) beseitigt, sie hat keine Größengrenze und wirkt
+sofort im Sinn der DSGVO. Ein jobspezifisch höheres statement_timeout bleibt
+höchstens eine Notlösung im Wartungsfenster. Das wird ein eigenes Server-Paket mit
+eigener Review; die Zwischenzustände sind neu zu testen.
+
+**Übernahme `3701ab9` (Folgeauftrag P2-1/P3-1), gemergt nach `p2/d2d3-integration-b`:**
+- Löschjob: Auswahl vorab als Liste unter `lock_sync`, sortiert nach Fehlversuchen,
+  Frist und ID. Jede Kontolöschung läuft in einem eigenen Unterblock, die Schleife
+  endet beim ersten Fehler. Abgeschlossene Löschungen bleiben; die abgebrochene rollt
+  vollständig zurück. Neue Tabelle `private.account_deletion_failures`, die mit dem
+  Profil kaskadiert. `account_deletion_job_status_v1` meldet `stalledAccountCount`
+  (Konten ab drei Fehlversuchen), nur als Anzahl.
+- Fristmechanik (gemessen, PG 17): `statement_timeout` feuert einmal je Statement.
+  `SET LOCAL` stellt keinen neuen Timer, eine Frist je Konto ist also nicht setzbar.
+- P3-1: `handle_new_user` lehnt getilgte Profil-IDs ab (`profile_id_retired`), sonst
+  identisch mit 00500.
+- Tests:
+  - 190: erwartet keinen atomaren Batch mehr.
+  - 220: prüft die Ablehnung statt der Wiederbelebung.
+  - 280: neu, Maßstab 1:12; gegen `0780489` sind 14 von 19 Prüfungen rot.
+- Eigene Durchsicht (Integrator): Diff schmal und schlüssig, kein Client liest das
+  Status-RPC, keine neue gebundene RPC (181 unverändert).
+- Bleibt offen: Konten über dem Limit, aber jetzt sichtbar und nicht mehr blockierend.
+  Ebenso Verhungern bei ständigem Zulauf und P2-2. Alles wird mit der gestaffelten
+  Löschung erledigt.
+- Root-SQL-Suite auf dem Merge: Rot sind nur die 5 Plattformlücken (110, 200). 260, 270 und 280 sind grün,
+  181 und 190 enden mit Exit 0. Log: `%TEMP%/advantly-root-sql-integration-20261020/suite-3701ab9.log`.
+
+**Nutzerentscheide 22.10.2026:** Endgültiges Löschen allein beseitigt den globalen
+Stillstand nicht, weil die Arbeit unter `lock_sync` bleibt. Ein nächtlicher Lauf wurde
+erwogen; entschieden ist „gestaffelt weiterbauen“, Variante **„pro Match atomar“**:
+- **A, Sperren:** kurz und atomar.
+- **B, Abtragen:** je Job-Aufruf (~1 s Budget) werden Blöcke von Matches vollständig
+  redigiert, mit Epochenanstieg in derselben Transaktion.
+- **C, Abschluss:** kurzes `purge_account`.
+- Der Cron läuft alle 5 s.
+
+**Übernahme gestaffelte Kontolöschung (`2bba3c8..b18aa2e`), Merge `904a7c2`:**
+- Neue Migration `20261022000200_staged_account_deletion.sql`, neue Tests 290 (pgTAP,
+  90 Prüfungen) und `290_…_concurrency.py` (in CI). 190 und 280 sind angepasst.
+- **Runde r2** (`2bba3c8`, `2ecefd1`): Grundumsetzung. Ein 100k-Konto hält die Sperre
+  höchstens etwa 1,2 s je Aufruf statt 398–822 s am Stück.
+- **Review r1:** freigegeben mit Auflagen.
+  - P2-1: Ein scheiterndes A hielt alle Löschungen an.
+  - P2-2: Staff verlor in A den Zugriff ohne neues G; der Client wirft bei gleichem G
+    und anderer Stufe.
+  - P3: Zwei gleichzeitige Löschungen mit gemeinsamen Matches wichen im Endzustand ab.
+- **Runde r3** (`c27ecae..bb5b6a2`):
+  - Fehler isoliert, mit gemeinsamer Reihenfolge nach Fehlversuchen.
+  - `bump_visibility` für Staff und Co-Leitung in A.
+  - A wartet auf überlappende laufende Löschungen; `settle` im Dashboard-Weg.
+  - Die Blockgröße halbiert sich bei Überlauf und wächst wieder bis 50.
+- **Review r2:** nicht freigegeben.
+  - P1: `account_deletion_blocker` war quadratisch, weil der Planner einen Nested Loop
+    über `unnest` des Parameters wählte. Zwei überlappende größere Löschungen hielten
+    `lock_sync` bis zu 60 s.
+  - Der Hänger der vollen Schatten-Suite war ein Harness-Artefakt (Ballast in einer
+    stundenlangen Transaktion), kein Produktfehler.
+- **Runde r4** (`9bc754d..b18aa2e`):
+  - Blocker mit `enable_nestloop = off`: 30k × 30k sinkt von 41,5 s auf 14 ms.
+  - Szenario 100k in B, daneben wird ein 20k-Konto fällig: Die längste Sperre je
+    Aufruf sinkt von 21,8 s auf 1,7 s.
+  - Wartestelle `private.account_deletion_waits`; zurückgestellte A zählen aufs Budget.
+  - `settle` arbeitet nur bis zum letzten gemeinsamen Match.
+  - Das Budget zählt ab Erhalt der Sperre, nicht ab dem Aufruf. Diese Änderung war
+    nicht beauftragt; sie ist übernommen, weil sie die Sperrhaltezeit misst, um die es
+    geht.
+- **Review r3:** **freigegeben mit Auflagen.**
+  - Kein P1 und kein P2.
+  - Drei überlappende Konten gleichen `purge_account`; die Gegenprobe ohne Wartestelle
+    weicht ab.
+- **Schatten je Testdatei:** Endzustand gleich `purge_account`, 0 G-Verletzungen in
+  6 011 Prüfschritten.
+- **Integratorentscheid, Ausnahme vom identischen Endzustand:** Hat die überlappende
+  andere Löschung drei oder mehr Fehlversuche, wartet A nicht mehr (Anti-Verhungern).
+  - Garantiert sind dann nur: keine Klarnamen, jede Namensänderung mit höherer
+    Epoche, G-Invariante.
+  - Nicht garantiert sind einzelne Zeilen (`match_redacted_names`, Höhe von
+    `redaction_epoch`).
+  - Der Fall steht unter Alarm (`stalledAccountCount`). Tests 290/82–85.
+- **Für das Betriebshandbuch:**
+  - Ein Dashboard- oder Admin-DELETE neben einer großen laufenden Löschung schließt
+    deren Matches bis zum letzten gemeinsamen Match in EINER Transaktion unter
+    `lock_sync` ab. Gemessen: 9,2 s bei 10k; bei 100k sind Minuten bzw. das
+    60-s-Limit möglich.
+  - Das DELETE scheitert, solange der Block der anderen Löschung scheitert und diese
+    unter drei Fehlversuchen hat.
+  - `admin_purge_due_accounts` bleibt ungestaffelt und sperrt global. Kein Client ruft
+    es auf.
+  - Der Index `match_events_author_idx` entsteht ohne `CONCURRENTLY`; dafür ein
+    Wartungsfenster einplanen.
+- **Bekannte Restpunkte (P3, nicht blockierend):**
+  - Eine veraltete Wartestelle nach Abbruch und Neuantrag verzögert A bis zur alten
+    Position, nie früher. Möglicher Fix: `cancel_account_deletion` räumt die
+    Wartestelle ab.
+  - Kein automatisierter Test für das Budget ab der Sperre.
+  - Kein Test mit drei Konten im Ausnahmepfad.
+  - `tournament_overview` hat keinen Kotlin-Client, Realtime ist seit `20261018000100`
+    geschlossen. Beim Wiederöffnen müssen A und `purge_account` `access_epoch` der
+    Turniermatches mit erhöhen.
+- **Auflage vor der Pilot-Freigabe:** CI auf dem Supabase-Stack muss grün sein. Test 290
+  nutzt im Aufbau `alter table public.matches disable trigger`; das ist lokal belegt,
+  in CI noch nicht.
+- **Release-Gate:** 20261022000200 gehört zum Gate von 00700/00800/00900/01000.
+- Root-SQL-Suite auf `904a7c2`: Rot sind nur die 5 Plattformlücken (110 ×2, 200 ×3).
+  290 hat 90/90, 181 und 190 enden mit Exit 0. Log:
+  `%TEMP%/advantly-root-sql-integration-20261020/root-suite-904a7c2.log`.
+- CI auf PR #75 (`826d29b`, Lauf 39840815447): alle 5 Checks grün. pgTAP 44 Dateien,
+  3 397 Tests; 290 grün inklusive `disable trigger`. Die CI-Auflage ist erfüllt.
+
+## Welle 3 – festgeschriebener Vertrag (22.10.2026)
+
+Grundlage ist die lesende Analyse `advantly-20261022-w3-contract-analysis-r1` auf
+`826d29b`. Bericht mit Datei:Zeile-Belegen: `%TEMP%/advantly-w3-20261022/contract-r1.md`.
+
+**Ist-Stand:**
+- V4 ist modelliert, aber ganz aus (`ProtocolVersion.CURRENT = MIN_SUPPORTED = 3`).
+- Die Data-Zustell-API (`registerPeer`, `pendingDeliveries`, `ackAccess`/`ackRedaction`,
+  Redaktionsseiten, `activate`) hat keinen Produktionsaufrufer.
+- Die Session hört nicht auf Data-Änderungen, `emit` ignoriert `AppendResult`,
+  und `refreshHeader` gilt nur für nicht offene Matches.
+- **Neuer Befund:** `pendingToPeers` zählt nur Events der Lesespur. Eigene
+  ungesendete Punkte im Fenster „schreiben ja, lesen nein“ sind unsichtbar
+  (`ScopedEventStore.kt:67–71`).
+- Eine Data-Redaktionsseite (64 KiB ohne Hülle) ist als Wire-Paket mit Envelope zu groß,
+  und `SyncCodec.encode` wirft dann.
+
+**Schnittstellen-Commit des Integrators** (vor dem Dispatch, `SessionState.kt`):
+- `SessionState.lifecycleRevision: Long`: ein Zähler im Speicher, der nur auf
+  Ungleichheit verglichen wird. Er steigt bei jeder Access-, Redaktions- oder
+  Directory-Änderung aus Data. Konsumenten verwerfen dann alle abgeleiteten Namen.
+- `SyncStatus.lifecyclePendingToPeers: Int` (Handy), `SyncStatus.lifecycleBlocked:
+  Boolean` und `SyncStatus.settled`.
+- Alle Felder haben Defaults. S füllt sie, P konsumiert sie. Ändern darf sie nur der
+  Integrator.
+
+**Entscheidungen des Integrators** (Empfehlungen der Analyse übernommen, wenn nicht anders vermerkt):
+- **E1:** S darf `SyncCodec.decode` und die Session um einen Parameter mit Default
+  für den zulässigen Versionsbereich ergänzen, damit V4 in Tests lesbar ist. Die
+  Konstanten bleiben beim Integrator und auf 3, bis aktiviert wird. Abweichung von der
+  Analyse: kein Vorab-Commit des Integrators nötig.
+- **E2:** Die Uhr aktiviert ihr Replikat in derselben Transaktion wie die erste
+  gültige Access-Zustellung vom bestätigten Handy (S, mit Test). Den Host-Schalter, ob
+  V4 überhaupt läuft, setzt der Integrator.
+- **E3:** Den Seitenstand hält das Handy im Speicher. Nach einem Neustart sendet es ab
+  Index 0 neu; die Uhr verarbeitet wiederholte Seiten idempotent. Keine Wire-Erweiterung.
+- **E4:** `WearSessions.isSyncSettled` setzt P um, über `SyncStatus.settled`.
+- **E5:** Der Glance-Cache speichert keine Namen mehr; der Kaltstart löst sie neu auf.
+- **E6:** P3-C: Zuerst schreibt S einen roten Repro-Test. Danach Variante (a): Teilnehmer-
+  autorität bei Handy bzw. Genesis-Quelle, ohne Data-Edit.
+- **E7:** `registerPeer` erhält die Watch-`deviceId` aus dem bestätigten Hello.
+- **E8:** Bei E=0 bestätigt das Handy die Redaktion mit dem `AccessAck` (MEMBER bei G)
+  oder sobald `Summary.lifecycle.redactionApplied >= E` meldet.
+- **E9:** Die Uhr setzt `markReady(G,E)` erst, wenn drei Bedingungen erfüllt sind:
+  MEMBER bei G, angewandter Stand ≥ gemeldetem E und kein offener Transfer.
+- **D-2** (öffentliches `canAppend`) entfällt; S fängt die erwarteten ISE.
+
+**Pakete** (exklusive Dateien, laut Analyse §7):
+- **S – Session/Zustellung:**
+  - Besitz: `shared/match-session/**`, darin allein `MatchSession.kt`.
+    Neue Logik kommt in eigene Dateien (`ReplicaDelivery.kt`, `ReplicaReceiver.kt`).
+  - Ausnahmen in `sync-protocol`: der E1-Parameter und reine Byte-Batching-Helfer in
+    `AntiEntropy.kt`.
+  - Inhalt:
+    - Zustellung von Access und Redaktion mit Wire-Aufteiler und Acks je Seite.
+    - Stamps und Envelope-Prüfung.
+    - Invalidierung über `observeDirectoryChanges` mit Fingerabdruck je offenem Match;
+      `refreshHeader` auch für offene Matches.
+    - Live-Zählen: schließen nur bei zugesperrter Schreibspur.
+    - `AppendResult`/ISE in `emit` und `receive`.
+    - MatchMeta-Quellautorität (P3-3) und P3-C.
+    - Byte-Batching für Events.
+- **D – Data-Ergänzung D-1:**
+  - `unconfirmedCountByMatch`, `unconfirmedMatches`, `unconfirmedEvents` und
+    `sequences` folgen bei eigenen Quellen der Schreibspur.
+  - Fremde Quellen bleiben streng an der Lesespur.
+  - Besitz: `ScopedEventStore.kt`, nötige `.sq`-Abfragen, internes `ownWritable` in
+    `ReplicaLifecycleStore` (vom Integrator freigegeben) und Data-Tests.
+- **P – Namensauflösung/Präsentation:**
+  - Besitz: `shared/presentation/**`, `shared/umbrella-watch/**`, `wearApp/**` und
+    `watchApp/ScoringModel.swift`.
+  - `lifecycleRevision` leert alle Namens-Caches (`SessionMatchStore`, Glance,
+    `WatchScoring`/`WatchDirectory`).
+  - Keine Namen in Verlauf, Vorschlägen und Rematch.
+  - Kein Data- oder Session-Edit.
+- **Integrator:**
+  - Merge.
+  - Pull-Host Android (`CloudPullRunner` hat bisher keinen Aufrufer).
+  - `activate` auf dem Handy und Host-Schalter.
+  - `assignPlayer` namenfrei, zusammen mit V4 (nach S).
+  - Versionssprung 3 → 4 und Update-Hinweis.
+
+**Reihenfolge:** S, D und P starten parallel auf dem Schnittstellen-Commit. S schaltet
+die Backlog-Tests im Schreibfenster erst nach dem Merge von D-1 scharf. Gradle läuft
+nacheinander: D → S → P. Die Abnahmefälle stehen in Bericht §9.
+
+**D-1 übernommen** (`967e79b` + `a720d301`, Merge `1f2def72`, voller Check grün):
+- Review r1: Freigabe mit Auflagen, kein Datenschutzleck, Reds echt.
+- P2-1 behoben: Ohne Lesespur liest die Zählung nur noch Index und Zähler, keine Payloads
+  mehr. In der Probe (300 fremde Matches × 200 Events) kostet das ca. 70 ms statt 180 ms;
+  die Basis lag bei 40 ms.
+- P3-3 behoben: Tests für mehrere eigene Geräte und ein Gerät eines fremden Kontos.
+- **Hinweis an S:** Bei ausstehender Redaktion meldet der Zähler einen Wert größer 0,
+  `unconfirmedEvents` bleibt aber leer. S behandelt das als „wartet auf Redaktion“, nicht
+  als Fehler.
+- **Hinweis an S (P3-1):** Verborgene Events verursachen ein Ping-Pong aus Events und
+  `Summary(reply)`. Mit D-1 betrifft das nur noch fremde Quellen und ausstehende Redaktion.
+- **Akzeptiertes Restrisiko (P3-4):** Ein neues E wird erst im neuen G sichtbar. Bis dahin
+  gibt das Neuscan-Fenster eigene Events nach dem bekannten E frei, und zwar nur an
+  Gegenstellen desselben Kontos. Das entspricht der normalen Lesespur.
+
+**P übernommen** (`29e2b1c8`..`2dcb267c`, Merge `1bafbe96`, voller Check grün):
+- **Review r1:** Freigabe mit Auflagen.
+  - Der vermutete Namensrückweg über `legacy`/`player_json` ist für redigierte Personen
+    nicht erreichbar: Die Redaktion setzt `player_json = NULL`.
+  - Der Wear-Flake `DirectUiBoundaryTest.healthyPointStillCommitsOnce` ließ sich in
+    6 Läufen nicht reproduzieren und ist vorbestehend.
+- **Runde 2:**
+  - P-1: Ein aufgeschobenes Glance-Update übersteht das Prozessende.
+  - P-2: Wizard-Plätze werden per ID neu aufgelöst.
+  - P-4: „Synchron“ gilt auf Wear und watchOS nur bei `SyncStatus.settled`.
+- **Offen beim Integrator (P-3):** Ein blockierter Rückstand bzw. reiner Rückstand anderer
+  Matches erscheint als „1 ausstehend“. Ein eigener DE/EN-Text folgt nach S.
+- **Offen für Data:** `MatchWizard.start()` wirft eine ISE, wenn ein Verzeichniseintrag
+  vorhanden, aber nicht schreibbar ist (`rememberPlayers` → `addGuest`). Das wird erst
+  mit V4 relevant.
+- Swift (`ScoringModel.swift`) ist nur in der CI prüfbar.
+
+**S übernommen** (`51faecf`, `b7a3b71`, `90e2746`, Merge `8c8bde95`; `WriteWindowBacklogTest`
+nach D-1 eingeschaltet in `b71f2390`). Der Baum ist identisch mit dem Probe-Merge
+`00850345`, auf dem der volle Check grün lief.
+
+Review r1: Freigabe mit Auflagen. Kein Rechte- oder Namensleck gefunden. 23 von 23
+neuen Tests sind gegen die Basis fachlich rot.
+
+**Vor der V4-Aktivierung Pflicht (Runde 2 `advantly-20261023-w3-session-r2`):**
+- **P2-1:** Ein Handy mit Konto und Bereich 3..4 handelte mit einer v3-Uhr Version 3 aus.
+  Danach flossen nur Events, Access und Redaktion kamen nie an, und das Handy meldete
+  trotzdem `settled`.
+  - **Entscheidung:** Mit Konto sendet das Hello `minV = 4`. Gegenüber v3 entsteht ein
+    Updatezustand, und es fließt nichts mehr.
+  - Ohne Konto bleibt P1 unverändert.
+- **P2-2:** Der Auth-Lease-Teil des Fence ist ungetestet. Die Mutationsproben der Review
+  bleiben grün, wenn die Fence leer ist oder ganz entfällt. Fehlende Tests:
+  - Neustart ohne `activateAccount`;
+  - Wechsel zwischen Empfang und Mutation.
+
+**P3 in Runde 2:**
+- Ein übergroßes Einzelelement wird als blockiert gemeldet.
+- `Summary.lifecycle` läuft im periodischen Takt mit, wegen Probe B (beendetes Match
+  bleibt auf der Uhr bis zum nächsten Hello unbereit).
+- P3-C-Repro und Prüfung der Nebenwirkung „neu installiertes Handy kann in älteren
+  eigenen Matches keine Spieler zuweisen“.
+- Stamp-Logik wandert nach `MatchStamps.kt`.
+
+**Beim Integrator:**
+- Data-Konstante 64 KiB öffentlich machen.
+- UI-Hinweis bei scheiterndem `emit` (mit P-3).
+- `activateAccount` bei jedem App-Start.
+- Der LinkFrame-Overhead liegt außerhalb der 64 KiB. Der Envelope-Spielraum deckt ihn
+  praktisch ab, garantiert ist das aber nicht.
+
+**D-2** (`0d1fdd8e`, Uhr-Match am aktivierten Handy, bestätigt durch Probe D der S-Review)
+ist in Review: `advantly-20261023-w3-data-d2-review-r1`.
+
+**D-2 übernommen** (`0d1fdd8e` + `c5a00389`, Merge `53753d2a`, voller Check grün):
+- Ein Match der eigenen, per `cloud_device_owner` gebundenen Uhr wird am aktivierten
+  Handy angenommen, in beiden Reihenfolgen.
+- Ein vorab gekommener Kopf muss zur Genesis passen (Format, Lineup, Meta,
+  Erzeugungszeit).
+- **Akzeptierter Rest:** `previous_match_id` eines solchen Kopfs wird nicht geprüft. Das
+  ergibt höchstens eine falsche Folge-Verknüpfung, das Vorgänger-Match bleibt gesperrt.
+
+**S Runde 2 übernommen** (`cf3adbed`..`84250307`, Merge `c68aacae`; match-session
+173 Tests, 0 übersprungen):
+- Mit Konto gilt `minV = 4`, dadurch Updatezustand statt Teilsync.
+- Fence-Tests: Die Mutationsproben „leere Fence“ und „ohne Kontositzung“ sind jetzt rot.
+- Ein übergroßes Element wird als blockiert gemeldet. Die Lifecycle-Meldung läuft im Takt
+  mit.
+- P3-C: BLOCKED heilt mit dem nächsten eigenen Upload. Ob der Server den
+  Teilnehmer-Upload annimmt, ist erst gegen den Cloud-Stack prüfbar.
+- **Entscheidung:** Regel (a) wird gelockert. Neben der Genesis-Quelle darf auch ein
+  eigenes Handy desselben Kontos Spieler zuweisen. Umsetzung in Runde 3 zusammen mit
+  dem Hook `eventsCommitted`: `advantly-20261023-w3-session-r3`.
+
+**H übernommen** (`04b84124` + `559e0c8c`, Merge `b3d2fe91`, voller Check grün):
+- Android-Pull-Host mit Kontosperre, prozessweit je Profil. Pull und U4 laufen
+  nacheinander.
+- Der Statusabschnitt zeigt BLOCKED-Gründe und Verbindungsfehler, DE und EN.
+- **Ein Schalter `PHONE_REPLICA_ACTIVATION` (aus) steuert Pull und `activate`
+  gemeinsam.** Ohne Aktivierung gibt es keinen Pull und keinen Button.
+- Die Fence der Aktivierung prüft auch den Auth-Lease.
+- `activateAccount` läuft bei jedem App-Start nach erfolgreicher Profilprüfung; offline
+  erst beim nächsten `refresh()`.
+- Review r1: Freigabe mit Auflagen, alle erledigt.
+- **Offen:**
+  - P3-5 und P3-6 (kosmetisch).
+  - `eventsCommitted` anschließen, nach S Runde 3.
+  - Die Reihenfolge „erst Pull, dann U4“ ist nicht erzwungen. Das gehört zu B4.
+
+**S Runde 3 und 4 übernommen** (Merges `0d7894b1`, `91c23684`; match-session 186 Tests):
+- Runde 3:
+  - `eventsCommitted`-Hook; der Pull-Host verdrahtet ihn in `fe71ffa6`.
+  - Atomare Löschung.
+- Review r2 zu Runde 2+3 verlangte vor V4 zwei Fixes, Runde 4 hat beide umgesetzt:
+  - **P2-1:** Mit Konto gehen vor der Aushandlung nur Hellos raus. Eine Sende- und eine
+    Empfangssperre gelten für Gegenstellen unter v4.
+  - **P2-2:** Die Teilnehmerregel ist an das Match gebunden. Belege: die Genesis-Quelle des
+    Kontos oder der Server-Ersteller im Pull-Snapshot. Das Payload-`createdBy` reicht
+    nicht.
+- Review r3: `advantly-20261023-w3-session-review-r3`.
+- **Bekannter Rest:** Unter V4↔V4 bleibt eine Seite nach einem verlorenen Hello bis zum
+  nächsten Link-Up unausgehandelt; kein Wiederholungs-Hello.
+- **`shortcut:`** `createdBy` wird roh aus dem Snapshot-JSON gelesen. Später durch eine
+  Data-Abfrage ersetzen.
+
+**Integrator-Commits:**
+- `78d5684b`: Die Wear-Uhr zeigt „Sync blockiert“ statt „1 ausstehend“ (P-3). Auf watchOS
+  steht weiter „N ausstehend“; ein eigener Text bräuchte Swift.
+- `32141c3b`: `ReplicaLifecycleStore.MAX_REDACTION_PAGE_BYTES` ist die eine Grenze für
+  Pull, `stageRedaction` und Gerätezustellung.
+- `66c2d81c`: `assignPlayer` erzeugt mit Konto und V4 `PlayerAssigned.reference`
+  (assignmentVersion 2, ohne Namen). Ohne Konto oder unter v3 bleibt es wie bisher.
+- **Scheiterndes `emit`:** Handy und Wear quittieren es bereits mit Ablehnungs-Haptik
+  (`LiveScoreController.kt:314`, `WatchControllerCore.kt:307`). Kein zusätzliches
+  Statusfeld.
+
+**Protokoll 4 aktiviert** (Paket A `f00e948e`..`8990ed0d` + D-3 `0e9e4e79`, `97eb2b9e`;
+Merge `edeb2bee`, voller Check grün):
+- **Versionen:** `CURRENT = 4`, `MIN_SUPPORTED = 3`.
+  - Mit Konto gilt nur v4. Gegenüber v3 entsteht der Updatezustand, Hello ist die
+    einzige Nachricht.
+  - Ohne Konto (P1) spricht die Session nur v3, auch zwischen zwei neuen Geräten.
+  - Ein Gerät mit Konto bleibt dauerhaft kontogebunden (`managed`), auch nach dem
+    Abmelden.
+- **Session-Fixes:**
+  - `Summary(reply)` für ein ganz fehlendes Match trägt den geprüften Stamp zurück.
+  - Bei ausstehender Redaktion gibt es keine Events-/Summary-Schleife mehr: vorher
+    ~6100 Pakete/min, jetzt ~2 je Takt.
+  - Hello wird im Takt wiederholt.
+- **Schalter:** `PHONE_REPLICA_ACTIVATION = true`. Die Uhr aktiviert sich selbst (E2).
+- **D-3:** Der Matchstart überspringt nicht schreibbare Verzeichniseinträge; keine ISE
+  mehr. `CloudPullStore.matchCreatedBy` ersetzt den `shortcut:`.
+- **Review A r1: Freigabe mit Auflagen**, kein P1/P2.
+  - Belegt sind: keine v4-only-Inhalte an v3, auch nach Gast/Bob/Alice; nur ein
+    Sendeweg; keine ungegateten Pfade.
+  - A1 (Bestätigungslücke nach Matchende) und A3 (`MatchStamps.echo` je Gegenstelle)
+    werden behoben in `advantly-20261023-w3-activation-r2`.
+- **A2 im Vertrag (akzeptiert):** Unter V4 erreichen Live-Punkte des Handys im Fenster
+  „schreiben ja, lesen nein“ die Uhr erst nach angewandter Redaktion. Übernimmt die Uhr
+  in diesem Fenster das Zählen, zählt sie auf altem Stand. Die Aussage der D-1-Notiz
+  („gibt eigene Events … frei“) gilt damit für den Draht unter V4 nicht. Data gibt den
+  Inhalt erst nach der Redaktion frei.
+- **iOS** hat noch keinen Konto-Host und bleibt bis zum Apple-Paket bei P1/v3.
+- **Nur auf Geräten, macOS oder dem Cloud-Stack prüfbar (Abnahme vor Release):**
+  - echte alte v3-App aus dem Store, auch im gestaffelten Rollout von Handy- und
+    Wear-App;
+  - Kotlin/Native, watchOS und Swift;
+  - Verluste auf Wear Data Layer und WatchConnectivity;
+  - Pull gegen Supabase mit Unterbrechung zwischen Katalog und Redaktion;
+  - Server-Annahme von `PlayerAssigned.reference` und Teilnehmer-Uploads.
+- **CI:** Test 290 hängt zeitweise auf dem Supabase-Stack (zwei Läufe nach 280 bis zum
+  Abbruch nach ~55 min). Unter `supabase/` gab es keine Änderung. Untersuchung:
+  `advantly-20261023-server-290-hang-r1`.
+
+**Aktivierung Runde 2 übernommen** (`c4cba036`, `d4fc4a64`, Merge `faceddf1`):
+- A1: Das Handy bestätigt die Takt-Summary einer Gegenstelle auch ohne eigenen Rückstand,
+  höchstens einmal je Takt und nicht für aktive Matches.
+- A3: `MatchStamps.echo` wird je Gegenstelle geführt.
+
+**Hänger pgTAP 290 behoben** (`8863499a`, `8bf27e99`, Merge `067c028e`):
+- **Ursache:** Es ist keine Wartekette und nicht der Cron-Job. 260/270 füllen Tabellen in
+  zurückgerollten Transaktionen, ihr `ANALYZE` bleibt aber stehen. Autovacuum räumt
+  danach, ohne zu kürzen. Ergebnis ist `reltuples = 0` bei vielen Seiten für `matches`
+  und `match_participants`.
+- **Folge:** Der Planner wählt in `private.anonymize_profile()` geschachtelte Schleifen
+  über ganze Tabellen, das dauert bei 20 000 Matches Stunden. Lokal ist der Hänger mit
+  gesetzter Statistik jedes Mal reproduzierbar. In der CI hingen 5 von 8 Läufen.
+- **Fix:**
+  - `vacuum` der drei Tabellen vor 290;
+  - `transaction_timeout = '5min'`;
+  - `timeout-minutes: 15` am pgTAP-Schritt.
+  
+  Ein `statement_timeout` greift hier nicht, weil die Job-Einheiten den Abbruch selbst
+  fangen.
+- **Kein Produktfehler,** weil Auto-Analyze die Statistik in Produktion nach wenigen
+  Änderungen korrigiert.
+- **Restrisiko (P3, Betriebshandbuch):** Die Übergabe-Anweisung in `anonymize_profile`
+  ist bei 1-Zeilen-Schätzungen kubisch. Eine robustere Form wäre `LATERAL` je eigenem
+  Match. Das ist nicht umgesetzt.
+
+## Welle 4 – gestartet 23.10.2026
+
+Aufträge:
+- Recovery-Rest: `advantly-20261023-recovery-rest-r1`.
+- B4 Android: `advantly-20261023-b4-android-r1`.
+- K7: `advantly-20261023-k7-pilot-r1`.
+
+**K7 übernommen** (`f575fb20`, `cf0fe8af`, Merge `80c56a2e`):
+- Lieferumfang:
+  - `docs/p2-pilot-nachweise.md` mit Nachweismatrix und Geräte-Bögen;
+  - Prüfskripte unter `tools/pilot-checks/`.
+- CI-Anschluss `29c266ee`: Die Skripte laufen seitdem im Supabase-Job gegen den echten
+  lokalen Stack. Das ist ihr erster Lauf überhaupt.
+- Skriptfix `f7e1a141`: Freundschafts-RPCs brauchen den Installationsnachweis.
+- Ergebnis CI 39921434622 und 39922481919, sechs von sieben grün:
+  - Release-Gate,
+  - Support,
+  - Widerruf,
+  - Export,
+  - Cloud-Upload: `PlayerAssigned.reference` und Teilnehmer vom zweiten eigenen Gerät
+    werden vom Server angenommen, damit belegt,
+  - Auth-Negativtests.
+- **Rot ist der Löschjob, ein echter Produktbefund.** Nach der gestaffelten Löschung von B
+  sieht A den Namen eines von B angelegten Gasts weiter: in `participants[].displayName`
+  und in `PlayerAssigned.player.displayName`. `anonymize_profile` löscht die eigene
+  Gastzeile, lässt den Namen im gemeinsamen Match aber stehen; das galt schon für das
+  alte `purge_account`. B selbst ist korrekt redigiert.
+
+**Nutzerentscheid 23.10.2026:** Gäste des gelöschten Kontos werden auch in gemeinsamen
+Matches entfernt. Sie erscheinen als „Gelöschter Spieler“ und sind in Teilnehmern und
+Verlauf redigiert, E steigt. Beanspruchte Gäste gehen wie bisher über. Die ID wird
+stillgelegt. Umsetzung: `advantly-20261023-server-guest-redaction-r1`.
+
+**B4 Android übernommen** (`3863bf2e`, `7697e4ef`, `4b281a2b`, `3bcb54d0`; Merge `5a530505`, voller Check grün):
+- Koordinierter Lauf erst Pull, dann U4, unter der prozessweiten Kontosperre.
+- Auslöser:
+  - App-Start bzw. Vordergrund (höchstens 1 je 60 s);
+  - Netz zurück, nur nach einem Verbindungsfehler;
+  - Matchende;
+  - alle 6 h über JobScheduler, persistent, mit Netzbedingung.
+- Backoff von 30 s bis 1 h. Bei BLOCKED keine Schleife, der Grund wird angezeigt.
+- Logout, Kontowechsel, Löschantrag und Einwilligungsentzug brechen laufende und geplante
+  Arbeit ab. Jeder Auftrag trägt sein Konto.
+- Neuer Abschnitt „Sicherung“ mit „Jetzt synchronisieren“.
+- **Architektur:** Der Konto-Host gilt prozessweit. Zwei Supabase-Clients rotierten sonst
+  ihre Refresh-Tokens gegeneinander. Jedes ViewModel hat einen eigenen Kind-Job.
+- Review r1: Freigabe mit Auflage. P2-1 (ViewModel-Leck) und fünf P3 behoben.
+- **Release-Gate:** Die App betreibt Pull und U4 jetzt automatisch.
+- Bekannte Reste: P3-4 bis P3-6. Doze, Standby und Neustart sind nur am Gerät prüfbar.
+
+**Recovery-Paket übernommen** (`f3994fe2`..`6ed66414`, Merge `977ed38d`, voller Check grün;
+Konflikt mit B4 nur in einem Kommentar in `PhoneAccount.kt`):
+- Hold mit ausdrücklicher Entscheidung: „Übernehmen“ (Standard, empfohlen), „Ohne
+  starten“ mit Rückfrage, „Später“.
+- Die Übernahme ist später aus Profil bzw. Startliste nachholbar, solange seit der
+  Entscheidung nichts gezählt wurde.
+- Bei der Übernahme gilt:
+  - Kopie statt Original;
+  - neue Geräte-ID, alte Zuordnungen und Pairing stillgelegt;
+  - Freigabe nur für dieselbe UID oder durch ausdrückliche Adoption.
+- `repairPairing` mit Rückfrage; die Uhr meldet `pairingConflict`.
+- Nach jeder Entscheidung ist ein frischer Login nötig.
+- **Altinstallationen:** Ein sicherer Unterscheider zum Restore fehlt. Deshalb sieht jeder
+  bestehende Nutzer den Dialog beim Update. Begründung:
+  `%TEMP%/advantly-recovery-20261023/r2/unterscheider.md`.
+- Review r1: kein P1, 12/12 Mutationsproben rot. Runde 2: 13/13 Mutationsproben rot.
+- **Rest P3-7:** Kopie und `quick_check` laufen auf dem Main-Thread. Bei 1 MB unter 0,3 s, bei
+  100 MB auf der Uhr bis 8 s. Das gehört zur asynchronen Guard-Initialisierung.
+
+**CI 39943705129:** 290 hing erneut, diesmal nach 5 min durch `transaction_timeout`
+beendet. Ursache ist wieder die Übergabe-Anweisung in `private.anonymize_profile()` bei
+1-Zeilen-Schätzungen; VACUUM reicht nicht. Robuste Formulierung (etwa `LATERAL` je Match)
+als Auflage für die nächste Runde des Gastnamen-Pakets, weil es dieselbe Funktion ändert.
+
+**Gastnamen-Paket übernommen:**
+- Runde 1: `e592c845`, `aafd22e2`, Merge `1c730e63`.
+- Runde 2: `82ef0886`, `4b617096`, `f4cc0fd5`, Merge `325ec789`.
+- D-4 (Client, Slot-ID im Pull-Snapshot): `c8819bfb`, Merge `22bd9e40`.
+
+Umsetzung:
+- Eigene Gäste des gelöschten Kontos werden in gemeinsamen Matches redigiert. Gestaffelt
+  und ungestaffelt ist das Ergebnis gleich.
+- Die Übergabe in `anonymize_profile` und der B-Block laufen ohne schätzungsabhängige
+  Joins. Damit läuft 290 auch mit `reltuples = 0` grün (10,6 s statt Abbruch nach 300 s).
+- `…00100` und `…00200` wurden direkt geändert. Beide liegen nicht auf `main`/staging.
+
+Review r1: **Freigabe mit Auflagen**, keine P1 oder P2.
+- Eigene Probe über alle Namensflächen 24/24.
+- Schatten `AB_EQUAL` und `PAIR_EQUAL` mit Blockgröße 7 und 1.
+- Endzustand Runde 1 gleich Runde 2 in neun Tabellen.
+
+P3-Reste:
+1. 220-Neuversuch geschärft (Integrator).
+2. Kein Renntest für „wartender Push sieht frisch gelöschten Gast gesperrt“.
+3. **Ab Merge nach `main` sind `…00100`/`…00200` eingefroren.** Danach nur neue
+   Migrationen. `check_release_gate.py` prüft nur Namen, nicht Inhalt.
+4. Ein eigener Gast in einem fremd verknüpften Slot wird stillgelegt, aber nicht redigiert
+   (bisheriges Verhalten).
+5. `docs/03-backend-datenmodell.md:1315` und A11 (`:1529`) beschreiben noch den alten
+   Stand; dafür fehlt ein Doku-Auftrag.
+6. Keine CI-Prüfung der Planstabilität (zweiter 290-Lauf mit `zero-stats3.sql`, ~11 s).
+
+CI: `325ec789` ist fachlich ganz grün, inklusive K7 `check_deletion_job.py`. Rot war nur
+„Stack stoppen“ (Runner). `8f37ab7e` macht diesen Schritt nicht fatal; der Supabase-Job ist
+dort grün.
+
+**Server-Nacharbeit übernommen** (`2d68abbb`, `0012d657`, `5fd98d6f`; Merge `647f6c64`, Fix `725f24fc`):
+- 290 läuft in CI zusätzlich mit verfälschter Statistik: 106/106 in 9,4 s. Gegen den Stand
+  vor Runde 2 bricht der Lauf nach 5 min ab.
+- Renntest: wartender Push und frisch stillgelegter Gast.
+- `check_release_gate.py` vergleicht den Inhalt angewandter Migrationen.
+- CI `725f24f` grün, 5/5.
+
+**K4/K5 Runde 1** (`03674a00`..`c83a3fb1`):
+- Migration `20261023000100_account_support.sql` mit vier Admin-RPCs:
+  - `lookup`: support/admin, AAL2, exakt;
+  - sperren/entsperren, Geräte widerrufen, Löschrücknahme: nur admin.
+  Alle mit Begründung und Konto-Audit.
+- Die Sperre gilt auf allen gebundenen Wegen.
+- Admin-Web mit Bereich „Konten“. App mit Geräteliste und BLOCKED „Konto gesperrt“.
+- Review r1: **fix-first.** Der Server wäre mit Auflagen freigabefähig; Rechte, AAL2,
+  Sperre und Rennen sind sauber, 14/14 SQL-Mutationen erkannt.
+  - P1-1: Das eigene Handy ist in der Liste widerrufbar und danach dauerhaft
+    ausgesperrt; Abmelden hilft nicht.
+  - P2-4: Enter im Admin-Formular sperrt das Konto.
+  - P2-1: Löschrücknahme ohne Nachweis möglich.
+  - P2-2: Konto-Audit wird erst in Phase C entkoppelt.
+  - P2-3: Renntest 300 nicht in CI.
+- **Nutzerentscheide 24.10.2026:**
+  - Für eine Löschrücknahme durch den Admin ist ein Ticket Pflicht, das nach dem Antrag
+    entstand: vom Zielkonto oder als Gastmeldung mit Zuordnungsbeleg.
+  - Der Logout bleibt global (G8 entschieden).
+- Runde 2: `advantly-20261024-k45-support-r2`.
+- Offen dokumentiert:
+  - Admin-JWT bleibt nach Logout oder MFA-Entfernung bis zum Ablauf gültig.
+  - Suchen werden nicht protokolliert.
+  - Bisherige `admin`-Mitglieder erhalten Kontorechte. `docs/support-admin-betrieb.md`
+    braucht dafür einen Doku-Auftrag.
+
+**K4/K5 übernommen** (`03674a00`..`efea6a13`, Merge `2927ab3f`; Alias-Fix `2174b270`).
+CI `2174b27` ist grün, inklusive Renntest 300 und K7 `check_account_support.py`.
+- **Endpunkte:** `admin_account_lookup` (support/admin, AAL2, exakt), `…set_suspended`,
+  `…revoke_devices`, `…cancel_deletion` (nur admin, Begründung, Konto-Audit).
+- **Sperre:** wirkt auf allen gebundenen Wegen (35 RPCs).
+- **Löschrücknahme:** nur mit einer Meldung, die nach dem Antrag entstand.
+- **App:** Das eigene Handy ist markiert und lässt sich nicht widerrufen.
+
+**K4-U „Widerruf aufheben“ übernommen** (`191ee05d`..`08a7ea0d`, Merge `2d99ab92`; Runde 3
+`29809ffc`). CI `2d99ab9` ist grün, inklusive pgTAP 310 und K7 `check_revoke.py` mit
+Freigabe, Neuanmeldung und Upload des offenen Events.
+- **Nutzerentscheid 24.10.2026:**
+  - Freigeben dürfen nur ein anderes eigenes Gerät oder der Admin, nie das widerrufene
+    Gerät selbst.
+  - Geräte- und Installations-ID bleiben erhalten, G steigt um 1, alte Sitzungen bleiben
+    gesperrt.
+- **Review-Auflagen:**
+  - Freigeben darf nur ein Gerät, das vor dem Widerruf gebunden war
+    (`device_unrevoke_caller_too_new`).
+  - Im Admin-Weg zählt eine Meldung nur, wenn sie nicht vom widerrufenen bzw. unbekannten
+    Gerät stammt und das Absendergerät vor dem Widerruf gebunden war
+    (`device_ticket_from_revoked_device`, `…_device_unknown`, `…_device_too_new`).
+  - Abgelehnte Uhr-Events (`device_not_owned`) gehen nach einer neuen Bindung oder einer
+    neuen G wieder in die Warteschlange.
+- **Rest:**
+  - Gegen einen Dieb mit Mail-Zugriff schützt nur der Widerruf. Neue Geräte kommen mit dem
+    Mail-Code ohnehin in die Cloud.
+  - Betriebshinweis für den Support fehlt noch in `docs/support-admin-betrieb.md`
+    (Doku-Auftrag).

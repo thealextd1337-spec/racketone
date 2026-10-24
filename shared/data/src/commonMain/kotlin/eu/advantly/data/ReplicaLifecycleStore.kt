@@ -1,6 +1,9 @@
 package eu.advantly.data
 
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssigned
@@ -165,8 +168,14 @@ class ReplicaLifecycleStore internal constructor(
         if (activated && (isCloudSeen(matchId) || access(captureContext(), matchId) != null)) requireReadable(matchId)
     }
 
+    /**
+     * Marker nur für einen Kopf über ungeklärtem Event-Bestand. Ein Kopf vor jeder Genesis bleibt unmarkiert und ohne
+     * Quelle unlesbar; die Genesis muss dann [requireAppend] bestehen (W3, Anfrage 1: Kopf der eigenen Uhr vor ihrer Genesis).
+     * Sein Inhalt ist bis dahin ungeprüft; [requireAppend] nimmt die Genesis nur an, wenn Format, Lineup, Metadaten und
+     * Erzeugungszeit des Kopfs aus ihr stammen.
+     */
     internal fun noteUnresolvedImport(matchId: String) {
-        if (!activated || readable(matchId)) return
+        if (!activated || readable(matchId) || database.matchEventQueries.countForMatch(matchId).executeAsOne() == 0L) return
         val ctx = captureContext()
         if (access(ctx, matchId) == null) queries.putAccess(ctx.accountKey, matchId, null, ReplicaAccessLevel.UNKNOWN.name)
     }
@@ -178,9 +187,42 @@ class ReplicaLifecycleStore internal constructor(
         return ids.all { readablePlayer(it.jsonPrimitive.content) }
     }
 
-    internal fun requireAppend(event: StoredEvent) {
-        if (!activated || readable(event.matchId)) return
-        // Nur die belegte lokale Erzeugung darf ohne Cloudstand beginnen, kein fremder Punkt.
+    /**
+     * Schreibspur eigener Matches (Vertrag P1-1): Die per UID dem aktuellen Konto gebundene Quelle darf an eigenen Matches
+     * unabhängig von ready schreiben (Access fehlt oder MEMBER beim aktuellen G, während eines Neuscans auch beim zuletzt
+     * vollständigen G); Events, Projektion und Kopf aus ihr offenbaren nichts, was die Sitzung nicht schon hält. Der
+     * Verification-Hold der Wiederherstellung ist hier nicht sichtbar (Host-Gate): Pull und Session dürfen vor abgeschlossener
+     * Restore-Prüfung nicht laufen, der Beweis stammt aus `cloud_device_owner`.
+     */
+    private fun ownWritable(
+        matchId: String,
+        deviceId: String?,
+    ): Boolean = queries.ownWritable(matchId, deviceId).executeAsOne() != 0L
+
+    /**
+     * D-1: Rückstand der eigenen Quelle [deviceId] an einem Match mit offener Schreibspur. Zähler folgen ihr immer, Inhalte
+     * ([content]) nur ohne ausstehende Redaktion, damit kein noch unbereinigtes Event an eine Gegenstelle geht.
+     */
+    internal fun ownBacklog(
+        matchId: String,
+        deviceId: String,
+        content: Boolean,
+    ): Boolean = ownWritable(matchId, deviceId) && (!content || queries.redactionSettled(matchId).executeAsOne() != 0L)
+
+    /** Lese- oder Schreibspur. Für Zähler und Bestätigungsflags, nie für Inhalte (Teil 2, P1-1). */
+    internal fun writable(matchId: String): Boolean = !activated || readable(matchId) || ownWritable(matchId, null)
+
+    internal fun requireWritable(matchId: String) {
+        check(writable(matchId)) { "Replikat ist nicht zum Schreiben freigegeben" }
+    }
+
+    /**
+     * `true` nur nach dem Genesis-Durchlauf einer eigenen Quelle (lokal im aktuellen Scope oder per `cloud_device_owner` an das
+     * aktuelle Konto gebunden, z. B. die eigene Uhr); Folgeevents im Batch sind dann an genau diese Quelle gebunden.
+     */
+    internal fun requireAppend(event: StoredEvent): Boolean {
+        if (!activated || readable(event.matchId) || ownWritable(event.matchId, event.deviceId)) return false
+        // Nur die belegte Erzeugung einer eigenen Quelle darf ohne Cloudstand beginnen, kein fremder Punkt.
         check(!isCloudSeen(event.matchId) && queries.hasLifecycle(event.matchId).executeAsOne() == 0L)
         if (database.matchEventQueries.countForMatch(event.matchId).executeAsOne() != 0L) {
             val existing = database.matchEventQueries.eventById(event.id).executeAsOneOrNull()
@@ -198,11 +240,30 @@ class ReplicaLifecycleStore internal constructor(
                 creator == source.self_id ||
                     (owner != null && database.cloudMetadataQueries.ownedSelfAlias(creator, owner).executeAsOne() > 0)
             )
-        check(
-            source != null && source.local == 1L && source.scope_id == data.accountIdentities.scope && ownCreator,
-        ) {
+        // Eigene Quelle: lokal im aktuellen Scope oder per UID an das aktuelle Konto gebunden (z. B. die eigene Uhr am Handy).
+        val ownSource =
+            source != null &&
+                (
+                    (source.local == 1L && source.scope_id == data.accountIdentities.scope) ||
+                        (owner != null && owner == (data.accountIdentities.profile ?: data.accountIdentities.scope))
+                )
+        check(ownSource && ownCreator) {
             "Ungeklärter Import benötigt autoritativen Lifecycle-Abgleich"
         }
+        // Ein Kopf vor der Genesis (MatchMeta zuerst) wird nur angenommen, wenn er aus ihr stammt; sonst würde fremder
+        // Kopfinhalt (Lineup, Ort) mit der eigenen Genesis lesbar. Ehrliche Erzeuger legen ihn genau so an (MatchSession).
+        val header = database.matchHeaderQueries.selectById(event.matchId).executeAsOneOrNull()
+        check(
+            header == null ||
+                (
+                    created != null &&
+                        DataJson.decodeFromString(MatchFormat.serializer(), header.format_json) == created.config &&
+                        DataJson.decodeFromString(Lineup.serializer(), header.lineup_json) == created.lineup &&
+                        DataJson.decodeFromString(MatchMeta.serializer(), header.meta_json) == created.meta &&
+                        header.created_at_ms == event.wallClockMs
+                ),
+        ) { "Vorhandener Kopf passt nicht zur Genesis" }
+        return true
     }
 
     fun applyAccess(
@@ -252,6 +313,25 @@ class ReplicaLifecycleStore internal constructor(
             check(transfer == null || (transfer.completed != 0L && transfer.epoch <= redactionEpoch))
             queries.ready(ctx.accountKey, matchId, generation)
         }
+
+    /** Sperrt Mitgliedslesen bis zum nächsten Readiness-Beleg; Materialisierung, Zugriff und Transfer bleiben. */
+    fun markNotReady(
+        ctx: ReplicaContext,
+        matchId: String,
+        fence: () -> Unit,
+    ): TransitionResult =
+        mutate(ctx, fence) {
+            if (access(ctx, matchId)?.ready != true) return@mutate TransitionResult.UNCHANGED
+            queries.notReady(ctx.accountKey, matchId)
+            TransitionResult.APPLIED
+        }
+
+    /** G-Wechsel: alle Zugriffe des Kontos unterhalb von G verlieren ready; Materialisierung, Zugriff und Transfer bleiben. */
+    fun markNotReadyBefore(
+        ctx: ReplicaContext,
+        generation: Long,
+        fence: () -> Unit,
+    ): Unit = mutate(ctx, fence) { queries.notReadyBefore(ctx.accountKey, generation) }
 
     private fun clearTransfer(
         account: String,
@@ -368,7 +448,7 @@ class ReplicaLifecycleStore internal constructor(
             val t = transfer(ctx, transferId)
             require(page.playerIds.size <= 200 && page.events.size <= 500 && page.index >= 0)
             val json = DataJson.encodeToString(RedactionPage.serializer(), page)
-            require(json.encodeToByteArray().size <= 64 * 1024)
+            require(json.encodeToByteArray().size <= MAX_REDACTION_PAGE_BYTES)
             val previous = queries.page(transferId, page.index).executeAsOneOrNull()
             if (previous != null) {
                 check(previous == json) { "Abweichende Wiederholung einer Redaktionsseite" }
@@ -669,12 +749,14 @@ class ReplicaLifecycleStore internal constructor(
             }
 
             is JsonObject -> {
+                fun id(key: String) = (value[key] as? JsonPrimitive)?.contentOrNull
+                // Ohne playerId ist die Slot-ID die Identität des Teilnehmers (v1-Gast); sonst gehört der Name der Besetzung.
+                val slot = if (id("playerId") == null && id("player_id") == null) id("slotId") ?: id("slot_id") else null
                 val redacted =
-                    listOf("id", "playerId", "player_id").any { key ->
-                        (value[key] as? JsonPrimitive)?.contentOrNull?.let(::isRedacted) == true
-                    } || (value["profileId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let {
-                        queries.isRedactedProfile(it).executeAsOne()
-                    } == true
+                    listOfNotNull(id("id"), id("playerId"), id("player_id"), slot).any(::isRedacted) ||
+                        (value["profileId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let {
+                            queries.isRedactedProfile(it).executeAsOne()
+                        } == true
                 JsonObject(
                     value.mapValues { (key, child) ->
                         if (redacted && key in setOf("displayName", "display_name", "alias")) JsonPrimitive("") else sanitizeJson(child)
@@ -697,6 +779,14 @@ class ReplicaLifecycleStore internal constructor(
             queries.registerPeer(ctx.accountKey, peerId)
             queries.seedPeer(peerId, ctx.accountKey)
         }
+
+    /** Neukopplung: keine Uhr bleibt Empfänger; erst ein neu bestätigtes Hello registriert sie wieder (E7). */
+    fun retirePeers(
+        ctx: ReplicaContext,
+        fence: () -> Unit,
+    ): Unit = mutate(ctx, fence) { clearDeliveries() }
+
+    internal fun clearDeliveries() = queries.clearDeliveries()
 
     fun pendingDeliveries(
         ctx: ReplicaContext,
@@ -745,7 +835,10 @@ class ReplicaLifecycleStore internal constructor(
             queries.ackRedaction(ctx.accountKey, peerId, matchId, generation, epoch)
         }
 
-    private companion object {
-        const val DELETED_NAME = "Gelöschter Spieler"
+    companion object {
+        /** Höchstgröße einer gespeicherten Redaktionsseite (JSON ohne Wire-Hülle); Pull und Gerätezustellung teilen sie. */
+        const val MAX_REDACTION_PAGE_BYTES: Int = 64 * 1024
+
+        private const val DELETED_NAME = "Gelöschter Spieler"
     }
 }

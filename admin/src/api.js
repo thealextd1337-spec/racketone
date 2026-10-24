@@ -36,5 +36,12 @@ export function createSupportApi(client) {
     sendMessage(args) {
       return rpc("admin_support_message", args);
     },
+    lookupAccount(query) {
+      return rpc("admin_account_lookup", { p_query: query });
+    },
+    accountAction({ rpc: name, args }) {
+      if (!name?.startsWith("admin_account_")) throw new SupportError("support_invalid");
+      return rpc(name, args);
+    },
   });
 }

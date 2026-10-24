@@ -95,7 +95,7 @@ class CloudUploadInventoryTest {
             assertEquals(5L, data.events.unconfirmedCount())
             assertFalse(
                 database.cloudMetadataQueries
-                    .pendingForProfile("alice", emptyList(), 100)
+                    .pendingForProfile("alice", emptyList(), null, "", 100)
                     .executeAsList()
                     .any { it.kind == "PROJECTION" && it.entity_id == "own" },
             )
@@ -152,7 +152,7 @@ class CloudUploadInventoryTest {
         profile: String,
     ): CloudUploadInventory {
         val queries = database.cloudUploadQueries
-        val pending = queries.pendingForProfile(profile, Long.MAX_VALUE) { id, _, _, _, _, _, _, _, _, _ -> id }.executeAsList().size
+        val pending = queries.pendingForProfile(profile, null, Long.MAX_VALUE) { id, _, _, _, _, _, _, _, _, _ -> id }.executeAsList().size
         val rejected =
             cloud.rejectedEvents().keys.count { id ->
                 val event = queries.eventById(id) { _, match, device, _, _, _, _, _, _, _ -> match to device }.executeAsOneOrNull()

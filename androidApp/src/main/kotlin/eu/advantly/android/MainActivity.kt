@@ -1,6 +1,5 @@
 package eu.advantly.android
 
-import android.app.AlertDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,12 +24,14 @@ import eu.advantly.ui.phone.AdvantlyApp
 
 class MainActivity : ComponentActivity() {
     private var sessionAccess: AndroidSessionAccess? = null
+    private var account: AuthViewModel? = null
     private val storageHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun runtimeUnavailable() {
         if (isFinishing || isDestroyed) return
         sessionAccess?.close()
         sessionAccess = null
+        account = null
         // Entfernen der Composition beendet ihre Subscriptions; Kontojobs nicht über Retry behalten.
         viewModelStore.clear()
         showInstallationError()
@@ -42,6 +43,12 @@ class MainActivity : ComponentActivity() {
             return true
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** App-Start bzw. Vordergrund (B4): höchstens ein gedrosselter automatischer Abgleich. */
+    override fun onStart() {
+        super.onStart()
+        account?.sync?.onForeground()
     }
 
     override fun onDestroy() {
@@ -92,6 +99,7 @@ class MainActivity : ComponentActivity() {
                     )[AuthViewModel::class.java]
                 }.getOrNull()
             }
+        account = auth
         val support =
             auth?.support ?: runCatching {
                 ViewModelProvider(
@@ -168,16 +176,18 @@ class MainActivity : ComponentActivity() {
                     } else {
                         { googleCredential() }
                     },
+                onRestorePrevious =
+                    if (installation.privateTransportAllowed && installation.restorable != null) {
+                        { showLaterRestore(current) }
+                    } else {
+                        null
+                    },
             )
         }
         if (!installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
-            AlertDialog
-                .Builder(this)
-                .setTitle(R.string.recovery_notice_title)
-                .setMessage(R.string.recovery_notice_body)
-                .setPositiveButton(R.string.recovery_continue_offline, null)
-                .show()
+            showRecoveryDecision(installation, current)
         }
+        if (savedInstanceState == null) showRecoveryDoneOnce(installation)
     }
 }
 

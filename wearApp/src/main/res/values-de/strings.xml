@@ -1,8 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="recovery_notice_title">Vorhandene Daten sicher aufbewahrt</string>
-    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Prüfung und Wiederherstellung sind noch nicht verfügbar. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
-    <string name="recovery_continue_offline">Offline fortfahren</string>
+    <string name="recovery_notice_body">Bisherige Daten bleiben getrennt erhalten. Sync ist pausiert. Neue Matches kannst du offline zählen.</string>
+    <string name="recovery_decision_body">Bisherige Daten gefunden. Übernehmen (empfohlen) gibt dieser Uhr eine neue Identität; dein Handy teilt danach, was zu seinem Konto gehört. Neu beginnen behält die Daten gespeichert, übernehmen geht auch später. Zählst du vorher neue Matches, geht die Übernahme erst nach dem Löschen.</string>
+    <string name="recovery_blocked_body">Seitdem wurden Matches gezählt. Lösche sie zum Übernehmen.</string>
+    <string name="recovery_failed_body">Übernahme fehlgeschlagen. Es wurde nichts geändert.</string>
+    <string name="recovery_restore">Übernehmen</string>
+    <string name="recovery_start_fresh">Neu beginnen</string>
+    <string name="recovery_continue_offline">Später</string>
+    <string name="recovery_fresh_confirm_title">Neu beginnen?</string>
+    <string name="recovery_fresh_confirm_body">Bisherige Daten bleiben gespeichert, werden aber nicht angezeigt. Übernehmen geht später im Startbildschirm, solange du hier nichts Neues zählst.</string>
+    <string name="recovery_later_title">Bisherige Daten übernehmen</string>
+    <string name="recovery_later_body">Gibt dieser Uhr eine neue Identität und startet die App neu. Danach neu mit dem Handy koppeln.</string>
+    <string name="recovery_save_failed">Das hat nicht geklappt. Es wurde nichts geändert.</string>
+    <string name="pairing_conflict_title">Handy geändert</string>
+    <string name="pairing_conflict_body">Ein Handy mit neuer Kopplung wurde gefunden. Diese Uhr neu koppeln? Die Daten auf der Uhr bleiben.</string>
+    <string name="pairing_repair">Neu koppeln</string>
+    <string name="pairing_later">Nicht jetzt</string>
     <string name="wear_version">v%1$s</string>
 
     <!-- Sportarten -->
@@ -75,6 +89,7 @@
         <item quantity="other">%1$d ausstehend</item>
     </plurals>
     <string name="sync_local">Nur lokal</string>
+    <string name="sync_blocked">Sync blockiert</string>
     <string name="sync_live">Live</string>
     <string name="sync_ago_seconds">vor %1$d s</string>
     <string name="sync_ago_minutes">vor %1$d min</string>

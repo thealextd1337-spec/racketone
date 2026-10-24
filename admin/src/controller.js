@@ -1,10 +1,14 @@
 import {
+  buildAccountAction,
   buildTicketUpdateArgs,
   createRequestEpoch,
   makeMessageOperation,
   SupportError,
+  validateAccountQuery,
   validateMessage,
 } from "./domain.js";
+
+const ACCOUNT_ACTION_LABELS = { suspend: "accountSuspend", unsuspend: "accountUnsuspend", revoke: "accountRevoke", "cancel-deletion": "accountCancelDeletion", unrevoke: "accountUnrevoke" };
 
 function messageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -47,6 +51,15 @@ function initialState(config) {
     updateDraft: null,
     saving: false,
     publicConfirmation: null,
+    workspace: "tickets",
+    accountQuery: "",
+    account: null,
+    viewerRole: null,
+    accountLoading: false,
+    accountNotice: null,
+    accountDraft: { reason: "", ticketId: "" },
+    accountSaving: false,
+    accountConfirmation: null,
   };
 }
 
@@ -61,6 +74,29 @@ function noticeForError(error, fallback = "genericError") {
     case "message-too-long": return "messageTooLong";
     case "update-reason-required": return "updateReasonRequired";
     case "update-reason-too-long": return "updateReasonTooLong";
+    case "support_admin_required": return "accountAdminRequired";
+    case "account_not_found": return "accountNotFound";
+    case "account_ambiguous": return "accountAmbiguous";
+    case "account-query-required": return "accountQueryRequired";
+    case "account-ticket-invalid": return "accountTicketInvalid";
+    case "account-ticket-required":
+    case "deletion_ticket_required": return "accountTicketRequired";
+    case "deletion_ticket_invalid": return "accountTicketMismatch";
+    case "deletion_ticket_stale": return "accountTicketStale";
+    case "deletion_ticket_evidence_required": return "accountTicketEvidence";
+    case "no_deletion_pending": return "accountNoDeletionPending";
+    case "account-device-ticket-required":
+    case "device_ticket_required": return "accountDeviceTicketRequired";
+    case "device_ticket_invalid": return "accountTicketMismatch";
+    case "device_ticket_stale": return "accountDeviceTicketStale";
+    case "device_ticket_evidence_required": return "accountTicketEvidence";
+    case "device_ticket_from_revoked_device": return "accountDeviceTicketFromRevoked";
+    case "device_ticket_device_unknown": return "accountDeviceTicketDeviceUnknown";
+    case "device_ticket_device_too_new": return "accountDeviceTicketDeviceTooNew";
+    case "device_not_found": return "accountDeviceNotFound";
+    case "device_not_revoked": return "accountDeviceNotRevoked";
+    case "account_suspended": return "accountUnrevokeSuspended";
+    case "account_deletion_pending": return "accountUnrevokeDeletionPending";
     default: return fallback;
   }
 }
@@ -95,6 +131,7 @@ export class AdminController {
     this.sessionEpoch = createRequestEpoch();
     this.listEpoch = createRequestEpoch();
     this.detailEpoch = createRequestEpoch();
+    this.accountEpoch = createRequestEpoch();
     this.authFlowEpoch = createRequestEpoch();
     this.authQueue = Promise.resolve();
     this.authOperations = 0;
@@ -132,6 +169,12 @@ export class AdminController {
       "retry-message": () => this.retryMessage(),
       "discard-message": () => this.discardMessage(),
       retry: () => this.refresh(),
+      workspace: (payload) => this.setWorkspace(payload?.value),
+      "account-search": (payload) => this.searchAccount(payload?.query),
+      "account-draft": (payload) => this.setAccountDraft(payload?.fields),
+      "account-action": (payload) => this.runAccountAction(payload?.action, payload?.fields),
+      "confirm-account-action": () => this.confirmAccountAction(),
+      "cancel-account-action": () => this.cancelAccountAction(),
     };
     for (const [event, callback] of Object.entries(routes)) {
       this.view.on(event, callback);
@@ -677,6 +720,104 @@ export class AdminController {
     this.render();
   }
 
+  setWorkspace(value) {
+    if (!this.hasAccess() || (value !== "tickets" && value !== "accounts") || value === this.state.workspace) return;
+    this.state.workspace = value;
+    this.render();
+  }
+
+  // Exakte Suche; jede neue Suche verwirft verspätete Antworten und den Entwurf zum vorherigen Konto.
+  async searchAccount(query) {
+    // Eine laufende Aktion behält ihr Konto, bis ihr Ergebnis angezeigt ist (sonst bliebe „Speichert…“ stehen).
+    if (!this.hasAccess() || this.state.accountSaving) return;
+    this.cancelAccountAction();
+    const request = this.accountEpoch.next();
+    const session = this.sessionToken;
+    this.state.accountQuery = String(query ?? "").trim().slice(0, 120);
+    this.state.account = null;
+    this.state.accountDraft = { reason: "", ticketId: "" };
+    this.state.accountNotice = null;
+    const invalid = validateAccountQuery(this.state.accountQuery);
+    if (invalid) {
+      this.state.accountNotice = noticeForError({ code: invalid }, "invalidFields");
+      this.render();
+      return;
+    }
+    this.state.accountLoading = true;
+    this.render();
+    try {
+      const result = await this.api.lookupAccount(this.state.accountQuery);
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      if (!result?.account?.profileId) throw new SupportError("support_unavailable");
+      this.state.account = result.account;
+      this.state.viewerRole = result.viewerRole === "admin" ? "admin" : "support";
+      this.state.accountLoading = false;
+      this.render();
+    } catch (error) {
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      this.state.accountLoading = false;
+      if (this.handleAccessError(error)) return;
+      this.state.accountNotice = noticeForError(error, "genericError");
+      this.render();
+    }
+  }
+
+  setAccountDraft(fields) {
+    if (!this.hasAccess() || !fields) return;
+    this.state.accountDraft = { ...this.state.accountDraft, ...fields };
+  }
+
+  // Prüft lokal und fragt dann nach; erst confirmAccountAction sendet.
+  runAccountAction(action, fields) {
+    if (!this.hasAccess() || this.state.accountSaving || !this.state.account) return;
+    if (fields) this.state.accountDraft = { ...this.state.accountDraft, ...fields };
+    let operation;
+    try {
+      operation = buildAccountAction(this.state.account, action, this.state.accountDraft);
+    } catch (error) {
+      this.state.accountNotice = noticeForError(error, "invalidFields");
+      this.render();
+      return;
+    }
+    this.state.accountConfirmation = operation;
+    // support erhält Geräte ohne ID: ohne p_device_id darf kein Eintrag ohne ID als „gefunden“ gelten.
+    const device = operation.args.p_device_id && this.state.account.revokedDevices?.find((item) => item.deviceId === operation.args.p_device_id);
+    this.view.showAccountConfirmation?.({ actionKey: ACCOUNT_ACTION_LABELS[action], alias: this.state.account.alias,
+      profileId: operation.args.p_profile_id, reason: operation.args.p_reason, ...(device ? { device } : {}) });
+  }
+
+  cancelAccountAction() {
+    this.state.accountConfirmation = null;
+    this.view.hideAccountConfirmation?.();
+  }
+
+  async confirmAccountAction() {
+    const operation = this.state.accountConfirmation;
+    this.cancelAccountAction();
+    if (!operation || !this.hasAccess() || this.state.accountSaving || this.state.account?.profileId !== operation.args.p_profile_id) return;
+    const request = this.accountEpoch.next();
+    const session = this.sessionToken;
+    this.state.accountSaving = true;
+    this.state.accountNotice = null;
+    this.render();
+    try {
+      const account = await this.api.accountAction(operation);
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      if (account?.profileId !== operation.args.p_profile_id) throw new SupportError("support_unavailable");
+      this.state.account = account;
+      this.state.accountDraft = { reason: "", ticketId: "" };
+      this.state.accountNotice = "accountActionSaved";
+      this.state.accountSaving = false;
+      this.render();
+    } catch (error) {
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      this.state.accountSaving = false;
+      if (this.handleAccessError(error)) return;
+      this.state.accountNotice = noticeForError(error, "genericError");
+      this.render();
+    }
+  }
+
   handleAccessError(error) {
     if (["support_forbidden", "support_mfa_required", "session_expired"].includes(error?.code)) {
       const messageKey = error.code === "support_forbidden" ? "noAccess" : error.code === "support_mfa_required" ? "mfaRequired" : "sessionExpired";
@@ -696,6 +837,7 @@ export class AdminController {
     this.sessionEpoch.invalidate();
     this.listEpoch.invalidate();
     this.detailEpoch.invalidate();
+    this.accountEpoch.invalidate();
     this.authFlowEpoch.invalidate();
     const hadSession = this.state.phase !== "login" && this.state.phase !== "missing-config";
     const language = this.state.language;
@@ -707,6 +849,7 @@ export class AdminController {
     this.state.authError = messageKey;
     this.state.authNotice = noticeKey;
     this.view.hidePublicConfirmation?.();
+    this.view.hideAccountConfirmation?.();
     this.render();
     if (hadSession || this.authOperations > 0) {
       await this.enqueueAuth(() => this.auth?.signOut?.());

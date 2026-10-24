@@ -45,7 +45,11 @@ def backfill_roundtrip(owner):
                                ("players", "players_capture_deleted_identity"),
                                ("match_participants", "participants_redacted_name"),
                                ("match_participants", "participants_capture_profile_context"),
-                               ("match_events", "events_redacted_name")):
+                               ("match_events", "events_redacted_name"),
+                               # 01000 setzt auf 00700 auf und gehört nicht zum 006-Zustand.
+                               ("match_events", "events_late_redaction_manifest"),
+                               ("match_participants", "participants_late_redaction_manifest"),
+                               ("match_participants", "participants_late_redaction_manifest_upd")):
             owner.execute("drop trigger " + trigger + " on public." + table)
         definition = owner.execute("select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)").fetchone()[0]
         for marker in ("  perform private.guard_push_lifecycle(v_uid,p);\n\n",
@@ -67,9 +71,15 @@ def backfill_roundtrip(owner):
         owner.execute(definition)
         owner.execute(original("20261015000500_rpc_sync.sql", "private.push_participants"))
         owner.execute(original("20261015000800_rpc_konto_export.sql", "private.anonymize_profile"))
+        # 20261022000100 liest in bump_visibility redacted_profile_identities, die der 006-Zustand nicht kennt.
+        owner.execute(original("20261015000100_profile_freunde_geraete.sql", "private.bump_visibility"))
+        # Ebenso prüft handle_new_user dort die Tombstones; der 006-Zustand legt danach noch Konten an.
+        owner.execute(original("20261016000500_auth_altersgate.sql", "private.handle_new_user"))
         owner.execute(original("20261018000600_cloud_lifecycle_redactions.sql", "private.capture_profile_redactions"))
         owner.execute("drop index public.match_events_redaction_legacy_idx,public.match_events_redaction_v2_idx,"
                       "public.match_events_redaction_lineup_idx")
+        # 01100 setzt auf 00700 auf (Index über redaction_uuid) und gehört nicht zum 006-Zustand.
+        owner.execute("drop index public.match_participants_redaction_slot_idx")
         for signature in ("redaction_uuid(text)", "redacted_player_identity(text)", "guard_push_lifecycle(uuid,jsonb)",
                           "guard_redacted_names()", "redact_linked_names()", "redacted_profile_identity(text)",
                           "redaction_identity_is_live(uuid)", "redacted_event_identity(uuid,text)",
@@ -366,22 +376,75 @@ def main():
                           "values(%s,%s,%s,1,1,1,'PlayerAssigned',%s)",
                           (event, match, creator[3], json.dumps({"player": {"id": str(guest), "displayName": "Kim"}})))
             batch = {"players": [{"id": str(guest), "kind": "self", "displayName": "Outsider"}]}
+
+            def redactions():
+                return [owner.execute("select count(*) from private." + table + " where player_id=%s", (guest,)).fetchone()[0]
+                        for table in ("redacted_player_identities", "player_write_redactions", "match_redacted_players")]
+
             with owner.transaction():
                 owner.execute("delete from auth.users where id=%s", (creator[0],))
                 expected = state(survivor, match)
+                # Nutzerentscheid 23.10.2026: Kim ist ein eigener Gast des Erstellers und wird mit ihm stillgelegt. Der
+                # Push ohne Beleg berührt danach eine gesperrte ID und scheitert nach dem Lock-Wait fail-closed.
+                pending = pool.submit(push, rpc, outsider, batch, ("40001", "restart_required"))
+                blocked(pending, owner.info.backend_pid, client.info.backend_pid)
+            assert pending.result(timeout=10) is None
+            assert state(survivor, match) == expected
+            # Auch der Neuversuch mit frischem Beleg übernimmt die ID nie.
+            generation = owner.execute("select visibility_epoch from public.profile_settings where profile_id=%s",
+                                       (outsider[0],)).fetchone()[0]
+            result = push(rpc, outsider, {**batch, "lifecycle": {"generation": generation, "redactionEpochs": {}}})
+            assert result["players"][0]["reason"] == "player_identity_conflict", result
+            assert owner.execute("select count(*) from public.players where id=%s", (guest,)).fetchone()[0] == 0
+            assert owner.execute("select count(*) from private.deleted_player_identities where player_id=%s", (guest,)).fetchone()[0] == 1
+            assert state(survivor, match) == expected
+            assert owner.execute("select payload#>>'{player,displayName}',redacted_at is not null from public.match_events "
+                                 "where id=%s", (event,)).fetchone() == ("Gelöschter Spieler", True)
+            assert redactions() == [1, 1, 1], redactions()
+            owner.execute("delete from auth.users where id=%s", (outsider[0],))
+            assert state(survivor, match) == expected, "Fremde Loeschung vergiftet uebernommenes Match"
+            assert redactions() == [1, 1, 1], "Fremde Loeschung aendert die Belege des uebernommenen Matches"
+            print("PASS proven delete/reuse lock-wait; outsider fail-closed and rejected on retry, handed-over match "
+                  "redacted once and untouched by unrelated deletion:", rpc)
+
+        def retired_guest_wait_race(rpc):
+            # Review P3-2: nonreuse_race scheitert seit dem Gäste-Entscheid schon am fehlenden Beleg. Hier wartet ein
+            # Push mit gültigem Beleg auf die Kontolöschung und muss danach Kim als gesperrt sehen: die Playerzeile
+            # wird abgewiesen, ein neuer Slot mit Kims ID nur als „Gelöschter Spieler“ gespeichert.
+            creator, survivor, outsider = new_user(), new_user(), new_user()
+            shared, fresh, guest = uuid4(), uuid4(), uuid4()
+            matches.extend((shared, fresh))
+            player_ids.append(guest)
+            owner.execute("insert into public.players(id,owner_id,kind,display_name) values(%s,%s,'guest','Kim')",
+                          (guest, creator[0]))
+            owner.execute("insert into public.matches(id,created_by,sport,discipline,format,started_at) "
+                          "values(%s,%s,'tennis','singles','{}',now())", (shared, creator[0]))
+            owner.execute("insert into public.match_participants(match_id,slot_id,team,position,player_id,profile_id,"
+                          "link_status,display_name) values(%s,'kim','A',1,%s,null,null,'Kim'),"
+                          "(%s,'survivor','B',1,null,%s,'linked','Survivor')", (shared, guest, shared, survivor[0]))
+            generation = owner.execute("select visibility_epoch from public.profile_settings where profile_id=%s",
+                                       (outsider[0],)).fetchone()[0]
+            slot = {"slotId": "kim", "team": "A", "position": 1, "playerId": str(guest), "displayName": "Kim"}
+            batch = {"players": [{"id": str(guest), "kind": "guest", "displayName": "Kim"}],
+                     "matches": [owner.execute("select tests.match(%s,%s::jsonb)", (fresh, json.dumps([slot]))).fetchone()[0]],
+                     "lifecycle": {"generation": generation, "redactionEpochs": {}}}
+            with owner.transaction():
+                owner.execute("delete from auth.users where id=%s", (creator[0],))
                 pending = pool.submit(push, rpc, outsider, batch)
                 blocked(pending, owner.info.backend_pid, client.info.backend_pid)
             result = pending.result(timeout=10)
-            assert result["players"][0]["reason"] == "player_identity_conflict", result
-            assert state(survivor, match) == expected
-            assert owner.execute("select count(*) from private.deleted_player_identities where player_id=%s", (guest,)).fetchone()[0] == 1
-            owner.execute("delete from auth.users where id=%s", (outsider[0],))
-            assert state(survivor, match) == expected, "Fremde Loeschung vergiftet uebernommenes Match"
-            assert owner.execute("select payload#>>'{player,displayName}',redacted_at from public.match_events where id=%s",
-                                 (event,)).fetchone() == ("Kim", None)
-            for table in ("redacted_player_identities", "player_write_redactions", "match_redacted_players"):
-                assert owner.execute("select count(*) from private." + table + " where player_id=%s", (guest,)).fetchone()[0] == 0
-            print("PASS proven delete/reuse lock-wait; outsider rejected, surviving guest unchanged:", rpc)
+            # Der Grund ist schon vor dem Gäste-Entscheid derselbe (deleted_player_identities); gesperrt zeigt der Slot.
+            assert result["players"] == [{"id": str(guest), "result": "rejected", "reason": "player_identity_conflict"}], result
+            assert result["matches"] == [{"id": str(fresh), "result": "created",
+                                          "notes": [{"note": "player_not_owned", "slotId": "kim"}]}], result
+            assert owner.execute("select display_name,deleted_profile,player_id,profile_id from public.match_participants "
+                                 "where match_id=%s", (fresh,)).fetchall() == [("Gelöschter Spieler", True, None, None)]
+            assert owner.execute("select count(*) from private.match_redacted_slots where match_id=%s and slot_id='kim'",
+                                 (fresh,)).fetchone()[0] == 1
+            assert owner.execute("select count(*) from private.player_write_redactions where player_id=%s",
+                                 (guest,)).fetchone()[0] == 1
+            print("PASS proven account-delete lock-wait; waiting push with valid proof sees the deleted account's own "
+                  "guest as retired: player_identity_conflict, new slot stored as deleted player:", rpc)
 
         def conflicting_context_race(rpc, text_slot=False):
             caller, deleted, living = new_user(), new_user(), new_user()
@@ -636,7 +699,8 @@ def main():
             with identity(owner, caller):
                 page = owner.execute("select public.cloud_pull_match_redaction_v1(%s,%s,%s)",
                                      (new_match, generation, epoch)).fetchone()[0]
-                assert len(page["events"]) == (1 if revocation == "notme" else 2) and page["redactedPlayerIds"] == [], page
+                # 01000: ohne direkten Profilkontext erfüllt das späte Event den globalen Zweig, also steht guest im Manifest.
+                assert len(page["events"]) == (1 if revocation == "notme" else 2) and page["redactedPlayerIds"] == [str(guest)], page
             print("PASS proven Profile-context revocation wait; proof_changed=", changed, "canonical event and original Player retirement preserved:", rpc, revocation)
 
         def genesis_delete_race(rpc, mode, existing):
@@ -710,12 +774,15 @@ def main():
                 result = push(rpc, caller, current_proof())
             assert [item["result"] for item in result["events"]] == ["accepted", "accepted"], result
             assert owner.execute("select payload,redacted_at from public.match_events where id=%s", (event,)).fetchone() == (payload, None)
-            assert owner.execute("select redaction_epoch from public.matches where id=%s", (target,)).fetchone()[0] == 0
+            # 01000: die späte Genesis mit global redigiertem guest trägt ihn ins Manifest und erhöht E genau einmal.
+            assert owner.execute("select redaction_epoch from public.matches where id=%s", (target,)).fetchone()[0] == 1
+            assert owner.execute("select array_agg(player_id) from private.match_redacted_players where match_id=%s",
+                                 (target,)).fetchone()[0] == [guest]
             assert owner.execute("select private.redacted_player_identity(%s)", (str(guest),)).fetchone()[0]
             with connect() as reopened:
                 assert reopened.execute("select payload from public.match_events where id=%s", (event,)).fetchone()[0] == payload
                 assert reopened.execute("select count(*) from public.players where id=%s", (innocent,)).fetchone()[0] == 1
-            print("PASS proven Delete/Genesis wait; no partial mixed batch, fresh G/exact E0, immutable payload:", rpc, mode, existing)
+            print("PASS proven Delete/Genesis wait; no partial mixed batch, fresh G/exact E0 before upload, E1 with manifest after, immutable payload:", rpc, mode, existing)
 
         try:
             owner.execute("select tests.publish_consent_documents(%s)", (prefix,))
@@ -792,6 +859,7 @@ def main():
                 cases += 3
                 print("PASS 3 isolation denials before stale lifecycle:", rpc)
                 nonreuse_race(rpc)
+                retired_guest_wait_race(rpc)
                 conflicting_context_race(rpc)
                 conflicting_context_race(rpc, text_slot=True)
                 direct_profile_collision_race(rpc)
@@ -804,7 +872,7 @@ def main():
                     for mode in ("no proof", "stale", "current"):
                         genesis_delete_race(rpc, mode, existing)
                         cases += 1
-                cases += 8
+                cases += 9
             print(f"PASS {cases} proven races; no live-platform claim")
         finally:
             with owner.transaction():

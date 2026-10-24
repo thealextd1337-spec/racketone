@@ -316,6 +316,7 @@ class PhoneUploadHostTest {
                 publicationDispatcher?.let { CoroutineScope(hostScope.coroutineContext + it) } ?: hostScope,
                 { 1000L },
                 { Thread.currentThread() === thread },
+                lane = PhoneCloudLane(),
             )
 
         init {

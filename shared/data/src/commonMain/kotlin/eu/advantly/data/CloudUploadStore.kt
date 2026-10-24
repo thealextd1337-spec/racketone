@@ -2,6 +2,7 @@ package eu.advantly.data
 
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.data.db.AdvantlyDatabase
+import eu.advantly.data.db.Cloud_metadata
 
 /** Lokale Upload-Berechtigung; nur [CloudUploadStore.activate] kann sie ausstellen. Kein Auth-Token. */
 class CloudUploadSession internal constructor(
@@ -10,10 +11,23 @@ class CloudUploadSession internal constructor(
 )
 
 /**
+ * U4-Upload-Beleg: [generation] = zuletzt abgeschlossene Pull-`visibilityEpoch` G, [redactionEpochs] = E für JEDES
+ * ausgewählte Match (ohne Access-Zeile 0). Ohne je abgeschlossene Runde gibt es keinen Beleg.
+ */
+data class CloudUploadLifecycle(
+    val generation: Long,
+    val redactionEpochs: Map<String, Long>,
+)
+
+/** Snapshot passt nicht mehr zu Kontext oder G/E: ohne Acks verwerfen und neu auswählen. */
+class CloudUploadLifecycleChangedException : IllegalStateException("Upload-Snapshot an veralteten Lifecycle gebunden")
+
+/**
  * Unveränderliche Auswahl für genau einen Upload-Versuch. Antworten dürfen ausschließlich diese Events betreffen.
  * Die Listen-Kopie verhindert, dass ein Aufrufer die interne Auswahl nachträglich verändert.
  */
 class CloudUploadSnapshot internal constructor(
+    private val store: CloudUploadStore,
     internal val session: CloudUploadSession,
     events: List<StoredEvent>,
     headers: List<CloudRevisioned<CloudMatchHeader>> = emptyList(),
@@ -22,6 +36,9 @@ class CloudUploadSnapshot internal constructor(
     projections: List<CloudRevisioned<CloudProjection>> = emptyList(),
     completeEventMatches: Set<String> = emptySet(),
     val inventory: CloudUploadInventory = CloudUploadInventory(0, 0, 0),
+    /** Gebunden an Auswahl und [context]; vor Versand und Ack erneut geprüft. */
+    val lifecycle: CloudUploadLifecycle? = null,
+    internal val context: ReplicaContext? = null,
 ) {
     private val selected = events.associateBy { it.id }
     private val selectedHeaders = headers.toList()
@@ -41,7 +58,21 @@ class CloudUploadSnapshot internal constructor(
             (headers.map { it.version } + participants.map { it.version } + players.map { it.version } + projections.map { it.version })
                 .toSet()
 
+    /** Alle Matches, auf die sich Events oder Match-Metadaten dieser Auswahl beziehen. */
+    val matchIds: Set<String>
+        get() =
+            selected.values.map { it.matchId }.toSet() + selectedHeaders.map { it.value.id } +
+                selectedParticipants.map { it.value.matchId } + selectedProjections.map { it.value.matchId }
+
     internal fun selectedEvent(id: String): StoredEvent? = selected[id]
+
+    internal val isEmpty: Boolean
+        get() =
+            selected.isEmpty() && selectedHeaders.isEmpty() && selectedParticipants.isEmpty() && selectedPlayers.isEmpty() &&
+                selectedProjections.isEmpty()
+
+    /** Nach `restart_required`: Upload des Profils sperren bis zu einer danach begonnenen, beendeten Pull-Runde. */
+    fun deferUntilPull() = store.deferUntilPull(this)
 }
 
 /**
@@ -59,6 +90,9 @@ class CloudUploadStore internal constructor(
     private val database: AdvantlyDatabase,
     private val cloud: CloudSyncRepository,
     private val driver: SqlDriver,
+    private val replicas: ReplicaLifecycleStore,
+    private val pulls: CloudPullStore,
+    private val settings: SettingsRepository,
 ) {
     private val queries = database.cloudUploadQueries
     private var active: CloudUploadSession? = null
@@ -71,6 +105,8 @@ class CloudUploadStore internal constructor(
         return database
             .transactionWithResult {
                 val session = CloudUploadSession(profileId, advanceGeneration())
+                // Jede Anmeldung bindet neu (K4-U: etwa nach der Freigabe dieses Handys).
+                cloud.resetDeviceRejections()
                 cloud.resolvePlayerMetadataSources()
                 cloud.resolveOwnedMatchMetadataSources(profileId)
                 session
@@ -119,7 +155,10 @@ class CloudUploadStore internal constructor(
         }
     }
 
-    /** Begrenzte, deterministisch sortierte Auswahl; fremde und ungebundene Quellgeräte bleiben ausgeschlossen. */
+    /**
+     * Begrenzte, deterministisch sortierte Auswahl; fremde und ungebundene Quellgeräte bleiben ausgeschlossen.
+     * Blockierte Matches (kein gültiger G/E-Beleg oder Neustart nach Pull offen) werden vor dem Limit übersprungen.
+     */
     fun capture(
         session: CloudUploadSession,
         limit: Int,
@@ -128,21 +167,42 @@ class CloudUploadStore internal constructor(
         require(limit > 0)
         return database.transactionWithResult {
             requireActive(session)
-            val events =
-                queries
-                    .pendingForProfile(
-                        session.profileId,
-                        limit.toLong(),
-                    ) { id, match, device, seq, lamport, at, parent, type, payload, confirmed ->
-                        StoredEvent(id, match, device, seq, lamport, payload, at, parent, type, confirmed == 1L)
-                    }.executeAsList()
+            val proof = LifecycleProof(session.profileId)
+            if (proof.blocksAll) {
+                cloud.resolveMetadataSources()
+                return@transactionWithResult CloudUploadSnapshot(
+                    this@CloudUploadStore,
+                    session,
+                    emptyList(),
+                    inventory = readInventory(session),
+                    context = proof.context,
+                ).also { requireActive(session) }
+            }
+            val events = mutableListOf<StoredEvent>()
+            var afterMatch: String? = null
+            while (events.size < limit) {
+                val page =
+                    queries
+                        .pendingForProfile(
+                            session.profileId,
+                            afterMatch,
+                            (limit - events.size).toLong(),
+                        ) { id, match, device, seq, lamport, at, parent, type, payload, confirmed ->
+                            StoredEvent(id, match, device, seq, lamport, payload, at, parent, type, confirmed == 1L)
+                        }.executeAsList()
+                val blocked = page.firstOrNull { !proof.admits(it.matchId) }?.matchId
+                // shortcut: verwirft je blockiertem Match den Seitenrest (bis B × limit Zeilen); Keyset (match, lamport, device, id)
+                // einführen, sobald D1 Access-Zeilen schreibt und viele Matches blockiert sein können (Review r2 P3-2).
+                events += page.takeWhile { it.matchId != blocked }
+                afterMatch = blocked ?: break
+            }
             cloud.resolveMetadataSources()
             val headers = mutableListOf<CloudRevisioned<CloudMatchHeader>>()
             val participants = mutableListOf<CloudRevisioned<CloudParticipants>>()
             val players = mutableListOf<CloudRevisioned<CloudPlayer>>()
             val projections = mutableListOf<CloudRevisioned<CloudProjection>>()
             val selectedIds = events.mapTo(mutableSetOf()) { it.id }
-            database.cloudMetadataQueries.pendingForProfile(session.profileId, selectedIds, limit.toLong()).executeAsList().forEach { row ->
+            pendingMetadata(session.profileId, selectedIds, limit, proof).forEach { row ->
                 val version = row.version()
                 when (version.kind) {
                     CloudMetadataKind.HEADER -> {
@@ -171,8 +231,158 @@ class CloudUploadStore internal constructor(
                     .filter { id ->
                         queries.outstandingForMatch(id).executeAsList().all { it in selectedIds }
                     }.toSet()
-            CloudUploadSnapshot(session, events, headers, participants, players, projections, complete, readInventory(session))
-                .also { requireActive(session) }
+            val matchIds =
+                (
+                    events.map { it.matchId } + headers.map { it.value.id } + participants.map { it.value.matchId } +
+                        projections.map { it.value.matchId }
+                ).toSet()
+            CloudUploadSnapshot(
+                this@CloudUploadStore,
+                session,
+                events,
+                headers,
+                participants,
+                players,
+                projections,
+                complete,
+                readInventory(session),
+                proof.lifecycle(matchIds),
+                proof.context,
+            ).also { requireActive(session) }
+        }
+    }
+
+    /** Keyset-Seiten der Metadatenauswahl; Zeilen blockierter Matches zählen nicht zum Limit. */
+    private fun pendingMetadata(
+        profileId: String,
+        selectedIds: Set<String>,
+        limit: Int,
+        proof: LifecycleProof,
+    ): List<Cloud_metadata> {
+        val rows = mutableListOf<Cloud_metadata>()
+        var after: Cloud_metadata? = null
+        while (rows.size < limit) {
+            val requested = limit - rows.size
+            val page =
+                database.cloudMetadataQueries
+                    .pendingForProfile(profileId, selectedIds, after?.let(::rank), after?.entity_id.orEmpty(), requested.toLong())
+                    .executeAsList()
+            rows += page.filter { it.kind == CloudMetadataKind.PLAYER.name || proof.admits(it.entity_id) }
+            if (page.size < requested) break
+            after = page.last()
+        }
+        return rows
+    }
+
+    /** Dieselbe Reihenfolge wie `CloudMetadata.pendingForProfile`. */
+    private fun rank(row: Cloud_metadata): Long =
+        when (row.kind) {
+            "PLAYER" -> 0
+            "HEADER" -> 1
+            "PARTICIPANTS" -> 2
+            else -> 3
+        }
+
+    /**
+     * Upload-Beleg nach Vertrag Welle 2 (U4, korrigiert nach Review r1). Data wird ausschließlich über
+     * `CloudPullStore.progress`/`snapshot`, `ReplicaLifecycleStore.access` und `redactionProgress` gelesen.
+     */
+    private inner class LifecycleProof(
+        private val profileId: String,
+        snapshotContext: ReplicaContext? = null,
+    ) {
+        private val progress = pulls.progress(profileId)
+
+        // Eine neue Runde ohne targetEpoch lässt das zuletzt abgeschlossene G gültig; der Server prüft G vor jedem Write.
+        val generation: Long? = progress.visibilityEpoch
+
+        // Ohne Owner-Scope existiert kein Replikatzugriff; eine Prüfung verwendet den Kontext ihres Snapshots.
+        val context: ReplicaContext? = snapshotContext ?: runCatching { replicas.captureContext() }.getOrNull()
+
+        // G stammt aus dem Upload-Profil; E nur aus demselben Konto lesen.
+        private val account = context?.takeIf { it.accountKey == profileId }
+
+        /** Kein Versand: neues G' noch nicht abgeschlossen, E aus fremdem Konto oder Neustart nach 40001 offen. */
+        val blocksAll = progress.targetEpoch != null || (generation != null && account == null) || restartPending(profileId, progress)
+        private val epochs = mutableMapOf<String, Long>()
+        private val blocked = mutableSetOf<String>()
+        private val checked = mutableSetOf<String>()
+
+        fun admits(matchId: String): Boolean {
+            if (checked.add(matchId)) evaluate(matchId)
+            return matchId !in blocked
+        }
+
+        private fun evaluate(matchId: String) {
+            val access = account?.let { replicas.access(it, matchId) }
+            val applied = access?.redactionEpoch ?: 0
+            // Katalog-E über dem angewandten E: D1 hat den Anstieg gesehen, der Transfer fehlt noch (auch ohne offenen Transfer).
+            val catalog = pulls.snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.redactionObserved ?: 0
+            val g = generation
+            if (blocksAll || catalog > applied || (g == null && applied > 0)) {
+                // Sonst sicher 40001: ohne G bei bekanntem E > 0, mit G beim alten E; beides sperrte das ganze Profil.
+                blocked += matchId
+                return
+            }
+            if (g == null) return
+            val ctx = checkNotNull(account)
+            // Der Server verlangt einen Eintrag für jedes ihm bekannte Match; ohne Access-Zeile ist E = 0.
+            if (access?.generation == null) {
+                epochs[matchId] = 0
+                return
+            }
+            val openTransfer = runCatching { replicas.redactionProgress(ctx, matchId)?.completed == false }.getOrDefault(true)
+            if (access.access == ReplicaAccessLevel.MEMBER && access.generation == g && !openTransfer &&
+                access.redactionEpoch <= Int.MAX_VALUE
+            ) {
+                epochs[matchId] = access.redactionEpoch
+            } else {
+                blocked += matchId
+            }
+        }
+
+        fun lifecycle(matchIds: Set<String>): CloudUploadLifecycle? {
+            if (blocksAll) return null
+            matchIds.forEach(::admits)
+            return generation?.let { g -> CloudUploadLifecycle(g, epochs.filterKeys { it in matchIds }) }
+        }
+
+        fun matches(snapshot: CloudUploadSnapshot): Boolean {
+            if (blocksAll) return snapshot.isEmpty
+            val ids = snapshot.matchIds
+            return ids.all(::admits) && lifecycle(ids) == snapshot.lifecycle
+        }
+    }
+
+    private fun restartKey(profileId: String) = "cloud.upload.restart.$profileId"
+
+    /**
+     * Profilweite Neustartsperre: gespeichert ist die Pull-Runde beim 40001. Integratorentscheid (Integrationspunkt B):
+     * Frei ist, sobald eine danach begonnene Runde ihren KATALOG abgeschlossen hat (`roundCatalogReady`), nicht erst
+     * nach dem Rundenabschluss. D1 braucht für eine ganze Runde bei 205 Matches 61 Läufe, U4 aber nur frisches G und
+     * frische Access-Zeilen; ein im Katalog gesehener E-Anstieg sperrt danach nur sein Match ([LifecycleProof]).
+     * Ein unlesbarer Wert sperrt bis zur nächsten Runde und wird dafür mit der aktuellen Runde überschrieben.
+     * Die Freigabe löscht den Wert: ein Katalogneustart derselben Runde (D1-eigenes 40001) sperrt nicht erneut.
+     */
+    private fun restartPending(
+        profileId: String,
+        progress: CloudPullProgress,
+    ): Boolean {
+        val stored = settings.get(restartKey(profileId)) ?: return false
+        val round = stored.toLongOrNull() ?: progress.checkRound.also { settings.putLong(restartKey(profileId), it) }
+        // beginRun startet nur ohne aktive Runde; checkRound >= round + 2 beweist also, dass round + 1 beendet ist.
+        val pending =
+            progress.checkRound <= round ||
+                (progress.checkRound == round + 1 && progress.roundActive && !progress.roundCatalogReady)
+        if (!pending) settings.remove(restartKey(profileId))
+        return pending
+    }
+
+    internal fun deferUntilPull(snapshot: CloudUploadSnapshot) {
+        requireOutsideTransaction()
+        database.transaction {
+            requireActive(snapshot.session)
+            settings.putLong(restartKey(snapshot.profileId), pulls.progress(snapshot.profileId).checkRound)
         }
     }
 
@@ -192,9 +402,15 @@ class CloudUploadStore internal constructor(
             database.cloudMetadataQueries.pendingCountForProfile(session.profileId).executeAsOne(),
         )
 
-    /** Vor dem Netzwerkversand erneut prüfen; B2b muss zusätzlich die verwendeten Credentials binden. */
+    /**
+     * Vor dem Netzwerkversand und vor dem Ack erneut prüfen; B2b muss zusätzlich die verwendeten Credentials binden.
+     * Abweichender Kontext, G/E oder ein inzwischen blockiertes Match: [CloudUploadLifecycleChangedException].
+     */
     fun requireCurrent(snapshot: CloudUploadSnapshot) {
         requireActive(snapshot.session)
+        val context = snapshot.context
+        if (context != null && runCatching { replicas.validate(context) }.isFailure) throw CloudUploadLifecycleChangedException()
+        if (!LifecycleProof(snapshot.profileId, context).matches(snapshot)) throw CloudUploadLifecycleChangedException()
     }
 
     /**

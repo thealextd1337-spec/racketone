@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -38,6 +40,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.platform.formatBuildDate
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.device_details
 import eu.advantly.ui.phone.resources.device_development
 import eu.advantly.ui.phone.resources.device_gray
@@ -48,6 +51,10 @@ import eu.advantly.ui.phone.resources.device_phone_build
 import eu.advantly.ui.phone.resources.device_ready
 import eu.advantly.ui.phone.resources.device_reconnect
 import eu.advantly.ui.phone.resources.device_red
+import eu.advantly.ui.phone.resources.device_repair
+import eu.advantly.ui.phone.resources.device_repair_confirm_body
+import eu.advantly.ui.phone.resources.device_repair_confirm_title
+import eu.advantly.ui.phone.resources.device_repair_hint
 import eu.advantly.ui.phone.resources.device_unknown
 import eu.advantly.ui.phone.resources.device_update_phone
 import eu.advantly.ui.phone.resources.device_update_recommended
@@ -65,6 +72,7 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
     val devices by port.deviceStatuses.collectAsState()
     val watches = devices.filter { it.kind == PeerKind.WATCH }
     var details by remember { mutableStateOf(false) }
+    var confirmRepair by remember { mutableStateOf(false) }
     val local = port.localAppBuild
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (watches.isEmpty()) {
@@ -137,8 +145,31 @@ internal fun WatchStatusIndicator(port: LiveMatchPort) {
                         Text(stringResource(hint), style = AdvantlyTheme.typography.body)
                     }
                 }
+                if (watches.isNotEmpty()) {
+                    Text(stringResource(Res.string.device_repair_hint), style = AdvantlyTheme.typography.body)
+                    TextButton({
+                        confirmRepair = true
+                        details = false
+                    }, modifier = Modifier.testTag("watch_repair")) { Text(stringResource(Res.string.device_repair)) }
+                }
             }
         }
+    }
+    if (confirmRepair) {
+        AlertDialog(
+            onDismissRequest = { confirmRepair = false },
+            title = { Text(stringResource(Res.string.device_repair_confirm_title)) },
+            text = { Text(stringResource(Res.string.device_repair_confirm_body)) },
+            confirmButton = {
+                TextButton({
+                    port.repairWatchPairing()
+                    confirmRepair = false
+                }, modifier = Modifier.testTag("watch_repair_confirm")) { Text(stringResource(Res.string.device_repair)) }
+            },
+            dismissButton = {
+                TextButton({ confirmRepair = false }) { Text(stringResource(Res.string.action_cancel)) }
+            },
+        )
     }
 }
 

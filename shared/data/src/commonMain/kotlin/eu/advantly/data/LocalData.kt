@@ -23,13 +23,14 @@ class LocalData(
     private val database = AdvantlyDatabase(driver)
     val replicas: ReplicaLifecycleStore = ReplicaLifecycleStore(database, this)
     private val rawEvents: EventStore = SqlDelightEventStore(database.matchEventQueries) { rebuildAssignments(MatchId(it)) }
-    val events: EventStore = ScopedEventStore(rawEvents, replicas) { block -> transaction(block) }
+    val events: EventStore = ScopedEventStore(rawEvents, database.matchEventQueries, replicas) { block -> transaction(block) }
     val matches: MatchRepository =
         MatchRepository(
             database.matchHeaderQueries,
             database.matchTombstoneQueries,
             ::assignmentIds,
             requireReadable = { replicas.requireReadable(it) },
+            requireWritable = { replicas.requireWritable(it) },
             requireInsert = { replicas.requireHeader(it) },
             created = {
                 cloud.resolveMatchMetadataSource(it)
@@ -55,7 +56,7 @@ class LocalData(
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
     val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent, ::redactedAssignmentSlots)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
-    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver)
+    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver, replicas, cloudPulls, settings)
     val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
     private val identityListeners = mutableSetOf<() -> Unit>()
 
@@ -301,7 +302,7 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 9: kontogebundener Zugriff, atomare Redaktionen und dauerhafte Eventbelege. */
-        const val SCHEMA_VERSION: Long = 10
+        /** Schema 13: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches. */
+        const val SCHEMA_VERSION: Long = 13
     }
 }

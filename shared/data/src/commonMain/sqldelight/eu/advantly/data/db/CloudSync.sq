@@ -23,6 +23,10 @@ UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL WHERE id = ?;
 markRejected:
 UPDATE match_event SET cloud_state = 2, cloud_rejection = :reason WHERE id = :id AND cloud_state = 0;
 
+-- K4-U: Nur diese Ablehnung kann eine Gerätefreigabe aufheben (Quellgerät widerrufen bzw. noch nicht gebunden).
+resetDeviceRejections:
+UPDATE match_event SET cloud_state = 0, cloud_rejection = NULL WHERE cloud_state = 2 AND cloud_rejection = 'device_not_owned';
+
 cursor:
 SELECT value FROM cloud_cursor WHERE profile_id = ? AND stream = ?;
 

@@ -2,6 +2,7 @@ package eu.advantly.presentation.auth
 
 import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentDocument
@@ -54,6 +55,25 @@ class FakePhoneAuth : CloudAuthPort {
     override suspend fun cancelDeletion() {
         call("recover")
         session.value = session.value!!.copy(deletionRequested = false)
+    }
+
+    val devices = mutableListOf(CloudDevice("d1", "phone", "android", "Pixel"), CloudDevice("w1", "watch", "wearos"))
+
+    override suspend fun devices(): List<CloudDevice> {
+        call("devices")
+        return devices.toList()
+    }
+
+    override suspend fun revokeDevice(deviceId: String) {
+        call("revoke:$deviceId")
+        val index = devices.indexOfFirst { it.deviceId == deviceId }
+        if (index >= 0) devices[index] = devices[index].copy(revokedAt = "2026-10-23T10:00:00Z")
+    }
+
+    override suspend fun restoreDevice(deviceId: String) {
+        call("restore:$deviceId")
+        val index = devices.indexOfFirst { it.deviceId == deviceId }
+        if (index >= 0) devices[index] = devices[index].copy(revokedAt = null)
     }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
@@ -147,6 +167,104 @@ class AuthViewModelTest {
         model.requestDeletion()
         model.cancelDeletion()
         assertEquals("recover", auth.calls.last())
+    }
+
+    @Test fun suspendedAccountShowsReasonKeepsRightsAndSkipsAdoption() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true, suspended = true)
+                it.sources = listOf(CloudAdoptionSource("opaque", "WATCH", 8))
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+        assertEquals(true, model.state.value.suspended)
+        assertNull(model.state.value.error)
+        assertEquals(emptyList(), model.state.value.adoptionSources, "keine Übernahme in ein gesperrtes Konto")
+        model.exportData()
+        assertEquals("{\"consentHistory\":[]}", model.state.value.exportedData)
+        model.loadDevices()
+        assertEquals(
+            2,
+            model.state.value.devices
+                ?.size,
+        )
+        auth.session.value = CloudSession("alice", true)
+        model.refresh()
+        assertFalse(model.state.value.suspended)
+        assertNull(model.state.value.devices, "neue Anzeige lädt Geräte erst auf Wunsch")
+    }
+
+    @Test fun revokingADeviceReloadsTheServerListAndFailuresStayVisible() {
+        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
+        val model = AuthViewModel(auth, scope)
+        assertNull(model.state.value.devices)
+        model.loadDevices()
+        model.revokeDevice("w1")
+        assertEquals(listOf("devices", "revoke:w1", "devices"), auth.calls.filter { it != "refresh" })
+        assertEquals(
+            "2026-10-23T10:00:00Z",
+            model.state.value.devices!!
+                .single { it.deviceId == "w1" }
+                .revokedAt,
+        )
+        auth.failure = "device_not_authorized"
+        model.revokeDevice("foreign")
+        assertEquals("device_not_authorized", model.state.value.error)
+        assertEquals(
+            2,
+            model.state.value.devices
+                ?.size,
+            "fehlgeschlagener Widerruf verändert die Liste nicht",
+        )
+    }
+
+    @Test fun theCurrentPhoneIsNeverRevokedFromThisPhone() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.devices[0] = it.devices[0].copy(current = true)
+            }
+        val model = AuthViewModel(auth, scope)
+        model.loadDevices()
+        model.revokeDevice("d1")
+        assertFalse(auth.calls.any { it.startsWith("revoke:") }, "kein Weg zurück: eigenes Handy bleibt")
+        assertNull(model.state.value.error)
+        assertFalse(model.state.value.busy)
+        model.revokeDevice("w1")
+        assertEquals("revoke:w1", auth.calls.single { it.startsWith("revoke:") })
+    }
+
+    @Test fun restoringAnotherDeviceReloadsTheListButTheCurrentPhoneNeverRestoresItself() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
+                it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
+            }
+        val model = AuthViewModel(auth, scope)
+        model.loadDevices()
+        model.restoreDevice("d1")
+        assertFalse(auth.calls.any { it.startsWith("restore:") }, "nie vom widerrufenen Handy selbst")
+        assertNull(model.state.value.error)
+        model.restoreDevice("w1")
+        assertEquals(listOf("devices", "restore:w1", "devices"), auth.calls.filter { it != "refresh" })
+        assertNull(
+            model.state.value.devices!!
+                .single { it.deviceId == "w1" }
+                .revokedAt,
+        )
+        auth.failure = "device_not_revoked"
+        model.restoreDevice("w1")
+        assertEquals("device_not_revoked", model.state.value.error)
+    }
+
+    @Test fun deviceListNeedsTheDisplayedSession() {
+        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, generation = 1) }
+        val model = AuthViewModel(auth, scope)
+        auth.session.value = CloudSession("bob", true, generation = 2)
+        model.loadDevices()
+        assertEquals("cloud_session_changed", model.state.value.error)
+        assertFalse(auth.calls.contains("devices"))
     }
 
     private fun documents(version: String = "v1") =

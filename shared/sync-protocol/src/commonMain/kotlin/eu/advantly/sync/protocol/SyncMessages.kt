@@ -23,7 +23,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed interface SyncMessage {
-    /** Protokollversion des Absenders ([ProtocolVersion.CURRENT]). */
+    /** Protokollversion der Nachricht: mit der Gegenstelle ausgehandelt, `Hello` trägt den eigenen Bereich. */
     val v: Int
 }
 
@@ -75,7 +75,7 @@ data class Hello(
 data class Summary(
     val matches: Map<String, VersionVector>,
     val reply: Boolean = false,
-    @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val lifecycle: Map<String, LifecycleSummary> = emptyMap(),
     val stamps: Map<String, MatchDataStamp> = emptyMap(),
 ) : SyncMessage {
@@ -106,7 +106,7 @@ data class Events(
     val matchId: MatchId,
     val events: List<ScoreEvent>,
     val more: Boolean = false,
-    @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val stamp: MatchDataStamp? = null,
 ) : SyncMessage {
     init {
@@ -154,7 +154,7 @@ data class MatchMetaMessage(
     val watchMatch: WatchAssignment? = null,
     /** Additiv in Protokoll 3 (P2-J): ältere Geräte ignorieren das unbekannte Feld (`ignoreUnknownKeys`). */
     val telemetry: TelemetrySetting? = null,
-    @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val stamp: MatchDataStamp? = null,
 ) : SyncMessage {
     init {
@@ -235,7 +235,7 @@ data class WatchAssignment(
 @SerialName("Deleted")
 data class Deleted(
     val matches: List<DeletedMatch>,
-    @EncodeDefault override val v: Int = ProtocolVersion.CURRENT,
+    @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val stamps: Map<String, MatchDataStamp> = emptyMap(),
 ) : SyncMessage {
     init {

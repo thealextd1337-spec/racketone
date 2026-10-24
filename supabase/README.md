@@ -333,6 +333,89 @@ oder unbereinigten Function-Logs werden als Artefakte veröffentlicht. Periodisc
 Hosted-CPU-/Speichergrenzen und reale Phone-Dateinutzung bleiben getrennte Nachweise.
 
 
+## K4/K5: Gerätewiderruf und Kontosupport
+
+Migration `20261023000100_account_support.sql`. K4 (Gerätebindung/Widerruf) stammt aus `20261018000100`; neu ist die
+Geräteliste mit Widerruf in der Android-App (`cloud_list_devices_v1`/`cloud_revoke_device_v1`, nur Auth-Sitzung).
+`auth.sessions` wird weiterhin nur gelesen. Die App-Abmeldung ist global (GoTrue, alle Sitzungen des Kontos); ein
+serverseitiger Auth-Admin-Widerruf (Ban/Abmeldung über die Supabase-Admin-API) bleibt ein getrennter Betreiberschritt.
+
+| RPC | Rolle | Wirkung | Audit |
+|---|---|---|---|
+| `admin_account_lookup(p_query)` | `support`, `admin` | exakt UUID, Freundescode oder Alias; minimaler Status; ohne Konten in Löschung und ohne eigenes Konto | – |
+| `admin_account_set_suspended(p_profile_id, p_suspended, p_reason)` | `admin` | Sperre setzen/aufheben | `account_suspend`/`account_unsuspend` |
+| `admin_account_revoke_devices(p_profile_id, p_reason)` | `admin` | alle Installationen, Cloud-Sitzungsbindungen, Geräte, Push-Token | `account_revoke_devices` (nur Zählwerte) |
+| `admin_account_cancel_deletion(p_profile_id, p_ticket_id, p_reason)` | `admin` | Löschrücknahme wie `cancel_account_deletion`, nur mit Meldung nach dem Antrag | `account_cancel_deletion` (Meldungs-UUID, `ticket_kind` `account`/`guest`) |
+| `admin_account_unrevoke_device(p_profile_id, p_device_id, p_ticket_id, p_reason)` | `admin` | K4-U: Widerruf eines Geräts aufheben, nur mit Meldung nach dem Widerruf | `device_unrevoke` (`via` `admin`, Gerät, Meldungs-UUID, `ticket_kind`, `ticket_uses`) |
+| `cloud_unrevoke_device_v1(p_device_id)` | Konto mit anderem, schon vor dem Widerruf gebundenem Gerät (Installationsnachweis) | K4-U: Widerruf eines anderen eigenen Geräts aufheben | `device_unrevoke` (`via` `device`, freigegebenes und freigebendes Gerät, ohne Begründung) |
+
+Alle prüfen bei jedem Aufruf Mitgliedschaft und AAL2 (`support_forbidden`, `support_mfa_required`), schreibende
+zusätzlich `admin` (`support_admin_required`) nach `lock_sync()`. Begründung 1–500 Zeichen (`support_invalid`).
+Weitere Fehler: `account_not_found` (auch Konto in Löschung und eigenes Konto), `account_ambiguous`,
+`no_deletion_pending`. Eigenes Konto ist kein Ziel (`support_invalid`).
+
+**Löschrücknahme (Entscheid 24.10.2026):** Pflicht ist eine Meldung, die nach `deletion_requested_at` entstand,
+entweder vom Zielkonto oder als Gastmeldung. Fehler: `deletion_ticket_required` (keine Meldungs-UUID),
+`deletion_ticket_invalid` (unbekannt oder von einem anderen Konto), `deletion_ticket_stale` (vor dem Antrag),
+`deletion_ticket_evidence_required` (Gastmeldung, Begründung unter 20 Zeichen). Bei einer Gastmeldung belegt die
+Begründung, wie die Meldung dem Konto zugeordnet wurde; der Server prüft nur die Länge, nicht den Inhalt.
+
+**Widerruf aufheben (K4-U, Entscheid 24.10.2026):** nie durch das widerrufene Gerät selbst. Die Freigabe löscht nur
+`revoked_at` von Gerät und Installation; Geräte-ID, Installations-ID und Proof gelten wieder. Sitzungsbindungen bleiben
+Tombstones: Das Gerät meldet sich neu an (Fünf-Minuten-Grenze der Erstbindung), bindet dieselben IDs und lädt danach
+seine noch nicht hochgeladenen Events hoch. Jede Freigabe erhöht G (`visibility_epoch`): Ein Push mit älterer G
+endet in `restart_required`, also frischer Pull vor dem Schreiben. E bleibt unverändert; Push-Token setzt erst die
+App neu. Der Widerrufszeitpunkt ist `greatest(devices.revoked_at, cloud_installations.revoked_at)` und Bezug der
+Meldungsregel; ein erneuter Widerruf setzt ihn neu.
+- Nutzerweg (`cloud_unrevoke_device_v1`, Installationsnachweis wie Push/Pull, im Inventar von 181):
+  `device_unrevoke_self` (42501, dieselbe Installation oder das Gerät der eigenen Sitzungsbindung, vor allen anderen
+  Prüfungen), `account_deletion_pending` (42501), danach `require_cloud_binding` mit `account_suspended`,
+  `consent_required`, `device_revoked` (aufrufendes Gerät widerrufen) und `device_not_authorized`. Nach
+  `device_not_found`/`device_not_revoked` folgt `device_unrevoke_caller_too_new` (42501): Die Installation des
+  aufrufenden Geräts entstand erst nach dem Widerruf, etwa eine zweite App-Instanz mit Mail-Code auf dem widerrufenen
+  Handy oder ein neues Gerät nach `admin_account_revoke_devices`. Dann bleibt nur der Adminweg.
+- Adminweg: Meldungsregel wie bei der Löschrücknahme mit `device_ticket_required`, `device_ticket_invalid`,
+  `device_ticket_stale` (vor dem Widerruf), `device_ticket_evidence_required`; außerdem `account_suspended` und
+  `account_deletion_pending` (P0001), `account_not_found` (Phase A). Eine Kontomeldung zählt nur von einem anderen
+  eigenen Gerät, das beim Melden nicht widerrufen war: `device_ticket_from_revoked_device` (vom Zielgerät oder einem
+  damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden),
+  `device_ticket_device_too_new` (Installation des Absendergeräts erst nach dem Widerruf des Zielgeräts, wie
+  `device_unrevoke_caller_too_new` im Nutzerweg). Das Absendergerät
+  hält ein Trigger beim Anlegen in `private.support_ticket_devices` fest (Bindung der JWT-Sitzung, Widerruf zu dem
+  Zeitpunkt); es erscheint in keiner Nutzer- oder Inbox-Antwort. Gastmeldungen mit Zuordnungsbeleg bleiben gültig.
+  Eine Meldung darf mehrere Geräte freigeben; `ticket_uses` im Audit zählt ihre Verwendungen. Die Löschrücknahme
+  braucht die Geräteregel nicht: `cancel_account_deletion` steht jeder Kontositzung offen, auch der eines widerrufenen
+  Geräts.
+- Beide: `device_not_found` (unbekannt oder fremd, gleicher Grund), `device_not_revoked`.
+- `admin_account_lookup` nennt widerrufene Geräte (`revokedDevices`: Art, Plattform, Zeitpunkt, höchstens 20; die
+  Geräte-ID nur für `admin`).
+- Ablehnungen `device_not_owned` (Quellgerät widerrufen, etwa eine noch nicht freigegebene Uhr) setzt die App bei
+  jeder neuen Anmeldung und bei jeder neuen G wieder auf ausstehend; die Reihenfolge der Freigaben ist egal.
+
+**Sperre:** `private.account_suspensions`. `require_active()` meldet `account_suspended` (42501), das RLS-Gate
+schließt direkte Tabellen; damit sind Bind, Push, Pull, Legacy- und Social-RPCs zu. Export, Löschantrag/-status,
+Zustimmung, eigene Geräteliste und Support bleiben erreichbar; `my_auth_profile` liefert `suspended`. Die Sicht
+anderer bleibt unverändert (`is_active` unverändert, keine Epochenänderung). GoTrue-Login bleibt technisch möglich.
+
+**Konto-Audit:** `ops.account_audit`, ein Jahr (über `private.purge_support()`/`advantly-support-cleanup`). Wie
+beim Support-Audit schon in Phase A der gestaffelten Löschung (Status `deleting`): Zielbezug und Begründung werden
+geleert, ein gelöschter Admin verliert den Akteursbezug. Ohne Phase A (direkte Auth-Löschung) setzt die FK den
+Bezug auf null und ein Trigger leert die Begründung. Mit dem Zielbezug fallen auch Geräte-IDs aus `changes` weg.
+
+Tests: pgTAP `300_account_support` (Rolle, AAL1, Begründung, Audit, Entkopplung, Sperrwirkung, Rücknahme samt
+Meldungsregeln) und `310_device_unrevoke` (alle Ablehnungen beider Wege, Freigabe, G, neue Bindung derselben IDs,
+Upload alter Events, später gebundene Geräte, Absendergerät der Meldung);
+Renntest `300_account_support_concurrency.py` (Sperre↔Push/Pull/Bind, Sperre/Rücknahme↔Löschjob, Freigabe↔erneuter
+Widerruf/Doppelfreigabe/Sperre/Löschjob, mit `pg_blocking_pids`, in CI im Schritt „Consent-Gate und
+D2/D3-Lockrennen“); K7 `tools/pilot-checks/check_account_support.py` (lokal Admin-Aktion über Owner-DB, staging durch
+Betreiber mit MFA) und `check_revoke.py` (Widerruf → Freigabe durch das zweite Handy → neue Anmeldung → alte Events).
+
+```powershell
+$env:ADVANTLY_ACCOUNT_TEST_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+uv run supabase/tests/database/300_account_support_concurrency.py --confirm-disposable
+Remove-Item Env:ADVANTLY_ACCOUNT_TEST_DB_URL
+```
+
 ## P2-C: Auth und Altersgate
 
 Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,

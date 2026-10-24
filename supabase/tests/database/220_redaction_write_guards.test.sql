@@ -1,6 +1,6 @@
 -- Servergrenze: echte Owner-Uploads nach K3, ohne neuen Client-/Releasevertrag.
 begin;
-select plan(1296);
+select plan(1326);
 select tests.world();
 select tests.publish_consent_documents('redaction-write-220');
 select tests.accept_current_consents(id) from tests.users;
@@ -577,24 +577,49 @@ select is(tests.result(pg_temp.push('q_alice',jsonb_build_object('matches',jsonb
 insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values
  ('55020000-0000-4000-8000-000000000001','55000000-0000-4000-8000-000000000001',(select device_id from tests.cloud_context where profile_id=tests.uid('q_alice')),1,1,1,'PlayerAssigned',
   '{"type":"PlayerAssigned","player":{"id":"55010000-0000-4000-8000-0000000000a1","displayName":"Kim"}}',tests.uid('q_alice'));
+-- Lea ist ein Gast von vera, nicht von alice, im selben Match; vera löscht ihn unten hart (Harddelete-Beleg ohne Löschung des Owners).
+insert into public.players(id,owner_id,kind,display_name) values ('55010000-0000-4000-8000-0000000000a3',tests.uid('q_vera'),'guest','Lea');
+insert into public.match_participants(match_id,slot_id,team,position,player_id,display_name) values
+ ('55000000-0000-4000-8000-000000000001','lea-slot','B',2,'55010000-0000-4000-8000-0000000000a3','Lea');
+insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values
+ ('55020000-0000-4000-8000-000000000003','55000000-0000-4000-8000-000000000001',(select device_id from tests.cloud_context where profile_id=tests.uid('q_vera')),1,2,2,'PlayerAssigned',
+  '{"type":"PlayerAssigned","player":{"id":"55010000-0000-4000-8000-0000000000a3","displayName":"Lea"}}',tests.uid('q_vera'));
 delete from auth.users where id=tests.uid('q_alice');
 select is((select created_by from public.matches where id='55000000-0000-4000-8000-000000000001'),tests.uid('q_vera'),'H1: match transferred to vera');
 select ok(not exists(select 1 from public.players where id='55010000-0000-4000-8000-0000000000a1'),'H1: guest row hard-deleted');
-select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Kim','H1: Kim slot survives in vera match');
--- Dritte Person war niemals Mitglied: die geloeschte Playeridentitaet ist gesperrt.
-select is(tests.result(pg_temp.push('q_mal',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','self','displayName','M')))),'players',0),'rejected:player_identity_conflict','H1: deleted guest UUID cannot become Mallory self');
+-- Nutzerentscheid 23.10.2026: Der eigene Gast der Gelöschten wird auch im Match, das bei vera bleibt, redigiert.
+select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Gelöschter Spieler','H1: own guest Kim is redacted in the match that stays with vera');
+-- Dritte Person war niemals Mitglied: die geloeschte Playeridentitaet ist gesperrt (mit Beleg bis zum Player-Writer).
+select is(tests.result(pg_temp.push('q_mal',pg_temp.proof('q_mal',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','self','displayName','M'))))),'players',0),'rejected:player_identity_conflict','H1: deleted guest UUID cannot become Mallory self');
 select ok(exists(select 1 from private.deleted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),
  'H1: actual deleted Player row creates durable non-reuse evidence');
-select ok(not private.player_write_redacted('55010000-0000-4000-8000-0000000000a1'),
+-- Die Sperre von Kim kommt aus der Löschung des Owners (pensionierter eigener Gast), nicht aus dem Harddelete-Beleg.
+select ok(private.player_write_redacted('55010000-0000-4000-8000-0000000000a1'),'H1: owner deletion retires the own guest');
+delete from public.players where id='55010000-0000-4000-8000-0000000000a3';
+select ok(exists(select 1 from private.deleted_player_identities where player_id='55010000-0000-4000-8000-0000000000a3')
+ and not private.player_write_redacted('55010000-0000-4000-8000-0000000000a3')
+ and not private.redacted_player_identity('55010000-0000-4000-8000-0000000000a3')
+ and not exists(select 1 from private.match_redacted_names where identity_id='55010000-0000-4000-8000-0000000000a3')
+ and not exists(select 1 from private.match_redacted_players where player_id='55010000-0000-4000-8000-0000000000a3')
+ and (select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='lea-slot')='Lea'
+ and pg_temp.ev_name('55020000-0000-4000-8000-000000000003')='Lea',
  'H1: hard-delete evidence alone never authorizes name redaction');
 select is(tests.result(pg_temp.push('q_vera',pg_temp.proof('q_vera',jsonb_build_object('players',jsonb_build_array(
  jsonb_build_object('id','55010000-0000-4000-8000-0000000000a1','kind','guest','displayName','Kim'))))),'players',0),
  'rejected:player_identity_conflict','H1: even current match owner cannot reuse the deleted UUID as guest');
+create temp table h1_before as select redaction_epoch from public.matches where id='55000000-0000-4000-8000-000000000001';
 delete from auth.users where id=tests.uid('q_mal');
-select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Kim','H1 EXPECT: vera match Kim slot untouched by unrelated deletion');
-select is(pg_temp.ev_name('55020000-0000-4000-8000-000000000001'),'Kim','H1 EXPECT: vera match Kim event untouched');
-select ok(not exists(select 1 from private.match_redacted_players where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: no global manifest entry in vera match');
-select ok(not exists(select 1 from private.redacted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: no global tombstone');
+select is((select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='55010000-0000-4000-8000-0000000000a1'),'Gelöschter Spieler','H1 EXPECT: vera match Kim slot stays redacted after unrelated deletion');
+select is(pg_temp.ev_name('55020000-0000-4000-8000-000000000001'),'Gelöschter Spieler','H1 EXPECT: vera match Kim event redacted by the owner deletion');
+select ok((select count(*) from private.match_redacted_players where player_id='55010000-0000-4000-8000-0000000000a1')=1
+ and (select redaction_epoch from public.matches where id='55000000-0000-4000-8000-000000000001')=(select redaction_epoch from h1_before),
+ 'H1 EXPECT: manifest entry only from the owner deletion, unrelated deletion leaves E unchanged');
+select ok(exists(select 1 from private.redacted_player_identities where player_id='55010000-0000-4000-8000-0000000000a1'),'H1 EXPECT: global tombstone from the owner deletion');
+select ok(not private.player_write_redacted('55010000-0000-4000-8000-0000000000a3')
+ and not private.redacted_player_identity('55010000-0000-4000-8000-0000000000a3')
+ and (select display_name from public.match_participants where match_id='55000000-0000-4000-8000-000000000001' and slot_id='lea-slot')='Lea'
+ and pg_temp.ev_name('55020000-0000-4000-8000-000000000003')='Lea',
+ 'H1 EXPECT: hard-deleted foreign guest keeps its name after the unrelated deletion');
 
 -- Review r3, N2: inverse historische Zuordnung: M1 bob via profileId mit Gast X, X danach vera2; VERA2 loescht =====
 insert into public.players(id,owner_id,kind,display_name) values ('56010000-0000-4000-8000-0000000000f1',tests.uid('q_al2'),'guest','X');
@@ -693,8 +718,8 @@ select is(pg_temp.ev_name('56020000-0000-4000-8000-000000000005'),'Bob after ret
  'H2: later Bob event is never globally anonymized');
 select ok(not exists(select 1 from private.match_redacted_players where player_id='56010000-0000-4000-8000-0000000000f1'),
  'H2: no global manifest promotion after new writes');
-select is(tests.result(pg_temp.push('q_vera',jsonb_build_object('players',jsonb_build_array(jsonb_build_object(
- 'id','{55010000-0000-4000-8000-0000000000A1}','kind','self','displayName','Collision')))),'players',0),
+select is(tests.result(pg_temp.push('q_vera',pg_temp.proof('q_vera',jsonb_build_object('players',jsonb_build_array(jsonb_build_object(
+ 'id','{55010000-0000-4000-8000-0000000000A1}','kind','self','displayName','Collision'))))),'players',0),
  'rejected:player_identity_conflict','H1: alternate UUID spelling cannot bypass non-reuse');
 
 -- Auch ein direkter, spaeter zurueckgerollter DELETE liefert keinen dauerhaften
@@ -1077,6 +1102,13 @@ begin
  update public.profile_settings set country='AT',age_confirmed_at=now(),age_rule_min_age=14 where profile_id=x;
  perform tests.accept_current_consents(x);
 end $$;
+-- Liefert den Fehlertext statt abzubrechen (20261022000100 lehnt getilgte Profil-IDs ab).
+create function pg_temp.try_fixed_profile(n text,x uuid) returns text language plpgsql as $$
+begin
+ perform pg_temp.fixed_profile(n,x);
+ return null;
+exception when others then return sqlerrm;
+end $$;
 create function pg_temp.typed_future_profile(mode text,cloud boolean) returns setof text language plpgsql as $$
 declare
  n text:='n7_'||left(mode,8)||case when cloud then '_c' else '_s' end;
@@ -1187,7 +1219,8 @@ begin
  return next is(tests.result(r,'events',0),'accepted',n||': Player-domain event accepted canonically');
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler' from public.match_events where id=ey),n||': general Player context never overrides global Player tombstone');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'='[]'::jsonb,n||': real manifest includes justified Player-domain event');
+ -- 01000: Player-FK und Event referenzieren das global redigierte x ohne direkten Profilkontext, also globaler Zweig.
+ return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'=jsonb_build_array(x),n||': real manifest includes justified Player-domain event and late global ID');
  -- Zwei aktuelle lebende Domaenen ohne vorherigen lokalen Loeschbeleg:
  -- der direkte Profil-FK darf den widersprechenden echten Player-FK nicht ueberstimmen.
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(my,jsonb_build_array(
@@ -1202,8 +1235,8 @@ begin
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler'
   from public.match_events where id=ec),n||': current direct Profile FK alone cannot exempt ambiguous Player-domain event');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'='[]'::jsonb,
-  n||': actual manifest includes both justified ambiguous Player events');
+ return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'=jsonb_build_array(x),
+  n||': actual manifest includes both justified ambiguous Player events and the late global ID');
 
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(mb,jsonb_build_array(
   tests.part('bob','A',1,'Bob',null),tests.part('vera-shared','B',1,'Vera',x)))))),cloud);
@@ -1221,7 +1254,8 @@ begin
  return next ok((select redacted_at is not null and payload#>>'{player,displayName}'='Gelöschter Spieler' from public.match_events where id=en)
   and (select redacted_at is null from public.match_events where id=ev),n||': other Match Profile context cannot create global UUID veto');
  page:=pg_temp.context_page(n||'_a',mv);
- return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'='[]'::jsonb,n||': NotMe manifest contains only forward justified redaction');
+ -- 01000: nach NotMe fehlt der direkte Profilkontext, das spaete Event erfuellt den globalen Zweig.
+ return next ok(jsonb_array_length(page->'events')=1 and page->'redactedPlayerIds'=jsonb_build_array(x),n||': NotMe manifest contains only forward justified redaction and the late global ID');
  delete from public.players where id=x;
  return next ok(not private.redaction_live_profile_context(my,x) and private.redaction_live_player_context(my,x),
   n||': historical conflicting Player FK also prevents ambiguous Profile exception');
@@ -1237,8 +1271,9 @@ begin
  return next ok((select count(*)=2 from public.match_events where id in (ey,ec) and redacted_at is not null
   and payload#>>'{player,displayName}'='Gelöschter Spieler'),n||': already authorized local redactions remain irreversible');
  page:=pg_temp.context_page(n||'_a',my);
- return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'='[]'::jsonb,
-  n||': actual manifest retains masked events without false new Profile event or global promotion');
+ -- 01000: nur die IDs aendern sich, x steht seit dem spaeten Player-FK im Manifest.
+ return next ok(jsonb_array_length(page->'events')=2 and page->'redactedPlayerIds'=jsonb_build_array(x),
+  n||': actual manifest retains masked events without false new Profile event, with the late global ID');
  return next ok(private.redacted_player_identity(x::text) and private.player_write_redacted(x::text),
   n||': revoking contradictory context never revokes original Player retirement');
  r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('players',jsonb_build_array(jsonb_build_object('id',x,'kind','guest','displayName','Reuse')))),cloud);
@@ -1254,18 +1289,15 @@ begin
  return next is(tests.result(r,'events',0),'accepted',n||': event after actual Profile deletion accepted canonically');
  page:=pg_temp.context_page(n||'_a',mv);
  return next ok(pg_temp.ev_name(ed)='Gelöschter Spieler' and jsonb_array_length(page->'events')=3
-  and page->'redactedPlayerIds'='[]'::jsonb,n||': true Vera deletion remains event-only in unrelated match');
- -- Selbst privilegierte Auth-UUID-Wiederanlage widerruft keinen echten Profilbeleg.
+  and page->'redactedPlayerIds'=jsonb_build_array(x),n||': unrelated match keeps the late global ID from the NotMe event');
+ -- Privilegierte Auth-UUID-Wiederanlage wird abgelehnt (20261022000100); der Profilbeleg bleibt bestehen.
  delete from tests.users where identifier=n||'_v';
- perform pg_temp.fixed_profile(n||'_r',x);
- insert into public.friendships(requester_id,addressee_id,status) values(a,x,'accepted');
- r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('matches',jsonb_build_array(tests.match(mr,jsonb_build_array(tests.part('revived','A',1,'Revived',x)))))),cloud);
- return next is(tests.result(r,'matches',0),'created',n||': reused Auth UUID creates only canonical match content');
- return next ok((select deleted_profile and profile_id is null from public.match_participants where match_id=mr)
-  and not private.redaction_live_profile_context(mr,x),n||': actual Profile delete guard cannot be reversed by new live row');
- r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('events',jsonb_build_array(tests.event(er,mr,d,7,'PlayerAssigned',jsonb_build_object('player',jsonb_build_object('id',x,'displayName','Revived')))))),cloud);
- return next is(tests.result(r,'events',0),'accepted',n||': stale recreated-Profile event accepted canonically');
- return next is(pg_temp.ev_name(er),'Gelöschter Spieler',n||': recreated Profile row does not undo deletion evidence');
+ return next is(pg_temp.try_fixed_profile(n||'_r',x),'profile_id_retired',n||': reused Auth UUID is rejected');
+ return next ok(private.redacted_profile_identity(x::text) and not exists(select 1 from public.profiles where id=x)
+  and not exists(select 1 from auth.users where id=x),n||': tombstone stays and no live profile reappears');
+ r:=pg_temp.push(n||'_a',pg_temp.proof(n||'_a',jsonb_build_object('events',jsonb_build_array(tests.event(er,mv,d,7,'PlayerAssigned',jsonb_build_object('player',jsonb_build_object('id',x,'displayName','Revived')))))),cloud);
+ return next is(tests.result(r,'events',0),'accepted',n||': stale event after rejected revival accepted canonically');
+ return next is(pg_temp.ev_name(er),'Gelöschter Spieler',n||': rejected revival does not undo deletion evidence');
 end $$;
 select * from pg_temp.player_profile_split(true);
 select * from pg_temp.player_profile_split(false);
@@ -1355,7 +1387,11 @@ begin
  return next is(tests.result(r,'events',1),'accepted',label||': fresh exact proof accepts genesis');
  return next is(tests.result(r,'events',0),'accepted',label||': fresh proof commits earlier healthy event');
  return next is((select p.payload from public.match_events p where id=e),payload,label||': accepted genesis payload preserved exactly');
- return next is((select redaction_epoch from public.matches where id=m),0,label||': new or previously empty match remains E0');
+ -- 01000: Genesis mit global redigiertem Player traegt die ID ins Manifest und erhoeht E einmal.
+ return next is((select redaction_epoch from public.matches where id=m),1,label||': late global genesis reference raises E once');
+ -- Nur das Ziel, nie die zufaelligen Lineup-IDs daneben.
+ return next is((select array_agg(player_id) from private.match_redacted_players where match_id=m),
+  array['bb110000-0000-4000-8000-000000000001'::uuid],label||': manifest holds exactly the global target');
  return next ok((select model=label from public.devices where id=d) and exists(select 1 from public.players where id=innocent)
   and exists(select 1 from public.matches where id=healthy),label||': fresh proof commits complete mixed batch');
  -- Ein spaeteres E-Inkrement aendert den bestehenden Event-ID-No-op nicht.
@@ -1396,7 +1432,12 @@ begin
  r:=pg_temp.push('genesis_actor',batch,cloud);
  return next is(tests.result(r,'events',0),'accepted',label||': previous healthy/malformed/foreign event contract preserved');
  return next is((select p.payload from public.match_events p where id=e),payload,label||': no extra payload validation or normalization');
- return next is((select redaction_epoch from public.matches where id=m),0,label||': fresh target starts E0');
+ -- 01000: die gruppierte Schreibweise ist dieselbe global redigierte UUID.
+ return next is((select redaction_epoch from public.matches where id=m),case when mode='grouped' then 1 else 0 end,
+  label||case when mode='grouped' then ': late global grouped UUID raises E once' else ': fresh target starts E0' end);
+ return next is((select array_agg(player_id) from private.match_redacted_players where match_id=m),
+  case when mode='grouped' then array['bb110000-0000-4000-8000-000000000001'::uuid] end,
+  label||case when mode='grouped' then ': manifest holds exactly the global target' else ': manifest stays empty' end);
 end $$;
 select r.* from (values(true),(false)) rpc(cloud)
  cross join unnest(array['healthy','null','empty','malformed','foreign','grouped']) mode

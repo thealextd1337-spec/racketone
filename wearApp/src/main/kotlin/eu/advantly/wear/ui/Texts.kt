@@ -197,6 +197,7 @@ fun syncText(sync: SyncUi): String =
     when (sync) {
         SyncUi.Synced -> stringResource(R.string.sync_synced)
         SyncUi.LocalOnly -> stringResource(R.string.sync_local)
+        SyncUi.Blocked -> stringResource(R.string.sync_blocked)
         is SyncUi.Pending -> pluralStringResource(R.plurals.sync_pending, sync.count, sync.count)
         SyncUi.Live -> stringResource(R.string.sync_live)
         is SyncUi.Stale -> agoText(sync.seconds)

@@ -3,6 +3,7 @@ package eu.advantly.presentation.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentSnapshot
@@ -32,6 +33,10 @@ data class AuthState(
     val authenticated: Boolean = false,
     val consent: ConsentSnapshot? = null,
     val exportedData: String? = null,
+    /** K5: Konto gesperrt; Kontorechte bleiben, Cloud-Arbeit ist pausiert. */
+    val suspended: Boolean = false,
+    /** K4: zuletzt geladene eigene Geräte; `null` = nicht geladen. */
+    val devices: List<CloudDevice>? = null,
 )
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -41,16 +46,20 @@ class AuthViewModel(
     val support: eu.advantly.presentation.support.SupportViewModel? = null,
     val upload: PhoneUploadPort? = null,
     val export: PhoneExportPort? = null,
+    val pull: PhonePullPort? = null,
+    /** Gehört dem prozessweiten Konto-Host, nicht diesem ViewModel: kein Abbau in [onCleared]. */
+    val sync: PhoneSyncPort? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
         var closesStarted = false
         var uploadDrained = upload == null
         var exportDrained = export == null
+        var pullDrained = pull == null
         var authClosed = false
 
         fun closeAuthWhenDrained() {
-            if (closesStarted && uploadDrained && exportDrained && !authClosed) {
+            if (closesStarted && uploadDrained && exportDrained && pullDrained && !authClosed) {
                 authClosed = true
                 auth.close()
             }
@@ -62,6 +71,10 @@ class AuthViewModel(
         }
         export?.close {
             exportDrained = true
+            closeAuthWhenDrained()
+        }
+        pull?.close {
+            pullDrained = true
             closeAuthWhenDrained()
         }
         closesStarted = true
@@ -195,6 +208,32 @@ class AuthViewModel(
             showSession()
         }
 
+    fun loadDevices() =
+        runAction {
+            val before = requireDisplayedSession()
+            val devices = auth.devices()
+            auth.requireAccountSession(before)
+            mutable.value = mutable.value.copy(devices = devices)
+        }
+
+    /** Danach Liste neu laden, damit der Serverzustand sichtbar ist. Nie das eigene Handy (Freigabe nur von anderswo). */
+    fun revokeDevice(deviceId: String) = changeDevice(deviceId, auth::revokeDevice)
+
+    /** K4-U: Freigabe eines anderen eigenen Geräts; das eigene Handy gibt sich nie selbst frei (der Server lehnt ab). */
+    fun restoreDevice(deviceId: String) = changeDevice(deviceId, auth::restoreDevice)
+
+    private fun changeDevice(
+        deviceId: String,
+        change: suspend (String) -> Unit,
+    ) = runAction {
+        if (mutable.value.devices?.any { it.deviceId == deviceId && it.current } == true) return@runAction
+        val before = requireDisplayedSession()
+        change(deviceId)
+        val devices = auth.devices()
+        auth.requireAccountSession(before)
+        mutable.value = mutable.value.copy(devices = devices)
+    }
+
     fun signOut() =
         runAction {
             displayedSession = null
@@ -264,6 +303,7 @@ class AuthViewModel(
                 busy = mutable.value.busy,
                 authenticated = session != null,
                 deletionRequested = session?.deletionRequested == true,
+                suspended = session?.suspended == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
         if (session != null) auth.requireAccountSession(session)
@@ -286,8 +326,9 @@ class AuthViewModel(
                 deletionRequested = session?.deletionRequested == true,
                 authenticated = session != null,
                 consent = consent,
+                suspended = session?.suspended == true,
             )
-        if (session?.onboarded == true && !session.deletionRequested && consent?.status == ConsentStatus.CURRENT) {
+        if (session?.onboarded == true && !session.deletionRequested && !session.suspended && consent?.status == ConsentStatus.CURRENT) {
             val candidates =
                 try {
                     auth.adoptionSources()

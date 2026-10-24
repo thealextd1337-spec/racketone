@@ -2,8 +2,22 @@
 <!-- Default: Englisch. Deutsch in values-de/ – Android Lint (MissingTranslation) bricht ab, wenn eine Übersetzung fehlt. -->
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="recovery_notice_title">Existing data kept safe</string>
-    <string name="recovery_notice_body">Previous data is retained separately. Verification and recovery are not yet available. Sync is paused. You can count new matches offline.</string>
-    <string name="recovery_continue_offline">Continue offline</string>
+    <string name="recovery_notice_body">Previous data is retained separately. Sync is paused. You can count new matches offline.</string>
+    <string name="recovery_decision_body">Previous data found. Restoring (recommended) gives this watch a new identity; your phone then shares what belongs to its account. Starting fresh keeps the data stored, you can still restore it later. Counting new matches first blocks restoring until you delete them.</string>
+    <string name="recovery_blocked_body">Matches were counted since. Delete them to restore.</string>
+    <string name="recovery_failed_body">Restoring failed. Nothing was changed.</string>
+    <string name="recovery_restore">Restore</string>
+    <string name="recovery_start_fresh">Start fresh</string>
+    <string name="recovery_continue_offline">Later</string>
+    <string name="recovery_fresh_confirm_title">Start fresh?</string>
+    <string name="recovery_fresh_confirm_body">Previous data stays stored but is not shown. Restore it later on the start screen as long as you count nothing new here.</string>
+    <string name="recovery_later_title">Restore previous data</string>
+    <string name="recovery_later_body">Gives this watch a new identity and restarts the app. Pair again with your phone afterwards.</string>
+    <string name="recovery_save_failed">That did not work. Nothing was changed.</string>
+    <string name="pairing_conflict_title">Phone changed</string>
+    <string name="pairing_conflict_body">A phone with a new pairing was found. Pair this watch again? Data on the watch stays.</string>
+    <string name="pairing_repair">Pair again</string>
+    <string name="pairing_later">Not now</string>
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
     <string name="wear_version">v%1$s</string>
@@ -82,6 +96,7 @@
         <item quantity="other">%1$d pending</item>
     </plurals>
     <string name="sync_local">Local only</string>
+    <string name="sync_blocked">Sync blocked</string>
     <string name="sync_live">Live</string>
     <string name="sync_ago_seconds">%1$d s ago</string>
     <string name="sync_ago_minutes">%1$d min ago</string>

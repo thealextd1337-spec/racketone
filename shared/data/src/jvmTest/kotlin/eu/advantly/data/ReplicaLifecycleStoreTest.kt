@@ -899,6 +899,76 @@ class ReplicaLifecycleStoreTest {
         }
 
     @Test
+    fun markNotReadyBeforeDropsOnlyOlderGenerationsOfThisAccountAtomically(): Unit =
+        Fixture().use { f ->
+            f.member("B", 3)
+            val ctx = f.member("A", 3)
+            f.cloudMatch()
+            f.data.replicas.applyAccess(ctx, "newer", 4, ReplicaAccessLevel.MEMBER, fence)
+            f.data.replicas.markReady(ctx, "newer", 4, 0, fence)
+            var calls = 0
+            assertFails { f.data.replicas.markNotReadyBefore(ctx, 4) { if (++calls == 2) error("lost authority") } }
+            assertTrue(
+                f.data.replicas
+                    .access(ctx, "match")!!
+                    .ready,
+            )
+            f.data.replicas.markNotReadyBefore(ctx, 4, fence)
+            val old = f.data.replicas.access(ctx, "match")!!
+            assertFalse(old.ready)
+            assertEquals(3, old.generation)
+            assertEquals(ReplicaAccessLevel.MEMBER, old.access)
+            assertTrue(
+                f.data.replicas
+                    .access(ctx, "newer")!!
+                    .ready,
+            )
+            val other = f.select("B")
+            assertTrue(
+                f.data.replicas
+                    .access(other, "match")!!
+                    .ready,
+            )
+            assertFails { f.data.replicas.markNotReadyBefore(ctx, 5, fence) }
+        }
+
+    @Test
+    fun markNotReadyIsIdempotentContextBoundAtomicAndKeepsAccessProofAndTransfer(): Unit =
+        Fixture().use { f ->
+            val ctx = f.member("A", 4)
+            f.cloudMatch()
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json,access,access_epoch,materialized_version)
+                    VALUES ('A','MATCH','match',1,'{}','member',4,1)""",
+            )
+            f.data.replicas.beginRedaction(ctx, RedactionTransfer("t", "match", 4, 1, 0), fence)
+            // Lücke vor dem Fix: ready trotz offenem Transfer eines neueren E.
+            f.sql("UPDATE replica_access SET ready = 1 WHERE account_key = 'A'")
+            val snapshot = f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match")
+            val progress = f.data.replicas.redactionProgress(ctx, "match")
+            var calls = 0
+            assertFails { f.data.replicas.markNotReady(ctx, "match") { if (++calls == 2) error("lost authority") } }
+            assertTrue(f.data.replicas.canReadMember(ctx, "match"))
+            f.member("B", 4)
+            f.select("A")
+            assertFails { f.data.replicas.markNotReady(ctx, "match", fence) }
+            val current = f.data.replicas.captureContext()
+            assertTrue(f.data.replicas.canReadMember(current, "match"))
+            assertEquals(TransitionResult.APPLIED, f.data.replicas.markNotReady(current, "match", fence))
+            assertEquals(TransitionResult.UNCHANGED, f.data.replicas.markNotReady(current, "match", fence))
+            assertEquals(TransitionResult.UNCHANGED, f.data.replicas.markNotReady(current, "unknown", fence))
+            f.reopen()
+            val resumed = f.data.replicas.captureContext()
+            assertFalse(f.data.replicas.canReadMember(resumed, "match"))
+            val access = f.data.replicas.access(resumed, "match")!!
+            assertEquals(4, access.generation)
+            assertEquals(ReplicaAccessLevel.MEMBER, access.access)
+            assertEquals(snapshot, f.data.cloudPulls.snapshot("A", CloudPullEntityKind.MATCH, "match"))
+            assertEquals(progress, f.data.replicas.redactionProgress(resumed, "match"))
+            assertTrue(f.data.replicas.canReadMember(f.select("B"), "match"))
+        }
+
+    @Test
     fun lowerGenerationIsIgnoredAndSameGenerationConflictsRollback(): Unit =
         Fixture().use { f ->
             val ctx = f.member("A", 4)
@@ -1282,6 +1352,33 @@ class ReplicaLifecycleStoreTest {
                     .selectById("deleted")
                     .executeAsOne()
                     .display_name,
+            )
+        }
+
+    @Test
+    fun rememberGuestSkipsExistingDirectoryRowOfForeignScopeWithoutRenameOrRevision(): Unit =
+        Fixture().use { f ->
+            val bea = PlayerId("bea")
+            f.data.players.addGuest(bea, "Bea", 1)
+            val revision = assertNotNull(f.data.cloud.metadataState(CloudMetadataKind.PLAYER, bea.value))
+            f.select("B")
+            assertNull(f.data.players.get(bea))
+            assertFails { f.data.players.addGuest(bea, "Renamed", 2) }
+            f.data.players.rememberGuest(bea, "Renamed", 2)
+            f.data.players.rememberGuest(PlayerId("cem"), "Cem", 2)
+            assertEquals(
+                "Bea",
+                f.db.playerQueries
+                    .selectById(bea.value)
+                    .executeAsOne()
+                    .display_name,
+            )
+            assertEquals(revision, f.data.cloud.metadataState(CloudMetadataKind.PLAYER, bea.value))
+            assertEquals(
+                "Cem",
+                f.data.players
+                    .get(PlayerId("cem"))
+                    ?.displayName,
             )
         }
 
@@ -2092,6 +2189,40 @@ class ReplicaLifecycleStoreTest {
             )
             val unproven = """{"profileId":"unrelated-profile","alias":"Sensitive name"}"""
             assertEquals(DataJson.parseToJsonElement(unproven), f.data.replicas.sanitizeJson(DataJson.parseToJsonElement(unproven)))
+        }
+
+    @Test
+    fun slotOnlyParticipantSnapshotOfRedactedGuestIsScrubbed() =
+        Fixture().use { f ->
+            val ctx = f.member("A")
+            f.cloudMatch()
+            // v1-Gast ohne playerId: die Slot-ID ist seine einzige Identität im Teilnehmer-Snapshot.
+            val pulled =
+                """
+                {"id":"shared","participants":[
+                {"slotId":"deleted","team":"A","position":1,"playerId":null,"displayName":"Sensitive name"},
+                {"slotId":"kept","team":"B","position":1,"displayName":"Kept name"}]}
+                """.trimIndent()
+            f.sql(
+                """INSERT INTO cloud_pull_snapshot(profile_id,kind,entity_id,server_version,snapshot_json)
+                    VALUES ('A','MATCH','shared',1,'$pulled')""",
+            )
+            val start = f.data.replicas.beginRedaction(ctx, RedactionTransfer("slot-t", "match", 1, 1, 3), fence)
+            f.data.replicas.stageRedaction(
+                ctx,
+                "slot-t",
+                RedactionPage(0, start, RedactionCursor("deleted", 0), listOf("deleted"), emptyList(), true, true),
+                fence,
+            )
+            f.data.replicas.completeRedaction(ctx, "slot-t", fence)
+            val stored =
+                f.data.cloudPulls
+                    .snapshot("A", CloudPullEntityKind.MATCH, "shared")!!
+                    .json
+            assertEquals(DataJson.parseToJsonElement(pulled.replace("Sensitive name", "")), DataJson.parseToJsonElement(stored))
+            // Ein neu besetzter Slot trägt den Namen der lebenden Person; die alte Slot-ID allein maskiert ihn nicht.
+            val reassigned = """{"slotId":"deleted","playerId":"living","displayName":"Living name"}"""
+            assertEquals(DataJson.parseToJsonElement(reassigned), f.data.replicas.sanitizeJson(DataJson.parseToJsonElement(reassigned)))
         }
 
     @Test

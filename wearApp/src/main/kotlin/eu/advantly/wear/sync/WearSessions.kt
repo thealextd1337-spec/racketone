@@ -9,6 +9,7 @@ import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.AndroidSessionBootstrap
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
+import eu.advantly.match.session.SyncStatus
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -56,18 +57,18 @@ object WearSessions {
 
     /**
      * Abgleich nach dem Start abgeschlossen: eine kompatible Gegenstelle ist da, ein Abgleich kam an und nichts ist
-     * mehr ausstehend. Nur Main-Thread.
+     * mehr ausstehend – weder Events noch Lifecycle-Zustellungen ([SyncStatus.settled], E4). Nur Main-Thread.
      */
-    fun isSyncSettled(): Boolean {
-        val sync =
-            holder
-                ?.session
-                ?.state
-                ?.value
-                ?.sync ?: return false
-        val peerReady = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
-        return peerReady && sync.lastSyncAtMs != null && sync.pendingToPeers == 0
-    }
+    fun isSyncSettled(): Boolean =
+        holder
+            ?.session
+            ?.state
+            ?.value
+            ?.sync
+            ?.let(::isSettled) == true
+
+    internal fun isSettled(sync: SyncStatus): Boolean =
+        sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE } && sync.lastSyncAtMs != null && sync.settled
 
     /** Wear-Resume und Hostlesepfade vor der Veröffentlichung derselben Sessiongeneration vorbereiten. */
     fun prepare(

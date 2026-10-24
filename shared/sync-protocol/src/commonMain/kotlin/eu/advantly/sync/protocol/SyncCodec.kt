@@ -62,13 +62,26 @@ object SyncCodec {
 
     private fun serialize(message: SyncMessage): String = json.encodeToString(SyncMessage.serializer(), message)
 
-    fun decode(bytes: ByteArray): DecodeResult = decodePacket(bytes.decodeToString(), bytes.size)
+    /**
+     * @param accepted lesbare Versionen; Standard [ProtocolVersion.MIN_SUPPORTED]..[ProtocolVersion.CURRENT]. Ein anderer
+     *   Bereich (Session-Konfiguration, Tests von Protokoll 4) ändert nie die Konstanten.
+     */
+    fun decode(
+        bytes: ByteArray,
+        accepted: IntRange = DEFAULT_ACCEPTED,
+    ): DecodeResult = decodePacket(bytes.decodeToString(), bytes.size, accepted)
 
-    fun decode(text: String): DecodeResult = decodePacket(text, text.encodeToByteArray().size)
+    fun decode(
+        text: String,
+        accepted: IntRange = DEFAULT_ACCEPTED,
+    ): DecodeResult = decodePacket(text, text.encodeToByteArray().size, accepted)
+
+    private val DEFAULT_ACCEPTED = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT
 
     private fun decodePacket(
         text: String,
         byteCount: Int,
+        accepted: IntRange,
     ): DecodeResult {
         val element =
             try {
@@ -81,7 +94,7 @@ object SyncCodec {
         val type = (obj["type"] as? JsonPrimitive)?.contentOrNull
         if (v >= 4 && byteCount > MAX_V4_PACKET_BYTES) return DecodeResult.Malformed("Wirepaket zu groß")
         // Hello immer lesen: Versionsprüfung braucht genau diese Nachricht
-        if (type != HELLO && !ProtocolVersion.accepts(v)) return DecodeResult.Unsupported(v, type)
+        if (type != HELLO && v !in accepted) return DecodeResult.Unsupported(v, type)
         return try {
             val message = json.decodeFromJsonElement(SyncMessage.serializer(), obj)
             val identity = obj["identity"]?.let { json.decodeFromJsonElement(IdentityEnvelope.serializer(), it) }
@@ -92,7 +105,7 @@ object SyncCodec {
                 DecodeResult.Ok(message, identity)
             }
         } catch (_: IllegalArgumentException) {
-            if (!ProtocolVersion.accepts(v)) DecodeResult.Unsupported(v, type) else DecodeResult.Malformed("unlesbare Nachricht")
+            if (v !in accepted) DecodeResult.Unsupported(v, type) else DecodeResult.Malformed("unlesbare Nachricht")
         }
     }
 

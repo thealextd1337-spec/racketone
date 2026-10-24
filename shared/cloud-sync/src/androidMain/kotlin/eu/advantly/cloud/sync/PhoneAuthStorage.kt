@@ -3,6 +3,7 @@
 package eu.advantly.cloud.sync
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.github.jan.supabase.auth.SessionManager
@@ -77,6 +78,13 @@ class PhoneAuthStorage(
             return CloudInstallation(createdId, createdProof)
         }
 
+    /**
+     * Recovery-Paket: Die Entscheidung über übernommene Daten beginnt eine neue Gerätequelle. Sitzung und Installations-
+     * kennung gehören zur alten Datenbank und werden verworfen; binden darf erst ein frischer, ausdrücklicher Login
+     * (Fünf-Minuten-Grenze des Servers). Das 24-h-Geheimnis und Supportentwürfe bleiben.
+     */
+    fun resetForRecovery() = resetCloudIdentity(prefs)
+
     override suspend fun saveSession(session: UserSession) =
         withContext(Dispatchers.IO) {
             check(prefs.edit().putString("session", json.encodeToString(session)).commit())
@@ -94,3 +102,13 @@ class PhoneAuthStorage(
             check(prefs.edit().remove("session").commit())
         }
 }
+
+internal fun resetCloudIdentity(prefs: SharedPreferences) =
+    check(
+        prefs
+            .edit()
+            .remove("session")
+            .remove("cloud_installation_id_v1")
+            .remove("cloud_installation_proof_v1")
+            .commit(),
+    )

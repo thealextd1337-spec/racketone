@@ -75,8 +75,9 @@ class PlaceholderPresentationTest {
         val match = MatchId("redacted-match")
         val format = Presets.TENNIS_DOUBLES_MTB10.format()
         val lineup = Lineup(listOf(owner, partner.id), listOf(slot, secondSlot), owner)
-        val genesis =
-            ScoreEvent(EventId("genesis"), match, DeviceId("cloud"), 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
+        // Genesis aus einer eigenen Quelle des Kontos: unter Protokoll 4 weist nur das eigene Konto zu (Teilnehmerregel)
+        val source = DeviceId(data.accountIdentities.currentSources().single())
+        val genesis = ScoreEvent(EventId("genesis"), match, source, 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
         val assigned =
             ScoreEvent(EventId("assigned"), match, DeviceId("cloud"), 2, 2, 2, genesis.id, PlayerAssigned(slot, person, owner))
                 .toStoredEvent()
@@ -123,6 +124,14 @@ class PlaceholderPresentationTest {
                 .summary.setup.assignedPlayers[slot]!!
                 .displayName,
         )
+        // Ein leerer Name ist nie ein Name: die Oberfläche zeigt den Platzhalter („Gegner“), nicht „Du“.
+        assertTrue(
+            store
+                .record(match)!!
+                .summary.setup
+                .player(slot)!!
+                .isPlaceholder,
+        )
         val directoryBefore = data.players.get(person.id)
         if (withDirectoryPlayer) {
             assertEquals("Sensitive name", directoryBefore!!.displayName)
@@ -132,6 +141,10 @@ class PlaceholderPresentationTest {
         val beforeAssignment = data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value)
         if (repeatMatch) {
             store.start(store.record(match)!!.summary.setup)
+            val rematch = store.active.value!!.setup
+            // Revanche: Name per Spieler-ID aus dem Verzeichnis, nie aus dem historischen Event
+            assertEquals(directoryBefore?.displayName ?: "", rematch.player(person.id)!!.displayName)
+            assertEquals(directoryBefore == null, rematch.player(person.id)!!.isPlaceholder)
         } else {
             assertTrue(store.assignPlayer(match, secondSlot, other.id))
         }

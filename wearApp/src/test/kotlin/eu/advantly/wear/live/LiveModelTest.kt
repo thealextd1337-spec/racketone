@@ -46,6 +46,12 @@ class LiveModelTest {
     }
 
     @Test
+    fun lifecycleBacklogIsPendingNotSynced() {
+        assertEquals(SyncUi.Pending(3), LiveModel.syncUi(LiveRole.SCORER, sync(pending = 1).copy(lifecyclePendingToPeers = 2), null))
+        assertEquals(SyncUi.Blocked, LiveModel.syncUi(LiveRole.SCORER, sync(pending = 2).copy(lifecycleBlocked = true), null))
+    }
+
+    @Test
     fun displayShowsLiveOrSecondsSinceLastContact() {
         assertEquals(SyncUi.Live, LiveModel.syncUi(LiveRole.DISPLAY, sync(), 5_000))
         assertEquals(SyncUi.Stale(42), LiveModel.syncUi(LiveRole.DISPLAY, sync(scorerConnected = false), 42_500))
