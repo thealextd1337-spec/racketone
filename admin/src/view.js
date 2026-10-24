@@ -105,10 +105,10 @@ function formatDate(value, language) {
   return date.toLocaleString(locale(language), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-// Widerrufenes Gerät ohne Modell: Art, Plattform und ID genügen zum Abgleich mit der Meldung.
+// Widerrufenes Gerät ohne Modell: Art, Plattform und ID genügen zum Abgleich mit der Meldung. support erhält keine ID.
 function deviceLabel(language, device) {
   const kind = [device.kind, device.platform].filter(Boolean).join(" \u00b7 ") || translate(language, "accountDeviceUnknown");
-  return `${kind} \u00b7 ${device.deviceId}`;
+  return [kind, device.deviceId].filter(Boolean).join(" \u00b7 ");
 }
 
 function formatDay(value, language) {

@@ -94,8 +94,8 @@ test("API sends only the account RPCs and maps their stable server errors", asyn
   assert.throws(() => api.accountAction({ rpc: "admin_support_update", args: {} }), (error) => error.code === "support_invalid");
   for (const code of ["account_not_found", "account_ambiguous", "no_deletion_pending", "deletion_ticket_required",
     "deletion_ticket_invalid", "deletion_ticket_stale", "deletion_ticket_evidence_required", "device_ticket_required",
-    "device_ticket_invalid", "device_ticket_stale", "device_ticket_evidence_required", "device_not_found", "device_not_revoked",
-    "account_suspended", "account_deletion_pending"]) {
+    "device_ticket_invalid", "device_ticket_stale", "device_ticket_evidence_required", "device_ticket_from_revoked_device",
+    "device_ticket_device_unknown", "device_not_found", "device_not_revoked", "account_suspended", "account_deletion_pending"]) {
     const failing = createSupportApi({ async rpc() { return { error: { message: code } }; } });
     await assert.rejects(failing.lookupAccount("x"), (error) => error.code === code);
   }
@@ -209,6 +209,47 @@ test("restoring a device asks with action, account and device, then shows the se
   assert.deepEqual(controller.state.account.revokedDevices, []);
 });
 
+test("refusals for tickets from a revoked or unknown device are explained", async () => {
+  const refusals = ["device_ticket_from_revoked_device", "device_ticket_device_unknown"];
+  const { controller } = await unlocked({
+    async lookupAccount() { return { viewerRole: "admin", account: account({ revokedDevices: [revokedPhone] }) }; },
+    async accountAction() { throw new SupportError(refusals.shift()); },
+  });
+  controller.setWorkspace("accounts");
+  await controller.searchAccount("Alex");
+  for (const notice of ["accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown"]) {
+    controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId });
+    await controller.confirmAccountAction();
+    assert.equal(controller.state.accountNotice, notice);
+  }
+});
+
+// Echter Dialogtext statt nur der Controller-Daten: Fake-DOM mit den Elementen aus index.html.
+test("the real confirmation dialog names the device to restore", async () => {
+  const elements = Object.fromEntries(["#account-confirm-title", "#account-confirm-copy", "#account-confirm-preview",
+    "#account-cancel", "#account-accept"].map((selector) => [selector, { textContent: "" }]));
+  const dialog = { open: false, querySelector: (selector) => elements[selector] ?? null, showModal() { this.open = true; } };
+  const real = Object.assign(Object.create(AdminView.prototype), { accountDialog: dialog });
+  const { controller, view } = await unlocked({
+    async lookupAccount() { return { viewerRole: "admin", account: account({ revokedDevices: [revokedPhone] }) }; },
+  });
+  view.showAccountConfirmation = (details) => real.showAccountConfirmation(details);
+  controller.setWorkspace("accounts");
+  await controller.searchAccount("Alex");
+  for (const language of ["en", "de"]) {
+    real.currentLanguage = language;
+    dialog.open = false;
+    controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId });
+    const copy = elements["#account-confirm-copy"].textContent;
+    assert.equal(dialog.open, true);
+    assert.ok(copy.includes(`${translate(language, "accountConfirmDevice")} phone · android · ${phoneId}`), copy);
+    assert.ok(copy.includes(`Alex (${accountId})`), copy);
+    assert.equal(elements["#account-accept"].textContent, translate(language, "accountUnrevoke"));
+    assert.equal(elements["#account-confirm-preview"].textContent, "Phone back");
+    controller.cancelAccountAction();
+  }
+});
+
 test("a new lookup drops an open confirmation, so no action reaches another account", async () => {
   const actions = [];
   const { controller, view } = await unlocked({
@@ -242,6 +283,12 @@ test("accounts workspace shows actions only to admins and labels everything in b
       assert.ok(support.some((element) => element.textContent === translate(language, "accountReadOnly")));
       assert.ok(support.some((element) => element.textContent === accountStatusLabel(language, "active")));
       assert.ok(!support.some((element) => /@/.test(element.textContent ?? "")), "no email address");
+      // support erhält widerrufene Geräte ohne ID (nur admin wählt ein Gerät zur Freigabe).
+      const supportRevoked = descendants(view.renderAccounts({ ...base, viewerRole: "support",
+        account: account({ revokedDevices: [{ kind: "phone", platform: "android", revokedAt: revokedPhone.revokedAt }] }) }));
+      assert.ok(supportRevoked.some((element) => element.textContent === "phone · android"), "device shown without ID");
+      assert.ok(!supportRevoked.some((element) => /undefined/.test(element.textContent ?? "")));
+      assert.ok(!supportRevoked.some((element) => element.dataset.action === "account-action"));
 
       const admin = descendants(view.renderAccounts({ ...base, viewerRole: "admin",
         account: account({ suspended: true, status: "deletion_requested", canCancelDeletion: true, deletionRequestedAt: "2026-10-20T10:00:00Z", earliestPurgeAt: "2026-11-03T10:00:00Z" }) }));
@@ -315,7 +362,7 @@ test("every account text exists in German and English", () => {
     "accountStatusDeleting", "accountRevokedDevices", "accountUnrevoke", "accountUnrevokeTicket", "accountUnrevokeHint",
     "accountUnrevokeUnavailable", "accountConfirmDevice", "accountDeviceUnknown", "accountDeviceTicketRequired",
     "accountDeviceTicketStale", "accountDeviceNotFound", "accountDeviceNotRevoked", "accountUnrevokeSuspended",
-    "accountUnrevokeDeletionPending"];
+    "accountUnrevokeDeletionPending", "accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown"];
   for (const key of keys) {
     assert.notEqual(translate("en", key), key, `en ${key}`);
     assert.notEqual(translate("de", key), translate("en", key) === "Alias" ? "" : translate("en", key), `de ${key}`);

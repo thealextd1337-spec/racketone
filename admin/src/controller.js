@@ -90,6 +90,8 @@ function noticeForError(error, fallback = "genericError") {
     case "device_ticket_invalid": return "accountTicketMismatch";
     case "device_ticket_stale": return "accountDeviceTicketStale";
     case "device_ticket_evidence_required": return "accountTicketEvidence";
+    case "device_ticket_from_revoked_device": return "accountDeviceTicketFromRevoked";
+    case "device_ticket_device_unknown": return "accountDeviceTicketDeviceUnknown";
     case "device_not_found": return "accountDeviceNotFound";
     case "device_not_revoked": return "accountDeviceNotRevoked";
     case "account_suspended": return "accountUnrevokeSuspended";
@@ -777,7 +779,8 @@ export class AdminController {
       return;
     }
     this.state.accountConfirmation = operation;
-    const device = this.state.account.revokedDevices?.find((item) => item.deviceId === operation.args.p_device_id);
+    // support erhält Geräte ohne ID: ohne p_device_id darf kein Eintrag ohne ID als „gefunden“ gelten.
+    const device = operation.args.p_device_id && this.state.account.revokedDevices?.find((item) => item.deviceId === operation.args.p_device_id);
     this.view.showAccountConfirmation?.({ actionKey: ACCOUNT_ACTION_LABELS[action], alias: this.state.account.alias,
       profileId: operation.args.p_profile_id, reason: operation.args.p_reason, ...(device ? { device } : {}) });
   }
