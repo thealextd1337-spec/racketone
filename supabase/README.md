@@ -378,7 +378,9 @@ Meldungsregel; ein erneuter Widerruf setzt ihn neu.
   `device_ticket_stale` (vor dem Widerruf), `device_ticket_evidence_required`; außerdem `account_suspended` und
   `account_deletion_pending` (P0001), `account_not_found` (Phase A). Eine Kontomeldung zählt nur von einem anderen
   eigenen Gerät, das beim Melden nicht widerrufen war: `device_ticket_from_revoked_device` (vom Zielgerät oder einem
-  damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden). Das Absendergerät
+  damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden),
+  `device_ticket_device_too_new` (Installation des Absendergeräts erst nach dem Widerruf des Zielgeräts, wie
+  `device_unrevoke_caller_too_new` im Nutzerweg). Das Absendergerät
   hält ein Trigger beim Anlegen in `private.support_ticket_devices` fest (Bindung der JWT-Sitzung, Widerruf zu dem
   Zeitpunkt); es erscheint in keiner Nutzer- oder Inbox-Antwort. Gastmeldungen mit Zuordnungsbeleg bleiben gültig.
   Eine Meldung darf mehrere Geräte freigeben; `ticket_uses` im Audit zählt ihre Verwendungen. Die Löschrücknahme

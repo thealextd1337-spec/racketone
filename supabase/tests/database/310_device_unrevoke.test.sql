@@ -13,8 +13,8 @@ insert into ops.support_members(id, role) values (tests.uid('ku_admin'), 'admin'
 select tests.publish_consent_documents();
 select tests.accept_current_consents(tests.uid('ku_alice'));
 select tests.accept_current_consents(tests.uid('ku_bob'));
--- Sitzungen: 1 Handy P (alt), 2 Handy Q, 3 Gerät R, 5 Bob; 4 und 6 sind spätere Anmeldungen von P, 7 und 9 neue
--- Geräte 8 und 9 erst nach dem Widerruf.
+-- Sitzungen: 1 Handy P (alt), 2 Handy Q, 3 Gerät R, 5 Bob; 4 und 6 sind spätere Anmeldungen von P, 7, 9 und 10 neue
+-- Geräte 8, 9 und 10 erst nach dem Widerruf.
 insert into auth.sessions(id, user_id, created_at, updated_at)
 select ('31000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
   tests.uid(case when n = 5 then 'ku_bob' else 'ku_alice' end), clock_timestamp(), now()
@@ -215,6 +215,13 @@ select pg_temp.identify(2, 2);
 select lives_ok($$select public.cloud_revoke_device_v1('31200000-0000-4000-8000-000000000001')$$, 'Q widerruft P erneut');
 -- Entscheid 24.10.2026: Eine Kontomeldung zählt nur von einem anderen eigenen, beim Melden nicht widerrufenen Gerät.
 select is(pg_temp.report(3), '31500000-0000-4000-8000-000000000003', 'Q meldet: Handy zurück');
+-- K4-U r3: zweite App-Instanz eines Diebs mit Mail-Zugriff, erst nach diesem Widerruf gebunden, meldet ebenfalls.
+reset role;
+insert into auth.sessions(id, user_id, created_at, updated_at)
+  values ('31000000-0000-4000-8000-000000000010', tests.uid('ku_alice'), clock_timestamp(), now());
+select pg_temp.identify(10, 10);
+select lives_ok($$select pg_temp.bind(10)$$, 'r3: neues Gerät 10 bindet nach dem Widerruf');
+select is(pg_temp.report(8), '31500000-0000-4000-8000-000000000008', 'r3: Gerät 10 meldet');
 select pg_temp.identify(1, 1);
 select is(pg_temp.report(5), '31500000-0000-4000-8000-000000000005', 'Support bleibt für die alte Sitzung von P erreichbar');
 select pg_temp.identify(3, 3);
@@ -225,7 +232,8 @@ reset role;
 select results_eq($$select ticket_id, device_id, revoked from private.support_ticket_devices order by ticket_id$$,
   $$values ('31500000-0000-4000-8000-000000000003'::uuid, '31200000-0000-4000-8000-000000000002'::uuid, false),
     ('31500000-0000-4000-8000-000000000005', '31200000-0000-4000-8000-000000000001', true),
-    ('31500000-0000-4000-8000-000000000006', '31200000-0000-4000-8000-000000000003', true)$$,
+    ('31500000-0000-4000-8000-000000000006', '31200000-0000-4000-8000-000000000003', true),
+    ('31500000-0000-4000-8000-000000000008', '31200000-0000-4000-8000-000000000010', false)$$,
   'Absendergerät und Widerruf beim Melden; ohne Bindung kein Gerät');
 -- In einer Transaktion ist now() konstant; echte Meldungen entstehen in einer späteren Transaktion.
 update ops.support_tickets set created_at = clock_timestamp() where owner_id = tests.uid('ku_alice');
@@ -279,6 +287,9 @@ select throws_ok($$select public.admin_account_unrevoke_device(tests.uid('ku_ali
 select throws_ok($$select public.admin_account_unrevoke_device(tests.uid('ku_alice'), '31200000-0000-4000-8000-000000000001',
   '31500000-0000-4000-8000-000000000007', 'Handy wieder da')$$, 'P0001', 'device_ticket_device_unknown',
   'Meldung ohne bekanntes Gerät');
+select throws_ok($$select public.admin_account_unrevoke_device(tests.uid('ku_alice'), '31200000-0000-4000-8000-000000000001',
+  '31500000-0000-4000-8000-000000000008', 'Handy wieder da')$$, 'P0001', 'device_ticket_device_too_new',
+  'r3: Meldung von einem erst nach dem Widerruf gebundenen Gerät');
 reset role;
 insert into private.account_suspensions(profile_id) values (tests.uid('ku_alice'));
 select pg_temp.operator('ku_admin');
@@ -303,7 +314,8 @@ select set_config('tests.ku_g', pg_temp.generation()::text, true);
 select pg_temp.operator('ku_admin');
 select is(pg_temp.try($$select public.admin_account_unrevoke_device(tests.uid('ku_alice'), '31200000-0000-4000-8000-000000000001',
   '31500000-0000-4000-8000-000000000003', '  Handy wieder da  ')->'revokedDevices' @>
-  '[{"deviceId":"31200000-0000-4000-8000-000000000001"}]'$$), 'false', 'admin gibt P mit eigener Meldung frei');
+  '[{"deviceId":"31200000-0000-4000-8000-000000000001"}]'$$), 'false',
+  'admin gibt P mit Meldung von Q frei (vor dem Widerruf gebunden)');
 reset role;
 select is(pg_temp.generation(), current_setting('tests.ku_g')::bigint + 1, 'Adminfreigabe erhöht G genau einmal');
 select ok((select revoked_at is null from public.devices where id = '31200000-0000-4000-8000-000000000001')
