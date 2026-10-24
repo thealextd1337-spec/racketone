@@ -2405,3 +2405,33 @@ dort grün.
   - Suchen werden nicht protokolliert.
   - Bisherige `admin`-Mitglieder erhalten Kontorechte. `docs/support-admin-betrieb.md`
     braucht dafür einen Doku-Auftrag.
+
+**K4/K5 übernommen** (`03674a00`..`efea6a13`, Merge `2927ab3f`; Alias-Fix `2174b270`).
+CI `2174b27` ist grün, inklusive Renntest 300 und K7 `check_account_support.py`.
+- **Endpunkte:** `admin_account_lookup` (support/admin, AAL2, exakt), `…set_suspended`,
+  `…revoke_devices`, `…cancel_deletion` (nur admin, Begründung, Konto-Audit).
+- **Sperre:** wirkt auf allen gebundenen Wegen (35 RPCs).
+- **Löschrücknahme:** nur mit einer Meldung, die nach dem Antrag entstand.
+- **App:** Das eigene Handy ist markiert und lässt sich nicht widerrufen.
+
+**K4-U „Widerruf aufheben“ übernommen** (`191ee05d`..`08a7ea0d`, Merge `2d99ab92`; Runde 3
+`29809ffc`). CI `2d99ab9` ist grün, inklusive pgTAP 310 und K7 `check_revoke.py` mit
+Freigabe, Neuanmeldung und Upload des offenen Events.
+- **Nutzerentscheid 24.10.2026:**
+  - Freigeben dürfen nur ein anderes eigenes Gerät oder der Admin, nie das widerrufene
+    Gerät selbst.
+  - Geräte- und Installations-ID bleiben erhalten, G steigt um 1, alte Sitzungen bleiben
+    gesperrt.
+- **Review-Auflagen:**
+  - Freigeben darf nur ein Gerät, das vor dem Widerruf gebunden war
+    (`device_unrevoke_caller_too_new`).
+  - Im Admin-Weg zählt eine Meldung nur, wenn sie nicht vom widerrufenen bzw. unbekannten
+    Gerät stammt und das Absendergerät vor dem Widerruf gebunden war
+    (`device_ticket_from_revoked_device`, `…_device_unknown`, `…_device_too_new`).
+  - Abgelehnte Uhr-Events (`device_not_owned`) gehen nach einer neuen Bindung oder einer
+    neuen G wieder in die Warteschlange.
+- **Rest:**
+  - Gegen einen Dieb mit Mail-Zugriff schützt nur der Widerruf. Neue Geräte kommen mit dem
+    Mail-Code ohnehin in die Cloud.
+  - Betriebshinweis für den Support fehlt noch in `docs/support-admin-betrieb.md`
+    (Doku-Auftrag).
