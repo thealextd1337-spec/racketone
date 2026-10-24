@@ -90,6 +90,52 @@ class AccountSupportAuthTest {
             }
         }
 
+    @Test fun restoreSendsThisPhonesInstallationProofAndKeepsServerReasons(): Unit =
+        runBlocking {
+            val requests = mutableListOf<HttpRequestData>()
+            var reply = """{"deviceId":"d2","revoked":false}""" to HttpStatusCode.OK
+            val sdk =
+                client { request ->
+                    requests += request
+                    if (request.url.encodedPath.endsWith("my_auth_profile")) {
+                        """{"profileId":"alice","onboarded":true,"deletionRequested":false,"consentStatus":"CURRENT"}""" to
+                            HttpStatusCode.OK
+                    } else {
+                        reply
+                    }
+                }
+            sdk.auth.awaitInitialization()
+            sdk.auth.importAuthToken(token(), autoRefresh = false)
+            val auth = SupabasePhoneAuth(sdk, "secret", scope = this)
+            try {
+                auth.refreshProfile()
+                assertEquals("device_restore_unavailable", assertFailsWith<CloudException> { auth.restoreDevice("d2") }.reason)
+                assertTrue(requests.none { it.url.encodedPath.endsWith("cloud_unrevoke_device_v1") }, "ohne Installation kein Aufruf")
+                auth.cloudBackend(CloudInstallation("i1", "a".repeat(64)))
+                auth.restoreDevice("d2")
+                val sent = requests.last()
+                assertEquals("cloud_unrevoke_device_v1", sent.url.encodedPath.substringAfterLast('/'))
+                assertEquals("""{"p_device_id":"d2"}""", (sent.body as TextContent).text)
+                assertEquals("i1", sent.headers["X-Advantly-Installation-Id"])
+                assertEquals("a".repeat(64), sent.headers["X-Advantly-Installation-Proof"])
+                for ((server, expected) in listOf(
+                    "device_unrevoke_self" to "device_unrevoke_self",
+                    "device_unrevoke_caller_too_new" to "device_unrevoke_caller_too_new",
+                    "device_not_found" to "device_not_found",
+                    "device_not_revoked" to "device_not_revoked",
+                    "account_deletion_pending" to "account_deletion_pending",
+                    "device_revoked" to "device_restore_self_revoked",
+                    "device_not_authorized" to "device_restore_unavailable",
+                )) {
+                    reply = """{"code":"42501","message":"$server"}""" to HttpStatusCode.Forbidden
+                    assertEquals(expected, assertFailsWith<CloudException> { auth.restoreDevice("d2") }.reason, server)
+                }
+                assertEquals("alice", auth.session.value?.profileId, "Ablehnungen beenden die Kontositzung nicht")
+            } finally {
+                auth.close()
+            }
+        }
+
     private fun token(): String =
         "header." +
             Base64.UrlSafe

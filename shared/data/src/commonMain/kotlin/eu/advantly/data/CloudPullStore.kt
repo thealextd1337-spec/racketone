@@ -171,6 +171,8 @@ class CloudPullStore internal constructor(
                 queries.startScan(page.visibilityEpoch, profileId)
                 // Ready gilt nur für (Match, G): ältere Generationen verlieren es sofort, nicht erst beim Wiedersehen.
                 data.replicas.markNotReadyBefore(ctx, page.visibilityEpoch, fence)
+                // Jede Gerätefreigabe erhöht G (K4-U): eine später freigegebene Uhr lädt ihre abgelehnten Events nach.
+                data.cloud.resetDeviceRejections()
                 data.cloud.saveCursor(profileId, METADATA_STREAM, 0)
                 state = progress(profileId)
                 if (inputCursor != 0L) {

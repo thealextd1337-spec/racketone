@@ -9,6 +9,8 @@ Belegt mit pg_blocking_pids, dass die wartende Seite nach dem Commit der anderen
 - Sperre zuerst: wartender Push/Pull/Bind endet mit account_suspended, ohne Teilwrite;
 - Push zuerst: Sperre wartet und greift danach, der Push davor bleibt gültig;
 - Löschjob zuerst: Sperre und Rücknahme finden kein Ziel mehr; Rücknahme zuerst: Job löscht nicht.
+- K4-U Freigabe: wartender erneuter Widerruf greift danach; Doppelfreigabe ergibt device_not_revoked und ein Audit;
+  Sperre bzw. Löschjob zuerst lassen die wartende Freigabe (Gerät oder admin) ohne Teilwrite scheitern.
 Kein Auth-/HTTP-Nachweis. Testkonten und Zustimmungsfassungen werden am Ende zurückgesetzt.
 """
 
@@ -190,6 +192,81 @@ def main():
             assert pending.result(timeout=8)["status"] == "succeeded"
             assert owner.execute("select status from public.profiles where id=%s", (target["uid"],)).fetchone()[0] == "active"
             print("PASS Rücknahme zuerst, Frist läuft während des Wartens ab → Löschjob lässt das Konto aktiv")
+
+            # K4-U: Handy P wird von Q widerrufen; Q oder admin geben es frei.
+            unrevoke = "select public.cloud_unrevoke_device_v1(%s)"
+            admin_unrevoke = "select public.admin_account_unrevoke_device(%s,%s,%s,'Renntest')"
+
+            def revoked_phone():
+                phone = bound_user()
+                sid = owner.execute("insert into auth.sessions(id,user_id,created_at,updated_at) values"
+                                    "(gen_random_uuid(),%s,clock_timestamp(),now()) returning id", (phone["uid"],)).fetchone()[0]
+                other = {**phone, "sid": sid, "installation": uuid4(), "device": uuid4(), "proof": secrets.token_hex(32)}
+                with identity(owner, other):
+                    owner.execute("select public.bind_cloud_session_v1(%s,%s)", (other["installation"], other["device"]))
+                with identity(owner, other):
+                    owner.execute("select public.cloud_revoke_device_v1(%s)", (phone["device"],))
+                phone["ticket"] = owner.execute(
+                    "insert into ops.support_tickets(id,owner_id,receipt_hash,payload_hash,category,title,body) values"
+                    "(gen_random_uuid(),%s,sha256('k4u'),sha256('k4u'),'bug','Renntest','Handy zurück') returning id",
+                    (phone["uid"],)).fetchone()[0]
+                return phone, other
+
+            def state(phone):
+                return owner.execute("select d.revoked_at is not null, (select count(*) from ops.account_audit a "
+                                     "where a.target_id=d.profile_id and a.action='device_unrevoke') from public.devices d "
+                                     "where d.id=%s", (phone["device"],)).fetchone()
+
+            # Freigabe zuerst: der wartende erneute Widerruf greift danach.
+            phone, other = revoked_phone()
+            with identity(owner, other):
+                owner.execute(unrevoke, (phone["device"],))
+                pending = pool.submit(outcome, other, "select public.cloud_revoke_device_v1(%s)", (phone["device"],))
+                wait_blocked(owner, pending)
+            assert pending.result(timeout=8)[0] == "ok"
+            assert state(phone) == (True, 1), "Erneuter Widerruf nach Freigabe nicht wirksam"
+            print("PASS Freigabe zuerst → wartender erneuter Widerruf greift danach")
+
+            # Doppelfreigabe: Q zuerst, admin wartet und sieht das freie Gerät.
+            with identity(owner, other):
+                owner.execute(unrevoke, (phone["device"],))
+                pending = pool.submit(outcome, admin, admin_unrevoke, (phone["uid"], phone["device"], phone["ticket"]), "aal2")
+                wait_blocked(owner, pending)
+            assert pending.result(timeout=8)[0] == "device_not_revoked", "Doppelfreigabe nicht frisch geprüft"
+            assert state(phone) == (False, 2), "Doppelfreigabe schrieb ein zweites Audit"
+            print("PASS Doppelfreigabe → wartende Freigabe: device_not_revoked, kein zweites Audit")
+
+            # Sperre zuerst: wartende Freigabe durch das Gerät bzw. admin scheitert ohne Teilwrite.
+            for label, run in (("Gerät", lambda p, o: (o, unrevoke, (p["device"],), None)),
+                               ("admin", lambda p, o: (admin, admin_unrevoke, (p["uid"], p["device"], p["ticket"]), "aal2"))):
+                phone, other = revoked_phone()
+                with identity(owner, admin, "aal2"):
+                    owner.execute(suspend, (phone["uid"], True))
+                    pending = pool.submit(outcome, *run(phone, other))
+                    wait_blocked(owner, pending)
+                assert pending.result(timeout=8)[0] == "account_suspended", label + ": Sperre nach Lock-Wait nicht gesehen"
+                assert state(phone) == (True, 0), label + ": Teilwrite trotz Sperre"
+                print(f"PASS Sperre zuerst → wartende Freigabe ({label}): account_suspended, kein Teilwrite")
+
+            # Löschjob zuerst: Phase A entfernt Sitzungen und blendet das Konto aus.
+            for label, expected, run in (
+                    ("Gerät", "device_not_authorized", lambda p, o: (o, unrevoke, (p["device"],), None)),
+                    ("admin", "account_not_found", lambda p, o: (admin, admin_unrevoke, (p["uid"], p["device"], p["ticket"]),
+                                                                 "aal2"))):
+                phone, other = revoked_phone()
+                with identity(owner, phone):
+                    owner.execute("select public.request_account_deletion()")
+                owner.execute("update public.profile_settings set deletion_requested_at=clock_timestamp()-interval '337 hours'"
+                              " where profile_id=%s", (phone["uid"],))
+                assert outcome(*run(phone, other))[0] == "account_deletion_pending", label + ": Konto in Löschung nicht abgewiesen"
+                with owner.transaction():
+                    assert job(owner)["status"] == "succeeded"
+                    pending = pool.submit(outcome, *run(phone, other))
+                    wait_blocked(owner, pending)
+                assert pending.result(timeout=8)[0] == expected, label + " nach Löschjob nicht abgewiesen"
+                assert owner.execute("select count(*) from public.devices where id=%s and revoked_at is null",
+                                     (phone["device"],)).fetchone()[0] == 0, label + ": Gerät nach Löschjob freigegeben"
+                print(f"PASS Löschjob zuerst → wartende Freigabe ({label}): {expected}")
         finally:
             with owner.transaction():
                 owner.execute("reset role")

@@ -76,7 +76,7 @@ select throws_ok($$select public.admin_account_lookup('K5_Support')$$, 'P0001', 
   'Eigenes Konto per Alias nicht auffindbar');
 select is((select array_agg(k order by k) from jsonb_object_keys(public.admin_account_lookup('K5_Target')->'account') k),
   array['activeDevices','alias','canCancelDeletion','consentStatus','consentVersions','deletionRequestedAt',
-    'earliestPurgeAt','lastActivityDay','profileId','status','suspended','suspendedAt'],
+    'earliestPurgeAt','lastActivityDay','profileId','revokedDevices','status','suspended','suspendedAt'],
   'Minimaler Status: genau diese Felder (keine E-Mail, Matches, Health, Geburtsdaten)');
 select is(public.admin_account_lookup('K5_Target')->'account'->>'consentStatus', 'CURRENT', 'Zustimmungsstatus');
 select is(public.admin_account_lookup('K5_Target')->'account'->'consentVersions',

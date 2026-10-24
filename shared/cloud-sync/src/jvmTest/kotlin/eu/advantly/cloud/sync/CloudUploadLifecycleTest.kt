@@ -39,6 +39,7 @@ import kotlinx.serialization.json.jsonObject
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -46,7 +47,9 @@ import kotlin.test.assertTrue
 
 /** U4: Upload-Beleg G/E, Neustart nach 40001 und Fairness blockierter Matches (Vertrag Welle 2). */
 class CloudUploadLifecycleTest {
-    private class Fixture : AutoCloseable {
+    private class Fixture(
+        sources: Set<String> = setOf("phone-source"),
+    ) : AutoCloseable {
         val driver = createInMemoryJvmDriver()
         val data = LocalData(driver)
         val hostThread: Thread = Thread.currentThread()
@@ -61,6 +64,10 @@ class CloudUploadLifecycleTest {
         val serverE = mutableMapOf<String, Long>()
         val serverMatches = mutableSetOf<String>()
         var restartWhen: (PushBatch) -> Boolean = { false }
+
+        // Widerrufene Geräte (K4-U): Bindung des Aufrufers → device_revoked, Quellgerät eines Events → device_not_owned.
+        val revoked = mutableSetOf<String>()
+        var rejectEvent: (EventRow) -> String? = { null }
 
         fun violates00700(batch: PushBatch): Boolean =
             restartRequired00700(batch, serverG, { id -> serverE.getOrDefault(id, 0).takeIf { id in serverMatches } }, { it in committed })
@@ -77,6 +84,9 @@ class CloudUploadLifecycleTest {
                         val body = CloudJson.parseToJsonElement((request.body as TextContent).text).jsonObject
                         val json = headersOf("Content-Type", "application/json")
                         if (request.url.encodedPath.endsWith("bind_cloud_session_v1")) {
+                            if ("caller-phone" in revoked) {
+                                return@MockEngine respond("""{"code":"42501","message":"device_revoked"}""", HttpStatusCode.Forbidden, json)
+                            }
                             val profile = credentials.profileId
                             return@MockEngine respond(
                                 """{"contractVersion":1,"profileId":"$profile","sessionId":"session",
@@ -106,7 +116,15 @@ class CloudUploadLifecycleTest {
                                 devices = batch.devices.map { ItemResult(it.id, "ok") },
                                 players = batch.players.map { ItemResult(it.id, "ok") },
                                 matches = batch.matches.map { ItemResult(it.id, "updated", projection = it.projection?.let { "applied" }) },
-                                events = batch.events.map { ItemResult(it.id, if (committed.add(it.id)) "accepted" else "duplicate") },
+                                events =
+                                    batch.events.map {
+                                        val reason = if (it.deviceId in revoked) "device_not_owned" else rejectEvent(it)
+                                        if (reason != null) {
+                                            ItemResult(it.id, "rejected", reason)
+                                        } else {
+                                            ItemResult(it.id, if (committed.add(it.id)) "accepted" else "duplicate")
+                                        }
+                                    },
                             )
                         if (loseResponse) throw IOException("response lost after commit")
                         respond(CloudJson.encodeToString(PushResponse.serializer(), response), headers = json)
@@ -120,7 +138,7 @@ class CloudUploadLifecycleTest {
             data.accountIdentities.initialize("phone-source", "me", "PHONE")
             account("alice")
             val session = data.cloudUploads.activate("alice")
-            data.cloudUploads.bindOwnedDevices(session, setOf("phone-source"))
+            data.cloudUploads.bindOwnedDevices(session, sources)
             data.cloudUploads.deactivate()
             gate.publish(gate.capture(false), CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT))
         }
@@ -221,6 +239,60 @@ class CloudUploadLifecycleTest {
             driver.close()
         }
     }
+
+    @Test
+    fun watchEventsUploadOnceTheWatchIsRestoredAfterThePhone(): Unit =
+        runBlocking {
+            // K4-U r2 (Review P2-3): Handy und Uhr widerrufen, erst das Handy frei → Uhr-Events device_not_owned (endgültig).
+            // Die Uhr-Freigabe erhöht G; danach gehen genau diese Ablehnungen wieder auf ausstehend, andere bleiben.
+            Fixture(setOf("phone-source", WATCH)).use { f ->
+                f.revoked += setOf("caller-phone", WATCH)
+                f.pull(1)
+                f.event(LOCAL, 1)
+                f.event(LOCAL, 2)
+                f.data.events.append(StoredEvent("$LOCAL-w1", LOCAL, WATCH, 1, 3, """{"type":"PointWon","side":"B"}""", type = "PointWon"))
+                assertEquals("device_revoked", assertFailsWith<CloudException> { f.bind() }.reason)
+                // Handy frei (G 2): neu anmelden und synchronisieren.
+                f.revoked -= "caller-phone"
+                f.rejectEvent = { if (it.id == "$LOCAL-e2") "forbidden" else null }
+                f.switchTo("alice")
+                f.pull(2)
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertEquals(mapOf("$LOCAL-e2" to "forbidden", "$LOCAL-w1" to "device_not_owned"), f.data.cloud.rejectedEvents())
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertEquals(1, f.bodies.size, "ohne Auslöser kein erneuter Versand")
+                // Uhr frei (G 3): der nächste Pull sieht die neue G, die Uhr-Events gehen hoch.
+                f.revoked -= WATCH
+                f.pull(3)
+                assertEquals(mapOf("$LOCAL-e2" to "forbidden"), f.data.cloud.rejectedEvents())
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                assertEquals(
+                    listOf("$LOCAL-w1"),
+                    f.batches
+                        .last()
+                        .events
+                        .map { it.id },
+                )
+                assertEquals(setOf("$LOCAL-e1", "$LOCAL-w1"), f.committed)
+                assertEquals(0, f.data.cloud.pendingCount())
+            }
+        }
+
+    @Test
+    fun aNewSignInRetriesDeviceRejections(): Unit =
+        runBlocking {
+            Fixture(setOf("phone-source", WATCH)).use { f ->
+                f.revoked += WATCH
+                f.pull(1)
+                f.data.events.append(StoredEvent("$LOCAL-w1", LOCAL, WATCH, 1, 1, """{"type":"PointWon","side":"B"}""", type = "PointWon"))
+                f.bind()
+                assertEquals(CloudUploadOutcome.BLOCKED, f.runner().uploadNow().outcome)
+                f.revoked -= WATCH
+                f.switchTo("alice")
+                assertEquals(CloudUploadOutcome.DRAINED, f.runner().uploadNow().outcome)
+                assertEquals(setOf("$LOCAL-w1"), f.committed)
+            }
+        }
 
     @Test
     fun lifecycleJsonCarriesAnEpochForEveryReferencedMatch(): Unit =
@@ -925,6 +997,7 @@ class CloudUploadLifecycleTest {
         const val BLOCKED_2 = "00000000-0000-4000-8000-000000000002"
         const val BLOCKED_3 = "00000000-0000-4000-8000-000000000003"
         const val LOCAL = "00000000-0000-4000-8000-0000000000f0"
+        const val WATCH = "watch-source"
         const val OLD = "00000000-0000-4000-8000-0000000000f1"
         const val BOB = "00000000-0000-4000-8000-0000000000b0"
         const val REDACTED = "00000000-0000-4000-8000-0000000000aa"

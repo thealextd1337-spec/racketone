@@ -70,6 +70,12 @@ class FakePhoneAuth : CloudAuthPort {
         if (index >= 0) devices[index] = devices[index].copy(revokedAt = "2026-10-23T10:00:00Z")
     }
 
+    override suspend fun restoreDevice(deviceId: String) {
+        call("restore:$deviceId")
+        val index = devices.indexOfFirst { it.deviceId == deviceId }
+        if (index >= 0) devices[index] = devices[index].copy(revokedAt = null)
+    }
+
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
 
     override fun adoptSources(ids: Set<String>) {
@@ -226,6 +232,30 @@ class AuthViewModelTest {
         assertFalse(model.state.value.busy)
         model.revokeDevice("w1")
         assertEquals("revoke:w1", auth.calls.single { it.startsWith("revoke:") })
+    }
+
+    @Test fun restoringAnotherDeviceReloadsTheListButTheCurrentPhoneNeverRestoresItself() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
+                it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
+            }
+        val model = AuthViewModel(auth, scope)
+        model.loadDevices()
+        model.restoreDevice("d1")
+        assertFalse(auth.calls.any { it.startsWith("restore:") }, "nie vom widerrufenen Handy selbst")
+        assertNull(model.state.value.error)
+        model.restoreDevice("w1")
+        assertEquals(listOf("devices", "restore:w1", "devices"), auth.calls.filter { it != "refresh" })
+        assertNull(
+            model.state.value.devices!!
+                .single { it.deviceId == "w1" }
+                .revokedAt,
+        )
+        auth.failure = "device_not_revoked"
+        model.restoreDevice("w1")
+        assertEquals("device_not_revoked", model.state.value.error)
     }
 
     @Test fun deviceListNeedsTheDisplayedSession() {
