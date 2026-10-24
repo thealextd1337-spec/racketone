@@ -388,6 +388,10 @@ class AccountScreenTest {
                     .performScrollTo()
                     .assertTextEquals(if (german) "Freigabe wiederherstellen" else "Restore access")
                     .performClick()
+                // Eine Uhr meldet sich nicht an: eigener Text ohne Anmeldung (Review P3-3).
+                onNodeWithText(if (german) "Diese Uhr behält ihre Kennung" else "This watch keeps its identity", substring = true)
+                    .assertIsDisplayed()
+                onNodeWithText(if (german) "nach einer erneuten Anmeldung" else "after it signs in", substring = true).assertDoesNotExist()
                 onNodeWithTag("account_device_restore_cancel").performClick()
                 assertTrue("restore:w1" !in auth.calls, "Abbrechen gibt nichts frei")
                 onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
@@ -409,19 +413,19 @@ class AccountScreenTest {
                 val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
                 setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
                 onNodeWithTag("account_devices_show").performScrollTo().performClick()
-                auth.failure = "device_restore_unavailable"
-                onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
-                onNodeWithTag("account_device_restore_confirm").performClick()
-                onNodeWithTag("auth_error")
-                    .performScrollTo()
-                    .assertTextContains(
-                        if (german) {
-                            "Dieses Handy kann gerade keine Freigabe erteilen"
-                        } else {
-                            "This phone cannot restore access right now"
-                        },
-                        substring = true,
-                    )
+                for ((failure, text) in listOf(
+                    "device_restore_unavailable" to
+                        if (german) "Dieses Handy kann gerade keine Freigabe erteilen" else "This phone cannot restore access right now",
+                    "device_restore_self_revoked" to
+                        if (german) "Der Cloud-Zugriff dieses Handys ist selbst widerrufen" else "This phone’s own cloud access is revoked",
+                    "device_unrevoke_caller_too_new" to
+                        if (german) "erst nach dem Widerruf angemeldet" else "signed in only after that device was revoked",
+                )) {
+                    auth.failure = failure
+                    onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
+                    onNodeWithTag("account_device_restore_confirm").performClick()
+                    onNodeWithTag("auth_error").performScrollTo().assertTextContains(text, substring = true)
+                }
                 onNodeWithTag("account_device_revoked_w1").performScrollTo().assertIsDisplayed()
             }
         }

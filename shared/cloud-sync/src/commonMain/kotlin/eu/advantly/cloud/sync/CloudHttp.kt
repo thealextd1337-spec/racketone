@@ -202,6 +202,7 @@ internal class CloudHttp(
                 "device_not_authorized",
                 "device_revoked",
                 "device_unrevoke_self",
+                "device_unrevoke_caller_too_new",
                 "device_not_found",
                 "device_not_revoked",
                 "account_deletion_pending",

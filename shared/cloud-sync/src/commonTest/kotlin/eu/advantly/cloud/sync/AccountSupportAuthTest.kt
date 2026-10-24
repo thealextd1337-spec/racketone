@@ -120,10 +120,11 @@ class AccountSupportAuthTest {
                 assertEquals("a".repeat(64), sent.headers["X-Advantly-Installation-Proof"])
                 for ((server, expected) in listOf(
                     "device_unrevoke_self" to "device_unrevoke_self",
+                    "device_unrevoke_caller_too_new" to "device_unrevoke_caller_too_new",
                     "device_not_found" to "device_not_found",
                     "device_not_revoked" to "device_not_revoked",
                     "account_deletion_pending" to "account_deletion_pending",
-                    "device_revoked" to "device_restore_unavailable",
+                    "device_revoked" to "device_restore_self_revoked",
                     "device_not_authorized" to "device_restore_unavailable",
                 )) {
                     reply = """{"code":"42501","message":"$server"}""" to HttpStatusCode.Forbidden

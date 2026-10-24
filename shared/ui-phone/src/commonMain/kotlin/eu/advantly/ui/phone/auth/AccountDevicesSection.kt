@@ -26,6 +26,7 @@ import eu.advantly.ui.phone.resources.account_device_current_revoked
 import eu.advantly.ui.phone.resources.account_device_last_seen
 import eu.advantly.ui.phone.resources.account_device_restore
 import eu.advantly.ui.phone.resources.account_device_restore_explanation
+import eu.advantly.ui.phone.resources.account_device_restore_explanation_watch
 import eu.advantly.ui.phone.resources.account_device_revoke
 import eu.advantly.ui.phone.resources.account_device_revoke_explanation
 import eu.advantly.ui.phone.resources.account_device_revoked
@@ -101,18 +102,20 @@ internal fun AccountDevicesSection(
         }
     }
     confirm?.let { (deviceId, restore) ->
+        // Eine Uhr meldet sich nicht selbst an; ihre Events lädt das Handy hoch.
+        val watch = state.devices?.firstOrNull { it.deviceId == deviceId }?.kind == "watch"
+        val explanation =
+            when {
+                !restore -> Res.string.account_device_revoke_explanation
+                watch -> Res.string.account_device_restore_explanation_watch
+                else -> Res.string.account_device_restore_explanation
+            }
         val action = if (restore) Res.string.account_device_restore else Res.string.account_device_revoke
         val tag = if (restore) "account_device_restore" else "account_device_revoke"
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text(stringResource(action)) },
-            text = {
-                Text(
-                    stringResource(
-                        if (restore) Res.string.account_device_restore_explanation else Res.string.account_device_revoke_explanation,
-                    ),
-                )
-            },
+            text = { Text(stringResource(explanation)) },
             confirmButton = {
                 TextButton({
                     confirm = null

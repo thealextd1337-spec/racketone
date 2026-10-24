@@ -527,14 +527,15 @@ class SupabasePhoneAuth(
             Unit
         }
 
-    // Ein eigener Grund, wenn dieses Handy selbst (noch) nicht gebunden oder widerrufen ist: Die Kontositzung gilt weiter.
+    // Eigene Gründe, wenn dieses Handy selbst widerrufen oder (noch) nicht gebunden ist: Die Kontositzung gilt weiter.
     override suspend fun restoreDevice(deviceId: String) =
         guarded {
             val own = installation ?: throw CloudException(RESTORE_UNAVAILABLE, true)
             try {
                 accountRpc("cloud_unrevoke_device_v1", buildJsonObject { put("p_device_id", deviceId) }, own)
             } catch (e: CloudException) {
-                if (e.reason in setOf("device_revoked", "device_not_authorized")) throw CloudException(RESTORE_UNAVAILABLE, true)
+                if (e.reason == "device_revoked") throw CloudException(RESTORE_SELF_REVOKED, true)
+                if (e.reason == "device_not_authorized") throw CloudException(RESTORE_UNAVAILABLE, true)
                 throw e
             }
             Unit
@@ -676,6 +677,7 @@ class SupabasePhoneAuth(
 
     private companion object {
         const val RESTORE_UNAVAILABLE = "device_restore_unavailable"
+        const val RESTORE_SELF_REVOKED = "device_restore_self_revoked"
 
         val REASONS =
             listOf(

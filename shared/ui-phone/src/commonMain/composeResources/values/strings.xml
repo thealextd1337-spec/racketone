@@ -775,9 +775,12 @@
     <string name="account_device_current_revoked">Cloud access for this phone was revoked. Restore it from another of your devices (Account, Devices) or through support, then sign out and sign in again on this phone (signing out applies to all your devices). Your matches stay on this phone and you can keep scoring; matches not uploaded yet are uploaded afterwards. Do not clear the app data or reinstall the app, or those matches will be lost. Export, deletion, devices and support remain available here.</string>
     <string name="account_device_restore">Restore access</string>
     <string name="account_device_restore_explanation">This device keeps its identity and can upload and download cloud data again after it signs in once more. Matches stored on it that were not uploaded yet are uploaded then. Only restore access if the device is back in your hands.</string>
+    <string name="account_device_restore_explanation_watch">This watch keeps its identity. Matches scored on it that were not uploaded yet are uploaded through its phone at the next sync. Only restore access if the watch is back in your hands.</string>
     <string name="account_device_error_self">A device cannot restore its own access. Use another of your devices or contact support.</string>
     <string name="account_device_error_not_found">This device was not found in your account.</string>
     <string name="account_device_error_not_revoked">This device already has access.</string>
-    <string name="account_device_error_this_phone">This phone cannot restore access right now: it must itself be connected to the cloud and must not be revoked. Try again after the next sync.</string>
+    <string name="account_device_error_this_phone">This phone cannot restore access right now because it is not connected to the cloud yet. Try again after the next sync.</string>
+    <string name="account_device_error_this_phone_revoked">This phone’s own cloud access is revoked, so it cannot restore other devices. Use another device that still has access, or contact support.</string>
+    <string name="account_device_error_too_new">This phone was signed in only after that device was revoked, so it cannot restore it. Use a device that was signed in before the revocation, or contact support.</string>
     <string name="account_deletion_pending">Your account is scheduled for deletion. Cancel the deletion first.</string>
 </resources>
