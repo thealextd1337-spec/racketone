@@ -421,9 +421,10 @@ create trigger support_ticket_device after insert on ops.support_tickets
   for each row execute function private.support_ticket_device();
 
 -- K4-U Adminweg: admin mit AAL2, Begründung und Meldung nach dem Widerruf (Regel wie die Löschrücknahme). Eine
--- Kontomeldung zählt nur von einem anderen eigenen, beim Melden nicht widerrufenen Gerät; die Löschrücknahme braucht
--- das nicht (cancel_account_deletion steht jeder Kontositzung offen, auch der des widerrufenen Geräts). Gesperrte
--- Konten und Konten in Löschung bleiben ausgeschlossen: erst entsperren bzw. die Löschung zurücknehmen.
+-- Kontomeldung zählt nur von einem anderen eigenen, beim Melden nicht widerrufenen und schon vor dem Widerruf
+-- gebundenen Gerät; die Löschrücknahme braucht das nicht (cancel_account_deletion steht jeder Kontositzung offen, auch
+-- der des widerrufenen Geräts). Gesperrte Konten und Konten in Löschung bleiben ausgeschlossen: erst entsperren bzw.
+-- die Löschung zurücknehmen.
 create function public.admin_account_unrevoke_device(p_profile_id uuid, p_device_id uuid, p_ticket_id uuid, p_reason text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -431,6 +432,7 @@ declare
   v_reason text;
   v_kind text;
   v_source private.support_ticket_devices%rowtype;
+  v_revoked timestamptz;
 begin
   perform private.lock_sync();
   v_actor := private.require_support_admin();
@@ -440,12 +442,18 @@ begin
   if exists (select 1 from public.profiles p where p.id = p_profile_id and p.status = 'deletion_requested') then
     perform private.fail('account_deletion_pending');
   end if;
-  v_kind := private.account_ticket_kind(p_profile_id, p_ticket_id, private.device_revoked_at(p_profile_id, p_device_id),
-    v_reason, 'device');
+  v_revoked := private.device_revoked_at(p_profile_id, p_device_id);
+  v_kind := private.account_ticket_kind(p_profile_id, p_ticket_id, v_revoked, v_reason, 'device');
   if v_kind = 'account' then
     select * into v_source from private.support_ticket_devices s where s.ticket_id = p_ticket_id;
     if not found then perform private.fail('device_ticket_device_unknown'); end if;
     if v_source.device_id = p_device_id or v_source.revoked then perform private.fail('device_ticket_from_revoked_device'); end if;
+    -- Wie device_unrevoke_caller_too_new im Nutzerweg: Ein erst nach dem Widerruf gebundenes Gerät (etwa eine zweite
+    -- App-Instanz mit Mail-Zugriff) belegt nichts.
+    if not exists (select 1 from private.cloud_installations i where i.device_id = v_source.device_id
+                     and i.created_at < v_revoked) then
+      perform private.fail('device_ticket_device_too_new');
+    end if;
   end if;
   perform private.device_restore(p_profile_id, p_device_id);
   -- Eine Meldung darf mehrere Geräte freigeben (Handy und Uhr zurück); ticket_uses > 1 macht das im Audit sichtbar.

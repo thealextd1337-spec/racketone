@@ -145,6 +145,7 @@ export function mapSafeError(error) {
     "device_ticket_evidence_required",
     "device_ticket_from_revoked_device",
     "device_ticket_device_unknown",
+    "device_ticket_device_too_new",
     "device_not_found",
     "device_not_revoked",
     "account_suspended",

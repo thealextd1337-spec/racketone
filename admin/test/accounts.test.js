@@ -95,7 +95,7 @@ test("API sends only the account RPCs and maps their stable server errors", asyn
   for (const code of ["account_not_found", "account_ambiguous", "no_deletion_pending", "deletion_ticket_required",
     "deletion_ticket_invalid", "deletion_ticket_stale", "deletion_ticket_evidence_required", "device_ticket_required",
     "device_ticket_invalid", "device_ticket_stale", "device_ticket_evidence_required", "device_ticket_from_revoked_device",
-    "device_ticket_device_unknown", "device_not_found", "device_not_revoked", "account_suspended", "account_deletion_pending"]) {
+    "device_ticket_device_unknown", "device_ticket_device_too_new", "device_not_found", "device_not_revoked", "account_suspended", "account_deletion_pending"]) {
     const failing = createSupportApi({ async rpc() { return { error: { message: code } }; } });
     await assert.rejects(failing.lookupAccount("x"), (error) => error.code === code);
   }
@@ -209,15 +209,15 @@ test("restoring a device asks with action, account and device, then shows the se
   assert.deepEqual(controller.state.account.revokedDevices, []);
 });
 
-test("refusals for tickets from a revoked or unknown device are explained", async () => {
-  const refusals = ["device_ticket_from_revoked_device", "device_ticket_device_unknown"];
+test("refusals for tickets from a revoked, unknown or too new device are explained", async () => {
+  const refusals = ["device_ticket_from_revoked_device", "device_ticket_device_unknown", "device_ticket_device_too_new"];
   const { controller } = await unlocked({
     async lookupAccount() { return { viewerRole: "admin", account: account({ revokedDevices: [revokedPhone] }) }; },
     async accountAction() { throw new SupportError(refusals.shift()); },
   });
   controller.setWorkspace("accounts");
   await controller.searchAccount("Alex");
-  for (const notice of ["accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown"]) {
+  for (const notice of ["accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown", "accountDeviceTicketDeviceTooNew"]) {
     controller.runAccountAction("unrevoke", { reason: "Phone back", ticketId, deviceId: phoneId });
     await controller.confirmAccountAction();
     assert.equal(controller.state.accountNotice, notice);
@@ -362,7 +362,8 @@ test("every account text exists in German and English", () => {
     "accountStatusDeleting", "accountRevokedDevices", "accountUnrevoke", "accountUnrevokeTicket", "accountUnrevokeHint",
     "accountUnrevokeUnavailable", "accountConfirmDevice", "accountDeviceUnknown", "accountDeviceTicketRequired",
     "accountDeviceTicketStale", "accountDeviceNotFound", "accountDeviceNotRevoked", "accountUnrevokeSuspended",
-    "accountUnrevokeDeletionPending", "accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown"];
+    "accountUnrevokeDeletionPending", "accountDeviceTicketFromRevoked", "accountDeviceTicketDeviceUnknown",
+    "accountDeviceTicketDeviceTooNew"];
   for (const key of keys) {
     assert.notEqual(translate("en", key), key, `en ${key}`);
     assert.notEqual(translate("de", key), translate("en", key) === "Alias" ? "" : translate("en", key), `de ${key}`);

@@ -102,8 +102,9 @@ eine Löschung auf Nutzerwunsch zurücknehmen. Dafür ist die UUID einer Meldung
 entstand: vom Kontoinhaber oder als Gastmeldung, deren Zuordnung die Begründung belegt (mindestens 20 Zeichen).
 „Gerätefreigabe wiederherstellen“ (K4-U) gibt ein widerrufenes Gerät wieder frei, mit derselben Regel: Meldung nach
 dem Widerruf. Eine Kontomeldung zählt nur, wenn sie von einem anderen Gerät des Kontos kam, das beim Melden nicht
-widerrufen war; sonst `device_ticket_from_revoked_device` (vom freizugebenden oder einem damals widerrufenen Gerät)
-bzw. `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden). Gastmeldungen mit Zuordnungsbeleg bleiben
+widerrufen war und schon vor dem Widerruf gebunden war; sonst `device_ticket_from_revoked_device` (vom freizugebenden
+oder einem damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden) bzw.
+`device_ticket_device_too_new` (Gerät erst nach dem Widerruf gebunden). Gastmeldungen mit Zuordnungsbeleg bleiben
 gültig. Gesperrte Konten und Konten in Löschung zeigen den Knopf nicht. Die Reihenfolge von Uhr und Handy ist egal.
 Jede Aktion verlangt eine Begründung (1–500 Zeichen), hat einen eigenen Knopf ohne Enter-Auslösung und läuft erst
 nach einer Rückfrage, die Aktion und Zielkonto nennt, bei der Freigabe auch das Gerät. Sie landet im Konto-Audit. Der Server prüft Rolle und AAL2 bei

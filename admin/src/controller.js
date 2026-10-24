@@ -92,6 +92,7 @@ function noticeForError(error, fallback = "genericError") {
     case "device_ticket_evidence_required": return "accountTicketEvidence";
     case "device_ticket_from_revoked_device": return "accountDeviceTicketFromRevoked";
     case "device_ticket_device_unknown": return "accountDeviceTicketDeviceUnknown";
+    case "device_ticket_device_too_new": return "accountDeviceTicketDeviceTooNew";
     case "device_not_found": return "accountDeviceNotFound";
     case "device_not_revoked": return "accountDeviceNotRevoked";
     case "account_suspended": return "accountUnrevokeSuspended";
