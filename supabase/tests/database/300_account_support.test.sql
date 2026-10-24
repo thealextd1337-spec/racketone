@@ -7,6 +7,8 @@ select tests.create_user('k5_friend');
 select tests.create_user('k5_support');
 select tests.create_user('k5_admin');
 select tests.create_user('k5_revoked');
+-- Alias ausdrücklich setzen: initcap() im Helfer hängt von Kollation/Version ab (CI-Lauf 40037702411).
+update public.profiles set alias = 'K5_Target' where id = tests.uid('k5_target');
 update public.profiles set alias = 'Same Alias' where id in (tests.uid('k5_twin'), tests.uid('k5_friend'));
 insert into ops.support_members(id, role) values (tests.uid('k5_support'), 'support'), (tests.uid('k5_admin'), 'admin'),
   (tests.uid('k5_revoked'), 'admin');
