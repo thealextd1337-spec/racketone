@@ -28,6 +28,10 @@ data class FavoriteLineup(
 /** Favoriten-Lineups; Zusammenführen mit anderen Geräten ist idempotent (Maximum von Zeit und Zähler). */
 class LineupFavoriteRepository internal constructor(
     private val queries: LineupFavoriteQueries,
+    private val candidates: (String?, Long) -> List<String>,
+    private val readable: (String) -> Boolean = { true },
+    private val readablePlayer: (String) -> Boolean = { true },
+    private val redacted: (String) -> Boolean = { false },
 ) {
     /** Merkt eine gespielte Besetzung (beim Matchstart): neu anlegen oder Zähler/Zeit erhöhen. */
     fun recordUse(
@@ -39,6 +43,10 @@ class LineupFavoriteRepository internal constructor(
     ): FavoriteLineup =
         queries.transactionWithResult {
             val id = keyOf(sport, discipline, a, b)
+            // Fehlendes Verzeichnis darf den Matchstart nicht verhindern; kein Lesen oder Speichern fremder Favoriten.
+            if (!(a + b).all { readablePlayer(it.value) }) {
+                return@transactionWithResult FavoriteLineup(id, sport, discipline, a, b, null, nowMs, 0)
+            }
             queries.insertOrIgnore(id, sport.name, discipline.name, encode(a), encode(b), null, nowMs, 0)
             queries.touch(nowMs, id)
             checkNotNull(get(id))
@@ -47,36 +55,40 @@ class LineupFavoriteRepository internal constructor(
     /** Übernimmt einen Favoriten von einem anderen Gerät (neuere Zeit und höherer Zähler gewinnen, Name falls gesetzt). */
     fun merge(favorite: FavoriteLineup) {
         queries.transaction {
+            if (!(favorite.a + favorite.b).all { readablePlayer(it.value) }) return@transaction
+            val safeName = favorite.name.takeUnless { (favorite.a + favorite.b).any { redacted(it.value) } }
             queries.insertOrIgnore(
                 favorite.id,
                 favorite.sport.name,
                 favorite.discipline.name,
                 encode(favorite.a),
                 encode(favorite.b),
-                favorite.name,
+                safeName,
                 favorite.lastUsedAtMs,
                 favorite.useCount.toLong(),
             )
-            queries.merge(favorite.name, favorite.lastUsedAtMs, favorite.useCount.toLong(), favorite.id)
+            queries.merge(safeName, favorite.lastUsedAtMs, favorite.useCount.toLong(), favorite.id)
         }
     }
 
-    fun get(id: String): FavoriteLineup? = queries.selectById(id).executeAsOneOrNull()?.toFavorite()
+    fun get(id: String): FavoriteLineup? = if (readable(id)) queries.selectById(id).executeAsOneOrNull()?.toFavorite() else null
 
     /** Zuletzt verwendete Favoriten, optional nur einer Sportart. */
     fun recent(
         sport: Sport? = null,
         limit: Long = 20,
-    ): List<FavoriteLineup> = queries.selectRecent(sport?.name, limit).executeAsList().map { it.toFavorite() }
+    ): List<FavoriteLineup> = candidates(sport?.name, limit).mapNotNull(::get)
 
     fun rename(
         id: String,
         name: String?,
     ) {
-        queries.rename(name, id)
+        val value = get(id) ?: return
+        queries.rename(name.takeUnless { (value.a + value.b).any { redacted(it.value) } }, id)
     }
 
     fun delete(id: String) {
+        if (!readable(id)) return
         queries.deleteById(id)
     }
 
@@ -87,7 +99,7 @@ class LineupFavoriteRepository internal constructor(
             discipline = Discipline.valueOf(discipline),
             a = decode(side_a),
             b = decode(side_b),
-            name = name,
+            name = name.takeUnless { (decode(side_a) + decode(side_b)).any { redacted(it.value) } },
             lastUsedAtMs = last_used_at_ms,
             useCount = use_count.toInt(),
         )

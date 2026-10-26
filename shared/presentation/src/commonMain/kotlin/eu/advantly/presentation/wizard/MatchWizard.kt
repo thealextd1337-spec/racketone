@@ -64,7 +64,7 @@ class MatchWizard(
     private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
     private var draftSelfId = players.self.value.id
-    private val detachIdentity = players.observeOwnerIdentity(::ensureCurrentIdentity)
+    private val detachIdentity = players.observeOwnerIdentity(::onDirectoryChanged)
 
     fun close() = detachIdentity()
 
@@ -76,6 +76,19 @@ class MatchWizard(
 
     private fun ensureCurrentIdentity() {
         if (draftSelfId != players.self.value.id) reset()
+    }
+
+    /** Anderer Besitzer: zurücksetzen; sonst gewählte Plätze per ID neu auflösen, Redigierte werden Platzhalter. */
+    private fun onDirectoryChanged() {
+        if (draftSelfId != players.self.value.id) return reset()
+        val current = (guests.value + players.self.value).associateBy { it.id }
+
+        fun fresh(player: Player?) =
+            player?.let {
+                val kept = it.isPlaceholder || it.id in players.archivedPlayerIds.value
+                current[it.id] ?: if (kept) it else Player(it.id, "", isPlaceholder = true)
+            }
+        update { it.copy(teamA = it.teamA.map(::fresh), teamB = it.teamB.map(::fresh)) }
     }
 
     private val input: WizardInput get() {
@@ -172,7 +185,7 @@ class MatchWizard(
     /** Legt einen Gast an und setzt ihn in den nächsten freien Slot. Leere Namen werden ignoriert. */
     fun addGuest(name: String): Player? {
         if (name.isBlank()) return null
-        val guest = players.addGuest(name)
+        val guest = players.tryAddGuest(name) ?: return null
         createdPlayers.add(guest)
         pickPlayer(guest)
         return guest
@@ -186,15 +199,16 @@ class MatchWizard(
         update { PlayerSelection.remove(it, PlayerPlace(side, index), players.self.value.id) }
     }
 
-    /** Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. */
-    fun playerSuggestions(): List<Player> =
-        PlayerSelection.suggestions(
-            createdPlayers.filterNot { it.id in players.archivedPlayerIds.value },
-            recentPlayers.filterNot { it.id in players.archivedPlayerIds.value },
-            guests.value,
-            input,
-            players.self.value.id,
-        )
+    /**
+     * Vorschläge: hier angelegt, zuletzt gemeinsam gespielt, übrige Gäste nach letzter Verwendung. Namen kommen per
+     * Spieler-ID aus den aktuellen Gästen: umbenannte, redigierte oder archivierte Personen erscheinen nie mit altem Namen.
+     */
+    fun playerSuggestions(): List<Player> {
+        val current = guests.value.associateBy { it.id }
+
+        fun fresh(list: List<Player>) = list.mapNotNull { current[it.id] }.filterNot { it.id in players.archivedPlayerIds.value }
+        return PlayerSelection.suggestions(fresh(createdPlayers), fresh(recentPlayers), guests.value, input, players.self.value.id)
+    }
 
     fun assignPlayer(
         place: PlayerPlace,
@@ -207,7 +221,7 @@ class MatchWizard(
         place: PlayerPlace,
     ): Player? {
         if (name.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
-        val guest = players.addGuest(name)
+        val guest = players.tryAddGuest(name) ?: return null
         createdPlayers.add(guest)
         assignPlayer(place, guest)
         return guest
@@ -365,7 +379,7 @@ class MatchWizard(
     fun finish(): MatchSetup? {
         ensureCurrentIdentity()
         val setup = mutableState.value.setup ?: return null
-        if (input.saveAsFavorite) players.saveFavorite(setup)
+        if (input.saveAsFavorite && players.trySaveFavorite(setup) == null) return null
         return setup
     }
 

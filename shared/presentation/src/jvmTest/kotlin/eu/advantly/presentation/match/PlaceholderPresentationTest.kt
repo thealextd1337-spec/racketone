@@ -14,7 +14,17 @@ import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.data.CloudMetadataKind
+import eu.advantly.data.MatchRecord
+import eu.advantly.data.RedactionCursor
+import eu.advantly.data.RedactionPage
+import eu.advantly.data.RedactionTransfer
+import eu.advantly.data.ReplicaAccessLevel
+import eu.advantly.data.ReplicaRedactionEvent
+import eu.advantly.data.ScoreSummary
 import eu.advantly.data.createInMemoryJvmLocalData
+import eu.advantly.data.metadataState
+import eu.advantly.data.storeDownloadedMatch
 import eu.advantly.data.toStoredEvent
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
@@ -24,9 +34,125 @@ import eu.advantly.sync.protocol.PeerKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PlaceholderPresentationTest {
+    @Test
+    fun eventOnlyRedactionStaysMaskedInMatchSetupWithoutErasingDirectoryPlayer() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = true)
+    }
+
+    @Test
+    fun eventOnlyRedactionDoesNotCreateBlankDirectoryPlayerDuringAssignment() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = false)
+    }
+
+    @Test
+    fun eventOnlyRematchDoesNotInventLocalPlayerFromMaskedAssignment() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = false, repeatMatch = true)
+    }
+
+    @Test
+    fun eventOnlyRematchPreservesExistingDirectoryIdentityAndRevision() {
+        checkEventOnlyRedactionDuringAssignment(withDirectoryPlayer = true, repeatMatch = true)
+    }
+
+    private fun checkEventOnlyRedactionDuringAssignment(
+        withDirectoryPlayer: Boolean,
+        repeatMatch: Boolean = false,
+    ) {
+        val data = createInMemoryJvmLocalData()
+        var identityIndex = 0
+        data.accountIdentities.select("scope-A", "A", 0, "PHONE") { "A-${identityIndex++}" }
+        val ctx = data.replicas.captureContext()
+        val owner = data.players.ensureSelf("Alex", 1) { PlayerId("owner") }.id
+        val slot = Placeholders.id("opponent")
+        val secondSlot = Placeholders.id("second-opponent")
+        val person = Player(PlayerId("living"), "Sensitive name")
+        val partner = data.players.addGuest(PlayerId("partner"), "Partner", 1)
+        val other = data.players.addGuest(PlayerId("other"), "Other", 1)
+        val match = MatchId("redacted-match")
+        val format = Presets.TENNIS_DOUBLES_MTB10.format()
+        val lineup = Lineup(listOf(owner, partner.id), listOf(slot, secondSlot), owner)
+        // Genesis aus einer eigenen Quelle des Kontos: unter Protokoll 4 weist nur das eigene Konto zu (Teilnehmerregel)
+        val source = DeviceId(data.accountIdentities.currentSources().single())
+        val genesis = ScoreEvent(EventId("genesis"), match, source, 1, 1, 1, null, MatchCreated(format, lineup, createdBy = owner))
+        val assigned =
+            ScoreEvent(EventId("assigned"), match, DeviceId("cloud"), 2, 2, 2, genesis.id, PlayerAssigned(slot, person, owner))
+                .toStoredEvent()
+        data.replicas.applyAccess(ctx, match.value, 1, ReplicaAccessLevel.MEMBER) {}
+        data.cloud.storeDownloadedMatch(
+            MatchRecord(
+                match,
+                format,
+                lineup,
+                MatchMeta(),
+                1,
+                1,
+                eu.advantly.core.scoring.MatchStatus.IN_PROGRESS,
+                ScoreSummary.EMPTY,
+                null,
+            ),
+            "A",
+        )
+        if (withDirectoryPlayer) data.players.addGuest(person.id, person.displayName, 1)
+        data.cloud.storeDownloaded(listOf(genesis.toStoredEvent(), assigned)) {}
+        val transfer = RedactionTransfer("redaction", match.value, 1, 1, 2)
+        val cursor = data.replicas.beginRedaction(ctx, transfer) {}
+        data.replicas.stageRedaction(
+            ctx,
+            transfer.id,
+            RedactionPage(
+                0,
+                cursor,
+                RedactionCursor(null, 2),
+                emptyList(),
+                listOf(ReplicaRedactionEvent(assigned.copy(payload = assigned.payload.replace("Sensitive name", "Gelöschter Spieler")), 2)),
+                true,
+                true,
+            ),
+        ) {}
+        data.replicas.completeRedaction(ctx, transfer.id) {}
+        data.replicas.markReady(ctx, match.value, 1, 1) {}
+        val session = MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE), { 10 })
+        val store = SessionMatchStore(session)
+        assertEquals(
+            "",
+            store
+                .record(match)!!
+                .summary.setup.assignedPlayers[slot]!!
+                .displayName,
+        )
+        // Ein leerer Name ist nie ein Name: die Oberfläche zeigt den Platzhalter („Gegner“), nicht „Du“.
+        assertTrue(
+            store
+                .record(match)!!
+                .summary.setup
+                .player(slot)!!
+                .isPlaceholder,
+        )
+        val directoryBefore = data.players.get(person.id)
+        if (withDirectoryPlayer) {
+            assertEquals("Sensitive name", directoryBefore!!.displayName)
+        } else {
+            assertNull(directoryBefore)
+        }
+        val beforeAssignment = data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value)
+        if (repeatMatch) {
+            store.start(store.record(match)!!.summary.setup)
+            val rematch = store.active.value!!.setup
+            // Revanche: Name per Spieler-ID aus dem Verzeichnis, nie aus dem historischen Event
+            assertEquals(directoryBefore?.displayName ?: "", rematch.player(person.id)!!.displayName)
+            assertEquals(directoryBefore == null, rematch.player(person.id)!!.isPlaceholder)
+        } else {
+            assertTrue(store.assignPlayer(match, secondSlot, other.id))
+        }
+        assertEquals(directoryBefore?.displayName, data.players.get(person.id)?.displayName)
+        assertEquals(beforeAssignment, data.cloud.metadataState(CloudMetadataKind.PLAYER, person.id.value))
+        store.close()
+    }
+
     @Test
     fun eventOnlyLegacySlotRemainsEditableAfterReleaseAndNeverBecomesARecentPerson() {
         val data = createInMemoryJvmLocalData()

@@ -43,8 +43,8 @@ class WatchDirectory(
             selected[PlayerSlot.OPPONENT_2] ?: placeholder(PlayerSlot.OPPONENT_2),
         )
 
-    /** Handy-Verzeichnis mit lokaler Offline-Historie, ohne archivierte Personen. */
-    fun recentPlayers(): List<Player> = data.watchPeople().map { it.toPlayer() }
+    /** Handy-Verzeichnis mit lokaler Offline-Historie, ohne archivierte und ohne redigierte (namenlose) Personen. */
+    fun recentPlayers(): List<Player> = data.watchPeople().filter { it.displayName.isNotBlank() }.map { it.toPlayer() }
 
     /** Anzeigename oder `null` (unbekannt bzw. leer = Standardbezeichnung der UI). */
     fun displayName(id: PlayerId): String? =

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import eu.advantly.core.model.MatchId
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.wear.live.WatchPrefs
 import eu.advantly.wear.workout.WorkoutSport
 
@@ -11,9 +12,17 @@ import eu.advantly.wear.workout.WorkoutSport
 class WearPrefs(
     context: Context,
 ) : WatchPrefs {
-    private val prefs: SharedPreferences = context.getSharedPreferences("wear_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("wear_prefs_${AndroidInstallationGuard.get(context).cacheNamespace}", Context.MODE_PRIVATE)
 
-    /** Letzter angeforderter Tile-/Complication-Zustand; verhindert Updates allein durch Prozessstarts. */
+    /** Genau einmal je neuer aktiver Datenbank: alte Systemanzeigen sind nur abgeleitete Caches. */
+    fun initializeOperationalCache(reset: () -> Unit) {
+        if (prefs.getBoolean("operational_cache_initialized", false)) return
+        reset()
+        check(prefs.edit().putBoolean("operational_cache_initialized", true).commit())
+    }
+
+    /** Letzter angeforderter Tile-/Complication-Zustand ohne Namen (E5); verhindert Updates allein durch Prozessstarts. */
     var glanceSentState: String?
         get() = prefs.getString(KEY_GLANCE_SENT, null)
         set(value) = prefs.edit { putString(KEY_GLANCE_SENT, value) }

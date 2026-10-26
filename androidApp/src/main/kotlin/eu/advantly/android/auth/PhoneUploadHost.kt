@@ -8,7 +8,6 @@ import eu.advantly.cloud.sync.CloudUploadOutcome
 import eu.advantly.cloud.sync.CloudUploadPort
 import eu.advantly.cloud.sync.CloudUploadRunner
 import eu.advantly.cloud.sync.CloudUploadState
-import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.OwnedSourceUploadPort
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
@@ -29,8 +28,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
-/** Ein Host je Konto-ViewModel; die prozessweite MatchSession und ihre Datenbank gehören ihm nicht. */
+/** Ein Host je prozessweitem Konto-Host ([PhoneAccountCore]); die MatchSession und ihre Datenbank gehören ihm nicht. */
 internal class PhoneUploadHost(
     private val auth: CloudAuthPort,
     private val session: MatchSession,
@@ -39,19 +39,18 @@ internal class PhoneUploadHost(
     scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate),
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val threadGuard: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() },
+    private val hostAccessAllowed: () -> Boolean = { true },
+    private val storageAction: (() -> Unit) -> Boolean = {
+        it()
+        true
+    },
+    private val lane: PhoneCloudLane,
 ) : PhoneUploadPort {
-    private data class Context(
-        val profile: String,
-        val generation: Long,
-        val device: String,
-    )
-
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
     private val mutable = MutableStateFlow(PhoneUploadState())
     override val state = mutable.asStateFlow()
-    private var context: Context? = null
-    private var bound: Context? = null
+    private var context: PhoneCloudContext? = null
     private var runner: CloudUploadRunner? = null
     private var action: Job? = null
     private var closed = false
@@ -73,28 +72,18 @@ internal class PhoneUploadHost(
 
     private fun confined() = check(threadGuard()) { "Phone-Upload nur auf dem Main-Host-Kontext verwenden" }
 
-    private fun current(): Context? {
-        val active = auth.session.value ?: return null
-        if (!active.onboarded || active.deletionRequested || active.consentStatus != ConsentStatus.CURRENT) return null
-        val identities = session.data.accountIdentities
-        val device = session.deviceId.value
-        if (identities.profile != active.profileId ||
-            identities.ownedSources(active.profileId).none {
-                it.deviceId == device && it.kind == "PHONE"
-            }
-        ) {
-            return null
-        }
-        return Context(active.profileId, active.generation, device)
+    private fun current(): PhoneCloudContext? {
+        var result: PhoneCloudContext? = null
+        return if (storageAction { result = readPhoneCloudContext(auth, session, hostAccessAllowed) }) result else null
     }
 
-    private fun synchronize(): Context? {
+    private fun synchronize(): PhoneCloudContext? {
         confined()
         if (closed) return null
         val next = current()
         if (next != context) {
             context = next
-            bound = null
+            lane.bound = null
             runner?.close()
             runner = null
             action?.cancel()
@@ -117,37 +106,55 @@ internal class PhoneUploadHost(
     }
 
     override fun uploadNow() {
+        start()
+    }
+
+    /** Startet einen Upload oder liefert die laufende Aktion (auch [refreshStatus]); `null` ohne gültigen Kontext. */
+    internal fun start(): Job? {
         confined()
-        val expected = synchronize() ?: return
-        if (closed || action != null) return
+        val expected = synchronize() ?: return null
+        if (closed) return null
+        action?.let { return it }
+        val lock = lane.mutex(expected.profile)
         mutable.value =
             mutable.value.copy(
                 busy = true,
-                phase = if (bound == expected) PhoneUploadPhase.UPLOADING else PhoneUploadPhase.BINDING,
+                phase =
+                    when {
+                        lock.isLocked -> PhoneUploadPhase.WAITING
+                        lane.bound == expected -> PhoneUploadPhase.UPLOADING
+                        else -> PhoneUploadPhase.BINDING
+                    },
                 result = null,
                 error = null,
             )
         // LAZY setzt die Referenz auch dann vor Ausführung, wenn Main.immediate sofort weiterläuft.
-        action =
+        val job =
             work.launch(start = CoroutineStart.LAZY) {
                 try {
-                    if (bound != expected) {
-                        bindDevice(expected.device)
-                        currentCoroutineContext().ensureActive()
+                    // Host-Vertrag B4: wartet auf einen laufenden Pull desselben Kontos.
+                    lock.withLock {
                         if (synchronize() != expected) return@launch
-                        bound = expected
+                        if (lane.bound != expected) {
+                            lane.bound = null
+                            mutable.value = mutable.value.copy(phase = PhoneUploadPhase.BINDING)
+                            bindDevice(expected.device)
+                            currentCoroutineContext().ensureActive()
+                            if (synchronize() != expected) return@launch
+                            lane.bound = expected
+                        }
+                        val active =
+                            runner ?: CloudUploadRunner(
+                                OwnedSourceUploadPort(uploads, session.data.accountIdentities),
+                                nowMs,
+                                threadGuard = threadGuard,
+                            ).also { runner = it }
+                        mutable.value = mutable.value.copy(phase = PhoneUploadPhase.UPLOADING, canRefreshStatus = true)
+                        val revision = localRevision
+                        val result = active.uploadNow()
+                        currentCoroutineContext().ensureActive()
+                        if (synchronize() == expected) publish(result, revision != localRevision)
                     }
-                    val active =
-                        runner ?: CloudUploadRunner(
-                            OwnedSourceUploadPort(uploads, session.data.accountIdentities),
-                            nowMs,
-                            threadGuard = threadGuard,
-                        ).also { runner = it }
-                    mutable.value = mutable.value.copy(phase = PhoneUploadPhase.UPLOADING, canRefreshStatus = true)
-                    val revision = localRevision
-                    val result = active.uploadNow()
-                    currentCoroutineContext().ensureActive()
-                    if (synchronize() == expected) publish(result, revision != localRevision)
                 } catch (error: CancellationException) {
                     if (!closed && synchronize() == expected) {
                         mutable.value = mutable.value.copy(result = PhoneUploadResult.CANCELLED)
@@ -173,13 +180,15 @@ internal class PhoneUploadHost(
                     if (!closed) mutable.value = mutable.value.copy(busy = false, phase = PhoneUploadPhase.IDLE)
                 }
             }
-        action?.start()
+        action = job
+        job.start()
+        return job
     }
 
     override fun refreshStatus() {
         confined()
         val expected = synchronize() ?: return
-        if (action != null || closed || bound != expected) return
+        if (action != null || closed || lane.bound != expected) return
         val active = runner ?: return
         action =
             work.launch(start = CoroutineStart.LAZY) {
@@ -204,7 +213,7 @@ internal class PhoneUploadHost(
             PhoneUploadState(
                 available = true,
                 busy = true,
-                canRefreshStatus = context != null && bound == context && runner != null,
+                canRefreshStatus = context != null && lane.bound == context && runner != null,
                 pendingEvents = result.inventory?.pendingEvents,
                 rejectedEvents = result.inventory?.rejectedEvents,
                 pendingMetadata = result.inventory?.pendingMetadata,

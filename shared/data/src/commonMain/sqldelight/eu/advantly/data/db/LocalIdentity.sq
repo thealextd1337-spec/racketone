@@ -78,3 +78,17 @@ SELECT device_id FROM local_match_source WHERE match_id = ?;
 
 ownedSourcesInScope:
 SELECT count(*) FROM local_source s JOIN cloud_device_owner o ON o.device_id = s.device_id WHERE s.scope_id = ?;
+
+-- Recovery: alte Scope→Gerät-Zuordnungen stilllegen; die Quellen behalten ihren Scope (Peer-Wiedermeldung bleibt konsistent).
+retireIdentities:
+UPDATE local_identity SET scope_id = 'retired:' || device_id;
+
+clearAcceptedSources:
+DELETE FROM local_scope_source;
+
+ownerCount:
+SELECT count(*) FROM cloud_device_owner;
+
+unboundSourceIds:
+SELECT s.device_id FROM local_source s
+WHERE NOT EXISTS (SELECT 1 FROM cloud_device_owner o WHERE o.device_id = s.device_id) ORDER BY s.device_id;

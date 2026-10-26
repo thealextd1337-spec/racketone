@@ -39,8 +39,16 @@ import eu.advantly.ui.phone.resources.account_cancel
 import eu.advantly.ui.phone.resources.account_close
 import eu.advantly.ui.phone.resources.account_delete
 import eu.advantly.ui.phone.resources.account_delete_explanation
+import eu.advantly.ui.phone.resources.account_deletion_pending
+import eu.advantly.ui.phone.resources.account_device_error_not_found
+import eu.advantly.ui.phone.resources.account_device_error_not_revoked
+import eu.advantly.ui.phone.resources.account_device_error_self
+import eu.advantly.ui.phone.resources.account_device_error_this_phone
+import eu.advantly.ui.phone.resources.account_device_error_this_phone_revoked
+import eu.advantly.ui.phone.resources.account_device_error_too_new
 import eu.advantly.ui.phone.resources.account_export
 import eu.advantly.ui.phone.resources.account_recover
+import eu.advantly.ui.phone.resources.account_suspended
 import eu.advantly.ui.phone.resources.auth_adoption_accept
 import eu.advantly.ui.phone.resources.auth_adoption_cancel
 import eu.advantly.ui.phone.resources.auth_adoption_phone
@@ -240,8 +248,17 @@ fun AccountScreen(
                     }
                 }
             }
+            if (state.suspended) {
+                Text(
+                    stringResource(Res.string.account_suspended),
+                    Modifier.testTag("account_suspended"),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             if (state.authenticated) {
-                model.upload?.let { CloudUploadSection(it) }
+                model.sync?.let { CloudSyncSection(it) }
+                model.upload?.let { CloudUploadSection(it, manual = model.sync == null) }
+                model.pull?.let { CloudPullSection(it, manual = model.sync == null) }
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(
@@ -318,6 +335,7 @@ fun AccountScreen(
                         Text(stringResource(Res.string.account_delete))
                     }
                 }
+                AccountDevicesSection(state, model)
             }
             if (state.adoptionSources.isNotEmpty()) {
                 Text(stringResource(Res.string.auth_adoption_title))
@@ -411,5 +429,13 @@ private fun authError(error: String) =
         "consent_required" -> Res.string.consent_required
         "consent_unavailable", "consent_documents_invalid", "consent_language_invalid" -> Res.string.consent_unavailable
         "consent_version_changed" -> Res.string.consent_changed
+        "account_suspended" -> Res.string.account_suspended
+        "account_deletion_pending" -> Res.string.account_deletion_pending
+        "device_unrevoke_self" -> Res.string.account_device_error_self
+        "device_unrevoke_caller_too_new" -> Res.string.account_device_error_too_new
+        "device_not_found" -> Res.string.account_device_error_not_found
+        "device_not_revoked" -> Res.string.account_device_error_not_revoked
+        "device_restore_unavailable" -> Res.string.account_device_error_this_phone
+        "device_restore_self_revoked" -> Res.string.account_device_error_this_phone_revoked
         else -> Res.string.auth_connection_failed
     }

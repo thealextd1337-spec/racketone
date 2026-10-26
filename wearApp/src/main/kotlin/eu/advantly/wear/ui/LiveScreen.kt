@@ -816,7 +816,7 @@ private fun StatusTimeText(
             isAmbient -> AmbientDigits
             live.updateRequired != null -> HintAmber
             live.role == LiveRole.DISPLAY && live.sync != SyncUi.Live -> HintAmber
-            live.sync is SyncUi.Pending -> HintAmber
+            live.sync is SyncUi.Pending || live.sync == SyncUi.Blocked -> HintAmber
             else -> TextSecondary
         }
     TimeText(

@@ -34,6 +34,7 @@ internal class CloudLease(
 
 /**
  * Auf dem seriellen Datenbank-/Host-Kontext verwenden (Android: Main). Der Host prüft dies mit [threadGuard].
+ * Der optionale Hostcallback muss thread-sicher die konkrete Ressourcenfreigabe liefern; Abbau nach Widerruf bleibt SQL-frei.
  * Jede Prüfung liest zusätzlich den SDK-Zustand: ein verzögerter Flow-Collector ist keine Sicherheitsgrenze.
  */
 class CloudSessionGate internal constructor(
@@ -41,6 +42,7 @@ class CloudSessionGate internal constructor(
     private val uploads: CloudUploadStore? = null,
     private val threadGuard: () -> Boolean = { true },
     private val ownership: LocalAccountOwnership? = null,
+    private val hostAccessAllowed: () -> Boolean = { true },
 ) {
     private val mutable = MutableStateFlow<CloudSession?>(null)
     val session = mutable.asStateFlow()
@@ -55,34 +57,60 @@ class CloudSessionGate internal constructor(
     private var identityRetained = false
     private val requests = mutableMapOf<Job, Boolean>()
 
-    private fun confined() = check(threadGuard()) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
+    private fun confined(requireAccess: Boolean = true) {
+        check(threadGuard()) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
+        if (requireAccess && !hostAccessAllowed()) changed()
+    }
 
     private fun invalidate(
         leaveIdentity: Boolean = true,
         forceLeave: Boolean = false,
     ) {
-        confined()
+        confined(requireAccess = false)
+        val persistLocal = hostAccessAllowed()
         check(generation < Long.MAX_VALUE)
         generation++
         profileRevision++
         cloudRevision++
         cloudSuspended = false
-        val shouldLeave = leaveIdentity && (identityRetained || ownership?.retainedProfileId != null || forceLeave)
+        val retained = identityRetained
+        var shouldLeave = false
         identity = null
         mutable.value = null
         uploadSession = null
-        try {
-            uploads?.deactivate()
-        } finally {
-            requests.keys.toList().forEach { it.cancel(CancellationException("cloud_session_changed")) }
-            requests.clear()
-            ownership?.detachAccountSession()
-            if (shouldLeave) leaveAccount()
+        var failure: Exception? = null
+
+        fun cleanup(action: () -> Unit) {
+            try {
+                action()
+            } catch (error: Exception) {
+                val primary = failure
+                if (primary == null) {
+                    failure = error
+                } else if (primary !== error) {
+                    primary.addSuppressed(error)
+                }
+            }
         }
+        cleanup {
+            shouldLeave =
+                persistLocal && hostAccessAllowed() && leaveIdentity && (retained || ownership?.retainedProfileId != null || forceLeave)
+        }
+        cleanup {
+            if (persistLocal && hostAccessAllowed()) uploads?.deactivate()
+        }
+        requests.keys.toList().forEach { request -> cleanup { request.cancel(CancellationException("cloud_session_changed")) } }
+        requests.clear()
+        // Widerrufene Hosts entwerten nur RAM und Requests. Keine Ownership-Lese-/Schreibzugriffe im Abbau.
+        cleanup { if (hostAccessAllowed()) ownership?.detachAccountSession() }
+        cleanup { if (shouldLeave && hostAccessAllowed()) leaveAccount() }
+        if (!hostAccessAllowed()) identityRetained = false
+        failure?.let { throw it }
     }
 
     /** Vor dem ersten suspendierenden Aufruf von Logout, Kontowechsel oder Löschantrag. */
     fun stop(leaveIdentity: Boolean = true): Long {
+        confined(requireAccess = false)
         acceptSdkSession = false
         invalidate(leaveIdentity, forceLeave = true)
         return generation
@@ -108,12 +136,13 @@ class CloudSessionGate internal constructor(
             val cloudRequests = requests.filterValues { it }.keys.toList()
             cloudRequests.forEach { it.cancel(CancellationException("cloud_session_changed")) }
             cloudRequests.forEach(requests::remove)
-            ownership?.detachAccountSession()
-            if (shouldLeave) leaveAccount()
+            if (hostAccessAllowed()) ownership?.detachAccountSession()
+            if (shouldLeave && hostAccessAllowed()) leaveAccount()
         }
     }
 
     private fun leaveAccount() {
+        confined()
         identityRetained = false
         ownership?.leaveAccount()
     }
@@ -182,6 +211,7 @@ class CloudSessionGate internal constructor(
     }
 
     private fun requireCloudProfile() {
+        if (mutable.value?.suspended == true) throw CloudException("account_suspended", true)
         if (cloudSuspended || mutable.value?.onboarded != true || mutable.value?.deletionRequested != false) {
             throw CloudException("profile_not_active", true)
         }
@@ -232,7 +262,9 @@ class CloudSessionGate internal constructor(
             mutable.value = profile.copy(generation = generation)
             if (uploadSession != null) {
                 uploadSession = null
+                confined()
                 uploads?.deactivate()
+                confined()
                 ownership?.detachAccountSession()
             }
             // Zustimmungssperre verändert keine U2-Kontoidentität und sperrt keine unabhängigen Konto-RPCs.
@@ -242,13 +274,19 @@ class CloudSessionGate internal constructor(
             return
         }
         if (profile.onboarded && profile.consentStatus == ConsentStatus.CURRENT && uploadSession == null) {
+            confined()
             val activated = uploads?.activate(profile.profileId)
             try {
+                confined()
                 if (activated != null) ownership?.activateAccount(profile.profileId, activated)
                 uploadSession = activated
                 identityRetained = ownership != null && activated != null
             } catch (error: Exception) {
-                invalidate()
+                try {
+                    invalidate()
+                } catch (cleanup: Exception) {
+                    if (cleanup !== error) error.addSuppressed(cleanup)
+                }
                 throw error
             }
         }

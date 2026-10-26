@@ -31,6 +31,13 @@ internal fun pullRecord(
         null,
     )
 
+/** D1 bindet jeden Lauf an den ausgewählten Replikatkontext; das Cloudprofil ist dessen Kontoschlüssel. */
+internal fun LocalData.selectPullAccount(profile: String = "alice"): LocalData {
+    var index = 0
+    accountIdentities.select("scope-$profile", profile, 0, "PHONE") { "$profile-device-${index++}" }
+    return this
+}
+
 internal fun storePage(
     record: MatchRecord = pullRecord(),
     version: Long = 1,
@@ -50,7 +57,7 @@ class CloudPullStoreTest {
     @Test
     fun fenceAfterPartialReceiptWritesRollsBackEventsCloudAcksAndCursorTogether() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
             val first =
@@ -93,7 +100,7 @@ class CloudPullStoreTest {
     @Test
     fun metadataRefreshPreservesRepairsReceiptsFailuresAndChecksExceptChangedMatch() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             val original = storePage()
             val matches =
@@ -148,7 +155,7 @@ class CloudPullStoreTest {
     @Test
     fun requestQuotaAndMetadataResetAreFencedAndEpochRestartKeepsMetadataDue() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
             val work = data.cloudPulls.eventWork("alice", "match")!!
@@ -190,7 +197,7 @@ class CloudPullStoreTest {
     @Test
     fun attemptAndFailureFencesRollbackWithoutAcknowledgingUnverifiedWork() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val first = data.cloudPulls.beginRun("alice") {}
             data.cloudPulls.commitMetadata("alice", first.runSerial, 0, storePage()) {}
             val original = data.cloudPulls.eventWork("alice", "match")!!
@@ -232,14 +239,20 @@ class CloudPullStoreTest {
     fun downloadedAssignmentProjectionStaysCleanOnlyForCleanCloudMaterializationOfReceivingProfile() {
         for (mode in listOf("clean", "dirty", "local", "peer", "other-profile")) {
             createInMemoryJvmDriver().use { driver ->
-                val data = LocalData(driver)
+                val data = LocalData(driver).selectPullAccount()
                 val record =
                     pullRecord().copy(
                         lineup = Lineup(listOf(PlayerId("a")), listOf(PlayerId("placeholder:slot")), PlayerId("a")),
                     )
                 if (mode == "other-profile") {
-                    val original = data.cloudPulls.beginRun("bob") {}.runSerial
+                    val original =
+                        data
+                            .selectPullAccount("bob")
+                            .cloudPulls
+                            .beginRun("bob") {}
+                            .runSerial
                     data.cloudPulls.commitMetadata("bob", original, 0, storePage(record)) {}
+                    data.selectPullAccount()
                 }
                 val run = data.cloudPulls.beginRun("alice") {}.runSerial
                 data.cloudPulls.commitMetadata("alice", run, 0, storePage(record)) {}
@@ -326,7 +339,7 @@ class CloudPullStoreTest {
     @Test
     fun danglingReceiptCannotConcealMissingPayloadAndRepairRestoresIt() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
             val receipt =
@@ -361,7 +374,7 @@ class CloudPullStoreTest {
     fun finalInvalidMatchOrPlayerRollsBackEntirePageAndDurableJobs() {
         for (invalidPlayer in listOf(true, false)) {
             createInMemoryJvmDriver().use { driver ->
-                val data = LocalData(driver)
+                val data = LocalData(driver).selectPullAccount()
                 val run = data.cloudPulls.beginRun("alice") {}.runSerial
                 val valid = storePage()
                 val invalid =
@@ -402,7 +415,7 @@ class CloudPullStoreTest {
     @Test
     fun fenceAtTransactionEndRollsBackSnapshotsAndCursor() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             var checks = 0
             assertFailsWith<IllegalStateException> {
@@ -419,9 +432,43 @@ class CloudPullStoreTest {
     }
 
     @Test
+    fun matchCreatedByReadsServerCreatorFromPulledSnapshotOnly() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun commit(
+                version: Long,
+                json: String,
+            ) = data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                version - 1,
+                CloudPullMetadataPage(
+                    listOf(CloudPullMatch("match", version, json, "member", 1, 0, false, pullRecord())),
+                    emptyList(),
+                    emptyList(),
+                    version,
+                    false,
+                    1,
+                ),
+            ) {}
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(1, """{"version":1}""")
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(2, """{"version":2,"createdBy":42}""")
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "match"))
+            commit(3, """{"version":3,"createdBy":"alice"}""")
+            assertEquals("alice", data.cloudPulls.matchCreatedBy("alice", "match"))
+            assertNull(data.cloudPulls.matchCreatedBy("bob", "match"))
+            assertNull(data.cloudPulls.matchCreatedBy("alice", "other"))
+        }
+    }
+
+    @Test
     fun versionsAreMonotoneCloudUpdatesAreMaterializedAndLocalChangesKeepTheirOwnContent() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
             data.cloudPulls.commitMetadata("alice", run, 1, storePage(pullRecord(venue = "New"), 2)) {}
@@ -461,7 +508,7 @@ class CloudPullStoreTest {
     fun localPeerAndOtherAccountMaterializationsAreNeverReplaced() {
         for (origin in listOf("LOCAL", "PEER", "UNKNOWN")) {
             createInMemoryJvmDriver().use { driver ->
-                val data = LocalData(driver)
+                val data = LocalData(driver).selectPullAccount()
                 val local = pullRecord(venue = origin)
                 data.matches.insertIfAbsent(local.id, local.format, local.lineup, local.meta, 1)
                 driver.execute(null, "UPDATE cloud_metadata SET origin='$origin', source_device_id='original'", 0)
@@ -480,10 +527,15 @@ class CloudPullStoreTest {
             }
         }
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val alice = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", alice, 0, storePage()) {}
-            val bob = data.cloudPulls.beginRun("bob") {}.runSerial
+            val bob =
+                data
+                    .selectPullAccount("bob")
+                    .cloudPulls
+                    .beginRun("bob") {}
+                    .runSerial
             data.cloudPulls.commitMetadata("bob", bob, 0, storePage(pullRecord(venue = "Bob"), 2)) {}
             assertEquals(
                 "Cloud",
@@ -501,7 +553,7 @@ class CloudPullStoreTest {
     @Test
     fun receiptAndEventCursorRollbackOnFinalFenceAndCallbacksOnlyFollowCommit() {
         createInMemoryJvmDriver().use { driver ->
-            val data = LocalData(driver)
+            val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
             data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
             val work = assertNotNull(data.cloudPulls.eventWork("alice", "match"))
@@ -522,6 +574,71 @@ class CloudPullStoreTest {
                 notifications++
             }
             assertEquals(1, notifications)
+        }
+    }
+
+    @Test
+    fun lostEventWorkIsRecreatedForUnchangedSnapshotInSameScan() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            assertTrue(data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {})
+            // Etwa ein Generationswechsel außerhalb dieses Scans hat die Eventarbeit entfernt; der Snapshot blieb gleich.
+            driver.execute(null, "DELETE FROM cloud_pull_event_work", 0)
+            assertTrue(data.cloudPulls.commitMetadata("alice", run, 1, storePage(cursor = 2)) {})
+            val work = assertNotNull(data.cloudPulls.eventWork("alice", "match"))
+            assertEquals(0, work.checkedRound)
+        }
+    }
+
+    @Test
+    fun participantAckInNotReadyMemberWindowNeedsOwnMaterializationProof() {
+        for (revoked in listOf(false, true)) {
+            createInMemoryJvmDriver().use { driver ->
+                val data = LocalData(driver).selectPullAccount()
+                val record =
+                    pullRecord().copy(
+                        lineup = Lineup(listOf(PlayerId("a")), listOf(PlayerId("placeholder:slot")), PlayerId("a")),
+                    )
+                val run = data.cloudPulls.beginRun("alice") {}.runSerial
+                data.cloudPulls.commitMetadata("alice", run, 0, storePage(record)) {}
+                val ctx = data.replicas.captureContext()
+                data.replicas.markReady(ctx, "match", 1, 0) {}
+                // Neue Sichtbarkeitsepoche: zuerst Neustart des Scans, dann derselbe Snapshot bei G = 2.
+                val next =
+                    storePage(record, cursor = 2, epoch = 2).let {
+                        if (revoked) it.copy(matches = it.matches.map { m -> m.copy(access = "feed", record = null) }) else it
+                    }
+                assertTrue(!data.cloudPulls.commitMetadata("alice", run, 1, next) {})
+                assertTrue(data.cloudPulls.commitMetadata("alice", run, 0, next) {})
+                val access = assertNotNull(data.replicas.access(ctx, "match"))
+                assertEquals(2, access.generation)
+                assertTrue(!access.ready)
+                if (revoked) {
+                    assertEquals(ReplicaAccessLevel.FEED, access.access)
+                    assertNull(data.cloudPulls.eventWork("alice", "match"))
+                    assertNull(data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")?.materializedVersion)
+                    return@use
+                }
+                assertEquals(1, data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")?.materializedVersion)
+                val before = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
+                val genesis =
+                    StoredEvent(
+                        "genesis",
+                        "match",
+                        "remote",
+                        1,
+                        1,
+                        DataJson.encodeToString(EventPayload.serializer(), MatchCreated(record.format, record.lineup)),
+                        type = "MatchCreated",
+                    )
+                data.cloudPulls.commitEvents(data.cloudPulls.eventWork("alice", "match")!!, run, listOf(CloudPullReceipt(genesis, 1)), {})
+                // Die Projektion dieser Serverevents bleibt sauber, obwohl ready bei G = 2 noch fehlt.
+                val after = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
+                assertTrue(after.selected.revision > before.selected.revision)
+                assertEquals(after.selected.revision, after.uploadedRevision)
+                assertTrue(!data.replicas.access(ctx, "match")!!.ready)
+            }
         }
     }
 }

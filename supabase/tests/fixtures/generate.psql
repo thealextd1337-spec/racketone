@@ -6,6 +6,9 @@
 -- Die Schlüssel prüft zusätzlich pgTAP (095_wire_vertrag.test.sql). Läuft in einer Transaktion und hinterlässt nichts.
 begin;
 select tests.world();
+-- Cloud-RPCs verlangen seit 181 akzeptierte Fassungen (nur Rollback-Fixture).
+select tests.publish_consent_documents('fixtures');
+select tests.accept_current_consents(id) from tests.users;
 select tests.authenticate_as('alice');
 select set_config('fx.push', public.sync_push(jsonb_build_object(
   'devices', jsonb_build_array(jsonb_build_object('id', tests.device('a1'), 'kind', 'phone', 'platform', 'android')),
@@ -30,4 +33,7 @@ select 'pull_match_events.json', (select jsonb_agg(to_jsonb(e) order by e."serve
 select 'match_event_watermarks.json', (select jsonb_agg(to_jsonb(w))
                                        from public.match_event_watermarks('a9500000-0000-7000-8000-000000000001') w)::text;
 select 'get_visitor_match.json', public.get_visitor_match('a9500000-0000-7000-8000-000000000001')::text;
+select 'cloud_match_readiness.json', public.cloud_match_readiness_v1('a9500000-0000-7000-8000-000000000001',
+  (select visibility_epoch from public.profile_settings where profile_id = auth.uid()),
+  (select redaction_epoch from public.matches where id = 'a9500000-0000-7000-8000-000000000001'))::text;
 rollback;

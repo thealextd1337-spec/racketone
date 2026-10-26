@@ -13,6 +13,8 @@ import kotlinx.serialization.json.jsonObject
 class CloudSyncRepository internal constructor(
     internal val database: AdvantlyDatabase,
     private val events: EventStore,
+    private val sanitizeDownloaded: (StoredEvent, () -> Unit) -> StoredEvent,
+    internal val redactedAssignmentSlots: (String) -> Set<String>,
 ) {
     private val queries = database.cloudSyncQueries
 
@@ -28,6 +30,12 @@ class CloudSyncRepository internal constructor(
 
     fun rejectedEvents(): Map<String, String> =
         queries.rejectedEvents { id, reason -> id to requireNotNull(reason) }.executeAsList().toMap()
+
+    /**
+     * `device_not_owned` wieder ausstehend: Nach einer neuen Upload-Sitzung oder neuen G kann das Quellgerät (etwa eine
+     * erst später freigegebene Uhr) wieder gelten. Kontoübergreifend; kostet höchstens eine weitere Ablehnungsrunde.
+     */
+    internal fun resetDeviceRejections() = queries.resetDeviceRejections()
 
     /** Nur tatsächlich bestätigte IDs übergeben. Fehlende Antworten bleiben ausstehend; Anwendung ist atomar. */
     fun acknowledge(
@@ -59,8 +67,9 @@ class CloudSyncRepository internal constructor(
             downloaded.forEach { event ->
                 fence()
                 if (database.matchTombstoneQueries.countById(event.matchId).executeAsOne() > 0) return@forEach
-                val payload = DataJson.parseToJsonElement(event.payload).jsonObject
-                val received = event.copy(confirmed = false, type = effectiveType(event, payload))
+                val originalPayload = DataJson.parseToJsonElement(event.payload).jsonObject
+                val received = sanitizeDownloaded(event.copy(confirmed = false, type = effectiveType(event, originalPayload)), fence)
+                val payload = DataJson.parseToJsonElement(received.payload).jsonObject
                 fence()
                 when (events.append(received)) {
                     AppendResult.INSERTED -> {}

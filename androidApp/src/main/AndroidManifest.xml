@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- B4: Netzbedingung geplanter Abgleiche (ab Android 14 Pflicht) und Netz-Auslöser im Vordergrund -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- B4: geplante Abgleiche überstehen einen Neustart (JobInfo.setPersisted) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".AdvantlyPhoneApplication"
@@ -33,6 +37,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/account_export_paths" />
         </provider>
+
+        <!-- B4: geplante Abgleiche (Matchende, Backoff, Fortsetzung, periodisch) -->
+        <service
+            android:name=".sync.PhoneSyncJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <!-- W1-I: Uhr-Events auch ohne laufende Activity empfangen (Wear Data Layer, Pfade aus device-link) -->
         <service

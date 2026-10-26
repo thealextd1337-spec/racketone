@@ -35,8 +35,10 @@ class WearDataLayerTransport(
     context: Context,
     /** DataItem-Queue nutzen, wenn die Gegenseite nicht live erreichbar ist. */
     private val useDataItemQueue: Boolean = true,
+    /** Prozess-/Identitätsfreigabe des Android-Hosts; auch vor asynchronen Seiteneffekten prüfen. */
+    private val allowed: () -> Boolean = { true },
 ) : LinkTransport {
-    override fun isTrustedCounterpart(peer: String): Boolean = peer.isNotBlank()
+    override fun isTrustedCounterpart(peer: String): Boolean = current(generation) && peer.isNotBlank()
 
     private val appContext = context.applicationContext
     private val messageClient = Wearable.getMessageClient(appContext)
@@ -48,17 +50,23 @@ class WearDataLayerTransport(
 
     @Volatile private var listener: LinkTransport.Listener? = null
 
-    private val inbox = WearQueueInbox { key -> dataClient.deleteDataItems(Uri.parse(key)) }
+    @Volatile private var generation = 0L
+
+    @Volatile private var running = false
+
+    private fun current(epoch: Long) = running && epoch == generation && allowed()
+
+    private val inbox = WearQueueInbox { key -> if (current(generation)) dataClient.deleteDataItems(Uri.parse(key)) }
 
     private val messageListener =
         MessageClient.OnMessageReceivedListener { event ->
-            if (event.path == MESSAGE_PATH) listener?.onFrame(event.sourceNodeId, event.data)
+            if (current(generation) && event.path == MESSAGE_PATH) listener?.onFrame(event.sourceNodeId, event.data)
         }
 
     private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { refreshPeers() }
 
     private val inboundSink: (String, ByteArray, () -> Unit) -> Unit = { node, frame, onConsumed ->
-        listener?.onFrame(node, frame, onConsumed)
+        if (current(generation)) listener?.onFrame(node, frame, onConsumed)
     }
 
     private val dataListener =
@@ -74,11 +82,14 @@ class WearDataLayerTransport(
         object : Runnable {
             override fun run() {
                 refreshPeers()
-                handler.postDelayed(this, REFRESH_MS)
+                if (current(generation)) handler.postDelayed(this, REFRESH_MS)
             }
         }
 
     override fun start(listener: LinkTransport.Listener) {
+        val epoch = ++generation
+        running = true
+        if (!current(epoch)) return
         this.listener = listener
         WearDataLayerInbound.attach(inboundSink)
         val generation = inbox.start(listener)
@@ -86,6 +97,7 @@ class WearDataLayerTransport(
         dataClient.addListener(dataListener)
         capabilityClient.addListener(capabilityListener, CAPABILITY)
         nodeClient.localNode.addOnSuccessListener { node: Node ->
+            if (!current(epoch)) return@addOnSuccessListener
             inbox.setLocalNode(generation, node.id)
             // Frames, die eingereiht wurden, während diese App nicht lief. Kommt das Ergebnis erst nach stop()
             // bzw. einem neuen Start, verwirft die Inbox es (Generation) – nichts wird gelöscht.
@@ -99,6 +111,8 @@ class WearDataLayerTransport(
     }
 
     override fun stop() {
+        running = false
+        generation++
         WearDataLayerInbound.detach(inboundSink)
         handler.removeCallbacks(refreshLoop)
         messageClient.removeListener(messageListener)
@@ -113,16 +127,20 @@ class WearDataLayerTransport(
         frame: ByteArray,
         onResult: (DeliveryResult) -> Unit,
     ) {
+        val epoch = generation
+        if (!current(epoch)) return
         messageClient
             .sendMessage(peer, MESSAGE_PATH, frame)
-            .addOnSuccessListener { onResult(DeliveryResult.SENT) }
+            .addOnSuccessListener { if (current(epoch)) onResult(DeliveryResult.SENT) }
             .addOnFailureListener {
-                if (useDataItemQueue) enqueue(peer, frame, onResult) else onResult(DeliveryResult.FAILED)
+                if (!current(epoch)) return@addOnFailureListener
+                if (useDataItemQueue) enqueue(epoch, peer, frame, onResult) else onResult(DeliveryResult.FAILED)
                 refreshPeers()
             }
     }
 
     private fun enqueue(
+        epoch: Long,
         peer: String,
         frame: ByteArray,
         onResult: (DeliveryResult) -> Unit,
@@ -132,26 +150,31 @@ class WearDataLayerTransport(
                 .create("$QUEUE_PREFIX/$peer/${queueCounter.incrementAndGet()}")
                 .setData(frame)
                 .setUrgent()
+        if (!current(epoch)) return
         dataClient
             .putDataItem(request)
-            .addOnSuccessListener { onResult(DeliveryResult.QUEUED) }
-            .addOnFailureListener { onResult(DeliveryResult.FAILED) }
+            .addOnSuccessListener { if (current(epoch)) onResult(DeliveryResult.QUEUED) }
+            .addOnFailureListener { if (current(epoch)) onResult(DeliveryResult.FAILED) }
     }
 
     private fun offerQueuedItem(
         generation: Int,
         item: DataItem,
     ) {
+        if (!current(this.generation)) return
         val uri: Uri = item.uri
         inbox.offer(generation, uri.toString(), uri.host, uri.pathSegments, item.data)
     }
 
     private fun refreshPeers() {
+        val epoch = generation
+        if (!current(epoch)) return
         capabilityClient
             .getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE)
             .addOnSuccessListener { info: CapabilityInfo ->
-                listener?.onPeersChanged(info.nodes.map { it.id }.sorted(), available = true)
+                if (current(epoch)) listener?.onPeersChanged(info.nodes.map { it.id }.sorted(), available = true)
             }.addOnFailureListener { error ->
+                if (!current(epoch)) return@addOnFailureListener
                 val apiMissing = error is ApiException && error.statusCode == CommonStatusCodes.API_NOT_CONNECTED
                 listener?.onPeersChanged(emptyList(), available = !apiMissing)
             }

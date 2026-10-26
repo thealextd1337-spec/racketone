@@ -1,6 +1,6 @@
--- Account-Löschung (Karenz, Anonymisierung, Kaskaden) und Datenexport.
+-- Account-Löschung (Karenz, Anonymisierung, Kaskaden) und Datenexport. Eigene Gäste wie der Account (23.10.2026).
 begin;
-select plan(37);
+select plan(46);
 
 select tests.world();
 select tests.publish_consent_documents();
@@ -82,6 +82,27 @@ select is((select e -> 'payload' from jsonb_array_elements(public.export_my_data
 select ok((public.export_my_data() -> 'devices' -> 0) ? 'id' and not ((public.export_my_data() -> 'devices' -> 0) ? 'push_token'),
           'Export ohne Push-Tokens');
 
+-- Eigene Gäste (Nutzerentscheid 23.10.2026): alice' Gast Gisela im gemeinsamen Match mit bob, dazu ein Gast, den
+-- alice bob zugewiesen hat. Die Löschung redigiert und legt den eigenen Gast still, der zugewiesene geht an bob.
+select is(tests.result(public.sync_push(jsonb_build_object(
+  'players', jsonb_build_array(
+     jsonb_build_object('id', 'b8000000-0000-7000-8000-00000000000b', 'kind', 'guest', 'displayName', 'Gisela'),
+     jsonb_build_object('id', 'b8000000-0000-7000-8000-00000000000c', 'kind', 'guest', 'displayName', 'Bob als Gast')),
+  'matches', jsonb_build_array(tests.match('a8000000-0000-7000-8000-000000000004', jsonb_build_array(
+     tests.part('s-alice', 'A', 1, 'Alice', tests.uid('alice')), tests.part('s-bob', 'B', 1, 'Bob', tests.uid('bob')),
+     tests.part('b8000000-0000-7000-8000-00000000000b', 'A', 2, 'Gisela', null, 'b8000000-0000-7000-8000-00000000000b'),
+     tests.part('b8000000-0000-7000-8000-00000000000c', 'B', 2, 'Bob als Gast', null, 'b8000000-0000-7000-8000-00000000000c')),
+     '{"discipline":"doubles"}')),
+  'events', jsonb_build_array(
+     tests.event('e8000000-0000-7000-8000-000000000021', 'a8000000-0000-7000-8000-000000000004', tests.device('a1'), 8, 'MatchCreated',
+                 '{"lineup":{"A":["s-alice","b8000000-0000-7000-8000-00000000000b"],"B":["s-bob","b8000000-0000-7000-8000-00000000000c"]}}'),
+     tests.event('e8000000-0000-7000-8000-000000000022', 'a8000000-0000-7000-8000-000000000004', tests.device('a1'), 9, 'PlayerAssigned',
+                 '{"slot":"b8000000-0000-7000-8000-00000000000b","player":{"id":"b8000000-0000-7000-8000-00000000000b","displayName":"Gisela Klarname"}}'),
+     tests.event('e8000000-0000-7000-8000-000000000023', 'a8000000-0000-7000-8000-000000000004', tests.device('a1'), 10, 'PlayerAssigned',
+                 '{"slot":"b8000000-0000-7000-8000-00000000000c","player":{"id":"b8000000-0000-7000-8000-00000000000c","displayName":"Bob Gastname"}}')))),
+  'events', 2), 'accepted', 'Gemeinsames Match mit eigenem Gast von alice und namentragenden Zuweisungen');
+select is(public.assign_player('b8000000-0000-7000-8000-00000000000c', tests.uid('bob')), 0, 'Zweiter Gast → bob zugewiesen');
+
 -- Löschung beantragen: sofort unsichtbar, keine Schreibrechte, abbrechbar
 select lives_ok($$ select public.request_account_deletion() $$, 'alice beantragt die Löschung');
 select throws_ok($$ select public.sync_push('{}'::jsonb) $$, '42501', 'profile_not_active', 'in der Karenz keine Uploads');
@@ -111,7 +132,7 @@ select is((select count(*)::int from public.match_events where match_id = 'a8000
           'Event-Log bleibt für bob vollständig');
 select results_eq($$ select display_name, profile_id is null from public.match_participants
                      where match_id = 'a8000000-0000-7000-8000-000000000003' and slot_id = 's-kim' $$,
-                  $$ values ('Kim'::text, true) $$, 'Zuweisung von bobs Dummy an alice ist gelöst');
+                  $$ values ('Gelöschter Spieler'::text, true) $$, 'Belegte Identität von bobs Dummy wird vor dem Unlink anonymisiert');
 
 -- Lösch-Ausnahme: Klarnamen in Event-Payloads redigiert (Review P2 #4)
 select is((select string_agg(e."payload" -> 'player' ->> 'displayName' || '/' || e."redacted"::text, ',' order by e."matchId")
@@ -125,6 +146,33 @@ select ok((select bool_and((m ->> 'redactionEpoch')::int > 0) from jsonb_array_e
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(current_setting('tests.bob_assign')::jsonb))), 'events', 0),
           'duplicate', 'erneuter Upload der alten lokalen Kopie bleibt ein Duplikat');
 select ok(public.export_my_data()::text !~ 'Alice Klarname', 'Klarname taucht auch im Export von bob nicht mehr auf');
+
+-- Eigene Gäste von alice nach purge_account (Nutzerentscheid 23.10.2026)
+select results_eq($$ select display_name, deleted_profile, player_id is null from public.match_participants
+                     where match_id = 'a8000000-0000-7000-8000-000000000004' and slot_id = 'b8000000-0000-7000-8000-00000000000b' $$,
+                  $$ values ('Gelöschter Spieler'::text, true, true) $$, 'Eigener Gast im gemeinsamen Match wie der Account anonymisiert');
+select is((select string_agg(e."payload" -> 'player' ->> 'displayName' || '/' || e."redacted"::text, ',' order by e."id")
+           from public.pull_match_events('a8000000-0000-7000-8000-000000000004') e where e."type" = 'PlayerAssigned'),
+          'Gelöschter Spieler/true,Bob Gastname/false', 'Zuweisung des eigenen Gasts redigiert, die des zugewiesenen Gasts bleibt');
+select ok(public.sync_pull(0)::text !~ 'Gisela', 'Gastname von alice taucht im Pull von bob nicht mehr auf');
+reset role;
+select ok(private.player_write_redacted('b8000000-0000-7000-8000-00000000000b')
+          and exists(select 1 from private.match_redacted_players where match_id = 'a8000000-0000-7000-8000-000000000004'
+                     and player_id = 'b8000000-0000-7000-8000-00000000000b')
+          and (select redaction_epoch from public.matches where id = 'a8000000-0000-7000-8000-000000000004') > 0,
+          'Eigener Gast stillgelegt, im Manifest des gemeinsamen Matches, Epoche gestiegen');
+select results_eq($$ select p.owner_id = tests.uid('bob'), p.display_name, mp.display_name from public.players p
+                     join public.match_participants mp on mp.player_id = p.id
+                     where p.id = 'b8000000-0000-7000-8000-00000000000c' $$,
+                  $$ values (true, 'Bob als Gast'::text, 'Bob als Gast'::text) $$, 'Zugewiesener Gast geht an bob und behält den Namen');
+-- Neuanlage derselben ID lehnt schon deleted_player_identities ab; eine dennoch vorhandene Zeile bleibt gesperrt.
+insert into public.players(id, owner_id, kind, display_name)
+  values ('b8000000-0000-7000-8000-00000000000b', tests.uid('bob'), 'guest', 'Wieder da');
+select tests.authenticate_as('bob');
+select throws_ok($$ select public.assign_player('b8000000-0000-7000-8000-00000000000b', tests.uid('carol')) $$,
+                 'P0001', 'player_redacted', 'Stillgelegte Gast-ID kann nicht erneut zugewiesen werden');
+select throws_ok($$ select public.create_invite('claim_player', 'b8000000-0000-7000-8000-00000000000b') $$,
+                 'P0001', 'player_redacted', 'Stillgelegte Gast-ID kann nicht beansprucht werden');
 
 -- Veraltetes JWT des gelöschten Accounts
 select tests.authenticate_as_id(current_setting('tests.alice')::uuid);

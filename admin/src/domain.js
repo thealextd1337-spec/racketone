@@ -65,6 +65,47 @@ export function makeMessageOperation(ticketId, body, internal, idGenerator) {
   });
 }
 
+// Kontosuche: genau eine UUID, ein Freundescode oder ein Alias; die Auswertung macht ausschließlich der Server.
+export function validateAccountQuery(query) {
+  const trimmed = String(query ?? "").trim();
+  if (!trimmed) return "account-query-required";
+  if (trimmed.length > 120) return "support_invalid";
+  return null;
+}
+
+const ACCOUNT_ACTIONS = {
+  suspend: "admin_account_set_suspended",
+  unsuspend: "admin_account_set_suspended",
+  revoke: "admin_account_revoke_devices",
+  "cancel-deletion": "admin_account_cancel_deletion",
+  unrevoke: "admin_account_unrevoke_device",
+};
+const TICKET_ACTIONS = new Set(["cancel-deletion", "unrevoke"]);
+
+// Zustandsändernde Kontoaktion: Begründung wie bei Vorgängen; Löschrücknahme und Gerätefreigabe brauchen eine Meldungs-UUID
+// (Server prüft Konto, Zeitpunkt nach Antrag bzw. Widerruf und bei Gastmeldungen den Beleg in der Begründung). Freigegeben
+// wird nur ein Gerät, das der Server in revokedDevices dieses Kontos meldet.
+export function buildAccountAction(account, action, fields) {
+  const rpc = ACCOUNT_ACTIONS[action];
+  if (!rpc || !isUuid(account?.profileId)) throw new SupportError("support_invalid");
+  const reason = String(fields?.reason ?? "").trim();
+  if (!reason) throw new SupportError("update-reason-required");
+  if (Array.from(reason).length > 500) throw new SupportError("update-reason-too-long");
+  const ticketId = String(fields?.ticketId ?? "").trim();
+  if (action === "cancel-deletion" && !ticketId) throw new SupportError("account-ticket-required");
+  if (action === "unrevoke" && !ticketId) throw new SupportError("account-device-ticket-required");
+  if (ticketId && (!TICKET_ACTIONS.has(action) || !isUuid(ticketId))) throw new SupportError("account-ticket-invalid");
+  const args = { p_profile_id: account.profileId, p_reason: reason };
+  if (rpc === "admin_account_set_suspended") args.p_suspended = action === "suspend";
+  if (TICKET_ACTIONS.has(action)) args.p_ticket_id = ticketId;
+  if (action === "unrevoke") {
+    const device = account.revokedDevices?.find((item) => item.deviceId === fields?.deviceId);
+    if (!isUuid(device?.deviceId)) throw new SupportError("support_invalid");
+    args.p_device_id = device.deviceId;
+  }
+  return Object.freeze({ rpc, args: Object.freeze(args) });
+}
+
 export function createRequestEpoch() {
   let current = 0;
   return Object.freeze({
@@ -90,6 +131,25 @@ export function mapSafeError(error) {
     "support_not_found",
     "support_guest_reply_unavailable",
     "support_unavailable",
+    "support_admin_required",
+    "account_not_found",
+    "account_ambiguous",
+    "no_deletion_pending",
+    "deletion_ticket_required",
+    "deletion_ticket_invalid",
+    "deletion_ticket_stale",
+    "deletion_ticket_evidence_required",
+    "device_ticket_required",
+    "device_ticket_invalid",
+    "device_ticket_stale",
+    "device_ticket_evidence_required",
+    "device_ticket_from_revoked_device",
+    "device_ticket_device_unknown",
+    "device_ticket_device_too_new",
+    "device_not_found",
+    "device_not_revoked",
+    "account_suspended",
+    "account_deletion_pending",
   ]);
   const candidates = [error?.code, error?.message];
   for (const candidate of candidates) {

@@ -66,6 +66,22 @@ class ManifestTest {
         assertTrue(dataItems.all { it.getAttributeNS(android, "pathPrefix") == WearDataLayerTransport.QUEUE_PREFIX })
     }
 
+    /** B4: geplanter Abgleich nur über das System, mit Netzbedingung (ab Android 14 Pflichtrecht) und über Neustarts. */
+    @Test
+    fun syncJobServiceIsSystemBoundAndItsStateStaysOutOfBackups() {
+        val service = elements("service").single { it.getAttributeNS(android, "name") == ".sync.PhoneSyncJobService" }
+        assertEquals("false", service.getAttributeNS(android, "exported"))
+        assertEquals("android.permission.BIND_JOB_SERVICE", service.getAttributeNS(android, "permission"))
+        val permissions = elements("uses-permission").map { it.getAttributeNS(android, "name") }
+        assertTrue(permissions.contains("android.permission.ACCESS_NETWORK_STATE"))
+        assertTrue(permissions.contains("android.permission.RECEIVE_BOOT_COMPLETED"))
+        // Ein wiederhergestelltes „zuletzt gesichert“ beschriebe ein anderes Gerät.
+        for (rules in listOf("backup_rules.xml", "data_extraction_rules.xml")) {
+            val excluded = File("src/main/res/xml/$rules").readText()
+            assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("advantly_sync.xml").size)
+        }
+    }
+
     @Test
     fun watchListenerCoversExactSubscriptionPath() {
         val wearManifest =

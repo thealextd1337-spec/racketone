@@ -67,8 +67,9 @@ class CloudPullMigrationTest {
                 driver.close()
                 driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
                 assertEquals(before, rows())
+                AdvantlyDatabase.Schema.migrate(driver, 7, LocalData.SCHEMA_VERSION).value
                 val data = LocalData(driver)
-                assertEquals(7, AdvantlyDatabase.Schema.version)
+                assertEquals(LocalData.SCHEMA_VERSION, AdvantlyDatabase.Schema.version)
                 assertEquals(42, data.cloudPulls.progress("alice").cursor)
                 assertEquals(77, data.cloudPulls.progress("bob").cursor)
                 assertEquals(0, data.cloudPulls.progress("alice").checkRound)
@@ -90,6 +91,65 @@ class CloudPullMigrationTest {
                 assertTrue(data.cloudPulls.nextEventWork("alice", 1) == null)
             } finally {
                 driver.close()
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun schemaTenToElevenAddsEmptyReadinessMarksKeepsPullRowsAndForcesFullCatalogAtSameGeneration() {
+        val file = File.createTempFile("pull-schema-ten", ".db")
+        try {
+            File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
+            JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+                AdvantlyDatabase.Schema.migrate(driver, 1, 10).value
+                driver.execute(null, "INSERT INTO cloud_pull_profile(profile_id,visibility_epoch,check_round) VALUES ('alice',3,2)", 0)
+                driver.execute(null, "INSERT INTO cloud_pull_event_work(profile_id,match_id,last_checked) VALUES ('alice','m',2)", 0)
+                driver.execute(null, "INSERT INTO cloud_pull_receipt VALUES ('alice','m','e',7,'d',1,0)", 0)
+                driver.execute(null, "UPDATE cloud_pull_profile SET metadata_complete = 1, round_catalog_ready = 1, scan_run = 4", 0)
+                driver.execute(null, "INSERT INTO cloud_cursor VALUES ('alice','pull',42)", 0)
+                driver.execute(null, "INSERT INTO cloud_cursor VALUES ('alice','pull:events:m',7)", 0)
+                AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
+                val db = AdvantlyDatabase(driver)
+                assertEquals(
+                    3,
+                    db.cloudPullQueries
+                        .profile("alice")
+                        .executeAsOne()
+                        .visibility_epoch,
+                )
+                assertEquals(
+                    2,
+                    db.cloudPullQueries
+                        .eventWork("alice", "m")
+                        .executeAsOne()
+                        .last_checked,
+                )
+                assertEquals(
+                    7,
+                    db.cloudPullQueries
+                        .receipt("alice", "m", "e")
+                        .executeAsOne()
+                        .server_seq,
+                )
+                // Alte Pullzeilen ohne Access: Vollkatalog ab null bei gleichem G als Neuscan, Eventcursor bleiben.
+                val profile = db.cloudPullQueries.profile("alice").executeAsOne()
+                assertEquals(3, profile.target_epoch)
+                assertEquals(5, profile.scan_run)
+                assertEquals(0, profile.metadata_complete)
+                assertEquals(0, profile.round_catalog_ready)
+                assertEquals(null, db.cloudSyncQueries.cursor("alice", "pull").executeAsOneOrNull())
+                assertEquals(7, db.cloudSyncQueries.cursor("alice", "pull:events:m").executeAsOne())
+                assertEquals(null, db.cloudPullQueries.readinessMark("alice", "m").executeAsOneOrNull())
+                db.cloudPullQueries.ensureReadinessMark("alice", "m", 3, 0, 7)
+                assertEquals(
+                    7,
+                    db.cloudPullQueries
+                        .readinessMark("alice", "m")
+                        .executeAsOne()
+                        .high_watermark,
+                )
             }
         } finally {
             file.delete()

@@ -80,6 +80,13 @@ SELECT DISTINCT match_id FROM match_event WHERE confirmed = 0 ORDER BY match_id;
 unconfirmedCountByMatch:
 SELECT match_id, count(*) AS count FROM match_event WHERE confirmed = 0 GROUP BY match_id;
 
+-- D-1: Quellen eines Matches aus dem UNIQUE-Index, ohne Tabellenzeilen; gezählt wird nur für eigene Quellen.
+devicesForMatch:
+SELECT DISTINCT device_id FROM match_event WHERE match_id = ?;
+
+unconfirmedCountForDevice:
+SELECT count(*) FROM match_event WHERE match_id = ? AND device_id = ? AND confirmed = 0;
+
 unconfirmedForMatch:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
 FROM match_event
@@ -93,11 +100,13 @@ CREATE INDEX match_event_type ON match_event (type, match_id);
 
 identityEvents:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
-FROM match_event WHERE match_id = ? AND type IN ('MatchCreated', 'PlayerAssigned')
+FROM match_event WHERE match_id = ? AND type IN ('MatchCreated', 'PlayerAssigned', '')
 ORDER BY lamport, device_id, id;
 
 assignmentMatches:
-SELECT DISTINCT match_id FROM match_event WHERE type = 'PlayerAssigned';
+SELECT DISTINCT match_id FROM match_event WHERE type IN ('PlayerAssigned', '');
 
 assignmentMatchesForSlot:
-SELECT DISTINCT match_id FROM match_event WHERE type = 'PlayerAssigned' AND instr(payload, :slot) > 0;
+SELECT DISTINCT match_id FROM match_event WHERE type IN ('PlayerAssigned', '') AND instr(payload, :slot) > 0;
+
+CREATE INDEX match_event_redaction ON match_event(type, id);

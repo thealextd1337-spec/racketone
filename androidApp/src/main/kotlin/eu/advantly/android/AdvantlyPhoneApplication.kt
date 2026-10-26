@@ -1,6 +1,9 @@
 package eu.advantly.android
 
 import android.app.Application
+import eu.advantly.android.sync.scheduleSyncAfterMatchEnd
+import eu.advantly.data.AndroidInstallationAvailability
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.live.LiveTelemetryStore
 import eu.advantly.presentation.live.clearWhenTelemetryOff
@@ -13,10 +16,33 @@ import eu.advantly.sync.protocol.PeerKind
  * Telemetrie-Sichtbarkeit „Gar nicht“ leert den flüchtigen Telemetrie-Eingang sofort.
  */
 class AdvantlyPhoneApplication : Application() {
+    private var bootstrapped = false
+
     override fun onCreate() {
         super.onCreate()
-        val session = AndroidMatchSessions.get(this, PeerKind.PHONE)
-        // „Gar nicht“ (P2-J) leert den flüchtigen Telemetrie-Eingang prozessweit – auch ohne laufende Activity
-        LiveTelemetryStore.Phone.clearWhenTelemetryOff(session)
+        bootstrap()
+    }
+
+    /** Nur eine erfolgreich geprüfte Installation darf prozessweite Session und Beobachter starten. */
+    fun bootstrap(): Boolean {
+        if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) return false
+        if (bootstrapped) return true
+        return AndroidInstallationGuard.storage(this) {
+            AndroidMatchSessions.prepare(this, PeerKind.PHONE) { session, stage ->
+                var removeTelemetry: (() -> Unit)? = null
+                var removeSyncTrigger: (() -> Unit)? = null
+                stage.onDiscard {
+                    bootstrapped = false
+                    removeTelemetry?.invoke()
+                    removeSyncTrigger?.invoke()
+                }
+                stage.afterCommit {
+                    removeTelemetry = LiveTelemetryStore.Phone.clearWhenTelemetryOff(session)
+                    removeSyncTrigger = scheduleSyncAfterMatchEnd(this, session)
+                }
+            }
+            bootstrapped = true
+            true
+        } == true
     }
 }

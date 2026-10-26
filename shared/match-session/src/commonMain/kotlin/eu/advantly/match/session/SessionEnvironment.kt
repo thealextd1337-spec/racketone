@@ -5,6 +5,7 @@ import eu.advantly.core.model.Uuid7
 import eu.advantly.sync.protocol.AntiEntropy
 import eu.advantly.sync.protocol.AppBuild
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.sync.protocol.ProtocolVersion
 import kotlin.random.Random
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -62,6 +63,10 @@ class RandomIdGenerator(
  * @property autoFollow ein von einer Gegenstelle gestartetes Match automatisch öffnen (Regeln: `MatchSession.maybeFollow`)
  * @property parallelMatches mehrere Matches gleichzeitig offen halten und das Uhr-Match zuweisen (F22) – Standard nur am
  *   Handy; Uhren halten genau ein Match offen und folgen der Zuweisung des Handys
+ * @property protocolVersions lesbare Protokollversionen und höchste gesprochene (E1, Welle 3). Standard sind die
+ *   Konstanten von [ProtocolVersion]; ein anderer Bereich (Tests) ändert sie nicht. Ohne Konto spricht die Session nur
+ *   die älteste Version des Bereichs, mit Konto nur noch ab 4 (`minV = 4`); ab Version 4 gelten Belege und
+ *   Lifecycle-Zustellung.
  */
 data class SessionConfig(
     val deviceId: DeviceId,
@@ -71,4 +76,5 @@ data class SessionConfig(
     val autoFollow: Boolean = true,
     val parallelMatches: Boolean = kind == PeerKind.PHONE,
     val appBuild: AppBuild? = null,
+    val protocolVersions: IntRange = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT,
 )

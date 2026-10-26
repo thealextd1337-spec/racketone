@@ -313,6 +313,9 @@ interface LiveMatchPort {
     /** Stand der Uhr sofort neu prüfen (Schritt „Wer zählt?“, App im Vordergrund, „Erneut prüfen“). */
     fun refreshWatchStatus()
 
+    /** Uhren neu koppeln (verlorene oder ersetzte Uhr): neue Pairing-Autorität, jede Uhr bestätigt danach selbst neu. */
+    fun repairWatchPairing() {}
+
     /**
      * Legt ein Match an und macht es aktiv. Laufende Matches bleiben offen und laufen weiter (F22). Zählt mit „Meine Uhr“
      * künftig die Uhr dieses Match, gibt sie ihr bisheriges laufendes Match geordnet ans Handy ab (Director).
@@ -325,6 +328,12 @@ interface LiveMatchPort {
         setup: MatchSetup,
         options: StartOptions = StartOptions(),
     ): MatchId
+
+    /** Host darf die tatsaechliche Operation ablehnen, ohne eine Match-ID zu erfinden. */
+    fun tryStart(
+        setup: MatchSetup,
+        options: StartOptions = StartOptions(),
+    ): MatchId? = start(setup, options)
 
     /** `PointWon(side)`; nur bei `IN_PROGRESS`/`PAUSED` und nur auf dem Zähler. */
     fun recordPoint(side: Side): Boolean
@@ -527,6 +536,7 @@ data class FavoriteLineup(
 
 /** Spieler und Schnellstart: eigener Spieler, Gäste, Favoriten und „Wie letztes Mal“. */
 interface PlayersPort {
+    /** Besitzer gewechselt oder Verzeichnis neu geladen (neue `lifecycleRevision`); gemeldet nach dem Neuladen. */
     fun observeOwnerIdentity(onChanged: () -> Unit): () -> Unit = {}
 
     /** Nur zur Auswahlfilterung; historische Namen bleiben in den Match-Daten. */
@@ -555,8 +565,13 @@ interface PlayersPort {
     /** Legt einen Gast an ([name] wird getrimmt, darf nicht leer sein). */
     fun addGuest(name: String): Player
 
+    /** Nullable Hostvariante; Defaults aendern das Verhalten bestehender Stores nicht. */
+    fun tryAddGuest(name: String): Player? = addGuest(name)
+
     /** Speichert [setup] als Favoriten (ohne `previousMatchId`). */
     fun saveFavorite(setup: MatchSetup): FavoriteLineup
+
+    fun trySaveFavorite(setup: MatchSetup): FavoriteLineup? = saveFavorite(setup)
 
     /** Entfernt den Favoriten [id]; unbekannte IDs sind ein No-op. */
     fun removeFavorite(id: String)

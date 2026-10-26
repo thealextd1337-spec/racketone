@@ -3,10 +3,13 @@ package eu.advantly.wear.sync
 import android.content.Context
 import android.os.Looper
 import android.os.SystemClock
+import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.AndroidSessionBootstrap
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
+import eu.advantly.match.session.SyncStatus
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.diagnostics.DiagnosticLog
@@ -37,7 +40,8 @@ object WearSessions {
     /** Liefert die gestartete Session; legt sie beim ersten Aufruf an. Nur Main-Thread. */
     fun get(context: Context): Holder {
         check(Looper.myLooper() == Looper.getMainLooper()) { "WearSessions nur auf dem Main-Thread" }
-        return holder ?: create(context.applicationContext).also { holder = it }
+        AndroidInstallationGuard.requireReady(context)
+        return holder ?: prepare(context) { _, _ -> }
     }
 
     /**
@@ -53,32 +57,43 @@ object WearSessions {
 
     /**
      * Abgleich nach dem Start abgeschlossen: eine kompatible Gegenstelle ist da, ein Abgleich kam an und nichts ist
-     * mehr ausstehend. Nur Main-Thread.
+     * mehr ausstehend – weder Events noch Lifecycle-Zustellungen ([SyncStatus.settled], E4). Nur Main-Thread.
      */
-    fun isSyncSettled(): Boolean {
-        val sync =
-            holder
-                ?.session
-                ?.state
-                ?.value
-                ?.sync ?: return false
-        val peerReady = sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE }
-        return peerReady && sync.lastSyncAtMs != null && sync.pendingToPeers == 0
-    }
+    fun isSyncSettled(): Boolean =
+        holder
+            ?.session
+            ?.state
+            ?.value
+            ?.sync
+            ?.let(::isSettled) == true
 
-    private fun create(app: Context): Holder {
-        startedAtElapsed = SystemClock.elapsedRealtime()
-        val session = AndroidMatchSessions.get(app, PeerKind.WATCH)
-        val prefs = WearPrefs(app)
-        prefs.openMatchId?.let { id ->
-            val resumed = session.resume(id)
-            DiagnosticLog.log("MATCH_RESUME_AFTER_RESTART", "match" to id.value, "ok" to resumed)
+    internal fun isSettled(sync: SyncStatus): Boolean =
+        sync.peers.any { it.compatibility == CompatibilityStatus.COMPATIBLE } && sync.lastSyncAtMs != null && sync.settled
+
+    /** Wear-Resume und Hostlesepfade vor der Veröffentlichung derselben Sessiongeneration vorbereiten. */
+    fun prepare(
+        context: Context,
+        configure: (Holder, AndroidSessionBootstrap) -> Unit,
+    ): Holder {
+        val app = context.applicationContext
+        var prepared: Holder? = null
+        holder = null
+        AndroidMatchSessions.prepare(app, PeerKind.WATCH) { session, stage ->
+            val local = Holder(session, WearPrefs(app)).also { it.prefs.openMatchId?.let(session::resume) }
+            prepared = local
+            stage.onDiscard { if (holder === local) holder = null }
+            configure(local, stage)
+            val rememberOpen = SessionListener { local.prefs.openMatchId = it.match?.id }
+            stage.onDiscard { session.removeListener(rememberOpen) }
+            stage.afterCommit {
+                session.addListener(rememberOpen)
+                if (DiagnosticLog.ENABLED) attachDiagnostics(session)
+                startedAtElapsed = SystemClock.elapsedRealtime()
+                holder = local
+                DiagnosticLog.log("SESSION_STARTED", "device" to session.deviceId.value)
+            }
         }
-        // Offenes Match merken (Neustart) – addListener liefert sofort den aktuellen Stand
-        session.addListener(SessionListener { prefs.openMatchId = it.match?.id })
-        if (DiagnosticLog.ENABLED) attachDiagnostics(session)
-        DiagnosticLog.log("SESSION_STARTED", "device" to session.deviceId.value)
-        return Holder(session, prefs)
+        return checkNotNull(prepared)
     }
 
     /** Debug: Verbindungsereignisse (Hello, Peer-Wechsel, Sends/Empfänge, Fehler) ins Diag-Log – ohne Gesundheitsdaten. */

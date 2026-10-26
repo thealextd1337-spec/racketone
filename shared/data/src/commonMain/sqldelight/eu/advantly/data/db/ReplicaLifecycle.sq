@@ -1,0 +1,309 @@
+CREATE TABLE replica_cloud_seen (match_id TEXT NOT NULL PRIMARY KEY);
+CREATE TABLE replica_access (
+    account_key TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    generation INTEGER,
+    access TEXT NOT NULL CHECK(access IN ('UNKNOWN','MEMBER','FEED','ABSENT')),
+    ready INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(account_key, match_id),
+    CHECK(generation IS NOT NULL OR (access = 'UNKNOWN' AND ready = 0))
+);
+CREATE INDEX replica_access_match ON replica_access(match_id, access);
+CREATE TABLE replica_redaction_state (
+    account_key TEXT NOT NULL, match_id TEXT NOT NULL, applied_epoch INTEGER NOT NULL,
+    PRIMARY KEY(account_key, match_id)
+);
+CREATE TABLE replica_redacted_player (
+    account_key TEXT NOT NULL, match_id TEXT NOT NULL, player_id TEXT NOT NULL, epoch INTEGER NOT NULL,
+    PRIMARY KEY(account_key, match_id, player_id)
+);
+CREATE INDEX replica_redacted_global ON replica_redacted_player(player_id);
+-- Ausschließlich positiv belegte Profilbeziehungen redigierter Spieler; niemals ein Grant.
+CREATE TABLE replica_redacted_profile (
+    player_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+    PRIMARY KEY(player_id, profile_id)
+);
+CREATE INDEX replica_redacted_profile_lookup ON replica_redacted_profile(profile_id);
+-- Unveränderliche Eventbindung mit bereinigtem Payload; überlebt den Purge des Rohlogs.
+CREATE TABLE replica_redacted_event (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    event_json TEXT NOT NULL,
+    match_id TEXT,
+    device_id TEXT,
+    device_seq INTEGER
+);
+CREATE UNIQUE INDEX replica_redacted_sequence ON replica_redacted_event(match_id, device_id, device_seq);
+CREATE INDEX replica_redacted_unindexed ON replica_redacted_event(event_id)
+WHERE match_id IS NULL OR device_id IS NULL OR device_seq IS NULL;
+CREATE TABLE replica_transfer (
+    id TEXT NOT NULL PRIMARY KEY,
+    account_key TEXT NOT NULL, scope_id TEXT NOT NULL,
+    match_id TEXT NOT NULL, generation INTEGER NOT NULL, epoch INTEGER NOT NULL, high_watermark INTEGER NOT NULL,
+    after_player_id TEXT, after_server_seq INTEGER NOT NULL DEFAULT 0,
+    ids_done INTEGER NOT NULL DEFAULT 0, events_done INTEGER NOT NULL DEFAULT 0,
+    next_index INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(account_key, match_id, generation, epoch)
+);
+CREATE TABLE replica_transfer_page (
+    transfer_id TEXT NOT NULL, page_index INTEGER NOT NULL, page_json TEXT NOT NULL,
+    PRIMARY KEY(transfer_id, page_index)
+);
+-- Eine Zeile mit leerer Match-ID registriert den Empfänger; Nutzzeilen haben einen stabilen Match-Schlüssel.
+CREATE TABLE replica_delivery (
+    account_key TEXT NOT NULL, peer_id TEXT NOT NULL, match_id TEXT NOT NULL,
+    generation INTEGER NOT NULL, access TEXT NOT NULL, redaction_epoch INTEGER NOT NULL,
+    access_ack INTEGER NOT NULL DEFAULT 0, redaction_ack INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(account_key, peer_id, match_id)
+);
+CREATE VIEW replica_current_context AS
+SELECT (SELECT value FROM setting WHERE key = 'identity.scope') AS scope_id,
+    coalesce((SELECT value FROM setting WHERE key = 'identity.profile'),
+        (SELECT value FROM setting WHERE key = 'identity.scope')) AS account_key;
+
+CREATE VIEW replica_local_match AS
+SELECT m.entity_id AS match_id, s.device_id, s.scope_id, o.profile_id
+FROM cloud_metadata m JOIN local_source s ON s.device_id = m.source_device_id
+LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
+WHERE m.kind = 'HEADER' AND m.origin IN ('LOCAL','PEER');
+
+-- Eigene Matches des aktuellen Kontos: Kopfquelle per UID gebunden (nie über Namen), Access fehlt oder ist MEMBER beim
+-- aktuellen G oder, solange ein Neuscan läuft, beim zuletzt vollständigen G (Schreibspur, Teil 2 P2-2). `current_g` = Access
+-- fehlt oder gilt beim aktuellen G (nur damit liest die Lesespur). FEED, ABSENT, UNKNOWN, ein älteres G, fremde Konten und
+-- ungebundene Quellen fallen heraus; FEED oder ABSENT beim neuen G überschreiben die Zeile und sperren sofort.
+CREATE VIEW replica_own_match AS
+SELECT m.entity_id AS match_id,
+    NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
+        AND a.generation IS NOT (SELECT coalesce(p.target_epoch, p.visibility_epoch)
+            FROM cloud_pull_profile p WHERE p.profile_id = c.account_key)) AS current_g
+FROM cloud_metadata m
+JOIN local_source s ON s.device_id = m.source_device_id
+JOIN cloud_device_owner o ON o.device_id = s.device_id
+JOIN replica_current_context c ON o.profile_id = c.account_key
+WHERE m.kind = 'HEADER' AND m.origin IN ('LOCAL','PEER')
+AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
+    AND (a.access != 'MEMBER' OR NOT EXISTS (SELECT 1 FROM cloud_pull_profile p WHERE p.profile_id = c.account_key
+        AND (a.generation = coalesce(p.target_epoch, p.visibility_epoch)
+            OR (p.target_epoch IS NOT NULL AND a.generation = p.visibility_epoch)))));
+
+CREATE VIEW replica_readable_match AS
+SELECT m.entity_id AS match_id FROM cloud_metadata m
+WHERE m.kind = 'HEADER' AND (
+    NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.activated' AND value = 'true')
+    OR EXISTS (SELECT 1 FROM replica_access a, replica_current_context c
+        WHERE a.account_key = c.account_key AND a.match_id = m.entity_id
+        AND a.generation IS NOT NULL AND a.access = 'MEMBER' AND a.ready = 1)
+    -- Lesespur eigener Matches ohne ready: nur ohne ausstehende Redaktion (angewandtes E ≥ Katalog-E, kein offener Transfer).
+    OR EXISTS (SELECT 1 FROM replica_own_match o, replica_current_context c WHERE o.match_id = m.entity_id AND o.current_g
+        AND coalesce((SELECT r.applied_epoch FROM replica_redaction_state r
+            WHERE r.account_key = c.account_key AND r.match_id = m.entity_id), 0)
+            >= coalesce((SELECT p.redaction_observed FROM cloud_pull_snapshot p
+            WHERE p.profile_id = c.account_key AND p.kind = 'MATCH' AND p.entity_id = m.entity_id), 0)
+        AND NOT EXISTS (SELECT 1 FROM replica_transfer t
+            WHERE t.account_key = c.account_key AND t.match_id = m.entity_id AND t.completed = 0))
+    OR (NOT EXISTS (SELECT 1 FROM replica_cloud_seen s WHERE s.match_id = m.entity_id)
+        AND NOT EXISTS (SELECT 1 FROM replica_access a WHERE a.match_id = m.entity_id)
+        AND EXISTS (SELECT 1 FROM replica_local_match l, replica_current_context c
+            WHERE l.match_id = m.entity_id AND (l.profile_id = c.account_key
+                OR (l.profile_id IS NULL AND (l.scope_id = c.scope_id OR EXISTS (
+                    SELECT 1 FROM local_scope_source x WHERE x.device_id = l.device_id AND x.scope_id = c.scope_id))))))
+);
+
+cloudSeen:
+SELECT count(*) FROM replica_cloud_seen WHERE match_id = ?;
+recordCloudSeen:
+INSERT OR IGNORE INTO replica_cloud_seen VALUES (?);
+access:
+SELECT a.*, coalesce(r.applied_epoch, 0) AS applied_epoch FROM replica_access a
+LEFT JOIN replica_redaction_state r ON r.account_key = a.account_key AND r.match_id = a.match_id
+WHERE a.account_key = ? AND a.match_id = ?;
+putAccess:
+INSERT OR REPLACE INTO replica_access(account_key,match_id,generation,access,ready) VALUES (?,?,?,?,0);
+ready:
+UPDATE replica_access SET ready = 1 WHERE account_key = ? AND match_id = ? AND generation = ?;
+notReady:
+UPDATE replica_access SET ready = 0 WHERE account_key = ? AND match_id = ?;
+notReadyBefore:
+UPDATE replica_access SET ready = 0 WHERE account_key = ? AND generation < ? AND ready = 1;
+readable:
+SELECT count(*) FROM replica_readable_match WHERE match_id = ?;
+-- Schreibspur: Event der eigenen Quelle [deviceId] bzw. (ohne Gerät) Kopf/Projektion der aktiven lokalen Quelle.
+ownWritable:
+SELECT count(*) FROM replica_own_match w, local_source s, cloud_device_owner o, replica_current_context c
+WHERE w.match_id = :matchId AND o.device_id = s.device_id AND o.profile_id = c.account_key
+AND s.device_id = coalesce(:deviceId, (SELECT i.device_id FROM local_identity i WHERE i.scope_id = c.scope_id));
+-- Keine Redaktion ausstehend (wie die Lesespur eigener Matches): angewandtes E ≥ Katalog-E, kein offener Transfer.
+redactionSettled:
+SELECT count(*) FROM replica_current_context c
+WHERE coalesce((SELECT r.applied_epoch FROM replica_redaction_state r
+    WHERE r.account_key = c.account_key AND r.match_id = :matchId), 0)
+    >= coalesce((SELECT p.redaction_observed FROM cloud_pull_snapshot p
+    WHERE p.profile_id = c.account_key AND p.kind = 'MATCH' AND p.entity_id = :matchId), 0)
+AND NOT EXISTS (SELECT 1 FROM replica_transfer t WHERE t.account_key = c.account_key AND t.match_id = :matchId AND t.completed = 0);
+localProof:
+SELECT count(*) FROM replica_local_match l, replica_current_context c
+WHERE l.match_id = :matchId AND (l.profile_id = c.account_key OR (l.profile_id IS NULL
+AND (l.scope_id = c.scope_id OR EXISTS (SELECT 1 FROM local_scope_source x WHERE x.device_id = l.device_id AND x.scope_id = c.scope_id))));
+isRedacted:
+SELECT count(*) FROM replica_redacted_player WHERE player_id = ?;
+redactPlayer:
+INSERT OR REPLACE INTO replica_redacted_player(account_key,match_id,player_id,epoch) VALUES (?,?,?,?);
+setEpoch:
+INSERT OR REPLACE INTO replica_redaction_state VALUES (?,?,?);
+transfer:
+SELECT * FROM replica_transfer WHERE id = ?;
+transferForMatch:
+SELECT * FROM replica_transfer WHERE account_key = ? AND match_id = ? ORDER BY generation DESC, epoch DESC LIMIT 1;
+insertTransfer:
+INSERT INTO replica_transfer(id,account_key,scope_id,match_id,generation,epoch,high_watermark) VALUES (?,?,?,?,?,?,?);
+advanceTransfer:
+UPDATE replica_transfer SET after_player_id = ?, after_server_seq = ?, ids_done = ?, events_done = ?, next_index = next_index + 1 WHERE id = ?;
+finishTransfer:
+UPDATE replica_transfer SET completed = 1 WHERE id = ?;
+page:
+SELECT page_json FROM replica_transfer_page WHERE transfer_id = ? AND page_index = ?;
+insertPage:
+INSERT INTO replica_transfer_page VALUES (?,?,?);
+deletePagesForMatch:
+DELETE FROM replica_transfer_page WHERE transfer_id IN (SELECT id FROM replica_transfer WHERE account_key = ? AND match_id = ?);
+deleteTransfer:
+UPDATE replica_transfer SET completed = -1 WHERE account_key = ? AND match_id = ?;
+
+retain:
+SELECT EXISTS (SELECT 1 FROM replica_access WHERE match_id = :matchId AND access = 'MEMBER')
+    OR EXISTS (SELECT 1 FROM replica_local_match WHERE match_id = :matchId)
+    OR EXISTS (SELECT 1 FROM match_event e JOIN local_source s ON s.device_id = e.device_id
+        WHERE e.match_id = :matchId AND e.cloud_state != 1)
+    OR EXISTS (SELECT 1 FROM cloud_metadata m WHERE m.entity_id = :matchId AND m.kind != 'PLAYER'
+        AND m.revision > m.uploaded_revision AND (m.source_device_id IS NOT NULL OR m.writer_profile_id IS NOT NULL));
+removePrivateSnapshot:
+DELETE FROM cloud_pull_snapshot WHERE profile_id = ? AND kind = 'MATCH' AND entity_id = ?;
+removeWork:
+DELETE FROM cloud_pull_event_work WHERE profile_id = ? AND match_id = ?;
+removeReceipts:
+DELETE FROM cloud_pull_receipt WHERE match_id = ?;
+removeEventCursors:
+DELETE FROM cloud_cursor WHERE stream = 'pull:events:' || ?;
+-- Purge: auch own_version/own_revisions vergessen; ein neu angelegter Kopf beginnt mit Revision 1 und nimmt zuerst den strengen Pfad.
+invalidateMaterialization:
+UPDATE cloud_pull_snapshot SET materialized_version = NULL, own_version = NULL, own_revisions = NULL WHERE kind = 'MATCH' AND entity_id = ?;
+invalidateWork:
+UPDATE cloud_pull_event_work SET last_checked = 0, repairing = 0, needs_verification = 0, materialization_pending = 1 WHERE match_id = ?;
+
+registerPeer:
+INSERT OR IGNORE INTO replica_delivery VALUES (?,?,'',0,'UNKNOWN',0,1,1);
+seedPeer:
+INSERT OR IGNORE INTO replica_delivery(account_key,peer_id,match_id,generation,access,redaction_epoch)
+SELECT a.account_key,:peerId,a.match_id,a.generation,a.access,coalesce(r.applied_epoch,0)
+FROM replica_access a LEFT JOIN replica_redaction_state r ON r.account_key = a.account_key AND r.match_id = a.match_id
+WHERE a.account_key = :accountKey AND a.generation IS NOT NULL;
+queueAccess:
+INSERT OR REPLACE INTO replica_delivery(account_key,peer_id,match_id,generation,access,redaction_epoch)
+SELECT d.account_key,d.peer_id,:matchId,:generation,:access,:epoch FROM replica_delivery d
+WHERE d.account_key = :accountKey AND d.match_id = '';
+queueRedaction:
+UPDATE replica_delivery SET redaction_epoch = :epoch, redaction_ack = 0
+WHERE account_key = :accountKey AND match_id = :matchId;
+pending:
+SELECT * FROM replica_delivery WHERE account_key = :accountKey AND peer_id = :peerId AND match_id != ''
+AND (access_ack = 0 OR redaction_ack = 0) AND (:afterId IS NULL OR match_id > :afterId)
+ORDER BY match_id LIMIT :pageLimit;
+ackAccess:
+UPDATE replica_delivery SET access_ack = 1
+WHERE account_key = ? AND peer_id = ? AND match_id = ? AND generation = ? AND access = ?;
+ackRedaction:
+UPDATE replica_delivery SET redaction_ack = 1
+WHERE account_key = ? AND peer_id = ? AND match_id = ? AND generation = ? AND redaction_epoch = ?;
+
+redactEventPayload:
+UPDATE match_event SET payload = ? WHERE id = ?;
+redactedEvent:
+SELECT event_json FROM replica_redacted_event WHERE event_id = ?;
+rememberRedactedEvent:
+INSERT INTO replica_redacted_event(event_id, event_json, match_id, device_id, device_seq) VALUES (?, ?, ?, ?, ?);
+redactedEventBySequence:
+SELECT event_id FROM replica_redacted_event WHERE match_id = ? AND device_id = ? AND device_seq = ?;
+unindexedRedactedEvents:
+SELECT * FROM replica_redacted_event
+WHERE match_id IS NULL OR device_id IS NULL OR device_seq IS NULL
+ORDER BY event_id LIMIT 200;
+indexRedactedEvent:
+UPDATE replica_redacted_event SET match_id = ?, device_id = ?, device_seq = ? WHERE event_id = ?;
+observeEventRedactions:
+SELECT event_id FROM replica_redacted_event LIMIT 1;
+identityPage:
+SELECT * FROM match_event WHERE type IN ('PlayerAssigned','') AND (:afterId IS NULL OR id > :afterId) ORDER BY id LIMIT 200;
+redactedPlayerSnapshotPage:
+SELECT rowid AS snapshot_rowid, entity_id, snapshot_json FROM cloud_pull_snapshot
+WHERE kind = 'PLAYER' AND rowid > :afterRow
+AND EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = entity_id)
+ORDER BY rowid LIMIT 200;
+rememberRedactedProfile:
+INSERT OR IGNORE INTO replica_redacted_profile(player_id, profile_id) VALUES (?, ?);
+isRedactedProfile:
+SELECT EXISTS (SELECT 1 FROM replica_redacted_profile WHERE profile_id = ?);
+snapshotPage:
+SELECT rowid AS snapshot_rowid, profile_id, kind, entity_id, snapshot_json FROM cloud_pull_snapshot WHERE rowid > ? ORDER BY rowid LIMIT 200;
+redactSnapshot:
+UPDATE cloud_pull_snapshot SET snapshot_json = ? WHERE rowid = ?;
+assignmentPage:
+SELECT rowid AS assignment_rowid, match_id, slot_id, player_id, player_json FROM match_assignment WHERE rowid > ? ORDER BY rowid LIMIT 200;
+redactAssignment:
+UPDATE match_assignment SET player_json = NULL, player_id = ? WHERE rowid = ?;
+favoritePage:
+SELECT * FROM lineup_favorite WHERE (:afterId IS NULL OR id > :afterId) ORDER BY id LIMIT 200;
+redactFavorite:
+UPDATE lineup_favorite SET name = NULL WHERE id = ?;
+clearPlayerName:
+UPDATE player SET display_name = '' WHERE id = ?;
+redactedDirectoryPage:
+SELECT id FROM player WHERE display_name != '' AND (:afterId IS NULL OR id > :afterId)
+AND EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = player.id) ORDER BY id LIMIT 200;
+CREATE VIEW replica_readable_player AS
+SELECT p.id FROM player p WHERE
+NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.activated' AND value = 'true')
+OR EXISTS (SELECT 1 FROM local_identity i, replica_current_context c WHERE i.scope_id = c.scope_id AND i.self_id = p.id)
+OR EXISTS (SELECT 1 FROM cloud_metadata m, replica_current_context c
+WHERE m.kind = 'PLAYER' AND m.entity_id = p.id AND m.writer_profile_id = c.account_key)
+OR EXISTS (SELECT 1 FROM cloud_metadata m JOIN local_source s ON s.device_id = m.source_device_id
+LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id, replica_current_context c
+WHERE m.kind = 'PLAYER' AND m.entity_id = p.id AND (o.profile_id = c.account_key OR (o.profile_id IS NULL AND s.scope_id = c.scope_id)))
+OR EXISTS (SELECT 1 FROM match_header h JOIN replica_readable_match r ON r.match_id = h.id
+WHERE instr(h.lineup_json, '"' || p.id || '"') > 0)
+OR EXISTS (SELECT 1 FROM match_assignment a JOIN replica_readable_match r ON r.match_id = a.match_id WHERE a.player_id = p.id);
+
+readablePlayer:
+SELECT count(*) FROM replica_readable_player WHERE id = ?;
+favoriteIdentities:
+SELECT side_a, side_b FROM lineup_favorite WHERE id = ?;
+favoriteCandidates:
+SELECT id, last_used_at_ms, use_count FROM lineup_favorite
+WHERE (:sport IS NULL OR sport = :sport)
+AND (:afterTime IS NULL OR last_used_at_ms < :afterTime
+    OR (last_used_at_ms = :afterTime AND use_count < :afterCount)
+    OR (last_used_at_ms = :afterTime AND use_count = :afterCount AND id > :afterId))
+AND NOT EXISTS (SELECT 1 FROM player p WHERE (instr(side_a, '"' || p.id || '"') > 0 OR instr(side_b, '"' || p.id || '"') > 0)
+AND p.id NOT IN (SELECT id FROM replica_readable_player))
+ORDER BY last_used_at_ms DESC, use_count DESC, id LIMIT :pageLimit;
+
+playerExists:
+SELECT count(*) FROM player WHERE id = ?;
+
+hasLifecycle:
+SELECT count(*) FROM replica_access WHERE match_id = ?;
+
+observeAccess:
+SELECT match_id FROM replica_access LIMIT 1;
+
+playerWriteAllowed:
+SELECT count(*) FROM player p JOIN cloud_metadata m ON m.kind = 'PLAYER' AND m.entity_id = p.id,
+replica_current_context c
+WHERE p.id = :playerId
+AND (m.writer_profile_id = c.account_key OR (m.writer_profile_id IS NULL AND m.origin IN ('LOCAL','PEER')
+    AND EXISTS (SELECT 1 FROM local_source s LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
+        WHERE s.device_id = m.source_device_id AND (o.profile_id = c.account_key
+            OR (o.profile_id IS NULL AND (s.scope_id = c.scope_id OR EXISTS (
+                SELECT 1 FROM local_scope_source x WHERE x.device_id = s.device_id AND x.scope_id = c.scope_id)))))))
+AND NOT EXISTS (SELECT 1 FROM cloud_device_owner o WHERE o.device_id = m.source_device_id AND o.profile_id != c.account_key);
+
+clearDeliveries:
+DELETE FROM replica_delivery;

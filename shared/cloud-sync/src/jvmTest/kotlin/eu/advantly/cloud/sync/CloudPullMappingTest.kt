@@ -61,16 +61,16 @@ class CloudPullMappingTest {
                 var row = pullMatch().copy(status = "scheduled", scheduledAt = "2026-10-19T12:00:00Z")
                 f.metadata = { _, _ -> PullResponse(listOf(row), cursor = row.serverVersion, visibilityEpoch = 1) }
                 f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
                 val runner = CloudPullRunner(f.backend, f.data)
                 val scheduled = runner.pullNow()
                 assertEquals(CloudPullOutcome.BLOCKED, scheduled.outcome)
                 assertEquals(1, scheduled.pendingMaterializations)
-                assertNull(f.data.matches.get(MatchId("match")))
-                val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")!!
+                assertNull(f.data.matches.get(MatchId(MATCH)))
+                val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!
                 assertTrue(snapshot.json.contains("scheduled"))
                 assertNull(snapshot.materializedVersion)
-                val waiting = f.data.cloudPulls.eventWork("alice", "match")!!
+                val waiting = f.data.cloudPulls.eventWork("alice", MATCH)!!
                 assertTrue(waiting.materializationPending)
                 assertEquals(0, waiting.checkedRound)
                 assertEquals(0, waiting.cursor)
@@ -79,28 +79,28 @@ class CloudPullMappingTest {
                 val active = runner.pullNow()
                 assertEquals(CloudPullOutcome.COMPLETE, active.outcome)
                 assertEquals(0, active.pendingMaterializations)
-                assertEquals(1, f.data.events.count("match"))
+                assertEquals(1, f.data.events.count(MATCH))
                 assertEquals(
                     eu.advantly.core.scoring.MatchStatus.IN_PROGRESS,
                     f.data.matches
-                        .get(MatchId("match"))
+                        .get(MatchId(MATCH))
                         ?.status,
                 )
                 assertEquals(
                     CloudMetadataOrigin.CLOUD,
                     f.data.cloud
-                        .metadataState(CloudMetadataKind.HEADER, "match")
+                        .metadataState(CloudMetadataKind.HEADER, MATCH)
                         ?.origin,
                 )
                 assertNull(
                     f.data.cloud
-                        .metadataState(CloudMetadataKind.HEADER, "match")
+                        .metadataState(CloudMetadataKind.HEADER, MATCH)
                         ?.writerProfileId,
                 )
                 assertEquals(
                     2,
                     f.data.cloudPulls
-                        .snapshot("alice", CloudPullEntityKind.MATCH, "match")
+                        .snapshot("alice", CloudPullEntityKind.MATCH, MATCH)
                         ?.materializedVersion,
                 )
             }
@@ -109,7 +109,8 @@ class CloudPullMappingTest {
     @Test
     fun scheduledSnapshotNeverReplacesExistingLocalEngineStatus() =
         runBlocking {
-            PullFixture().use { f ->
+            // Der lokale Stand vor dem Abgleich wird direkt umgeschrieben; das geht nur im inaktiven Store.
+            PullFixture(activated = false).use { f ->
                 f.bind()
                 val record =
                     PullMapping
@@ -119,20 +120,23 @@ class CloudPullMappingTest {
                         .record!!
                 f.data.matches.insertIfAbsent(record.id, record.format, record.lineup, record.meta, 1)
                 f.data.matches.updateProgress(record.id, eu.advantly.core.scoring.MatchStatus.PAUSED, record.score, 1)
-                f.driver.execute(null, "UPDATE cloud_metadata SET origin='LOCAL', source_device_id='original' WHERE entity_id='match'", 0)
-                val before = f.data.cloud.metadataState(CloudMetadataKind.HEADER, "match")
+                f.driver.execute(null, "UPDATE cloud_metadata SET origin='LOCAL', source_device_id='original' WHERE entity_id='$MATCH'", 0)
+                val before = f.data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH)
                 f.metadata = { _, _ -> PullResponse(listOf(pullMatch().copy(status = "scheduled")), cursor = 1, visibilityEpoch = 1) }
-                assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
+                // Ohne materialisierten Cloudsnapshot fehlt Readiness-Bedingung (4): sichtbar blockiert statt still bereit.
+                val result = CloudPullRunner(f.backend, f.data).pullNow()
+                assertEquals(CloudPullOutcome.BLOCKED, result.outcome)
+                assertEquals(1, result.pendingReadiness)
                 assertEquals(
                     eu.advantly.core.scoring.MatchStatus.PAUSED,
                     f.data.matches
                         .get(record.id)
                         ?.status,
                 )
-                assertEquals(before, f.data.cloud.metadataState(CloudMetadataKind.HEADER, "match"))
+                assertEquals(before, f.data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH))
                 assertNull(
                     f.data.cloudPulls
-                        .snapshot("alice", CloudPullEntityKind.MATCH, "match")
+                        .snapshot("alice", CloudPullEntityKind.MATCH, MATCH)
                         ?.materializedVersion,
                 )
             }
@@ -151,11 +155,11 @@ class CloudPullMappingTest {
                 val feed = legacy.copy(access = "feed", summary = JsonObject(mapOf("score" to JsonPrimitive("6:3"))))
                 f.metadata = { _, _ -> PullResponse(listOf(feed), cursor = 1, visibilityEpoch = 1) }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                assertNull(f.data.matches.get(MatchId("match")))
-                assertNull(f.data.cloudPulls.eventWork("alice", "match"))
+                assertNull(f.data.matches.get(MatchId(MATCH)))
+                assertNull(f.data.cloudPulls.eventWork("alice", MATCH))
                 assertTrue(
                     f.data.cloudPulls
-                        .snapshot("alice", CloudPullEntityKind.MATCH, "match")!!
+                        .snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!
                         .json
                         .contains("6:3"),
                 )
@@ -168,6 +172,11 @@ class CloudPullMappingTest {
             PullFixture().use { f ->
                 f.bind()
                 f.data.players.ensureSelf("Local", 1) { PlayerId("local-self") }
+                val localSelf =
+                    f.data.players
+                        .self()
+                        ?.id
+                        ?.value
                 val row =
                     pullMatch().copy(
                         participants =
@@ -189,11 +198,11 @@ class CloudPullMappingTest {
                         )
                     }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                val record = assertNotNull(f.data.matches.get(MatchId("match")))
+                val record = assertNotNull(f.data.matches.get(MatchId(MATCH)))
                 assertEquals(listOf(PlayerId("slot-a")), record.lineup.a)
                 assertEquals(listOf(PlayerId("slot-b")), record.lineup.b)
                 assertEquals(
-                    "local-self",
+                    localSelf,
                     f.data.players
                         .self()
                         ?.id
@@ -214,7 +223,7 @@ class CloudPullMappingTest {
                 )
                 assertNull(
                     f.data.cloud
-                        .metadataState(CloudMetadataKind.HEADER, "match")
+                        .metadataState(CloudMetadataKind.HEADER, MATCH)
                         ?.writerProfileId,
                 )
             }
@@ -225,8 +234,8 @@ class CloudPullMappingTest {
         runBlocking {
             PullFixture().use { f ->
                 f.bind()
-                f.data.accountIdentities.initialize("phone", "self", "PHONE")
-                val device = DeviceId("phone")
+                val device = DeviceId(uuid("phone"))
+                f.data.accountIdentities.recordSource(device.value, "self", "PHONE", "scope-alice", local = true)
                 val self = PlayerId("self")
                 val format = Presets.TENNIS_SINGLES_BO3.format()
                 val genesis =
@@ -250,16 +259,16 @@ class CloudPullMappingTest {
                 f.events = { _, after, _ -> if (after == 0L) listOf(genesis) else emptyList() }
                 f.watermarks = { listOf(EventWatermark(device.value, 1, 1)) }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                val state = f.data.cloud.metadataState(CloudMetadataKind.HEADER, "match")!!
+                val state = f.data.cloud.metadataState(CloudMetadataKind.HEADER, MATCH)!!
                 assertEquals(CloudMetadataOrigin.CLOUD, state.origin)
                 assertNull(state.sourceDeviceId)
                 assertNull(state.writerProfileId)
                 assertEquals(1, f.data.events.unconfirmedCount())
-                f.data.events.markConfirmedUpTo("match", device.value, 1)
+                f.data.events.markConfirmedUpTo(MATCH, device.value, 1)
                 f.data.cloud.saveCursor(
                     "alice",
                     eu.advantly.data.CloudPullStore
-                        .eventStream("match"),
+                        .eventStream(MATCH),
                     0,
                 )
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
@@ -268,7 +277,7 @@ class CloudPullMappingTest {
         }
 
     @Test
-    fun downgradeAndObservedRedactionRemainPendingWithoutDeletingOrOverwritingEvents() =
+    fun downgradeToFeedAppliesAccessAtNewGenerationAndPurgesPrivateReplicaWithoutTombstone() =
         runBlocking {
             PullFixture().use { f ->
                 f.bind()
@@ -276,20 +285,35 @@ class CloudPullMappingTest {
                 var row = pullMatch()
                 f.metadata = { _, _ -> PullResponse(listOf(row), cursor = 1, visibilityEpoch = epoch) }
                 f.events = { _, after, _ -> if (after == 0L) listOf(pullEvent(1)) else emptyList() }
-                f.watermarks = { listOf(EventWatermark("remote", 1, 1)) }
+                f.watermarks = { listOf(EventWatermark(REMOTE, 1, 1)) }
                 assertEquals(CloudPullOutcome.COMPLETE, CloudPullRunner(f.backend, f.data).pullNow().outcome)
-                val original = f.data.events.eventsFor("match")
+                assertEquals(
+                    1,
+                    f.data.events
+                        .eventsFor(MATCH)
+                        .size,
+                )
                 epoch = 2
                 row = row.copy(access = "feed", redactionEpoch = 2)
                 val result = CloudPullRunner(f.backend, f.data).pullNow()
-                assertEquals(CloudPullOutcome.BLOCKED, result.outcome)
-                assertEquals(1, result.pendingRemovals)
-                assertEquals(1, result.pendingRedactions)
-                val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match")!!
+                // Entzug wirkt vor jeder weiteren Materialisierung: privater Bestand weg, Feedkarte bleibt, keine Feed-Redaktion offen.
+                assertEquals(CloudPullOutcome.COMPLETE, result.outcome)
+                assertEquals(0, result.pendingRemovals)
+                assertEquals(0, result.pendingRedactions)
+                val access = f.data.replicas.access(f.data.replicas.captureContext(), MATCH)!!
+                assertEquals(eu.advantly.data.ReplicaAccessLevel.FEED, access.access)
+                assertEquals(2, access.generation)
+                assertFalse(access.ready)
+                val snapshot = f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH)!!
                 assertEquals("feed", snapshot.access)
                 assertEquals(2, snapshot.redactionObserved)
-                assertEquals(0, snapshot.redactionApplied)
-                assertEquals(original, f.data.events.eventsFor("match"))
+                assertNull(snapshot.materializedVersion)
+                assertTrue(
+                    f.data.events
+                        .eventsFor(MATCH)
+                        .isEmpty(),
+                )
+                assertNull(f.data.matches.get(MatchId(MATCH)))
                 assertTrue(
                     f.data.matches
                         .deleted()
@@ -321,7 +345,7 @@ class CloudPullMappingTest {
                     ).cursor}",
                 )
                 assertNotNull(
-                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, "match"),
+                    f.data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, MATCH),
                     "Gültigen Serverzustand vollständig als Snapshot aufbewahren",
                 )
                 assertEquals(

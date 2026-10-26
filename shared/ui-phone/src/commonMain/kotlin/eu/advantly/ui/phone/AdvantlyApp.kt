@@ -53,6 +53,7 @@ import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.auth_open
+import eu.advantly.ui.phone.resources.profile_restore_previous
 import eu.advantly.ui.phone.resources.support_open
 import eu.advantly.ui.phone.resources.watch_takeover_confirm
 import eu.advantly.ui.phone.resources.watch_takeover_text
@@ -72,6 +73,7 @@ import org.jetbrains.compose.resources.stringResource
  *
  * @param debugTools Latenz-Overlay, Entprellung und Auto-Benchmark im Live-Menü (nur Debug-Builds/Preview)
  * @param autoBenchmark startet direkt ein Tennis-Match und den Auto-Benchmark (iOS-CI, Spike S4)
+ * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg im Profil; nur gesetzt, solange der Host ihn anbietet
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -90,6 +92,7 @@ fun AdvantlyApp(
     supportModel: SupportViewModel? = null,
     supportDiagnostics: Map<String, String> = emptyMap(),
     onShareExport: (() -> Unit)? = null,
+    onRestorePrevious: (() -> Unit)? = null,
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -130,6 +133,7 @@ fun AdvantlyApp(
                                 supportModel,
                                 supportDiagnostics,
                                 onShareExport,
+                                onRestorePrevious,
                             )
                         }
                     }
@@ -225,6 +229,7 @@ private fun TabLayer(
     supportModel: SupportViewModel?,
     supportDiagnostics: Map<String, String>,
     onShareExport: (() -> Unit)?,
+    onRestorePrevious: (() -> Unit)?,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
@@ -287,6 +292,11 @@ private fun TabLayer(
                                         },
                                         modifier = Modifier.testTag("profile_account"),
                                     ) { Text(stringResource(Res.string.auth_open)) }
+                                }
+                                if (onRestorePrevious != null) {
+                                    TextButton(onRestorePrevious, modifier = Modifier.testTag("profile_restore_previous")) {
+                                        Text(stringResource(Res.string.profile_restore_previous))
+                                    }
                                 }
                                 ComingSoonScreen(
                                     AppTab.Profile,

@@ -37,11 +37,13 @@ CREATE TRIGGER cloud_header_delete AFTER DELETE ON match_header BEGIN
     DELETE FROM cloud_metadata WHERE entity_id = old.id AND kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION');
 END;
 
-CREATE TRIGGER cloud_assignment_insert AFTER INSERT ON match_assignment BEGIN
+CREATE TRIGGER cloud_assignment_insert AFTER INSERT ON match_assignment
+WHEN NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
 END;
 
-CREATE TRIGGER cloud_assignment_delete AFTER DELETE ON match_assignment BEGIN
+CREATE TRIGGER cloud_assignment_delete AFTER DELETE ON match_assignment
+WHEN NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = old.match_id;
 END;
 
@@ -49,22 +51,24 @@ CREATE TRIGGER cloud_player_insert AFTER INSERT ON player BEGIN
     INSERT INTO cloud_metadata(kind, entity_id) VALUES ('PLAYER', new.id);
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
         SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
-        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.id OR instr(player_json, '"' || new.id || '"') > 0
     );
 END;
 
 CREATE TRIGGER cloud_player_update AFTER UPDATE OF display_name, kind ON player
-WHEN old.display_name IS NOT new.display_name OR (old.kind = 'ARCHIVED') != (new.kind = 'ARCHIVED')
-    OR (old.kind = 'PLACEHOLDER') != (new.kind = 'PLACEHOLDER') BEGIN
+WHEN (old.display_name IS NOT new.display_name OR (old.kind = 'ARCHIVED') != (new.kind = 'ARCHIVED')
+    OR (old.kind = 'PLACEHOLDER') != (new.kind = 'PLACEHOLDER'))
+AND NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PLAYER' AND entity_id = new.id;
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
         SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.id || '"') > 0
-        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.id OR instr(player_json, '"' || new.id || '"') > 0
     );
 END;
 
-CREATE TRIGGER cloud_assignment_update AFTER UPDATE OF player_json ON match_assignment
-WHEN old.player_json IS NOT new.player_json BEGIN
+CREATE TRIGGER cloud_assignment_update AFTER UPDATE OF player_json, player_id ON match_assignment
+WHEN (old.player_json IS NOT new.player_json OR old.player_id IS NOT new.player_id)
+AND NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
 END;
 
@@ -74,7 +78,7 @@ WHEN new.kind = 'PLAYER' AND (old.origin IS NOT new.origin OR old.source_device_
     OR old.writer_profile_id IS NOT new.writer_profile_id) BEGIN
     UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id IN (
         SELECT id FROM match_header WHERE instr(lineup_json, '"' || new.entity_id || '"') > 0
-        UNION SELECT match_id FROM match_assignment WHERE instr(player_json, '"' || new.entity_id || '"') > 0
+        UNION SELECT match_id FROM match_assignment WHERE player_id = new.entity_id OR instr(player_json, '"' || new.entity_id || '"') > 0
     );
 END;
 
@@ -83,7 +87,7 @@ CREATE TRIGGER cloud_player_source_binding AFTER INSERT ON cloud_device_owner BE
         SELECT h.id FROM match_header h JOIN cloud_metadata p
             ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND instr(h.lineup_json, '"' || p.entity_id || '"') > 0
         UNION SELECT a.match_id FROM match_assignment a JOIN cloud_metadata p
-            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND instr(a.player_json, '"' || p.entity_id || '"') > 0
+            ON p.kind = 'PLAYER' AND p.source_device_id = new.device_id AND (a.player_id = p.entity_id OR instr(a.player_json, '"' || p.entity_id || '"') > 0)
     );
 END;
 
@@ -130,6 +134,11 @@ AND ((m.kind = 'PLAYER' AND EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity
 AND (m.kind != 'PROJECTION' OR NOT EXISTS (
     SELECT 1 FROM match_event e WHERE e.match_id = m.entity_id AND e.cloud_state != 1 AND e.id NOT IN :selectedEventIds
 ))
+-- Global redigierte Identitäten werden nie hochgeladen und belegen daher keinen Platz im Limit.
+AND (m.kind != 'PLAYER' OR NOT EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = m.entity_id))
+-- Keyset: Kotlin filtert blockierte Matches seitenweise vor dem effektiven Limit.
+AND (:afterRank IS NULL OR CASE m.kind WHEN 'PLAYER' THEN 0 WHEN 'HEADER' THEN 1 WHEN 'PARTICIPANTS' THEN 2 ELSE 3 END > :afterRank
+    OR (CASE m.kind WHEN 'PLAYER' THEN 0 WHEN 'HEADER' THEN 1 WHEN 'PARTICIPANTS' THEN 2 ELSE 3 END = :afterRank AND m.entity_id > :afterId))
 ORDER BY CASE m.kind WHEN 'PLAYER' THEN 0 WHEN 'HEADER' THEN 1 WHEN 'PARTICIPANTS' THEN 2 ELSE 3 END, m.entity_id
 LIMIT :limit;
 
@@ -143,6 +152,7 @@ WHERE m.revision > m.uploaded_revision AND (m.writer_profile_id = :profile OR EX
 AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id AND m.kind != 'PLAYER')
 AND CASE
     WHEN m.kind = 'PLAYER' THEN EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind != 'PLACEHOLDER')
+        AND NOT EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = m.entity_id)
     WHEN m.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') THEN EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id)
     ELSE 0 END;
 
@@ -176,8 +186,27 @@ SELECT count(*) FROM cloud_metadata m
 LEFT JOIN local_source s ON s.device_id = m.source_device_id
 LEFT JOIN cloud_device_owner o ON o.device_id = s.device_id
 WHERE m.kind = 'PLAYER' AND m.entity_id = :id AND m.origin != 'UNKNOWN'
-AND (m.writer_profile_id = :profileId OR o.profile_id = :profileId);
+AND (m.writer_profile_id = :profileId OR o.profile_id = :profileId)
+AND NOT EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = :id);
 
 genesisForMatch:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload
 FROM match_event WHERE match_id = ? AND (type = 'MatchCreated' OR type = '') ORDER BY lamport, device_id, id;
+
+-- Nur zuvor saubere, eindeutig diesem Konto zugeordnete Materialisierungen ohne eigenen Teilnehmer-Upload.
+playerDownloadParticipantPage:
+SELECT m.entity_id, m.revision, m.writer_profile_id, s.materialized_version
+FROM cloud_metadata m JOIN cloud_pull_snapshot s
+ON s.kind = 'MATCH' AND s.entity_id = m.entity_id AND s.profile_id = :profileId
+WHERE m.kind = 'PARTICIPANTS' AND m.origin = 'CLOUD' AND m.source_device_id IS NULL
+AND m.writer_profile_id IS NULL
+AND m.revision = m.uploaded_revision AND s.materialized_version IS NOT NULL
+AND s.access = 'member' AND s.removal_pending = 0
+AND (:afterId IS NULL OR m.entity_id > :afterId)
+AND NOT EXISTS (SELECT 1 FROM cloud_pull_snapshot other WHERE other.kind = 'MATCH' AND other.entity_id = m.entity_id
+    AND other.profile_id != :profileId AND other.materialized_version IS NOT NULL)
+AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id)
+AND (EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id AND instr(h.lineup_json, '"' || :playerId || '"') > 0)
+    OR EXISTS (SELECT 1 FROM match_assignment a WHERE a.match_id = m.entity_id
+        AND (a.player_id = :playerId OR instr(a.player_json, '"' || :playerId || '"') > 0)))
+ORDER BY m.entity_id LIMIT 200;

@@ -98,7 +98,9 @@ internal class CloudHttp(
                                     ?.get("message")
                                     ?.jsonPrimitive
                                     ?.content
-                                    ?.takeIf { it in ERRORS }
+                                    ?.takeIf { it in ERRORS || it == RESTART_REQUIRED }
+                        // Veraltetes G/E (SQLSTATE 40001): kein Rechteverlust, sondern Neustart nach frischem Pull.
+                        if (error == RESTART_REQUIRED) throw CloudException(RESTART_REQUIRED, false)
                         if (error != null) throw CloudException(error.takeIf { it in ERRORS } ?: "cloud_connection_failed", true)
                         if (response.status.value !in 200..299) {
                             throw CloudException("cloud_connection_failed", response.status.value in setOf(401, 403))
@@ -191,11 +193,19 @@ internal class CloudHttp(
     }
 
     private companion object {
+        const val RESTART_REQUIRED = "restart_required"
+
         val ERRORS =
             setOf(
                 "profile_not_active",
+                "account_suspended",
                 "device_not_authorized",
                 "device_revoked",
+                "device_unrevoke_self",
+                "device_unrevoke_caller_too_new",
+                "device_not_found",
+                "device_not_revoked",
+                "account_deletion_pending",
                 "cloud_session_changed",
                 "profile_missing",
                 "age_ticket_expired",

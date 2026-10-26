@@ -54,6 +54,7 @@ androidx-compose-ui-test = "1.10.0"
 kotest = "6.2.6"
 # SQLDelight 2.4.1 (06.10.2026): native-driver inkl. sqliter/stately auch für watchosDeviceArm64 (Spike S1, geprüft 2026-10-15)
 sqldelight = "2.4.1"
+androidx-sqlite = "2.7.1"
 # Wear Data Layer (MessageClient, DataClient, CapabilityClient) – Google Maven, geprüft 2026-10-15
 play-services-wearable = "20.0.1"
 
@@ -110,6 +111,7 @@ androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "andr
 
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "androidx-sqlite" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "play-services-wearable" }

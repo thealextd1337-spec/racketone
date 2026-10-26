@@ -66,10 +66,16 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
                     },
             )
         }
+    val referenced = matches.map { it.id }.toSet() + events.map { it.matchId }
     return PushBatch(
         players = players.map { it.value.let { player -> PlayerDto(player.id, player.kind, player.displayName, player.deleted) } },
         matches = matches,
         events = events.map(EventRows::toRow),
+        // E nur für tatsächlich gesendete Matches; Player-only behält G mit leerer Map.
+        lifecycle =
+            lifecycle?.let { proof ->
+                CloudPushLifecycle(proof.generation, proof.redactionEpochs.filterKeys { it in referenced }.mapValues { it.value.toInt() })
+            },
     )
 }
 

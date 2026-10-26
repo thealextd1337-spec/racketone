@@ -32,4 +32,15 @@ interface CloudPullPort {
         attempt: CloudPullAttempt,
         matchId: String,
     ): List<EventWatermark>
+
+    suspend fun pullRedactionPage(
+        attempt: CloudPullAttempt,
+        request: CloudRedactionRequest,
+    ): CloudRedactionPage
+
+    /** `cloud_match_readiness_v1`: Versionsvektor bis H; nur zusammen mit abgeschlossenem Redaktionstransfer verwenden. */
+    suspend fun pullReadiness(
+        attempt: CloudPullAttempt,
+        request: CloudReadinessRequest,
+    ): CloudMatchReadiness
 }

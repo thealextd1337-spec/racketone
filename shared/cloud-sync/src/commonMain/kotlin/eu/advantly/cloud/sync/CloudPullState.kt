@@ -10,11 +10,16 @@ data class CloudPullState(
     val completedMetadataPages: Int = 0,
     val completedEventPages: Int = 0,
     val completedEventJobs: Int = 0,
+    val completedRedactionPages: Int = 0,
     val rpcCount: Int = 0,
     val pendingRemovals: Long = 0,
     val pendingRedactions: Long = 0,
     val failedEventJobs: Long = 0,
     val pendingMaterializations: Long = 0,
+    /** Mitgliedsmatches ohne geprüfte Readiness bei G; kein Lesefreigabe-Ersatz. */
+    val pendingReadiness: Long = 0,
+    /** Durch `restart_required` verworfene Handles in diesem Lauf. */
+    val restarts: Int = 0,
     val failure: String? = null,
 ) {
     val running: Boolean get() = outcome == CloudPullOutcome.RUNNING

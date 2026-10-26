@@ -2,7 +2,8 @@ package eu.advantly.presentation.auth
 
 import kotlinx.coroutines.flow.StateFlow
 
-enum class PhoneUploadPhase { IDLE, BINDING, UPLOADING, CLOSED }
+/** [WAITING]: wartet auf einen laufenden Download desselben Kontos (Kontosperre). */
+enum class PhoneUploadPhase { IDLE, WAITING, BINDING, UPLOADING, CLOSED }
 
 enum class PhoneUploadResult { DRAINED, PARTIAL, LIMIT_REACHED, BLOCKED, FAILED, CANCELLED }
 

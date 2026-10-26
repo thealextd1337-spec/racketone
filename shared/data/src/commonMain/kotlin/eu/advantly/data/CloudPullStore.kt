@@ -1,6 +1,8 @@
 package eu.advantly.data
 
 import eu.advantly.data.db.AdvantlyDatabase
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /** D1-Persistenz auf demselben seriellen Kontext wie LocalData. Alle Commits verlangen einen synchronen Fence. */
@@ -9,6 +11,15 @@ class CloudPullStore internal constructor(
     private val data: LocalData,
 ) {
     private val queries = database.cloudPullQueries
+
+    /** Nur der bei [beginRun] erfasste Replikatkontext trägt Commits dieses Laufs; Auswahlwechsel (auch A → B → A) brechen ab. */
+    private var runContext: RunContext? = null
+
+    private class RunContext(
+        val profileId: String,
+        val runSerial: Long,
+        val ctx: ReplicaContext,
+    )
 
     fun progress(profileId: String): CloudPullProgress {
         require(profileId.isNotBlank())
@@ -31,27 +42,79 @@ class CloudPullStore internal constructor(
     fun beginRun(
         profileId: String,
         fence: () -> Unit,
-    ): CloudPullProgress =
-        data.transaction {
-            fence()
-            require(profileId.isNotBlank())
-            queries.ensureProfile(profileId)
-            val state = progress(profileId)
-            check(state.runSerial < Long.MAX_VALUE)
-            queries.beginRun(profileId)
-            if (!state.roundActive) {
-                check(state.checkRound < Long.MAX_VALUE)
-                queries.startCheckRound(profileId)
+    ): CloudPullProgress {
+        val ctx = data.replicas.captureContext()
+        val started =
+            data.transaction {
+                fence()
+                require(profileId.isNotBlank())
+                check(ctx.accountKey == profileId) { "Replikatkontext gehört zu einem anderen Konto" }
+                queries.ensureProfile(profileId)
+                val state = progress(profileId)
+                check(state.runSerial < Long.MAX_VALUE)
+                queries.beginRun(profileId)
+                if (!state.roundActive) {
+                    check(state.checkRound < Long.MAX_VALUE)
+                    queries.startCheckRound(profileId)
+                }
+                fence()
+                data.replicas.validate(ctx)
+                progress(profileId)
             }
-            fence()
-            progress(profileId)
-        }
+        runContext = RunContext(profileId, started.runSerial, ctx)
+        return started
+    }
 
     fun requireRun(
         profileId: String,
         runSerial: Long,
     ) {
         check(progress(profileId).runSerial == runSerial) { "Pull-Lauf wurde ersetzt" }
+        context(profileId, runSerial)
+    }
+
+    private fun context(
+        profileId: String,
+        runSerial: Long,
+    ): ReplicaContext {
+        val current = runContext?.takeIf { it.profileId == profileId && it.runSerial == runSerial }
+        checkNotNull(current) { "Pull-Lauf ohne gültigen Replikatkontext" }
+        data.replicas.validate(current.ctx)
+        return current.ctx
+    }
+
+    /**
+     * ABSENT bei G für Matches, die der letzte vollständige Katalog dieser Epoche nicht mehr geliefert hat.
+     * Begrenzt je Transaktion; während eines laufenden Neuscans geschieht nichts. Liefert die Zahl angewandter Matches.
+     */
+    fun applyMissing(
+        profileId: String,
+        runSerial: Long,
+        fence: () -> Unit,
+    ): Int =
+        data.transaction {
+            fence()
+            requireRun(profileId, runSerial)
+            val state = progress(profileId)
+            val generation = state.visibilityEpoch
+            if (state.targetEpoch != null || generation == null) return@transaction 0
+            val ctx = context(profileId, runSerial)
+            val missing = queries.missingMatches(profileId, state.scanRun, generation, MISSING_PAGE).executeAsList()
+            missing.forEach { data.replicas.applyAccess(ctx, it, generation, ReplicaAccessLevel.ABSENT, fence) }
+            fence()
+            missing.size
+        }
+
+    /** restart_required: Handle verwerfen und zuerst einen frischen Katalog holen, bevor Event-/Readiness-Arbeit weiterläuft. */
+    fun restartCatalog(
+        profileId: String,
+        runSerial: Long,
+        fence: () -> Unit,
+    ) = data.transaction {
+        fence()
+        requireRun(profileId, runSerial)
+        queries.restartCatalog(profileId)
+        fence()
     }
 
     fun snapshot(
@@ -76,6 +139,16 @@ class CloudPullStore internal constructor(
             )
         }
 
+    /** Serverseitiger Ersteller (`createdBy`) aus dem gezogenen Match-Snapshot; `null` ohne Snapshot oder ohne String-Feld. */
+    fun matchCreatedBy(
+        profileId: String,
+        matchId: String,
+    ): String? {
+        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return null
+        val createdBy = runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
+        return createdBy?.takeIf { it.isString }?.content
+    }
+
     /** false: Epoche wechselte hinter Cursor null; Antwort verwerfen und dauerhaft ab null neu beginnen. */
     fun commitMetadata(
         profileId: String,
@@ -87,6 +160,7 @@ class CloudPullStore internal constructor(
         data.transaction {
             fence()
             requireRun(profileId, runSerial)
+            val ctx = context(profileId, runSerial)
             var state = progress(profileId)
             check(state.cursor == inputCursor)
             require(page.cursor >= inputCursor && page.visibilityEpoch >= 0)
@@ -95,6 +169,10 @@ class CloudPullStore internal constructor(
             if (epoch != page.visibilityEpoch) {
                 check(state.scanRun < Long.MAX_VALUE)
                 queries.startScan(page.visibilityEpoch, profileId)
+                // Ready gilt nur für (Match, G): ältere Generationen verlieren es sofort, nicht erst beim Wiedersehen.
+                data.replicas.markNotReadyBefore(ctx, page.visibilityEpoch, fence)
+                // Jede Gerätefreigabe erhöht G (K4-U): eine später freigegebene Uhr lädt ihre abgelehnten Events nach.
+                data.cloud.resetDeviceRejections()
                 data.cloud.saveCursor(profileId, METADATA_STREAM, 0)
                 state = progress(profileId)
                 if (inputCursor != 0L) {
@@ -116,7 +194,23 @@ class CloudPullStore internal constructor(
             page.matches.forEach { match ->
                 require(match.access in setOf("member", "feed") && match.redactionEpoch >= 0)
                 val old = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)
-                val removal = match.deleted || (old?.access == "member" && match.access != "member")
+                val level = if (match.access == "member") ReplicaAccessLevel.MEMBER else ReplicaAccessLevel.FEED
+                val before = data.replicas.access(ctx, match.id)
+                // Zugriff bei G vor jeder Materialisierung; eine ältere Generation darf nichts mehr materialisieren.
+                if (data.replicas.applyAccess(ctx, match.id, page.visibilityEpoch, level, fence) == TransitionResult.IGNORED) {
+                    queries.markSeen(state.scanRun, profileId, match.id)
+                    return@forEach
+                }
+                // Neues E bei gleichem G: Namen sind serverseitig schon redigiert, lokal also sofort sperren.
+                if (match.redactionEpoch > (data.replicas.access(ctx, match.id)?.redactionEpoch ?: 0)) {
+                    data.replicas.markNotReady(ctx, match.id, fence)
+                }
+                val retained = database.matchHeaderQueries.countById(match.id).executeAsOne() > 0
+                // Ein vollzogener Entzug hinterlässt nichts; nur zurückgehaltene lokale Daten bleiben als D2-Rest sichtbar.
+                val removal = match.deleted || (old?.access == "member" && match.access != "member" && retained)
+                // Schema-10-Altbestand ohne Access-Zeile: der erste Access löscht den eigenen Snapshot, der Beleg bleibt gültig.
+                val legacyProof = old?.materializedVersion?.takeIf { before == null && level == ReplicaAccessLevel.MEMBER }
+                val materializedVersion = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)?.materializedVersion ?: legacyProof
                 val saved =
                     saveSnapshot(
                         profileId,
@@ -131,14 +225,16 @@ class CloudPullStore internal constructor(
                         removal,
                     )
                 queries.markSeen(state.scanRun, profileId, match.id)
-                if (saved && match.access == "member" && !match.deleted) {
+                if (legacyProof != null) queries.materialized(legacyProof, profileId, "MATCH", match.id)
+                if (match.access == "member" && !match.deleted) {
                     val record = match.record
-                    if (record != null) {
+                    if (saved && record != null) {
                         require(record.id.value == match.id)
-                        if (data.cloud.materializePullMatch(record, profileId, old?.materializedVersion)) {
+                        if (data.cloud.materializePullMatch(record, profileId, materializedVersion)) {
                             queries.materialized(match.serverVersion, profileId, "MATCH", match.id)
                         }
                     }
+                    // Auch bei unverändertem Snapshot: ein Generationswechsel hat die Eventarbeit bereits entfernt.
                     queries.ensureEventWork(profileId, match.id)
                     if (old != null && (
                             match.serverVersion > old.serverVersion || match.access != old.access ||
@@ -150,10 +246,15 @@ class CloudPullStore internal constructor(
                     // Ohne Kopf ist noch kein Download-Herkunftsbeleg vor einer möglichen Genesis vorhanden.
                     val pending = database.matchHeaderQueries.countById(match.id).executeAsOne() == 0L
                     queries.setMaterializationPending(if (pending) 1 else 0, profileId, match.id)
+                    adoptReadiness(ctx, profileId, match, before, page.visibilityEpoch, fence)
                 }
             }
             if (!page.hasMore) {
-                if (state.targetEpoch != null) queries.markMissing(profileId, state.scanRun)
+                if (state.targetEpoch != null) {
+                    // Fehlende Matches erst hier markieren; ABSENT folgt begrenzt über applyMissing.
+                    queries.markMissing(profileId, state.scanRun)
+                    queries.reopenUnready(profileId)
+                }
                 queries.completeMetadata(page.visibilityEpoch, profileId)
             } else {
                 queries.incompleteMetadata(profileId)
@@ -164,6 +265,31 @@ class CloudPullStore internal constructor(
             fence()
             true
         }
+
+    /**
+     * Übernahme bei neuem G: Der Readiness-Vektor bis H hängt nicht von G ab. Galt der letzte Beweis für die vorige
+     * Mitgliedsgeneration und sind E und serverVersion unverändert, wird ready ohne neuen Abruf im selben Commit gesetzt.
+     */
+    private fun adoptReadiness(
+        ctx: ReplicaContext,
+        profileId: String,
+        match: CloudPullMatch,
+        before: ReplicaAccess?,
+        generation: Long,
+        fence: () -> Unit,
+    ) {
+        if (before?.access != ReplicaAccessLevel.MEMBER || before.generation == generation) return
+        val proof = queries.readinessMark(profileId, match.id).executeAsOneOrNull() ?: return
+        val snapshot = requireNotNull(snapshot(profileId, CloudPullEntityKind.MATCH, match.id))
+        if (proof.proof_generation != before.generation || proof.proof_epoch != match.redactionEpoch ||
+            before.redactionEpoch != match.redactionEpoch || proof.proof_version != match.serverVersion ||
+            snapshot.materializedVersion != match.serverVersion || snapshot.removalPending
+        ) {
+            return
+        }
+        data.replicas.markReady(ctx, match.id, generation, match.redactionEpoch, fence)
+        queries.adoptReadinessProof(generation, profileId, match.id)
+    }
 
     private fun saveSnapshot(
         profileId: String,
@@ -298,6 +424,8 @@ class CloudPullStore internal constructor(
         val match = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId))
         check(match.access == "member" && !match.removalPending)
         check(database.matchTombstoneQueries.countById(work.matchId).executeAsOne() == 0L)
+        val access = data.replicas.access(context(work.profileId, runSerial), work.matchId)
+        check(access?.access == ReplicaAccessLevel.MEMBER && access.generation != null) { "Kein Mitgliedszugriff bei G" }
     }
 
     /** Eigene atomare Grenze: Eventpayloads, Empfangsnachweise und Eventcursor; kein Metadatencursor. */
@@ -395,6 +523,233 @@ class CloudPullStore internal constructor(
             matches
         }
 
+    /**
+     * Ausstehender Redaktionstransfer eines Mitgliedsmatches bei G: solange für E > 0 bei dieser Generation noch kein
+     * vollständiger Transfer (G, E, H) angewandt ist. Ein Generationswechsel verlangt daher einen neuen Transfer.
+     */
+    fun redactionWork(
+        work: CloudPullEventWork,
+        runSerial: Long,
+    ): CloudPullRedactionWork? {
+        requireWork(work, runSerial)
+        val ctx = context(work.profileId, runSerial)
+        val access = checkNotNull(data.replicas.access(ctx, work.matchId))
+        val generation = checkNotNull(access.generation)
+        val epoch = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId)).redactionObserved
+        // Ready (auch übernommen) belegt angewandtes E; ein höheres E hat ready bereits im Katalog-Commit entzogen.
+        if (epoch == 0L || epoch < access.redactionEpoch || access.ready) return null
+        val transfer =
+            data.replicas.redactionProgress(ctx, work.matchId)?.takeIf {
+                it.transfer.generation == generation && it.transfer.epoch == epoch
+            }
+        if (transfer?.completed == true) return null
+        return CloudPullRedactionWork(
+            work.matchId,
+            generation,
+            epoch,
+            transfer?.transfer?.highWatermark,
+            transfer?.cursor ?: RedactionCursor(null, 0),
+        )
+    }
+
+    /**
+     * Übernimmt genau eine authentisierte Cloud-Redaktionsseite atomar: Transfer (G, E, H) bei Bedarf beginnen, in die
+     * zulässigen Data-Seiten (≤ 200 IDs, ≤ 500 Events, ≤ 64 KiB) teilen und nach der letzten Seite vollständig anwenden.
+     * true: Transfer abgeschlossen und E lokal angewandt.
+     */
+    fun stageRedaction(
+        work: CloudPullEventWork,
+        runSerial: Long,
+        request: CloudPullRedactionWork,
+        highWatermark: Long,
+        playerIds: List<String>,
+        events: List<ReplicaRedactionEvent>,
+        idsDone: Boolean,
+        eventsDone: Boolean,
+        fence: () -> Unit,
+    ): Boolean =
+        data.transaction {
+            fence()
+            check(redactionWork(work, runSerial) == request) { "Redaktionsstand hat sich seit der Anfrage geändert" }
+            require(highWatermark >= 0 && (request.highWatermark == null || request.highWatermark == highWatermark))
+            val ctx = context(work.profileId, runSerial)
+            val id = "${ctx.accountKey}:${request.matchId}:${request.generation}:${request.redactionEpoch}"
+            if (request.highWatermark == null) {
+                data.replicas.beginRedaction(
+                    ctx,
+                    RedactionTransfer(id, request.matchId, request.generation, request.redactionEpoch, highWatermark),
+                    fence,
+                )
+            }
+            val progress = checkNotNull(data.replicas.redactionProgress(ctx, request.matchId))
+            check(progress.transfer.id == id && progress.cursor == request.cursor && !progress.completed)
+            redactionPages(progress, playerIds, events, idsDone, eventsDone).forEach {
+                data.replicas.stageRedaction(ctx, id, it, fence)
+            }
+            val complete = idsDone && eventsDone
+            if (complete) {
+                data.replicas.completeRedaction(ctx, id, fence)
+                queries.redactionApplied(request.redactionEpoch, work.profileId, request.matchId)
+            }
+            fence()
+            complete
+        }
+
+    private fun redactionPages(
+        start: RedactionProgress,
+        playerIds: List<String>,
+        events: List<ReplicaRedactionEvent>,
+        idsDone: Boolean,
+        eventsDone: Boolean,
+    ): List<RedactionPage> {
+        val pages = mutableListOf<RedactionPage>()
+        var from = start.cursor
+        var rest = events
+        do {
+            val ids = if (pages.isEmpty()) playerIds else emptyList()
+            val empty = RedactionPage(start.nextPageIndex + pages.size, from, from, ids, emptyList(), idsDone, eventsDone)
+            var size = DataJson.encodeToString(RedactionPage.serializer(), empty).encodeToByteArray().size + CURSOR_SLACK
+            var count = 0
+            while (count < rest.size) {
+                val extra = DataJson.encodeToString(ReplicaRedactionEvent.serializer(), rest[count]).encodeToByteArray().size + 1
+                if (size + extra > ReplicaLifecycleStore.MAX_REDACTION_PAGE_BYTES) break
+                size += extra
+                count++
+            }
+            // Ein einzelnes übergroßes Event weist stageRedaction zurück, statt endlos leere Seiten zu erzeugen.
+            if (count == 0 && rest.isNotEmpty() && ids.isEmpty()) count = 1
+            val chunk = rest.take(count)
+            rest = rest.drop(count)
+            val next = RedactionCursor(ids.lastOrNull() ?: from.afterPlayerId, chunk.lastOrNull()?.serverSeq ?: from.afterServerSeq)
+            pages += empty.copy(next = next, events = chunk, eventsDone = eventsDone && rest.isEmpty())
+            from = next
+        } while (rest.isNotEmpty())
+        return pages
+    }
+
+    /**
+     * Readiness-Ziel nur für (Match, G) mit Mitgliedszugriff, abgeschlossenem Katalog derselben Epoche und angewandtem E.
+     * Auch ready-Matches prüft jede Runde so. H stammt für noch nicht bereite Matches mit E > 0 aus dem vollständigen
+     * Transfer, sonst aus dem für diese Runde festgehaltenen Serverwert (null = erst abrufen). Laufende Uploads oberhalb
+     * von H verhindern den Rundenabschluss daher nicht.
+     */
+    fun readinessWork(
+        work: CloudPullEventWork,
+        runSerial: Long,
+    ): CloudPullReadinessWork? {
+        requireWork(work, runSerial)
+        val ctx = context(work.profileId, runSerial)
+        val access = checkNotNull(data.replicas.access(ctx, work.matchId))
+        val generation = checkNotNull(access.generation)
+        val progress = progress(work.profileId)
+        if (progress.targetEpoch != null || progress.visibilityEpoch != generation) return null
+        val epoch = access.redactionEpoch
+        if (requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId)).redactionObserved != epoch) return null
+        val high =
+            if (epoch > 0 && !access.ready) {
+                data.replicas
+                    .redactionProgress(ctx, work.matchId)
+                    ?.takeIf { it.completed && it.transfer.generation == generation && it.transfer.epoch == epoch }
+                    ?.transfer
+                    ?.highWatermark ?: return null
+            } else {
+                queries
+                    .readinessMark(work.profileId, work.matchId)
+                    .executeAsOneOrNull()
+                    ?.takeIf { it.generation == generation && it.redaction_epoch == epoch && it.check_round == progress.checkRound }
+                    ?.high_watermark
+            }
+        return CloudPullReadinessWork(work.matchId, generation, epoch, high)
+    }
+
+    /**
+     * Prüft einen authentisierten Readiness-Vektor bis H gegen heruntergeladene lokale Events und den materialisierten
+     * Snapshot. Nur bei exakter Abdeckung wird ready unter Fence gesetzt; eigene ungesendete Events zählen nie mit.
+     * Bei exakter Abdeckung gilt die Eventarbeit dieser Runde als geprüft, auch wenn nur der Snapshot noch veraltet ist.
+     */
+    fun applyReadiness(
+        work: CloudPullEventWork,
+        runSerial: Long,
+        request: CloudPullReadinessWork,
+        highWatermark: Long,
+        serverVersion: Long,
+        server: List<CloudPullWatermark>,
+        fence: () -> Unit,
+    ): CloudPullReadinessResult =
+        data.transaction {
+            fence()
+            check(readinessWork(work, runSerial) == request) { "Readiness-Stand hat sich seit der Anfrage geändert" }
+            require(highWatermark >= 0 && (request.highWatermark == null || request.highWatermark == highWatermark))
+            require(server.map { it.deviceId }.distinct().size == server.size)
+            require(server.all { it.deviceId.isNotBlank() && it.maxSeq > 0 && it.eventCount in 1..it.maxSeq })
+            require(server.sumOf { it.eventCount } <= highWatermark)
+            queries.ensureReadinessMark(work.profileId, work.matchId, request.generation, request.redactionEpoch, highWatermark)
+            queries.holdReadinessMark(
+                request.generation,
+                request.redactionEpoch,
+                highWatermark,
+                progress(work.profileId).checkRound,
+                work.profileId,
+                work.matchId,
+            )
+            val local =
+                queries
+                    .readinessWatermarks(work.profileId, work.matchId, highWatermark, if (work.repairing) 1 else 0, work.repairRun)
+                    .executeAsList()
+                    .map { CloudPullWatermark(it.device_id, requireNotNull(it.max_seq), it.event_count) }
+            val snapshot = requireNotNull(snapshot(work.profileId, CloudPullEntityKind.MATCH, work.matchId))
+            val result =
+                when {
+                    local.toSet() != server.toSet() && work.cursor < highWatermark -> {
+                        queries.reopenEventWork(work.profileId, work.matchId)
+                        CloudPullReadinessResult.MISSING_EVENTS
+                    }
+
+                    local.toSet() != server.toSet() -> {
+                        check(work.repairRun < Long.MAX_VALUE)
+                        queries.startRepair(work.profileId, work.matchId)
+                        queries.reopenEventWork(work.profileId, work.matchId)
+                        data.cloud.saveCursor(work.profileId, eventStream(work.matchId), 0)
+                        CloudPullReadinessResult.GAP
+                    }
+
+                    snapshot.serverVersion != serverVersion || snapshot.materializedVersion != serverVersion -> {
+                        completeChecked(work)
+                        CloudPullReadinessResult.STALE_SNAPSHOT
+                    }
+
+                    else -> {
+                        completeChecked(work)
+                        data.replicas.markReady(
+                            context(work.profileId, runSerial),
+                            work.matchId,
+                            request.generation,
+                            request.redactionEpoch,
+                            fence,
+                        )
+                        queries.saveReadinessProof(
+                            request.generation,
+                            request.redactionEpoch,
+                            highWatermark,
+                            serverVersion,
+                            work.profileId,
+                            work.matchId,
+                        )
+                        CloudPullReadinessResult.READY
+                    }
+                }
+            fence()
+            result
+        }
+
+    /** Exakter Vektor bis H ersetzt für diese Runde den Wasserstandsvergleich. */
+    private fun completeChecked(work: CloudPullEventWork) {
+        if (work.repairing) queries.finishRepair(work.profileId, work.matchId, work.repairRun)
+        queries.completeEventWork(progress(work.profileId).checkRound, work.profileId, work.matchId)
+    }
+
+    fun pendingReadiness(profileId: String): Long = queries.pendingReadinessCount(profileId).executeAsOne()
+
     fun pendingRemovals(profileId: String): Long = queries.pendingRemovalCount(profileId).executeAsOne()
 
     fun pendingRedactions(profileId: String): Long = queries.pendingRedactionCount(profileId).executeAsOne()
@@ -406,6 +761,10 @@ class CloudPullStore internal constructor(
     companion object {
         const val METADATA_STREAM: String = "pull"
         const val EVENT_REQUESTS_PER_METADATA_TURN: Long = 12
+        private const val MISSING_PAGE = 200L
+
+        // Platz für wachsende Cursorziffern zwischen Messung und endgültiger Seite.
+        private const val CURSOR_SLACK = 64
 
         fun eventStream(matchId: String): String = "pull:events:$matchId"
     }

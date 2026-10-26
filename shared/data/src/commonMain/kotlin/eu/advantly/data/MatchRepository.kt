@@ -133,6 +133,10 @@ class MatchRepository internal constructor(
     private val queries: MatchHeaderQueries,
     private val tombstones: MatchTombstoneQueries,
     private val assignments: (MatchId) -> Map<PlayerId, PlayerId>,
+    private val requireInsert: (String) -> Unit = {},
+    private val requireReadable: (String) -> Unit = {},
+    /** Schreibspur eigener Matches: Projektion und Kopf auch ohne Lesefreigabe (Vertrag P1-1). */
+    private val requireWritable: (String) -> Unit = requireReadable,
     private val created: (String) -> Unit = {},
 ) {
     /**
@@ -149,9 +153,13 @@ class MatchRepository internal constructor(
         previousMatchId: MatchId? = null,
     ): Boolean =
         queries.transactionWithResult {
+            requireInsert(id.value)
             if (isDeleted(id)) return@transactionWithResult false
             if (queries.countById(id.value).executeAsOne() > 0) {
-                previousMatchId?.let { queries.updatePrevious(it.value, id.value) }
+                previousMatchId?.let {
+                    requireReadable(id.value)
+                    queries.updatePrevious(it.value, id.value)
+                }
                 return@transactionWithResult false
             }
             queries.insertOrIgnore(
@@ -179,6 +187,7 @@ class MatchRepository internal constructor(
         score: ScoreSummary,
         updatedAtMs: Long,
     ) {
+        requireWritable(id.value)
         queries.updateProgress(
             status = status.name,
             winner = score.winner?.name,
@@ -196,10 +205,11 @@ class MatchRepository internal constructor(
         id: MatchId,
         meta: MatchMeta,
     ) {
+        requireWritable(id.value)
         queries.updateMeta(DataJson.encodeToString(MatchMeta.serializer(), meta), meta.surface?.name, meta.environment?.name, id.value)
     }
 
-    fun get(id: MatchId): MatchRecord? = queries.selectById(id.value).executeAsOneOrNull()?.toRecord()
+    fun get(id: MatchId): MatchRecord? = queries.selectReadableById(id.value).executeAsOneOrNull()?.toRecord()
 
     /**
      * Historie, neueste zuerst: optional nur [sport], nur Matches mit `createdAt` in [fromMs] bis ausschließlich [toMs].
@@ -280,6 +290,7 @@ class MatchRepository internal constructor(
 
     /** Löscht nur den Kopf; Events löscht [LocalData.deleteMatch] mit. */
     fun delete(id: MatchId) {
+        requireReadable(id.value)
         queries.deleteById(id.value)
     }
 

@@ -2,8 +2,19 @@ CREATE TABLE match_assignment (
     match_id TEXT NOT NULL,
     slot_id TEXT NOT NULL,
     player_json TEXT,
+    player_id TEXT,
+    source_event_id TEXT,
     PRIMARY KEY (match_id, slot_id)
 );
+
+-- Nur ein Wechsel zwischen redigierter und unredigierter Anzeige ändert den Teilnehmerinhalt.
+CREATE TRIGGER replica_assignment_source_update AFTER UPDATE OF source_event_id ON match_assignment
+WHEN old.source_event_id IS NOT new.source_event_id
+AND EXISTS (SELECT 1 FROM replica_redacted_event WHERE event_id = old.source_event_id)
+    != EXISTS (SELECT 1 FROM replica_redacted_event WHERE event_id = new.source_event_id)
+AND NOT EXISTS (SELECT 1 FROM setting WHERE key = 'replica.redacting' AND value = 'true') BEGIN
+    UPDATE cloud_metadata SET revision = revision + 1 WHERE kind = 'PARTICIPANTS' AND entity_id = new.match_id;
+END;
 
 forMatch:
 SELECT slot_id, player_json FROM match_assignment WHERE match_id = ?;
@@ -19,3 +30,16 @@ DELETE FROM match_assignment;
 
 hasSlot:
 SELECT count(*) FROM match_assignment WHERE match_id = ? AND slot_id = ?;
+
+identitiesForMatch:
+SELECT slot_id, player_id, player_json, source_event_id FROM match_assignment WHERE match_id = ?;
+
+putIdentity:
+INSERT OR REPLACE INTO match_assignment(match_id,slot_id,player_id,player_json) VALUES (?,?,?,?);
+
+recordSource:
+UPDATE match_assignment SET source_event_id = ? WHERE match_id = ? AND slot_id = ?;
+
+redactedSlots:
+SELECT slot_id FROM match_assignment a JOIN replica_redacted_event r ON r.event_id = a.source_event_id
+WHERE a.match_id = ?;

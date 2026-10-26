@@ -45,6 +45,8 @@ interface HomeActions {
 /**
  * Startliste (04 W1): fortsetzbares Match, „Wie letztes Mal“, Workout-Schalter, Telemetrie-Sichtbarkeit, letzte Ergebnisse;
  * EdgeButton „Neues Match“ (04 §1.2: im `edgeButton`-Slot des `ScreenScaffold`).
+ *
+ * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg; nur gesetzt, solange der Host ihn anbietet
  */
 @Composable
 fun HomeScreen(
@@ -52,6 +54,7 @@ fun HomeScreen(
     permissions: WorkoutPermissions,
     powerSave: Boolean,
     actions: HomeActions,
+    onRestorePrevious: (() -> Unit)? = null,
 ) {
     val listState = rememberScalingLazyListState()
     ScreenScaffold(
@@ -147,6 +150,16 @@ fun HomeScreen(
                     )
                 }
             }
+            if (onRestorePrevious != null) {
+                item {
+                    Button(
+                        onClick = onRestorePrevious,
+                        modifier = Modifier.fillMaxWidth().testTag(RESTORE_PREVIOUS_TAG),
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        label = { Text(stringResource(R.string.recovery_later_title), maxLines = 2) },
+                    )
+                }
+            }
             // P1-Gate: versteckter Feldtest-Schalter, nur Debug-Build
             if (FieldTestRecorder.AVAILABLE) item { FieldTestToggle() }
             item { PhoneStatusLabel(home.phoneLight, home.updateRequired, home.developmentBuild) }
@@ -211,3 +224,6 @@ fun telemetryVisibilityHint(visibility: TelemetryVisibility): Int =
     }
 
 const val TELEMETRY_VISIBILITY_TAG = "home_telemetry_visibility"
+
+/** Recovery-Paket: späterer Übernahmeweg auf der Startliste. */
+const val RESTORE_PREVIOUS_TAG = "home_restore_previous"

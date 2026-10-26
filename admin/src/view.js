@@ -1,4 +1,4 @@
-import { categoryLabel, priorityLabel, statusLabel, translate } from "./i18n.js";
+import { accountStatusLabel, categoryLabel, priorityLabel, statusLabel, translate } from "./i18n.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const iconParts = {
@@ -105,6 +105,18 @@ function formatDate(value, language) {
   return date.toLocaleString(locale(language), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+// Widerrufenes Gerät ohne Modell: Art, Plattform und ID genügen zum Abgleich mit der Meldung. support erhält keine ID.
+function deviceLabel(language, device) {
+  const kind = [device.kind, device.platform].filter(Boolean).join(" \u00b7 ") || translate(language, "accountDeviceUnknown");
+  return [kind, device.deviceId].filter(Boolean).join(" \u00b7 ");
+}
+
+function formatDay(value, language) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(locale(language), { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 function relativeAge(value, language) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -138,15 +150,24 @@ function alertBox(language, key, style = "error") {
 }
 
 export class AdminView {
-  constructor({ app = document.getElementById("app"), dialog = document.getElementById("public-confirm") } = {}) {
+  constructor({ app = document.getElementById("app"), dialog = document.getElementById("public-confirm"),
+    accountDialog = document.getElementById("account-confirm") } = {}) {
     this.app = app;
     this.dialog = dialog;
+    this.accountDialog = accountDialog;
     this.listeners = new Map();
     this.handleClick = (event) => {
       const target = event.target.closest?.("[data-action]");
       if (!target) return;
       if (target.dataset.action === "language") this.emit("language", { language: target.dataset.language });
       else if (target.dataset.action === "select-ticket") this.emit("select-ticket", { id: target.dataset.id });
+      else if (target.dataset.action === "workspace") this.emit("workspace", { value: target.dataset.workspace });
+      else if (target.dataset.action === "account-action") {
+        const field = (name) => this.app.querySelector(`[data-account-field="${name}"]`)?.value ?? "";
+        const fields = { reason: field("reason"), ticketId: field("ticketId") };
+        if (target.dataset.deviceId) fields.deviceId = target.dataset.deviceId;
+        this.emit("account-action", { action: target.dataset.accountAction, fields });
+      }
       else this.emit(target.dataset.action);
     };
     this.handleSubmit = (event) => {
@@ -176,6 +197,7 @@ export class AdminView {
       }
       else if (form.dataset.form === "ticket-update") this.emit("save-ticket", { fields: Object.fromEntries(values.entries()) });
       else if (form.dataset.form === "message") this.emit("send-message");
+      else if (form.dataset.form === "account-search") this.emit("account-search", { query: values.get("query") });
     };
     this.handleInput = (event) => {
       const target = event.target;
@@ -183,6 +205,7 @@ export class AdminView {
       if (target.dataset.field === "search") this.emit("search", { value: target.value });
       else if (target.dataset.field === "message") this.emit("composer", { body: target.value, mode: this.getComposerMode() });
       else if (target.dataset.ticketField) this.emit("ticket-draft", { fields: { [target.dataset.ticketField]: target.value } });
+      else if (target.dataset.accountField) this.emit("account-draft", { fields: { [target.dataset.accountField]: target.value } });
     };
     this.handleChange = (event) => {
       const target = event.target;
@@ -196,6 +219,7 @@ export class AdminView {
     document.addEventListener("input", this.handleInput);
     document.addEventListener("change", this.handleChange);
     this.dialog?.addEventListener("cancel", () => this.emit("cancel-public-send"));
+    this.accountDialog?.addEventListener("cancel", () => this.emit("cancel-account-action"));
   }
 
   on(event, callback) {
@@ -387,15 +411,130 @@ export class AdminView {
     refresh.disabled = state.listLoading;
     refresh.setAttribute("aria-label", translate(state.language, "refresh"));
     refresh.setAttribute("aria-busy", String(state.listLoading));
-    heading.append(titleGroup, refresh);
-
-    const workspace = node("div", `workspace${state.selectedId ? " has-selection" : ""}`);
-    workspace.append(this.renderList(state), this.renderDetail(state, data));
+    heading.append(titleGroup, this.workspaceToggle(state.language, state.workspace));
+    if (state.workspace !== "accounts") heading.append(refresh);
     shell.append(heading);
     if (state.rememberFailed) shell.append(alertBox(state.language, "rememberDeviceFailed", "warning"));
-    shell.append(workspace);
+    if (state.workspace === "accounts") shell.append(this.renderAccounts(state));
+    else {
+      const workspace = node("div", `workspace${state.selectedId ? " has-selection" : ""}`);
+      workspace.append(this.renderList(state), this.renderDetail(state, data));
+      shell.append(workspace);
+    }
     page.append(shell);
     return page;
+  }
+
+  workspaceToggle(language, current) {
+    const group = node("div", "language-toggle");
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", translate(language, "workspaceLabel"));
+    for (const [value, key] of [["tickets", "tickets"], ["accounts", "accountsTitle"]]) {
+      const button = node("button", `language-toggle__button${current === value ? " is-active" : ""}`, translate(language, key));
+      button.type = "button"; button.dataset.action = "workspace"; button.dataset.workspace = value;
+      button.setAttribute("aria-pressed", String(current === value));
+      group.append(button);
+    }
+    return group;
+  }
+
+  // Kontosupport: exakte Suche, minimaler Status; Aktionen nur für admin (Server prüft Rolle und AAL2 erneut).
+  renderAccounts(state) {
+    const language = state.language;
+    const panel = node("section", "detail-panel");
+    const body = node("div", "ticket-detail");
+    body.append(node("h2", "section-title", translate(language, "accountsTitle")), node("p", "inbox-heading__copy", translate(language, "accountsDescription")));
+    const search = node("form", "update-form");
+    search.dataset.form = "account-search";
+    const query = fieldInput({ type: "search", value: state.accountQuery, placeholder: translate(language, "accountQueryPlaceholder"), name: "query", focusKey: "account-query", required: true, maxLength: 120 });
+    query.autocapitalize = "none"; query.spellcheck = false;
+    const submit = node("button", "button button--accent", translate(language, state.accountLoading ? "accountSearching" : "accountSearch"));
+    submit.type = "submit"; submit.disabled = state.accountLoading || state.accountSaving;
+    const actions = node("div", "form-actions");
+    actions.append(node("p", "field-hint", translate(language, "accountQueryHint")), submit);
+    search.append(addFieldLabel(translate(language, "accountQuery"), query), actions);
+    body.append(search);
+    if (state.accountNotice) body.append(alertBox(language, state.accountNotice, state.accountNotice === "accountActionSaved" ? "success" : "error"));
+    if (state.account) {
+      body.append(this.renderAccountStatus(language, state.account));
+      body.append(state.viewerRole === "admin" ? this.renderAccountActions(state) : node("p", "field-hint", translate(language, "accountReadOnly")));
+    }
+    panel.append(body);
+    return panel;
+  }
+
+  renderAccountStatus(language, account) {
+    const section = node("section", "metadata-strip");
+    const item = (key, value) => {
+      const entry = node("div", "metadata-item");
+      entry.append(node("span", "metadata-item__label", translate(language, key)), node("span", "metadata-item__value metadata-item__value--contact", value || "\u2014"));
+      section.append(entry);
+    };
+    const yes = (flag) => translate(language, flag ? "accountYes" : "accountNo");
+    item("accountId", account.profileId);
+    item("accountAlias", account.alias ?? "");
+    item("accountStatus", accountStatusLabel(language, account.status));
+    item("accountSuspended", account.suspended ? `${yes(true)} \u00b7 ${formatDate(account.suspendedAt, language)}` : yes(false));
+    if (account.deletionRequestedAt) {
+      item("accountDeletionRequested", formatDate(account.deletionRequestedAt, language));
+      item("accountEarliestPurge", formatDate(account.earliestPurgeAt, language));
+    }
+    item("accountDevices", String(account.activeDevices ?? 0));
+    item("accountRevokedDevices", (account.revokedDevices ?? []).map((device) => deviceLabel(language, device)).join("; "));
+    item("accountLastActivity", account.lastActivityDay ? formatDay(account.lastActivityDay, language) : "");
+    const versions = account.consentVersions ?? {};
+    item("accountConsent", `${account.consentStatus ?? ""} \u00b7 ${translate(language, "accountTerms")} ${versions.TERMS ?? "\u2014"} \u00b7 ${translate(language, "accountPrivacy")} ${versions.PRIVACY ?? "\u2014"}`);
+    return section;
+  }
+
+  renderAccountActions(state) {
+    const language = state.language;
+    const account = state.account;
+    const draft = state.accountDraft ?? {};
+    // Kein <form>: Enter in einem Feld löst nie eine Aktion aus (implizites Absenden), jede Aktion hat ihren Knopf.
+    const form = node("div", "update-form");
+    const reason = fieldInput({ value: draft.reason, placeholder: translate(language, "updateReasonPlaceholder"), name: "reason", focusKey: "account-reason", required: true, maxLength: 500 });
+    reason.dataset.accountField = "reason";
+    form.append(addFieldLabel(translate(language, "updateReason"), reason), node("p", "field-hint", translate(language, "updateReasonHint")));
+    const buttons = node("div", "form-actions");
+    const button = (action, key, style = "button button--quiet", parent = buttons) => {
+      const element = node("button", style, translate(language, state.accountSaving ? "saving" : key));
+      element.type = "button"; element.dataset.action = "account-action"; element.dataset.accountAction = action;
+      element.disabled = state.accountSaving;
+      parent.append(element);
+      return element;
+    };
+    const ticketField = (labelKey, hintKey) => {
+      const ticket = fieldInput({ value: draft.ticketId, placeholder: translate(language, "accountTicketPlaceholder"), name: "ticketId", focusKey: "account-ticket", required: true, maxLength: 36 });
+      ticket.dataset.accountField = "ticketId"; ticket.autocapitalize = "none"; ticket.spellcheck = false;
+      form.append(addFieldLabel(translate(language, labelKey), ticket), node("p", "field-hint", translate(language, hintKey)));
+    };
+    if (account.status !== "deleting") {
+      button(account.suspended ? "unsuspend" : "suspend", account.suspended ? "accountUnsuspend" : "accountSuspend", "button button--accent");
+      button("revoke", "accountRevoke");
+    }
+    if (account.canCancelDeletion) {
+      ticketField("accountTicket", "accountCancelDeletionHint");
+      button("cancel-deletion", "accountCancelDeletion");
+    }
+    form.append(buttons);
+    // K4-U: Freigabe je widerrufenem Gerät; gesperrte Konten und Konten in Löschung lehnt auch der Server ab.
+    const revoked = account.revokedDevices ?? [];
+    if (revoked.length && account.status !== "deleting") {
+      form.append(node("h3", "section-title", translate(language, "accountRevokedDevices")));
+      if (account.suspended || account.status === "deletion_requested") {
+        form.append(node("p", "field-hint", translate(language, "accountUnrevokeUnavailable")));
+      } else {
+        ticketField("accountUnrevokeTicket", "accountUnrevokeHint");
+        for (const device of revoked) {
+          const row = node("div", "form-actions");
+          row.append(node("p", "field-hint", `${deviceLabel(language, device)} \u00b7 ${formatDate(device.revokedAt, language)}`));
+          button("unrevoke", "accountUnrevoke", "button button--quiet", row).dataset.deviceId = device.deviceId;
+          form.append(row);
+        }
+      }
+    }
+    return form;
   }
 
   renderList(state) {
@@ -700,6 +839,23 @@ export class AdminView {
 
   hidePublicConfirmation() {
     if (this.dialog?.open) this.dialog.close();
+  }
+
+  // Vor jeder zustandsändernden Kontoaktion: Aktion, Zielkonto und Begründung nennen.
+  showAccountConfirmation({ actionKey, alias, profileId, reason, device }) {
+    const language = this.currentLanguage ?? "en";
+    const text = (selector, value) => { const element = this.accountDialog?.querySelector(selector); if (element) element.textContent = value; };
+    text("#account-confirm-title", translate(language, "accountConfirmTitle"));
+    const target = `${translate(language, actionKey)} · ${translate(language, "accountConfirmTarget")} ${alias || "—"} (${profileId})`;
+    text("#account-confirm-copy", device ? `${target} · ${translate(language, "accountConfirmDevice")} ${deviceLabel(language, device)}` : target);
+    text("#account-confirm-preview", reason ?? "");
+    text("#account-cancel", translate(language, "cancel"));
+    text("#account-accept", translate(language, actionKey));
+    if (this.accountDialog && !this.accountDialog.open) this.accountDialog.showModal();
+  }
+
+  hideAccountConfirmation() {
+    if (this.accountDialog?.open) this.accountDialog.close();
   }
 
   dispose() {

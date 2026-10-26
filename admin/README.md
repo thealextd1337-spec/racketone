@@ -89,6 +89,28 @@ und [E-Mail-Vorlagen](https://supabase.com/docs/guides/auth/auth-email-templates
 
 Interne Notizen sind voreingestellt. Eine Nutzerantwort erfordert eine ausdrückliche Auswahl und Bestätigung. Bei Versionskonflikten wird der aktuelle Vorgang geladen; der Antwortentwurf bleibt erhalten.
 
+## Konten (K5)
+
+Der Umschalter „Konten“ neben „Meldungen“ öffnet die exakte Kontosuche: Konto-UUID, Freundescode oder genauer
+Alias. Kein Teiltreffer, keine Liste; mehrdeutige Aliase liefern kein Ergebnis. Angezeigt wird nur der minimale
+Status (Status, Sperre, Löschfrist, Anzahl aktiver Geräte, widerrufene Geräte mit Art, Plattform, ID (nur `admin`) und Zeitpunkt,
+letzter Aktivitätstag, Zustimmungsversion). Keine E-Mail, Matches, Gesundheits- oder Geburtsdaten, keine Anmeldung
+als Nutzer.
+
+`support` sieht nur den Status. `admin` kann sperren/entsperren, alle Geräte und Cloud-Sitzungen widerrufen und
+eine Löschung auf Nutzerwunsch zurücknehmen. Dafür ist die UUID einer Meldung Pflicht, die nach dem Löschantrag
+entstand: vom Kontoinhaber oder als Gastmeldung, deren Zuordnung die Begründung belegt (mindestens 20 Zeichen).
+„Gerätefreigabe wiederherstellen“ (K4-U) gibt ein widerrufenes Gerät wieder frei, mit derselben Regel: Meldung nach
+dem Widerruf. Eine Kontomeldung zählt nur, wenn sie von einem anderen Gerät des Kontos kam, das beim Melden nicht
+widerrufen war und schon vor dem Widerruf gebunden war; sonst `device_ticket_from_revoked_device` (vom freizugebenden
+oder einem damals widerrufenen Gerät), `device_ticket_device_unknown` (Sitzung an kein Gerät gebunden) bzw.
+`device_ticket_device_too_new` (Gerät erst nach dem Widerruf gebunden). Gastmeldungen mit Zuordnungsbeleg bleiben
+gültig. Gesperrte Konten und Konten in Löschung zeigen den Knopf nicht. Die Reihenfolge von Uhr und Handy ist egal.
+Jede Aktion verlangt eine Begründung (1–500 Zeichen), hat einen eigenen Knopf ohne Enter-Auslösung und läuft erst
+nach einer Rückfrage, die Aktion und Zielkonto nennt, bei der Freigabe auch das Gerät. Sie landet im Konto-Audit. Der Server prüft Rolle und AAL2 bei
+jedem Aufruf erneut; die Oberfläche blendet Aktionen für `support` nur aus. Details:
+[`supabase/README.md`](../supabase/README.md#k4k5-gerätewiderruf-und-kontosupport).
+
 ## Prüfungen
 
 ```powershell

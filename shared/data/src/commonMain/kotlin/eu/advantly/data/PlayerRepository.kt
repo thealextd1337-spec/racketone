@@ -38,9 +38,11 @@ class PlayerRepository internal constructor(
     private val queries: PlayerQueries,
     private val locallyCreated: (String) -> Unit = {},
     private val sourcePlayerCreated: (String) -> Unit = {},
+    private val redacted: (String) -> Boolean = { false },
+    private val writable: (String) -> Boolean = { true },
 ) {
     /** Der Self-Player oder `null`, wenn noch keiner angelegt ist. */
-    fun self(): LocalPlayer? = queries.selectSelf().executeAsOneOrNull()?.toLocal()
+    fun self(): LocalPlayer? = queries.selectReadableSelf().executeAsOneOrNull()?.toLocal()
 
     /**
      * Liefert den Self-Player und legt ihn beim ersten Aufruf mit [newId] (stabile lokale UUID, extern erzeugt) an.
@@ -56,7 +58,7 @@ class PlayerRepository internal constructor(
                 val id = newId()
                 queries.insertOrIgnore(id.value, displayName, PlayerKind.SELF.name, nowMs, null)
                 locallyCreated(id.value)
-                checkNotNull(get(id))
+                checkNotNull(rawGet(id))
             }
         }
 
@@ -67,12 +69,25 @@ class PlayerRepository internal constructor(
         nowMs: Long,
     ): LocalPlayer =
         queries.transactionWithResult {
+            check(writable(id.value))
             require(!Placeholders.isPlaceholder(id)) { "Ein Platzhalter ist kein Gast" }
-            val exists = get(id) != null
+            val exists = rawGet(id) != null
             queries.insertOrIgnore(id.value, displayName, PlayerKind.GUEST.name, nowMs, null)
             if (!exists) locallyCreated(id.value)
-            checkNotNull(get(id))
+            checkNotNull(rawGet(id))
         }
+
+    /**
+     * Merkt [id] als Gast, falls es noch keinen Verzeichniseintrag gibt. Ein vorhandener Eintrag bleibt unberührt, auch
+     * wenn er im aktuellen Scope weder lesbar noch schreibbar ist (kein Umbenennen, keine Revision, kein Wurf).
+     */
+    fun rememberGuest(
+        id: PlayerId,
+        displayName: String,
+        nowMs: Long,
+    ) {
+        queries.transaction { if (rawGet(id) == null) addGuest(id, displayName, nowMs) }
+    }
 
     /**
      * Übernimmt einen Spieler von einem anderen Gerät (`MatchMeta`): unbekannt → Gast; bekannt → Name aktualisieren.
@@ -82,13 +97,14 @@ class PlayerRepository internal constructor(
         player: Player,
         nowMs: Long,
     ) {
+        if (redacted(player.id.value) || !writable(player.id.value)) return
         queries.transaction {
             if (Placeholders.isPlaceholder(player.id)) return@transaction
             if (player.isPlaceholder) {
                 if (canMarkPlaceholder(player.id)) markPlaceholder(player.id, nowMs)
                 return@transaction
             }
-            val existing = get(player.id)
+            val existing = rawGet(player.id)
             if (existing?.kind == PlayerKind.PLACEHOLDER && !isDefaultSlotName(player.displayName) && player.displayName.isNotBlank()) {
                 queries.updateKind(PlayerKind.GUEST.name, player.id.value)
                 queries.rename(player.displayName, player.id.value)
@@ -125,7 +141,7 @@ class PlayerRepository internal constructor(
         nowMs: Long,
     ): LocalPlayer? =
         queries.transactionWithResult {
-            val current = self()
+            val current = queries.selectSelf().executeAsOneOrNull()?.toLocal()
             if (current?.id == owner.id) {
                 if (owner.displayName.isNotBlank() &&
                     owner.displayName != current.displayName
@@ -135,26 +151,28 @@ class PlayerRepository internal constructor(
                 return@transactionWithResult null
             }
             current?.let { queries.updateKind(PlayerKind.GUEST.name, it.id.value) }
-            if (get(owner.id) == null) {
+            if (rawGet(owner.id) == null) {
                 queries.insertOrIgnore(owner.id.value, owner.displayName, PlayerKind.SELF.name, nowMs, null)
                 sourcePlayerCreated(owner.id.value)
             } else {
                 queries.updateKind(PlayerKind.SELF.name, owner.id.value)
-                queries.rename(owner.displayName, owner.id.value)
+                if (owner.displayName.isNotBlank()) queries.rename(owner.displayName, owner.id.value)
             }
             current
         }
 
-    fun get(id: PlayerId): LocalPlayer? = queries.selectById(id.value).executeAsOneOrNull()?.toLocal()
+    fun get(id: PlayerId): LocalPlayer? = queries.selectReadableById(id.value).executeAsOneOrNull()?.toLocal()
+
+    private fun rawGet(id: PlayerId): LocalPlayer? = queries.selectById(id.value).executeAsOneOrNull()?.toLocal()
 
     /** Kennzeichnung alter Uhr-Gäste ohne Namensverlust; echte Namen können sie zurückkorrigieren. */
     fun markPlaceholder(
         id: PlayerId,
         nowMs: Long,
     ) {
-        if (Placeholders.isPlaceholder(id) || get(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
+        if (!writable(id.value) || Placeholders.isPlaceholder(id) || rawGet(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
         queries.transaction {
-            val exists = get(id) != null
+            val exists = rawGet(id) != null
             queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
             if (!exists) sourcePlayerCreated(id.value)
             queries.updateKind(PlayerKind.PLACEHOLDER.name, id.value)
@@ -162,7 +180,7 @@ class PlayerRepository internal constructor(
     }
 
     fun canMarkPlaceholder(id: PlayerId): Boolean =
-        get(id).let {
+        rawGet(id).let {
             it == null || (
                 it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED &&
                     (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
@@ -182,14 +200,14 @@ class PlayerRepository internal constructor(
     /** Self zuerst, dann zuletzt verwendete Gäste. */
     fun all(): List<LocalPlayer> =
         queries
-            .selectAll()
+            .selectReadableAll()
             .executeAsList()
             .filter { it.kind == PlayerKind.SELF.name || it.kind == PlayerKind.GUEST.name }
             .map { it.toLocal() }
 
     fun archivedIds(): Set<PlayerId> =
         queries
-            .selectAll()
+            .selectReadableAll()
             .executeAsList()
             .filter { it.kind == PlayerKind.ARCHIVED.name }
             .map { PlayerId(it.id) }
@@ -199,7 +217,8 @@ class PlayerRepository internal constructor(
         id: PlayerId,
         displayName: String,
     ) {
-        queries.rename(displayName, id.value)
+        check(writable(id.value))
+        queries.rename(if (redacted(id.value)) "" else displayName, id.value)
     }
 
     /** Merkt die Verwendung in einem Match (Sortierung „Zuletzt“ im Wizard). */
@@ -207,14 +226,15 @@ class PlayerRepository internal constructor(
         ids: Collection<PlayerId>,
         nowMs: Long,
     ) {
-        val people = ids.filter { get(it)?.kind != PlayerKind.PLACEHOLDER && !Placeholders.isPlaceholder(it) }
+        val people = ids.filter { writable(it.value) && get(it)?.kind != PlayerKind.PLACEHOLDER && !Placeholders.isPlaceholder(it) }
         if (people.isNotEmpty()) queries.markUsed(nowMs, people.map { it.value })
     }
 
     /** Archiviert einen Gast ohne Namensverlust. Self, Platzhalter und bereits archivierte bleiben unverändert. */
     fun deleteGuest(id: PlayerId): Boolean =
         queries.transactionWithResult {
-            val existing = get(id) ?: return@transactionWithResult false
+            if (!writable(id.value)) return@transactionWithResult false
+            val existing = rawGet(id) ?: return@transactionWithResult false
             if (existing.kind != PlayerKind.GUEST) return@transactionWithResult false
             queries.deleteGuest(id.value)
             true
@@ -225,15 +245,15 @@ class PlayerRepository internal constructor(
         id: PlayerId,
         nowMs: Long,
     ) {
-        if (Placeholders.isPlaceholder(id)) return
+        if (!writable(id.value) || Placeholders.isPlaceholder(id)) return
         queries.transaction {
-            val exists = get(id) != null
+            val exists = rawGet(id) != null
             queries.insertOrIgnore(id.value, "", PlayerKind.ARCHIVED.name, nowMs, null)
             if (!exists) sourcePlayerCreated(id.value)
-            if (get(id)?.kind == PlayerKind.GUEST) queries.deleteGuest(id.value)
+            if (rawGet(id)?.kind == PlayerKind.GUEST) queries.deleteGuest(id.value)
         }
     }
 
     private fun PlayerRow.toLocal(): LocalPlayer =
-        LocalPlayer(PlayerId(id), display_name, PlayerKind.valueOf(kind), created_at_ms, last_used_at_ms)
+        LocalPlayer(PlayerId(id), if (redacted(id)) "" else display_name, PlayerKind.valueOf(kind), created_at_ms, last_used_at_ms)
 }
