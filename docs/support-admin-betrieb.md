@@ -89,6 +89,43 @@ Betriebskennzahlen gehören in das Folgepaket.
    Das wirkt beim nächsten RPC trotz bestehendem JWT. Zusätzlich Auth-Sitzungen über den Betreiberzugang
    widerrufen. Provisionierung, Recovery und Widerruf im geschützten Betriebsprotokoll dokumentieren.
 
+## Kontosupport (K4/K5) und Gerätewiderruf
+
+Migration `20261023000100_account_support.sql`, Admin-Web Bereich „Konten“. Alle Aktionen nur per RPC mit
+aktiver Mitgliedschaft in `ops.support_members`, AAL2 (MFA) und Begründung; jede Änderung landet im Konto-Audit.
+
+| RPC | Rolle | Wirkung |
+|---|---|---|
+| `admin_account_lookup` | support, admin | exakte Suche nach Profil-ID, Freundescode oder Alias (keine Teiltreffer, bei Mehrdeutigkeit Fehler); Kontostatus, Geräte-IDs nur für admin |
+| `admin_account_set_suspended` | admin | Konto sperren/entsperren; die Sperre greift auf allen gebundenen Wegen, die App zeigt „Konto gesperrt“ |
+| `admin_account_revoke_devices` | admin | Geräte widerrufen; widerrufene Geräte synchronisieren nicht mehr |
+| `admin_account_cancel_deletion` | admin | Löschantrag zurücknehmen, nur mit Meldung, die **nach** dem Antrag entstand |
+| `admin_account_unrevoke_device` | admin | Widerruf aufheben, nur mit Meldung, die nach dem Widerruf entstand |
+
+**Wichtig beim Einrichten:** Bestehende Mitglieder mit Rolle `admin` erhalten mit dieser Migration automatisch
+alle Kontorechte. Vor dem Rollout auf staging/Produktion die Admin-Liste prüfen und nicht mehr benötigte
+Mitgliedschaften widerrufen.
+
+**Meldung als Nachweis** (Löschrücknahme und Widerruf aufheben): Die Meldung muss vom Zielkonto stammen oder
+eine Gastmeldung sein; bei Gastmeldungen verlangt der Server eine ausführliche Begründung (mindestens 20 Zeichen)
+mit dem geprüften Zuordnungsbeleg. Vorgangsnummer oder Kontaktadresse allein beweisen keine Identität (siehe unten).
+
+**Widerruf aufheben – Betriebshinweise:**
+- Nutzerweg: In der App kann nur ein **anderes** eigenes Gerät freigeben, das schon vor dem Widerruf gebunden war
+  (`cloud_unrevoke_device_v1`). Das widerrufene Gerät selbst kann sich nie freigeben; das eigene Handy lässt sich
+  in der Geräteliste nicht widerrufen.
+- Admin-Weg: Eine Kontomeldung zählt nur, wenn sie nicht vom widerrufenen oder einem unbekannten Gerät stammt und
+  das Absendergerät vor dem Widerruf gebunden war (Fehler `device_ticket_from_revoked_device`,
+  `device_ticket_device_unknown`, `device_ticket_device_too_new`). Eine Meldung darf mehrere Geräte freigeben
+  (z. B. Handy und Uhr); Mehrfachnutzung ist im Audit sichtbar.
+- Geräte- und Installations-ID bleiben erhalten, die Zugriffsgeneration G steigt um 1, alte Sitzungen bleiben
+  gesperrt: Das Gerät muss sich neu anmelden. Danach gehen zuvor abgelehnte Events erneut in den Upload.
+- Gegen einen Dieb mit Zugriff auf das E-Mail-Postfach schützt nur der Widerruf; im Zweifel nicht freigeben,
+  sondern den Nutzer ein neues Gerät anmelden lassen.
+
+**Bekannte Grenzen:** Ein Admin-JWT bleibt nach Logout oder Entfernen der MFA bis zu seinem Ablauf gültig.
+Suchen über `admin_account_lookup` werden nicht protokolliert.
+
 ## Datenschutz und Aufbewahrung
 
 - Nur RPC-Zugriff: normale Konten lesen ausschließlich eigene Meldungen und öffentliche Antworten.
