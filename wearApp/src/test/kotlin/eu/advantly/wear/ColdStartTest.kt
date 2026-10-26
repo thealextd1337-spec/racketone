@@ -110,9 +110,9 @@ class ColdStartTest {
         activity.pause().stop().destroy()
     }
 
-    private fun tile(): Intent =
+    private fun tile(action: GlanceAction = GlanceAction.NEW): Intent =
         Intent(RuntimeEnvironment.getApplication(), MainActivity::class.java)
-            .putExtra(GlanceLaunch.EXTRA_ACTION, GlanceAction.NEW.name)
+            .putExtra(GlanceLaunch.EXTRA_ACTION, action.name)
 
     /** Neuerstellung im Ladezustand: Zustand der ersten Instanz sichern und an eine neue Instanz geben. */
     private fun recreateWhilePending(
@@ -148,7 +148,25 @@ class ColdStartTest {
     }
 
     @Test
-    fun permissionResultDuringCheckIsAppliedAfterwards() {
+    fun processDeathRestoresPendingTileActionNotStaleTaskIntent() {
+        // Task per Tile A (REPEAT) gestartet, während der Prüfung Tile-Tipp B (OPEN), dann Prozesstod: Android liefert A.
+        val first = activity(tile(GlanceAction.REPEAT)).create(Bundle().apply { putBoolean("installation_started", true) }).start()
+        first.newIntent(tile(GlanceAction.OPEN))
+        val second = recreateWhilePending(first, tile(GlanceAction.REPEAT))
+        assertTrue(second.get().intent.getStringExtra(GlanceLaunch.EXTRA_ACTION) == GlanceAction.OPEN.name)
+        busy.countDown()
+        settleInstallationGuard()
+        assertNull(second.get().intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
+        second.pause().stop().destroy()
+    }
+
+    @Test
+    fun permissionResultDuringCheckIsAppliedAfterwards() = permissionResultDuringCheck(recreate = false)
+
+    @Test
+    fun permissionResultDuringCheckSurvivesRecreation() = permissionResultDuringCheck(recreate = true)
+
+    private fun permissionResultDuringCheck(recreate: Boolean) {
         val app = RuntimeEnvironment.getApplication()
         // Ausstehender Workout-Auftrag aus dem früheren Prozess; danach wieder kalt (Ergebnis nicht zwischengespeichert).
         eu.advantly.wear.sync.WearPrefs(app).apply {
@@ -167,9 +185,9 @@ class ColdStartTest {
                 putBoolean("installation_started", true)
                 putBoolean("permissionRequestInFlight", true)
             }
-        val activity = activity().create(saved)
+        val created = activity().create(saved)
         // Das Dialogergebnis wird mit ON_START zugestellt, also vor dem Prüfergebnis.
-        val registry = activity.get().activityResultRegistry
+        val registry = created.get().activityResultRegistry
         val requestCode =
             (
                 androidx.activity.result.ActivityResultRegistry::class.java.declaredFields
@@ -178,7 +196,8 @@ class ColdStartTest {
                     .get(registry) as Map<*, *>
             ).values.single() as Int
         registry.dispatchResult(requestCode, android.app.Activity.RESULT_CANCELED, null)
-        activity.start()
+        val first = created.start()
+        val activity = if (recreate) recreateWhilePending(first, Intent(app, MainActivity::class.java)) else first
         busy.countDown()
         settleInstallationGuard()
         assertFalse(

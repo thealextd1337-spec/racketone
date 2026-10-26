@@ -212,7 +212,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createdFrom = savedInstanceState
+        permissionResultWhilePending = savedInstanceState?.getBoolean(KEY_PERMISSION_RESULT_PENDING) == true
         newIntentWhilePending = savedInstanceState?.getBoolean(KEY_NEW_INTENT_PENDING) == true
+        if (newIntentWhilePending) {
+            // Das Bundle ist maßgeblich: Nach Prozesstod liefert Android das ursprüngliche Task-Intent, nicht den Tile-Tipp.
+            val action = savedInstanceState?.getString(KEY_NEW_INTENT_ACTION)
+            if (action == null) intent.removeExtra(GlanceLaunch.EXTRA_ACTION) else intent.putExtra(GlanceLaunch.EXTRA_ACTION, action)
+        }
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(this) { availability ->
@@ -358,9 +364,9 @@ class MainActivity : ComponentActivity() {
         for (key in listOf(KEY_STARTED, KEY_PERMISSION_IN_FLIGHT)) {
             if (original?.containsKey(key) == true) outState.putBoolean(key, original.getBoolean(key))
         }
-        // Dialogergebnis schon da: Die neue Instanz behandelt den Dialog als beendet, nicht als weiter offen.
-        if (permissionResultWhilePending) outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, false)
+        outState.putBoolean(KEY_PERMISSION_RESULT_PENDING, permissionResultWhilePending)
         outState.putBoolean(KEY_NEW_INTENT_PENDING, newIntentWhilePending)
+        if (newIntentWhilePending) outState.putString(KEY_NEW_INTENT_ACTION, intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
     }
 
     override fun onStart() {
@@ -724,6 +730,8 @@ class MainActivity : ComponentActivity() {
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val KEY_STARTED = "installation_started"
         const val KEY_NEW_INTENT_PENDING = "installation_new_intent_pending"
+        const val KEY_NEW_INTENT_ACTION = "installation_new_intent_action"
+        const val KEY_PERMISSION_RESULT_PENDING = "installation_permission_result_pending"
         const val TICK_MS = 1_000L
     }
 }

@@ -163,6 +163,37 @@ class InstallationHostFailureTest {
     }
 
     @Test
+    fun tileFutureFailsWhenGlanceTextFails() {
+        // Kalt: Das Prüfergebnis kommt asynchron, der Textaufbau läuft außerhalb des getFuture-Aufrufs.
+        val snapshot = GlancePublisher::class.java.getDeclaredField("snapshot").apply { isAccessible = true }
+        val previous = snapshot.get(null)
+        // Ungültiger Cache lässt GlanceText.render werfen; das muss die Future beenden, nicht den Main-Thread.
+        snapshot.set(null, null)
+        try {
+            val service = Robolectric.buildService(eu.advantly.wear.glance.MatchTileService::class.java).create()
+
+            @Suppress("UNCHECKED_CAST")
+            val future =
+                eu.advantly.wear.glance.MatchTileService::class.java
+                    .getDeclaredMethod("onTileRequest", androidx.wear.tiles.RequestBuilders.TileRequest::class.java)
+                    .apply { isAccessible = true }
+                    .invoke(
+                        service.get(),
+                        androidx.wear.tiles.RequestBuilders.TileRequest
+                            .Builder()
+                            .build(),
+                    )
+                    as com.google.common.util.concurrent.ListenableFuture<*>
+            settleInstallationGuard()
+            val failure = assertThrows(java.util.concurrent.ExecutionException::class.java) { future.get() }
+            assertTrue(failure.cause is NullPointerException)
+            service.destroy()
+        } finally {
+            snapshot.set(null, previous)
+        }
+    }
+
+    @Test
     fun coldWorkoutServiceDefersCommandUntilBackgroundCheck() {
         val app = RuntimeEnvironment.getApplication()
         File(app.noBackupFilesDir, "installation-check-123").writeText("blocked cleanup")
