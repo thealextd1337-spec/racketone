@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import eu.advantly.android.R
 import eu.advantly.android.showInstallationError
+import eu.advantly.android.showInstallationLoading
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.LinkStats
@@ -49,6 +50,11 @@ class LinkDebugActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showInstallationLoading()
+        AndroidInstallationGuard.checkAsync(applicationContext) { if (!isDestroyed) start() }
+    }
+
+    private fun start() {
         val session =
             AndroidInstallationGuard.storage(this) { AndroidMatchSessions.get(applicationContext, PeerKind.PHONE) }
                 ?: run {

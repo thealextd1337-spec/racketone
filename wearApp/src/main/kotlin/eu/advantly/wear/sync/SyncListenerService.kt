@@ -18,6 +18,7 @@ import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import eu.advantly.sync.protocol.LiveTelemetrySubscriptionCodec
+import eu.advantly.wear.AdvantlyWearApplication
 import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.live.telemetryActive
 import eu.advantly.wear.workout.WorkoutStateHolder
@@ -47,6 +48,7 @@ class SyncListenerService : WearableListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
     override fun onMessageReceived(event: MessageEvent) {
+        awaitBootstrap()
         if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         if (event.path == LiveTelemetrySubscription.MESSAGE_PATH) {
             // Ohne laufende Exercise wird nie gesendet: Abo verwerfen, ohne IPC oder kalten Session-Aufbau
@@ -102,6 +104,7 @@ class SyncListenerService : WearableListenerService() {
         }
 
     override fun onDataChanged(events: DataEventBuffer) {
+        awaitBootstrap()
         if (!AndroidInstallationGuard.privateTransportAllowed(this)) {
             events.release()
             return // Kein ACK, keine Queue-Löschung und kein alter lokaler Scope als Ausweichweg.
@@ -145,6 +148,7 @@ class SyncListenerService : WearableListenerService() {
     }
 
     override fun onCapabilityChanged(info: CapabilityInfo) {
+        awaitBootstrap()
         if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         DiagnosticLog.log("SYNC_SERVICE_CAPABILITY", "nodes" to info.nodes.size)
         val cold =
@@ -153,6 +157,20 @@ class SyncListenerService : WearableListenerService() {
                 WearSessions.consumeColdStart()
             }
         if (cold == true) awaitSettled()
+    }
+
+    /**
+     * Kaltstart: Die Application prüft die Installation asynchron. Dieser Worker-Thread wartet auf die Prüfung und den
+     * Prozess-Bootstrap auf dem Main-Thread (idempotent), statt Frames vorzeitig als nicht erlaubt zu verwerfen.
+     */
+    private fun awaitBootstrap() {
+        if (AndroidInstallationGuard.privateTransportAllowed(this)) return
+        val done = CountDownLatch(1)
+        AndroidInstallationGuard.checkAsync(this) {
+            (application as? AdvantlyWearApplication)?.bootstrap()
+            done.countDown()
+        }
+        if (Looper.myLooper() != Looper.getMainLooper()) done.await(BOOTSTRAP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 
     /** Kaltstart: bis zum abgeschlossenen Abgleich gebunden bleiben (begrenzt). */
@@ -203,5 +221,6 @@ class SyncListenerService : WearableListenerService() {
         const val QUEUE_TIMEOUT_MS = 10_000L
         const val SETTLE_TIMEOUT_MS = 8_000L
         const val POLL_MS = 200L
+        const val BOOTSTRAP_TIMEOUT_MS = 30_000L
     }
 }

@@ -155,6 +155,7 @@ class FreshReviewStorageProbeTest {
     fun firstNativeBackgroundFailureBetweenCollectorAccessAndGateShowsErrorUi() {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val session = requireNotNull(AndroidMatchSessions.current())
         val installation = AndroidInstallationGuard.get(app)
         val marker = File(app.noBackupFilesDir, "installation-v1").readBytes().toList()
@@ -562,6 +563,7 @@ class FreshReviewStorageProbeTest {
         FreshReviewQueryDatabase.mode = "activation"
         FreshReviewQueryDatabase.failure = SQLiteDiskIOException("activity activation failed")
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         assertNotNull(
             activity
                 .get()

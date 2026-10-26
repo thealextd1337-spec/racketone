@@ -108,3 +108,21 @@ class WatchHarness(
         const val BASE_MS = 1_760_000_000_000L
     }
 }
+
+/** Wartet auf die Hintergrundprüfung des Guards und führt die dadurch geposteten Main-Thread-Ergebnisse aus. */
+internal fun settleInstallationGuard(idleMain: Boolean = true) {
+    val worker =
+        eu.advantly.data.AndroidInstallationGuard::class.java
+            .getDeclaredField("worker")
+            .apply { isAccessible = true }
+            .get(null) as java.util.concurrent.ExecutorService
+    // Ergebnis-Callbacks dürfen weitere Prüfungen anstoßen (Activity nach Application): zweimal abwarten.
+    repeat(if (idleMain) 2 else 1) {
+        worker.submit {}.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        if (idleMain) {
+            org.robolectric.Shadows
+                .shadowOf(android.os.Looper.getMainLooper())
+                .idle()
+        }
+    }
+}

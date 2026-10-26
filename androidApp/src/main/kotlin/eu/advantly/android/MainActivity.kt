@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -60,7 +61,17 @@ class MainActivity : ComponentActivity() {
         // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val availability = AndroidInstallationGuard.check(applicationContext)
+        // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
+        showInstallationLoading()
+        AndroidInstallationGuard.checkAsync(applicationContext) { availability ->
+            if (!isFinishing && !isDestroyed) start(savedInstanceState, availability)
+        }
+    }
+
+    private fun start(
+        savedInstanceState: Bundle?,
+        availability: AndroidInstallationAvailability,
+    ) {
         if (availability !is AndroidInstallationAvailability.Ready) {
             viewModelStore.clear()
             showInstallationError()
@@ -188,6 +199,8 @@ class MainActivity : ComponentActivity() {
             showRecoveryDecision(installation, current)
         }
         if (savedInstanceState == null) showRecoveryDoneOnce(installation)
+        // Kam das Ergebnis erst nach onStart, den dort ausgelassenen Vordergrund-Abgleich nachholen.
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) account?.sync?.onForeground()
     }
 }
 

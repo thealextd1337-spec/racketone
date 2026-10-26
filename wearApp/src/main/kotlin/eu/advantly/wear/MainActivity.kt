@@ -203,7 +203,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val availability = AndroidInstallationGuard.check(this)
+        // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
+        showInstallationLoading()
+        AndroidInstallationGuard.checkAsync(this) { availability ->
+            if (!isFinishing && !isDestroyed) start(savedInstanceState, availability)
+        }
+    }
+
+    private fun start(
+        savedInstanceState: Bundle?,
+        availability: AndroidInstallationAvailability,
+    ) {
         if (availability !is AndroidInstallationAvailability.Ready) {
             showInstallationError()
             return
@@ -312,6 +322,9 @@ class MainActivity : ComponentActivity() {
                         ?.let { { showLaterRestore(holder.session) } },
             )
         }
+        // Kam das Ergebnis erst nach onStart/onResume, die dort ausgelassenen Schritte nachholen.
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) startRuntime()
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeRuntime()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -321,6 +334,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        startRuntime()
+    }
+
+    private fun startRuntime() {
         if (!currentSession()) return
         controller.effects = ::onEffect
         updatePowerSave()
@@ -342,6 +359,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        resumeRuntime()
+    }
+
+    private fun resumeRuntime() {
         if (!currentSession()) return
         UiVisibility.resumed = true
         controller.setInteractive(!isAmbient.value)
@@ -368,8 +389,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (!currentSession()) return
+        // Auch während der Installationsprüfung übernehmen, damit resumeRuntime() danach die neueste Glance-Aktion sieht.
         setIntent(intent)
+        if (!currentSession()) return
         glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
     }

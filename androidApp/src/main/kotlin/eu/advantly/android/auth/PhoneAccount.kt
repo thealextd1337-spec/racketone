@@ -36,8 +36,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.security.MessageDigest
 import java.security.SecureRandom
+import kotlin.coroutines.resume
 
 /** Konfiguration fehlt im Standardbuild: P1 funktioniert ohne Konto und ohne Netzwerk unverändert. */
 fun ComponentActivity.createPhoneAccount(): AuthViewModel? = createPhoneAccount(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
@@ -240,6 +242,8 @@ internal suspend fun runScheduledSync(
     profile: String?,
 ): Boolean {
     val app = context.applicationContext
+    // Kaltstart per JobScheduler: die Installationsprüfung nicht auf Main ausführen, nur auf ihr Ergebnis warten.
+    suspendCancellableCoroutine<Unit> { done -> AndroidInstallationGuard.checkAsync(app) { done.resume(Unit) } }
     if ((app as? AdvantlyPhoneApplication)?.bootstrap() == false) return false
     val core =
         try {

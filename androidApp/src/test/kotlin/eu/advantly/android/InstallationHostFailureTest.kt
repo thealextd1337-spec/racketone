@@ -46,6 +46,7 @@ class InstallationHostFailureTest {
     fun runningPhoneActivityObservesRuntimeRevocation() {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val accountLifetime = androidx.lifecycle.ViewModelProvider(activity.get())[RuntimeViewModel::class.java]
         assertNotNull(AndroidMatchSessions.current())
         AndroidInstallationGuard.storageFailed(app, SQLiteDiskIOException("runtime revoked"))
@@ -220,6 +221,7 @@ class InstallationHostFailureTest {
     fun reset() = resetProcess()
 
     private fun resetProcess() {
+        settleInstallationGuard()
         AndroidMatchSessions.current()?.close()
         AndroidMatchSessions::class.java
             .getDeclaredField("instance")
@@ -397,6 +399,7 @@ class InstallationHostFailureTest {
         val product = AdvantlyPhoneApplication()
         shadowOf(product).callAttach(app)
         product.onCreate()
+        settleInstallationGuard()
         assertInert()
 
         assertEquals(before, protectedBytes(app))
@@ -412,12 +415,14 @@ class InstallationHostFailureTest {
         val before = protectedBytes(app)
         val blocker = File(app.noBackupFilesDir, "installation-check-123").apply { writeText("blocked cleanup") }
         val activityController = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val activity = activityController.get()
         assertNotNull(activity.window.decorView.findViewWithTag<android.view.View>("installation_error"))
         val retry = activity.window.decorView.findViewWithTag<Button>("installation_retry")
         assertEquals(activity.getString(R.string.installation_error_retry), retry.text.toString())
         repeat(2) {
             retry.performClick()
+            settleInstallationGuard()
             assertTrue(retry.isEnabled)
             assertInert()
             assertEquals(before, protectedBytes(app))
@@ -429,6 +434,7 @@ class InstallationHostFailureTest {
         assertInert()
         assertEquals(before, protectedBytes(app))
         retry.performClick()
+        settleInstallationGuard()
         assertEquals(first, AndroidInstallationGuard.get(app))
         assertEquals(before, protectedBytes(app))
         assertFalse(first.privateTransportAllowed)

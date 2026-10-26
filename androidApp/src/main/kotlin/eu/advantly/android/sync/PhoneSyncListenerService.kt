@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
@@ -46,6 +47,7 @@ class PhoneSyncListenerService : WearableListenerService() {
     private val expireTelemetry = Runnable { LiveTelemetryStore.Phone.expire() }
 
     override fun onMessageReceived(event: MessageEvent) {
+        awaitBootstrap()
         if (!AndroidInstallationGuard.privateTransportAllowed(this)) return
         if (event.path == LiveTelemetry.MESSAGE_PATH) {
             val payload = LiveTelemetryCodec.decode(event.data) ?: return
@@ -81,6 +83,7 @@ class PhoneSyncListenerService : WearableListenerService() {
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
+        awaitBootstrap()
         if (!AndroidInstallationGuard.privateTransportAllowed(this)) {
             events.release()
             return // Keine Zustellbestätigung und kein Löschen eines nicht gespeicherten Queue-Elements.
@@ -132,6 +135,20 @@ class PhoneSyncListenerService : WearableListenerService() {
             null
         }
 
+    /**
+     * Kaltstart: Die Application prüft die Installation asynchron. Dieser Worker-Thread wartet auf die Prüfung und den
+     * Prozess-Bootstrap auf dem Main-Thread (idempotent), statt Frames vorzeitig als nicht erlaubt zu verwerfen.
+     */
+    private fun awaitBootstrap() {
+        if (AndroidInstallationGuard.privateTransportAllowed(this)) return
+        val done = CountDownLatch(1)
+        AndroidInstallationGuard.checkAsync(this) {
+            (application as? AdvantlyPhoneApplication)?.bootstrap()
+            done.countDown()
+        }
+        if (Looper.myLooper() != Looper.getMainLooper()) done.await(BOOTSTRAP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }
+
     private fun ensureSession() {
         AndroidMatchSessions.get(applicationContext, PeerKind.PHONE)
     }
@@ -158,5 +175,6 @@ class PhoneSyncListenerService : WearableListenerService() {
     private companion object {
         const val MAIN_TIMEOUT_SECONDS = 5L
         const val QUEUE_TIMEOUT_SECONDS = 10L
+        const val BOOTSTRAP_TIMEOUT_SECONDS = 30L
     }
 }

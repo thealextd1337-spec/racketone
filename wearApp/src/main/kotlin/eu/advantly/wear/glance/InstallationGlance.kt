@@ -5,13 +5,20 @@ import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.wear.R
 
-/** Provider zeigen bei Speicherfehlern weder alte Snapshots noch Schnellstart-Aktionen. */
-internal fun installationGlance(context: Context): Pair<GlanceState, GlanceCopy> {
-    if (AndroidInstallationGuard.check(context) is AndroidInstallationAvailability.Ready) {
+/**
+ * Provider zeigen bei Speicherfehlern weder alte Snapshots noch Schnellstart-Aktionen. Tile- und Complication-Anfragen
+ * kommen auf dem Main-Thread: Die Installationsprüfung läuft dafür asynchron, [onResult] danach auf dem Main-Thread.
+ */
+internal fun installationGlance(
+    context: Context,
+    onResult: (GlanceState, GlanceCopy) -> Unit,
+) = AndroidInstallationGuard.checkAsync(context) { availability ->
+    if (availability is AndroidInstallationAvailability.Ready) {
         val state = GlancePublisher.snapshot
-        return state to GlanceText.render(state, AndroidGlanceStrings(context))
+        onResult(state, GlanceText.render(state, AndroidGlanceStrings(context)))
+    } else {
+        val title = context.getString(R.string.installation_error_title)
+        val open = context.getString(R.string.glance_open_app)
+        onResult(GlanceState(), GlanceCopy(title, listOf(open), GlanceAction.OPEN, "$title. $open", title, "$title. $open"))
     }
-    val title = context.getString(R.string.installation_error_title)
-    val open = context.getString(R.string.glance_open_app)
-    return GlanceState() to GlanceCopy(title, listOf(open), GlanceAction.OPEN, "$title. $open", title, "$title. $open")
 }

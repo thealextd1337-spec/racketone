@@ -25,86 +25,93 @@ import eu.advantly.wear.R
 class MatchTileService : TileService() {
     override fun onTileRequest(requestParams: TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { result ->
-            val (state, copy) = installationGlance(this)
-            val device = requestParams.deviceConfiguration
-            val metrics =
-                TileLayoutMetrics(device.screenWidthDp, device.screenHeightDp, device.screenShape == SCREEN_SHAPE_ROUND, device.fontScale)
-            val live = state.live
-            val lines =
-                if (live == null) {
-                    copy.lines.take(metrics.setupLines)
-                } else {
-                    (listOfNotNull(copy.status) + copy.tileLines).distinct().take(metrics.liveLines)
-                }
-            val content =
-                LayoutElementBuilders.Column
-                    .Builder()
-                    .setWidth(dp(metrics.contentWidth))
-                    .setHeight(wrap())
-                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-                    .addContent(
+            // Kaltstart: Prüfung asynchron, die Kachel folgt danach (kein Warten auf dem Main-Thread).
+            installationGlance(this) { state, copy ->
+                val device = requestParams.deviceConfiguration
+                val metrics =
+                    TileLayoutMetrics(
+                        device.screenWidthDp,
+                        device.screenHeightDp,
+                        device.screenShape == SCREEN_SHAPE_ROUND,
+                        device.fontScale,
+                    )
+                val live = state.live
+                val lines =
+                    if (live == null) {
+                        copy.lines.take(metrics.setupLines)
+                    } else {
+                        (listOfNotNull(copy.status) + copy.tileLines).distinct().take(metrics.liveLines)
+                    }
+                val content =
+                    LayoutElementBuilders.Column
+                        .Builder()
+                        .setWidth(dp(metrics.contentWidth))
+                        .setHeight(wrap())
+                        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                        .addContent(
+                            button(
+                                copy.score ?: copy.title,
+                                lines,
+                                copy.primary,
+                                copy.description,
+                                metrics,
+                                role = copy.title.takeIf { live != null },
+                            ),
+                        )
+                if (live == null && copy.primary == GlanceAction.REPEAT) {
+                    content.addContent(
+                        LayoutElementBuilders.Spacer
+                            .Builder()
+                            .setHeight(dp(6f))
+                            .build(),
+                    )
+                    content.addContent(
                         button(
-                            copy.score ?: copy.title,
-                            lines,
-                            copy.primary,
-                            copy.description,
+                            getString(R.string.home_new_match),
+                            emptyList(),
+                            GlanceAction.NEW,
+                            getString(R.string.home_new_match),
                             metrics,
-                            role = copy.title.takeIf { live != null },
                         ),
                     )
-            if (live == null && copy.primary == GlanceAction.REPEAT) {
-                content.addContent(
-                    LayoutElementBuilders.Spacer
+                }
+                val root =
+                    LayoutElementBuilders.Box
                         .Builder()
-                        .setHeight(dp(6f))
-                        .build(),
-                )
-                content.addContent(
-                    button(
-                        getString(R.string.home_new_match),
-                        emptyList(),
-                        GlanceAction.NEW,
-                        getString(R.string.home_new_match),
-                        metrics,
-                    ),
+                        .setWidth(expand())
+                        .setHeight(expand())
+                        .setModifiers(
+                            ModifiersBuilders.Modifiers
+                                .Builder()
+                                .setBackground(
+                                    ModifiersBuilders.Background
+                                        .Builder()
+                                        .setColor(argb(BACKGROUND))
+                                        .build(),
+                                ).build(),
+                        ).addContent(content.build())
+                        .build()
+                val layout =
+                    LayoutElementBuilders.Layout
+                        .Builder()
+                        .setRoot(root)
+                        .build()
+                result.set(
+                    TileBuilders.Tile
+                        .Builder()
+                        .setResourcesVersion(RESOURCES_VERSION)
+                        .setTileTimeline(
+                            TimelineBuilders.Timeline
+                                .Builder()
+                                .addTimelineEntry(
+                                    TimelineBuilders.TimelineEntry
+                                        .Builder()
+                                        .setLayout(layout)
+                                        .build(),
+                                ).build(),
+                        ).build(),
                 )
             }
-            val root =
-                LayoutElementBuilders.Box
-                    .Builder()
-                    .setWidth(expand())
-                    .setHeight(expand())
-                    .setModifiers(
-                        ModifiersBuilders.Modifiers
-                            .Builder()
-                            .setBackground(
-                                ModifiersBuilders.Background
-                                    .Builder()
-                                    .setColor(argb(BACKGROUND))
-                                    .build(),
-                            ).build(),
-                    ).addContent(content.build())
-                    .build()
-            val layout =
-                LayoutElementBuilders.Layout
-                    .Builder()
-                    .setRoot(root)
-                    .build()
-            result.set(
-                TileBuilders.Tile
-                    .Builder()
-                    .setResourcesVersion(RESOURCES_VERSION)
-                    .setTileTimeline(
-                        TimelineBuilders.Timeline
-                            .Builder()
-                            .addTimelineEntry(
-                                TimelineBuilders.TimelineEntry
-                                    .Builder()
-                                    .setLayout(layout)
-                                    .build(),
-                            ).build(),
-                    ).build(),
-            )
             "Advantly tile"
         }
 

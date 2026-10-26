@@ -20,6 +20,7 @@ import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.wear.glance.GlanceAction
+import eu.advantly.wear.glance.GlanceCopy
 import eu.advantly.wear.glance.GlanceMatch
 import eu.advantly.wear.glance.GlancePublisher
 import eu.advantly.wear.glance.GlanceState
@@ -65,6 +66,7 @@ class InstallationHostFailureTest {
             )
         }
         activity.setup()
+        settleInstallationGuard()
         AndroidInstallationGuard.storageFailed(app, SQLiteDiskIOException("runtime revoked"))
         activity.pause().stop()
         org.robolectric.Shadows
@@ -84,6 +86,7 @@ class InstallationHostFailureTest {
     fun reset() = resetProcess()
 
     private fun resetProcess() {
+        settleInstallationGuard()
         AndroidMatchSessions.current()?.close()
         AndroidMatchSessions::class.java
             .getDeclaredField("instance")
@@ -160,6 +163,28 @@ class InstallationHostFailureTest {
     }
 
     @Test
+    fun coldWorkoutServiceDefersCommandUntilBackgroundCheck() {
+        val app = RuntimeEnvironment.getApplication()
+        File(app.noBackupFilesDir, "installation-check-123").writeText("blocked cleanup")
+        val worker =
+            AndroidInstallationGuard::class.java
+                .getDeclaredField("worker")
+                .apply { isAccessible = true }
+                .get(null) as java.util.concurrent.ExecutorService
+        val busy = java.util.concurrent.CountDownLatch(1)
+        worker.submit { busy.await() }
+        // Sticky-Neustart im Kaltstart: onCreate/onStartCommand warten nicht auf die Prüfung und lesen keinen Marker.
+        val workout = Robolectric.buildService(WorkoutService::class.java).create()
+        assertEquals(android.app.Service.START_STICKY, workout.get().onStartCommand(Intent(WorkoutService.ACTION_RECOVER), 0, 1))
+        assertFalse(shadowOf(workout.get()).isStoppedBySelf)
+        busy.countDown()
+        settleInstallationGuard()
+        assertTrue(shadowOf(workout.get()).isStoppedBySelf)
+        assertNull(AndroidMatchSessions.current())
+        workout.destroy()
+    }
+
+    @Test
     fun emptyInstallFailureDoesNotInventInstallation() {
         val app = RuntimeEnvironment.getApplication()
         File(app.noBackupFilesDir, "installation-check-123").writeText("blocked cleanup")
@@ -203,6 +228,7 @@ class InstallationHostFailureTest {
         val product = AdvantlyWearApplication()
         shadowOf(product).callAttach(app)
         product.onCreate()
+        settleInstallationGuard()
         assertInert()
         val workout = Robolectric.buildService(WorkoutService::class.java).create()
         assertEquals(android.app.Service.START_NOT_STICKY, workout.get().onStartCommand(Intent(WorkoutService.ACTION_RECOVER), 0, 1))
@@ -211,7 +237,9 @@ class InstallationHostFailureTest {
             isAccessible = true
             set(null, GlanceState(live = GlanceMatch("old sets", "old games", "old points", null, true, MatchStatus.IN_PROGRESS)))
         }
-        val (state, copy) = installationGlance(app)
+        var glance: Pair<GlanceState, GlanceCopy>? = null
+        installationGlance(app) { state, copy -> glance = state to copy }
+        val (state, copy) = glance!!
         assertNull(state.live)
         assertEquals(GlanceAction.OPEN, copy.primary)
         assertEquals(app.getString(R.string.installation_error_title), copy.title)
@@ -229,12 +257,14 @@ class InstallationHostFailureTest {
         val before = protectedBytes(app)
         val blocker = File(app.noBackupFilesDir, "installation-check-123").apply { writeText("blocked cleanup") }
         val activityController = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val activity = activityController.get()
         assertNotNull(activity.window.decorView.findViewWithTag<android.view.View>("installation_error"))
         val retry = activity.window.decorView.findViewWithTag<Button>("installation_retry")
         assertEquals(activity.getString(R.string.installation_error_retry), retry.text.toString())
         repeat(2) {
             retry.performClick()
+            settleInstallationGuard()
             assertTrue(retry.isEnabled)
             assertInert()
             assertEquals(before, protectedBytes(app))
@@ -245,6 +275,8 @@ class InstallationHostFailureTest {
         assertInert()
         assertEquals(before, protectedBytes(app))
         retry.performClick()
+        // Nur die Prüfung abwarten; das folgende recreate() lief hier nie (Robolectric ohne Wear-Ambient-Klassen).
+        settleInstallationGuard(idleMain = false)
         assertEquals(first, AndroidInstallationGuard.get(app))
         assertEquals(before, protectedBytes(app))
         assertFalse(first.privateTransportAllowed)

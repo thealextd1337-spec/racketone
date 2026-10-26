@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import eu.advantly.android.MainActivity
 import eu.advantly.android.UnsupportedDirectorySyncLinux
+import eu.advantly.android.settleInstallationGuard
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.createAndroidDriver
 import eu.advantly.data.db.AdvantlyDatabase
@@ -99,6 +100,7 @@ class PhoneRuntimeRevocationTest {
     fun configuredAuthCloseAfterRevocationIsSqlFree() {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val auth = configuredAuth(activity.get())
         ViewModelProvider(
             activity.get(),
@@ -191,6 +193,7 @@ class PhoneRuntimeRevocationTest {
     fun healthyAuthClosePersistsGeneration() {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val auth = configuredAuth(activity.get())
         shadowOf(Looper.getMainLooper()).idle()
         val driver = createAndroidDriver(app)
