@@ -159,6 +159,10 @@ class MainActivity : ComponentActivity() {
     /** Ein Rechte-Dialog ist offen (übersteht die Neuerstellung über den Saved State). */
     private var permissionRequestInFlight = false
 
+    /** Erst gesetzt, wenn [start] die Entscheidungen dieser Instanz getroffen hat (nicht schon im Ladezustand). */
+    private var started = false
+    private var newIntentWhilePending = false
+
     private val viewModel: WatchViewModel by viewModels {
         viewModelFactory { initializer { WatchViewModel(createController()) } }
     }
@@ -214,6 +218,9 @@ class MainActivity : ComponentActivity() {
         savedInstanceState: Bundle?,
         availability: AndroidInstallationAvailability,
     ) {
+        started = true
+        // Konfigurationswechsel im Ladezustand zählt nicht als Wiederherstellung (sonst fehlen Hold-Dialog und Glance).
+        val restored = savedInstanceState?.getBoolean(KEY_STARTED, true) == true
         if (availability !is AndroidInstallationAvailability.Ready) {
             showInstallationError()
             return
@@ -226,7 +233,8 @@ class MainActivity : ComponentActivity() {
         }
         sessionReady = true
         // Ein restauriertes Task-Intent darf nie erneut einen Schnellstart auslösen.
-        glanceConsumption = GlanceIntentConsumption(consumed = savedInstanceState != null)
+        // Ein neues Intent während der Prüfung (Tile-Tipp nach Prozesstod) ist nicht verbraucht.
+        glanceConsumption = GlanceIntentConsumption(consumed = restored && !newIntentWhilePending)
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
         holder = AndroidInstallationGuard.storage(this) { WearSessions.get(this) } ?: run {
@@ -243,9 +251,9 @@ class MainActivity : ComponentActivity() {
             runtimeUnavailable()
             return
         }
-        if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
+        if (!availability.installation.privateTransportAllowed && (!restored || afterInstallationRetry)) {
             showRecoveryDecision(availability.installation, holder.session)
-        } else if (availability.installation.restoreFailed && savedInstanceState == null) {
+        } else if (availability.installation.restoreFailed && !restored) {
             showLaterRestoreFailed()
         }
         runtimeJobs +=
@@ -261,7 +269,7 @@ class MainActivity : ComponentActivity() {
             // Dialog ging verloren (z. B. Prozess neu, ohne Ergebnis) → Match gilt nicht als erledigt, neu fragen
             holder.prefs.workoutPending = null
         }
-        DiagnosticLog.log("ACTIVITY_CREATE", "restored" to (savedInstanceState != null))
+        DiagnosticLog.log("ACTIVITY_CREATE", "restored" to restored)
 
         // Capabilities beim App-Start abfragen und cachen (05 §0.1).
         runtimeJobs +=
@@ -330,6 +338,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+        outState.putBoolean(KEY_STARTED, started)
     }
 
     override fun onStart() {
@@ -389,8 +398,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Auch während der Installationsprüfung übernehmen, damit resumeRuntime() danach die neueste Glance-Aktion sieht.
+        // Auch während der Installationsprüfung übernehmen; start() wertet die neueste Glance-Aktion dann als unverbraucht.
         setIntent(intent)
+        if (!started) newIntentWhilePending = true
         if (!currentSession()) return
         glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
@@ -690,6 +700,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
+        const val KEY_STARTED = "installation_started"
         const val TICK_MS = 1_000L
     }
 }

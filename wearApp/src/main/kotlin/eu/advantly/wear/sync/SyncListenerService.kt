@@ -11,6 +11,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
 import eu.advantly.device.link.WearDataLayerTransport
@@ -164,7 +165,9 @@ class SyncListenerService : WearableListenerService() {
      * Prozess-Bootstrap auf dem Main-Thread (idempotent), statt Frames vorzeitig als nicht erlaubt zu verwerfen.
      */
     private fun awaitBootstrap() {
-        if (AndroidInstallationGuard.privateTransportAllowed(this)) return
+        // Der Worker wartet hier ggf. auf die gemeinsame Prüfung. Nur ohne Session (noch kein Bootstrap) auf Main warten;
+        // Fehler- oder Hold-Zustand und laufende Session gehen ohne Umweg weiter.
+        if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready || AndroidMatchSessions.current() != null) return
         val done = CountDownLatch(1)
         AndroidInstallationGuard.checkAsync(this) {
             (application as? AdvantlyWearApplication)?.bootstrap()

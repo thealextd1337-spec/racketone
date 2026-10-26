@@ -10,6 +10,7 @@ import android.os.Looper
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import androidx.annotation.VisibleForTesting
 import androidx.sqlite.db.SupportSQLiteDatabase
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import eu.advantly.data.db.AdvantlyDatabase
@@ -18,6 +19,7 @@ import java.io.IOException
 import java.io.UncheckedIOException
 import java.nio.file.DirectoryIteratorException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** Kein Ersatz für eine Installation: Bei Speicherfehlern existiert ausschließlich dieser Fehlerstatus. */
@@ -79,6 +81,10 @@ object AndroidInstallationGuard {
     ) = background(context.applicationContext, ::retry, onResult)
 
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "advantly-installation").apply { isDaemon = true } }
+
+    /** Nur für Tests: der Hintergrundthread von [checkAsync]/[retryAsync], um ihn abzuwarten oder gezielt aufzuhalten. */
+    @VisibleForTesting
+    fun executorForTesting(): ExecutorService = worker
 
     private fun background(
         app: Context,

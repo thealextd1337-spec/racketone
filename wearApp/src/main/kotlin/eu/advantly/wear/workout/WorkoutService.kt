@@ -102,6 +102,8 @@ class WorkoutService : Service() {
     private var healthLease: WorkoutHealthLease? = null
     private var commandJob: Job? = null
     private var created = false
+
+    // Nur der letzte Befehl: Auch onStartCommand bricht einen wartenden Vorgänger ab (commandJob), Semantik unverändert.
     private var pendingStart: Triple<Intent?, Int, Int>? = null
     private var matchSession: MatchSession? = null
     private var receiverRegistered = false

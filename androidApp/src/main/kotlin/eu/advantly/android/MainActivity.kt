@@ -4,7 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -46,10 +47,12 @@ class MainActivity : ComponentActivity() {
         return super.dispatchTouchEvent(event)
     }
 
-    /** App-Start bzw. Vordergrund (B4): höchstens ein gedrosselter automatischer Abgleich. */
-    override fun onStart() {
-        super.onStart()
-        account?.sync?.onForeground()
+    /** Erst gesetzt, wenn [start] die Entscheidungen dieser Instanz getroffen hat (nicht schon im Ladezustand). */
+    private var started = false
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_STARTED, started)
     }
 
     override fun onDestroy() {
@@ -72,6 +75,9 @@ class MainActivity : ComponentActivity() {
         savedInstanceState: Bundle?,
         availability: AndroidInstallationAvailability,
     ) {
+        started = true
+        // Rotation im Ladezustand zählt nicht als Wiederherstellung: Hold-Dialog und Hinweis sonst nie gezeigt.
+        val restored = savedInstanceState?.getBoolean(KEY_STARTED, true) == true
         if (availability !is AndroidInstallationAvailability.Ready) {
             viewModelStore.clear()
             showInstallationError()
@@ -195,12 +201,23 @@ class MainActivity : ComponentActivity() {
                     },
             )
         }
-        if (!installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
+        if (!installation.privateTransportAllowed && (!restored || afterInstallationRetry)) {
             showRecoveryDecision(installation, current)
         }
-        if (savedInstanceState == null) showRecoveryDoneOnce(installation)
-        // Kam das Ergebnis erst nach onStart, den dort ausgelassenen Vordergrund-Abgleich nachholen.
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) account?.sync?.onForeground()
+        if (!restored) showRecoveryDoneOnce(installation)
+        // App-Start bzw. Vordergrund (B4): höchstens ein gedrosselter automatischer Abgleich. Als Beobachter erst ab
+        // hier, damit ein Prüfergebnis nach onStart den Abgleich nachholt (der Lifecycle liefert ON_START nach).
+        lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    account?.sync?.onForeground()
+                }
+            },
+        )
+    }
+
+    private companion object {
+        const val KEY_STARTED = "installation_started"
     }
 }
 

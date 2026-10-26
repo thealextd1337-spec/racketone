@@ -166,18 +166,21 @@ class InstallationHostFailureTest {
     fun coldWorkoutServiceDefersCommandUntilBackgroundCheck() {
         val app = RuntimeEnvironment.getApplication()
         File(app.noBackupFilesDir, "installation-check-123").writeText("blocked cleanup")
-        val worker =
-            AndroidInstallationGuard::class.java
-                .getDeclaredField("worker")
-                .apply { isAccessible = true }
-                .get(null) as java.util.concurrent.ExecutorService
         val busy = java.util.concurrent.CountDownLatch(1)
-        worker.submit { busy.await() }
-        // Sticky-Neustart im Kaltstart: onCreate/onStartCommand warten nicht auf die Prüfung und lesen keinen Marker.
-        val workout = Robolectric.buildService(WorkoutService::class.java).create()
-        assertEquals(android.app.Service.START_STICKY, workout.get().onStartCommand(Intent(WorkoutService.ACTION_RECOVER), 0, 1))
-        assertFalse(shadowOf(workout.get()).isStoppedBySelf)
-        busy.countDown()
+        AndroidInstallationGuard.executorForTesting().submit { busy.await() }
+        val workout =
+            try {
+                // Sticky-Neustart im Kaltstart: onCreate/onStartCommand warten nicht auf die Prüfung und lesen keinen Marker.
+                Robolectric.buildService(WorkoutService::class.java).create().also { workout ->
+                    assertEquals(
+                        android.app.Service.START_STICKY,
+                        workout.get().onStartCommand(Intent(WorkoutService.ACTION_RECOVER), 0, 1),
+                    )
+                    assertFalse(shadowOf(workout.get()).isStoppedBySelf)
+                }
+            } finally {
+                busy.countDown()
+            }
         settleInstallationGuard()
         assertTrue(shadowOf(workout.get()).isStoppedBySelf)
         assertNull(AndroidMatchSessions.current())
@@ -275,8 +278,13 @@ class InstallationHostFailureTest {
         assertInert()
         assertEquals(before, protectedBytes(app))
         retry.performClick()
-        // Nur die Prüfung abwarten; das folgende recreate() lief hier nie (Robolectric ohne Wear-Ambient-Klassen).
+        // Erfolgszweig ausführen (Ergebnis-Callback bis recreate()), aber nicht das von recreate() gepostete Neuerstellen:
+        // Robolectric fehlen die Wear-Ambient-Klassen der neuen Instanz.
         settleInstallationGuard(idleMain = false)
+        val main = shadowOf(android.os.Looper.getMainLooper())
+        repeat(20) { if (!activity.intent.getBooleanExtra(INSTALLATION_RETRY_COMPLETE, false) && !main.isIdle) main.runOneTask() }
+        assertTrue(activity.intent.getBooleanExtra(INSTALLATION_RETRY_COMPLETE, false))
+        assertFalse(retry.isEnabled)
         assertEquals(first, AndroidInstallationGuard.get(app))
         assertEquals(before, protectedBytes(app))
         assertFalse(first.privateTransportAllowed)

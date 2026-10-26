@@ -58,8 +58,10 @@ data class AndroidInstallationState internal constructor(
  * (gemessen: 1 MB < 0,3 s, 100 MB auf der Uhr bis 8 s) und braucht zusätzlichen freien Speicher in Familiengröße.
  * Main-Thread-Einstiege prüfen über [AndroidInstallationGuard.checkAsync] auf einem Hintergrundthread und zeigen bzw.
  * liefern bis dahin einen Ladezustand; Listener-Dienste warten auf ihrem Worker-Thread. Der Start dauert also weiterhin
- * so lange, blockiert aber nicht den Main-Thread. Synchron auf dem Main-Thread bleiben nur die kleinen Metadaten-Schreib-
- * vorgänge der Nutzerentscheidung ([AndroidInstallationGuard.requestRestore], [AndroidInstallationGuard.keepWithoutRestore]).
+ * so lange, die Prüfung blockiert aber nicht den Main-Thread. Weiter auf dem Main-Thread laufen: der anschließende
+ * Bootstrap (Session-prepare mit produktivem DB-Open und Migration, die Session gehört dem Main-Thread) und die kleinen
+ * Metadaten-Schreibvorgänge der Nutzerentscheidung ([AndroidInstallationGuard.requestRestore],
+ * [AndroidInstallationGuard.keepWithoutRestore]).
  *
  * Recovery-Paket: Eine ausdrückliche Übernahme ist eine Reservierung mit Quellfamilie. Die Quelle wird nur kopiert, nie
  * geöffnet oder verändert; [restore] prüft, migriert und bindet ausschließlich die eigene Kopie. Scheitert das, endet

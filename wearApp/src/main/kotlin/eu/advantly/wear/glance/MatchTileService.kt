@@ -27,93 +27,104 @@ class MatchTileService : TileService() {
         CallbackToFutureAdapter.getFuture { result ->
             // Kaltstart: Prüfung asynchron, die Kachel folgt danach (kein Warten auf dem Main-Thread).
             installationGlance(this) { state, copy ->
-                val device = requestParams.deviceConfiguration
-                val metrics =
-                    TileLayoutMetrics(
-                        device.screenWidthDp,
-                        device.screenHeightDp,
-                        device.screenShape == SCREEN_SHAPE_ROUND,
-                        device.fontScale,
-                    )
-                val live = state.live
-                val lines =
-                    if (live == null) {
-                        copy.lines.take(metrics.setupLines)
-                    } else {
-                        (listOfNotNull(copy.status) + copy.tileLines).distinct().take(metrics.liveLines)
-                    }
-                val content =
-                    LayoutElementBuilders.Column
-                        .Builder()
-                        .setWidth(dp(metrics.contentWidth))
-                        .setHeight(wrap())
-                        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-                        .addContent(
-                            button(
-                                copy.score ?: copy.title,
-                                lines,
-                                copy.primary,
-                                copy.description,
-                                metrics,
-                                role = copy.title.takeIf { live != null },
-                            ),
-                        )
-                if (live == null && copy.primary == GlanceAction.REPEAT) {
-                    content.addContent(
-                        LayoutElementBuilders.Spacer
-                            .Builder()
-                            .setHeight(dp(6f))
-                            .build(),
-                    )
-                    content.addContent(
-                        button(
-                            getString(R.string.home_new_match),
-                            emptyList(),
-                            GlanceAction.NEW,
-                            getString(R.string.home_new_match),
-                            metrics,
-                        ),
-                    )
+                // Fehler im asynchronen Aufbau an die Future geben, statt den Prozess abstürzen zu lassen.
+                try {
+                    result.set(tile(requestParams, state, copy))
+                } catch (error: Exception) {
+                    result.setException(error)
                 }
-                val root =
-                    LayoutElementBuilders.Box
-                        .Builder()
-                        .setWidth(expand())
-                        .setHeight(expand())
-                        .setModifiers(
-                            ModifiersBuilders.Modifiers
-                                .Builder()
-                                .setBackground(
-                                    ModifiersBuilders.Background
-                                        .Builder()
-                                        .setColor(argb(BACKGROUND))
-                                        .build(),
-                                ).build(),
-                        ).addContent(content.build())
-                        .build()
-                val layout =
-                    LayoutElementBuilders.Layout
-                        .Builder()
-                        .setRoot(root)
-                        .build()
-                result.set(
-                    TileBuilders.Tile
-                        .Builder()
-                        .setResourcesVersion(RESOURCES_VERSION)
-                        .setTileTimeline(
-                            TimelineBuilders.Timeline
-                                .Builder()
-                                .addTimelineEntry(
-                                    TimelineBuilders.TimelineEntry
-                                        .Builder()
-                                        .setLayout(layout)
-                                        .build(),
-                                ).build(),
-                        ).build(),
-                )
             }
             "Advantly tile"
         }
+
+    private fun tile(
+        requestParams: TileRequest,
+        state: GlanceState,
+        copy: GlanceCopy,
+    ): TileBuilders.Tile {
+        val device = requestParams.deviceConfiguration
+        val metrics =
+            TileLayoutMetrics(
+                device.screenWidthDp,
+                device.screenHeightDp,
+                device.screenShape == SCREEN_SHAPE_ROUND,
+                device.fontScale,
+            )
+        val live = state.live
+        val lines =
+            if (live == null) {
+                copy.lines.take(metrics.setupLines)
+            } else {
+                (listOfNotNull(copy.status) + copy.tileLines).distinct().take(metrics.liveLines)
+            }
+        val content =
+            LayoutElementBuilders.Column
+                .Builder()
+                .setWidth(dp(metrics.contentWidth))
+                .setHeight(wrap())
+                .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                .addContent(
+                    button(
+                        copy.score ?: copy.title,
+                        lines,
+                        copy.primary,
+                        copy.description,
+                        metrics,
+                        role = copy.title.takeIf { live != null },
+                    ),
+                )
+        if (live == null && copy.primary == GlanceAction.REPEAT) {
+            content.addContent(
+                LayoutElementBuilders.Spacer
+                    .Builder()
+                    .setHeight(dp(6f))
+                    .build(),
+            )
+            content.addContent(
+                button(
+                    getString(R.string.home_new_match),
+                    emptyList(),
+                    GlanceAction.NEW,
+                    getString(R.string.home_new_match),
+                    metrics,
+                ),
+            )
+        }
+        val root =
+            LayoutElementBuilders.Box
+                .Builder()
+                .setWidth(expand())
+                .setHeight(expand())
+                .setModifiers(
+                    ModifiersBuilders.Modifiers
+                        .Builder()
+                        .setBackground(
+                            ModifiersBuilders.Background
+                                .Builder()
+                                .setColor(argb(BACKGROUND))
+                                .build(),
+                        ).build(),
+                ).addContent(content.build())
+                .build()
+        val layout =
+            LayoutElementBuilders.Layout
+                .Builder()
+                .setRoot(root)
+                .build()
+        return TileBuilders.Tile
+            .Builder()
+            .setResourcesVersion(RESOURCES_VERSION)
+            .setTileTimeline(
+                TimelineBuilders.Timeline
+                    .Builder()
+                    .addTimelineEntry(
+                        TimelineBuilders.TimelineEntry
+                            .Builder()
+                            .setLayout(layout)
+                            .build(),
+                    ).build(),
+            ).build()
+    }
 
     override fun onTileResourcesRequest(requestParams: ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =
         CallbackToFutureAdapter.getFuture { result ->
