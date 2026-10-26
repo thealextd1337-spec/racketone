@@ -57,6 +57,7 @@ class ScopedPollFailureTest {
     private fun firstFailure(error: Exception) {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         shadowOf(Looper.getMainLooper()).idle()
         val installation = AndroidInstallationGuard.get(app)
         val source = requireNotNull(AndroidMatchSessions.current()).deviceId

@@ -307,4 +307,5 @@
     <string name="installation_error_title">Local data unavailable</string>
     <string name="installation_error_body">Local data could not be checked. Counting, device sync and account features are paused. Try again to repeat this check. Existing match data is kept.</string>
     <string name="installation_error_retry">Try again</string>
+    <string name="installation_loading">Checking local data…</string>
 </resources>

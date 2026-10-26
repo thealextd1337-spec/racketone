@@ -20,7 +20,8 @@ class AdvantlyPhoneApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        bootstrap()
+        // Installationsprüfung (Kopie, quick_check) im Hintergrund; Session und Beobachter danach auf dem Main-Thread.
+        AndroidInstallationGuard.checkAsync(this) { bootstrap() }
     }
 
     /** Nur eine erfolgreich geprüfte Installation darf prozessweite Session und Beobachter starten. */

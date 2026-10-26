@@ -18,8 +18,7 @@ class MatchComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener,
     ) {
-        val (state, copy) = installationGlance(this)
-        listener.onComplicationData(data(request.complicationType, state, copy))
+        installationGlance(this) { state, copy -> listener.onComplicationData(data(request.complicationType, state, copy)) }
     }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? =

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import eu.advantly.data.AndroidInstallationAvailability
@@ -35,17 +36,34 @@ internal fun Activity.showInstallationError() {
             setText(R.string.installation_error_retry)
             setOnClickListener {
                 isEnabled = false
-                val ready = AndroidInstallationGuard.retry(this@showInstallationError) is AndroidInstallationAvailability.Ready
-                val bootstrapped = ready && ((application as? AdvantlyPhoneApplication)?.bootstrap() != false)
-                if (bootstrapped) {
-                    intent.putExtra(INSTALLATION_RETRY_COMPLETE, true)
-                    recreate()
-                } else {
-                    isEnabled = true
-                    content.announceForAccessibility(getString(R.string.installation_error_body))
+                // Kopie und quick_check nicht auf dem Main-Thread; der Knopf bleibt bis zum Ergebnis gesperrt.
+                AndroidInstallationGuard.retryAsync(this@showInstallationError) { availability ->
+                    if (isDestroyed) return@retryAsync
+                    val ready = availability is AndroidInstallationAvailability.Ready
+                    val bootstrapped = ready && ((application as? AdvantlyPhoneApplication)?.bootstrap() != false)
+                    if (bootstrapped) {
+                        intent.putExtra(INSTALLATION_RETRY_COMPLETE, true)
+                        recreate()
+                    } else {
+                        isEnabled = true
+                        content.announceForAccessibility(getString(R.string.installation_error_body))
+                    }
                 }
             }
         },
     )
     setContentView(ScrollView(this).apply { addView(content) })
+}
+
+/** Bis die Installationsprüfung im Hintergrund fertig ist: nur ein Ladezustand, keine Session und kein Konto. */
+internal fun Activity.showInstallationLoading() {
+    val content =
+        LinearLayout(this).apply {
+            tag = "installation_loading"
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+    content.addView(ProgressBar(this).apply { isIndeterminate = true })
+    content.addView(TextView(this).apply { setText(R.string.installation_loading) })
+    setContentView(content)
 }

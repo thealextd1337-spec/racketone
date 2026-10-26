@@ -159,6 +159,12 @@ class MainActivity : ComponentActivity() {
     /** Ein Rechte-Dialog ist offen (übersteht die Neuerstellung über den Saved State). */
     private var permissionRequestInFlight = false
 
+    /** Erst gesetzt, wenn [start] die Entscheidungen dieser Instanz getroffen hat (nicht schon im Ladezustand). */
+    private var started = false
+    private var createdFrom: Bundle? = null
+    private var newIntentWhilePending = false
+    private var permissionResultWhilePending = false
+
     private val viewModel: WatchViewModel by viewModels {
         viewModelFactory { initializer { WatchViewModel(createController()) } }
     }
@@ -194,6 +200,8 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            // Ergebnis vor dem Prüfergebnis (Prozesstod mit offenem Dialog): start() wendet es an, statt es zu verwerfen.
+            if (!started) permissionResultWhilePending = true
             if (!currentSession()) return@registerForActivityResult
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
             permissions.value = Permissions.current(this)
@@ -203,7 +211,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val availability = AndroidInstallationGuard.check(this)
+        createdFrom = savedInstanceState
+        permissionResultWhilePending = savedInstanceState?.getBoolean(KEY_PERMISSION_RESULT_PENDING) == true
+        newIntentWhilePending = savedInstanceState?.getBoolean(KEY_NEW_INTENT_PENDING) == true
+        if (newIntentWhilePending) {
+            // Das Bundle ist maßgeblich: Nach Prozesstod liefert Android das ursprüngliche Task-Intent, nicht den Tile-Tipp.
+            val action = savedInstanceState?.getString(KEY_NEW_INTENT_ACTION)
+            if (action == null) intent.removeExtra(GlanceLaunch.EXTRA_ACTION) else intent.putExtra(GlanceLaunch.EXTRA_ACTION, action)
+        }
+        // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
+        showInstallationLoading()
+        AndroidInstallationGuard.checkAsync(this) { availability ->
+            if (!isFinishing && !isDestroyed) start(savedInstanceState, availability)
+        }
+    }
+
+    private fun start(
+        savedInstanceState: Bundle?,
+        availability: AndroidInstallationAvailability,
+    ) {
+        started = true
+        // Konfigurationswechsel im Ladezustand zählt nicht als Wiederherstellung (sonst fehlen Hold-Dialog und Glance).
+        val restored = savedInstanceState?.getBoolean(KEY_STARTED, true) == true
         if (availability !is AndroidInstallationAvailability.Ready) {
             showInstallationError()
             return
@@ -216,7 +245,8 @@ class MainActivity : ComponentActivity() {
         }
         sessionReady = true
         // Ein restauriertes Task-Intent darf nie erneut einen Schnellstart auslösen.
-        glanceConsumption = GlanceIntentConsumption(consumed = savedInstanceState != null)
+        // Ein neues Intent während der Prüfung (Tile-Tipp nach Prozesstod) ist nicht verbraucht.
+        glanceConsumption = GlanceIntentConsumption(consumed = restored && !newIntentWhilePending)
         lifecycle.addObserver(ambientObserver)
         haptics = Haptics(this)
         holder = AndroidInstallationGuard.storage(this) { WearSessions.get(this) } ?: run {
@@ -233,9 +263,9 @@ class MainActivity : ComponentActivity() {
             runtimeUnavailable()
             return
         }
-        if (!availability.installation.privateTransportAllowed && (savedInstanceState == null || afterInstallationRetry)) {
+        if (!availability.installation.privateTransportAllowed && (!restored || afterInstallationRetry)) {
             showRecoveryDecision(availability.installation, holder.session)
-        } else if (availability.installation.restoreFailed && savedInstanceState == null) {
+        } else if (availability.installation.restoreFailed && !restored) {
             showLaterRestoreFailed()
         }
         runtimeJobs +=
@@ -247,11 +277,14 @@ class MainActivity : ComponentActivity() {
             }
         permissions.value = Permissions.current(this)
         permissionRequestInFlight = savedInstanceState?.getBoolean(KEY_PERMISSION_IN_FLIGHT) == true
-        if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {
+        if (permissionResultWhilePending) {
+            permissionRequestInFlight = false
+            onPermissionDecision()
+        } else if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {
             // Dialog ging verloren (z. B. Prozess neu, ohne Ergebnis) → Match gilt nicht als erledigt, neu fragen
             holder.prefs.workoutPending = null
         }
-        DiagnosticLog.log("ACTIVITY_CREATE", "restored" to (savedInstanceState != null))
+        DiagnosticLog.log("ACTIVITY_CREATE", "restored" to restored)
 
         // Capabilities beim App-Start abfragen und cachen (05 §0.1).
         runtimeJobs +=
@@ -312,15 +345,36 @@ class MainActivity : ComponentActivity() {
                         ?.let { { showLaterRestore(holder.session) } },
             )
         }
+        // Kam das Ergebnis erst nach onStart/onResume, die dort ausgelassenen Schritte nachholen.
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) startRuntime()
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeRuntime()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+        val original = createdFrom
+        if (started) {
+            outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+            outState.putBoolean(KEY_STARTED, true)
+            return
+        }
+        // Im Ladezustand die eigenen Merker des Ursprungs unverändert weitergeben: Eine echte Wiederherstellung bleibt eine,
+        // ein offener Rechte-Dialog bleibt offen und ein Tile-Tipp während der Prüfung bleibt unverbraucht.
+        if (original == null) outState.putBoolean(KEY_STARTED, false)
+        for (key in listOf(KEY_STARTED, KEY_PERMISSION_IN_FLIGHT)) {
+            if (original?.containsKey(key) == true) outState.putBoolean(key, original.getBoolean(key))
+        }
+        outState.putBoolean(KEY_PERMISSION_RESULT_PENDING, permissionResultWhilePending)
+        outState.putBoolean(KEY_NEW_INTENT_PENDING, newIntentWhilePending)
+        if (newIntentWhilePending) outState.putString(KEY_NEW_INTENT_ACTION, intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
     }
 
     override fun onStart() {
         super.onStart()
+        startRuntime()
+    }
+
+    private fun startRuntime() {
         if (!currentSession()) return
         controller.effects = ::onEffect
         updatePowerSave()
@@ -342,6 +396,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        resumeRuntime()
+    }
+
+    private fun resumeRuntime() {
         if (!currentSession()) return
         UiVisibility.resumed = true
         controller.setInteractive(!isAmbient.value)
@@ -368,8 +426,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (!currentSession()) return
+        // Auch während der Installationsprüfung übernehmen; start() wertet die neueste Glance-Aktion dann als unverbraucht.
         setIntent(intent)
+        if (!started) newIntentWhilePending = true
+        if (!currentSession()) return
         glanceConsumption.onNewIntent()
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) consumeGlanceAction()
     }
@@ -668,6 +728,10 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
+        const val KEY_STARTED = "installation_started"
+        const val KEY_NEW_INTENT_PENDING = "installation_new_intent_pending"
+        const val KEY_NEW_INTENT_ACTION = "installation_new_intent_action"
+        const val KEY_PERMISSION_RESULT_PENDING = "installation_permission_result_pending"
         const val TICK_MS = 1_000L
     }
 }

@@ -66,6 +66,7 @@ class DirectUiBoundaryTest {
     ) {
         val app = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val session = requireNotNull(AndroidMatchSessions.current())
 
         val self =
@@ -152,6 +153,7 @@ class DirectUiBoundaryTest {
     @Test
     fun retainedAndroidModelSurvivesRotationAndClosesItsStore() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        settleInstallationGuard()
         val model = androidx.lifecycle.ViewModelProvider(activity.get())[AndroidPhoneAppViewModel::class.java]
         val guest = requireNotNull(model.model.players.tryAddGuest("Before rotation"))
         activity.recreate()

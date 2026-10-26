@@ -79,6 +79,7 @@ class DirectUiBoundaryTest {
             )
         }
         activity.setup()
+        settleInstallationGuard()
         val session =
             eu.advantly.wear.sync.WearSessions
                 .get(app)

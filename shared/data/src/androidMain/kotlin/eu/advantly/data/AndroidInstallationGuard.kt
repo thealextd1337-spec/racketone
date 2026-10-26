@@ -5,9 +5,12 @@ import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDatabaseCorruptException
 import android.database.sqlite.SQLiteException
+import android.os.Handler
+import android.os.Looper
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import androidx.annotation.VisibleForTesting
 import androidx.sqlite.db.SupportSQLiteDatabase
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import eu.advantly.data.db.AdvantlyDatabase
@@ -15,6 +18,9 @@ import java.io.File
 import java.io.IOException
 import java.io.UncheckedIOException
 import java.nio.file.DirectoryIteratorException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 /** Kein Ersatz für eine Installation: Bei Speicherfehlern existiert ausschließlich dieser Fehlerstatus. */
 sealed interface AndroidInstallationAvailability {
@@ -27,8 +33,9 @@ sealed interface AndroidInstallationAvailability {
 
 /** Prozessweiter Android-Schutz, einschließlich Service-/Tile-Kaltstart. Unbekannte Originale bleiben ungeöffnet. */
 object AndroidInstallationGuard {
-    private val states = mutableMapOf<String, AndroidInstallationState>()
-    private val unavailable = mutableSetOf<String>()
+    // Geschrieben nur unter der Objektsperre; nebenläufig lesbar, damit [checkAsync] ein bekanntes Ergebnis ohne Sperre sieht.
+    private val states = ConcurrentHashMap<String, AndroidInstallationState>()
+    private val unavailable: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val bootstrapped = mutableSetOf<String>()
 
     private val failures = mutableMapOf<String, Exception>()
@@ -42,6 +49,54 @@ object AndroidInstallationGuard {
         if (key(context) in unavailable) return AndroidInstallationAvailability.Unavailable
         return capture(context) { AndroidInstallationAvailability.Ready(get(context)) }
             ?: AndroidInstallationAvailability.Unavailable
+    }
+
+    /**
+     * Für Main-Thread-Einstiege (Application, Activity, Tile/Complication, Dienst-`onCreate`, JobService): [check] mit
+     * Kopie, quick_check und Übernahme läuft auf einem eigenen Hintergrundthread, [onResult] danach auf dem Main-Thread.
+     * Ist das Ergebnis dieses Prozesses schon bekannt, ruft der Main-Thread [onResult] sofort auf (ohne Sperre und I/O).
+     * Nebenläufige Aufrufer teilen eine Prüfung: [check] ist gesperrt und hält das Ergebnis je Prozess fest. Bis zu ihrem
+     * Abschluss öffnet niemand produktiv; [storage]/[get] auf anderen Threads warten an derselben Sperre.
+     */
+    fun checkAsync(
+        context: Context,
+        onResult: (AndroidInstallationAvailability) -> Unit,
+    ) {
+        val app = context.applicationContext
+        val key = key(app)
+        val known =
+            if (key in unavailable) {
+                AndroidInstallationAvailability.Unavailable
+            } else {
+                states[key]?.let(AndroidInstallationAvailability::Ready)
+            }
+        if (known != null && Looper.myLooper() == Looper.getMainLooper()) return onResult(known)
+        background(app, ::check, onResult)
+    }
+
+    /** [retry] außerhalb des Main-Threads (Fehleransicht); [onResult] läuft auf dem Main-Thread. */
+    fun retryAsync(
+        context: Context,
+        onResult: (AndroidInstallationAvailability) -> Unit,
+    ) = background(context.applicationContext, ::retry, onResult)
+
+    private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "advantly-installation").apply { isDaemon = true } }
+
+    /** Nur für Tests: der Hintergrundthread von [checkAsync]/[retryAsync], um ihn abzuwarten oder gezielt aufzuhalten. */
+    @VisibleForTesting
+    fun executorForTesting(): Executor = worker
+
+    private fun background(
+        app: Context,
+        action: (Context) -> AndroidInstallationAvailability,
+        onResult: (AndroidInstallationAvailability) -> Unit,
+    ) {
+        val main = Handler(Looper.getMainLooper())
+        worker.execute {
+            val result = runCatching { action(app) }
+            // Programmierfehler wie bisher auf dem Main-Thread werfen, statt Aufrufer ohne Ergebnis warten zu lassen.
+            main.post { onResult(result.getOrThrow()) }
+        }
     }
 
     /** Wiederholt Datei- und Kopienprüfung, niemals Verifikationsfreigabe oder Generationswechsel als I/O-Fallback. */

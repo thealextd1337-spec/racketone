@@ -101,6 +101,10 @@ class WorkoutService : Service() {
     private var sessionAccess: AndroidSessionAccess? = null
     private var healthLease: WorkoutHealthLease? = null
     private var commandJob: Job? = null
+    private var created = false
+
+    // Nur der letzte Befehl: Auch onStartCommand bricht einen wartenden Vorgänger ab (commandJob), Semantik unverändert.
+    private var pendingStart: Triple<Intent?, Int, Int>? = null
     private var matchSession: MatchSession? = null
     private var receiverRegistered = false
     private var healthAborted = false
@@ -148,7 +152,13 @@ class WorkoutService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        if (AndroidInstallationGuard.check(this) !is AndroidInstallationAvailability.Ready) {
+        // Sticky-Neustart im Kaltstart: Prüfung im Hintergrund; ein Startbefehl wartet bis dahin in [pendingStart].
+        AndroidInstallationGuard.checkAsync(this) { availability -> if (scope.isActive) create(availability) }
+    }
+
+    private fun create(availability: AndroidInstallationAvailability) {
+        created = true
+        if (availability !is AndroidInstallationAvailability.Ready) {
             stopSelf()
             return
         }
@@ -181,6 +191,10 @@ class WorkoutService : Service() {
             }
         ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         receiverRegistered = true
+        pendingStart?.let { (intent, flags, startId) ->
+            pendingStart = null
+            onStartCommand(intent, flags, startId)
+        }
     }
 
     override fun onStartCommand(
@@ -188,6 +202,11 @@ class WorkoutService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
+        if (!created) {
+            pendingStart = Triple(intent, flags, startId)
+            // Sitzungsmarker erst nach der Prüfung lesbar: STICKY hält einen Sticky-Neustart, ein späteres stopSelf beendet ihn.
+            return START_STICKY
+        }
         if (!currentSession()) {
             stopSelf()
             return START_NOT_STICKY

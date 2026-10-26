@@ -54,9 +54,14 @@ data class AndroidInstallationState internal constructor(
  * noch unveröffentlichte Zwischenfamilie. Fremde Familien werden nie initialisiert, verändert oder gelöscht.
  * Validierung öffnet nur eine vollständige private Kopie; I/O-/SQLite-Fehler brechen ohne Umschaltung ab.
  *
- * Leistungsgrenze dieses Schutzschnitts: Jeder Prozessstart kopiert die aktive Familie synchron, derzeit auch vom
- * Main-Thread, einschließlich SQLite-quick_check. Dafür wird zusätzlicher freier Speicher in Familiengröße benötigt; große Familien können den Start
- * blockieren und ein ANR auslösen. Eine asynchrone Initialisierung ist eine separate spätere Arbeit.
+ * Leistungsgrenze dieses Schutzschnitts: Jeder Prozessstart kopiert die aktive Familie einschließlich SQLite-quick_check
+ * (gemessen: 1 MB < 0,3 s, 100 MB auf der Uhr bis 8 s) und braucht zusätzlichen freien Speicher in Familiengröße.
+ * Main-Thread-Einstiege prüfen über [AndroidInstallationGuard.checkAsync] auf einem Hintergrundthread und zeigen bzw.
+ * liefern bis dahin einen Ladezustand; Listener-Dienste warten auf ihrem Worker-Thread. Der Start dauert also weiterhin
+ * so lange, die Prüfung blockiert aber nicht den Main-Thread. Weiter auf dem Main-Thread laufen: der anschließende
+ * Bootstrap (Session-prepare mit produktivem DB-Open und Migration, die Session gehört dem Main-Thread) und die kleinen
+ * Metadaten-Schreibvorgänge der Nutzerentscheidung ([AndroidInstallationGuard.requestRestore],
+ * [AndroidInstallationGuard.keepWithoutRestore]).
  *
  * Recovery-Paket: Eine ausdrückliche Übernahme ist eine Reservierung mit Quellfamilie. Die Quelle wird nur kopiert, nie
  * geöffnet oder verändert; [restore] prüft, migriert und bindet ausschließlich die eigene Kopie. Scheitert das, endet
