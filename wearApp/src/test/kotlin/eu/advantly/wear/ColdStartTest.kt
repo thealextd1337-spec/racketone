@@ -45,7 +45,7 @@ class ColdStartTest {
         InstallationHostFailureTest().reset()
         UiVisibility.resumed = false
         // Der Hintergrundthread hängt wie bei einer großen Familie, bis der Test ihn freigibt.
-        AndroidInstallationGuard.executorForTesting().submit { busy.await() }
+        AndroidInstallationGuard.executorForTesting().execute { busy.await() }
     }
 
     @After
@@ -58,8 +58,8 @@ class ColdStartTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun activity(): ActivityController<MainActivity> =
-        Robolectric.buildActivity(MainActivity::class.java).also { activity ->
+    private fun activity(intent: Intent? = null): ActivityController<MainActivity> =
+        Robolectric.buildActivity(MainActivity::class.java, intent).also { activity ->
             // Derselbe reine Robolectric-Ambientstub wie in den bestehenden Hosttests.
             MainActivity::class.java.getDeclaredField("ambientObserver\$delegate").apply {
                 isAccessible = true
@@ -107,6 +107,91 @@ class ColdStartTest {
         busy.countDown()
         settleInstallationGuard()
         assertNull(activity.get().intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
+        activity.pause().stop().destroy()
+    }
+
+    private fun tile(): Intent =
+        Intent(RuntimeEnvironment.getApplication(), MainActivity::class.java)
+            .putExtra(GlanceLaunch.EXTRA_ACTION, GlanceAction.NEW.name)
+
+    /** Neuerstellung im Ladezustand: Zustand der ersten Instanz sichern und an eine neue Instanz geben. */
+    private fun recreateWhilePending(
+        first: ActivityController<MainActivity>,
+        intent: Intent,
+    ): ActivityController<MainActivity> {
+        val saved = Bundle()
+        first.saveInstanceState(saved)
+        first.pause().stop().destroy()
+        return activity(intent).create(saved).start().resume()
+    }
+
+    @Test
+    fun restoredGlanceStaysConsumedAcrossRecreationDuringCheck() {
+        // Echter Restore (alte Task mit verbrauchter Tile-Aktion), dann Konfigurationswechsel während der Prüfung.
+        val first = activity(tile()).create(Bundle().apply { putBoolean("installation_started", true) }).start().resume()
+        val second = recreateWhilePending(first, tile())
+        busy.countDown()
+        settleInstallationGuard()
+        assertNotNull(second.get().intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
+        second.pause().stop().destroy()
+    }
+
+    @Test
+    fun tileIntentDuringCheckSurvivesRecreation() {
+        val first = activity().create(Bundle().apply { putBoolean("installation_started", true) }).start()
+        first.newIntent(tile())
+        val second = recreateWhilePending(first, tile())
+        busy.countDown()
+        settleInstallationGuard()
+        assertNull(second.get().intent.getStringExtra(GlanceLaunch.EXTRA_ACTION))
+        second.pause().stop().destroy()
+    }
+
+    @Test
+    fun permissionResultDuringCheckIsAppliedAfterwards() {
+        val app = RuntimeEnvironment.getApplication()
+        // Ausstehender Workout-Auftrag aus dem früheren Prozess; danach wieder kalt (Ergebnis nicht zwischengespeichert).
+        eu.advantly.wear.sync.WearPrefs(app).apply {
+            workoutPending = eu.advantly.core.model
+                .MatchId("pending-match") to eu.advantly.wear.workout.WorkoutSport.TENNIS
+            notificationsAsked = true
+        }
+        (
+            AndroidInstallationGuard::class.java
+                .getDeclaredField("states")
+                .apply { isAccessible = true }
+                .get(AndroidInstallationGuard) as MutableMap<*, *>
+        ).clear()
+        val saved =
+            Bundle().apply {
+                putBoolean("installation_started", true)
+                putBoolean("permissionRequestInFlight", true)
+            }
+        val activity = activity().create(saved)
+        // Das Dialogergebnis wird mit ON_START zugestellt, also vor dem Prüfergebnis.
+        val registry = activity.get().activityResultRegistry
+        val requestCode =
+            (
+                androidx.activity.result.ActivityResultRegistry::class.java.declaredFields
+                    .first { it.name == "keyToRc" }
+                    .apply { isAccessible = true }
+                    .get(registry) as Map<*, *>
+            ).values.single() as Int
+        registry.dispatchResult(requestCode, android.app.Activity.RESULT_CANCELED, null)
+        activity.start()
+        busy.countDown()
+        settleInstallationGuard()
+        assertFalse(
+            MainActivity::class.java
+                .getDeclaredField("permissionRequestInFlight")
+                .apply { isAccessible = true }
+                .getBoolean(activity.get()),
+        )
+        val prefs =
+            eu.advantly.wear.sync
+                .WearPrefs(app)
+        assertNull(prefs.workoutPending)
+        assertTrue(prefs.workoutHandledMatchId?.value == "pending-match")
         activity.pause().stop().destroy()
     }
 

@@ -161,7 +161,9 @@ class MainActivity : ComponentActivity() {
 
     /** Erst gesetzt, wenn [start] die Entscheidungen dieser Instanz getroffen hat (nicht schon im Ladezustand). */
     private var started = false
+    private var createdFrom: Bundle? = null
     private var newIntentWhilePending = false
+    private var permissionResultWhilePending = false
 
     private val viewModel: WatchViewModel by viewModels {
         viewModelFactory { initializer { WatchViewModel(createController()) } }
@@ -198,6 +200,8 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            // Ergebnis vor dem Prüfergebnis (Prozesstod mit offenem Dialog): start() wendet es an, statt es zu verwerfen.
+            if (!started) permissionResultWhilePending = true
             if (!currentSession()) return@registerForActivityResult
             DiagnosticLog.log("PERMISSIONS_RESULT", *result.map { (k, v) -> k.substringAfterLast('.') to v }.toTypedArray())
             permissions.value = Permissions.current(this)
@@ -207,6 +211,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        createdFrom = savedInstanceState
+        newIntentWhilePending = savedInstanceState?.getBoolean(KEY_NEW_INTENT_PENDING) == true
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(this) { availability ->
@@ -265,7 +271,10 @@ class MainActivity : ComponentActivity() {
             }
         permissions.value = Permissions.current(this)
         permissionRequestInFlight = savedInstanceState?.getBoolean(KEY_PERMISSION_IN_FLIGHT) == true
-        if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {
+        if (permissionResultWhilePending) {
+            permissionRequestInFlight = false
+            onPermissionDecision()
+        } else if (!permissionRequestInFlight && holder.prefs.workoutPending != null) {
             // Dialog ging verloren (z. B. Prozess neu, ohne Ergebnis) → Match gilt nicht als erledigt, neu fragen
             holder.prefs.workoutPending = null
         }
@@ -337,8 +346,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
-        outState.putBoolean(KEY_STARTED, started)
+        val original = createdFrom
+        if (started) {
+            outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, permissionRequestInFlight)
+            outState.putBoolean(KEY_STARTED, true)
+            return
+        }
+        // Im Ladezustand die eigenen Merker des Ursprungs unverändert weitergeben: Eine echte Wiederherstellung bleibt eine,
+        // ein offener Rechte-Dialog bleibt offen und ein Tile-Tipp während der Prüfung bleibt unverbraucht.
+        if (original == null) outState.putBoolean(KEY_STARTED, false)
+        for (key in listOf(KEY_STARTED, KEY_PERMISSION_IN_FLIGHT)) {
+            if (original?.containsKey(key) == true) outState.putBoolean(key, original.getBoolean(key))
+        }
+        // Dialogergebnis schon da: Die neue Instanz behandelt den Dialog als beendet, nicht als weiter offen.
+        if (permissionResultWhilePending) outState.putBoolean(KEY_PERMISSION_IN_FLIGHT, false)
+        outState.putBoolean(KEY_NEW_INTENT_PENDING, newIntentWhilePending)
     }
 
     override fun onStart() {
@@ -701,6 +723,7 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val KEY_PERMISSION_IN_FLIGHT = "permissionRequestInFlight"
         const val KEY_STARTED = "installation_started"
+        const val KEY_NEW_INTENT_PENDING = "installation_new_intent_pending"
         const val TICK_MS = 1_000L
     }
 }

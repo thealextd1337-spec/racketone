@@ -26,7 +26,7 @@ class MatchTileService : TileService() {
     override fun onTileRequest(requestParams: TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { result ->
             // Kaltstart: Prüfung asynchron, die Kachel folgt danach (kein Warten auf dem Main-Thread).
-            installationGlance(this) { state, copy ->
+            installationGlance(this, onFailure = { error -> result.setException(error) }) { state, copy ->
                 // Fehler im asynchronen Aufbau an die Future geben, statt den Prozess abstürzen zu lassen.
                 try {
                     result.set(tile(requestParams, state, copy))

@@ -19,7 +19,7 @@ import java.io.IOException
 import java.io.UncheckedIOException
 import java.nio.file.DirectoryIteratorException
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 /** Kein Ersatz für eine Installation: Bei Speicherfehlern existiert ausschließlich dieser Fehlerstatus. */
@@ -84,7 +84,7 @@ object AndroidInstallationGuard {
 
     /** Nur für Tests: der Hintergrundthread von [checkAsync]/[retryAsync], um ihn abzuwarten oder gezielt aufzuhalten. */
     @VisibleForTesting
-    fun executorForTesting(): ExecutorService = worker
+    fun executorForTesting(): Executor = worker
 
     private fun background(
         app: Context,

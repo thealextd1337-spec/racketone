@@ -167,7 +167,7 @@ class InstallationHostFailureTest {
         val app = RuntimeEnvironment.getApplication()
         File(app.noBackupFilesDir, "installation-check-123").writeText("blocked cleanup")
         val busy = java.util.concurrent.CountDownLatch(1)
-        AndroidInstallationGuard.executorForTesting().submit { busy.await() }
+        AndroidInstallationGuard.executorForTesting().execute { busy.await() }
         val workout =
             try {
                 // Sticky-Neustart im Kaltstart: onCreate/onStartCommand warten nicht auf die Prüfung und lesen keinen Marker.

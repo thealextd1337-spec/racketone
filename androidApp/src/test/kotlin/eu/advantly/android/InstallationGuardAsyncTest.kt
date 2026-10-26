@@ -39,7 +39,10 @@ internal fun settleInstallationGuard() {
     val worker = AndroidInstallationGuard.executorForTesting()
     // Ergebnis-Callbacks dürfen weitere Prüfungen anstoßen (Activity nach Application): zweimal abwarten.
     repeat(2) {
-        worker.submit {}.get(30, TimeUnit.SECONDS)
+        java.util.concurrent
+            .FutureTask {}
+            .also(worker::execute)
+            .get(30, TimeUnit.SECONDS)
         shadowOf(Looper.getMainLooper()).idle()
     }
 }
@@ -119,6 +122,54 @@ class InstallationGuardAsyncTest {
     }
 
     @Test
+    fun foregroundSyncRunsOnceAfterLateCheck() {
+        val busy = CountDownLatch(1)
+        AndroidInstallationGuard.executorForTesting().execute { busy.await() }
+        val calls = AtomicInteger()
+        val original = MainActivity.foreground
+        MainActivity.foreground = { calls.incrementAndGet() }
+        try {
+            val activity =
+                try {
+                    Robolectric.buildActivity(MainActivity::class.java).setup()
+                } finally {
+                    busy.countDown()
+                }
+            assertEquals(0, calls.get())
+            settleInstallationGuard()
+            assertEquals(1, calls.get())
+            activity.pause().stop().destroy()
+        } finally {
+            MainActivity.foreground = original
+        }
+    }
+
+    @Test
+    fun recoveryDoneIsNotRepeatedAfterRecreationDuringCheck() {
+        val busy = CountDownLatch(1)
+        AndroidInstallationGuard.executorForTesting().execute { busy.await() }
+        // Echter Restore einer Instanz, deren Hinweis „Übernahme gelungen“ schon gezeigt wurde; Rotation im Ladezustand.
+        val intent = android.content.Intent(RuntimeEnvironment.getApplication(), MainActivity::class.java).putExtra("recovery_done", true)
+        val activity =
+            try {
+                Robolectric
+                    .buildActivity(MainActivity::class.java, intent)
+                    .create(android.os.Bundle().apply { putBoolean("installation_started", true) })
+                    .start()
+                    .resume()
+                    .recreate()
+            } finally {
+                busy.countDown()
+            }
+        settleInstallationGuard()
+        assertNull(
+            org.robolectric.shadows.ShadowAlertDialog
+                .getLatestAlertDialog(),
+        )
+        activity.pause().stop().destroy()
+    }
+
+    @Test
     @Config(application = AdvantlyPhoneApplication::class)
     fun coldListenerWaitsForAsyncBootstrapAndDeliversFrame() {
         val app = RuntimeEnvironment.getApplication() as AdvantlyPhoneApplication
@@ -134,7 +185,7 @@ class InstallationGuardAsyncTest {
                 .get(AndroidInstallationGuard) as MutableSet<*>
         ).clear()
         val busy = CountDownLatch(1)
-        AndroidInstallationGuard.executorForTesting().submit { busy.await() }
+        AndroidInstallationGuard.executorForTesting().execute { busy.await() }
         val service = Robolectric.buildService(PhoneSyncListenerService::class.java).create()
         var failure: Throwable? = null
         val listener =

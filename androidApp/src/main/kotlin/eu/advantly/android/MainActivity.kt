@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
@@ -49,10 +50,17 @@ class MainActivity : ComponentActivity() {
 
     /** Erst gesetzt, wenn [start] die Entscheidungen dieser Instanz getroffen hat (nicht schon im Ladezustand). */
     private var started = false
+    private var createdFrom: Bundle? = null
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_STARTED, started)
+        // Im Ladezustand den Merker des Ursprungs unverändert weitergeben: Eine echte Wiederherstellung bleibt eine.
+        val original = createdFrom
+        when {
+            started -> outState.putBoolean(KEY_STARTED, true)
+            original == null -> outState.putBoolean(KEY_STARTED, false)
+            original.containsKey(KEY_STARTED) -> outState.putBoolean(KEY_STARTED, original.getBoolean(KEY_STARTED))
+        }
     }
 
     override fun onDestroy() {
@@ -64,6 +72,7 @@ class MainActivity : ComponentActivity() {
         // Systemleisten folgen dem System-Theme (die App ist Dark-first, der Live-Score immer schwarz)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        createdFrom = savedInstanceState
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(applicationContext) { availability ->
@@ -209,15 +218,17 @@ class MainActivity : ComponentActivity() {
         // hier, damit ein Prüfergebnis nach onStart den Abgleich nachholt (der Lifecycle liefert ON_START nach).
         lifecycle.addObserver(
             object : DefaultLifecycleObserver {
-                override fun onStart(owner: LifecycleOwner) {
-                    account?.sync?.onForeground()
-                }
+                override fun onStart(owner: LifecycleOwner) = foreground(this@MainActivity)
             },
         )
     }
 
-    private companion object {
-        const val KEY_STARTED = "installation_started"
+    internal companion object {
+        private const val KEY_STARTED = "installation_started"
+
+        /** Testnaht wie [eu.advantly.android.sync.PhoneSyncJobService.work]; im Produkt immer der Konto-Abgleich. */
+        @VisibleForTesting
+        internal var foreground: (MainActivity) -> Unit = { activity -> activity.account?.sync?.onForeground() }
     }
 }
 
