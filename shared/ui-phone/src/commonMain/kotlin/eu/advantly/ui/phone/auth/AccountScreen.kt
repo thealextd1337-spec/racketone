@@ -88,6 +88,7 @@ import eu.advantly.ui.phone.resources.auth_username_taken
 import eu.advantly.ui.phone.resources.consent_accept
 import eu.advantly.ui.phone.resources.consent_changed
 import eu.advantly.ui.phone.resources.consent_confirm
+import eu.advantly.ui.phone.resources.consent_confirm_privacy
 import eu.advantly.ui.phone.resources.consent_current
 import eu.advantly.ui.phone.resources.consent_decline
 import eu.advantly.ui.phone.resources.consent_declined
@@ -301,7 +302,16 @@ fun AccountScreen(
                                     enabled = !state.busy,
                                     modifier = Modifier.testTag("consent_confirm_${document.type}"),
                                 )
-                                Text(stringResource(Res.string.consent_confirm, title), modifier = Modifier.weight(1f))
+                                // Die Datenschutzerklärung wird nur zur Kenntnis genommen: Rechtsgrundlage ist der Vertrag, keine Einwilligung.
+                                val confirm =
+                                    if (document.type ==
+                                        ConsentDocumentType.TERMS
+                                    ) {
+                                        Res.string.consent_confirm
+                                    } else {
+                                        Res.string.consent_confirm_privacy
+                                    }
+                                Text(stringResource(confirm, title), modifier = Modifier.weight(1f))
                             }
                         }
                     }

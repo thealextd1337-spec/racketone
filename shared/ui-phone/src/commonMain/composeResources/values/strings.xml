@@ -653,11 +653,12 @@
     <string name="consent_privacy">App privacy policy</string>
     <string name="consent_version">Version %1$s · %2$s</string>
     <string name="consent_unavailable">The required documents have not been released for account and cloud use yet. You can keep scoring offline and access support and your account rights.</string>
-    <string name="consent_required">Please review the current documents and decide whether to accept them before using your account and cloud features.</string>
+    <string name="consent_required">Please read the current documents and decide before using your account and cloud features.</string>
     <string name="consent_declined">You declined. Cloud use remains paused. Offline scoring, support and your account rights remain available.</string>
-    <string name="consent_current">Your acceptance of the current versions is recorded.</string>
-    <string name="consent_confirm">I have reviewed and accept: %1$s</string>
-    <string name="consent_accept">Accept the selected document versions</string>
+    <string name="consent_current">Your confirmation of the current versions is recorded.</string>
+    <string name="consent_confirm">I have read and accept: %1$s</string>
+    <string name="consent_confirm_privacy">I have taken note of: %1$s</string>
+    <string name="consent_accept">Confirm and use the cloud</string>
     <string name="consent_decline">Decline and keep scoring offline</string>
     <string name="consent_changed">The document versions have changed. Refresh and review them again.</string>
     <string name="account_export">View account data (JSON)</string>

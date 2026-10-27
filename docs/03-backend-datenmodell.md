@@ -1318,7 +1318,7 @@ Kaskaden im Detail:
 | `match_roles`, `match_visitors` | Zuweisungen des gelöschten Accounts sowie von ihm erteilte Visitor-Zugriffe kaskadierend löschen; aktive Live-Abos entziehen. Laufender Zählerwechsel bleibt ein Engine-Event, keine stille Neuzuweisung. |
 | `ops.notification_outbox` | cascade |
 | `ops.revenuecat_events` | `app_user_id` wird gehasht (Abrechnung läuft über Apple/Google, wir stellen keine Rechnungen → keine HGB/AO-Aufbewahrung bei uns) |
-| Backups | Daten verschwinden spätestens nach 7 Tagen aus den täglichen Backups (PITR nicht aktivieren oder Retention dokumentieren) |
+| Backups | Pilot auf Supabase Free: keine Backups (Nutzerentscheid 27.10.2026), gelöschte Daten sind mit Abschluss der Löschung entfernt. Bei Wechsel auf Pro: tägliche Backups, nach 7 Tagen überschrieben; PITR nicht aktivieren; nach einem Restore abgeschlossene Löschungen erneut anwenden |
 
 Die Redaktionsgrundlage `00700` trennt Profil-IDs, belegte Player-IDs und
 matchlokale Slot-/Eventbelege. Namen beweisen keine Identität. Eine alte

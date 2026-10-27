@@ -653,11 +653,12 @@
     <string name="consent_privacy">App-Datenschutzerklärung</string>
     <string name="consent_version">Version %1$s · %2$s</string>
     <string name="consent_unavailable">Die erforderlichen Dokumente sind noch nicht für Konto und Cloud freigegeben. Du kannst weiter offline zählen und Support sowie deine Kontorechte nutzen.</string>
-    <string name="consent_required">Bitte prüfe die aktuellen Dokumente und entscheide bewusst über deine Zustimmung, bevor du Konto- und Cloudfunktionen nutzt.</string>
+    <string name="consent_required">Bitte lies die aktuellen Dokumente und entscheide bewusst, bevor du Konto- und Cloudfunktionen nutzt.</string>
     <string name="consent_declined">Du hast abgelehnt. Die Cloud bleibt pausiert. Offline-Zählen, Support und deine Kontorechte bleiben verfügbar.</string>
-    <string name="consent_current">Deine Zustimmung zu den aktuellen Versionen ist gespeichert.</string>
-    <string name="consent_confirm">Ich habe das Dokument geprüft und stimme zu: %1$s</string>
-    <string name="consent_accept">Den ausgewählten Dokumentversionen zustimmen</string>
+    <string name="consent_current">Deine Bestätigung der aktuellen Versionen ist gespeichert.</string>
+    <string name="consent_confirm">Ich habe gelesen und akzeptiere: %1$s</string>
+    <string name="consent_confirm_privacy">Ich habe zur Kenntnis genommen: %1$s</string>
+    <string name="consent_accept">Bestätigen und Cloud nutzen</string>
     <string name="consent_decline">Ablehnen und weiter offline zählen</string>
     <string name="consent_changed">Die Dokumentversionen haben sich geändert. Bitte aktualisieren und erneut prüfen.</string>
     <string name="account_export">Kontodaten anzeigen (JSON)</string>
