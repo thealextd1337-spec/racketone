@@ -14,6 +14,11 @@ data class PhonePullState(
     val busy: Boolean = false,
     val result: PhonePullResult? = null,
     val blocked: PhonePullBlock? = null,
+    /**
+     * Dieser Lauf hat den Metadatenabgleich (Matches, Spieler, Freundschaften) bis zur letzten Seite übernommen –
+     * auch wenn Event-, Redaktions- oder Materialisierungsrückstände das Ergebnis BLOCKED/FAILED machen.
+     */
+    val metadataComplete: Boolean = false,
 )
 
 /** Phone-Präsentation ohne SDK-, Netzwerk- oder Datenbanktypen. Alle Aufrufe auf dem seriellen Host-Kontext. */

@@ -418,6 +418,8 @@ class PhonePullHostTest {
                     assertSerial(f.trace)
                     assertEquals(listOf(f.phone.deviceId.value), f.bindings.toList())
                     assertEquals(PhonePullResult.COMPLETE, f.pull.state.value.result)
+                    // Freunde-Tab: vollständige Metadaten dieses Laufs lösen die lokale Überlagerung ab.
+                    assertTrue(f.pull.state.value.metadataComplete)
                 } finally {
                     f.close()
                 }
@@ -507,6 +509,7 @@ class PhonePullHostTest {
                     f.idle()
                     assertEquals(case, expected, f.pull.state.value.result)
                     assertEquals(if (expected == PhonePullResult.BLOCKED) PhonePullBlock.PERMISSION else null, f.pull.state.value.blocked)
+                    assertFalse(case, f.pull.state.value.metadataComplete)
                 } finally {
                     f.close()
                 }

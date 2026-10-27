@@ -115,7 +115,7 @@ internal class PhonePullHost(
         val expected = synchronize() ?: return null
         if (closed) return null
         action?.let { return it }
-        mutable.value = mutable.value.copy(busy = true, result = null, blocked = null)
+        mutable.value = mutable.value.copy(busy = true, result = null, blocked = null, metadataComplete = false)
         val job =
             work.launch(start = CoroutineStart.LAZY) {
                 try {
@@ -187,6 +187,17 @@ internal class PhonePullHost(
     private fun publish(result: CloudPullState) {
         // Nur Requestfehler sind Verbindungsfehler; lokale, Antwort- und Matchfehler bleiben neutral.
         val failed = if (result.failure == REQUEST_FAILED) PhonePullResult.CONNECTION_FAILED else PhonePullResult.FAILED
+        // Nur wenn dieser Lauf Seiten übernahm und die letzte davon den Abgleich abschloss (hasMore = false).
+        var metadataComplete = false
+        val profile = result.profileId
+        if (result.completedMetadataPages > 0 && profile != null) {
+            storageAction {
+                metadataComplete =
+                    session.data.cloudPulls
+                        .progress(profile)
+                        .metadataComplete
+            }
+        }
         mutable.value =
             PhonePullState(
                 available = true,
@@ -215,6 +226,7 @@ internal class PhonePullHost(
 
                         else -> PhonePullBlock.READINESS
                     },
+                metadataComplete = metadataComplete,
             )
     }
 
