@@ -194,6 +194,7 @@ class MainActivity : ComponentActivity() {
                 debugTools = BuildConfig.DEBUG,
                 authModel = auth,
                 onShareExport = this@MainActivity.phoneExportShareCallback(auth),
+                onShareMatchImage = { image, text -> this@MainActivity.shareMatchImage(image, text) },
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =

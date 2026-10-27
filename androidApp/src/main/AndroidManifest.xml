@@ -38,6 +38,17 @@
                 android:resource="@xml/account_export_paths" />
         </provider>
 
+        <!-- S1: Ergebniskarte als Bild teilen (nur cacheDir/match-images) -->
+        <provider
+            android:name=".MatchImageProvider"
+            android:authorities="${applicationId}.match.images"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/match_image_paths" />
+        </provider>
+
         <!-- B4: geplante Abgleiche (Matchende, Backoff, Fortsetzung, periodisch) -->
         <service
             android:name=".sync.PhoneSyncJobService"
