@@ -80,7 +80,7 @@ private class UiFriends : FriendsPort {
 
     override suspend fun blockUser(profileId: String) {
         call("block:$profileId")
-        blocked += BlockedProfile(profileId, "2026-10-27T10:00:00Z")
+        blocked += BlockedProfile(profileId, "2026-10-27T10:00:00Z", profileId.replaceFirstChar { it.uppercase() })
     }
 
     override suspend fun unblockUser(profileId: String) {
@@ -170,6 +170,7 @@ class FriendsScreenTest {
                     onNodeWithTag("friends_confirm").performClick()
                     onNodeWithTag("friends_person_carl").assertDoesNotExist()
                     click("friends_segment_friends")
+                    onNodeWithTag("friends_blocked_carl").assertTextContains("Carl · blocked since 2026-10-27")
                     click("friends_unblock_carl")
                     onNodeWithTag("friends_confirm").performClick()
                     onNodeWithTag("friends_blocked_carl").assertDoesNotExist()

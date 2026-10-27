@@ -431,14 +431,14 @@
     <string name="live_telemetry_unknown">—</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Profil) -->
     <string name="telemetry_section">Puls &amp; Schritte</string>
-    <string name="telemetry_intro">Wer Puls und Schritte deiner Uhr sehen darf. Gilt für deine Uhr und dieses Handy. Gespeichert wird nichts.</string>
+    <string name="telemetry_intro">Wer Puls und Schritte deiner Uhr sehen darf. Gilt für deine Uhr und dieses Handy, mit Konto für alle deine Geräte. Puls und Schritte werden nicht gespeichert.</string>
     <string name="telemetry_share">Teilen</string>
     <string name="telemetry_share_sub">Vorerst wie „Nur für mich“; später auch für Freunde und die Live-Ansicht.</string>
     <string name="telemetry_private">Nur für mich (Standard)</string>
     <string name="telemetry_private_sub">Live nur auf deiner Uhr und diesem Handy.</string>
     <string name="telemetry_off">Gar nicht</string>
     <string name="telemetry_off_sub">Keine Live-Anzeige, die Uhr sendet nichts und gepufferte Werte werden verworfen.</string>
-    <string name="telemetry_share_pending">Wirkt, sobald Freunde und Live-Ansicht verfügbar sind.</string>
+    <string name="telemetry_share_pending">Gesundheitsdaten werden derzeit nicht in die Cloud übertragen, andere sehen also noch nichts. Deine Wahl gilt für dein ganzes Konto.</string>
     <string name="home_open_matches">Laufende Matches (%1$d)</string>
     <string name="home_new_match_parallel">Weiteren Platz starten – laufende Matches laufen weiter.</string>
     <string name="open_match_watch_scores">Deine Uhr zählt</string>
@@ -831,6 +831,7 @@
     <string name="friends_blocked_show">Blockierte Konten anzeigen</string>
     <string name="friends_blocked_empty">Du hast niemanden blockiert.</string>
     <string name="friends_blocked_since">Blockiertes Konto · seit %1$s</string>
+    <string name="friends_blocked_alias_since">%1$s · blockiert seit %2$s</string>
     <string name="friends_unknown">Unbekanntes Profil</string>
     <string name="friends_dismiss">OK</string>
     <string name="friends_error_rate_limit">Zu viele Suchen oder Anfragen in kurzer Zeit. Warte eine Minute und versuch es erneut.</string>

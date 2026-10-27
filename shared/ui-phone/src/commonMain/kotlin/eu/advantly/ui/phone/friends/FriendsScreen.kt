@@ -51,6 +51,7 @@ import eu.advantly.ui.phone.resources.friends_access_signed_out
 import eu.advantly.ui.phone.resources.friends_add_title
 import eu.advantly.ui.phone.resources.friends_block
 import eu.advantly.ui.phone.resources.friends_block_explanation
+import eu.advantly.ui.phone.resources.friends_blocked_alias_since
 import eu.advantly.ui.phone.resources.friends_blocked_empty
 import eu.advantly.ui.phone.resources.friends_blocked_show
 import eu.advantly.ui.phone.resources.friends_blocked_since
@@ -222,13 +223,15 @@ fun FriendsScreen(
                     Text(stringResource(Res.string.friends_blocked_empty), color = colors.text2)
                 }
                 blocked?.forEach { entry ->
-                    // Den Alias Blockierter liefert der Server nicht; nur der Tag der Blockierung.
+                    // Alias nur bei aktivem Profil (cloud_my_blocks_v1), sonst nur der Tag der Blockierung.
+                    val since = entry.createdAt.take(10)
                     Text(
-                        stringResource(Res.string.friends_blocked_since, entry.createdAt.take(10)),
+                        entry.alias?.let { stringResource(Res.string.friends_blocked_alias_since, it, since) }
+                            ?: stringResource(Res.string.friends_blocked_since, since),
                         modifier = Modifier.testTag("friends_blocked_${entry.profileId}"),
                     )
                     TextButton(
-                        { confirm = Confirm(ConfirmKind.UNBLOCK, entry.profileId, null) },
+                        { confirm = Confirm(ConfirmKind.UNBLOCK, entry.profileId, entry.alias) },
                         enabled = !state.busy,
                         modifier = Modifier.testTag("friends_unblock_${entry.profileId}"),
                     ) { Text(stringResource(Res.string.friends_unblock)) }
