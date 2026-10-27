@@ -82,6 +82,20 @@ class FriendPlayerPresentationTest {
         val again = MatchWizard(store).apply { selectSport(Sport.BADMINTON) }
         assertEquals(bob.id, again.assignFriend(place, "bob-profile", "Bobby")?.id)
         assertTrue(store.guests.value.isEmpty())
+
+        // Revanche/Favorit: der Freund sitzt schon über seine lokale ID – nicht erneut anbieten, Alias nicht anfassen.
+        val rematch = MatchWizard(store).apply { selectSport(Sport.BADMINTON) }
+        rematch.assignPlayer(
+            place,
+            store
+                .record(id)!!
+                .summary.setup
+                .player(bob.id)!!,
+        )
+        assertTrue(rematch.isFriendSeated("bob-profile"))
+        assertFalse(rematch.isFriendSeated("carol-profile"))
+        assertNull(rematch.assignFriend(PlayerPlace(Side.A, 0), "bob-profile", "Renamed"))
+        assertEquals("Bobby", data.players.get(bob.id)?.displayName)
         store.close()
     }
 }

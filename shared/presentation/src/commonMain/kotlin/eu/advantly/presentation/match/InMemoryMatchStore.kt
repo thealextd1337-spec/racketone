@@ -426,6 +426,8 @@ class InMemoryMatchStore(
             profileId.isNotBlank() && it.displayName.isNotEmpty()
         }
 
+    override fun friendProfile(id: PlayerId): String? = friendIds.entries.firstOrNull { it.value == id }?.key
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         val favorite = FavoriteLineup(ids.newId().value, setup.copy(previousMatchId = null))
         favoritesFlow.value = listOf(favorite) + favoritesFlow.value

@@ -516,6 +516,8 @@ class SessionMatchStore(
         return player
     }
 
+    override fun friendProfile(id: PlayerId): String? = data.accountIdentities.profile?.let { data.players.friendProfile(it, id) }
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         rememberPlayers(setup.players)
         val stored = StoredFavorite(ids.newId().value, setup.format, setup.lineup, setup.meta)

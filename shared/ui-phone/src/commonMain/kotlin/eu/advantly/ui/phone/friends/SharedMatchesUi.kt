@@ -260,12 +260,14 @@ fun ShareDefaultSection(model: FriendsViewModel) {
     val state by model.state.collectAsState()
     if (state.access != FriendsAccess.READY) return
     // Erst wenn nichts anderes läuft: ein belegtes ViewModel würde den Aufruf sonst still verwerfen.
-    LaunchedEffect(model, state.busy) { if (!state.busy && state.shareDefault == null && state.error == null) model.loadShareDefault() }
+    LaunchedEffect(model, state.busy) {
+        if (!state.busy && state.shareDefault == null && state.shareDefaultError == null) model.loadShareDefault()
+    }
     val share = state.shareDefault
-    // Speichern gescheitert: der Schalter bleibt beim Serverwert, der Grund steht darunter.
-    val error = state.error?.takeIf { share != null }
+    // Nur der eigene Lade-/Speicherfehler; Speichern gescheitert: der Schalter bleibt beim Serverwert, Grund darunter.
+    val error = state.shareDefaultError
     if (share == null) {
-        if (!state.busy && state.error != null) {
+        if (!state.busy && error != null) {
             TextButton(model::loadShareDefault, modifier = Modifier.testTag("sharing_default_retry")) {
                 Text(stringResource(Res.string.sharing_default_retry))
             }

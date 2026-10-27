@@ -88,6 +88,9 @@ class PlayerRepository internal constructor(
     /**
      * Freund als Mitspieler für [account]: dieselbe lokale Spieler-ID je Konto und Freund (Verlauf und Statistik zählen
      * wie bei Gästen über Matches hinweg), beim ersten Mal [newId]. Der aktuelle [alias] ersetzt den gespeicherten Namen.
+     *
+     * Bekannte Grenze: Die Zuordnung ist pro Gerät. Ein Zweitgerät desselben Kontos vergibt eine eigene lokale ID, die
+     * Statistik zu diesem Freund zerfällt dann geräteübergreifend (ein Abgleich über die Cloud ist nicht vorgesehen).
      */
     fun rememberFriend(
         account: String,

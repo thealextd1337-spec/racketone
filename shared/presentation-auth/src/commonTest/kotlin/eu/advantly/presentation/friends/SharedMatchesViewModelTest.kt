@@ -346,4 +346,32 @@ class SharedMatchesViewModelTest {
         assertEquals(emptyList(), sets("""{"sets":[${List(10) { "[1,0]" }.joinToString(",")}]}"""))
         assertEquals(emptyList(), sets("""{"games":[1,0]}"""))
     }
+
+    @Test fun hidingAlsoEndsSharingSoFriendsNoLongerSeeItInTheirFeed() =
+        fixture {
+            model.openMatch("linked")
+            model.hideMatch()
+            assertEquals("alice:participation:linked:false:true", shared.calls.single())
+            assertEquals(MatchSharing("linked", gone = true), state.match)
+        }
+
+    @Test fun shareDefaultErrorsStaySeparateFromOtherFriendsErrors() =
+        fixture {
+            shared.failure = "connection_failed"
+            model.loadShareDefault()
+            assertEquals("connection_failed", state.shareDefaultError)
+            assertNull(state.error)
+            model.openMatch("own")
+            model.setShared(true)
+            assertEquals("connection_failed", state.error)
+            assertNull(state.shareDefaultError)
+            shared.failure = null
+            model.loadShareDefault()
+            shared.failure = "rate_limit_exceeded"
+            model.setShareDefault(true)
+            assertEquals("rate_limit_exceeded", state.shareDefaultError)
+            assertEquals(false, state.shareDefault)
+            model.dismissError()
+            assertNull(state.shareDefaultError)
+        }
 }

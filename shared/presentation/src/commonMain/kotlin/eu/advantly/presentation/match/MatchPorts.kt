@@ -577,6 +577,9 @@ interface PlayersPort {
         alias: String,
     ): Player? = null
 
+    /** Profil des als Freund eingetragenen Spielers [id] (aktuelles Konto), sonst `null`; nur für die Auswahl im Assistenten. */
+    fun friendProfile(id: PlayerId): String? = null
+
     /** Speichert [setup] als Favoriten (ohne `previousMatchId`). */
     fun saveFavorite(setup: MatchSetup): FavoriteLineup
 

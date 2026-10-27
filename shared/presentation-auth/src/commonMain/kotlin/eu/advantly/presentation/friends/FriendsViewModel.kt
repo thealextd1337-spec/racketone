@@ -48,6 +48,8 @@ data class FriendsState(
     val feed: List<FeedMatch> = emptyList(),
     /** `share_matches_default`; `null` = noch nicht geladen. */
     val shareDefault: Boolean? = null,
+    /** Fehler nur beim Laden/Speichern von [shareDefault]; fremde Fehler des Freunde-Tabs stehen in [error]. */
+    val shareDefaultError: String? = null,
     /** Eigene Sicht auf das gerade geöffnete Match ([FriendsViewModel.openMatch]). */
     val match: MatchSharing? = null,
 )
@@ -171,7 +173,7 @@ class FriendsViewModel(
             loadBlocked(session)
         }
 
-    fun showBlocked() = run(::loadBlocked)
+    fun showBlocked() = run(block = ::loadBlocked)
 
     /** Match-Detail geöffnet ([matchId]) bzw. geschlossen (`null`): eigene Freigabe aus dem Pull-Bestand lesen. */
     fun openMatch(matchId: String?) {
@@ -185,12 +187,14 @@ class FriendsViewModel(
             shareOverlay[it] = share
         }
 
-    /** „Aus meinem Verlauf ausblenden“: nur meine Sicht, die anderen Teilnehmer behalten das Match. */
+    /**
+     * „Aus meinem Verlauf ausblenden“: nur meine Sicht, die anderen Teilnehmer behalten das Match. Beendet zugleich das
+     * Teilen – sonst sähen Freunde es weiter im Feed, ohne dass ich die Freigabe noch abschalten könnte.
+     */
     fun hideMatch() =
-        matchAction({ it.canHide }, { port, profile, id -> port.setMyParticipation(profile, id, hidden = true) }) {
-            goneMatches +=
-                it
-        }
+        matchAction({ it.canHide }, { port, profile, id ->
+            port.setMyParticipation(profile, id, shareWithFriends = false, hidden = true)
+        }) { goneMatches += it }
 
     /** „War ich nicht“: löst die Verknüpfung durch einen Freund und sperrt sie für dieses Match. */
     fun rejectParticipation() =
@@ -201,7 +205,7 @@ class FriendsViewModel(
 
     fun loadShareDefault() {
         val port = matches ?: return
-        run { session ->
+        run(shareDefault = true) { session ->
             val share = port.shareMatchesDefault(session.profileId)
             current(session)
             show { copy(shareDefault = share) }
@@ -211,7 +215,7 @@ class FriendsViewModel(
     /** Standard für eigene neue Matches; gilt beim Hochladen eines Matches, bestehende bleiben unverändert. */
     fun setShareDefault(share: Boolean) {
         val port = matches ?: return
-        run { session ->
+        run(shareDefault = true) { session ->
             port.setShareMatchesDefault(session.profileId, share)
             current(session)
             show { copy(shareDefault = share) }
@@ -219,7 +223,7 @@ class FriendsViewModel(
     }
 
     fun dismissError() {
-        mutable.value = mutable.value.copy(error = null)
+        mutable.value = mutable.value.copy(error = null, shareDefaultError = null)
     }
 
     private suspend fun loadBlocked(session: CloudSession) {
@@ -371,11 +375,15 @@ class FriendsViewModel(
         mutable.value = mutable.value.update()
     }
 
-    private fun run(block: suspend (CloudSession) -> Unit) {
+    /** [shareDefault]: Fehler gehört zum Standardwert-Schalter, nicht zum Freunde-Tab. */
+    private fun run(
+        shareDefault: Boolean = false,
+        block: suspend (CloudSession) -> Unit,
+    ) {
         val session = shown ?: return
         if (mutable.value.busy || mutable.value.access != FriendsAccess.READY) return
         val started = epoch
-        mutable.value = mutable.value.copy(busy = true, error = null)
+        mutable.value = mutable.value.copy(busy = true, error = null, shareDefaultError = null)
         action =
             scope.launch {
                 try {
@@ -390,7 +398,8 @@ class FriendsViewModel(
                 } catch (e: Exception) {
                     if (started == epoch) {
                         val reason = (e as? CloudException)?.reason ?: "connection_failed"
-                        mutable.value = mutable.value.copy(error = reason)
+                        mutable.value =
+                            if (shareDefault) mutable.value.copy(shareDefaultError = reason) else mutable.value.copy(error = reason)
                         // Fehlende Bindung holt der Pull-Host nach; danach lädt [onPull] den Code erneut.
                         if (reason == "device_not_authorized") pull?.pullNow()
                     }
