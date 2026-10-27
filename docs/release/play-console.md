@@ -167,6 +167,18 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
     where (document_type, version) in (('TERMS', '1'), ('PRIVACY', '2'));
   commit;
   ```
+  **0.2.0 (Datenschutzerklärung Version 3, Freunde und geteilte Matches):** nur PRIVACY wechselt, TERMS 1 bleibt aktuell.
+  Erst nach Merge und live geschalteter Seite ausführen; danach bestätigen bestehende Nutzer beim nächsten Öffnen neu.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '3', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '3', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '3', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '3');
+  commit;
+  ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
@@ -184,7 +196,7 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 Ablauf laut [P7]: Starten → E-Mail für IARC angeben (`alxpro@cakamper.at`) → Kategorie wählen → Fragebogen ausfüllen → Zusammenfassung prüfen → Einreichen.
 - [ ] **Kategorie:** „Alle anderen App-Typen“ (Utility/Produktivität). Nicht „Spiel“ und nicht „Soziale Netzwerke“.
 - [ ] **Empfohlene Antworten (Phase 1):** Gewalt, sexuelle Inhalte, Vulgärsprache, Drogen, Alkohol, Tabak, Glücksspiel und anstößiger Humor jeweils **Nein**.
-  Interaktion bzw. Austausch zwischen Nutzern: **Nein** (Konto nur für die eigene Sicherung; Freunde, Teilen und Chat gibt es noch nicht). Standortweitergabe: **Nein**.
+  Interaktion bzw. Austausch zwischen Nutzern: 0.1.0 **Nein**; ab 0.2.0 **Ja** (Freunde, geteilte Matches mit Anzeigenamen, kein Chat). Standortweitergabe: **Nein**.
   Digitale Käufe: **Nein**. Uneingeschränkter Internetzugang bzw. Webbrowser: **Nein**.
 - Erwartetes Ergebnis: niedrigste Stufe (z. B. PEGI 3, USK 0, IARC 3+). Das Ergebnis berechnet die Console.
 - **Phase 2 neu ausfüllen:** Freunde/Teilen = Nutzerinteraktion, In-App-Abo = digitale Käufe.
@@ -243,7 +255,12 @@ Empfänger ist ausschließlich unser Backend (Supabase mit Cloudflare davor, Mai
 - IP-Adressen landen nur als ungesalzener Hash (Missbrauchsschutz bei Altersgate und Gastmeldungen) sowie in den Verbindungslogs der Anbieter; daraus wird kein Standort abgeleitet.
 - Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
-- **Neu ausfüllen, sobald** Freunde/Teilen (P2-2), Push oder Health-Daten in der Cloud dazukommen.
+- **0.2.0 (Freunde, geteilte Matches, Google-Login):** Datentypen bleiben gleich (Alias, Benutzername, Freundescode und
+  Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). Die Sichtbarkeit für andere Nutzer der App
+  ist **kein „Teilen“** im Sinne von Play (keine Weitergabe an Drittunternehmen). Kontoerstellung zusätzlich **„OAuth“** ankreuzen
+  (Google-Login), weiterhin „Nutzername und andere Authentifizierung“ (E-Mail-Code). Die Einstellung „Puls & Schritte“ ist eine
+  Präferenz, keine Gesundheitsinfo; Puls- und Schrittwerte bleiben **nicht erhoben**.
+- **Neu ausfüllen, sobald** Push, Live-Zuschauer oder Health-Daten in der Cloud dazukommen.
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
