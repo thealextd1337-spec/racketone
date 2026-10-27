@@ -18,6 +18,7 @@
     <string name="pairing_repair">Neu koppeln</string>
     <string name="pairing_later">Nicht jetzt</string>
     <string name="wear_version">v%1$s</string>
+    <string name="home_privacy">Datenschutz: Matchdaten gehen an dein gekoppeltes Handy, Puls und Schritte nur wie unter „Puls &amp; Schritte“ eingestellt. Details in der Handy-App unter Profil › Datenschutz.</string>
 
     <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>
