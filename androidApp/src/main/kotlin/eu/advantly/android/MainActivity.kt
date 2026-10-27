@@ -11,6 +11,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
@@ -186,6 +187,9 @@ class MainActivity : ComponentActivity() {
             runtimeUnavailable()
             return
         }
+        // Ohne privaten Transport gibt es keine Uhr-Erkennung (companion = null), also auch keinen Installationshinweis
+        val watchInstall =
+            if (installation.privateTransportAllowed) WatchAppInstaller(this, model.live.deviceStatuses, lifecycleScope) else null
         setContent {
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
             AdvantlyApp(
@@ -198,6 +202,7 @@ class MainActivity : ComponentActivity() {
                 onShareExport = this@MainActivity.phoneExportShareCallback(auth),
                 onShareMatchImage = { image, text -> this@MainActivity.shareMatchImage(image, text) },
                 onShareText = this@MainActivity::shareText,
+                watchInstall = watchInstall,
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =
