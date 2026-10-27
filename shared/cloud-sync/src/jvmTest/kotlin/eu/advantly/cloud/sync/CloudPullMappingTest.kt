@@ -356,4 +356,23 @@ class CloudPullMappingTest {
                 )
             }
         }
+
+    @Test
+    fun ownHiddenParticipantTurnsAMemberMatchIntoARevocationWithoutRecord() {
+        val visible = PullMapping.metadata(PullResponse(listOf(pullMatch()), cursor = 1), 0, 200).matches.single()
+        assertFalse(visible.hidden)
+        assertNotNull(visible.record)
+        val match = pullMatch().let { it.copy(participants = it.participants.map { p -> p.copy(hidden = p.team == "A") }) }
+        val hidden = PullMapping.metadata(PullResponse(listOf(match), cursor = 1), 0, 200).matches.single()
+        assertTrue(hidden.hidden)
+        assertNull(hidden.record)
+        // Feed-Sichten tragen kein eigenes hidden.
+        assertFalse(
+            PullMapping
+                .metadata(PullResponse(listOf(pullMatch(access = "feed")), cursor = 1), 0, 200)
+                .matches
+                .single()
+                .hidden,
+        )
+    }
 }

@@ -203,13 +203,20 @@ class CloudPullStore internal constructor(
             page.matches.forEach { match ->
                 require(match.access in setOf("member", "feed") && match.redactionEpoch >= 0)
                 val old = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)
-                val level = if (match.access == "member") ReplicaAccessLevel.MEMBER else ReplicaAccessLevel.FEED
+                val level =
+                    when {
+                        match.hidden -> ReplicaAccessLevel.ABSENT
+                        match.access == "member" -> ReplicaAccessLevel.MEMBER
+                        else -> ReplicaAccessLevel.FEED
+                    }
                 val before = data.replicas.access(ctx, match.id)
                 // Zugriff bei G vor jeder Materialisierung; eine ältere Generation darf nichts mehr materialisieren.
                 if (data.replicas.applyAccess(ctx, match.id, page.visibilityEpoch, level, fence) == TransitionResult.IGNORED) {
                     queries.markSeen(state.scanRun, profileId, match.id)
                     return@forEach
                 }
+                // Ausgeblendet: ABSENT hat Snapshot und nicht zurückgehaltene lokale Kopie entfernt; nichts materialisieren.
+                if (match.hidden) return@forEach
                 // Neues E bei gleichem G: Namen sind serverseitig schon redigiert, lokal also sofort sperren.
                 if (match.redactionEpoch > (data.replicas.access(ctx, match.id)?.redactionEpoch ?: 0)) {
                     data.replicas.markNotReady(ctx, match.id, fence)

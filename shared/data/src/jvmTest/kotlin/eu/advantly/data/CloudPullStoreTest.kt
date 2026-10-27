@@ -699,4 +699,35 @@ class CloudPullStoreTest {
             assertTrue(data.cloudPulls.feedMatches("alice").isEmpty())
         }
     }
+
+    @Test
+    fun ownHiddenFlagRevokesTheLocalCopyLikeOnASecondDeviceAndUnhidingRestoresIt() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val id = pullRecord().id
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
+            assertTrue(data.matches.get(id) != null)
+
+            // Ausblenden erhöht G: der Vollabgleich liefert das Match weiter als member, aber mit eigenem hidden.
+            val hidden =
+                storePage(version = 2, epoch = 2).let {
+                    it.copy(
+                        matches =
+                            it.matches.map { m ->
+                                m.copy(hidden = true, record = null)
+                            },
+                    )
+                }
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 1, hidden) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, hidden) {}
+            assertEquals(null, data.matches.get(id))
+            assertEquals(null, data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, id.value))
+
+            // Wieder einblenden: neues G, wieder member – die Kopie kommt zurück.
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 2, storePage(version = 3, epoch = 3)) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage(version = 3, epoch = 3)) {}
+            assertTrue(data.matches.get(id) != null)
+        }
+    }
 }
