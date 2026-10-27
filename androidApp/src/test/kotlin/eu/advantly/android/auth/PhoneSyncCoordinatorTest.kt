@@ -3,6 +3,7 @@ package eu.advantly.android.auth
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import eu.advantly.android.sync.onMatchFinished
+import eu.advantly.android.sync.onTelemetryChanged
 import eu.advantly.cloud.sync.CloudInstallation
 import eu.advantly.cloud.sync.CloudJson
 import eu.advantly.cloud.sync.CloudPullAttempt
@@ -18,6 +19,7 @@ import eu.advantly.cloud.sync.SupabasePhoneAuth
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
 import eu.advantly.data.db.AdvantlyDatabase
@@ -801,6 +803,26 @@ class PhoneSyncCoordinatorTest {
                 assertEquals(1, finished)
                 f.phone.recordPoint(eu.advantly.core.model.Side.A)
                 assertEquals(1, finished)
+            } finally {
+                remove()
+                f.close()
+            }
+        }
+
+    @Test fun onlyAChangedTelemetryChoiceTriggersItsSync() =
+        runBlocking {
+            val f = Fixture(this)
+            var changed = 0
+            val remove = onTelemetryChanged(f.phone) { changed++ }
+            try {
+                f.match()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.PRIVATE)
+                assertEquals("Match und unveränderte Wahl sind keine Änderung", 0, changed)
+                f.phone.setTelemetryVisibility(TelemetryVisibility.OFF)
+                assertEquals(1, changed)
+                remove()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                assertEquals(1, changed)
             } finally {
                 remove()
                 f.close()

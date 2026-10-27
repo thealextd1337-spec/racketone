@@ -20,6 +20,8 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.LocalAccountOwnership
@@ -117,6 +119,11 @@ class PhonePullHostTest {
         var pullOffline = false
         var hostAccess = true
 
+        /** Antwort und Anfragen von `cloud_set_telemetry_visibility_v1` (H0); Standard = Konto ohne Änderung. */
+        var telemetryBody = """{"visibility":"private","counter":0,"origin":null}"""
+        var telemetryStatus = HttpStatusCode.OK
+        val telemetryCalls = CopyOnWriteArrayList<JsonObject>()
+
         /** Aus: Die Auth übergeht SDK-Wechsel, Sitzungsflow und Konto-Identitäten bleiben auf dem alten Stand. */
         var authSync = true
         var afterBind: suspend () -> Unit = {}
@@ -192,6 +199,12 @@ class PhonePullHostTest {
                                     )
                                 }
 
+                                "cloud_set_telemetry_visibility_v1" -> {
+                                    telemetryCalls += CloudJson.parseToJsonElement((request.body as TextContent).text).jsonObject
+                                    status = telemetryStatus
+                                    telemetryBody
+                                }
+
                                 "logout" -> {
                                     "{}"
                                 }
@@ -250,6 +263,7 @@ class PhonePullHostTest {
                 hostScope,
                 { Thread.currentThread() === thread },
                 hostAccessAllowed = { hostAccess },
+                telemetry = backend,
             )
 
         init {
@@ -740,6 +754,49 @@ class PhonePullHostTest {
                 }
             } finally {
                 driver.close()
+            }
+        }
+
+    /** H0: lokaler Stand geht ins Konto, der Kontostand kommt nach derselben Regel zurück (und damit zur Uhr). */
+    @Test fun pullExchangesTheAccountTelemetryChoiceForTheBoundAccountOnly() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                val local = f.phone.state.value.telemetry
+                f.telemetryBody = """{"visibility":"off","counter":${local.counter},"origin":"zz-watch"}"""
+                f.pull.pullNow()
+                f.idle()
+                assertEquals(PhonePullResult.COMPLETE, f.pull.state.value.result)
+                val sent = f.telemetryCalls.single()
+                assertEquals("share", sent.getValue("p_visibility").jsonPrimitive.content)
+                assertEquals(local.origin, sent.getValue("p_origin").jsonPrimitive.content)
+                // Gleicher Zähler: restriktiver Kontostand gewinnt auch lokal.
+                assertEquals(TelemetryPreference(TelemetryVisibility.OFF, local.counter, "zz-watch"), f.phone.state.value.telemetry)
+            } finally {
+                f.close()
+            }
+        }
+
+    /** Ein Server ohne die RPC (alte Migration) hält den Match-Abgleich nicht auf; ein Rechtefehler schon. */
+    @Test fun telemetryFailureBlocksThePullOnlyOnPermissionLoss() =
+        runBlocking {
+            for ((status, expected) in listOf(
+                HttpStatusCode.NotFound to PhonePullResult.COMPLETE,
+                HttpStatusCode.Forbidden to PhonePullResult.BLOCKED,
+            )) {
+                val f = Fixture(this)
+                try {
+                    f.signIn()
+                    f.telemetryStatus = status
+                    f.pull.pullNow()
+                    f.idle()
+                    assertEquals("$status", expected, f.pull.state.value.result)
+                    assertEquals(TelemetryPreference(), f.phone.state.value.telemetry)
+                } finally {
+                    f.close()
+                }
             }
         }
 }

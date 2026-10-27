@@ -8,6 +8,7 @@ import eu.advantly.cloud.sync.CloudPullPort
 import eu.advantly.cloud.sync.CloudPullRunner
 import eu.advantly.cloud.sync.CloudPullState
 import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.CloudTelemetryPort
 import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.PhonePullBlock
 import eu.advantly.presentation.auth.PhonePullPort
@@ -60,6 +61,7 @@ internal class PhonePullHost(
         it()
         true
     },
+    private val telemetry: CloudTelemetryPort? = null,
 ) : PhonePullPort {
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
@@ -129,6 +131,8 @@ internal class PhonePullHost(
                             if (synchronize() != expected) return@launch
                             lane.bound = expected
                         }
+                        syncTelemetry(expected)
+                        if (synchronize() != expected) return@launch
                         activate(expected)
                         val active =
                             runner
@@ -167,6 +171,25 @@ internal class PhonePullHost(
         action = job
         job.start()
         return job
+    }
+
+    /**
+     * H0: Kontoweite Telemetrie-Wahl abgleichen – lokalen Stand senden, Kontostand nach derselben Regel übernehmen und
+     * damit an die Uhr weitergeben. Nur für das gebundene Konto [expected]; die Antwort gilt nur, wenn danach noch derselbe
+     * Kontext besteht. Kein Rechtefehler (etwa ein Server ohne die RPC) hält den Match-Abgleich auf.
+     */
+    private suspend fun syncTelemetry(expected: PhoneCloudContext) {
+        val port = telemetry ?: return
+        if (synchronize() != expected) return
+        val remote =
+            try {
+                port.syncTelemetry(expected.profile, session.state.value.telemetry)
+            } catch (error: CloudException) {
+                if (error.permission) throw error
+                return
+            } ?: return
+        currentCoroutineContext().ensureActive()
+        if (synchronize() == expected) storageAction { session.mergeTelemetryPreference(remote) }
     }
 
     /**

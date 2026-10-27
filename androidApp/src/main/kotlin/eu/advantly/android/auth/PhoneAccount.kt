@@ -165,7 +165,7 @@ internal class PhoneAccountCore private constructor(
         phonePullHost {
             PhonePullHost(auth, session, backend, backend::bindDevice, lane, runtime.scope, hostAccessAllowed = {
                 runtime.allowed
-            }, storageAction = runtime::storageAction)
+            }, storageAction = runtime::storageAction, telemetry = backend)
         }
     val sync =
         PhoneSyncCoordinator(
