@@ -19,6 +19,12 @@ enum class PlayerKind {
 
     /** Aus der Auswahl entfernt; Name und ID bleiben für vergangene Matches erhalten. */
     ARCHIVED,
+
+    /**
+     * Freund mit Konto als Mitspieler (P2-E): ID = Profil-ID des Freundes, Name = sein Alias zum Zeitpunkt der Auswahl.
+     * Kein Gast: weder in Personenlisten noch als Cloud-Spieler hochgeladen; der Upload verknüpft den Platz per `profileId`.
+     */
+    FRIEND,
 }
 
 /** Lokal bekannter Spieler. Regeln referenzieren nur [id]; [displayName] ist reine Anzeige. */
@@ -75,6 +81,42 @@ class PlayerRepository internal constructor(
             queries.insertOrIgnore(id.value, displayName, PlayerKind.GUEST.name, nowMs, null)
             if (!exists) locallyCreated(id.value)
             checkNotNull(rawGet(id))
+        }
+
+    /**
+     * Freund als Mitspieler: legt [profileId] als [PlayerKind.FRIEND] an bzw. übernimmt den aktuellen [alias]. Ein Gast oder
+     * archivierter Eintrag derselben ID (aus einem gezogenen Match) wird zum Freund; Self und Platzhalter nie (`null`).
+     */
+    fun rememberFriend(
+        profileId: PlayerId,
+        alias: String,
+        nowMs: Long,
+    ): LocalPlayer? =
+        queries.transactionWithResult {
+            if (alias.isBlank() || Placeholders.isPlaceholder(profileId)) return@transactionWithResult null
+            when (rawGet(profileId)?.kind) {
+                // Freundeszeilen haben keinen Cloud-Schreiber und sind daher nie „schreibbar“; der Alias stammt aus der
+                // Freundesliste des aktuellen Kontos, die erneute Auswahl darf ihn also immer aktualisieren.
+                PlayerKind.FRIEND -> {
+                    queries.rename(alias, profileId.value)
+                }
+
+                null -> {
+                    if (!writable(profileId.value)) return@transactionWithResult null
+                    queries.insertOrIgnore(profileId.value, alias, PlayerKind.FRIEND.name, nowMs, null)
+                }
+
+                PlayerKind.GUEST, PlayerKind.ARCHIVED -> {
+                    if (!writable(profileId.value)) return@transactionWithResult null
+                    queries.updateKind(PlayerKind.FRIEND.name, profileId.value)
+                    queries.rename(alias, profileId.value)
+                }
+
+                else -> {
+                    return@transactionWithResult null
+                }
+            }
+            rawGet(profileId)
         }
 
     /**
@@ -170,7 +212,11 @@ class PlayerRepository internal constructor(
         id: PlayerId,
         nowMs: Long,
     ) {
-        if (!writable(id.value) || Placeholders.isPlaceholder(id) || rawGet(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
+        if (!writable(id.value) || Placeholders.isPlaceholder(id) ||
+            rawGet(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED, PlayerKind.FRIEND)
+        ) {
+            return
+        }
         queries.transaction {
             val exists = rawGet(id) != null
             queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
@@ -182,7 +228,7 @@ class PlayerRepository internal constructor(
     fun canMarkPlaceholder(id: PlayerId): Boolean =
         rawGet(id).let {
             it == null || (
-                it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED &&
+                it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED && it.kind != PlayerKind.FRIEND &&
                     (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
             )
         }

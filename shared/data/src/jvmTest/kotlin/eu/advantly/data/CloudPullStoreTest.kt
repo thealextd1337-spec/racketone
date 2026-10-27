@@ -672,4 +672,31 @@ class CloudPullStoreTest {
             assertTrue(data.cloudPulls.friendships("other").isEmpty())
         }
     }
+
+    @Test
+    fun feedListsOnlyThisAccountsCurrentFeedSnapshotsAndDropsThemAfterARescan() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun feed(
+                id: String,
+                version: Long,
+            ) = CloudPullMatch(id, version, """{"id":"$id","access":"feed"}""", "feed", null, 0, false, null)
+            val page = storePage().copy(matches = storePage().matches + feed("feed-old", 2) + feed("feed-new", 3), cursor = 3)
+            data.cloudPulls.commitMetadata("alice", run, 0, page) {}
+            // Mitglieds-Matches gehören nicht in den Feed; neueste Serverversion zuerst.
+            assertEquals(
+                listOf("feed-new", "feed-old"),
+                data.cloudPulls.feedMatches("alice").map {
+                    it.substringAfter("\"id\":\"").substringBefore('"')
+                },
+            )
+            assertTrue(data.cloudPulls.feedMatches("other").isEmpty())
+            // Entfreunden erhöht die Sichtbarkeits-Epoche: ein Vollabgleich ohne die Feed-Matches entfernt sie.
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 3, storePage(version = 4, epoch = 2)) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage(version = 4, epoch = 2)) {}
+            assertTrue(data.cloudPulls.feedMatches("alice").isEmpty())
+        }
+    }
 }

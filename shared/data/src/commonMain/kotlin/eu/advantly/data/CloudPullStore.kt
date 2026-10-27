@@ -143,6 +143,9 @@ class CloudPullStore internal constructor(
     fun friendships(profileId: String): List<CloudPullFriendship> =
         queries.friendships(profileId).executeAsList().map { CloudPullFriendship(it.entity_id, it.server_version, it.snapshot_json) }
 
+    /** Rohsnapshots der Feed-Matches dieses Kontos (neueste Serverversion zuerst, höchstens 200). */
+    fun feedMatches(profileId: String): List<String> = queries.feedMatches(profileId).executeAsList()
+
     /** Serverseitiger Ersteller (`createdBy`) aus dem gezogenen Match-Snapshot; `null` ohne Snapshot oder ohne String-Feld. */
     fun matchCreatedBy(
         profileId: String,

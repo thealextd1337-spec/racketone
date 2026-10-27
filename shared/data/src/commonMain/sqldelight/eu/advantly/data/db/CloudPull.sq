@@ -139,6 +139,12 @@ friendships:
 SELECT entity_id, server_version, snapshot_json FROM cloud_pull_snapshot
 WHERE profile_id = ? AND kind = 'FRIENDSHIP' ORDER BY entity_id;
 
+-- Feed (P2-E): bereinigte Sicht geteilter Matches von Freunden, wie zuletzt gezogen; entzogene sind removal_pending.
+feedMatches:
+SELECT snapshot_json FROM cloud_pull_snapshot
+WHERE profile_id = ? AND kind = 'MATCH' AND access = 'feed' AND removal_pending = 0
+ORDER BY server_version DESC LIMIT 200;
+
 materialized:
 UPDATE cloud_pull_snapshot SET materialized_version = ? WHERE profile_id = ? AND kind = ? AND entity_id = ?;
 
