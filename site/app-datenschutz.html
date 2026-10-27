@@ -79,7 +79,7 @@
       <!-- ÜBERARBEITEN vor Phase 3: Health-Speicherung, Cloud, Health Connect / Apple Health, getrennte Einwilligungen (05 §6.3). -->
 
       <h2>4. Konto und Cloud-Sicherung</h2>
-      <p>Das Konto ist freiwillig. Sie legen es in der Handy-App an. Bevor die Cloud genutzt wird, stimmen Sie den Nutzungsbedingungen und dieser Datenschutzerklärung in der jeweils angezeigten Fassung zu; lehnen Sie ab, zählen Sie weiter offline.</p>
+      <p>Das Konto ist freiwillig. Sie legen es in der Handy-App an. Bevor die Cloud genutzt wird, akzeptieren Sie die Nutzungsbedingungen und bestätigen, diese Datenschutzerklärung in der jeweils angezeigten Fassung zur Kenntnis genommen zu haben; wir speichern dazu Dokument, Fassung, Sprache und Zeitpunkt. Lehnen Sie ab, zählen Sie weiter offline.</p>
 
       <h3>4.1 Anmeldung und Altersprüfung</h3>
       <ul>
@@ -98,8 +98,10 @@
       <!-- PRÜFEN vor jeder Freigabe: Bleibt Teilen/Freunde/Claim (P2-2) im ausgelieferten Build wirklich aus? -->
 
       <h3>4.3 Sicherheit, Protokolle und Missbrauchsschutz</h3>
-      <p>Alle Verbindungen sind per TLS verschlüsselt. Bei jedem Zugriff verarbeiten unsere Dienstleister technisch notwendige Verbindungsdaten wie IP-Adresse, Zeitpunkt und App-Kennung, um den Dienst bereitzustellen und gegen Angriffe zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Diese Protokolle werden nach kurzer Zeit gelöscht.</p>
-      <!-- PRÜFEN: Aufbewahrung der Auth-/Gateway-Logs bei Supabase und Cloudflare konkret benennen. -->
+      <p>Alle Verbindungen sind per TLS verschlüsselt. Bei jedem Zugriff verarbeiten unsere Dienstleister technisch notwendige Verbindungsdaten wie IP-Adresse, Zeitpunkt und App-Kennung, um den Dienst bereitzustellen und gegen Angriffe zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Supabase bewahrt diese Zugriffsprotokolle einen Tag auf, Cloudflare Sicherheitsereignisse bis zu 31 Tage, Resend Versandprotokolle und E-Mail-Inhalte 30 Tage.</p>
+      <!-- Fristen laut Anbieterdoku, Abruf 27.10.2026: supabase.com/pricing (Log retention Free 1 Tag, Pro 7 Tage),
+           developers.cloudflare.com/analytics/graphql-api/limits/, resend.com/docs/knowledge-base/account-quotas-and-limits.
+           Bei Wechsel auf Supabase Pro: 7 Tage. -->
 
       <h2>5. Meldungen an den Support</h2>
       <p>Über „Feedback &amp; Hilfe“ können Sie uns Meldungen senden – mit Konto oder als Gast. Wir speichern Kategorie, Titel und Text, eine optional angegebene Kontakt-E-Mail-Adresse und bei Meldungen mit Konto das absendende Gerät. Nur wenn Sie es ankreuzen, senden Sie zusätzlich die angezeigten technischen Angaben mit (App-Version, Betriebssystem, Gerätemodell, Bildschirmgröße und Schriftgröße). Bei Gastmeldungen speichern wir zum Schutz vor Missbrauch einen Hashwert Ihrer IP-Adresse.</p>
@@ -108,13 +110,17 @@
       <h2>6. Empfänger und Dienstleister</h2>
       <p>Wir geben Ihre Daten nicht an Dritte weiter und verkaufen sie nicht. Wir setzen folgende Dienstleister als Auftragsverarbeiter ein (Art. 28 DSGVO):</p>
       <ul>
-        <li><strong>Supabase</strong> (Supabase Inc.): Datenbank, Anmeldung und Dateispeicher, Rechenzentrum in Frankfurt am Main.</li>
-        <li><strong>Cloudflare</strong> (Cloudflare Inc.): vorgeschaltetes Netzwerk zum Schutz und zur Auslieferung.</li>
-        <li><strong>Resend</strong> (Resend Inc.): Versand der E-Mails mit Anmeldecodes.</li>
+        <li><strong>Supabase</strong> (Supabase Pte. Ltd., Singapur): Datenbank, Anmeldung und Dateispeicher. Die Daten liegen in einem Rechenzentrum von Amazon Web Services in Frankfurt am Main. Für Support- und Betriebszugriffe aus Drittländern gelten EU-Standardvertragsklauseln.</li>
+        <li><strong>Cloudflare</strong> (Cloudflare, Inc., USA): vorgeschaltetes Netzwerk zum Schutz und zur Auslieferung sowie Betrieb unserer Verwaltungsoberfläche.</li>
+        <li><strong>Resend</strong> (Plus Five Five, Inc., USA): Versand der E-Mails mit Anmeldecodes. Der Versand erfolgt aus Irland; Versandprotokolle und E-Mail-Daten speichert Resend in den USA.</li>
       </ul>
-      <p>Diese Anbieter haben ihren Sitz in den USA. Soweit dabei Daten in die USA gelangen können, stützt sich die Übermittlung auf den Angemessenheitsbeschluss zum EU-US Data Privacy Framework bzw. auf EU-Standardvertragsklauseln.</p>
-      <!-- PRÜFEN vor Freigabe (R2): AVV/DPA je Anbieter abgeschlossen, DPF-Zertifizierung aktuell, Region Resend,
-           tatsächliche Region des gehosteten Supabase-Projekts. Bei Wechsel zu Scaleway TEM Abschnitt anpassen. -->
+      <p>Cloudflare und Resend sind unter dem EU-US Data Privacy Framework zertifiziert; die Übermittlung in die USA stützt sich auf den Angemessenheitsbeschluss der EU-Kommission, hilfsweise auf EU-Standardvertragsklauseln. Die Verträge zur Auftragsverarbeitung sind Bestandteil der jeweiligen Nutzungsbedingungen der Anbieter.</p>
+      <!-- Quellen (Abruf 27.10.2026): supabase.com/terms §7(b) + /legal/dpa (Vertragspartner Singapur, SCCs, kein DPF),
+           /legal/subprocessor-list (AWS), cloudflare.com/terms §6.1 + /dpa + /privacypolicy (DPF), resend.com/legal/dpa,
+           /docs/dashboard/domains/regions (Daten in den USA unabhängig von der Versandregion).
+           PRÜFEN vor Freigabe: DPF-Einträge auf dataprivacyframework.gov/list (Cloudflare, Inc.; Plus Five Five, Inc.),
+           Versandregion der Resend-Domain = eu-west-1, Supabase-Projektregion = eu-central-1, Supabase-Dashboard
+           „Legal Documents“ (ob dort noch ein DPA zum Unterzeichnen angeboten wird). Bei Wechsel zu Scaleway TEM anpassen. -->
       <p>Für die Anmeldung mit Google und den Abgleich zwischen Handy und Uhr nutzen Sie Dienste von Google nach deren eigenen Bestimmungen.</p>
 
       <h2>7. Speicherdauer und Löschung</h2>
@@ -123,8 +129,10 @@
         <li><strong>Konto und Cloud:</strong> Die Daten bleiben gespeichert, solange Ihr Konto besteht. Unter Profil → Konto können Sie die <strong>Löschung beantragen</strong>; Ihr Konto wird sofort ausgeblendet und nach einer Frist von 14 Tagen endgültig gelöscht. Innerhalb dieser Frist können Sie den Antrag zurücknehmen. Ohne App erreichen Sie die Löschung über <a href="konto-loeschen.html">advantly.eu/konto-loeschen.html</a>.</li>
         <li>Matches, an denen weitere Konten beteiligt sind, bleiben für diese erhalten; Ihr Name und die Namen der von Ihnen angelegten Gäste werden darin durch „Gelöschter Spieler“ ersetzt. Matches ohne weitere Konten werden gelöscht.</li>
         <li>Nicht abgeschlossene Registrierungen löschen wir nach 24 Stunden, Datenexporte nach 24 Stunden.</li>
+        <li><strong>Sicherungskopien:</strong> Für die Cloud-Daten bestehen derzeit keine Sicherungskopien beim Hosting-Anbieter. Gelöschte Daten sind mit Abschluss der Löschung endgültig entfernt. Sichern Sie wichtige Matches deshalb zusätzlich über den Datenexport.</li>
       </ul>
-      <!-- PRÜFEN: Sicherungen (Backups) des gehosteten Projekts und deren Aufbewahrung ergänzen, sobald entschieden (p2-plan §8). -->
+      <!-- Nutzerentscheid 27.10.2026: Pilot bleibt auf Supabase Free (keine Backups). Bei Wechsel auf Pro ersetzen durch:
+           tägliche Sicherung, nach 7 Tagen überschrieben; gelöschte Konten werden bei einer Wiederherstellung nicht reaktiviert. -->
       <p>Wenn Sie die Android-Datensicherung in Ihrem Google-Konto aktiviert haben, kann das System die Daten der Handy-App in diese Sicherung aufnehmen. Diese Sicherung verwaltet Google für Sie; wir haben darauf keinen Zugriff.</p>
 
       <h2>8. Berechtigungen und ihr Zweck</h2>
@@ -149,7 +157,8 @@
 
       <h2>12. Mindestalter</h2>
       <p>Ein Konto können Sie in Österreich ab 14 Jahren, in Deutschland, der Schweiz und Liechtenstein ab 16 Jahren anlegen. In anderen Ländern ist ein Konto derzeit nicht verfügbar. Ohne Konto richtet sich Advantly an Personen ab 14 Jahren.</p>
-      <!-- PRÜFEN: Altersgrenzen CH/LI rechtlich offen (p2-plan.md). Werte aus country_age_rules. -->
+      <!-- Werte aus country_age_rules. Geprüft 27.10.2026: LI ohne Abweichung von Art. 8 DSGVO → 16 (DSG LI, Datenschutzstelle);
+           CH: revDSG ohne feste Grenze (Urteilsfähigkeit, Art. 16/19 ZGB), DSGVO gilt über Art. 3 Abs. 2 → 16 beibehalten. -->
 
       <h2>13. Änderungen</h2>
       <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie Freunde, geteilte Matches oder die Speicherung von Gesundheitsdaten verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert.</p>
