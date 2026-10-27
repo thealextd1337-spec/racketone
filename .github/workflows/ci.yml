@@ -399,7 +399,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.121.0
       - name: Deno und Android-SDK aus dem zentralen Katalog lesen

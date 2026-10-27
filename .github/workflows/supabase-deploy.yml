@@ -40,7 +40,7 @@ jobs:
           fi
       - uses: actions/checkout@v7
         if: steps.config.outputs.ready == 'true'
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         if: steps.config.outputs.ready == 'true'
         with:
           version: 2.121.0
