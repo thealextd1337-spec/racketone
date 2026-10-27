@@ -30,6 +30,11 @@ internal data class CloudTelemetrySetting(
     fun toPreference(): TelemetryPreference? {
         val value = TelemetryVisibility.fromWire(visibility) ?: return null
         val source = origin?.takeIf { it.isNotBlank() && it.length <= 64 } ?: return null
-        return if (counter > 0) TelemetryPreference(value, counter, source) else null
+        return if (counter in 1 until MAX_COUNTER) TelemetryPreference(value, counter, source) else null
+    }
+
+    companion object {
+        /** Obergrenze wie `cloud_set_telemetry_visibility_v1` (2^53, verlustfrei in JSON). */
+        const val MAX_COUNTER: Long = 1L shl 53
     }
 }

@@ -434,11 +434,13 @@ class SupabaseCloudBackend internal constructor(
         val lease = sessions.capture()
         // Identitätssicherheit: die Wahl von Konto A geht nie an die Sitzung von Konto B.
         if (lease.credentials.profileId != profileId) throw CloudException("cloud_session_changed", true)
+        // Der Server nimmt Zähler nur unter 2^53 an; darüber nur lesen statt dauerhaft abgewiesen zu werden.
+        val sent = local.takeIf { it.counter < CloudTelemetrySetting.MAX_COUNTER } ?: TelemetryPreference()
         val body =
             buildJsonObject {
-                put("p_visibility", local.visibility.wire)
-                put("p_counter", local.counter)
-                put("p_origin", local.origin)
+                put("p_visibility", sent.visibility.wire)
+                put("p_counter", sent.counter)
+                put("p_origin", sent.origin)
             }
         return decode<CloudTelemetrySetting>(rpc(lease, "cloud_set_telemetry_visibility_v1", body)).toPreference()
     }

@@ -232,11 +232,18 @@ class AccountOwnershipSessionTest {
         pair.activate("alice")
         assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.phone.state.value.telemetry.visibility)
         assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.watch.state.value.telemetry.visibility)
+        // Kontolos gewählt: gehört diesem Gerät und darf ins erste Konto.
+        assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.phone.accountTelemetry().visibility)
         pair.phone.leaveAccount()
         pair.settle()
         assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.phone.state.value.telemetry.visibility)
+        assertTrue(pair.phone.accountTelemetry().isDefault, "Alices Wahl bleibt im Gast nur lokal")
         pair.activate("bob")
+        // H0: Lokal weiter OFF, aber nie als Bobs Wahl ins Konto (auch nicht über den Gast).
+        assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.phone.state.value.telemetry.visibility)
+        assertTrue(pair.phone.accountTelemetry().isDefault, "Alices Wahl geht nicht an Bob")
         pair.phone.setTelemetryVisibility(eu.advantly.core.model.TelemetryVisibility.PRIVATE)
+        assertEquals(eu.advantly.core.model.TelemetryVisibility.PRIVATE, pair.phone.accountTelemetry().visibility)
         pair.settle()
         pair.activate("alice")
         assertEquals(eu.advantly.core.model.TelemetryVisibility.OFF, pair.phone.state.value.telemetry.visibility)

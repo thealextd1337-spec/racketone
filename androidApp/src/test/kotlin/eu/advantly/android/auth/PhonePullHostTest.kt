@@ -123,6 +123,7 @@ class PhonePullHostTest {
         var telemetryBody = """{"visibility":"private","counter":0,"origin":null}"""
         var telemetryStatus = HttpStatusCode.OK
         val telemetryCalls = CopyOnWriteArrayList<JsonObject>()
+        var duringTelemetry: suspend () -> Unit = {}
 
         /** Aus: Die Auth übergeht SDK-Wechsel, Sitzungsflow und Konto-Identitäten bleiben auf dem alten Stand. */
         var authSync = true
@@ -201,6 +202,7 @@ class PhonePullHostTest {
 
                                 "cloud_set_telemetry_visibility_v1" -> {
                                     telemetryCalls += CloudJson.parseToJsonElement((request.body as TextContent).text).jsonObject
+                                    duringTelemetry()
                                     status = telemetryStatus
                                     telemetryBody
                                 }
@@ -797,6 +799,38 @@ class PhonePullHostTest {
                 } finally {
                     f.close()
                 }
+            }
+        }
+
+    /** P3-c: Kontowechsel, während die Antwort für Alice unterwegs ist – sie wird weder bei Alice noch bei Bob übernommen. */
+    @Test fun lateTelemetryAnswerAfterAnAccountSwitchIsDiscarded() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                f.telemetryBody = """{"visibility":"off","counter":99,"origin":"alice-watch"}"""
+                f.duringTelemetry = {
+                    f.duringTelemetry = {}
+                    f.authSync = false
+                    f.owner = "bob"
+                    f.epoch++
+                    f.restoreSession()
+                    delay(50)
+                    f.authSync = true
+                }
+                f.pull.pullNow()
+                f.idle()
+                assertEquals(1, f.telemetryCalls.size)
+                assertTrue(f.pull.state.value.result != PhonePullResult.COMPLETE)
+                assertTrue(f.phone.state.value.telemetry.counter < 99)
+                assertTrue(f.phone.state.value.telemetry.visibility != TelemetryVisibility.OFF)
+                // Auch Alices gespeicherter Stand bleibt unberührt.
+                val aliceScope = f.data.settings.get("identity.account.alice")
+                val stored = f.data.settings.get("session.telemetry.$aliceScope")
+                assertTrue(stored.toString(), stored != null && "\"share\"" in stored && "\"counter\":1," in stored)
+            } finally {
+                f.close()
             }
         }
 }

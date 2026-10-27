@@ -9,6 +9,7 @@ import eu.advantly.cloud.sync.CloudPullRunner
 import eu.advantly.cloud.sync.CloudPullState
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.CloudTelemetryPort
+import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.PhonePullBlock
 import eu.advantly.presentation.auth.PhonePullPort
@@ -181,9 +182,11 @@ internal class PhonePullHost(
     private suspend fun syncTelemetry(expected: PhoneCloudContext) {
         val port = telemetry ?: return
         if (synchronize() != expected) return
+        var local: TelemetryPreference? = null
+        if (!storageAction { local = session.accountTelemetry() }) return
         val remote =
             try {
-                port.syncTelemetry(expected.profile, session.state.value.telemetry)
+                port.syncTelemetry(expected.profile, local ?: return)
             } catch (error: CloudException) {
                 if (error.permission) throw error
                 return

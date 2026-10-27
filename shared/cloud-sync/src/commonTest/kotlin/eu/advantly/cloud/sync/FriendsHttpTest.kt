@@ -242,6 +242,10 @@ class FriendsHttpTest {
                 assertEquals("0", calls[1].string("p_counter"))
                 reply = """{"visibility":"friends-only","counter":9,"origin":"x"}"""
                 assertNull(backend.syncTelemetry("alice", TelemetryPreference()))
+                // Zähler ab 2^53 nimmt der Server nicht an: nur lesen, Serverwerte darüber nie übernehmen.
+                reply = """{"visibility":"off","counter":${1L shl 53},"origin":"x"}"""
+                assertNull(backend.syncTelemetry("alice", TelemetryPreference(TelemetryVisibility.OFF, Long.MAX_VALUE, "phone-1")))
+                assertEquals("0", calls[3].string("p_counter"))
                 reply = "[]"
                 assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.syncTelemetry("alice", local) }.reason)
             } finally {
