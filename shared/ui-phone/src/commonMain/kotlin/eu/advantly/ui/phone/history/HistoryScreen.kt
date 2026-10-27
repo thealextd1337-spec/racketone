@@ -291,11 +291,12 @@ private fun HistoryItem(
     }
 }
 
-/** Sieg/Niederlage/Unentschieden/Abgebrochen – Text + Farbe (nie nur Farbe). */
+/** Sieg/Niederlage/Unentschieden/Abgebrochen – Text + Farbe (nie nur Farbe); [full]: ausgeschrieben statt Kürzel. */
 @Composable
 fun ResultBadge(
     match: MatchSummary,
     modifier: Modifier = Modifier,
+    full: Boolean = false,
 ) {
     val colors = AdvantlyTheme.colors
     val (fullText, text, color) =
@@ -321,7 +322,7 @@ fun ResultBadge(
             }
         }
     Text(
-        text.uppercase(),
+        (if (full) fullText else text).uppercase(),
         style = AdvantlyTheme.typography.overline,
         color = color,
         modifier =

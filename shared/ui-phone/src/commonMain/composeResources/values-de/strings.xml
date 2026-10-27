@@ -281,6 +281,10 @@
     <string name="result_compare_a11y">%1$s: Wir %2$s, Gegner %3$s</string>
     <string name="result_play_again">Nochmal in gleicher Besetzung</string>
     <string name="result_delete">Match löschen</string>
+    <string name="result_share">Match teilen</string>
+    <string name="result_share_confirm">Bild teilen</string>
+    <string name="result_share_text">Mein Match, gezählt mit Advantly: %1$s</string>
+    <string name="result_share_failed">Das Bild konnte nicht geteilt werden.</string>
     <string name="result_delete_title">Dieses Match löschen?</string>
     <string name="result_delete_text">Das Match und alle Punkte werden von diesem Gerät entfernt. Das lässt sich nicht rückgängig machen.</string>
     <string name="action_delete">Löschen</string>

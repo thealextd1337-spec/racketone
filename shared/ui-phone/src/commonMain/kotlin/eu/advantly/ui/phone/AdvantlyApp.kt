@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.presentation.auth.AuthViewModel
@@ -74,6 +75,7 @@ import org.jetbrains.compose.resources.stringResource
  * @param debugTools Latenz-Overlay, Entprellung und Auto-Benchmark im Live-Menü (nur Debug-Builds/Preview)
  * @param autoBenchmark startet direkt ein Tennis-Match und den Auto-Benchmark (iOS-CI, Spike S4)
  * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg im Profil; nur gesetzt, solange der Host ihn anbietet
+ * @param onShareMatchImage teilt die Ergebniskarte (Bild + Text mit Link) über die Plattform; `null` blendet „Teilen“ aus
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -93,6 +95,7 @@ fun AdvantlyApp(
     supportDiagnostics: Map<String, String> = emptyMap(),
     onShareExport: (() -> Unit)? = null,
     onRestorePrevious: (() -> Unit)? = null,
+    onShareMatchImage: (suspend (ImageBitmap, String) -> Unit)? = null,
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -183,6 +186,7 @@ fun AdvantlyApp(
                                 )
                             },
                             onBack = { navigator.pop() },
+                            onShareImage = onShareMatchImage,
                             onPlayAgain = { model.startMatch(it) },
                             onDelete = {
                                 model.history.delete(top.matchId)

@@ -281,6 +281,10 @@
     <string name="result_compare_a11y">%1$s: us %2$s, them %3$s</string>
     <string name="result_play_again">Play again, same line-up</string>
     <string name="result_delete">Delete match</string>
+    <string name="result_share">Share match</string>
+    <string name="result_share_confirm">Share image</string>
+    <string name="result_share_text">My match, scored with Advantly: %1$s</string>
+    <string name="result_share_failed">The image could not be shared.</string>
     <string name="result_delete_title">Delete this match?</string>
     <string name="result_delete_text">The match and all its points are removed from this device. This cannot be undone.</string>
     <string name="action_delete">Delete</string>

@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -36,9 +37,11 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.MatchRecord
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.presentation.match.isRated
 import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.stats.MatchStats
@@ -85,6 +88,7 @@ import eu.advantly.ui.phone.resources.result_not_rated
 import eu.advantly.ui.phone.resources.result_play_again
 import eu.advantly.ui.phone.resources.result_ratio
 import eu.advantly.ui.phone.resources.result_section_compare
+import eu.advantly.ui.phone.resources.result_share
 import eu.advantly.ui.phone.resources.result_stat_break_points
 import eu.advantly.ui.phone.resources.result_stat_deciding_points
 import eu.advantly.ui.phone.resources.result_stat_games
@@ -116,8 +120,10 @@ fun ResultScreen(
     playerAssignments: @Composable (MatchRecord) -> Unit = {},
     headToHead: @Composable (MatchSetup) -> Unit = {},
     statisticsCache: MatchStatisticsCache? = null,
+    onShareImage: (suspend (ImageBitmap, String) -> Unit)? = null,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
@@ -126,6 +132,19 @@ fun ResultScreen(
             .testTag("result"),
     ) {
         TopBar(stringResource(Res.string.result_title), onBack, stringResource(Res.string.action_back)) {
+            if (record != null && onShareImage != null && record.finalState.status == MatchStatus.FINISHED) {
+                val label = stringResource(Res.string.result_share)
+                Box(
+                    Modifier
+                        .testTag("result_share")
+                        .size(Spacing.minTouchTarget)
+                        .clickable(role = Role.Button) { sharing = true }
+                        .semantics { contentDescription = label },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(AdvantlyIcons.Share, contentDescription = null, tint = AdvantlyTheme.colors.text2)
+                }
+            }
             if (record != null) {
                 val label = stringResource(Res.string.result_delete)
                 Box(
@@ -163,6 +182,9 @@ fun ResultScreen(
                 modifier = Modifier.testTag("delete_dialog"),
             )
         }
+        if (sharing && record != null && onShareImage != null) {
+            ShareDialog(record.summary, onShareImage, onDismiss = { sharing = false })
+        }
         if (record == null) {
             Text(
                 stringResource(Res.string.result_not_found),
@@ -181,7 +203,7 @@ fun ResultScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
-            Hero(record)
+            Hero(record.summary)
             SectionTitle(stringResource(Res.string.detail_format))
             Text(
                 formatLabel(record.summary.setup.format),
@@ -238,10 +260,15 @@ fun ResultScreen(
     }
 }
 
-/** Ergebnis-Hero (04 §6): Sport, Datum, beide Seiten, Sieger hervorgehoben, Satzergebnisse groß. */
+/**
+ * Ergebnis-Hero (04 §6): Sport, Datum, beide Seiten, Sieger hervorgehoben, Satzergebnisse groß.
+ * [forShare]: Variante für das geteilte Bild – Disziplin statt Belag/Halle, ohne Wertungs- und Folgematch-Hinweis.
+ */
 @Composable
-private fun Hero(record: MatchRecord) {
-    val summary = record.summary
+internal fun Hero(
+    summary: MatchSummary,
+    forShare: Boolean = false,
+) {
     val setup = summary.setup
     val colors = AdvantlyTheme.colors
     Column(
@@ -253,18 +280,22 @@ private fun Hero(record: MatchRecord) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
             val meta =
-                listOfNotNull(
-                    stringResource(sportName(setup.sport)),
-                    setup.meta.surface?.let { stringResource(surfaceName(it)) },
-                    setup.meta.environment?.let {
-                        stringResource(if (it == Environment.INDOOR) Res.string.wizard_indoor else Res.string.wizard_outdoor)
-                    },
-                )
+                if (forShare) {
+                    listOf(stringResource(sportName(setup.sport)), stringResource(disciplineName(setup)))
+                } else {
+                    listOfNotNull(
+                        stringResource(sportName(setup.sport)),
+                        setup.meta.surface?.let { stringResource(surfaceName(it)) },
+                        setup.meta.environment?.let {
+                            stringResource(if (it == Environment.INDOOR) Res.string.wizard_indoor else Res.string.wizard_outdoor)
+                        },
+                    )
+                }
             SportBadge(setup.sport, meta.joinToString(" · "))
         }
-        ResultBadge(summary)
+        ResultBadge(summary, full = forShare)
         Text(formatDateTime(summary.startedAtMs), style = AdvantlyTheme.typography.caption, color = colors.text2)
-        if (!summary.isRated) {
+        if (!forShare && !summary.isRated) {
             // F21: bleibt mit Stand im Verlauf (löschbar), zählt aber nicht für Siege und Statistik
             Text(
                 stringResource(Res.string.result_not_rated),
@@ -288,8 +319,12 @@ private fun Hero(record: MatchRecord) {
             color = colors.text,
             modifier = Modifier.testTag("result_sets"),
         )
-        setup.previousMatchId?.let {
+        if (!forShare && setup.previousMatchId != null) {
             Text(stringResource(Res.string.result_followup_of), style = AdvantlyTheme.typography.caption, color = colors.text2)
+        }
+        if (forShare) {
+            // Marke und Link sind Eigennamen und werden nicht übersetzt
+            Text("Advantly · ${SHARE_LINK.removePrefix("https://")}", style = AdvantlyTheme.typography.caption, color = colors.text2)
         }
     }
 }
