@@ -131,6 +131,9 @@ jobs:
             echo "::error::Variablen ADVANTLY_SUPABASE_URL und ADVANTLY_SUPABASE_KEY im Environment fehlen"
             exit 1
           fi
+          if [[ -z "$GOOGLE_WEB_CLIENT_ID" ]]; then
+            echo "::warning::ADVANTLY_GOOGLE_WEB_CLIENT_ID fehlt – der Build zeigt keine Google-Anmeldung"
+          fi
           export ADVANTLY_UPLOAD_KEYSTORE="$RUNNER_TEMP/advantly-upload.jks"
           ./gradlew bundleAllRelease --no-configuration-cache \
             -Padvantly.supabase.url="$SUPABASE_URL" -Padvantly.supabase.key="$SUPABASE_KEY" \

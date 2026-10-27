@@ -385,6 +385,12 @@ Die Hilfe nennt keine zusätzliche Mindestzahl von zwölf Uhren [P12]. Phone- **
 
 ## 9. CI: signierte AABs per GitHub Actions (vorbereitet)
 
+> **Backend-Ziel:** Beide Workflows bauen im Environment `android-release` mit dessen Variablen `ADVANTLY_SUPABASE_URL`,
+> `ADVANTLY_SUPABASE_KEY` und `ADVANTLY_GOOGLE_WEB_CLIENT_ID` (öffentliche Client-Werte, keine Secrets). Produktion entsteht
+> nur per Promote aus alpha, also läuft **Produktion gegen dasselbe Backend wie der getestete Build**. Stand 27.10.2026 zeigen
+> die Variablen auf **staging** (`lgeoafnbluvxoezpftzo`, Google-Projekt `advantly-staging`). Vor dem ersten Produktions-Build
+> ein eigenes Produktionsprojekt anlegen und die Variablen umstellen; staging-Builds nie nach Produktion hochstufen.
+
 Workflow `.github/workflows/android-release.yml` (nur `workflow_dispatch`): Er baut `bundleAllRelease` mit dem Upload-Key,
 prüft die Signatur, schreibt die Zertifikats-SHA-256 ins Job-Summary und lädt AABs und R8-Mappings als Artefakt hoch (7 Tage).
 Die Secrets sind **noch nicht angelegt**. Ohne sie bricht der Workflow sofort mit einer Meldung ab. Einrichtung:
