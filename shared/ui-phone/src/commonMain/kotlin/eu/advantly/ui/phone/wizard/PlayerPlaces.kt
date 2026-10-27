@@ -55,6 +55,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import eu.advantly.core.model.Side
+import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.PlayerPlace
 import eu.advantly.presentation.wizard.PlayerSelection
@@ -74,6 +75,7 @@ import eu.advantly.ui.phone.resources.wizard_choose_place
 import eu.advantly.ui.phone.resources.wizard_choose_player
 import eu.advantly.ui.phone.resources.wizard_drag_hint
 import eu.advantly.ui.phone.resources.wizard_empty_suggestions
+import eu.advantly.ui.phone.resources.wizard_friends_title
 import eu.advantly.ui.phone.resources.wizard_new_player
 import eu.advantly.ui.phone.resources.wizard_place_action
 import eu.advantly.ui.phone.resources.wizard_player_actions
@@ -96,6 +98,7 @@ internal fun PlayerPlaces(
     wizard: MatchWizard,
     state: WizardUiState,
     doubles: Boolean,
+    friends: List<FriendEntry> = emptyList(),
 ) {
     val colors = AdvantlyTheme.colors
     val current by rememberUpdatedState(state)
@@ -253,6 +256,19 @@ internal fun PlayerPlaces(
             if (player == null) {
                 SectionTitle(stringResource(Res.string.wizard_choose_player))
                 val suggestions = wizard.playerSuggestions()
+                // Freunde (Konto) neben Gästen; schon gesetzte Freunde nicht noch einmal anbieten.
+                val assigned = current.input.players.mapTo(mutableSetOf()) { it.id.value }
+                val pickable = friends.filter { it.profileId !in assigned && !it.alias.isNullOrBlank() }
+                if (pickable.isNotEmpty()) {
+                    SectionTitle(stringResource(Res.string.wizard_friends_title))
+                    pickable.forEach { friend ->
+                        TextButton(
+                            onClick = { if (wizard.assignFriend(place, friend.profileId, friend.alias.orEmpty()) != null) selected = null },
+                            modifier = Modifier.fillMaxWidth().testTag("friend_${friend.profileId}"),
+                        ) { Text(friend.alias.orEmpty()) }
+                    }
+                    SectionTitle(stringResource(Res.string.wizard_choose_player))
+                }
                 if (suggestions.isEmpty()) Text(stringResource(Res.string.wizard_empty_suggestions), color = colors.text2)
                 suggestions.forEach { suggestion ->
                     TextButton(

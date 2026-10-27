@@ -28,7 +28,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -65,6 +67,7 @@ import eu.advantly.ui.phone.resources.friends_empty
 import eu.advantly.ui.phone.resources.friends_error_binding
 import eu.advantly.ui.phone.resources.friends_error_connection
 import eu.advantly.ui.phone.resources.friends_error_cooldown
+import eu.advantly.ui.phone.resources.friends_error_no_participation
 import eu.advantly.ui.phone.resources.friends_error_not_found
 import eu.advantly.ui.phone.resources.friends_error_not_pending
 import eu.advantly.ui.phone.resources.friends_error_rate_limit
@@ -72,7 +75,6 @@ import eu.advantly.ui.phone.resources.friends_error_revoked
 import eu.advantly.ui.phone.resources.friends_error_self
 import eu.advantly.ui.phone.resources.friends_error_session
 import eu.advantly.ui.phone.resources.friends_error_unavailable
-import eu.advantly.ui.phone.resources.friends_feed_placeholder
 import eu.advantly.ui.phone.resources.friends_found_send
 import eu.advantly.ui.phone.resources.friends_incoming_title
 import eu.advantly.ui.phone.resources.friends_list_title
@@ -120,10 +122,11 @@ private data class Confirm(
 )
 
 /**
- * Freunde-Tab (04 §2.1, H11): Segmente Feed (Platzhalter für P2-E) · Freunde · Anfragen. Ohne Konto, Zustimmung oder
+ * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen. Ohne Konto, Zustimmung oder
  * bei pausiertem Konto nur ein Hinweis; das Zählen ohne Konto bleibt unberührt. [onShareText] öffnet das
  * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun FriendsScreen(
     model: FriendsViewModel,
@@ -136,6 +139,7 @@ fun FriendsScreen(
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     // Auf Bildschirmebene: Segmentwechsel verwirft die Eingabe nicht.
     var query by rememberSaveable { mutableStateOf("") }
+    var openFeed by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.access) { if (state.access == FriendsAccess.READY) model.open() }
     val colors = AdvantlyTheme.colors
     Column(
@@ -188,7 +192,13 @@ fun FriendsScreen(
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("friends_busy"))
         when (segment) {
             Segment.FEED -> {
-                Text(stringResource(Res.string.friends_feed_placeholder), color = colors.text2, modifier = Modifier.testTag("friends_feed"))
+                val opened = state.feed.firstOrNull { it.id == openFeed }
+                if (opened != null) {
+                    BackHandler { openFeed = null }
+                    FeedDetail(opened) { openFeed = null }
+                } else {
+                    Column(Modifier.testTag("friends_feed")) { FeedList(state.feed) { openFeed = it } }
+                }
             }
 
             Segment.FRIENDS -> {
@@ -391,13 +401,14 @@ private fun Person(
 /** 8 Zeichen Crockford-Base32 lesbar als `XXXX-XXXX`; andere Längen unverändert. */
 internal fun formatFriendCode(code: String): String = if (code.length == 8) "${code.take(4)}-${code.drop(4)}" else code
 
-private fun errorLabel(error: String): StringResource =
+internal fun errorLabel(error: String): StringResource =
     when (error) {
         "rate_limit_exceeded" -> Res.string.friends_error_rate_limit
         "profile_not_found" -> Res.string.friends_error_not_found
         "request_cooldown" -> Res.string.friends_error_cooldown
         "cannot_befriend_self" -> Res.string.friends_error_self
         "no_pending_request" -> Res.string.friends_error_not_pending
+        "no_participation" -> Res.string.friends_error_no_participation
         "device_not_authorized" -> Res.string.friends_error_binding
         "device_revoked" -> Res.string.friends_error_revoked
         "cloud_session_changed" -> Res.string.friends_error_session

@@ -121,6 +121,8 @@ fun ResultScreen(
     headToHead: @Composable (MatchSetup) -> Unit = {},
     statisticsCache: MatchStatisticsCache? = null,
     onShareImage: (suspend (ImageBitmap, String) -> Unit)? = null,
+    /** Freunde-Abschnitt (Teilen, „War ich nicht“); nur mit Konto. */
+    sharing: @Composable (MatchRecord) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -220,6 +222,7 @@ fun ResultScreen(
             SectionTitle(stringResource(Res.string.detail_lineup))
             headToHead(record.summary.setup)
             playerAssignments(record)
+            sharing(record)
             SectionTitle(stringResource(Res.string.detail_sets))
             record.summary.sets.forEachIndexed { index, set ->
                 Text(

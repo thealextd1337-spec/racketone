@@ -46,6 +46,7 @@ import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.FriendsScreen
+import eu.advantly.ui.phone.friends.MatchSharingSection
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
@@ -149,11 +150,21 @@ fun AdvantlyApp(
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             UpdateRequiredBanner(updateRequired)
+                            // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
+                            val friends =
+                                authModel
+                                    ?.friends
+                                    ?.state
+                                    ?.collectAsState()
+                                    ?.value
+                                    ?.friends
+                                    .orEmpty()
                             WizardScreen(
                                 model.wizard,
                                 onClose = { navigator.pop() },
                                 onStart = model::finishWizard,
                                 busyMatch = model.watchMatch(),
+                                friends = friends,
                             )
                         }
                     }
@@ -195,6 +206,24 @@ fun AdvantlyApp(
                             onDelete = {
                                 model.history.delete(top.matchId)
                                 navigator.pop()
+                            },
+                            sharing = { shown ->
+                                authModel?.friends?.let { friends ->
+                                    MatchSharingSection(
+                                        friends,
+                                        top.matchId.value,
+                                        slotName = { slot ->
+                                            shown.summary.setup.players
+                                                .firstOrNull { it.id.value == slot }
+                                                ?.displayName
+                                        },
+                                        onGone = {
+                                            // „War ich nicht“/„Ausblenden“: nur meine Sicht; die lokale Kopie geht mit.
+                                            model.history.delete(top.matchId)
+                                            navigator.pop()
+                                        },
+                                    )
+                                }
                             },
                         )
                     }
