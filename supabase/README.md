@@ -436,6 +436,10 @@ Gesundheitsdaten selbst gehen weiterhin nicht in die Cloud (P3); gespeichert wir
   überspringt einen Server ohne RPC still. Ältere Apps bleiben lauffähig (sie lesen `user_blocks` direkt und
   schreiben `telemetry_visibility` nie).
 
+**Satzstände im Feed** (`20261027000400_feed_set_scores.sql`, Test 340): `sanitize_projection` akzeptiert neben
+`[[a,b]]` das tatsächliche Client-Format `sets: [{"a":6,"b":4,…}]` (ScoreSummary) und gibt weiterhin nur `[[a,b],…]`
+aus. Bereinigt wird beim Lesen (Feed in `sync_pull`, Visitor-Sicht) – bestehende Projektionen brauchen keinen Backfill.
+
 ## P2-C: Auth und Altersgate
 
 Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,
