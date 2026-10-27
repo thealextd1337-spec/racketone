@@ -130,7 +130,11 @@ internal fun CloudSyncRepository.uploadParticipants(
                     slot.value in redactedSlots ||
                         playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
                 val name = if (redacted) "" else player?.display_name ?: legacy?.displayName.orEmpty()
-                val friend = playerId?.value?.takeIf { !redacted && player?.kind == PlayerKind.FRIEND.name }
+                // Freund: Profil-ID nur aus der Zuordnung des hochladenden Kontos, nie aus Slot-ID oder Lineup.
+                val friend =
+                    playerId?.value?.takeIf { !redacted && player?.kind == PlayerKind.FRIEND.name }?.let {
+                        database.friendPlayerQueries.profileFor(profileId, it).executeAsOneOrNull()
+                    }
                 CloudParticipant(slot.value, team, index + 1, name, reference, friend)
             }
         }

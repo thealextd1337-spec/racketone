@@ -3,6 +3,7 @@ package eu.advantly.data
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.data.db.FriendPlayerQueries
 import eu.advantly.data.db.PlayerQueries
 import eu.advantly.data.db.Player as PlayerRow
 
@@ -21,8 +22,8 @@ enum class PlayerKind {
     ARCHIVED,
 
     /**
-     * Freund mit Konto als Mitspieler (P2-E): ID = Profil-ID des Freundes, Name = sein Alias zum Zeitpunkt der Auswahl.
-     * Kein Gast: weder in Personenlisten noch als Cloud-Spieler hochgeladen; der Upload verknüpft den Platz per `profileId`.
+     * Freund mit Konto als Mitspieler (P2-E): zufällige lokale ID (wie ein Gast), Name = Alias bei der Auswahl. Die Profil-ID
+     * steht nur in `friend_player` je Konto. Kein Gast: weder in Personenlisten noch als Cloud-Spieler hochgeladen.
      */
     FRIEND,
 }
@@ -42,6 +43,7 @@ data class LocalPlayer(
 /** Lokale Spieler: Self-Player, Gäste, von anderen Geräten übernommene Namen (P1 ohne Account). */
 class PlayerRepository internal constructor(
     private val queries: PlayerQueries,
+    private val friendLinks: FriendPlayerQueries,
     private val locallyCreated: (String) -> Unit = {},
     private val sourcePlayerCreated: (String) -> Unit = {},
     private val redacted: (String) -> Boolean = { false },
@@ -84,40 +86,38 @@ class PlayerRepository internal constructor(
         }
 
     /**
-     * Freund als Mitspieler: legt [profileId] als [PlayerKind.FRIEND] an bzw. übernimmt den aktuellen [alias]. Ein Gast oder
-     * archivierter Eintrag derselben ID (aus einem gezogenen Match) wird zum Freund; Self und Platzhalter nie (`null`).
+     * Freund als Mitspieler für [account]: dieselbe lokale Spieler-ID je Konto und Freund (Verlauf und Statistik zählen
+     * wie bei Gästen über Matches hinweg), beim ersten Mal [newId]. Der aktuelle [alias] ersetzt den gespeicherten Namen.
      */
     fun rememberFriend(
-        profileId: PlayerId,
+        account: String,
+        profileId: String,
         alias: String,
         nowMs: Long,
+        newId: () -> PlayerId,
     ): LocalPlayer? =
         queries.transactionWithResult {
-            if (alias.isBlank() || Placeholders.isPlaceholder(profileId)) return@transactionWithResult null
-            when (rawGet(profileId)?.kind) {
-                // Freundeszeilen haben keinen Cloud-Schreiber und sind daher nie „schreibbar“; der Alias stammt aus der
-                // Freundesliste des aktuellen Kontos, die erneute Auswahl darf ihn also immer aktualisieren.
-                PlayerKind.FRIEND -> {
-                    queries.rename(alias, profileId.value)
-                }
-
-                null -> {
-                    if (!writable(profileId.value)) return@transactionWithResult null
-                    queries.insertOrIgnore(profileId.value, alias, PlayerKind.FRIEND.name, nowMs, null)
-                }
-
-                PlayerKind.GUEST, PlayerKind.ARCHIVED -> {
-                    if (!writable(profileId.value)) return@transactionWithResult null
-                    queries.updateKind(PlayerKind.FRIEND.name, profileId.value)
-                    queries.rename(alias, profileId.value)
-                }
-
-                else -> {
-                    return@transactionWithResult null
-                }
+            if (account.isBlank() || profileId.isBlank() || alias.isBlank()) return@transactionWithResult null
+            val known = friendLinks.playerFor(account, profileId).executeAsOneOrNull()?.let(::PlayerId)
+            if (known != null) {
+                // Freundeszeilen haben keinen Cloud-Schreiber und sind nie „schreibbar“; der Alias stammt aus der
+                // Freundesliste genau dieses Kontos und darf daher immer aktualisiert werden.
+                if (rawGet(known)?.kind != PlayerKind.FRIEND) return@transactionWithResult null
+                queries.rename(alias, known.value)
+                return@transactionWithResult rawGet(known)
             }
-            rawGet(profileId)
+            val id = newId()
+            if (Placeholders.isPlaceholder(id) || rawGet(id) != null || !writable(id.value)) return@transactionWithResult null
+            queries.insertOrIgnore(id.value, alias, PlayerKind.FRIEND.name, nowMs, null)
+            friendLinks.link(account, profileId, id.value)
+            rawGet(id)
         }
+
+    /** Profil-ID des als Freund eingetragenen Spielers [id] für [account]; nur für den Teilnehmer-Upload. */
+    fun friendProfile(
+        account: String,
+        id: PlayerId,
+    ): String? = friendLinks.profileFor(account, id.value).executeAsOneOrNull()
 
     /**
      * Merkt [id] als Gast, falls es noch keinen Verzeichniseintrag gibt. Ein vorhandener Eintrag bleibt unberührt, auch

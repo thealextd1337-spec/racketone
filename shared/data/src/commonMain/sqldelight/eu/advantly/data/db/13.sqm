@@ -1,0 +1,20 @@
+-- P2-E: Freunde als Mitspieler mit lokaler Spieler-ID je Konto und Server-Hinweise zur Verknüpfung (siehe FriendPlayer.sq).
+CREATE TABLE friend_player (
+    account_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    PRIMARY KEY (account_id, profile_id)
+);
+
+CREATE UNIQUE INDEX friend_player_by_player ON friend_player(account_id, player_id);
+
+CREATE TABLE friend_link_note (
+    account_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    notes_json TEXT NOT NULL,
+    PRIMARY KEY (account_id, match_id)
+);
+
+CREATE TRIGGER friend_link_note_cleanup AFTER DELETE ON match_header BEGIN
+    DELETE FROM friend_link_note WHERE match_id = old.id;
+END;

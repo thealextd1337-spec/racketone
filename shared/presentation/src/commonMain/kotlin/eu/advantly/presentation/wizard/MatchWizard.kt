@@ -62,6 +62,7 @@ class MatchWizard(
 
     // Freunde stehen nicht in [guests]; ohne diese Liste würden sie bei Verzeichniswechseln zu Platzhaltern.
     private val friends = mutableMapOf<PlayerId, Player>()
+    private val friendProfiles = mutableMapOf<PlayerId, String>()
 
     // Einmal beim Sportwechsel laden; Gesten und Recomposition bleiben frei von Datenbankzugriffen.
     private var recentPlayers: List<Player> = emptyList()
@@ -107,6 +108,7 @@ class MatchWizard(
         draftSelfId = players.self.value.id
         createdPlayers.clear()
         friends.clear()
+        friendProfiles.clear()
         recentPlayers = emptyList()
         set(initialInput())
     }
@@ -226,12 +228,17 @@ class MatchWizard(
         alias: String,
     ): Player? {
         if (alias.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
-        if (input.players.any { it.id.value == profileId }) return null
+        if (isFriendSeated(profileId)) return null
         val friend = players.addFriend(profileId, alias) ?: return null
+        if (input.players.any { it.id == friend.id }) return null
         friends[friend.id] = friend
+        friendProfiles[friend.id] = profileId
         assignPlayer(place, friend)
         return friend
     }
+
+    /** Sitzt der Freund [profileId] schon auf einem Platz? Die Profil-ID bleibt dafür im Assistenten, nie im Lineup. */
+    fun isFriendSeated(profileId: String): Boolean = input.players.any { friendProfiles[it.id] == profileId }
 
     /** Neues Profil gezielt am angetippten freien Platz anlegen. */
     fun addGuestAt(

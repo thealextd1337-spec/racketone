@@ -40,6 +40,7 @@ class LocalData(
     val players: PlayerRepository =
         PlayerRepository(
             database.playerQueries,
+            database.friendPlayerQueries,
             locallyCreated = { cloud.recordLocalPlayer(it) },
             sourcePlayerCreated = { cloud.resolvePlayerMetadataSources(it) },
             redacted = { replicas.isRedacted(it) },
@@ -302,7 +303,10 @@ class LocalData(
         /** Settings-Schlüssel der Self-Aliase (kommagetrennte Spieler-IDs). */
         const val SELF_ALIASES_KEY: String = "players.selfAliases"
 
-        /** Schema 13: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches. */
-        const val SCHEMA_VERSION: Long = 13
+        /**
+         * Schema 14: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches;
+         * Freunde als Mitspieler (lokale Spieler-ID je Konto) und Verknüpfungshinweise (P2-E).
+         */
+        const val SCHEMA_VERSION: Long = 14
     }
 }

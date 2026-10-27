@@ -21,6 +21,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -33,11 +34,12 @@ class FriendParticipantUploadTest {
         val driver = createInMemoryJvmDriver()
         val data = LocalData(driver)
         val me = PlayerId("me")
-        val friend = PlayerId("bob-profile")
+        // Lokale Spieler-ID wie bei Gästen; die Profil-ID steht nur in der Zuordnung des Kontos.
+        val friend = PlayerId("bob-player")
         val format = Presets.TENNIS_SINGLES_BO3.format()
         val lineup = Lineup(listOf(me), listOf(friend), me)
         data.players.ensureSelf("Alex", 0) { me }
-        data.players.rememberFriend(friend, "Bob", 0)
+        data.players.rememberFriend("alice", "bob-profile", "Bob", 0) { friend }
         data.accountIdentities.initialize("phone", me.value, "PHONE")
         data.cloudUploads.bindOwnedDevices(data.cloudUploads.activate("alice"), setOf("phone"))
         data.cloudUploads.deactivate()
@@ -84,8 +86,17 @@ class FriendParticipantUploadTest {
                     .single()
                     .participants!!
             assertEquals(ParticipantDto("me", "A", 1, "Alex", "me", null), participants.first())
-            assertEquals(ParticipantDto("bob-profile", "B", 1, "Bob", null, "bob-profile"), participants.last())
+            assertEquals(ParticipantDto("bob-player", "B", 1, "Bob", null, "bob-profile"), participants.last())
             assertEquals(listOf("me"), selected.batch.players.map { it.id })
+            // Die Profil-ID steht ausschließlich im Feld profileId: weder Slot, Lineup noch Event-Payload tragen sie.
+            val withoutProfileField =
+                selected.batch.copy(
+                    matches =
+                        selected.batch.matches.map { m ->
+                            m.copy(participants = m.participants?.map { it.copy(profileId = null) })
+                        },
+                )
+            assertFalse(CloudJson.encodeToString(PushBatch.serializer(), withoutProfileField).contains("bob-profile"))
             runBlocking { backend.pushSelected(selected, selected.batch) }
             val state = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
             assertEquals(state.selected.revision, state.uploadedRevision)
@@ -94,12 +105,12 @@ class FriendParticipantUploadTest {
 
     @Test
     fun finalLinkNoteAcknowledgesParticipantsAndIsStoredForTheMatchDetail() =
-        upload("""[{"slotId":"bob-profile","note":"not_friend"}]""") { data, backend ->
+        upload("""[{"slotId":"bob-player","note":"not_friend"}]""") { data, backend ->
             val selected = backend.captureUpload()
             runBlocking { backend.pushSelected(selected, selected.batch) }
             val state = data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!
             assertEquals(state.selected.revision, state.uploadedRevision)
-            assertEquals(mapOf("bob-profile" to "not_friend"), data.cloudUploads.linkNotes("alice", "match"))
+            assertEquals(mapOf("bob-player" to "not_friend"), data.cloudUploads.linkNotes("alice", "match"))
             assertTrue(data.cloudUploads.linkNotes("bob", "match").isEmpty())
             assertNull(
                 backend
@@ -111,7 +122,7 @@ class FriendParticipantUploadTest {
 
     @Test
     fun retryableNoteKeepsParticipantsPendingWithoutStoringNotes() =
-        upload("""[{"slotId":"bob-profile","note":"player_not_owned"}]""") { data, backend ->
+        upload("""[{"slotId":"bob-player","note":"player_not_owned"}]""") { data, backend ->
             val selected = backend.captureUpload()
             runBlocking { backend.pushSelected(selected, selected.batch) }
             assertEquals(0, data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, "match")!!.uploadedRevision)

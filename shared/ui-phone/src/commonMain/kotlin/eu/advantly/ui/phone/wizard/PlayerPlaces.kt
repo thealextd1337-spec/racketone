@@ -257,8 +257,7 @@ internal fun PlayerPlaces(
                 SectionTitle(stringResource(Res.string.wizard_choose_player))
                 val suggestions = wizard.playerSuggestions()
                 // Freunde (Konto) neben Gästen; schon gesetzte Freunde nicht noch einmal anbieten.
-                val assigned = current.input.players.mapTo(mutableSetOf()) { it.id.value }
-                val pickable = friends.filter { it.profileId !in assigned && !it.alias.isNullOrBlank() }
+                val pickable = friends.filter { !wizard.isFriendSeated(it.profileId) && !it.alias.isNullOrBlank() }
                 if (pickable.isNotEmpty()) {
                     SectionTitle(stringResource(Res.string.wizard_friends_title))
                     pickable.forEach { friend ->

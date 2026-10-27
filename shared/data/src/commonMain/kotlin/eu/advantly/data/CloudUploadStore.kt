@@ -453,30 +453,28 @@ class CloudUploadStore internal constructor(
             }
             // Hinweise der zuletzt quittierten Besetzung ersetzen die vorigen; ohne Hinweis bleibt nichts stehen.
             linkNotes.forEach { (matchId, notes) ->
-                val key = linkNotesKey(snapshot.profileId, matchId)
-                if (notes.isEmpty()) settings.remove(key) else settings.put(key, DataJson.encodeToString(LINK_NOTES, notes))
+                if (notes.isEmpty()) {
+                    database.friendPlayerQueries.removeNotes(snapshot.profileId, matchId)
+                } else {
+                    database.friendPlayerQueries.putNotes(snapshot.profileId, matchId, DataJson.encodeToString(LINK_NOTES, notes))
+                }
             }
         }
     }
 
     /**
      * Server-Hinweise je Platz (`not_friend`, `link_rejected`, …) zur zuletzt von [profileId] quittierten Besetzung von
-     * [matchId]; je Konto getrennt, weil sie dessen Freundschaften verraten.
+     * [matchId]; je Konto getrennt, weil sie dessen Freundschaften verraten. Mit dem Match-Kopf gelöscht (Trigger).
      */
     fun linkNotes(
         profileId: String,
         matchId: String,
     ): Map<String, String> =
-        settings
-            .get(
-                linkNotesKey(profileId, matchId),
-            )?.let { runCatching { DataJson.decodeFromString(LINK_NOTES, it) }.getOrNull() }
+        database.friendPlayerQueries
+            .notes(profileId, matchId)
+            .executeAsOneOrNull()
+            ?.let { runCatching { DataJson.decodeFromString(LINK_NOTES, it) }.getOrNull() }
             .orEmpty()
 }
-
-private fun linkNotesKey(
-    profileId: String,
-    matchId: String,
-) = "cloud.linkNotes.$profileId.$matchId"
 
 private val LINK_NOTES = MapSerializer(String.serializer(), String.serializer())

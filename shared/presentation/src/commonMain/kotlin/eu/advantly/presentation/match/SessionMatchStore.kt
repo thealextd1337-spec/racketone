@@ -506,8 +506,12 @@ class SessionMatchStore(
         profileId: String,
         alias: String,
     ): Player? {
-        if (profileId.isBlank() || PlayerId(profileId) == selfFlow.value.id || PlayerId(profileId) in aliases) return null
-        val player = data.players.rememberFriend(PlayerId(profileId), alias.trim(), clock.nowMs())?.toPlayer() ?: return null
+        // Nur unter dem ausgewählten Konto: die Zuordnung Spieler → Profil gilt je Konto und nur für dessen Upload.
+        val account = data.accountIdentities.profile?.takeIf { it != profileId } ?: return null
+        val player =
+            data.players
+                .rememberFriend(account, profileId, alias.trim(), clock.nowMs()) { PlayerId(ids.newId().value) }
+                ?.toPlayer() ?: return null
         players[player.id] = player
         return player
     }
