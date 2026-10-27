@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.wear.remote.interactions.RemoteActivityHelper
+import com.google.common.util.concurrent.ListenableFuture
 import eu.advantly.match.session.DeviceStatus
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.home.WatchInstallHost
@@ -19,20 +20,26 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * Uhren, denen der Installationshinweis gilt: `appInstalled == false` setzt der WearCompanionDetector für verbundene
  * Knoten ohne Capability `advantly_device_link` – also „Uhr verbunden, Advantly fehlt“; ausgeblendete Uhren fallen weg.
+ * Eine per Sync erreichbare Uhr hat die App, auch wenn ihre Capability (z. B. direkt nach dem Booten) noch fehlt.
  */
 internal fun watchInstallTargets(
     devices: List<DeviceStatus>,
     dismissed: Set<String>,
-): List<DeviceStatus> = devices.filter { it.kind == PeerKind.WATCH && it.appInstalled == false && it.peer !in dismissed }
+): List<DeviceStatus> = devices.filter { it.kind == PeerKind.WATCH && it.appInstalled == false && !it.reachable && it.peer !in dismissed }
 
 /**
  * Öffnet die Play-Store-Seite von Advantly direkt auf der Uhr (Googles Muster für Standalone-Wear-Apps). Neu bewertet
- * wird nur, wenn sich der Uhr-Status ändert (Capability-Listener, App-Vordergrund) – keine eigene Abfrageschleife.
+ * wird nur, wenn sich der Uhr-Status ändert: Capability-Listener, App-Vordergrund und die bestehende 30-s-Abfrage des
+ * WearCompanionDetector (sie erfasst auch neu verbundene Uhren ohne App, die kein Capability-Ereignis auslösen) –
+ * keine eigene Abfrageschleife.
  */
 internal class WatchAppInstaller(
     context: Context,
     devices: StateFlow<List<DeviceStatus>>,
     scope: CoroutineScope,
+    // Ein Helper mit Main-Executor; der Standard-Konstruktor legte je Aufruf einen nie beendeten Thread an.
+    private val startRemote: (Intent, String) -> ListenableFuture<Void> =
+        RemoteActivityHelper(context.applicationContext, ContextCompat.getMainExecutor(context))::startRemoteActivity,
 ) : WatchInstallHost {
     private val context = context.applicationContext
     private val prefs = this.context.getSharedPreferences("watch_install", Context.MODE_PRIVATE)
@@ -51,7 +58,7 @@ internal class WatchAppInstaller(
                 .addCategory(Intent.CATEGORY_BROWSABLE)
         val future =
             try {
-                RemoteActivityHelper(context).startRemoteActivity(intent, peer)
+                startRemote(intent, peer)
             } catch (_: Exception) {
                 onResult(false)
                 return

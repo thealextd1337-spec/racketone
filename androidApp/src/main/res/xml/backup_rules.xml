@@ -2,4 +2,5 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="advantly_auth.xml" />
     <exclude domain="sharedpref" path="advantly_sync.xml" />
+    <exclude domain="sharedpref" path="watch_install.xml" />
 </full-backup-content>

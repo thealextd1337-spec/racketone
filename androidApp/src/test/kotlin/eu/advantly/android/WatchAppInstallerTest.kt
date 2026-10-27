@@ -1,6 +1,10 @@
 package eu.advantly.android
 
 import android.app.Application
+import android.content.Intent
+import android.os.Looper
+import androidx.concurrent.futures.CallbackToFutureAdapter
+import com.google.common.util.concurrent.ListenableFuture
 import eu.advantly.match.session.DeviceStatus
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -34,6 +39,10 @@ class WatchAppInstallerTest {
     fun watchWithoutAppGetsHint() = assertEquals(listOf(withoutApp), watchInstallTargets(listOf(withoutApp), emptySet()))
 
     @Test
+    fun reachableWatchHasTheAppEvenWithoutCapability() =
+        assertEquals(emptyList<DeviceStatus>(), watchInstallTargets(listOf(withoutApp.copy(reachable = true)), emptySet()))
+
+    @Test
     fun onlyWatchesWithoutAppAmongSeveral() {
         val second = DeviceStatus("fossil", PeerKind.WATCH, appInstalled = false)
         assertEquals(listOf(withoutApp, second), watchInstallTargets(listOf(withApp, withoutApp, second), emptySet()))
@@ -51,6 +60,29 @@ class WatchAppInstallerTest {
             emptyList<DeviceStatus>(),
             watchInstallTargets(listOf(DeviceStatus("other", PeerKind.PHONE, appInstalled = false)), emptySet()),
         )
+
+    @Test
+    fun installReportsFailureAndSuccess() {
+        val context = RuntimeEnvironment.getApplication()
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val results = mutableListOf<Boolean>()
+
+        fun install(start: (Intent, String) -> ListenableFuture<Void>) =
+            WatchAppInstaller(context, MutableStateFlow(emptyList()), scope, start).install("galaxy") { results += it }
+        try {
+            install { _, _ -> throw IllegalStateException("kein Companion") }
+            install { _, _ -> CallbackToFutureAdapter.getFuture { it.setException(IllegalStateException("Uhr weg")) } }
+            install { intent, peer ->
+                assertEquals("market://details?id=${context.packageName}", intent.dataString)
+                assertEquals("galaxy", peer)
+                CallbackToFutureAdapter.getFuture { it.set(null) }
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(false, false, true), results)
+        } finally {
+            scope.cancel()
+        }
+    }
 
     @Test
     fun dismissIsRememberedAcrossAppStarts() {
