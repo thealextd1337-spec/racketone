@@ -800,6 +800,7 @@
     <string name="friends_access_open_account">Open account</string>
     <string name="friends_code_title">Your friend code</string>
     <string name="friends_code_loading">Loading your friend code…</string>
+    <string name="friends_code_retry">Load friend code again</string>
     <string name="friends_share">Share code</string>
     <string name="friends_share_text">Add me on Advantly – my friend code: %1$s</string>
     <string name="friends_add_title">Add friend</string>

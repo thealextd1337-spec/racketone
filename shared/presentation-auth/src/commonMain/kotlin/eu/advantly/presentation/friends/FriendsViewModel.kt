@@ -10,7 +10,6 @@ import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.presentation.auth.PhonePullPort
-import eu.advantly.presentation.auth.PhonePullResult
 import eu.advantly.presentation.auth.PhonePullState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -78,9 +77,15 @@ class FriendsViewModel(
 
     fun close() = scope.cancel()
 
-    /** Tab sichtbar: lokale Liste neu lesen und den eigenen Code einmal je Konto laden. */
+    /** Tab sichtbar: lokale Liste neu lesen, Abgleich anstoßen (neue Anfragen) und den eigenen Code laden. */
     fun open() {
         reloadLocal()
+        if (mutable.value.access == FriendsAccess.READY) pull?.pullNow()
+        loadCode()
+    }
+
+    /** Auch „Erneut versuchen“ nach einem gescheiterten Laden des Codes. */
+    fun loadCode() {
         if (mutable.value.friendCode != null) return
         run { session ->
             val code = port.friendCode()
@@ -190,12 +195,13 @@ class FriendsViewModel(
             pull?.pullNow()
             return
         }
-        if (state.result == PhonePullResult.COMPLETE) overlay.clear()
+        // Vollständige Metadaten enthalten alle Freundschaften: auch bei BLOCKED/FAILED durch andere Rückstände.
+        if (state.metadataComplete) overlay.clear()
         reloadLocal()
-        // Gerätebindung entsteht im Pull: nach einem daran gescheiterten Aufruf den Code jetzt nachladen.
-        if (state.result == PhonePullResult.COMPLETE && mutable.value.error == "device_not_authorized" && action?.isActive != true) {
-            dismissError()
-            open()
+        // Gerätebindung entsteht im Pull: einen fehlenden (z. B. daran gescheiterten) Code jetzt nachladen.
+        if (state.metadataComplete && mutable.value.friendCode == null && action?.isActive != true) {
+            if (mutable.value.error == "device_not_authorized") dismissError()
+            loadCode()
         }
     }
 
@@ -265,6 +271,9 @@ class FriendsViewModel(
         action =
             scope.launch {
                 try {
+                    // Vor dem RPC: Das SDK kann schon ein anderes Konto tragen, während [shown] noch nachhinkt.
+                    // Sonst liefe z. B. block_user mit dem Gegenüber von A unter der Sitzung von B.
+                    auth.requireAccountSession(session)
                     block(session)
                 } catch (e: CancellationException) {
                     throw e

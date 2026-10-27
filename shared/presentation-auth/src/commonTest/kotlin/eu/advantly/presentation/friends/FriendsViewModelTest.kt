@@ -84,13 +84,18 @@ private class FakePull : PhonePullPort {
     override val state = MutableStateFlow(PhonePullState(available = true))
     var started = 0
 
+    // Wie der Host: ein laufender Pull wird nicht doppelt gestartet.
     override fun pullNow() {
+        if (state.value.busy) return
         started++
-        state.value = state.value.copy(busy = true, result = null)
+        state.value = state.value.copy(busy = true, result = null, metadataComplete = false)
     }
 
-    fun finish(result: PhonePullResult = PhonePullResult.COMPLETE) {
-        state.value = state.value.copy(busy = false, result = result)
+    fun finish(
+        result: PhonePullResult = PhonePullResult.COMPLETE,
+        metadataComplete: Boolean = result == PhonePullResult.COMPLETE,
+    ) {
+        state.value = state.value.copy(busy = false, result = result, metadataComplete = metadataComplete)
     }
 
     override fun close(onDrained: () -> Unit) = onDrained()
@@ -265,6 +270,8 @@ class FriendsViewModelTest {
                 listOf(
                     "respond:carl:true",
                     "remove:zed",
+                    // Vollständige Metadaten ohne Code: automatischer Nachladeversuch.
+                    "code",
                     "blocked",
                     "block:carl",
                     "blocked",
@@ -282,4 +289,68 @@ class FriendsViewModelTest {
             pull.finish(PhonePullResult.CONNECTION_FAILED)
             assertEquals(listOf("anna"), state.friends.ids())
         }
+
+    @Test fun blockedOrFailedPullWithCompleteMetadataReplacesOverlay() =
+        fixture {
+            model.remove("zed")
+            // Metadaten unvollständig: die bestätigte Änderung bleibt sichtbar.
+            pull.finish(PhonePullResult.BLOCKED, metadataComplete = false)
+            assertEquals(listOf("anna"), state.friends.ids())
+            // Ausstehende Redaktionen o. Ä. machen das Ergebnis FAILED/BLOCKED, Freundschaften sind aber vollständig.
+            local["alice"] = local.getValue("alice").filter { it.profileId != "zed" } +
+                PulledFriendship("hugo", "Hugo", "pending", outgoing = false, serverVersion = 9)
+            model.respond("carl", accept = true)
+            pull.finish(PhonePullResult.FAILED, metadataComplete = true)
+            // Überlagerung verworfen: der Server kennt Carls Annahme hier (noch) nicht, die lokale Liste gilt.
+            assertEquals(listOf("carl", "hugo"), state.incoming.ids())
+            assertEquals(listOf("anna"), state.friends.ids())
+        }
+
+    @Test fun openingTheTabStartsAPullAndCodeFailureCanBeRetried() =
+        fixture {
+            friends.failure = "connection_failed"
+            model.open()
+            assertEquals(1, pull.started)
+            assertEquals("connection_failed", state.error)
+            assertNull(state.friendCode)
+            friends.failure = null
+            model.loadCode()
+            assertEquals("K7QF92MX", state.friendCode)
+            // Ohne Fehler nach dem nächsten vollständigen Pull automatisch.
+            friends.failure = "connection_failed"
+            auth.session.value = alice(generation = 2)
+            model.open()
+            friends.failure = null
+            pull.finish()
+            assertEquals("K7QF92MX", state.friendCode)
+            assertEquals(4, friends.calls.count { it == "code" })
+        }
+
+    @Test fun laggingAccountFlowNeverSendsUnderTheNewSdkAccount() {
+        val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+        val fake = FakePhoneAuth().apply { session.value = alice() }
+        // SDK steht schon auf Bob, der Sitzungs-Flow zeigt noch Alice.
+        var sdkProfile = "alice"
+        val auth =
+            object : eu.advantly.cloud.sync.CloudAuthPort by fake {
+                override fun requireAccountSession(expected: CloudSession) {
+                    if (expected.profileId != sdkProfile) throw CloudException("cloud_session_changed", true)
+                }
+            }
+        val friends = FakeFriends()
+        val model = FriendsViewModel(auth, friends, { emptyList() }, null, scope)
+        try {
+            sdkProfile = "bob"
+            model.block("zed")
+            model.remove("zed")
+            model.search("bob_99")
+            model.loadCode()
+            assertTrue(friends.calls.isEmpty())
+            assertEquals("cloud_session_changed", model.state.value.error)
+            assertFalse(model.state.value.busy)
+        } finally {
+            model.close()
+            scope.cancel()
+        }
+    }
 }

@@ -56,6 +56,7 @@ import eu.advantly.ui.phone.resources.friends_blocked_show
 import eu.advantly.ui.phone.resources.friends_blocked_since
 import eu.advantly.ui.phone.resources.friends_blocked_title
 import eu.advantly.ui.phone.resources.friends_code_loading
+import eu.advantly.ui.phone.resources.friends_code_retry
 import eu.advantly.ui.phone.resources.friends_code_title
 import eu.advantly.ui.phone.resources.friends_decline
 import eu.advantly.ui.phone.resources.friends_dismiss
@@ -190,7 +191,8 @@ fun FriendsScreen(
             }
 
             Segment.FRIENDS -> {
-                OwnCode(state.friendCode, onShareText)
+                // Nach einem Fehler nicht ewig „wird geladen“: ausdrücklich erneut versuchen.
+                OwnCode(state.friendCode, onShareText, retry = if (!state.busy && state.error != null) model::loadCode else null)
                 AddFriend(model, query) { query = it }
                 HorizontalDivider()
                 Title(Res.string.friends_list_title)
@@ -300,10 +302,15 @@ fun FriendsScreen(
 private fun OwnCode(
     code: String?,
     onShareText: ((String) -> Unit)?,
+    retry: (() -> Unit)?,
 ) {
     Title(Res.string.friends_code_title)
     if (code == null) {
-        Text(stringResource(Res.string.friends_code_loading), color = AdvantlyTheme.colors.text2)
+        if (retry == null) {
+            Text(stringResource(Res.string.friends_code_loading), color = AdvantlyTheme.colors.text2)
+        } else {
+            TextButton(retry, modifier = Modifier.testTag("friends_code_retry")) { Text(stringResource(Res.string.friends_code_retry)) }
+        }
         return
     }
     val shown = formatFriendCode(code)

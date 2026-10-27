@@ -128,12 +128,17 @@ class FriendsScreenTest {
                 val port = UiFriends()
                 val model = FriendsViewModel(auth, port, { if (it == "alice") local else emptyList() }, null, scope)
                 val shared = mutableListOf<String>()
+                port.failure = "connection_failed"
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
                         AdvantlyTheme(darkTheme = false) { FriendsScreen(model, onOpenAccount = {}, onShareText = { shared += it }) }
                     }
                 }
                 try {
+                    // Gescheitertes Laden bleibt nicht bei „wird geladen“ stehen.
+                    onNodeWithTag("friends_error").assertTextContains("No connection", substring = true)
+                    port.failure = null
+                    click("friends_code_retry")
                     onNodeWithTag("friends_code").assertTextContains("K7QF-92MX")
                     screenshot("friends-en-200")
                     click("friends_share")
@@ -184,6 +189,7 @@ class FriendsScreenTest {
                     onNodeWithTag("friends_error").assertTextContains("Too many searches", substring = true)
                     assertEquals(
                         listOf(
+                            "code",
                             "code",
                             "find:bob_99",
                             "send:bob",
