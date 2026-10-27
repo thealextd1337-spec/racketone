@@ -45,6 +45,7 @@ import eu.advantly.ui.phone.common.PlaceholderAssignments
 import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
+import eu.advantly.ui.phone.friends.FriendsScreen
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
@@ -76,6 +77,7 @@ import org.jetbrains.compose.resources.stringResource
  * @param autoBenchmark startet direkt ein Tennis-Match und den Auto-Benchmark (iOS-CI, Spike S4)
  * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg im Profil; nur gesetzt, solange der Host ihn anbietet
  * @param onShareMatchImage teilt die Ergebniskarte (Bild + Text mit Link) über die Plattform; `null` blendet „Teilen“ aus
+ * @param onShareText Teilen-Menü der Plattform für reinen Text (z. B. Freundescode); `null` blendet Teilen aus
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -96,6 +98,7 @@ fun AdvantlyApp(
     onShareExport: (() -> Unit)? = null,
     onRestorePrevious: (() -> Unit)? = null,
     onShareMatchImage: (suspend (ImageBitmap, String) -> Unit)? = null,
+    onShareText: ((String) -> Unit)? = null,
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -137,6 +140,7 @@ fun AdvantlyApp(
                                 supportDiagnostics,
                                 onShareExport,
                                 onRestorePrevious,
+                                onShareText,
                             )
                         }
                     }
@@ -234,6 +238,7 @@ private fun TabLayer(
     supportDiagnostics: Map<String, String>,
     onShareExport: (() -> Unit)?,
     onRestorePrevious: (() -> Unit)?,
+    onShareText: ((String) -> Unit)?,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
@@ -262,7 +267,21 @@ private fun TabLayer(
                     }
 
                     AppTab.Friends -> {
-                        ComingSoonScreen(AppTab.Friends, versionName)
+                        val friends = authModel?.friends
+                        if (friends == null) {
+                            // Build ohne Backend: Freunde gibt es hier nicht, P1 bleibt unverändert.
+                            ComingSoonScreen(AppTab.Friends, versionName)
+                        } else {
+                            FriendsScreen(
+                                friends,
+                                onOpenAccount = {
+                                    authModel.refresh()
+                                    showAccount = true
+                                    navigator.tab = AppTab.Profile
+                                },
+                                onShareText = onShareText,
+                            )
+                        }
                     }
 
                     AppTab.Profile -> {
