@@ -128,6 +128,17 @@ markMissing:
 UPDATE cloud_pull_snapshot SET removal_pending = 1
 WHERE profile_id = ? AND kind = 'MATCH' AND seen_run != ?;
 
+markFriendshipSeen:
+UPDATE cloud_pull_snapshot SET seen_run = ? WHERE profile_id = ? AND kind = 'FRIENDSHIP' AND entity_id = ?;
+
+-- Freundschaften haben keine lokale Materialisierung: nach einem Vollabgleich fehlende Zeilen sind serverseitig gelöscht.
+deleteMissingFriendships:
+DELETE FROM cloud_pull_snapshot WHERE profile_id = ? AND kind = 'FRIENDSHIP' AND seen_run != ?;
+
+friendships:
+SELECT entity_id, server_version, snapshot_json FROM cloud_pull_snapshot
+WHERE profile_id = ? AND kind = 'FRIENDSHIP' ORDER BY entity_id;
+
 materialized:
 UPDATE cloud_pull_snapshot SET materialized_version = ? WHERE profile_id = ? AND kind = ? AND entity_id = ?;
 

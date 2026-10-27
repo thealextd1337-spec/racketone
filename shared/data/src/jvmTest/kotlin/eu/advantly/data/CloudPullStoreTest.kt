@@ -641,4 +641,35 @@ class CloudPullStoreTest {
             }
         }
     }
+
+    @Test
+    fun fullRescanDropsFriendshipsTheServerNoLongerDeliversButKeepsUnchangedContent() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun friendship(
+                id: String,
+                alias: String,
+            ) = CloudPullFriendship(id, 1, """{"profileId":"$id","alias":"$alias","status":"accepted","outgoing":true,"serverVersion":1}""")
+            val page = storePage().copy(friendships = listOf(friendship("bob", "Bob"), friendship("carol", "Carol")))
+            data.cloudPulls.commitMetadata("alice", run, 0, page) {}
+            assertEquals(listOf("bob", "carol"), data.cloudPulls.friendships("alice").map { it.id })
+            // Delta ohne Epochenwechsel entfernt nichts.
+            data.cloudPulls.commitMetadata("alice", run, 1, storePage(version = 2).copy(friendships = emptyList())) {}
+            assertEquals(2, data.cloudPulls.friendships("alice").size)
+            // Entfreunden erhöht die Sichtbarkeits-Epoche: Vollabgleich ab null liefert nur noch Bob (gleiche Version).
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 2, storePage(version = 3, epoch = 2)) {})
+            data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                0,
+                storePage(version = 3, epoch = 2).copy(friendships = listOf(friendship("bob", "Changed"))),
+            ) {}
+            val left = data.cloudPulls.friendships("alice")
+            assertEquals(listOf("bob"), left.map { it.id })
+            assertTrue("\"Bob\"" in left.single().json)
+            assertTrue(data.cloudPulls.friendships("other").isEmpty())
+        }
+    }
 }

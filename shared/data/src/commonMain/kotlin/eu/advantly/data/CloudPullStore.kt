@@ -139,6 +139,10 @@ class CloudPullStore internal constructor(
             )
         }
 
+    /** Gezogene Freundschaften dieses Kontos (Rohsnapshot je Gegenüber); nach Vollabgleichen ohne gelöschte Paare. */
+    fun friendships(profileId: String): List<CloudPullFriendship> =
+        queries.friendships(profileId).executeAsList().map { CloudPullFriendship(it.entity_id, it.server_version, it.snapshot_json) }
+
     /** Serverseitiger Ersteller (`createdBy`) aus dem gezogenen Match-Snapshot; `null` ohne Snapshot oder ohne String-Feld. */
     fun matchCreatedBy(
         profileId: String,
@@ -190,6 +194,8 @@ class CloudPullStore internal constructor(
             }
             page.friendships.forEach {
                 saveSnapshot(profileId, CloudPullEntityKind.FRIENDSHIP, it.id, it.serverVersion, it.json, state.scanRun)
+                // Nur die Lesespur: ein unveränderter Snapshot behält seinen (ggf. redigierten) Inhalt.
+                queries.markFriendshipSeen(state.scanRun, profileId, it.id)
             }
             page.matches.forEach { match ->
                 require(match.access in setOf("member", "feed") && match.redactionEpoch >= 0)
@@ -253,6 +259,7 @@ class CloudPullStore internal constructor(
                 if (state.targetEpoch != null) {
                     // Fehlende Matches erst hier markieren; ABSENT folgt begrenzt über applyMissing.
                     queries.markMissing(profileId, state.scanRun)
+                    queries.deleteMissingFriendships(profileId, state.scanRun)
                     queries.reopenUnready(profileId)
                 }
                 queries.completeMetadata(page.visibilityEpoch, profileId)
