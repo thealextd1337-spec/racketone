@@ -502,6 +502,22 @@ class SessionMatchStore(
         return player
     }
 
+    override fun addFriend(
+        profileId: String,
+        alias: String,
+    ): Player? {
+        // Nur unter dem ausgewählten Konto: die Zuordnung Spieler → Profil gilt je Konto und nur für dessen Upload.
+        val account = data.accountIdentities.profile?.takeIf { it != profileId } ?: return null
+        val player =
+            data.players
+                .rememberFriend(account, profileId, alias.trim(), clock.nowMs()) { PlayerId(ids.newId().value) }
+                ?.toPlayer() ?: return null
+        players[player.id] = player
+        return player
+    }
+
+    override fun friendProfile(id: PlayerId): String? = data.accountIdentities.profile?.let { data.players.friendProfile(it, id) }
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         rememberPlayers(setup.players)
         val stored = StoredFavorite(ids.newId().value, setup.format, setup.lineup, setup.meta)

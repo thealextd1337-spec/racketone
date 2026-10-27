@@ -74,7 +74,7 @@ class TelemetrySettingsUiTest {
                 onNodeWithTag("telemetry_share").assertIsSelected().assertTextContains("Share", substring = true)
                 onNodeWithTag("telemetry_private").assertTextContains("Only me (default)", substring = true)
                 onNodeWithTag("telemetry_share_pending")
-                    .assertTextContains("once friends and the live view are available", substring = true)
+                    .assertTextContains("not uploaded to the cloud", substring = true)
                     .assertIsDisplayed()
                 val output = File("build/reports/screenshots/telemetry-settings-en-large.png")
                 output.parentFile.mkdirs()

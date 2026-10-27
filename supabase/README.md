@@ -416,6 +416,30 @@ uv run supabase/tests/database/300_account_support_concurrency.py --confirm-disp
 Remove-Item Env:ADVANTLY_ACCOUNT_TEST_DB_URL
 ```
 
+## H0: Puls & Schritte kontoweit, Blockliste mit Alias
+
+Migration `20261027000300_telemetry_visibility_sync.sql`, Tests `330_telemetry_visibility_sync.test.sql`.
+Gesundheitsdaten selbst gehen weiterhin nicht in die Cloud (P3); gespeichert wird nur die Wahl.
+
+- **`cloud_set_telemetry_visibility_v1(p_visibility, p_counter, p_origin)`** (Cloud-Bindung): übernimmt den Stand nur,
+  wenn er nach der Client-Regel (`TelemetryPreference.merge`) größer ist – Lamport-Zähler, dann Restriktivität
+  `off` > `private` > `share`, dann Ursprung in `"C"`-Reihenfolge. Antwort ist immer der Kontostand
+  `{visibility, counter, origin}`; `p_counter = 0` liest nur. Ungültige Angaben (Zähler < 0 oder ≥ 2^53, unbekannter
+  Wert, Ursprung fehlt/kein sichtbares ASCII/> 64 Zeichen) → `P0001 invalid_telemetry_setting`. Direktes
+  `UPDATE` von `profile_settings.telemetry_visibility` ist entzogen. Die Wahl ändert keine Sichtbarkeitsgeneration
+  (Trigger `cloud_access_generation` auf `profile_settings` ohne `telemetry_*`). Zähler und Ursprung stehen im Export.
+- **`cloud_my_blocks_v1()`** (Cloud-Bindung): eigene Blockierungen `{profileId, alias, createdAt}`, Alias nur bei
+  aktivem Profil, keine weiteren Profildaten. `my_friend_code()` verlangt jetzt ebenfalls die Cloud-Bindung (kein
+  service_role-EXECUTE mehr).
+- **Rollout:** Migration **vor** der App ausrollen. Die neue App liest die Blockliste nur noch über
+  `cloud_my_blocks_v1` (kein Rückfall auf `user_blocks`) und bräche ohne Migration dort ab; der Telemetrie-Abgleich
+  überspringt einen Server ohne RPC still. Ältere Apps bleiben lauffähig (sie lesen `user_blocks` direkt und
+  schreiben `telemetry_visibility` nie).
+
+**Satzstände im Feed** (`20261027000400_feed_set_scores.sql`, Test 340): `sanitize_projection` akzeptiert neben
+`[[a,b]]` das tatsächliche Client-Format `sets: [{"a":6,"b":4,…}]` (ScoreSummary) und gibt weiterhin nur `[[a,b],…]`
+aus. Bereinigt wird beim Lesen (Feed in `sync_pull`, Visitor-Sicht) – bestehende Projektionen brauchen keinen Backfill.
+
 ## P2-C: Auth und Altersgate
 
 Migration `20261016000500_auth_altersgate.sql` ergänzt kurzlebige zufällige Einmal-Tickets, IP-/Geräte-/Globalbudgets,

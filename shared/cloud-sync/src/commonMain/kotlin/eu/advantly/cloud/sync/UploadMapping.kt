@@ -27,7 +27,7 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
                 previousMatchId = header?.previousMatchId,
                 participants =
                     participants[id]?.value?.participants?.map {
-                        ParticipantDto(it.slotId, it.team, it.position, it.displayName, it.playerId)
+                        ParticipantDto(it.slotId, it.team, it.position, it.displayName, it.playerId, it.profileId)
                     },
                 projection =
                     projection?.let {
@@ -79,7 +79,13 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
     )
 }
 
-/** Nur ausdrücklich erfolgreiche Teilantworten quittieren; Hinweise halten Teilnehmerkorrekturen ausstehend. */
+/**
+ * Endgültige Verknüpfungshinweise (P2-E): Der Server hat den Platz als unverknüpften Namen gespeichert; ein erneuter
+ * Versand ändert daran nichts. Die Besetzung gilt als quittiert, der Hinweis wird für die Anzeige gespeichert.
+ */
+internal val FINAL_LINK_NOTES = setOf("not_friend", "link_rejected", "profile_already_in_match")
+
+/** Nur ausdrücklich erfolgreiche Teilantworten quittieren; andere Hinweise halten Teilnehmerkorrekturen ausstehend. */
 internal fun CloudUploadSnapshot.acknowledgedMetadata(
     batch: PushBatch,
     response: PushResponse,
@@ -106,8 +112,9 @@ internal fun CloudUploadSnapshot.acknowledgedMetadata(
                 }
 
                 CloudMetadataKind.PARTICIPANTS -> {
-                    result?.result in success && sent?.participants != null &&
-                        result?.notes?.isEmpty() == true
+                    val slots = sent?.participants?.mapTo(mutableSetOf()) { it.slotId }
+                    result?.result in success && slots != null &&
+                        result?.notes?.all { it.note in FINAL_LINK_NOTES && it.slotId in slots } == true
                 }
 
                 CloudMetadataKind.PROJECTION -> {
@@ -121,3 +128,16 @@ internal fun CloudUploadSnapshot.acknowledgedMetadata(
         }
     }
 }
+
+/** Hinweise je quittierter Besetzung (leer = keine); Grundlage für die Anzeige im Match-Detail. */
+internal fun linkNotes(
+    acknowledged: Set<CloudMetadataRevision>,
+    response: PushResponse,
+): Map<String, Map<String, String>> =
+    acknowledged.filter { it.kind == CloudMetadataKind.PARTICIPANTS }.associate { version ->
+        version.id to
+            response.matches
+                .first { it.id == version.id }
+                .notes
+                .associate { it.slotId to it.note }
+    }

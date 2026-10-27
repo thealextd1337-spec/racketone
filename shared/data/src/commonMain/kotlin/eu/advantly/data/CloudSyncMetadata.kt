@@ -130,27 +130,37 @@ internal fun CloudSyncRepository.uploadParticipants(
                     slot.value in redactedSlots ||
                         playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
                 val name = if (redacted) "" else player?.display_name ?: legacy?.displayName.orEmpty()
-                CloudParticipant(slot.value, team, index + 1, name, reference)
+                // Freund: Profil-ID nur aus der Zuordnung des hochladenden Kontos, nie aus Slot-ID oder Lineup.
+                val friend =
+                    playerId?.value?.takeIf { !redacted && player?.kind == PlayerKind.FRIEND.name }?.let {
+                        database.friendPlayerQueries.profileFor(profileId, it).executeAsOneOrNull()
+                    }
+                CloudParticipant(slot.value, team, index + 1, name, reference, friend)
             }
         }
     return CloudParticipants(id, people)
 }
 
 internal fun CloudSyncRepository.uploadPlayer(id: String): CloudPlayer? =
-    database.playerQueries.selectById(id).executeAsOneOrNull()?.takeUnless { it.kind == PlayerKind.PLACEHOLDER.name }?.let {
-        CloudPlayer(
-            it.id,
-            if (database.cloudMetadataQueries.sourceForSelf(id).executeAsOneOrNull() !=
-                null
-            ) {
-                "self"
-            } else {
-                "guest"
-            },
-            it.display_name,
-            it.kind == PlayerKind.ARCHIVED.name,
-        )
-    }
+    database.playerQueries
+        .selectById(id)
+        .executeAsOneOrNull()
+        ?.takeUnless {
+            it.kind == PlayerKind.PLACEHOLDER.name || it.kind == PlayerKind.FRIEND.name
+        }?.let {
+            CloudPlayer(
+                it.id,
+                if (database.cloudMetadataQueries.sourceForSelf(id).executeAsOneOrNull() !=
+                    null
+                ) {
+                    "self"
+                } else {
+                    "guest"
+                },
+                it.display_name,
+                it.kind == PlayerKind.ARCHIVED.name,
+            )
+        }
 
 internal fun CloudSyncRepository.uploadProjection(id: String): CloudProjection? =
     database.matchHeaderQueries.selectById(id).executeAsOneOrNull()?.let {

@@ -85,7 +85,16 @@ internal object PullMapping {
                     it.status in setOf("invited", "accepted", "declined", "revoked")
             },
         )
-        val record = if (row.access == "member" && !row.deleted && engineStatus != null) memberRecord(row, engineStatus) else null
+        // `hidden` liefert der Server nur für die eigenen Plätze: selbst ausgeblendet = für mich entzogen.
+        val hidden = row.access == "member" && row.participants.any { it.hidden == true }
+        val record =
+            if (row.access == "member" && !row.deleted && !hidden &&
+                engineStatus != null
+            ) {
+                memberRecord(row, engineStatus)
+            } else {
+                null
+            }
         // Feedprojektionen sind bereinigte JSON-Snapshots, niemals Engine-Köpfe oder Eventberechtigungen.
         return CloudPullMatch(
             row.id,
@@ -96,6 +105,7 @@ internal object PullMapping {
             row.redactionEpoch.toLong(),
             row.deleted,
             record,
+            hidden,
         )
     }
 

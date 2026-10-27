@@ -363,7 +363,8 @@ class CloudUploadRunnerTest {
                                 it.id,
                                 "updated",
                                 projection = "ahead_of_events",
-                                notes = listOf(ParticipantNote("guest", "not_friend")),
+                                // Wiederholbarer Hinweis; endgültige (not_friend, …) quittieren, siehe FriendParticipantUploadTest.
+                                notes = listOf(ParticipantNote("guest", "player_not_owned")),
                             )
                         },
                 )

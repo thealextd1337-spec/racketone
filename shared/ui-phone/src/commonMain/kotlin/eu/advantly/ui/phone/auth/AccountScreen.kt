@@ -34,6 +34,7 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
+import eu.advantly.ui.phone.friends.ShareDefaultSection
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.account_cancel
 import eu.advantly.ui.phone.resources.account_close
@@ -260,6 +261,7 @@ fun AccountScreen(
                 model.sync?.let { CloudSyncSection(it) }
                 model.upload?.let { CloudUploadSection(it, manual = model.sync == null) }
                 model.pull?.let { CloudPullSection(it, manual = model.sync == null) }
+                model.friends?.let { ShareDefaultSection(it) }
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(

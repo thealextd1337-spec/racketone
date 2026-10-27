@@ -20,6 +20,8 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.CloudUploadSession
 import eu.advantly.data.LocalAccountOwnership
@@ -117,6 +119,12 @@ class PhonePullHostTest {
         var pullOffline = false
         var hostAccess = true
 
+        /** Antwort und Anfragen von `cloud_set_telemetry_visibility_v1` (H0); Standard = Konto ohne Änderung. */
+        var telemetryBody = """{"visibility":"private","counter":0,"origin":null}"""
+        var telemetryStatus = HttpStatusCode.OK
+        val telemetryCalls = CopyOnWriteArrayList<JsonObject>()
+        var duringTelemetry: suspend () -> Unit = {}
+
         /** Aus: Die Auth übergeht SDK-Wechsel, Sitzungsflow und Konto-Identitäten bleiben auf dem alten Stand. */
         var authSync = true
         var afterBind: suspend () -> Unit = {}
@@ -192,6 +200,13 @@ class PhonePullHostTest {
                                     )
                                 }
 
+                                "cloud_set_telemetry_visibility_v1" -> {
+                                    telemetryCalls += CloudJson.parseToJsonElement((request.body as TextContent).text).jsonObject
+                                    duringTelemetry()
+                                    status = telemetryStatus
+                                    telemetryBody
+                                }
+
                                 "logout" -> {
                                     "{}"
                                 }
@@ -250,6 +265,7 @@ class PhonePullHostTest {
                 hostScope,
                 { Thread.currentThread() === thread },
                 hostAccessAllowed = { hostAccess },
+                telemetry = backend,
             )
 
         init {
@@ -418,6 +434,8 @@ class PhonePullHostTest {
                     assertSerial(f.trace)
                     assertEquals(listOf(f.phone.deviceId.value), f.bindings.toList())
                     assertEquals(PhonePullResult.COMPLETE, f.pull.state.value.result)
+                    // Freunde-Tab: vollständige Metadaten dieses Laufs lösen die lokale Überlagerung ab.
+                    assertTrue(f.pull.state.value.metadataComplete)
                 } finally {
                     f.close()
                 }
@@ -507,6 +525,7 @@ class PhonePullHostTest {
                     f.idle()
                     assertEquals(case, expected, f.pull.state.value.result)
                     assertEquals(if (expected == PhonePullResult.BLOCKED) PhonePullBlock.PERMISSION else null, f.pull.state.value.blocked)
+                    assertFalse(case, f.pull.state.value.metadataComplete)
                 } finally {
                     f.close()
                 }
@@ -737,6 +756,81 @@ class PhonePullHostTest {
                 }
             } finally {
                 driver.close()
+            }
+        }
+
+    /** H0: lokaler Stand geht ins Konto, der Kontostand kommt nach derselben Regel zurück (und damit zur Uhr). */
+    @Test fun pullExchangesTheAccountTelemetryChoiceForTheBoundAccountOnly() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                val local = f.phone.state.value.telemetry
+                f.telemetryBody = """{"visibility":"off","counter":${local.counter},"origin":"zz-watch"}"""
+                f.pull.pullNow()
+                f.idle()
+                assertEquals(PhonePullResult.COMPLETE, f.pull.state.value.result)
+                val sent = f.telemetryCalls.single()
+                assertEquals("share", sent.getValue("p_visibility").jsonPrimitive.content)
+                assertEquals(local.origin, sent.getValue("p_origin").jsonPrimitive.content)
+                // Gleicher Zähler: restriktiver Kontostand gewinnt auch lokal.
+                assertEquals(TelemetryPreference(TelemetryVisibility.OFF, local.counter, "zz-watch"), f.phone.state.value.telemetry)
+            } finally {
+                f.close()
+            }
+        }
+
+    /** Ein Server ohne die RPC (alte Migration) hält den Match-Abgleich nicht auf; ein Rechtefehler schon. */
+    @Test fun telemetryFailureBlocksThePullOnlyOnPermissionLoss() =
+        runBlocking {
+            for ((status, expected) in listOf(
+                HttpStatusCode.NotFound to PhonePullResult.COMPLETE,
+                HttpStatusCode.Forbidden to PhonePullResult.BLOCKED,
+            )) {
+                val f = Fixture(this)
+                try {
+                    f.signIn()
+                    f.telemetryStatus = status
+                    f.pull.pullNow()
+                    f.idle()
+                    assertEquals("$status", expected, f.pull.state.value.result)
+                    assertEquals(TelemetryPreference(), f.phone.state.value.telemetry)
+                } finally {
+                    f.close()
+                }
+            }
+        }
+
+    /** P3-c: Kontowechsel, während die Antwort für Alice unterwegs ist – sie wird weder bei Alice noch bei Bob übernommen. */
+    @Test fun lateTelemetryAnswerAfterAnAccountSwitchIsDiscarded() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                f.telemetryBody = """{"visibility":"off","counter":99,"origin":"alice-watch"}"""
+                f.duringTelemetry = {
+                    f.duringTelemetry = {}
+                    f.authSync = false
+                    f.owner = "bob"
+                    f.epoch++
+                    f.restoreSession()
+                    delay(50)
+                    f.authSync = true
+                }
+                f.pull.pullNow()
+                f.idle()
+                assertEquals(1, f.telemetryCalls.size)
+                assertTrue(f.pull.state.value.result != PhonePullResult.COMPLETE)
+                assertTrue(f.phone.state.value.telemetry.counter < 99)
+                assertTrue(f.phone.state.value.telemetry.visibility != TelemetryVisibility.OFF)
+                // Auch Alices gespeicherter Stand bleibt unberührt.
+                val aliceScope = f.data.settings.get("identity.account.alice")
+                val stored = f.data.settings.get("session.telemetry.$aliceScope")
+                assertTrue(stored.toString(), stored != null && "\"share\"" in stored && "\"counter\":1," in stored)
+            } finally {
+                f.close()
             }
         }
 }

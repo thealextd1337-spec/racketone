@@ -1,14 +1,18 @@
 package eu.advantly.android
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.VisibleForTesting
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
@@ -184,6 +188,12 @@ class MainActivity : ComponentActivity() {
             runtimeUnavailable()
             return
         }
+        // Ohne privaten Transport gibt es keine Uhr-Erkennung (companion = null), also auch keinen Installationshinweis
+        val watchInstall =
+            if (installation.privateTransportAllowed) WatchAppInstaller(this, model.live.deviceStatuses, lifecycleScope) else null
+        // Recovery hat Vorrang: im Hold und solange der Abschlussdialog offen ist, wartet der Startbildschirm.
+        val recoveryNotice = mutableStateOf(false)
+        val startLogin = auth?.let { StartLoginPrefs(this) }
         setContent {
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
             AdvantlyApp(
@@ -195,6 +205,10 @@ class MainActivity : ComponentActivity() {
                 authModel = auth,
                 onShareExport = this@MainActivity.phoneExportShareCallback(auth),
                 onShareMatchImage = { image, text -> this@MainActivity.shareMatchImage(image, text) },
+                onShareText = this@MainActivity::shareText,
+                watchInstall = watchInstall,
+                startLogin = startLogin,
+                recoveryHold = !installation.privateTransportAllowed || recoveryNotice.value,
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =
@@ -214,7 +228,7 @@ class MainActivity : ComponentActivity() {
         if (!installation.privateTransportAllowed && (!restored || afterInstallationRetry)) {
             showRecoveryDecision(installation, current)
         }
-        if (!restored) showRecoveryDoneOnce(installation)
+        if (!restored) recoveryNotice.value = showRecoveryDoneOnce(installation) { recoveryNotice.value = false }
         // App-Start bzw. Vordergrund (B4): höchstens ein gedrosselter automatischer Abgleich. Als Beobachter erst ab
         // hier, damit ein Prüfergebnis nach onStart den Abgleich nachholt (der Lifecycle liefert ON_START nach).
         lifecycle.addObserver(
@@ -230,6 +244,16 @@ class MainActivity : ComponentActivity() {
         /** Testnaht wie [eu.advantly.android.sync.PhoneSyncJobService.work]; im Produkt immer der Konto-Abgleich. */
         @VisibleForTesting
         internal var foreground: (MainActivity) -> Unit = { activity -> activity.account?.sync?.onForeground() }
+    }
+}
+
+/** Reiner Text (Freundescode) über das System-Teilen-Menü; ohne passende App passiert nichts. */
+internal fun ComponentActivity.shareText(text: String) {
+    val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    try {
+        startActivity(Intent.createChooser(intent, null))
+    } catch (_: ActivityNotFoundException) {
+        // Kein Teilen-Ziel: der Code bleibt auf dem Bildschirm auswählbar.
     }
 }
 

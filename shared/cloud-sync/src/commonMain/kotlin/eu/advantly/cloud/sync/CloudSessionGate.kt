@@ -365,9 +365,10 @@ class CloudSessionGate internal constructor(
         uploaded: Set<String>,
         rejected: Map<String, String>,
         metadata: Set<CloudMetadataRevision> = emptySet(),
+        linkNotes: Map<String, Map<String, String>> = emptyMap(),
     ) {
         requireUpload(lease, snapshot)
-        requireNotNull(uploads).acknowledge(snapshot, uploaded, rejected, metadata)
+        requireNotNull(uploads).acknowledge(snapshot, uploaded, rejected, metadata, linkNotes)
     }
 
     private fun changed(): Nothing = throw CloudException("cloud_session_changed", true)

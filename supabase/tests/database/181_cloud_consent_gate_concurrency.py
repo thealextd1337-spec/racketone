@@ -95,7 +95,7 @@ def main():
                                       "from pg_proc p where p.pronamespace='public'::regnamespace and "
                                       "(strpos(p.prosrc,'private.require_cloud_binding()')>0 or p.proname='bind_cloud_session_v1') "
                                       "order by p.proname").fetchall()
-            assert len(functions) == 35
+            assert len(functions) == 38
             assert any(name == "cloud_pull_match_redaction_v1" for name, _ in functions)
             assert any(name == "cloud_match_readiness_v1" for name, _ in functions)
             assert any(name == "cloud_unrevoke_device_v1" for name, _ in functions)
@@ -156,7 +156,7 @@ def main():
                 with owner.transaction():
                     owner.execute("set transaction isolation level " + isolation)
                     assert not owner.execute("select private.has_current_consents(%s)", (uid,)).fetchone()[0]
-                print("PASS", isolation, "35 RPCs, 8 Tabellenwrites, 18 RLS-Tabellen geschlossen;", populated, "RC-Positivkontrollen")
+                print("PASS", isolation, "38 RPCs, 8 Tabellenwrites, 18 RLS-Tabellen geschlossen;", populated, "RC-Positivkontrollen")
 
             # Unabhängige Sessionprüfung des Consenthelfers nach echtem Lock-Wait.
             with owner.transaction():

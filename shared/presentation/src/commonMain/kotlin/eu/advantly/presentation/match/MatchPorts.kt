@@ -568,6 +568,18 @@ interface PlayersPort {
     /** Nullable Hostvariante; Defaults aendern das Verhalten bestehender Stores nicht. */
     fun tryAddGuest(name: String): Player? = addGuest(name)
 
+    /**
+     * Freund mit Konto als Mitspieler (P2-E): lokale Spieler-ID (je Konto und Freund stabil), Name = [alias]. Kein Gast,
+     * nicht in [guests]; nur der Upload verknüpft den Platz per [profileId]. `null`: hier nicht möglich (ohne Konto).
+     */
+    fun addFriend(
+        profileId: String,
+        alias: String,
+    ): Player? = null
+
+    /** Profil des als Freund eingetragenen Spielers [id] (aktuelles Konto), sonst `null`; nur für die Auswahl im Assistenten. */
+    fun friendProfile(id: PlayerId): String? = null
+
     /** Speichert [setup] als Favoriten (ohne `previousMatchId`). */
     fun saveFavorite(setup: MatchSetup): FavoriteLineup
 

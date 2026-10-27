@@ -117,7 +117,8 @@ internal class AndroidPhoneSyncRecord(
 
 /**
  * Matchende auch ohne Activity (etwa ein empfangenes Uhr-Match über den Listener-Service): ein Abgleich, sobald Netz
- * da ist. Nur mit lokalem Konto; der Auftrag läuft ausschließlich für dieses Konto.
+ * da ist. Nur mit lokalem Konto; der Auftrag läuft ausschließlich für dieses Konto. Ebenso eine geänderte
+ * Telemetrie-Wahl (H0, auch von der Uhr): der Lauf bringt sie ins Konto.
  */
 internal fun scheduleSyncAfterMatchEnd(
     context: Context,
@@ -126,14 +127,38 @@ internal fun scheduleSyncAfterMatchEnd(
     if (BuildConfig.SUPABASE_URL.isBlank()) return {}
     val scheduler = AndroidPhoneSyncScheduler(context)
     val record = AndroidPhoneSyncRecord(context)
-    return onMatchFinished(session) {
+    val schedule = {
         AndroidInstallationGuard
             .storage(context) {
                 session.data.accountIdentities.profile
                     .orEmpty()
             }?.takeIf { it.isNotEmpty() }
             ?.let { scheduler.scheduleAfterMatchEnd(it, record) }
+        Unit
     }
+    val removeMatch = onMatchFinished(session, schedule)
+    val removeTelemetry = onTelemetryChanged(session, schedule)
+    return {
+        removeMatch()
+        removeTelemetry()
+    }
+}
+
+/** Meldet jede Änderung der Telemetrie-Wahl (lokal, von der Uhr, aus dem Konto oder durch Kontowechsel). */
+internal fun onTelemetryChanged(
+    session: MatchSession,
+    changed: () -> Unit,
+): () -> Unit {
+    var known = session.state.value.telemetry
+    val listener =
+        SessionListener { state ->
+            if (state.telemetry != known) {
+                known = state.telemetry
+                changed()
+            }
+        }
+    session.addListener(listener)
+    return { session.removeListener(listener) }
 }
 
 /** Meldet jedes offene Match, das beendet wird; Schließen in der Anzeige oder Punkte zählen nicht. */

@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Sport
+import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.wizard.MatchWizard
 import eu.advantly.presentation.wizard.WizardUiState
 import eu.advantly.ui.phone.common.ChoiceChip
@@ -37,6 +38,7 @@ import org.jetbrains.compose.resources.stringResource
 internal fun PlayersStep(
     wizard: MatchWizard,
     state: WizardUiState,
+    friends: List<FriendEntry> = emptyList(),
 ) {
     val input = state.input
     val sport = input.sport ?: return
@@ -52,7 +54,7 @@ internal fun PlayersStep(
         )
     }
     val doubles = input.discipline == Discipline.DOUBLES
-    PlayerPlaces(wizard, state, doubles)
+    PlayerPlaces(wizard, state, doubles, friends)
     if (doubles) {
         Text(
             stringResource(teamOrderHint(sport)),

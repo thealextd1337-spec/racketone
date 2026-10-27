@@ -39,6 +39,8 @@ dependencies {
     implementation(libs.google.id)
     // WearableListenerService: Uhr-Events auch ohne laufende Activity (W1-I)
     implementation(libs.play.services.wearable)
+    // Play-Store-Seite der Uhr-App auf einer Uhr ohne Advantly öffnen
+    implementation(libs.wear.remote.interactions)
     // Nur Debug-APK: Link-Debug-Screen (Spike S3, src/debug). device-link kommt transitiv über ui-phone → presentation.
     debugImplementation(libs.compose.foundation)
     debugImplementation(libs.compose.material3)

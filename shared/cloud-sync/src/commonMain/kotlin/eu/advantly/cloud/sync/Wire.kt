@@ -179,7 +179,7 @@ data class PulledParticipant(
     val position: Int,
     val playerId: String? = null,
     val profileId: String? = null,
-    /** `self` | `pending` | `confirmed` | `assigned` | `null` (nicht verknüpft) */
+    /** Nur Mitglieder: `self` | `linked` (Freund vom Ersteller eingetragen, F23) | `assigned` | `confirmed` | `null` (nicht verknüpft) */
     val linkStatus: String? = null,
     val displayName: String,
     val deletedProfile: Boolean = false,

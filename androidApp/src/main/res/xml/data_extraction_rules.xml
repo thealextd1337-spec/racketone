@@ -3,9 +3,13 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="advantly_auth.xml" />
         <exclude domain="sharedpref" path="advantly_sync.xml" />
+        <exclude domain="sharedpref" path="watch_install.xml" />
+        <exclude domain="sharedpref" path="start_login.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="advantly_auth.xml" />
         <exclude domain="sharedpref" path="advantly_sync.xml" />
+        <exclude domain="sharedpref" path="watch_install.xml" />
+        <exclude domain="sharedpref" path="start_login.xml" />
     </device-transfer>
 </data-extraction-rules>

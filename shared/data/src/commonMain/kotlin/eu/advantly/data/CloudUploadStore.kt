@@ -3,6 +3,8 @@ package eu.advantly.data
 import app.cash.sqldelight.db.SqlDriver
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.data.db.Cloud_metadata
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 
 /** Lokale Upload-Berechtigung; nur [CloudUploadStore.activate] kann sie ausstellen. Kein Auth-Token. */
 class CloudUploadSession internal constructor(
@@ -423,8 +425,10 @@ class CloudUploadStore internal constructor(
         uploaded: Set<String>,
         rejected: Map<String, String> = emptyMap(),
         metadata: Set<CloudMetadataRevision> = emptySet(),
+        linkNotes: Map<String, Map<String, String>> = emptyMap(),
     ) {
         require(uploaded.intersect(rejected.keys).isEmpty())
+        require(linkNotes.keys.all { id -> metadata.any { it.kind == CloudMetadataKind.PARTICIPANTS && it.id == id } })
         require(rejected.values.all { it.isNotBlank() })
         val ids = uploaded + rejected.keys
         database.transaction {
@@ -447,6 +451,30 @@ class CloudUploadStore internal constructor(
             metadata.forEach { version ->
                 database.cloudMetadataQueries.acknowledge(version.revision, version.kind.name, version.id)
             }
+            // Hinweise der zuletzt quittierten Besetzung ersetzen die vorigen; ohne Hinweis bleibt nichts stehen.
+            linkNotes.forEach { (matchId, notes) ->
+                if (notes.isEmpty()) {
+                    database.friendPlayerQueries.removeNotes(snapshot.profileId, matchId)
+                } else {
+                    database.friendPlayerQueries.putNotes(snapshot.profileId, matchId, DataJson.encodeToString(LINK_NOTES, notes))
+                }
+            }
         }
     }
+
+    /**
+     * Server-Hinweise je Platz (`not_friend`, `link_rejected`, …) zur zuletzt von [profileId] quittierten Besetzung von
+     * [matchId]; je Konto getrennt, weil sie dessen Freundschaften verraten. Mit dem Match-Kopf gelöscht (Trigger).
+     */
+    fun linkNotes(
+        profileId: String,
+        matchId: String,
+    ): Map<String, String> =
+        database.friendPlayerQueries
+            .notes(profileId, matchId)
+            .executeAsOneOrNull()
+            ?.let { runCatching { DataJson.decodeFromString(LINK_NOTES, it) }.getOrNull() }
+            .orEmpty()
 }
+
+private val LINK_NOTES = MapSerializer(String.serializer(), String.serializer())

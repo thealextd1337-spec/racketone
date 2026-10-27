@@ -24,6 +24,8 @@ export const COLUMNS: Record<string, string[]> = {
     "country",
     "ageConfirmedAt",
     "telemetryVisibility",
+    "telemetryCounter",
+    "telemetryOrigin",
     "shareMatchesDefault",
     "locale",
     "deletionRequestedAt",

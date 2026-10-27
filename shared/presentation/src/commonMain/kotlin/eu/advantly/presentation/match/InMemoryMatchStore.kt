@@ -416,6 +416,18 @@ class InMemoryMatchStore(
         return player
     }
 
+    private val friendIds = mutableMapOf<String, PlayerId>()
+
+    override fun addFriend(
+        profileId: String,
+        alias: String,
+    ): Player? =
+        Player(friendIds.getOrPut(profileId) { PlayerId(ids.newId().value) }, alias.trim()).takeIf {
+            profileId.isNotBlank() && it.displayName.isNotEmpty()
+        }
+
+    override fun friendProfile(id: PlayerId): String? = friendIds.entries.firstOrNull { it.value == id }?.key
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         val favorite = FavoriteLineup(ids.newId().value, setup.copy(previousMatchId = null))
         favoritesFlow.value = listOf(favorite) + favoritesFlow.value

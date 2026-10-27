@@ -641,4 +641,93 @@ class CloudPullStoreTest {
             }
         }
     }
+
+    @Test
+    fun fullRescanDropsFriendshipsTheServerNoLongerDeliversButKeepsUnchangedContent() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun friendship(
+                id: String,
+                alias: String,
+            ) = CloudPullFriendship(id, 1, """{"profileId":"$id","alias":"$alias","status":"accepted","outgoing":true,"serverVersion":1}""")
+            val page = storePage().copy(friendships = listOf(friendship("bob", "Bob"), friendship("carol", "Carol")))
+            data.cloudPulls.commitMetadata("alice", run, 0, page) {}
+            assertEquals(listOf("bob", "carol"), data.cloudPulls.friendships("alice").map { it.id })
+            // Delta ohne Epochenwechsel entfernt nichts.
+            data.cloudPulls.commitMetadata("alice", run, 1, storePage(version = 2).copy(friendships = emptyList())) {}
+            assertEquals(2, data.cloudPulls.friendships("alice").size)
+            // Entfreunden erhöht die Sichtbarkeits-Epoche: Vollabgleich ab null liefert nur noch Bob (gleiche Version).
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 2, storePage(version = 3, epoch = 2)) {})
+            data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                0,
+                storePage(version = 3, epoch = 2).copy(friendships = listOf(friendship("bob", "Changed"))),
+            ) {}
+            val left = data.cloudPulls.friendships("alice")
+            assertEquals(listOf("bob"), left.map { it.id })
+            assertTrue("\"Bob\"" in left.single().json)
+            assertTrue(data.cloudPulls.friendships("other").isEmpty())
+        }
+    }
+
+    @Test
+    fun feedListsOnlyThisAccountsCurrentFeedSnapshotsAndDropsThemAfterARescan() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun feed(
+                id: String,
+                version: Long,
+            ) = CloudPullMatch(id, version, """{"id":"$id","access":"feed"}""", "feed", null, 0, false, null)
+            val page = storePage().copy(matches = storePage().matches + feed("feed-old", 2) + feed("feed-new", 3), cursor = 3)
+            data.cloudPulls.commitMetadata("alice", run, 0, page) {}
+            // Mitglieds-Matches gehören nicht in den Feed; neueste Serverversion zuerst.
+            assertEquals(
+                listOf("feed-new", "feed-old"),
+                data.cloudPulls.feedMatches("alice").map {
+                    it.substringAfter("\"id\":\"").substringBefore('"')
+                },
+            )
+            assertTrue(data.cloudPulls.feedMatches("other").isEmpty())
+            // Entfreunden erhöht die Sichtbarkeits-Epoche: ein Vollabgleich ohne die Feed-Matches entfernt sie.
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 3, storePage(version = 4, epoch = 2)) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage(version = 4, epoch = 2)) {}
+            assertTrue(data.cloudPulls.feedMatches("alice").isEmpty())
+        }
+    }
+
+    @Test
+    fun ownHiddenFlagRevokesTheLocalCopyLikeOnASecondDeviceAndUnhidingRestoresIt() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val id = pullRecord().id
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage()) {}
+            assertTrue(data.matches.get(id) != null)
+
+            // Ausblenden erhöht G: der Vollabgleich liefert das Match weiter als member, aber mit eigenem hidden.
+            val hidden =
+                storePage(version = 2, epoch = 2).let {
+                    it.copy(
+                        matches =
+                            it.matches.map { m ->
+                                m.copy(hidden = true, record = null)
+                            },
+                    )
+                }
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 1, hidden) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, hidden) {}
+            assertEquals(null, data.matches.get(id))
+            assertEquals(null, data.cloudPulls.snapshot("alice", CloudPullEntityKind.MATCH, id.value))
+
+            // Wieder einblenden: neues G, wieder member – die Kopie kommt zurück.
+            assertTrue(!data.cloudPulls.commitMetadata("alice", run, 2, storePage(version = 3, epoch = 3)) {})
+            data.cloudPulls.commitMetadata("alice", run, 0, storePage(version = 3, epoch = 3)) {}
+            assertTrue(data.matches.get(id) != null)
+        }
+    }
 }

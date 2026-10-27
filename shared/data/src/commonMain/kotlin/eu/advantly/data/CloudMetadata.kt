@@ -41,6 +41,8 @@ data class CloudParticipant(
     val position: Int,
     val displayName: String,
     val playerId: String?,
+    /** Konto eines als Freund eingetragenen Mitspielers ([PlayerKind.FRIEND]); der Server verknüpft nur Freunde. */
+    val profileId: String? = null,
 )
 
 /** Auch die verschachtelte Liste lässt sich von außen nicht nachträglich verändern. */

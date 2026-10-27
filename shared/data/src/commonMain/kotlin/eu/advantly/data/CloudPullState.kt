@@ -48,6 +48,8 @@ data class CloudPullMatch(
     val redactionEpoch: Long,
     val deleted: Boolean,
     val record: MatchRecord?,
+    /** Selbst ausgeblendet (`set_my_participation`, P2-E): wirkt lokal wie ein Entzug, auch auf Zweitgeräten. */
+    val hidden: Boolean = false,
 )
 
 data class CloudPullPlayer(

@@ -229,6 +229,8 @@ class MatchSession(
         scope: String,
         profile: String?,
     ): DeviceId {
+        // Stammt das OFF aus einem Konto (auch über einen Gast), bleibt es nur lokal: nie in ein anderes Konto hochladen.
+        val foreign = data.accountIdentities.profile != null || data.settings.get(telemetryKey() + INHERITED_SUFFIX) != null
         val id =
             DeviceId(
                 data.accountIdentities.select(scope, profile, clock.nowMs(), config.kind.name) {
@@ -242,6 +244,7 @@ class MatchSession(
         if (data.settings.get(targetTelemetry) == null && telemetry.visibility == TelemetryVisibility.OFF) {
             val off = TelemetrySetting(TelemetryVisibility.OFF.wire, 1, id.value)
             data.settings.put(targetTelemetry, SyncCodec.json.encodeToString(TelemetrySetting.serializer(), off))
+            if (foreign) data.settings.put(targetTelemetry + INHERITED_SUFFIX, off.counter.toString())
         }
         if (config.kind == PeerKind.PHONE) pairing.rotate(scope)
         return id
@@ -567,10 +570,20 @@ class MatchSession(
     }
 
     /**
-     * Schnittstelle für einen späteren Profil-Abgleich (P2-E, `profile_settings.telemetry_visibility`): [remote] wird nach
-     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte. **P2-E:** Der Server muss dafür `counter` und
-     * `origin` neben `telemetry_visibility` speichern; ein Standard (counter 0) wird ignoriert. `true`, wenn sich der Stand
-     * geändert hat.
+     * Stand für den Konto-Abgleich (H0): ein beim Kontowechsel aus einem anderen Konto übernommenes OFF gilt nur lokal und
+     * wird als Standard gemeldet (nur lesen), bis eine spätere Änderung (Nutzer am Handy oder an der Uhr) den Zähler über
+     * den übernommenen hebt. Die übernommene Kopie der Uhr (gleicher Zähler) zählt nicht als eigene Wahl.
+     */
+    fun accountTelemetry(): TelemetryPreference {
+        checkThread()
+        val inherited = data.settings.get(telemetryKey() + INHERITED_SUFFIX)?.toLongOrNull() ?: return telemetry
+        return if (telemetry.counter <= inherited) TelemetryPreference() else telemetry
+    }
+
+    /**
+     * Kontostand aus `cloud_set_telemetry_visibility_v1` (H0, `profile_settings.telemetry_*`): [remote] wird nach
+     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte und an sie weitergegeben; ein Standard
+     * (counter 0) wird ignoriert. `true`, wenn sich der Stand geändert hat.
      */
     fun mergeTelemetryPreference(remote: TelemetryPreference): Boolean {
         checkThread()
@@ -2861,6 +2874,9 @@ class MatchSession(
 
         /** Settings: Telemetrie-Sichtbarkeit samt Versionsangabe als ein JSON-Eintrag (`TelemetrySetting`, P2-J). */
         private const val TELEMETRY_KEY = "session.telemetry"
+
+        /** Settings-Suffix: Zähler der aus einem anderen Konto übernommenen Telemetrie-Wahl (nur lokal, H0). */
+        private const val INHERITED_SUFFIX = ".inherited"
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"

@@ -128,7 +128,7 @@ LEFT JOIN cloud_device_owner o ON o.device_id = m.source_device_id
 WHERE m.revision > m.uploaded_revision AND (m.writer_profile_id = :profile OR o.profile_id = :profile)
 AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id AND m.kind != 'PLAYER')
 -- Nur tatsächlich abbildbare Einheiten zählen zum Limit; ihr Ack-Stand bleibt bei Ausschluss unverändert.
-AND ((m.kind = 'PLAYER' AND EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind != 'PLACEHOLDER'))
+AND ((m.kind = 'PLAYER' AND EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind NOT IN ('PLACEHOLDER', 'FRIEND')))
     OR (m.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') AND EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id)))
 -- Wie beim Upload-Mapping darf eine Projektion keinen außerhalb dieser Auswahl ausstehenden Events vorauslaufen.
 AND (m.kind != 'PROJECTION' OR NOT EXISTS (
@@ -151,7 +151,7 @@ WHERE m.revision > m.uploaded_revision AND (m.writer_profile_id = :profile OR EX
 ))
 AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id AND m.kind != 'PLAYER')
 AND CASE
-    WHEN m.kind = 'PLAYER' THEN EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind != 'PLACEHOLDER')
+    WHEN m.kind = 'PLAYER' THEN EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind NOT IN ('PLACEHOLDER', 'FRIEND'))
         AND NOT EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = m.entity_id)
     WHEN m.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') THEN EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id)
     ELSE 0 END;

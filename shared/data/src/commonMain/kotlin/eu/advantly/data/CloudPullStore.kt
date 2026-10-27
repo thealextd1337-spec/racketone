@@ -139,6 +139,13 @@ class CloudPullStore internal constructor(
             )
         }
 
+    /** Gezogene Freundschaften dieses Kontos (Rohsnapshot je Gegenüber); nach Vollabgleichen ohne gelöschte Paare. */
+    fun friendships(profileId: String): List<CloudPullFriendship> =
+        queries.friendships(profileId).executeAsList().map { CloudPullFriendship(it.entity_id, it.server_version, it.snapshot_json) }
+
+    /** Rohsnapshots der Feed-Matches dieses Kontos (neueste Serverversion zuerst, höchstens 200). */
+    fun feedMatches(profileId: String): List<String> = queries.feedMatches(profileId).executeAsList()
+
     /** Serverseitiger Ersteller (`createdBy`) aus dem gezogenen Match-Snapshot; `null` ohne Snapshot oder ohne String-Feld. */
     fun matchCreatedBy(
         profileId: String,
@@ -190,17 +197,26 @@ class CloudPullStore internal constructor(
             }
             page.friendships.forEach {
                 saveSnapshot(profileId, CloudPullEntityKind.FRIENDSHIP, it.id, it.serverVersion, it.json, state.scanRun)
+                // Nur die Lesespur: ein unveränderter Snapshot behält seinen (ggf. redigierten) Inhalt.
+                queries.markFriendshipSeen(state.scanRun, profileId, it.id)
             }
             page.matches.forEach { match ->
                 require(match.access in setOf("member", "feed") && match.redactionEpoch >= 0)
                 val old = snapshot(profileId, CloudPullEntityKind.MATCH, match.id)
-                val level = if (match.access == "member") ReplicaAccessLevel.MEMBER else ReplicaAccessLevel.FEED
+                val level =
+                    when {
+                        match.hidden -> ReplicaAccessLevel.ABSENT
+                        match.access == "member" -> ReplicaAccessLevel.MEMBER
+                        else -> ReplicaAccessLevel.FEED
+                    }
                 val before = data.replicas.access(ctx, match.id)
                 // Zugriff bei G vor jeder Materialisierung; eine ältere Generation darf nichts mehr materialisieren.
                 if (data.replicas.applyAccess(ctx, match.id, page.visibilityEpoch, level, fence) == TransitionResult.IGNORED) {
                     queries.markSeen(state.scanRun, profileId, match.id)
                     return@forEach
                 }
+                // Ausgeblendet: ABSENT hat Snapshot und nicht zurückgehaltene lokale Kopie entfernt; nichts materialisieren.
+                if (match.hidden) return@forEach
                 // Neues E bei gleichem G: Namen sind serverseitig schon redigiert, lokal also sofort sperren.
                 if (match.redactionEpoch > (data.replicas.access(ctx, match.id)?.redactionEpoch ?: 0)) {
                     data.replicas.markNotReady(ctx, match.id, fence)
@@ -253,6 +269,7 @@ class CloudPullStore internal constructor(
                 if (state.targetEpoch != null) {
                     // Fehlende Matches erst hier markieren; ABSENT folgt begrenzt über applyMissing.
                     queries.markMissing(profileId, state.scanRun)
+                    queries.deleteMissingFriendships(profileId, state.scanRun)
                     queries.reopenUnready(profileId)
                 }
                 queries.completeMetadata(page.visibilityEpoch, profileId)

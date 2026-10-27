@@ -60,6 +60,10 @@ class MatchWizard(
 ) {
     private val createdPlayers = mutableListOf<Player>()
 
+    // Freunde stehen nicht in [guests]; ohne diese Liste würden sie bei Verzeichniswechseln zu Platzhaltern.
+    private val friends = mutableMapOf<PlayerId, Player>()
+    private val friendProfiles = mutableMapOf<PlayerId, String?>()
+
     // Einmal beim Sportwechsel laden; Gesten und Recomposition bleiben frei von Datenbankzugriffen.
     private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
@@ -81,7 +85,7 @@ class MatchWizard(
     /** Anderer Besitzer: zurücksetzen; sonst gewählte Plätze per ID neu auflösen, Redigierte werden Platzhalter. */
     private fun onDirectoryChanged() {
         if (draftSelfId != players.self.value.id) return reset()
-        val current = (guests.value + players.self.value).associateBy { it.id }
+        val current = friends + (guests.value + players.self.value).associateBy { it.id }
 
         fun fresh(player: Player?) =
             player?.let {
@@ -103,6 +107,8 @@ class MatchWizard(
     fun reset() {
         draftSelfId = players.self.value.id
         createdPlayers.clear()
+        friends.clear()
+        friendProfiles.clear()
         recentPlayers = emptyList()
         set(initialInput())
     }
@@ -214,6 +220,29 @@ class MatchWizard(
         place: PlayerPlace,
         player: Player,
     ) = update { PlayerSelection.assign(it, place, player, players.self.value.id) }
+
+    /** Freund (Konto) gezielt am angetippten freien Platz eintragen; `null`, wenn der Host ihn nicht übernehmen kann. */
+    fun assignFriend(
+        place: PlayerPlace,
+        profileId: String,
+        alias: String,
+    ): Player? {
+        if (alias.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
+        if (isFriendSeated(profileId)) return null
+        val friend = players.addFriend(profileId, alias) ?: return null
+        if (input.players.any { it.id == friend.id }) return null
+        friends[friend.id] = friend
+        friendProfiles[friend.id] = profileId
+        assignPlayer(place, friend)
+        return friend
+    }
+
+    /**
+     * Sitzt der Freund [profileId] schon auf einem Platz – auch aus Revanche, Favorit oder „Wie letztes Mal“? Die
+     * Profil-ID bleibt dafür im Assistenten, nie im Lineup; je Spieler höchstens eine Abfrage beim Host.
+     */
+    fun isFriendSeated(profileId: String): Boolean =
+        input.players.any { player -> friendProfiles.getOrPut(player.id) { players.friendProfile(player.id) } == profileId }
 
     /** Neues Profil gezielt am angetippten freien Platz anlegen. */
     fun addGuestAt(

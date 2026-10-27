@@ -3,6 +3,7 @@ package eu.advantly.data
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.data.db.FriendPlayerQueries
 import eu.advantly.data.db.PlayerQueries
 import eu.advantly.data.db.Player as PlayerRow
 
@@ -19,6 +20,12 @@ enum class PlayerKind {
 
     /** Aus der Auswahl entfernt; Name und ID bleiben für vergangene Matches erhalten. */
     ARCHIVED,
+
+    /**
+     * Freund mit Konto als Mitspieler (P2-E): zufällige lokale ID (wie ein Gast), Name = Alias bei der Auswahl. Die Profil-ID
+     * steht nur in `friend_player` je Konto. Kein Gast: weder in Personenlisten noch als Cloud-Spieler hochgeladen.
+     */
+    FRIEND,
 }
 
 /** Lokal bekannter Spieler. Regeln referenzieren nur [id]; [displayName] ist reine Anzeige. */
@@ -36,6 +43,7 @@ data class LocalPlayer(
 /** Lokale Spieler: Self-Player, Gäste, von anderen Geräten übernommene Namen (P1 ohne Account). */
 class PlayerRepository internal constructor(
     private val queries: PlayerQueries,
+    private val friendLinks: FriendPlayerQueries,
     private val locallyCreated: (String) -> Unit = {},
     private val sourcePlayerCreated: (String) -> Unit = {},
     private val redacted: (String) -> Boolean = { false },
@@ -76,6 +84,43 @@ class PlayerRepository internal constructor(
             if (!exists) locallyCreated(id.value)
             checkNotNull(rawGet(id))
         }
+
+    /**
+     * Freund als Mitspieler für [account]: dieselbe lokale Spieler-ID je Konto und Freund (Verlauf und Statistik zählen
+     * wie bei Gästen über Matches hinweg), beim ersten Mal [newId]. Der aktuelle [alias] ersetzt den gespeicherten Namen.
+     *
+     * Bekannte Grenze: Die Zuordnung ist pro Gerät. Ein Zweitgerät desselben Kontos vergibt eine eigene lokale ID, die
+     * Statistik zu diesem Freund zerfällt dann geräteübergreifend (ein Abgleich über die Cloud ist nicht vorgesehen).
+     */
+    fun rememberFriend(
+        account: String,
+        profileId: String,
+        alias: String,
+        nowMs: Long,
+        newId: () -> PlayerId,
+    ): LocalPlayer? =
+        queries.transactionWithResult {
+            if (account.isBlank() || profileId.isBlank() || alias.isBlank()) return@transactionWithResult null
+            val known = friendLinks.playerFor(account, profileId).executeAsOneOrNull()?.let(::PlayerId)
+            if (known != null) {
+                // Freundeszeilen haben keinen Cloud-Schreiber und sind nie „schreibbar“; der Alias stammt aus der
+                // Freundesliste genau dieses Kontos und darf daher immer aktualisiert werden.
+                if (rawGet(known)?.kind != PlayerKind.FRIEND) return@transactionWithResult null
+                queries.rename(alias, known.value)
+                return@transactionWithResult rawGet(known)
+            }
+            val id = newId()
+            if (Placeholders.isPlaceholder(id) || rawGet(id) != null || !writable(id.value)) return@transactionWithResult null
+            queries.insertOrIgnore(id.value, alias, PlayerKind.FRIEND.name, nowMs, null)
+            friendLinks.link(account, profileId, id.value)
+            rawGet(id)
+        }
+
+    /** Profil-ID des als Freund eingetragenen Spielers [id] für [account]; nur für den Teilnehmer-Upload. */
+    fun friendProfile(
+        account: String,
+        id: PlayerId,
+    ): String? = friendLinks.profileFor(account, id.value).executeAsOneOrNull()
 
     /**
      * Merkt [id] als Gast, falls es noch keinen Verzeichniseintrag gibt. Ein vorhandener Eintrag bleibt unberührt, auch
@@ -170,7 +215,11 @@ class PlayerRepository internal constructor(
         id: PlayerId,
         nowMs: Long,
     ) {
-        if (!writable(id.value) || Placeholders.isPlaceholder(id) || rawGet(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED)) return
+        if (!writable(id.value) || Placeholders.isPlaceholder(id) ||
+            rawGet(id)?.kind in setOf(PlayerKind.SELF, PlayerKind.ARCHIVED, PlayerKind.FRIEND)
+        ) {
+            return
+        }
         queries.transaction {
             val exists = rawGet(id) != null
             queries.insertOrIgnore(id.value, "", PlayerKind.PLACEHOLDER.name, nowMs, null)
@@ -182,7 +231,7 @@ class PlayerRepository internal constructor(
     fun canMarkPlaceholder(id: PlayerId): Boolean =
         rawGet(id).let {
             it == null || (
-                it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED &&
+                it.kind != PlayerKind.SELF && it.kind != PlayerKind.ARCHIVED && it.kind != PlayerKind.FRIEND &&
                     (isDefaultSlotName(it.displayName) || (it.kind == PlayerKind.PLACEHOLDER && it.displayName.isBlank()))
             )
         }

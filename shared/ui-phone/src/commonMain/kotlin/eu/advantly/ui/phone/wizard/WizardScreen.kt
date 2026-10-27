@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.wizard.MatchWizard
@@ -95,6 +96,8 @@ fun WizardScreen(
     onStart: () -> Unit,
     modifier: Modifier = Modifier,
     busyMatch: LiveMatchSnapshot? = null,
+    /** Freunde mit Konto als Mitspieler (P2-E); leer ohne Konto. */
+    friends: List<FriendEntry> = emptyList(),
 ) {
     val state by wizard.state.collectAsState()
     // Uhr installiert/entfernt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1), reaktiv
@@ -126,7 +129,7 @@ fun WizardScreen(
             when (state.step) {
                 WizardStep.SPORT -> SportStep(wizard)
                 WizardStep.SURFACE -> SurfaceStep(wizard, state)
-                WizardStep.PLAYERS -> PlayersStep(wizard, state)
+                WizardStep.PLAYERS -> PlayersStep(wizard, state, friends)
                 WizardStep.FORMAT -> FormatStep(wizard, state)
                 WizardStep.SCORER -> ScorerStep(wizard, state, busyMatch)
             }

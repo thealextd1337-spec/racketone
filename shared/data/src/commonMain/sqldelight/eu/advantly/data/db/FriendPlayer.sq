@@ -1,0 +1,40 @@
+-- Freunde als Mitspieler (P2-E): je Konto eine zufällige lokale Spieler-ID pro Freund. Die Profil-ID verlässt das Gerät
+-- nur als `profileId` im Teilnehmer-Upload – nie in Lineup, Events, Uhr-Nachrichten oder Export.
+CREATE TABLE friend_player (
+    account_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    PRIMARY KEY (account_id, profile_id)
+);
+
+CREATE UNIQUE INDEX friend_player_by_player ON friend_player(account_id, player_id);
+
+-- Server-Hinweise (not_friend, link_rejected, …) zur zuletzt quittierten Besetzung, je Konto; verschwinden mit dem Match.
+CREATE TABLE friend_link_note (
+    account_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    notes_json TEXT NOT NULL,
+    PRIMARY KEY (account_id, match_id)
+);
+
+CREATE TRIGGER friend_link_note_cleanup AFTER DELETE ON match_header BEGIN
+    DELETE FROM friend_link_note WHERE match_id = old.id;
+END;
+
+playerFor:
+SELECT player_id FROM friend_player WHERE account_id = ? AND profile_id = ?;
+
+profileFor:
+SELECT profile_id FROM friend_player WHERE account_id = ? AND player_id = ?;
+
+link:
+INSERT INTO friend_player(account_id, profile_id, player_id) VALUES (?, ?, ?);
+
+notes:
+SELECT notes_json FROM friend_link_note WHERE account_id = ? AND match_id = ?;
+
+putNotes:
+INSERT OR REPLACE INTO friend_link_note(account_id, match_id, notes_json) VALUES (?, ?, ?);
+
+removeNotes:
+DELETE FROM friend_link_note WHERE account_id = ? AND match_id = ?;

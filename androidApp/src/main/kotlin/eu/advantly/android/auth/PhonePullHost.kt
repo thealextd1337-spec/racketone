@@ -8,6 +8,8 @@ import eu.advantly.cloud.sync.CloudPullPort
 import eu.advantly.cloud.sync.CloudPullRunner
 import eu.advantly.cloud.sync.CloudPullState
 import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.CloudTelemetryPort
+import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.PhonePullBlock
 import eu.advantly.presentation.auth.PhonePullPort
@@ -60,6 +62,7 @@ internal class PhonePullHost(
         it()
         true
     },
+    private val telemetry: CloudTelemetryPort? = null,
 ) : PhonePullPort {
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
@@ -115,7 +118,7 @@ internal class PhonePullHost(
         val expected = synchronize() ?: return null
         if (closed) return null
         action?.let { return it }
-        mutable.value = mutable.value.copy(busy = true, result = null, blocked = null)
+        mutable.value = mutable.value.copy(busy = true, result = null, blocked = null, metadataComplete = false)
         val job =
             work.launch(start = CoroutineStart.LAZY) {
                 try {
@@ -129,6 +132,8 @@ internal class PhonePullHost(
                             if (synchronize() != expected) return@launch
                             lane.bound = expected
                         }
+                        syncTelemetry(expected)
+                        if (synchronize() != expected) return@launch
                         activate(expected)
                         val active =
                             runner
@@ -170,6 +175,27 @@ internal class PhonePullHost(
     }
 
     /**
+     * H0: Kontoweite Telemetrie-Wahl abgleichen – lokalen Stand senden, Kontostand nach derselben Regel übernehmen und
+     * damit an die Uhr weitergeben. Nur für das gebundene Konto [expected]; die Antwort gilt nur, wenn danach noch derselbe
+     * Kontext besteht. Kein Rechtefehler (etwa ein Server ohne die RPC) hält den Match-Abgleich auf.
+     */
+    private suspend fun syncTelemetry(expected: PhoneCloudContext) {
+        val port = telemetry ?: return
+        if (synchronize() != expected) return
+        var local: TelemetryPreference? = null
+        if (!storageAction { local = session.accountTelemetry() }) return
+        val remote =
+            try {
+                port.syncTelemetry(expected.profile, local ?: return)
+            } catch (error: CloudException) {
+                if (error.permission) throw error
+                return
+            } ?: return
+        currentCoroutineContext().ensureActive()
+        if (synchronize() == expected) storageAction { session.mergeTelemetryPreference(remote) }
+    }
+
+    /**
      * Nach Restore-Gate und gültiger Kontositzung; der Fence verlangt beides bis zum Commit. Die Auth-Lease liest
      * die SDK-Identität synchron, damit ein noch nicht synchronisierter Sitzungswechsel nicht durchrutscht.
      */
@@ -187,6 +213,17 @@ internal class PhonePullHost(
     private fun publish(result: CloudPullState) {
         // Nur Requestfehler sind Verbindungsfehler; lokale, Antwort- und Matchfehler bleiben neutral.
         val failed = if (result.failure == REQUEST_FAILED) PhonePullResult.CONNECTION_FAILED else PhonePullResult.FAILED
+        // Nur wenn dieser Lauf Seiten übernahm und die letzte davon den Abgleich abschloss (hasMore = false).
+        var metadataComplete = false
+        val profile = result.profileId
+        if (result.completedMetadataPages > 0 && profile != null) {
+            storageAction {
+                metadataComplete =
+                    session.data.cloudPulls
+                        .progress(profile)
+                        .metadataComplete
+            }
+        }
         mutable.value =
             PhonePullState(
                 available = true,
@@ -215,6 +252,7 @@ internal class PhonePullHost(
 
                         else -> PhonePullBlock.READINESS
                     },
+                metadataComplete = metadataComplete,
             )
     }
 

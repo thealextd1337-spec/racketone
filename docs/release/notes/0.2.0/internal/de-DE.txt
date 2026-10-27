@@ -1,0 +1,6 @@
+Neu in 0.2.0:
+• Freunde: per Benutzername oder Freundescode hinzufügen, Anfragen, Blockieren.
+• Geteilte Matches: pro Match mit Freunden teilen, Feed im Freunde-Tab, Freunde im Match eintragen.
+• Anmelden mit Google oder E-Mail-Code; Startbildschirm beim ersten Öffnen (überspringbar).
+• Hinweis zum Installieren der Uhr-App.
+Bitte testen: Freund hinzufügen, Match teilen, Google-Anmeldung, Uhr-Hinweis.

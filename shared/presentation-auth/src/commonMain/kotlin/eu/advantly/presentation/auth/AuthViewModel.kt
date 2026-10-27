@@ -49,9 +49,12 @@ class AuthViewModel(
     val pull: PhonePullPort? = null,
     /** Gehört dem prozessweiten Konto-Host, nicht diesem ViewModel: kein Abbau in [onCleared]. */
     val sync: PhoneSyncPort? = null,
+    /** Freunde-Tab (P2-D); Arbeit endet mit diesem ViewModel. */
+    val friends: eu.advantly.presentation.friends.FriendsViewModel? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
+        friends?.close()
         var closesStarted = false
         var uploadDrained = upload == null
         var exportDrained = export == null
