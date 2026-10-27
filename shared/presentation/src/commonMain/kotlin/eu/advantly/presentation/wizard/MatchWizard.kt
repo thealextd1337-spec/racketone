@@ -60,6 +60,9 @@ class MatchWizard(
 ) {
     private val createdPlayers = mutableListOf<Player>()
 
+    // Freunde stehen nicht in [guests]; ohne diese Liste würden sie bei Verzeichniswechseln zu Platzhaltern.
+    private val friends = mutableMapOf<PlayerId, Player>()
+
     // Einmal beim Sportwechsel laden; Gesten und Recomposition bleiben frei von Datenbankzugriffen.
     private var recentPlayers: List<Player> = emptyList()
     private val mutableState = MutableStateFlow(derive(initialInput()))
@@ -81,7 +84,7 @@ class MatchWizard(
     /** Anderer Besitzer: zurücksetzen; sonst gewählte Plätze per ID neu auflösen, Redigierte werden Platzhalter. */
     private fun onDirectoryChanged() {
         if (draftSelfId != players.self.value.id) return reset()
-        val current = (guests.value + players.self.value).associateBy { it.id }
+        val current = friends + (guests.value + players.self.value).associateBy { it.id }
 
         fun fresh(player: Player?) =
             player?.let {
@@ -103,6 +106,7 @@ class MatchWizard(
     fun reset() {
         draftSelfId = players.self.value.id
         createdPlayers.clear()
+        friends.clear()
         recentPlayers = emptyList()
         set(initialInput())
     }
@@ -214,6 +218,20 @@ class MatchWizard(
         place: PlayerPlace,
         player: Player,
     ) = update { PlayerSelection.assign(it, place, player, players.self.value.id) }
+
+    /** Freund (Konto) gezielt am angetippten freien Platz eintragen; `null`, wenn der Host ihn nicht übernehmen kann. */
+    fun assignFriend(
+        place: PlayerPlace,
+        profileId: String,
+        alias: String,
+    ): Player? {
+        if (alias.isBlank() || place !in PlayerSelection.places(input) || input.team(place.side)[place.index] != null) return null
+        if (input.players.any { it.id.value == profileId }) return null
+        val friend = players.addFriend(profileId, alias) ?: return null
+        friends[friend.id] = friend
+        assignPlayer(place, friend)
+        return friend
+    }
 
     /** Neues Profil gezielt am angetippten freien Platz anlegen. */
     fun addGuestAt(

@@ -502,6 +502,16 @@ class SessionMatchStore(
         return player
     }
 
+    override fun addFriend(
+        profileId: String,
+        alias: String,
+    ): Player? {
+        if (profileId.isBlank() || PlayerId(profileId) == selfFlow.value.id || PlayerId(profileId) in aliases) return null
+        val player = data.players.rememberFriend(PlayerId(profileId), alias.trim(), clock.nowMs())?.toPlayer() ?: return null
+        players[player.id] = player
+        return player
+    }
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         rememberPlayers(setup.players)
         val stored = StoredFavorite(ids.newId().value, setup.format, setup.lineup, setup.meta)
