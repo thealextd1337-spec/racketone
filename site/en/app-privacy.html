@@ -12,11 +12,7 @@
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
-  <!--
-    App privacy policy, Phase 1 (offline). English version of ../app-datenschutz.html – keep both in sync.
-    Sections marked "ÜBERARBEITEN vor Phase 2/3" (revise before phase 2/3) must be updated before the
-    respective release (see docs/03-backend-datenmodell.md §8.4, docs/05-watches-health.md §6).
-  -->
+  <!-- Englische Fassung von ../app-datenschutz.html, inhaltlich synchron halten. Maßgeblich ist die deutsche Fassung. -->
   <header class="top">
     <div class="wrap">
       <a class="logo" href="./"><img src="../assets/icon.svg" alt="" width="32" height="32">Advantly</a>
@@ -34,10 +30,11 @@
 
       <h2>1. In short</h2>
       <ul>
-        <li>Advantly stores your matches <strong>only locally</strong> on your phone and watch. There is currently no user account and no cloud.</li>
-        <li>Data is only transferred between <strong>your own devices</strong> (phone and paired watch).</li>
-        <li>Your heart rate is measured and shown on the watch during a match, but it is <strong>not stored in a cloud and not shared</strong>.</li>
-        <li><strong>No ads, no tracking, no analytics.</strong> As the provider, I receive none of your match or health data.</li>
+        <li>Keeping score works <strong>without an account</strong>. Your matches then stay on your phone and watch only.</li>
+        <li>With an <strong>account</strong>, the phone app backs up your matches to our cloud (data centre in Frankfurt am Main, Germany) so you can use and restore them on several devices.</li>
+        <li>Your heart rate is measured on the watch and, depending on your setting, also shown on your phone. It is <strong>not sent to the cloud</strong> and not stored.</li>
+        <li><strong>No ads, no tracking, no analytics tools.</strong> Your data is not sold.</li>
+        <li>You can view and export your account data in the app at any time and request deletion of your account.</li>
       </ul>
 
       <h2>2. Controller</h2>
@@ -47,74 +44,103 @@
         Email: <a href="mailto:alxpro@cakamper.at">alxpro@cakamper.at</a>
       </p>
       <p>No data protection officer has been appointed.</p>
-      <!-- ÜBERARBEITEN vor Phase 3: check whether a data protection officer is required (03 §8.4 item 1, O6). -->
 
-      <h2>3. What data the apps process</h2>
+      <h2>3. Using the apps without an account</h2>
 
-      <h3>3.1 Match data</h3>
-      <p>When you score a match, the app stores the sport, rules and format, the score with every point (including corrections), timestamps and the names or labels of players that you enter yourself. This data is kept exclusively in the app's private storage on your device.</p>
-      <p>The purpose is to score, resume and display your matches. The legal basis is Art. 6(1)(b) GDPR (providing the app function you use). If you enter the names of other players, this is based on your legitimate interest in documenting your games (Art. 6(1)(f) GDPR); these names never leave your devices.</p>
-      <!-- ÜBERARBEITEN vor Phase 2: account, cloud sync (Supabase, EU), friends, guest claim, visibility for co-players,
-           recipients/processors, third-country transfers (03 §8.1, §8.4 items 4–7). -->
+      <h3>3.1 Match data on your devices</h3>
+      <p>When you keep score, the app stores the sport, rules and format, the score with every point (including corrections), timestamps, an optional venue and the names or labels of the players you enter yourself. Without an account, this data stays exclusively in the app's private storage on your devices.</p>
+      <p>The purpose is to keep score, resume and display your matches. The legal basis is Art. 6(1)(b) GDPR (providing the app function you use). If you enter names of other players, this is based on your legitimate interest in recording your games (Art. 6(1)(f) GDPR).</p>
 
       <h3>3.2 Transfer between your own devices</h3>
-      <p>So that you can score on your phone and watch at the same time, the apps synchronise match data between your phone and your paired watch:</p>
+      <p>So that you can keep score on phone and watch at the same time, the apps exchange match data, connection and version status and, during a match, heart rate and steps between your phone and your paired watch:</p>
       <ul>
-        <li><strong>Android and Wear OS:</strong> via the Wear Data Layer API of Google Play services. Data is transferred directly over an encrypted Bluetooth connection or, if that is not available, end-to-end encrypted via Google's servers. Only the Advantly app with the same signature on your paired devices can read this data.</li>
+        <li><strong>Android and Wear OS:</strong> via the Wear Data Layer API of Google Play services. The transfer runs directly over an encrypted Bluetooth connection or, if that is unavailable, end-to-end encrypted through Google servers. Only the Advantly app with the same signature on your paired devices can read this data.</li>
         <li><strong>iPhone and Apple Watch</strong> (once available): via Apple's WatchConnectivity between your paired devices.</li>
       </ul>
-      <p>I do not operate any server for this and receive none of this data.</p>
+      <p>The watch app itself has no internet access. Data only reaches the cloud through the phone app and only with an account (section 4).</p>
 
       <h3>3.3 Heart rate and workout session on the watch</h3>
-      <p>During a match, the watch app starts a workout session (Wear OS: Health Services, Apple Watch: workout session). This keeps the app running while the display is off, so the score is not lost. If you allow it, the app also shows your current heart rate.</p>
+      <p>During a match, the watch app starts a workout session (Wear OS: Health Services, Apple Watch: workout session). This keeps the app running with the display off so the score is not lost. If you allow it, the app shows your current heart rate and steps.</p>
       <ul>
-        <li>Heart rate is read only while a match session is running, used only for display on the watch and <strong>not stored permanently</strong> by Advantly.</li>
-        <li>It is <strong>not uploaded to a cloud</strong>, not shared with me or third parties and not used for advertising.</li>
-        <li>Advantly currently writes nothing to Health Connect, Apple Health or other health stores.</li>
+        <li>Under “Heart rate &amp; steps” you choose whether the values are shown only on the watch, also on your paired phone, or not at all.</li>
+        <li>Advantly does <strong>not store</strong> heart rate or steps permanently, does <strong>not send them to the cloud</strong>, does not pass them on to us or third parties and does not use them for advertising.</li>
+        <li>Advantly currently writes nothing to Health Connect, Apple Health or any other health store.</li>
         <li>The measurement itself is performed by your watch's sensors and system services (Google or Samsung on Wear OS, Apple on watchOS) under their own privacy terms.</li>
       </ul>
       <p>Heart rate is health data (Art. 9 GDPR). It is only processed if you grant the permission and start a match; the legal basis is your explicit consent (Art. 9(2)(a) GDPR). You can revoke the permission at any time in the watch settings – scoring keeps working, just without the heart rate display.</p>
-      <!-- ÜBERARBEITEN vor Phase 3: health storage (heart-rate series, kcal, steps per match), transfer to the phone,
-           Health Connect / Apple Health, separate in-app consent for measuring/cloud/sharing (05 §6.3, 03 §8.2),
-           revocation = deletion, sharing with friends, DPIA. Update the Play Console data safety answers as well. -->
 
-      <h3>3.4 What Advantly does not do</h3>
-      <p>The apps contain <strong>no ads</strong>, <strong>no tracking or analytics tools</strong> and do not use the advertising ID. The current versions have <strong>no internet permission</strong>, there is no user account and no location access. There is no automated decision-making or profiling.</p>
-      <!-- ÜBERARBEITEN vor Phase 2: internet permission, push (FCM/APNs), crash reporting if any, subscriptions (RevenueCat). -->
+      <h2>4. Account and cloud backup</h2>
+      <p>The account is optional. You create it in the phone app. Before the cloud is used, you accept the terms of use and this privacy policy in the version shown; if you decline, you keep scoring offline.</p>
 
-      <h2>4. Permissions and their purpose</h2>
-      <p>The watch app (Wear OS) only asks for permissions it needs for scoring with a workout session. You can deny or revoke all of them.</p>
+      <h3>4.1 Sign-in and age check</h3>
       <ul>
-        <li><strong>Heart rate / body sensors</strong> (<code>health.READ_HEART_RATE</code>, up to Wear OS 5 <code>BODY_SENSORS</code>): showing your heart rate during the match.</li>
-        <li><strong>Physical activity</strong> (<code>ACTIVITY_RECOGNITION</code>): steps recorded by the watch's system services during the workout session.</li>
-        <li><strong>Notifications</strong> (<code>POST_NOTIFICATIONS</code>): an ongoing-match notice that takes you back into the app.</li>
-        <li><strong>“Health” foreground service</strong> and keeping the device awake: so the match keeps running while the display is off.</li>
-        <li><strong>Vibration</strong> (phone and watch): haptic confirmation of each point.</li>
+        <li><strong>Sign-in:</strong> with your email address and a one-time code that we send you by email. If you choose “Sign in with Google” instead, we receive your email address and an account identifier from Google.</li>
+        <li><strong>Age check:</strong> you enter your country and date of birth. The date of birth is only checked and <strong>not stored</strong>. We store the country, the applicable age limit and the time of confirmation. To prevent abuse, we briefly store an irreversible hash of your IP address and of the check (deleted after 25 hours at the latest).</li>
+        <li><strong>Profile:</strong> a display name (alias) of your choice, a username, an automatically generated friend code and your language setting.</li>
       </ul>
 
-      <h2>5. Retention and deletion</h2>
-      <p>Match data stays on your devices until you delete it. You delete individual matches in the <strong>phone app</strong> under History → match → Delete. The watch app has no function for deleting individual matches. To remove all data completely, uninstall the app on your phone and watch or choose “Clear storage” (app data) in the system settings of each device. This only affects the device concerned, so do it on both your phone <em>and</em> your watch. Heart rate is not stored and therefore does not need to be deleted.</p>
-      <!-- Status: "Delete match" only in the phone app (PR #14, History → match → Delete), not on the watch.
-           ÜBERARBEITEN if the menu path or scope changes (e.g. deleting on the watch, cloud copy from P2). -->
-      <p>If you have enabled Android backup to your Google account, the system may include the phone app's match data in that backup. Google manages this backup for you; I have no access to it. You can control and delete it in the Android settings under “Backup”.</p>
+      <h3>4.2 What is sent to the cloud</h3>
+      <ul>
+        <li>Your matches with all points and corrections, timestamps, optional venue and the names of the players you entered (including names of guests without their own account).</li>
+        <li>Technical identifiers of your installations and devices (randomly generated IDs, device type and platform), so that data is only accepted from your own devices and you can manage and block devices in the app.</li>
+        <li>Your consents with document, version, language and time.</li>
+      </ul>
+      <p>The purpose is to back up, restore and synchronise your matches between your devices. The legal basis is Art. 6(1)(b) GDPR. Currently only you can see your cloud data; features for sharing with friends or other players will only be introduced after this policy has been extended accordingly.</p>
 
-      <h2>6. Google Play and App Store</h2>
-      <p>When you download Advantly from Google Play (or later Apple's App Store), the store operator processes data under its own responsibility. If you have agreed on your device to share crash and usage data with Google or Apple, I can see aggregated, non-personal crash statistics in the respective developer console.</p>
+      <h3>4.3 Security, logs and abuse prevention</h3>
+      <p>All connections are encrypted with TLS. For every request, our service providers process technically necessary connection data such as IP address, time and app identifier in order to provide the service and protect it against attacks (Art. 6(1)(f) GDPR). These logs are deleted after a short time.</p>
 
-      <h2>7. Your rights</h2>
-      <p>You have the right of access (Art. 15 GDPR), rectification (Art. 16), erasure (Art. 17), restriction of processing (Art. 18), data portability (Art. 20), objection (Art. 21) and the right to withdraw consent at any time with effect for the future (Art. 7(3)). Since your data is currently only stored on your devices, you can exercise most of these rights directly yourself (view and edit in the app, delete individual matches in the phone app or all data by uninstalling or clearing app data, revoke permissions). For questions, please use the email address above.</p>
+      <h2>5. Messages to support</h2>
+      <p>Under “Feedback &amp; help” you can send us messages – with an account or as a guest. We store the category, title and text, an optional contact email address and, for messages sent with an account, the sending device. Only if you tick the box do you also send the technical details shown (app version, operating system, device model, screen size and font size). For guest messages we store a hash of your IP address to prevent abuse.</p>
+      <p>The purpose is to handle your request and improve the app (Art. 6(1)(b) or (f) GDPR). We delete resolved messages 180 days after closing them. Logs of support and administrative actions are kept for one year.</p>
+
+      <h2>6. Recipients and service providers</h2>
+      <p>We do not pass your data on to third parties and do not sell it. We use the following service providers as processors (Art. 28 GDPR):</p>
+      <ul>
+        <li><strong>Supabase</strong> (Supabase Inc.): database, sign-in and file storage, data centre in Frankfurt am Main.</li>
+        <li><strong>Cloudflare</strong> (Cloudflare Inc.): upstream network for protection and delivery.</li>
+        <li><strong>Resend</strong> (Resend Inc.): sending the emails with sign-in codes.</li>
+      </ul>
+      <p>These providers are based in the USA. Where data may reach the USA, the transfer is based on the adequacy decision for the EU-US Data Privacy Framework or on EU standard contractual clauses.</p>
+      <p>For Google sign-in and the exchange between phone and watch you use Google services under Google's own terms.</p>
+
+      <h2>7. Retention and deletion</h2>
+      <ul>
+        <li><strong>On your devices:</strong> delete individual matches in the phone app under History → match → Delete. Remove all local data by uninstalling the app on phone and watch or choosing “Clear app data”.</li>
+        <li><strong>Account and cloud:</strong> the data is kept as long as your account exists. Under Profile → Account you can <strong>request deletion</strong>; your account is hidden immediately and permanently deleted after 14 days. You can withdraw the request within this period. Without the app, you can request deletion via <a href="delete-account.html">advantly.eu/en/delete-account.html</a>.</li>
+        <li>Matches involving other accounts remain available to them; your name and the names of guests you created are replaced by “Deleted player”. Matches without other accounts are deleted.</li>
+        <li>We delete unfinished registrations after 24 hours and data exports after 24 hours.</li>
+      </ul>
+      <p>If you have enabled Android backup in your Google account, the system may include the phone app's data in that backup. Google manages this backup for you; we have no access to it.</p>
+
+      <h2>8. Permissions and their purpose</h2>
+      <ul>
+        <li><strong>Internet</strong> (phone only): account, cloud backup and messages to support.</li>
+        <li><strong>Heart rate / body sensors</strong> (watch; <code>health.READ_HEART_RATE</code>, up to Wear OS 5 <code>BODY_SENSORS</code>): showing your heart rate during the match.</li>
+        <li><strong>Physical activity</strong> (watch; <code>ACTIVITY_RECOGNITION</code>): counting steps during the workout session.</li>
+        <li><strong>Notifications</strong> (<code>POST_NOTIFICATIONS</code>): notice of the ongoing match that takes you back into the app.</li>
+        <li><strong>Foreground service “health”</strong> and keeping the screen on (watch): so the match continues with the display off.</li>
+        <li><strong>Vibration</strong> (phone and watch): tactile confirmation of every point.</li>
+      </ul>
+
+      <h2>9. What Advantly does not do</h2>
+      <p>The apps contain <strong>no ads</strong>, <strong>no tracking or analytics tools</strong> and use neither an advertising ID nor your location. There is no automated decision-making or profiling.</p>
+
+      <h2>10. Google Play and App Store</h2>
+      <p>When you download Advantly from Google Play (or later Apple's App Store), the store operator processes data under its own responsibility. If you have agreed on your device to share crash and usage data with Google or Apple, we see aggregated crash statistics in the respective developer console.</p>
+
+      <h2>11. Your rights</h2>
+      <p>You have the right of access (Art. 15 GDPR), rectification (Art. 16), erasure (Art. 17), restriction of processing (Art. 18), data portability (Art. 20), objection (Art. 21) and the right to withdraw consent at any time with effect for the future (Art. 7(3)). Much of this you can do directly in the app: view and export your account data under Profile → Account, request deletion, block devices and revoke permissions. For anything else, write to the email address above.</p>
       <p>You also have the right to lodge a complaint with a data protection supervisory authority (Art. 77 GDPR). In Austria this is the Austrian Data Protection Authority (Datenschutzbehörde), Barichgasse 40–42, 1030 Vienna, <a href="https://www.dsb.gv.at/">dsb.gv.at</a>. You may also contact the supervisory authority of your place of residence.</p>
 
-      <h2>8. Minimum age</h2>
-      <p>Advantly is intended for people aged 14 and over.</p>
-      <!-- Minimum age 14: § 4(4) DSG (Austria) with Art. 8 GDPR. Germany: 16 for consent.
-           ÜBERARBEITEN before phase 2/3: age check at sign-up per country (docs/release/play-console.md §6.5). -->
+      <h2>12. Minimum age</h2>
+      <p>You can create an account from age 14 in Austria and from age 16 in Germany, Switzerland and Liechtenstein. Accounts are currently not available in other countries. Without an account, Advantly is intended for people aged 14 and over.</p>
 
-      <h2>9. Changes</h2>
-      <p>Advantly is under development. With user accounts, friends and cloud sync (phase 2) and the storage and analysis of health data (phase 3), this policy will be extended <strong>before</strong> those features become available. Even then, health data will only be stored with your separate, explicit consent.</p>
+      <h2>13. Changes</h2>
+      <p>Advantly is under development. We extend this policy <strong>before</strong> new features such as friends, shared matches or storing health data become available. For material changes we ask for your consent again in the app. Health data will only be stored with your separate, explicit consent.</p>
 
-      <h2>10. Last updated</h2>
-      <p>October 2026 (version 1, phase 1 – offline)</p>
+      <h2>14. Last updated</h2>
+      <p>October 2026 (version 2, account and cloud backup)</p>
     </div>
   </main>
 
@@ -126,6 +152,7 @@
         <a href="../impressum.html" hreflang="de">Legal notice (Impressum)</a>
         <a href="../datenschutz.html" hreflang="de">Privacy (Datenschutz)</a>
         <a href="app-privacy.html">App privacy</a>
+        <a href="terms.html">Terms of use</a>
       </nav>
     </div>
   </footer>
