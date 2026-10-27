@@ -1,0 +1,6 @@
+New in 0.2.0:
+• Friends: add by username or friend code, requests, blocking.
+• Shared matches: share per match with friends, feed in the Friends tab, add friends to a match.
+• Sign in with Google or an email code; welcome screen on first launch (skippable).
+• Prompt to install the watch app.
+Please test: adding a friend, sharing a match, Google sign-in, watch prompt.
