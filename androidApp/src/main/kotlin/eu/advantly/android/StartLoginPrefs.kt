@@ -5,7 +5,10 @@ import androidx.core.content.edit
 import eu.advantly.ui.phone.auth.StartLoginHost
 import kotlinx.coroutines.flow.MutableStateFlow
 
-/** Wahl zum Startbildschirm in SharedPreferences (wie der Uhr-Installationshinweis), nicht in Konto oder Matchdaten. */
+/**
+ * Wahl zum Startbildschirm in SharedPreferences, nicht in Konto oder Matchdaten. Wie `advantly_auth.xml` von Sicherung und
+ * Geräteumzug ausgenommen: Auf einem neuen Handy fehlt die Anmeldung, also soll der Startbildschirm dort wieder kommen.
+ */
 internal class StartLoginPrefs(
     context: Context,
 ) : StartLoginHost {

@@ -81,6 +81,8 @@ class ManifestTest {
             assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("advantly_sync.xml").size)
             // Ausgeblendete Uhr-Installationshinweise hängen an Node-IDs dieses Geräts.
             assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("watch_install.xml").size)
+            // Die Startbildschirm-Wahl gehört zu diesem Gerät: die Anmeldung wird ja auch nicht übertragen.
+            assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("start_login.xml").size)
         }
     }
 
