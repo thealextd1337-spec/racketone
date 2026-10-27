@@ -51,6 +51,7 @@ import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
 import eu.advantly.ui.phone.home.HomeScreen
+import eu.advantly.ui.phone.home.WatchInstallHost
 import eu.advantly.ui.phone.live.LiveScoreScreen
 import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
@@ -79,6 +80,7 @@ import org.jetbrains.compose.resources.stringResource
  * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg im Profil; nur gesetzt, solange der Host ihn anbietet
  * @param onShareMatchImage teilt die Ergebniskarte (Bild + Text mit Link) über die Plattform; `null` blendet „Teilen“ aus
  * @param onShareText Teilen-Menü der Plattform für reinen Text (z. B. Freundescode); `null` blendet Teilen aus
+ * @param watchInstall Uhr-App auf einer Uhr ohne Advantly installieren (nur Android); `null` blendet den Hinweis aus
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -100,6 +102,7 @@ fun AdvantlyApp(
     onRestorePrevious: (() -> Unit)? = null,
     onShareMatchImage: (suspend (ImageBitmap, String) -> Unit)? = null,
     onShareText: ((String) -> Unit)? = null,
+    watchInstall: WatchInstallHost? = null,
 ) {
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
@@ -142,6 +145,7 @@ fun AdvantlyApp(
                                 onShareExport,
                                 onRestorePrevious,
                                 onShareText,
+                                watchInstall,
                             )
                         }
                     }
@@ -266,6 +270,7 @@ private fun TabLayer(
     onShareExport: (() -> Unit)?,
     onRestorePrevious: (() -> Unit)?,
     onShareText: ((String) -> Unit)?,
+    watchInstall: WatchInstallHost?,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
@@ -286,6 +291,7 @@ private fun TabLayer(
                             model,
                             clock = model.clock,
                             onSupport = if (supportModel != null) ({ showSupport = true }) else null,
+                            watchInstall = watchInstall,
                         )
                     }
 

@@ -88,6 +88,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     clock: WallClock = WallClock.System,
     onSupport: (() -> Unit)? = null,
+    watchInstall: WatchInstallHost? = null,
 ) {
     val self by model.players.self.collectAsState()
     val open by model.live.openMatches.collectAsState()
@@ -130,6 +131,7 @@ fun HomeScreen(
                 }
             }
         }
+        watchInstall?.let { WatchInstallHint(it) }
         if (open.size > 1) SectionTitle(stringResource(Res.string.home_open_matches, runningCount))
         open.forEachIndexed { index, snapshot ->
             ResumeCard(snapshot, if (index == 0) "resume_card" else "resume_card_$index", onClick = { model.openMatch(snapshot.matchId) })
