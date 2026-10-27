@@ -57,6 +57,9 @@ sqldelight = "2.4.1"
 androidx-sqlite = "2.7.1"
 # Wear Data Layer (MessageClient, DataClient, CapabilityClient) – Google Maven, geprüft 2026-10-15
 play-services-wearable = "20.0.1"
+# Uhr-App vom Handy aus installieren (RemoteActivityHelper, nur androidApp) – Google Maven: 1.2.0 ist die neueste
+# stabile Version (1.3.0 erst beta01), minSdk 23; geprüft 2026-10-27
+wear-remote-interactions = "1.2.0"
 
 supabase = "3.8.0"
 ktor = "3.5.1"
@@ -115,6 +118,7 @@ androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", versi
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "play-services-wearable" }
+wear-remote-interactions = { module = "androidx.wear:wear-remote-interactions", version.ref = "wear-remote-interactions" }
 
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
