@@ -84,7 +84,9 @@ select * from pg_temp.change($q$insert into public.user_blocks(blocker_id,blocke
 select * from pg_temp.change($q$update public.user_blocks set blocked_id=tests.uid('carol')$q$,array['alice','bob','carol']);
 select * from pg_temp.change($q$update public.user_blocks set blocked_id=tests.uid('bob')$q$,array['alice','bob','carol']);
 select * from pg_temp.change($q$delete from public.user_blocks$q$,array['alice','bob']);
-select * from pg_temp.change($q$update public.profile_settings set share_matches_default=true where profile_id=tests.uid('bob')$q$,array['bob']);
+-- share_matches_default ist keine Sichtbarkeit (nur beim Anlegen des eigenen Platzes gelesen, 20261027000500).
+select * from pg_temp.change($q$update public.profile_settings set share_matches_default=true where profile_id=tests.uid('bob')$q$,
+  '{}'::text[],array['bob','dave']);
 
 insert into public.tournaments(id,director_id,name,sport)
   values('21000000-0000-4000-8000-000000000010',tests.uid('alice'),'Test','tennis');
