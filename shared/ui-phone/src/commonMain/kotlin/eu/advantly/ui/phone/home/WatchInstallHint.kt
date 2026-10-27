@@ -14,7 +14,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import eu.advantly.match.session.DeviceStatus
+import eu.advantly.presentation.match.LiveMatchPort
+import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.common.AdvantlyCard
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
@@ -48,14 +53,19 @@ interface WatchInstallHost {
 
 /** Unauffälliger Hinweis unter dem Uhr-Status der Startseite, je Uhr ohne Advantly einer. */
 @Composable
-internal fun WatchInstallHint(host: WatchInstallHost) {
+internal fun WatchInstallHint(
+    host: WatchInstallHost,
+    port: LiveMatchPort,
+) {
     val targets by host.targets.collectAsState()
+    val devices by port.deviceStatuses.collectAsState()
+    val severalWatches = devices.count { it.kind == PeerKind.WATCH } > 1
     targets.forEach { device ->
         key(device.peer) {
             var opened by remember { mutableStateOf<Boolean?>(null) }
             AdvantlyCard(Modifier.padding(bottom = Spacing.m).testTag("watch_install_${device.peer}")) {
                 Text(
-                    if (targets.size > 1 && device.name.isNotBlank()) {
+                    if (severalWatches && device.name.isNotBlank()) {
                         stringResource(Res.string.watch_install_prompt_named, device.name)
                     } else {
                         stringResource(Res.string.watch_install_prompt)
@@ -68,7 +78,10 @@ internal fun WatchInstallHint(host: WatchInstallHost) {
                         stringResource(if (it) Res.string.watch_install_opened else Res.string.watch_install_failed),
                         style = AdvantlyTheme.typography.caption,
                         color = if (it) AdvantlyTheme.colors.text2 else AdvantlyTheme.colors.danger,
-                        modifier = Modifier.testTag("watch_install_result_${device.peer}"),
+                        modifier =
+                            Modifier.testTag("watch_install_result_${device.peer}").semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
                     )
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {

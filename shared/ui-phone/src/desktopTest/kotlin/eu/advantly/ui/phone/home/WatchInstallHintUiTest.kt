@@ -3,7 +3,10 @@ package eu.advantly.ui.phone.home
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -66,6 +69,7 @@ class WatchInstallHintUiTest {
                 onNodeWithText(
                     if (de) "Auf der Uhr geöffnet – bitte dort installieren." else "Opened on the watch – please install it there.",
                 ).assertIsDisplayed()
+                onNodeWithTag("watch_install_result_galaxy").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
                 host.result = false
                 onNodeWithTag("watch_install_action_galaxy").performClick()
                 onNodeWithText(if (de) "Uhr nicht erreichbar" else "Couldn’t reach the watch", substring = true).assertIsDisplayed()
@@ -78,17 +82,24 @@ class WatchInstallHintUiTest {
     }
 
     @Test
-    fun severalWatchesAreNamed() {
+    fun nameShownAsSoonAsSeveralWatchesAreKnown() {
+        // Nur eine Uhr ohne App, aber zwei bekannte Uhren: „deine Uhr“ wäre mehrdeutig
         val host = FakeHost()
-        host.targets.value += DeviceStatus("fossil", PeerKind.WATCH, name = "Fossil", appInstalled = false)
-        val store = InMemoryMatchStore()
+        val store =
+            InMemoryMatchStore().apply {
+                setDeviceStatuses(
+                    listOf(
+                        DeviceStatus("pixel", PeerKind.WATCH, name = "Pixel", appInstalled = true),
+                        host.targets.value.single(),
+                    ),
+                )
+            }
         val previous = Locale.getDefault()
         try {
             Locale.setDefault(Locale.US)
             runDesktopComposeUiTest(width = 720, height = 1280) {
                 setContent { AdvantlyTheme { HomeScreen(AdvantlyAppModel(store, store, store), watchInstall = host) } }
                 onNodeWithText("Install Advantly on Galaxy").assertIsDisplayed()
-                onNodeWithText("Install Advantly on Fossil").assertIsDisplayed()
             }
         } finally {
             Locale.setDefault(previous)
