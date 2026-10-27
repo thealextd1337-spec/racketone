@@ -93,18 +93,26 @@ internal fun Activity.showLaterRestore(
         .emphasizeRestore()
 }
 
-/** Nach dem Neustart einmal: Übernahme gelungen (Freigabe nur über dasselbe Konto, Uhr neu koppeln) oder gescheitert. */
-internal fun Activity.showRecoveryDoneOnce(installation: AndroidInstallationState) {
+/**
+ * Nach dem Neustart einmal: Übernahme gelungen (Freigabe nur über dasselbe Konto, Uhr neu koppeln) oder gescheitert.
+ * Liefert, ob der Dialog gezeigt wird; [onDismiss] kommt, sobald er geschlossen ist.
+ */
+internal fun Activity.showRecoveryDoneOnce(
+    installation: AndroidInstallationState,
+    onDismiss: () -> Unit = {},
+): Boolean {
     val done = intent.getBooleanExtra(RECOVERY_DONE, false)
     intent.removeExtra(RECOVERY_DONE)
     // Im Hold zeigt der Entscheidungsdialog einen Fehlschlag selbst.
-    if (!done || !installation.privateTransportAllowed) return
+    if (!done || !installation.privateTransportAllowed) return false
     AlertDialog
         .Builder(this)
         .setTitle(if (installation.restoreFailed) R.string.recovery_later_title else R.string.recovery_done_title)
         .setMessage(if (installation.restoreFailed) R.string.recovery_failed_body else R.string.recovery_done_body)
         .setPositiveButton(android.R.string.ok, null)
+        .setOnDismissListener { onDismiss() }
         .show()
+    return true
 }
 
 private fun Activity.confirmStartFresh(
