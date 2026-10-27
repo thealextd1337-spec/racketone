@@ -2,6 +2,8 @@ package eu.advantly.cloud.sync
 
 import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.data.CloudUploadSnapshot
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -39,7 +41,8 @@ class SupabaseCloudBackend internal constructor(
     CloudPullPort,
     CloudUploadPort,
     FriendsPort,
-    CloudTelemetryPort {
+    CloudTelemetryPort,
+    SharedMatchesPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -180,7 +183,7 @@ class SupabaseCloudBackend internal constructor(
                 throw CloudException("cloud_response_invalid", false)
             }
         val update = OutboxPlanner.evaluate(sent, response)
-        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata)
+        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata, linkNotes(metadata, response))
         return response
     }
 
@@ -443,6 +446,62 @@ class SupabaseCloudBackend internal constructor(
                 put("p_origin", sent.origin)
             }
         return decode<CloudTelemetrySetting>(rpc(lease, "cloud_set_telemetry_visibility_v1", body)).toPreference()
+    }
+
+    override suspend fun setMyParticipation(
+        matchId: String,
+        shareWithFriends: Boolean?,
+        hidden: Boolean?,
+    ) {
+        require(matchId.isNotBlank() && (shareWithFriends != null || hidden != null))
+        rpc(
+            sessions.capture(),
+            "set_my_participation",
+            buildJsonObject {
+                put("p_match_id", matchId)
+                put("p_share_with_friends", shareWithFriends)
+                put("p_hidden", hidden)
+            },
+        )
+    }
+
+    override suspend fun rejectMatchParticipation(matchId: String) {
+        require(matchId.isNotBlank())
+        rpc(sessions.capture(), "reject_match_participation", buildJsonObject { put("p_match_id", matchId) })
+    }
+
+    override suspend fun shareMatchesDefault(): Boolean = shareDefault(profileSettings { "select=share_matches_default" })
+
+    override suspend fun setShareMatchesDefault(share: Boolean) {
+        val body = buildJsonObject { put("share_matches_default", share) }
+        // Spaltenrecht statt RPC (20261015000990_rechte.sql); der Filter bindet das Update an das eigene Profil der Sitzung.
+        val stored = shareDefault(profileSettings(body) { "profile_id=eq.${it.credentials.profileId}&select=share_matches_default" })
+        if (stored != share) throw CloudException("cloud_response_invalid", false)
+    }
+
+    @Serializable
+    private class ShareDefaultRow(
+        @SerialName("share_matches_default") val share: Boolean,
+    )
+
+    /** Genau die eigene Zeile; fehlt sie (Profil ohne Einstellungen), ist die Antwort ungültig. */
+    private fun shareDefault(response: String): Boolean =
+        decode<List<ShareDefaultRow>>(response).singleOrNull()?.share ?: throw CloudException("cloud_response_invalid", false)
+
+    /** Eigene `profile_settings`-Zeile (Lesen oder mit [body] spaltenweises Update) unter derselben Gerätebindung wie [rpc]. */
+    private suspend fun profileSettings(
+        body: JsonObject? = null,
+        query: (CloudLease) -> String,
+    ): String {
+        val lease = sessions.capture()
+        val current = requireBinding(lease)
+        val token = lease.credentials.accessToken
+        val response =
+            sessions.request(lease) {
+                http.profileSettings(query(lease), body, token, installation)
+            }
+        if (binding !== current) throw CloudException("device_not_authorized", true)
+        return response
     }
 
     private suspend fun otherRpc(

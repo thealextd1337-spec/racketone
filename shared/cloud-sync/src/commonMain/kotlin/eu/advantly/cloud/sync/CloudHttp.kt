@@ -58,18 +58,38 @@ internal class CloudHttp(
         installation: CloudInstallation? = null,
     ): String = request("rpc/$name", body.toString(), accessToken, installation)
 
+    /**
+     * Einzige direkte Tabellen-Grenze (P2-E): eigene Zeile `profile_settings` lesen bzw. mit [patch] spaltenweise ändern
+     * (Spaltenrecht + RLS + Cloud-Bindung; Blocklisten u. a. laufen über Cloud-RPCs). Liefert die (geänderten) Zeilen.
+     */
+    suspend fun profileSettings(
+        query: String,
+        patch: JsonObject?,
+        accessToken: String,
+        installation: CloudInstallation,
+    ): String =
+        request(
+            "profile_settings?$query",
+            patch?.toString(),
+            accessToken,
+            installation,
+            if (patch == null) HttpMethod.Get else HttpMethod.Patch,
+        )
+
     private suspend fun request(
         path: String,
         payload: String?,
         accessToken: String?,
         installation: CloudInstallation?,
+        verb: HttpMethod = if (payload == null) HttpMethod.Get else HttpMethod.Post,
     ): String =
         try {
             withTimeoutOrNull(timeoutMillis) {
                 require(payload == null || payload.encodeToByteArray().size <= 2_000_000)
                 http
                     .prepareRequest("${url.trimEnd('/')}/rest/v1/$path") {
-                        method = if (payload == null) HttpMethod.Get else HttpMethod.Post
+                        method = verb
+                        if (verb == HttpMethod.Patch) header("Prefer", "return=representation")
                         header("apikey", publicKey)
                         accessToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                         installation?.let {
@@ -241,6 +261,8 @@ internal class CloudHttp(
                 "profile_not_found",
                 "request_cooldown",
                 "no_pending_request",
+                // Geteilte Matches (P2-E)
+                "no_participation",
             )
     }
 }
