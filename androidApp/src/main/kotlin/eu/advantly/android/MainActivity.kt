@@ -1,5 +1,7 @@
 package eu.advantly.android
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -195,6 +197,7 @@ class MainActivity : ComponentActivity() {
                 authModel = auth,
                 onShareExport = this@MainActivity.phoneExportShareCallback(auth),
                 onShareMatchImage = { image, text -> this@MainActivity.shareMatchImage(image, text) },
+                onShareText = this@MainActivity::shareText,
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =
@@ -230,6 +233,16 @@ class MainActivity : ComponentActivity() {
         /** Testnaht wie [eu.advantly.android.sync.PhoneSyncJobService.work]; im Produkt immer der Konto-Abgleich. */
         @VisibleForTesting
         internal var foreground: (MainActivity) -> Unit = { activity -> activity.account?.sync?.onForeground() }
+    }
+}
+
+/** Reiner Text (Freundescode) über das System-Teilen-Menü; ohne passende App passiert nichts. */
+internal fun ComponentActivity.shareText(text: String) {
+    val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    try {
+        startActivity(Intent.createChooser(intent, null))
+    } catch (_: ActivityNotFoundException) {
+        // Kein Teilen-Ziel: der Code bleibt auf dem Bildschirm auswählbar.
     }
 }
 

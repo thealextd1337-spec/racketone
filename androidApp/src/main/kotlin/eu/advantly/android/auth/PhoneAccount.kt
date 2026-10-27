@@ -18,14 +18,17 @@ import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
+import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.SupabasePhoneAuth
 import eu.advantly.cloud.sync.SupabaseSupport
+import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
+import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
@@ -56,6 +59,12 @@ internal fun ComponentActivity.createPhoneAccount(
         PhoneAccountPort(core.auth, core.runtime.scope, core.record) {
             if (core.refreshAccount === refresh) core.refreshAccount = null
         }
+    val pull =
+        core.pull?.let { pull ->
+            object : PhonePullPort by pull {
+                override fun close(onDrained: () -> Unit) = onDrained()
+            }
+        }
     model =
         AuthViewModel(
             account,
@@ -64,12 +73,8 @@ internal fun ComponentActivity.createPhoneAccount(
                 object : PhoneUploadPort by core.upload {
                     override fun close(onDrained: () -> Unit) = onDrained()
                 },
-            pull =
-                core.pull?.let { pull ->
-                    object : PhonePullPort by pull {
-                        override fun close(onDrained: () -> Unit) = onDrained()
-                    }
-                },
+            pull = pull,
+            friends = FriendsViewModel(account, core.backend, core::localFriendships, pull, account.scope),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
             support =
@@ -150,7 +155,7 @@ internal class PhoneAccountCore private constructor(
             hostAccessAllowed = { runtime.allowed },
             hostStorageAction = runtime::storageAction,
         )
-    private val backend = auth.cloudBackend(storage.cloudInstallation)
+    val backend = auth.cloudBackend(storage.cloudInstallation)
     private val lane = PhoneCloudLane()
     val upload =
         PhoneUploadHost(auth, session, backend, backend::bindDevice, runtime.scope, hostAccessAllowed = {
@@ -174,6 +179,18 @@ internal class PhoneAccountCore private constructor(
             hostAccessAllowed = { runtime.allowed },
             storageAction = runtime::storageAction,
         )
+
+    /** Gezogene Freundschaften nur innerhalb der Session-Grenze; nach Widerruf eine leere Liste statt SQL-Zugriff. */
+    fun localFriendships(profile: String): List<PulledFriendship> {
+        var result = emptyList<PulledFriendship>()
+        return if (runtime.allowed &&
+            runtime.storageAction { result = session.data.cloudPulls.pulledFriendships(profile) }
+        ) {
+            result
+        } else {
+            emptyList()
+        }
+    }
 
     /** Profilprüfung über das zuletzt erzeugte Konto-ViewModel; ohne ViewModel prüft geplante Arbeit selbst. */
     var refreshAccount: (() -> Unit)? = null
