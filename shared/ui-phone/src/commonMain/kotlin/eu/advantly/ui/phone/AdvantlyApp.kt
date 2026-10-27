@@ -121,6 +121,7 @@ fun AdvantlyApp(
             decided = startLoginDecided == true,
             signedIn = authState?.authenticated == true,
             checking = authState?.busy == true,
+            checkFailed = authState?.error != null,
             recoveryHold = recoveryHold,
         )
     val archived by model.players.archivedPlayerIds.collectAsState()

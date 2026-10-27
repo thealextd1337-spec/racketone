@@ -42,8 +42,9 @@ class StartLoginTest {
         decided: Boolean = false,
         signedIn: Boolean = false,
         checking: Boolean = false,
+        checkFailed: Boolean = false,
         recoveryHold: Boolean = false,
-    ) = shouldShowStartLogin(available, decided, signedIn, checking, recoveryHold)
+    ) = shouldShowStartLogin(available, decided, signedIn, checking, checkFailed, recoveryHold)
 
     @Test fun firstStartShows() = assertTrue(show())
 
@@ -57,11 +58,18 @@ class StartLoginTest {
 
     @Test fun whileFirstAccountCheckRunsNotShown() = assertFalse(show(checking = true))
 
-    private fun authModel(signedIn: Boolean = false) =
-        AuthViewModel(
-            FakePhoneAuth().also { if (signedIn) it.session.value = CloudSession("alice", true) },
-            CoroutineScope(Dispatchers.Unconfined),
-        )
+    @Test fun failedAccountCheckNotShown() = assertFalse(show(checkFailed = true))
+
+    private fun authModel(
+        signedIn: Boolean = false,
+        failure: String? = null,
+    ) = AuthViewModel(
+        FakePhoneAuth().also {
+            if (signedIn) it.session.value = CloudSession("alice", true)
+            it.failure = failure
+        },
+        CoroutineScope(Dispatchers.Unconfined),
+    )
 
     @Test fun germanAtLargeFontSkipStoresDecisionAndShowsHome() = skip(Locale.GERMANY)
 
@@ -134,6 +142,19 @@ class StartLoginTest {
             onNodeWithTag("home").assertIsDisplayed()
             onNodeWithTag("start_login").assertDoesNotExist()
             runOnIdle { assertTrue(host.decided.value) }
+        }
+    }
+
+    @Test
+    fun signedInBeforeTheFeatureButOfflineNotShown() {
+        // Gespeicherte Sitzung, Flag noch false, my_auth_profile scheitert: authenticated bleibt false.
+        val host = FakeHost()
+        val auth = authModel(signedIn = true, failure = "connection_failed")
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setContent { AdvantlyApp(model = testModel(), authModel = auth, startLogin = host) }
+            onNodeWithTag("home").assertIsDisplayed()
+            onNodeWithTag("start_login").assertDoesNotExist()
+            assertFalse(host.decided.value)
         }
     }
 

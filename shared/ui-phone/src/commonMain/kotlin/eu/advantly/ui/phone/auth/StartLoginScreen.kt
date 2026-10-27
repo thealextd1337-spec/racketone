@@ -42,16 +42,18 @@ interface StartLoginHost {
 
 /**
  * Startbildschirm zeigen? Nur mit Backend und Host, solange nichts entschieden und niemand angemeldet ist. Während der
- * Recovery-Hold bzw. sein Dialog offen ist ([recoveryHold]) und solange die erste Kontoprüfung läuft ([checking]), nicht –
- * sonst blitzte er bei angemeldeten Nutzern kurz auf.
+ * Recovery-Hold bzw. sein Dialog offen ist ([recoveryHold]) und solange die erste Kontoprüfung läuft ([checking]) oder
+ * gescheitert ist ([checkFailed]), nicht: Ohne Sitzung prüft das SDK rein lokal und fehlerfrei; ein Fehler heißt, eine
+ * gespeicherte Sitzung ließ sich (offline/Serverfehler) nicht bestätigen – der Nutzer ist womöglich angemeldet.
  */
 fun shouldShowStartLogin(
     available: Boolean,
     decided: Boolean,
     signedIn: Boolean,
     checking: Boolean,
+    checkFailed: Boolean,
     recoveryHold: Boolean,
-): Boolean = available && !decided && !signedIn && !checking && !recoveryHold
+): Boolean = available && !decided && !signedIn && !checking && !checkFailed && !recoveryHold
 
 /** Schlanker Einstieg: beide Kontoknöpfe führen in denselben bestehenden Konto-Fluss ([AccountScreen]). */
 @Composable

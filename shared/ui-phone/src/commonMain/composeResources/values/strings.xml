@@ -881,7 +881,7 @@
     <string name="sharing_default_retry">Load setting again</string>
     <string name="wizard_friends_title">Friends</string>
     <string name="start_login_benefit">With an account, your matches are backed up in the cloud and you can add friends and share matches with them.</string>
-    <string name="start_login_local">Scoring works fully without an account too – your matches then stay on your devices.</string>
+    <string name="start_login_local">Scoring works fully without an account too – your matches are then not transferred to the Advantly cloud.</string>
     <string name="start_login_create">Create account</string>
     <string name="start_login_sign_in">Sign in</string>
     <string name="start_login_skip">Continue scoring without an account</string>
