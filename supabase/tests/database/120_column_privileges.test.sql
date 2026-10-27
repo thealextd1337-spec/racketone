@@ -9,7 +9,7 @@ select tests.accept_current_consents(id) from tests.users;
 create temporary table expected_writes (tbl text, col text, priv text);
 insert into expected_writes values
  ('profiles', 'alias', 'UPDATE'), ('profiles', 'username', 'UPDATE'), ('profiles', 'discoverable', 'UPDATE'),
- ('profile_settings', 'telemetry_visibility', 'UPDATE'), ('profile_settings', 'share_matches_default', 'UPDATE'),
+ ('profile_settings', 'share_matches_default', 'UPDATE'),
  ('profile_settings', 'locale', 'UPDATE');
 insert into expected_writes
  select 'tournaments', c, 'INSERT' from unnest(array['id','director_id','name','sport','starts_on','ends_on','status']) c;

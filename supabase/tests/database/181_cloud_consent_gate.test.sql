@@ -50,7 +50,7 @@ from pg_proc p where p.pronamespace='public'::regnamespace
 create temp table gated_tables as select tablename from pg_policies
   where schemaname='public' and policyname='cloud_binding_required';
 grant select on gated_rpcs,gated_tables to authenticated;
-select is((select count(*) from gated_rpcs),35::bigint,'Alle Bind-/Push-/Pull-/Legacy-Seams im Inventar');
+select is((select count(*) from gated_rpcs),38::bigint,'Alle Bind-/Push-/Pull-/Legacy-Seams im Inventar');
 select ok(exists(select 1 from gated_rpcs where proname='cloud_pull_match_redaction_v1'),
   'Redaktions-Paging bleibt in jeder Consent-Gate-Probe enthalten');
 select ok(exists(select 1 from gated_rpcs where proname='cloud_unrevoke_device_v1'),

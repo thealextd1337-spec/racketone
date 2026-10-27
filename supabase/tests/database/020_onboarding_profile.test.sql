@@ -57,8 +57,8 @@ select lives_ok($$ update public.profiles set alias = 'Hacked' where id = tests.
 select is((select alias from public.profiles where id = tests.uid('alice')), 'Alice', '… und ändert nichts (RLS)');
 select throws_ok($$ update public.profiles set status = 'active' where id = tests.uid('bob') $$, '42501', null,
                  'Status nicht direkt änderbar (nur RPC)');
-select lives_ok($$ update public.profile_settings set telemetry_visibility = 'share' where profile_id = tests.uid('bob') $$,
-                'F19: eigene Telemetrie-Sichtbarkeit änderbar');
+select throws_ok($$ update public.profile_settings set telemetry_visibility = 'share' where profile_id = tests.uid('bob') $$,
+                 '42501', null, 'F19/H0: Telemetrie-Sichtbarkeit nur über cloud_set_telemetry_visibility_v1 (Zähler)');
 
 -- Suche: exakt, ohne Enumeration --------------------------------------------------------------------------
 select results_eq($$ select alias from public.find_profile('DAVE') $$, $$ values ('Dave'::text) $$,
