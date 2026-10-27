@@ -66,21 +66,29 @@ private class FakeShared : SharedMatchesPort {
         failure?.let { throw CloudException(it, true) }
     }
 
+    // Das erwartete Konto steht vorn in jedem Aufruf: der Port bindet daran die Lease.
     override suspend fun setMyParticipation(
+        profileId: String,
         matchId: String,
         shareWithFriends: Boolean?,
         hidden: Boolean?,
-    ) = call("participation:$matchId:$shareWithFriends:$hidden")
+    ) = call("$profileId:participation:$matchId:$shareWithFriends:$hidden")
 
-    override suspend fun rejectMatchParticipation(matchId: String) = call("reject:$matchId")
+    override suspend fun rejectMatchParticipation(
+        profileId: String,
+        matchId: String,
+    ) = call("$profileId:reject:$matchId")
 
-    override suspend fun shareMatchesDefault(): Boolean {
-        call("default")
+    override suspend fun shareMatchesDefault(profileId: String): Boolean {
+        call("$profileId:default")
         return shareDefault
     }
 
-    override suspend fun setShareMatchesDefault(share: Boolean) {
-        call("default:$share")
+    override suspend fun setShareMatchesDefault(
+        profileId: String,
+        share: Boolean,
+    ) {
+        call("$profileId:default:$share")
         shareDefault = share
     }
 }
@@ -189,7 +197,7 @@ class SharedMatchesViewModelTest {
                             "feed",
                             participant("s1", "A", "Carla", profileId = "carla-id"),
                             participant("s2", "B", ""),
-                            summary = Json.parseToJsonElement("""{"sets":[[6,4],[3,6],"x",[7]]}""") as JsonObject,
+                            summary = Json.parseToJsonElement("""{"sets":[[6,4],[3,6]]}""") as JsonObject,
                         ),
                     )
                 feeds["bob"] = listOf(match("feed-b", "feed", participant("s1", "A", "Dora"), participant("s2", "B", "Eve")))
@@ -250,7 +258,7 @@ class SharedMatchesViewModelTest {
             model.openMatch("own")
             assertEquals(MatchSharing("own", shared = false, linkNotes = mapOf("x" to "not_friend")), state.match)
             model.setShared(true)
-            assertEquals("participation:own:true:null", shared.calls.single())
+            assertEquals("alice:participation:own:true:null", shared.calls.single())
             assertEquals(true, state.match?.shared)
             assertEquals(1, pull.started)
             // Der Pull liefert den Serverstand: ab jetzt gilt wieder der lokale Snapshot.
@@ -273,7 +281,7 @@ class SharedMatchesViewModelTest {
             model.openMatch("linked")
             assertEquals(MatchSharing("linked", shared = false, canReject = true, canHide = true), state.match)
             model.rejectParticipation()
-            assertEquals("reject:linked", shared.calls.single())
+            assertEquals("alice:reject:linked", shared.calls.single())
             assertEquals(MatchSharing("linked", gone = true), state.match)
             assertEquals(1, pull.started)
             model.openMatch("own")
@@ -314,7 +322,7 @@ class SharedMatchesViewModelTest {
             model.loadShareDefault()
             assertEquals(false, state.shareDefault)
             model.setShareDefault(true)
-            assertEquals(listOf("default", "default:true"), shared.calls)
+            assertEquals(listOf("alice:default", "alice:default:true"), shared.calls)
             assertEquals(true, state.shareDefault)
             shared.failure = "no_participation"
             model.openMatch("own")
@@ -325,4 +333,17 @@ class SharedMatchesViewModelTest {
             assertNull(state.shareDefault)
             assertNull(state.match)
         }
+
+    @Test fun setsAreReadFromFeedArraysAndMemberObjectsWithServerBounds() {
+        fun sets(json: String) = match("m", "feed", summary = Json.parseToJsonElement(json) as JsonObject).toFeed().sets
+        assertEquals(listOf(6 to 4, 3 to 6), sets("""{"sets":[[6,4],[3,6]]}"""))
+        // Mitglieder: rohe Client-Summary mit Objekten (Tiebreak-Felder werden ignoriert).
+        assertEquals(listOf(7 to 6, 2 to 6), sets("""{"sets":[{"a":7,"b":6,"tiebreakA":7,"tiebreakB":3},{"a":2,"b":6}]}"""))
+        // Wie der Server: ein ungültiger Satz verwirft alle; höchstens 9 Sätze; Werte 0..99, keine Texte.
+        assertEquals(emptyList(), sets("""{"sets":[[6,4],"x"]}"""))
+        assertEquals(emptyList(), sets("""{"sets":[[6,4],[100,1]]}"""))
+        assertEquals(emptyList(), sets("""{"sets":[{"a":"6","b":4}]}"""))
+        assertEquals(emptyList(), sets("""{"sets":[${List(10) { "[1,0]" }.joinToString(",")}]}"""))
+        assertEquals(emptyList(), sets("""{"games":[1,0]}"""))
+    }
 }

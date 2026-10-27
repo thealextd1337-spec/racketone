@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import eu.advantly.cloud.sync.BlockedProfile
+import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.FoundProfile
@@ -81,7 +82,10 @@ private class UiShared : SharedMatchesPort {
     val calls = mutableListOf<String>()
     var shareDefault = false
 
+    var failure: String? = null
+
     override suspend fun setMyParticipation(
+        profileId: String,
         matchId: String,
         shareWithFriends: Boolean?,
         hidden: Boolean?,
@@ -89,14 +93,21 @@ private class UiShared : SharedMatchesPort {
         calls += "participation:$matchId:$shareWithFriends:$hidden"
     }
 
-    override suspend fun rejectMatchParticipation(matchId: String) {
+    override suspend fun rejectMatchParticipation(
+        profileId: String,
+        matchId: String,
+    ) {
         calls += "reject:$matchId"
     }
 
-    override suspend fun shareMatchesDefault() = shareDefault.also { calls += "default" }
+    override suspend fun shareMatchesDefault(profileId: String) = shareDefault.also { calls += "default" }
 
-    override suspend fun setShareMatchesDefault(share: Boolean) {
+    override suspend fun setShareMatchesDefault(
+        profileId: String,
+        share: Boolean,
+    ) {
         calls += "default:$share"
+        failure?.let { throw CloudException(it, true) }
         shareDefault = share
     }
 }
@@ -147,7 +158,7 @@ private object UiLocal : SharedMatchesLocal {
                     }
 
                     else -> {
-                        listOf(participant("me", "A", "Alice", "alice", "self"), participant("bob-profile", "B", "Bob"))
+                        listOf(participant("me", "A", "Alice", "alice", "self"), participant("bob-player", "B", "Bob"))
                     }
                 },
         )
@@ -156,7 +167,7 @@ private object UiLocal : SharedMatchesLocal {
     override fun linkNotes(
         profileId: String,
         matchId: String,
-    ) = if (profileId == "alice" && matchId == "own") mapOf("bob-profile" to "not_friend") else emptyMap()
+    ) = if (profileId == "alice" && matchId == "own") mapOf("bob-player" to "not_friend") else emptyMap()
 }
 
 @OptIn(ExperimentalTestApi::class)
@@ -235,17 +246,25 @@ class SharedMatchesUiTest {
                         AdvantlyTheme(darkTheme = false) {
                             Column(Modifier.verticalScroll(rememberScrollState())) {
                                 ShareDefaultSection(model)
-                                MatchSharingSection(model, matchId, slotName = { if (it == "bob-profile") "Bob" else null }) { gone++ }
+                                MatchSharingSection(model, matchId, slotName = { if (it == "bob-player") "Bob" else null }) { gone++ }
                             }
                         }
                     }
                 }
                 try {
-                    onNodeWithTag("sharing_note_bob-profile").assertTextContains("Bob was not linked: you are not (or no longer) friends.")
+                    onNodeWithTag("sharing_note_bob-player").assertTextContains("Bob was not linked: you are not (or no longer) friends.")
                     onNodeWithTag("sharing_hide").assertDoesNotExist()
                     onNodeWithTag("sharing_reject").assertDoesNotExist()
                     click("sharing_share")
+                    // Speichern scheitert: Schalter bleibt aus, der Grund ist sichtbar.
+                    shared.failure = "connection_failed"
                     click("sharing_default")
+                    onNodeWithTag("sharing_default_error").assertTextContains("No connection", substring = true)
+                    assertEquals(false, model.state.value.shareDefault)
+                    model.dismissError()
+                    shared.failure = null
+                    click("sharing_default")
+                    onNodeWithTag("sharing_default_error").assertDoesNotExist()
                     screenshot("sharing-en-200")
                     // Von einem Freund eingetragen: „War ich nicht“ erst nach Rückfrage.
                     matchId = "linked"
@@ -258,7 +277,7 @@ class SharedMatchesUiTest {
                     waitForIdle()
                     assertEquals(1, gone)
                     assertEquals(
-                        listOf("default", "participation:own:true:null", "default:true", "reject:linked"),
+                        listOf("default", "participation:own:true:null", "default:true", "default:true", "reject:linked"),
                         shared.calls,
                     )
                 } finally {
@@ -285,7 +304,11 @@ class SharedMatchesUiTest {
                 val seated =
                     wizard.state.value.input
                         .team(Side.B)[0]
-                assertEquals("bob-profile" to "Bob", seated?.id?.value to seated?.displayName)
+                assertEquals("Bob", seated?.displayName)
+                assertTrue(seated?.id?.value != "bob-profile")
+                // Schon gesetzt: nicht noch einmal anbieten.
+                click("slot_B_1")
+                onNodeWithTag("friend_bob-profile").assertDoesNotExist()
                 assertTrue(wizard.guests.value.isEmpty())
             }
         }

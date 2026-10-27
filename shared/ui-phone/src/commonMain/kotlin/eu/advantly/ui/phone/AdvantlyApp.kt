@@ -217,11 +217,9 @@ fun AdvantlyApp(
                                                 .firstOrNull { it.id.value == slot }
                                                 ?.displayName
                                         },
-                                        onGone = {
-                                            // „War ich nicht“/„Ausblenden“: nur meine Sicht; die lokale Kopie geht mit.
-                                            model.history.delete(top.matchId)
-                                            navigator.pop()
-                                        },
+                                        // „War ich nicht“/„Ausblenden“: kein lokales Löschen (Tombstone sperrte die
+                                        // Rematerialisierung); der angestoßene Pull entzieht die lokale Kopie.
+                                        onGone = { navigator.pop() },
                                     )
                                 }
                             },

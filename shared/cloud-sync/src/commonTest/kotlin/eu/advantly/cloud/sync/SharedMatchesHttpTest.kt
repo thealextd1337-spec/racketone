@@ -88,11 +88,11 @@ class SharedMatchesHttpTest {
                     } to HttpStatusCode.OK
                 }
             backend.bindDevice("phone")
-            backend.setMyParticipation("m1", shareWithFriends = true)
-            backend.setMyParticipation("m2", hidden = true)
-            backend.rejectMatchParticipation("m3")
-            assertFalse(backend.shareMatchesDefault())
-            backend.setShareMatchesDefault(true)
+            backend.setMyParticipation("alice", "m1", shareWithFriends = true)
+            backend.setMyParticipation("alice", "m2", hidden = true)
+            backend.rejectMatchParticipation("alice", "m3")
+            assertFalse(backend.shareMatchesDefault("alice"))
+            backend.setShareMatchesDefault("alice", true)
 
             assertEquals(
                 listOf(
@@ -134,16 +134,29 @@ class SharedMatchesHttpTest {
                     }
                 }
             // Ohne Gerätebindung geht nichts ins Netz.
-            assertEquals("device_not_authorized", assertFailsWith<CloudException> { backend.rejectMatchParticipation("m1") }.reason)
+            assertEquals(
+                "device_not_authorized",
+                assertFailsWith<CloudException> { backend.rejectMatchParticipation("alice", "m1") }.reason,
+            )
             assertTrue(calls.isEmpty())
             backend.bindDevice("phone")
-            assertEquals("no_participation", assertFailsWith<CloudException> { backend.rejectMatchParticipation("m1") }.reason)
-            assertEquals("no_participation", assertFailsWith<CloudException> { backend.setMyParticipation("m1", true) }.reason)
-            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.shareMatchesDefault() }.reason)
+            // Erwartet das ViewModel noch ein anderes Konto als die Sitzung trägt, geht nichts ins Netz.
+            for (call in listOf<suspend () -> Unit>(
+                { backend.rejectMatchParticipation("bob", "m1") },
+                { backend.setShareMatchesDefault("bob", true) },
+                { backend.setMyParticipation("bob", "m1", true) },
+                { backend.shareMatchesDefault("bob") },
+            )) {
+                assertEquals("cloud_session_changed", assertFailsWith<CloudException> { call() }.reason)
+            }
+            assertTrue(calls.isEmpty())
+            assertEquals("no_participation", assertFailsWith<CloudException> { backend.rejectMatchParticipation("alice", "m1") }.reason)
+            assertEquals("no_participation", assertFailsWith<CloudException> { backend.setMyParticipation("alice", "m1", true) }.reason)
+            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.shareMatchesDefault("alice") }.reason)
             // Ein Update, das die Zeile nicht (oder anders) zurückgibt, gilt nicht als gespeichert.
-            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.setShareMatchesDefault(true) }.reason)
+            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.setShareMatchesDefault("alice", true) }.reason)
             settings = """[{"share_matches_default":false}]"""
-            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.setShareMatchesDefault(true) }.reason)
-            assertFailsWith<IllegalArgumentException> { backend.setMyParticipation("m1") }
+            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.setShareMatchesDefault("alice", true) }.reason)
+            assertFailsWith<IllegalArgumentException> { backend.setMyParticipation("alice", "m1") }
         }
 }

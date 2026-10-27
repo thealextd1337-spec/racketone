@@ -4,6 +4,7 @@ import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 
@@ -65,11 +66,23 @@ data class MatchSharing(
 
 internal fun PulledMatch.toFeed(): FeedMatch {
     fun team(name: String) = participants.filter { it.team == name }.sortedBy { it.position }.map { it.displayName }
-    val sets =
+    // Feed: bereinigt als [[a,b],…]; Mitglieder bekommen die rohe Client-Summary mit Objekten {a,b,…}. Grenzen wie der
+    // Server (höchstens 9 Sätze, 0..99, ein ungültiger Satz verwirft alle).
+    val parsed =
         (summary?.get("sets") as? JsonArray)
-            ?.mapNotNull { set -> (set as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }?.takeIf { it.size == 2 } }
-            ?.map { it[0] to it[1] }
-            .orEmpty()
+            ?.takeIf { it.size <= 9 }
+            ?.map { set ->
+                val pair =
+                    when (set) {
+                        is JsonArray -> set.takeIf { it.size == 2 }?.let { it[0] to it[1] }
+                        is JsonObject -> set["a"]?.let { a -> set["b"]?.let { b -> a to b } }
+                        else -> null
+                    }
+                val a = (pair?.first as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
+                val b = (pair?.second as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
+                if (a != null && b != null && a in 0..99 && b in 0..99) a to b else null
+            }.orEmpty()
+    val sets = if (parsed.any { it == null }) emptyList() else parsed.filterNotNull()
     return FeedMatch(
         id = id,
         sport = Sport.entries.firstOrNull { it.name.lowercase() == sport },

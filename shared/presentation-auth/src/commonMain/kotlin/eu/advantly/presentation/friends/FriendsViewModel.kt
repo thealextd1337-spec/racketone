@@ -181,20 +181,28 @@ class FriendsViewModel(
 
     /** „Mit Freunden teilen“ für das geöffnete Match; nur mit eigenem verknüpftem Platz in der Cloud. */
     fun setShared(share: Boolean) =
-        matchAction({ it.shared != null }, { port, id -> port.setMyParticipation(id, shareWithFriends = share) }) {
+        matchAction({ it.shared != null }, { port, profile, id -> port.setMyParticipation(profile, id, shareWithFriends = share) }) {
             shareOverlay[it] = share
         }
 
     /** „Aus meinem Verlauf ausblenden“: nur meine Sicht, die anderen Teilnehmer behalten das Match. */
-    fun hideMatch() = matchAction({ it.canHide }, { port, id -> port.setMyParticipation(id, hidden = true) }) { goneMatches += it }
+    fun hideMatch() =
+        matchAction({ it.canHide }, { port, profile, id -> port.setMyParticipation(profile, id, hidden = true) }) {
+            goneMatches +=
+                it
+        }
 
     /** „War ich nicht“: löst die Verknüpfung durch einen Freund und sperrt sie für dieses Match. */
-    fun rejectParticipation() = matchAction({ it.canReject }, { port, id -> port.rejectMatchParticipation(id) }) { goneMatches += it }
+    fun rejectParticipation() =
+        matchAction({ it.canReject }, { port, profile, id -> port.rejectMatchParticipation(profile, id) }) {
+            goneMatches +=
+                it
+        }
 
     fun loadShareDefault() {
         val port = matches ?: return
         run { session ->
-            val share = port.shareMatchesDefault()
+            val share = port.shareMatchesDefault(session.profileId)
             current(session)
             show { copy(shareDefault = share) }
         }
@@ -204,7 +212,7 @@ class FriendsViewModel(
     fun setShareDefault(share: Boolean) {
         val port = matches ?: return
         run { session ->
-            port.setShareMatchesDefault(share)
+            port.setShareMatchesDefault(session.profileId, share)
             current(session)
             show { copy(shareDefault = share) }
         }
@@ -316,7 +324,7 @@ class FriendsViewModel(
     /** Erst nach [current] die Überlagerung setzen: eine verspätete Antwort darf kein anderes Konto verändern. */
     private fun matchAction(
         allowed: (MatchSharing) -> Boolean,
-        call: suspend (SharedMatchesPort, String) -> Unit,
+        call: suspend (SharedMatchesPort, String, String) -> Unit,
         confirmed: (String) -> Unit,
     ) {
         val port = matches ?: return
@@ -325,7 +333,7 @@ class FriendsViewModel(
                 ?.takeIf(allowed)
                 ?.matchId ?: return
         run { session ->
-            call(port, id)
+            call(port, session.profileId, id)
             current(session)
             confirmed(id)
             afterChange()

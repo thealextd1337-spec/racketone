@@ -262,6 +262,8 @@ fun ShareDefaultSection(model: FriendsViewModel) {
     // Erst wenn nichts anderes läuft: ein belegtes ViewModel würde den Aufruf sonst still verwerfen.
     LaunchedEffect(model, state.busy) { if (!state.busy && state.shareDefault == null && state.error == null) model.loadShareDefault() }
     val share = state.shareDefault
+    // Speichern gescheitert: der Schalter bleibt beim Serverwert, der Grund steht darunter.
+    val error = state.error?.takeIf { share != null }
     if (share == null) {
         if (!state.busy && state.error != null) {
             TextButton(model::loadShareDefault, modifier = Modifier.testTag("sharing_default_retry")) {
@@ -279,4 +281,12 @@ fun ShareDefaultSection(model: FriendsViewModel) {
         onChange = model::setShareDefault,
         tag = "sharing_default",
     )
+    if (error != null) {
+        Text(
+            stringResource(errorLabel(error)),
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag("sharing_default_error"),
+        )
+        TextButton(model::dismissError) { Text(stringResource(Res.string.friends_dismiss)) }
+    }
 }

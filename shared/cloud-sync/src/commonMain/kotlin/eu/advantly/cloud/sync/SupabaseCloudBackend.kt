@@ -449,13 +449,14 @@ class SupabaseCloudBackend internal constructor(
     }
 
     override suspend fun setMyParticipation(
+        profileId: String,
         matchId: String,
         shareWithFriends: Boolean?,
         hidden: Boolean?,
     ) {
         require(matchId.isNotBlank() && (shareWithFriends != null || hidden != null))
         rpc(
-            sessions.capture(),
+            lease(profileId),
             "set_my_participation",
             buildJsonObject {
                 put("p_match_id", matchId)
@@ -465,18 +466,31 @@ class SupabaseCloudBackend internal constructor(
         )
     }
 
-    override suspend fun rejectMatchParticipation(matchId: String) {
+    override suspend fun rejectMatchParticipation(
+        profileId: String,
+        matchId: String,
+    ) {
         require(matchId.isNotBlank())
-        rpc(sessions.capture(), "reject_match_participation", buildJsonObject { put("p_match_id", matchId) })
+        rpc(lease(profileId), "reject_match_participation", buildJsonObject { put("p_match_id", matchId) })
     }
 
-    override suspend fun shareMatchesDefault(): Boolean = shareDefault(profileSettings { "select=share_matches_default" })
+    override suspend fun shareMatchesDefault(profileId: String): Boolean =
+        shareDefault(profileSettings(lease(profileId)) { "select=share_matches_default" })
 
-    override suspend fun setShareMatchesDefault(share: Boolean) {
+    override suspend fun setShareMatchesDefault(
+        profileId: String,
+        share: Boolean,
+    ) {
         val body = buildJsonObject { put("share_matches_default", share) }
-        // Spaltenrecht statt RPC (20261015000990_rechte.sql); der Filter bindet das Update an das eigene Profil der Sitzung.
-        val stored = shareDefault(profileSettings(body) { "profile_id=eq.${it.credentials.profileId}&select=share_matches_default" })
+        // Spaltenrecht statt RPC (20261015000990_rechte.sql); der Filter bindet das Update an das geprüfte eigene Profil.
+        val stored = shareDefault(profileSettings(lease(profileId), body) { "profile_id=eq.$profileId&select=share_matches_default" })
         if (stored != share) throw CloudException("cloud_response_invalid", false)
+    }
+
+    /** Lease nur für das erwartete Konto: ein inzwischen gewechseltes SDK-Konto sendet nichts. */
+    private fun lease(profileId: String): CloudLease {
+        require(profileId.isNotBlank())
+        return sessions.capture().also { if (it.credentials.profileId != profileId) throw CloudException("cloud_session_changed", true) }
     }
 
     @Serializable
@@ -490,15 +504,15 @@ class SupabaseCloudBackend internal constructor(
 
     /** Eigene `profile_settings`-Zeile (Lesen oder mit [body] spaltenweises Update) unter derselben Gerätebindung wie [rpc]. */
     private suspend fun profileSettings(
+        lease: CloudLease,
         body: JsonObject? = null,
-        query: (CloudLease) -> String,
+        query: () -> String,
     ): String {
-        val lease = sessions.capture()
         val current = requireBinding(lease)
         val token = lease.credentials.accessToken
         val response =
             sessions.request(lease) {
-                http.profileSettings(query(lease), body, token, installation)
+                http.profileSettings(query(), body, token, installation)
             }
         if (binding !== current) throw CloudException("device_not_authorized", true)
         return response

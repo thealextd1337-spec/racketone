@@ -6,22 +6,32 @@ import eu.advantly.data.CloudPullStore
 // Geteilte Matches (P2-E, F23): RPCs aus supabase/migrations/20261015000700_rpc_zuweisung_claim.sql (Teilen/Ausblenden,
 // „War ich nicht“), Standardwert per Spaltenrecht auf profile_settings (20261015000990_rechte.sql); alle über Cloud-Bindung.
 
-/** Fehler als [CloudException] mit stabilem Grund (`no_participation`, `profile_not_active`, …). */
+/**
+ * Fehler als [CloudException] mit stabilem Grund (`no_participation`, `profile_not_active`, …). Jeder Aufruf nennt das
+ * erwartete Konto [profileId]; trägt die Sitzung inzwischen ein anderes, geht nichts ins Netz (`cloud_session_changed`).
+ */
 interface SharedMatchesPort {
     /** Eigene Sicht je Match: mit meinen Freunden teilen bzw. aus meiner Liste ausblenden; `null` lässt den Wert. */
     suspend fun setMyParticipation(
+        profileId: String,
         matchId: String,
         shareWithFriends: Boolean? = null,
         hidden: Boolean? = null,
     )
 
     /** „War ich nicht“: löst meine Verknüpfung und sperrt sie für dieses Match. */
-    suspend fun rejectMatchParticipation(matchId: String)
+    suspend fun rejectMatchParticipation(
+        profileId: String,
+        matchId: String,
+    )
 
     /** Standard für eigene neue Matches (`share_matches_default`, serverseitig Standard aus). */
-    suspend fun shareMatchesDefault(): Boolean
+    suspend fun shareMatchesDefault(profileId: String): Boolean
 
-    suspend fun setShareMatchesDefault(share: Boolean)
+    suspend fun setShareMatchesDefault(
+        profileId: String,
+        share: Boolean,
+    )
 }
 
 /** Feed dieses Kontos aus dem Pull-Bestand; unlesbare oder gelöschte Snapshots werden ausgelassen. */
