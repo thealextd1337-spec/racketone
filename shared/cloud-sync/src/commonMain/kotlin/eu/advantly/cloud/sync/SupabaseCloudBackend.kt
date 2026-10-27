@@ -36,7 +36,8 @@ class SupabaseCloudBackend internal constructor(
     private val installation: CloudInstallation,
 ) : CloudBackend,
     CloudPullPort,
-    CloudUploadPort {
+    CloudUploadPort,
+    FriendsPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -361,4 +362,88 @@ class SupabaseCloudBackend internal constructor(
             rpc(sessions.capture(), "cloud_get_visitor_match_v1", buildJsonObject { put("p_match_id", matchId) }),
         )
     }
+
+    override suspend fun friendCode(): String =
+        decode<String>(rpc(sessions.capture(), "my_friend_code", buildJsonObject {})).takeIf { it.isNotBlank() }
+            ?: throw CloudException("cloud_response_invalid", false)
+
+    override suspend fun findProfile(query: String): FoundProfile? {
+        val trimmed = query.trim()
+        require(trimmed.isNotEmpty() && trimmed.length <= 64)
+        val found = decode<List<FoundProfile>>(rpc(sessions.capture(), "find_profile", buildJsonObject { put("p_query", trimmed) }))
+        if (found.size > 1 || found.any { it.id.isBlank() }) throw CloudException("cloud_response_invalid", false)
+        return found.firstOrNull()
+    }
+
+    override suspend fun sendFriendRequest(
+        profileId: String,
+        viaCode: Boolean,
+    ): FriendRequestResult {
+        require(profileId.isNotBlank())
+        val result =
+            decode<String>(
+                rpc(
+                    sessions.capture(),
+                    "send_friend_request",
+                    buildJsonObject {
+                        put("p_target", profileId)
+                        put("p_source", if (viaCode) "code" else "search")
+                    },
+                ),
+            )
+        return when (result) {
+            "requested" -> FriendRequestResult.REQUESTED
+            "accepted" -> FriendRequestResult.ACCEPTED
+            "already_friends" -> FriendRequestResult.ALREADY_FRIENDS
+            else -> throw CloudException("cloud_response_invalid", false)
+        }
+    }
+
+    override suspend fun respondFriendRequest(
+        requesterId: String,
+        accept: Boolean,
+    ) {
+        require(requesterId.isNotBlank())
+        rpc(
+            sessions.capture(),
+            "respond_friend_request",
+            buildJsonObject {
+                put("p_requester", requesterId)
+                put("p_accept", accept)
+            },
+        )
+    }
+
+    override suspend fun removeFriend(profileId: String) = otherRpc("remove_friend", profileId)
+
+    override suspend fun blockUser(profileId: String) = otherRpc("block_user", profileId)
+
+    override suspend fun unblockUser(profileId: String) = otherRpc("unblock_user", profileId)
+
+    override suspend fun blockedProfiles(): List<BlockedProfile> {
+        val lease = sessions.capture()
+        val current = requireBinding(lease)
+        val response =
+            sessions.request(lease) {
+                http.select("user_blocks?select=blocked_id,created_at&order=created_at.desc", lease.credentials.accessToken, installation)
+            }
+        if (binding !== current) throw CloudException("device_not_authorized", true)
+        return decode(response)
+    }
+
+    private suspend fun otherRpc(
+        name: String,
+        profileId: String,
+    ) {
+        require(profileId.isNotBlank())
+        rpc(sessions.capture(), name, buildJsonObject { put("p_other", profileId) })
+    }
+
+    private inline fun <reified T> decode(response: String): T =
+        try {
+            CloudJson.decodeFromString<T>(response)
+        } catch (_: IllegalArgumentException) {
+            // SerializationException ist ein IllegalArgumentException: Rohantworten nie an die UI weitergeben.
+            throw CloudException("cloud_response_invalid", false)
+        }
 }

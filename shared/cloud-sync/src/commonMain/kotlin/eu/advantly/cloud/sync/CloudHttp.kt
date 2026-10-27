@@ -3,7 +3,6 @@ package eu.advantly.cloud.sync
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
-import io.ktor.client.request.preparePost
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
@@ -57,21 +56,37 @@ internal class CloudHttp(
         body: JsonObject,
         accessToken: String?,
         installation: CloudInstallation? = null,
+    ): String = request("rpc/$name", body.toString(), accessToken, installation)
+
+    /** Lesender PostgREST-Tabellenzugriff (RLS + Cloud-Bindung), gleiche Header und Fehlerauswertung wie [rpc]. */
+    suspend fun select(
+        path: String,
+        accessToken: String,
+        installation: CloudInstallation,
+    ): String = request(path, null, accessToken, installation)
+
+    private suspend fun request(
+        path: String,
+        payload: String?,
+        accessToken: String?,
+        installation: CloudInstallation?,
     ): String =
         try {
             withTimeoutOrNull(timeoutMillis) {
-                val payload = body.toString()
-                require(payload.encodeToByteArray().size <= 2_000_000)
+                require(payload == null || payload.encodeToByteArray().size <= 2_000_000)
                 http
-                    .preparePost("${url.trimEnd('/')}/rest/v1/rpc/$name") {
+                    .prepareRequest("${url.trimEnd('/')}/rest/v1/$path") {
+                        method = if (payload == null) HttpMethod.Get else HttpMethod.Post
                         header("apikey", publicKey)
                         accessToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                         installation?.let {
                             header("X-Advantly-Installation-Id", it.id)
                             header("X-Advantly-Installation-Proof", it.proof)
                         }
-                        header(HttpHeaders.ContentType, ContentType.Application.Json)
-                        setBody(payload)
+                        if (payload != null) {
+                            header(HttpHeaders.ContentType, ContentType.Application.Json)
+                            setBody(payload)
+                        }
                     }.execute { response ->
                         val channel = response.bodyAsChannel()
                         val chunks = mutableListOf<ByteArray>()
@@ -228,6 +243,11 @@ internal class CloudHttp(
                 "consent_documents_invalid",
                 "consent_language_invalid",
                 "no_deletion_pending",
+                // Freunde (P2-D)
+                "cannot_befriend_self",
+                "profile_not_found",
+                "request_cooldown",
+                "no_pending_request",
             )
     }
 }
