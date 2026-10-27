@@ -15,6 +15,10 @@ Menüpfade beziehen sich auf die deutschsprachige Console. Wenn ein Menüpunkt a
 >
 > **Freigabekriterium vor dem ersten Upload, auch für den internen Test:** Die Datenschutzerklärung muss in Handy- **und** Uhr-App
 > erreichbar sein (§6.1). Die Links sind umgesetzt; vor Upload in beiden tatsächlichen Release-Builds prüfen.
+>
+> **Stand 27.10.2026 (erster Upload mit Konto und Cloud):** Der erste Upload enthält P2 (Konto per E-Mail-Code, Cloud-Sicherung,
+> Export, Kontolöschung, Support-Meldungen). Die Phase-1-Angaben unten sind dafür ersetzt: §6.1 (Zustimmungsfassungen),
+> §6.2 (App-Zugriff), §6.6 (Data safety mit Erhebung), §6.7. Vorher müssen die neuen Rechtsseiten live und die Fassungen freigegeben sein.
 
 ---
 
@@ -140,13 +144,37 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 - [ ] **Verbindliches Freigabekriterium vor dem ersten Upload: Die Datenschutzerklärung ist auch in den Apps erreichbar.**
   Google verlangt beides: „a privacy policy link in the designated field within Play Console“ **und** „a privacy policy link or text within the app itself“ [P14].
   - **Handy:** Profil bzw. Einstellungen → „Datenschutz“ (DE) / „Privacy policy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser.
-  - **Uhr (Wear OS):** in den Einstellungen ein Eintrag „Datenschutz“ mit kurzem Text (Puls nur zur Anzeige, nichts wird übertragen oder gespeichert) und Verweis auf die URL.
-    Das geht als „Auf Handy öffnen“ (RemoteActivityHelper), QR-Code oder Hinweis „Details in der Handy-App unter Datenschutz“.
-  - **Status (W1-G):** Noch nicht umgesetzt. Die Umsetzung in den Apps übernimmt ein anderes Arbeitspaket. Bis dahin ist **kein** Upload in einen Track freigegeben.
+  - **Uhr (Wear OS):** Hinweis „Datenschutz“ am Ende der Startliste: Matchdaten gehen ans gekoppelte Handy, Puls und Schritte nur wie unter
+    „Puls & Schritte“ eingestellt; Details in der Handy-App unter Profil › Datenschutz.
+  - **Status 27.10.2026:** In beiden Apps umgesetzt (Handy seit W1-G, Uhr in `HomeScreen`). Vor Upload in beiden Release-Builds prüfen.
+- [ ] **Rechtsseiten live** (über `pages.yml` nach Merge nach `main`): `app-datenschutz.html`, `en/app-privacy.html` (Version 2),
+  `nutzungsbedingungen.html`, `en/terms.html` (Version 1), `konto-loeschen.html`, `en/delete-account.html`.
+  Die Texte sind Entwürfe; die mit `PRÜFEN` markierten Stellen (Anbieterverträge, Logs, Backups, CH/LI) vor der Freigabe klären (Pilot-Gate R2).
+- [ ] **Zustimmungsfassungen freigeben** – erst wenn die Seiten live und geprüft sind, sonst bleibt die Cloud in der App gesperrt
+  (`consent_unavailable`). Freigegebene Fassungen sind unveränderlich; jede spätere Textänderung braucht eine neue Fassung.
+  Im SQL-Editor des jeweiligen Projekts (zuerst staging):
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where is_current;
+  insert into private.consent_versions(document_type, version, is_current) values
+    ('TERMS', '1', true), ('PRIVACY', '2', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('TERMS', '1', 'de', 'https://advantly.eu/nutzungsbedingungen.html'),
+    ('TERMS', '1', 'en', 'https://advantly.eu/en/terms.html'),
+    ('PRIVACY', '2', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '2', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now()
+    where (document_type, version) in (('TERMS', '1'), ('PRIVACY', '2'));
+  commit;
+  ```
+  Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
-- [ ] **„Alle Funktionen sind ohne besondere Zugriffsrechte verfügbar“**. Es gibt keine Anmeldung, kein Konto und keinen Code.
-- Hinweis für die Prüfer (optional): „Pulsanzeige nur auf einer Wear-OS-Uhr mit Herzfrequenzsensor; Zählen funktioniert auch ohne Berechtigung.“
+- [ ] **„Alle oder einige Funktionen sind eingeschränkt“** wählen: Zählen funktioniert ohne Konto; Konto und Cloud-Sicherung brauchen eine Anmeldung.
+- [ ] Anleitung für die Prüfer (DE/EN): „Zählen, Verlauf und Uhr-App funktionieren ohne Konto. Für Konto und Cloud-Sicherung: Profil → Konto →
+  eigene E-Mail-Adresse eingeben, Land Österreich oder Deutschland wählen, ein Geburtsdatum ab 16 Jahren eingeben, Code aus der E-Mail eintragen,
+  Nutzungsbedingungen und Datenschutzerklärung annehmen. Pulsanzeige nur auf einer Wear-OS-Uhr mit Herzfrequenzsensor.“
+  Es gibt keine festen Prüferzugangsdaten; der Mail-Code geht an die Adresse des Prüfers.
 
 ### 6.3 Werbung
 - [ ] **Nein**, die App enthält keine Werbung.
@@ -156,7 +184,7 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 Ablauf laut [P7]: Starten → E-Mail für IARC angeben (`alxpro@cakamper.at`) → Kategorie wählen → Fragebogen ausfüllen → Zusammenfassung prüfen → Einreichen.
 - [ ] **Kategorie:** „Alle anderen App-Typen“ (Utility/Produktivität). Nicht „Spiel“ und nicht „Soziale Netzwerke“.
 - [ ] **Empfohlene Antworten (Phase 1):** Gewalt, sexuelle Inhalte, Vulgärsprache, Drogen, Alkohol, Tabak, Glücksspiel und anstößiger Humor jeweils **Nein**.
-  Interaktion bzw. Austausch zwischen Nutzern: **Nein** (keine Accounts, kein Chat). Standortweitergabe: **Nein**.
+  Interaktion bzw. Austausch zwischen Nutzern: **Nein** (Konto nur für die eigene Sicherung; Freunde, Teilen und Chat gibt es noch nicht). Standortweitergabe: **Nein**.
   Digitale Käufe: **Nein**. Uneingeschränkter Internetzugang bzw. Webbrowser: **Nein**.
 - Erwartetes Ergebnis: niedrigste Stufe (z. B. PEGI 3, USK 0, IARC 3+). Das Ergebnis berechnet die Console.
 - **Phase 2 neu ausfüllen:** Freunde/Teilen = Nutzerinteraktion, In-App-Abo = digitale Käufe.
@@ -179,7 +207,7 @@ Die Play Console bietet nur feste Altersgruppen an: 5 und jünger, 6–8, 9–12
 - [ ] **Altersgruppen:** **16–17** und **18 und älter**.
 - [ ] „Könnte die App für Kinder interessant sein?“: **Nein** (Sport-Utility ohne kindgerichtete Gestaltung).
 
-### 6.6 Datensicherheit (Data safety) – Phase 1
+### 6.6 Datensicherheit (Data safety)
 Googles Definitionen [P8]:
 - **„Erheben“ (collect)** heißt, Daten von der App vom Gerät des Nutzers zu übertragen.
 - Drei Ebenen auseinanderhalten: (1) **tatsächliche Übertragung** vom Gerät, (2) was im **Formular** anzugeben ist, (3) was **öffentlich** im Store angezeigt wird.
@@ -193,22 +221,29 @@ Googles Definitionen [P8]:
 - **„Teilen“ (share)** heißt Weitergabe an Dritte.
 - Auch Apps ohne Datenerhebung müssen das Formular ausfüllen und eine Datenschutz-URL angeben [P8].
 
-Einordnung für Phase 1:
+Einordnung ab dem ersten Upload (P2, Stand 27.10.2026). Nur die Handy-App hat `INTERNET`; die Uhr-App nicht.
+Empfänger ist ausschließlich unser Backend (Supabase mit Cloudflare davor, Mailversand über Resend); das sind Auftragsverarbeiter, also **kein Teilen**.
 
-| Daten | Was passiert | Einordnung |
-|---|---|---|
-| Match-Daten, Spielernamen | nur lokal (SQLite bzw. SharedPreferences) | auf dem Gerät → **nicht erhoben** |
-| Abgleich Handy ↔ Uhr (Data Layer) | per verschlüsseltem Bluetooth direkt. Sonst über Google Cloud, „All data transferred through Google Cloud is end-to-end encrypted“, und nur dieselbe App mit derselben Signatur kann mitlesen [P9] | Ende-zu-Ende-verschlüsselt, Anbieter ohne Zugriff → **nicht erhoben** |
-| Herzfrequenz (Health Services) | wird während der Session gelesen, angezeigt und nicht gespeichert oder übertragen (das S5-Diagnose-Log ist im Release abgeschaltet, im AAB geprüft) | nur auf dem Gerät → **nicht erhoben**, nicht anzugeben (keine „ephemere“ Angabe, weil nichts das Gerät verlässt) |
-| Schritte, Kalorien (ExerciseClient) | angefordert, nicht übertragen | auf dem Gerät → **nicht erhoben** |
-| Technischer Beleg | beide AABs haben **keine `INTERNET`-Berechtigung** | – |
+| Daten | Was passiert | Play-Datentyp | Optional? | Zweck |
+|---|---|---|---|---|
+| E-Mail-Adresse | Anmeldung per Mail-Code (bzw. Google), optionale Kontaktadresse in Support-Meldungen | Persönliche Infos → E-Mail-Adresse | ja (Konto freiwillig) | App-Funktionalität, Kontoverwaltung, Kommunikation des Entwicklers |
+| Alias, Benutzername, Spielernamen | Profil sowie Namen in Matches und Gästen | Persönliche Infos → Name | ja | App-Funktionalität, Kontoverwaltung |
+| Konto-ID, Freundescode | Profil | Persönliche Infos → Nutzer-IDs | ja | App-Funktionalität, Kontoverwaltung |
+| Land, Altersgrenze, Zeitpunkt der Altersbestätigung (Geburtsdatum nur geprüft, nicht gespeichert) | Altersgate | Persönliche Infos → Sonstige Infos | ja | Kontoverwaltung, Betrugsprävention/Sicherheit/Compliance |
+| Installations- und Geräte-IDs (zufällig erzeugt), Plattform | Gerätebindung, Widerruf | Geräte- oder sonstige IDs | ja | App-Funktionalität, Betrugsprävention/Sicherheit |
+| Matches (Spielstand, Punkte, Zeitpunkte, optionaler Ort) | Cloud-Sicherung | Fitness → Fitness-Infos (vorsichtige Einordnung; Alternative „App-Aktivität → Andere nutzergenerierte Inhalte“) | ja | App-Funktionalität |
+| Support-Meldungen (Titel, Text) | Feedback & Hilfe, auch als Gast | App-Aktivität → Andere nutzergenerierte Inhalte | ja | App-Funktionalität, Kommunikation des Entwicklers |
+| Technische Angaben (App-Version, OS, Gerätemodell, Bildschirm, Schriftgröße) | nur per Häkchen in Support-Meldungen | App-Info und -Leistung → Sonstige Leistungsdaten | ja | App-Funktionalität |
+| Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
-- [ ] Frage „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Nein**.
-- [ ] Die Folgefragen (Verschlüsselung bei der Übertragung, Löschanfrage) entfallen dann.
-- Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§5) ist sie erwähnt.
+- [ ] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
+- [ ] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
+- [ ] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto → Kontolöschung beantragen) und per Web-Link
+  **`https://advantly.eu/konto-loeschen.html`** (Feld „Link zum Löschen des Kontos“; englisch `https://advantly.eu/en/delete-account.html`).
+- IP-Adressen landen nur als ungesalzener Hash (Missbrauchsschutz bei Altersgate und Gastmeldungen) sowie in den Verbindungslogs der Anbieter; daraus wird kein Standort abgeleitet.
+- Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
-- **Neu ausfüllen, sobald** Daten das Gerät **ohne** Ende-zu-Ende-Verschlüsselung verlassen, z. B. in P2 mit Konto bzw. Cloud-Sync.
-  Dann sind erhoben: E-Mail, Name, Nutzer-IDs, App-Aktivität und Match-Daten als „Fitness-Info“, verschlüsselt bei der Übertragung, mit Löschmöglichkeit.
+- **Neu ausfüllen, sobald** Freunde/Teilen (P2-2), Push oder Health-Daten in der Cloud dazukommen.
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
@@ -218,7 +253,7 @@ Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch 
 Die Kategorie „Aktivität und Fitness“ umfasst ausdrücklich „tracking body vitals related to fitness (like heart rate)“ [P10].
 - [ ] Auswählen: **Gesundheit und Fitness → Aktivität und Fitness**. **Nicht** „Medizinisch“ und nicht „Medizinprodukt“.
 - [ ] Beschreibung (DE/EN, falls ein Feld kommt):
-  „Advantly zählt Racketsport-Matches auf Wear-OS-Uhr und Handy. Während eines Matches läuft auf der Uhr eine Trainings-Session (Health Services, Übungstyp Tennis bzw. Badminton/Tischtennis), damit die Zählung bei ausgeschaltetem Display weiterläuft. Die aktuelle Herzfrequenz wird dabei nur angezeigt; sie wird nicht gespeichert, nicht übertragen und nicht geteilt. Keine medizinischen Funktionen.“
+  „Advantly zählt Racketsport-Matches auf Wear-OS-Uhr und Handy. Während eines Matches läuft auf der Uhr eine Trainings-Session (Health Services, Übungstyp Tennis bzw. Badminton/Tischtennis), damit die Zählung bei ausgeschaltetem Display weiterläuft. Die aktuelle Herzfrequenz wird dabei nur angezeigt, auf Wunsch auch auf dem gekoppelten Handy; sie wird nicht gespeichert, nicht in die Cloud übertragen und nicht geteilt. Keine medizinischen Funktionen.“
 - **Health Connect** wird in Phase 1 **nicht** genutzt (keine `android.permission.health.*` außer `READ_HEART_RATE` für den Sensor der Uhr).
   Falls die Console wegen `health.READ_HEART_RATE` eine Begründung pro Berechtigung verlangt, diese verwenden:
   - `health.READ_HEART_RATE` / `BODY_SENSORS` (≤ Wear OS 5): „Anzeige der aktuellen Herzfrequenz auf der Uhr während eines vom Nutzer gestarteten Matches. Nur im Vordergrund bzw. während der laufenden Trainings-Session, keine Hintergrundmessung, keine Speicherung.“

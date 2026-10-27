@@ -1,6 +1,7 @@
 package eu.advantly.wear.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -9,6 +10,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.Button
@@ -163,6 +165,16 @@ fun HomeScreen(
             // P1-Gate: versteckter Feldtest-Schalter, nur Debug-Build
             if (FieldTestRecorder.AVAILABLE) item { FieldTestToggle() }
             item { PhoneStatusLabel(home.phoneLight, home.updateRequired, home.developmentBuild) }
+            // Play verlangt die Datenschutzerklärung auch in der Uhr-App (docs/release/play-console.md §6.1).
+            item {
+                Text(
+                    stringResource(R.string.home_privacy),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag(PRIVACY_TAG),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
             item { BuildVersionLabel() }
         }
     }

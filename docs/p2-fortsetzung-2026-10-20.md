@@ -2365,8 +2365,8 @@ P3-Reste:
    Migrationen. `check_release_gate.py` prüft nur Namen, nicht Inhalt.
 4. Ein eigener Gast in einem fremd verknüpften Slot wird stillgelegt, aber nicht redigiert
    (bisheriges Verhalten).
-5. `docs/03-backend-datenmodell.md:1315` und A11 (`:1529`) beschreiben noch den alten
-   Stand; dafür fehlt ein Doku-Auftrag.
+5. ~~`docs/03-backend-datenmodell.md` §8.3 und A11 beschreiben noch den alten Stand.~~
+   Erledigt in `ede83eaf`.
 6. Keine CI-Prüfung der Planstabilität (zweiter 290-Lauf mit `zero-stats3.sql`, ~11 s).
 
 CI: `325ec789` ist fachlich ganz grün, inklusive K7 `check_deletion_job.py`. Rot war nur
@@ -2403,8 +2403,8 @@ dort grün.
 - Offen dokumentiert:
   - Admin-JWT bleibt nach Logout oder MFA-Entfernung bis zum Ablauf gültig.
   - Suchen werden nicht protokolliert.
-  - Bisherige `admin`-Mitglieder erhalten Kontorechte. `docs/support-admin-betrieb.md`
-    braucht dafür einen Doku-Auftrag.
+  - Bisherige `admin`-Mitglieder erhalten Kontorechte. In `docs/support-admin-betrieb.md`
+    dokumentiert (`ede83eaf`).
 
 **K4/K5 übernommen** (`03674a00`..`efea6a13`, Merge `2927ab3f`; Alias-Fix `2174b270`).
 CI `2174b27` ist grün, inklusive Renntest 300 und K7 `check_account_support.py`.
@@ -2433,5 +2433,4 @@ Freigabe, Neuanmeldung und Upload des offenen Events.
 - **Rest:**
   - Gegen einen Dieb mit Mail-Zugriff schützt nur der Widerruf. Neue Geräte kommen mit dem
     Mail-Code ohnehin in die Cloud.
-  - Betriebshinweis für den Support fehlt noch in `docs/support-admin-betrieb.md`
-    (Doku-Auftrag).
+  - Betriebshinweis für den Support steht in `docs/support-admin-betrieb.md` (`ede83eaf`).

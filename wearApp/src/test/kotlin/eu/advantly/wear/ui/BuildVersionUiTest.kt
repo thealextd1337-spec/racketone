@@ -86,5 +86,7 @@ class BuildVersionUiTest {
             }
         }
         rule.screenshot("home-version-$language-206dp-font130")
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag(PRIVACY_TAG))
+        rule.onNodeWithTag(PRIVACY_TAG).assertIsDisplayed()
     }
 }

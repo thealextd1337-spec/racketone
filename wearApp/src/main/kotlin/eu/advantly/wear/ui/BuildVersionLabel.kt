@@ -44,3 +44,4 @@ internal fun localBuildDate(
     }.getOrDefault("")
 
 const val BUILD_VERSION_TAG = "home_build_version"
+const val PRIVACY_TAG = "home_privacy"
