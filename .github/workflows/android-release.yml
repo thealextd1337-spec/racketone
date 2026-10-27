@@ -46,7 +46,14 @@ jobs:
           ADVANTLY_UPLOAD_STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
           ADVANTLY_UPLOAD_KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
           ADVANTLY_UPLOAD_KEY_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_KEY_PASSWORD }}
-        run: ./gradlew bundleAllRelease --no-configuration-cache
+          # Öffentliche Client-Werte; fehlen sie, baut die App ohne Konto/Cloud (manueller Testweg).
+          SUPABASE_URL: ${{ vars.ADVANTLY_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.ADVANTLY_SUPABASE_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.ADVANTLY_GOOGLE_WEB_CLIENT_ID }}
+        run: |
+          ./gradlew bundleAllRelease --no-configuration-cache \
+            -Padvantly.supabase.url="$SUPABASE_URL" -Padvantly.supabase.key="$SUPABASE_KEY" \
+            -Padvantly.google.webClientId="$GOOGLE_WEB_CLIENT_ID"
       - name: Signatur prüfen + Summary
         run: |
           set -euo pipefail

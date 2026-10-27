@@ -121,9 +121,20 @@ jobs:
           ADVANTLY_UPLOAD_STORE_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_STORE_PASSWORD }}
           ADVANTLY_UPLOAD_KEY_ALIAS: ${{ secrets.ADVANTLY_UPLOAD_KEY_ALIAS }}
           ADVANTLY_UPLOAD_KEY_PASSWORD: ${{ secrets.ADVANTLY_UPLOAD_KEY_PASSWORD }}
+          # Öffentliche Client-Werte (Publishable Key, OAuth-Web-Client-ID), daher Variablen statt Secrets.
+          SUPABASE_URL: ${{ vars.ADVANTLY_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.ADVANTLY_SUPABASE_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.ADVANTLY_GOOGLE_WEB_CLIENT_ID }}
         run: |
+          # Ohne Backend würde ein Store-Build still ohne Konto und Cloud ausgeliefert.
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_KEY" ]]; then
+            echo "::error::Variablen ADVANTLY_SUPABASE_URL und ADVANTLY_SUPABASE_KEY im Environment fehlen"
+            exit 1
+          fi
           export ADVANTLY_UPLOAD_KEYSTORE="$RUNNER_TEMP/advantly-upload.jks"
-          ./gradlew bundleAllRelease --no-configuration-cache
+          ./gradlew bundleAllRelease --no-configuration-cache \
+            -Padvantly.supabase.url="$SUPABASE_URL" -Padvantly.supabase.key="$SUPABASE_KEY" \
+            -Padvantly.google.webClientId="$GOOGLE_WEB_CLIENT_ID"
       - name: Beide Signaturen prüfen
         if: inputs.operation == 'upload'
         run: |
