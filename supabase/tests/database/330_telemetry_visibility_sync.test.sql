@@ -9,8 +9,9 @@ select tests.accept_current_consents(id) from tests.users;
 select has_column('public', 'profile_settings', 'telemetry_counter', 'Lamport-Zähler gespeichert');
 select has_column('public', 'profile_settings', 'telemetry_origin', 'Ursprung gespeichert');
 select is_empty($$ select r, f from unnest(array['anon', 'service_role']) r,
-    unnest(array['public.cloud_set_telemetry_visibility_v1(text,bigint,text)', 'public.cloud_my_blocks_v1()']) f
-  where has_function_privilege(r, f, 'EXECUTE') $$, 'Neue RPCs weder für anon noch für service_role');
+    unnest(array['public.cloud_set_telemetry_visibility_v1(text,bigint,text)', 'public.cloud_my_blocks_v1()',
+      'public.my_friend_code()']) f
+  where has_function_privilege(r, f, 'EXECUTE') $$, 'Neue RPCs und Freundescode weder für anon noch für service_role');
 select ok(has_function_privilege('authenticated', 'public.cloud_set_telemetry_visibility_v1(text,bigint,text)', 'EXECUTE')
   and has_function_privilege('authenticated', 'public.cloud_my_blocks_v1()', 'EXECUTE'), 'authenticated darf beide RPCs');
 select column_privs_are('public', 'profile_settings', 'telemetry_visibility', 'authenticated', array['SELECT'],
@@ -40,6 +41,8 @@ select throws_ok($$ update public.profile_settings set telemetry_counter = 99 wh
   '42501', null, 'Zähler nicht direkt setzbar');
 select is(public.cloud_set_telemetry_visibility_v1('share', 0, null),
   '{"visibility":"private","counter":0,"origin":null}'::jsonb, 'Zähler 0 liest nur den Standard');
+select set_config('tests.g_before', (select visibility_epoch from public.profile_settings
+  where profile_id = tests.uid('alice'))::text, true);
 select is(public.cloud_set_telemetry_visibility_v1('off', 1, 'phone-a'),
   '{"visibility":"off","counter":1,"origin":"phone-a"}'::jsonb, 'Erste Änderung gewinnt gegen den Standard');
 select is(public.cloud_set_telemetry_visibility_v1('share', 1, 'phone-z'),
@@ -50,14 +53,12 @@ select is(public.cloud_set_telemetry_visibility_v1('off', 1, 'phone-b'),
   '{"visibility":"off","counter":1,"origin":"phone-z"}'::jsonb, '… kleinerer Ursprung verliert');
 select is(public.cloud_set_telemetry_visibility_v1('share', 2, 'phone-a'),
   '{"visibility":"share","counter":2,"origin":"phone-a"}'::jsonb, 'Kausal spätere Änderung gewinnt, auch weniger restriktiv');
-select set_config('tests.g_before', (select visibility_epoch from public.profile_settings
-  where profile_id = tests.uid('alice'))::text, true);
 select is(public.cloud_set_telemetry_visibility_v1('off', 1, 'zzz'),
   '{"visibility":"share","counter":2,"origin":"phone-a"}'::jsonb, 'Älterer Zähler verliert');
 select is(public.cloud_set_telemetry_visibility_v1('share', 2, 'phone-a'),
   '{"visibility":"share","counter":2,"origin":"phone-a"}'::jsonb, 'Gleicher Stand ist idempotent');
 select is((select visibility_epoch from public.profile_settings where profile_id = tests.uid('alice')),
-  current_setting('tests.g_before')::bigint, 'Abgelehnter Stand schreibt nicht und ändert keine Generation');
+  current_setting('tests.g_before')::bigint, 'Weder akzeptierte noch abgelehnte Stände ändern die Generation');
 -- Kotlin vergleicht UTF-16-Codeeinheiten: 'B' (66) < 'a' (97), also "C"-Reihenfolge statt Spracheinstellung.
 select is(public.cloud_set_telemetry_visibility_v1('private', 3, 'a')->>'origin', 'a', 'Zähler 3 von a');
 select is(public.cloud_set_telemetry_visibility_v1('private', 3, 'B')->>'origin', 'a', 'B < a wie im Client');
@@ -81,10 +82,21 @@ select tests.authenticate_as('bob');
 select is(public.cloud_set_telemetry_visibility_v1('private', 0, null),
   '{"visibility":"private","counter":0,"origin":null}'::jsonb, 'Bob sieht nur seinen eigenen Stand');
 select is(public.cloud_set_telemetry_visibility_v1('off', 50, 'bob-phone')->>'counter', '50', 'Bob setzt nur seinen Stand');
+select throws_ok($$ select public.cloud_set_telemetry_visibility_v1('off', 9007199254740992, 'x') $$, 'P0001',
+  'invalid_telemetry_setting', 'Zähler ab 2^53 abgelehnt (sonst eingefroren)');
+select is(public.cloud_set_telemetry_visibility_v1('off', 9007199254740991, 'bob-phone')->>'counter', '9007199254740991',
+  'Zähler 2^53 - 1 erlaubt');
 select is_empty($$ select 1 from public.profile_settings where profile_id = tests.uid('alice') $$, 'Alices Zeile unsichtbar');
 reset role;
 select is((select telemetry_counter from public.profile_settings where profile_id = tests.uid('alice')), 3::bigint,
   'Alices Stand unverändert');
+select tests.authenticate_as('alice');
+select is(public.export_my_data() -> 'settings' -> 'telemetryCounter', '3'::jsonb, 'Art. 15: Zähler im Export');
+select is(public.export_my_data() -> 'settings' ->> 'telemetryOrigin', 'a', 'Art. 15: Ursprung im Export');
+reset role;
+select ok((select count(*) = 1 from pg_trigger where tgrelid = 'public.profile_settings'::regclass
+    and tgname = 'cloud_access_generation' and tgenabled = 'O'),
+  'Generationstrigger auf profile_settings bleibt aktiv (nur ohne telemetry_*)');
 
 -- Blockliste: nur eigene Einträge, nur Alias.
 select tests.authenticate_as('alice');
