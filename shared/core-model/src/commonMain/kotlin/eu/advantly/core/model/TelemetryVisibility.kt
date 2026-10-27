@@ -2,8 +2,8 @@ package eu.advantly.core.model
 
 /**
  * Telemetrie-Sichtbarkeit des Besitzers (F19/F29, P2-J): wer Puls und Schritte sehen darf. Eine Einstellung je Besitzer,
- * gerätelokal gespeichert und zwischen den eigenen Geräten synchronisiert; später mit `profile_settings.telemetry_visibility`
- * abgeglichen (P2-E). Keine Health-Speicherung (P3).
+ * gerätelokal gespeichert, zwischen den eigenen Geräten synchronisiert und mit Konto über
+ * `cloud_set_telemetry_visibility_v1` kontoweit abgeglichen (H0, gleiche Konfliktregel). Keine Health-Speicherung (P3).
  *
  * @property wire Wert auf dem Draht und in der Datenbank (`share`/`private`/`off`, CHECK-Constraint in Supabase)
  * @property restriction Strenge für den Gleichstand in [TelemetryPreference.merge]: höher = restriktiver

@@ -1,5 +1,7 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.core.model.TelemetryPreference
+import eu.advantly.core.model.TelemetryVisibility
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -10,6 +12,7 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -69,11 +72,26 @@ class FriendsHttpTest {
             val (friends, calls, http) =
                 backend { call ->
                     when (call.path.substringAfterLast('/')) {
-                        "my_friend_code" -> "\"K7QF92MX\""
-                        "find_profile" -> """[{"id":"bob","alias":"Bob","username":"bob_99"}]"""
-                        "send_friend_request" -> "\"accepted\""
-                        "user_blocks" -> """[{"blocked_id":"eve","created_at":"2026-10-27T10:00:00+00:00"}]"""
-                        else -> "" // void-RPCs
+                        "my_friend_code" -> {
+                            "\"K7QF92MX\""
+                        }
+
+                        "find_profile" -> {
+                            """[{"id":"bob","alias":"Bob","username":"bob_99"}]"""
+                        }
+
+                        "send_friend_request" -> {
+                            "\"accepted\""
+                        }
+
+                        "cloud_my_blocks_v1" -> {
+                            """[{"profileId":"eve","alias":"Eve","createdAt":"2026-10-27T10:00:00+00:00"},""" +
+                                """{"profileId":"gone","alias":null,"createdAt":"2026-10-26T10:00:00+00:00"}]"""
+                        }
+
+                        else -> {
+                            ""
+                        } // void-RPCs
                     } to HttpStatusCode.OK
                 }
             try {
@@ -85,7 +103,10 @@ class FriendsHttpTest {
                 friends.removeFriend("dave")
                 friends.blockUser("eve")
                 friends.unblockUser("eve")
-                assertEquals(listOf(BlockedProfile("eve", "2026-10-27T10:00:00+00:00")), friends.blockedProfiles())
+                assertEquals(
+                    listOf(BlockedProfile("eve", "2026-10-27T10:00:00+00:00", "Eve"), BlockedProfile("gone", "2026-10-26T10:00:00+00:00")),
+                    friends.blockedProfiles(),
+                )
 
                 assertEquals(
                     listOf(
@@ -96,7 +117,7 @@ class FriendsHttpTest {
                         "rpc/remove_friend",
                         "rpc/block_user",
                         "rpc/unblock_user",
-                        "user_blocks",
+                        "rpc/cloud_my_blocks_v1",
                     ),
                     calls.map { it.path.removePrefix("/rest/v1/") },
                 )
@@ -106,15 +127,14 @@ class FriendsHttpTest {
                             it.proof == installation.proof
                     },
                 )
-                assertEquals(List(7) { HttpMethod.Post } + HttpMethod.Get, calls.map { it.method })
+                assertEquals(List(8) { HttpMethod.Post }, calls.map { it.method })
                 assertEquals("bob_99", calls[1].string("p_query"))
                 assertEquals("bob", calls[2].string("p_target"))
                 assertEquals("code", calls[2].string("p_source"))
                 assertEquals("carol", calls[3].string("p_requester"))
                 assertEquals("false", calls[3].string("p_accept"))
                 assertEquals(listOf("dave", "eve", "eve"), calls.subList(4, 7).map { it.string("p_other") })
-                assertEquals("select=blocked_id,created_at&order=created_at.desc", calls[7].query)
-                assertNull(calls[7].body)
+                assertEquals(JsonObject(emptyMap()), calls[7].body)
             } finally {
                 http.close()
             }
@@ -198,6 +218,46 @@ class FriendsHttpTest {
                 // Danach gilt die alte Bindung nicht für Bob.
                 assertFailsWith<CloudException> { friends.friendCode() }
                 assertEquals(1, calls.size)
+            } finally {
+                http.close()
+            }
+        }
+
+    @Test fun telemetrySyncSendsLocalStateAndReturnsTheAccountState(): Unit =
+        runBlocking {
+            var reply = """{"visibility":"off","counter":3,"origin":"watch-1"}"""
+            val (backend, calls, http) = backend { reply to HttpStatusCode.OK }
+            try {
+                backend.bindDevice("phone")
+                val local = TelemetryPreference(TelemetryVisibility.SHARE, 2, "phone-1")
+                assertEquals(TelemetryPreference(TelemetryVisibility.OFF, 3, "watch-1"), backend.syncTelemetry("alice", local))
+                assertEquals("rpc/cloud_set_telemetry_visibility_v1", calls.single().path.removePrefix("/rest/v1/"))
+                assertEquals(listOf("share", "2", "phone-1"), listOf("p_visibility", "p_counter", "p_origin").map { calls[0].string(it) })
+                assertEquals("installation", calls[0].installationId)
+
+                // Standard: nur lesen (counter 0, origin null); Konto ohne Änderung bzw. unbekannter Wert → nichts übernehmen.
+                reply = """{"visibility":"private","counter":0,"origin":null}"""
+                assertNull(backend.syncTelemetry("alice", TelemetryPreference()))
+                assertEquals(JsonNull, calls[1].body?.get("p_origin"))
+                assertEquals("0", calls[1].string("p_counter"))
+                reply = """{"visibility":"friends-only","counter":9,"origin":"x"}"""
+                assertNull(backend.syncTelemetry("alice", TelemetryPreference()))
+                reply = "[]"
+                assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.syncTelemetry("alice", local) }.reason)
+            } finally {
+                http.close()
+            }
+        }
+
+    @Test fun telemetryOfAnotherAccountOrWithoutBindingIsNeverSent(): Unit =
+        runBlocking {
+            val (backend, calls, http) = backend { "{}" to HttpStatusCode.OK }
+            try {
+                val local = TelemetryPreference(TelemetryVisibility.OFF, 1, "phone-1")
+                assertEquals("device_not_authorized", assertFailsWith<CloudException> { backend.syncTelemetry("alice", local) }.reason)
+                backend.bindDevice("phone")
+                assertEquals("cloud_session_changed", assertFailsWith<CloudException> { backend.syncTelemetry("bob", local) }.reason)
+                assertTrue(calls.isEmpty())
             } finally {
                 http.close()
             }

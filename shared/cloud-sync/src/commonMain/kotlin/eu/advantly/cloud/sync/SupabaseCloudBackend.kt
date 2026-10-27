@@ -1,5 +1,6 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.data.CloudUploadSnapshot
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
@@ -37,7 +38,8 @@ class SupabaseCloudBackend internal constructor(
 ) : CloudBackend,
     CloudPullPort,
     CloudUploadPort,
-    FriendsPort {
+    FriendsPort,
+    CloudTelemetryPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -420,15 +422,25 @@ class SupabaseCloudBackend internal constructor(
 
     override suspend fun unblockUser(profileId: String) = otherRpc("unblock_user", profileId)
 
-    override suspend fun blockedProfiles(): List<BlockedProfile> {
+    override suspend fun blockedProfiles(): List<BlockedProfile> =
+        decode<List<BlockedProfile>>(rpc(sessions.capture(), "cloud_my_blocks_v1", buildJsonObject {})).also { blocks ->
+            if (blocks.any { it.profileId.isBlank() }) throw CloudException("cloud_response_invalid", false)
+        }
+
+    override suspend fun syncTelemetry(
+        profileId: String,
+        local: TelemetryPreference,
+    ): TelemetryPreference? {
         val lease = sessions.capture()
-        val current = requireBinding(lease)
-        val response =
-            sessions.request(lease) {
-                http.select("user_blocks?select=blocked_id,created_at&order=created_at.desc", lease.credentials.accessToken, installation)
+        // Identitätssicherheit: die Wahl von Konto A geht nie an die Sitzung von Konto B.
+        if (lease.credentials.profileId != profileId) throw CloudException("cloud_session_changed", true)
+        val body =
+            buildJsonObject {
+                put("p_visibility", local.visibility.wire)
+                put("p_counter", local.counter)
+                put("p_origin", local.origin)
             }
-        if (binding !== current) throw CloudException("device_not_authorized", true)
-        return decode(response)
+        return decode<CloudTelemetrySetting>(rpc(lease, "cloud_set_telemetry_visibility_v1", body)).toPreference()
     }
 
     private suspend fun otherRpc(

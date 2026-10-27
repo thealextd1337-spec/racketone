@@ -58,13 +58,6 @@ internal class CloudHttp(
         installation: CloudInstallation? = null,
     ): String = request("rpc/$name", body.toString(), accessToken, installation)
 
-    /** Lesender PostgREST-Tabellenzugriff (RLS + Cloud-Bindung), gleiche Header und Fehlerauswertung wie [rpc]. */
-    suspend fun select(
-        path: String,
-        accessToken: String,
-        installation: CloudInstallation,
-    ): String = request(path, null, accessToken, installation)
-
     private suspend fun request(
         path: String,
         payload: String?,

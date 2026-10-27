@@ -567,10 +567,9 @@ class MatchSession(
     }
 
     /**
-     * Schnittstelle für einen späteren Profil-Abgleich (P2-E, `profile_settings.telemetry_visibility`): [remote] wird nach
-     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte. **P2-E:** Der Server muss dafür `counter` und
-     * `origin` neben `telemetry_visibility` speichern; ein Standard (counter 0) wird ignoriert. `true`, wenn sich der Stand
-     * geändert hat.
+     * Kontostand aus `cloud_set_telemetry_visibility_v1` (H0, `profile_settings.telemetry_*`): [remote] wird nach
+     * derselben Konfliktregel übernommen wie eine Angabe der eigenen Geräte und an sie weitergegeben; ein Standard
+     * (counter 0) wird ignoriert. `true`, wenn sich der Stand geändert hat.
      */
     fun mergeTelemetryPreference(remote: TelemetryPreference): Boolean {
         checkThread()

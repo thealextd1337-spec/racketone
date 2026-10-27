@@ -22,4 +22,19 @@ class TelemetryVisibilityContractTest {
         assertEquals(TelemetryVisibility.entries.map { it.wire }.toSet(), allowed)
         assertEquals(TelemetryVisibility.DEFAULT.wire, default)
     }
+
+    /** H0: Der Server-Merge ordnet nach derselben Restriktivität wie [eu.advantly.core.model.TelemetryPreference.ORDER]. */
+    @Test
+    fun serverMergeUsesTheClientRestrictionOrder() {
+        val merge =
+            File(System.getProperty("user.dir"), "../../supabase/migrations/20261027000300_telemetry_visibility_sync.sql").readText()
+        val orders =
+            Regex("""array_position\(array\[([^\]]+)]""")
+                .findAll(merge)
+                .map { match ->
+                    Regex("""'([a-z]+)'""").findAll(match.groupValues[1]).map { it.groupValues[1] }.toList()
+                }.toList()
+        assertEquals(2, orders.size)
+        orders.forEach { assertEquals(TelemetryVisibility.entries.sortedBy { it.restriction }.map { it.wire }, it) }
+    }
 }

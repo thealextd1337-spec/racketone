@@ -1,7 +1,6 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.data.CloudPullStore
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 // Freunde (P2-D, docs/03-backend-datenmodell.md §6): RPCs aus supabase/migrations/20261015000400_rpc_profil_freunde.sql,
@@ -15,11 +14,12 @@ data class FoundProfile(
     val username: String? = null,
 )
 
-/** Eigene Blockierung aus `user_blocks`; den Alias Blockierter gibt der Server bewusst nicht heraus. */
+/** Eigene Blockierung aus `cloud_my_blocks_v1`; [alias] nur bei aktivem Profil, sonst keine Profildaten. */
 @Serializable
 data class BlockedProfile(
-    @SerialName("blocked_id") val profileId: String,
-    @SerialName("created_at") val createdAt: String,
+    val profileId: String,
+    val createdAt: String,
+    val alias: String? = null,
 )
 
 /** Antwort von `send_friend_request`: neue Anfrage, Gegenanfrage angenommen oder schon befreundet. */
