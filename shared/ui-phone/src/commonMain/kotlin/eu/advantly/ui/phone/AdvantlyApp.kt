@@ -38,6 +38,9 @@ import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.auth.AccountScreen
+import eu.advantly.ui.phone.auth.StartLoginHost
+import eu.advantly.ui.phone.auth.StartLoginScreen
+import eu.advantly.ui.phone.auth.shouldShowStartLogin
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
@@ -81,6 +84,8 @@ import org.jetbrains.compose.resources.stringResource
  * @param onShareMatchImage teilt die Ergebniskarte (Bild + Text mit Link) über die Plattform; `null` blendet „Teilen“ aus
  * @param onShareText Teilen-Menü der Plattform für reinen Text (z. B. Freundescode); `null` blendet Teilen aus
  * @param watchInstall Uhr-App auf einer Uhr ohne Advantly installieren (nur Android); `null` blendet den Hinweis aus
+ * @param startLogin gespeicherte Wahl zum Startbildschirm „Konto oder ohne Konto“; `null` (iOS/Desktop) zeigt ihn nie
+ * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Startbildschirm wartet, bis er entschieden ist
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -103,7 +108,21 @@ fun AdvantlyApp(
     onShareMatchImage: (suspend (ImageBitmap, String) -> Unit)? = null,
     onShareText: ((String) -> Unit)? = null,
     watchInstall: WatchInstallHost? = null,
+    startLogin: StartLoginHost? = null,
+    recoveryHold: Boolean = false,
 ) {
+    val authState = authModel?.state?.collectAsState()?.value
+    val startLoginDecided = startLogin?.decided?.collectAsState()?.value
+    // Wer angemeldet war, hat sich entschieden: nach Abmelden oder Kontolöschung kein erneuter Startbildschirm.
+    LaunchedEffect(authState?.authenticated, startLogin) { if (authState?.authenticated == true) startLogin?.decide() }
+    val showStartLogin =
+        shouldShowStartLogin(
+            available = authModel != null && startLoginDecided != null,
+            decided = startLoginDecided == true,
+            signedIn = authState?.authenticated == true,
+            checking = authState?.busy == true,
+            recoveryHold = recoveryHold,
+        )
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
     val aliases by model.players.ownerAliases.collectAsState()
@@ -146,6 +165,7 @@ fun AdvantlyApp(
                                 onRestorePrevious,
                                 onShareText,
                                 watchInstall,
+                                onStartLoginDecided = if (showStartLogin) startLogin?.let { it::decide } else null,
                             )
                         }
                     }
@@ -255,7 +275,7 @@ fun AdvantlyApp(
     }
 }
 
-/** Tabs, Mini-Scorebar und Tab-Leiste (nur ohne Vollbild-Ebene). */
+/** Tabs, Mini-Scorebar und Tab-Leiste (nur ohne Vollbild-Ebene); mit [onStartLoginDecided] stattdessen der Startbildschirm. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TabLayer(
@@ -271,12 +291,32 @@ private fun TabLayer(
     onRestorePrevious: (() -> Unit)?,
     onShareText: ((String) -> Unit)?,
     watchInstall: WatchInstallHost?,
+    onStartLoginDecided: (() -> Unit)?,
 ) {
     var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
     var showSupport by remember(navigator.tab) { mutableStateOf(false) }
+    val openAccount = {
+        authModel?.refresh()
+        showAccount = true
+        navigator.tab = AppTab.Profile
+    }
+    if (onStartLoginDecided != null) {
+        // Vollbild ohne Tab-Leiste; Konto führt in den bestehenden Fluss unter Profil → Konto.
+        StartLoginScreen(
+            onAccount = {
+                onStartLoginDecided()
+                openAccount()
+            },
+            onSkip = {
+                onStartLoginDecided()
+                navigator.tab = AppTab.Home
+            },
+        )
+        return
+    }
     Column(Modifier.fillMaxSize().safeContentPadding()) {
         Box(Modifier.weight(1f)) {
             if (showSupport && supportModel != null) {
@@ -307,11 +347,7 @@ private fun TabLayer(
                         } else {
                             FriendsScreen(
                                 friends,
-                                onOpenAccount = {
-                                    authModel.refresh()
-                                    showAccount = true
-                                    navigator.tab = AppTab.Profile
-                                },
+                                onOpenAccount = openAccount,
                                 onShareText = onShareText,
                             )
                         }

@@ -880,4 +880,10 @@
     <string name="sharing_default_loading">Einstellung wird geladen…</string>
     <string name="sharing_default_retry">Einstellung erneut laden</string>
     <string name="wizard_friends_title">Freunde</string>
+    <string name="start_login_benefit">Mit Konto werden deine Matches in der Cloud gesichert, und du kannst Freunde hinzufügen und Matches mit ihnen teilen.</string>
+    <string name="start_login_local">Zählen geht auch ganz ohne Konto – deine Matches bleiben dann auf deinen Geräten.</string>
+    <string name="start_login_create">Konto anlegen</string>
+    <string name="start_login_sign_in">Anmelden</string>
+    <string name="start_login_skip">Ohne Konto weiter zählen</string>
+    <string name="start_login_later">Anmelden oder ein Konto anlegen kannst du später jederzeit im Profil.</string>
 </resources>
