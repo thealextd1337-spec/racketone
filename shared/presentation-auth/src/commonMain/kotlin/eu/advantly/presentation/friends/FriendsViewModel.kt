@@ -9,6 +9,8 @@ import eu.advantly.cloud.sync.FoundProfile
 import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
 import eu.advantly.cloud.sync.PulledFriendship
+import eu.advantly.cloud.sync.PulledMatch
+import eu.advantly.cloud.sync.SharedMatchesPort
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhonePullState
 import kotlinx.coroutines.CancellationException
@@ -42,6 +44,12 @@ data class FriendsState(
     val requestResult: FriendRequestResult? = null,
     val busy: Boolean = false,
     val error: String? = null,
+    /** Geteilte Matches von Freunden (P2-E), neueste zuerst; nur was der Server als `feed` freigibt. */
+    val feed: List<FeedMatch> = emptyList(),
+    /** `share_matches_default`; `null` = noch nicht geladen. */
+    val shareDefault: Boolean? = null,
+    /** Eigene Sicht auf das gerade geöffnete Match ([FriendsViewModel.openMatch]). */
+    val match: MatchSharing? = null,
 )
 
 /**
@@ -56,6 +64,9 @@ class FriendsViewModel(
     private val localFriendships: (profileId: String) -> List<PulledFriendship>,
     private val pull: PhonePullPort? = null,
     parentScope: CoroutineScope,
+    /** Geteilte Matches (P2-E); ohne Port bleiben Feed, Teilen und „War ich nicht“ aus. */
+    private val matches: SharedMatchesPort? = null,
+    private val local: SharedMatchesLocal? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -67,6 +78,11 @@ class FriendsViewModel(
     /** Bestätigte, noch nicht gezogene Änderungen je Gegenüber; `null` = entfernt. */
     private val overlay = mutableMapOf<String, PulledFriendship?>()
     private var pullAgain = false
+
+    /** Geöffnetes Match (nur die ID, keine Kontodaten); bestätigte Freigaben und verlassene Matches bis zum Pull. */
+    private var openedMatch: String? = null
+    private val shareOverlay = mutableMapOf<String, Boolean>()
+    private val goneMatches = mutableSetOf<String>()
 
     private class Stale : Exception()
 
@@ -157,6 +173,43 @@ class FriendsViewModel(
 
     fun showBlocked() = run(::loadBlocked)
 
+    /** Match-Detail geöffnet ([matchId]) bzw. geschlossen (`null`): eigene Freigabe aus dem Pull-Bestand lesen. */
+    fun openMatch(matchId: String?) {
+        openedMatch = matchId
+        reloadLocal()
+    }
+
+    /** „Mit Freunden teilen“ für das geöffnete Match; nur mit eigenem verknüpftem Platz in der Cloud. */
+    fun setShared(share: Boolean) =
+        matchAction({ it.shared != null }, { port, id -> port.setMyParticipation(id, shareWithFriends = share) }) {
+            shareOverlay[it] = share
+        }
+
+    /** „Aus meinem Verlauf ausblenden“: nur meine Sicht, die anderen Teilnehmer behalten das Match. */
+    fun hideMatch() = matchAction({ it.canHide }, { port, id -> port.setMyParticipation(id, hidden = true) }) { goneMatches += it }
+
+    /** „War ich nicht“: löst die Verknüpfung durch einen Freund und sperrt sie für dieses Match. */
+    fun rejectParticipation() = matchAction({ it.canReject }, { port, id -> port.rejectMatchParticipation(id) }) { goneMatches += it }
+
+    fun loadShareDefault() {
+        val port = matches ?: return
+        run { session ->
+            val share = port.shareMatchesDefault()
+            current(session)
+            show { copy(shareDefault = share) }
+        }
+    }
+
+    /** Standard für eigene neue Matches; gilt beim Hochladen eines Matches, bestehende bleiben unverändert. */
+    fun setShareDefault(share: Boolean) {
+        val port = matches ?: return
+        run { session ->
+            port.setShareMatchesDefault(share)
+            current(session)
+            show { copy(shareDefault = share) }
+        }
+    }
+
     fun dismissError() {
         mutable.value = mutable.value.copy(error = null)
     }
@@ -178,6 +231,8 @@ class FriendsViewModel(
             action?.cancel()
             action = null
             overlay.clear()
+            shareOverlay.clear()
+            goneMatches.clear()
             pullAgain = false
             mutable.value = FriendsState(access = access)
         } else {
@@ -196,7 +251,11 @@ class FriendsViewModel(
             return
         }
         // Vollständige Metadaten enthalten alle Freundschaften: auch bei BLOCKED/FAILED durch andere Rückstände.
-        if (state.metadataComplete) overlay.clear()
+        if (state.metadataComplete) {
+            overlay.clear()
+            shareOverlay.clear()
+            goneMatches.clear()
+        }
         reloadLocal()
         // Gerätebindung entsteht im Pull: einen fehlenden (z. B. daran gescheiterten) Code jetzt nachladen.
         if (state.metadataComplete && mutable.value.friendCode == null && action?.isActive != true) {
@@ -229,12 +288,48 @@ class FriendsViewModel(
                 .sortedWith(compareBy({ it.alias.isNullOrBlank() }, { it.alias.orEmpty().lowercase() }, { it.profileId }))
 
         fun of(predicate: (PulledFriendship) -> Boolean) = merged.filter(predicate).map { FriendEntry(it.profileId, it.alias) }
+        val profile = shown?.profileId?.takeIf { mutable.value.access == FriendsAccess.READY }
         mutable.value =
             mutable.value.copy(
                 friends = of { it.status == "accepted" },
                 incoming = of { it.status == "pending" && !it.outgoing },
                 outgoing = of { it.status == "pending" && it.outgoing },
+                feed = profile?.let { local?.feed(it)?.map(PulledMatch::toFeed) }.orEmpty(),
+                match = profile?.let { sharing(it) },
             )
+    }
+
+    private fun sharing(profileId: String): MatchSharing? {
+        val id = openedMatch ?: return null
+        val source = local ?: return null
+        if (id in goneMatches) return MatchSharing(id, gone = true)
+        val mine = source.match(profileId, id)?.participants?.firstOrNull { it.profileId == profileId }
+        return MatchSharing(
+            id,
+            shared = mine?.let { shareOverlay[id] ?: (it.shareWithFriends == true) },
+            canReject = mine?.linkStatus == "linked",
+            canHide = mine?.linkStatus in setOf("linked", "assigned", "confirmed"),
+            linkNotes = source.linkNotes(profileId, id),
+        )
+    }
+
+    /** Erst nach [current] die Überlagerung setzen: eine verspätete Antwort darf kein anderes Konto verändern. */
+    private fun matchAction(
+        allowed: (MatchSharing) -> Boolean,
+        call: suspend (SharedMatchesPort, String) -> Unit,
+        confirmed: (String) -> Unit,
+    ) {
+        val port = matches ?: return
+        val id =
+            mutable.value.match
+                ?.takeIf(allowed)
+                ?.matchId ?: return
+        run { session ->
+            call(port, id)
+            current(session)
+            confirmed(id)
+            afterChange()
+        }
     }
 
     private fun changed(
@@ -242,6 +337,11 @@ class FriendsViewModel(
         value: PulledFriendship?,
     ) {
         overlay[profileId] = value
+        afterChange()
+    }
+
+    /** Bestätigte Änderung anzeigen und einen Pull anstoßen, der sie ablöst (ein laufender begann davor). */
+    private fun afterChange() {
         reloadLocal()
         val port = pull ?: return
         if (port.state.value.busy) pullAgain = true else port.pullNow()
