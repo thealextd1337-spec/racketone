@@ -17,7 +17,7 @@ class ScorerHandoverTest {
 
     private fun watchScoring(): Cluster {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES, scorer = ScorerChoice.Device(DeviceId("watch")))
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.Device(DeviceId("watch")))
         cluster.settle()
         return cluster
     }
@@ -91,7 +91,7 @@ class ScorerHandoverTest {
     @Test
     fun simultaneousTakeoversConvergeToOneScorer() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch1" to PeerKind.WATCH, "watch2" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         assertTrue(cluster["watch1"].session.takeOverScoring())
         assertTrue(cluster["watch2"].session.takeOverScoring())

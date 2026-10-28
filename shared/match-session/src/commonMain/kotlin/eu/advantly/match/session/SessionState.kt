@@ -79,7 +79,7 @@ data class SessionState(
  * @property conflicts aktive Widersprüche (nur noch innerhalb eines Geräts möglich, 01 §4.4)
  * @property absorbedTaps als Doppel-Tap zusammengeführte Punkte
  * @property lastPoint zuletzt wirksam gezählter Ballwechsel – Ziel der Aufschlag-Leiste ([MatchSession.setServeInfo])
- * @property serveInfoEnabled Aufschlag-Info erfassbar: Tennis/Padel und Match-Option „Aufschlag-Statistik erfassen“
+ * @property serveInfoEnabled Aufschlag-Info erfassbar: Tennis/Padel und Match-Option „Aufschläge“ ≠ „Nein“
  * @property canRemovePoint je Seite: dieses Gerät zählt und es gibt einen wirksamen Punkt der Seite
  *   ([MatchSession.removeLastPointOf])
  * @property nextSetOptions bei `AWAITING_DECISION` die wählbaren Satzarten für [MatchSession.startNextSet], sonst leer

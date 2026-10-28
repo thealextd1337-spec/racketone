@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import eu.advantly.core.model.Discipline
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.stats.MatchStats
@@ -45,12 +46,13 @@ internal fun ServeStatistics(
                 teamName(setup, side),
                 stats.serve[side],
                 "serve_team_${side.name}",
+                stats.serveTracking,
                 showServicePoints = setup.format.discipline == Discipline.DOUBLES,
             )
         }
         if (setup.format.discipline == Discipline.DOUBLES) {
             stats.servers.forEach { server ->
-                ServeStatsGroup(playerName(setup, server.player), server.stats, "serve_player_${server.player.value}")
+                ServeStatsGroup(playerName(setup, server.player), server.stats, "serve_player_${server.player.value}", stats.serveTracking)
             }
         }
     }
@@ -61,17 +63,23 @@ private fun ServeStatsGroup(
     name: String,
     stats: ServeStats,
     tag: String,
+    tracking: ServeTracking,
     showServicePoints: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth().testTag(tag), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Text(name, style = AdvantlyTheme.typography.label, color = AdvantlyTheme.colors.text)
         if (showServicePoints) ServeStatRow(Res.string.result_stat_serve_points, ratioText(stats.servicePoints))
         ServeStatRow(Res.string.stats_service_games, ratioText(stats.serviceGames))
-        ServeStatRow(Res.string.stats_first_serve_pct, ratioText(stats.firstServeIn))
-        ServeStatRow(Res.string.stats_first_serve_won, ratioText(stats.firstServeWon))
-        ServeStatRow(Res.string.stats_second_serve_won, ratioText(stats.secondServeWon))
-        val faults = if (stats.recorded == 0) stringResource(Res.string.stats_not_recorded) else stats.doubleFaults.toString()
-        ServeStatRow(Res.string.stats_double_faults, faults)
+        // „Nur Doppelfehler“: 1./2. Aufschlag unbekannt; „Nein“: keine Werte aus Aufschlag-Info
+        if (tracking == ServeTracking.FULL) {
+            ServeStatRow(Res.string.stats_first_serve_pct, ratioText(stats.firstServeIn))
+            ServeStatRow(Res.string.stats_first_serve_won, ratioText(stats.firstServeWon))
+            ServeStatRow(Res.string.stats_second_serve_won, ratioText(stats.secondServeWon))
+        }
+        if (tracking != ServeTracking.OFF) {
+            val faults = if (stats.recorded == 0) stringResource(Res.string.stats_not_recorded) else stats.doubleFaults.toString()
+            ServeStatRow(Res.string.stats_double_faults, faults)
+        }
     }
 }
 

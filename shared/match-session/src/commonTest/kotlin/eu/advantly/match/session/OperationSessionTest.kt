@@ -5,9 +5,11 @@ import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.ContinueDecision
 import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
@@ -341,7 +343,7 @@ class OperationSessionTest {
     @Test
     fun serveInfoOnlyForTennisPadelWithOption() {
         val (_, phone, _) = cluster()
-        phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, MatchMeta(serveStats = false))
+        phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, MatchMeta(serveTracking = ServeTracking.OFF))
         phone.session.recordPoint(Side.A)
         assertFalse(phone.match.serveInfoEnabled)
         assertFalse(phone.session.setServeInfo(assertNotNull(phone.match.lastPoint).id, ServeOutcome.FIRST_SERVE_IN))
@@ -349,6 +351,71 @@ class OperationSessionTest {
         phone.session.recordPoint(Side.A)
         assertFalse(phone.match.serveInfoEnabled)
         assertFalse(phone.session.setServeInfo(assertNotNull(phone.match.lastPoint).id, ServeOutcome.FIRST_SERVE_IN))
+    }
+
+    private fun Device.serves() = ScoringEngine.pointHistory(data.events.scoreEvents(match.id)).map { it.serve }
+
+    private fun Device.detailEvents() = data.events.scoreEvents(match.id).count { it.payload is PointDetailSet }
+
+    @Test
+    fun fullModeRecordsFirstServeWithoutInputOnNextPointAndTimeout() {
+        val (cluster, phone, watch) = cluster()
+        phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        phone.session.recordPoint(Side.A)
+        assertNull(phone.match.lastPoint?.serve, "solange die Leiste steht, noch offen")
+        phone.session.recordPoint(Side.B) // nächster Punkt ohne Eingabe → 1. Aufschlag
+        val second = assertNotNull(phone.match.lastPoint)
+        assertTrue(phone.session.setServeInfo(second.id, ServeOutcome.SECOND_SERVE_IN))
+        phone.session.recordPoint(Side.A) // Eingabe bleibt
+        val third = assertNotNull(phone.match.lastPoint)
+        assertTrue(phone.session.settleServeInfo(third.id), "Anzeigezeit abgelaufen")
+        assertTrue(phone.session.settleServeInfo(third.id), "zweites Ende ist ein No-op")
+        assertEquals(listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN, ServeOutcome.FIRST_SERVE_IN), phone.serves())
+        assertEquals(3, phone.detailEvents(), "je Punkt genau ein PointDetailSet, nie doppelt")
+        // Undo nimmt den Punkt zurück, nicht die Aufschlag-Info des vorigen
+        assertTrue(phone.session.undo())
+        assertEquals(second.id, phone.match.lastPoint?.id)
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, phone.match.lastPoint?.serve)
+        assertTrue(phone.session.redo())
+        assertEquals(ServeOutcome.FIRST_SERVE_IN, phone.match.lastPoint?.serve)
+        assertFalse(watch.session.settleServeInfo(third.id), "nur der Zähler")
+        cluster.settle()
+        assertEquals(phone.serves(), watch.serves())
+        cluster.assertConverged()
+    }
+
+    @Test
+    fun fullModeSettlesTheMatchPointAndTheLastPointOnEarlyEnd() {
+        val (_, phone, _) = cluster()
+        phone.session.create(Presets.TENNIS_TIEBREAK_ONLY_7.format(), SINGLES)
+        repeat(7) { phone.session.recordPoint(Side.A) }
+        assertEquals(MatchStatus.FINISHED, phone.score.status)
+        assertEquals(List(7) { ServeOutcome.FIRST_SERVE_IN }, phone.serves(), "auch der Punkt, der das Match beendet")
+        phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        phone.session.recordPoint(Side.B)
+        assertTrue(phone.session.endMatch(EndReason.STOPPED))
+        assertEquals(listOf(ServeOutcome.FIRST_SERVE_IN), phone.serves())
+    }
+
+    @Test
+    fun doubleFaultsOnlyModeOffersDoubleFaultsAndSetsNothingAutomatically() {
+        val (_, phone, _) = cluster()
+        phone.session.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, MatchMeta(serveTracking = ServeTracking.DOUBLE_FAULTS_ONLY))
+        assertTrue(phone.match.serveInfoEnabled)
+        phone.session.recordPoint(Side.A)
+        assertFalse(
+            phone.session.setServeInfo(assertNotNull(phone.match.lastPoint).id, ServeOutcome.DOUBLE_FAULT),
+            "Punkt des Aufschlägers",
+        )
+        phone.session.recordPoint(Side.B)
+        val returned = assertNotNull(phone.match.lastPoint)
+        assertTrue(returned.doubleFaultAllowed)
+        assertTrue(phone.session.setServeInfo(returned.id, ServeOutcome.DOUBLE_FAULT))
+        phone.session.recordPoint(Side.B)
+        assertTrue(phone.session.settleServeInfo(assertNotNull(phone.match.lastPoint).id))
+        assertTrue(phone.session.endMatch(EndReason.STOPPED))
+        assertEquals(listOf(null, ServeOutcome.DOUBLE_FAULT, null), phone.serves())
+        assertEquals(1, phone.detailEvents())
     }
 
     @Test

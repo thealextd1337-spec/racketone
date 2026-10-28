@@ -4,6 +4,7 @@ import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.LineupValidator
@@ -187,8 +188,8 @@ class SetupCatalogTest {
     @Test
     fun serveStatsMetaOnlyForTennisAndPadel() {
         assertTrue(SetupCatalog.meta(Sport.TENNIS).serveStats)
-        assertFalse(SetupCatalog.meta(Sport.PADEL, serveStats = false).serveStats)
-        assertTrue("ohne Wirkung bei anderen Sportarten", SetupCatalog.meta(Sport.BADMINTON, serveStats = false).serveStats)
+        assertFalse(SetupCatalog.meta(Sport.PADEL, serveTracking = ServeTracking.OFF).serveStats)
+        assertTrue("ohne Wirkung bei anderen Sportarten", SetupCatalog.meta(Sport.BADMINTON, serveTracking = ServeTracking.OFF).serveStats)
         assertTrue(SetupCatalog.serveStatsAvailable(Sport.TENNIS))
         assertFalse(SetupCatalog.serveStatsAvailable(Sport.PICKLEBALL))
     }

@@ -149,7 +149,7 @@ class WriteWindowBacklogTest {
     @Test
     fun ownPointsInTheWriteWindowCountAsPendingAndReachTheWatch() {
         pair.activate("alice")
-        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        val match = pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, NO_SERVE_TRACKING)
         pair.settle()
         val upload = pair.phoneData.cloudUploads.capture(pair.token!!, 100)
         pair.phoneData.cloudUploads.acknowledge(upload, upload.events.mapTo(mutableSetOf()) { it.id }, metadata = upload.metadataRevisions)

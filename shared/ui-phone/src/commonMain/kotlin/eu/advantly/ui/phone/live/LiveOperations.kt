@@ -182,7 +182,9 @@ internal fun ServeInfoBar(
                             },
                         ),
                     selected = point.serve == option,
-                    onClick = { controller.setServeInfo(point.id, option.takeUnless { it == point.serve }) },
+                    onClick = {
+                        controller.setServeInfo(point.id, option.takeUnless { it == point.serve } ?: LiveOperationRules.autoServe(snapshot))
+                    },
                     tag = "serve_${option.name}",
                     modifier = if (option == options.last()) Modifier.bringIntoViewRequester(lastOption) else Modifier,
                     role = Role.RadioButton,

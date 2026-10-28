@@ -23,10 +23,12 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.presentation.live.HapticCue
@@ -258,47 +260,71 @@ class LiveOperationsUiTest {
         }
 
     @Test
-    fun serveBarOnlyOffersValidOutcomesAndAllowsChangingAndClearing() =
+    fun serveBarOffersSecondServeAndDoubleFaultAndFallsBackToTheFirstServe() =
         runComposeUiTest {
             val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format()) }
             show(model)
+
+            fun serve() =
+                runOnIdle {
+                    model.live.active.value!!
+                        .lastPoint!!
+                        .serve
+                }
             onNodeWithTag("panel_us").performClick()
             onNodeWithTag("serve_DOUBLE_FAULT").assertDoesNotExist()
-            onNodeWithTag("serve_FIRST_SERVE_IN").performScrollTo().performClick().assertIsSelected()
-            assertEquals(Role.RadioButton, onNodeWithTag("serve_FIRST_SERVE_IN").fetchSemanticsNode().config[SemanticsProperties.Role])
+            // Modus „Ja“: der 1. Aufschlag ist der Standard ohne eigenen Knopf
+            onNodeWithTag("serve_FIRST_SERVE_IN").assertDoesNotExist()
+            onNodeWithTag("serve_SECOND_SERVE_IN").performScrollTo().performClick().assertIsSelected()
+            assertEquals(Role.RadioButton, onNodeWithTag("serve_SECOND_SERVE_IN").fetchSemanticsNode().config[SemanticsProperties.Role])
             assertEquals(
                 LiveRegionMode.Polite,
                 onNodeWithTag("serve_info_title", useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.LiveRegion],
             )
-            runOnIdle {
-                assertEquals(
-                    ServeOutcome.FIRST_SERVE_IN,
-                    model.live.active.value!!
-                        .lastPoint!!
-                        .serve,
-                )
-            }
-            onNodeWithTag("serve_SECOND_SERVE_IN").performScrollTo().performClick().assertIsSelected()
+            assertEquals(ServeOutcome.SECOND_SERVE_IN, serve())
             onNodeWithTag("serve_SECOND_SERVE_IN").performClick()
-            runOnIdle {
-                assertNull(
-                    model.live.active.value!!
-                        .lastPoint!!
-                        .serve,
-                )
-            }
+            assertEquals(ServeOutcome.FIRST_SERVE_IN, serve(), "abgewählt = 1. Aufschlag")
             runOnIdle { model.controller.debounceEnabled = false }
             onNodeWithTag("panel_them").performClick()
             onNodeWithTag("serve_DOUBLE_FAULT").performScrollTo().performClick().assertIsSelected()
-            runOnIdle {
-                assertEquals(
-                    ServeOutcome.DOUBLE_FAULT,
-                    model.live.active.value!!
-                        .lastPoint!!
-                        .serve,
-                )
-            }
+            assertEquals(ServeOutcome.DOUBLE_FAULT, serve())
         }
+
+    @Test
+    fun serveBarTimeoutRecordsTheFirstServe() = checkServeTimeout(ServeTracking.FULL, ServeOutcome.FIRST_SERVE_IN)
+
+    @Test
+    fun doubleFaultsOnlyTimeoutRecordsNothing() = checkServeTimeout(ServeTracking.DOUBLE_FAULTS_ONLY, null)
+
+    private fun checkServeTimeout(
+        tracking: ServeTracking,
+        expected: ServeOutcome?,
+    ) = runComposeUiTest {
+        val model = testModel().apply { startWith(Presets.TENNIS_SINGLES_BO3.format(), meta = MatchMeta(serveTracking = tracking)) }
+        show(model)
+        onNodeWithTag("panel_us").performClick()
+        if (tracking == ServeTracking.DOUBLE_FAULTS_ONLY) onNodeWithTag("serve_info").assertDoesNotExist()
+        runOnIdle { model.controller.debounceEnabled = false }
+        onNodeWithTag("panel_them").performClick() // Punkt der Rückschlagseite: Leiste in beiden Modi
+        onNodeWithTag("serve_info").assertExists()
+        onNodeWithTag("serve_FIRST_SERVE_IN").assertDoesNotExist()
+        mainClock.advanceTimeBy(10_100)
+        waitForIdle()
+        onNodeWithTag("serve_info").assertDoesNotExist()
+        val points =
+            runOnIdle {
+                ScoringEngine
+                    .pointHistory(
+                        model.history
+                            .record(
+                                model.live.active.value!!
+                                    .matchId,
+                            )!!
+                            .events,
+                    ).map { it.serve }
+            }
+        assertEquals(listOf(expected, expected), points, "$tracking: ohne Eingabe")
+    }
 
     @Test
     fun expiredAndSupersededServePromptsCannotEditTheNextPoint() =
@@ -322,7 +348,13 @@ class LiveOperationsUiTest {
     @Test
     fun disabledServeTrackingShowsNoBar() =
         runComposeUiTest {
-            val model = testModel().apply { startWith(Presets.PADEL_GOLDEN_BO3.format(), meta = MatchMeta(serveStats = false)) }
+            val model =
+                testModel().apply {
+                    startWith(
+                        Presets.PADEL_GOLDEN_BO3.format(),
+                        meta = MatchMeta(serveTracking = ServeTracking.OFF),
+                    )
+                }
             show(model)
             onNodeWithTag("panel_us").performClick()
             onNodeWithTag("serve_info").assertDoesNotExist()
@@ -400,7 +432,7 @@ class LiveOperationsUiTest {
             mainClock.advanceTimeBy(11_000)
             waitForIdle()
             onNodeWithTag("serve_info").assertExists()
-            onNodeWithTag("serve_FIRST_SERVE_IN").performClick()
+            onNodeWithTag("serve_SECOND_SERVE_IN").performClick()
             onNodeWithTag("decision_yes").assertExists()
             onNodeWithTag("decision_match_tiebreak").assertExists()
             runOnIdle { assertNotNull(model.controller.servePromptId) }
@@ -478,12 +510,13 @@ class LiveOperationsUiTest {
             model.wizard.next()
             setContent { Box(Modifier.size(412.dp, 892.dp)) { AdvantlyApp(model = model, darkTheme = true) } }
             onNodeWithTag("games_0").assertExists()
-            onNodeWithTag("advanced_content").assertDoesNotExist()
+            // „Erweitert“ ist ohne Antippen aufgeklappt (0.3.0)
+            onNodeWithTag("advanced_content").assertExists()
             onNodeWithTag("match_kind_TIEBREAK_7").performScrollTo().performClick()
             onNodeWithTag("games_0").assertDoesNotExist()
             onNodeWithTag("sets_0").assertDoesNotExist()
-            onNodeWithTag("advanced_toggle").performScrollTo().performClick()
-            onNodeWithTag("toggle_serve_stats").performScrollTo().performClick()
+            // „Aufschläge“: Ja · Nur Doppelfehler · Nein
+            onNodeWithTag("serve_tracking_2").performScrollTo().performClick()
             runOnIdle {
                 assertEquals(TennisMatchChoice.TIEBREAK_7, model.wizard.state.value.input.tennisMatch)
                 assertFalse(
@@ -685,7 +718,7 @@ class LiveOperationsUiTest {
     fun doublesWithoutServeStatsKeepOperationsSpaceAcrossChoiceWindows() {
         for (format in listOf(Presets.TENNIS_BO3_MTB10.format(Discipline.DOUBLES), Presets.PADEL_GOLDEN_BO3.format())) {
             runComposeUiTest {
-                val model = testModel().apply { startWith(format, meta = MatchMeta(serveStats = false)) }
+                val model = testModel().apply { startWith(format, meta = MatchMeta(serveTracking = ServeTracking.OFF)) }
                 show(model)
                 val slot = onNodeWithTag("live_operations_slot").getBoundsInRoot()
                 val us = onNodeWithTag("panel_us").getBoundsInRoot()

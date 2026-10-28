@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
@@ -103,20 +104,22 @@ fun ActionStripContent(
     val density = LocalDensity.current
     val strip = with(density) { modifier.size(geometry.width.toDp(), geometry.visualHeight.toDp()) }
     when (action) {
-        is StripAction.Serve -> ServeBar(action.bar, geometry, actions, strip)
+        is StripAction.Serve -> ServeBar(action.bar, live.scoreCall ?: LiveModel.setsText(live.sets), geometry, actions, strip)
         StripAction.UndoRemoval -> UndoRemovalStrip(actions, strip)
         StripAction.ChooseServer -> ChooseServerStrip(live, actions, strip)
     }
 }
 
 /**
- * „1. Aufschlag · 2. Aufschlag · Doppelfehler“ – ausgeschriebene Labels in großen Segmenten, gewählter Wert hell
- * hinterlegt. Lage und Breite jedes Segments kommen aus [ActionStrip.segmentRanges] – dieselben Bereiche nutzt die
- * Trefferprüfung ([onStripTap]), Darstellung und Tap passen also exakt zusammen.
+ * Satzstand [sets] links, dann „2. Aufschlag · Doppelfehler“ (Modus „Ja“) bzw. „Doppelfehler“ – ausgeschriebene Labels
+ * in großen Segmenten, gewählter Wert hell hinterlegt. Die Leiste liegt über dem Mittelband und zeigt dessen Sätze und
+ * Games deshalb selbst (Spielstand bleibt sichtbar). Lage und Breite jedes Felds kommen aus [ActionStrip.segmentRanges] –
+ * dieselben Bereiche nutzt die Trefferprüfung ([onStripTap]), Darstellung und Tap passen also exakt zusammen.
  */
 @Composable
 private fun ServeBar(
     bar: ServeBarUi,
+    sets: String,
     geometry: StripGeometry,
     actions: OperationActions,
     modifier: Modifier,
@@ -124,20 +127,33 @@ private fun ServeBar(
     val density = LocalDensity.current
     val ranges = ActionStrip.segmentRanges(geometry, OperationRules.serveWeights(bar))
     val countdown = rememberServeCountdown(bar)
+
+    fun Modifier.at(range: ClosedFloatingPointRange<Float>) =
+        with(density) { offset(x = (range.start - geometry.left).toDp()).width((range.endInclusive - range.start).toDp()) }
     // schwarz hinterlegt: darunter liegende Namenszeilen scheinen nicht durch die Lücken
     Box(modifier = modifier.background(Color.Black, SEGMENT_SHAPE)) {
-        bar.options.zip(ranges).forEach { (outcome, range) ->
+        ranges.firstOrNull()?.let { range ->
+            Box(Modifier.at(range).fillMaxHeight().padding(horizontal = 2.dp), contentAlignment = Alignment.Center) {
+                val minSize = with(density) { ServeLabel.MIN_SP.dp.toSp() }
+                BasicText(
+                    sets,
+                    modifier = Modifier.testTag(LiveTags.SETS),
+                    style =
+                        LocalTextStyle.current.merge(
+                            TextStyle(color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 1.1.em),
+                        ),
+                    maxLines = 2,
+                    autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = ServeLabel.MAX_SP.sp, stepSize = 0.25.sp),
+                )
+            }
+        }
+        bar.options.zip(ranges.drop(1)).forEach { (outcome, range) ->
             ServeSegment(
                 outcome = outcome,
                 selected = outcome == bar.selected,
                 countdown = countdown,
                 modifier =
-                    with(density) {
-                        Modifier
-                            .offset(x = (range.start - geometry.left).toDp())
-                            .width((range.endInclusive - range.start).toDp())
-                            .fillMaxHeight()
-                    }.semantics(mergeDescendants = true) {
+                    Modifier.at(range).fillMaxHeight().semantics(mergeDescendants = true) {
                         role = Role.Button
                         onClick { actions.setServe(outcome) }
                     },

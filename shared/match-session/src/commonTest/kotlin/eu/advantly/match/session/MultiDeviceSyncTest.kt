@@ -39,7 +39,7 @@ class MultiDeviceSyncTest {
                 .kind,
         )
 
-        val id = phone.session.create(format, SINGLES, scorer = watchScores)
+        val id = phone.session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = watchScores)
         cluster.settle()
         assertEquals(id, watch.match.id, "Uhr folgt dem neuen Match automatisch")
         assertTrue(watch.match.isScorer)
@@ -66,7 +66,7 @@ class MultiDeviceSyncTest {
     @Test
     fun lossDuplicatesAndRetriesConverge() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES, scorer = watchScores)
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = watchScores)
         cluster.settle()
         cluster.network.lossRate = 0.3
         cluster.network.duplicateRate = 0.3
@@ -92,7 +92,7 @@ class MultiDeviceSyncTest {
         val phoneData = testLocalData()
         val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE), cluster.clock)
         phone.start()
-        val id = phone.create(format, SINGLES)
+        val id = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         repeat(12) { phone.recordPoint(if (it % 3 == 0) Side.B else Side.A) }
         phone.undo()
         phone.correct(Correction.initialServer(SINGLES.b.single()))
@@ -117,7 +117,7 @@ class MultiDeviceSyncTest {
     @Test
     fun offlineScorerCatchesUpInOneBatch() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES, scorer = watchScores)
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = watchScores)
         cluster.settle()
         cluster.offline("watch")
         cluster.settle(30_000)
@@ -147,7 +147,7 @@ class MultiDeviceSyncTest {
         // Uhren sprechen nie direkt miteinander (WatchConnectivity/Data Layer: nur Uhr ↔ Handy)
         cluster.network.dropFilter = { from, to, _ -> setOf(from, to) != setOf("watch1", "watch2") }
         cluster.offline("watch2")
-        cluster["phone"].session.create(format, SINGLES, scorer = ScorerChoice.Device(DeviceId("watch1")))
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.Device(DeviceId("watch1")))
         cluster.settle()
         repeat(6) {
             cluster["watch1"].session.recordPoint(Side.A)
@@ -170,7 +170,7 @@ class MultiDeviceSyncTest {
     @Test
     fun periodicAntiEntropyRepairsSilentLoss() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         cluster.network.lossRate = 1.0
         repeat(3) { cluster["phone"].session.recordPoint(Side.A) }
@@ -227,7 +227,7 @@ class MultiDeviceSyncTest {
         // Events im alten Format werden nicht übernommen
         val phoneData = testLocalData()
         val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("old-phone"), PeerKind.PHONE), cluster.clock)
-        val id = phone.create(format, SINGLES)
+        val id = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         val v1 = SyncCodec.encodeToString(Events(id, phoneData.events.scoreEvents(id))).replace("\"v\":3", "\"v\":2")
         old.send("watch", v1.encodeToByteArray())
         cluster.settle()
@@ -262,7 +262,7 @@ class MultiDeviceSyncTest {
 
         val phoneData = testLocalData()
         val phone = MatchSession(phoneData, null, cluster.scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE), cluster.clock)
-        val id = phone.create(format, SINGLES)
+        val id = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         lab.send("watch", SyncCodec.encode(Events(id, phoneData.events.scoreEvents(id))))
         cluster.settle()
         assertNull(

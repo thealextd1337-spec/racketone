@@ -395,7 +395,10 @@
     <string name="serve_second_in">2. Aufschlag</string>
     <string name="serve_double_fault">Doppelfehler</string>
     <string name="serve_point_title">Letzter Punkt · Aufschlag von %1$s</string>
-    <string name="setup_serve_stats">Aufschlag-Statistik erfassen</string>
+    <string name="setup_serve_tracking">Aufschläge</string>
+    <string name="setup_serve_full">Ja</string>
+    <string name="setup_serve_double_faults_only">Nur Doppelfehler</string>
+    <string name="setup_serve_off">Nein</string>
     <string name="setup_match_kind">Matchformat</string>
     <string name="setup_tiebreak_only_7">Nur Tiebreak (bis 7)</string>
     <string name="setup_tiebreak_only_10">Nur Champions-Tiebreak (bis 10)</string>
@@ -551,7 +554,7 @@
     <string name="help_deciding">Normal: Ihr spielt einen vollen Entscheidungssatz. Champions-Tiebreak (auch Super-Tiebreak; im Padel Super-Tiebreak): bis 10 mit zwei Punkten Vorsprung, ersetzt den Entscheidungssatz. Vorteilssatz: zwei Games Vorsprung, kein Tiebreak. Tiebreak bis 10: voller Entscheidungssatz mit Tiebreak bis 10 beim eingestellten Gleichstand.</string>
     <string name="help_deciding_padel">Normal: Ihr spielt einen vollen 3. Satz mit Tiebreak beim Gleichstand. Super-Tiebreak: bis 10 mit zwei Punkten Vorsprung, ersetzt den 3. Satz. Ohne Tiebreak: der 3. Satz läuft bis zwei Games Vorsprung.</string>
     <string name="help_tiebreak">Ein Tiebreak beginnt normalerweise bei 6:6 und geht bis 7 mit zwei Punkten Vorsprung. Bei kürzeren Sätzen bestimmt die Gamezahl den Gleichstand. Ein Game früher bedeutet z. B. 3:3 im Vier-Game-Satz. Ohne Tiebreak spielt ihr bis zu zwei Games Vorsprung. Die Wahl des Entscheidungssatzes kann diese Regel ersetzen.</string>
-    <string name="help_serve_stats">Erfasst je Punkt ersten Aufschlag, zweiten Aufschlag oder Doppelfehler. So entstehen Aufschlag-Statistiken im Ergebnis; die Zählweise bleibt gleich. Punkte können auch ohne Aufschlagdetails bleiben.</string>
+    <string name="help_serve_stats">Ja: Nach jedem Punkt 2. Aufschlag oder Doppelfehler antippen; ohne Eingabe zählt der Punkt als 1. Aufschlag. Nur Doppelfehler: Doppelfehler antippen, wenn die Rückschlagseite den Punkt gewinnt; 1. und 2. Aufschlag bleiben unbekannt. Nein: keine Aufschlagdetails. Die Zählweise bleibt immer gleich.</string>
     <string name="help_discipline">Einzel: ein Spieler pro Seite. Doppel: zwei pro Seite; die App führt die Aufschlagreihenfolge mit. Mixed kennzeichnet ein Doppel und ändert die Zählweise nicht.</string>
     <string name="help_badminton">Rally Point: Jeder Ballwechsel bringt einen Punkt, unabhängig vom Aufschlag. Bis 21: zwei Punkte Vorsprung, höchstens bis 30. Bis 15: zwei Punkte Vorsprung, höchstens bis 21. Die kurze 11-Punkte-Alternative hat keine Verlängerung. Das gewählte Format legt auch Pause und Seitenwechsel fest.</string>
     <string name="help_table_tennis">Jeder Ballwechsel bringt einen Punkt. Ein Satz geht bis 11 mit zwei Punkten Vorsprung, ohne Obergrenze. Der Aufschlag wechselt alle zwei Punkte, ab 10:10 nach jedem Punkt. Die Freizeitoption bis 21 wechselt alle fünf Punkte, ab 20:20 nach jedem Punkt. Wählt Best of oder Offen, um nach jedem Satz weiterzuentscheiden.</string>

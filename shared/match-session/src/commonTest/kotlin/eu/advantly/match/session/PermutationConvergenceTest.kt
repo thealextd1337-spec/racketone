@@ -51,7 +51,7 @@ class PermutationConvergenceTest {
         // Uhr zählt; Handy übernimmt, während die Uhr offline weiterzählt
         val watch = WireNode("watch", 1, PeerKind.WATCH)
         val phone = WireNode("phone", 2)
-        val id = watch.session.create(format, SINGLES)
+        val id = watch.session.create(format, SINGLES, NO_SERVE_TRACKING)
         phone.link.deliver(Events(id, watch.events()))
         watch.points(Side.A, 2)
         phone.link.deliver(Events(id, watch.events()))
@@ -75,7 +75,7 @@ class PermutationConvergenceTest {
         val phone = WireNode("phone", 3)
         val watch1 = WireNode("watch1", 4, PeerKind.WATCH)
         val watch2 = WireNode("watch2", 5, PeerKind.WATCH)
-        val id = phone.session.create(format, SINGLES)
+        val id = phone.session.create(format, SINGLES, NO_SERVE_TRACKING)
         val genesis = phone.events()
         watch1.link.deliver(Events(id, genesis))
         watch2.link.deliver(Events(id, genesis))
@@ -97,7 +97,7 @@ class PermutationConvergenceTest {
     @Test
     fun followUpMatchIsFollowedInEveryOrder() {
         val watch = WireNode("watch", 6, PeerKind.WATCH)
-        val old = watch.session.create(format, SINGLES)
+        val old = watch.session.create(format, SINGLES, NO_SERVE_TRACKING)
         watch.points(Side.A, 1)
         watch.session.endMatch()
         val oldEvents = watch.events(old)

@@ -10,6 +10,7 @@ import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.core.model.TelemetryVisibility
@@ -876,7 +877,10 @@ class MatchSession(
         val m = scoringMatch() ?: return false
         if (m.status != MatchStatus.IN_PROGRESS && m.status != MatchStatus.PAUSED) return false
         m.redo.clear()
-        return emit(m, PointWon(side)) != null
+        settleServe(m, m.engine.lastPoint?.id) // Leiste des vorigen Punktes endet mit dem nächsten
+        val point = emit(m, PointWon(side)) ?: return false
+        if (m.status == MatchStatus.FINISHED) settleServe(m, point.id)
+        return true
     }
 
     /** UI-Undo: macht das letzte wirksame Zähl-Event rückgängig (02 §7.3). */
@@ -915,6 +919,7 @@ class MatchSession(
             val m = scoringMatch() ?: return false
             if (m.status != MatchStatus.AWAITING_DECISION) return false
             m.redo.clear()
+            settleServe(m, m.engine.lastPoint?.id)
             return emit(m, ContinueDecision(anotherSet = false)) != null
         }
         return startNextSet(if (matchTiebreak) NextSetKind.MATCH_TIEBREAK else NextSetKind.REGULAR)
@@ -981,7 +986,7 @@ class MatchSession(
 
     /**
      * Aufschlag-Info für den Punkt [pointId] setzen, ändern oder löschen (`null`) – 02 §7.2, Entscheidung 2026-10-15.
-     * Nur Tennis/Padel mit `meta.serveStats`, nur für wirksame Punkte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den
+     * Nur Tennis/Padel mit `meta.serveTracking` ≠ OFF, nur für wirksame Punkte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den
      * Punkt gewonnen hat. Übrige Detailfelder bleiben erhalten (widersprüchliche ältere Angaben `secondServe` bzw.
      * `kind = DOUBLE_FAULT` werden ersetzt). Schreibt `PointDetailSet` (letztes gilt); unverändert = No-op (`true`).
      * Lässt den Redo-Stapel unberührt.
@@ -1000,7 +1005,31 @@ class MatchSession(
         return emit(m, PointDetailSet(pointId, detail)) != null
     }
 
-    private fun serveInfoEnabled(m: OpenMatch): Boolean = m.record.format.sport.isTennisLike && m.record.meta.serveStats
+    /**
+     * Die Aufschlag-Leiste für [pointId] endet ohne Eingabe (Anzeigezeit abgelaufen) – Modus „Ja“ (FULL, Entscheidung
+     * 2026-10-28): „1. Aufschlag“ setzen, sofern der Punkt noch wirkt und keine Aufschlag-Info hat. Dasselbe geschieht
+     * automatisch, wenn vorher der nächste Punkt gezählt wird oder das Match endet. Idempotent (nie ein zweites Event,
+     * eine Eingabe wird nie überschrieben); in anderen Modi ein No-op. Lässt den Redo-Stapel unberührt.
+     */
+    fun settleServeInfo(pointId: EventId): Boolean {
+        checkThread()
+        val m = scoringMatch() ?: return false
+        return settleServe(m, pointId)
+    }
+
+    private fun settleServe(
+        m: OpenMatch,
+        pointId: EventId?,
+    ): Boolean {
+        val sport = m.record.format.sport
+        val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(m.record.meta, sport)) ?: return true
+        val point = pointId?.let { m.engine.point(it) } ?: return false
+        if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return true
+        return emit(m, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto))) != null
+    }
+
+    private fun serveInfoEnabled(m: OpenMatch): Boolean =
+        PointDetailRules.serveTracking(m.record.meta, m.record.format.sport) != ServeTracking.OFF
 
     /** Korrektur von Aufschläger, Reihenfolge oder Positionen (02 §7.1/§7.4); ungültige überspringt die Engine. */
     fun correct(correction: Correction): Boolean {
@@ -1060,6 +1089,7 @@ class MatchSession(
                 else -> MatchEnded(reason, side)
             }
         m.redo.clear()
+        settleServe(m, m.engine.lastPoint?.id)
         return emit(m, payload) != null
     }
 

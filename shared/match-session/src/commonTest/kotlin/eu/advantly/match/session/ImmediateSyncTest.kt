@@ -19,7 +19,7 @@ class ImmediateSyncTest {
 
     private fun watchScoring(): Cluster {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH, latencyMs = 20)
-        cluster["phone"].session.create(format, SINGLES, scorer = ScorerChoice.Device(DeviceId("watch")))
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.Device(DeviceId("watch")))
         cluster.settle()
         return cluster
     }

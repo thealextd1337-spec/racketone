@@ -1,6 +1,7 @@
 package eu.advantly.presentation.live
 
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.OperationTimings
 import eu.advantly.presentation.match.LiveMatchSnapshot
@@ -15,10 +16,18 @@ object LiveOperationRules {
         side: Side,
     ): Boolean = snapshot.isScorer && snapshot.canRemovePoint[side]
 
+    /** Werte der Aufschlag-Leiste für den letzten Punkt – gleiche Regel wie auf der Uhr ([PointDetailRules.serveOptions]). */
     fun serveOptions(snapshot: LiveMatchSnapshot): List<ServeOutcome> {
         if (!snapshot.isScorer || !snapshot.serveInfoEnabled) return emptyList()
         val point = snapshot.lastPoint ?: return emptyList()
-        return listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN) +
-            if (point.doubleFaultAllowed) listOf(ServeOutcome.DOUBLE_FAULT) else emptyList()
+        return PointDetailRules.serveOptions(tracking(snapshot), point.doubleFaultAllowed)
     }
+
+    /** Wert eines Punktes ohne Eingabe (Modus „Ja“: „1. Aufschlag“, auch nach dem Abwählen), sonst `null`. */
+    fun autoServe(snapshot: LiveMatchSnapshot): ServeOutcome? {
+        if (!snapshot.isScorer || !snapshot.serveInfoEnabled) return null
+        return PointDetailRules.autoServe(tracking(snapshot))
+    }
+
+    private fun tracking(snapshot: LiveMatchSnapshot) = PointDetailRules.serveTracking(snapshot.setup.meta, snapshot.setup.sport)
 }

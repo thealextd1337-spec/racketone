@@ -649,8 +649,10 @@ class SessionMatchStore(
     ): Boolean {
         if (previous == null || previous.dataRevision != state.dataRevision) return true
 
-        // anderes Match im Fokus, Matches geöffnet/geschlossen oder ein Status gewechselt (z. B. Nachbarplatz beendet)
-        fun statuses(s: SessionState) = s.matches.map { it.id to it.state.status }
+        // anderes Match im Fokus, Matches geöffnet/geschlossen oder ein Status gewechselt (z. B. Nachbarplatz beendet) –
+        // oder ein beendetes Match bekam noch ein Event (Aufschlag-Info zum Matchball): Kopf der Liste nachziehen
+        fun statuses(s: SessionState) =
+            s.matches.map { Triple(it.id, it.state.status, it.eventCount.takeIf { _ -> it.state.status == MatchStatus.FINISHED }) }
         return previous.match?.id != state.match?.id || statuses(previous) != statuses(state)
     }
 

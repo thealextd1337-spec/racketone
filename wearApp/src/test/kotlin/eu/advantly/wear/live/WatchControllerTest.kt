@@ -4,6 +4,7 @@ import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.MatchStatus
@@ -41,11 +42,13 @@ class WatchControllerTest {
         format: FormatChoice = FormatChoice.TENNIS_BO3,
         server: Side = Side.A,
         serverIndex: Int = 0,
+        serveTracking: ServeTracking = ServeTracking.FULL,
     ) {
         c.newMatch()
         c.selectSport(sport)
         if (sport != Sport.PADEL) c.selectDiscipline(discipline)
         c.selectFormat(format)
+        c.setServeTracking(serveTracking)
         assertTrue(c.selectServer(server, serverIndex))
     }
 
@@ -226,7 +229,7 @@ class WatchControllerTest {
 
     @Test
     fun oldScorerOfflineInputsAreReportedAsNotApplied() {
-        startOnWatch()
+        startOnWatch(serveTracking = ServeTracking.OFF) // zählt Eingaben: ohne automatische Aufschlag-Info
         points(Side.A)
         h.settle()
         h.offline("watch")
@@ -244,7 +247,7 @@ class WatchControllerTest {
 
     @Test
     fun offlineScorerBuffersAndDeliversImmediatelyOnReconnect() {
-        startOnWatch()
+        startOnWatch(serveTracking = ServeTracking.OFF) // zählt Events: ohne automatische Aufschlag-Info
         h.settle()
         h.offline("watch") // Flugmodus mitten im Satz
         points(Side.A, Side.B, Side.A)

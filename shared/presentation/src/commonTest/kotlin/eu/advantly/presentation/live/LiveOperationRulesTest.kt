@@ -1,6 +1,7 @@
 package eu.advantly.presentation.live
 
 import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ServeOutcome
@@ -33,17 +34,24 @@ class LiveOperationRulesTest {
         store.start(setup)
         assertTrue(LiveOperationRules.serveOptions(store.active.value!!).isEmpty())
         store.play("A")
-        assertEquals(
-            listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN),
-            LiveOperationRules.serveOptions(store.active.value!!),
-        )
+        // „Ja“: 2. Aufschlag (Doppelfehler nur bei Punkt der Rückschlagseite); ohne Eingabe gilt der 1. Aufschlag
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN), LiveOperationRules.serveOptions(store.active.value!!))
+        assertEquals(ServeOutcome.FIRST_SERVE_IN, LiveOperationRules.autoServe(store.active.value!!))
         store.play("B")
         val snapshot = store.active.value!!
-        assertEquals(ServeOutcome.entries.toList(), LiveOperationRules.serveOptions(snapshot))
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), LiveOperationRules.serveOptions(snapshot))
         assertTrue(LiveOperationRules.serveOptions(snapshot.copy(role = LiveRole.DISPLAY)).isEmpty())
-        store.start(setup.copy(meta = MatchMeta(serveStats = false)))
+        // „Nur Doppelfehler“: nur bei Punkten der Rückschlagseite, nichts automatisch
+        store.start(setup.copy(meta = MatchMeta(serveTracking = ServeTracking.DOUBLE_FAULTS_ONLY)))
+        store.play("A")
+        assertTrue(LiveOperationRules.serveOptions(store.active.value!!).isEmpty())
+        store.play("B")
+        assertEquals(listOf(ServeOutcome.DOUBLE_FAULT), LiveOperationRules.serveOptions(store.active.value!!))
+        assertEquals(null, LiveOperationRules.autoServe(store.active.value!!))
+        store.start(setup.copy(meta = MatchMeta(serveTracking = ServeTracking.OFF)))
         store.play("B")
         assertTrue(LiveOperationRules.serveOptions(store.active.value!!).isEmpty())
+        assertEquals(null, LiveOperationRules.autoServe(store.active.value!!))
         store.start(store.setupFor(Presets.BADMINTON_1GAME_21.format()))
         store.play("A")
         assertTrue(LiveOperationRules.serveOptions(store.active.value!!).isEmpty())

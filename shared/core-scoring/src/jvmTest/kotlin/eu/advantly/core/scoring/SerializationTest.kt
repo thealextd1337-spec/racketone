@@ -1,6 +1,7 @@
 package eu.advantly.core.scoring
 
 import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Uuid7
 import eu.advantly.core.scoring.vectors.vectorJson
 import kotlinx.serialization.SerializationException
@@ -123,7 +124,7 @@ class SerializationTest {
                 """{"type":"ContinueDecision","anotherSet":true,"nextSetKind":"MATCH_TIEBREAK"}""",
             ),
         )
-        // MatchMeta.serveStats: Default true, wird nicht geschrieben; fehlt das Feld, gilt true
+        // MatchMeta.serveStats (Wire-Form von serveTracking FULL/OFF): Default true, wird nicht geschrieben; fehlt das Feld, gilt true
         val meta =
             eu.advantly.core.model
                 .MatchMeta()
@@ -149,7 +150,7 @@ class SerializationTest {
             vectorJson.encodeToString(
                 eu.advantly.core.model.MatchMeta
                     .serializer(),
-                meta.copy(serveStats = false),
+                meta.copy(serveTracking = ServeTracking.OFF),
             ),
         )
     }
