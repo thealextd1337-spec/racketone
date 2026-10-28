@@ -120,6 +120,7 @@ fun ControlsPage(
     heartRate: Int?,
     actions: LiveActions,
     onClose: () -> Unit,
+    background: @Composable () -> Unit = {},
 ) {
     BackToScore(onClose)
     var interaction by remember { mutableIntStateOf(0) }
@@ -134,7 +135,7 @@ fun ControlsPage(
             action()
         }
     SwipeToDismissBox(onDismissed = onClose) { isBackground ->
-        if (!isBackground) ControlsList(live, workout, heartRate, actions, onClose, ::touch)
+        if (isBackground) background() else ControlsList(live, workout, heartRate, actions, onClose, ::touch)
     }
 }
 

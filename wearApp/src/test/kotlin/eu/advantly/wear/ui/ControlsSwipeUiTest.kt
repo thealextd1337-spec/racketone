@@ -1,6 +1,7 @@
 package eu.advantly.wear.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -65,6 +66,21 @@ class ControlsSwipeUiTest {
         rule.onRoot().performTouchInput { swipeRight() }
         rule.waitForIdle()
         assertBackOnScore()
+    }
+
+    @Test
+    fun draggingRevealsTheScoreBehindTheControls() {
+        show()
+        openControls()
+        rule.onRoot().performTouchInput {
+            down(Offset(width * 0.1f, centerY))
+            moveBy(Offset(width * 0.3f, 0f))
+        }
+        // während des Ziehens schaut die Zähl-Ansicht hervor statt einer schwarzen Fläche
+        rule.onNodeWithTag(LiveTags.points(Side.A)).assertExists()
+        rule.onRoot().performTouchInput { up() }
+        rule.waitForIdle()
+        assertEquals("die Vorschau zählt nicht", emptyList<String>(), recorder.calls)
     }
 
     @Test

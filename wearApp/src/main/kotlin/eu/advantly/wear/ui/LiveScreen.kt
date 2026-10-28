@@ -202,7 +202,10 @@ fun LiveScreen(
         }
 
         controls -> {
-            ControlsPage(live, workout, heartRate, actions, onClose = { controls = false })
+            ControlsPage(live, workout, heartRate, actions, onClose = { controls = false }) {
+                // beim Zurückwischen schaut die Zähl-Ansicht schon hervor (nur Anzeige, keine Eingaben)
+                ScorePage(live, workout, isAmbient = false, toast = null, actions = actions, onOpenControls = {}, inputEnabled = false)
+            }
         }
 
         else -> {
@@ -225,6 +228,7 @@ private fun ScorePage(
     toast: WatchToast?,
     actions: LiveActions,
     onOpenControls: () -> Unit,
+    inputEnabled: Boolean = true,
 ) {
     var flashSide by remember { mutableStateOf<Side?>(null) }
     var flashKey by remember { mutableIntStateOf(0) }
@@ -255,8 +259,9 @@ private fun ScorePage(
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .pointerInput(isAmbient, scorer) {
-                        if (isAmbient) return@pointerInput // Handgelenk unten = Eingaben aus (04 §4.3.3 Punkt 4)
+                    .pointerInput(isAmbient, scorer, inputEnabled) {
+                        // Handgelenk unten = Eingaben aus (04 §4.3.3 Punkt 4); ebenso als Hintergrund der Steuerseite
+                        if (isAmbient || !inputEnabled) return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             // Ziel beim Aufsetzen festlegen: wer auf der Aktionsleiste beginnt, zählt und zieht nie ab
@@ -461,7 +466,7 @@ private fun ScorePage(
                             }
                         },
                         modifier =
-                            if (scorer && !isAmbient) {
+                            if (scorer && !isAmbient && inputEnabled) {
                                 Modifier.semantics {
                                     role = Role.Button
                                     contentDescription = "$pointLabel. $scoreDescription. $serveDescription"
