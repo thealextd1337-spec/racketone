@@ -1,6 +1,6 @@
 New in 0.3.0:
-• An account is required: sign in on first launch, no skipping. Afterwards phone and watch also score offline.
-• Automatic backup: phone and watch matches belong to your account without asking.
-• New legal texts appear as a confirmation screen.
-• Slim profile with one backup line; export and deletion under “Account & privacy”.
-Please test: first launch, backing up a watch match, confirming legal texts, signing out.
+• Account required; phone and watch matches backed up automatically; slim profile.
+• Serves: yes / double faults only / no; watch asks only 2nd serve or double fault, otherwise 1st counts.
+• Edit the result and servers on the phone after a match.
+• Watch: swipe back from the menu to scoring; score stays visible.
+Please test: first launch, backing up a watch match, serves, editing a result.

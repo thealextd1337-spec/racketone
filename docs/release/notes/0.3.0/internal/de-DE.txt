@@ -1,6 +1,6 @@
 Neu in 0.3.0:
-• Konto ist Pflicht: Anmeldung beim ersten Start, kein Überspringen. Danach zählen Handy und Uhr auch offline.
-• Automatische Sicherung: Handy- und Uhr-Matches gehören ohne Rückfrage zum Konto.
-• Neue Rechtstexte erscheinen als Bestätigungsschirm.
-• Schlankes Profil mit einer Sicherungszeile; Export und Löschung unter „Konto & Datenschutz“.
-Bitte testen: Erststart, Uhr-Match sichern, Rechtstexte bestätigen, Abmelden.
+• Konto Pflicht, Matches von Handy und Uhr automatisch gesichert; schlankes Profil.
+• Aufschläge: Ja / Nur Doppelfehler / Nein; Uhr fragt nur 2. Aufschlag oder Doppelfehler, sonst gilt der 1.
+• Ergebnis und Aufschläger nach dem Match am Handy bearbeiten.
+• Uhr: vom Menü per Wisch zurück zum Zählen; Spielstand bleibt sichtbar.
+Bitte testen: Erststart, Uhr-Match sichern, Aufschläge, Ergebnis bearbeiten.
