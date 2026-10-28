@@ -40,6 +40,7 @@ data class PendingWatchTakeOver(
     val setup: MatchSetup,
     val options: StartOptions,
     val busy: LiveMatchSnapshot,
+    val visitors: Set<String> = emptySet(),
 )
 
 /** Die fünf Tabs der Bottom-Navigation (04 §2.1); [Play] ist eine Aktion, kein eigener Inhalt. */
@@ -180,7 +181,7 @@ class AdvantlyAppModel(
     fun confirmWatchTakeOver() {
         val pending = pendingWatchTakeOver ?: return
         pendingWatchTakeOver = null
-        doStart(pending.setup, pending.options.copy(takeOverWatchMatch = true))
+        doStart(pending.setup, pending.options.copy(takeOverWatchMatch = true), pending.visitors)
     }
 
     fun cancelWatchTakeOver() {
@@ -190,14 +191,16 @@ class AdvantlyAppModel(
     private fun doStart(
         setup: MatchSetup,
         options: StartOptions,
+        visitors: Set<String> = emptySet(),
     ) {
         if (options.scorer == ScorerOption.MY_WATCH && !options.takeOverWatchMatch) {
             live.watchTakeOverNeeded()?.let { busy ->
-                pendingWatchTakeOver = PendingWatchTakeOver(setup, options, busy)
+                pendingWatchTakeOver = PendingWatchTakeOver(setup, options, busy, visitors)
                 return
             }
         }
-        live.tryStart(setup, options) ?: return
+        val id = live.tryStart(setup, options) ?: return
+        if (visitors.isNotEmpty()) onVisitorsChosen?.invoke(id, visitors)
         controller.sync(live.active.value)
         when (navigator.top) {
             Overlay.Wizard, is Overlay.Result -> navigator.replaceTop(Overlay.Live)
@@ -205,10 +208,16 @@ class AdvantlyAppModel(
         }
     }
 
-    /** Assistent abschließen (Zähler und Workout-Wunsch aus dem Schritt „Wer zählt?“). */
-    fun finishWizard() {
+    /**
+     * Zuschauer-Wahl des Assistenten (F16): gestartetes Match und gewählte Freunde; der Konto-Host merkt sie vor, bis
+     * das Match hochgeladen ist. `null` ohne Konto.
+     */
+    var onVisitorsChosen: ((MatchId, Set<String>) -> Unit)? = null
+
+    /** Assistent abschließen (Zähler und Workout-Wunsch aus dem Schritt „Wer zählt?“, optional Zuschauer). */
+    fun finishWizard(visitors: Set<String> = emptySet()) {
         val options = wizard.state.value.startOptions
-        wizard.finish()?.let { startMatch(it, options) }
+        wizard.finish()?.let { doStart(it, options, visitors) }
     }
 
     fun openResult(matchId: MatchId) {

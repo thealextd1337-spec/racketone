@@ -190,6 +190,8 @@ fun LiveScoreScreen(
     autoBenchmark: Boolean = false,
     onBenchmarkFinished: (String) -> Unit = {},
     playerAssignments: @Composable (eu.advantly.presentation.match.LiveMatchSnapshot) -> Unit = {},
+    /** Einstieg zur Zuschauer-Verwaltung des Matches (F16); leer ohne Konto. */
+    visitors: @Composable (eu.advantly.presentation.match.LiveMatchSnapshot) -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     DisposableEffect(haptics) {
@@ -348,6 +350,7 @@ fun LiveScoreScreen(
                     )
                     LiveOperationsSlot(controller, snapshot)
                     playerAssignments(snapshot)
+                    visitors(snapshot)
                 }
             }
             val footer: @Composable (Modifier) -> Unit = { footerModifier ->

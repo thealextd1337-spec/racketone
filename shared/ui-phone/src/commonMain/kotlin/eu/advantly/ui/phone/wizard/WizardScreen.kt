@@ -57,6 +57,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.friends.WizardVisitors
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
@@ -102,6 +103,9 @@ fun WizardScreen(
     busyMatch: LiveMatchSnapshot? = null,
     /** Freunde mit Konto als Mitspieler (P2-E); leer ohne Konto. */
     friends: List<FriendEntry> = emptyList(),
+    /** Gewählte Zuschauer (Profil-IDs, F16) im letzten Schritt; nur mit Freunden sichtbar. */
+    visitors: Set<String> = emptySet(),
+    onVisitorsChange: (Set<String>) -> Unit = {},
 ) {
     val state by wizard.state.collectAsState()
     // Uhr installiert/entfernt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1), reaktiv
@@ -131,11 +135,32 @@ fun WizardScreen(
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
             when (state.step) {
-                WizardStep.SPORT -> SportStep(wizard)
-                WizardStep.SURFACE -> SurfaceStep(wizard, state)
-                WizardStep.PLAYERS -> PlayersStep(wizard, state, friends)
-                WizardStep.FORMAT -> FormatStep(wizard, state)
-                WizardStep.SCORER -> ScorerStep(wizard, state, busyMatch)
+                WizardStep.SPORT -> {
+                    SportStep(wizard)
+                }
+
+                WizardStep.SURFACE -> {
+                    SurfaceStep(wizard, state)
+                }
+
+                WizardStep.PLAYERS -> {
+                    PlayersStep(wizard, state, friends)
+                }
+
+                WizardStep.FORMAT -> {
+                    FormatStep(wizard, state)
+                }
+
+                WizardStep.SCORER -> {
+                    ScorerStep(wizard, state, busyMatch)
+                    // Schon als Mitspieler gesetzte Freunde schauen nicht zusätzlich zu.
+                    val pickable = friends.filter { !wizard.isFriendSeated(it.profileId) && !it.alias.isNullOrBlank() }
+                    WizardVisitors(
+                        pickable,
+                        visitors.filterTo(mutableSetOf()) { id -> pickable.any { it.profileId == id } },
+                        onVisitorsChange,
+                    )
+                }
             }
         }
         Footer(wizard, state, onStart)

@@ -64,6 +64,7 @@ import eu.advantly.ui.phone.resources.friends_code_title
 import eu.advantly.ui.phone.resources.friends_decline
 import eu.advantly.ui.phone.resources.friends_dismiss
 import eu.advantly.ui.phone.resources.friends_empty
+import eu.advantly.ui.phone.resources.friends_error_already_member
 import eu.advantly.ui.phone.resources.friends_error_binding
 import eu.advantly.ui.phone.resources.friends_error_connection
 import eu.advantly.ui.phone.resources.friends_error_cooldown
@@ -75,6 +76,7 @@ import eu.advantly.ui.phone.resources.friends_error_revoked
 import eu.advantly.ui.phone.resources.friends_error_self
 import eu.advantly.ui.phone.resources.friends_error_session
 import eu.advantly.ui.phone.resources.friends_error_unavailable
+import eu.advantly.ui.phone.resources.friends_error_visitor_not_friend
 import eu.advantly.ui.phone.resources.friends_found_send
 import eu.advantly.ui.phone.resources.friends_incoming_title
 import eu.advantly.ui.phone.resources.friends_list_title
@@ -92,6 +94,7 @@ import eu.advantly.ui.phone.resources.friends_search
 import eu.advantly.ui.phone.resources.friends_segment_feed
 import eu.advantly.ui.phone.resources.friends_segment_friends
 import eu.advantly.ui.phone.resources.friends_segment_requests
+import eu.advantly.ui.phone.resources.friends_segment_watching
 import eu.advantly.ui.phone.resources.friends_share
 import eu.advantly.ui.phone.resources.friends_share_text
 import eu.advantly.ui.phone.resources.friends_unblock
@@ -103,7 +106,7 @@ import eu.advantly.ui.phone.resources.tab_friends
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
-private enum class Segment { FEED, FRIENDS, REQUESTS }
+private enum class Segment { FEED, FRIENDS, REQUESTS, WATCHING }
 
 private enum class ConfirmKind(
     val action: StringResource,
@@ -122,7 +125,8 @@ private data class Confirm(
 )
 
 /**
- * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen. Ohne Konto, Zustimmung oder
+ * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Ich schaue zu
+ * (Zuschauer, F16). Ohne Konto, Zustimmung oder
  * bei pausiertem Konto nur ein Hinweis; das Zählen ohne Konto bleibt unberührt. [onShareText] öffnet das
  * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus.
  */
@@ -176,6 +180,7 @@ fun FriendsScreen(
                 Segment.FEED to stringResource(Res.string.friends_segment_feed),
                 Segment.FRIENDS to stringResource(Res.string.friends_segment_friends),
                 Segment.REQUESTS to stringResource(Res.string.friends_segment_requests) + if (requests > 0) " ($requests)" else "",
+                Segment.WATCHING to stringResource(Res.string.friends_segment_watching),
             ).forEach { (value, label) ->
                 FilterChip(
                     selected = segment == value,
@@ -282,6 +287,10 @@ fun FriendsScreen(
                         ) { Text(stringResource(Res.string.friends_withdraw)) }
                     }
                 }
+            }
+
+            Segment.WATCHING -> {
+                WatchingList(model, state)
             }
         }
     }
@@ -409,6 +418,8 @@ internal fun errorLabel(error: String): StringResource =
         "cannot_befriend_self" -> Res.string.friends_error_self
         "no_pending_request" -> Res.string.friends_error_not_pending
         "no_participation" -> Res.string.friends_error_no_participation
+        "visitor_must_be_friend" -> Res.string.friends_error_visitor_not_friend
+        "already_member" -> Res.string.friends_error_already_member
         "device_not_authorized" -> Res.string.friends_error_binding
         "device_revoked" -> Res.string.friends_error_revoked
         "cloud_session_changed" -> Res.string.friends_error_session
