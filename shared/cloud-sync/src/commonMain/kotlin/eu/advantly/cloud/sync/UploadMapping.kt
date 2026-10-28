@@ -1,10 +1,18 @@
 package eu.advantly.cloud.sync
 
+import eu.advantly.core.scoring.GameKind
 import eu.advantly.data.CloudMetadataKind
 import eu.advantly.data.CloudMetadataRevision
 import eu.advantly.data.CloudUploadSnapshot
+import eu.advantly.data.ScoreSummary
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.time.Instant
 
 /** Ausschließlich der eingefrorene Stand wird abgebildet; keine erneute Datenbankabfrage während HTTP. */
@@ -56,6 +64,7 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
                                     ?.takeIf { _ -> it.status == "finished" }
                                     ?.let { at -> Instant.fromEpochMilliseconds(at).toString() },
                             summary = summary,
+                            liveState = liveStateOf(it.status, it.scoreJson),
                             eventCount =
                                 summary
                                     ?.get("eventCount")
@@ -77,6 +86,47 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
                 CloudPushLifecycle(proof.generation, proof.redactionEpochs.filterKeys { it in referenced }.mapValues { it.value.toInt() })
             },
     )
+}
+
+private val LIVE_POINTS = Regex("^[0-9A-Za-z]{1,3}$")
+
+/**
+ * Live-Stand eines laufenden Matches für Visitor (F16): nur Felder, die `private.sanitize_projection` behält
+ * (Sätze, Spiele, Punktanzeige, Tiebreak, Status, Zeit) – nie Telemetrie, Gesundheitsdaten oder IDs.
+ * Aufschlag fehlt, weil die Projektion ([ScoreSummary]) ihn nicht enthält. Beendete Matches: `null` (Ergebnis kommt aus summary).
+ */
+internal fun liveStateOf(
+    status: String,
+    scoreJson: String,
+): JsonObject? {
+    if (status == "finished") return null
+    val score = runCatching { CloudJson.decodeFromString(ScoreSummary.serializer(), scoreJson) }.getOrNull() ?: return null
+    val current = score.currentState
+    return buildJsonObject {
+        putJsonArray("sets") {
+            score.sets.take(9).forEach { set ->
+                addJsonArray {
+                    add(set.a)
+                    add(set.b)
+                }
+            }
+        }
+        current?.games?.let { games ->
+            putJsonArray("games") {
+                add(games.a)
+                add(games.b)
+            }
+        }
+        current?.display?.takeIf { LIVE_POINTS.matches(it.a) && LIVE_POINTS.matches(it.b) }?.let { display ->
+            putJsonArray("points") {
+                add(display.a)
+                add(display.b)
+            }
+        }
+        current?.let { put("tiebreak", it.gameKind == GameKind.TIEBREAK || it.gameKind == GameKind.MATCH_TIEBREAK) }
+        put("status", status)
+        score.lastEventAtMs?.let { put("updatedAtMs", it) }
+    }
 }
 
 /**

@@ -855,4 +855,27 @@
     <string name="start_login_benefit">Advantly nutzt ein Konto: Deine Matches werden automatisch gesichert, und du kannst Freunde hinzufügen und Matches mit ihnen teilen. Zählen auf Handy und Uhr geht auch offline.</string>
     <string name="start_login_create">Konto anlegen</string>
     <string name="start_login_sign_in">Anmelden</string>
+    <string name="visitors_limit">Höchstens 10 Zuschauer pro Match.</string>
+    <string name="friends_error_visitor_limit">Dieses Match hat schon 10 Zuschauer.</string>
+    <string name="friends_segment_watching">Ich schaue zu</string>
+    <string name="visitors_title">Zuschauer</string>
+    <string name="visitors_hint">Hinzugefügte Freunde sehen nur den Live-Stand und das Ergebnis, nie deine Gesundheitsdaten. Sie bleiben, bis du sie entfernst.</string>
+    <string name="visitors_empty">Noch keine Zuschauer.</string>
+    <string name="visitors_add">Zuschauer hinzufügen</string>
+    <string name="visitors_add_confirm">Hinzufügen</string>
+    <string name="visitors_remove">Entfernen</string>
+    <string name="visitors_pending">wartet auf Upload</string>
+    <string name="visitors_no_friends">Alle deine Freunde schauen schon zu oder spielen mit.</string>
+    <string name="visitors_loading">Zuschauer werden geladen …</string>
+    <string name="watching_loading">Matches werden geladen …</string>
+    <string name="visitors_close">Schließen</string>
+    <string name="wizard_visitors_title">Zuschauer</string>
+    <string name="wizard_visitors_hint">Optional: Freunde, die Live-Stand und Ergebnis verfolgen dürfen.</string>
+    <string name="watching_empty">Du schaust gerade keinem Match zu. Freunde können dich als Zuschauer hinzufügen.</string>
+    <string name="watching_stop">Nicht mehr zuschauen</string>
+    <string name="watching_live">Aktuell: %1$s – %2$s</string>
+    <string name="watching_games">Spiele %1$d:%2$d</string>
+    <string name="watching_tiebreak">Tiebreak</string>
+    <string name="friends_error_visitor_not_friend">Nur Freunde können Zuschauer werden.</string>
+    <string name="friends_error_already_member">Dieser Freund spielt in dem Match schon mit.</string>
 </resources>

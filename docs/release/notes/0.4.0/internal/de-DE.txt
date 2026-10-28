@@ -1,0 +1,5 @@
+Neu in 0.4.0:
+• Zuschauer: Freunde beim Matchstart oder später als Zuschauer hinzufügen und wieder entfernen.
+• „Ich schaue zu“ im Freunde-Tab: Live-Stand und Ergebnis von Matches, denen du zuschaust.
+• Datenschutzerklärung Version 6 (Zuschauer) – einmal neu bestätigen.
+Bitte testen: Zuschauer beim Start wählen, während des Spiels hinzufügen, als Zuschauer mitverfolgen.

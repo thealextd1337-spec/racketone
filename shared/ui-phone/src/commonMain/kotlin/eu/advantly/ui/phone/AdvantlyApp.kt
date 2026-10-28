@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,7 +48,9 @@ import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.FriendsScreen
+import eu.advantly.ui.phone.friends.LiveVisitorsButton
 import eu.advantly.ui.phone.friends.MatchSharingSection
+import eu.advantly.ui.phone.friends.MatchVisitorsSection
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
@@ -124,6 +127,11 @@ fun AdvantlyApp(
         model.live.refreshWatchStatus()
         onPauseOrDispose {}
     }
+    // Im Assistenten gewählte Zuschauer gehen an den Konto-Host (vorgemerkt bis zum Upload des Matches).
+    DisposableEffect(model, authModel) {
+        model.onVisitorsChosen = authModel?.friends?.let { friends -> { id, visitors -> friends.queueVisitors(id.value, visitors) } }
+        onDispose { model.onVisitorsChosen = null }
+    }
     CompositionLocalProvider(
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
@@ -169,12 +177,16 @@ fun AdvantlyApp(
                                     ?.value
                                     ?.friends
                                     .orEmpty()
+                            // Zuschauer-Wahl lebt nur, solange der Assistent offen ist.
+                            var visitors by remember { mutableStateOf(emptySet<String>()) }
                             WizardScreen(
                                 model.wizard,
                                 onClose = { navigator.pop() },
-                                onStart = model::finishWizard,
+                                onStart = { model.finishWizard(visitors) },
                                 busyMatch = model.watchMatch(),
                                 friends = friends,
+                                visitors = visitors,
+                                onVisitorsChange = { visitors = it },
                             )
                         }
                     }
@@ -190,6 +202,9 @@ fun AdvantlyApp(
                                 onBenchmarkNewMatch = if (debugTools || autoBenchmark) model::startBenchmarkMatch else null,
                                 autoBenchmark = autoBenchmark,
                                 onBenchmarkFinished = onBenchmarkFinished,
+                                visitors = { snapshot ->
+                                    authModel?.friends?.let { friends -> LiveVisitorsButton(friends, snapshot.matchId.value) }
+                                },
                             )
                         }
                     }
@@ -233,6 +248,7 @@ fun AdvantlyApp(
                                         // Rematerialisierung); der angestoßene Pull entzieht die lokale Kopie.
                                         onGone = { navigator.pop() },
                                     )
+                                    MatchVisitorsSection(friends, top.matchId.value)
                                 }
                             },
                         )

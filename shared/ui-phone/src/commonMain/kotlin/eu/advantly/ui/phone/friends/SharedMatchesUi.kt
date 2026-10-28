@@ -132,7 +132,7 @@ internal fun FeedDetail(
 }
 
 @Composable
-private fun headline(match: FeedMatch): String {
+internal fun headline(match: FeedMatch): String {
     val status =
         when (match.status) {
             "finished" -> Res.string.friends_feed_status_finished
@@ -148,7 +148,7 @@ private fun headline(match: FeedMatch): String {
 }
 
 @Composable
-private fun names(team: List<String>): String {
+internal fun names(team: List<String>): String {
     val unknown = stringResource(Res.string.friends_unknown)
     return team.joinToString(" / ") { it.ifBlank { unknown } }
 }

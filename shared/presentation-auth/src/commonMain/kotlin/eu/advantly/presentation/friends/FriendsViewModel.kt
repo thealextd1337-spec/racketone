@@ -54,6 +54,12 @@ data class FriendsState(
     val shareDefaultError: String? = null,
     /** Eigene Sicht auf das gerade geöffnete Match ([FriendsViewModel.openMatch]). */
     val match: MatchSharing? = null,
+    /** Zuschauer des Matches aus [FriendsViewModel.openVisitors]; `null` ohne Zuschauer-Port oder ohne offenes Match. */
+    val visitors: MatchVisitors? = null,
+    /** Matches, denen ich zuschaue (neueste zuerst); `null` = noch nicht geladen. */
+    val watching: List<WatchedMatch>? = null,
+    /** Fehler beim Laden/Beenden von [watching]. */
+    val watchingError: String? = null,
 )
 
 /**
@@ -71,6 +77,8 @@ class FriendsViewModel(
     /** Geteilte Matches (P2-E); ohne Port bleiben Feed, Teilen und „War ich nicht“ aus. */
     private val matches: SharedMatchesPort? = null,
     private val local: SharedMatchesLocal? = null,
+    /** Zuschauer (F16/F25); ohne Warteschlange bleiben Zuschauer-Abschnitte und „Ich schaue zu“ aus. */
+    private val visitorQueue: VisitorQueue? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -87,6 +95,10 @@ class FriendsViewModel(
     private var openedMatch: String? = null
     private val shareOverlay = mutableMapOf<String, Boolean>()
     private val goneMatches = mutableSetOf<String>()
+
+    /** Match der Zuschauer-Verwaltung; Zähler verwirft „Ich schaue zu“-Antworten, die vor einem Beenden begannen. */
+    private var visitorMatch: String? = null
+    private var watchingRevision = 0L
 
     private class Stale : Exception()
 
@@ -239,6 +251,191 @@ class FriendsViewModel(
         mutable.value = mutable.value.copy(error = null, shareDefaultError = null)
     }
 
+    /** Zuschauer-Verwaltung für [matchId] öffnen (lädt die Liste) bzw. schließen (`null`). */
+    fun openVisitors(matchId: String?) {
+        visitorMatch = matchId
+        show { copy(visitors = null) }
+        loadVisitors()
+    }
+
+    /**
+     * Aktive Zuschauer vom Server; ein noch nicht hochgeladenes Match zeigt nur vorgemerkte. Kennt das Match keine
+     * Zuschauer mehr, endet auch der Live-Upload während des Spiels.
+     */
+    fun loadVisitors() {
+        val queue = visitorQueue ?: return
+        val id = visitorMatch ?: return
+        val profile = readyProfile() ?: return
+        show { copy(visitors = localVisitors(profile, id, visitors.confirmed(id)).copy(loading = true)) }
+        quiet(
+            { error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(loading = false, error = error)) } },
+        ) { session ->
+            val onServer = queue.isOnServer(session.profileId, id)
+            val confirmed = if (onServer) queue.port.matchVisitors(session.profileId, id) else emptyList()
+            current(session)
+            if (visitorMatch != id) return@quiet
+            if (onServer) queue.setWatched(session.profileId, id, confirmed.isNotEmpty())
+            val entries = confirmed.map { VisitorEntry(it.profileId, it.alias, it.canRevoke) }
+            show { copy(visitors = localVisitors(session.profileId, id, entries)) }
+        }
+    }
+
+    /**
+     * Freunde als Zuschauer des offenen Matches benennen. Liegt das Match schon auf dem Server, sofort (Fehler sichtbar);
+     * sonst vormerken – sie gehen nach dem Upload hinaus.
+     */
+    fun addVisitors(profileIds: Set<String>) {
+        val queue = visitorQueue ?: return
+        val id = visitorMatch ?: return
+        val profile = readyProfile() ?: return
+        if (profileIds.isEmpty()) return
+        dismissVisitorError()
+        if (!queue.isOnServer(profile, id)) {
+            queue.enqueue(profile, id, profileIds)
+            show { copy(visitors = localVisitors(profile, id, visitors.confirmed(id))) }
+            return
+        }
+        quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
+            try {
+                profileIds.forEach { queue.port.addVisitor(session.profileId, id, it) }
+                current(session)
+                queue.setWatched(session.profileId, id, true)
+            } finally {
+                if (visitorMatch == id && started(session)) loadVisitors()
+            }
+        }
+    }
+
+    /** Zuschauer entfernen: vorgemerkt nur lokal, sonst Widerruf am Server (Benennender oder Ersteller). */
+    fun removeVisitor(profileId: String) {
+        val queue = visitorQueue ?: return
+        val id = visitorMatch ?: return
+        val profile = readyProfile() ?: return
+        val entry =
+            mutable.value.visitors
+                ?.takeIf { it.matchId == id }
+                ?.visitors
+                ?.firstOrNull { it.profileId == profileId } ?: return
+        if (entry.pending) {
+            queue.forget(profile, id, profileId)
+            show { copy(visitors = localVisitors(profile, id, visitors.confirmed(id))) }
+            return
+        }
+        if (!entry.canRevoke) return
+        dismissVisitorError()
+        quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
+            queue.port.revokeVisitor(session.profileId, id, profileId)
+            current(session)
+            if (visitorMatch == id) loadVisitors()
+        }
+    }
+
+    /** Im Assistenten gewählte Zuschauer eines gerade gestarteten Matches vormerken (Upload folgt). */
+    fun queueVisitors(
+        matchId: String,
+        profileIds: Set<String>,
+    ) {
+        val profile = readyProfile() ?: return
+        visitorQueue?.enqueue(profile, matchId, profileIds)
+    }
+
+    /** „Ich schaue zu“ laden; die UI ruft das wiederholt, solange der Abschnitt sichtbar ist (Realtime ist aus). */
+    fun loadWatching() {
+        val queue = visitorQueue ?: return
+        val revision = watchingRevision
+        quiet({ error -> show { copy(watchingError = error) } }) { session ->
+            val views = queue.port.myVisitorMatches(session.profileId)
+            current(session)
+            if (revision != watchingRevision) return@quiet
+            show { copy(watching = views.map { it.toWatched() }, watchingError = null) }
+        }
+    }
+
+    /** Nicht mehr zuschauen (Widerruf durch den Visitor selbst). */
+    fun stopWatching(matchId: String) {
+        val queue = visitorQueue ?: return
+        quiet({ error -> show { copy(watchingError = error) } }) { session ->
+            queue.port.revokeVisitor(session.profileId, matchId, session.profileId)
+            current(session)
+            watchingRevision++
+            show { copy(watching = watching?.filter { it.match.id != matchId }) }
+        }
+    }
+
+    fun dismissVisitorError() {
+        show { copy(visitors = visitors?.copy(error = null), watchingError = null) }
+    }
+
+    private fun readyProfile(): String? = shown?.profileId?.takeIf { mutable.value.access == FriendsAccess.READY }
+
+    /** Sitzung von [session] wird noch angezeigt (kein Kontowechsel seit dem Start). */
+    private fun started(session: CloudSession): Boolean = shown?.profileId == session.profileId && shown?.generation == session.generation
+
+    private fun MatchVisitors?.confirmed(matchId: String): List<VisitorEntry> =
+        this
+            ?.takeIf { it.matchId == matchId }
+            ?.visitors
+            .orEmpty()
+            .filter { !it.pending }
+
+    /** Bestätigte [confirmed] plus vorgemerkte Zuschauer; Mitspieler aus dem Pull-Bestand, soweit bekannt. */
+    private fun localVisitors(
+        profileId: String,
+        matchId: String,
+        confirmed: List<VisitorEntry>,
+    ): MatchVisitors {
+        val known = confirmed.mapTo(mutableSetOf()) { it.profileId }
+        val aliases = mutable.value.friends.associate { it.profileId to it.alias }
+        val pending =
+            visitorQueue
+                ?.pending(profileId, matchId)
+                .orEmpty()
+                .filter { it !in known }
+                .map { VisitorEntry(it, aliases[it], canRevoke = true, pending = true) }
+        val players =
+            local
+                ?.match(profileId, matchId)
+                ?.participants
+                ?.mapNotNullTo(mutableSetOf()) { it.profileId }
+                .orEmpty()
+        // Ein Fehler bleibt bis zum Schließen bzw. zur nächsten Aktion stehen, auch über das Neuladen hinweg.
+        val error =
+            mutable.value.visitors
+                ?.takeIf { it.matchId == matchId }
+                ?.error
+        return MatchVisitors(matchId, confirmed + pending, players, error = error)
+    }
+
+    /**
+     * Wie [run], aber ohne Belegt-Zustand und ohne den Fehler des Freunde-Tabs: Zuschauer-Laden läuft wiederholt im
+     * Hintergrund und darf weder andere Aktionen sperren noch deren Fehler überschreiben. Fehler gehen an [onError].
+     */
+    private fun quiet(
+        onError: (String) -> Unit,
+        block: suspend (CloudSession) -> Unit,
+    ) {
+        val session = shown ?: return
+        if (mutable.value.access != FriendsAccess.READY) return
+        val started = epoch
+        scope.launch {
+            try {
+                // Vor dem RPC: Das SDK kann schon ein anderes Konto tragen, während [shown] noch nachhinkt.
+                auth.requireAccountSession(session)
+                block(session)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Stale) {
+                // Antwort für ein früheres Konto: nichts anzeigen.
+            } catch (e: Exception) {
+                if (started == epoch) {
+                    val reason = (e as? CloudException)?.reason ?: "connection_failed"
+                    onError(reason)
+                    if (reason == "device_not_authorized") pull?.pullNow()
+                }
+            }
+        }
+    }
+
     private suspend fun loadBlocked(session: CloudSession) {
         val blocked = port.blockedProfiles()
         current(session)
@@ -259,12 +456,15 @@ class FriendsViewModel(
             shareOverlay.clear()
             goneMatches.clear()
             pullAgain = false
+            watchingRevision++
             mutable.value = FriendsState(access = access)
         } else {
             mutable.value = mutable.value.copy(access = access)
         }
         shown = session
         reloadLocal()
+        // Neues Konto mit offener Zuschauer-Verwaltung: dessen Liste laden.
+        if (!same && visitorMatch != null) loadVisitors()
     }
 
     private fun onPull(state: PhonePullState) {

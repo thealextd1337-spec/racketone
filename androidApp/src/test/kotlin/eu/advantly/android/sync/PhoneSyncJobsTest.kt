@@ -94,6 +94,21 @@ class PhoneSyncJobsTest {
         assertEquals(setOf("last_backup.bob", "failures.bob"), prefs.all.keys)
     }
 
+    /** Zuschauer: vorgemerkte Benennungen und beobachtete Matches je Konto, Logout entfernt sie. */
+    @Test fun visitorQueueSurvivesReopenAndIsForgottenWithTheAccount() {
+        val record = AndroidPhoneSyncRecord(app)
+        record.setPending("alice", mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")))
+        record.setWatched("alice", setOf("m3"))
+        record.setPending("bob", mapOf("m9" to setOf("eve")))
+        val reopened = AndroidPhoneSyncRecord(app)
+        assertEquals(mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")), reopened.pending("alice"))
+        assertEquals(setOf("m3"), reopened.watched("alice"))
+        record.forget("alice")
+        assertEquals(emptyMap<String, Set<String>>(), reopened.pending("alice"))
+        assertEquals(emptySet<String>(), reopened.watched("alice"))
+        assertEquals(mapOf("m9" to setOf("eve")), reopened.pending("bob"))
+    }
+
     /** P3-3: Ein Matchende plant nach 10 s, verkürzt aber keinen aktiven Backoff. */
     @Test fun matchEndKeepsAnActiveBackoffButReplacesOtherPendingWork() {
         val scheduler = AndroidPhoneSyncScheduler(app)

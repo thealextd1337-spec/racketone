@@ -201,6 +201,19 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   ```
   Reihenfolge: App 0.3.0 zuerst ausrollen, dann freigeben. Ältere Apps (bis 0.2.0) zeigen die neue Fassung nur im Profil an
   und pausieren bis zur Bestätigung die Sicherung.
+  **0.4.0 (Datenschutzerklärung Version 6, Zuschauer):** nur PRIVACY wechselt, TERMS 2 bleibt aktuell. Vorher prüfen, dass
+  PRIVACY 5 die aktuelle Fassung ist (`select * from private.consent_versions where is_current`).
+  Reihenfolge: Merge, Seite live, Migration `20261029000100_match_visitors_list.sql` auf staging, App 0.4.0 ausrollen, dann freigeben.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '6', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '6', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '6', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '6');
+  commit;
+  ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
