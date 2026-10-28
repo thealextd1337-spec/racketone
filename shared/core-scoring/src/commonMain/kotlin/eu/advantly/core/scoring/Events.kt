@@ -305,3 +305,59 @@ data class PlayerAssigned(
         ): PlayerAssigned = PlayerAssigned(slot, null, assignedBy, legacySlot, creatorAlias, 2, playerId)
     }
 }
+
+/**
+ * Ein Satz im korrigierten Ergebnis ([ResultCorrected]). [score] = Spiele bei `REGULAR`, sonst Punkte (Match-Tiebreak,
+ * Pickleball-Spiel, Rally-Satz), je 0…99. [tiebreak] = Tiebreak-Punkte eines `REGULAR`-Satzes, der mit Tiebreak endete
+ * (dann Pflicht, sonst verboten). [incomplete] = unvollständiger letzter Satz bei Aufgabe, Abbruch oder „Beenden, wie es
+ * steht“ (nur der letzte Satz, ohne Tiebreak-Punkte; Tennis/Padel in ganzen Spielen).
+ */
+@Serializable
+data class CorrectedSet(
+    val kind: SetKind,
+    val score: SidePair<Int>,
+    val tiebreak: SidePair<Int>? = null,
+    val incomplete: Boolean = false,
+)
+
+/**
+ * Ergebnis nach Matchende korrigieren (neu in Protokoll 5): [sets] ersetzt die gezählten Sätze vollständig; Sieger und
+ * Grund leitet [ResultCorrection] daraus ab, `result.corrected = true`. Die Punkte bleiben unverändert (Statistik).
+ *
+ * - Gültig nur bei `status = FINISHED` an seiner Position und mit plausiblen Sätzen ([ResultCorrection.check]), sonst
+ *   `ignoredEvents`. Wird das Matchende später per Undo aufgehoben, verfällt die Korrektur damit (Position vor dem Undo).
+ * - Das letzte gültige gilt (vollständiger Stand, keine Differenz); leere [sets] stellen das gezählte Ergebnis wieder her.
+ * - Kein UI-Undo-Ziel; ein ausdrückliches `Undo` darauf macht es wie jedes Event unwirksam. Nur der Zähler (02 §7.5).
+ */
+@Serializable
+@SerialName("ResultCorrected")
+data class ResultCorrected(
+    val sets: List<CorrectedSet>,
+) : EventPayload
+
+/**
+ * Aufschläger eines Standardspiels (Tennis/Padel): [set] und [game] 0-basiert im (ggf. korrigierten) Ergebnis, [game] =
+ * Spielstand `A + B` vor dem Spiel; Tiebreaks haben keinen Eintrag. [side] = Side von [player] (redundant, damit der
+ * Export ohne Spieler-ID die Seite kennt; muss passen, sonst ist das Event ungültig).
+ */
+@Serializable
+data class GameServer(
+    val set: Int,
+    val game: Int,
+    val player: PlayerId,
+    val side: Side,
+)
+
+/**
+ * Aufschläger je Spiel nach Matchende korrigieren (neu in Protokoll 5, nur Tennis/Padel). [servers] ersetzt alle
+ * bisherigen Angaben (leer = keine). Wirkt nicht auf den Score, nur auf die Zuordnung der Punkte in
+ * [ScoringEngine.pointHistory] und [ScoringEngine.serviceGames] (Aufschlag-Statistik, Breakbälle).
+ *
+ * Gültig nur bei `status = FINISHED`, Tennis/Padel, Spieler aus dem Lineup, jedes Spiel höchstens einmal und vorhanden
+ * ([ScoringEngine.serviceGames]); sonst `ignoredEvents`. Letztes gültiges gilt; Undo wie [ResultCorrected].
+ */
+@Serializable
+@SerialName("GameServersCorrected")
+data class GameServersCorrected(
+    val servers: List<GameServer>,
+) : EventPayload

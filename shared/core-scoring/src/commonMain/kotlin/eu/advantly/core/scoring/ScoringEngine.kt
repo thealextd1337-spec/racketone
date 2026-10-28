@@ -49,7 +49,37 @@ class EngineState internal constructor(
 
     /** Alle wirksam angewendeten Ballwechsel in Fold-Reihenfolge. */
     val points: Collection<AppliedPoint> get() = appliedPoints.values
+
+    /** Wirksame Aufschläger-Korrektur je Spiel (letzte gültige [GameServersCorrected]), sonst leer. */
+    val gameServers: List<GameServer> get() = core.effectiveGameServers()
+
+    /**
+     * Prüft eine Ergebnis-Korrektur genau wie der Fold (gezähltes Ergebnis als Bezug, wirksames Lineup), z. B. für die
+     * Vorschau im Editor. Vor Matchende immer ungültig ([CorrectionIssueKind.AFTER_MATCH_END] ohne Satz).
+     */
+    fun checkCorrection(sets: List<CorrectedSet>): CorrectionCheck {
+        val original = core.recorded
+        val recorded = original?.result ?: state.result ?: return CorrectionCheck(CorrectionIssue(CorrectionIssueKind.AFTER_MATCH_END))
+        return ResultCorrection.check(format, core.lineup, sets, recorded, if (original != null) original.current else state.current)
+    }
 }
+
+/**
+ * Ein Standardspiel (Tennis/Padel) des – ggf. korrigierten – Ergebnisses ([ScoringEngine.serviceGames]).
+ *
+ * @property set 0-basierter Satz, [game] 0-basiertes Spiel im Satz (Spielstand `A + B` davor)
+ * @property server korrigierter Aufschläger ([GameServersCorrected]), sonst der des letzten Punktes; `null` = unbekannt
+ * @property winner aus den Punkten (`GAME_WON`); ohne Punkte abgeleitet, wenn der Satzstand alle offenen Spiele einer
+ *   Side zuordnet (z. B. 5:4 gezählt, 6:4 korrigiert → das 10. Spiel gewann der Satzsieger); sonst `null`
+ * @property recorded es gibt Punkte zu diesem Spiel
+ */
+data class ServiceGame(
+    val set: Int,
+    val game: Int,
+    val server: PlayerId?,
+    val winner: Side?,
+    val recorded: Boolean,
+)
 
 /**
  * Ein wirksam angewendetes `PointWon` (02 §7.3) mit Zuordnung für Statistik und Bedienung.
@@ -340,17 +370,112 @@ object ScoringEngine {
         lineup: Lineup,
         events: Collection<ScoreEvent>,
         scorer: DeviceId?,
-    ): List<PointRecord> {
+    ): List<PointRecord> = history(format, lineup, events, scorer).second
+
+    /**
+     * Alle Standardspiele (Tennis/Padel) des – ggf. korrigierten – Ergebnisses in Satz- und Spielreihenfolge, inklusive
+     * Spielen ohne Punkte (nach [ResultCorrected]) und des unterbrochenen Spiels bei vorzeitigem Ende; Tiebreaks fehlen.
+     * Basis für „Aufschlagspiele gewonnen“ und den Editor der Aufschläger. Andere Sportarten: leer (dort folgt der
+     * Aufschlag aus der Punktfolge bzw. der festen Reihenfolge).
+     */
+    fun serviceGames(log: Collection<ScoreEvent>): List<ServiceGame> {
+        val ordered = EventLog.distinctOrdered(log)
+        val genesis = requireNotNull(ordered.firstOrNull { it.payload is MatchCreated }) { "Log ohne MatchCreated" }
+        val created = genesis.payload as MatchCreated
+        if (!created.config.sport.isTennisLike) return emptyList()
+        val (engine, points) =
+            history(created.config, created.lineup, ordered.filter { it != genesis }, created.scorerDeviceId ?: genesis.deviceId)
+        val byGame =
+            points
+                .filter { it.before.current?.gameKind == GameKind.STANDARD }
+                .groupBy { gameKey(checkNotNull(it.before.current)) }
+        val overrides = engine.core.effectiveGameServers().associateBy { it.set to it.game }
+        val state = engine.state
+        return (0 until state.sets.size + (if (state.current != null) 1 else 0)).flatMap { set ->
+            val games =
+                (0 until engine.core.standardGames(set)).map { game ->
+                    val last = byGame[set to game]?.last()
+                    ServiceGame(
+                        set = set,
+                        game = game,
+                        server = overrides[set to game]?.player ?: last?.server,
+                        winner = last?.point?.side?.takeIf { Effect.GAME_WON in last.after.effects },
+                        recorded = last != null,
+                    )
+                }
+            inferWinners(state.sets.getOrNull(set), games)
+        }
+    }
+
+    private fun gameKey(current: CurrentSet): Pair<Int, Int> = current.setIndex to (current.games?.let { it.a + it.b } ?: 0)
+
+    /** Offene Spiele eines abgeschlossenen Satzes bekommen den Sieger, wenn der Satzstand sie alle einer Side zuordnet. */
+    private fun inferWinners(
+        record: SetRecord?,
+        games: List<ServiceGame>,
+    ): List<ServiceGame> {
+        val total = record?.games ?: return games
+        val unknown = games.count { it.winner == null }
+        if (unknown == 0) return games
+        val tiebreakWinner = record.winner.takeIf { record.tiebreak != null }
+        val missing =
+            SidePair.of { side -> total[side] - (if (tiebreakWinner == side) 1 else 0) - games.count { it.winner == side } }
+        val side =
+            when {
+                missing.a == unknown && missing.b == 0 -> Side.A
+                missing.b == unknown && missing.a == 0 -> Side.B
+                else -> return games
+            }
+        return games.map { if (it.winner == null) it.copy(winner = side) else it }
+    }
+
+    /**
+     * Fold mit Punktverlauf. Korrigierte Aufschläger ([GameServersCorrected]) ersetzen in `before` Aufschläger, Side und
+     * Breakball-Kennzeichen der Punkte ihres Spiels; die Aufschlag-Info wird gegen die korrigierte Side neu bewertet.
+     */
+    private fun history(
+        format: MatchFormat,
+        lineup: Lineup,
+        events: Collection<ScoreEvent>,
+        scorer: DeviceId?,
+    ): Pair<EngineState, List<PointRecord>> {
         val records = mutableListOf<PointRecord>()
         val engine =
             Replay.run(format, lineup, events, onPoint = { event, before, after ->
                 records += PointRecord(event, event.payload as PointWon, before, after)
             }, scorer = scorer)
-        return records.map { r ->
-            val applied = engine.appliedPoints[r.event.id] ?: return@map r
-            val detail = applied.detail
-            r.copy(detail = detail, serve = PointDetailRules.serveOutcome(detail, applied.side, applied.servingSide, format.sport))
-        }
+        val overrides = engine.core.effectiveGameServers().associateBy { it.set to it.game }
+        val points =
+            records.map { r ->
+                val applied = engine.appliedPoints[r.event.id] ?: return@map r
+                val corrected =
+                    r.before.current
+                        ?.takeIf { it.gameKind == GameKind.STANDARD }
+                        ?.let { overrides[gameKey(it)] }
+                val before = if (corrected == null) r.before else reassigned(r.before, corrected.player, lineup)
+                val servingSide = before.serve?.side ?: applied.servingSide
+                val detail = applied.detail
+                r.copy(
+                    before = before,
+                    detail = detail,
+                    serve = PointDetailRules.serveOutcome(detail, applied.side, servingSide, format.sport),
+                )
+            }
+        return engine to points
+    }
+
+    /** Zustand vor dem Punkt mit [player] als Aufschläger (Rückschläger unbekannt, wenn die Side wechselt). */
+    private fun reassigned(
+        state: MatchState,
+        player: PlayerId,
+        lineup: Lineup,
+    ): MatchState {
+        val serve = state.serve ?: return state
+        val side = lineup.sideOf(player) ?: return state
+        return state.copy(
+            serve = serve.copy(side = side, player = player, receiver = serve.receiver.takeIf { side == serve.side }),
+            statusFlags = state.statusFlags.map { it.copy(breakPoint = it.side != side) },
+        )
     }
 }
 

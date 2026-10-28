@@ -41,7 +41,7 @@ class RecordingLink(
         callback: SendCallback?,
     ): String {
         sent += payload
-        val message = (SyncCodec.decode(payload, 3..4) as? DecodeResult.Ok)?.message
+        val message = (SyncCodec.decode(payload, 3..ProtocolVersion.CURRENT) as? DecodeResult.Ok)?.message
         if (message != null && lose(message)) return "lost-${sent.size}"
         return delegate.send(peer, payload, callback)
     }
@@ -51,7 +51,7 @@ class RecordingLink(
         payload: ByteArray,
     ) = checkNotNull(receiver).onMessage(peer, "replay", payload)
 
-    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it, 3..4) as? DecodeResult.Ok }
+    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it, 3..ProtocolVersion.CURRENT) as? DecodeResult.Ok }
 }
 
 /**
@@ -60,7 +60,8 @@ class RecordingLink(
  */
 class LifecyclePair(
     private val phoneVersions: IntRange = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT,
-    private val watchVersions: IntRange = phoneVersions,
+    /** Versionsbereich der Uhr; nach Änderung wirkt er beim nächsten [restartWatch] („Uhr aktualisiert“). */
+    var watchVersions: IntRange = phoneVersions,
 ) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, queueWhenDisconnected = true)

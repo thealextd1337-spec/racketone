@@ -70,6 +70,7 @@ import eu.advantly.ui.phone.resources.history_by_week
 import eu.advantly.ui.phone.resources.history_chip_draw
 import eu.advantly.ui.phone.resources.history_chip_loss
 import eu.advantly.ui.phone.resources.history_chip_win
+import eu.advantly.ui.phone.resources.history_corrected
 import eu.advantly.ui.phone.resources.history_empty
 import eu.advantly.ui.phone.resources.history_empty_filtered
 import eu.advantly.ui.phone.resources.history_opponents
@@ -283,7 +284,12 @@ private fun HistoryItem(
             Text(setsLine(match), style = AdvantlyTheme.typography.scoreS, color = colors.text)
             ResultBadge(match)
             Text(
-                formatDateTime(match.finishedAtMs) + " · " + durationText(match.durationMs),
+                listOfNotNull(
+                    formatDateTime(match.finishedAtMs),
+                    durationText(match.durationMs),
+                    // dezent: Ergebnis nach dem Spiel von Hand geändert
+                    stringResource(Res.string.history_corrected).takeIf { match.result.corrected },
+                ).joinToString(" · "),
                 style = AdvantlyTheme.typography.caption,
                 color = colors.text2,
             )

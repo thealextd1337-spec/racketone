@@ -14,8 +14,11 @@ import eu.advantly.core.model.PickleballScoring
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.MatchDriver
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.NextSetKind
@@ -25,11 +28,14 @@ import eu.advantly.core.scoring.PointDetailKind
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChosen
+import eu.advantly.core.scoring.SetKind
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.core.scoring.lineupFor
 import eu.advantly.core.scoring.p
@@ -166,6 +172,29 @@ object RuleScenarios {
                 send(Correction.initialServer(p("B1")))
                 point(Side.B)
                 undo()
+            },
+            s(
+                Sport.TENNIS,
+                "result-corrected",
+                "ResultCorrected/GameServersCorrected nach Matchende: vorher ignoriert, unplausibel ignoriert, letzte gilt, leer = gezählt",
+                tennis,
+            ) {
+                send(ResultCorrected(listOf(CorrectedSet(SetKind.REGULAR, SidePair(6, 4)))))
+                win(Side.A, 12)
+                send(ResultCorrected(listOf(CorrectedSet(SetKind.REGULAR, SidePair(8, 4)))))
+                send(
+                    ResultCorrected(
+                        listOf(
+                            CorrectedSet(SetKind.REGULAR, SidePair(6, 4)),
+                            CorrectedSet(SetKind.REGULAR, SidePair(6, 7), SidePair(5, 7)),
+                            CorrectedSet(SetKind.REGULAR, SidePair(7, 5)),
+                        ),
+                    ),
+                )
+                send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.B))))
+                send(GameServersCorrected(listOf(GameServer(1, 12, p("B1"), Side.B))))
+                send(ResultCorrected(listOf(CorrectedSet(SetKind.REGULAR, SidePair(4, 6)))))
+                send(ResultCorrected(emptyList()))
             },
             s(
                 Sport.TENNIS,

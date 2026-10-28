@@ -83,6 +83,17 @@ internal class Core private constructor(
     var cycle: List<PlayerId> = emptyList()
     var prevCycle: List<PlayerId>? = null
 
+    // --- Korrekturen nach Matchende ---
+
+    /** Gezählter Stand vor der ersten wirksamen [ResultCorrected] (für das Zurücksetzen), sonst `null`. */
+    var recorded: RecordedResult? = null
+
+    /** Letzte gültige Aufschläger je Spiel ([GameServersCorrected]); wirksam nur für vorhandene Spiele ([effectiveGameServers]). */
+    var gameServers: List<GameServer> = emptyList()
+
+    /** Eingefrorener unvollständiger letzter Satz einer [ResultCorrected], sonst `null`. */
+    var correctedCurrent: CurrentSet? = null
+
     fun copy(): Core =
         Core(format, lineup).also { c ->
             c.status = status
@@ -121,6 +132,9 @@ internal class Core private constructor(
             c.pos = pos
             c.cycle = cycle
             c.prevCycle = prevCycle
+            c.recorded = recorded
+            c.gameServers = gameServers
+            c.correctedCurrent = correctedCurrent
         }
 
     // =================================================================================================================
@@ -146,6 +160,8 @@ internal class Core private constructor(
                 Resumed -> onResumed()
                 is PointDetailSet -> onPointDetailSet(payload, appliedPoint(payload.target))
                 is ServerChosen -> onServerChosen(payload)
+                is ResultCorrected -> onResultCorrected(payload)
+                is GameServersCorrected -> onGameServersCorrected(payload)
                 is PlayerAssigned -> error("PlayerAssigned wirkt nur in der Identitätsprojektion")
                 is MatchCreated -> false
                 is Undo -> error("Undo geht nicht in den Fold ein (02 §7.3)")
@@ -242,6 +258,79 @@ internal class Core private constructor(
         frozen = inSet
         effects = effects + Effect.MATCH_ENDED
         return true
+    }
+
+    /** Ergebnis-Korrektur ([ResultCorrected]): nur nach Matchende, Plausibilität über [ResultCorrection.check]. */
+    private fun onResultCorrected(payload: ResultCorrected): Boolean {
+        if (status != MatchStatus.FINISHED) return false
+        val original = recorded ?: RecordedResult(checkNotNull(result), sets, setsWon, inSet, if (inSet) currentSet() else null)
+        if (payload.sets.isEmpty()) {
+            result = original.result
+            sets = original.sets
+            setsWon = original.setsWon
+            inSet = original.inSet
+            correctedCurrent = null
+            recorded = null
+            return true
+        }
+        val check = ResultCorrection.check(format, lineup, payload.sets, original.result, original.current)
+        if (check.issue != null) return false
+        recorded = original
+        result = check.result
+        sets = check.sets
+        setsWon = check.setsWon
+        // Nur die eingegebenen Sätze; ein unvollständiger letzter Satz ersetzt den eingefrorenen laufenden Satz.
+        inSet = false
+        correctedCurrent = check.current
+        return true
+    }
+
+    /** Aufschläger je Spiel ([GameServersCorrected]): Tennis/Padel nach Matchende, jedes vorhandene Spiel höchstens einmal. */
+    private fun onGameServersCorrected(payload: GameServersCorrected): Boolean {
+        if (status != MatchStatus.FINISHED || !sport.isTennisLike) return false
+        val keys = payload.servers.map { it.set to it.game }
+        if (keys.toSet().size != keys.size) return false
+        if (payload.servers.any { sideOf(it.player) != it.side || it.game !in 0 until standardGames(it.set) }) return false
+        gameServers = payload.servers
+        return true
+    }
+
+    /** Aufschläger-Korrekturen, deren Spiel es im aktuellen (ggf. später erneut korrigierten) Ergebnis noch gibt. */
+    fun effectiveGameServers(): List<GameServer> = gameServers.filter { it.game < standardGames(it.set) }
+
+    /** Eingefrorener laufender Satz (korrigiert bzw. gezählt), sonst `null`. */
+    fun frozenCurrent(): CurrentSet? = correctedCurrent ?: if (inSet) currentSet() else null
+
+    /**
+     * Standardspiele im Satz [set] (Tennis/Padel): abgeschlossener `REGULAR`-Satz ohne sein Tiebreak-Spiel, beim
+     * laufenden bzw. eingefrorenen Satz inklusive des unterbrochenen Standardspiels, sofern darin schon gespielt wurde;
+     * Match-Tiebreaks haben keine.
+     */
+    fun standardGames(set: Int): Int {
+        val record = sets.getOrNull(set)
+        val games = record?.games
+        return when {
+            record != null -> {
+                if (record.kind == SetKind.REGULAR &&
+                    games != null
+                ) {
+                    games.a + games.b - (if (record.tiebreak != null) 1 else 0)
+                } else {
+                    0
+                }
+            }
+
+            set == sets.size && frozenCurrent() != null -> {
+                val current = checkNotNull(frozenCurrent())
+                val played = current.games?.let { it.a + it.b } ?: 0
+                val running = current.gameKind == GameKind.STANDARD && current.points.a + current.points.b > 0
+                if (current.setKind == SetKind.REGULAR) played + (if (running) 1 else 0) else 0
+            }
+
+            else -> {
+                0
+            }
+        }
     }
 
     /**
@@ -959,7 +1048,7 @@ internal class Core private constructor(
             result = result,
             setsWon = setsWon,
             sets = sets,
-            current = if (inSet) currentSet() else null,
+            current = frozenCurrent(),
             serve = serve,
             scoreCall = serve?.let { scoreCall(it) },
             positions = if (live) positions() else null,
@@ -1119,6 +1208,15 @@ internal class Core private constructor(
         val side = nextOpener ?: return null
         return Continuation(side, order[side][0])
     }
+
+    /** Gezählter Endstand, den eine [ResultCorrected] überdeckt. */
+    data class RecordedResult(
+        val result: MatchResult,
+        val sets: List<SetRecord>,
+        val setsWon: SidePair<Int>,
+        val inSet: Boolean,
+        val current: CurrentSet?,
+    )
 
     companion object {
         private val ZERO = SidePair(0, 0)

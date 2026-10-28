@@ -13,11 +13,14 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchEnded
@@ -29,6 +32,7 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
@@ -386,6 +390,33 @@ class InMemoryMatchStore(
     override fun record(matchId: MatchId): MatchRecord? {
         val entry = entries[matchId] ?: return null
         return MatchRecord(summary(entry), entry.engine.state, listOf(entry.genesis) + entry.engine.events)
+    }
+
+    override fun canCorrectResult(matchId: MatchId): Boolean = entries[matchId]?.engine?.state?.status == MatchStatus.FINISHED
+
+    override fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
+    ): Boolean {
+        val entry = entries[matchId] ?: return false
+        val payloads = listOfNotNull(sets?.let(::ResultCorrected), servers?.let(::GameServersCorrected))
+        // Atomar wie die Session: erst beide auf einer Kopie prüfen, dann anhängen
+        val engine = entry.engine
+        val lamport = entry.lamport
+        val trial =
+            payloads.mapIndexed { i, p -> ScoreEvent(EventId("probe-$i"), entry.id, deviceId, 0, lamport + 1 + i, clock.nowMs(), null, p) }
+        if (trial.isNotEmpty() &&
+            ScoringEngine
+                .applyAll(engine, trial)
+                .state.ignoredEvents
+                .any { id -> trial.any { it.id == id } }
+        ) {
+            return false
+        }
+        if (payloads.any { appendEvent(entry, it) == null }) return false
+        publish()
+        return true
     }
 
     override fun delete(matchId: MatchId): Boolean {

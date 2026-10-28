@@ -100,4 +100,14 @@ class OutboxPlannerTest {
         assertEquals(mapOf(ids[2] to "id_conflict"), update.rejected)
         assertEquals(setOf(ids[3], ids[4]), update.retry)
     }
+
+    /** Ergebnis-Korrektur eines Nicht-Erstellers (0.3.0): endgültig abgewiesen, kein Endlos-Retry. */
+    @Test
+    fun correctionForbiddenIsRejectedNotRetried() {
+        val sent = OutboxPlanner.plan(listOf(event("m1", 1))).single()
+        val id = sent.events.single().id
+        val update = OutboxPlanner.evaluate(sent, PushResponse(events = listOf(ItemResult(id, "rejected", "correction_forbidden"))))
+        assertEquals(mapOf(id to "correction_forbidden"), update.rejected)
+        assertEquals(emptySet(), update.retry)
+    }
 }

@@ -31,6 +31,10 @@ package eu.advantly.sync.protocol
  *   (`MatchDataStamp`) an `Events`, `Summary`, `MatchMeta` und `Deleted`, geprüft vor jeder Mutation und jedem Ack;
  *   Lifecycle-Zustellung von Zugriff und Redaktion (`AccessState`, `RedactedChunk` und Acks, nur mit `IdentityEnvelope`);
  *   `Summary.lifecycle`; 64-KiB-Grenze je Paket inklusive Envelope; `PlayerAssigned` ohne Klarnamen (Referenz).
+ * - **5** (0.3.0, 2026-10-28): neue Event-Inhalte `ResultCorrected` und `GameServersCorrected` (Ergebnis und
+ *   Aufschläger nach Matchende am Handy korrigieren). Ein Gerät mit Version 4 kann sie nicht dekodieren und verwürfe
+ *   ganze `Events`-Nachrichten. Mit Konto meldet die Session deshalb `minV = 5`: 4↔5 ist auf beiden Seiten ein
+ *   Updatezustand (wie 3↔4). Ohne Konto bleibt es bei 3, und die Session bietet keine Korrektur an.
  *
  * **Warum 3↔4 mit Konto inkompatibel ist:** Eine Uhr mit Protokoll 3 versteht weder Belege noch Redaktion. Über 3 kämen
  * Events an, Zugriffsentzug und Redaktion nie – die Uhr behielte gelöschte Klarnamen (Datenschutzfehler, kein
@@ -53,7 +57,7 @@ package eu.advantly.sync.protocol
  */
 object ProtocolVersion {
     /** Höchste Version, die dieses Gerät spricht und schreibt (mit Konto). */
-    const val CURRENT: Int = 4
+    const val CURRENT: Int = 5
 
     /** Älteste Version, die dieses Gerät noch lesen kann. */
     const val MIN_SUPPORTED: Int = 3
