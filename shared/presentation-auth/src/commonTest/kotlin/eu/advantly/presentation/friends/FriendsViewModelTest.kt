@@ -44,7 +44,12 @@ private class FakeFriends : FriendsPort {
         return code
     }
 
-    override suspend fun ownProfile() = FoundProfile("alice", "Alice", "alice_1")
+    var profileFailure: String? = null
+
+    override suspend fun ownProfile(): FoundProfile {
+        profileFailure?.let { throw CloudException(it, false) }
+        return FoundProfile("alice", "Alice", "alice_1")
+    }
 
     override suspend fun findProfile(query: String): FoundProfile? {
         call("find:$query")
@@ -193,6 +198,19 @@ class FriendsViewModelTest {
             model.sendRequest("K7QF-92MX")
             assertEquals("send:gina:true", friends.calls.last())
             assertTrue("gina" in state.friends.ids())
+        }
+
+    @Test fun friendCodeShowsEvenIfOwnProfileFailsAndProfileIsRetriedLater() =
+        fixture {
+            friends.profileFailure = "connection_failed"
+            model.open()
+            assertEquals("K7QF92MX", state.friendCode)
+            assertNull(state.me)
+            assertNull(state.error, "der Code ist kein Fehlerfall")
+            friends.profileFailure = null
+            model.open()
+            assertEquals(FoundProfile("alice", "Alice", "alice_1"), state.me)
+            assertEquals(1, friends.calls.count { it == "code" }, "Code wird nicht erneut geladen")
         }
 
     @Test fun errorsAreShownAndMissingBindingTriggersPullThenCodeReload() =

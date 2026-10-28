@@ -104,14 +104,24 @@ class FriendsViewModel(
         loadCode()
     }
 
-    /** Auch „Erneut versuchen“ nach einem gescheiterten Laden des Codes; lädt Alias und Benutzername mit. */
+    /**
+     * Auch „Erneut versuchen“ nach einem gescheiterten Laden des Codes; lädt Alias und Benutzername mit. Scheitert nur das
+     * Profil, steht der Code trotzdem da und der nächste Aufruf (z. B. Öffnen des Freunde-Tabs) versucht das Profil erneut.
+     */
     fun loadCode() {
-        if (mutable.value.friendCode != null) return
+        if (mutable.value.friendCode != null && mutable.value.me != null) return
         run { session ->
-            val code = port.friendCode()
-            val me = port.ownProfile()
+            val code = mutable.value.friendCode ?: port.friendCode()
+            val me =
+                try {
+                    port.ownProfile()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
             current(session)
-            show { copy(friendCode = code, me = me) }
+            show { copy(friendCode = code, me = me ?: this.me) }
         }
     }
 
