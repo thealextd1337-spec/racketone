@@ -64,8 +64,8 @@ select is((select jsonb_agg(e -> 'payload' order by e ->> 'id') from jsonb_array
            jsonb_array_elements(m -> 'events') e where e ->> 'id' in ('e8000000-0000-7000-8000-000000000005',
                                                                       'e8000000-0000-7000-8000-000000000006',
                                                                       'e8000000-0000-7000-8000-000000000007')),
-          '[{"type":"PointWon","side":"A"},{"type":"PointDetailSet","target":"e8000000-0000-7000-8000-000000000005"},{"type":"PointDetailSet","target":"e8000000-0000-7000-8000-000000000005","detail":{"kind":"ACE"}}]'::jsonb,
-          'Details ohne Spielerbezug, null-Detail entfällt');
+          '[{"type":"PointWon","side":"A"},{"target":"e8000000-0000-7000-8000-000000000005"},{"target":"e8000000-0000-7000-8000-000000000005","detail":{"kind":"ACE"}}]'::jsonb,
+          'Details ohne Spielerbezug, null-Detail entfällt; PointDetailSet kompakt ohne doppelten Typ (0.3.0)');
 
 -- Export (vor der Löschung)
 select is(jsonb_array_length(public.export_my_data() -> 'matches'), 3, 'Export enthält alle eigenen/verknüpften Matches');
