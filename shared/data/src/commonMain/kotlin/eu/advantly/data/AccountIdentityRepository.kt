@@ -166,11 +166,6 @@ class AccountIdentityRepository internal constructor(
         }
 
     /**
-     * Eigenes Gerät und alle Quellen dieses Kontobereichs binden: Hat eine Uhr ihr Hello geschickt, während keine
-     * Kontositzung aktiv war (offline gestartet, Zustimmung offen), holt die nächste Aktivierung ihre Bindung nach.
-     */
-
-    /**
      * Pflichtkonto (0.3.0): ohne Rückfrage übernommen wird nur, was nachweislich zu diesem Handy bzw. [profileId] gehört:
      * eigene Vorkonto-Bereiche dieses Geräts (`legacy:`, `installation:` – ein wiederhergestelltes Abbild hat seine
      * Bereiche stillgelegt), ein Gastbereich, der nach dem Abmelden genau dieses Profils entstand, und ausdrücklich
@@ -198,6 +193,10 @@ class AccountIdentityRepository internal constructor(
 
     fun guestOrigin(guest: String): String? = data.settings.get(GUEST_ORIGIN_PREFIX + guest)
 
+    /**
+     * Eigenes Gerät und alle Quellen dieses Kontobereichs binden: Hat eine Uhr ihr Hello geschickt, während keine
+     * Kontositzung aktiv war (offline gestartet, Zustimmung offen), holt die nächste Aktivierung ihre Bindung nach.
+     */
     fun bindCurrent(session: CloudUploadSession) {
         check(profile == session.profileId)
         val current = checkNotNull(scope)
