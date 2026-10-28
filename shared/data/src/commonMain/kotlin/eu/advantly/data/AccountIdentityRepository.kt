@@ -169,6 +169,35 @@ class AccountIdentityRepository internal constructor(
      * Eigenes Gerät und alle Quellen dieses Kontobereichs binden: Hat eine Uhr ihr Hello geschickt, während keine
      * Kontositzung aktiv war (offline gestartet, Zustimmung offen), holt die nächste Aktivierung ihre Bindung nach.
      */
+
+    /**
+     * Pflichtkonto (0.3.0): ohne Rückfrage übernommen wird nur, was nachweislich zu diesem Handy bzw. [profileId] gehört:
+     * eigene Vorkonto-Bereiche dieses Geräts (`legacy:`, `installation:` – ein wiederhergestelltes Abbild hat seine
+     * Bereiche stillgelegt), ein Gastbereich, der nach dem Abmelden genau dieses Profils entstand, und ausdrücklich
+     * freigegebene Quellen ([releaseRestored]). Fremde Uhren, fremde Abbilder und Gastdaten anderer Konten bleiben ungebunden.
+     */
+    fun automaticAdoptionSources(profileId: String): List<AdoptionSource> {
+        val own =
+            queries
+                .identityScopes()
+                .executeAsList()
+                .filter {
+                    it.startsWith("legacy:") || it.startsWith("installation:") || data.settings.get(GUEST_ORIGIN_PREFIX + it) == profileId
+                }.toSet()
+        return adoptionSources().filter {
+            queries.source(it.deviceId).executeAsOne().scope_id in own ||
+                queries.acceptedScopeForSource(it.deviceId).executeAsOneOrNull() in own
+        }
+    }
+
+    /** Gastbereich nach dem Abmelden von [profileId]: nur dieses Profil übernimmt ihn später automatisch. */
+    fun rememberGuestOrigin(
+        guest: String,
+        profileId: String,
+    ) = data.settings.put(GUEST_ORIGIN_PREFIX + guest, profileId)
+
+    fun guestOrigin(guest: String): String? = data.settings.get(GUEST_ORIGIN_PREFIX + guest)
+
     fun bindCurrent(session: CloudUploadSession) {
         check(profile == session.profileId)
         val current = checkNotNull(scope)
@@ -221,6 +250,7 @@ class AccountIdentityRepository internal constructor(
 
     private companion object {
         const val ACCOUNT_PREFIX = "identity.account."
+        const val GUEST_ORIGIN_PREFIX = "identity.guestOrigin."
         val RESTORED_KEYS =
             setOf(
                 "identity.scope",
@@ -232,7 +262,7 @@ class AccountIdentityRepository internal constructor(
                 "session.deviceId",
                 "session.deviceStatuses",
             )
-        val RESTORED_PREFIXES = listOf(ACCOUNT_PREFIX, "session.peerKind.", "session.nodeDevice.")
+        val RESTORED_PREFIXES = listOf(ACCOUNT_PREFIX, GUEST_ORIGIN_PREFIX, "session.peerKind.", "session.nodeDevice.")
     }
 }
 

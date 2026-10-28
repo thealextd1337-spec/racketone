@@ -21,6 +21,7 @@ interface LocalAccountOwnership {
         session: CloudUploadSession,
     )
 
+    /** Quellen, die ohne Rückfrage zum aktiven Konto gehören ([AccountIdentityRepository.automaticAdoptionSources]). */
     fun adoptionSources(): List<AdoptionSource>
 
     fun adoptSources(
