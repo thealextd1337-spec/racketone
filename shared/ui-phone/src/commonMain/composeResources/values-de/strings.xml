@@ -566,7 +566,7 @@
     <string name="server_choice_current">Aktuell: %1$s. Du kannst bis zum nächsten Punkt wählen.</string>
 
     <string name="auth_title">Konto</string>
-    <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Österreich: ab 14, Deutschland, Schweiz und Liechtenstein: ab 16.</string>
+    <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Mindestalter: in Österreich 14, in allen anderen Ländern 16.</string>
     <string name="auth_country">Wohnsitzland (2-stelliger Code, z. B. AT, DE, US)</string>
     <string name="auth_birth">Geburtsdatum (JJJJ-MM-TT)</string>
     <string name="auth_continue">Weiter</string>
@@ -679,7 +679,7 @@
     <string name="cloud_sync_backed_up">Alles gesichert ✓</string>
     <string name="cloud_sync_connection_failed">Keine Verbindung. Deine Matches werden automatisch gesichert, sobald du online bist.</string>
     <string name="cloud_sync_failed">Die Sicherung ist fehlgeschlagen.</string>
-    <string name="cloud_sync_blocked_permission">Dieses Handy hat keinen Cloud-Zugriff mehr. Melde dich ab und wieder an oder wende dich an den Support.</string>
+    <string name="cloud_sync_blocked_permission">Dieses Handy hat keinen Cloud-Zugriff mehr, neue Matches bleiben nur auf diesem Handy. Bitte wende dich an den Support. Lösche keine App-Daten und installiere die App nicht neu, sonst gehen nicht gesicherte Matches verloren.</string>
     <string name="cloud_sync_blocked_rejected">Einige Events wurden von der Cloud dauerhaft abgewiesen und werden nicht gesichert.</string>
     <string name="cloud_sync_blocked_waiting">Einige Daten warten, bis der Cloud-Abgleich auf diesem Handy abgeschlossen ist.</string>
     <string name="profile_account_privacy">Konto &amp; Datenschutz</string>
@@ -734,7 +734,7 @@
     <string name="friends_segment_requests">Anfragen</string>
     <string name="friends_access_signed_out">Melde dich an, um Freunde hinzuzufügen.</string>
     <string name="friends_access_setup">Schließ zuerst die Einrichtung deines Kontos ab, um Freunde hinzuzufügen.</string>
-    <string name="friends_access_consent">Für Freunde brauchst du deine Zustimmung zu Datenschutzerklärung und Nutzungsbedingungen. Das Zählen auf diesem Gerät bleibt davon unberührt.</string>
+    <string name="friends_access_consent">Für Freunde brauchst du deine Zustimmung zu den aktuellen Nutzungsbedingungen und der Datenschutzerklärung.</string>
     <string name="friends_access_paused">Dein Konto ist gesperrt oder zur Löschung vorgemerkt. Freunde sind bis dahin nicht verfügbar.</string>
     <string name="friends_access_open_account">Konto öffnen</string>
     <string name="friends_code_title">Dein Freundescode</string>

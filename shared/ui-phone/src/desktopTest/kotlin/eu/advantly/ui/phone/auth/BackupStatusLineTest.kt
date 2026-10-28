@@ -1,6 +1,7 @@
 package eu.advantly.ui.phone.auth
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -79,13 +80,8 @@ class BackupStatusLineTest {
                     sync.state.value =
                         PhoneSyncState(available = true, status = PhoneSyncStatus.BLOCKED, blocked = PhoneSyncBlock.PERMISSION)
                     waitForIdle()
-                    text.assertTextEquals(
-                        if (de) {
-                            "Dieses Handy hat keinen Cloud-Zugriff mehr. Melde dich ab und wieder an oder wende dich an den Support."
-                        } else {
-                            "This phone no longer has cloud access. Sign out and sign in again, or contact support."
-                        },
-                    )
+                    text.assertTextContains(if (de) "wende dich an den Support" else "contact support", substring = true)
+                    text.assertTextContains(if (de) "Lösche keine App-Daten" else "Do not clear the app data", substring = true)
                     onNodeWithTag("backup_action").performClick()
                     assertEquals(2, sync.syncs)
 

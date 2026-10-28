@@ -291,14 +291,19 @@ private fun TabLayer(
         navigator.tab = AppTab.Profile
     }
     if (accountRequired && authModel != null) {
-        // Vollbild ohne Tab-Leiste und ohne Überspringen; nur Hilfe bleibt erreichbar.
-        if (showSupport && supportModel != null) {
-            BackHandler { showSupport = false }
-            SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
-                showSupport = false
+        // Vollbild ohne Tab-Leiste und ohne Überspringen; Hilfe und ein laufendes Match bleiben erreichbar.
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f)) {
+                if (showSupport && supportModel != null) {
+                    BackHandler { showSupport = false }
+                    SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
+                        showSupport = false
+                    }
+                } else {
+                    AccountGate(authModel, googleCredential, onSupport, onShareExport)
+                }
             }
-        } else {
-            AccountGate(authModel, googleCredential, onSupport, onShareExport)
+            active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }, more = open.size - 1) }
         }
         return
     }

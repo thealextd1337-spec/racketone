@@ -212,7 +212,9 @@ class StartLoginTest {
             onNodeWithTag("live_minimize").assertIsDisplayed()
             onNodeWithTag("live_minimize").performClick()
             onNodeWithTag("consent_status").assertIsDisplayed()
-            onNodeWithTag("mini_scorebar").assertDoesNotExist()
+            // Das minimierte Match bleibt über die Mini-Scorebar erreichbar.
+            onNodeWithTag("mini_scorebar").performClick()
+            onNodeWithTag("live_minimize").assertIsDisplayed()
         }
     }
 

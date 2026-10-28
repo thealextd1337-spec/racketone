@@ -566,7 +566,7 @@
     <string name="server_choice_current">Current: %1$s. You can choose until the next point.</string>
 
     <string name="auth_title">Account</string>
-    <string name="auth_birth_privacy">Your date of birth is only checked and never stored. Austria: 14+, Germany, Switzerland and Liechtenstein: 16+.</string>
+    <string name="auth_birth_privacy">Your date of birth is only checked and never stored. Minimum age: 14 in Austria, 16 in all other countries.</string>
     <string name="auth_country">Country of residence (2-letter code, e.g. US, GB, AT)</string>
     <string name="auth_birth">Date of birth (YYYY-MM-DD)</string>
     <string name="auth_continue">Continue</string>
@@ -679,7 +679,7 @@
     <string name="cloud_sync_backed_up">All backed up ✓</string>
     <string name="cloud_sync_connection_failed">No connection. Your matches are backed up automatically as soon as you are online.</string>
     <string name="cloud_sync_failed">Backup failed.</string>
-    <string name="cloud_sync_blocked_permission">This phone no longer has cloud access. Sign out and sign in again, or contact support.</string>
+    <string name="cloud_sync_blocked_permission">This phone no longer has cloud access, so new matches stay on this phone only. Please contact support. Do not clear the app data or reinstall the app, or matches that are not backed up will be lost.</string>
     <string name="cloud_sync_blocked_rejected">Some events were permanently rejected by the cloud and will not be backed up.</string>
     <string name="cloud_sync_blocked_waiting">Some data is waiting until the cloud check on this phone is complete.</string>
     <string name="profile_account_privacy">Account &amp; privacy</string>
@@ -734,7 +734,7 @@
     <string name="friends_segment_requests">Requests</string>
     <string name="friends_access_signed_out">Sign in to add friends.</string>
     <string name="friends_access_setup">Finish setting up your account first to add friends.</string>
-    <string name="friends_access_consent">Friends need your consent to the privacy policy and terms. Counting on this device is not affected.</string>
+    <string name="friends_access_consent">Friends need your consent to the current terms of use and privacy policy.</string>
     <string name="friends_access_paused">Your account is suspended or scheduled for deletion. Friends are unavailable until then.</string>
     <string name="friends_access_open_account">Open account</string>
     <string name="friends_code_title">Your friend code</string>
