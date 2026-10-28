@@ -86,11 +86,16 @@ enum class ResultReason {
     STOPPED,
 }
 
-/** Ergebnis; `winner = null` bei `DRAW`, `ABANDONED` und `STOPPED` mit Gleichstand. */
+/**
+ * Ergebnis; `winner = null` bei `DRAW`, `ABANDONED` und `STOPPED` mit Gleichstand.
+ *
+ * @property corrected nach Matchende manuell korrigiert (`ResultCorrected`); fehlt im JSON, wenn `false`
+ */
 @Serializable
 data class MatchResult(
     val winner: Side?,
     val reason: ResultReason,
+    val corrected: Boolean = false,
 )
 
 /** Art eines Satzes in der Engine (02 §0, §8). */

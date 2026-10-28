@@ -183,6 +183,34 @@ class SerializationTest {
         assertTrue(obj["pending"] is kotlinx.serialization.json.JsonNull)
     }
 
+    /** Korrekturen nach Matchende (Protokoll 5): Wire-Form; `corrected` erscheint nur, wenn gesetzt (alte Vektoren bleiben gleich). */
+    @Test
+    fun resultCorrectionWireForm() {
+        fun enc(payload: EventPayload) = vectorJson.encodeToString(EventPayload.serializer(), payload)
+        val corrected =
+            ResultCorrected(
+                listOf(
+                    CorrectedSet(SetKind.REGULAR, SidePair(7, 6), SidePair(7, 4)),
+                    CorrectedSet(SetKind.MATCH_TIEBREAK, SidePair(8, 10)),
+                ),
+            )
+        val json =
+            """{"type":"ResultCorrected","sets":[{"kind":"REGULAR","score":{"A":7,"B":6},"tiebreak":{"A":7,"B":4}},""" +
+                """{"kind":"MATCH_TIEBREAK","score":{"A":8,"B":10}}]}"""
+        assertEquals(json, enc(corrected))
+        assertEquals(corrected, vectorJson.decodeFromString(EventPayload.serializer(), json))
+        val servers = GameServersCorrected(listOf(GameServer(1, 4, p("B2"))))
+        assertEquals("""{"type":"GameServersCorrected","servers":[{"set":1,"game":4,"player":"B2"}]}""", enc(servers))
+        assertEquals(
+            """{"winner":"A","reason":"COMPLETED"}""",
+            vectorJson.encodeToString(MatchResult.serializer(), MatchResult(eu.advantly.core.model.Side.A, ResultReason.COMPLETED)),
+        )
+        assertEquals(
+            """{"winner":null,"reason":"STOPPED","corrected":true}""",
+            vectorJson.encodeToString(MatchResult.serializer(), MatchResult(null, ResultReason.STOPPED, true)),
+        )
+    }
+
     @Test
     fun uuid7FromPartsIsValidAndOrdered() {
         val a = Uuid7.fromParts(1_700_000_000_000L, 0xABC, 0x1234_5678_9ABC_DEFL)

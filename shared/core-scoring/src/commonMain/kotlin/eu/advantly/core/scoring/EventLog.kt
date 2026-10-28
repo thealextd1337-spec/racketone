@@ -92,7 +92,15 @@ object EventLog {
         return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved, roleRejected, scorer)
     }
 
-    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5, seit 2026-10-15 auch `ServerChosen`). */
+    /**
+     * Zählt das Event für Matchzeit und -ende („letztes Event“ in Dauer, Ende, Listen)? Nein für Personenzuweisung (F20),
+     * Korrekturen nach Matchende (Protokoll 5) und Zählerwechsel – letzterer geht einer Korrektur am Handy voraus und
+     * verschöbe sonst das Matchende auf den Zeitpunkt der Korrektur.
+     */
+    fun countsForMatchTime(payload: EventPayload): Boolean =
+        payload !is PlayerAssigned && payload !is ScorerChanged && payload !is ResultCorrected && payload !is GameServersCorrected
+
+    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5; seit 2026-10-15 `ServerChosen`, ab Protokoll 5 die Korrekturen). */
     fun isScorerOnly(payload: EventPayload): Boolean =
         payload is PointWon ||
             payload is Undo ||
@@ -102,7 +110,9 @@ object EventLog {
             payload is Resumed ||
             payload is MatchEnded ||
             payload is PointDetailSet ||
-            payload is ServerChosen
+            payload is ServerChosen ||
+            payload is ResultCorrected ||
+            payload is GameServersCorrected
 
     /**
      * Rollenregel (02 §7.5): Vorwärts durch die Ordnung; `ScorerChanged` setzt den Zähler ab seiner Position. Ein
