@@ -143,6 +143,12 @@ internal object PullMapping {
         )
     }
 
+    /**
+     * Gezogene Event-Zeilen → lokale Events; jede Payload muss dekodierbar sein (sonst `IllegalArgumentException`, der Job
+     * des Matches gilt als fehlgeschlagen). Bekannte Grenze (Review P2-3, akzeptiert): Apps vor 0.3.0 kennen
+     * `ResultCorrected`/`GameServersCorrected` nicht – dort scheitert der Pull eines korrigierten Matches sicher (kein
+     * Absturz, keine Datenänderung), die übrigen Matches laufen weiter.
+     */
     fun events(
         rows: List<PulledEvent>,
         matchId: String,
