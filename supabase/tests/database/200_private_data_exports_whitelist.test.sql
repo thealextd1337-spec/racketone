@@ -7,7 +7,7 @@ select tests.accept_current_consents(tests.uid('bob'));
 insert into public.matches(id,created_by,sport,discipline,started_at,format,meta,summary) values
  ('20000000-0000-4000-8000-000000000010',tests.uid('alice'),'tennis','singles',now(),
  '{"formatVersion":1,"sport":"TENNIS","discipline":"SINGLES","match":{"mode":"BEST_OF","bestOf":3,"token":"SECRET"},"set":{"kind":"REGULAR","gamesToWin":6,"tiebreakAt":6,"tiebreak":{"pointsToWin":7,"winBy":2,"endChange":{"first":6,"every":null,"deviceId":"SECRET"},"token":"SECRET"}},"token":"SECRET"}',
- '{"venue":"München 🏸","mixed":false,"watchWorkout":true,"serveStats":true,"courtPace":3,"token":"SECRET"}',
+ '{"venue":"München 🏸","mixed":false,"watchWorkout":true,"serveStats":true,"serveTracking":"DOUBLE_FAULTS_ONLY","courtPace":3,"token":"SECRET"}',
  '{"setsWonA":1,"setsWonB":0,"sets":[{"a":6,"b":4,"tiebreakA":null,"matchTiebreak":false,"token":"SECRET"}],"completedSets":[{"kind":"REGULAR","games":{"A":6,"B":4,"profileId":"SECRET"},"tiebreak":null,"points":null,"winner":"A"}],"currentState":{"setIndex":1,"setKind":"REGULAR","gameKind":"STANDARD","games":{"A":0,"B":0},"points":{"A":1,"B":0},"display":{"A":"15","B":"0","token":"SECRET"},"callout":null,"deuceCount":0,"decidingPoint":false,"deviceId":"SECRET"},"lastEventAtMs":42,"eventCount":9,"token":"SECRET"}');
 insert into public.match_events(id,match_id,device_id,device_seq,lamport,wall_clock_ms,type,payload,author_id) values
  ('20000000-0000-4000-8000-000000000011','20000000-0000-4000-8000-000000000010',tests.device('a1'),1,1,1,'MatchCreated',
@@ -32,6 +32,7 @@ select is(jsonb_array_length(current_setting('tests.k2_data')::jsonb->'consentHi
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,format,match,bestOf}','3','Format-Fachwerte erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>'{matches,0,format,set,tiebreak,endChange,every}','null'::jsonb,'explizites Null erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,meta,venue}','München 🏸','zulässiger Freitext erhalten');
+select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,meta,serveTracking}','DOUBLE_FAULTS_ONLY','Aufschläge-Modus erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,summary,currentState,display,A}','15','vollständiger ScoreSummary-Cache erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,summary,completedSets,0,games,A}','6','abgeschlossene Sätze erhalten');
 select is(current_setting('tests.k2_data')::jsonb#>>'{matches,0,events,0,payload,config,game,deuceMode}','ADVANTAGE','Genesis fachlich erhalten');
