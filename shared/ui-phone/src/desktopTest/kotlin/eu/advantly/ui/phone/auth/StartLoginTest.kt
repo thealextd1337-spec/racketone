@@ -3,6 +3,8 @@ package eu.advantly.ui.phone.auth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
@@ -12,97 +14,65 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.ConsentDocument
+import eu.advantly.cloud.sync.ConsentDocumentType
+import eu.advantly.cloud.sync.ConsentSnapshot
+import eu.advantly.cloud.sync.ConsentStatus
+import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AppTab
+import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.startWith
 import eu.advantly.ui.phone.testModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Locale
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** Pflichtkonto (0.3.0): ohne nutzbares Konto zeigt die Handy-App nur den Konto-Fluss, ohne Überspringen. */
 @OptIn(ExperimentalTestApi::class)
 class StartLoginTest {
-    private class FakeHost(
-        decided: Boolean = false,
-    ) : StartLoginHost {
-        override val decided = MutableStateFlow(decided)
-
-        override fun decide() {
-            decided.value = true
-        }
-    }
-
-    private fun show(
-        available: Boolean = true,
-        decided: Boolean = false,
-        signedIn: Boolean = false,
-        checking: Boolean = false,
-        checkFailed: Boolean = false,
-        recoveryHold: Boolean = false,
-    ) = shouldShowStartLogin(available, decided, signedIn, checking, checkFailed, recoveryHold)
-
-    @Test fun firstStartShows() = assertTrue(show())
-
-    @Test fun afterDecisionNotShown() = assertFalse(show(decided = true))
-
-    @Test fun signedInNotShown() = assertFalse(show(signedIn = true))
-
-    @Test fun withoutBackendNotShown() = assertFalse(show(available = false))
-
-    @Test fun duringRecoveryHoldNotShown() = assertFalse(show(recoveryHold = true))
-
-    @Test fun whileFirstAccountCheckRunsNotShown() = assertFalse(show(checking = true))
-
-    @Test fun failedAccountCheckNotShown() = assertFalse(show(checkFailed = true))
-
     private fun authModel(
+        auth: FakePhoneAuth = FakePhoneAuth(),
         signedIn: Boolean = false,
         failure: String? = null,
     ) = AuthViewModel(
-        FakePhoneAuth().also {
+        auth.also {
             if (signedIn) it.session.value = CloudSession("alice", true)
             it.failure = failure
         },
         CoroutineScope(Dispatchers.Unconfined),
     )
 
-    @Test fun germanAtLargeFontSkipStoresDecisionAndShowsHome() = skip(Locale.GERMANY)
+    @Test fun germanAtLargeFontFirstStartHasNoSkip() = firstStart(Locale.GERMANY)
 
-    @Test fun englishAtLargeFontSkipStoresDecisionAndShowsHome() = skip(Locale.US)
+    @Test fun englishAtLargeFontFirstStartHasNoSkip() = firstStart(Locale.US)
 
-    private fun skip(locale: Locale) {
+    private fun firstStart(locale: Locale) {
         val previous = Locale.getDefault()
         try {
             Locale.setDefault(locale)
             val de = locale.language == "de"
-            val host = FakeHost()
             // Kleines Handy (360 × 640 dp) bei doppelter Schrift: alles muss erreichbar und lesbar bleiben.
             runDesktopComposeUiTest(width = 720, height = 1280) {
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(2f, 2f)) {
-                        AdvantlyApp(model = testModel(), authModel = authModel(), startLogin = host)
+                        AdvantlyApp(model = testModel(), authModel = authModel())
                     }
                 }
                 onNodeWithTag("start_login").assertIsDisplayed()
                 onNodeWithTag("home").assertDoesNotExist()
-                listOf(
-                    if (de) "Mit Konto werden deine Matches in der Cloud gesichert" else "With an account, your matches are backed up",
-                    if (de) "später jederzeit im Profil" else "any time later under Profile",
-                ).forEach { onNodeWithText(it, substring = true).performScrollTo().assertIsDisplayed() }
-                listOf(
-                    if (de) "Konto anlegen" else "Create account",
-                    if (de) "Anmelden" else "Sign in",
-                    if (de) "Ohne Konto weiter zählen" else "Continue scoring without an account",
-                ).forEach { onNodeWithText(it).performScrollTo().assertIsDisplayed() }
-                onNodeWithTag("start_login_skip").performScrollTo().performClick()
-                assertTrue(host.decided.value)
-                onNodeWithTag("start_login").assertDoesNotExist()
-                onNodeWithTag("home").assertIsDisplayed()
+                onNodeWithTag("tab_home").assertDoesNotExist()
+                onNodeWithText(if (de) "Zählen auf Handy und Uhr geht auch offline" else "also works offline", substring = true)
+                    .performScrollTo()
+                    .assertIsDisplayed()
+                listOf(if (de) "Konto anlegen" else "Create account", if (de) "Anmelden" else "Sign in")
+                    .forEach { onNodeWithText(it).performScrollTo().assertIsDisplayed() }
+                onNodeWithTag("start_login_skip").assertDoesNotExist()
+                onNodeWithText(if (de) "ohne Konto" else "without an account", substring = true).assertDoesNotExist()
             }
         } finally {
             Locale.setDefault(previous)
@@ -110,89 +80,163 @@ class StartLoginTest {
     }
 
     @Test
-    fun createAccountOpensTheExistingAccountFlow() {
-        val host = FakeHost()
-        val app = testModel()
-        runDesktopComposeUiTest(width = 360, height = 640) {
-            setContent { AdvantlyApp(model = app, authModel = authModel(), startLogin = host) }
-            onNodeWithTag("start_login_create").performScrollTo().performClick()
-            assertTrue(host.decided.value)
-            assertEquals(AppTab.Profile, app.navigator.tab)
-            onNodeWithTag("start_login").assertDoesNotExist()
-            // Erster Schritt des bestehenden Konto-Flusses (Land/Geburtsdatum → Altersticket)
-            onNodeWithTag("auth_country").assertIsDisplayed()
-        }
-    }
-
-    @Test
-    fun signInOpensTheSameAccountFlow() {
-        val host = FakeHost()
-        runDesktopComposeUiTest(width = 360, height = 640) {
-            setContent { AdvantlyApp(model = testModel(), authModel = authModel(), startLogin = host) }
-            onNodeWithTag("start_login_sign_in").performScrollTo().performClick()
-            onNodeWithTag("auth_country").assertIsDisplayed()
-        }
-    }
-
-    @Test
-    fun signedInUserNeverSeesItAndCountsAsDecided() {
-        val host = FakeHost()
-        runDesktopComposeUiTest(width = 360, height = 640) {
-            setContent { AdvantlyApp(model = testModel(), authModel = authModel(signedIn = true), startLogin = host) }
-            onNodeWithTag("home").assertIsDisplayed()
-            onNodeWithTag("start_login").assertDoesNotExist()
-            runOnIdle { assertTrue(host.decided.value) }
-        }
-    }
-
-    @Test
-    fun signedInBeforeTheFeatureButOfflineNotShown() {
-        // Gespeicherte Sitzung, Flag noch false, my_auth_profile scheitert: authenticated bleibt false.
-        val host = FakeHost()
-        val auth = authModel(signedIn = true, failure = "connection_failed")
-        runDesktopComposeUiTest(width = 360, height = 640) {
-            setContent { AdvantlyApp(model = testModel(), authModel = auth, startLogin = host) }
-            onNodeWithTag("home").assertIsDisplayed()
-            onNodeWithTag("start_login").assertDoesNotExist()
-            assertFalse(host.decided.value)
-        }
-    }
-
-    @Test
-    fun decidedOrWithoutHostOrBackendNotShown() {
-        val app = testModel()
-        val auth = authModel()
-        val decided = FakeHost(decided = true)
-        val fresh = FakeHost()
-        runDesktopComposeUiTest(width = 360, height = 640) {
-            val variant = mutableStateOf(0)
-            setContent {
-                when (variant.value) {
-                    0 -> AdvantlyApp(model = app, authModel = auth, startLogin = decided)
-                    1 -> AdvantlyApp(model = app, authModel = auth)
-                    else -> AdvantlyApp(model = app, startLogin = fresh)
+    fun legalTextsAreReachableBeforeAnyInput() {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+            runDesktopComposeUiTest(width = 360, height = 640) {
+                val opened = mutableListOf<String>()
+                setContent {
+                    CompositionLocalProvider(
+                        LocalUriHandler provides
+                            object : UriHandler {
+                                override fun openUri(uri: String) {
+                                    opened += uri
+                                }
+                            },
+                    ) { AdvantlyApp(model = testModel(), authModel = authModel()) }
                 }
+                for (tag in listOf("legal_privacy", "legal_terms", "legal_imprint")) onNodeWithTag(tag).performScrollTo().performClick()
+                // Auch im Alters-/Anmeldeschritt, bevor Land, Geburtsdatum oder E-Mail eingegeben sind.
+                onNodeWithTag("start_login_create").performScrollTo().performClick()
+                onNodeWithTag("auth_country").assertIsDisplayed()
+                onNodeWithTag("legal_privacy").performScrollTo().performClick()
+                assertEquals(
+                    listOf(
+                        "https://advantly.eu/app-datenschutz.html",
+                        "https://advantly.eu/nutzungsbedingungen.html",
+                        "https://advantly.eu/impressum.html",
+                        "https://advantly.eu/app-datenschutz.html",
+                    ),
+                    opened,
+                )
             }
-            for (v in 0..2) {
-                runOnIdle { variant.value = v }
-                onNodeWithTag("home").assertIsDisplayed()
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun createAccountAndSignInOpenTheAccountFlowWithoutTabs() {
+        for (button in listOf("start_login_create", "start_login_sign_in")) {
+            runDesktopComposeUiTest(width = 360, height = 640) {
+                setContent { AdvantlyApp(model = testModel(), authModel = authModel()) }
+                onNodeWithTag(button).performScrollTo().performClick()
                 onNodeWithTag("start_login").assertDoesNotExist()
+                // Erster Schritt des Konto-Flusses (Land/Geburtsdatum → Altersticket)
+                onNodeWithTag("auth_country").assertIsDisplayed()
+                onNodeWithTag("auth_local").assertDoesNotExist()
+                onNodeWithTag("tab_home").assertDoesNotExist()
             }
+        }
+    }
+
+    @Test
+    fun signedInUserSeesTheAppAndSignOutShowsTheStartAgain() {
+        val previous = Locale.getDefault()
+        Locale.setDefault(Locale.US)
+        try {
+            signOutAfterConfirmation()
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    private fun signOutAfterConfirmation() {
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            val app = testModel()
+            setContent { AdvantlyApp(model = app, authModel = authModel(signedIn = true)) }
+            onNodeWithTag("home").assertIsDisplayed()
+            onNodeWithTag("start_login").assertDoesNotExist()
+            runOnIdle { app.navigator.tab = AppTab.Profile }
+            onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+            // Rückfrage: ohne Netz kein erneutes Anmelden; Ungesichertes erst nach Anmeldung mit demselben Konto.
+            onNodeWithText("same account", substring = true).assertIsDisplayed()
+            onNodeWithText("Cancel").performClick()
+            onNodeWithTag("auth_sign_out_dialog").assertDoesNotExist()
+            onNodeWithTag("profile").assertExists()
+            onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+            onNodeWithTag("auth_sign_out_confirm").performClick()
+            onNodeWithTag("start_login").assertIsDisplayed()
+            onNodeWithTag("tab_profile").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun storedSessionOfflineKeepsCounting() {
+        // Gespeicherte Sitzung, my_auth_profile scheitert an der Verbindung: weiterzählen statt Anmeldung erzwingen.
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setContent { AdvantlyApp(model = testModel(), authModel = authModel(signedIn = true, failure = "connection_failed")) }
+            onNodeWithTag("home").assertIsDisplayed()
+            onNodeWithTag("start_login").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun newLegalTextsBlockTheAppUntilConfirmed() {
+        val auth =
+            FakePhoneAuth().also {
+                it.consentSnapshot =
+                    ConsentSnapshot(
+                        "alice",
+                        ConsentStatus.REQUIRED,
+                        ConsentDocumentType.entries.map { type ->
+                            ConsentDocument(type, "5", "en", "https://advantly.eu/en/app-privacy.html", approved = true)
+                        },
+                    )
+            }
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setContent { AdvantlyApp(model = testModel(), authModel = authModel(auth, signedIn = true)) }
+            onNodeWithTag("home").assertDoesNotExist()
+            onNodeWithTag("tab_home").assertDoesNotExist()
+            onNodeWithTag("consent_confirm_TERMS").performScrollTo().performClick()
+            onNodeWithTag("consent_confirm_PRIVACY").performScrollTo().performClick()
+            onNodeWithTag("consent_accept").performScrollTo().performClick()
+            assertTrue("consent:true" in auth.calls)
+            onNodeWithTag("home").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun aRunningMatchIsNotInterruptedAndTheConfirmationFollowsAfterwards() {
+        val auth = FakePhoneAuth()
+        val account = authModel(auth, signedIn = true)
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            val app = testModel().apply { startWith(Presets.TENNIS_OPEN.format(), "AAAA") }
+            runOnIdle { app.navigator.push(Overlay.Live) }
+            setContent { AdvantlyApp(model = app, authModel = account) }
+            runOnIdle {
+                auth.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED)
+                account.refresh()
+            }
+            onNodeWithTag("live_minimize").assertIsDisplayed()
+            onNodeWithTag("live_minimize").performClick()
+            onNodeWithTag("consent_status").assertIsDisplayed()
+            // Das minimierte Match bleibt über die Mini-Scorebar erreichbar.
+            onNodeWithTag("mini_scorebar").performClick()
+            onNodeWithTag("live_minimize").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun withoutBackendTheAppCountsWithoutAccount() {
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setContent { AdvantlyApp(model = testModel()) }
+            onNodeWithTag("home").assertIsDisplayed()
+            onNodeWithTag("start_login").assertDoesNotExist()
         }
     }
 
     @Test
     fun waitsForTheRecoveryHold() {
-        val host = FakeHost()
         val app = testModel()
         val auth = authModel()
         runDesktopComposeUiTest(width = 360, height = 640) {
             val hold = mutableStateOf(true)
-            setContent { AdvantlyApp(model = app, authModel = auth, startLogin = host, recoveryHold = hold.value) }
+            setContent { AdvantlyApp(model = app, authModel = auth, recoveryHold = hold.value) }
             onNodeWithTag("start_login").assertDoesNotExist()
             runOnIdle { hold.value = false }
             onNodeWithTag("start_login").assertIsDisplayed()
-            assertFalse(host.decided.value)
         }
     }
 }

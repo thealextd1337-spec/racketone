@@ -9,8 +9,10 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.GameServer
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
@@ -157,7 +159,7 @@ data class StartOptions(
  * @property waitingForScorer das Match ist an die Uhr gesendet, sie hat sich dafür aber noch nicht gemeldet (keine
  *   Verbindung, noch keine Eingabe) – UI: „Warte auf Uhr …“ mit „Doch am Handy zählen“
  * @property lastPoint zuletzt wirksam gezählter Ballwechsel – Ziel der Aufschlag-Leiste ([LiveMatchPort.setServeInfo])
- * @property serveInfoEnabled Aufschlag-Leiste anbieten: Tennis/Padel und `meta.serveStats` (gilt auch auf Anzeige-Geräten
+ * @property serveInfoEnabled Aufschlag-Leiste anbieten: Tennis/Padel und `meta.serveTracking` ≠ OFF (gilt auch auf Anzeige-Geräten
  *   für die Anzeige; erfassen kann nur der Zähler)
  * @property canRemovePoint je Seite: „Letzten Punkt abziehen“ möglich ([LiveMatchPort.removeLastPointOf])
  * @property nextSetOptions bei `AWAITING_DECISION` die Satzarten für [LiveMatchPort.startNextSet], sonst leer
@@ -385,6 +387,12 @@ interface LiveMatchPort {
     ): Boolean
 
     /**
+     * Die Aufschlag-Leiste für [pointId] endete ohne Eingabe: im Modus „Ja“ „1. Aufschlag“ setzen, falls der Punkt noch
+     * keine Aufschlag-Info hat (nie überschreiben, idempotent; Regel wie `MatchSession.settleServeInfo`). Nur Zähler.
+     */
+    fun settleServeInfo(pointId: EventId): Boolean
+
+    /**
      * Vorzeitiges Ende (02 §7 `MatchEnded`, nur Zähler): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED`
      * und `STOPPED` `null`.
      */
@@ -507,6 +515,23 @@ interface MatchHistoryPort {
         matchId: MatchId,
         slot: PlayerId,
         player: PlayerId?,
+    ): Boolean = false
+
+    /**
+     * „Ergebnis bearbeiten“ nach Matchende: Ersteller, Match beendet, Protokoll 5 mit Konto (sonst könnte eine ältere Uhr
+     * die Korrektur nicht lesen).
+     */
+    fun canCorrectResult(matchId: MatchId): Boolean = false
+
+    /**
+     * Sätze ([sets] → `ResultCorrected`, leer = gezähltes Ergebnis) und/oder Aufschläger je Spiel ([servers] →
+     * `GameServersCorrected`, Tennis/Padel, vollständige Liste) in einem Vorgang; `null` = unverändert. Atomar: Ist eines
+     * ungültig, entsteht kein Event und `false` kommt zurück.
+     */
+    fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>? = null,
     ): Boolean = false
 
     /** Beendete Matches, neueste zuerst. Ein per Undo wieder geöffnetes Match verschwindet, bis es erneut endet. */

@@ -193,6 +193,29 @@ class RestoredInstallationTest {
     }
 
     @Test
+    fun automaticAdoptionSkipsRestoredDataOfAnotherPersonButTakesAReleasedImage() {
+        login(profileA)
+        createMatch("Alex")
+        session.leaveAccount()
+        val guestDevice = session.deviceId.value
+        createMatch("Alex")
+        restart(rekey = "restored-token")
+        login(profileC)
+        assertTrue(session.adoptionSources().none { it.deviceId == guestDevice }, "fremdes Abbild bleibt gesperrt")
+        login(profileA)
+        assertTrue(session.adoptionSources().none { it.deviceId == guestDevice }, "nur ausdrücklich, nicht automatisch")
+    }
+
+    @Test
+    fun releasedUnboundImageIsAdoptedAutomatically() {
+        val legacyDevice = session.deviceId.value
+        createMatch("Alex")
+        restart(rekey = "restored-token")
+        login(profileA)
+        assertTrue(session.adoptionSources().any { it.deviceId == legacyDevice })
+    }
+
+    @Test
     fun lateContextFromBeforeTheRekeyIsRejected() {
         login(profileA)
         val matchA = createMatch("Alex")

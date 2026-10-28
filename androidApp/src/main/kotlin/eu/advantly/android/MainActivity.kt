@@ -191,9 +191,8 @@ class MainActivity : ComponentActivity() {
         // Ohne privaten Transport gibt es keine Uhr-Erkennung (companion = null), also auch keinen Installationshinweis
         val watchInstall =
             if (installation.privateTransportAllowed) WatchAppInstaller(this, model.live.deviceStatuses, lifecycleScope) else null
-        // Recovery hat Vorrang: im Hold und solange der Abschlussdialog offen ist, wartet der Startbildschirm.
+        // Recovery hat Vorrang: im Hold und solange der Abschlussdialog offen ist, wartet der Konto-Fluss.
         val recoveryNotice = mutableStateOf(false)
-        val startLogin = auth?.let { StartLoginPrefs(this) }
         setContent {
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
             AdvantlyApp(
@@ -207,7 +206,6 @@ class MainActivity : ComponentActivity() {
                 onShareMatchImage = { image, text -> this@MainActivity.shareMatchImage(image, text) },
                 onShareText = this@MainActivity::shareText,
                 watchInstall = watchInstall,
-                startLogin = startLogin,
                 recoveryHold = !installation.privateTransportAllowed || recoveryNotice.value,
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),

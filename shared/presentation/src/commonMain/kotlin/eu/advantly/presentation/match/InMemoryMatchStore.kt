@@ -8,15 +8,19 @@ import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchEnded
@@ -28,6 +32,7 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
@@ -249,7 +254,10 @@ class InMemoryMatchStore(
             detail == point.detail || append(e, PointDetailSet(pointId, detail))
         }
 
-    private fun serveInfoEnabled(e: Entry): Boolean = e.setup.format.sport.isTennisLike && e.setup.meta.serveStats
+    override fun settleServeInfo(pointId: EventId): Boolean = command(clearRedo = false) { e -> settleServe(e, pointId) }
+
+    private fun serveInfoEnabled(e: Entry): Boolean =
+        PointDetailRules.serveTracking(e.setup.meta, e.setup.format.sport) != ServeTracking.OFF
 
     /** Ein Gerät: nie eine Uhr, die übernommen werden müsste. */
     override fun watchTakeOverNeeded(): LiveMatchSnapshot? = null
@@ -384,6 +392,33 @@ class InMemoryMatchStore(
         return MatchRecord(summary(entry), entry.engine.state, listOf(entry.genesis) + entry.engine.events)
     }
 
+    override fun canCorrectResult(matchId: MatchId): Boolean = entries[matchId]?.engine?.state?.status == MatchStatus.FINISHED
+
+    override fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
+    ): Boolean {
+        val entry = entries[matchId] ?: return false
+        val payloads = listOfNotNull(sets?.let(::ResultCorrected), servers?.let(::GameServersCorrected))
+        // Atomar wie die Session: erst beide auf einer Kopie prüfen, dann anhängen
+        val engine = entry.engine
+        val lamport = entry.lamport
+        val trial =
+            payloads.mapIndexed { i, p -> ScoreEvent(EventId("probe-$i"), entry.id, deviceId, 0, lamport + 1 + i, clock.nowMs(), null, p) }
+        if (trial.isNotEmpty() &&
+            ScoringEngine
+                .applyAll(engine, trial)
+                .state.ignoredEvents
+                .any { id -> trial.any { it.id == id } }
+        ) {
+            return false
+        }
+        if (payloads.any { appendEvent(entry, it) == null }) return false
+        publish()
+        return true
+    }
+
     override fun delete(matchId: MatchId): Boolean {
         val entry = entries[matchId] ?: return false
         if (entry.engine.state.status != MatchStatus.FINISHED) return false
@@ -484,10 +519,32 @@ class InMemoryMatchStore(
         return ok
     }
 
+    /**
+     * Wie die Session (`MatchSession.settleServeInfo`): Im Modus „Ja“ bekommt der letzte Punkt ohne Aufschlag-Info
+     * „1. Aufschlag“, bevor der nächste Punkt zählt bzw. das Match endet – auch der Punkt, der das Match beendet.
+     */
     private fun append(
         entry: Entry,
         payload: EventPayload,
-    ): Boolean = appendEvent(entry, payload) != null
+    ): Boolean {
+        val closes = payload is PointWon || payload is MatchEnded || (payload is ContinueDecision && !payload.anotherSet)
+        if (closes) settleServe(entry, entry.engine.lastPoint?.id)
+        val event = appendEvent(entry, payload) ?: return false
+        if (payload is PointWon && entry.engine.state.status == MatchStatus.FINISHED) settleServe(entry, event.id)
+        return true
+    }
+
+    /** `true`, wenn ein automatischer 1. Aufschlag geschrieben wurde. */
+    private fun settleServe(
+        e: Entry,
+        pointId: EventId?,
+    ): Boolean {
+        val sport = e.setup.format.sport
+        val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(e.setup.meta, sport)) ?: return false
+        val point = pointId?.let { e.engine.point(it) } ?: return false
+        if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return false
+        return appendEvent(e, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto))) != null
+    }
 
     /**
      * Hängt [payload] an, wenn die Engine es anwendet. Ein Event, das die Engine überspringen würde

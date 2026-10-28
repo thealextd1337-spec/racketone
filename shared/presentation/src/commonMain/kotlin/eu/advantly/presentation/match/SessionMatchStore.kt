@@ -12,10 +12,14 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.GameKind
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchFormatValidator
@@ -27,6 +31,7 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
@@ -332,6 +337,8 @@ class SessionMatchStore(
         value: ServeOutcome?,
     ): Boolean = session.setServeInfo(pointId, value)
 
+    override fun settleServeInfo(pointId: EventId): Boolean = session.settleServeInfo(pointId)
+
     override fun select(matchId: MatchId): Boolean = session.state.value.match(matchId) != null && session.resume(matchId)
 
     override fun endMatch(
@@ -398,7 +405,7 @@ class SessionMatchStore(
                         is PointWon -> InputKind.POINT to payload.side
                         is Undo -> InputKind.UNDO to null
                         is ContinueDecision -> InputKind.SET_DECISION to null
-                        is Correction, is ServerChosen -> InputKind.CORRECTION to null
+                        is Correction, is ServerChosen, is ResultCorrected, is GameServersCorrected -> InputKind.CORRECTION to null
                         Paused -> InputKind.PAUSE to null
                         Resumed -> InputKind.RESUME to null
                         is MatchEnded -> InputKind.END to payload.side
@@ -426,6 +433,14 @@ class SessionMatchStore(
         player: PlayerId?,
     ): Boolean = session.assignPlayer(matchId, slot, player)
 
+    override fun canCorrectResult(matchId: MatchId): Boolean = session.canCorrectResult(matchId)
+
+    override fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
+    ): Boolean = session.correctResult(matchId, sets, servers)
+
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
         val cached =
@@ -452,10 +467,7 @@ class SessionMatchStore(
                 header,
                 engine.state,
                 genesis.wallClockMs,
-                engine.events
-                    .lastOrNull {
-                        it.payload !is PlayerAssigned
-                    }?.wallClockMs,
+                EventLog.matchEnd(engine.events)?.wallClockMs,
                 engine.events.size + 1,
             )
         val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
@@ -649,8 +661,10 @@ class SessionMatchStore(
     ): Boolean {
         if (previous == null || previous.dataRevision != state.dataRevision) return true
 
-        // anderes Match im Fokus, Matches geöffnet/geschlossen oder ein Status gewechselt (z. B. Nachbarplatz beendet)
-        fun statuses(s: SessionState) = s.matches.map { it.id to it.state.status }
+        // anderes Match im Fokus, Matches geöffnet/geschlossen oder ein Status gewechselt (z. B. Nachbarplatz beendet) –
+        // oder ein beendetes Match bekam noch ein Event (Aufschlag-Info zum Matchball): Kopf der Liste nachziehen
+        fun statuses(s: SessionState) =
+            s.matches.map { Triple(it.id, it.state.status, it.eventCount.takeIf { _ -> it.state.status == MatchStatus.FINISHED }) }
         return previous.match?.id != state.match?.id || statuses(previous) != statuses(state)
     }
 
@@ -746,7 +760,7 @@ class SessionMatchStore(
         val at =
             data.events
                 .scoreEvents(m.id)
-                .lastOrNull { it.payload !is PlayerAssigned }
+                .let(EventLog::matchEnd)
                 ?.wallClockMs
         finishedAt[m.id] = m.eventCount to at
         return at
@@ -938,7 +952,7 @@ class SessionMatchStore(
         return MatchSummary(
             header.id,
             setupOf(header),
-            MatchResult(score.winner, score.reason ?: ResultReason.ABANDONED),
+            MatchResult(score.winner, score.reason ?: ResultReason.ABANDONED, score.corrected),
             sets,
             SidePair(score.setsWonA, score.setsWonB),
             header.createdAtMs,

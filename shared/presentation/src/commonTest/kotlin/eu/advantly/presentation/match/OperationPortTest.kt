@@ -1,6 +1,8 @@
 package eu.advantly.presentation.match
 
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
@@ -181,13 +183,14 @@ class OperationPortTest {
 
         val stats = MatchStatistics.compute(assertNotNull(store.record(id)))
         assertTrue(stats.serveInfoRecorded)
-        val teamA = ServeStats(Ratio(4, 5), Ratio(1, 1), Ratio(1, 3), Ratio(1, 1), Ratio(1, 2), doubleFaults = 1, recorded = 3)
+        // „Ja“: die Punkte ohne Eingabe bekamen mit dem nächsten Punkt „1. Aufschlag“ – nur der letzte ist noch offen
+        val teamA = ServeStats(Ratio(4, 5), Ratio(1, 1), Ratio(3, 5), Ratio(3, 3), Ratio(1, 2), doubleFaults = 1, recorded = 5)
         assertEquals(teamA, stats.serve.a)
         assertEquals(listOf(mia, tom), stats.servers.map { it.player }, "nur Spieler mit Aufschlag, Lineup-Reihenfolge")
         assertEquals(teamA, stats.servers[0].stats)
         val tomStats = stats.servers[1].stats
         assertEquals(Ratio(4, 4), tomStats.servicePoints)
-        assertEquals(Ratio(1, 1), tomStats.firstServeIn)
+        assertEquals(Ratio(3, 3), tomStats.firstServeIn)
         assertEquals(Ratio(0, 0), tomStats.secondServeWon)
         assertNull(tomStats.secondServeWon.percent, "nicht erfasst → „—“")
         assertTrue(me != jonas)
@@ -227,23 +230,52 @@ class OperationPortTest {
         }
     }
 
+    /** Statistik je Modus „Aufschläge“: Ja = Quoten (mit automatischen 1. Aufschlägen), Nur Doppelfehler, Nein. */
     @Test
-    fun serveStatisticsWithoutServeInfo() {
-        val store = testStore()
-        val id = store.start(store.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
-        store.play("AAAB")
-        val stats = MatchStatistics.compute(assertNotNull(store.record(id)))
-        assertFalse(stats.serveInfoRecorded)
-        assertEquals(Ratio(3, 4), stats.serve.a.servicePoints)
-        assertNull(stats.serve.a.firstServeIn.percent)
-        assertEquals(ServeStats.EMPTY, stats.serve.b)
+    fun serveStatisticsPerServeTrackingMode() {
+        for (tracking in ServeTracking.entries) {
+            val store = testStore()
+            val setup = store.setupFor(Presets.TENNIS_SINGLES_BO3.format())
+            val id = store.start(setup.copy(meta = MatchMeta(serveTracking = tracking)))
+            store.play("AAB")
+            val returned = assertNotNull(store.snap.lastPoint)
+            assertEquals(tracking != ServeTracking.OFF, store.setServeInfo(returned.id, ServeOutcome.DOUBLE_FAULT), "$tracking")
+            store.play("A") // letzter Punkt: Leiste noch offen, keine Eingabe
+            val stats = MatchStatistics.compute(assertNotNull(store.record(id)))
+            val a = stats.serve.a
+            assertEquals(tracking, stats.serveTracking)
+            assertEquals(Ratio(3, 4), a.servicePoints, "$tracking")
+            assertEquals(ServeStats.EMPTY, stats.serve.b, "$tracking")
+            when (tracking) {
+                ServeTracking.FULL -> {
+                    assertTrue(stats.serveInfoRecorded)
+                    assertEquals(ServeStats(Ratio(3, 4), Ratio(0, 0), Ratio(2, 3), Ratio(2, 2), Ratio(0, 1), 1, 3), a)
+                }
+
+                ServeTracking.DOUBLE_FAULTS_ONLY -> {
+                    assertTrue(stats.serveInfoRecorded)
+                    assertNull(a.firstServeIn.percent, "1. Aufschlag unbekannt")
+                    assertNull(a.firstServeWon.percent)
+                    assertNull(a.secondServeWon.percent)
+                    assertEquals(1, a.doubleFaults)
+                    assertEquals(4, a.recorded, "jeder Aufschlagpunkt ist bzgl. Doppelfehler bekannt")
+                }
+
+                ServeTracking.OFF -> {
+                    assertFalse(stats.serveInfoRecorded)
+                    assertNull(a.firstServeIn.percent)
+                    assertEquals(0, a.doubleFaults)
+                    assertEquals(0, a.recorded)
+                }
+            }
+        }
     }
 
     @Test
     fun serveInfoDisabledByOptionOrSport() {
         val store = testStore()
         val tennis = store.setupFor(Presets.TENNIS_SINGLES_BO3.format())
-        store.start(tennis.copy(meta = tennis.meta.copy(serveStats = false)))
+        store.start(tennis.copy(meta = tennis.meta.copy(serveTracking = ServeTracking.OFF)))
         store.play("A")
         assertFalse(store.snap.serveInfoEnabled)
         assertFalse(store.setServeInfo(assertNotNull(store.snap.lastPoint).id, ServeOutcome.FIRST_SERVE_IN))

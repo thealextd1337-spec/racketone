@@ -2,7 +2,6 @@ package eu.advantly.presentation.auth
 
 import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
-import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentDocument
@@ -17,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class FakePhoneAuth : CloudAuthPort {
     override val session = MutableStateFlow<CloudSession?>(null)
@@ -55,25 +55,6 @@ class FakePhoneAuth : CloudAuthPort {
     override suspend fun cancelDeletion() {
         call("recover")
         session.value = session.value!!.copy(deletionRequested = false)
-    }
-
-    val devices = mutableListOf(CloudDevice("d1", "phone", "android", "Pixel"), CloudDevice("w1", "watch", "wearos"))
-
-    override suspend fun devices(): List<CloudDevice> {
-        call("devices")
-        return devices.toList()
-    }
-
-    override suspend fun revokeDevice(deviceId: String) {
-        call("revoke:$deviceId")
-        val index = devices.indexOfFirst { it.deviceId == deviceId }
-        if (index >= 0) devices[index] = devices[index].copy(revokedAt = "2026-10-23T10:00:00Z")
-    }
-
-    override suspend fun restoreDevice(deviceId: String) {
-        call("restore:$deviceId")
-        val index = devices.indexOfFirst { it.deviceId == deviceId }
-        if (index >= 0) devices[index] = devices[index].copy(revokedAt = null)
     }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
@@ -178,93 +159,14 @@ class AuthViewModelTest {
         val model = AuthViewModel(auth, scope)
         assertEquals(AuthStep.ACCOUNT, model.state.value.step)
         assertEquals(true, model.state.value.suspended)
+        assertFalse(model.state.value.accountRequired, "gesperrt: Zählen bleibt möglich, der Grund steht im Profil")
         assertNull(model.state.value.error)
-        assertEquals(emptyList(), model.state.value.adoptionSources, "keine Übernahme in ein gesperrtes Konto")
+        assertEquals(emptyList(), auth.adopted, "keine Übernahme in ein gesperrtes Konto")
         model.exportData()
         assertEquals("{\"consentHistory\":[]}", model.state.value.exportedData)
-        model.loadDevices()
-        assertEquals(
-            2,
-            model.state.value.devices
-                ?.size,
-        )
         auth.session.value = CloudSession("alice", true)
         model.refresh()
         assertFalse(model.state.value.suspended)
-        assertNull(model.state.value.devices, "neue Anzeige lädt Geräte erst auf Wunsch")
-    }
-
-    @Test fun revokingADeviceReloadsTheServerListAndFailuresStayVisible() {
-        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
-        val model = AuthViewModel(auth, scope)
-        assertNull(model.state.value.devices)
-        model.loadDevices()
-        model.revokeDevice("w1")
-        assertEquals(listOf("devices", "revoke:w1", "devices"), auth.calls.filter { it != "refresh" })
-        assertEquals(
-            "2026-10-23T10:00:00Z",
-            model.state.value.devices!!
-                .single { it.deviceId == "w1" }
-                .revokedAt,
-        )
-        auth.failure = "device_not_authorized"
-        model.revokeDevice("foreign")
-        assertEquals("device_not_authorized", model.state.value.error)
-        assertEquals(
-            2,
-            model.state.value.devices
-                ?.size,
-            "fehlgeschlagener Widerruf verändert die Liste nicht",
-        )
-    }
-
-    @Test fun theCurrentPhoneIsNeverRevokedFromThisPhone() {
-        val auth =
-            FakePhoneAuth().also {
-                it.session.value = CloudSession("alice", true)
-                it.devices[0] = it.devices[0].copy(current = true)
-            }
-        val model = AuthViewModel(auth, scope)
-        model.loadDevices()
-        model.revokeDevice("d1")
-        assertFalse(auth.calls.any { it.startsWith("revoke:") }, "kein Weg zurück: eigenes Handy bleibt")
-        assertNull(model.state.value.error)
-        assertFalse(model.state.value.busy)
-        model.revokeDevice("w1")
-        assertEquals("revoke:w1", auth.calls.single { it.startsWith("revoke:") })
-    }
-
-    @Test fun restoringAnotherDeviceReloadsTheListButTheCurrentPhoneNeverRestoresItself() {
-        val auth =
-            FakePhoneAuth().also {
-                it.session.value = CloudSession("alice", true)
-                it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
-                it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
-            }
-        val model = AuthViewModel(auth, scope)
-        model.loadDevices()
-        model.restoreDevice("d1")
-        assertFalse(auth.calls.any { it.startsWith("restore:") }, "nie vom widerrufenen Handy selbst")
-        assertNull(model.state.value.error)
-        model.restoreDevice("w1")
-        assertEquals(listOf("devices", "restore:w1", "devices"), auth.calls.filter { it != "refresh" })
-        assertNull(
-            model.state.value.devices!!
-                .single { it.deviceId == "w1" }
-                .revokedAt,
-        )
-        auth.failure = "device_not_revoked"
-        model.restoreDevice("w1")
-        assertEquals("device_not_revoked", model.state.value.error)
-    }
-
-    @Test fun deviceListNeedsTheDisplayedSession() {
-        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, generation = 1) }
-        val model = AuthViewModel(auth, scope)
-        auth.session.value = CloudSession("bob", true, generation = 2)
-        model.loadDevices()
-        assertEquals("cloud_session_changed", model.state.value.error)
-        assertFalse(auth.calls.contains("devices"))
     }
 
     private fun documents(version: String = "v1") =
@@ -344,28 +246,131 @@ class AuthViewModelTest {
         assertEquals(true, validBirthDate("2000-02-29"))
     }
 
-    @Test fun adoptionRequiresSelectionAndCancelLeavesSourcesUnbound() {
+    @Test fun signInAdoptsAllOfferedPhoneAndWatchSourcesWithoutAQuestion() {
         val auth =
             FakePhoneAuth().also {
                 it.session.value = CloudSession("alice", true, generation = 4)
-                it.sources = listOf(CloudAdoptionSource("opaque", "WATCH", 8))
+                it.sources = listOf(CloudAdoptionSource("old-phone", "PHONE", 3), CloudAdoptionSource("old-watch", "WATCH", 8))
             }
-        val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-        assertEquals(1, model.state.value.adoptionSources.size)
-        model.selectSource("opaque")
-        model.cancelAdoption()
-        assertEquals(emptyList(), auth.adopted)
-        assertEquals(emptySet(), model.state.value.selectedSources)
+        val model = AuthViewModel(auth, scope)
+        assertEquals(listOf(setOf("old-phone", "old-watch")), auth.adopted)
+        assertFalse(model.state.value.accountRequired)
+        // Später gekoppelte Uhr: die nächste Kontoprüfung übernimmt auch ihre Matches.
+        auth.sources = listOf(CloudAdoptionSource("new-watch", "WATCH", 2))
         model.refresh()
-        model.selectSource("opaque")
-        auth.session.value = CloudSession("bob", true, generation = 5)
-        model.acceptAdoption()
-        assertEquals("cloud_session_changed", model.state.value.error)
-        assertEquals(emptyList(), auth.adopted)
+        assertEquals(setOf("new-watch"), auth.adopted.last())
+        auth.sources = emptyList()
         model.refresh()
-        model.selectSource("opaque")
-        model.acceptAdoption()
-        assertEquals(listOf(setOf("opaque")), auth.adopted)
+        assertEquals(2, auth.adopted.size, "nichts mehr offen: kein leerer Übernahmeaufruf")
+    }
+
+    @Test fun noAdoptionBeforeConsentIsCurrent() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents())
+                it.sources = listOf(CloudAdoptionSource("old-watch", "WATCH", 8))
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals(emptyList(), auth.adopted)
+        model.decideConsent(true)
+        assertEquals(listOf(setOf("old-watch")), auth.adopted)
+    }
+
+    @Test fun withoutAccountOnlyTheAccountFlowIsShownAndThereIsNoSkip() {
+        val model = AuthViewModel(FakePhoneAuth(), scope)
+        assertEquals(AuthStep.AGE, model.state.value.step)
+        assertTrue(model.state.value.accountRequired)
+        model.checkAge("AT", "2000-01-01")
+        model.sendCode("a@example.com")
+        model.verifyCode("123456")
+        assertEquals(AuthStep.ALIAS, model.state.value.step)
+        assertTrue(model.state.value.accountRequired, "ohne Profil kein Zählen")
+        model.finish("Alias", "alias")
+        assertFalse(model.state.value.accountRequired)
+        model.signOut()
+        assertTrue(model.state.value.accountRequired, "nach dem Abmelden wieder die Anmeldung")
+    }
+
+    @Test fun outdatedConsentBlocksUntilConfirmedAndDeclineStaysVisible() {
+        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
+        val model = AuthViewModel(auth, scope)
+        assertFalse(model.state.value.accountRequired)
+        // Neue Fassung freigegeben (wie PRIVACY 3 am 27.10.): beim nächsten Prüfen blockiert der Bestätigungsschirm.
+        auth.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.REQUIRED, documents("v2"))
+        model.refresh()
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        assertTrue(model.state.value.accountRequired)
+        model.decideConsent(false)
+        assertEquals(
+            ConsentStatus.DECLINED,
+            model.state.value.consent
+                ?.status,
+        )
+        assertTrue(model.state.value.accountRequired, "Ablehnen ist kein stilles Weiterzählen ohne Sicherung")
+        model.decideConsent(true)
+        assertFalse(model.state.value.accountRequired)
+    }
+
+    @Test fun deletionRequestShowsTheAccountFlowUntilRecovered() {
+        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
+        val model = AuthViewModel(auth, scope)
+        model.requestDeletion()
+        assertTrue(model.state.value.accountRequired)
+        model.cancelDeletion()
+        assertFalse(model.state.value.accountRequired)
+    }
+
+    @Test fun storedSessionKeepsCountingOfflineButPermissionErrorsShowTheAccountFlow() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.failure = "connection_failed"
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals("connection_failed", model.state.value.error)
+        assertTrue(model.state.value.unconfirmed)
+        assertFalse(model.state.value.accountRequired, "offline mit gespeicherter Sitzung weiterzählen")
+        auth.failure = null
+        model.refresh()
+        assertFalse(model.state.value.unconfirmed)
+        assertFalse(model.state.value.accountRequired)
+        auth.failure = "profile_missing"
+        model.refresh()
+        assertFalse(model.state.value.unconfirmed)
+        assertTrue(model.state.value.accountRequired)
+    }
+
+    @Test fun transientServerErrorsDoNotLockOut() {
+        for (reason in listOf("rate_limit_exceeded", "cloud_session_changed", "cloud_connection_failed", "connection_failed")) {
+            val auth =
+                FakePhoneAuth().also {
+                    it.session.value = CloudSession("alice", true)
+                    it.failure = reason
+                }
+            val model = AuthViewModel(auth, scope)
+            assertTrue(model.state.value.unconfirmed, reason)
+            assertFalse(model.state.value.accountRequired, reason)
+        }
+    }
+
+    @Test fun unreleasedCatalogPausesBackupButOnlyBlocksUnfinishedOnboarding() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentStatus = ConsentStatus.UNAVAILABLE
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        assertFalse(model.state.value.accountRequired, "Betreiberfehler sperrt niemanden aus")
+        auth.session.value = CloudSession("alice", false)
+        model.refresh()
+        assertTrue(model.state.value.accountRequired, "ohne Profil kein Zählen")
+    }
+
+    @Test fun pendingFirstCheckDoesNotBlock() {
+        assertFalse(AuthState(unconfirmed = true).accountRequired)
+        assertTrue(AuthState().accountRequired)
     }
 
     private val scope = CoroutineScope(Dispatchers.Unconfined)

@@ -1,0 +1,6 @@
+New in 0.3.0:
+• Account required; phone and watch matches backed up automatically; slim profile.
+• Serves: yes / double faults only / no; watch asks only 2nd serve or double fault, otherwise 1st counts.
+• Edit the result and servers on the phone after a match.
+• Watch: swipe back from the menu to scoring; score stays visible.
+Please test: first launch, backing up a watch match, serves, editing a result.

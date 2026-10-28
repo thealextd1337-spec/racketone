@@ -1,7 +1,9 @@
 package eu.advantly.wear.live
 
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
@@ -130,7 +132,8 @@ class WatchFollowsItsMatchTest {
     /** Review W3-M #5: Offline bestätigte Übernahme – die Uhr meldet nach der Wiederverbindung verworfene Eingaben. */
     @Test
     fun offlineTakeOverShowsDiscardedInputsOnTheWatch() {
-        val first = h.phone.create(format, singles, scorer = ScorerChoice.MyWatch)
+        // zählt verworfene Eingaben: ohne automatische Aufschlag-Info
+        val first = h.phone.create(format, singles, MatchMeta(serveTracking = ServeTracking.OFF), scorer = ScorerChoice.MyWatch)
         h.settle()
         assertTrue(c.point(Side.A))
         h.settle()

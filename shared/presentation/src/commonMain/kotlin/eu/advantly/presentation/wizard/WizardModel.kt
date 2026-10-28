@@ -9,6 +9,7 @@ import eu.advantly.core.model.MidGameEndChange
 import eu.advantly.core.model.PickleballScoring
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
@@ -93,7 +94,7 @@ data class WizardInput(
     val sets: SetsChoice? = null,
     val gamesPerSet: Int = 6,
     val tennisMatch: TennisMatchChoice = TennisMatchChoice.REGULAR,
-    val serveStats: Boolean = true,
+    val serveTracking: ServeTracking = ServeTracking.FULL,
     val tiebreakAt: TiebreakAtChoice = TiebreakAtChoice.AT_GAMES,
     val deuceMode: DeuceMode = DeuceMode.ADVANTAGE,
     val decidingSet: DecidingSetChoice = DecidingSetChoice.NORMAL,
@@ -101,7 +102,8 @@ data class WizardInput(
     val pickleballScoring: PickleballScoring = PickleballScoring.SIDE_OUT,
     val pickleballWinBy: Int = 2,
     val pickleballMidGame: MidGameEndChange = MidGameEndChange.DECIDING_GAME_ONLY,
-    val advancedExpanded: Boolean = false,
+    /** „Erweitert“ ist von Anfang an aufgeklappt (Nutzerwunsch 0.3.0), lässt sich aber einklappen. */
+    val advancedExpanded: Boolean = true,
     val saveAsFavorite: Boolean = false,
     /** Gewählter Zähler; `null` = Standard (Meine Uhr, wenn sie verfügbar und frei ist, sonst dieses Handy). */
     val scorer: ScorerOption? = null,

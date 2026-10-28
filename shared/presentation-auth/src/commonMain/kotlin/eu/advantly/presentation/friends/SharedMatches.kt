@@ -6,6 +6,7 @@ import eu.advantly.core.model.Sport
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** Lokaler Bestand für geteilte Matches (Pull-Snapshots, Upload-Hinweise); der Host kapselt Datenbank und Sitzungsgrenze. */
@@ -44,6 +45,8 @@ data class FeedMatch(
     val teamB: List<String>,
     /** Satzstände (A, B), soweit die bereinigte Projektion sie enthält. */
     val sets: List<Pair<Int, Int>>,
+    /** Ergebnis nach dem Spiel von Hand korrigiert (`summary.corrected`, 0.3.0). */
+    val corrected: Boolean = false,
 )
 
 /** Eigene Sicht auf ein Match im Detail; ohne Konto, vor dem Hochladen oder ohne eigenen Platz ohne Aktionen. */
@@ -95,5 +98,6 @@ internal fun PulledMatch.toFeed(): FeedMatch {
         teamA = team("A"),
         teamB = team("B"),
         sets = sets,
+        corrected = (summary?.get("corrected") as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true,
     )
 }

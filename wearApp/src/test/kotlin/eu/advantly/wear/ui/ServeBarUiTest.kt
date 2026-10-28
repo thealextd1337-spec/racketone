@@ -34,8 +34,8 @@ import org.robolectric.annotation.GraphicsMode
 import kotlin.math.hypot
 
 /**
- * Aufschlag-Leiste nach dem Punkt (Feldtest 2026-10-16): ausgeschriebene Labels „1. Aufschlag · 2. Aufschlag ·
- * Doppelfehler“ statt „1. · 2. · DF“ – lesbar, nichts abgeschnitten (auch nicht am runden Rand), Segmente ≥ 40 dp breit
+ * Aufschlag-Leiste nach dem Punkt (Feldtest 2026-10-16, 0.3.0: Satzstand · „2. Aufschlag · Doppelfehler“): ausgeschriebene
+ * Labels statt „2. · DF“ – lesbar, nichts abgeschnitten (auch nicht am runden Rand), Segmente ≥ 40 dp breit
  * und der Tap trifft das sichtbare Segment. Pixel Watch 3 41 mm (192 dp), 45 mm (228 dp), kleine runde Uhr (180 dp).
  */
 @RunWith(RobolectricTestRunner::class)
@@ -129,7 +129,11 @@ class ServeBarUiTest {
 
     @Test
     @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
-    fun withoutDoubleFaultBothServesShareTheStrip() = checkStrip(serveBar(withDoubleFault = false))
+    fun withoutDoubleFaultSecondServeSharesTheStripWithTheSets() = checkStrip(serveBar(withDoubleFault = false))
+
+    @Test
+    @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
+    fun doubleFaultsOnlyStripFits() = checkStrip(serveBar().copy(options = listOf(ServeOutcome.DOUBLE_FAULT)))
 
     @Test
     @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
@@ -189,12 +193,12 @@ class ServeBarUiTest {
         bar.options.forEachIndexed { index, outcome ->
             val label = label(outcome)
             val segment = rule.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
-            // Darstellung = Trefferbereich
-            assertEquals("$label links", ranges[index].start, segment.left, 1f)
-            assertEquals("$label rechts", ranges[index].endInclusive, segment.right, 1f)
+            // Darstellung = Trefferbereich (Feld 0 = Satzstand)
+            assertEquals("$label links", ranges[index + 1].start, segment.left, 1f)
+            assertEquals("$label rechts", ranges[index + 1].endInclusive, segment.right, 1f)
             assertTrue("$label: ≥ 40 dp breit (${segment.width / density})", segment.width / density >= 40f)
             assertTrue("$label: Trefferzone ≥ 40 dp hoch", geometry.height / density >= 40f)
-            assertEquals(index, ActionStrip.segment(segment.center.x, geometry, OperationRules.serveWeights(bar)))
+            assertEquals(index + 1, ActionStrip.segment(segment.center.x, geometry, OperationRules.serveWeights(bar)))
             // abgerundete Segmentecken und der Text liegen im runden Display
             val inset = SEGMENT_CORNER_DP * density * 0.3f
             assertInsideCircle(

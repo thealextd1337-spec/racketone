@@ -103,7 +103,7 @@ class OwnMatchWriteWindowSessionTest {
         phone.activateAccount("alice", token)
         settle()
         phoneData.replicas.activate(phoneData.replicas.captureContext()) {}
-        val match = phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        val match = phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, NO_SERVE_TRACKING)
         assertTrue(phone.recordPoint(Side.A))
         settle()
         val uploaded = phoneData.cloudUploads.capture(token, 100)

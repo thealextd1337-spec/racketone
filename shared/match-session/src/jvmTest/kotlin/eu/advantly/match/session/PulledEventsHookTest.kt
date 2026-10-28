@@ -112,7 +112,12 @@ class PulledEventsHookTest {
     fun liveScoringDuringAPullLosesNoPoint() {
         session.start()
         val slot = Placeholders.id("opponent")
-        val match = session.create(Presets.TENNIS_SINGLES_BO3.format(), Lineup(listOf(PlayerId("me")), listOf(slot), PlayerId("me")))
+        val match =
+            session.create(
+                Presets.TENNIS_SINGLES_BO3.format(),
+                Lineup(listOf(PlayerId("me")), listOf(slot), PlayerId("me")),
+                NO_SERVE_TRACKING,
+            )
         session.recordPoint(Side.A)
 
         // Zweites eigenes Handy weist zu (Pull), die Session hat das Signal noch nicht verarbeitet – hier wird weiter gezählt

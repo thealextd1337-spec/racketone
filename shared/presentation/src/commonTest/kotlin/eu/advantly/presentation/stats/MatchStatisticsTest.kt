@@ -6,6 +6,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.presentation.match.NO_SERVE_TRACKING
 import eu.advantly.presentation.match.play
 import eu.advantly.presentation.match.setupFor
 import eu.advantly.presentation.match.testStore
@@ -54,7 +55,7 @@ class MatchStatisticsTest {
             Presets.PADEL_TIEBREAK_ONLY_10,
         )) {
             val store = testStore()
-            val setup = store.setupFor(preset.format(Discipline.DOUBLES))
+            val setup = store.setupFor(preset.format(Discipline.DOUBLES)).copy(meta = NO_SERVE_TRACKING)
             val id = store.start(setup)
             val first = assertNotNull(store.active.value!!.serverChoiceContext)
             val partner = setup.lineup.a.last()
@@ -141,7 +142,7 @@ class MatchStatisticsTest {
     @Test
     fun undonePointsAndPausesDoNotCount() {
         val store = testStore()
-        val id = store.start(store.setupFor(Presets.TENNIS_ONE_SET.format()))
+        val id = store.start(store.setupFor(Presets.TENNIS_ONE_SET.format()).copy(meta = NO_SERVE_TRACKING))
         store.play("AB")
         store.undo()
         store.pause()

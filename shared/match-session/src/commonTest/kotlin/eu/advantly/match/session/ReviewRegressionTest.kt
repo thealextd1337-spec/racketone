@@ -29,7 +29,7 @@ class ReviewRegressionTest {
     fun reorderedMultipartDeliveryIsAppliedCompletely() {
         val a = WireNode("a", 11)
         val b = WireNode("b", 12)
-        val id = a.session.create(format, SINGLES)
+        val id = a.session.create(format, SINGLES, NO_SERVE_TRACKING)
         b.link.deliver(Events(id, a.events()))
         a.points(Side.A, 3)
         val e = a.events().drop(1)
@@ -66,7 +66,7 @@ class ReviewRegressionTest {
     fun followUpIsOpenedWhenThePredecessorEndsLater() {
         val a = WireNode("a", 1)
         val b = WireNode("b", 2)
-        val old = a.session.create(format, SINGLES)
+        val old = a.session.create(format, SINGLES, NO_SERVE_TRACKING)
         b.link.deliver(Events(old, a.events()))
         a.session.endMatch()
         val end = a.events().last()
@@ -93,7 +93,7 @@ class ReviewRegressionTest {
     @Test
     fun resultCacheKeepsTheFrozenSetOnRetirement() {
         val a = WireNode("a", 81)
-        val id = a.session.create(format, SINGLES)
+        val id = a.session.create(format, SINGLES, NO_SERVE_TRACKING)
         a.points(Side.A, 9)
         assertTrue(a.session.endMatch(EndReason.RETIRED, Side.A))
         val cached = assertNotNull(a.data.matches.get(id)).score
@@ -118,7 +118,7 @@ class ReviewRegressionTest {
                 SessionConfig(DeviceId("x"), PeerKind.PHONE),
                 threadGuard = { false },
             )
-        assertFailsWith<IllegalStateException> { session.create(format, SINGLES) }
+        assertFailsWith<IllegalStateException> { session.create(format, SINGLES, NO_SERVE_TRACKING) }
         assertFailsWith<IllegalStateException> { session.recordPoint(Side.A) }
     }
 }

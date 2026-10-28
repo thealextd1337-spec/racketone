@@ -1,6 +1,8 @@
 package eu.advantly.core.scoring
 
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchMeta
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 
@@ -45,6 +47,32 @@ object PointDetailRules {
         if (!sport.isTennisLike) return false
         return serve != ServeOutcome.DOUBLE_FAULT || side != servingSide
     }
+
+    /** Wirksamer Modus „Aufschläge“ (Entscheidung 2026-10-28): [MatchMeta.serveTracking], außer Tennis/Padel immer OFF. */
+    fun serveTracking(
+        meta: MatchMeta,
+        sport: Sport,
+    ): ServeTracking = if (sport.isTennisLike) meta.serveTracking else ServeTracking.OFF
+
+    /**
+     * Wählbare Werte der Aufschlag-Leiste je Modus (Handy und Uhr gleich): FULL „2. Aufschlag · Doppelfehler“ (ohne
+     * Eingabe gilt [autoServe]), DOUBLE_FAULTS_ONLY nur „Doppelfehler“, OFF nichts. „Doppelfehler“ nur bei
+     * [doubleFaultAllowed] (Punkt der Rückschlagseite).
+     */
+    fun serveOptions(
+        tracking: ServeTracking,
+        doubleFaultAllowed: Boolean,
+    ): List<ServeOutcome> {
+        val doubleFault = ServeOutcome.DOUBLE_FAULT.takeIf { doubleFaultAllowed }
+        return when (tracking) {
+            ServeTracking.OFF -> emptyList()
+            ServeTracking.DOUBLE_FAULTS_ONLY -> listOfNotNull(doubleFault)
+            ServeTracking.FULL -> listOfNotNull(ServeOutcome.SECOND_SERVE_IN, doubleFault)
+        }
+    }
+
+    /** Wert eines Punktes, für den die Leiste ohne Eingabe endet: FULL „1. Aufschlag“, sonst nichts (`null`). */
+    fun autoServe(tracking: ServeTracking): ServeOutcome? = ServeOutcome.FIRST_SERVE_IN.takeIf { tracking == ServeTracking.FULL }
 
     /**
      * Neues Detail, wenn die Aufschlag-Info eines Punktes mit dem Detail [current] auf [serve] gesetzt wird (`null` =

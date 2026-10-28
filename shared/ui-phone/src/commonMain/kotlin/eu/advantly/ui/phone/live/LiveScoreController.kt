@@ -184,8 +184,17 @@ class LiveScoreController(
     var servePromptId: EventId? by mutableStateOf(null)
         private set
 
+    /** Anzeigezeit der Leiste vorbei: ohne Eingabe erfasst Modus „Ja“ „1. Aufschlag“ (wie auf der Uhr). */
     fun dismissServePrompt(id: EventId) {
-        if (servePromptId == id) servePromptId = null
+        if (servePromptId != id) return
+        servePromptId = null
+        val current = snapshot ?: return
+        if (LiveOperationRules.autoServe(current) == null) return
+        // still (ohne Haptik); „nie überschreiben“ prüft der Port an einer Stelle (settleServeInfo)
+        if (current.lastPoint?.id == id && port.settleServeInfo(id)) {
+            updateSnapshot(port.active.value)
+            generation++
+        }
     }
 
     fun removeLastPointOf(side: Side): Boolean {
@@ -224,7 +233,11 @@ class LiveScoreController(
     ): Boolean {
         val current = snapshot ?: return false
         if (current.lastPoint?.id != pointId || LiveOperationRules.serveOptions(current).isEmpty()) return false
-        if (value != null && value !in LiveOperationRules.serveOptions(current)) return false
+        if (value != null && value !in LiveOperationRules.serveOptions(current) &&
+            value != LiveOperationRules.autoServe(current)
+        ) {
+            return false
+        }
         return metadataCommand { port.setServeInfo(pointId, value) }
     }
 

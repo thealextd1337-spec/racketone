@@ -16,6 +16,9 @@ CREATE TABLE local_source (
 identityForScope:
 SELECT * FROM local_identity WHERE scope_id = ?;
 
+identityScopes:
+SELECT scope_id FROM local_identity;
+
 putIdentity:
 INSERT INTO local_identity(scope_id, device_id, self_id) VALUES (?, ?, ?);
 

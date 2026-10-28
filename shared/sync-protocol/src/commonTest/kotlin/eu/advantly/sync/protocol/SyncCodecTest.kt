@@ -117,7 +117,7 @@ class SyncCodecTest {
         val events = SyncCodec.encodeToString(Events(MATCH, listOf(point("e1", "phone", 1, 1, null, Side.B))))
         assertTrue(""""payload":{"type":"PointWon","side":"B"}""" in events, events)
         val hello = SyncCodec.encodeToString(Hello(DeviceId("d"), PeerKind.PHONE))
-        assertTrue(""""v":4""" in hello && """"minV":3""" in hello, hello)
+        assertTrue(""""v":5""" in hello && """"minV":3""" in hello, hello)
     }
 
     @Test
@@ -128,9 +128,9 @@ class SyncCodecTest {
 
     @Test
     fun unsupportedVersionIsReportedButHelloIsAlwaysRead() {
-        assertEquals(DecodeResult.Unsupported(5, "Summary"), SyncCodec.decode("""{"type":"Summary","v":5,"matches":{}}"""))
-        val hello = SyncCodec.decode("""{"type":"Hello","v":5,"minV":5,"deviceId":"d","kind":"WATCH","newField":true}""")
-        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 5, v = 5)), hello)
+        assertEquals(DecodeResult.Unsupported(6, "Summary"), SyncCodec.decode("""{"type":"Summary","v":6,"matches":{}}"""))
+        val hello = SyncCodec.decode("""{"type":"Hello","v":6,"minV":6,"deviceId":"d","kind":"WATCH","newField":true}""")
+        assertEquals(DecodeResult.Ok(Hello(DeviceId("d"), PeerKind.WATCH, minV = 6, v = 6)), hello)
         // W2-Gerät (Protokoll 2): nur noch sein Hello wird gelesen
         assertEquals(DecodeResult.Unsupported(2, "Events"), SyncCodec.decode("""{"type":"Events","v":2,"matchId":"m1","events":[]}"""))
     }

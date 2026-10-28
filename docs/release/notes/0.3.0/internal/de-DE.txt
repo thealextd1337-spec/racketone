@@ -1,0 +1,6 @@
+Neu in 0.3.0:
+• Konto Pflicht, Matches von Handy und Uhr automatisch gesichert; schlankes Profil.
+• Aufschläge: Ja / Nur Doppelfehler / Nein; Uhr fragt nur 2. Aufschlag oder Doppelfehler, sonst gilt der 1.
+• Ergebnis und Aufschläger nach dem Match am Handy bearbeiten.
+• Uhr: vom Menü per Wisch zurück zum Zählen; Spielstand bleibt sichtbar.
+Bitte testen: Erststart, Uhr-Match sichern, Aufschläge, Ergebnis bearbeiten.

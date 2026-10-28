@@ -49,6 +49,7 @@ import eu.advantly.ui.phone.resources.friends_feed_status_scheduled
 import eu.advantly.ui.phone.resources.friends_feed_vs
 import eu.advantly.ui.phone.resources.friends_feed_winner
 import eu.advantly.ui.phone.resources.friends_unknown
+import eu.advantly.ui.phone.resources.history_corrected
 import eu.advantly.ui.phone.resources.sharing_default_hint
 import eu.advantly.ui.phone.resources.sharing_default_loading
 import eu.advantly.ui.phone.resources.sharing_default_retry
@@ -138,8 +139,12 @@ private fun headline(match: FeedMatch): String {
             "scheduled" -> Res.string.friends_feed_status_scheduled
             else -> Res.string.friends_feed_status_running
         }
-    return listOfNotNull(match.sport?.let { stringResource(sportName(it)) }, stringResource(status), match.startedAt?.take(10))
-        .joinToString(" · ")
+    return listOfNotNull(
+        match.sport?.let { stringResource(sportName(it)) },
+        stringResource(status),
+        match.startedAt?.take(10),
+        stringResource(Res.string.history_corrected).takeIf { match.corrected },
+    ).joinToString(" · ")
 }
 
 @Composable

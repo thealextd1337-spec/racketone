@@ -161,8 +161,7 @@ class AppFlowTest {
         runComposeUiTest {
             val model = showApp()
             runWizard(Sport.BADMINTON, doubles = false) {
-                // Erweitert: nur lesende Regeln + 11 Punkte (Best of 5)
-                click("advanced_toggle")
+                // Erweitert (sofort aufgeklappt): nur lesende Regeln + 11 Punkte (Best of 5)
                 onNodeWithTag("advanced_content").assertExists()
             }
             val format =
@@ -425,7 +424,7 @@ class AppFlowTest {
             click("tab_friends", scroll = false)
             onNodeWithTag("coming_soon_friends").assertExists()
             click("tab_profile", scroll = false)
-            onNodeWithTag("coming_soon_profile").assertExists()
+            onNodeWithTag("profile").assertExists()
             click("tab_home", scroll = false)
             onNodeWithTag("home_new_match").assertExists()
         }

@@ -1,10 +1,14 @@
 package eu.advantly.match.session
 
 import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Effect
+import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.data.scoreEvents
 import eu.advantly.sync.protocol.PeerKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,9 +19,9 @@ import kotlin.test.assertTrue
 class ScorerHandoverTest {
     private val format = Presets.TENNIS_SINGLES_BO3.format()
 
-    private fun watchScoring(): Cluster {
+    private fun watchScoring(meta: MatchMeta = NO_SERVE_TRACKING): Cluster {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES, scorer = ScorerChoice.Device(DeviceId("watch")))
+        cluster["phone"].session.create(format, SINGLES, meta, scorer = ScorerChoice.Device(DeviceId("watch")))
         cluster.settle()
         return cluster
     }
@@ -39,8 +43,10 @@ class ScorerHandoverTest {
     }
 
     @Test
-    fun onlineHandoverMovesTheRole() {
-        val cluster = watchScoring()
+    fun onlineHandoverMovesTheRole() = SERVE_MODES.forEach(::onlineHandoverMovesTheRole)
+
+    private fun onlineHandoverMovesTheRole(meta: MatchMeta) {
+        val cluster = watchScoring(meta)
         val phone = cluster["phone"]
         val watch = cluster["watch"]
         watch.session.recordPoint(Side.A)
@@ -64,8 +70,10 @@ class ScorerHandoverTest {
     }
 
     @Test
-    fun offlineOldScorerInputsAreRejectedAndReported() {
-        val cluster = watchScoring()
+    fun offlineOldScorerInputsAreRejectedAndReported() = SERVE_MODES.forEach(::offlineOldScorerInputsAreRejectedAndReported)
+
+    private fun offlineOldScorerInputsAreRejectedAndReported(meta: MatchMeta) {
+        val cluster = watchScoring(meta)
         val phone = cluster["phone"]
         val watch = cluster["watch"]
         watch.session.recordPoint(Side.A)
@@ -82,16 +90,24 @@ class ScorerHandoverTest {
         cluster.online("watch")
         cluster.settle(5_000)
         cluster.assertConverged()
-        assertEquals(3, watch.match.rejectedByRoleCount)
-        assertEquals(3, phone.match.rejectedByRoleCount)
+        // verworfen: die drei Uhr-Punkte (im Modus „Ja“ dazu deren automatische 1. Aufschläge)
+        assertEquals(3, phone.rejectedPoints(), "$meta")
+        assertEquals(phone.match.rejectedByRoleCount, watch.match.rejectedByRoleCount)
         assertEquals(SidePair(1, 1), phone.score.current?.points)
         assertFalse(watch.match.isScorer)
+        // der neue Zähler setzt für den fremden Uhr-Punkt keinen 1. Aufschlag (dort könnte eine Eingabe unterwegs sein)
+        assertEquals(listOf(null, null), ScoringEngine.pointHistory(phone.data.events.scoreEvents(phone.match.id)).map { it.serve })
+    }
+
+    private fun Device.rejectedPoints(): Int {
+        val log = data.events.scoreEvents(match.id).associateBy { it.id }
+        return score.rejectedByRole.count { log[it]?.payload is PointWon }
     }
 
     @Test
     fun simultaneousTakeoversConvergeToOneScorer() {
         val cluster = Cluster("phone" to PeerKind.PHONE, "watch1" to PeerKind.WATCH, "watch2" to PeerKind.WATCH)
-        cluster["phone"].session.create(format, SINGLES)
+        cluster["phone"].session.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         assertTrue(cluster["watch1"].session.takeOverScoring())
         assertTrue(cluster["watch2"].session.takeOverScoring())

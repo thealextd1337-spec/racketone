@@ -18,7 +18,7 @@
     <string name="pairing_repair">Neu koppeln</string>
     <string name="pairing_later">Nicht jetzt</string>
     <string name="wear_version">v%1$s</string>
-    <string name="home_privacy">Datenschutz: Matchdaten gehen an dein gekoppeltes Handy, Puls und Schritte nur wie unter „Puls &amp; Schritte“ eingestellt. Details in der Handy-App unter Profil › Datenschutz.</string>
+    <string name="home_privacy">Datenschutz: Matchdaten gehen an dein gekoppeltes Handy, Puls und Schritte nur wie unter „Puls &amp; Schritte“ eingestellt. Details in der Handy-App unter Profil › Konto &amp; Datenschutz.</string>
 
     <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>
@@ -204,8 +204,11 @@
         <item quantity="one">%1$d Game</item>
         <item quantity="other">%1$d Games</item>
     </plurals>
-    <string name="setup_serve_stats">Aufschlag-Statistik erfassen</string>
-    <string name="setup_serve_stats_hint">Nach jedem Punkt: 1./2. Aufschlag oder Doppelfehler</string>
+    <string name="setup_serve_tracking">Aufschläge</string>
+    <string name="setup_serve_full">Ja</string>
+    <string name="setup_serve_double_faults_only">Nur Doppelfehler</string>
+    <string name="setup_serve_off">Nein</string>
+    <string name="setup_serve_tracking_hint">Ja: nach dem Punkt 2. Aufschlag oder Doppelfehler antippen, sonst zählt der 1. Aufschlag</string>
     <string name="live_remove_point_us">Letzten Punkt von uns abziehen</string>
     <string name="live_remove_point_them">Letzten Punkt der Gegner abziehen</string>
     <string name="live_point_removed">Punkt abgezogen</string>

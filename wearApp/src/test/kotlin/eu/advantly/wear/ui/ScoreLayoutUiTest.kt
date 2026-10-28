@@ -3,6 +3,7 @@ package eu.advantly.wear.ui
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
@@ -10,16 +11,20 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.live.SetColumn
+import eu.advantly.wear.R
 import eu.advantly.wear.live.CourtLetter
 import eu.advantly.wear.live.LiveRole
 import eu.advantly.wear.live.LiveUi
+import eu.advantly.wear.live.ServeBarUi
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.WatchTelemetryPolicy
 import eu.advantly.wear.live.WatchToast
@@ -200,6 +205,67 @@ class ScoreLayoutUiTest {
         render(singles().copy(serveBar = serveBar()), activeWorkout())
         assertTrue(rule.onAllNodesWithTag(LiveTags.HEART_RATE, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertTrue(rule.onAllNodesWithTag(LiveTags.STEPS, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    // 0.3.0: Die Aufschlag-Leiste verdeckt den Spielstand nicht – Sätze/Games stehen links in der Leiste, Punkte frei
+
+    @Test
+    @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
+    fun scoreStaysVisibleWithTheServeBarOnPixelWatch41mm() = checkScoreVisibleWithServeBar()
+
+    @Test
+    @Config(qualifiers = "de-w180dp-h180dp-round-watch-hdpi")
+    fun scoreStaysVisibleWithTheServeBarOnSmallRoundWatch() = checkScoreVisibleWithServeBar()
+
+    @Test
+    @Config(qualifiers = "de-w206dp-h206dp-round-watch-340dpi")
+    fun scoreStaysVisibleWithTheServeBarOnGalaxyWatch8LargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        checkScoreVisibleWithServeBar()
+    }
+
+    @Test
+    @Config(qualifiers = "de-w180dp-h180dp-round-watch-hdpi")
+    fun threeSetsStayVisibleWithTheServeBarOnSmallRoundWatchLargeFont() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        val third = SetColumn(SidePair(3, 2), tiebreakLoserPoints = null, winner = null, isCurrent = true)
+        checkScoreVisibleWithServeBar(singles().let { it.copy(sets = it.sets + third) }, expectedSets = "6:4 6:7 3:2")
+    }
+
+    @Test
+    @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
+    fun scoreStaysVisibleWithTheDoubleFaultOnlyBar() =
+        checkScoreVisibleWithServeBar(bar = serveBar().copy(options = listOf(ServeOutcome.DOUBLE_FAULT)))
+
+    @Test
+    @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
+    fun scoreStaysVisibleWithTheSecondServeOnlyBar() = checkScoreVisibleWithServeBar(bar = serveBar(withDoubleFault = false))
+
+    private fun checkScoreVisibleWithServeBar(
+        live: LiveUi = singles(),
+        bar: ServeBarUi = serveBar(),
+        expectedSets: String = "6:4 6:7",
+    ) {
+        render(live.copy(serveBar = bar), activeWorkout())
+        val root = rule.onRoot().fetchSemanticsNode().boundsInRoot
+        val sets = rule.onNodeWithTag(LiveTags.SETS, useUnmergedTree = true)
+        assertEquals(expectedSets, sets.fetchSemanticsNode().config[SemanticsProperties.Text].joinToString(" ") { it.text })
+        assertFalse("Satzstand abgeschnitten", sets.textLayout().hasVisualOverflow)
+        val setsBox = bounds(LiveTags.SETS)
+        assertInsideCircle("Satzstand", setsBox, root)
+        val app = RuntimeEnvironment.getApplication()
+        val segments =
+            bar.options.map {
+                val label = if (it == ServeOutcome.DOUBLE_FAULT) R.string.serve_double_fault else R.string.serve_second_in
+                rule.onNodeWithText(app.getString(label)).fetchSemanticsNode().boundsInRoot
+            }
+        segments.forEach { assertFalse("Satzstand unter einem Segment ($it)", setsBox.overlaps(it)) }
+        for (side in Side.entries) {
+            val digits = bounds(LiveTags.points(side))
+            segments.forEach { assertFalse("Punkte $side verdeckt ($digits / $it)", digits.overlaps(it)) }
+            assertFalse("Punkte $side unter dem Satzstand", digits.overlaps(setsBox))
+        }
+        rule.screenshot("score-serve-bar-${root.width.toInt()}px-${bar.options.size}-${live.sets.size}")
     }
 
     /** Telemetrie ist nicht klickbar: ein Tap darauf zählt nicht (Mittelband), die Hälften zählen wie bisher. */

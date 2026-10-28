@@ -92,7 +92,26 @@ object EventLog {
         return LogAnalysis(ordered, rejected, undone, invalidUndos, absorbed, active, resolved, roleRejected, scorer)
     }
 
-    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5, seit 2026-10-15 auch `ServerChosen`). */
+    /**
+     * Letztes Event für Matchzeit und -ende („letztes Event“ in Dauer, Ende, Listen) in [events] (Log-Ordnung): ohne
+     * Personenzuweisung (F20) und Korrekturen nach Matchende (Protokoll 5). Ein Zählerwechsel zählt nur dann nicht, wenn
+     * ihm noch eine Korrektur folgt (die Übernahme am Handy vor der Korrektur); Alt-Logs ohne Korrektur bleiben dadurch
+     * unverändert.
+     */
+    fun matchEnd(events: List<ScoreEvent>): ScoreEvent? {
+        var correctionAfter = false
+        for (event in events.asReversed()) {
+            when (event.payload) {
+                is PlayerAssigned -> Unit
+                is ResultCorrected, is GameServersCorrected -> correctionAfter = true
+                is ScorerChanged -> if (!correctionAfter) return event
+                else -> return event
+            }
+        }
+        return null
+    }
+
+    /** Payloads, die nur der Zähler erzeugen darf (02 §7.5; seit 2026-10-15 `ServerChosen`, ab Protokoll 5 die Korrekturen). */
     fun isScorerOnly(payload: EventPayload): Boolean =
         payload is PointWon ||
             payload is Undo ||
@@ -102,7 +121,9 @@ object EventLog {
             payload is Resumed ||
             payload is MatchEnded ||
             payload is PointDetailSet ||
-            payload is ServerChosen
+            payload is ServerChosen ||
+            payload is ResultCorrected ||
+            payload is GameServersCorrected
 
     /**
      * Rollenregel (02 §7.5): Vorwärts durch die Ordnung; `ScorerChanged` setzt den Zähler ab seiner Position. Ein

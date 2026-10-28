@@ -9,6 +9,7 @@ import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.MidGameEndChange
 import eu.advantly.core.model.PickleballScoring
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Preset
@@ -219,14 +220,14 @@ object SetupCatalog {
 
     /**
      * Metadaten: Badminton in der Halle (Default des Assistenten), sonst ohne Angabe; Tennis/Padel mit Option
-     * „Aufschlag-Statistik erfassen“ ([serveStats], Default an – `MatchMeta.serveStats`).
+     * „Aufschläge“ ([serveTracking], Default „Ja“ – `MatchMeta.serveTracking`).
      */
     fun meta(
         sport: Sport,
-        serveStats: Boolean = true,
+        serveTracking: ServeTracking = ServeTracking.FULL,
     ): MatchMeta {
         val base = if (sport == Sport.BADMINTON) MatchMeta(environment = Environment.INDOOR) else MatchMeta()
-        return if (serveStatsAvailable(sport)) base.copy(serveStats = serveStats) else base
+        return if (serveStatsAvailable(sport)) base.copy(serveTracking = serveTracking) else base
     }
 
     /**

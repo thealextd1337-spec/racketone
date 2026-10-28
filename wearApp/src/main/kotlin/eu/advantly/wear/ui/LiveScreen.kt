@@ -78,6 +78,7 @@ import androidx.wear.compose.material3.timeTextSeparator
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.OperationTimings
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.wear.R
@@ -201,7 +202,10 @@ fun LiveScreen(
         }
 
         controls -> {
-            ControlsPage(live, workout, heartRate, actions, onClose = { controls = false })
+            ControlsPage(live, workout, heartRate, actions, onClose = { controls = false }) {
+                // beim Zurückwischen schaut die Zähl-Ansicht schon hervor (nur Anzeige, keine Eingaben)
+                ScorePage(live, workout, isAmbient = false, toast = null, actions = actions, onOpenControls = {}, inputEnabled = false)
+            }
         }
 
         else -> {
@@ -224,6 +228,7 @@ private fun ScorePage(
     toast: WatchToast?,
     actions: LiveActions,
     onOpenControls: () -> Unit,
+    inputEnabled: Boolean = true,
 ) {
     var flashSide by remember { mutableStateOf<Side?>(null) }
     var flashKey by remember { mutableIntStateOf(0) }
@@ -254,8 +259,9 @@ private fun ScorePage(
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .pointerInput(isAmbient, scorer) {
-                        if (isAmbient) return@pointerInput // Handgelenk unten = Eingaben aus (04 §4.3.3 Punkt 4)
+                    .pointerInput(isAmbient, scorer, inputEnabled) {
+                        // Handgelenk unten = Eingaben aus (04 §4.3.3 Punkt 4); ebenso als Hintergrund der Steuerseite
+                        if (isAmbient || !inputEnabled) return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             // Ziel beim Aufsetzen festlegen: wer auf der Aktionsleiste beginnt, zählt und zieht nie ab
@@ -382,6 +388,20 @@ private fun ScorePage(
             // „Gegner“-Namen stehen direkt unter dem Mittelband: neben ihnen ragen Puls/Schritte ins Feld
             val telemetryInset = if (workout.telemetryActive) TELEMETRY_EDGE + TELEMETRY_WIDTH + 2.dp else 0.dp
             val bandHeight = maxHeight * TapZones.MIDDLE_BAND
+            // Die Aktionsleiste ist höher als das Mittelband: so weit sie in eine Hälfte ragt, bleiben deren Ziffern frei
+            // (sie werden dafür etwas kleiner) – der Spielstand ist auch bei sichtbarer Leiste nie verdeckt (0.3.0)
+            val stripClearance =
+                if (strip == null) {
+                    SidePair(0.dp, 0.dp)
+                } else {
+                    with(LocalDensity.current) {
+                        val g = ActionStrip.geometry(maxWidth.toPx(), maxHeight.toPx(), density)
+                        SidePair(
+                            (halfHeight - g.visualTop.toDp() + STRIP_DIGIT_GAP).coerceAtLeast(0.dp),
+                            ((g.visualTop + g.visualHeight).toDp() - halfHeight - bandHeight + STRIP_DIGIT_GAP).coerceAtLeast(0.dp),
+                        )
+                    }
+                }
             // Beide Hälften gleich groß: höchstens so groß, wie „Wir“ unter Uhrzeit, Statuszeile und Namenszeilen Platz hat
             // (die Ziffern-Box ist etwa DIGIT_BOX_RATIO × Schriftgröße hoch); notfalls schrumpft autoSize weiter
             val digitSize =
@@ -430,6 +450,7 @@ private fun ScorePage(
                         // „Gegner“-Namen liegen am Mittelband unter der Aktionsleiste: solange sie steht, ausblenden
                         // (statt halb verdeckt durchzuscheinen); Layout bleibt gleich
                         labelHidden = side == Side.B && strip != null,
+                        bandClearance = stripClearance[side],
                         // Statuszeile oben und Hinweise unten bekommen eigenen Platz in ihrer Hälfte (keine Überlagerung)
                         header = {
                             if (side == Side.A) {
@@ -445,7 +466,7 @@ private fun ScorePage(
                             }
                         },
                         modifier =
-                            if (scorer && !isAmbient) {
+                            if (scorer && !isAmbient && inputEnabled) {
                                 Modifier.semantics {
                                     role = Role.Button
                                     contentDescription = "$pointLabel. $scoreDescription. $serveDescription"
@@ -503,6 +524,7 @@ private fun TeamHalf(
     flashing: Boolean,
     holdProgress: () -> Float,
     labelHidden: Boolean,
+    bandClearance: Dp,
     header: @Composable ColumnScope.() -> Unit,
     footer: @Composable ColumnScope.() -> Unit,
     modifier: Modifier,
@@ -613,6 +635,7 @@ private fun TeamHalf(
                 halfHeight = height,
                 screen = screen,
                 sideInset = sideInset,
+                bandClearance = bandClearance,
                 label = {
                     Column(
                         modifier = if (labelHidden) Modifier.alpha(0f) else Modifier,
@@ -634,7 +657,8 @@ private fun TeamHalf(
  * bei Bedarf); die Namenszeile wird erst gemessen, wenn ihre Lage feststeht – so breit, wie der runde Rand an ihrer
  * randnächsten Kante erlaubt ([ScoreLayout.chordWidth]), der Rest endet mit „…“. [halfTop]/[halfHeight] = Lage der
  * Hälfte im Screen, [screen] = Displaydurchmesser, [sideInset] = links und rechts freizuhaltender Rand (Telemetrie-
- * Spalten neben der „Gegner“-Zeile am Mittelband).
+ * Spalten neben der „Gegner“-Zeile am Mittelband), [bandClearance] = am Mittelband freizuhaltender Streifen (dort liegt
+ * gerade die Aktionsleiste; „Gegner“: die ausgeblendete Namenszeile zählt dazu).
  */
 @Composable
 private fun NamesAndDigits(
@@ -643,6 +667,7 @@ private fun NamesAndDigits(
     halfHeight: Dp,
     screen: Dp,
     sideInset: Dp,
+    bandClearance: Dp,
     label: @Composable () -> Unit,
     digits: @Composable () -> Unit,
     modifier: Modifier,
@@ -652,12 +677,15 @@ private fun NamesAndDigits(
         val height = constraints.maxHeight
         val labelMeasurable = labels.single()
         val labelHeight = labelMeasurable.minIntrinsicHeight(width)
-        val digitsPlaceable =
-            numbers.single().measure(Constraints(maxWidth = width, maxHeight = (height - labelHeight).coerceAtLeast(0)))
+        val clear = bandClearance.roundToPx()
+        // „Gegner“: die Namenszeile liegt ohnehin am Mittelband – frei bleibt der größere der beiden Streifen
+        val digitsTop = if (side == Side.A) labelHeight else maxOf(labelHeight, clear)
+        val digitsRoom = height - digitsTop - if (side == Side.A) clear else 0
+        val digitsPlaceable = numbers.single().measure(Constraints(maxWidth = width, maxHeight = digitsRoom.coerceAtLeast(0)))
         // „Wir“: Kopf (Uhrzeit) liegt darüber, dieser Bereich endet am Mittelband; „Gegner“: beginnt am Mittelband
         val top = halfTop.toPx() + if (side == Side.A) halfHeight.toPx() - height else 0f
-        val labelY = if (side == Side.A) height - digitsPlaceable.height - labelHeight else 0
-        val digitsY = labelY + labelHeight
+        val labelY = if (side == Side.A) height - clear - digitsPlaceable.height - labelHeight else 0
+        val digitsY = if (side == Side.A) labelY + labelHeight else digitsTop
         val margin = ScoreLayout.EDGE_MARGIN_DP.dp.toPx()
         val chord =
             min(
@@ -1012,6 +1040,9 @@ internal object LiveTags {
 }
 
 private const val HALF_FRACTION = (1f - TapZones.MIDDLE_BAND) / 2f
+
+/** Abstand der Ziffern zur sichtbaren Aktionsleiste. */
+private val STRIP_DIGIT_GAP = 2.dp
 private const val DIGIT_FRACTION = 0.55f
 
 /** Höhe der Ziffern-Box im Verhältnis zur Schriftgröße (Ober-/Unterlänge der Schrift). */

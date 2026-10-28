@@ -16,6 +16,7 @@ import eu.advantly.core.model.PickleballScoring
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.RegularSet
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.SetFormat
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -314,7 +315,8 @@ class MatchWizard(
         update { it.copy(tennisMatch = choice) }
     }
 
-    fun setServeStats(enabled: Boolean) = update { it.copy(serveStats = enabled) }
+    /** Vorab-Wahl „Aufschläge“: Ja / Nur Doppelfehler / Nein (nur Tennis/Padel wirksam). */
+    fun setServeTracking(tracking: ServeTracking) = update { it.copy(serveTracking = tracking) }
 
     fun setTiebreakAt(choice: TiebreakAtChoice) = update { it.copy(tiebreakAt = choice) }
 
@@ -455,7 +457,7 @@ class MatchWizard(
                             surface = input.surface,
                             environment = input.environment,
                             mixed = input.mixed,
-                            serveStats = input.serveStats,
+                            serveTracking = input.serveTracking,
                         ),
                     players = input.players,
                 )

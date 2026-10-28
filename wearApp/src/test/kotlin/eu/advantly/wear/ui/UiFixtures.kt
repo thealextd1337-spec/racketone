@@ -112,7 +112,7 @@ fun liveUi(
     )
 }
 
-/** Aufschlag-Leiste für einen Punkt der Rückschlagseite (alle drei Werte) bzw. nur 1./2. Aufschlag. */
+/** Aufschlag-Leiste im Modus „Ja“: Punkt der Rückschlagseite („2. Aufschlag · Doppelfehler“) bzw. nur „2. Aufschlag“. */
 fun serveBar(
     withDoubleFault: Boolean = true,
     selected: ServeOutcome? = null,
@@ -124,7 +124,6 @@ fun serveBar(
         hideAtMillis = hideAtMillis,
         options =
             listOfNotNull(
-                ServeOutcome.FIRST_SERVE_IN,
                 ServeOutcome.SECOND_SERVE_IN,
                 ServeOutcome.DOUBLE_FAULT.takeIf { withDoubleFault },
             ),

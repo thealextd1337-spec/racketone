@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.CorrectedSet
+import eu.advantly.core.scoring.GameServer
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.MatchRecord
@@ -79,9 +81,11 @@ import eu.advantly.ui.phone.resources.detail_net_duration
 import eu.advantly.ui.phone.resources.detail_set_score
 import eu.advantly.ui.phone.resources.detail_sets
 import eu.advantly.ui.phone.resources.result_compare_a11y
+import eu.advantly.ui.phone.resources.result_corrected
 import eu.advantly.ui.phone.resources.result_delete
 import eu.advantly.ui.phone.resources.result_delete_text
 import eu.advantly.ui.phone.resources.result_delete_title
+import eu.advantly.ui.phone.resources.result_edit
 import eu.advantly.ui.phone.resources.result_followup_of
 import eu.advantly.ui.phone.resources.result_not_found
 import eu.advantly.ui.phone.resources.result_not_rated
@@ -123,9 +127,18 @@ fun ResultScreen(
     onShareImage: (suspend (ImageBitmap, String) -> Unit)? = null,
     /** Freunde-Abschnitt (Teilen, „War ich nicht“); nur mit Konto. */
     sharing: @Composable (MatchRecord) -> Unit = {},
+    /** „Ergebnis bearbeiten“ anbieten (`MatchHistoryPort.canCorrectResult`). */
+    canEditResult: Boolean = false,
+    /** Sätze und/oder Aufschläger in einem Vorgang speichern (`MatchHistoryPort.correctResult`). */
+    onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    if (editing && record != null && canEditResult) {
+        ResultEditor(record, onCorrectResult, onClose = { editing = false })
+        return
+    }
     Column(
         modifier
             .fillMaxSize()
@@ -245,6 +258,14 @@ fun ResultScreen(
                     color = AdvantlyTheme.colors.text2,
                 )
             }
+            if (canEditResult) {
+                AdvantlyButton(
+                    text = stringResource(Res.string.result_edit),
+                    primary = false,
+                    onClick = { editing = true },
+                    modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).testTag("result_edit"),
+                )
+            }
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
@@ -298,6 +319,15 @@ internal fun Hero(
         }
         ResultBadge(summary, full = forShare)
         Text(formatDateTime(summary.startedAtMs), style = AdvantlyTheme.typography.caption, color = colors.text2)
+        if (summary.result.corrected) {
+            // Auch auf dem geteilten Bild: Punkte und Statistik stammen aus der Zählung, das Ergebnis nicht
+            Text(
+                stringResource(Res.string.result_corrected),
+                style = AdvantlyTheme.typography.label,
+                color = colors.text2,
+                modifier = Modifier.testTag("result_corrected"),
+            )
+        }
         if (!forShare && !summary.isRated) {
             // F21: bleibt mit Stand im Verlauf (löschbar), zählt aber nicht für Siege und Statistik
             Text(

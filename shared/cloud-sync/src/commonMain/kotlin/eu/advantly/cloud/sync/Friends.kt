@@ -29,6 +29,9 @@ enum class FriendRequestResult { REQUESTED, ACCEPTED, ALREADY_FRIENDS }
 interface FriendsPort {
     suspend fun friendCode(): String
 
+    /** Eigener Alias und Benutzername fürs Profil; `null`: nicht verfügbar (Testdoubles). */
+    suspend fun ownProfile(): FoundProfile? = null
+
     /** `null`: kein Treffer (auch Blockierte und nicht auffindbare Benutzernamen sind nicht unterscheidbar). */
     suspend fun findProfile(query: String): FoundProfile?
 

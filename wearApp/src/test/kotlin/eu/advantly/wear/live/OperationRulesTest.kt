@@ -6,6 +6,7 @@ import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.ServeOutcome
@@ -65,12 +66,12 @@ class OperationRulesTest {
         s.recordPoint(Side.A)
         val won = s.state.value.match!!
         val ours = OperationRules.serveBar(won, won.lastPoint!!.id)!!
-        assertEquals(listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN), ours.options)
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN), ours.options)
         assertNull(ours.selected)
         s.recordPoint(Side.B)
         val lost = s.state.value.match!!
         val theirs = OperationRules.serveBar(lost, lost.lastPoint!!.id)!!
-        assertEquals(ServeOutcome.entries.toList(), theirs.options)
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), theirs.options)
         assertTrue(s.setServeInfo(lost.lastPoint!!.id, ServeOutcome.DOUBLE_FAULT))
         val marked = s.state.value.match!!
         assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveBar(marked, marked.lastPoint!!.id)?.selected)
@@ -79,9 +80,21 @@ class OperationRulesTest {
     }
 
     @Test
+    fun doubleFaultsOnlyBarAppearsOnlyForReceiverPoints() {
+        val s = session()
+        s.create(Presets.PADEL_GOLDEN_BO3.format(), doubles, MatchMeta(serveTracking = ServeTracking.DOUBLE_FAULTS_ONLY))
+        s.recordPoint(Side.A)
+        val won = s.state.value.match!!
+        assertNull("Punkt des Aufschlägers", OperationRules.serveBar(won, won.lastPoint!!.id))
+        s.recordPoint(Side.B)
+        val lost = s.state.value.match!!
+        assertEquals(listOf(ServeOutcome.DOUBLE_FAULT), OperationRules.serveBar(lost, lost.lastPoint!!.id)?.options)
+    }
+
+    @Test
     fun serveBarNeedsServeStatsAndTheScorerRole() {
         val off = session()
-        off.create(Presets.TENNIS_SINGLES_BO3.format(), singles, MatchMeta(serveStats = false))
+        off.create(Presets.TENNIS_SINGLES_BO3.format(), singles, MatchMeta(serveTracking = ServeTracking.OFF))
         off.recordPoint(Side.A)
         val noStats = off.state.value.match!!
         assertNull(OperationRules.serveBar(noStats, noStats.lastPoint!!.id))
@@ -179,10 +192,13 @@ class OperationRulesTest {
 
     @Test
     fun serveOptionMapsSegments() {
-        val bar = ServeBarUi(EventId("p"), listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN), null)
-        assertEquals(ServeOutcome.FIRST_SERVE_IN, OperationRules.serveOption(bar, 0))
+        val bar = ServeBarUi(EventId("p"), listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), null)
+        // Feld 0 = Satzstand (nicht antippbar), dann die Werte
+        assertEquals(listOf(OperationRules.SETS_WEIGHT, 1f, OperationRules.DOUBLE_FAULT_WEIGHT), OperationRules.serveWeights(bar))
+        assertNull(OperationRules.serveOption(bar, 0))
         assertEquals(ServeOutcome.SECOND_SERVE_IN, OperationRules.serveOption(bar, 1))
-        assertNull(OperationRules.serveOption(bar, 2))
+        assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveOption(bar, 2))
+        assertNull(OperationRules.serveOption(bar, 3))
     }
 
     @Test
@@ -211,5 +227,19 @@ class OperationRulesTest {
         timer.onPoint(p1, 30_000)
         timer.dismiss()
         assertNull(timer.visiblePoint(30_001))
+    }
+
+    @Test
+    fun serveBarTimerReportsTheEndWithoutInputExactlyOnce() {
+        val timer = ServeBarTimer(visibleMillis = 5_000, afterChoiceMillis = 1_500)
+        val p1 = EventId("p1")
+        timer.onPoint(p1, 1_000)
+        assertNull("läuft noch", timer.takeExpired(5_999))
+        assertEquals(p1, timer.takeExpired(6_000))
+        assertNull("nur einmal", timer.takeExpired(7_000))
+        assertNull(timer.visiblePoint(7_000))
+        timer.onPoint(p1, 10_000)
+        timer.dismiss()
+        assertNull("ausgeblendet (Undo, Punkt abziehen): kein Ende ohne Eingabe", timer.takeExpired(20_000))
     }
 }
