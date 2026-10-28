@@ -172,6 +172,9 @@ class FakePhoneAuth : CloudAuthPort {
     }
 }
 
+private const val DE_COUNTRY = "Konten sind in deinem Land noch nicht verfügbar."
+private const val EN_COUNTRY = "Accounts are not yet available in your country."
+
 /** Wie im Profil: die Kontorechte liegen in einer scrollbaren Spalte. */
 @Composable
 internal fun ScrollingRights(
@@ -364,6 +367,24 @@ class AccountScreenTest {
             onNodeWithTag("auth_error").assertExists()
             onNodeWithTag("auth_email").assertDoesNotExist()
             assertEquals(listOf("refresh"), auth.calls)
+        }
+
+    @Test fun unsupportedCountryExplainsWithoutPromisingLocalUse() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth = FakePhoneAuth()
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                setContent { AdvantlyTheme { AccountScreen(model, null) } }
+                auth.failure = "country_not_supported"
+                onNodeWithTag("auth_country").performTextReplacement("KP")
+                onNodeWithTag("auth_birth").performTextInput("2000-01-01")
+                onNodeWithTag("auth_age_next").performScrollTo().performClick()
+                onNodeWithTag("auth_error")
+                    .assertTextEquals(if (german) DE_COUNTRY else EN_COUNTRY)
+                onNodeWithTag("auth_local").assertDoesNotExist()
+                onNodeWithTag("auth_email").assertDoesNotExist()
+                assertTrue(model.state.value.accountRequired)
+            }
         }
 
     @Test fun rejectedAgeKeepsTheAccountFlowWithoutLocalExit() =

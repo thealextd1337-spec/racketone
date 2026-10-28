@@ -261,6 +261,35 @@ class AccountExportSectionIntegrationTest {
             }
         }
 
+    @Test fun busyExportInTheAccountFlowDoesNotBlockConsentSupportOrSignOut() =
+        fixture { scope ->
+            runDesktopComposeUiTest(width = 360, height = 640) {
+                val auth = signedInAuth().apply { consentSnapshot = snapshot(ConsentStatus.REQUIRED) }
+                val export =
+                    Export().apply {
+                        state.value =
+                            PhoneExportState(
+                                PhoneExportPhase.DOWNLOADING,
+                                setOf(PhoneExportAction.CANCEL),
+                            )
+                    }
+                val model = AuthViewModel(auth, scope, export = export)
+                var supports = 0
+                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { AccountScreen(model, null, onSupport = { supports++ }) } } }
+                onNodeWithTag("cloud_export_cancel").performScrollTo().assertIsEnabled()
+                onNodeWithTag("account_support").performScrollTo().performClick()
+                assertEquals(1, supports)
+                onNodeWithTag("consent_decline").performScrollTo().performClick()
+                assertEquals(1, auth.calls.count { it == "consent:false" })
+                onNodeWithTag("consent_confirm_TERMS").performScrollTo().performClick()
+                onNodeWithTag("consent_confirm_PRIVACY").performScrollTo().performClick()
+                onNodeWithTag("consent_accept").performScrollTo().assertIsEnabled()
+                onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+                assertEquals(1, auth.calls.count { it == "logout" })
+                assertTrue(export.calls.isEmpty())
+            }
+        }
+
     @Test fun busyExportDoesNotBlockDeletion() =
         fixture { scope ->
             runDesktopComposeUiTest(width = 360, height = 640) {
