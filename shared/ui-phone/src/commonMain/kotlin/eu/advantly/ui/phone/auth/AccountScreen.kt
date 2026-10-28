@@ -135,7 +135,7 @@ fun AccountScreen(
                     val isoBirthDate = birthDateIso(birthDate)
                     Button(
                         { isoBirthDate?.let { model.checkAge(country, it) } },
-                        enabled = !state.busy && isoBirthDate != null,
+                        enabled = !state.busy && country.isNotEmpty() && isoBirthDate != null,
                         modifier = Modifier.testTag("auth_age_next"),
                     ) { Text(stringResource(Res.string.auth_continue)) }
                 }

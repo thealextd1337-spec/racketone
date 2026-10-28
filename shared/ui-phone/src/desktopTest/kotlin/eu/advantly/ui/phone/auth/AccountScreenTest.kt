@@ -363,9 +363,14 @@ class AccountScreenTest {
             val auth = FakePhoneAuth()
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
             setContent { AdvantlyTheme { AccountScreen(model, null) } }
+            onNodeWithTag("auth_birth").performTextInput("3112199")
+            // Nur getippt, nicht gewählt: kein Land, also kein Weiter.
+            onNodeWithTag("auth_country").performTextReplacement("xyz")
+            onNodeWithTag("auth_birth").performTextInput("9")
+            onNodeWithTag("auth_age_next").assertIsNotEnabled()
+            onNodeWithTag("auth_birth").performTextReplacement("3112199")
             onNodeWithTag("auth_country").performTextReplacement("us")
             onNodeWithTag("auth_country_US").performClick()
-            onNodeWithTag("auth_birth").performTextInput("3112199")
             onNodeWithTag("auth_age_next").assertIsNotEnabled()
             onNodeWithTag("auth_birth").performTextInput("9")
             onNodeWithTag("auth_birth").assertTextContains("31-12-1999")
