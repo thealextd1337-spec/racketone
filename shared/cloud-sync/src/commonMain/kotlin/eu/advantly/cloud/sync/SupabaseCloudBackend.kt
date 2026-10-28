@@ -42,7 +42,8 @@ class SupabaseCloudBackend internal constructor(
     CloudUploadPort,
     FriendsPort,
     CloudTelemetryPort,
-    SharedMatchesPort {
+    SharedMatchesPort,
+    VisitorsPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -494,6 +495,47 @@ class SupabaseCloudBackend internal constructor(
         val stored =
             shareDefault(ownRow("profile_settings", lease(profileId), body) { "profile_id=eq.$profileId&select=share_matches_default" })
         if (stored != share) throw CloudException("cloud_response_invalid", false)
+    }
+
+    override suspend fun addVisitor(
+        profileId: String,
+        matchId: String,
+        visitorId: String,
+    ) = visitorRpc("add_match_visitor", profileId, matchId, visitorId)
+
+    override suspend fun revokeVisitor(
+        profileId: String,
+        matchId: String,
+        visitorId: String,
+    ) = visitorRpc("revoke_match_visitor", profileId, matchId, visitorId)
+
+    override suspend fun matchVisitors(
+        profileId: String,
+        matchId: String,
+    ): List<MatchVisitor> {
+        require(matchId.isNotBlank())
+        return decode<List<MatchVisitor>>(rpc(lease(profileId), "cloud_match_visitors_v1", buildJsonObject { put("p_match_id", matchId) }))
+            .also { visitors -> if (visitors.any { it.profileId.isBlank() }) throw CloudException("cloud_response_invalid", false) }
+    }
+
+    override suspend fun myVisitorMatches(profileId: String): List<VisitorView> =
+        decode<List<VisitorView>>(rpc(lease(profileId), "my_visitor_matches", buildJsonObject {}))
+
+    private suspend fun visitorRpc(
+        name: String,
+        profileId: String,
+        matchId: String,
+        visitorId: String,
+    ) {
+        require(matchId.isNotBlank() && visitorId.isNotBlank())
+        rpc(
+            lease(profileId),
+            name,
+            buildJsonObject {
+                put("p_match_id", matchId)
+                put("p_profile_id", visitorId)
+            },
+        )
     }
 
     /** Lease nur für das erwartete Konto: ein inzwischen gewechseltes SDK-Konto sendet nichts. */

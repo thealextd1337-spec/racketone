@@ -855,4 +855,25 @@
     <string name="start_login_benefit">Advantly works with an account: your matches are backed up automatically, and you can add friends and share matches with them. Scoring on your phone and watch also works offline.</string>
     <string name="start_login_create">Create account</string>
     <string name="start_login_sign_in">Sign in</string>
+    <string name="friends_segment_watching">Watching</string>
+    <string name="visitors_title">Spectators</string>
+    <string name="visitors_hint">Friends you add see only the live score and the result, never your health data. They stay until removed.</string>
+    <string name="visitors_empty">No spectators yet.</string>
+    <string name="visitors_add">Add spectators</string>
+    <string name="visitors_add_confirm">Add</string>
+    <string name="visitors_remove">Remove</string>
+    <string name="visitors_pending">waits for upload</string>
+    <string name="visitors_no_friends">All your friends are already spectators or players.</string>
+    <string name="visitors_loading">Loading spectators …</string>
+    <string name="watching_loading">Loading matches …</string>
+    <string name="visitors_close">Close</string>
+    <string name="wizard_visitors_title">Spectators</string>
+    <string name="wizard_visitors_hint">Optional: friends who may follow the live score and result.</string>
+    <string name="watching_empty">You are not watching any match. Friends can add you as a spectator.</string>
+    <string name="watching_stop">Stop watching</string>
+    <string name="watching_live">Now: %1$s – %2$s</string>
+    <string name="watching_games">Games %1$d:%2$d</string>
+    <string name="watching_tiebreak">Tiebreak</string>
+    <string name="friends_error_visitor_not_friend">Only friends can be added as spectators.</string>
+    <string name="friends_error_already_member">This friend already plays in the match.</string>
 </resources>
