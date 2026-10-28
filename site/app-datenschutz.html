@@ -13,7 +13,7 @@
 </head>
 <body>
   <!--
-    Datenschutzerklärung der Apps, Stand Phase 2 (Konto und Cloud-Sicherung). Diese URL ist in der Google Play Console
+    Datenschutzerklärung der Apps, Stand 0.3.0 (Konto erforderlich, automatische Cloud-Sicherung). Diese URL ist in der Google Play Console
     als Datenschutz-URL und in private.consent_translations als PRIVACY-Dokument hinterlegt – Pfad nicht ändern.
     Jede inhaltliche Änderung braucht eine neue Fassung im Zustimmungskatalog (docs/support-admin-betrieb.md).
     Englische Fassung: en/app-privacy.html (inhaltlich synchron halten).
@@ -37,8 +37,8 @@
 
       <h2>1. Kurz gesagt</h2>
       <ul>
-        <li>Zählen funktioniert <strong>ohne Konto</strong>. Dann bleiben Ihre Matches nur auf Ihrem Handy und Ihrer Uhr.</li>
-        <li>Mit einem <strong>Konto</strong> sichert die Handy-App Ihre Matches in unserer Cloud (Rechenzentrum in Frankfurt am Main), damit Sie sie auf mehreren Geräten nutzen und wiederherstellen können. Mit Freunden teilen Sie Matches nur, wenn Sie es einschalten – pro Match oder als Standard für neue Matches.</li>
+        <li>Für die Handy-App ist ein <strong>Konto erforderlich</strong>. Sie legen es beim ersten Start an; die Uhr braucht keine eigene Anmeldung.</li>
+        <li>Die Handy-App sichert Ihre Matches – auch die auf der Uhr gezählten – <strong>automatisch</strong> in unserer Cloud (Rechenzentrum in Frankfurt am Main), damit Sie sie auf mehreren Geräten nutzen und wiederherstellen können. Gezählt wird auch offline; gesichert wird, sobald eine Internetverbindung besteht. Mit Freunden teilen Sie Matches nur, wenn Sie es einschalten – pro Match oder als Standard für neue Matches.</li>
         <li>Die Herzfrequenz wird auf der Uhr gemessen und je nach Einstellung auch auf Ihrem Handy angezeigt. Sie wird <strong>nicht in die Cloud übertragen</strong> und nicht gespeichert.</li>
         <li><strong>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge.</strong> Ihre Daten werden nicht verkauft.</li>
         <li>Sie können Ihre Kontodaten jederzeit in der App ansehen und exportieren und die Löschung Ihres Kontos beantragen.</li>
@@ -53,10 +53,10 @@
       <p>Ein Datenschutzbeauftragter ist nicht bestellt.</p>
       <!-- ÜBERARBEITEN vor Phase 3: Pflicht zur Bestellung eines Datenschutzbeauftragten prüfen (03 §8.4 Punkt 1, O6). -->
 
-      <h2>3. Nutzung ohne Konto</h2>
+      <h2>3. Zählen auf Ihren Geräten</h2>
 
       <h3>3.1 Match-Daten auf Ihren Geräten</h3>
-      <p>Wenn Sie ein Match zählen, speichert die App Sportart, Regeln und Format, den Spielstand mit allen Punkten (einschließlich Korrekturen), Zeitpunkte, einen optional eingegebenen Ort sowie die Namen oder Bezeichnungen der Spieler, die Sie selbst eingeben. Ohne Konto liegen diese Daten ausschließlich im privaten Speicherbereich der App auf Ihren Geräten.</p>
+      <p>Wenn Sie ein Match zählen, speichert die App Sportart, Regeln und Format, den Spielstand mit allen Punkten (einschließlich Korrekturen), Zeitpunkte, einen optional eingegebenen Ort sowie die Namen oder Bezeichnungen der Spieler, die Sie selbst eingeben. Diese Daten liegen im privaten Speicherbereich der App auf Ihren Geräten und werden zusätzlich in Ihrem Konto gesichert (Abschnitt 4).</p>
       <p>Zweck ist das Zählen, Fortsetzen und Anzeigen Ihrer Matches. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von Ihnen genutzten App-Funktion). Wenn Sie Namen von Mitspielern eingeben, geschieht das in Ihrem berechtigten Interesse, Ihre Spiele zu dokumentieren (Art. 6 Abs. 1 lit. f DSGVO).</p>
 
       <h3>3.2 Übertragung zwischen Ihren eigenen Geräten</h3>
@@ -65,7 +65,7 @@
         <li><strong>Android und Wear OS:</strong> über die Wear Data Layer API der Google-Play-Dienste. Die Übertragung läuft direkt per verschlüsselter Bluetooth-Verbindung oder, wenn diese nicht verfügbar ist, Ende-zu-Ende-verschlüsselt über Server von Google. Nur die Advantly-App mit derselben Signatur auf Ihren gekoppelten Geräten kann diese Daten lesen.</li>
         <li><strong>iPhone und Apple Watch</strong> (sobald verfügbar): über Apples WatchConnectivity zwischen Ihren gekoppelten Geräten.</li>
       </ul>
-      <p>Die Uhr-App selbst hat keinen Internetzugriff. In die Cloud gelangen Daten nur über die Handy-App und nur mit Konto (Abschnitt 4).</p>
+      <p>Die Uhr-App selbst hat keinen Internetzugriff. In die Cloud gelangen Daten nur über die Handy-App (Abschnitt 4).</p>
 
       <h3>3.3 Herzfrequenz und Workout-Session auf der Uhr</h3>
       <p>Während eines Matches startet die Uhr-App eine Trainings-Session (Wear OS: Health Services, Apple Watch: Workout-Session). Das sorgt dafür, dass die App bei ausgeschaltetem Display weiterläuft und den Spielstand nicht verliert. Wenn Sie es erlauben, zeigt die App dabei Ihre aktuelle Herzfrequenz und Ihre Schritte an.</p>
@@ -79,7 +79,8 @@
       <!-- ÜBERARBEITEN vor Phase 3: Health-Speicherung, Cloud, Health Connect / Apple Health, getrennte Einwilligungen (05 §6.3). -->
 
       <h2>4. Konto und Cloud-Sicherung</h2>
-      <p>Das Konto ist freiwillig. Sie legen es in der Handy-App an. Bevor die Cloud genutzt wird, akzeptieren Sie die Nutzungsbedingungen und bestätigen, diese Datenschutzerklärung in der jeweils angezeigten Fassung zur Kenntnis genommen zu haben; wir speichern dazu Dokument, Fassung, Sprache und Zeitpunkt. Lehnen Sie ab, zählen Sie weiter offline.</p>
+      <p>Die Handy-App lässt sich nur mit einem Konto nutzen. Sie legen es beim ersten Start der Handy-App an; die Uhr-App hat keine eigene Anmeldung. Bevor Sie die App nutzen, akzeptieren Sie die Nutzungsbedingungen und bestätigen, diese Datenschutzerklärung in der jeweils angezeigten Fassung zur Kenntnis genommen zu haben; wir speichern dazu Dokument, Fassung, Sprache und Zeitpunkt. Bei einer neuen Fassung fragt die App erneut, bevor Sie weiterzählen. Lehnen Sie ab, können Sie sich abmelden; Datenexport und Kontolöschung bleiben möglich, die App nutzen Sie erst nach Ihrer Bestätigung wieder. Bereits gesicherte Daten bleiben bis zur Löschung Ihres Kontos erhalten.</p>
+      <p>Matches, die auf diesem Handy oder Ihrer gekoppelten Uhr vor der Anmeldung gezählt wurden, ordnet die App beim Anmelden automatisch Ihrem Konto zu und sichert sie. Nach dem Abmelden oder einem Löschantrag erscheint wieder die Anmeldung.</p>
 
       <h3>4.1 Anmeldung und Altersprüfung</h3>
       <ul>
@@ -91,7 +92,7 @@
       <h3>4.2 Was in die Cloud übertragen wird</h3>
       <ul>
         <li>Ihre Matches mit allen Punkten und Korrekturen, Zeitpunkten, optionalem Ort und den Namen der Spieler, die Sie eingegeben haben (auch Namen von Gästen ohne eigenes Konto).</li>
-        <li>Technische Kennungen Ihrer Installationen und Geräte (zufällig erzeugte IDs, Gerätetyp und Plattform), damit Daten nur von Ihren eigenen Geräten angenommen werden und Sie Geräte in der App verwalten und sperren können.</li>
+        <li>Technische Kennungen Ihrer Installationen und Geräte (zufällig erzeugte IDs, Gerätetyp und Plattform), damit Daten nur von Ihren eigenen Geräten angenommen werden und ein Gerät bei Verlust über den Support gesperrt werden kann.</li>
         <li>Ihre Zustimmungen mit Dokument, Fassung, Sprache und Zeitpunkt.</li>
       </ul>
       <p>Zweck ist die Sicherung, Wiederherstellung und der Abgleich Ihrer Matches zwischen Ihren Geräten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Wer Ihre Matches außerdem sehen kann, legen Sie selbst fest (Abschnitt 4.3).</p>
@@ -100,7 +101,7 @@
       <h3>4.3 Freunde und geteilte Matches</h3>
       <ul>
         <li><strong>Freunde finden:</strong> Andere können Sie nur über Ihren genauen Benutzernamen oder Ihren Freundescode finden und Ihnen eine Freundschaftsanfrage senden. Angezeigt werden dabei Ihr Anzeigename (Alias) und Ihr Benutzername. Sie können Anfragen annehmen oder ablehnen, Freunde entfernen und Konten blockieren; Blockierte können Sie nicht mehr finden oder anfragen.</li>
-        <li><strong>Matches teilen:</strong> Pro Match entscheiden Sie, ob Ihre Freunde es sehen („Mit Freunden teilen“, standardmäßig aus; den Standard können Sie unter Profil → Konto ändern). Freunde sehen dann eine eingeschränkte Ansicht mit Sportart, Datum, Spielstand, Angaben zum Match wie Belag oder Halle und den Anzeigenamen der Teilnehmenden – ohne Geräteangaben und ohne Puls oder Schritte. Teilt ein eingetragener Mitspieler das Match, sehen auch seine Freunde diese Ansicht. Ausblenden oder das Teilen beenden ist jederzeit möglich.</li>
+        <li><strong>Matches teilen:</strong> Pro Match entscheiden Sie, ob Ihre Freunde es sehen („Mit Freunden teilen“, standardmäßig aus; den Standard können Sie unter Profil ändern). Freunde sehen dann eine eingeschränkte Ansicht mit Sportart, Datum, Spielstand, Angaben zum Match wie Belag oder Halle und den Anzeigenamen der Teilnehmenden – ohne Geräteangaben und ohne Puls oder Schritte. Teilt ein eingetragener Mitspieler das Match, sehen auch seine Freunde diese Ansicht. Ausblenden oder das Teilen beenden ist jederzeit möglich.</li>
         <li><strong>Freunde als Mitspieler:</strong> Tragen Sie einen Freund in ein Match ein, wird das Match mit seinem Konto verknüpft und erscheint auch in seinem Verlauf; eingetragene Mitspieler sehen die Anzeigenamen aller Teilnehmenden. Mit „War ich nicht“ kann er der Verknüpfung widersprechen; das Match verschwindet dann aus seiner Sicht.</li>
       </ul>
       <p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (die von Ihnen genutzten Freundes- und Teilen-Funktionen). Wenn Sie Freunde in Matches eintragen, geschieht das zusätzlich in Ihrem berechtigten Interesse, Ihre Spiele gemeinsam zu dokumentieren (Art. 6 Abs. 1 lit. f DSGVO).</p>
@@ -133,7 +134,7 @@
       <h2>7. Speicherdauer und Löschung</h2>
       <ul>
         <li><strong>Auf Ihren Geräten:</strong> Einzelne Matches löschen Sie in der Handy-App unter Verlauf → Match → Löschen. Alle lokalen Daten entfernen Sie, indem Sie die App auf Handy und Uhr deinstallieren oder „App-Daten löschen“ wählen.</li>
-        <li><strong>Konto und Cloud:</strong> Die Daten bleiben gespeichert, solange Ihr Konto besteht. Unter Profil → Konto können Sie die <strong>Löschung beantragen</strong>; Ihr Konto wird sofort ausgeblendet und nach einer Frist von 14 Tagen endgültig gelöscht. Innerhalb dieser Frist können Sie den Antrag zurücknehmen. Ohne App erreichen Sie die Löschung über <a href="konto-loeschen.html">advantly.eu/konto-loeschen.html</a>.</li>
+        <li><strong>Konto und Cloud:</strong> Die Daten bleiben gespeichert, solange Ihr Konto besteht. Unter Profil → Konto &amp; Datenschutz können Sie die <strong>Löschung beantragen</strong>; Ihr Konto wird sofort ausgeblendet und nach einer Frist von 14 Tagen endgültig gelöscht. Innerhalb dieser Frist können Sie den Antrag zurücknehmen. Ohne App erreichen Sie die Löschung über <a href="konto-loeschen.html">advantly.eu/konto-loeschen.html</a>.</li>
         <li>Matches, an denen weitere Konten beteiligt sind, bleiben für diese erhalten; Ihr Name und die Namen der von Ihnen angelegten Gäste werden darin durch „Gelöschter Spieler“ ersetzt. Matches ohne weitere Konten werden gelöscht.</li>
         <li>Nicht abgeschlossene Registrierungen löschen wir nach 24 Stunden, Datenexporte nach 24 Stunden.</li>
         <li><strong>Sicherungskopien:</strong> Für die Cloud-Daten bestehen derzeit keine Sicherungskopien beim Hosting-Anbieter. Gelöschte Daten sind mit Abschluss der Löschung endgültig entfernt. Sichern Sie wichtige Matches deshalb zusätzlich über den Datenexport.</li>
@@ -159,11 +160,11 @@
       <p>Wenn Sie Advantly über Google Play (oder später Apples App Store) herunterladen, verarbeitet der Store-Betreiber dabei Daten in eigener Verantwortung. Wenn Sie in Ihrem Gerät der Weitergabe von Absturz- und Nutzungsdaten an Google bzw. Apple zugestimmt haben, sehen wir in der jeweiligen Entwicklerkonsole zusammengefasste Absturzstatistiken.</p>
 
       <h2>11. Ihre Rechte</h2>
-      <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20), Widerspruch (Art. 21) sowie das Recht, eine erteilte Einwilligung jederzeit mit Wirkung für die Zukunft zu widerrufen (Art. 7 Abs. 3). Vieles können Sie direkt in der App erledigen: Kontodaten unter Profil → Konto anzeigen und exportieren, die Löschung beantragen, Geräte sperren und Berechtigungen entziehen. Für alles andere schreiben Sie an die oben genannte E-Mail-Adresse.</p>
+      <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20), Widerspruch (Art. 21) sowie das Recht, eine erteilte Einwilligung jederzeit mit Wirkung für die Zukunft zu widerrufen (Art. 7 Abs. 3). Vieles können Sie direkt in der App erledigen: Kontodaten unter Profil → Konto &amp; Datenschutz anzeigen und exportieren, die Löschung beantragen und Berechtigungen entziehen; ein Gerät sperren wir auf Ihren Wunsch über den Support. Für alles andere schreiben Sie an die oben genannte E-Mail-Adresse.</p>
       <p>Sie haben außerdem das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren (Art. 77 DSGVO). In Österreich ist das die Österreichische Datenschutzbehörde, Barichgasse 40–42, 1030 Wien, <a href="https://www.dsb.gv.at/">dsb.gv.at</a>. Sie können sich auch an die Aufsichtsbehörde Ihres Aufenthaltsorts wenden.</p>
 
       <h2>12. Mindestalter</h2>
-      <p>Ein Konto können Sie in Österreich ab 14 Jahren und in allen anderen Ländern ab 16 Jahren anlegen. Ausgenommen sind Länder, in denen Advantly wegen Embargos nicht angeboten wird. Ohne Konto richtet sich Advantly an Personen ab 14 Jahren. Ihre Daten werden unabhängig von Ihrem Wohnsitzland wie in dieser Erklärung beschrieben verarbeitet.</p>
+      <p>Da die Handy-App ein Konto erfordert, richtet sich Advantly in Österreich an Personen ab 14 Jahren und in allen anderen Ländern an Personen ab 16 Jahren. Ausgenommen sind Länder, in denen Advantly wegen Embargos nicht angeboten wird. Ihre Daten werden unabhängig von Ihrem Wohnsitzland wie in dieser Erklärung beschrieben verarbeitet.</p>
       <!-- Werte aus country_age_rules. Seit 28.10.2026 alle übrigen Länder 16 (Nutzerentscheid, Embargoländer CU/IR/KP/SY ausgenommen). Geprüft 27.10.2026: LI ohne Abweichung von Art. 8 DSGVO → 16 (DSG LI, Datenschutzstelle);
            CH: revDSG ohne feste Grenze (Urteilsfähigkeit, Art. 16/19 ZGB), DSGVO gilt über Art. 3 Abs. 2 → 16 beibehalten. -->
 
@@ -171,7 +172,7 @@
       <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie Live-Zuschauer oder die Speicherung von Gesundheitsdaten verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert.</p>
 
       <h2>14. Stand</h2>
-      <p>Oktober 2026 (Version 4, Konten in allen Ländern)</p>
+      <p>Oktober 2026 (Version 5, Konto erforderlich)</p>
     </div>
   </main>
 

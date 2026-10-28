@@ -143,12 +143,12 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 - Die Seite ist öffentlich, ohne Geo-Sperre und als HTML erreichbar. Das verlangt Play, und für Health Connect muss es später **dieselbe** URL sein [P6].
 - [ ] **Verbindliches Freigabekriterium vor dem ersten Upload: Die Datenschutzerklärung ist auch in den Apps erreichbar.**
   Google verlangt beides: „a privacy policy link in the designated field within Play Console“ **und** „a privacy policy link or text within the app itself“ [P14].
-  - **Handy:** Profil bzw. Einstellungen → „Datenschutz“ (DE) / „Privacy policy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser.
+  - **Handy:** Profil → „Konto & Datenschutz“ → „Datenschutz“ (DE) / „Account & privacy“ → „Privacy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser; ohne Konto-Backend (Entwicklerbuild) steht der Link direkt unter „Rechtliches“. Vor der Anmeldung verlinkt der Zustimmungsschritt beide Rechtstexte.
   - **Uhr (Wear OS):** Hinweis „Datenschutz“ am Ende der Startliste: Matchdaten gehen ans gekoppelte Handy, Puls und Schritte nur wie unter
-    „Puls & Schritte“ eingestellt; Details in der Handy-App unter Profil › Datenschutz.
+    „Puls & Schritte“ eingestellt; Details in der Handy-App unter Profil › Konto & Datenschutz (seit 0.3.0).
   - **Status 27.10.2026:** In beiden Apps umgesetzt (Handy seit W1-G, Uhr in `HomeScreen`). Vor Upload in beiden Release-Builds prüfen.
-- [ ] **Rechtsseiten live** (über `pages.yml` nach Merge nach `main`): `app-datenschutz.html`, `en/app-privacy.html` (Version 2),
-  `nutzungsbedingungen.html`, `en/terms.html` (Version 1), `konto-loeschen.html`, `en/delete-account.html`.
+- [ ] **Rechtsseiten live** (über `pages.yml` nach Merge nach `main`): `app-datenschutz.html`, `en/app-privacy.html` (ab 0.3.0 Version 5),
+  `nutzungsbedingungen.html`, `en/terms.html` (ab 0.3.0 Version 2), `konto-loeschen.html`, `en/delete-account.html`.
   Die Texte sind Entwürfe; die mit `PRÜFEN` markierten Stellen (Anbieterverträge, Logs, Backups, CH/LI) vor der Freigabe klären (Pilot-Gate R2).
 - [ ] **Zustimmungsfassungen freigeben** – erst wenn die Seiten live und geprüft sind, sonst bleibt die Cloud in der App gesperrt
   (`consent_unavailable`). Freigegebene Fassungen sind unveränderlich; jede spätere Textänderung braucht eine neue Fassung.
@@ -181,14 +181,36 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   ```
   **0.2.0 Build 4 (Datenschutzerklärung Version 4, Konten in allen Ländern ab 16, AT 14):** wie oben mit `'4'` statt `'3'`;
   Voraussetzung ist zusätzlich die Migration `20261028000100_countries_worldwide.sql`.
+  **0.3.0 (Konto erforderlich: Datenschutzerklärung Version 5, Nutzungsbedingungen Version 2):** beide Dokumente wechseln,
+  weil die Nutzungsbedingungen das Zählen ohne Konto und das Sperren von Geräten in der App nicht mehr versprechen dürfen.
+  Erst nach Merge und live geschalteten Seiten ausführen; bestehende Nutzer sehen danach beim nächsten Öffnen den
+  blockierenden Bestätigungsschirm (ab 0.3.0 kein stiller Stillstand der Sicherung mehr). Zuerst staging, dann Produktion.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type in ('TERMS', 'PRIVACY') and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values
+    ('TERMS', '2', true), ('PRIVACY', '5', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('TERMS', '2', 'de', 'https://advantly.eu/nutzungsbedingungen.html'),
+    ('TERMS', '2', 'en', 'https://advantly.eu/en/terms.html'),
+    ('PRIVACY', '5', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '5', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now()
+    where (document_type, version) in (('TERMS', '2'), ('PRIVACY', '5'));
+  commit;
+  ```
+  Reihenfolge: App 0.3.0 zuerst ausrollen, dann freigeben. Ältere Apps (bis 0.2.0) zeigen die neue Fassung nur im Profil an
+  und pausieren bis zur Bestätigung die Sicherung.
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
-- [ ] **„Alle oder einige Funktionen sind eingeschränkt“** wählen: Zählen funktioniert ohne Konto; Konto und Cloud-Sicherung brauchen eine Anmeldung.
-- [ ] Anleitung für die Prüfer (DE/EN): „Zählen, Verlauf und Uhr-App funktionieren ohne Konto. Für Konto und Cloud-Sicherung: Profil → Konto →
-  eigene E-Mail-Adresse eingeben, Land Österreich oder Deutschland wählen, ein Geburtsdatum ab 16 Jahren eingeben, Code aus der E-Mail eintragen,
-  Nutzungsbedingungen und Datenschutzerklärung annehmen. Pulsanzeige nur auf einer Wear-OS-Uhr mit Herzfrequenzsensor.“
-  Es gibt keine festen Prüferzugangsdaten; der Mail-Code geht an die Adresse des Prüfers.
+- [ ] **„Alle Funktionen sind eingeschränkt“** wählen (ab 0.3.0): Die Handy-App zeigt vor der Anmeldung nur den Konto-Fluss;
+  Zählen, Verlauf, Freunde und Profil gibt es erst mit Konto. Die Uhr-App hat keine eigene Anmeldung, sie läuft über das gekoppelte Handy.
+- [ ] Anleitung für die Prüfer (DE/EN): „Beim ersten Start ‚Konto anlegen‘ oder ‚Anmelden‘ wählen, Land Österreich oder Deutschland,
+  ein Geburtsdatum ab 16 Jahren, die E-Mail-Adresse des Prüferkontos und den Code aus der E-Mail eingeben, Nutzungsbedingungen und
+  Datenschutzerklärung annehmen. Danach funktionieren Zählen, Verlauf und die Uhr-App, auch offline. Pulsanzeige nur auf einer
+  Wear-OS-Uhr mit Herzfrequenzsensor.“
+- [ ] Prüferkonto **steam@cakamper.at** bleibt in der Play Console hinterlegt (Zugangsdaten nur dort, nie im Repo).
 
 ### 6.3 Werbung
 - [ ] **Nein**, die App enthält keine Werbung.
@@ -238,21 +260,24 @@ Googles Definitionen [P8]:
 Einordnung ab dem ersten Upload (P2, Stand 27.10.2026). Nur die Handy-App hat `INTERNET`; die Uhr-App nicht.
 Empfänger ist ausschließlich unser Backend (Supabase mit Cloudflare davor, Mailversand über Resend); das sind Auftragsverarbeiter, also **kein Teilen**.
 
+Ab 0.3.0 ist das Konto Pflicht: alle Konto- und Cloud-Daten sind **nicht optional** (Frage „Ist die Erhebung dieser Daten
+optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per Häkchen mitgesendeten technischen Angaben.
+
 | Daten | Was passiert | Play-Datentyp | Optional? | Zweck |
 |---|---|---|---|---|
-| E-Mail-Adresse | Anmeldung per Mail-Code (bzw. Google), optionale Kontaktadresse in Support-Meldungen | Persönliche Infos → E-Mail-Adresse | ja (Konto freiwillig) | App-Funktionalität, Kontoverwaltung, Kommunikation des Entwicklers |
-| Alias, Benutzername, Spielernamen | Profil sowie Namen in Matches und Gästen | Persönliche Infos → Name | ja | App-Funktionalität, Kontoverwaltung |
-| Konto-ID, Freundescode | Profil | Persönliche Infos → Nutzer-IDs | ja | App-Funktionalität, Kontoverwaltung |
-| Land, Altersgrenze, Zeitpunkt der Altersbestätigung (Geburtsdatum nur geprüft, nicht gespeichert) | Altersgate | Persönliche Infos → Sonstige Infos | ja | Kontoverwaltung, Betrugsprävention/Sicherheit/Compliance |
-| Installations- und Geräte-IDs (zufällig erzeugt), Plattform | Gerätebindung, Widerruf | Geräte- oder sonstige IDs | ja | App-Funktionalität, Betrugsprävention/Sicherheit |
-| Matches (Spielstand, Punkte, Zeitpunkte, optionaler Ort) | Cloud-Sicherung | Fitness → Fitness-Infos (vorsichtige Einordnung; Alternative „App-Aktivität → Andere nutzergenerierte Inhalte“) | ja | App-Funktionalität |
+| E-Mail-Adresse | Anmeldung per Mail-Code (bzw. Google), optionale Kontaktadresse in Support-Meldungen | Persönliche Infos → E-Mail-Adresse | nein (Konto Pflicht) | App-Funktionalität, Kontoverwaltung, Kommunikation des Entwicklers |
+| Alias, Benutzername, Spielernamen | Profil sowie Namen in Matches und Gästen | Persönliche Infos → Name | nein | App-Funktionalität, Kontoverwaltung |
+| Konto-ID, Freundescode | Profil | Persönliche Infos → Nutzer-IDs | nein | App-Funktionalität, Kontoverwaltung |
+| Land, Altersgrenze, Zeitpunkt der Altersbestätigung (Geburtsdatum nur geprüft, nicht gespeichert) | Altersgate | Persönliche Infos → Sonstige Infos | nein | Kontoverwaltung, Betrugsprävention/Sicherheit/Compliance |
+| Installations- und Geräte-IDs (zufällig erzeugt), Plattform | Gerätebindung, Widerruf | Geräte- oder sonstige IDs | nein | App-Funktionalität, Betrugsprävention/Sicherheit |
+| Matches (Spielstand, Punkte, Zeitpunkte, optionaler Ort) | automatische Cloud-Sicherung (auch Uhr-Matches über das Handy) | Fitness → Fitness-Infos (vorsichtige Einordnung; Alternative „App-Aktivität → Andere nutzergenerierte Inhalte“) | nein | App-Funktionalität |
 | Support-Meldungen (Titel, Text) | Feedback & Hilfe, auch als Gast | App-Aktivität → Andere nutzergenerierte Inhalte | ja | App-Funktionalität, Kommunikation des Entwicklers |
 | Technische Angaben (App-Version, OS, Gerätemodell, Bildschirm, Schriftgröße) | nur per Häkchen in Support-Meldungen | App-Info und -Leistung → Sonstige Leistungsdaten | ja | App-Funktionalität |
 | Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
 - [ ] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
 - [ ] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
-- [ ] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto → Kontolöschung beantragen) und per Web-Link
+- [ ] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
   **`https://advantly.eu/konto-loeschen.html`** (Feld „Link zum Löschen des Kontos“; englisch `https://advantly.eu/en/delete-account.html`).
 - IP-Adressen landen nur als ungesalzener Hash (Missbrauchsschutz bei Altersgate und Gastmeldungen) sowie in den Verbindungslogs der Anbieter; daraus wird kein Standort abgeleitet.
 - Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt.
