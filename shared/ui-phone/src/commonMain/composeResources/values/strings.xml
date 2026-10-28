@@ -604,8 +604,8 @@
 
     <string name="auth_title">Account</string>
     <string name="auth_birth_privacy">Your date of birth is only checked and never stored. Minimum age: 14 in Austria, 16 in all other countries.</string>
-    <string name="auth_country">Country of residence (2-letter code, e.g. US, GB, AT)</string>
-    <string name="auth_birth">Date of birth (YYYY-MM-DD)</string>
+    <string name="auth_country">Country of residence</string>
+    <string name="auth_birth">Date of birth (DD-MM-YYYY)</string>
     <string name="auth_continue">Continue</string>
     <string name="auth_google">Sign in with Google</string>
     <string name="auth_email">Email address</string>
@@ -617,6 +617,7 @@
     <string name="auth_link_google">Link Google to this account</string>
     <string name="auth_sign_out">Sign out</string>
     <string name="auth_sign_out_explanation">Without a connection you cannot sign in again, so scoring is only possible after signing in. Matches not yet backed up are uploaded only after you sign in again with the same account.</string>
+    <string name="auth_account_not_found">There is no account for this sign-in yet. Tap “Sign in again” and choose “Create account”.</string>
     <string name="auth_restart">Sign in again</string>
     <string name="auth_unavailable">Accounts are not yet available in your country.</string>
     <string name="auth_too_young">An account is not available for your age. Try again after 24 hours.</string>

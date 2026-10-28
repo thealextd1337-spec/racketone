@@ -5,9 +5,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import eu.advantly.presentation.live.HapticCue
+import platform.Foundation.NSLocale
+import platform.Foundation.NSLocaleCountryCode
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSProcessInfo
+import platform.Foundation.currentLocale
 import platform.UIKit.UIAccessibilityIsReduceMotionEnabled
 import platform.UIKit.UIAccessibilityReduceMotionStatusDidChangeNotification
 import platform.UIKit.UIApplication
@@ -152,3 +155,5 @@ actual fun formatBuildDate(epochMs: Long): String {
     formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
     return formatter.stringFromDate(platform.Foundation.NSDate(timeIntervalSinceReferenceDate = epochMs / 1000.0 - 978_307_200.0))
 }
+
+actual fun countryName(code: String): String = NSLocale.currentLocale.displayNameForKey(NSLocaleCountryCode, code) ?: code

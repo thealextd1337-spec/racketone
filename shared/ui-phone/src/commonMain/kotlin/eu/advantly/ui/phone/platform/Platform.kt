@@ -64,3 +64,6 @@ expect fun formatMonth(
 
 /** Bauminute in lokaler Zeitzone, kompakt DE/EN (ohne Sekunden). */
 expect fun formatBuildDate(epochMs: Long): String
+
+/** Ländername zum ISO-3166-Code in der Systemsprache; unbekannte Codes bleiben unverändert. */
+expect fun countryName(code: String): String
