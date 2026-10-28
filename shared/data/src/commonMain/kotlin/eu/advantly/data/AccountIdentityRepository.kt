@@ -165,10 +165,16 @@ class AccountIdentityRepository internal constructor(
             AdoptionSource(it.device_id, it.kind, it.event_count)
         }
 
+    /**
+     * Eigenes Gerät und alle Quellen dieses Kontobereichs binden: Hat eine Uhr ihr Hello geschickt, während keine
+     * Kontositzung aktiv war (offline gestartet, Zustimmung offen), holt die nächste Aktivierung ihre Bindung nach.
+     */
     fun bindCurrent(session: CloudUploadSession) {
         check(profile == session.profileId)
-        val source = queries.identityForScope(checkNotNull(scope)).executeAsOne()
-        data.cloudUploads.bindOwnedDevices(session, setOf(source.device_id))
+        val current = checkNotNull(scope)
+        val source = queries.identityForScope(current).executeAsOne()
+        val recorded = queries.sourcesForScope(current).executeAsList().map { it.device_id }
+        data.cloudUploads.bindOwnedDevices(session, recorded.toSet() + source.device_id)
     }
 
     /**
