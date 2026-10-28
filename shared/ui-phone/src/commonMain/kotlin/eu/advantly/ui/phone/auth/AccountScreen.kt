@@ -36,6 +36,7 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.account_deletion_pending
 import eu.advantly.ui.phone.resources.account_recover
 import eu.advantly.ui.phone.resources.account_suspended
+import eu.advantly.ui.phone.resources.auth_account_not_found
 import eu.advantly.ui.phone.resources.auth_alias
 import eu.advantly.ui.phone.resources.auth_birth
 import eu.advantly.ui.phone.resources.auth_birth_privacy
@@ -114,24 +115,27 @@ fun AccountScreen(
             when (state.step) {
                 AuthStep.AGE -> {
                     Text(stringResource(Res.string.auth_birth_privacy))
-                    OutlinedTextField(
+                    CountryField(
                         country,
-                        { country = it.uppercase().take(2) },
-                        label = { Text(stringResource(Res.string.auth_country)) },
+                        { country = it },
+                        stringResource(Res.string.auth_country),
                         enabled = !state.busy,
-                        modifier = Modifier.fillMaxWidth().testTag("auth_country"),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         birthDate,
-                        { birthDate = it.take(10) },
+                        { birthDate = it.filter(Char::isDigit).take(8) },
                         label = { Text(stringResource(Res.string.auth_birth)) },
                         enabled = !state.busy,
+                        singleLine = true,
+                        visualTransformation = BirthDateTransformation,
+                        keyboardOptions = BirthDateKeyboard,
                         modifier = Modifier.fillMaxWidth().testTag("auth_birth"),
                     )
+                    val isoBirthDate = birthDateIso(birthDate)
                     Button(
-                        { model.checkAge(country, birthDate) },
-                        enabled =
-                            !state.busy && birthDate.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")),
+                        { isoBirthDate?.let { model.checkAge(country, it) } },
+                        enabled = !state.busy && country.isNotEmpty() && isoBirthDate != null,
                         modifier = Modifier.testTag("auth_age_next"),
                     ) { Text(stringResource(Res.string.auth_continue)) }
                 }
@@ -310,6 +314,7 @@ fun AccountScreen(
 internal fun authError(error: String) =
     when (error) {
         "country_not_supported" -> Res.string.auth_unavailable
+        "account_not_found" -> Res.string.auth_account_not_found
         "age_below_minimum", "age_retry_later" -> Res.string.auth_too_young
         "age_ticket_required", "age_ticket_expired", "age_ticket_bound" -> Res.string.auth_expired
         "profile_missing" -> Res.string.auth_profile_missing

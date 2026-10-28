@@ -1,6 +1,7 @@
 package eu.advantly.ui.phone.designsystem
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -62,7 +63,10 @@ fun AdvantlyTheme(
         LocalAdvantlyColors provides colors,
         LocalAdvantlyTypography provides typography,
     ) {
-        MaterialTheme(colorScheme = scheme, typography = typography.toMaterial(), content = content)
+        MaterialTheme(colorScheme = scheme, typography = typography.toMaterial()) {
+            // Ohne Surface wäre Text ohne eigene Farbe schwarz – im dunklen Theme unlesbar.
+            CompositionLocalProvider(LocalContentColor provides colors.text, content = content)
+        }
     }
 }
 

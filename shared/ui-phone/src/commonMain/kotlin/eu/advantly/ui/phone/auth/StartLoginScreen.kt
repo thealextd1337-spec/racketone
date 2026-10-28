@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,16 +56,21 @@ internal fun AccountGate(
 ) {
     val state by model.state.collectAsState()
     var started by remember { mutableStateOf(false) }
+    // Abbrechen aus jedem späteren Schritt führt wieder zur Wahl „Konto anlegen“ / „Anmelden“.
+    LaunchedEffect(state.step) { if (state.step != AuthStep.AGE) started = false }
     if (state.step == AuthStep.AGE && state.error == null && !started) {
-        StartLoginScreen { started = true }
+        StartLoginScreen(onCreate = { started = true }, onSignIn = model::signInExisting)
     } else {
         AccountScreen(model, google, onSupport, onShareExport)
     }
 }
 
-/** Schlanker Einstieg: beide Knöpfe führen in denselben Konto-Fluss ([AccountScreen]). */
+/** Schlanker Einstieg: „Konto anlegen“ beginnt mit der Altersprüfung, „Anmelden“ springt direkt zur Anmeldung. */
 @Composable
-internal fun StartLoginScreen(onAccount: () -> Unit) {
+internal fun StartLoginScreen(
+    onCreate: () -> Unit,
+    onSignIn: () -> Unit,
+) {
     val colors = AdvantlyTheme.colors
     val typography = AdvantlyTheme.typography
     // Scrollbar statt fester Höhe: bei großer Schrift auf kleinen Handys wird nichts abgeschnitten.
@@ -87,13 +93,13 @@ internal fun StartLoginScreen(onAccount: () -> Unit) {
         AdvantlyButton(
             stringResource(Res.string.start_login_create),
             primary = true,
-            onClick = onAccount,
+            onClick = onCreate,
             modifier = Modifier.fillMaxWidth().testTag("start_login_create"),
         )
         AdvantlyButton(
             stringResource(Res.string.start_login_sign_in),
             primary = false,
-            onClick = onAccount,
+            onClick = onSignIn,
             modifier = Modifier.fillMaxWidth().testTag("start_login_sign_in"),
         )
         LegalLinks()

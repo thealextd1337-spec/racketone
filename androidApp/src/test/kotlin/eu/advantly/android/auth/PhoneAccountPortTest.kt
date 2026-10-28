@@ -49,7 +49,7 @@ class PhoneAccountPortTest {
             provider: IdTokenProvider,
             idToken: String,
             rawNonce: String?,
-            ticket: String,
+            ticket: String?,
         ) = error("unused")
 
         override suspend fun linkGoogle(
@@ -59,7 +59,7 @@ class PhoneAccountPortTest {
 
         override suspend fun sendEmailCode(
             email: String,
-            ticket: String,
+            ticket: String?,
         ) = error("unused")
 
         override suspend fun verifyEmailCode(

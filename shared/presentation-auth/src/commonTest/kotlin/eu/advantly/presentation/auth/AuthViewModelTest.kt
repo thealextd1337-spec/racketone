@@ -80,7 +80,7 @@ class FakePhoneAuth : CloudAuthPort {
         provider: IdTokenProvider,
         idToken: String,
         rawNonce: String?,
-        ticket: String,
+        ticket: String?,
     ) {
         call("google:$ticket")
         session.value = CloudSession("id", false)
@@ -99,7 +99,7 @@ class FakePhoneAuth : CloudAuthPort {
 
     override suspend fun sendEmailCode(
         email: String,
-        ticket: String,
+        ticket: String?,
     ) {
         call("send:$ticket")
     }
@@ -131,6 +131,46 @@ class FakePhoneAuth : CloudAuthPort {
 }
 
 class AuthViewModelTest {
+    @Test fun existingAccountSignsInWithoutAgeTicket() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.signInExisting()
+        assertEquals(AuthStep.PROVIDER, model.state.value.step)
+        model.sendCode("a@b.at")
+        model.verifyCode("123456")
+        assertEquals(listOf("refresh", "send:null", "verify"), auth.calls)
+        val viaGoogle = FakePhoneAuth()
+        AuthViewModel(viaGoogle, scope).apply {
+            signInExisting()
+            google({ GoogleCredential("token", "nonce") })
+        }
+        assertEquals(listOf("refresh", "google:null"), viaGoogle.calls)
+    }
+
+    @Test fun ageCheckAfterExistingAccountAttemptCreatesAccountWithTicket() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.signInExisting()
+        model.checkAge("AT", "2000-01-01")
+        model.sendCode("a@b.at")
+        assertEquals(listOf("refresh", "age:AT", "send:ticket"), auth.calls)
+    }
+
+    @Test fun unknownExistingAccountExplainsInsteadOfAskingForAge() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.signInExisting()
+        auth.failure = "age_ticket_required"
+        model.google({ GoogleCredential("token", "nonce") })
+        assertEquals("account_not_found", model.state.value.error)
+        assertEquals(AuthStep.PROVIDER, model.state.value.step)
+        auth.failure = null
+        model.restart()
+        assertEquals(AuthStep.AGE, model.state.value.step)
+        model.sendCode("a@b.at")
+        assertEquals("age_ticket_expired", model.state.value.error)
+    }
+
     @Test fun failedDeclineDoesNotPreventIndependentAccountRights() {
         val auth =
             FakePhoneAuth().also {

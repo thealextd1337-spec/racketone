@@ -64,6 +64,7 @@ class FakePhoneAuth : CloudAuthPort {
     override val session = MutableStateFlow<CloudSession?>(null)
     val calls = mutableListOf<String>()
     var failure: String? = null
+    var lastBirthDate: String? = null
     var sources: List<CloudAdoptionSource> = emptyList()
     val adopted = mutableListOf<Set<String>>()
     var consentStatus = ConsentStatus.CURRENT
@@ -114,6 +115,7 @@ class FakePhoneAuth : CloudAuthPort {
         country: String,
         birthDate: String,
     ): String {
+        lastBirthDate = birthDate
         call("age:$country")
         return "ticket"
     }
@@ -122,7 +124,7 @@ class FakePhoneAuth : CloudAuthPort {
         provider: IdTokenProvider,
         idToken: String,
         rawNonce: String?,
-        ticket: String,
+        ticket: String?,
     ) {
         call("google:$ticket")
         session.value = CloudSession("id", false)
@@ -141,7 +143,7 @@ class FakePhoneAuth : CloudAuthPort {
 
     override suspend fun sendEmailCode(
         email: String,
-        ticket: String,
+        ticket: String?,
     ) {
         call("send:$ticket")
     }
@@ -348,7 +350,7 @@ class AccountScreenTest {
             }
             onNodeWithTag("auth_google").assertDoesNotExist()
             onNodeWithTag("auth_age_next").assertIsNotEnabled()
-            onNodeWithTag("auth_birth").performTextInput("2000-01-01")
+            onNodeWithTag("auth_birth").performTextInput("01012000")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
             onNodeWithTag("auth_email").assertExists()
             onNodeWithTag("auth_google").assertExists()
@@ -356,17 +358,26 @@ class AccountScreenTest {
             assertEquals(listOf("refresh", "age:AT"), auth.calls)
         }
 
-    @Test fun malformedCountryNeverOpensProvider() =
+    @Test fun countryIsPickedFromSearchAndBirthDateIsSentAsIso() =
         runComposeUiTest {
             val auth = FakePhoneAuth()
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
             setContent { AdvantlyTheme { AccountScreen(model, null) } }
-            onNodeWithTag("auth_country").performTextReplacement("U1")
-            onNodeWithTag("auth_birth").performTextInput("2000-01-01")
+            onNodeWithTag("auth_birth").performTextInput("3112199")
+            // Nur getippt, nicht gewählt: kein Land, also kein Weiter.
+            onNodeWithTag("auth_country").performTextReplacement("xyz")
+            onNodeWithTag("auth_birth").performTextInput("9")
+            onNodeWithTag("auth_age_next").assertIsNotEnabled()
+            onNodeWithTag("auth_birth").performTextReplacement("3112199")
+            onNodeWithTag("auth_country").performTextReplacement("us")
+            onNodeWithTag("auth_country_US").performClick()
+            onNodeWithTag("auth_age_next").assertIsNotEnabled()
+            onNodeWithTag("auth_birth").performTextInput("9")
+            onNodeWithTag("auth_birth").assertTextContains("31-12-1999")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
-            onNodeWithTag("auth_error").assertExists()
-            onNodeWithTag("auth_email").assertDoesNotExist()
-            assertEquals(listOf("refresh"), auth.calls)
+            onNodeWithTag("auth_email").assertExists()
+            assertEquals(listOf("refresh", "age:US"), auth.calls)
+            assertEquals("1999-12-31", auth.lastBirthDate)
         }
 
     @Test fun unsupportedCountryExplainsWithoutPromisingLocalUse() =
@@ -376,8 +387,9 @@ class AccountScreenTest {
                 val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
                 setContent { AdvantlyTheme { AccountScreen(model, null) } }
                 auth.failure = "country_not_supported"
-                onNodeWithTag("auth_country").performTextReplacement("KP")
-                onNodeWithTag("auth_birth").performTextInput("2000-01-01")
+                onNodeWithTag("auth_country").performTextReplacement("us")
+                onNodeWithTag("auth_country_US").performClick()
+                onNodeWithTag("auth_birth").performTextInput("01012000")
                 onNodeWithTag("auth_age_next").performScrollTo().performClick()
                 onNodeWithTag("auth_error")
                     .assertTextEquals(if (german) DE_COUNTRY else EN_COUNTRY)
@@ -393,7 +405,7 @@ class AccountScreenTest {
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
             setContent { AdvantlyTheme { AccountScreen(model, null) } }
             auth.failure = "age_below_minimum"
-            onNodeWithTag("auth_birth").performTextInput("2020-01-01")
+            onNodeWithTag("auth_birth").performTextInput("01012020")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
             onNodeWithTag("auth_error").assertExists()
             onNodeWithTag("auth_birth").assertExists()

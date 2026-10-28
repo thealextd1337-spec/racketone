@@ -1,0 +1,5 @@
+New in 0.3.1:
+• Sign in to an existing account without repeating the age and country check.
+• New account: pick your country with search, enter birth date as DD-MM-YYYY.
+• Friends: text is readable again in the dark design.
+Please test: signing in to an existing account (email and Google), creating a new account.

@@ -41,7 +41,7 @@ class ConsentAccountIntegrationTest {
                 object : CloudAuthPort by FakePhoneAuth() {
                     override suspend fun sendEmailCode(
                         email: String,
-                        ticket: String,
+                        ticket: String?,
                     ) {
                         sent.complete(Unit)
                         release.await()

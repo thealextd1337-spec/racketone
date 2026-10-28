@@ -604,8 +604,8 @@
 
     <string name="auth_title">Konto</string>
     <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Mindestalter: in Österreich 14, in allen anderen Ländern 16.</string>
-    <string name="auth_country">Wohnsitzland (2-stelliger Code, z. B. AT, DE, US)</string>
-    <string name="auth_birth">Geburtsdatum (JJJJ-MM-TT)</string>
+    <string name="auth_country">Wohnsitzland</string>
+    <string name="auth_birth">Geburtsdatum (TT-MM-JJJJ)</string>
     <string name="auth_continue">Weiter</string>
     <string name="auth_google">Mit Google anmelden</string>
     <string name="auth_email">E-Mail-Adresse</string>
@@ -617,6 +617,7 @@
     <string name="auth_link_google">Google mit diesem Konto verknüpfen</string>
     <string name="auth_sign_out">Abmelden</string>
     <string name="auth_sign_out_explanation">Ohne Internetverbindung kannst du dich nicht wieder anmelden und erst danach weiterzählen. Noch nicht gesicherte Matches werden erst hochgeladen, wenn du dich wieder mit demselben Konto anmeldest.</string>
+    <string name="auth_account_not_found">Zu dieser Anmeldung gibt es noch kein Konto. Tippe auf „Neu anmelden“ und wähle „Konto anlegen“.</string>
     <string name="auth_restart">Neu anmelden</string>
     <string name="auth_unavailable">Konten sind in deinem Land noch nicht verfügbar.</string>
     <string name="auth_too_young">Ein Konto ist für dein Alter noch nicht verfügbar. Erneute Prüfung nach 24 Stunden.</string>

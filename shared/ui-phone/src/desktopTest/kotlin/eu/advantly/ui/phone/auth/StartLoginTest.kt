@@ -118,13 +118,14 @@ class StartLoginTest {
 
     @Test
     fun createAccountAndSignInOpenTheAccountFlowWithoutTabs() {
-        for (button in listOf("start_login_create", "start_login_sign_in")) {
+        // Neues Konto beginnt mit Land/Geburtsdatum (Altersticket), bestehendes Konto direkt mit der Anmeldung.
+        for ((button, first) in listOf("start_login_create" to "auth_country", "start_login_sign_in" to "auth_email")) {
             runDesktopComposeUiTest(width = 360, height = 640) {
                 setContent { AdvantlyApp(model = testModel(), authModel = authModel()) }
                 onNodeWithTag(button).performScrollTo().performClick()
                 onNodeWithTag("start_login").assertDoesNotExist()
-                // Erster Schritt des Konto-Flusses (Land/Geburtsdatum → Altersticket)
-                onNodeWithTag("auth_country").assertIsDisplayed()
+                onNodeWithTag(first).assertIsDisplayed()
+                if (button == "start_login_sign_in") onNodeWithTag("auth_country").assertDoesNotExist()
                 onNodeWithTag("auth_local").assertDoesNotExist()
                 onNodeWithTag("tab_home").assertDoesNotExist()
             }

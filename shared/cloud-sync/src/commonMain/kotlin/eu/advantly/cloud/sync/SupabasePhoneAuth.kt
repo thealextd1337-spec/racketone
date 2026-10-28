@@ -283,18 +283,20 @@ class SupabasePhoneAuth(
         provider: IdTokenProvider,
         idToken: String,
         rawNonce: String?,
-        ticket: String,
+        ticket: String?,
     ) = newLogin {
         if (provider != IdTokenProvider.GOOGLE) throw CloudException("provider_unavailable", false)
-        // Nur Routing, kein Vertrauensbeweis: Supabase verifiziert Signatur, aud, exp und Nonce des ganzen Tokens.
-        val subject =
-            Json.parseToJsonElement(
-                Base64.UrlSafe
-                    .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
-                    .decode(idToken.split('.')[1])
-                    .decodeToString(),
-            ) as JsonObject
-        bind(ticket, "google", subject.getValue("sub").jsonPrimitive.content)
+        if (ticket != null) {
+            // Nur Routing, kein Vertrauensbeweis: Supabase verifiziert Signatur, aud, exp und Nonce des ganzen Tokens.
+            val subject =
+                Json.parseToJsonElement(
+                    Base64.UrlSafe
+                        .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
+                        .decode(idToken.split('.')[1])
+                        .decodeToString(),
+                ) as JsonObject
+            bind(ticket, "google", subject.getValue("sub").jsonPrimitive.content)
+        }
         client.auth.signInWith(IDToken) {
             this.provider = Google
             this.idToken = idToken
@@ -315,18 +317,20 @@ class SupabasePhoneAuth(
 
     override suspend fun sendEmailCode(
         email: String,
-        ticket: String,
+        ticket: String?,
     ) {
         invalidateAccount()
         val transition = sessions.stop()
         guarded {
             mutations.withLock {
                 sessions.requireTransition(transition)
-                bind(ticket, "email", email)
+                ticket?.let { bind(it, "email", email) }
                 boundedAuth {
                     client.auth.signInWith(OTP) {
                         this.email = email.trim()
-                        data = buildJsonObject { put("age_ticket", ticket) }
+                        // Ohne Altersnachweis kein neues Konto: GoTrue lehnt unbekannte Adressen dann ab.
+                        createUser = ticket != null
+                        ticket?.let { data = buildJsonObject { put("age_ticket", it) } }
                     }
                 }
             }
@@ -695,7 +699,10 @@ class SupabasePhoneAuth(
             throw e
         } catch (e: Exception) {
             // Keine Rohantwort/Token an UI oder Logs weitergeben. Unbekannte Fehler bleiben generisch.
-            val reason = REASONS.firstOrNull { e.message?.contains(it) == true } ?: "connection_failed"
+            val reason =
+                REASONS.firstOrNull { e.message?.contains(it) == true }
+                    ?: "account_not_found".takeIf { e.message?.contains("Signups not allowed") == true }
+                    ?: "connection_failed"
             throw CloudException(reason, false)
         }
 

@@ -131,11 +131,12 @@ interface CloudAuthPort {
 
     suspend fun cancelAgeTicket(ticket: String)
 
+    /** [ticket] `null`: nur bestehendes Konto anmelden; ein neues lehnt der Server ab (`age_ticket_required`). */
     suspend fun signInWithIdToken(
         provider: IdTokenProvider,
         idToken: String,
         rawNonce: String?,
-        ticket: String,
+        ticket: String?,
     )
 
     suspend fun linkGoogle(
@@ -143,9 +144,10 @@ interface CloudAuthPort {
         rawNonce: String?,
     )
 
+    /** [ticket] `null`: Code nur für ein bestehendes Konto; unbekannte Adressen enden mit `account_not_found`. */
     suspend fun sendEmailCode(
         email: String,
-        ticket: String,
+        ticket: String?,
     )
 
     suspend fun verifyEmailCode(
