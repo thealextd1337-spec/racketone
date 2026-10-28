@@ -435,13 +435,9 @@ class SessionMatchStore(
 
     override fun correctResult(
         matchId: MatchId,
-        sets: List<CorrectedSet>,
-    ): Boolean = session.correctResult(matchId, sets)
-
-    override fun correctGameServers(
-        matchId: MatchId,
-        servers: List<GameServer>,
-    ): Boolean = session.correctGameServers(matchId, servers)
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
+    ): Boolean = session.correctResult(matchId, sets, servers)
 
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
@@ -469,10 +465,7 @@ class SessionMatchStore(
                 header,
                 engine.state,
                 genesis.wallClockMs,
-                engine.events
-                    .lastOrNull {
-                        EventLog.countsForMatchTime(it.payload)
-                    }?.wallClockMs,
+                EventLog.matchEnd(engine.events)?.wallClockMs,
                 engine.events.size + 1,
             )
         val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
@@ -763,7 +756,7 @@ class SessionMatchStore(
         val at =
             data.events
                 .scoreEvents(m.id)
-                .lastOrNull { EventLog.countsForMatchTime(it.payload) }
+                .let(EventLog::matchEnd)
                 ?.wallClockMs
         finishedAt[m.id] = m.eventCount to at
         return at

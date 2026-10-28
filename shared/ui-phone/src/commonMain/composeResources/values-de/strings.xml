@@ -287,6 +287,7 @@
     <string name="result_share_failed">Das Bild konnte nicht geteilt werden.</string>
     <string name="result_delete_title">Dieses Match löschen?</string>
     <string name="result_delete_text">Das Match und alle Punkte werden von diesem Gerät entfernt. Das lässt sich nicht rückgängig machen.</string>
+    <string name="history_corrected">korrigiert</string>
     <string name="result_corrected">Ergebnis manuell korrigiert</string>
     <string name="result_edit">Ergebnis bearbeiten</string>
     <string name="result_edit_title">Ergebnis bearbeiten</string>
@@ -304,6 +305,10 @@
     <string name="result_edit_issue_no_sets">Bitte mindestens einen Satz eingeben.</string>
     <string name="result_edit_issue_too_many_sets">Es sind höchstens 9 Sätze möglich.</string>
     <string name="result_edit_issue_set_kind">Satz %1$d: Diese Satzart ist in diesem Format hier nicht möglich (Satz oder Match-Tiebreak).</string>
+    <string name="result_edit_issue_set_kind_other">Satz %1$d passt nicht zu diesem Format.</string>
+    <string name="result_edit_issue_incomplete_not_last">Satz %1$d: Nur der letzte Satz kann unvollständig sein.</string>
+    <string name="result_edit_incomplete">Unvollständiger Satz</string>
+    <string name="result_edit_incomplete_hint">Das Match endete in diesem Satz (Aufgabe, Abbruch oder „Beenden, wie es steht“).</string>
     <string name="result_edit_issue_set_score">Satz %1$d: Dieser Stand ist nach den Regeln des Formats nicht möglich.</string>
     <string name="result_edit_issue_tiebreak_required">Satz %1$d endete im Tiebreak – bitte die Tiebreak-Punkte eingeben.</string>
     <string name="result_edit_issue_tiebreak_score">Satz %1$d: Die Tiebreak-Punkte passen nicht – der Satzsieger gewinnt den Tiebreak, und nur ein im Tiebreak entschiedener Satz hat Tiebreak-Punkte.</string>

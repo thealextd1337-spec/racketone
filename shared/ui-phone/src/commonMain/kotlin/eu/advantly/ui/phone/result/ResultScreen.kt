@@ -129,14 +129,14 @@ fun ResultScreen(
     sharing: @Composable (MatchRecord) -> Unit = {},
     /** „Ergebnis bearbeiten“ anbieten (`MatchHistoryPort.canCorrectResult`). */
     canEditResult: Boolean = false,
-    onCorrectResult: (List<CorrectedSet>) -> Boolean = { false },
-    onCorrectServers: (List<GameServer>) -> Boolean = { false },
+    /** Sätze und/oder Aufschläger in einem Vorgang speichern (`MatchHistoryPort.correctResult`). */
+    onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     if (editing && record != null && canEditResult) {
-        ResultEditor(record, onCorrectResult, onCorrectServers, onClose = { editing = false })
+        ResultEditor(record, onCorrectResult, onClose = { editing = false })
         return
     }
     Column(

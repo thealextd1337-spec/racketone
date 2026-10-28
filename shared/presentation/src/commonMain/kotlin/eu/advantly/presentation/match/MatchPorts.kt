@@ -517,16 +517,15 @@ interface MatchHistoryPort {
      */
     fun canCorrectResult(matchId: MatchId): Boolean = false
 
-    /** Sätze korrigieren (`ResultCorrected`, leer = gezähltes Ergebnis); `false` ohne Event bei unplausiblen Sätzen. */
+    /**
+     * Sätze ([sets] → `ResultCorrected`, leer = gezähltes Ergebnis) und/oder Aufschläger je Spiel ([servers] →
+     * `GameServersCorrected`, Tennis/Padel, vollständige Liste) in einem Vorgang; `null` = unverändert. Atomar: Ist eines
+     * ungültig, entsteht kein Event und `false` kommt zurück.
+     */
     fun correctResult(
         matchId: MatchId,
-        sets: List<CorrectedSet>,
-    ): Boolean = false
-
-    /** Aufschläger je Spiel (Tennis/Padel, `GameServersCorrected`, vollständige Liste); `false` ohne Event, wenn ungültig. */
-    fun correctGameServers(
-        matchId: MatchId,
-        servers: List<GameServer>,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>? = null,
     ): Boolean = false
 
     /** Beendete Matches, neueste zuerst. Ein per Undo wieder geöffnetes Match verschwindet, bis es erneut endet. */

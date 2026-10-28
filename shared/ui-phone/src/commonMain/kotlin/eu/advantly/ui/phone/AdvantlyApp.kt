@@ -228,8 +228,7 @@ fun AdvantlyApp(
                             onBack = { navigator.pop() },
                             onShareImage = onShareMatchImage,
                             canEditResult = remember(top.matchId, revision) { model.history.canCorrectResult(top.matchId) },
-                            onCorrectResult = { model.history.correctResult(top.matchId, it) },
-                            onCorrectServers = { model.history.correctGameServers(top.matchId, it) },
+                            onCorrectResult = { sets, servers -> model.history.correctResult(top.matchId, sets, servers) },
                             onPlayAgain = { model.startMatch(it) },
                             onDelete = {
                                 model.history.delete(top.matchId)

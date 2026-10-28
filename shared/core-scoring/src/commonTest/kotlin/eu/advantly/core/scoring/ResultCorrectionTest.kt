@@ -197,7 +197,7 @@ class ResultCorrectionTest {
                 .single()
                 .breakPoint,
         )
-        d.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1")))))
+        d.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.B))))
         val after = ScoringEngine.pointHistory(format, d.lineup, d.events, null)
         assertEquals(List(4) { p("B1") }, after.take(4).map { it.server })
         assertEquals(
@@ -220,16 +220,16 @@ class ResultCorrectionTest {
     @Test
     fun invalidGameServersAreIgnored() {
         val d = MatchDriver(Presets.TENNIS_SINGLES_BO3.format())
-        val early = d.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1")))))
+        val early = d.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.B))))
         d.points("AAAA".repeat(12))
-        val missingGame = d.send(GameServersCorrected(listOf(GameServer(0, 6, p("B1")))))
-        val duplicate = d.send(GameServersCorrected(listOf(GameServer(0, 1, p("B1")), GameServer(0, 1, p("A1")))))
-        val stranger = d.send(GameServersCorrected(listOf(GameServer(0, 1, p("Z9")))))
+        val missingGame = d.send(GameServersCorrected(listOf(GameServer(0, 6, p("B1"), Side.B))))
+        val duplicate = d.send(GameServersCorrected(listOf(GameServer(0, 1, p("B1"), Side.B), GameServer(0, 1, p("A1"), Side.A))))
+        val stranger = d.send(GameServersCorrected(listOf(GameServer(0, 1, p("Z9"), Side.A))))
         assertTrue(d.state.ignoredEvents.containsAll(listOf(early, missingGame, duplicate, stranger)))
         assertEquals(emptyList(), d.engineState.gameServers)
         val pickleball = MatchDriver(Presets.PICKLEBALL_SINGLES_BO3_11.format(), lineupFor(Discipline.SINGLES))
         pickleball.points("A".repeat(60))
-        val pb = pickleball.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1")))))
+        val pb = pickleball.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.B))))
         assertEquals(MatchStatus.FINISHED, pickleball.state.status)
         assertTrue(pb in pickleball.state.ignoredEvents, "nur Tennis/Padel")
     }
@@ -249,7 +249,7 @@ class ResultCorrectionTest {
         assertEquals(6, set2.count { it.recorded })
         // offene Spiele: A braucht noch 1, B 5 → nicht eindeutig zuzuordnen
         assertTrue(set2.filterNot { it.recorded }.all { it.winner == null && it.server == null })
-        d.send(GameServersCorrected(listOf(GameServer(1, 11, p("B1")))))
+        d.send(GameServersCorrected(listOf(GameServer(1, 11, p("B1"), Side.B))))
         games = ScoringEngine.serviceGames(listOf(genesis) + d.events)
         assertEquals(p("B1"), games.last().server)
         // gezählt 6:0 6:0, korrigiert 6:0 7:5 ist mehrdeutig; 6:0 6:0 → 6:0 und 7:5 nach vorherigem 5:5 wäre eindeutig:
@@ -259,5 +259,108 @@ class ResultCorrectionTest {
         e.send(ResultCorrected(listOf(reg(6, 0), reg(7, 5))))
         val inferred = ScoringEngine.serviceGames(listOf(genesis.copy(payload = MatchCreated(format, e.lineup))) + e.events)
         assertEquals(listOf(Side.A, Side.A), inferred.filter { it.set == 1 && !it.recorded }.map { it.winner })
+    }
+
+    /** Review P1-1: Kein Korrektur-Payload darf im Fold werfen – unsinnige Werte sind ungültig (`ignoredEvents`). */
+    @Test
+    fun hostilePayloadsAreIgnoredWithoutThrowing() {
+        val d = MatchDriver(Presets.TENNIS_SINGLES_BO3.format())
+        d.points("AAAA".repeat(12))
+        val hostile =
+            listOf(
+                listOf(reg(7, 6, -5, -7)),
+                listOf(reg(7, 6, Int.MAX_VALUE, 0)),
+                listOf(reg(7, 6, 0, Int.MIN_VALUE)),
+                listOf(reg(-1, 6)),
+                listOf(reg(Int.MAX_VALUE, Int.MIN_VALUE)),
+                listOf(tb(Int.MAX_VALUE, 3)),
+                List(10_000) { reg(6, 0) },
+                listOf(CorrectedSet(SetKind.REGULAR, SidePair(Int.MAX_VALUE, 0), incomplete = true)),
+                listOf(CorrectedSet(SetKind.REGULAR, SidePair(3, 2), incomplete = true), reg(6, 0)),
+            )
+        for (sets in hostile) {
+            val id = d.send(ResultCorrected(sets))
+            assertTrue(id in d.state.ignoredEvents, "$sets")
+        }
+        assertEquals(CorrectionIssueKind.TIEBREAK_SCORE, issue(Presets.TENNIS_SINGLES_BO3.format(), reg(7, 6, -5, -7)))
+        assertEquals(CorrectionIssueKind.TOO_MANY_SETS, issue(Presets.TENNIS_SINGLES_BO3.format(), *Array(10) { reg(6, 0) }))
+        val hugeServers = d.send(GameServersCorrected(List(5_000) { GameServer(it, -it, p("A1"), Side.A) }))
+        assertTrue(hugeServers in d.state.ignoredEvents)
+        assertEquals(MatchResult(Side.A, ResultReason.COMPLETED), d.state.result, "gezähltes Ergebnis unverändert")
+    }
+
+    /** Review P2-5: Bei Aufgabe/„Beenden“ bleibt der unvollständige letzte Satz erhalten und editierbar. */
+    @Test
+    fun incompleteLastSetKeepsRetirementAndStoppedRules() {
+        val format = Presets.TENNIS_SINGLES_BO3.format()
+        // „Beenden, wie es steht“ bei 4:6 6:4 5:2 → A führt im Teilsatz
+        val stopped = MatchDriver(format)
+        stopped.points("BBBB".repeat(6) + "AAAABBBB".repeat(4) + "AAAA".repeat(2) + "AAAA".repeat(5) + "BBBB".repeat(2))
+        stopped.send(MatchEnded(EndReason.STOPPED))
+        assertEquals(SidePair(5, 2), stopped.state.current?.games)
+        val recordedStop = stopped.state.current
+        // Satz 1 korrigiert, Teilsatz bleibt unverändert erhalten und entscheidet „wie es steht“
+        stopped.send(ResultCorrected(listOf(reg(3, 6), reg(6, 4), CorrectedSet(SetKind.REGULAR, SidePair(5, 2), incomplete = true))))
+        assertEquals(MatchResult(Side.A, ResultReason.STOPPED, true), stopped.state.result)
+        assertEquals(recordedStop, stopped.state.current)
+        val decided = listOf(reg(6, 4), reg(6, 4), CorrectedSet(SetKind.REGULAR, SidePair(5, 2), incomplete = true))
+        assertEquals(
+            CorrectionIssueKind.AFTER_MATCH_END,
+            issue(format, *decided.toTypedArray(), recorded = MatchResult(Side.A, ResultReason.STOPPED)),
+        )
+        val partial = listOf(reg(6, 4), reg(4, 6), CorrectedSet(SetKind.REGULAR, SidePair(2, 5), incomplete = true))
+        stopped.send(ResultCorrected(partial))
+        assertEquals(MatchResult(Side.B, ResultReason.STOPPED, true), stopped.state.result, "wie es steht inkl. Teilsatz")
+        assertEquals(SidePair(2, 5), stopped.state.current?.games)
+        // Aufgabe: Teilsatz bleibt, Sieger bleibt die Gegenseite
+        val retired = MatchDriver(format)
+        retired.points("AAAA".repeat(6) + "BBBB".repeat(2) + "AA")
+        retired.send(MatchEnded(EndReason.RETIRED, Side.A))
+        val recordedCurrent = retired.state.current
+        retired.send(ResultCorrected(listOf(reg(6, 3), CorrectedSet(SetKind.REGULAR, SidePair(0, 2), incomplete = true))))
+        assertEquals(MatchResult(Side.B, ResultReason.RETIRED, true), retired.state.result)
+        assertEquals(recordedCurrent, retired.state.current, "unveränderter Teilsatz behält 30:0 im laufenden Spiel")
+        retired.send(ResultCorrected(listOf(reg(6, 3), CorrectedSet(SetKind.REGULAR, SidePair(1, 2), incomplete = true))))
+        assertEquals(SidePair(1, 2), retired.state.current?.games)
+        assertEquals(SidePair(0, 0), retired.state.current?.points)
+        // Teilsatz darf nicht enden bzw. keine Tiebreak-Punkte haben
+        val bo3 = Presets.TENNIS_SINGLES_BO3.format()
+        assertEquals(CorrectionIssueKind.SET_SCORE, issue(bo3, CorrectedSet(SetKind.REGULAR, SidePair(6, 2), incomplete = true)))
+        assertEquals(
+            CorrectionIssueKind.TIEBREAK_SCORE,
+            issue(bo3, CorrectedSet(SetKind.REGULAR, SidePair(6, 6), SidePair(3, 2), incomplete = true)),
+        )
+        assertNull(issue(bo3, CorrectedSet(SetKind.REGULAR, SidePair(6, 6), incomplete = true)))
+        assertNull(issue(Presets.BADMINTON_SINGLES_BO3_21.format(), rally(21, 4), rally(20, 20).copy(incomplete = true)))
+    }
+
+    /** Review P3: Aufschläger-Korrekturen gelten nur für Spiele, die es nach einer späteren Ergebnis-Korrektur noch gibt. */
+    @Test
+    fun staleGameServersAreDroppedAndSidesMustMatch() {
+        val d = MatchDriver(Presets.TENNIS_SINGLES_BO3.format())
+        d.points("AAAA".repeat(12))
+        val wrongSide = d.send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.A))))
+        assertTrue(wrongSide in d.state.ignoredEvents)
+        d.send(ResultCorrected(listOf(reg(7, 5), reg(6, 0))))
+        d.send(GameServersCorrected(listOf(GameServer(0, 11, p("B1"), Side.B), GameServer(0, 0, p("B1"), Side.B))))
+        assertEquals(2, d.engineState.gameServers.size)
+        d.send(ResultCorrected(listOf(reg(6, 4), reg(6, 0))))
+        assertEquals(listOf(GameServer(0, 0, p("B1"), Side.B)), d.engineState.gameServers, "Spiel 12 gibt es nicht mehr")
+    }
+
+    /** Review P3: Das Matchende verschiebt sich durch Korrekturen nicht; Alt-Logs bleiben unverändert. */
+    @Test
+    fun matchEndIgnoresCorrectionsButKeepsOldLogs() {
+        fun ev(
+            id: String,
+            payload: EventPayload,
+        ) = ScoreEvent(EventId(id), MatchId("m"), DeviceId("d"), 1, 1, id.length * 1000L, null, payload)
+        val point = ev("p", PointWon(Side.A))
+        val takeOver = ev("tt", ScorerChanged(DeviceId("phone")))
+        val assigned = ev("aaa", PlayerAssigned.reference(p("B1"), p("X"), p("A1")))
+        val corrected = ev("cccc", ResultCorrected(listOf(reg(6, 0))))
+        assertEquals(takeOver, EventLog.matchEnd(listOf(point, takeOver, assigned)), "Alt-Log: Zählerwechsel zählt weiter")
+        assertEquals(point, EventLog.matchEnd(listOf(point, takeOver, corrected, assigned)), "Übernahme vor Korrektur zählt nicht")
+        assertNull(EventLog.matchEnd(listOf(assigned)))
     }
 }

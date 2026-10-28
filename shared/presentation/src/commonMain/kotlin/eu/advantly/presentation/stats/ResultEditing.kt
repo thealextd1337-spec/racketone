@@ -18,7 +18,7 @@ import eu.advantly.presentation.match.MatchRecord
 
 /**
  * „Ergebnis bearbeiten“ (0.3.0): Ausgangswerte, Prüfung und Vorschau für den Editor – rein, ohne Port. Gespeichert wird
- * über `MatchHistoryPort.correctResult` bzw. `correctGameServers`.
+ * über `MatchHistoryPort.correctResult` (Sätze und Aufschläger in einem Vorgang).
  */
 class ResultEditing(
     private val record: MatchRecord,
@@ -31,8 +31,15 @@ class ResultEditing(
     /** Aufschläger je Spiel gibt es nur bei Tennis/Padel (sonst folgt der Aufschlag aus der Punktfolge). */
     val serversEditable: Boolean = engine.format.sport.isTennisLike
 
-    /** Aktuelle (ggf. schon korrigierte) Sätze als Startwerte. */
-    val initialSets: List<CorrectedSet> = record.finalState.sets.map(::corrected)
+    /**
+     * Aktuelle (ggf. schon korrigierte) Sätze als Startwerte; bei vorzeitigem Ende (Aufgabe, Abbruch, „Beenden“) zuletzt
+     * der eingefrorene laufende Satz als unvollständiger Satz.
+     */
+    val initialSets: List<CorrectedSet> =
+        record.finalState.sets.map(::corrected) +
+            listOfNotNull(
+                record.finalState.current?.let { CorrectedSet(it.setKind, ResultCorrection.unitsOf(it), incomplete = true) },
+            )
 
     /** Bisher wirksame Aufschläger-Korrekturen. */
     val initialServers: Map<Pair<Int, Int>, PlayerId> = engine.gameServers.associate { (it.set to it.game) to it.player }
@@ -63,7 +70,7 @@ class ResultEditing(
         return ScoringEngine.serviceGames(record.events + preview)
     }
 
-    /** Vollständige Liste für `correctGameServers`: nur Spiele, die es in [games] gibt, sortiert nach Satz und Spiel. */
+    /** Vollständige Aufschläger-Liste fürs Speichern: nur Spiele, die es in [games] gibt, sortiert nach Satz und Spiel. */
     fun servers(
         chosen: Map<Pair<Int, Int>, PlayerId>,
         games: List<ServiceGame>,
@@ -71,7 +78,7 @@ class ResultEditing(
         val existing = games.mapTo(HashSet()) { it.set to it.game }
         return chosen
             .filterKeys { it in existing }
-            .map { (key, player) -> GameServer(key.first, key.second, player) }
+            .mapNotNull { (key, player) -> engine.lineup.sideOf(player)?.let { GameServer(key.first, key.second, player, it) } }
             .sortedWith(compareBy({ it.set }, { it.game }))
     }
 

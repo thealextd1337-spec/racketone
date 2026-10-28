@@ -191,8 +191,8 @@ object RuleScenarios {
                         ),
                     ),
                 )
-                send(GameServersCorrected(listOf(GameServer(0, 0, p("B1")))))
-                send(GameServersCorrected(listOf(GameServer(1, 12, p("B1")))))
+                send(GameServersCorrected(listOf(GameServer(0, 0, p("B1"), Side.B))))
+                send(GameServersCorrected(listOf(GameServer(1, 12, p("B1"), Side.B))))
                 send(ResultCorrected(listOf(CorrectedSet(SetKind.REGULAR, SidePair(4, 6)))))
                 send(ResultCorrected(emptyList()))
             },

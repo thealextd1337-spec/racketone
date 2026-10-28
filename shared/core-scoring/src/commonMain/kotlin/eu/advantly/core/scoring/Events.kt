@@ -308,14 +308,16 @@ data class PlayerAssigned(
 
 /**
  * Ein Satz im korrigierten Ergebnis ([ResultCorrected]). [score] = Spiele bei `REGULAR`, sonst Punkte (Match-Tiebreak,
- * Pickleball-Spiel, Rally-Satz). [tiebreak] = Tiebreak-Punkte eines `REGULAR`-Satzes, der mit Tiebreak endete (dann
- * Pflicht, sonst verboten).
+ * Pickleball-Spiel, Rally-Satz), je 0…99. [tiebreak] = Tiebreak-Punkte eines `REGULAR`-Satzes, der mit Tiebreak endete
+ * (dann Pflicht, sonst verboten). [incomplete] = unvollständiger letzter Satz bei Aufgabe, Abbruch oder „Beenden, wie es
+ * steht“ (nur der letzte Satz, ohne Tiebreak-Punkte; Tennis/Padel in ganzen Spielen).
  */
 @Serializable
 data class CorrectedSet(
     val kind: SetKind,
     val score: SidePair<Int>,
     val tiebreak: SidePair<Int>? = null,
+    val incomplete: Boolean = false,
 )
 
 /**
@@ -335,13 +337,15 @@ data class ResultCorrected(
 
 /**
  * Aufschläger eines Standardspiels (Tennis/Padel): [set] und [game] 0-basiert im (ggf. korrigierten) Ergebnis, [game] =
- * Spielstand `A + B` vor dem Spiel; Tiebreaks haben keinen Eintrag.
+ * Spielstand `A + B` vor dem Spiel; Tiebreaks haben keinen Eintrag. [side] = Side von [player] (redundant, damit der
+ * Export ohne Spieler-ID die Seite kennt; muss passen, sonst ist das Event ungültig).
  */
 @Serializable
 data class GameServer(
     val set: Int,
     val game: Int,
     val player: PlayerId,
+    val side: Side,
 )
 
 /**

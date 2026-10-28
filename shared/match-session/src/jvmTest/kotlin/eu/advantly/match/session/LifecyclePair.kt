@@ -60,7 +60,8 @@ class RecordingLink(
  */
 class LifecyclePair(
     private val phoneVersions: IntRange = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT,
-    private val watchVersions: IntRange = phoneVersions,
+    /** Versionsbereich der Uhr; nach Änderung wirkt er beim nächsten [restartWatch] („Uhr aktualisiert“). */
+    var watchVersions: IntRange = phoneVersions,
 ) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, queueWhenDisconnected = true)

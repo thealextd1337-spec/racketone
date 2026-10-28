@@ -239,9 +239,10 @@ object MatchStatistics {
      * Rückgängig gemachte und übersprungene Events werden ignoriert.
      */
     private fun netDuration(record: MatchRecord): Long {
-        val events = record.events.filter { it.payload is MatchCreated || EventLog.countsForMatchTime(it.payload) }
+        val events = record.events.filterNot { it.payload is eu.advantly.core.scoring.PlayerAssigned }
         if (events.size < 2) return 0
-        val end = events.last().wallClockMs
+        // Ende ohne Korrekturen nach Matchende (und deren vorgeschaltete Übernahme), Analyse über das volle Log
+        val end = (EventLog.matchEnd(record.events) ?: events.last()).wallClockMs
         var total = end - events.first().wallClockMs
         val log = EventLog.analyze(events.drop(1))
         val skipped = log.undone + log.rejected + log.absorbed + record.finalState.ignoredEvents

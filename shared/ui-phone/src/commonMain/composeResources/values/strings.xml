@@ -287,6 +287,7 @@
     <string name="result_share_failed">The image could not be shared.</string>
     <string name="result_delete_title">Delete this match?</string>
     <string name="result_delete_text">The match and all its points are removed from this device. This cannot be undone.</string>
+    <string name="history_corrected">corrected</string>
     <string name="result_corrected">Result corrected manually</string>
     <string name="result_edit">Edit result</string>
     <string name="result_edit_title">Edit result</string>
@@ -304,6 +305,10 @@
     <string name="result_edit_issue_no_sets">Enter at least one set.</string>
     <string name="result_edit_issue_too_many_sets">At most 9 sets are possible.</string>
     <string name="result_edit_issue_set_kind">Set %1$d: this kind of set is not possible here in this format (set or match tiebreak).</string>
+    <string name="result_edit_issue_set_kind_other">Set %1$d does not fit this format.</string>
+    <string name="result_edit_issue_incomplete_not_last">Set %1$d: only the last set can be incomplete.</string>
+    <string name="result_edit_incomplete">Incomplete set</string>
+    <string name="result_edit_incomplete_hint">The match ended during this set (retirement, abandonment or “end as it stands”).</string>
     <string name="result_edit_issue_set_score">Set %1$d: this score is not possible under the rules of the format.</string>
     <string name="result_edit_issue_tiebreak_required">Set %1$d ended in a tiebreak – please enter the tiebreak points.</string>
     <string name="result_edit_issue_tiebreak_score">Set %1$d: the tiebreak points do not fit – the set winner wins the tiebreak, and only a set decided by a tiebreak has tiebreak points.</string>

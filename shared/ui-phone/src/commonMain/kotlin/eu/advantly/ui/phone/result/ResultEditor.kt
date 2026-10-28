@@ -21,9 +21,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.PlayerId
@@ -39,6 +42,7 @@ import eu.advantly.presentation.stats.ResultEditing
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.SegmentedChoice
+import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.TopBar
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.common.safeContentPadding
@@ -51,9 +55,13 @@ import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.result_edit_add_set
 import eu.advantly.ui.phone.resources.result_edit_failed
 import eu.advantly.ui.phone.resources.result_edit_game
+import eu.advantly.ui.phone.resources.result_edit_incomplete
+import eu.advantly.ui.phone.resources.result_edit_incomplete_hint
 import eu.advantly.ui.phone.resources.result_edit_issue_after_match_end
+import eu.advantly.ui.phone.resources.result_edit_issue_incomplete_not_last
 import eu.advantly.ui.phone.resources.result_edit_issue_no_sets
 import eu.advantly.ui.phone.resources.result_edit_issue_set_kind
+import eu.advantly.ui.phone.resources.result_edit_issue_set_kind_other
 import eu.advantly.ui.phone.resources.result_edit_issue_set_score
 import eu.advantly.ui.phone.resources.result_edit_issue_tiebreak_required
 import eu.advantly.ui.phone.resources.result_edit_issue_tiebreak_score
@@ -85,8 +93,8 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun ResultEditor(
     record: MatchRecord,
-    onCorrectResult: (List<CorrectedSet>) -> Boolean,
-    onCorrectServers: (List<GameServer>) -> Boolean,
+    /** Speichert Sätze und/oder Aufschläger in einem Vorgang (`null` = unverändert); `false` = nichts gespeichert. */
+    onCorrect: (List<CorrectedSet>?, List<GameServer>?) -> Boolean,
     onClose: () -> Unit,
 ) {
     val editing = remember(record) { ResultEditing(record) }
@@ -131,7 +139,8 @@ internal fun ResultEditor(
                         .testTag("edit_set_$index"),
                     verticalArrangement = Arrangement.spacedBy(Spacing.s),
                 ) {
-                    Text(stringResource(Res.string.result_edit_set, index + 1), style = AdvantlyTheme.typography.label, color = colors.text)
+                    val setLabel = stringResource(Res.string.result_edit_set, index + 1)
+                    Text(setLabel, style = AdvantlyTheme.typography.label, color = colors.text)
                     if (editing.setKinds.size > 1) {
                         SegmentedChoice(
                             options = editing.setKinds,
@@ -147,28 +156,39 @@ internal fun ResultEditor(
                                     },
                                 )
                             },
-                            onSelect = { update(index, CorrectedSet(it, set.score)) },
+                            onSelect = { update(index, CorrectedSet(it, set.score, incomplete = set.incomplete)) },
                             tagPrefix = "edit_kind_$index",
                         )
                     }
+                    if (index == sets.lastIndex) {
+                        ToggleRow(
+                            title = stringResource(Res.string.result_edit_incomplete),
+                            subtitle = stringResource(Res.string.result_edit_incomplete_hint),
+                            checked = set.incomplete,
+                            onChange = { update(index, CorrectedSet(set.kind, set.score, incomplete = it)) },
+                            tag = "edit_incomplete_$index",
+                        )
+                    }
                     for (side in Side.entries) {
-                        Stepper(teamName(setup, side), set.score[side], "edit_score_${index}_${side.name}") {
+                        Stepper(teamName(setup, side), setLabel, set.score[side], "edit_score_${index}_${side.name}") {
                             // Neuer Satzstand: Tiebreak-Punkte neu eingeben (passen sonst womöglich nicht mehr)
-                            update(index, CorrectedSet(set.kind, set.score.with(side, it)))
+                            update(index, CorrectedSet(set.kind, set.score.with(side, it), incomplete = set.incomplete))
                         }
                     }
                     val issue = check.issue
                     val tiebreak = set.tiebreak
                     val asksTiebreak = issue?.set == index && issue.kind == CorrectionIssueKind.TIEBREAK_REQUIRED
-                    if (set.kind == SetKind.REGULAR && (tiebreak != null || asksTiebreak)) {
-                        Text(
-                            stringResource(Res.string.result_edit_tiebreak),
-                            style = AdvantlyTheme.typography.caption,
-                            color = colors.text2,
-                        )
+                    if (set.kind == SetKind.REGULAR && !set.incomplete && (tiebreak != null || asksTiebreak)) {
+                        val tiebreakLabel = stringResource(Res.string.result_edit_tiebreak)
+                        Text(tiebreakLabel, style = AdvantlyTheme.typography.caption, color = colors.text2)
                         val points = tiebreak ?: SidePair(0, 0)
                         for (side in Side.entries) {
-                            Stepper(teamName(setup, side), points[side], "edit_tiebreak_${index}_${side.name}") {
+                            Stepper(
+                                teamName(setup, side),
+                                "$setLabel, $tiebreakLabel",
+                                points[side],
+                                "edit_tiebreak_${index}_${side.name}",
+                            ) {
                                 update(index, set.copy(tiebreak = points.with(side, it)))
                             }
                         }
@@ -195,7 +215,7 @@ internal fun ResultEditor(
             val winner = check.result?.winner
             Text(
                 when {
-                    issue != null -> issueText(issue.kind, (issue.set ?: 0) + 1)
+                    issue != null -> issueText(issue.kind, (issue.set ?: 0) + 1, editing.setKinds.size > 1)
                     winner != null -> stringResource(Res.string.result_edit_winner, teamName(setup, winner))
                     else -> stringResource(Res.string.result_edit_no_winner)
                 },
@@ -239,10 +259,10 @@ internal fun ResultEditor(
                 enabled = check.issue == null,
                 onClick = {
                     val chosen = editing.servers(servers, games)
-                    val ok =
-                        (sets == editing.initialSets || onCorrectResult(sets)) &&
-                            (chosen == editing.servers(editing.initialServers, games) || onCorrectServers(chosen))
-                    if (ok) onClose() else failed = true
+                    val newSets = sets.takeIf { it != editing.initialSets }
+                    val newServers = chosen.takeIf { it != editing.servers(editing.initialServers, games) }
+                    // Ein Vorgang; bei Fehler bleibt der Editor mit allen Eingaben offen
+                    if ((newSets == null && newServers == null) || onCorrect(newSets, newServers)) onClose() else failed = true
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = Spacing.l).testTag("edit_save"),
             )
@@ -250,7 +270,7 @@ internal fun ResultEditor(
                 AdvantlyButton(
                     text = stringResource(Res.string.result_edit_restore),
                     primary = false,
-                    onClick = { if (onCorrectResult(emptyList())) onClose() else failed = true },
+                    onClick = { if (onCorrect(emptyList(), null)) onClose() else failed = true },
                     modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.m).testTag("edit_restore"),
                 )
             }
@@ -262,37 +282,75 @@ internal fun ResultEditor(
 private fun issueText(
     kind: CorrectionIssueKind,
     set: Int,
+    tennisLike: Boolean,
 ): String =
     when (kind) {
-        CorrectionIssueKind.NO_SETS -> stringResource(Res.string.result_edit_issue_no_sets)
-        CorrectionIssueKind.TOO_MANY_SETS -> stringResource(Res.string.result_edit_issue_too_many_sets)
-        CorrectionIssueKind.SET_KIND -> stringResource(Res.string.result_edit_issue_set_kind, set)
-        CorrectionIssueKind.SET_SCORE -> stringResource(Res.string.result_edit_issue_set_score, set)
-        CorrectionIssueKind.TIEBREAK_REQUIRED -> stringResource(Res.string.result_edit_issue_tiebreak_required, set)
-        CorrectionIssueKind.TIEBREAK_SCORE -> stringResource(Res.string.result_edit_issue_tiebreak_score, set)
-        CorrectionIssueKind.AFTER_MATCH_END -> stringResource(Res.string.result_edit_issue_after_match_end, set)
+        CorrectionIssueKind.NO_SETS -> {
+            stringResource(Res.string.result_edit_issue_no_sets)
+        }
+
+        CorrectionIssueKind.TOO_MANY_SETS -> {
+            stringResource(Res.string.result_edit_issue_too_many_sets)
+        }
+
+        CorrectionIssueKind.SET_KIND -> {
+            stringResource(if (tennisLike) Res.string.result_edit_issue_set_kind else Res.string.result_edit_issue_set_kind_other, set)
+        }
+
+        CorrectionIssueKind.INCOMPLETE_NOT_LAST -> {
+            stringResource(Res.string.result_edit_issue_incomplete_not_last, set)
+        }
+
+        CorrectionIssueKind.SET_SCORE -> {
+            stringResource(Res.string.result_edit_issue_set_score, set)
+        }
+
+        CorrectionIssueKind.TIEBREAK_REQUIRED -> {
+            stringResource(Res.string.result_edit_issue_tiebreak_required, set)
+        }
+
+        CorrectionIssueKind.TIEBREAK_SCORE -> {
+            stringResource(Res.string.result_edit_issue_tiebreak_score, set)
+        }
+
+        CorrectionIssueKind.AFTER_MATCH_END -> {
+            stringResource(Res.string.result_edit_issue_after_match_end, set)
+        }
     }
 
-/** Zahl mit −/+ (0…99), Bezeichnung links; Knöpfe mit sprechender Beschreibung für Screenreader. */
+/**
+ * Zahl mit −/+ (0…99), Bezeichnung links. Screenreader: Knöpfe nennen Seite und [context] (Satz bzw. Tiebreak), der Wert
+ * wird als Zustand mit Bezeichnung angesagt und nach jeder Änderung vorgelesen (`liveRegion`).
+ */
 @Composable
 private fun Stepper(
     label: String,
+    context: String,
     value: Int,
     tag: String,
     onChange: (Int) -> Unit,
 ) {
     val colors = AdvantlyTheme.colors
+    val full = "$context, $label"
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = AdvantlyTheme.typography.body, color = colors.text, modifier = Modifier.weight(1f))
-        StepButton("−", stringResource(Res.string.result_edit_minus, label), "${tag}_minus", value > 0) { onChange(value - 1) }
+        StepButton("−", stringResource(Res.string.result_edit_minus, full), "${tag}_minus", value > 0) { onChange(value - 1) }
         Text(
             value.toString(),
             style = AdvantlyTheme.typography.title,
             color = colors.text,
             textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(min = 40.dp).testTag("${tag}_value"),
+            modifier =
+                Modifier
+                    .widthIn(min = 40.dp)
+                    .testTag("${tag}_value")
+                    .semantics {
+                        contentDescription = full
+                        stateDescription = value.toString()
+                        liveRegion = LiveRegionMode.Polite
+                    },
         )
-        StepButton("+", stringResource(Res.string.result_edit_plus, label), "${tag}_plus", value < 99) { onChange(value + 1) }
+        StepButton("+", stringResource(Res.string.result_edit_plus, full), "${tag}_plus", value < 99) { onChange(value + 1) }
     }
 }
 

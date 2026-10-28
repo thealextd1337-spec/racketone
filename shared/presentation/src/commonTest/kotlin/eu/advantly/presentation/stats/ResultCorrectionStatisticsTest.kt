@@ -36,7 +36,7 @@ class ResultCorrectionStatisticsTest {
         assertEquals(1, before.serve.a.doubleFaults)
 
         val b = setup.lineup.b.single()
-        assertTrue(store.correctGameServers(id, listOf(GameServer(0, 0, b))))
+        assertTrue(store.correctResult(id, null, listOf(GameServer(0, 0, b, Side.B))))
         val after = MatchStatistics.compute(assertNotNull(store.record(id)))
         assertEquals(Ratio(0, 6), after.breaks.b, "B hat sein eigenes Aufschlagspiel gewonnen")
         assertEquals(Ratio(1, 7), after.serve.b.serviceGames)
@@ -62,20 +62,51 @@ class ResultCorrectionStatisticsTest {
         assertTrue(store.correctResult(id, sets))
         val b = setup.lineup.b.single()
         val chosen = editing.servers(mapOf((1 to 10) to b, (1 to 11) to b, (5 to 0) to b), preview)
-        assertEquals(listOf(GameServer(1, 10, b), GameServer(1, 11, b)), chosen, "nur vorhandene Spiele")
+        assertEquals(listOf(GameServer(1, 10, b, Side.B), GameServer(1, 11, b, Side.B)), chosen, "nur vorhandene Spiele")
         val before =
             MatchStatistics
                 .compute(assertNotNull(store.record(id)))
                 .serve.b.serviceGames
-        assertTrue(store.correctGameServers(id, chosen))
+        assertTrue(store.correctResult(id, null, chosen))
         val after =
             MatchStatistics
                 .compute(assertNotNull(store.record(id)))
                 .serve.b.serviceGames
         assertEquals(Ratio(before.won, before.total + 2), after, "zwei verlorene Aufschlagspiele ohne Punkte")
-        assertFalse(store.correctGameServers(id, listOf(GameServer(1, 12, b))), "Spiel gibt es nicht")
+        assertFalse(store.correctResult(id, null, listOf(GameServer(1, 12, b, Side.B))), "Spiel gibt es nicht")
         val record = assertNotNull(store.record(id))
         assertTrue(record.summary.result.corrected)
         assertEquals(Discipline.SINGLES, record.summary.setup.format.discipline)
+    }
+
+    /** Review P3: Sätze und Aufschläger in einem Vorgang – ist eines ungültig, wird nichts gespeichert. */
+    @Test
+    fun savingIsAtomic() {
+        val store = testStore()
+        val setup = store.setupFor(Presets.TENNIS_SINGLES_BO3.format())
+        val id = store.start(setup)
+        store.play("AAAA".repeat(12))
+        val before = assertNotNull(store.record(id)).events.size
+        val sets = listOf(CorrectedSet(SetKind.REGULAR, SidePair(6, 4)), CorrectedSet(SetKind.REGULAR, SidePair(6, 0)))
+        val b = setup.lineup.b.single()
+        assertFalse(store.correctResult(id, sets, listOf(GameServer(0, 10, b, Side.B))), "Spiel 11 gibt es nicht")
+        assertEquals(before, assertNotNull(store.record(id)).events.size, "keine halbe Speicherung")
+        assertTrue(store.correctResult(id, sets, listOf(GameServer(0, 9, b, Side.B))))
+        assertEquals(before + 2, assertNotNull(store.record(id)).events.size)
+    }
+
+    /** Review P2-5: Bei Aufgabe startet der Editor mit dem Teilsatz als unvollständigem letzten Satz. */
+    @Test
+    fun editorStartsWithTheInterruptedSet() {
+        val store = testStore()
+        val id = store.start(store.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
+        store.play("AAAA".repeat(6) + "BBBB".repeat(2))
+        assertTrue(store.endMatch(eu.advantly.core.scoring.EndReason.RETIRED, Side.A))
+        val editing = ResultEditing(assertNotNull(store.record(id)))
+        assertEquals(
+            listOf(CorrectedSet(SetKind.REGULAR, SidePair(6, 0)), CorrectedSet(SetKind.REGULAR, SidePair(0, 2), incomplete = true)),
+            editing.initialSets,
+        )
+        assertEquals(Side.B, editing.check(editing.initialSets).result?.winner, "Aufgabe: Sieger bleibt die Gegenseite")
     }
 }

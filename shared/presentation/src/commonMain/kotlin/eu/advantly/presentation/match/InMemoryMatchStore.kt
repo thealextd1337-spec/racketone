@@ -392,20 +392,25 @@ class InMemoryMatchStore(
 
     override fun correctResult(
         matchId: MatchId,
-        sets: List<CorrectedSet>,
-    ): Boolean = correction(matchId, ResultCorrected(sets))
-
-    override fun correctGameServers(
-        matchId: MatchId,
-        servers: List<GameServer>,
-    ): Boolean = correction(matchId, GameServersCorrected(servers))
-
-    private fun correction(
-        matchId: MatchId,
-        payload: EventPayload,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
     ): Boolean {
         val entry = entries[matchId] ?: return false
-        if (appendEvent(entry, payload) == null) return false
+        val payloads = listOfNotNull(sets?.let(::ResultCorrected), servers?.let(::GameServersCorrected))
+        // Atomar wie die Session: erst beide auf einer Kopie prüfen, dann anhängen
+        val engine = entry.engine
+        val lamport = entry.lamport
+        val trial =
+            payloads.mapIndexed { i, p -> ScoreEvent(EventId("probe-$i"), entry.id, deviceId, 0, lamport + 1 + i, clock.nowMs(), null, p) }
+        if (trial.isNotEmpty() &&
+            ScoringEngine
+                .applyAll(engine, trial)
+                .state.ignoredEvents
+                .any { id -> trial.any { it.id == id } }
+        ) {
+            return false
+        }
+        if (payloads.any { appendEvent(entry, it) == null }) return false
         publish()
         return true
     }

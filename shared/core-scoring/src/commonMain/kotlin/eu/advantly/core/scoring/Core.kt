@@ -88,8 +88,11 @@ internal class Core private constructor(
     /** Gezählter Stand vor der ersten wirksamen [ResultCorrected] (für das Zurücksetzen), sonst `null`. */
     var recorded: RecordedResult? = null
 
-    /** Wirksame Aufschläger je Spiel ([GameServersCorrected]). */
+    /** Letzte gültige Aufschläger je Spiel ([GameServersCorrected]); wirksam nur für vorhandene Spiele ([effectiveGameServers]). */
     var gameServers: List<GameServer> = emptyList()
+
+    /** Eingefrorener unvollständiger letzter Satz einer [ResultCorrected], sonst `null`. */
+    var correctedCurrent: CurrentSet? = null
 
     fun copy(): Core =
         Core(format, lineup).also { c ->
@@ -131,6 +134,7 @@ internal class Core private constructor(
             c.prevCycle = prevCycle
             c.recorded = recorded
             c.gameServers = gameServers
+            c.correctedCurrent = correctedCurrent
         }
 
     // =================================================================================================================
@@ -259,23 +263,25 @@ internal class Core private constructor(
     /** Ergebnis-Korrektur ([ResultCorrected]): nur nach Matchende, Plausibilität über [ResultCorrection.check]. */
     private fun onResultCorrected(payload: ResultCorrected): Boolean {
         if (status != MatchStatus.FINISHED) return false
-        val original = recorded ?: RecordedResult(checkNotNull(result), sets, setsWon, inSet)
+        val original = recorded ?: RecordedResult(checkNotNull(result), sets, setsWon, inSet, if (inSet) currentSet() else null)
         if (payload.sets.isEmpty()) {
             result = original.result
             sets = original.sets
             setsWon = original.setsWon
             inSet = original.inSet
+            correctedCurrent = null
             recorded = null
             return true
         }
-        val check = ResultCorrection.check(format, lineup, payload.sets, original.result)
+        val check = ResultCorrection.check(format, lineup, payload.sets, original.result, original.current)
         if (check.issue != null) return false
         recorded = original
         result = check.result
         sets = check.sets
         setsWon = check.setsWon
-        // Das Ergebnis besteht nur aus den eingegebenen Sätzen; ein eingefrorener laufender Satz entfällt.
+        // Nur die eingegebenen Sätze; ein unvollständiger letzter Satz ersetzt den eingefrorenen laufenden Satz.
         inSet = false
+        correctedCurrent = check.current
         return true
     }
 
@@ -284,14 +290,21 @@ internal class Core private constructor(
         if (status != MatchStatus.FINISHED || !sport.isTennisLike) return false
         val keys = payload.servers.map { it.set to it.game }
         if (keys.toSet().size != keys.size) return false
-        if (payload.servers.any { sideOf(it.player) == null || it.game !in 0 until standardGames(it.set) }) return false
+        if (payload.servers.any { sideOf(it.player) != it.side || it.game !in 0 until standardGames(it.set) }) return false
         gameServers = payload.servers
         return true
     }
 
+    /** Aufschläger-Korrekturen, deren Spiel es im aktuellen (ggf. später erneut korrigierten) Ergebnis noch gibt. */
+    fun effectiveGameServers(): List<GameServer> = gameServers.filter { it.game < standardGames(it.set) }
+
+    /** Eingefrorener laufender Satz (korrigiert bzw. gezählt), sonst `null`. */
+    fun frozenCurrent(): CurrentSet? = correctedCurrent ?: if (inSet) currentSet() else null
+
     /**
      * Standardspiele im Satz [set] (Tennis/Padel): abgeschlossener `REGULAR`-Satz ohne sein Tiebreak-Spiel, beim
-     * eingefrorenen laufenden Satz inklusive des unterbrochenen Standardspiels; Match-Tiebreaks haben keine.
+     * laufenden bzw. eingefrorenen Satz inklusive des unterbrochenen Standardspiels, sofern darin schon gespielt wurde;
+     * Match-Tiebreaks haben keine.
      */
     fun standardGames(set: Int): Int {
         val record = sets.getOrNull(set)
@@ -307,8 +320,11 @@ internal class Core private constructor(
                 }
             }
 
-            set == sets.size && inSet -> {
-                this.games.a + this.games.b + (if (gameKind == GameKind.STANDARD) 1 else 0)
+            set == sets.size && frozenCurrent() != null -> {
+                val current = checkNotNull(frozenCurrent())
+                val played = current.games?.let { it.a + it.b } ?: 0
+                val running = current.gameKind == GameKind.STANDARD && current.points.a + current.points.b > 0
+                if (current.setKind == SetKind.REGULAR) played + (if (running) 1 else 0) else 0
             }
 
             else -> {
@@ -1032,7 +1048,7 @@ internal class Core private constructor(
             result = result,
             setsWon = setsWon,
             sets = sets,
-            current = if (inSet) currentSet() else null,
+            current = frozenCurrent(),
             serve = serve,
             scoreCall = serve?.let { scoreCall(it) },
             positions = if (live) positions() else null,
@@ -1199,6 +1215,7 @@ internal class Core private constructor(
         val sets: List<SetRecord>,
         val setsWon: SidePair<Int>,
         val inSet: Boolean,
+        val current: CurrentSet?,
     )
 
     companion object {

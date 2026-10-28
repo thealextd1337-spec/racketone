@@ -199,8 +199,8 @@ class SerializationTest {
                 """{"kind":"MATCH_TIEBREAK","score":{"A":8,"B":10}}]}"""
         assertEquals(json, enc(corrected))
         assertEquals(corrected, vectorJson.decodeFromString(EventPayload.serializer(), json))
-        val servers = GameServersCorrected(listOf(GameServer(1, 4, p("B2"))))
-        assertEquals("""{"type":"GameServersCorrected","servers":[{"set":1,"game":4,"player":"B2"}]}""", enc(servers))
+        val servers = GameServersCorrected(listOf(GameServer(1, 4, p("B2"), eu.advantly.core.model.Side.B)))
+        assertEquals("""{"type":"GameServersCorrected","servers":[{"set":1,"game":4,"player":"B2","side":"B"}]}""", enc(servers))
         assertEquals(
             """{"winner":"A","reason":"COMPLETED"}""",
             vectorJson.encodeToString(MatchResult.serializer(), MatchResult(eu.advantly.core.model.Side.A, ResultReason.COMPLETED)),

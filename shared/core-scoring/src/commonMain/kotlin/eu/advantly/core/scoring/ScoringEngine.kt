@@ -51,15 +51,16 @@ class EngineState internal constructor(
     val points: Collection<AppliedPoint> get() = appliedPoints.values
 
     /** Wirksame Aufschläger-Korrektur je Spiel (letzte gültige [GameServersCorrected]), sonst leer. */
-    val gameServers: List<GameServer> get() = core.gameServers
+    val gameServers: List<GameServer> get() = core.effectiveGameServers()
 
     /**
      * Prüft eine Ergebnis-Korrektur genau wie der Fold (gezähltes Ergebnis als Bezug, wirksames Lineup), z. B. für die
      * Vorschau im Editor. Vor Matchende immer ungültig ([CorrectionIssueKind.AFTER_MATCH_END] ohne Satz).
      */
     fun checkCorrection(sets: List<CorrectedSet>): CorrectionCheck {
-        val recorded = core.recorded?.result ?: state.result ?: return CorrectionCheck(CorrectionIssue(CorrectionIssueKind.AFTER_MATCH_END))
-        return ResultCorrection.check(format, core.lineup, sets, recorded)
+        val original = core.recorded
+        val recorded = original?.result ?: state.result ?: return CorrectionCheck(CorrectionIssue(CorrectionIssueKind.AFTER_MATCH_END))
+        return ResultCorrection.check(format, core.lineup, sets, recorded, if (original != null) original.current else state.current)
     }
 }
 
@@ -388,7 +389,7 @@ object ScoringEngine {
             points
                 .filter { it.before.current?.gameKind == GameKind.STANDARD }
                 .groupBy { gameKey(checkNotNull(it.before.current)) }
-        val overrides = engine.core.gameServers.associateBy { it.set to it.game }
+        val overrides = engine.core.effectiveGameServers().associateBy { it.set to it.game }
         val state = engine.state
         return (0 until state.sets.size + (if (state.current != null) 1 else 0)).flatMap { set ->
             val games =
@@ -443,7 +444,7 @@ object ScoringEngine {
             Replay.run(format, lineup, events, onPoint = { event, before, after ->
                 records += PointRecord(event, event.payload as PointWon, before, after)
             }, scorer = scorer)
-        val overrides = engine.core.gameServers.associateBy { it.set to it.game }
+        val overrides = engine.core.effectiveGameServers().associateBy { it.set to it.game }
         val points =
             records.map { r ->
                 val applied = engine.appliedPoints[r.event.id] ?: return@map r

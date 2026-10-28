@@ -58,8 +58,8 @@
     {"id":"e49","type":"PointWon","side":"A"},
     {"id":"e50","type":"ResultCorrected","sets":[{"kind":"REGULAR","score":{"A":8,"B":4}}]},
     {"id":"e51","type":"ResultCorrected","sets":[{"kind":"REGULAR","score":{"A":6,"B":4}},{"kind":"REGULAR","score":{"A":6,"B":7},"tiebreak":{"A":5,"B":7}},{"kind":"REGULAR","score":{"A":7,"B":5}}]},
-    {"id":"e52","type":"GameServersCorrected","servers":[{"set":0,"game":0,"player":"B1"}]},
-    {"id":"e53","type":"GameServersCorrected","servers":[{"set":1,"game":12,"player":"B1"}]},
+    {"id":"e52","type":"GameServersCorrected","servers":[{"set":0,"game":0,"player":"B1","side":"B"}]},
+    {"id":"e53","type":"GameServersCorrected","servers":[{"set":1,"game":12,"player":"B1","side":"B"}]},
     {"id":"e54","type":"ResultCorrected","sets":[{"kind":"REGULAR","score":{"A":4,"B":6}}]},
     {"id":"e55","type":"ResultCorrected","sets":[]}
   ],

@@ -824,7 +824,8 @@ class MatchSession(
     /**
      * Darf dieses Gerät Ergebnis und Aufschläger von [matchId] korrigieren? Beendetes Match, Ersteller wie bei
      * [canAssignPlayer] und Protokoll 5 mit Konto – nur dann sprechen alle gekoppelten Geräte die neuen Events
-     * (`minV = 5`); ohne Konto könnte eine Uhr mit 0.2.0 sie nicht lesen.
+     * (`minV = 5`); ohne Konto könnte eine Uhr mit 0.2.0 sie nicht lesen. Der Server prüft den Ersteller ebenfalls
+     * (`push_event`: `correction_forbidden`).
      */
     fun canCorrectResult(matchId: MatchId): Boolean {
         checkThread()
@@ -832,37 +833,34 @@ class MatchSession(
         return data.matches.get(matchId)?.status == MatchStatus.FINISHED && canAssignPlayer(matchId)
     }
 
-    /** Satzergebnis korrigieren (`ResultCorrected`, leere Liste = gezähltes Ergebnis); `false` ohne Event, wenn unplausibel. */
+    /**
+     * Ergebnis ([sets] → `ResultCorrected`, leere Liste = gezähltes Ergebnis) und/oder Aufschläger je Spiel ([servers] →
+     * `GameServersCorrected`, vollständige Liste) in einem Vorgang; `null` = unverändert. Beide werden vorab gemeinsam auf
+     * einer Kopie geprüft: Ist eines ungültig, entsteht gar kein Event (keine halbe Speicherung).
+     *
+     * Korrekturen sind Zähler-Events (02 §7.5). Zählt ein anderes Gerät (meist die Uhr), übernimmt dieses Gerät vorher
+     * (`ScorerChanged`, wirkungslos auf das beendete Match).
+     */
     fun correctResult(
         matchId: MatchId,
-        sets: List<CorrectedSet>,
-    ): Boolean = emitCorrection(matchId, ResultCorrected(sets))
-
-    /** Aufschläger je Spiel festlegen (`GameServersCorrected`, vollständige Liste); `false` ohne Event, wenn ungültig. */
-    fun correctGameServers(
-        matchId: MatchId,
-        servers: List<GameServer>,
-    ): Boolean = emitCorrection(matchId, GameServersCorrected(servers))
-
-    /**
-     * Korrekturen sind Zähler-Events (02 §7.5). Zählt ein anderes Gerät (meist die Uhr), übernimmt dieses Gerät vorher
-     * (`ScorerChanged`, wirkungslos auf das beendete Match). Vorab auf einer Kopie geprüft: Ein ungültiges Event entsteht nie.
-     */
-    private fun emitCorrection(
-        matchId: MatchId,
-        payload: EventPayload,
+        sets: List<CorrectedSet>?,
+        servers: List<GameServer>?,
     ): Boolean {
         if (!canCorrectResult(matchId)) return false
+        val payloads = listOfNotNull(sets?.let(::ResultCorrected), servers?.let(::GameServersCorrected))
+        if (payloads.isEmpty()) return true
         val m = opened[matchId] ?: detached(matchId) ?: return false
         val takeOver = m.scorer != null && m.scorer != deviceId
         val lamport = data.events.maxLamport(m.id.value)
         val trial =
-            listOfNotNull(ScorerChanged(deviceId).takeIf { takeOver }, payload).mapIndexed { i, p ->
+            (listOfNotNull(ScorerChanged(deviceId).takeIf { takeOver }) + payloads).mapIndexed { i, p ->
                 ScoreEvent(EventId("probe-$i"), m.id, deviceId, 0, lamport + 1 + i, clock.nowMs(), null, p)
             }
-        if (trial.last().id in ScoringEngine.applyAll(m.engine, trial).state.ignoredEvents) return false
+        val ignored = ScoringEngine.applyAll(m.engine, trial).state.ignoredEvents
+        if (trial.any { it.id in ignored }) return false
         if (takeOver && emit(m, ScorerChanged(deviceId)) == null) return false
-        return emit(m, payload) != null
+        // Nach der gemeinsamen Prüfung scheitert ein Event nur noch am Store (Schreibspur zu) – dann ohne Folge-Event
+        return payloads.all { emit(m, it) != null }
     }
 
     // --- Rolle ------------------------------------------------------------------------------------
@@ -1484,9 +1482,7 @@ class MatchSession(
         val score =
             ScoreSummary.of(state).copy(
                 lastEventAtMs =
-                    m.engine.events
-                        .lastOrNull { EventLog.countsForMatchTime(it.payload) }
-                        ?.wallClockMs ?: m.genesis.wallClockMs,
+                    EventLog.matchEnd(m.engine.events)?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
             )
         writingProgress = true
@@ -2019,7 +2015,7 @@ class MatchSession(
             }
         val score =
             ScoreSummary.of(state).copy(
-                lastEventAtMs = log.lastOrNull { EventLog.countsForMatchTime(it.payload) }?.wallClockMs,
+                lastEventAtMs = EventLog.matchEnd(log)?.wallClockMs,
                 eventCount = log.size,
             )
         data.matches.updateProgress(matchId, state.status, score, clock.nowMs())

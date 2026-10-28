@@ -30,6 +30,9 @@ enum class CorrectionIssueKind {
 
     /** Satz nach dem bereits entschiedenen Match (Best-of). */
     AFTER_MATCH_END,
+
+    /** Nur der letzte Satz darf unvollständig sein. */
+    INCOMPLETE_NOT_LAST,
 }
 
 /** Unplausible Eingabe; [set] = 0-basierter Satz, sonst `null`. */
@@ -39,14 +42,15 @@ data class CorrectionIssue(
 )
 
 /**
- * Prüfergebnis einer Ergebnis-Korrektur: bei [issue] `null` die kanonischen Sätze, Satzstand und abgeleitetes Ergebnis
- * (immer mit `corrected = true`).
+ * Prüfergebnis einer Ergebnis-Korrektur: bei [issue] `null` die kanonischen Sätze, Satzstand, abgeleitetes Ergebnis
+ * (immer mit `corrected = true`) und der eingefrorene unvollständige letzte Satz ([current], sonst `null`).
  */
 data class CorrectionCheck(
     val issue: CorrectionIssue?,
     val sets: List<SetRecord> = emptyList(),
     val setsWon: SidePair<Int> = SidePair(0, 0),
     val result: MatchResult? = null,
+    val current: CurrentSet? = null,
 )
 
 /**
@@ -55,11 +59,15 @@ data class CorrectionCheck(
  * gelten exakt die Regeln aus [MatchFormat]: Kurzsätze, Vorteilssätze, Tiebreak bei n:n, Match-Tiebreak im
  * Entscheidungssatz, Punkte-Deckel (Badminton 30, Pickleball `pointCap`), 2 Punkte Vorsprung und Side-Out.
  *
+ * Der letzte Satz darf unvollständig sein ([CorrectedSet.incomplete]): Er wird ohne Satzende nachgespielt und bleibt als
+ * eingefrorener laufender Satz erhalten.
+ *
  * Sieger und Grund (normativ):
  * - Best-of und eine Side erreicht die Gewinnsätze → Sieger, `COMPLETED`.
  * - Sonst bleiben Aufgabe, Walkover und Abbruch (`RETIRED`/`WALKOVER`/`ABANDONED`) mit ihrem Sieger bestehen.
- * - Sonst offener Modus: mehr Sätze gewinnt (`COMPLETED`), Gleichstand `DRAW`; Best-of unvollständig: `STOPPED` mit der
- *   nach Sätzen führenden Side (Gleichstand: kein Sieger, 02 §9.27).
+ * - Sonst offener Modus ohne unvollständigen Satz: mehr Sätze gewinnt (`COMPLETED`), Gleichstand `DRAW`.
+ * - Sonst `STOPPED` „wie es steht“ (02 §9.27): Sätze, dann Spiele bzw. Punkte des unvollständigen Satzes; Gleichstand
+ *   ohne Sieger.
  */
 object ResultCorrection {
     /** Höchstzahl Sätze (Grenze der Feed-Projektion, `sanitize_projection`). */
@@ -79,25 +87,33 @@ object ResultCorrection {
     /**
      * Prüft [sets] gegen [format] und leitet das Ergebnis relativ zum gezählten Ergebnis [recorded] ab. [lineup] wird nur
      * für das Nachspielen gebraucht (der Aufschlag beeinflusst nur bei Pickleball-Side-Out, wann ein Punkt zählt).
+     * [recordedCurrent] = eingefrorener laufender Satz des gezählten Endes: Entspricht ihm ein unvollständiger letzter
+     * Satz, bleibt er samt Punkten im laufenden Spiel erhalten.
+     *
+     * Wirft nie: Jede Eingabe außerhalb der Grenzen ([MAX_SETS], 0…[MAX_SCORE]) ist ein [CorrectionIssue].
      */
     fun check(
         format: MatchFormat,
         lineup: Lineup,
         sets: List<CorrectedSet>,
         recorded: MatchResult,
+        recordedCurrent: CurrentSet? = null,
     ): CorrectionCheck {
         if (sets.isEmpty()) return CorrectionCheck(CorrectionIssue(CorrectionIssueKind.NO_SETS))
         if (sets.size > MAX_SETS) return CorrectionCheck(CorrectionIssue(CorrectionIssueKind.TOO_MANY_SETS))
         var core = Core.initial(format, lineup)
         sets.forEachIndexed { index, set ->
             if (set.kind !in setKinds(format)) return issue(CorrectionIssueKind.SET_KIND, index)
+            if (!set.score.inRange()) return issue(CorrectionIssueKind.SET_SCORE, index)
+            if (set.tiebreak?.inRange() == false) return issue(CorrectionIssueKind.TIEBREAK_SCORE, index)
+            if (set.incomplete && index != sets.lastIndex) return issue(CorrectionIssueKind.INCOMPLETE_NOT_LAST, index)
             if (core.status == MatchStatus.FINISHED) return issue(CorrectionIssueKind.AFTER_MATCH_END, index)
             var firstIssue: CorrectionIssueKind? = null
             var played: Core? = null
             for (kind in candidates(format, core, set)) {
                 val attempt = core.copy()
                 if (kind != null) attempt.step(event(ContinueDecision(true, kind))) { null }
-                val problem = play(attempt, set, index)
+                val problem = if (set.incomplete) playIncomplete(attempt, set, index) else play(attempt, set, index)
                 if (problem == null) {
                     played = attempt
                     break
@@ -106,7 +122,15 @@ object ResultCorrection {
             }
             core = played ?: return issue(firstIssue ?: CorrectionIssueKind.SET_KIND, index)
         }
-        val leader = StopRule.winner(core.setsWon, null, null)
+        val incomplete = sets.last().incomplete
+        val current =
+            if (!incomplete) {
+                null
+            } else {
+                recordedCurrent?.takeIf { it.setKind == sets.last().kind && unitsOf(it) == sets.last().score }
+                    ?: core.export().current
+            }
+        val leader = StopRule.winner(core.setsWon, current?.games, current?.points)
         val result =
             when {
                 core.status == MatchStatus.FINISHED -> {
@@ -117,7 +141,7 @@ object ResultCorrection {
                     recorded.copy(corrected = true)
                 }
 
-                format.match.mode == MatchMode.OPEN -> {
+                format.match.mode == MatchMode.OPEN && !incomplete -> {
                     MatchResult(leader, if (leader == null) ResultReason.DRAW else ResultReason.COMPLETED, corrected = true)
                 }
 
@@ -125,10 +149,22 @@ object ResultCorrection {
                     MatchResult(leader, ResultReason.STOPPED, corrected = true)
                 }
             }
-        return CorrectionCheck(null, core.sets, core.setsWon, result)
+        return CorrectionCheck(null, core.sets, core.setsWon, result, current)
     }
 
     private val KEPT = setOf(ResultReason.RETIRED, ResultReason.WALKOVER, ResultReason.ABANDONED)
+
+    private fun SidePair<Int>.inRange(): Boolean = a in 0..MAX_SCORE && b in 0..MAX_SCORE
+
+    /** Stand eines laufenden Satzes in der Einheit von [CorrectedSet.score]: Spiele (Tennis/Padel-Satz), sonst Punkte. */
+    fun unitsOf(current: CurrentSet): SidePair<Int> =
+        if (current.setKind ==
+            SetKind.REGULAR
+        ) {
+            current.games ?: current.points
+        } else {
+            current.points
+        }
 
     private fun issue(
         kind: CorrectionIssueKind,
@@ -162,6 +198,30 @@ object ResultCorrection {
             }
         }
 
+    /**
+     * Unvollständiger letzter Satz (Aufgabe, Abbruch, „Beenden, wie es steht“): Stand nachspielen, ohne dass der Satz
+     * endet; Tennis/Padel nur ganze Spiele, ohne Tiebreak-Punkte.
+     */
+    private fun playIncomplete(
+        core: Core,
+        set: CorrectedSet,
+        index: Int,
+    ): CorrectionIssueKind? {
+        if (!core.inSet || core.sets.size != index) return CorrectionIssueKind.AFTER_MATCH_END
+        if (core.setKind != set.kind) return CorrectionIssueKind.SET_KIND
+        if (set.tiebreak != null) return CorrectionIssueKind.TIEBREAK_SCORE
+        val score = set.score
+        val leader = if (score.b > score.a) Side.B else Side.A
+        for (side in alternating(leader, score)) {
+            if (core.sets.size != index) return CorrectionIssueKind.SET_SCORE
+            val games = set.kind == SetKind.REGULAR && core.gameKind == GameKind.STANDARD
+            if (set.kind == SetKind.REGULAR && !games) return CorrectionIssueKind.SET_SCORE
+            if (!award(core, index, side) { if (games) it.games[side] else it.points[side] }) return CorrectionIssueKind.SET_SCORE
+        }
+        val reached = core.sets.size == index && core.inSet && core.export().current?.let(::unitsOf) == score
+        return if (reached) null else CorrectionIssueKind.SET_SCORE
+    }
+
     /** Spielt [set] als Satz [index] nach; `null` = Stand exakt erreicht und Satz beendet. */
     private fun play(
         core: Core,
@@ -171,7 +231,7 @@ object ResultCorrection {
         if (!core.inSet || core.sets.size != index) return CorrectionIssueKind.AFTER_MATCH_END
         if (core.setKind != set.kind) return CorrectionIssueKind.SET_KIND
         val score = set.score
-        if (score.a !in 0..MAX_SCORE || score.b !in 0..MAX_SCORE || score.a == score.b) return CorrectionIssueKind.SET_SCORE
+        if (score.a == score.b) return CorrectionIssueKind.SET_SCORE
         val winner = if (score.a > score.b) Side.A else Side.B
         val regular = set.kind == SetKind.REGULAR
         if (!regular && set.tiebreak != null) return CorrectionIssueKind.TIEBREAK_SCORE
