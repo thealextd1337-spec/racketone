@@ -1,0 +1,5 @@
+New in 0.4.0:
+• Spectators: add friends as spectators at match start or later, and remove them again.
+• “Watching” in the Friends tab: live score and result of matches you follow.
+• Privacy policy version 6 (spectators) – please confirm once.
+Please test: picking spectators at start, adding them during play, following a match as a spectator.
