@@ -143,7 +143,7 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
 - Die Seite ist öffentlich, ohne Geo-Sperre und als HTML erreichbar. Das verlangt Play, und für Health Connect muss es später **dieselbe** URL sein [P6].
 - [ ] **Verbindliches Freigabekriterium vor dem ersten Upload: Die Datenschutzerklärung ist auch in den Apps erreichbar.**
   Google verlangt beides: „a privacy policy link in the designated field within Play Console“ **und** „a privacy policy link or text within the app itself“ [P14].
-  - **Handy:** Profil → „Konto & Datenschutz“ → „Datenschutz“ (DE) / „Account & privacy“ → „Privacy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser; ohne Konto-Backend (Entwicklerbuild) steht der Link direkt unter „Rechtliches“. Vor der Anmeldung verlinkt der Zustimmungsschritt beide Rechtstexte.
+  - **Handy:** Profil → „Konto & Datenschutz“ → „Datenschutz“ (DE) / „Account & privacy“ → „Privacy“ (EN) öffnet `https://advantly.eu/app-datenschutz.html` bzw. die englische URL im Browser; ohne Konto-Backend (Entwicklerbuild) steht der Link direkt unter „Rechtliches“. Vor der Anmeldung stehen Datenschutz, Nutzungsbedingungen und Impressum schon auf dem Startbildschirm und in jedem Schritt des Konto-Flusses (vor Land, Geburtsdatum und E-Mail).
   - **Uhr (Wear OS):** Hinweis „Datenschutz“ am Ende der Startliste: Matchdaten gehen ans gekoppelte Handy, Puls und Schritte nur wie unter
     „Puls & Schritte“ eingestellt; Details in der Handy-App unter Profil › Konto & Datenschutz (seit 0.3.0).
   - **Status 27.10.2026:** In beiden Apps umgesetzt (Handy seit W1-G, Uhr in `HomeScreen`). Vor Upload in beiden Release-Builds prüfen.

@@ -3,6 +3,8 @@ package eu.advantly.ui.phone.auth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,6 +29,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /** Pflichtkonto (0.3.0): ohne nutzbares Konto zeigt die Handy-App nur den Konto-Fluss, ohne Überspringen. */
@@ -70,6 +73,43 @@ class StartLoginTest {
                     .forEach { onNodeWithText(it).performScrollTo().assertIsDisplayed() }
                 onNodeWithTag("start_login_skip").assertDoesNotExist()
                 onNodeWithText(if (de) "ohne Konto" else "without an account", substring = true).assertDoesNotExist()
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun legalTextsAreReachableBeforeAnyInput() {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+            runDesktopComposeUiTest(width = 360, height = 640) {
+                val opened = mutableListOf<String>()
+                setContent {
+                    CompositionLocalProvider(
+                        LocalUriHandler provides
+                            object : UriHandler {
+                                override fun openUri(uri: String) {
+                                    opened += uri
+                                }
+                            },
+                    ) { AdvantlyApp(model = testModel(), authModel = authModel()) }
+                }
+                for (tag in listOf("legal_privacy", "legal_terms", "legal_imprint")) onNodeWithTag(tag).performScrollTo().performClick()
+                // Auch im Alters-/Anmeldeschritt, bevor Land, Geburtsdatum oder E-Mail eingegeben sind.
+                onNodeWithTag("start_login_create").performScrollTo().performClick()
+                onNodeWithTag("auth_country").assertIsDisplayed()
+                onNodeWithTag("legal_privacy").performScrollTo().performClick()
+                assertEquals(
+                    listOf(
+                        "https://advantly.eu/app-datenschutz.html",
+                        "https://advantly.eu/nutzungsbedingungen.html",
+                        "https://advantly.eu/impressum.html",
+                        "https://advantly.eu/app-datenschutz.html",
+                    ),
+                    opened,
+                )
             }
         } finally {
             Locale.setDefault(previous)

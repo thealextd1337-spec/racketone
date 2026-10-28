@@ -302,6 +302,7 @@ fun AccountScreen(
                 }
             }
             if (state.busy) CircularProgressIndicator()
+            LegalLinks()
         }
     }
 }

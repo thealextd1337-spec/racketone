@@ -360,7 +360,7 @@ private fun LinkRow(
  * statt abzustürzen zeigt die App dann einen Hinweis mit der URL zum Kopieren.
  */
 @Composable
-private fun rememberSafeLinkOpener(): (String) -> Unit {
+internal fun rememberSafeLinkOpener(): (String) -> Unit {
     val uriHandler = LocalUriHandler.current
     var failedUrl by remember { mutableStateOf<String?>(null) }
     failedUrl?.let { url -> LinkFailedDialog(url, onClose = { failedUrl = null }) }
