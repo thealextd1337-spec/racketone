@@ -385,6 +385,12 @@ interface LiveMatchPort {
     ): Boolean
 
     /**
+     * Die Aufschlag-Leiste für [pointId] endete ohne Eingabe: im Modus „Ja“ „1. Aufschlag“ setzen, falls der Punkt noch
+     * keine Aufschlag-Info hat (nie überschreiben, idempotent; Regel wie `MatchSession.settleServeInfo`). Nur Zähler.
+     */
+    fun settleServeInfo(pointId: EventId): Boolean
+
+    /**
      * Vorzeitiges Ende (02 §7 `MatchEnded`, nur Zähler): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED`
      * und `STOPPED` `null`.
      */

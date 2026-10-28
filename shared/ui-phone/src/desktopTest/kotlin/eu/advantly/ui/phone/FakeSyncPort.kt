@@ -70,6 +70,8 @@ class FakeSyncPort(
         value: ServeOutcome?,
     ): Boolean = after(base.setServeInfo(pointId, value))
 
+    override fun settleServeInfo(pointId: EventId): Boolean = after(base.settleServeInfo(pointId))
+
     override fun chooseServer(player: PlayerId): Boolean = after(base.chooseServer(player))
 
     override fun startNextSet(kind: NextSetKind): Boolean = after(base.startNextSet(kind))

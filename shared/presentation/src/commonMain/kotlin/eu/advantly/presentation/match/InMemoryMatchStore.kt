@@ -250,6 +250,8 @@ class InMemoryMatchStore(
             detail == point.detail || append(e, PointDetailSet(pointId, detail))
         }
 
+    override fun settleServeInfo(pointId: EventId): Boolean = command(clearRedo = false) { e -> settleServe(e, pointId) }
+
     private fun serveInfoEnabled(e: Entry): Boolean =
         PointDetailRules.serveTracking(e.setup.meta, e.setup.format.sport) != ServeTracking.OFF
 
@@ -501,15 +503,16 @@ class InMemoryMatchStore(
         return true
     }
 
+    /** `true`, wenn ein automatischer 1. Aufschlag geschrieben wurde. */
     private fun settleServe(
         e: Entry,
         pointId: EventId?,
-    ) {
+    ): Boolean {
         val sport = e.setup.format.sport
-        val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(e.setup.meta, sport)) ?: return
-        val point = pointId?.let { e.engine.point(it) } ?: return
-        if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return
-        appendEvent(e, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto)))
+        val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(e.setup.meta, sport)) ?: return false
+        val point = pointId?.let { e.engine.point(it) } ?: return false
+        if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return false
+        return appendEvent(e, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto))) != null
     }
 
     /**

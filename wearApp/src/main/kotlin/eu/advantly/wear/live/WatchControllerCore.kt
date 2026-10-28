@@ -10,6 +10,7 @@ import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
@@ -350,12 +351,23 @@ internal class WatchControllerCore(
         return true
     }
 
-    /** Aufschlag-Leiste: Wert für den letzten Punkt setzen bzw. ändern (nur solange die Leiste sichtbar ist). */
+    /**
+     * Aufschlag-Leiste: Wert für den letzten Punkt setzen bzw. ändern (nur solange die Leiste sichtbar ist). Ein erneuter
+     * Tipp auf den gewählten Wert nimmt einen Fehl-Tipp zurück (wie am Handy): „Ja“ → wieder „1. Aufschlag“, „Nur
+     * Doppelfehler“ → keine Angabe.
+     */
     fun setServe(outcome: ServeOutcome): Boolean {
         val live = mutableState.value.live ?: return false
         val bar = live.serveBar ?: return false
         if (locked || outcome !in bar.options) return false
-        if (!session.setServeInfo(bar.pointId, outcome)) {
+        val match = session.state.value.match ?: return false
+        val value =
+            if (outcome == bar.selected) {
+                PointDetailRules.autoServe(PointDetailRules.serveTracking(match.meta, match.format.sport))
+            } else {
+                outcome
+            }
+        if (!session.setServeInfo(bar.pointId, value)) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             return false
         }

@@ -164,6 +164,12 @@ class WatchControllerOperationTest {
         // Korrektur, solange sichtbar
         assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
         assertEquals(ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
+        // Fehl-Tipp zurücknehmen: erneuter Tipp auf den gewählten Wert → wieder 1. Aufschlag (wie am Handy)
+        assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertEquals(ServeOutcome.FIRST_SERVE_IN, match.lastPoint?.serve)
+        assertNull("nichts markiert", live.serveBar?.selected?.takeIf { it in live.serveBar!!.options })
+        assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
         // kurz nach der Wahl blendet sie aus
         h.scheduler.advanceBy(ServeBarTimer.AFTER_CHOICE_MILLIS)
         c.tick()
@@ -255,6 +261,9 @@ class WatchControllerOperationTest {
         c.tick()
         assertNull(live.serveBar)
         points(Side.B)
+        assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
+        assertTrue("Fehl-Tipp zurücknehmen", c.setServe(ServeOutcome.DOUBLE_FAULT))
+        assertNull("„Nur Doppelfehler“: keine Angabe", match.lastPoint?.serve)
         assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
         points(Side.A)
         c.confirmEnd()

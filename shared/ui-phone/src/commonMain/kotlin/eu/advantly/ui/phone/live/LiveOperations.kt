@@ -138,7 +138,10 @@ internal fun LiveOperationsSlot(
     }
 }
 
-/** Kein Dialog: Der nächste Punkt bleibt jederzeit zählbar. Erneutes Wählen löscht die Angabe. */
+/**
+ * Kein Dialog: Der nächste Punkt bleibt jederzeit zählbar. Werte je Modus „Aufschläge“ ([LiveOperationRules.serveOptions]);
+ * erneutes Wählen nimmt die Angabe zurück – „Ja“: wieder 1. Aufschlag, „Nur Doppelfehler“: keine Angabe.
+ */
 @Composable
 internal fun ServeInfoBar(
     controller: LiveScoreController,

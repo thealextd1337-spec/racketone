@@ -332,6 +332,8 @@ class SessionMatchStore(
         value: ServeOutcome?,
     ): Boolean = session.setServeInfo(pointId, value)
 
+    override fun settleServeInfo(pointId: EventId): Boolean = session.settleServeInfo(pointId)
+
     override fun select(matchId: MatchId): Boolean = session.state.value.match(matchId) != null && session.resume(matchId)
 
     override fun endMatch(

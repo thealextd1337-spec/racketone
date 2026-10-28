@@ -189,9 +189,9 @@ class LiveScoreController(
         if (servePromptId != id) return
         servePromptId = null
         val current = snapshot ?: return
-        val auto = LiveOperationRules.autoServe(current) ?: return
-        // still (ohne Haptik): eine Absage heißt nur, dass der Punkt nicht mehr wirkt oder schon erfasst ist
-        if (current.lastPoint?.let { it.id == id && it.serve == null } == true && port.setServeInfo(id, auto)) {
+        if (LiveOperationRules.autoServe(current) == null) return
+        // still (ohne Haptik); „nie überschreiben“ prüft der Port an einer Stelle (settleServeInfo)
+        if (current.lastPoint?.id == id && port.settleServeInfo(id)) {
             updateSnapshot(port.active.value)
             generation++
         }
