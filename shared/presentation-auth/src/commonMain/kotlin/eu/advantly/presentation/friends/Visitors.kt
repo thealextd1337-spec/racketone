@@ -106,8 +106,9 @@ class VisitorQueue(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: CloudException) {
-                        if (!e.final) return@withLock added
+                        if (!isFinal(e, matchId, visitorId)) return@withLock added
                     }
+                    permissionFailures.remove(matchId to visitorId)
                     removePending(profileId, matchId, visitorId)
                 }
             }
@@ -124,12 +125,27 @@ class VisitorQueue(
         store.setPending(profileId, if (rest.isEmpty()) pending - matchId else pending + (matchId to rest))
     }
 
-    private val CloudException.final: Boolean
-        // `forbidden` kommt als abgewiesene Berechtigung ohne eigenen Grund (CloudHttp kennt ihn nicht).
-        get() = reason in FINAL_REASONS || (reason == "cloud_connection_failed" && permission)
+    private val permissionFailures = mutableMapOf<Pair<String, String>, Int>()
+
+    /**
+     * `forbidden` kommt als abgewiesene Berechtigung ohne eigenen Grund (CloudHttp kennt ihn nicht) – genau wie ein
+     * abgelaufenes Token (401). Deshalb erst nach [PERMISSION_ATTEMPTS] Versuchen verwerfen, nicht beim ersten.
+     */
+    private fun isFinal(
+        e: CloudException,
+        matchId: String,
+        visitorId: String,
+    ): Boolean {
+        if (e.reason in FINAL_REASONS) return true
+        if (e.reason != "cloud_connection_failed" || !e.permission) return false
+        val failures = (permissionFailures[matchId to visitorId] ?: 0) + 1
+        permissionFailures[matchId to visitorId] = failures
+        return failures >= PERMISSION_ATTEMPTS
+    }
 
     companion object {
         val FINAL_REASONS = setOf("visitor_must_be_friend", "already_member")
+        const val PERMISSION_ATTEMPTS = 3
     }
 }
 

@@ -293,14 +293,13 @@ class VisitorsViewModelTest {
             val store = MemoryVisitorStore()
             val onServer = mutableSetOf<String>()
             val queue = VisitorQueue(store, port, { _, match -> match in onServer }) {}
-            queue.enqueue("alice", "m1", setOf("vera", "carol", "dave", "eve"))
+            queue.enqueue("alice", "m1", setOf("vera", "carol", "eve"))
             assertFalse(queue.flush("alice"))
             assertTrue(port.calls.isEmpty(), "vor dem Upload des Kopfes kein Aufruf (Rate-Limit)")
 
             onServer += "m1"
             port.failures["vera"] = CloudException("visitor_must_be_friend", true)
             port.failures["carol"] = CloudException("already_member", true)
-            port.failures["dave"] = CloudException("cloud_connection_failed", true) // forbidden
             port.failures["eve"] = CloudException("cloud_connection_failed", false) // offline
             assertFalse(queue.flush("alice"))
             assertEquals(mapOf("m1" to setOf("eve")), store.pending("alice"))
@@ -314,6 +313,22 @@ class VisitorsViewModelTest {
             assertTrue(queue.flush("alice"))
             assertTrue(store.pending("alice").isEmpty())
             assertEquals(setOf("m1"), store.watched("alice"))
+        }
+
+    @Test fun permissionFailureDropsOnlyAfterRepeatedAttempts(): Unit =
+        runBlocking {
+            val port = FakeVisitors()
+            val store = MemoryVisitorStore()
+            val queue = VisitorQueue(store, port, { _, _ -> true }) {}
+            queue.enqueue("alice", "m1", setOf("dave"))
+            // forbidden und abgelaufenes Token (401) sehen gleich aus: nicht beim ersten Mal verwerfen.
+            port.failures["dave"] = CloudException("cloud_connection_failed", true)
+            repeat(VisitorQueue.PERMISSION_ATTEMPTS - 1) {
+                queue.flush("alice")
+                assertEquals(mapOf("m1" to setOf("dave")), store.pending("alice"))
+            }
+            queue.flush("alice")
+            assertTrue(store.pending("alice").isEmpty())
         }
 
     @Test fun liveUploadIsThrottledAndOnlyForWatchedMatches() {
