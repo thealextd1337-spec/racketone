@@ -1,0 +1,5 @@
+Neu in 0.3.1:
+• Anmelden mit bestehendem Konto ohne erneute Alters- und Landabfrage.
+• Neues Konto: Land per Suche auswählen, Geburtsdatum als TT-MM-JJJJ.
+• Freunde: Texte im dunklen Design wieder lesbar.
+Bitte testen: Anmelden mit bestehendem Konto (E-Mail und Google), neues Konto anlegen.
