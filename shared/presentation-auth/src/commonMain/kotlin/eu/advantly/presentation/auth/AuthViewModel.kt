@@ -99,6 +99,9 @@ class AuthViewModel(
     private val mutable = MutableStateFlow(AuthState(unconfirmed = true))
     val state = mutable.asStateFlow()
     private var ticket: String? = null
+
+    /** Anmelden mit bestehendem Konto: ohne Altersprüfung, der Server legt dann kein neues Konto an. */
+    private var existingAccount = false
     private var email: String = ""
     private var displayedSession: CloudSession? = null
     private var consentLanguage = "en"
@@ -149,9 +152,16 @@ class AuthViewModel(
         mutable.value = AuthState(AuthStep.PROVIDER)
     }
 
+    /** Bestehendes Konto: direkt zur Anmeldung, Land und Alter sind bereits beim Anlegen geprüft worden. */
+    fun signInExisting() {
+        if (mutable.value.busy || mutable.value.authenticated) return
+        existingAccount = true
+        mutable.value = AuthState(AuthStep.PROVIDER)
+    }
+
     fun sendCode(address: String) =
         runAction {
-            val currentTicket = ticket ?: throw CloudException("age_ticket_expired", false)
+            val currentTicket = if (existingAccount) null else ticket ?: throw CloudException("age_ticket_expired", false)
             auth.sendEmailCode(address, currentTicket)
             email = address
             ticket = null
@@ -171,12 +181,17 @@ class AuthViewModel(
         link: Boolean = false,
     ) = runAction {
         val currentTicket = ticket
-        if (!link && currentTicket == null) throw CloudException("age_ticket_expired", false)
+        if (!link && !existingAccount && currentTicket == null) throw CloudException("age_ticket_expired", false)
         val credential = getCredential()
         if (link) {
             auth.linkGoogle(credential.idToken, credential.rawNonce)
         } else {
-            auth.signInWithIdToken(IdTokenProvider.GOOGLE, credential.idToken, credential.rawNonce, currentTicket!!)
+            auth.signInWithIdToken(
+                IdTokenProvider.GOOGLE,
+                credential.idToken,
+                credential.rawNonce,
+                currentTicket.takeUnless { existingAccount },
+            )
         }
         ticket = null
         showSession()
@@ -245,6 +260,7 @@ class AuthViewModel(
             } finally {
                 ticket = null
                 email = ""
+                existingAccount = false
                 mutable.value = AuthState()
             }
         }
@@ -255,6 +271,7 @@ class AuthViewModel(
             val abandoned = ticket
             ticket = null
             email = ""
+            existingAccount = false
             try {
                 if (abandoned != null) auth.cancelAgeTicket(abandoned)
             } catch (e: CancellationException) {
@@ -348,7 +365,9 @@ class AuthViewModel(
                 throw e
             } catch (e: Exception) {
                 if (revision != actionRevision) return@launch
-                val reason = (e as? CloudException)?.reason ?: "connection_failed"
+                val raw = (e as? CloudException)?.reason ?: "connection_failed"
+                // Ohne Altersnachweis lehnt der Server nur ein noch nicht vorhandenes Konto ab.
+                val reason = if (existingAccount && raw == "age_ticket_required") "account_not_found" else raw
                 val reset =
                     reason in setOf("age_ticket_expired", "age_ticket_bound", "age_ticket_required", "age_retry_later", "age_below_minimum")
                 if (reset) ticket = null

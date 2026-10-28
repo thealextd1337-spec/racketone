@@ -72,3 +72,12 @@ actual fun formatBuildDate(epochMs: Long): String =
                 .ofEpochMilli(epochMs)
                 .atZone(java.time.ZoneId.systemDefault()),
         )
+
+actual fun countryName(code: String): String =
+    runCatching {
+        java.util.Locale
+            .Builder()
+            .setRegion(code)
+            .build()
+            .displayCountry
+    }.getOrNull()?.ifBlank { null } ?: code
