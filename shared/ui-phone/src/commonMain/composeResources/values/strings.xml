@@ -855,6 +855,8 @@
     <string name="start_login_benefit">Advantly works with an account: your matches are backed up automatically, and you can add friends and share matches with them. Scoring on your phone and watch also works offline.</string>
     <string name="start_login_create">Create account</string>
     <string name="start_login_sign_in">Sign in</string>
+    <string name="visitors_limit">At most 10 spectators per match.</string>
+    <string name="friends_error_visitor_limit">This match already has 10 spectators.</string>
     <string name="friends_segment_watching">Watching</string>
     <string name="visitors_title">Spectators</string>
     <string name="visitors_hint">Friends you add see only the live score and the result, never your health data. They stay until removed.</string>

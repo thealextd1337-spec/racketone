@@ -202,6 +202,28 @@ class VisitorsUiTest {
             }
         }
 
+    @Test fun wizardStopsAtTenSpectators() =
+        runDesktopComposeUiTest(width = 360, height = 1600) {
+            val friends = (1..11).map { FriendEntry("f$it", "Freund $it") }
+            var chosen by mutableStateOf((1..10).mapTo(mutableSetOf()) { "f$it" } as Set<String>)
+            setContent {
+                AdvantlyTheme {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        WizardVisitors(friends, chosen) {
+                            chosen =
+                                it
+                        }
+                    }
+                }
+            }
+            onNodeWithTag("wizard_visitor_limit").assertExists()
+            onNodeWithTag("wizard_visitor_f11").performScrollTo().performClick()
+            assertEquals(10, chosen.size, "kein elfter Zuschauer")
+            onNodeWithTag("wizard_visitor_f1").performScrollTo().performClick()
+            onNodeWithTag("wizard_visitor_f11").performScrollTo().performClick()
+            assertEquals(setOf("f11") + (2..10).map { "f$it" }, chosen)
+        }
+
     @Test fun wizardWithoutFriendsHasNoSpectatorSection() =
         runDesktopComposeUiTest(width = 360, height = 1200) {
             val wizard = MatchWizard(InMemoryMatchStore(selfName = "Alex")).apply { selectSport(Sport.TENNIS) }

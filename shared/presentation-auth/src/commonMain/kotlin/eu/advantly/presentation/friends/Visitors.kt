@@ -144,7 +144,7 @@ class VisitorQueue(
     }
 
     companion object {
-        val FINAL_REASONS = setOf("visitor_must_be_friend", "already_member")
+        val FINAL_REASONS = setOf("visitor_must_be_friend", "already_member", "visitor_limit_reached")
         const val PERMISSION_ATTEMPTS = 3
     }
 }

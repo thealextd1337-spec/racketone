@@ -45,6 +45,7 @@ import eu.advantly.ui.phone.resources.visitors_add_confirm
 import eu.advantly.ui.phone.resources.visitors_close
 import eu.advantly.ui.phone.resources.visitors_empty
 import eu.advantly.ui.phone.resources.visitors_hint
+import eu.advantly.ui.phone.resources.visitors_limit
 import eu.advantly.ui.phone.resources.visitors_loading
 import eu.advantly.ui.phone.resources.visitors_no_friends
 import eu.advantly.ui.phone.resources.visitors_pending
@@ -65,6 +66,9 @@ import org.jetbrains.compose.resources.stringResource
 /** Abfrageintervall von „Ich schaue zu“: Realtime ist serverseitig aus (`can_receive_realtime`), daher Polling. */
 internal const val WATCHING_POLL_MS = 15_000L
 
+/** Höchstens so viele aktive Zuschauer pro Match; der Server setzt dieselbe Grenze durch (`visitor_limit_reached`). */
+internal const val MAX_VISITORS = 10
+
 /** Mehrfachauswahl von Freunden als Zuschauer (Assistent und „Hinzufügen“). */
 @Composable
 private fun VisitorPicker(
@@ -72,13 +76,23 @@ private fun VisitorPicker(
     selected: Set<String>,
     onToggle: (String) -> Unit,
     tagPrefix: String,
+    limit: Int,
 ) {
+    if (selected.size >= limit) {
+        Text(
+            stringResource(Res.string.visitors_limit),
+            style = AdvantlyTheme.typography.caption,
+            color = AdvantlyTheme.colors.text2,
+            modifier = Modifier.testTag("${tagPrefix}_limit"),
+        )
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         friends.forEach { friend ->
             ChoiceChip(
                 friend.alias.orEmpty(),
                 selected = friend.profileId in selected,
-                onClick = { onToggle(friend.profileId) },
+                // Abwählen geht immer, Hinzufügen nur unterhalb der Grenze.
+                onClick = { if (friend.profileId in selected || selected.size < limit) onToggle(friend.profileId) },
                 tag = "${tagPrefix}_${friend.profileId}",
             )
         }
@@ -101,7 +115,13 @@ internal fun WizardVisitors(
             color = AdvantlyTheme.colors.text2,
             modifier = Modifier.padding(bottom = Spacing.s),
         )
-        VisitorPicker(friends, selected, { id -> onChange(if (id in selected) selected - id else selected + id) }, "wizard_visitor")
+        VisitorPicker(
+            friends,
+            selected,
+            { id -> onChange(if (id in selected) selected - id else selected + id) },
+            "wizard_visitor",
+            MAX_VISITORS,
+        )
     }
 }
 
@@ -165,12 +185,15 @@ fun MatchVisitorsSection(
         }
         val taken = section.visitors.mapTo(mutableSetOf()) { it.profileId } + section.players
         val candidates = state.friends.filter { it.profileId !in taken && !it.alias.isNullOrBlank() }
-        if (!adding) {
+        val remaining = MAX_VISITORS - section.visitors.size
+        if (remaining <= 0) {
+            Text(stringResource(Res.string.visitors_limit), color = colors.text2, modifier = Modifier.testTag("visitors_limit"))
+        } else if (!adding) {
             TextButton({ adding = true }, modifier = Modifier.testTag("visitors_add")) { Text(stringResource(Res.string.visitors_add)) }
         } else if (candidates.isEmpty()) {
             Text(stringResource(Res.string.visitors_no_friends), color = colors.text2, modifier = Modifier.testTag("visitors_no_friends"))
         } else {
-            VisitorPicker(candidates, chosen, { id -> chosen = if (id in chosen) chosen - id else chosen + id }, "visitor_pick")
+            VisitorPicker(candidates, chosen, { id -> chosen = if (id in chosen) chosen - id else chosen + id }, "visitor_pick", remaining)
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 TextButton({
                     model.addVisitors(chosen)

@@ -76,6 +76,7 @@ import eu.advantly.ui.phone.resources.friends_error_revoked
 import eu.advantly.ui.phone.resources.friends_error_self
 import eu.advantly.ui.phone.resources.friends_error_session
 import eu.advantly.ui.phone.resources.friends_error_unavailable
+import eu.advantly.ui.phone.resources.friends_error_visitor_limit
 import eu.advantly.ui.phone.resources.friends_error_visitor_not_friend
 import eu.advantly.ui.phone.resources.friends_found_send
 import eu.advantly.ui.phone.resources.friends_incoming_title
@@ -420,6 +421,7 @@ internal fun errorLabel(error: String): StringResource =
         "no_participation" -> Res.string.friends_error_no_participation
         "visitor_must_be_friend" -> Res.string.friends_error_visitor_not_friend
         "already_member" -> Res.string.friends_error_already_member
+        "visitor_limit_reached" -> Res.string.friends_error_visitor_limit
         "device_not_authorized" -> Res.string.friends_error_binding
         "device_revoked" -> Res.string.friends_error_revoked
         "cloud_session_changed" -> Res.string.friends_error_session

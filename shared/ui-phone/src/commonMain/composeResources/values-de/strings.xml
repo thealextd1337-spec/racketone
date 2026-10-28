@@ -855,6 +855,8 @@
     <string name="start_login_benefit">Advantly nutzt ein Konto: Deine Matches werden automatisch gesichert, und du kannst Freunde hinzufügen und Matches mit ihnen teilen. Zählen auf Handy und Uhr geht auch offline.</string>
     <string name="start_login_create">Konto anlegen</string>
     <string name="start_login_sign_in">Anmelden</string>
+    <string name="visitors_limit">Höchstens 10 Zuschauer pro Match.</string>
+    <string name="friends_error_visitor_limit">Dieses Match hat schon 10 Zuschauer.</string>
     <string name="friends_segment_watching">Ich schaue zu</string>
     <string name="visitors_title">Zuschauer</string>
     <string name="visitors_hint">Hinzugefügte Freunde sehen nur den Live-Stand und das Ergebnis, nie deine Gesundheitsdaten. Sie bleiben, bis du sie entfernst.</string>

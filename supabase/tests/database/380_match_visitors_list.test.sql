@@ -1,6 +1,6 @@
 -- Welle 8 / Zuschauer: cloud_match_visitors_v1 – nur Ersteller/verknüpfte Spieler, nur aktive Visitor, canRevoke.
 begin;
-select plan(12);
+select plan(15);
 
 select tests.world();
 select tests.publish_consent_documents();
@@ -49,6 +49,21 @@ select tests.authenticate_as('alice');
 select is((select array_agg(v ->> 'alias') from jsonb_array_elements(
              public.cloud_match_visitors_v1('a3800000-0000-7000-8000-000000000001')) v),
           array['Vera'], 'widerrufener Visitor fehlt in der Liste');
+
+-- Obergrenze (Produktwert 10): in dieser Transaktion auf 1 gesenkt; aktiv ist nur noch vera
+reset role;
+create or replace function private.max_match_visitors()
+returns integer language sql immutable set search_path = '' as $$ select 1 $$;
+select tests.authenticate_as('bob');
+select throws_ok($$ select public.add_match_visitor('a3800000-0000-7000-8000-000000000001', tests.uid('carol')) $$,
+                 'visitor_limit_reached', 'weiterer Visitor über der Grenze wird abgelehnt');
+select tests.authenticate_as('alice');
+select lives_ok($$ select public.add_match_visitor('a3800000-0000-7000-8000-000000000001', tests.uid('vera')) $$,
+                'erneutes Benennen eines aktiven Visitors zählt nicht doppelt');
+select public.revoke_match_visitor('a3800000-0000-7000-8000-000000000001', tests.uid('vera'));
+select tests.authenticate_as('bob');
+select lives_ok($$ select public.add_match_visitor('a3800000-0000-7000-8000-000000000001', tests.uid('carol')) $$,
+                'Widerruf gibt den Platz wieder frei');
 
 reset role;
 select is((select p.prosecdef and p.proconfig = array['search_path=""']

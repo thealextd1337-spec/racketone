@@ -270,6 +270,7 @@ internal class CloudHttp(
                 // Zuschauer (F16/F25)
                 "visitor_must_be_friend",
                 "already_member",
+                "visitor_limit_reached",
             )
     }
 }
