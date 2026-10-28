@@ -462,6 +462,14 @@ class CloudUploadStore internal constructor(
         }
     }
 
+    /** Der Match-Kopf von [matchId] wurde schon einmal quittiert, das Match existiert also auf dem Server (Zuschauer, F16). */
+    fun headerUploaded(matchId: String): Boolean =
+        database.cloudMetadataQueries
+            .byKey(CloudMetadataKind.HEADER.name, matchId)
+            .executeAsOneOrNull()
+            ?.uploaded_revision
+            ?.let { it > 0 } == true
+
     /**
      * Server-Hinweise je Platz (`not_friend`, `link_rejected`, …) zur zuletzt von [profileId] quittierten Besetzung von
      * [matchId]; je Konto getrennt, weil sie dessen Freundschaften verraten. Mit dem Match-Kopf gelöscht (Trigger).
