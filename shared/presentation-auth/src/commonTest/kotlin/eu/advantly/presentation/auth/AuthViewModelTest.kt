@@ -147,6 +147,15 @@ class AuthViewModelTest {
         assertEquals(listOf("refresh", "google:null"), viaGoogle.calls)
     }
 
+    @Test fun ageCheckAfterExistingAccountAttemptCreatesAccountWithTicket() {
+        val auth = FakePhoneAuth()
+        val model = AuthViewModel(auth, scope)
+        model.signInExisting()
+        model.checkAge("AT", "2000-01-01")
+        model.sendCode("a@b.at")
+        assertEquals(listOf("refresh", "age:AT", "send:ticket"), auth.calls)
+    }
+
     @Test fun unknownExistingAccountExplainsInsteadOfAskingForAge() {
         val auth = FakePhoneAuth()
         val model = AuthViewModel(auth, scope)

@@ -114,6 +114,7 @@ class AuthViewModel(
             auth.accountSession.collect { session ->
                 if (displayedSession != null && !sameSession(displayedSession, session)) {
                     displayedSession = null
+                    existingAccount = false
                     // Nur eine verschwundene Sitzung ist eindeutig; ein Wechsel (z. B. Token-Rennen) sperrt nicht aus.
                     mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed", unconfirmed = session != null)
                 } else if (previous == null && session != null && displayedSession == null && mutable.value.unconfirmed) {
@@ -145,6 +146,8 @@ class AuthViewModel(
         country: String,
         birthDate: String,
     ) = runAction {
+        // Wer die Altersprüfung durchläuft, legt ein Konto an – auch nach einem Rückfall aus dem Anmelde-Weg.
+        existingAccount = false
         // Welche Länder freigeschaltet sind, entscheidet der Server (country_age_rules); hier nur das Format.
         if (!COUNTRY_CODE.matches(country)) throw CloudException("country_not_supported", false)
         if (!validBirthDate(birthDate)) throw CloudException("invalid_birth_date", false)
@@ -295,6 +298,8 @@ class AuthViewModel(
 
     private suspend fun showSession() {
         val session = auth.accountSession.value
+        // Angemeldet: die Umdeutung „kein Konto“ gilt nur für den Anmeldeversuch selbst.
+        if (session != null) existingAccount = false
         displayedSession = session
         // Bis der Katalog geladen ist: ohne Profil gesperrt, mit Profil unbestätigt (scheitert das Laden, wird weitergezählt).
         mutable.value =

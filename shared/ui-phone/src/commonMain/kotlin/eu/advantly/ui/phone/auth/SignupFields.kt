@@ -58,7 +58,7 @@ internal fun CountryField(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var query by remember(country) { mutableStateOf(countryName(country)) }
+    var query by remember { mutableStateOf(countryName(country)) }
     // Steht noch der gewählte Name im Feld, zeigt das Aufklappen alle Länder statt nur dieses einen.
     val filter = if (query == countryName(country)) "" else query
     val matches = remember(filter) { filterCountries(filter, ::countryName) }
@@ -68,6 +68,8 @@ internal fun CountryField(
             {
                 query = it
                 expanded = true
+                // Getippt statt gewählt: kein Land, bis ein Treffer ausgewählt ist.
+                onCountry("")
             },
             label = { Text(label) },
             singleLine = true,

@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,8 @@ internal fun AccountGate(
 ) {
     val state by model.state.collectAsState()
     var started by remember { mutableStateOf(false) }
+    // Abbrechen aus jedem späteren Schritt führt wieder zur Wahl „Konto anlegen“ / „Anmelden“.
+    LaunchedEffect(state.step) { if (state.step != AuthStep.AGE) started = false }
     if (state.step == AuthStep.AGE && state.error == null && !started) {
         StartLoginScreen(onCreate = { started = true }, onSignIn = model::signInExisting)
     } else {
