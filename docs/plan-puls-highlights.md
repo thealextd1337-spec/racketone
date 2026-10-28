@@ -18,7 +18,6 @@
   - watchOS: `WorkoutManager.swift` zeigt den Wert nur an.
   - Gespeichert wird bisher **nichts** (KDoc in `WorkoutService`, `TelemetryVisibility`). Dieser Plan führt die Speicherung erst ein.
 - **Nicht im Umfang:**
-  - Teilen mit Freunden (Einwilligung 3)
   - Schreiben nach Health Connect/Apple Health über das heutige `saveToHealth` hinaus
   - Tracker-Import ([p3-tracker-import.md](p3-tracker-import.md))
   - Kalorien und Schritte in der Zeitleiste
@@ -97,7 +96,7 @@ object MatchMoments { fun derive(points: List<PointRecord>): List<MatchMoment> }
 ### 3.2 Wear OS (`wearApp`)
 - `WorkoutService` erhält die HR-`DataPoint`s schon im Exercise-Callback.
   - Heute gehen sie nur an `LiveTelemetrySender`.
-  - Neu gehen sie zusätzlich an einen `PulseRecorder`, aber nur wenn `match.meta.healthRecording && telemetryVisibility.allowsLive`.
+  - Neu gehen sie zusätzlich an einen `PulseRecorder`, aber nur wenn `match.meta.pulseVisibility != NONE && telemetryVisibility.allowsLive`.
 - Die Zeitbasis ist `DataPoint.getTimeInstant(bootInstant)`, umgerechnet in Wanduhr-ms.
 - Etwa 1×/min werden die Buckets in die lokale Tabelle geschrieben (§3.4), damit beim Prozess-Tod nichts verloren geht.
 - Die KDoc-Aussage „Puls wird nicht gespeichert“ wird angepasst.
@@ -148,9 +147,10 @@ object MatchMoments { fun derive(points: List<PointRecord>): List<MatchMoment> }
 |---|---|---|
 | F19 „Gar nicht“ | Wie heute: kein Live-Wert. Die Pulsaufzeichnung ist dann gesperrt, der Schalter ausgegraut | – |
 | 1 Messen & lokal speichern | Neue Einstellung „Pulsverlauf aufzeichnen“ (`HealthConsent`). Sie wird zwischen den eigenen Geräten mit der Lamport-Merge-Regel wie bei `TelemetryPreference` abgeglichen, als zusätzliches Feld in `MatchMetaMessage` | **aus** |
-| je Match | `MatchMeta.healthRecording: Boolean = false`. Der Wizard-Schalter ist mit Einwilligung 1 vorbelegt, das Wire-Format folgt `serveTracking` (`MatchMetaWire`). Die Uhr nimmt nur auf, wenn dieses Flag gesetzt ist | aus |
-| 2 Cloud-Sync | Eigener Schalter, nur mit Konto, erst ab Phase H9 | **aus** |
-| 3 Teilen | Nicht in diesem Plan | aus |
+| je Match (entschieden 28.10.) | Beim Matchstart wählt man im Assistenten `MatchMeta.pulseVisibility`: **„Gar nicht“ / „Nur für mich“ / „Für alle“**, dieselben Stufen wie F19. Vorbelegt ist der Wert der globalen Einstellung, ohne Einwilligung 1 ist es „Gar nicht“. Das Wire-Format folgt `serveTracking` (`MatchMetaWire`). Die Uhr nimmt nur auf, wenn die Stufe nicht „Gar nicht“ ist | Gar nicht |
+| nachträglich (entschieden 28.10.) | Im Match-Detail lassen sich alle drei Stufen wählen. Der Wechsel geht als eigenes Meta-Update mit Lamport-Takt an Uhr und Cloud, ohne Event im Spielverlauf. Wird auf „Gar nicht“ gestellt, löscht das den Pulsverlauf auf Handy, Uhr und Cloud, nach einer Rückfrage. Wurde nichts aufgezeichnet, sind „Nur für mich“ und „Für alle“ ausgegraut, mit dem Hinweis „Kein Pulsverlauf aufgezeichnet“ | – |
+| 2 Cloud-Sync | „Nur für mich“ mit Konto: Upload in Besitzer-Tabellen (RLS nur Besitzer), ab Phase H9 | – |
+| 3 Teilen | „Für alle“: Die Kurve sehen die Mitspieler des Matches und Freunde, die das geteilte Match sehen, ab Phase H10. Visitor-Accounts sehen nie Gesundheitsdaten (Gate P2) | – |
 
 - **Ohne Einwilligung:**
   - Die Zeitleiste zeigt die Highlights auf der Zeitachse, nur ohne Kurve.
@@ -200,17 +200,19 @@ object MatchMoments { fun derive(points: List<PointRecord>): List<MatchMoment> }
 | **H2** | Zeitleiste **ohne** Puls (Highlights, Liste, Tipp-Karte) | presentation, ui-phone | Desktop-UI-Test: Antippen eines Markers zeigt den richtigen Stand; DE/EN-Parität |
 | **H3** | `shared/health`: Recorder, Quality, Alignment | health (neu), settings.gradle.kts | Tests für Buckets, Lücken, Offset und Fenster; keine Floats in gespeicherten Werten |
 | **H4** | `14.sqm`, `HealthRepository` und Lösch-Trigger | data | Migrationstest, Löschen über die Match-Löschung, keine Werte in `toString`/Logs |
-| **H5** | Einwilligung 1, `MatchMeta.healthRecording`, Wizard-Schalter, Sync der Einwilligung, Löschfunktionen | core-model, sync-protocol (additiv), presentation, ui-phone | Standard ist aus; F19 „Gar nicht“ sperrt; ein Widerruf löscht auf beiden Geräten. **Vorbedingung: DSFA und Datenschutzerklärung freigegeben** |
+| **H5** | Einwilligung 1, `MatchMeta.pulseVisibility` (drei Stufen), Schalter beim Matchstart und nachträglich im Match-Detail, Sync der Einwilligung, Löschfunktionen | core-model, sync-protocol (additiv), presentation, ui-phone | Standard ist aus; F19 „Gar nicht“ sperrt; ein Widerruf löscht auf beiden Geräten. **Vorbedingung: DSFA und Datenschutzerklärung freigegeben** |
 | **H6** | Wear: Aufnahme in `WorkoutService` → Repository; `HealthSeries` (Protokoll 6) → Handy | wearApp, sync-protocol, match-session, device-link | Realtest auf Pixel und Galaxy, 30 min mit Display aus: Lücken < 10 %, Nachlieferung nach Flugmodus, keine Doppelungen |
 | **H7** | watchOS: `WatchHealth`-Facade und Swift-Anbindung | umbrella-watch, watchApp | Simulator-CI; Realtest auf der Ultra mit watchOS 26 |
 | **H8** | Pulskurve in der Zeitleiste, Offset-Abgleich, Qualitätshinweise | presentation, ui-phone | Vom Handy gezählt, Puls von der Uhr: Marker liegen ≤ 5 s neben den Events; ohne Serie sieht die Ansicht aus wie bei H2 |
-| **H9** (optional, später) | Cloud-Sync: `health_sessions`/`health_series` nach 03 §3.3.5, RLS nur für den Besitzer, pgTAP, Export und Löschung, Einwilligung 2 | supabase, cloud-sync, data | pgTAP-RLS grün; Löschen entfernt die Cloud-Kopie sofort |
+| **H9** | Cloud-Sync für „Nur für mich“: `health_sessions`/`health_series` nach 03 §3.3.5, RLS nur für den Besitzer, pgTAP, Export und Löschung | supabase, cloud-sync, data | pgTAP-RLS grün; ein fremdes Profil sieht nichts; Löschen entfernt die Cloud-Kopie sofort |
+| **H10** | „Für alle“: RLS-Freigabe für Mitspieler und Freunde mit Sicht auf das geteilte Match, Kurve im geteilten Match-Detail, nachträglicher Stufenwechsel wirkt sofort | supabase, cloud-sync, presentation, ui-phone | pgTAP: Sichtbarkeit nur bei „Für alle“ und Zugriff auf das Match; Visitor sieht nie etwas; Zurückstufen entzieht den Zugriff sofort. **Vorbedingung: Datenschutzerklärung nennt das Teilen von Gesundheitsdaten** |
 
 Reihenfolge:
 - H1, H2 und H3 sind unabhängig voneinander.
 - H4 braucht H3, H5 braucht H4.
 - H6 und H7 brauchen H5.
 - H8 braucht H2 und H6/H7.
+- H9 braucht H5, H10 braucht H9.
 
 ## 7. Risiken
 
@@ -227,12 +229,12 @@ Reihenfolge:
 ## 8. Offene Entscheidungen
 
 - **E1:** Einwilligung 1 als eigener Schalter (Vorschlag) oder als vierte F19-Stufe?
-- **E2:** Pro-Match-Schalter im Wizard sichtbar (Vorschlag) oder nur die globale Einstellung?
+- ~~E2~~ **entschieden 28.10.:** Beim Matchstart gibt es einen Schalter mit drei Stufen (Gar nicht / Nur für mich / Für alle). Nachträglich ist jede der drei Stufen wählbar.
 - **E3:** Aufnahme-Punkt auf der Uhr: ja (Vorschlag, Transparenz) oder nichts Neues?
 - **E4:** Comeback-Schwellen: 2 Spiele, 5 Punkte oder abgewehrter Satz-/Matchball?
 - **E5:** Haltedauer einer unbestätigten Serie auf der Uhr: 7 Tage (Vorschlag)?
-- **E6:** Zeitleiste mit Puls kostenlos oder Pro? PLAN nennt „Health-Trends“ als Pro; vorgeschlagen ist, das einzelne Match kostenlos zu lassen.
-- **E7:** H9 (Cloud) in diesem Plan oder im P3-Gesamtpaket mit dem Tracker-Import?
+- ~~E6~~ **entschieden 28.10.:** Alles ist kostenlos.
+- ~~E7~~ erledigt durch E2: H9 (Cloud) und H10 (Teilen) gehören in diesen Plan.
 
 ## 9. Kritische Dateien
 
