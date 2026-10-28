@@ -39,6 +39,7 @@ grant execute on function public.cloud_match_visitors_v1(uuid) to authenticated;
 -- ihrer Transaktion senken können. Erneutes Benennen eines bereits aktiven Visitors zählt nicht doppelt.
 create function private.max_match_visitors()
 returns integer language sql immutable set search_path = '' as $$ select 10 $$;
+revoke all on function private.max_match_visitors() from public, anon, authenticated, service_role;
 
 -- Wie 20261016000000_rate_limits.sql plus Cloud-Bindung (20261018000100) und Obergrenze. Die Zeilensperre auf dem
 -- Match serialisiert parallele Benennungen, damit die Grenze auch bei gleichzeitigen Aufrufen hält.
