@@ -267,6 +267,9 @@ internal class CloudHttp(
                 "no_pending_request",
                 // Geteilte Matches (P2-E)
                 "no_participation",
+                // Zuschauer (F16/F25)
+                "visitor_must_be_friend",
+                "already_member",
             )
     }
 }
