@@ -1009,7 +1009,9 @@ class MatchSession(
      * Die Aufschlag-Leiste für [pointId] endet ohne Eingabe (Anzeigezeit abgelaufen) – Modus „Ja“ (FULL, Entscheidung
      * 2026-10-28): „1. Aufschlag“ setzen, sofern der Punkt noch wirkt und keine Aufschlag-Info hat. Dasselbe geschieht
      * automatisch, wenn vorher der nächste Punkt gezählt wird oder das Match endet. Idempotent (nie ein zweites Event,
-     * eine Eingabe wird nie überschrieben); in anderen Modi ein No-op. Lässt den Redo-Stapel unberührt.
+     * eine Eingabe wird nie überschrieben); in anderen Modi ein No-op. Nur für Punkte, die dieses Gerät selbst gezählt
+     * hat – nach einer Übernahme kann zu einem fremden Punkt noch eine Eingabe des alten Zählers unterwegs sein.
+     * Lässt den Redo-Stapel unberührt.
      */
     fun settleServeInfo(pointId: EventId): Boolean {
         checkThread()
@@ -1025,6 +1027,13 @@ class MatchSession(
         val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(m.record.meta, sport)) ?: return true
         val point = pointId?.let { m.engine.point(it) } ?: return false
         if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return true
+        if (m.engine.events
+                .asReversed()
+                .firstOrNull { it.id == point.id }
+                ?.deviceId != deviceId
+        ) {
+            return true
+        }
         return emit(m, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto))) != null
     }
 
