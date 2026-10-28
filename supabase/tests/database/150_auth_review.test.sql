@@ -14,11 +14,11 @@ select set_config('request.headers','{"x-forwarded-for":"192.0.2.0/24"}',true);
 select is(private.age_client_ip(), null::text, 'Netzmaske ist keine Client-IP');
 delete from private.age_attempts;
 select set_config('request.headers','{}',true);
-select public.issue_age_ticket('US','2000-01-01',repeat('a',63)||i) from generate_series(1,3) i;
+select public.issue_age_ticket('XX','2000-01-01',repeat('a',63)||i) from generate_series(1,3) i;
 select is(public.issue_age_ticket('AT','2000-01-01',repeat('b',64))->>'error', 'rate_limit_exceeded',
   'Ohne IP nur drei Aufrufe, auch bei wechselndem Gerät');
 update private.age_attempts set started_at=clock_timestamp()-interval '61 seconds';
-select is(public.issue_age_ticket('US','2000-01-01',repeat('b',64))->>'error', 'country_not_supported', 'Fallbackfenster läuft ab');
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('b',64))->>'error', 'country_not_supported', 'Fallbackfenster läuft ab');
 delete from private.age_attempts;
 select set_config('request.headers','{"x-forwarded-for":"192.0.2.15"}',true);
 select public.bind_age_ticket('missing','email','someone@example.com') from generate_series(1,30);

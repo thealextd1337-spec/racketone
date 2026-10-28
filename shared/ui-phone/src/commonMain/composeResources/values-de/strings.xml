@@ -568,7 +568,7 @@
     <string name="auth_title">Konto</string>
     <string name="auth_optional">Ein Konto ist optional. Lokal kannst du alles wie bisher nutzen.</string>
     <string name="auth_birth_privacy">Dein Geburtsdatum wird nur geprüft und nicht gespeichert. Österreich: ab 14, Deutschland, Schweiz und Liechtenstein: ab 16.</string>
-    <string name="auth_country">Wohnsitzland (AT, DE, CH, LI)</string>
+    <string name="auth_country">Wohnsitzland (2-stelliger Code, z. B. AT, DE, US)</string>
     <string name="auth_birth">Geburtsdatum (JJJJ-MM-TT)</string>
     <string name="auth_continue">Weiter</string>
     <string name="auth_google">Mit Google anmelden</string>

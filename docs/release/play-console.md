@@ -179,6 +179,8 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '3');
   commit;
   ```
+  **0.2.0 Build 4 (Datenschutzerklärung Version 4, Konten in allen Ländern ab 16, AT 14):** wie oben mit `'4'` statt `'3'`;
+  Voraussetzung ist zusätzlich die Migration `20261028000100_countries_worldwide.sql`.
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff

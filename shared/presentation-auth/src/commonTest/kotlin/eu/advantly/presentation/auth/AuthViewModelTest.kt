@@ -388,12 +388,22 @@ class AuthViewModelTest {
         assertNull(auth.session.value)
     }
 
-    @Test fun unsupportedCountryDoesNotCallBackendOrProvider() {
+    @Test fun malformedCountryDoesNotCallBackendOrProvider() {
+        for (code in listOf("U1", "A", "USA", "")) {
+            val auth = FakePhoneAuth()
+            val model = AuthViewModel(auth, scope)
+            model.checkAge(code, "2000-01-01")
+            assertEquals(listOf("refresh"), auth.calls, code)
+            assertEquals("country_not_supported", model.state.value.error, code)
+        }
+    }
+
+    @Test fun anyIsoCountryIsCheckedByBackend() {
         val auth = FakePhoneAuth()
         val model = AuthViewModel(auth, scope)
         model.checkAge("US", "2000-01-01")
-        assertEquals(listOf("refresh"), auth.calls)
-        assertEquals("country_not_supported", model.state.value.error)
+        assertEquals(listOf("refresh", "age:US"), auth.calls)
+        assertEquals(AuthStep.PROVIDER, model.state.value.step)
     }
 
     @Test fun ageRejectionAndExpiredTicketReturnToGate() {

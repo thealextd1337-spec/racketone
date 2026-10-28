@@ -117,7 +117,8 @@ class AuthViewModel(
         country: String,
         birthDate: String,
     ) = runAction {
-        if (country !in setOf("AT", "DE", "CH", "LI")) throw CloudException("country_not_supported", false)
+        // Welche Länder freigeschaltet sind, entscheidet der Server (country_age_rules); hier nur das Format.
+        if (!COUNTRY_CODE.matches(country)) throw CloudException("country_not_supported", false)
         if (!validBirthDate(birthDate)) throw CloudException("invalid_birth_date", false)
         ticket = auth.issueAgeTicket(country, birthDate)
         mutable.value = AuthState(AuthStep.PROVIDER)
@@ -383,6 +384,8 @@ class GoogleCredential(
     val idToken: String,
     val rawNonce: String,
 )
+
+private val COUNTRY_CODE = Regex("[A-Z]{2}")
 
 /** Kalenderprüfung ohne Clock: das Mindestalter prüft ausschließlich der Server mit Wohnsitzzeitzone. */
 internal fun validBirthDate(value: String): Boolean {

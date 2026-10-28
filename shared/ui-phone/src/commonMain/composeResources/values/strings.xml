@@ -568,7 +568,7 @@
     <string name="auth_title">Account</string>
     <string name="auth_optional">An account is optional. All local features remain available.</string>
     <string name="auth_birth_privacy">Your date of birth is only checked and never stored. Austria: 14+, Germany, Switzerland and Liechtenstein: 16+.</string>
-    <string name="auth_country">Country of residence (AT, DE, CH, LI)</string>
+    <string name="auth_country">Country of residence (2-letter code, e.g. US, GB, AT)</string>
     <string name="auth_birth">Date of birth (YYYY-MM-DD)</string>
     <string name="auth_continue">Continue</string>
     <string name="auth_google">Sign in with Google</string>

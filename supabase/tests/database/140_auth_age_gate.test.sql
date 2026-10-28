@@ -20,7 +20,7 @@ select is(private.age_result('LI','2010-10-16','2026-10-16 12:00+00'), 'ok', 'LI
 select is(private.age_result('CH','2010-10-16','2026-10-16 12:00+00'), 'ok', 'CH: genau 16');
 select is(private.age_result('LI','2010-10-17','2026-10-16 12:00+00'), 'age_below_minimum', 'LI: Tag vor Geburtstag');
 select is(private.age_result('DE','2010-10-17','2026-10-16 12:00+00'), 'age_below_minimum', 'DE: Tag vor Geburtstag');
-select is(private.age_result('US','1990-01-01',now()), 'country_not_supported', 'Andere Länder nicht verfügbar');
+select is(private.age_result('XX','1990-01-01',now()), 'country_not_supported', 'Andere Länder nicht verfügbar');
 select is(private.age_result('AT',null,now()), 'invalid_birth_date', 'Datum fehlt');
 select is(private.age_result('AT','1899-12-31',now()), 'invalid_birth_date', 'Unplausibles Datum');
 select is(private.age_result('AT','2999-01-01',now()), 'invalid_birth_date', 'Zukunft abgelehnt');
@@ -108,10 +108,10 @@ select ok(public.issue_age_ticket('AT','2000-01-01',repeat('d',64)) ? 'ticket', 
 -- Separates Budgetfenster für deterministische Rate-Grenzprüfung.
 delete from private.age_attempts;
 select set_config('request.headers','{"x-forwarded-for":"192.0.2.2"}',true);
-select public.issue_age_ticket('US','2000-01-01',repeat('e',64)) from generate_series(1,10);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('e',64))->>'error', 'rate_limit_exceeded', 'Auch fachliche Ablehnungen zählen: Versuch 11 gesperrt');
+select public.issue_age_ticket('XX','2000-01-01',repeat('e',64)) from generate_series(1,10);
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('e',64))->>'error', 'rate_limit_exceeded', 'Auch fachliche Ablehnungen zählen: Versuch 11 gesperrt');
 update private.age_attempts set started_at=clock_timestamp()-interval '61 seconds';
-select is(public.issue_age_ticket('US','2000-01-01',repeat('e',64))->>'error', 'country_not_supported', 'Fenster läuft ab');
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('e',64))->>'error', 'country_not_supported', 'Fenster läuft ab');
 select is_empty($$ select id from auth.users where email='expired@example.com' $$, 'Abgelaufene/abgelehnte Versuche ohne Auth-Nutzer');
 select set_config('request.headers','{}',true);
 select ok(public.issue_age_ticket('AT','2000-01-01',repeat('f',64)) ? 'ticket', 'Fehlende IP nutzt begrenztes gemeinsames Budget');
@@ -137,13 +137,13 @@ select throws_ok($$ select public.finish_onboarding('Alias','unchecked') $$,'P00
 reset role;
 -- Geräte- und IP-Budgets separat; wechselnde Installationen umgehen das IP-Budget nicht.
 delete from private.age_attempts;
-select public.issue_age_ticket('US','2000-01-01',repeat('g',63)||i::text) from generate_series(1,10) i;
+select public.issue_age_ticket('XX','2000-01-01',repeat('g',63)||i::text) from generate_series(1,10) i;
 select is(public.issue_age_ticket('AT','2000-01-01',repeat('h',64))->>'error','rate_limit_exceeded','IP-Budget gilt installationsübergreifend');
 delete from private.age_attempts;
 do $$ begin
   for i in 1..1000 loop
     perform set_config('request.headers',jsonb_build_object('x-forwarded-for','2001:db8::'||to_hex(i))::text,true);
-    perform public.issue_age_ticket('US','2000-01-01',repeat('z',60)||i::text);
+    perform public.issue_age_ticket('XX','2000-01-01',repeat('z',60)||i::text);
   end loop;
 end $$;
 select set_config('request.headers','{"x-forwarded-for":"192.0.2.200"}',true);
