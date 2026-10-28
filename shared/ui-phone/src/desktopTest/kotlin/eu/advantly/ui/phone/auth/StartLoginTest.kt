@@ -133,6 +133,16 @@ class StartLoginTest {
 
     @Test
     fun signedInUserSeesTheAppAndSignOutShowsTheStartAgain() {
+        val previous = Locale.getDefault()
+        Locale.setDefault(Locale.US)
+        try {
+            signOutAfterConfirmation()
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    private fun signOutAfterConfirmation() {
         runDesktopComposeUiTest(width = 360, height = 640) {
             val app = testModel()
             setContent { AdvantlyApp(model = app, authModel = authModel(signedIn = true)) }
@@ -140,6 +150,13 @@ class StartLoginTest {
             onNodeWithTag("start_login").assertDoesNotExist()
             runOnIdle { app.navigator.tab = AppTab.Profile }
             onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+            // Rückfrage: ohne Netz kein erneutes Anmelden; Ungesichertes erst nach Anmeldung mit demselben Konto.
+            onNodeWithText("same account", substring = true).assertIsDisplayed()
+            onNodeWithText("Cancel").performClick()
+            onNodeWithTag("auth_sign_out_dialog").assertDoesNotExist()
+            onNodeWithTag("profile").assertExists()
+            onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+            onNodeWithTag("auth_sign_out_confirm").performClick()
             onNodeWithTag("start_login").assertIsDisplayed()
             onNodeWithTag("tab_profile").assertDoesNotExist()
         }

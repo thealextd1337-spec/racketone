@@ -579,6 +579,7 @@
     <string name="auth_finish">Finish</string>
     <string name="auth_link_google">Link Google to this account</string>
     <string name="auth_sign_out">Sign out</string>
+    <string name="auth_sign_out_explanation">Without a connection you cannot sign in again, so scoring is only possible after signing in. Matches not yet backed up are uploaded only after you sign in again with the same account.</string>
     <string name="auth_restart">Sign in again</string>
     <string name="auth_unavailable">Accounts are not yet available in your country.</string>
     <string name="auth_too_young">An account is not available for your age. Try again after 24 hours.</string>

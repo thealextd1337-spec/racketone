@@ -60,9 +60,11 @@ import eu.advantly.ui.phone.friends.ShareDefaultSection
 import eu.advantly.ui.phone.live.WatchMark
 import eu.advantly.ui.phone.live.compactScore
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.account_cancel
 import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.app_version
 import eu.advantly.ui.phone.resources.auth_sign_out
+import eu.advantly.ui.phone.resources.auth_sign_out_explanation
 import eu.advantly.ui.phone.resources.coming_soon
 import eu.advantly.ui.phone.resources.coming_soon_friends
 import eu.advantly.ui.phone.resources.consent_terms
@@ -253,6 +255,7 @@ fun ProfileScreen(
     val termsUrl = stringResource(Res.string.terms_url)
     val imprintUrl = stringResource(Res.string.imprint_url)
     var accountOpen by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
@@ -281,7 +284,7 @@ fun ProfileScreen(
             LinkRow(stringResource(Res.string.profile_restore_previous), "profile_restore_previous", onRestorePrevious)
         }
         if (account != null) {
-            TextButton(account::signOut, modifier = Modifier.testTag("auth_sign_out")) {
+            TextButton({ confirmSignOut = true }, modifier = Modifier.testTag("auth_sign_out")) {
                 Text(stringResource(Res.string.auth_sign_out), color = colors.text)
             }
             Row(
@@ -329,6 +332,22 @@ fun ProfileScreen(
                 )
             }
         }
+    }
+    if (confirmSignOut && account != null) {
+        // Nach dem Abmelden zählt die App erst nach erneuter Anmeldung weiter (Pflichtkonto, 0.3.0).
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
+            title = { Text(stringResource(Res.string.auth_sign_out)) },
+            text = { Text(stringResource(Res.string.auth_sign_out_explanation)) },
+            confirmButton = {
+                TextButton({
+                    confirmSignOut = false
+                    account.signOut()
+                }, modifier = Modifier.testTag("auth_sign_out_confirm")) { Text(stringResource(Res.string.auth_sign_out)) }
+            },
+            dismissButton = { TextButton({ confirmSignOut = false }) { Text(stringResource(Res.string.account_cancel)) } },
+            modifier = Modifier.testTag("auth_sign_out_dialog"),
+        )
     }
 }
 

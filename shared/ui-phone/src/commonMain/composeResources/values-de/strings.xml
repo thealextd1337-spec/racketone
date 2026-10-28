@@ -579,6 +579,7 @@
     <string name="auth_finish">Fertig</string>
     <string name="auth_link_google">Google mit diesem Konto verknüpfen</string>
     <string name="auth_sign_out">Abmelden</string>
+    <string name="auth_sign_out_explanation">Ohne Internetverbindung kannst du dich nicht wieder anmelden und erst danach weiterzählen. Noch nicht gesicherte Matches werden erst hochgeladen, wenn du dich wieder mit demselben Konto anmeldest.</string>
     <string name="auth_restart">Neu anmelden</string>
     <string name="auth_unavailable">Konten sind in deinem Land noch nicht verfügbar.</string>
     <string name="auth_too_young">Ein Konto ist für dein Alter noch nicht verfügbar. Erneute Prüfung nach 24 Stunden.</string>
