@@ -40,7 +40,7 @@ select lives_ok($$ select public.finish_onboarding('Dirk') $$,
                 'DE: ab 16 Jahren erlaubt');
 
 select tests.authenticate_as('neu_xx');
-select is(public.issue_age_ticket('US', '1990-01-01', repeat('z',64))->>'error', 'country_not_supported',
+select is(public.issue_age_ticket('XX', '1990-01-01', repeat('z',64))->>'error', 'country_not_supported',
           'Nicht freigeschaltete Länder werden vor Auth abgelehnt');
 
 -- Sichtbarkeit -------------------------------------------------------------------------------------------

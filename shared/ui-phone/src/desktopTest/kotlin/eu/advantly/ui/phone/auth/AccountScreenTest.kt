@@ -485,12 +485,12 @@ class AccountScreenTest {
             assertEquals(listOf("refresh", "age:AT"), auth.calls)
         }
 
-    @Test fun unsupportedCountryNeverOpensProvider() =
+    @Test fun malformedCountryNeverOpensProvider() =
         runComposeUiTest {
             val auth = FakePhoneAuth()
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
             setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-            onNodeWithTag("auth_country").performTextReplacement("US")
+            onNodeWithTag("auth_country").performTextReplacement("U1")
             onNodeWithTag("auth_birth").performTextInput("2000-01-01")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
             onNodeWithTag("auth_error").assertExists()

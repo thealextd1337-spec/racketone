@@ -30,16 +30,16 @@ set local app.settings.trust_xff = '';
 delete from private.age_attempts;
 select set_config('request.headers','{"x-forwarded-for":"203.0.113.1"}',true);
 set local role anon;
-select is(public.issue_age_ticket('US','2000-01-01',repeat('1',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('1',64))->>'error',
   'country_not_supported', 'First untrusted XFF request uses shared fallback');
 select set_config('request.headers','{"x-forwarded-for":"203.0.113.2"}',true);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('2',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('2',64))->>'error',
   'country_not_supported', 'Second spoofed IP still uses shared fallback');
 select set_config('request.headers','{"x-forwarded-for":"203.0.113.3"}',true);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('3',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('3',64))->>'error',
   'country_not_supported', 'Third spoofed IP exhausts shared fallback');
 select set_config('request.headers','{"x-forwarded-for":"203.0.113.4","x-real-ip":"203.0.113.5"}',true);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('4',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('4',64))->>'error',
   'rate_limit_exceeded', 'Spoofed XFF and X-Real-IP cannot create another budget');
 reset role;
 select is((select attempts from private.age_attempts where key_hash=private.age_hash('issue:ip:missing')),
@@ -49,16 +49,16 @@ select is((select count(*)::int from private.age_attempts where key_hash in (
   private.age_hash('issue:ip:203.0.113.3'), private.age_hash('issue:ip:203.0.113.4'),
   private.age_hash('issue:ip:203.0.113.5'))), 0, 'No budget is created for spoofed addresses');
 select set_config('request.headers','{"cf-connecting-ip":"192.0.2.7","x-forwarded-for":"203.0.113.4"}',true);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('5',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('5',64))->>'error',
   'country_not_supported', 'Cloudflare has its own budget without opt-in');
 set local app.settings.trust_xff = 'on';
 select set_config('request.headers','{"x-forwarded-for":"203.0.113.4"}',true);
-select is(public.issue_age_ticket('US','2000-01-01',repeat('6',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('6',64))->>'error',
   'country_not_supported', 'Explicitly trusted XFF gets an IP budget');
 select is((select attempts from private.age_attempts where key_hash=private.age_hash('issue:ip:203.0.113.4')),
   1, 'Opt-in books the XFF address');
 set local app.settings.trust_xff = 'off';
-select is(public.issue_age_ticket('US','2000-01-01',repeat('7',64))->>'error',
+select is(public.issue_age_ticket('XX','2000-01-01',repeat('7',64))->>'error',
   'rate_limit_exceeded', 'Disabling trust returns to the exhausted fallback budget');
 select * from finish();
 rollback;
