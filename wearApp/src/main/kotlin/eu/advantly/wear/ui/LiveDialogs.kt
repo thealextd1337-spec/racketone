@@ -30,6 +30,7 @@ import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.SwipeToDismissBox
 import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
@@ -109,7 +110,8 @@ private fun ScalingLazyListScope.actionItem(
 /**
  * Steuerseite (04 W4, Pager links): Zähler – Rückgängig, Wiederholen, Pause, Sperre, Match beenden; Anzeige – Rolleninfo,
  * Staleness und „Zählen übernehmen“. Dazu Sync-Status, Fitness (Puls, kcal, Schritte) und Workout-Fehler.
- * Kehrt nach 8 s ohne Eingabe zum Score zurück (04 §2.2).
+ * Kehrt nach 8 s ohne Eingabe zum Score zurück (04 §2.2), ebenso mit Zurück und mit dem Gegen-Wisch nach rechts: Den
+ * fängt die App selbst ab (Swipe-to-dismiss der Activity ist aus) – das Match wird dabei nie verlassen.
  */
 @Composable
 fun ControlsPage(
@@ -131,6 +133,20 @@ fun ControlsPage(
             interaction++
             action()
         }
+    SwipeToDismissBox(onDismissed = onClose) { isBackground ->
+        if (!isBackground) ControlsList(live, workout, heartRate, actions, onClose, ::touch)
+    }
+}
+
+@Composable
+private fun ControlsList(
+    live: LiveUi,
+    workout: WorkoutUiState,
+    heartRate: Int?,
+    actions: LiveActions,
+    onClose: () -> Unit,
+    touch: (() -> Unit) -> () -> Unit,
+) {
     ListPage(edgeLabel = stringResource(R.string.action_back_to_score), onEdge = onClose) {
         if (live.role == LiveRole.SCORER) {
             item { ListHeader { Text(stringResource(R.string.controls_title)) } }
