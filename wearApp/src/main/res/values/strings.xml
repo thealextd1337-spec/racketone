@@ -21,7 +21,7 @@
     <!-- Markenname, in allen Sprachen gleich -->
     <string name="app_name" translatable="false">Advantly</string>
     <string name="wear_version">v%1$s</string>
-    <string name="home_privacy">Privacy: match data goes to your paired phone, heart rate and steps only as set under “Heart rate &amp; steps”. Details in the phone app under Profile › Privacy.</string>
+    <string name="home_privacy">Privacy: match data goes to your paired phone, heart rate and steps only as set under “Heart rate &amp; steps”. Details in the phone app under Profile › Account &amp; privacy.</string>
 
     <!-- Sportarten -->
     <string name="sport_tennis">Tennis</string>
