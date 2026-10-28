@@ -287,6 +287,35 @@
     <string name="result_share_failed">Das Bild konnte nicht geteilt werden.</string>
     <string name="result_delete_title">Dieses Match löschen?</string>
     <string name="result_delete_text">Das Match und alle Punkte werden von diesem Gerät entfernt. Das lässt sich nicht rückgängig machen.</string>
+    <string name="result_corrected">Ergebnis manuell korrigiert</string>
+    <string name="result_edit">Ergebnis bearbeiten</string>
+    <string name="result_edit_title">Ergebnis bearbeiten</string>
+    <string name="result_edit_sets">Sätze</string>
+    <string name="result_edit_set">Satz %1$d</string>
+    <string name="result_edit_kind_regular">Satz</string>
+    <string name="result_edit_kind_match_tiebreak">Match-Tiebreak</string>
+    <string name="result_edit_tiebreak">Tiebreak-Punkte</string>
+    <string name="result_edit_minus">%1$s verringern</string>
+    <string name="result_edit_plus">%1$s erhöhen</string>
+    <string name="result_edit_add_set">Satz hinzufügen</string>
+    <string name="result_edit_remove_set">Letzten Satz entfernen</string>
+    <string name="result_edit_winner">Sieger: %1$s</string>
+    <string name="result_edit_no_winner">Kein Sieger</string>
+    <string name="result_edit_issue_no_sets">Bitte mindestens einen Satz eingeben.</string>
+    <string name="result_edit_issue_too_many_sets">Es sind höchstens 9 Sätze möglich.</string>
+    <string name="result_edit_issue_set_kind">Satz %1$d: Diese Satzart ist in diesem Format hier nicht möglich (Satz oder Match-Tiebreak).</string>
+    <string name="result_edit_issue_set_score">Satz %1$d: Dieser Stand ist nach den Regeln des Formats nicht möglich.</string>
+    <string name="result_edit_issue_tiebreak_required">Satz %1$d endete im Tiebreak – bitte die Tiebreak-Punkte eingeben.</string>
+    <string name="result_edit_issue_tiebreak_score">Satz %1$d: Die Tiebreak-Punkte passen nicht – der Satzsieger gewinnt den Tiebreak, und nur ein im Tiebreak entschiedener Satz hat Tiebreak-Punkte.</string>
+    <string name="result_edit_issue_after_match_end">Satz %1$d: Das Match war schon entschieden – bitte diesen Satz entfernen.</string>
+    <string name="result_edit_servers">Aufschläger je Spiel</string>
+    <string name="result_edit_servers_hint">Die Aufschlag-Statistik folgt deiner Auswahl. Spiele ohne gezählte Punkte gehen nur in „Aufschlagspiele gewonnen“ ein, wenn der Satzstand zeigt, wer sie gewonnen hat.</string>
+    <string name="result_edit_servers_unavailable">Bei dieser Sportart ergibt sich der Aufschlag aus den Punkten und lässt sich nachträglich nicht ändern.</string>
+    <string name="result_edit_game">Satz %1$d · Spiel %2$d</string>
+    <string name="result_edit_save">Speichern</string>
+    <string name="result_edit_restore">Gezähltes Ergebnis wiederherstellen</string>
+    <string name="result_edit_failed">Die Änderung konnte nicht gespeichert werden.</string>
+    <string name="result_edit_note">Punkte und Statistik bleiben wie gezählt; das Match wird als korrigiert gekennzeichnet.</string>
     <string name="action_delete">Löschen</string>
 
     <!-- Latenz-Overlay (Spike S4, nur Debug) -->
