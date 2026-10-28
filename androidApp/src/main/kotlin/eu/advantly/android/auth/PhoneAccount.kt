@@ -24,15 +24,19 @@ import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.cloud.sync.pulledFeed
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.cloud.sync.pulledMatch
+import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.SessionListener
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.friends.LiveVisitorUpload
 import eu.advantly.presentation.friends.SharedMatchesLocal
+import eu.advantly.presentation.friends.VisitorQueue
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
@@ -43,6 +47,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -87,6 +93,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     account.scope,
                     core.backend,
                     core.sharedMatches,
+                    core.visitors,
                 ),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
@@ -193,6 +200,41 @@ internal class PhoneAccountCore private constructor(
             storageAction = runtime::storageAction,
         )
 
+    /**
+     * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
+     * wurde), und gehen nach jedem Abgleich hinaus. Ein Match mit Zuschauern lädt während des Spiels höchstens alle
+     * 30 s den Live-Stand hoch, sonst bleibt es beim Abgleich am Matchende.
+     */
+    val visitors =
+        VisitorQueue(record, backend, { profile, match ->
+            guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
+        }) { sync.syncNow() }
+    private val liveVisitors =
+        LiveVisitorUpload(visitors, System::currentTimeMillis, { delayMs, run ->
+            runtime.scope.launch {
+                delay(delayMs)
+                run()
+            }
+        }) { sync.syncNow() }
+    private val scoreListener =
+        SessionListener { state ->
+            val profile = auth.session.value?.profileId
+            state.matches
+                .filter { it.state.status != MatchStatus.FINISHED }
+                .forEach { liveVisitors.onScore(profile, it.id.value, it.eventCount) }
+        }
+
+    private suspend fun flushVisitors() {
+        val profile = auth.session.value?.profileId ?: return
+        try {
+            visitors.flush(profile)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Nicht endgültige Fehler bleiben vorgemerkt; der nächste Abgleich versucht es erneut.
+        }
+    }
+
     /** Gezogene Freundschaften nur innerhalb der Session-Grenze; nach Widerruf eine leere Liste statt SQL-Zugriff. */
     fun localFriendships(profile: String): List<PulledFriendship> = guarded(emptyList()) { cloudPulls.pulledFriendships(profile) }
 
@@ -234,11 +276,20 @@ internal class PhoneAccountCore private constructor(
 
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
+        session.addListener(scoreListener)
+        runtime.scope.launch {
+            var running = false
+            sync.state.collect { state ->
+                if (running && !state.running) flushVisitors()
+                running = state.running
+            }
+        }
     }
 
     /** Nur für einen widerrufenen Kern: Hosts erst leeren, dann Auth und Laufzeit schließen. */
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
+        session.removeListener(scoreListener)
         refreshAccount = null
         sync.close()
         var pending = if (pull == null) 1 else 2
