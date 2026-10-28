@@ -44,6 +44,8 @@ private class FakeFriends : FriendsPort {
         return code
     }
 
+    override suspend fun ownProfile() = FoundProfile("alice", "Alice", "alice_1")
+
     override suspend fun findProfile(query: String): FoundProfile? {
         call("find:$query")
         return found
@@ -170,6 +172,7 @@ class FriendsViewModelTest {
         fixture {
             model.open()
             assertEquals("K7QF92MX", state.friendCode)
+            assertEquals(FoundProfile("alice", "Alice", "alice_1"), state.me, "Profilkopf: Alias und Benutzername")
             model.open()
             assertEquals(1, friends.calls.count { it == "code" })
             model.search("  ")

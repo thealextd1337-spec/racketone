@@ -59,22 +59,26 @@ internal class CloudHttp(
     ): String = request("rpc/$name", body.toString(), accessToken, installation)
 
     /**
-     * Einzige direkte Tabellen-Grenze (P2-E): eigene Zeile `profile_settings` lesen bzw. mit [patch] spaltenweise ändern
-     * (Spaltenrecht + RLS + Cloud-Bindung; Blocklisten u. a. laufen über Cloud-RPCs). Liefert die (geänderten) Zeilen.
+     * Einzige direkte Tabellen-Grenze (P2-E): eigene Zeile `profile_settings` lesen bzw. mit [patch] spaltenweise ändern,
+     * eigene Zeile `profiles` (Alias, Benutzername fürs Profil) nur lesen (Spaltenrecht + RLS + Cloud-Bindung; Blocklisten
+     * u. a. laufen über Cloud-RPCs). Liefert die (geänderten) Zeilen.
      */
-    suspend fun profileSettings(
+    suspend fun ownRow(
+        table: String,
         query: String,
         patch: JsonObject?,
         accessToken: String,
         installation: CloudInstallation,
-    ): String =
-        request(
-            "profile_settings?$query",
+    ): String {
+        require(table == "profile_settings" || (table == "profiles" && patch == null))
+        return request(
+            "$table?$query",
             patch?.toString(),
             accessToken,
             installation,
             if (patch == null) HttpMethod.Get else HttpMethod.Patch,
         )
+    }
 
     private suspend fun request(
         path: String,

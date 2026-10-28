@@ -34,6 +34,8 @@ data class FriendEntry(
 data class FriendsState(
     val access: FriendsAccess = FriendsAccess.SIGNED_OUT,
     val friendCode: String? = null,
+    /** Eigener Alias und Benutzername fürs Profil; lädt zusammen mit [friendCode]. */
+    val me: FoundProfile? = null,
     val friends: List<FriendEntry> = emptyList(),
     val incoming: List<FriendEntry> = emptyList(),
     val outgoing: List<FriendEntry> = emptyList(),
@@ -102,13 +104,14 @@ class FriendsViewModel(
         loadCode()
     }
 
-    /** Auch „Erneut versuchen“ nach einem gescheiterten Laden des Codes. */
+    /** Auch „Erneut versuchen“ nach einem gescheiterten Laden des Codes; lädt Alias und Benutzername mit. */
     fun loadCode() {
         if (mutable.value.friendCode != null) return
         run { session ->
             val code = port.friendCode()
+            val me = port.ownProfile()
             current(session)
-            show { copy(friendCode = code) }
+            show { copy(friendCode = code, me = me) }
         }
     }
 

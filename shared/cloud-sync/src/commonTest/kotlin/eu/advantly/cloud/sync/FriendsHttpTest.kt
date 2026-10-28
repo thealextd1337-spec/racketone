@@ -266,4 +266,23 @@ class FriendsHttpTest {
                 http.close()
             }
         }
+
+    @Test fun ownProfileReadsOnlyTheOwnRowWithBearerAndInstallationProof(): Unit =
+        runBlocking {
+            var row = """[{"id":"alice","alias":"Alice","username":"alice_1"}]"""
+            val (friends, calls, http) = backend { row to HttpStatusCode.OK }
+            try {
+                friends.bindDevice("phone")
+                assertEquals(FoundProfile("alice", "Alice", "alice_1"), friends.ownProfile())
+                val call = calls.single()
+                assertEquals(HttpMethod.Get, call.method)
+                assertEquals("/rest/v1/profiles", call.path)
+                assertEquals("id=eq.alice&select=id,alias,username", call.query.replace("%2C", ","))
+                assertTrue(call.bearer == "Bearer token-a" && call.installationId == "installation" && call.proof == installation.proof)
+                row = """[{"id":"bob","alias":"Bob"}]"""
+                assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { friends.ownProfile() }.reason)
+            } finally {
+                http.close()
+            }
+        }
 }

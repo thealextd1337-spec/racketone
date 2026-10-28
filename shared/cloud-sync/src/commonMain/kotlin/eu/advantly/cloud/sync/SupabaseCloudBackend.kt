@@ -372,6 +372,14 @@ class SupabaseCloudBackend internal constructor(
         decode<String>(rpc(sessions.capture(), "my_friend_code", buildJsonObject {})).takeIf { it.isNotBlank() }
             ?: throw CloudException("cloud_response_invalid", false)
 
+    override suspend fun ownProfile(): FoundProfile {
+        val lease = sessions.capture()
+        val id = lease.credentials.profileId
+        return decode<List<FoundProfile>>(ownRow("profiles", lease) { "id=eq.$id&select=id,alias,username" })
+            .singleOrNull()
+            ?.takeIf { it.id == id } ?: throw CloudException("cloud_response_invalid", false)
+    }
+
     override suspend fun findProfile(query: String): FoundProfile? {
         val trimmed = query.trim()
         require(trimmed.isNotEmpty() && trimmed.length <= 64)
@@ -475,7 +483,7 @@ class SupabaseCloudBackend internal constructor(
     }
 
     override suspend fun shareMatchesDefault(profileId: String): Boolean =
-        shareDefault(profileSettings(lease(profileId)) { "select=share_matches_default" })
+        shareDefault(ownRow("profile_settings", lease(profileId)) { "select=share_matches_default" })
 
     override suspend fun setShareMatchesDefault(
         profileId: String,
@@ -483,7 +491,8 @@ class SupabaseCloudBackend internal constructor(
     ) {
         val body = buildJsonObject { put("share_matches_default", share) }
         // Spaltenrecht statt RPC (20261015000990_rechte.sql); der Filter bindet das Update an das geprüfte eigene Profil.
-        val stored = shareDefault(profileSettings(lease(profileId), body) { "profile_id=eq.$profileId&select=share_matches_default" })
+        val stored =
+            shareDefault(ownRow("profile_settings", lease(profileId), body) { "profile_id=eq.$profileId&select=share_matches_default" })
         if (stored != share) throw CloudException("cloud_response_invalid", false)
     }
 
@@ -502,8 +511,9 @@ class SupabaseCloudBackend internal constructor(
     private fun shareDefault(response: String): Boolean =
         decode<List<ShareDefaultRow>>(response).singleOrNull()?.share ?: throw CloudException("cloud_response_invalid", false)
 
-    /** Eigene `profile_settings`-Zeile (Lesen oder mit [body] spaltenweises Update) unter derselben Gerätebindung wie [rpc]. */
-    private suspend fun profileSettings(
+    /** Eigene Tabellenzeile (Lesen oder mit [body] spaltenweises Update) unter derselben Gerätebindung wie [rpc]. */
+    private suspend fun ownRow(
+        table: String,
         lease: CloudLease,
         body: JsonObject? = null,
         query: () -> String,
@@ -512,7 +522,7 @@ class SupabaseCloudBackend internal constructor(
         val token = lease.credentials.accessToken
         val response =
             sessions.request(lease) {
-                http.profileSettings(query(), body, token, installation)
+                http.ownRow(table, query(), body, token, installation)
             }
         if (binding !== current) throw CloudException("device_not_authorized", true)
         return response
