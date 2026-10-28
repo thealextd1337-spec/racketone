@@ -46,10 +46,10 @@ sealed interface WatchScreen {
         val gamesOptions: List<Int> = emptyList(),
         /** Wirksame Games pro Satz (Auswahl oder Standard des Formats), `null` ohne Auswahlmöglichkeit. */
         val gamesPerSet: Int? = null,
-        /** Schalter „Aufschlag-Statistik erfassen“ anbieten (nur Tennis/Padel). */
+        /** Wahl „Aufschläge“ anbieten (nur Tennis/Padel). */
         val serveStatsAvailable: Boolean = false,
-        /** Stand des Schalters (Default an, W2-Vertrag §1). */
-        val serveStats: Boolean = true,
+        /** Gewählter Modus (Default „Ja“). */
+        val serveTracking: eu.advantly.core.model.ServeTracking = eu.advantly.core.model.ServeTracking.FULL,
         val recentPlayers: List<eu.advantly.core.model.Player> = emptyList(),
         val selectedPlayers: Map<eu.advantly.wear.match.PlayerSlot, eu.advantly.core.model.PlayerId> = emptyMap(),
     ) : WatchScreen

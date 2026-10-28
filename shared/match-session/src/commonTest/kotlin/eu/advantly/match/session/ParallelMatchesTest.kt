@@ -49,10 +49,10 @@ class ParallelMatchesTest {
 
     /** A: Uhr zählt; B und C: Handy als Director (Nachbarplätze). */
     private fun threeMatches(): Triple<MatchId, MatchId, MatchId> {
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle()
         val b = phone.create(padel, doubles)
-        val c = phone.create(format, SINGLES)
+        val c = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         return Triple(a, b, c)
     }
@@ -136,7 +136,7 @@ class ParallelMatchesTest {
         watch.points("AA")
         cluster.settle()
         // Uhr-Match wechseln: neues Match „Meine Uhr“ – das Handy übernimmt A als Director
-        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val d = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle()
         assertEquals(d, phone.state.value.watchMatchId)
         assertTrue(
@@ -190,7 +190,7 @@ class ParallelMatchesTest {
         cluster.offline("watch")
         cluster.settle()
         assertEquals(a, phone.watchMatchNeedingTakeOver(), "… und ist nicht erreichbar: Wechsel nur mit Bestätigung")
-        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) }
         assertFalse(
             phone.assignToWatch(
                 phone.state.value.matches[1]
@@ -198,7 +198,7 @@ class ParallelMatchesTest {
             ),
         )
         // bestätigt: das Handy übernimmt A sofort
-        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
+        val d = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
         watch.points("AAA") // Uhr zählt offline weiter auf A
         cluster.online("watch")
         cluster.settle()
@@ -226,7 +226,7 @@ class ParallelMatchesTest {
         watch.points("A")
         cluster.offline("watch")
         cluster.settle()
-        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
+        phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
         watch.points("AA")
         cluster.online("watch")
         cluster.settle()
@@ -243,7 +243,7 @@ class ParallelMatchesTest {
     /** Review R2 #1a: Genesis zugestellt, Ack unterwegs, Uhr zählt – der Wechsel verwirft keinen Uhr-Punkt. */
     @Test
     fun switchWhileTheAckIsInFlightKeepsWatchPoints() {
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle(25) // Genesis bei der Uhr (20 ms), Ack noch unterwegs
         assertEquals(
             a,
@@ -252,7 +252,7 @@ class ParallelMatchesTest {
         )
         assertTrue(watch.recordPoint(Side.A))
         assertTrue(watch.recordPoint(Side.A))
-        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle()
         val old = phone.state.value.match(a)!!
         assertEquals(0, old.rejectedByRoleCount, "nichts verworfen")
@@ -267,22 +267,22 @@ class ParallelMatchesTest {
     /** Review R2 #1b: Trennung kurz vor dem Ack – der Wechsel verlangt die Bestätigung. */
     @Test
     fun disconnectBeforeTheAckStillAsksBeforeTakingOver() {
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle(25)
         assertTrue(watch.recordPoint(Side.A))
         assertTrue(watch.recordPoint(Side.A))
         cluster.offline("watch")
         cluster.settle()
         assertEquals(a, phone.watchMatchNeedingTakeOver(), "Match wurde an die Uhr gesendet: Rückfrage")
-        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) }
     }
 
     /** Review R2 #2: ausdrücklicher Wechsel zu einem älteren Director-Match – die Uhr folgt und gibt ihr Match ab. */
     @Test
     fun explicitSwitchToAnOlderMatchWinsOverTheWatchStartedOne() {
-        val a = phone.create(format, SINGLES) // Director, Uhr frei → zeigt A an
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING) // Director, Uhr frei → zeigt A an
         cluster.settle(1_000)
-        val w = watch.create(format, SINGLES) // Uhr startet selbst W (jünger)
+        val w = watch.create(format, SINGLES, NO_SERVE_TRACKING) // Uhr startet selbst W (jünger)
         cluster.settle()
         assertEquals(w, phone.state.value.watchMatchId, "Rennregel: jüngeres Uhr-Match")
         assertTrue(watch.recordPoint(Side.B))
@@ -317,7 +317,7 @@ class ParallelMatchesTest {
     /** Review R3 #1: Upgrade mit bestehendem Match ohne Merker – gilt als möglicherweise gesendet, Wechsel nur mit Rückfrage. */
     @Test
     fun upgradeWithAnExistingMatchStillAsksBeforeTakingOver() {
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         cluster.settle() // Genesis zugestellt und bestätigt
         cluster.offline("watch")
         cluster.settle()
@@ -341,7 +341,7 @@ class ParallelMatchesTest {
             ).also { it.start() }
         assertTrue(phone.resume(a))
         assertEquals(a, phone.watchMatchNeedingTakeOver(), "Bestandsmatch: Rückfrage statt stiller Übernahme")
-        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) }
+        assertFailsWith<IllegalStateException> { phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) }
     }
 
     /** Review R3 #1: Ein hier angelegtes, nie gesendetes Match übernimmt das Handy weiter ohne Rückfrage. */
@@ -349,9 +349,9 @@ class ParallelMatchesTest {
     fun neverSentMatchIsTakenOverWithoutAsking() {
         cluster.offline("watch")
         cluster.settle()
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // Uhr offline: nie gesendet
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) // Uhr offline: nie gesendet
         assertNull(phone.watchMatchNeedingTakeOver())
-        phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         assertTrue(
             phone.state.value
                 .match(a)!!
@@ -363,11 +363,11 @@ class ParallelMatchesTest {
     /** Review R3 #2: Ausdrücklicher Auftrag für dasselbe, bisher implizite Ziel gewinnt gegen einen Offline-Start der Uhr. */
     @Test
     fun explicitConfirmationOfTheSameTargetBeatsAnOfflineWatchStart() {
-        val a = phone.create(format, SINGLES) // Director bei freier Uhr: implizit zugewiesen
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING) // Director bei freier Uhr: implizit zugewiesen
         cluster.settle()
         cluster.offline("watch")
         cluster.settle()
-        val w = watch.create(format, SINGLES) // Uhr startet offline ein eigenes Match
+        val w = watch.create(format, SINGLES, NO_SERVE_TRACKING) // Uhr startet offline ein eigenes Match
         assertTrue(watch.recordPoint(Side.A))
         cluster.settle(1_000)
         assertTrue(phone.assignToWatch(a, watchScores = true))
@@ -399,8 +399,8 @@ class ParallelMatchesTest {
     fun unidentifiedPeersGetNoMatchData() {
         for (kind in listOf(PeerKind.WATCH, PeerKind.PHONE)) {
             val node = WireNode("p-$kind", 21, identifyPeer = false)
-            node.session.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // Uhr-Match (Platzhalter)
-            val id = node.session.create(format, SINGLES) // Director-Match auf dem Nachbarplatz
+            node.session.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) // Uhr-Match (Platzhalter)
+            val id = node.session.create(format, SINGLES, NO_SERVE_TRACKING) // Director-Match auf dem Nachbarplatz
             node.points(Side.A, 2)
             val before = node.link.sent.toList()
             assertTrue(before.none { it is Events }, "keine Events vor dem Hello")
@@ -423,7 +423,7 @@ class ParallelMatchesTest {
         watch.points("A")
         cluster.settle()
         assertNull(phone.watchMatchNeedingTakeOver(), "Uhr erreichbar: keine Rückfrage")
-        val d = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val d = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
         // die Uhr zählt weiter, bevor die neue Zuweisung ankommt
         assertTrue(watch.recordPoint(Side.A))
         assertTrue(watch.recordPoint(Side.A))
@@ -467,13 +467,13 @@ class ParallelMatchesTest {
         cluster.settle()
         val (b, w) =
             if (watchFirst) {
-                val w = watch.create(format, SINGLES)
+                val w = watch.create(format, SINGLES, NO_SERVE_TRACKING)
                 if (!sameMs) cluster.settle(1_000)
-                phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) to w
+                phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) to w
             } else {
-                val b = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+                val b = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch)
                 cluster.settle(1_000)
-                b to watch.create(format, SINGLES)
+                b to watch.create(format, SINGLES, NO_SERVE_TRACKING)
             }
         watch.points("AB")
         cluster.online("watch")
@@ -639,7 +639,7 @@ class ParallelMatchesTest {
         assertTrue(phone.resume(b))
         // Uhr-Nutzer beendet A und startet selbst ein neues Match
         watch.endMatch()
-        val w = watch.create(format, SINGLES)
+        val w = watch.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         val state = phone.state.value
         assertEquals(w, state.watchMatchId)
@@ -664,7 +664,7 @@ class ParallelMatchesTest {
         cluster.settle()
         assertNull(watch.state.value.match, "Uhr folgt keinem fremden Director-Match")
         // Neues Director-Match bei freier Uhr: die Uhr zeigt es an (wie bisher)
-        val e = phone.create(format, SINGLES)
+        val e = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         assertEquals(e, phone.state.value.watchMatchId)
         assertEquals(
@@ -754,7 +754,7 @@ class ParallelMatchesTest {
     fun migrationMakesTheLastRunningMatchTheWatchMatch() {
         val data = testLocalData()
         val old = MatchSession(data, null, cluster.scheduler, SessionConfig(DeviceId("p"), PeerKind.PHONE), cluster.clock)
-        val id = old.create(format, SINGLES)
+        val id = old.create(format, SINGLES, NO_SERVE_TRACKING)
         // Stand vor F22: keine gespeicherte Zuweisung
         data.settings.remove("session.watchMatch")
         data.settings.remove("session.watchMatchAt")
@@ -772,7 +772,7 @@ class ParallelMatchesTest {
         cluster.settle()
         assertNull(phone.state.value.watchMatchId)
         assertNull(watch.state.value.match, "gelöschtes Uhr-Match ist auch auf der Uhr weg")
-        val e = phone.create(format, SINGLES)
+        val e = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.settle()
         assertEquals(e, phone.state.value.watchMatchId)
         assertEquals(
@@ -791,8 +791,8 @@ class ParallelMatchesTest {
     fun placeholderGoesOnlyToTheAssignedMatch() {
         cluster.offline("watch")
         cluster.settle()
-        val a = phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch) // bekannte Uhr wird direkt Zähler
-        val b = phone.create(format, SINGLES)
+        val a = phone.create(format, SINGLES, NO_SERVE_TRACKING, scorer = ScorerChoice.MyWatch) // bekannte Uhr wird direkt Zähler
+        val b = phone.create(format, SINGLES, NO_SERVE_TRACKING)
         cluster.online("watch")
         cluster.settle()
         assertEquals(
@@ -811,8 +811,8 @@ class ParallelMatchesTest {
     fun watchIgnoresAnOlderAssignment() {
         val node = WireNode("w", 3, PeerKind.WATCH)
         val source = WireNode("p", 4)
-        val first = source.session.create(format, SINGLES)
-        val second = source.session.create(format, SINGLES)
+        val first = source.session.create(format, SINGLES, NO_SERVE_TRACKING)
+        val second = source.session.create(format, SINGLES, NO_SERVE_TRACKING)
         listOf(first, second).forEach {
             node.link.deliver(
                 eu.advantly.sync.protocol

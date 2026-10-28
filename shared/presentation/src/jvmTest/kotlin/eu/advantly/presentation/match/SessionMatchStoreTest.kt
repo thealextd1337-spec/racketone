@@ -349,7 +349,9 @@ class SessionMatchStoreTest {
         return LocalData(driver)
     }
 
-    private fun Rig.watchScoredMatch() = phone.start(phone.setupFor(tennis), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
+    // ohne automatische Aufschlag-Info: die Tests zählen verworfene Eingaben des Altzählers
+    private fun Rig.watchScoredMatch() =
+        phone.start(phone.setupFor(tennis).copy(meta = NO_SERVE_TRACKING), StartOptions(ScorerOption.MY_WATCH)).also { settle() }
 
     /** Versionsunterschied (Protokoll 1 ↔ 2) wird sichtbar: „Bitte Uhr aktualisieren“ bzw. „dieses Gerät aktualisieren“. */
     @Test
@@ -670,7 +672,7 @@ class SessionMatchStoreTest {
     @Test
     fun pendingEventsAreCountedWhileWatchIsAway() {
         val rig = Rig()
-        rig.phone.start(rig.phone.setupFor(tennis))
+        rig.phone.start(rig.phone.setupFor(tennis).copy(meta = NO_SERVE_TRACKING))
         rig.settle()
         rig.offline("watch")
         rig.settle()

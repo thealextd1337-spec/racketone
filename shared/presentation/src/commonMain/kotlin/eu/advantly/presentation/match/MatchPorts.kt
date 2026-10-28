@@ -157,7 +157,7 @@ data class StartOptions(
  * @property waitingForScorer das Match ist an die Uhr gesendet, sie hat sich dafür aber noch nicht gemeldet (keine
  *   Verbindung, noch keine Eingabe) – UI: „Warte auf Uhr …“ mit „Doch am Handy zählen“
  * @property lastPoint zuletzt wirksam gezählter Ballwechsel – Ziel der Aufschlag-Leiste ([LiveMatchPort.setServeInfo])
- * @property serveInfoEnabled Aufschlag-Leiste anbieten: Tennis/Padel und `meta.serveStats` (gilt auch auf Anzeige-Geräten
+ * @property serveInfoEnabled Aufschlag-Leiste anbieten: Tennis/Padel und `meta.serveTracking` ≠ OFF (gilt auch auf Anzeige-Geräten
  *   für die Anzeige; erfassen kann nur der Zähler)
  * @property canRemovePoint je Seite: „Letzten Punkt abziehen“ möglich ([LiveMatchPort.removeLastPointOf])
  * @property nextSetOptions bei `AWAITING_DECISION` die Satzarten für [LiveMatchPort.startNextSet], sonst leer
@@ -383,6 +383,12 @@ interface LiveMatchPort {
         pointId: EventId,
         value: ServeOutcome?,
     ): Boolean
+
+    /**
+     * Die Aufschlag-Leiste für [pointId] endete ohne Eingabe: im Modus „Ja“ „1. Aufschlag“ setzen, falls der Punkt noch
+     * keine Aufschlag-Info hat (nie überschreiben, idempotent; Regel wie `MatchSession.settleServeInfo`). Nur Zähler.
+     */
+    fun settleServeInfo(pointId: EventId): Boolean
 
     /**
      * Vorzeitiges Ende (02 §7 `MatchEnded`, nur Zähler): [side] = aufgebende bzw. nicht angetretene Side, bei `ABANDONED`

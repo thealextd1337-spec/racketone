@@ -11,6 +11,7 @@ import eu.advantly.core.model.MatchMode
 import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
@@ -642,7 +643,12 @@ class WatchScoring internal constructor(
                 return fail(STORE_WRITE)
             }
         try {
-            b.session.create(format, lineup, MatchMeta(watchWorkout = watchWorkout, serveStats = serveStats), scorer)
+            b.session.create(
+                format,
+                lineup,
+                MatchMeta(watchWorkout = watchWorkout, serveTracking = if (serveStats) ServeTracking.FULL else ServeTracking.OFF),
+                scorer,
+            )
         } catch (e: SessionThreadViolation) {
             return fail(THREAD_VIOLATION)
         } catch (e: IllegalArgumentException) {
@@ -893,7 +899,7 @@ class WatchPlayer(
  * @property lastPointServingSide Aufschlagseite vor dem letzten Punkt (A/B/leer)
  * @property lastPointServer stabile Spieler-/Platz-ID des Aufschlägers vor diesem Punkt (sonst leer)
  * @property lastPointServe FIRST_SERVE_IN / SECOND_SERVE_IN / DOUBLE_FAULT / leer (= unbekannt)
- * @property serveInfoEnabled Tennis/Padel und MatchMeta.serveStats; die UI begrenzt zusätzlich auf Zähler und aktive Anzeige
+ * @property serveInfoEnabled Tennis/Padel und MatchMeta.serveTracking ≠ OFF; die UI begrenzt zusätzlich auf Zähler und aktive Anzeige
  * @property doubleFaultAllowed der letzte Punkt ging an die Rückschlagseite
  * @property canRemovePointA Zähler und wirksamer Punkt von uns vorhanden (B entsprechend für Gegner)
  * @property serverChoiceGame 1/2 im offenen Wahlfenster, sonst 0; nicht blockierend

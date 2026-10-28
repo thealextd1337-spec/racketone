@@ -2,6 +2,7 @@ package eu.advantly.presentation.stats
 
 import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Effect
 import eu.advantly.core.scoring.EventLog
@@ -9,6 +10,7 @@ import eu.advantly.core.scoring.FlagLevel
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.Paused
+import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointRecord
 import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Resumed
@@ -44,6 +46,8 @@ data class Ratio(
  * @property servers Aufschlag-Kennzahlen je Spieler (Doppel: nach Aufschlägerwahl bzw. Rotation), Lineup-Reihenfolge
  *   (erst A, dann B); Spieler ohne eigenen Aufschlag fehlen
  * @property serveInfoRecorded mindestens ein Punkt hat eine Aufschlag-Info – sonst zeigt die UI die Aufschlag-Quoten als „—“
+ * @property serveTracking wirksamer Modus „Aufschläge“ des Matches (außer Tennis/Padel OFF): DOUBLE_FAULTS_ONLY kennt nur
+ *   Doppelfehler (1./2.-Aufschlag-Quoten bleiben leer), OFF keine Werte aus Aufschlag-Info
  */
 data class MatchStats(
     val pointsWon: SidePair<Int>,
@@ -60,6 +64,7 @@ data class MatchStats(
     val serveInfoRecorded: Boolean = false,
     val breakPointsSaved: SidePair<Ratio> = SidePair(Ratio(0, 0), Ratio(0, 0)),
     val progression: List<GameProgress> = emptyList(),
+    val serveTracking: ServeTracking = ServeTracking.FULL,
 ) {
     val totalPoints: Int get() = pointsWon.a + pointsWon.b
 
@@ -115,6 +120,7 @@ object MatchStatistics {
         val setup = record.summary.setup
         // Vollständiges Log inkl. Genesis: Zähler-Rolle aus MatchCreated (Single-Scorer, 02 §7.1a).
         val points = ScoringEngine.pointHistory(record.events)
+        val tracking = PointDetailRules.serveTracking(setup.meta, created.config.sport)
         return MatchStats(
             pointsWon = count(points) { p, side -> p.point.side == side },
             servicePoints = ratio(points, { p, side -> p.before.serve?.side == side }) { p, side -> p.point.side == side },
@@ -131,7 +137,7 @@ object MatchStatistics {
             longestStreak = streaks(points),
             games = games(record, created.config.sport.isTennisLike),
             netDurationMs = netDuration(record),
-            serve = SidePair.of { side -> serveStats(points) { it.before.serve?.side == side } },
+            serve = SidePair.of { side -> serveStats(points, tracking) { it.before.serve?.side == side } },
             servers =
                 (created.lineup.a + created.lineup.b)
                     .filter { player ->
@@ -143,22 +149,26 @@ object MatchStatistics {
                             setup.assignedPlayers[player]
                                 ?.id ?: player,
                             checkNotNull(created.lineup.sideOf(player)),
-                            serveStats(points) {
+                            serveStats(points, tracking) {
                                 it.server ==
                                     player
                             },
                         )
                     },
-            serveInfoRecorded = points.any { it.serve != null },
+            serveInfoRecorded = tracking != ServeTracking.OFF && points.any { it.serve != null },
+            serveTracking = tracking,
         )
     }
 
     /**
      * Aufschlag-Kennzahlen über die Punkte, die [served] auswählt (Team oder Spieler als Aufschläger). Ein Aufschlagspiel
-     * wird dem Aufschläger seines letzten Punktes zugerechnet (Standardspiel mit `GAME_WON`).
+     * wird dem Aufschläger seines letzten Punktes zugerechnet (Standardspiel mit `GAME_WON`). Je [tracking] zählt nur die
+     * Aufschlag-Info, die der Modus erfasst (z. B. von einem älteren Gerät erfasste 1./2. Aufschläge bei „Nur
+     * Doppelfehler“ nicht).
      */
     private fun serveStats(
         points: List<PointRecord>,
+        tracking: ServeTracking,
         served: (PointRecord) -> Boolean,
     ): ServeStats {
         val mine = points.filter(served)
@@ -166,7 +176,21 @@ object MatchStatistics {
         fun wonByServer(p: PointRecord) = p.point.side == p.before.serve?.side
         val games =
             mine.filter { it.before.current?.gameKind == GameKind.STANDARD && Effect.GAME_WON in it.after.effects }
-        val withInfo = mine.filter { it.serve != null }
+        val withInfo =
+            when (tracking) {
+                ServeTracking.OFF -> emptyList()
+                ServeTracking.DOUBLE_FAULTS_ONLY -> mine.filter { it.serve == ServeOutcome.DOUBLE_FAULT }
+                ServeTracking.FULL -> mine.filter { it.serve != null }
+            }
+        if (tracking == ServeTracking.DOUBLE_FAULTS_ONLY) {
+            // 1./2. Aufschlag unbekannt: nur Doppelfehler; recorded = Aufschlagpunkte (0 Doppelfehler ist ein Wert)
+            return ServeStats.EMPTY.copy(
+                servicePoints = Ratio(mine.count(::wonByServer), mine.size),
+                serviceGames = Ratio(games.count(::wonByServer), games.size),
+                doubleFaults = withInfo.size,
+                recorded = mine.size,
+            )
+        }
         val first = withInfo.filter { it.serve == ServeOutcome.FIRST_SERVE_IN }
         val second = withInfo.filter { it.serve != ServeOutcome.FIRST_SERVE_IN }
         return ServeStats(

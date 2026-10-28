@@ -3,6 +3,7 @@ package eu.advantly.wear.live
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
@@ -109,8 +110,8 @@ class WatchController(
         action { core.selectGamesPerSet(games) }
     }
 
-    fun setServeStats(enabled: Boolean) {
-        action { core.setServeStats(enabled) }
+    fun setServeTracking(tracking: ServeTracking) {
+        action { core.setServeTracking(tracking) }
     }
 
     fun selectServer(

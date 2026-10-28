@@ -3,7 +3,9 @@ package eu.advantly.match.session
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.data.LocalData
 import eu.advantly.data.scoreEvents
@@ -16,6 +18,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 val SINGLES: Lineup = Lineup(listOf(PlayerId("me")), listOf(PlayerId("bea")), PlayerId("me"))
+
+/** Für Tests, die Events zählen: „Aufschläge: Nein“, also keine automatische Aufschlag-Info („1. Aufschlag“) je Punkt. */
+val NO_SERVE_TRACKING: MatchMeta = MatchMeta(serveTracking = ServeTracking.OFF)
+
+/** Sync-/Übernahmetests in beiden Varianten: ohne Aufschlag-Info und im Standard „Ja“ (automatischer 1. Aufschlag). */
+val SERVE_MODES: List<MatchMeta> = listOf(NO_SERVE_TRACKING, MatchMeta())
 
 /** Ein simuliertes Gerät: eigene Datenbank, eigener Link, eigene Session. */
 class Device(

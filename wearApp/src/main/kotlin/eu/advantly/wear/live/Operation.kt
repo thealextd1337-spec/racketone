@@ -3,6 +3,7 @@ package eu.advantly.wear.live
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
+import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.OperationTimings
@@ -17,10 +18,11 @@ import eu.advantly.wear.scoring.StripHit
 // Aktionsleiste im Mittelband und Versionshinweis – reine Modelle und Regeln ohne Android (JVM-getestet).
 
 /**
- * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2): „1. Aufschlag · 2. Aufschlag · Doppelfehler“ für [pointId]
- * (= `lastPoint`).
+ * Aufschlag-Leiste nach dem Punkt (W2-Vertrag §2, 02 §7.2) für [pointId] (= `lastPoint`), je Modus „Aufschläge“:
+ * „Ja“ = „2. Aufschlag · Doppelfehler“ (ohne Eingabe gilt „1. Aufschlag“), „Nur Doppelfehler“ = „Doppelfehler“.
  *
- * @property options wählbare Werte; `DOUBLE_FAULT` nur, wenn die Rückschlagseite den Punkt gewann
+ * @property options wählbare Werte ([PointDetailRules.serveOptions]); `DOUBLE_FAULT` nur, wenn die Rückschlagseite den
+ *   Punkt gewann
  * @property selected aktuell erfasster Wert (markieren) oder `null`
  * @property hideAtMillis Ausblendzeitpunkt (monotone Zeit des Controllers, `SystemClock.elapsedRealtime`); die
  *   Restzeit-Anzeige rechnet hideAtMillis − jetzt und startet neu, wenn er sich ändert (neuer Punkt, Auswahl)
@@ -53,8 +55,9 @@ data class ServerChoiceUi(
 /**
  * Sichtbarkeit der Aufschlag-Leiste: erscheint nach jedem auf dieser Uhr gezählten Punkt für [VISIBLE_MILLIS], nach einer
  * Auswahl noch [AFTER_CHOICE_MILLIS] (Markierung sichtbar, Korrektur möglich), dann blendet sie sich aus. Ein neuer
- * Punkt ersetzt sie (neuer `lastPoint`); Undo, „Punkt abziehen“ und Aufwachen aus Ambient blenden sie aus.
- * Zeiten monoton (ms), als Parameter.
+ * Punkt ersetzt sie (neuer `lastPoint`); Undo, „Punkt abziehen“ und Aufwachen aus Ambient blenden sie aus. Das Ende
+ * ohne Eingabe meldet [takeExpired] genau einmal (Modus „Ja“: dann gilt „1. Aufschlag“). Zeiten monoton (ms), als
+ * Parameter.
  */
 class ServeBarTimer(
     private val visibleMillis: Long = VISIBLE_MILLIS,
@@ -79,6 +82,13 @@ class ServeBarTimer(
 
     fun dismiss() {
         pointId = null
+    }
+
+    /** Punkt, dessen Leiste bis [nowMillis] abgelaufen ist – genau einmal, danach ist die Leiste weg; sonst `null`. */
+    fun takeExpired(nowMillis: Long): EventId? {
+        val point = pointId?.takeIf { nowMillis >= hideAt } ?: return null
+        pointId = null
+        return point
     }
 
     /** Punkt, für den die Leiste gerade sichtbar ist, sonst `null`. */
@@ -109,19 +119,29 @@ sealed interface StripAction {
 
 /** Reine Regeln für Aufschlag-Leiste, Aufschlägerwahl, Aktionsleiste und Versionshinweis. */
 object OperationRules {
-    /** Reihenfolge der Leiste: „1. Aufschlag · 2. Aufschlag · Doppelfehler“. */
-    private val SERVE_ORDER = listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT)
-
     /**
      * Relative Breite des Segments „Doppelfehler“: ein langes Wort ohne Umbruchstelle („Doppelfehler“), die anderen
-     * Labels brechen zweizeilig um („1.“ / „Aufschlag“).
+     * Labels brechen zweizeilig um („2.“ / „Aufschlag“).
      */
     const val DOUBLE_FAULT_WEIGHT = 1.3f
 
-    /** Relative Segmentbreiten der Aufschlag-Leiste (Darstellung und Treffer, [eu.advantly.wear.scoring.ActionStrip]). */
-    fun serveWeights(bar: ServeBarUi): List<Float> = bar.options.map { if (it == ServeOutcome.DOUBLE_FAULT) DOUBLE_FAULT_WEIGHT else 1f }
+    /**
+     * Relative Breite des Satzstand-Felds ganz links in der Aufschlag-Leiste: Die Leiste liegt im Mittelband, wo sonst
+     * die Sätze und Games stehen – sie zeigt sie deshalb selbst an (nicht antippbar), so bleibt der Stand sichtbar.
+     */
+    const val SETS_WEIGHT = 1f
 
-    /** Aufschlag-Leiste für [match], falls sie für [visiblePoint] gerade sichtbar ist (nur Zähler mit Aufschlag-Statistik). */
+    /**
+     * Relative Breiten der Aufschlag-Leiste (Darstellung und Treffer, [eu.advantly.wear.scoring.ActionStrip]): erst das
+     * Satzstand-Feld ([SETS_WEIGHT]), dann je Wert aus [ServeBarUi.options] ein Segment.
+     */
+    fun serveWeights(bar: ServeBarUi): List<Float> =
+        listOf(SETS_WEIGHT) + bar.options.map { if (it == ServeOutcome.DOUBLE_FAULT) DOUBLE_FAULT_WEIGHT else 1f }
+
+    /**
+     * Aufschlag-Leiste für [match], falls sie für [visiblePoint] gerade sichtbar ist (nur Zähler, Modus „Aufschläge“ ≠
+     * „Nein“); `null` auch, wenn der Modus für diesen Punkt nichts anbietet („Nur Doppelfehler“, Punkt des Aufschlägers).
+     */
     fun serveBar(
         match: ActiveMatch,
         visiblePoint: EventId?,
@@ -129,7 +149,8 @@ object OperationRules {
     ): ServeBarUi? {
         if (!match.isScorer || !match.serveInfoEnabled || visiblePoint == null) return null
         val last = match.lastPoint?.takeIf { it.id == visiblePoint } ?: return null
-        val options = SERVE_ORDER.filter { it != ServeOutcome.DOUBLE_FAULT || last.doubleFaultAllowed }
+        val tracking = PointDetailRules.serveTracking(match.meta, match.format.sport)
+        val options = PointDetailRules.serveOptions(tracking, last.doubleFaultAllowed).ifEmpty { return null }
         return ServeBarUi(last.id, options, last.serve, hideAtMillis)
     }
 
@@ -167,11 +188,11 @@ object OperationRules {
         return null
     }
 
-    /** Segment [index] der Aufschlag-Leiste → Wert. */
+    /** Segment [index] der Aufschlag-Leiste ([serveWeights]) → Wert; das Satzstand-Feld (0) wählt nichts. */
     fun serveOption(
         bar: ServeBarUi,
         index: Int,
-    ): ServeOutcome? = bar.options.getOrNull(index)
+    ): ServeOutcome? = bar.options.getOrNull(index - 1)
 
     /**
      * Versionsunterschied zu einer erreichbaren Gegenstelle (W2-Vertrag §5): `PEER_TOO_OLD` → das andere Gerät (Handy)

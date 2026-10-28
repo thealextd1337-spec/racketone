@@ -20,12 +20,14 @@ import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.RadioButton
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.SwipeToDismissBox
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.wear.R
@@ -62,8 +64,8 @@ interface SetupActions {
     /** „Games pro Satz“ (Tennis/Padel 1–6). */
     fun selectGamesPerSet(games: Int)
 
-    /** „Aufschlag-Statistik erfassen“ (Tennis/Padel). */
-    fun setServeStats(enabled: Boolean)
+    /** „Aufschläge“: Ja / Nur Doppelfehler / Nein (Tennis/Padel). */
+    fun setServeTracking(tracking: ServeTracking)
 }
 
 /**
@@ -233,8 +235,8 @@ private fun ScalingLazyListScope.serverStep(
 
 /**
  * Match-Optionen im letzten Schritt (W2-Vertrag §5, unter den Startknöpfen – ohne Änderung startet der Standard mit
- * einem Tap): Tennis/Padel „Games pro Satz“ 1–6 als 2 × 3 runde Umschalter (nicht bei „Nur Tiebreak“) und der Schalter
- * „Aufschlag-Statistik erfassen“ (Default an).
+ * einem Tap): Tennis/Padel „Games pro Satz“ 1–6 als 2 × 3 runde Umschalter (nicht bei „Nur Tiebreak“) und die Wahl
+ * „Aufschläge“ (Ja / Nur Doppelfehler / Nein, Default „Ja“).
  */
 private fun ScalingLazyListScope.matchOptions(
     setup: WatchScreen.Setup,
@@ -254,17 +256,34 @@ private fun ScalingLazyListScope.matchOptions(
         }
     }
     if (setup.serveStatsAvailable) {
+        item { ListHeader { Text(stringResource(R.string.setup_serve_tracking)) } }
+        SERVE_TRACKING_LABELS.forEach { (tracking, label) ->
+            item {
+                RadioButton(
+                    selected = setup.serveTracking == tracking,
+                    onSelect = { actions.setServeTracking(tracking) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(label), maxLines = 2) },
+                )
+            }
+        }
         item {
-            SwitchButton(
-                checked = setup.serveStats,
-                onCheckedChange = actions::setServeStats,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.setup_serve_stats), maxLines = 2) },
-                secondaryLabel = { Text(stringResource(R.string.setup_serve_stats_hint), maxLines = 2) },
+            Text(
+                stringResource(R.string.setup_serve_tracking_hint),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
             )
         }
     }
 }
+
+/** Reihenfolge und Labels der Wahl „Aufschläge“ (wie im Handy-Assistenten). */
+private val SERVE_TRACKING_LABELS =
+    listOf(
+        ServeTracking.FULL to R.string.setup_serve_full,
+        ServeTracking.DOUBLE_FAULTS_ONLY to R.string.setup_serve_double_faults_only,
+        ServeTracking.OFF to R.string.setup_serve_off,
+    )
 
 /** Optionale Spielerwahl vor den Startknöpfen. Jede Person ist ein eigenes Element der Rotary-Liste. */
 private fun ScalingLazyListScope.playerChoices(

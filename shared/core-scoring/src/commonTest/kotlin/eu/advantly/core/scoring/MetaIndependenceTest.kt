@@ -6,6 +6,7 @@ import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -49,10 +50,14 @@ class MetaIndependenceTest {
         assertEquals(true, MatchMeta().watchWorkout)
     }
 
-    /** „Aufschlag-Statistik erfassen“ steuert nur die UI (02 §10), nicht den Fold. */
+    /** „Aufschläge“ (Ja / Nur Doppelfehler / Nein) steuert nur die UI (02 §10), nicht den Fold. */
     @Test
-    fun serveStatsOptionDoesNotChangeTheScore() {
-        assertEquals(ScoringEngine.fold(log(MatchMeta())), ScoringEngine.fold(log(MatchMeta(serveStats = false))))
+    fun serveTrackingOptionDoesNotChangeTheScore() {
+        val full = ScoringEngine.fold(log(MatchMeta()))
+        for (tracking in ServeTracking.entries) {
+            assertEquals(full, ScoringEngine.fold(log(MatchMeta(serveTracking = tracking))), "$tracking")
+        }
+        assertEquals(ServeTracking.FULL, MatchMeta().serveTracking)
         assertEquals(true, MatchMeta().serveStats)
     }
 }

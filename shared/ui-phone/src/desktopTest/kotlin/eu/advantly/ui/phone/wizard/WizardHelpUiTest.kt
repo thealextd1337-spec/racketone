@@ -114,7 +114,6 @@ class WizardHelpUiTest {
                             }
                         }
                         assertTrue(next())
-                        toggleAdvanced()
                     }
                 assertEquals(WizardStep.FORMAT, wizard.state.value.step)
                 setContent {

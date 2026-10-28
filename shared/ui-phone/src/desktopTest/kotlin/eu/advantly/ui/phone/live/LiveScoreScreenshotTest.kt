@@ -215,7 +215,6 @@ class LiveScoreScreenshotTest {
                 wizard.selectSurface(null)
                 wizard.addGuest("Jonas")
                 wizard.next()
-                wizard.toggleAdvanced()
                 wizard.setTennisMatch(eu.advantly.presentation.wizard.TennisMatchChoice.TIEBREAK_10)
             },
         )
@@ -308,7 +307,6 @@ class LiveScoreScreenshotTest {
                 wizard.selectSurface(Surface.CLAY)
                 wizard.addGuest("Jonas")
                 wizard.next()
-                wizard.toggleAdvanced()
             },
         )
 
@@ -322,7 +320,6 @@ class LiveScoreScreenshotTest {
                 wizard.selectSport(Sport.TABLE_TENNIS)
                 wizard.addGuest("Jonas")
                 wizard.next()
-                wizard.toggleAdvanced()
             },
         )
 
@@ -337,7 +334,6 @@ class LiveScoreScreenshotTest {
                 wizard.next()
                 wizard.addGuest("Jonas")
                 wizard.next()
-                wizard.toggleAdvanced()
             },
             interact = { onNodeWithTag("advanced_content").performScrollTo() },
         )

@@ -1,7 +1,9 @@
 package eu.advantly.cloud.sync
 
 import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
@@ -165,6 +167,8 @@ class ConsentUploadRunnerIntegrationTest {
                             fixture.phone.create(
                                 Presets.TENNIS_SINGLES_BO3.format(),
                                 Lineup(listOf(PlayerId("a")), listOf(PlayerId("b")), PlayerId("a")),
+                                // zählt ausstehende Events: ohne automatische Aufschlag-Info
+                                MatchMeta(serveTracking = ServeTracking.OFF),
                             )
                         assertTrue(fixture.phone.recordPoint(Side.A))
                         val historical = fixture.data.events.eventsFor(match.value)

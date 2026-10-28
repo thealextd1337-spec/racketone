@@ -30,6 +30,7 @@ import androidx.wear.ambient.AmbientLifecycleObserver
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
@@ -710,7 +711,7 @@ class MainActivity : ComponentActivity() {
 
             override fun selectGamesPerSet(games: Int) = if (currentSession()) controller.selectGamesPerSet(games) else Unit
 
-            override fun setServeStats(enabled: Boolean) = if (currentSession()) controller.setServeStats(enabled) else Unit
+            override fun setServeTracking(tracking: ServeTracking) = if (currentSession()) controller.setServeTracking(tracking) else Unit
 
             override fun removePoint(side: Side): Boolean = currentSession() && (!isAmbient.value && controller.removePoint(side))
 

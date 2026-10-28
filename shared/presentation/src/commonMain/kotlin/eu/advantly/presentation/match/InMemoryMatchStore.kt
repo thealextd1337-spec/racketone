@@ -8,6 +8,7 @@ import eu.advantly.core.model.MatchSettings
 import eu.advantly.core.model.MatchTiebreakFormat
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
@@ -249,7 +250,10 @@ class InMemoryMatchStore(
             detail == point.detail || append(e, PointDetailSet(pointId, detail))
         }
 
-    private fun serveInfoEnabled(e: Entry): Boolean = e.setup.format.sport.isTennisLike && e.setup.meta.serveStats
+    override fun settleServeInfo(pointId: EventId): Boolean = command(clearRedo = false) { e -> settleServe(e, pointId) }
+
+    private fun serveInfoEnabled(e: Entry): Boolean =
+        PointDetailRules.serveTracking(e.setup.meta, e.setup.format.sport) != ServeTracking.OFF
 
     /** Ein Gerät: nie eine Uhr, die übernommen werden müsste. */
     override fun watchTakeOverNeeded(): LiveMatchSnapshot? = null
@@ -484,10 +488,32 @@ class InMemoryMatchStore(
         return ok
     }
 
+    /**
+     * Wie die Session (`MatchSession.settleServeInfo`): Im Modus „Ja“ bekommt der letzte Punkt ohne Aufschlag-Info
+     * „1. Aufschlag“, bevor der nächste Punkt zählt bzw. das Match endet – auch der Punkt, der das Match beendet.
+     */
     private fun append(
         entry: Entry,
         payload: EventPayload,
-    ): Boolean = appendEvent(entry, payload) != null
+    ): Boolean {
+        val closes = payload is PointWon || payload is MatchEnded || (payload is ContinueDecision && !payload.anotherSet)
+        if (closes) settleServe(entry, entry.engine.lastPoint?.id)
+        val event = appendEvent(entry, payload) ?: return false
+        if (payload is PointWon && entry.engine.state.status == MatchStatus.FINISHED) settleServe(entry, event.id)
+        return true
+    }
+
+    /** `true`, wenn ein automatischer 1. Aufschlag geschrieben wurde. */
+    private fun settleServe(
+        e: Entry,
+        pointId: EventId?,
+    ): Boolean {
+        val sport = e.setup.format.sport
+        val auto = PointDetailRules.autoServe(PointDetailRules.serveTracking(e.setup.meta, sport)) ?: return false
+        val point = pointId?.let { e.engine.point(it) } ?: return false
+        if (PointDetailRules.serveOutcome(point.detail, point.side, point.servingSide, sport) != null) return false
+        return appendEvent(e, PointDetailSet(point.id, PointDetailRules.withServe(point.detail, auto))) != null
+    }
 
     /**
      * Hängt [payload] an, wenn die Engine es anwendet. Ein Event, das die Engine überspringen würde

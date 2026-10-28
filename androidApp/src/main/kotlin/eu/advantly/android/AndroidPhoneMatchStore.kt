@@ -90,6 +90,8 @@ internal class AndroidPhoneMatchStore private constructor(
         value: ServeOutcome?,
     ) = calls.run { raw.setServeInfo(pointId, value) } ?: false
 
+    override fun settleServeInfo(pointId: EventId) = calls.run { raw.settleServeInfo(pointId) } ?: false
+
     override fun select(matchId: MatchId) = calls.run { raw.select(matchId) } ?: false
 
     override fun endMatch(

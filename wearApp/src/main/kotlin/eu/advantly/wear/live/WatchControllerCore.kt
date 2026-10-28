@@ -3,12 +3,14 @@ package eu.advantly.wear.live
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.assignments
 import eu.advantly.match.session.ActiveMatch
@@ -67,8 +69,8 @@ internal class WatchControllerCore(
         val format: FormatChoice? = null,
         /** Gewählte Games pro Satz; `null` = Standard des Formats. */
         val gamesPerSet: Int? = null,
-        /** „Aufschlag-Statistik erfassen“ (Tennis/Padel, Default an). */
-        val serveStats: Boolean = true,
+        /** „Aufschläge“ (Tennis/Padel, Default „Ja“). */
+        val serveTracking: ServeTracking = ServeTracking.FULL,
         val selectedPlayers: Map<PlayerSlot, PlayerId> = emptyMap(),
     )
 
@@ -135,15 +137,18 @@ internal class WatchControllerCore(
         session.removeListener(listener)
     }
 
-    /** Sekundentakt der UI (Staleness, Übernahme-Angebot nach 30 s). */
-    fun tick() = publish()
+    /** Sekundentakt der UI (Staleness, Übernahme-Angebot nach 30 s, Ende der Aufschlag-Leiste). */
+    fun tick() {
+        settleServeBar(elapsed())
+        publish()
+    }
 
     /** Display wieder aktiv (Ambient → interaktiv): kurze Sperre gegen den Aufweck-Tap (04 §4.3.3 Punkt 4). */
     fun onWake() {
         interactive = true
         tapGuard.onWake(uptime())
-        // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei
-        serveBar.dismiss()
+        // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei (ohne Eingabe beendet)
+        settleServeBar(Long.MAX_VALUE)
         publish()
     }
 
@@ -233,11 +238,11 @@ internal class WatchControllerCore(
         publish()
     }
 
-    /** Schalter „Aufschlag-Statistik erfassen“ (nur Tennis/Padel). */
-    fun setServeStats(enabled: Boolean) {
+    /** Vorab-Wahl „Aufschläge“: Ja / Nur Doppelfehler / Nein (nur Tennis/Padel). */
+    fun setServeTracking(tracking: ServeTracking) {
         val d = draft ?: return
         if (d.sport?.let(SetupCatalog::serveStatsAvailable) != true) return
-        draft = d.copy(serveStats = enabled)
+        draft = d.copy(serveTracking = tracking)
         publish()
     }
 
@@ -257,7 +262,7 @@ internal class WatchControllerCore(
             WatchSetup(
                 format = SetupCatalog.format(choice, discipline, today(), d.gamesPerSet),
                 lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(d.selectedPlayers), server, serverIndex),
-                meta = SetupCatalog.meta(sport, d.serveStats).copy(watchWorkout = prefs.workoutEnabled),
+                meta = SetupCatalog.meta(sport, d.serveTracking).copy(watchWorkout = prefs.workoutEnabled),
             )
         return start(setup)
     }
@@ -346,12 +351,23 @@ internal class WatchControllerCore(
         return true
     }
 
-    /** Aufschlag-Leiste: Wert für den letzten Punkt setzen bzw. ändern (nur solange die Leiste sichtbar ist). */
+    /**
+     * Aufschlag-Leiste: Wert für den letzten Punkt setzen bzw. ändern (nur solange die Leiste sichtbar ist). Ein erneuter
+     * Tipp auf den gewählten Wert nimmt einen Fehl-Tipp zurück (wie am Handy): „Ja“ → wieder „1. Aufschlag“, „Nur
+     * Doppelfehler“ → keine Angabe.
+     */
     fun setServe(outcome: ServeOutcome): Boolean {
         val live = mutableState.value.live ?: return false
         val bar = live.serveBar ?: return false
         if (locked || outcome !in bar.options) return false
-        if (!session.setServeInfo(bar.pointId, outcome)) {
+        val match = session.state.value.match ?: return false
+        val value =
+            if (outcome == bar.selected) {
+                PointDetailRules.autoServe(PointDetailRules.serveTracking(match.meta, match.format.sport))
+            } else {
+                outcome
+            }
+        if (!session.setServeInfo(bar.pointId, value)) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             return false
         }
@@ -556,6 +572,14 @@ internal class WatchControllerCore(
             false
         }
 
+    /**
+     * Leiste bis [nowMillis] ohne Eingabe abgelaufen: Modus „Ja“ erfasst „1. Aufschlag“ (die Session setzt nur, wenn noch
+     * nichts erfasst ist – eine Auswahl bleibt, kein zweites Event). Nächster Punkt und Matchende erledigt die Session.
+     */
+    private fun settleServeBar(nowMillis: Long) {
+        serveBar.takeExpired(nowMillis)?.let { session.settleServeInfo(it) }
+    }
+
     /** Die Wahl darf die Erfassung zum letzten lokalen Punkt nicht dauerhaft verdrängen. */
     private fun restoreServeBarAfterChoice() {
         val match = session.state.value.match ?: return
@@ -720,7 +744,7 @@ internal class WatchControllerCore(
             gamesOptions = gamesOptions,
             gamesPerSet = if (gamesOptions.isEmpty()) null else d.gamesPerSet ?: d.format?.let(SetupCatalog::defaultGames),
             serveStatsAvailable = sport?.let(SetupCatalog::serveStatsAvailable) == true,
-            serveStats = d.serveStats,
+            serveTracking = d.serveTracking,
             recentPlayers = directory.recentPlayers(),
             selectedPlayers = d.selectedPlayers,
         )

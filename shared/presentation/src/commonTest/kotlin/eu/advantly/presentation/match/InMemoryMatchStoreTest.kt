@@ -379,7 +379,7 @@ class InMemoryMatchStoreTest {
     @Test
     fun recordContainsGenesisAndAllEvents() {
         val store = testStore()
-        val id = store.start(store.setupFor(tennisBo3))
+        val id = store.start(store.setupFor(tennisBo3).copy(meta = NO_SERVE_TRACKING))
         store.play("AB")
         store.undo()
         val record = assertNotNull(store.record(id))

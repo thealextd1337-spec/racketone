@@ -3,8 +3,10 @@ package eu.advantly.presentation.match
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
+import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Uuid7
 
@@ -24,6 +26,9 @@ class CountingIds(
 }
 
 fun testStore(selfName: String = "Alex"): InMemoryMatchStore = InMemoryMatchStore(StepClock(), CountingIds(), selfName = selfName)
+
+/** Für Tests, die Events oder Zeiten zählen: „Aufschläge: Nein“, also keine automatische Aufschlag-Info je Punkt. */
+val NO_SERVE_TRACKING: MatchMeta = MatchMeta(serveTracking = ServeTracking.OFF)
 
 /** Setup mit dem eigenen Spieler (A) gegen Gäste (B); Doppel mit Partner. */
 fun PlayersPort.setupFor(

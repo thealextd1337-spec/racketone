@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Environment
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
 import eu.advantly.presentation.friends.FriendEntry
@@ -60,7 +61,10 @@ import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
 import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.setup_one_game_hint
-import eu.advantly.ui.phone.resources.setup_serve_stats
+import eu.advantly.ui.phone.resources.setup_serve_double_faults_only
+import eu.advantly.ui.phone.resources.setup_serve_full
+import eu.advantly.ui.phone.resources.setup_serve_off
+import eu.advantly.ui.phone.resources.setup_serve_tracking
 import eu.advantly.ui.phone.resources.wizard_advanced
 import eu.advantly.ui.phone.resources.wizard_continue
 import eu.advantly.ui.phone.resources.wizard_environment
@@ -385,7 +389,7 @@ private fun RuleHint(text: StringResource) {
     )
 }
 
-/** „Erweitert“ (eingeklappt): alle Varianten aus 02 §5.1 bzw. die nur-lesenden Regeln für B/TT (§5.1.1). */
+/** „Erweitert“ (anfangs aufgeklappt): alle Varianten aus 02 §5.1 bzw. die nur-lesenden Regeln für B/TT (§5.1.1). */
 @Composable
 private fun AdvancedSection(
     wizard: MatchWizard,
@@ -420,17 +424,15 @@ private fun AdvancedSection(
     if (!input.advancedExpanded) return
     Column(Modifier.testTag("advanced_content")) {
         if (sport.isTennisLike) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ToggleRow(
-                    modifier = Modifier.weight(1f),
-                    title = stringResource(Res.string.setup_serve_stats),
-                    subtitle = null,
-                    checked = state.input.serveStats,
-                    onChange = wizard::setServeStats,
-                    tag = "toggle_serve_stats",
-                )
-                HelpIcon(stringResource(Res.string.setup_serve_stats), WizardHelp.SERVE_STATS)
-            }
+            HelpSection(stringResource(Res.string.setup_serve_tracking), WizardHelp.SERVE_STATS)
+            WizardChoices(
+                options = listOf(ServeTracking.FULL, ServeTracking.DOUBLE_FAULTS_ONLY, ServeTracking.OFF),
+                selected = input.serveTracking,
+                label = { serveTrackingLabel(it) },
+                onSelect = wizard::setServeTracking,
+                tagPrefix = "serve_tracking",
+                accent = accent,
+            )
             if (input.tennisMatch != TennisMatchChoice.REGULAR) return@Column
         }
         when (sport) {
@@ -483,6 +485,16 @@ private fun AdvancedSection(
         }
     }
 }
+
+@Composable
+private fun serveTrackingLabel(tracking: ServeTracking): String =
+    stringResource(
+        when (tracking) {
+            ServeTracking.FULL -> Res.string.setup_serve_full
+            ServeTracking.DOUBLE_FAULTS_ONLY -> Res.string.setup_serve_double_faults_only
+            ServeTracking.OFF -> Res.string.setup_serve_off
+        },
+    )
 
 @Composable
 private fun TennisLikeAdvanced(

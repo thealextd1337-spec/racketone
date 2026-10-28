@@ -3,15 +3,19 @@ package eu.advantly.wear.live
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.PlayerId
+import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.data.scoreEvents
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.presentation.live.PointLabel
 import eu.advantly.presentation.match.LocalDay
@@ -42,14 +46,14 @@ class WatchControllerOperationTest {
         format: FormatChoice = FormatChoice.TENNIS_BO3,
         server: Side = Side.A,
         games: Int? = null,
-        serveStats: Boolean? = null,
+        serveTracking: ServeTracking? = null,
     ) {
         c.newMatch()
         c.selectSport(sport)
         if (sport != Sport.PADEL) c.selectDiscipline(discipline)
         c.selectFormat(format)
         games?.let(c::selectGamesPerSet)
-        serveStats?.let(c::setServeStats)
+        serveTracking?.let(c::setServeTracking)
         assertTrue(c.selectServer(server, 0))
     }
 
@@ -142,12 +146,17 @@ class WatchControllerOperationTest {
         startOnWatch(server = Side.A)
         assertNull(live.serveBar)
         points(Side.A) // Aufschläger gewinnt
-        assertEquals(listOf(ServeOutcome.FIRST_SERVE_IN, ServeOutcome.SECOND_SERVE_IN), live.serveBar?.options)
+        val first = match.lastPoint!!.id
+        // Modus „Ja“: nur „2. Aufschlag“ (und „Doppelfehler“ bei Punkten der Rückschlagseite), 1. Aufschlag ist der Standard
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN), live.serveBar?.options)
         assertFalse(c.setServe(ServeOutcome.DOUBLE_FAULT))
+        assertFalse("kein Knopf für den 1. Aufschlag", c.setServe(ServeOutcome.FIRST_SERVE_IN))
+        assertNull(match.lastPoint?.serve)
         points(Side.B) // Rückschläger gewinnt → neue Leiste für den neuen Punkt
+        assertEquals("ohne Eingabe: 1. Aufschlag", ServeOutcome.FIRST_SERVE_IN, serveOf(first))
         val bar = live.serveBar!!
         assertEquals(match.lastPoint?.id, bar.pointId)
-        assertEquals(ServeOutcome.entries.toList(), bar.options)
+        assertEquals(listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), bar.options)
         assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
         assertEquals(WatchHaptic.CONFIRM, h.haptics.last().pattern)
         assertEquals(ServeOutcome.DOUBLE_FAULT, match.lastPoint?.serve)
@@ -155,11 +164,18 @@ class WatchControllerOperationTest {
         // Korrektur, solange sichtbar
         assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
         assertEquals(ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
+        // Fehl-Tipp zurücknehmen: erneuter Tipp auf den gewählten Wert → wieder 1. Aufschlag (wie am Handy)
+        assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertEquals(ServeOutcome.FIRST_SERVE_IN, match.lastPoint?.serve)
+        assertNull("nichts markiert", live.serveBar?.selected?.takeIf { it in live.serveBar!!.options })
+        assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
         // kurz nach der Wahl blendet sie aus
         h.scheduler.advanceBy(ServeBarTimer.AFTER_CHOICE_MILLIS)
         c.tick()
         assertNull(live.serveBar)
-        assertFalse(c.setServe(ServeOutcome.FIRST_SERVE_IN))
+        assertEquals("die Wahl bleibt, kein automatischer 1. Aufschlag", ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
+        assertFalse(c.setServe(ServeOutcome.DOUBLE_FAULT))
     }
 
     /**
@@ -213,10 +229,15 @@ class WatchControllerOperationTest {
         startOnWatch()
         points(Side.A)
         assertNotNull(live.serveBar)
+        val details = detailEvents()
         h.scheduler.advanceBy(ServeBarTimer.VISIBLE_MILLIS)
         c.tick()
         assertNull("ohne Wahl nach wenigen Sekunden weg", live.serveBar)
+        assertEquals("Ablauf ohne Eingabe: 1. Aufschlag", ServeOutcome.FIRST_SERVE_IN, match.lastPoint?.serve)
+        c.tick()
+        assertEquals("genau ein Event, kein zweites beim nächsten Takt", details + 1, detailEvents())
         points(Side.A)
+        assertEquals("der nächste Punkt schreibt für den vorigen nichts mehr", details + 1, detailEvents())
         assertNotNull(live.serveBar)
         assertTrue(c.undo())
         assertNull(live.serveBar)
@@ -225,11 +246,43 @@ class WatchControllerOperationTest {
         points(Side.B)
         c.onWake()
         assertNull(live.serveBar)
+        assertEquals("Aufwachen beendet die Leiste ohne Eingabe", ServeOutcome.FIRST_SERVE_IN, match.lastPoint?.serve)
     }
 
     @Test
+    fun doubleFaultsOnlyShowsTheBarOnlyForReceiverPointsAndSetsNothingByItself() {
+        startOnWatch(server = Side.A, serveTracking = ServeTracking.DOUBLE_FAULTS_ONLY)
+        assertEquals(ServeTracking.DOUBLE_FAULTS_ONLY, match.meta.serveTracking)
+        points(Side.A)
+        assertNull("Punkt des Aufschlägers: keine Leiste", live.serveBar)
+        points(Side.B)
+        assertEquals(listOf(ServeOutcome.DOUBLE_FAULT), live.serveBar?.options)
+        h.scheduler.advanceBy(ServeBarTimer.VISIBLE_MILLIS)
+        c.tick()
+        assertNull(live.serveBar)
+        points(Side.B)
+        assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
+        assertTrue("Fehl-Tipp zurücknehmen", c.setServe(ServeOutcome.DOUBLE_FAULT))
+        assertNull("„Nur Doppelfehler“: keine Angabe", match.lastPoint?.serve)
+        assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
+        points(Side.A)
+        c.confirmEnd()
+        assertEquals(listOf(null, null, ServeOutcome.DOUBLE_FAULT, null), serves())
+    }
+
+    private fun serves() = ScoringEngine.pointHistory(h.watchData.events.scoreEvents(match.id)).map { it.serve }
+
+    private fun serveOf(point: eu.advantly.core.model.EventId) =
+        ScoringEngine.pointHistory(h.watchData.events.scoreEvents(match.id)).single { it.event.id == point }.serve
+
+    private fun detailEvents() =
+        h.watchData.events
+            .scoreEvents(match.id)
+            .count { it.payload is PointDetailSet }
+
+    @Test
     fun serveBarRespectsTheServeStatsOptionAndTheSport() {
-        startOnWatch(serveStats = false)
+        startOnWatch(serveTracking = ServeTracking.OFF)
         assertFalse(match.meta.serveStats)
         points(Side.A)
         assertNull(live.serveBar)
@@ -505,13 +558,13 @@ class WatchControllerOperationTest {
         assertEquals(listOf(1, 2, 3, 4, 5, 6), setup.gamesOptions)
         assertEquals("Standard des Formats", 4, setup.gamesPerSet)
         assertTrue(setup.serveStatsAvailable)
-        assertTrue(setup.serveStats)
+        assertTrue(setup.serveTracking == ServeTracking.FULL)
         c.selectGamesPerSet(9) // nicht wählbar
         c.selectGamesPerSet(3)
-        c.setServeStats(false)
+        c.setServeTracking(ServeTracking.OFF)
         setup = c.state.value.screen as WatchScreen.Setup
         assertEquals(3, setup.gamesPerSet)
-        assertFalse(setup.serveStats)
+        assertFalse(setup.serveTracking == ServeTracking.FULL)
         // anderes Format → wieder dessen Standard
         c.back()
         c.selectFormat(FormatChoice.TENNIS_BO3)
@@ -561,8 +614,8 @@ class WatchControllerOperationTest {
         val setup = c.state.value.screen as WatchScreen.Setup
         assertFalse(setup.serveStatsAvailable)
         assertEquals(emptyList<Int>(), setup.gamesOptions)
-        c.setServeStats(false)
-        assertTrue((c.state.value.screen as WatchScreen.Setup).serveStats)
+        c.setServeTracking(ServeTracking.OFF)
+        assertTrue((c.state.value.screen as WatchScreen.Setup).serveTracking == ServeTracking.FULL)
     }
 
     @Test

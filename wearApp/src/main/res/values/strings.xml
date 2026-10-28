@@ -211,8 +211,11 @@
         <item quantity="one">%1$d game</item>
         <item quantity="other">%1$d games</item>
     </plurals>
-    <string name="setup_serve_stats">Track serve statistics</string>
-    <string name="setup_serve_stats_hint">After each point: 1st/2nd serve or double fault</string>
+    <string name="setup_serve_tracking">Serves</string>
+    <string name="setup_serve_full">Yes</string>
+    <string name="setup_serve_double_faults_only">Double faults only</string>
+    <string name="setup_serve_off">No</string>
+    <string name="setup_serve_tracking_hint">Yes: tap 2nd serve or double fault after the point, otherwise it counts as a 1st serve</string>
     <string name="live_remove_point_us">Remove our last point</string>
     <string name="live_remove_point_them">Remove opponents\' last point</string>
     <string name="live_point_removed">Point removed</string>

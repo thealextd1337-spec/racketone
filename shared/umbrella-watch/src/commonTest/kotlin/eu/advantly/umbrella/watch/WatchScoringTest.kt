@@ -432,7 +432,8 @@ class WatchScoringTest {
         rig.network.setConnected("watch", false)
         rig.settle()
         val offline = assertNotNull(rig.points("A"))
-        assertEquals(1, offline.pendingToPeers, "„1 ausstehend“")
+        // Punkt + automatischer „1. Aufschlag“ zum vorigen Punkt (Modus „Ja“, keine Eingabe)
+        assertEquals(2, offline.pendingToPeers, "„2 ausstehend“")
         assertFalse(offline.linkConnected)
         rig.network.setConnected("watch", true)
         rig.settle()
@@ -549,9 +550,10 @@ class WatchScoringTest {
         rig.points("AAA")
         rig.watch.close()
         val next = assertNotNull(rig.watch.startMatch("TENNIS_OPEN", doubles = false, weServeFirst = true, watchWorkout = true))
-        assertEquals(1, next.pendingToPeers, "nur die neue Genesis, nicht die vier Events des alten Matches")
+        assertEquals(1, next.pendingToPeers, "nur die neue Genesis, nicht die sechs Events des alten Matches")
         assertEquals(1, assertNotNull(rig.snapshots.last()).pendingToPeers)
-        assertEquals(5, rig.watchSession.state.value.sync.pendingToPeers, "Session bleibt geräteweit")
+        // alt: Genesis, 3 Punkte, 2 automatische „1. Aufschlag“ (der letzte Punkt ist noch offen); neu: Genesis
+        assertEquals(7, rig.watchSession.state.value.sync.pendingToPeers, "Session bleibt geräteweit")
         assertEquals(2, assertNotNull(rig.watch.point(sideA = true)).pendingToPeers)
         val id = next.matchId
         rig.watchData.events.markConfirmedUpTo(id, rig.watch.deviceId(), rig.watchData.events.maxDeviceSeq(id, rig.watch.deviceId()))
@@ -758,7 +760,8 @@ class WatchScoringTest {
         assertNotNull(rig.watch.point(sideA = true))
         rig.network.setConnected("watch", true)
         rig.settle(5_000)
-        assertEquals(1, assertNotNull(rig.watch.snapshot()).droppedInputs)
+        // der verworfene Punkt und der automatische „1. Aufschlag“ zum vorigen Punkt (Modus „Ja“)
+        assertEquals(2, assertNotNull(rig.watch.snapshot()).droppedInputs)
         rig.watch.acknowledgeDroppedInputs()
         assertEquals(0, assertNotNull(rig.watch.snapshot()).droppedInputs)
     }

@@ -138,7 +138,10 @@ internal fun LiveOperationsSlot(
     }
 }
 
-/** Kein Dialog: Der nächste Punkt bleibt jederzeit zählbar. Erneutes Wählen löscht die Angabe. */
+/**
+ * Kein Dialog: Der nächste Punkt bleibt jederzeit zählbar. Werte je Modus „Aufschläge“ ([LiveOperationRules.serveOptions]);
+ * erneutes Wählen nimmt die Angabe zurück – „Ja“: wieder 1. Aufschlag, „Nur Doppelfehler“: keine Angabe.
+ */
 @Composable
 internal fun ServeInfoBar(
     controller: LiveScoreController,
@@ -182,7 +185,9 @@ internal fun ServeInfoBar(
                             },
                         ),
                     selected = point.serve == option,
-                    onClick = { controller.setServeInfo(point.id, option.takeUnless { it == point.serve }) },
+                    onClick = {
+                        controller.setServeInfo(point.id, option.takeUnless { it == point.serve } ?: LiveOperationRules.autoServe(snapshot))
+                    },
                     tag = "serve_${option.name}",
                     modifier = if (option == options.last()) Modifier.bringIntoViewRequester(lastOption) else Modifier,
                     role = Role.RadioButton,
