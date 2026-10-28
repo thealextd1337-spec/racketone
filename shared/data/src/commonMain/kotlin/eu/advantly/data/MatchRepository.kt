@@ -52,6 +52,8 @@ data class ScoreSummary(
     val currentState: CurrentSet? = null,
     val lastEventAtMs: Long? = null,
     val eventCount: Int = 0,
+    /** Ergebnis nach Matchende manuell korrigiert (`MatchResult.corrected`, Protokoll 5). */
+    val corrected: Boolean = false,
 ) {
     companion object {
         val EMPTY: ScoreSummary = ScoreSummary()
@@ -96,6 +98,7 @@ data class ScoreSummary(
                 current = state.current?.let { currentScore(it) },
                 completedSets = state.sets,
                 currentState = state.current,
+                corrected = state.result?.corrected == true,
             )
     }
 }

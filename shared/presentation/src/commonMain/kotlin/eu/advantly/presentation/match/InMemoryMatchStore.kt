@@ -12,11 +12,14 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchEnded
@@ -28,6 +31,7 @@ import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
@@ -382,6 +386,28 @@ class InMemoryMatchStore(
     override fun record(matchId: MatchId): MatchRecord? {
         val entry = entries[matchId] ?: return null
         return MatchRecord(summary(entry), entry.engine.state, listOf(entry.genesis) + entry.engine.events)
+    }
+
+    override fun canCorrectResult(matchId: MatchId): Boolean = entries[matchId]?.engine?.state?.status == MatchStatus.FINISHED
+
+    override fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>,
+    ): Boolean = correction(matchId, ResultCorrected(sets))
+
+    override fun correctGameServers(
+        matchId: MatchId,
+        servers: List<GameServer>,
+    ): Boolean = correction(matchId, GameServersCorrected(servers))
+
+    private fun correction(
+        matchId: MatchId,
+        payload: EventPayload,
+    ): Boolean {
+        val entry = entries[matchId] ?: return false
+        if (appendEvent(entry, payload) == null) return false
+        publish()
+        return true
     }
 
     override fun delete(matchId: MatchId): Boolean {

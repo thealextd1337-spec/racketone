@@ -9,8 +9,10 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
+import eu.advantly.core.scoring.GameServer
 import eu.advantly.core.scoring.MatchResult
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
@@ -507,6 +509,24 @@ interface MatchHistoryPort {
         matchId: MatchId,
         slot: PlayerId,
         player: PlayerId?,
+    ): Boolean = false
+
+    /**
+     * „Ergebnis bearbeiten“ nach Matchende: Ersteller, Match beendet, Protokoll 5 mit Konto (sonst könnte eine ältere Uhr
+     * die Korrektur nicht lesen).
+     */
+    fun canCorrectResult(matchId: MatchId): Boolean = false
+
+    /** Sätze korrigieren (`ResultCorrected`, leer = gezähltes Ergebnis); `false` ohne Event bei unplausiblen Sätzen. */
+    fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>,
+    ): Boolean = false
+
+    /** Aufschläger je Spiel (Tennis/Padel, `GameServersCorrected`, vollständige Liste); `false` ohne Event, wenn ungültig. */
+    fun correctGameServers(
+        matchId: MatchId,
+        servers: List<GameServer>,
     ): Boolean = false
 
     /** Beendete Matches, neueste zuerst. Ein per Undo wieder geöffnetes Match verschwindet, bis es erneut endet. */

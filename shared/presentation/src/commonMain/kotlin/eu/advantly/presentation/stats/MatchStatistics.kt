@@ -14,6 +14,7 @@ import eu.advantly.core.scoring.PointWon
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoringEngine
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.ServiceGame
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.StatusFlag
@@ -44,6 +45,8 @@ data class Ratio(
  * @property servers Aufschlag-Kennzahlen je Spieler (Doppel: nach Aufschlägerwahl bzw. Rotation), Lineup-Reihenfolge
  *   (erst A, dann B); Spieler ohne eigenen Aufschlag fehlen
  * @property serveInfoRecorded mindestens ein Punkt hat eine Aufschlag-Info – sonst zeigt die UI die Aufschlag-Quoten als „—“
+ * @property breaks gewonnene / abgeschlossene Rückschlagspiele (Tennis/Padel) über [ScoringEngine.serviceGames]: mit
+ *   korrigierten Aufschlägern und Spielen ohne Punkte, deren Sieger feststeht; Tiebreaks und laufende Spiele zählen nicht
  */
 data class MatchStats(
     val pointsWon: SidePair<Int>,
@@ -60,15 +63,9 @@ data class MatchStats(
     val serveInfoRecorded: Boolean = false,
     val breakPointsSaved: SidePair<Ratio> = SidePair(Ratio(0, 0), Ratio(0, 0)),
     val progression: List<GameProgress> = emptyList(),
+    val breaks: SidePair<Ratio> = SidePair(Ratio(0, 0), Ratio(0, 0)),
 ) {
     val totalPoints: Int get() = pointsWon.a + pointsWon.b
-
-    /** Gewonnene / abgeschlossene Rückschlagspiele; Tiebreaks und laufende Spiele zählen nicht. */
-    val breaks: SidePair<Ratio> get() =
-        SidePair.of { side ->
-            val returns = progression.filter { it.kind == GameKind.STANDARD && it.server == side.other && it.winner != null }
-            Ratio(returns.count { it.winner == side }, returns.size)
-        }
 }
 
 /**
@@ -76,7 +73,8 @@ data class MatchStats(
  * für die sie erfasst wurde ([recorded]); ohne Erfassung ist `total = 0`, `Ratio.percent = null` → Anzeige „—“.
  *
  * @property servicePoints Punkte bei eigenem Aufschlag gewonnen / gespielt (immer verfügbar)
- * @property serviceGames Aufschlagspiele (Standardspiele) gewonnen / gespielt (Tennis/Padel, immer verfügbar)
+ * @property serviceGames Aufschlagspiele (Standardspiele) gewonnen / gespielt (Tennis/Padel, immer verfügbar; nach einer
+ *   Ergebnis-Korrektur auch Spiele ohne Punkte mit festgelegtem Aufschläger und feststehendem Sieger)
  * @property firstServeIn 1. Aufschlag gut / Punkte mit Aufschlag-Info („1.-Aufschlag-Quote“)
  * @property firstServeWon nach gutem 1. Aufschlag gewonnen / gute 1. Aufschläge
  * @property secondServeWon nach 2. Aufschlag gewonnen / Punkte mit 2. Aufschlag (inklusive Doppelfehler, Tour-Konvention)
@@ -115,6 +113,12 @@ object MatchStatistics {
         val setup = record.summary.setup
         // Vollständiges Log inkl. Genesis: Zähler-Rolle aus MatchCreated (Single-Scorer, 02 §7.1a).
         val points = ScoringEngine.pointHistory(record.events)
+        // abgeschlossene Aufschlagspiele mit Aufschläger-Side
+        val games =
+            ScoringEngine
+                .serviceGames(record.events)
+                .filter { it.winner != null }
+                .mapNotNull { game -> game.server?.let(created.lineup::sideOf)?.let { game to it } }
         return MatchStats(
             pointsWon = count(points) { p, side -> p.point.side == side },
             servicePoints = ratio(points, { p, side -> p.before.serve?.side == side }) { p, side -> p.point.side == side },
@@ -131,47 +135,51 @@ object MatchStatistics {
             longestStreak = streaks(points),
             games = games(record, created.config.sport.isTennisLike),
             netDurationMs = netDuration(record),
-            serve = SidePair.of { side -> serveStats(points) { it.before.serve?.side == side } },
+            serve = SidePair.of { side -> serveStats(points, games.filter { it.second == side }) { it.before.serve?.side == side } },
             servers =
                 (created.lineup.a + created.lineup.b)
                     .filter { player ->
                         val assigned = player in setup.assignedPlayers
                         setup.player(player)?.isPlaceholder != true && (assigned || !Placeholders.isPlaceholder(player))
-                    }.filter { player -> points.any { it.server == player } }
+                    }.filter { player -> points.any { it.server == player } || games.any { it.first.server == player } }
                     .map { player ->
                         PlayerServeStats(
                             setup.assignedPlayers[player]
                                 ?.id ?: player,
                             checkNotNull(created.lineup.sideOf(player)),
-                            serveStats(points) {
+                            serveStats(points, games.filter { it.first.server == player }) {
                                 it.server ==
                                     player
                             },
                         )
                     },
             serveInfoRecorded = points.any { it.serve != null },
+            breaks =
+                SidePair.of { side ->
+                    val returns = games.filter { it.second == side.other }
+                    Ratio(returns.count { it.first.winner == side }, returns.size)
+                },
         )
     }
 
     /**
-     * Aufschlag-Kennzahlen über die Punkte, die [served] auswählt (Team oder Spieler als Aufschläger). Ein Aufschlagspiel
-     * wird dem Aufschläger seines letzten Punktes zugerechnet (Standardspiel mit `GAME_WON`).
+     * Aufschlag-Kennzahlen über die Punkte, die [served] auswählt (Team oder Spieler als Aufschläger), und dessen
+     * abgeschlossene Aufschlagspiele [games] mit Aufschläger-Side (letzter Punkt bzw. korrigiert, [ScoringEngine.serviceGames]).
      */
     private fun serveStats(
         points: List<PointRecord>,
+        games: List<Pair<ServiceGame, Side?>>,
         served: (PointRecord) -> Boolean,
     ): ServeStats {
         val mine = points.filter(served)
 
         fun wonByServer(p: PointRecord) = p.point.side == p.before.serve?.side
-        val games =
-            mine.filter { it.before.current?.gameKind == GameKind.STANDARD && Effect.GAME_WON in it.after.effects }
         val withInfo = mine.filter { it.serve != null }
         val first = withInfo.filter { it.serve == ServeOutcome.FIRST_SERVE_IN }
         val second = withInfo.filter { it.serve != ServeOutcome.FIRST_SERVE_IN }
         return ServeStats(
             servicePoints = Ratio(mine.count(::wonByServer), mine.size),
-            serviceGames = Ratio(games.count(::wonByServer), games.size),
+            serviceGames = Ratio(games.count { it.second == it.first.winner }, games.size),
             firstServeIn = Ratio(first.size, withInfo.size),
             firstServeWon = Ratio(first.count(::wonByServer), first.size),
             secondServeWon = Ratio(second.count(::wonByServer), second.size),
@@ -231,7 +239,7 @@ object MatchStatistics {
      * Rückgängig gemachte und übersprungene Events werden ignoriert.
      */
     private fun netDuration(record: MatchRecord): Long {
-        val events = record.events.filterNot { it.payload is eu.advantly.core.scoring.PlayerAssigned }
+        val events = record.events.filter { it.payload is MatchCreated || EventLog.countsForMatchTime(it.payload) }
         if (events.size < 2) return 0
         val end = events.last().wallClockMs
         var total = end - events.first().wallClockMs
