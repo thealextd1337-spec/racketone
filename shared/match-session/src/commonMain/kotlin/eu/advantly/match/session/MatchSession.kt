@@ -161,11 +161,14 @@ class MatchSession(
     override fun leaveAccount() {
         checkThread()
         activeOwnership = null
-        if (!data.accountIdentities.managed || data.accountIdentities.profile == null) return
+        val leaving = data.accountIdentities.profile
+        if (!data.accountIdentities.managed || leaving == null) return
         var guest = data.settings.get("identity.guest")
-        if (guest == null || data.accountIdentities.scopeHasOwnedSource(guest)) {
+        // Ein Gastbereich gehört genau dem Profil, nach dessen Abmelden er entstand (automatische Übernahme, 0.3.0).
+        if (guest == null || data.accountIdentities.scopeHasOwnedSource(guest) || data.accountIdentities.guestOrigin(guest) != leaving) {
             guest = ids.newUuid7(clock.nowMs()).value
             data.settings.put("identity.guest", guest)
+            data.accountIdentities.rememberGuestOrigin(guest, leaving)
         }
         selectIdentity(guest, null)
     }
@@ -189,7 +192,10 @@ class MatchSession(
         if (changed) finishIdentityChange(next, scope)
     }
 
-    override fun adoptionSources(): List<AdoptionSource> = data.accountIdentities.adoptionSources()
+    override fun adoptionSources(): List<AdoptionSource> =
+        data.accountIdentities.profile
+            ?.let(data.accountIdentities::automaticAdoptionSources)
+            .orEmpty()
 
     override fun adoptSources(
         session: CloudUploadSession,

@@ -3,7 +3,6 @@ package eu.advantly.presentation.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.advantly.cloud.sync.CloudAuthPort
-import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentSnapshot
@@ -17,27 +16,39 @@ import kotlinx.coroutines.launch
 
 enum class AuthStep { AGE, PROVIDER, CODE, CONSENT, ALIAS, ACCOUNT }
 
-data class AdoptionChoice(
-    val key: String,
-    val watch: Boolean,
-    val eventCount: Long,
-)
-
 data class AuthState(
     val step: AuthStep = AuthStep.AGE,
     val busy: Boolean = false,
     val error: String? = null,
     val deletionRequested: Boolean = false,
-    val adoptionSources: List<AdoptionChoice> = emptyList(),
-    val selectedSources: Set<String> = emptySet(),
     val authenticated: Boolean = false,
     val consent: ConsentSnapshot? = null,
     val exportedData: String? = null,
     /** K5: Konto gesperrt; Kontorechte bleiben, Cloud-Arbeit ist pausiert. */
     val suspended: Boolean = false,
-    /** K4: zuletzt geladene eigene Geräte; `null` = nicht geladen. */
-    val devices: List<CloudDevice>? = null,
-)
+    /**
+     * Kontoprüfung läuft noch oder scheiterte ohne eindeutigen Kontozustand (offline, Serverfehler, Rate-Limit, Token-Rennen):
+     * eine gespeicherte Sitzung zählt weiter.
+     */
+    val unconfirmed: Boolean = false,
+    val onboarded: Boolean = false,
+) {
+    /**
+     * Pflichtkonto (0.3.0): Ohne Anmeldung oder Profil, bei einer freigegebenen, noch nicht bestätigten Fassung der
+     * Rechtstexte, bei Löschantrag und bei serverseitig entferntem Profil zeigt die Handy-App nur den Konto-Fluss. Ist
+     * gar keine Fassung freigegeben (UNAVAILABLE, Betreiberfehler), pausiert nur die Sicherung.
+     */
+    val accountRequired: Boolean
+        get() =
+            !unconfirmed &&
+                (
+                    deletionRequested || error == "profile_missing" ||
+                        (
+                            step != AuthStep.ACCOUNT &&
+                                !(onboarded && step == AuthStep.CONSENT && consent?.status == ConsentStatus.UNAVAILABLE)
+                        )
+                )
+}
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
 class AuthViewModel(
@@ -85,11 +96,10 @@ class AuthViewModel(
         super.onCleared()
     }
 
-    private val mutable = MutableStateFlow(AuthState())
+    private val mutable = MutableStateFlow(AuthState(unconfirmed = true))
     val state = mutable.asStateFlow()
     private var ticket: String? = null
     private var email: String = ""
-    private var adoptionGeneration: Long? = null
     private var displayedSession: CloudSession? = null
     private var consentLanguage = "en"
     private var actionRevision = 0L
@@ -97,11 +107,17 @@ class AuthViewModel(
 
     init {
         scope.launch {
+            var previous = auth.accountSession.value
             auth.accountSession.collect { session ->
                 if (displayedSession != null && !sameSession(displayedSession, session)) {
                     displayedSession = null
-                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed")
+                    // Nur eine verschwundene Sitzung ist eindeutig; ein Wechsel (z. B. Token-Rennen) sperrt nicht aus.
+                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed", unconfirmed = session != null)
+                } else if (previous == null && session != null && displayedSession == null && mutable.value.unconfirmed) {
+                    // Offline unbestätigt, inzwischen vom Host bestätigt (Sitzung wieder erneuert): anzeigen.
+                    runAction { showSession() }
                 }
+                previous = session
             }
         }
         refresh()
@@ -109,8 +125,17 @@ class AuthViewModel(
 
     fun refresh() =
         runAction {
-            auth.refreshProfile()
-            showSession()
+            try {
+                auth.refreshProfile()
+                showSession()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Nur ein entferntes Profil ist eindeutig; offline, 401/403 ohne Grund, Rate-Limit oder Token-Rennen sperren nicht aus.
+                val definite = (e as? CloudException)?.reason == "profile_missing"
+                mutable.value = mutable.value.copy(unconfirmed = !definite && (mutable.value.unconfirmed || mutable.value.authenticated))
+                throw e
+            }
         }
 
     fun checkAge(
@@ -212,32 +237,6 @@ class AuthViewModel(
             showSession()
         }
 
-    fun loadDevices() =
-        runAction {
-            val before = requireDisplayedSession()
-            val devices = auth.devices()
-            auth.requireAccountSession(before)
-            mutable.value = mutable.value.copy(devices = devices)
-        }
-
-    /** Danach Liste neu laden, damit der Serverzustand sichtbar ist. Nie das eigene Handy (Freigabe nur von anderswo). */
-    fun revokeDevice(deviceId: String) = changeDevice(deviceId, auth::revokeDevice)
-
-    /** K4-U: Freigabe eines anderen eigenen Geräts; das eigene Handy gibt sich nie selbst frei (der Server lehnt ab). */
-    fun restoreDevice(deviceId: String) = changeDevice(deviceId, auth::restoreDevice)
-
-    private fun changeDevice(
-        deviceId: String,
-        change: suspend (String) -> Unit,
-    ) = runAction {
-        if (mutable.value.devices?.any { it.deviceId == deviceId && it.current } == true) return@runAction
-        val before = requireDisplayedSession()
-        change(deviceId)
-        val devices = auth.devices()
-        auth.requireAccountSession(before)
-        mutable.value = mutable.value.copy(devices = devices)
-    }
-
     fun signOut() =
         runAction {
             displayedSession = null
@@ -266,27 +265,6 @@ class AuthViewModel(
             showSession()
         }
 
-    fun selectSource(key: String) {
-        if (mutable.value.busy || mutable.value.adoptionSources.none { it.key == key }) return
-        val selected = mutable.value.selectedSources
-        mutable.value = mutable.value.copy(selectedSources = if (key in selected) selected - key else selected + key)
-    }
-
-    fun cancelAdoption() {
-        if (mutable.value.busy) return
-        adoptionGeneration = null
-        mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
-    }
-
-    fun acceptAdoption() =
-        runAction {
-            val generation = adoptionGeneration
-            if (generation == null || auth.session.value?.generation != generation) throw CloudException("cloud_session_changed", true)
-            auth.adoptSources(mutable.value.selectedSources)
-            adoptionGeneration = null
-            mutable.value = mutable.value.copy(adoptionSources = emptyList(), selectedSources = emptySet())
-        }
-
     private fun sameSession(
         before: CloudSession?,
         after: CloudSession?,
@@ -301,13 +279,21 @@ class AuthViewModel(
     private suspend fun showSession() {
         val session = auth.accountSession.value
         displayedSession = session
+        // Bis der Katalog geladen ist: ohne Profil gesperrt, mit Profil unbestätigt (scheitert das Laden, wird weitergezählt).
         mutable.value =
             AuthState(
-                step = if (session == null) AuthStep.AGE else AuthStep.ACCOUNT,
+                step =
+                    when {
+                        session == null -> AuthStep.AGE
+                        !session.onboarded && !session.deletionRequested -> AuthStep.CONSENT
+                        else -> AuthStep.ACCOUNT
+                    },
                 busy = mutable.value.busy,
                 authenticated = session != null,
                 deletionRequested = session?.deletionRequested == true,
                 suspended = session?.suspended == true,
+                unconfirmed = session?.onboarded == true && !session.deletionRequested,
+                onboarded = session?.onboarded == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
         if (session != null) auth.requireAccountSession(session)
@@ -315,7 +301,6 @@ class AuthViewModel(
             throw CloudException("cloud_session_changed", true)
         }
         displayedSession = session
-        adoptionGeneration = null
         mutable.value =
             AuthState(
                 step =
@@ -331,6 +316,7 @@ class AuthViewModel(
                 authenticated = session != null,
                 consent = consent,
                 suspended = session?.suspended == true,
+                onboarded = session?.onboarded == true,
             )
         if (session?.onboarded == true && !session.deletionRequested && !session.suspended && consent?.status == ConsentStatus.CURRENT) {
             val candidates =
@@ -344,10 +330,9 @@ class AuthViewModel(
                     }
                     emptyList()
                 }
+            // Pflichtkonto: Was Handy und Uhr ohne Konto gezählt haben, gehört ohne Rückfrage zum angemeldeten Konto.
+            if (candidates.isNotEmpty()) auth.adoptSources(candidates.map { it.key }.toSet())
             auth.requireAccountSession(session)
-            adoptionGeneration = auth.session.value?.generation
-            mutable.value =
-                mutable.value.copy(adoptionSources = candidates.map { AdoptionChoice(it.key, it.kind == "WATCH", it.eventCount) })
         }
     }
 

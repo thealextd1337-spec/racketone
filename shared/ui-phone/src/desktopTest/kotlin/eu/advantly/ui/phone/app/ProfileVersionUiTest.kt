@@ -44,8 +44,7 @@ class ProfileVersionUiTest {
                     CompositionLocalProvider(LocalDensity provides Density(2f, 1.3f)) {
                         AdvantlyTheme(darkTheme = true) {
                             Surface(color = AdvantlyTheme.colors.bg) {
-                                ComingSoonScreen(
-                                    AppTab.Profile,
+                                ProfileScreen(
                                     "0.1.0",
                                     buildCommit = "5e3db67-dirty",
                                     buildTimeUtc = "2026-10-16T14:54:00Z",

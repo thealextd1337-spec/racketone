@@ -425,7 +425,7 @@ class AppFlowTest {
             click("tab_friends", scroll = false)
             onNodeWithTag("coming_soon_friends").assertExists()
             click("tab_profile", scroll = false)
-            onNodeWithTag("coming_soon_profile").assertExists()
+            onNodeWithTag("profile").assertExists()
             click("tab_home", scroll = false)
             onNodeWithTag("home_new_match").assertExists()
         }

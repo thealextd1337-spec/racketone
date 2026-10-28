@@ -102,4 +102,28 @@ class AccountIdentityRepositoryTest {
         identities.select("guest-scope", null, 3, "PHONE", ::id)
         assertEquals(guestDevice, data.settings.get("session.deviceId"))
     }
+
+    @Test
+    fun activationBindsWatchSourcesThatJoinedTheAccountScopeWithoutASession() {
+        val identities = data.accountIdentities
+        select("alice")
+        val scope = identities.scope!!
+        // Hello einer neu gekoppelten Uhr, während keine Kontositzung aktiv war (offline gestartet, Zustimmung offen).
+        identities.recordSource("new-watch", "watch-self", "WATCH", scope, local = false, eventCount = 1)
+        identities.recordSource("legacy-watch", "old-watch-self", "WATCH", "legacy:watch", local = false, eventCount = 1)
+        data.events.appendAll(listOf(StoredEvent("watch-event", "match", "new-watch", 1, 1, "payload")))
+        assertTrue(identities.ownedSources("alice").none { it.deviceId == "new-watch" })
+        val session = data.cloudUploads.activate("alice")
+        identities.bindCurrent(session)
+        assertTrue(identities.ownedSources("alice").any { it.deviceId == "new-watch" && it.kind == "WATCH" })
+        assertEquals(
+            listOf("watch-event"),
+            data.cloudUploads
+                .capture(session, 10)
+                .events
+                .map { it.id },
+        )
+        // Fremder Kontobereich (Altbestand) bleibt der automatischen Übernahme beim Anmelden vorbehalten.
+        assertEquals(listOf("legacy-watch"), identities.adoptionSources().map { it.deviceId })
+    }
 }

@@ -268,7 +268,7 @@ class ReviewRound1UiTest {
             click("link_copy")
             onNodeWithTag("link_failed_dialog").assertDoesNotExist()
             assertEquals(listOf("https://advantly.eu/impressum.html"), copied)
-            onNodeWithTag("coming_soon_profile").assertExists()
+            onNodeWithTag("profile").assertExists()
         }
 
     // Freigabekriterium Play: Datenschutz und Impressum im Profil
@@ -286,7 +286,7 @@ class ReviewRound1UiTest {
                     },
             )
             click("tab_profile")
-            onNodeWithTag("coming_soon_profile").assertExists()
+            onNodeWithTag("profile").assertExists()
             click("profile_privacy")
             click("profile_imprint")
             assertTrue(

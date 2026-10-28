@@ -219,26 +219,26 @@ class FriendsScreenTest {
                 val auth = FakePhoneAuth()
                 val port = UiFriends()
                 val friends = FriendsViewModel(auth, port, { local }, null, scope)
-                val account = AuthViewModel(auth, scope, friends = friends)
-                val app = testModel().apply { navigator.tab = AppTab.Friends }
+                var opened = 0
+                // Mit Konto-Pflicht deckt die App diesen Zustand mit dem Konto-Fluss ab; der Tab bleibt trotzdem ehrlich.
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                        Box(Modifier.size(360.dp, 892.dp)) { AdvantlyApp(model = app, darkTheme = true, authModel = account) }
+                        AdvantlyTheme(darkTheme = true) {
+                            Box(Modifier.size(360.dp, 892.dp)) { FriendsScreen(friends, onOpenAccount = { opened++ }, onShareText = null) }
+                        }
                     }
                 }
                 try {
                     onNodeWithTag("friends_hint")
-                        .assertTextContains("Mit einem Konto kannst du Freunde hinzufügen. Matches zählen geht auch ohne Konto.")
+                        .assertTextContains("Melde dich an, um Freunde hinzuzufügen.")
                     onNodeWithTag("friends_person_anna").assertDoesNotExist()
                     screenshot("friends-signed-out-de-200")
                     click("friends_open_account")
-                    assertEquals(AppTab.Profile, app.navigator.tab)
-                    onNodeWithTag("auth_country").assertExists()
+                    assertEquals(1, opened)
                     assertTrue(port.calls.isEmpty())
 
                     // Ohne Zustimmung: eigener Hinweis, weiterhin keine Daten und keine Aufrufe.
                     auth.session.value = CloudSession("alice", true, consentStatus = ConsentStatus.DECLINED)
-                    app.navigator.tab = AppTab.Friends
                     onNodeWithTag("friends_hint").assertTextContains("Zustimmung", substring = true)
                     assertTrue(port.calls.isEmpty())
                 } finally {

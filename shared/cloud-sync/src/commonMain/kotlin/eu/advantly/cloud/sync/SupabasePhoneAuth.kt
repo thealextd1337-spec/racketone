@@ -9,6 +9,7 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.providers.builtin.OTP
+import io.github.jan.supabase.auth.status.SessionStatus
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +63,7 @@ class SupabasePhoneAuth(
             requestTimeoutMillis,
             exportFactory = exportHttpTransportFactory(client.config.networkConfig.httpEngine),
         )
-    val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership, hostAccessAllowed)
+    val sessions = CloudSessionGate(::credentials, uploads, threadGuard, ownership, hostAccessAllowed, ::refreshPending)
     override val session = sessions.session
     private val mutations = Mutex()
     private val lifecycle = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
@@ -109,10 +110,30 @@ class SupabasePhoneAuth(
         val rejection: CloudException,
     ) : Exception()
 
+    /** Abgelaufene gespeicherte Sitzung, deren Erneuerung scheiterte (offline/Serverfehler); das SDK versucht es weiter. */
+    private fun refreshPending() = client.auth.sessionStatus.value is SessionStatus.RefreshFailure
+
     init {
         lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
-            client.auth.sessionStatus.collect {
+            var recovering = false
+            client.auth.sessionStatus.collect { status ->
                 if (!hostAccessAllowed()) return@collect
+                if (status is SessionStatus.RefreshFailure) recovering = true
+                // Wieder erneuert: ein offline bisher unbestätigtes Konto jetzt prüfen (Netzrückkehr im SDK-Wiederholfenster).
+                if (status is SessionStatus.Authenticated && recovering) {
+                    recovering = false
+                    if (verifiedAccount.value == null) {
+                        lifecycle.launch {
+                            try {
+                                refreshProfile()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                // Bleibt unbestätigt; der nächste Anstoß (Netz, Vordergrund, „Erneut versuchen“) prüft erneut.
+                            }
+                        }
+                    }
+                }
                 val completed =
                     hostStorageAction {
                         try {
@@ -167,6 +188,7 @@ class SupabasePhoneAuth(
 
     private fun synchronizeAccount() {
         requireHostAccess()
+        if (refreshPending()) return
         val identity = credentials()?.let { it.profileId to it.sessionId }
         if (identity != accountIdentity) {
             accountIdentity = identity
@@ -344,6 +366,8 @@ class SupabasePhoneAuth(
             sessions.synchronize()
             synchronizeAccount()
             if (expectedRevision != null) requireMutationCurrent(expectedRevision)
+            // Abgelaufen und offline nicht erneuerbar ist nicht abgemeldet: weiterzählen statt Konto verlassen.
+            if (refreshPending()) throw CloudException("connection_failed", false)
             if (client.auth.currentSessionOrNull() == null) {
                 sessions.verifiedAbsent()
                 return@guarded

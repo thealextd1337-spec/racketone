@@ -43,6 +43,12 @@ class CloudSessionGate internal constructor(
     private val threadGuard: () -> Boolean = { true },
     private val ownership: LocalAccountOwnership? = null,
     private val hostAccessAllowed: () -> Boolean = { true },
+    /**
+     * Gespeicherte Sitzung ist abgelaufen und ließ sich (noch) nicht erneuern, meist offline: kein Kontowechsel. Das SDK
+     * meldet dann keine Credentials, die Identität und das lokale Konto bleiben aber erhalten, bis es wieder erneuert ist
+     * oder die Sitzung verwirft.
+     */
+    private val refreshPending: () -> Boolean = { false },
 ) {
     private val mutable = MutableStateFlow<CloudSession?>(null)
     val session = mutable.asStateFlow()
@@ -182,7 +188,7 @@ class CloudSessionGate internal constructor(
 
     internal fun synchronize() {
         confined()
-        if (!acceptSdkSession) return
+        if (!acceptSdkSession || refreshPending()) return
         val sdk = credentials()
         if (sdk?.profileId != identity?.profileId || sdk?.sessionId != identity?.sessionId) {
             val previousProfile = identity?.profileId ?: ownership?.retainedProfileId
@@ -193,13 +199,13 @@ class CloudSessionGate internal constructor(
 
     internal fun verifiedAbsent() {
         confined()
-        if (credentials() == null && acceptSdkSession) invalidate(forceLeave = true)
+        if (credentials() == null && acceptSdkSession && !refreshPending()) invalidate(forceLeave = true)
     }
 
     internal fun capture(requireProfile: Boolean = true): CloudLease {
         synchronize()
         if (!acceptSdkSession) changed()
-        val sdk = credentials() ?: changed()
+        val sdk = credentials() ?: if (refreshPending()) throw CloudException("cloud_connection_failed", false) else changed()
         if (requireProfile) requireCloudProfile()
         return CloudLease(
             generation,

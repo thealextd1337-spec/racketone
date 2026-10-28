@@ -639,7 +639,6 @@ class RecoveryIntentIntegrationTest {
             assertTrue(state.authenticated)
             assertEquals(ConsentStatus.CURRENT, state.consent?.status)
             assertEquals(AuthStep.ACCOUNT, state.step)
-            assertTrue(state.adoptionSources.isEmpty())
             assertBlocked()
             model.exportData()
             assertEquals("exported", settled().exportedData)
@@ -737,7 +736,6 @@ class RecoveryIntentIntegrationTest {
             assertNull(state.error)
             assertEquals(ConsentStatus.CURRENT, state.consent?.status)
             assertTrue(state.authenticated)
-            assertTrue(state.adoptionSources.isEmpty())
             assertBlocked()
             assertNull(data.accountIdentities.profile)
         }

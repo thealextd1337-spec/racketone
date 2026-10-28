@@ -206,8 +206,53 @@ class AccountOwnershipSessionTest {
         val fresh = pair.watch.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
         pair.settle()
         pair.activate("alice")
-        assertTrue(pair.phone.adoptionSources().any { it.deviceId != guestWatch.value && it.kind == "WATCH" })
+        assertTrue(
+            pair.phoneData.accountIdentities
+                .adoptionSources()
+                .any { it.deviceId != guestWatch.value && it.kind == "WATCH" },
+        )
         assertTrue(pair.watchData.events.count(fresh.value) > 0)
+    }
+
+    @Test
+    fun automaticAdoptionTakesOwnPreAccountDataButNotAUsedWatchOfAPreviousOwner() {
+        val pair = Pairing()
+        pair.network.setConnected("watch", false)
+        // Vorbesitzer: die Uhr hat vor der Kopplung mit diesem Konto schon gezählt (eigener Altbereich der Uhr).
+        pair.watch.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.watch.recordPoint(Side.A)
+        pair.phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.phone.recordPoint(Side.B)
+        pair.network.setConnected("watch", true)
+        pair.settle()
+        pair.activate("alice")
+        assertTrue(
+            pair.phoneData.accountIdentities
+                .adoptionSources()
+                .any { it.kind == "WATCH" },
+            "ausdrücklich weiter möglich",
+        )
+        val automatic = pair.phone.adoptionSources()
+        assertTrue(automatic.any { it.kind == "PHONE" }, "Vorkonto-Daten dieses Handys")
+        assertTrue(automatic.none { it.kind == "WATCH" }, "Altbereich einer Uhr beweist kein Eigentum")
+    }
+
+    @Test
+    fun guestDataAfterSignOutBelongsOnlyToTheSameAccount() {
+        val pair = Pairing()
+        pair.activate("alice")
+        pair.phone.leaveAccount()
+        pair.settle()
+        // Geteiltes Handy: Alice ist abgemeldet, ihre Uhr zählt im Gastbereich weiter.
+        pair.watch.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES)
+        pair.watch.recordPoint(Side.A)
+        pair.settle()
+        pair.activate("bob")
+        assertTrue(pair.phone.adoptionSources().none { it.kind == "WATCH" }, "Bob bekommt Alices Gastdaten nicht")
+        pair.phone.leaveAccount()
+        pair.settle()
+        pair.activate("alice")
+        assertTrue(pair.phone.adoptionSources().any { it.kind == "WATCH" }, "Alice bekommt ihre Gastdaten zurück")
     }
 
     @Test
@@ -338,7 +383,10 @@ class AccountOwnershipSessionTest {
         pair.network.setConnected("watch", true)
         pair.settle()
         assertEquals(0L, pair.phoneData.events.count(legacy.value))
-        val source = pair.phone.adoptionSources().single { it.kind == "WATCH" }
+        val source =
+            pair.phoneData.accountIdentities
+                .adoptionSources()
+                .single { it.kind == "WATCH" }
         assertEquals(2L, source.eventCount)
         val token = pair.phoneData.cloudUploads.activate("alice")
         pair.phone.activateAccount("alice", token)
