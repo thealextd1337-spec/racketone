@@ -26,15 +26,28 @@ data class AuthState(
     val exportedData: String? = null,
     /** K5: Konto gesperrt; Kontorechte bleiben, Cloud-Arbeit ist pausiert. */
     val suspended: Boolean = false,
-    /** Kontoprüfung läuft noch oder scheiterte nur an der Verbindung: eine gespeicherte Sitzung zählt offline weiter. */
+    /**
+     * Kontoprüfung läuft noch oder scheiterte ohne eindeutigen Kontozustand (offline, Serverfehler, Rate-Limit, Token-Rennen):
+     * eine gespeicherte Sitzung zählt weiter.
+     */
     val unconfirmed: Boolean = false,
+    val onboarded: Boolean = false,
 ) {
     /**
-     * Pflichtkonto (0.3.0): Ohne Anmeldung, Profil oder aktuelle Zustimmung, bei Löschantrag und bei serverseitig
-     * entferntem Profil zeigt die Handy-App nur den Konto-Fluss.
+     * Pflichtkonto (0.3.0): Ohne Anmeldung oder Profil, bei einer freigegebenen, noch nicht bestätigten Fassung der
+     * Rechtstexte, bei Löschantrag und bei serverseitig entferntem Profil zeigt die Handy-App nur den Konto-Fluss. Ist
+     * gar keine Fassung freigegeben (UNAVAILABLE, Betreiberfehler), pausiert nur die Sicherung.
      */
     val accountRequired: Boolean
-        get() = !unconfirmed && (step != AuthStep.ACCOUNT || deletionRequested || error == "profile_missing")
+        get() =
+            !unconfirmed &&
+                (
+                    deletionRequested || error == "profile_missing" ||
+                        (
+                            step != AuthStep.ACCOUNT &&
+                                !(onboarded && step == AuthStep.CONSENT && consent?.status == ConsentStatus.UNAVAILABLE)
+                        )
+                )
 }
 
 /** Nur Speicherzustand: weder Geburtstag, Ticket noch OTP kommen in SavedState oder lokale Matchdaten. */
@@ -94,11 +107,17 @@ class AuthViewModel(
 
     init {
         scope.launch {
+            var previous = auth.accountSession.value
             auth.accountSession.collect { session ->
                 if (displayedSession != null && !sameSession(displayedSession, session)) {
                     displayedSession = null
-                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed")
+                    // Nur eine verschwundene Sitzung ist eindeutig; ein Wechsel (z. B. Token-Rennen) sperrt nicht aus.
+                    mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed", unconfirmed = session != null)
+                } else if (previous == null && session != null && displayedSession == null && mutable.value.unconfirmed) {
+                    // Offline unbestätigt, inzwischen vom Host bestätigt (Sitzung wieder erneuert): anzeigen.
+                    runAction { showSession() }
                 }
+                previous = session
             }
         }
         refresh()
@@ -112,9 +131,9 @@ class AuthViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Offline bestätigt sich keine gespeicherte Sitzung: weiterzählen statt Anmeldung erzwingen; Rechtefehler sperren.
-                val offline = e !is CloudException || (e.reason == "connection_failed" && !e.permission)
-                mutable.value = mutable.value.copy(unconfirmed = offline && (mutable.value.unconfirmed || mutable.value.authenticated))
+                // Nur ein entferntes Profil ist eindeutig; offline, 401/403 ohne Grund, Rate-Limit oder Token-Rennen sperren nicht aus.
+                val definite = (e as? CloudException)?.reason == "profile_missing"
+                mutable.value = mutable.value.copy(unconfirmed = !definite && (mutable.value.unconfirmed || mutable.value.authenticated))
                 throw e
             }
         }
@@ -260,13 +279,21 @@ class AuthViewModel(
     private suspend fun showSession() {
         val session = auth.accountSession.value
         displayedSession = session
+        // Bis der Katalog geladen ist: ohne Profil gesperrt, mit Profil unbestätigt (scheitert das Laden, wird weitergezählt).
         mutable.value =
             AuthState(
-                step = if (session == null) AuthStep.AGE else AuthStep.ACCOUNT,
+                step =
+                    when {
+                        session == null -> AuthStep.AGE
+                        !session.onboarded && !session.deletionRequested -> AuthStep.CONSENT
+                        else -> AuthStep.ACCOUNT
+                    },
                 busy = mutable.value.busy,
                 authenticated = session != null,
                 deletionRequested = session?.deletionRequested == true,
                 suspended = session?.suspended == true,
+                unconfirmed = session?.onboarded == true && !session.deletionRequested,
+                onboarded = session?.onboarded == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
         if (session != null) auth.requireAccountSession(session)
@@ -289,6 +316,7 @@ class AuthViewModel(
                 authenticated = session != null,
                 consent = consent,
                 suspended = session?.suspended == true,
+                onboarded = session?.onboarded == true,
             )
         if (session?.onboarded == true && !session.deletionRequested && !session.suspended && consent?.status == ConsentStatus.CURRENT) {
             val candidates =

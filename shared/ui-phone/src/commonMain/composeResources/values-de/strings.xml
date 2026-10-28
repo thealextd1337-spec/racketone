@@ -685,6 +685,7 @@
     <string name="cloud_sync_confirm_terms">Rechtstexte bestätigen</string>
     <string name="cloud_sync_retry">Erneut versuchen</string>
     <string name="cloud_sync_consent">Die Sicherung ist pausiert, bis du die aktuellen Rechtstexte bestätigst.</string>
+    <string name="cloud_sync_documents_unavailable">Die Sicherung pausiert, solange die Rechtstexte aktualisiert werden. Bitte versuche es später erneut.</string>
     <string name="cloud_export_title">Deine Daten als ZIP-Datei</string>
     <string name="cloud_export_timestamp">%1$s um %2$s UTC</string>
     <string name="cloud_export_unavailable">Melde dich an, um deine Daten anzufordern.</string>

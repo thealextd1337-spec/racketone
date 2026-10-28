@@ -121,6 +121,17 @@ class BackupStatusLineTest {
                     .assertTextEquals("Die Sicherung ist pausiert, bis du die aktuellen Rechtstexte bestätigst.")
                 onNodeWithTag("backup_action").assertTextEquals("Rechtstexte bestätigen").performClick()
                 assertEquals(2, auth.calls.count { it == "refresh" })
+                // Kein freigegebener Katalog: nur die Sicherung pausiert, die App sperrt nicht.
+                runOnIdle {
+                    auth.consentSnapshot = ConsentSnapshot("alice", ConsentStatus.UNAVAILABLE)
+                    model.refresh()
+                }
+                onNodeWithTag("backup_status_text")
+                    .assertTextEquals(
+                        "Die Sicherung pausiert, solange die Rechtstexte aktualisiert werden. Bitte versuche es später erneut.",
+                    )
+                onNodeWithTag("backup_action").assertTextEquals("Erneut versuchen")
+                assertEquals(false, model.state.value.accountRequired)
             }
         } finally {
             Locale.setDefault(original)

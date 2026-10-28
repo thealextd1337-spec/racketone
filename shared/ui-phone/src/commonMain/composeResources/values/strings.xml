@@ -685,6 +685,7 @@
     <string name="cloud_sync_confirm_terms">Confirm legal texts</string>
     <string name="cloud_sync_retry">Try again</string>
     <string name="cloud_sync_consent">Backup is paused until you confirm the current terms and privacy policy.</string>
+    <string name="cloud_sync_documents_unavailable">Backup is paused while the legal texts are being updated. Please try again later.</string>
     <string name="cloud_export_title">Your data as a ZIP file</string>
     <string name="cloud_export_timestamp">%1$s at %2$s UTC</string>
     <string name="cloud_export_unavailable">Sign in to request your data.</string>

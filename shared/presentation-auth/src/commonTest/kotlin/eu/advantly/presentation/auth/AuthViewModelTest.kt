@@ -341,6 +341,33 @@ class AuthViewModelTest {
         assertTrue(model.state.value.accountRequired)
     }
 
+    @Test fun transientServerErrorsDoNotLockOut() {
+        for (reason in listOf("rate_limit_exceeded", "cloud_session_changed", "cloud_connection_failed", "connection_failed")) {
+            val auth =
+                FakePhoneAuth().also {
+                    it.session.value = CloudSession("alice", true)
+                    it.failure = reason
+                }
+            val model = AuthViewModel(auth, scope)
+            assertTrue(model.state.value.unconfirmed, reason)
+            assertFalse(model.state.value.accountRequired, reason)
+        }
+    }
+
+    @Test fun unreleasedCatalogPausesBackupButOnlyBlocksUnfinishedOnboarding() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.consentStatus = ConsentStatus.UNAVAILABLE
+            }
+        val model = AuthViewModel(auth, scope)
+        assertEquals(AuthStep.CONSENT, model.state.value.step)
+        assertFalse(model.state.value.accountRequired, "Betreiberfehler sperrt niemanden aus")
+        auth.session.value = CloudSession("alice", false)
+        model.refresh()
+        assertTrue(model.state.value.accountRequired, "ohne Profil kein Zählen")
+    }
+
     @Test fun pendingFirstCheckDoesNotBlock() {
         assertFalse(AuthState(unconfirmed = true).accountRequired)
         assertTrue(AuthState().accountRequired)

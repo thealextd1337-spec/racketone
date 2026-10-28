@@ -54,6 +54,7 @@ import eu.advantly.ui.phone.resources.cloud_sync_blocked_waiting
 import eu.advantly.ui.phone.resources.cloud_sync_confirm_terms
 import eu.advantly.ui.phone.resources.cloud_sync_connection_failed
 import eu.advantly.ui.phone.resources.cloud_sync_consent
+import eu.advantly.ui.phone.resources.cloud_sync_documents_unavailable
 import eu.advantly.ui.phone.resources.cloud_sync_failed
 import eu.advantly.ui.phone.resources.cloud_sync_last_backup
 import eu.advantly.ui.phone.resources.cloud_sync_retry
@@ -106,6 +107,11 @@ internal fun backupStatus(
 ): Pair<StringResource, BackupAction?> {
     val blocked = sync?.blocked
     return when {
+        // Kein freigegebener Katalog (Betreiberfehler): nur die Sicherung pausiert, die App bleibt nutzbar.
+        auth.consent?.status == ConsentStatus.UNAVAILABLE -> {
+            Res.string.cloud_sync_documents_unavailable to BackupAction.RETRY
+        }
+
         auth.consent != null && auth.consent?.status != ConsentStatus.CURRENT -> {
             Res.string.cloud_sync_consent to BackupAction.CONFIRM_TERMS
         }
