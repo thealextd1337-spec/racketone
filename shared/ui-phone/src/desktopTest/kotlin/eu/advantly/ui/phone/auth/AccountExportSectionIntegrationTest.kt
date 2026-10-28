@@ -123,14 +123,13 @@ class AccountExportSectionIntegrationTest {
                             val upload = Upload()
                             val model = AuthViewModel(auth, scope, upload = upload, export = export)
                             var shares = 0
-                            var supports = 0
                             var background = Color.Unspecified
                             setContent {
                                 CompositionLocalProvider(LocalDensity provides Density(1f, 2f), LocalContentColor provides Color.Black) {
                                     AdvantlyTheme(darkTheme = dark) {
                                         background = MaterialTheme.colorScheme.background
                                         Box(Modifier.fillMaxSize().background(background)) {
-                                            AccountScreen(model, null, { supports++ }, {}, { shares++ })
+                                            ScrollingRights(model) { shares++ }
                                         }
                                     }
                                 }
@@ -180,57 +179,11 @@ class AccountExportSectionIntegrationTest {
                                 onNodeWithTag("account_export").assertDoesNotExist()
                                 onNodeWithTag("account_export_data").assertDoesNotExist()
                                 onNodeWithTag("account_delete").performScrollTo().assertIsEnabled()
-                                onNodeWithTag("auth_sign_out").performScrollTo().assertIsEnabled()
-                            }
-                            for ((status, onboarded, deletion) in listOf(
-                                Triple(ConsentStatus.REQUIRED, true, false),
-                                Triple(ConsentStatus.UNAVAILABLE, true, false),
-                                Triple(ConsentStatus.DECLINED, true, false),
-                                Triple(ConsentStatus.CURRENT, false, false),
-                                Triple(ConsentStatus.CURRENT, true, true),
-                            )) {
-                                runOnIdle {
-                                    auth.session.value = CloudSession("alice", onboarded, deletionRequested = deletion)
-                                    auth.consentSnapshot = snapshot(status)
-                                    model.refresh()
-                                }
-                                for (phase in listOf(
-                                    PhoneExportPhase.REQUESTING,
-                                    PhoneExportPhase.CHECKING,
-                                    PhoneExportPhase.DOWNLOADING,
-                                )) {
-                                    runOnIdle { export.state.value = PhoneExportState(phase, setOf(PhoneExportAction.CANCEL)) }
-                                    onNodeWithTag("cloud_export_status").performScrollTo().assertIsDisplayed()
-                                    onNodeWithTag("cloud_export_cancel").performScrollTo().assertIsEnabled()
-                                    for (tag in listOf(
-                                        "account_support",
-                                        "auth_refresh",
-                                        "cloud_upload_now",
-                                        "cloud_upload_refresh",
-                                        if (deletion) "account_recover" else "account_delete",
-                                        "auth_sign_out",
-                                        "auth_local",
-                                    )) {
-                                        onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertIsEnabled()
-                                    }
-                                    if (status != ConsentStatus.CURRENT) {
-                                        onNodeWithTag("consent_decline").performScrollTo().assertIsEnabled()
-                                        onNodeWithTag("consent_accept").performScrollTo().assertIsNotEnabled()
-                                        if (status != ConsentStatus.UNAVAILABLE) {
-                                            for (type in ConsentDocumentType.entries) {
-                                                onNodeWithTag("consent_confirm_$type").performScrollTo().assertIsEnabled()
-                                            }
-                                        }
-                                    }
-                                    if (!onboarded) onNodeWithTag("auth_alias").performScrollTo().assertIsEnabled()
-                                    assertFalse(model.state.value.busy)
-                                }
                             }
                             assertTrue(export.calls.isEmpty())
                             assertEquals(0, upload.uploads)
                             assertEquals(0, upload.refreshes)
                             assertEquals(0, shares)
-                            assertEquals(0, supports)
                             assertTrue(auth.calls.all { it == "refresh" }, auth.calls.toString())
                         }
                     }
@@ -247,7 +200,7 @@ class AccountExportSectionIntegrationTest {
                 val auth = signedInAuth()
                 val export = Export()
                 val model = AuthViewModel(auth, scope, export = export)
-                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { AccountScreen(model, null) {} } } }
+                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { ScrollingRights(model) } } }
                 waitForIdle()
                 assertTrue(export.calls.isEmpty())
                 for ((phase, action, tag) in listOf(
@@ -282,7 +235,7 @@ class AccountExportSectionIntegrationTest {
                 setContent { AdvantlyApp(model = app, authModel = model, onShareExport = callback.value) }
                 onNodeWithTag("cloud_export_section").assertDoesNotExist()
                 runOnIdle { app.navigator.tab = AppTab.Profile }
-                onNodeWithTag("profile_account").performClick()
+                onNodeWithTag("profile_account_privacy").performScrollTo().performClick()
                 onNodeWithTag("cloud_export_status").performScrollTo().assertIsDisplayed()
                 runOnIdle { export.state.value = PhoneExportState(PhoneExportPhase.LOCAL_FILE, setOf(PhoneExportAction.SHARE)) }
                 onNodeWithTag("cloud_export_primary").performScrollTo().assertIsNotEnabled()
@@ -308,62 +261,32 @@ class AccountExportSectionIntegrationTest {
             }
         }
 
-    @Test fun busyExportDoesNotBlockExplicitConsentRecoveryDeletionUploadSupportOrLogout() =
+    @Test fun busyExportDoesNotBlockDeletion() =
         fixture { scope ->
             runDesktopComposeUiTest(width = 360, height = 640) {
-                val auth =
-                    signedInAuth().apply {
-                        session.value = session.value!!.copy(deletionRequested = true)
-                        consentSnapshot = snapshot(ConsentStatus.REQUIRED)
-                    }
+                val auth = signedInAuth()
                 val export = Export().apply { state.value = PhoneExportState(PhoneExportPhase.DOWNLOADING) }
-                val upload = Upload()
-                val model = AuthViewModel(auth, scope, upload = upload, export = export)
-                var supports = 0
-                setContent {
-                    AdvantlyTheme {
-                        Box(Modifier.fillMaxSize()) { AccountScreen(model, null, onSupport = { supports++ }, onClose = {}) }
-                    }
-                }
-                onNodeWithTag("account_support").performScrollTo().performClick()
-                assertEquals(1, supports)
-                onNodeWithTag("cloud_upload_now").performScrollTo().performClick()
-                onNodeWithTag("cloud_upload_refresh").performScrollTo().performClick()
-                assertEquals(1, upload.uploads)
-                assertEquals(1, upload.refreshes)
-                onNodeWithTag("account_recover").performScrollTo().performClick()
-                assertEquals(1, auth.calls.count { it == "recover" })
-                onNodeWithTag("consent_decline").performScrollTo().performClick()
-                assertEquals(1, auth.calls.count { it == "consent:false" })
-                onNodeWithTag("consent_confirm_TERMS").performScrollTo().performClick()
-                onNodeWithTag("consent_confirm_PRIVACY").performScrollTo().performClick()
-                onNodeWithTag("consent_accept").performScrollTo().assertIsEnabled().performClick()
-                assertEquals(1, auth.calls.count { it == "consent:true" })
+                val model = AuthViewModel(auth, scope, export = export)
+                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { ScrollingRights(model) } } }
                 onNodeWithTag("account_delete").performScrollTo().performClick()
                 onNodeWithTag("account_delete_confirm").performClick()
                 assertEquals(1, auth.calls.count { it == "delete" })
-                onNodeWithTag("auth_sign_out").performScrollTo().performClick()
-                assertEquals(1, auth.calls.count { it == "logout" })
-                onNodeWithTag("cloud_export_section").assertDoesNotExist()
                 assertTrue(export.calls.isEmpty())
             }
         }
 
-    @Test fun defaultViewModelRetainsLegacyJsonExportAndCloseLambda() =
+    @Test fun defaultViewModelRetainsLegacyJsonExport() =
         fixture { scope ->
             runDesktopComposeUiTest(width = 360, height = 640) {
                 val auth = signedInAuth()
                 val model = AuthViewModel(auth, scope)
-                var closes = 0
-                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { AccountScreen(model, null) { closes++ } } } }
+                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { ScrollingRights(model) } } }
                 onNodeWithTag("cloud_export_section").assertDoesNotExist()
                 onNodeWithTag("account_export").performScrollTo().performClick()
                 onNodeWithTag("account_export_data").assertTextEquals("{\"consentHistory\":[]}")
                 assertEquals(1, auth.calls.count { it == "export" })
                 runOnIdle { model.dismissExport() }
                 onNodeWithTag("account_export_data").assertDoesNotExist()
-                onNodeWithTag("auth_local").performScrollTo().performClick()
-                assertEquals(1, closes)
             }
         }
 
@@ -387,7 +310,7 @@ class AccountExportSectionIntegrationTest {
                 val export = Export()
                 val upload = Upload()
                 val model = AuthViewModel(auth, scope, upload = upload, export = export)
-                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { AccountScreen(model, null) {} } } }
+                setContent { AdvantlyTheme { Box(Modifier.fillMaxSize()) { ScrollingRights(model) } } }
                 waitForIdle()
                 runOnIdle {
                     pending = true
@@ -397,8 +320,7 @@ class AccountExportSectionIntegrationTest {
                     upload.state.value = upload.state.value.copy(busy = true)
                     export.state.value = PhoneExportState(PhoneExportPhase.IDLE, setOf(PhoneExportAction.REQUEST))
                 }
-                onNodeWithTag("auth_refresh").performScrollTo().assertIsNotEnabled()
-                onNodeWithTag("cloud_upload_now").performScrollTo().assertIsNotEnabled()
+                onNodeWithTag("account_delete").performScrollTo().assertIsNotEnabled()
                 onNodeWithTag("cloud_export_primary").performScrollTo().assertIsEnabled().performClick()
                 assertEquals(listOf(PhoneExportAction.REQUEST), export.calls)
                 runOnIdle {

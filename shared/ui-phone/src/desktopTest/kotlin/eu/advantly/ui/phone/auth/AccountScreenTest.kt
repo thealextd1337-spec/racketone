@@ -2,9 +2,13 @@ package eu.advantly.ui.phone.auth
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,7 +39,6 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import eu.advantly.cloud.sync.CloudAdoptionSource
 import eu.advantly.cloud.sync.CloudAuthPort
-import eu.advantly.cloud.sync.CloudDevice
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentDocument
@@ -54,6 +57,7 @@ import java.util.Locale
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class FakePhoneAuth : CloudAuthPort {
@@ -93,23 +97,6 @@ class FakePhoneAuth : CloudAuthPort {
     override suspend fun cancelDeletion() {
         call("recover")
         session.value = session.value!!.copy(deletionRequested = false)
-    }
-
-    val devices = mutableListOf(CloudDevice("d1", "phone", "android", "Pixel"), CloudDevice("w1", "watch", "wearos"))
-
-    override suspend fun devices(): List<CloudDevice> {
-        call("devices")
-        return devices.toList()
-    }
-
-    override suspend fun revokeDevice(deviceId: String) {
-        call("revoke:$deviceId")
-        devices.replaceAll { if (it.deviceId == deviceId) it.copy(revokedAt = "2026-10-23T10:00:00Z") else it }
-    }
-
-    override suspend fun restoreDevice(deviceId: String) {
-        call("restore:$deviceId")
-        devices.replaceAll { if (it.deviceId == deviceId) it.copy(revokedAt = null) else it }
     }
 
     override fun adoptionSources(): List<CloudAdoptionSource> = sources
@@ -185,6 +172,13 @@ class FakePhoneAuth : CloudAuthPort {
     }
 }
 
+/** Wie im Profil: die Kontorechte liegen in einer scrollbaren Spalte. */
+@Composable
+internal fun ScrollingRights(
+    model: AuthViewModel,
+    onShareExport: (() -> Unit)? = null,
+) = Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { AccountRights(model, null, onShareExport) }
+
 @OptIn(ExperimentalTestApi::class)
 class AccountScreenTest {
     @Test fun accountCopyKeepsThemeContrastWithoutAParentSurfaceInBothLanguagesAtLargeFont() {
@@ -194,14 +188,13 @@ class AccountScreenTest {
                 Locale.setDefault(Locale.forLanguageTag(language))
                 for (dark in listOf(true, false)) {
                     runDesktopComposeUiTest(width = 360, height = 640) {
-                        val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
-                        val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                        val model = AuthViewModel(FakePhoneAuth(), CoroutineScope(Dispatchers.Unconfined))
                         var background = Color.Unspecified
                         setContent {
                             CompositionLocalProvider(LocalDensity provides Density(1f, 2f), LocalContentColor provides Color.Black) {
                                 AdvantlyTheme(darkTheme = dark) {
                                     background = MaterialTheme.colorScheme.background
-                                    Box(Modifier.fillMaxSize().background(background)) { AccountScreen(model, null) {} }
+                                    Box(Modifier.fillMaxSize().background(background)) { AccountScreen(model, null) }
                                 }
                             }
                         }
@@ -219,10 +212,8 @@ class AccountScreenTest {
                         val directory = File("build/reports/account-contrast").also { it.mkdirs() }
                         ImageIO.write(onRoot().captureToImage().toAwtImage(), "png", File(directory, "account-$language-$dark-200.png"))
                         assertTrue(ratio >= 4.5f, "Account foreground contrast: $ratio (dark=$dark)")
-                        onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
-                        onNodeWithTag("account_delete").performScrollTo().assertIsEnabled()
-                        onNodeWithTag("auth_sign_out").performScrollTo().assertIsEnabled()
-                        onNodeWithTag("auth_local").performScrollTo().assertIsEnabled()
+                        onNodeWithTag("auth_birth").performScrollTo().assertIsEnabled()
+                        onNodeWithTag("auth_local").assertDoesNotExist()
                     }
                 }
             }
@@ -249,7 +240,7 @@ class AccountScreenTest {
                     val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
                     setContent {
                         CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                            AdvantlyTheme { AccountScreen(model, null) {} }
+                            AdvantlyTheme { AccountScreen(model, null) }
                         }
                     }
                     onNodeWithTag("consent_accept").performScrollTo().assertIsNotEnabled()
@@ -275,159 +266,56 @@ class AccountScreenTest {
         }
     }
 
-    @Test fun unavailableAndDeclinedConsentKeepSupportExportDeletionRecoveryAndLocalExit() =
-        runComposeUiTest {
-            val auth =
-                FakePhoneAuth().also {
-                    it.session.value = CloudSession("alice", true)
-                    it.consentStatus = ConsentStatus.UNAVAILABLE
-                }
-            val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-            var supportOpened = false
-            var closed = false
-            setContent { AdvantlyTheme { AccountScreen(model, null, onSupport = { supportOpened = true }) { closed = true } } }
-            onNodeWithTag("consent_accept").performScrollTo().assertIsNotEnabled()
-            onNodeWithTag("consent_decline").performScrollTo().performClick()
-            onNodeWithTag("account_support").performScrollTo().performClick()
-            assertTrue(supportOpened)
-            onNodeWithTag("account_export").performScrollTo().performClick()
-            onNodeWithTag("account_export_data").assertExists()
-            runOnIdle { model.dismissExport() }
-            onNodeWithTag("account_delete").performScrollTo().performClick()
-            onNodeWithTag("account_delete_confirm").performClick()
-            onNodeWithTag("account_recover").performScrollTo().performClick()
-            assertTrue(auth.calls.containsAll(listOf("consent:false", "export", "delete", "recover")))
-            onNodeWithTag("auth_local").performScrollTo().performClick()
-            assertTrue(closed)
+    @Test fun unavailableAndDeclinedConsentOfferSupportAndSignOutButNoLocalExit() =
+        inBothLanguages { german ->
+            runComposeUiTest {
+                val auth =
+                    FakePhoneAuth().also {
+                        it.session.value = CloudSession("alice", true)
+                        it.consentStatus = ConsentStatus.UNAVAILABLE
+                    }
+                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+                var supportOpened = false
+                setContent { AdvantlyTheme { AccountScreen(model, null, onSupport = { supportOpened = true }) } }
+                onNodeWithTag("consent_accept").performScrollTo().assertIsNotEnabled()
+                onNodeWithTag("consent_decline").performScrollTo().performClick()
+                onNodeWithTag("consent_status")
+                    .performScrollTo()
+                    .assertTextContains(if (german) "Bestätige sie oder melde dich ab" else "Confirm them or sign out", substring = true)
+                onNodeWithTag("account_support").performScrollTo().performClick()
+                assertTrue(supportOpened)
+                // Kontorechte hängen nicht an der Zustimmung.
+                onNodeWithTag("account_export").performScrollTo().performClick()
+                onNodeWithTag("account_export_data").assertExists()
+                runOnIdle { model.dismissExport() }
+                onNodeWithTag("account_delete").performScrollTo().assertIsEnabled()
+                onNodeWithTag("auth_local").assertDoesNotExist()
+                onNodeWithTag("auth_sign_out").performScrollTo().performClick()
+                assertTrue(auth.calls.containsAll(listOf("consent:false", "export", "logout")))
+            }
         }
 
-    @Test fun suspendedAccountExplainsTheBlockAndDevicesAreRevokedOnlyAfterConfirmation() =
+    @Test fun deletionRequestOffersRecoveryExportAndSignOut() =
+        runComposeUiTest {
+            val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, deletionRequested = true) }
+            val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
+            setContent { AdvantlyTheme { AccountScreen(model, null) } }
+            onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
+            onNodeWithTag("account_delete").assertDoesNotExist()
+            onNodeWithTag("auth_sign_out").performScrollTo().assertIsEnabled()
+            onNodeWithTag("account_recover").performScrollTo().performClick()
+            assertTrue("recover" in auth.calls)
+            assertFalse(model.state.value.accountRequired)
+        }
+
+    @Test fun suspendedAccountExplainsTheBlockAndKeepsExport() =
         runComposeUiTest {
             val auth = FakePhoneAuth().also { it.session.value = CloudSession("alice", true, suspended = true) }
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-            setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+            setContent { AdvantlyTheme { ScrollingRights(model) } }
             onNodeWithTag("account_suspended").performScrollTo().assertIsDisplayed()
             onNodeWithTag("account_export").performScrollTo().assertIsEnabled()
-            onNodeWithTag("account_devices_show").performScrollTo().performClick()
-            onNodeWithTag("account_device_revoke_w1").performScrollTo().performClick()
-            onNodeWithTag("account_device_revoke_cancel").performClick()
-            assertTrue("revoke:w1" !in auth.calls, "Abbrechen widerruft nichts")
-            onNodeWithTag("account_device_revoke_w1").performScrollTo().performClick()
-            onNodeWithTag("account_device_revoke_confirm").performClick()
-            onNodeWithTag("account_device_revoked_w1").performScrollTo().assertIsDisplayed()
-            onNodeWithTag("account_device_revoke_d1").performScrollTo().assertIsEnabled()
-            assertEquals(listOf("devices", "revoke:w1", "devices"), auth.calls.filter { it != "refresh" })
-        }
-
-    @Test fun theCurrentPhoneIsMarkedAndHasNoRevokeButtonOnlyAHint() =
-        inBothLanguages { german ->
-            runComposeUiTest {
-                val auth =
-                    FakePhoneAuth().also {
-                        it.session.value = CloudSession("alice", true)
-                        it.devices[0] = CloudDevice("d1", installationId = "i1", current = true)
-                    }
-                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-                onNodeWithTag("account_devices_show").performScrollTo().performClick()
-                onNodeWithTag("account_device_d1").performScrollTo().assertTextEquals(if (german) "Dieses Gerät" else "This device")
-                onNodeWithTag("account_device_current_hint")
-                    .performScrollTo()
-                    .assertTextContains(if (german) "melde dich ab" else "sign out", substring = true)
-                onNodeWithTag("account_device_revoke_d1").assertDoesNotExist()
-                onNodeWithTag("account_device_revoke_w1").performScrollTo().assertIsEnabled()
-                onNodeWithTag("account_device_w1").assertTextEquals("wearos · watch")
-            }
-        }
-
-    @Test fun aPhoneRevokedFromElsewhereExplainsWhatStaysAndWhatToAvoid() =
-        inBothLanguages { german ->
-            runComposeUiTest {
-                val auth =
-                    FakePhoneAuth().also {
-                        it.session.value = CloudSession("alice", true)
-                        it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
-                    }
-                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-                onNodeWithTag("account_devices_show").performScrollTo().performClick()
-                onNodeWithTag("account_device_d1")
-                    .performScrollTo()
-                    .assertTextEquals(if (german) "Dieses Gerät · Pixel · android · phone" else "This device · Pixel · android · phone")
-                onNodeWithTag("account_device_revoked_d1").performScrollTo().assertIsDisplayed()
-                val hint = onNodeWithTag("account_device_current_hint").performScrollTo()
-                hint.assertTextContains(if (german) "Lösche keine App-Daten" else "Do not clear the app data", substring = true)
-                hint.assertTextContains(
-                    if (german) {
-                        "von einem anderen deiner Geräte (Konto, Geräte) oder über den Support frei"
-                    } else {
-                        "Restore it from another of your devices (Account, Devices) or through support"
-                    },
-                    substring = true,
-                )
-                hint.assertTextContains(if (german) "ab und wieder an" else "sign out and sign in again", substring = true)
-                onNodeWithTag("account_device_revoke_d1").assertDoesNotExist()
-                onNodeWithTag("account_device_restore_d1").assertDoesNotExist()
-            }
-        }
-
-    @Test fun aRevokedOtherDeviceIsRestoredOnlyAfterConfirmationNeverTheCurrentPhone() =
-        inBothLanguages { german ->
-            runComposeUiTest {
-                val auth =
-                    FakePhoneAuth().also {
-                        it.session.value = CloudSession("alice", true)
-                        it.devices[0] = it.devices[0].copy(current = true, revokedAt = "2026-10-24T08:00:00Z")
-                        it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
-                    }
-                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-                onNodeWithTag("account_devices_show").performScrollTo().performClick()
-                onNodeWithTag("account_device_restore_d1").assertDoesNotExist()
-                onNodeWithTag("account_device_restore_w1")
-                    .performScrollTo()
-                    .assertTextEquals(if (german) "Freigabe wiederherstellen" else "Restore access")
-                    .performClick()
-                // Eine Uhr meldet sich nicht an: eigener Text ohne Anmeldung (Review P3-3).
-                onNodeWithText(if (german) "Diese Uhr behält ihre Kennung" else "This watch keeps its identity", substring = true)
-                    .assertIsDisplayed()
-                onNodeWithText(if (german) "nach einer erneuten Anmeldung" else "after it signs in", substring = true).assertDoesNotExist()
-                onNodeWithTag("account_device_restore_cancel").performClick()
-                assertTrue("restore:w1" !in auth.calls, "Abbrechen gibt nichts frei")
-                onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
-                onNodeWithTag("account_device_restore_confirm").performClick()
-                assertEquals(listOf("devices", "restore:w1", "devices"), auth.calls.filter { it != "refresh" })
-                onNodeWithTag("account_device_revoked_w1").assertDoesNotExist()
-                onNodeWithTag("account_device_revoke_w1").performScrollTo().assertIsEnabled()
-            }
-        }
-
-    @Test fun aRejectedRestoreExplainsTheServerReason() =
-        inBothLanguages { german ->
-            runComposeUiTest {
-                val auth =
-                    FakePhoneAuth().also {
-                        it.session.value = CloudSession("alice", true)
-                        it.devices[1] = it.devices[1].copy(revokedAt = "2026-10-24T08:00:00Z")
-                    }
-                val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-                setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-                onNodeWithTag("account_devices_show").performScrollTo().performClick()
-                for ((failure, text) in listOf(
-                    "device_restore_unavailable" to
-                        if (german) "Dieses Handy kann gerade keine Freigabe erteilen" else "This phone cannot restore access right now",
-                    "device_restore_self_revoked" to
-                        if (german) "Der Cloud-Zugriff dieses Handys ist selbst widerrufen" else "This phone’s own cloud access is revoked",
-                    "device_unrevoke_caller_too_new" to
-                        if (german) "erst nach dem Widerruf angemeldet" else "signed in only after that device was revoked",
-                )) {
-                    auth.failure = failure
-                    onNodeWithTag("account_device_restore_w1").performScrollTo().performClick()
-                    onNodeWithTag("account_device_restore_confirm").performClick()
-                    onNodeWithTag("auth_error").performScrollTo().assertTextContains(text, substring = true)
-                }
-                onNodeWithTag("account_device_revoked_w1").performScrollTo().assertIsDisplayed()
-            }
+            onNodeWithTag("account_devices_show").assertDoesNotExist()
         }
 
     private fun inBothLanguages(block: (german: Boolean) -> Unit) {
@@ -442,26 +330,6 @@ class AccountScreenTest {
         }
     }
 
-    @Test fun adoptionSelectionUsesLabelsAndCancelHasNoOwnershipEffect() =
-        runComposeUiTest {
-            val auth =
-                FakePhoneAuth().also {
-                    it.session.value = CloudSession("alice", true, generation = 4)
-                    it.sources = listOf(CloudAdoptionSource("secret-source-id", "WATCH", 8))
-                }
-            val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-            setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
-            onNodeWithTag("auth_adoption_accept").assertIsNotEnabled()
-            onNodeWithTag("auth_adoption_source_0").performScrollTo().performClick()
-            onNodeWithTag("auth_adoption_cancel").performScrollTo().performClick()
-            onNodeWithTag("auth_adoption_source_0").assertDoesNotExist()
-            assertEquals(emptyList(), auth.adopted)
-            runOnIdle { model.refresh() }
-            onNodeWithTag("auth_adoption_source_0").performScrollTo().performClick()
-            onNodeWithTag("auth_adoption_accept").performScrollTo().performClick()
-            assertEquals(listOf(setOf("secret-source-id")), auth.adopted)
-        }
-
     @Test fun ageGateHasNoProviderActionUntilServerAccepted() =
         runComposeUiTest {
             val auth = FakePhoneAuth()
@@ -472,7 +340,7 @@ class AccountScreenTest {
                     AccountScreen(model, {
                         credentialsOpened = true
                         GoogleCredential("token", "nonce")
-                    }) {}
+                    })
                 }
             }
             onNodeWithTag("auth_google").assertDoesNotExist()
@@ -489,7 +357,7 @@ class AccountScreenTest {
         runComposeUiTest {
             val auth = FakePhoneAuth()
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-            setContent { AdvantlyTheme { AccountScreen(model, null) {} } }
+            setContent { AdvantlyTheme { AccountScreen(model, null) } }
             onNodeWithTag("auth_country").performTextReplacement("U1")
             onNodeWithTag("auth_birth").performTextInput("2000-01-01")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
@@ -498,19 +366,18 @@ class AccountScreenTest {
             assertEquals(listOf("refresh"), auth.calls)
         }
 
-    @Test fun rejectedAgeAndUnsupportedCountryKeepLocalExit() =
+    @Test fun rejectedAgeKeepsTheAccountFlowWithoutLocalExit() =
         runComposeUiTest {
             val auth = FakePhoneAuth()
             val model = AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined))
-            var closed = false
-            setContent { AdvantlyTheme { AccountScreen(model, null) { closed = true } } }
+            setContent { AdvantlyTheme { AccountScreen(model, null) } }
             auth.failure = "age_below_minimum"
             onNodeWithTag("auth_birth").performTextInput("2020-01-01")
             onNodeWithTag("auth_age_next").performScrollTo().performClick()
             onNodeWithTag("auth_error").assertExists()
             onNodeWithTag("auth_birth").assertExists()
-            onNodeWithTag("auth_local").performScrollTo().performClick()
-            assertTrue(closed)
+            onNodeWithTag("auth_local").assertDoesNotExist()
+            assertTrue(model.state.value.accountRequired)
             assertEquals(listOf("refresh", "age:AT"), auth.calls)
         }
 }

@@ -35,12 +35,10 @@ import eu.advantly.ui.phone.app.ComingSoonScreen
 import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.app.ProfileScreen
 import eu.advantly.ui.phone.app.TabBar
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
-import eu.advantly.ui.phone.auth.AccountScreen
-import eu.advantly.ui.phone.auth.StartLoginHost
-import eu.advantly.ui.phone.auth.StartLoginScreen
-import eu.advantly.ui.phone.auth.shouldShowStartLogin
+import eu.advantly.ui.phone.auth.AccountGate
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
@@ -59,9 +57,6 @@ import eu.advantly.ui.phone.live.LiveScoreScreen
 import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
-import eu.advantly.ui.phone.resources.auth_open
-import eu.advantly.ui.phone.resources.profile_restore_previous
-import eu.advantly.ui.phone.resources.support_open
 import eu.advantly.ui.phone.resources.watch_takeover_confirm
 import eu.advantly.ui.phone.resources.watch_takeover_text
 import eu.advantly.ui.phone.resources.watch_takeover_title
@@ -84,8 +79,9 @@ import org.jetbrains.compose.resources.stringResource
  * @param onShareMatchImage teilt die Ergebniskarte (Bild + Text mit Link) über die Plattform; `null` blendet „Teilen“ aus
  * @param onShareText Teilen-Menü der Plattform für reinen Text (z. B. Freundescode); `null` blendet Teilen aus
  * @param watchInstall Uhr-App auf einer Uhr ohne Advantly installieren (nur Android); `null` blendet den Hinweis aus
- * @param startLogin gespeicherte Wahl zum Startbildschirm „Konto oder ohne Konto“; `null` (iOS/Desktop) zeigt ihn nie
- * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Startbildschirm wartet, bis er entschieden ist
+ * @param authModel Konto (Pflicht, 0.3.0): ohne nutzbares Konto zeigt die App nur den Konto-Fluss; `null` (Build ohne Backend,
+ *   iOS) zählt ohne Konto
+ * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Konto-Fluss wartet, bis er entschieden ist
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -108,32 +104,21 @@ fun AdvantlyApp(
     onShareMatchImage: (suspend (ImageBitmap, String) -> Unit)? = null,
     onShareText: ((String) -> Unit)? = null,
     watchInstall: WatchInstallHost? = null,
-    startLogin: StartLoginHost? = null,
     recoveryHold: Boolean = false,
 ) {
-    val authState = authModel?.state?.collectAsState()?.value
-    val startLoginDecided = startLogin?.decided?.collectAsState()?.value
-    // Wer angemeldet war, hat sich entschieden: nach Abmelden oder Kontolöschung kein erneuter Startbildschirm.
-    LaunchedEffect(authState?.authenticated, startLogin) { if (authState?.authenticated == true) startLogin?.decide() }
-    val showStartLogin =
-        shouldShowStartLogin(
-            available = authModel != null && startLoginDecided != null,
-            decided = startLoginDecided == true,
-            signedIn = authState?.authenticated == true,
-            checking = authState?.busy == true,
-            checkFailed = authState?.error != null,
-            recoveryHold = recoveryHold,
-        )
+    val accountState = authModel?.state?.collectAsState()?.value
     val archived by model.players.archivedPlayerIds.collectAsState()
     val self by model.players.self.collectAsState()
     val aliases by model.players.ownerAliases.collectAsState()
     val updateRequired by model.live.updateRequired.collectAsState()
     val telemetryVisibility by model.telemetry.telemetryVisibility.collectAsState()
     val navigator = model.navigator
+    // Ein laufendes Match wird nicht unterbrochen: der Konto-Fluss erscheint nach dem Verlassen des Live-Scores.
+    val accountRequired = accountState?.accountRequired == true && !recoveryHold && navigator.top != Overlay.Live
     if (autoBenchmark) {
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
     }
-    BackHandler(enabled = navigator.top != null) { model.onBack() }
+    BackHandler(enabled = navigator.top != null && !accountRequired) { model.onBack() }
     // App wieder im Vordergrund: Stand der Uhr neu prüfen (Uhr-App evtl. inzwischen installiert/geöffnet)
     LifecycleResumeEffect(model) {
         model.live.refreshWatchStatus()
@@ -149,7 +134,7 @@ fun AdvantlyApp(
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
                 // oder für Screenreader erreichbar.
-                if (navigator.top == null) {
+                if (navigator.top == null || accountRequired) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
                         Box(Modifier.weight(1f)) {
@@ -166,12 +151,12 @@ fun AdvantlyApp(
                                 onRestorePrevious,
                                 onShareText,
                                 watchInstall,
-                                onStartLoginDecided = if (showStartLogin) startLogin?.let { it::decide } else null,
+                                accountRequired = accountRequired,
                             )
                         }
                     }
                 }
-                when (val top = navigator.top) {
+                when (val top = navigator.top.takeUnless { accountRequired }) {
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             UpdateRequiredBanner(updateRequired)
@@ -269,14 +254,16 @@ fun AdvantlyApp(
                         Unit
                     }
                 }
-                model.pendingScorerChoice?.let { ScorerDialog(model) }
-                model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
+                if (!accountRequired) {
+                    model.pendingScorerChoice?.let { ScorerDialog(model) }
+                    model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
+                }
             }
         }
     }
 }
 
-/** Tabs, Mini-Scorebar und Tab-Leiste (nur ohne Vollbild-Ebene); mit [onStartLoginDecided] stattdessen der Startbildschirm. */
+/** Tabs, Mini-Scorebar und Tab-Leiste (nur ohne Vollbild-Ebene); mit [accountRequired] stattdessen der Konto-Fluss. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TabLayer(
@@ -292,30 +279,27 @@ private fun TabLayer(
     onRestorePrevious: (() -> Unit)?,
     onShareText: ((String) -> Unit)?,
     watchInstall: WatchInstallHost?,
-    onStartLoginDecided: (() -> Unit)?,
+    accountRequired: Boolean,
 ) {
-    var showAccount by remember { mutableStateOf(false) }
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
     val navigator = model.navigator
     var showSupport by remember(navigator.tab) { mutableStateOf(false) }
+    val onSupport = if (supportModel != null) ({ showSupport = true }) else null
     val openAccount = {
         authModel?.refresh()
-        showAccount = true
         navigator.tab = AppTab.Profile
     }
-    if (onStartLoginDecided != null) {
-        // Vollbild ohne Tab-Leiste; Konto führt in den bestehenden Fluss unter Profil → Konto.
-        StartLoginScreen(
-            onAccount = {
-                onStartLoginDecided()
-                openAccount()
-            },
-            onSkip = {
-                onStartLoginDecided()
-                navigator.tab = AppTab.Home
-            },
-        )
+    if (accountRequired && authModel != null) {
+        // Vollbild ohne Tab-Leiste und ohne Überspringen; nur Hilfe bleibt erreichbar.
+        if (showSupport && supportModel != null) {
+            BackHandler { showSupport = false }
+            SupportScreen(supportModel, supportDiagnostics + mapOf("app_version" to versionName, "commit" to buildCommit)) {
+                showSupport = false
+            }
+        } else {
+            AccountGate(authModel, googleCredential, onSupport, onShareExport)
+        }
         return
     }
     Column(Modifier.fillMaxSize().safeContentPadding()) {
@@ -344,7 +328,7 @@ private fun TabLayer(
                         val friends = authModel?.friends
                         if (friends == null) {
                             // Build ohne Backend: Freunde gibt es hier nicht, P1 bleibt unverändert.
-                            ComingSoonScreen(AppTab.Friends, versionName)
+                            ComingSoonScreen(AppTab.Friends)
                         } else {
                             FriendsScreen(
                                 friends,
@@ -355,53 +339,20 @@ private fun TabLayer(
                     }
 
                     AppTab.Profile -> {
-                        if (showAccount && authModel != null) {
-                            AccountScreen(
-                                authModel,
-                                googleCredential,
-                                onSupport =
-                                    if (supportModel !=
-                                        null
-                                    ) {
-                                        ({ showSupport = true })
-                                    } else {
-                                        null
-                                    },
-                                onClose = { showAccount = false },
-                                onShareExport = onShareExport,
-                            )
-                        } else {
-                            Column {
-                                if (supportModel != null) {
-                                    TextButton({ showSupport = true }, modifier = Modifier.testTag("profile_support")) {
-                                        Text(stringResource(Res.string.support_open))
-                                    }
-                                }
-                                if (authModel != null) {
-                                    TextButton(
-                                        {
-                                            authModel.refresh()
-                                            showAccount = true
-                                        },
-                                        modifier = Modifier.testTag("profile_account"),
-                                    ) { Text(stringResource(Res.string.auth_open)) }
-                                }
-                                if (onRestorePrevious != null) {
-                                    TextButton(onRestorePrevious, modifier = Modifier.testTag("profile_restore_previous")) {
-                                        Text(stringResource(Res.string.profile_restore_previous))
-                                    }
-                                }
-                                ComingSoonScreen(
-                                    AppTab.Profile,
-                                    versionName,
-                                    players = model.players,
-                                    onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
-                                    telemetry = model.telemetry,
-                                    buildCommit = buildCommit,
-                                    buildTimeUtc = buildTimeUtc,
-                                )
-                            }
-                        }
+                        ProfileScreen(
+                            versionName,
+                            players = model.players,
+                            onPlayerHistory = { navigator.push(Overlay.PlayerHistory(it)) },
+                            telemetry = model.telemetry,
+                            buildCommit = buildCommit,
+                            buildTimeUtc = buildTimeUtc,
+                            account = authModel,
+                            google = googleCredential,
+                            onFriends = { navigator.tab = AppTab.Friends },
+                            onSupport = onSupport,
+                            onRestorePrevious = onRestorePrevious,
+                            onShareExport = onShareExport,
+                        )
                     }
                 }
             }

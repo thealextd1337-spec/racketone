@@ -42,23 +42,30 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.advantly.core.model.Side
+import eu.advantly.presentation.auth.AuthViewModel
+import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.presentation.match.TelemetrySettingsPort
+import eu.advantly.ui.phone.auth.AccountHeader
+import eu.advantly.ui.phone.auth.AccountRights
+import eu.advantly.ui.phone.auth.BackupStatusLine
 import eu.advantly.ui.phone.common.SportIcon
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.friends.ShareDefaultSection
 import eu.advantly.ui.phone.live.WatchMark
 import eu.advantly.ui.phone.live.compactScore
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_close
 import eu.advantly.ui.phone.resources.app_version
+import eu.advantly.ui.phone.resources.auth_sign_out
 import eu.advantly.ui.phone.resources.coming_soon
 import eu.advantly.ui.phone.resources.coming_soon_friends
-import eu.advantly.ui.phone.resources.coming_soon_profile
+import eu.advantly.ui.phone.resources.consent_terms
 import eu.advantly.ui.phone.resources.imprint_url
 import eu.advantly.ui.phone.resources.link_copy
 import eu.advantly.ui.phone.resources.link_failed_text
@@ -66,14 +73,18 @@ import eu.advantly.ui.phone.resources.link_failed_title
 import eu.advantly.ui.phone.resources.mini_scorebar_a11y
 import eu.advantly.ui.phone.resources.mini_scorebar_more
 import eu.advantly.ui.phone.resources.privacy_url
+import eu.advantly.ui.phone.resources.profile_account_privacy
 import eu.advantly.ui.phone.resources.profile_imprint
 import eu.advantly.ui.phone.resources.profile_legal
 import eu.advantly.ui.phone.resources.profile_privacy
+import eu.advantly.ui.phone.resources.profile_restore_previous
+import eu.advantly.ui.phone.resources.support_open
 import eu.advantly.ui.phone.resources.tab_friends
 import eu.advantly.ui.phone.resources.tab_history
 import eu.advantly.ui.phone.resources.tab_home
 import eu.advantly.ui.phone.resources.tab_play
 import eu.advantly.ui.phone.resources.tab_profile
+import eu.advantly.ui.phone.resources.terms_url
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -188,20 +199,11 @@ fun MiniScoreBar(
     }
 }
 
-/**
- * Platzhalter für Freunde/Profil in P1 („kommt bald“). Das Profil enthält schon Rechtliches und die Spielerliste
- * (Dummy-/Gastspieler umbenennen, 04 §3.2 „Namen & Aliase“).
- */
+/** Platzhalter für Freunde in Builds ohne Backend („kommt bald“). */
 @Composable
 fun ComingSoonScreen(
     tab: AppTab,
-    versionName: String,
     modifier: Modifier = Modifier,
-    players: PlayersPort? = null,
-    onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
-    telemetry: TelemetrySettingsPort? = null,
-    buildCommit: String = "",
-    buildTimeUtc: String = "",
 ) {
     val colors = AdvantlyTheme.colors
     Column(
@@ -219,36 +221,112 @@ fun ComingSoonScreen(
             modifier = Modifier.semantics { heading() },
         )
         Text(stringResource(Res.string.coming_soon).uppercase(), style = AdvantlyTheme.typography.overline, color = colors.brand)
+        Text(stringResource(Res.string.coming_soon_friends), style = AdvantlyTheme.typography.body, color = colors.text2)
+    }
+}
+
+/**
+ * Profil (0.3.0, schlank): oben Name, Benutzername, Freundescode und eine Statuszeile zur Sicherung; darunter Freunde,
+ * „Puls & Schritte“, Standard fürs Teilen, Spielerliste (04 §3.2 „Namen & Aliase“), Hilfe und Abmelden. Export, Löschung
+ * und Rechtstexte liegen aufklappbar unter „Konto & Datenschutz“. Ohne [account] (Build ohne Backend) nur die lokalen Teile.
+ */
+@Composable
+fun ProfileScreen(
+    versionName: String,
+    modifier: Modifier = Modifier,
+    players: PlayersPort? = null,
+    onPlayerHistory: (eu.advantly.core.model.PlayerId) -> Unit = {},
+    telemetry: TelemetrySettingsPort? = null,
+    buildCommit: String = "",
+    buildTimeUtc: String = "",
+    account: AuthViewModel? = null,
+    google: (suspend () -> GoogleCredential)? = null,
+    onFriends: () -> Unit = {},
+    onSupport: (() -> Unit)? = null,
+    onRestorePrevious: (() -> Unit)? = null,
+    onShareExport: (() -> Unit)? = null,
+) {
+    val colors = AdvantlyTheme.colors
+    // Rechtliches ist Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
+    val openLink = rememberSafeLinkOpener()
+    val privacyUrl = stringResource(Res.string.privacy_url)
+    val termsUrl = stringResource(Res.string.terms_url)
+    val imprintUrl = stringResource(Res.string.imprint_url)
+    var accountOpen by remember { mutableStateOf(false) }
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(Spacing.xl)
+            .testTag("profile"),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
         Text(
-            stringResource(if (tab == AppTab.Friends) Res.string.coming_soon_friends else Res.string.coming_soon_profile),
-            style = AdvantlyTheme.typography.body,
-            color = colors.text2,
+            stringResource(tabLabel(AppTab.Profile)),
+            style = AdvantlyTheme.typography.headline,
+            color = colors.text,
+            modifier = Modifier.semantics { heading() },
         )
-        if (tab == AppTab.Profile && players != null) GuestList(players, onPlayerHistory)
-        // Einstellung „Puls & Schritte“ (P2-J) – lokal, wirkt auf Uhr und Handy, später mit dem Profil synchronisiert
-        if (tab == AppTab.Profile && telemetry != null) TelemetryVisibilitySection(telemetry, Modifier.padding(top = Spacing.l))
-        if (tab == AppTab.Profile) {
-            // Rechtliches ist schon in P1 Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
-            val openLink = rememberSafeLinkOpener()
-            val privacyUrl = stringResource(Res.string.privacy_url)
-            val imprintUrl = stringResource(Res.string.imprint_url)
-            Text(
-                stringResource(Res.string.profile_legal).uppercase(),
-                style = AdvantlyTheme.typography.overline,
-                color = colors.text2,
-                modifier = Modifier.padding(top = Spacing.l).semantics { heading() },
-            )
-            LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { openLink(privacyUrl) }
-            LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { openLink(imprintUrl) }
-            if (versionName.isNotBlank()) {
-                SelectionContainer {
-                    Text(
-                        stringResource(Res.string.app_version, versionDetails(versionName, buildCommit, buildTimeUtc)),
-                        style = AdvantlyTheme.typography.caption,
-                        color = colors.text2,
-                        modifier = Modifier.testTag("profile_version"),
-                    )
-                }
+        if (account != null) {
+            account.friends?.let { AccountHeader(it) }
+            BackupStatusLine(account)
+            if (account.friends != null) LinkRow(stringResource(Res.string.tab_friends), "profile_friends", onFriends)
+        }
+        // Einstellung „Puls & Schritte“ (P2-J) – wirkt auf Uhr und Handy
+        if (telemetry != null) TelemetryVisibilitySection(telemetry, Modifier.padding(top = Spacing.s))
+        account?.friends?.let { ShareDefaultSection(it) }
+        if (players != null) GuestList(players, onPlayerHistory)
+        if (onSupport != null) LinkRow(stringResource(Res.string.support_open), "profile_support", onSupport)
+        if (onRestorePrevious != null) {
+            LinkRow(stringResource(Res.string.profile_restore_previous), "profile_restore_previous", onRestorePrevious)
+        }
+        if (account != null) {
+            TextButton(account::signOut, modifier = Modifier.testTag("auth_sign_out")) {
+                Text(stringResource(Res.string.auth_sign_out), color = colors.text)
+            }
+            Row(
+                Modifier
+                    .testTag("profile_account_privacy")
+                    .fillMaxWidth()
+                    .heightIn(min = Spacing.minTouchTarget)
+                    .clickable(role = Role.Button) { accountOpen = !accountOpen }
+                    .semantics { heading() },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(Res.string.profile_account_privacy).uppercase(),
+                    style = AdvantlyTheme.typography.overline,
+                    color = colors.text2,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (accountOpen) AdvantlyIcons.ChevronDown else AdvantlyIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = colors.text2,
+                )
+            }
+            if (accountOpen) {
+                AccountRights(account, google, onShareExport)
+                LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { openLink(privacyUrl) }
+                LinkRow(stringResource(Res.string.consent_terms), "profile_terms") { openLink(termsUrl) }
+            }
+        }
+        Text(
+            stringResource(Res.string.profile_legal).uppercase(),
+            style = AdvantlyTheme.typography.overline,
+            color = colors.text2,
+            modifier = Modifier.padding(top = Spacing.l).semantics { heading() },
+        )
+        if (account == null) LinkRow(stringResource(Res.string.profile_privacy), "profile_privacy") { openLink(privacyUrl) }
+        LinkRow(stringResource(Res.string.profile_imprint), "profile_imprint") { openLink(imprintUrl) }
+        if (versionName.isNotBlank()) {
+            SelectionContainer {
+                Text(
+                    stringResource(Res.string.app_version, versionDetails(versionName, buildCommit, buildTimeUtc)),
+                    style = AdvantlyTheme.typography.caption,
+                    color = colors.text2,
+                    modifier = Modifier.testTag("profile_version"),
+                )
             }
         }
     }

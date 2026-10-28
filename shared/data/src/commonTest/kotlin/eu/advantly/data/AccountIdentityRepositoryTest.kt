@@ -116,7 +116,13 @@ class AccountIdentityRepositoryTest {
         val session = data.cloudUploads.activate("alice")
         identities.bindCurrent(session)
         assertTrue(identities.ownedSources("alice").any { it.deviceId == "new-watch" && it.kind == "WATCH" })
-        assertEquals(listOf("watch-event"), data.cloudUploads.capture(session, 10).events.map { it.id })
+        assertEquals(
+            listOf("watch-event"),
+            data.cloudUploads
+                .capture(session, 10)
+                .events
+                .map { it.id },
+        )
         // Fremder Kontobereich (Altbestand) bleibt der automatischen Übernahme beim Anmelden vorbehalten.
         assertEquals(listOf("legacy-watch"), identities.adoptionSources().map { it.deviceId })
     }

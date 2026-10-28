@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,27 +32,10 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
-import eu.advantly.ui.phone.friends.ShareDefaultSection
 import eu.advantly.ui.phone.resources.Res
-import eu.advantly.ui.phone.resources.account_cancel
-import eu.advantly.ui.phone.resources.account_close
-import eu.advantly.ui.phone.resources.account_delete
-import eu.advantly.ui.phone.resources.account_delete_explanation
 import eu.advantly.ui.phone.resources.account_deletion_pending
-import eu.advantly.ui.phone.resources.account_device_error_not_found
-import eu.advantly.ui.phone.resources.account_device_error_not_revoked
-import eu.advantly.ui.phone.resources.account_device_error_self
-import eu.advantly.ui.phone.resources.account_device_error_this_phone
-import eu.advantly.ui.phone.resources.account_device_error_this_phone_revoked
-import eu.advantly.ui.phone.resources.account_device_error_too_new
-import eu.advantly.ui.phone.resources.account_export
 import eu.advantly.ui.phone.resources.account_recover
 import eu.advantly.ui.phone.resources.account_suspended
-import eu.advantly.ui.phone.resources.auth_adoption_accept
-import eu.advantly.ui.phone.resources.auth_adoption_cancel
-import eu.advantly.ui.phone.resources.auth_adoption_phone
-import eu.advantly.ui.phone.resources.auth_adoption_title
-import eu.advantly.ui.phone.resources.auth_adoption_watch
 import eu.advantly.ui.phone.resources.auth_alias
 import eu.advantly.ui.phone.resources.auth_birth
 import eu.advantly.ui.phone.resources.auth_birth_privacy
@@ -71,12 +52,8 @@ import eu.advantly.ui.phone.resources.auth_invalid_alias
 import eu.advantly.ui.phone.resources.auth_invalid_birth
 import eu.advantly.ui.phone.resources.auth_invalid_code
 import eu.advantly.ui.phone.resources.auth_invalid_username
-import eu.advantly.ui.phone.resources.auth_link_google
-import eu.advantly.ui.phone.resources.auth_local
-import eu.advantly.ui.phone.resources.auth_optional
 import eu.advantly.ui.phone.resources.auth_profile_missing
 import eu.advantly.ui.phone.resources.auth_rate_limit
-import eu.advantly.ui.phone.resources.auth_ready
 import eu.advantly.ui.phone.resources.auth_refresh
 import eu.advantly.ui.phone.resources.auth_restart
 import eu.advantly.ui.phone.resources.auth_send
@@ -90,7 +67,6 @@ import eu.advantly.ui.phone.resources.consent_accept
 import eu.advantly.ui.phone.resources.consent_changed
 import eu.advantly.ui.phone.resources.consent_confirm
 import eu.advantly.ui.phone.resources.consent_confirm_privacy
-import eu.advantly.ui.phone.resources.consent_current
 import eu.advantly.ui.phone.resources.consent_decline
 import eu.advantly.ui.phone.resources.consent_declined
 import eu.advantly.ui.phone.resources.consent_language
@@ -103,22 +79,15 @@ import eu.advantly.ui.phone.resources.consent_version
 import eu.advantly.ui.phone.resources.support_open
 import org.jetbrains.compose.resources.stringResource
 
-/** Erhält bestehende Aufrufe mit nachgestellter Schließen-Lambda. */
+/**
+ * Konto-Fluss des Pflichtkontos ([AccountGate]): Altersprüfung, Anmeldung, Zustimmung zu neuen Rechtstexten, Profil und
+ * Löschantrag. Kein lokaler Ausgang; Support, Abmelden und die Kontorechte bleiben erreichbar. Kein Login auf der Uhr.
+ */
 @Composable
 fun AccountScreen(
     model: AuthViewModel,
     google: (suspend () -> GoogleCredential)?,
     onSupport: (() -> Unit)? = null,
-    onClose: () -> Unit,
-) = AccountScreen(model, google, onSupport, onClose, onShareExport = null)
-
-/** Optionaler Kontobereich; kein Zugriff auf lokale Matches und kein Login auf der Uhr. */
-@Composable
-fun AccountScreen(
-    model: AuthViewModel,
-    google: (suspend () -> GoogleCredential)?,
-    onSupport: (() -> Unit)? = null,
-    onClose: () -> Unit,
     onShareExport: (() -> Unit)? = null,
 ) {
     val state by model.state.collectAsState()
@@ -126,7 +95,6 @@ fun AccountScreen(
     val language = stringResource(Res.string.consent_language)
     LaunchedEffect(language, state.busy) { model.setConsentLanguage(language) }
     var confirmed by remember(state.consent) { mutableStateOf(emptySet<ConsentDocumentType>()) }
-    var confirmDeletion by remember(state.consent?.profileId) { mutableStateOf(false) }
     // Absichtlich remember statt rememberSaveable: Geburtstag und OTP werden nie in SavedState serialisiert.
     var country by remember(state.step) { mutableStateOf("AT") }
     var birthDate by remember(state.step) { mutableStateOf("") }
@@ -137,7 +105,6 @@ fun AccountScreen(
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(Res.string.auth_title))
-            Text(stringResource(Res.string.auth_optional))
             onSupport?.let {
                 TextButton(it, modifier = Modifier.testTag("account_support")) { Text(stringResource(Res.string.support_open)) }
             }
@@ -239,29 +206,15 @@ fun AccountScreen(
                 }
 
                 AuthStep.ACCOUNT -> {
-                    Text(stringResource(if (state.deletionRequested) Res.string.auth_deletion else Res.string.auth_ready))
-                    if (!state.deletionRequested) {
-                        google?.let {
-                            Button(
-                                { model.google(it, link = true) },
-                                enabled = !state.busy,
-                            ) { Text(stringResource(Res.string.auth_link_google)) }
+                    if (state.deletionRequested) {
+                        Text(stringResource(Res.string.auth_deletion))
+                        TextButton(model::cancelDeletion, enabled = !state.busy, modifier = Modifier.testTag("account_recover")) {
+                            Text(stringResource(Res.string.account_recover))
                         }
                     }
                 }
             }
-            if (state.suspended) {
-                Text(
-                    stringResource(Res.string.account_suspended),
-                    Modifier.testTag("account_suspended"),
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (state.authenticated) {
-                model.sync?.let { CloudSyncSection(it) }
-                model.upload?.let { CloudUploadSection(it, manual = model.sync == null) }
-                model.pull?.let { CloudPullSection(it, manual = model.sync == null) }
-                model.friends?.let { ShareDefaultSection(it) }
+            if (state.step == AuthStep.CONSENT) {
                 state.consent?.let { consent ->
                     Text(stringResource(Res.string.consent_title))
                     Text(
@@ -270,7 +223,7 @@ fun AccountScreen(
                                 ConsentStatus.UNAVAILABLE -> Res.string.consent_unavailable
                                 ConsentStatus.REQUIRED -> Res.string.consent_required
                                 ConsentStatus.DECLINED -> Res.string.consent_declined
-                                ConsentStatus.CURRENT -> Res.string.consent_current
+                                ConsentStatus.CURRENT -> Res.string.consent_required
                             },
                         ),
                         modifier = Modifier.testTag("consent_status"),
@@ -330,55 +283,14 @@ fun AccountScreen(
                         ) { Text(stringResource(Res.string.consent_decline)) }
                     }
                 }
-                val export = model.export
-                if (export != null) {
-                    CloudExportSection(export, onShareExport)
-                } else {
-                    TextButton(model::exportData, enabled = !state.busy, modifier = Modifier.testTag("account_export")) {
-                        Text(stringResource(Res.string.account_export))
-                    }
-                }
-                if (state.deletionRequested) {
-                    TextButton(model::cancelDeletion, enabled = !state.busy, modifier = Modifier.testTag("account_recover")) {
-                        Text(stringResource(Res.string.account_recover))
-                    }
-                } else {
-                    TextButton({ confirmDeletion = true }, enabled = !state.busy, modifier = Modifier.testTag("account_delete")) {
-                        Text(stringResource(Res.string.account_delete))
-                    }
-                }
-                AccountDevicesSection(state, model)
             }
-            if (state.adoptionSources.isNotEmpty()) {
-                Text(stringResource(Res.string.auth_adoption_title))
-                state.adoptionSources.forEachIndexed { index, source ->
-                    Row {
-                        Checkbox(
-                            checked = source.key in state.selectedSources,
-                            onCheckedChange = { model.selectSource(source.key) },
-                            enabled = !state.busy,
-                            modifier = Modifier.testTag("auth_adoption_source_$index"),
-                        )
-                        Text(
-                            stringResource(
-                                if (source.watch) Res.string.auth_adoption_watch else Res.string.auth_adoption_phone,
-                                source.eventCount,
-                            ),
-                        )
-                    }
-                }
-                Button(
-                    model::acceptAdoption,
-                    enabled = !state.busy && state.selectedSources.isNotEmpty(),
-                    modifier = Modifier.testTag("auth_adoption_accept"),
-                ) { Text(stringResource(Res.string.auth_adoption_accept)) }
-                TextButton(
-                    model::cancelAdoption,
-                    enabled = !state.busy,
-                    modifier = Modifier.testTag("auth_adoption_cancel"),
-                ) { Text(stringResource(Res.string.auth_adoption_cancel)) }
+            // Kontorechte hängen nicht an der Zustimmung: Export und Löschung bleiben auch vor der Bestätigung erreichbar.
+            val rights = state.authenticated && (state.step == AuthStep.CONSENT || state.deletionRequested)
+            if (rights) {
+                AccountRights(model, null, onShareExport)
+            } else {
+                state.error?.let { error -> Text(stringResource(authError(error)), modifier = Modifier.testTag("auth_error")) }
             }
-            state.error?.let { error -> Text(stringResource(authError(error)), modifier = Modifier.testTag("auth_error")) }
             if (state.error == "profile_missing") {
                 Button(model::signOut, enabled = !state.busy, modifier = Modifier.testTag("auth_reauthenticate")) {
                     Text(stringResource(Res.string.auth_restart))
@@ -390,43 +302,11 @@ fun AccountScreen(
                 }
             }
             if (state.busy) CircularProgressIndicator()
-            TextButton({
-                model.restart()
-                onClose()
-            }, enabled = !state.busy, modifier = Modifier.testTag("auth_local")) {
-                Text(stringResource(Res.string.auth_local))
-            }
-        }
-    }
-    if (confirmDeletion && state.authenticated) {
-        AlertDialog(
-            onDismissRequest = { confirmDeletion = false },
-            title = { Text(stringResource(Res.string.account_delete)) },
-            text = { Text(stringResource(Res.string.account_delete_explanation)) },
-            confirmButton = {
-                TextButton({
-                    confirmDeletion = false
-                    model.requestDeletion()
-                }, modifier = Modifier.testTag("account_delete_confirm")) {
-                    Text(stringResource(Res.string.account_delete))
-                }
-            },
-            dismissButton = { TextButton({ confirmDeletion = false }) { Text(stringResource(Res.string.account_cancel)) } },
-        )
-    }
-    if (model.export == null) {
-        state.exportedData?.let { data ->
-            AlertDialog(
-                onDismissRequest = model::dismissExport,
-                title = { Text(stringResource(Res.string.account_export)) },
-                text = { SelectionContainer { Text(data, Modifier.verticalScroll(rememberScrollState()).testTag("account_export_data")) } },
-                confirmButton = { TextButton(model::dismissExport) { Text(stringResource(Res.string.account_close)) } },
-            )
         }
     }
 }
 
-private fun authError(error: String) =
+internal fun authError(error: String) =
     when (error) {
         "country_not_supported" -> Res.string.auth_unavailable
         "age_below_minimum", "age_retry_later" -> Res.string.auth_too_young
@@ -443,11 +323,5 @@ private fun authError(error: String) =
         "consent_version_changed" -> Res.string.consent_changed
         "account_suspended" -> Res.string.account_suspended
         "account_deletion_pending" -> Res.string.account_deletion_pending
-        "device_unrevoke_self" -> Res.string.account_device_error_self
-        "device_unrevoke_caller_too_new" -> Res.string.account_device_error_too_new
-        "device_not_found" -> Res.string.account_device_error_not_found
-        "device_not_revoked" -> Res.string.account_device_error_not_revoked
-        "device_restore_unavailable" -> Res.string.account_device_error_this_phone
-        "device_restore_self_revoked" -> Res.string.account_device_error_this_phone_revoked
         else -> Res.string.auth_connection_failed
     }
