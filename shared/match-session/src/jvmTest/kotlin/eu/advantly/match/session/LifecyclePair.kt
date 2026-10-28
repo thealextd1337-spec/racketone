@@ -41,7 +41,7 @@ class RecordingLink(
         callback: SendCallback?,
     ): String {
         sent += payload
-        val message = (SyncCodec.decode(payload, 3..4) as? DecodeResult.Ok)?.message
+        val message = (SyncCodec.decode(payload, 3..ProtocolVersion.CURRENT) as? DecodeResult.Ok)?.message
         if (message != null && lose(message)) return "lost-${sent.size}"
         return delegate.send(peer, payload, callback)
     }
@@ -51,7 +51,7 @@ class RecordingLink(
         payload: ByteArray,
     ) = checkNotNull(receiver).onMessage(peer, "replay", payload)
 
-    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it, 3..4) as? DecodeResult.Ok }
+    fun decoded(): List<DecodeResult.Ok> = sent.mapNotNull { SyncCodec.decode(it, 3..ProtocolVersion.CURRENT) as? DecodeResult.Ok }
 }
 
 /**

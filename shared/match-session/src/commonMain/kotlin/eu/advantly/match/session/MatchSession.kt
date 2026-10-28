@@ -14,6 +14,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.ContinueDecision
+import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.Correction
 import eu.advantly.core.scoring.CorrectionKind
 import eu.advantly.core.scoring.EndReason
@@ -21,6 +22,8 @@ import eu.advantly.core.scoring.EngineState
 import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.EventOrdering
 import eu.advantly.core.scoring.EventPayload
+import eu.advantly.core.scoring.GameServer
+import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchEnded
 import eu.advantly.core.scoring.MatchStatus
@@ -30,6 +33,7 @@ import eu.advantly.core.scoring.PlayerAssigned
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointDetailSet
 import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ResultCorrected
 import eu.advantly.core.scoring.Resumed
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
@@ -815,6 +819,52 @@ class MatchSession(
         return emit(m, event) != null
     }
 
+    // --- Korrektur nach Matchende (Protokoll 5) ------------------------------------------------------
+
+    /**
+     * Darf dieses Gerät Ergebnis und Aufschläger von [matchId] korrigieren? Beendetes Match, Ersteller wie bei
+     * [canAssignPlayer] und Protokoll 5 mit Konto – nur dann sprechen alle gekoppelten Geräte die neuen Events
+     * (`minV = 5`); ohne Konto könnte eine Uhr mit 0.2.0 sie nicht lesen.
+     */
+    fun canCorrectResult(matchId: MatchId): Boolean {
+        checkThread()
+        if (!data.accountIdentities.managed || config.protocolVersions.last < 5) return false
+        return data.matches.get(matchId)?.status == MatchStatus.FINISHED && canAssignPlayer(matchId)
+    }
+
+    /** Satzergebnis korrigieren (`ResultCorrected`, leere Liste = gezähltes Ergebnis); `false` ohne Event, wenn unplausibel. */
+    fun correctResult(
+        matchId: MatchId,
+        sets: List<CorrectedSet>,
+    ): Boolean = emitCorrection(matchId, ResultCorrected(sets))
+
+    /** Aufschläger je Spiel festlegen (`GameServersCorrected`, vollständige Liste); `false` ohne Event, wenn ungültig. */
+    fun correctGameServers(
+        matchId: MatchId,
+        servers: List<GameServer>,
+    ): Boolean = emitCorrection(matchId, GameServersCorrected(servers))
+
+    /**
+     * Korrekturen sind Zähler-Events (02 §7.5). Zählt ein anderes Gerät (meist die Uhr), übernimmt dieses Gerät vorher
+     * (`ScorerChanged`, wirkungslos auf das beendete Match). Vorab auf einer Kopie geprüft: Ein ungültiges Event entsteht nie.
+     */
+    private fun emitCorrection(
+        matchId: MatchId,
+        payload: EventPayload,
+    ): Boolean {
+        if (!canCorrectResult(matchId)) return false
+        val m = opened[matchId] ?: detached(matchId) ?: return false
+        val takeOver = m.scorer != null && m.scorer != deviceId
+        val lamport = data.events.maxLamport(m.id.value)
+        val trial =
+            listOfNotNull(ScorerChanged(deviceId).takeIf { takeOver }, payload).mapIndexed { i, p ->
+                ScoreEvent(EventId("probe-$i"), m.id, deviceId, 0, lamport + 1 + i, clock.nowMs(), null, p)
+            }
+        if (trial.last().id in ScoringEngine.applyAll(m.engine, trial).state.ignoredEvents) return false
+        if (takeOver && emit(m, ScorerChanged(deviceId)) == null) return false
+        return emit(m, payload) != null
+    }
+
     // --- Rolle ------------------------------------------------------------------------------------
 
     /**
@@ -1435,7 +1485,7 @@ class MatchSession(
             ScoreSummary.of(state).copy(
                 lastEventAtMs =
                     m.engine.events
-                        .lastOrNull { it.payload !is PlayerAssigned }
+                        .lastOrNull { EventLog.countsForMatchTime(it.payload) }
                         ?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
             )
@@ -1969,7 +2019,7 @@ class MatchSession(
             }
         val score =
             ScoreSummary.of(state).copy(
-                lastEventAtMs = log.lastOrNull { it.payload !is PlayerAssigned }?.wallClockMs,
+                lastEventAtMs = log.lastOrNull { EventLog.countsForMatchTime(it.payload) }?.wallClockMs,
                 eventCount = log.size,
             )
         data.matches.updateProgress(matchId, state.status, score, clock.nowMs())
@@ -2228,7 +2278,7 @@ class MatchSession(
                 deviceId,
                 config.kind,
                 if (scoped) emptyList() else opened.keys.toList(),
-                minV = if (scoped && known?.identityProtocol != 1) 4 else minVersion(),
+                minV = if (scoped && known?.identityProtocol != 1) maxOf(4, minVersion()) else minVersion(),
                 v = maxVersion(),
                 appBuild = config.appBuild,
                 session = sessionId,
@@ -2459,10 +2509,16 @@ class MatchSession(
 
     /**
      * Kleinste zulässige Version: Mit Konto ist 3 kein Rückfall mehr, sobald 4 lokal geht (Integrator-Entscheidung zu P2-1).
-     * Über 3 flössen Events, Access und Redaktion aber nie; eine v3-Gegenstelle ist daher ein Updatezustand.
+     * Über 3 flössen Events, Access und Redaktion aber nie; eine v3-Gegenstelle ist daher ein Updatezustand. Ebenso 4,
+     * sobald 5 lokal geht: Ein v4-Gerät kann die Ergebnis-Korrekturen nicht dekodieren (ProtocolVersion 5).
      */
     private fun minVersion(): Int =
-        if (data.accountIdentities.managed && config.protocolVersions.last >= 4) 4 else config.protocolVersions.first
+        when {
+            !data.accountIdentities.managed -> config.protocolVersions.first
+            config.protocolVersions.last >= 5 -> 5
+            config.protocolVersions.last >= 4 -> 4
+            else -> config.protocolVersions.first
+        }
 
     /**
      * Höchste gesprochene Version: Ohne Konto (P1) nur die älteste des Bereichs (Standard 3). Belege, Lifecycle-Zustellung

@@ -387,14 +387,14 @@ class ReplicaLifecycleCodecTest {
 
     @Test
     fun helloNegotiatesTheUpdateStateAndErrorsHideBodies() {
-        assertEquals(4, ProtocolVersion.CURRENT)
+        assertEquals(5, ProtocolVersion.CURRENT)
         assertEquals(3, ProtocolVersion.MIN_SUPPORTED)
         val hello = assertIs<DecodeResult.Ok>(SyncCodec.decode(SyncCodec.encode(Hello(DeviceId("watch"), PeerKind.WATCH, minV = 4, v = 4))))
         val watch = hello.message as Hello
         // Uhr mit Konto (minV 4) gegen ein Handy, das nur 3 spricht, und umgekehrt: beidseitig Updatezustand
         assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(watch.v, watch.minV, 3, 3).status)
         assertEquals(CompatibilityStatus.PEER_TOO_OLD, ProtocolVersion.negotiate(3, 3, 4, 4).status)
-        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 4), ProtocolVersion.negotiate(watch.v, watch.minV))
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 4), ProtocolVersion.negotiate(watch.v, watch.minV, 4, 4))
         val secret = "PRIVATE_RAW_PAYLOAD"
         val malformed =
             listOf(
