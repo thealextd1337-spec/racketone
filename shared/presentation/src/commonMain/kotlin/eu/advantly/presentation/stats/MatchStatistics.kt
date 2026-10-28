@@ -140,7 +140,10 @@ object MatchStatistics {
             longestStreak = streaks(points),
             games = games(record, created.config.sport.isTennisLike),
             netDurationMs = netDuration(record),
-            serve = SidePair.of { side -> serveStats(points, games.filter { it.second == side }, tracking) { it.before.serve?.side == side } },
+            serve =
+                SidePair.of { side ->
+                    serveStats(points, games.filter { it.second == side }, tracking) { it.before.serve?.side == side }
+                },
             servers =
                 (created.lineup.a + created.lineup.b)
                     .filter { player ->
