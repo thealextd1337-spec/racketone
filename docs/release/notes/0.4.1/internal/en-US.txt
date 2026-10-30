@@ -1,0 +1,4 @@
+New in 0.4.1:
+• The watch reliably connects again, even when the watch app is installed while the phone app is running.
+• The sign-in screen no longer flashes briefly when returning to the app.
+Please test: minimize and reopen the phone app; watch connection after a longer break.
