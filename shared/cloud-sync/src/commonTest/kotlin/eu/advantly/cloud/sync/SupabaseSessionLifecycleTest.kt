@@ -1,9 +1,11 @@
 package eu.advantly.cloud.sync
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.minimalConfig
+import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
 import io.ktor.client.engine.mock.MockEngine
@@ -16,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -63,6 +66,31 @@ class SupabaseSessionLifecycleTest {
                 assertEquals(ConsentStatus.UNAVAILABLE, auth.session.value?.consentStatus)
                 assertEquals("consent_required", assertFailsWith<CloudException> { auth.sessions.capture() }.reason)
                 auth.sessions.capture(requireProfile = false)
+            } finally {
+                auth.close()
+            }
+        }
+
+    @OptIn(SupabaseInternal::class)
+    @Test
+    fun backgroundInitializingStatusKeepsVerifiedAccount(): Unit =
+        runBlocking {
+            val sdk = client { profile to HttpStatusCode.OK }
+            sdk.restore()
+            val auth = SupabasePhoneAuth(sdk, "age-secret", scope = this)
+            try {
+                auth.refreshProfile()
+                // Android-SDK beim Wechsel in den Hintergrund (Lifecycle-Callbacks): keine Abmeldung.
+                sdk.auth.setSessionStatus(SessionStatus.Initializing)
+                yield()
+                auth.sessions.synchronize()
+                assertEquals("alice", auth.accountSession.value?.profileId)
+                assertEquals("cloud_connection_failed", assertFailsWith<CloudException> { auth.sessions.capture() }.reason)
+                // Rückkehr in den Vordergrund: dieselbe Sitzung (awaitInitialization wartete hier auf Initializing).
+                sdk.auth.importAuthToken(token(), autoRefresh = false)
+                yield()
+                assertEquals("alice", auth.accountSession.value?.profileId)
+                auth.sessions.capture()
             } finally {
                 auth.close()
             }

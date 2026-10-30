@@ -288,8 +288,11 @@ internal class AndroidScopedLink(
     @Volatile private var generation = 0L
 
     @Volatile private var active = false
-    override val state: LinkState get() = if (active) delegate?.state ?: LinkState.UNAVAILABLE else LinkState.UNAVAILABLE
-    override val peers: List<String> get() = if (active) delegate?.peers.orEmpty() else emptyList()
+
+    // Auch Lesen bindet nach Identitätswechsel neu: Ein alter Transport verwirft Eingänge still und sucht keine Peers mehr.
+    // Ohne bekannten Peer sendete die Session nie, der Link bliebe bis zum Prozessneustart taub.
+    override val state: LinkState get() = if (active) currentDelegate().state else LinkState.UNAVAILABLE
+    override val peers: List<String> get() = if (active) currentDelegate().peers else emptyList()
     override val stats: LinkStats get() = delegate?.stats ?: LinkStats()
 
     override fun isTrustedCounterpart(peer: String): Boolean = active && currentDelegate().isTrustedCounterpart(peer)

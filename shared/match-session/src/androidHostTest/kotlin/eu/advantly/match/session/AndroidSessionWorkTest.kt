@@ -75,6 +75,20 @@ class AndroidSessionWorkTest {
     }
 
     @Test
+    fun readingPeersAfterIdentityChangeRebindsTransportWithoutSending() {
+        Fixture().use { f ->
+            val old = f.raw
+            f.data.settings.put("identity.epoch", "2")
+            f.link.peers
+            // Ohne Senden: der neue Transport muss Eingänge annehmen, sonst bleibt der Link taub (Uhr ohne Antwort).
+            assertEquals(2, f.raws.size)
+            assertEquals(1, old.stops)
+            f.link.peers
+            assertEquals(2, f.raws.size)
+        }
+    }
+
+    @Test
     fun discardWithoutFailureRemainsProgrammingMisuse() {
         Fixture().use { f ->
             f.work.discard()

@@ -1,0 +1,4 @@
+Neu in 0.4.1:
+• Uhr verbindet sich wieder zuverlässig, auch wenn die Uhr-App installiert wird, während die Handy-App läuft.
+• Kein kurzes Aufblitzen des Anmeldebildschirms mehr beim Zurückkehren in die App.
+Bitte testen: Handy-App minimieren und wieder öffnen; Uhr-Verbindung nach längerer Pause.
