@@ -158,7 +158,12 @@ internal class PhoneAccountCore private constructor(
         createSupabaseClient(apiUrl, apiKey) {
             // SDK-Debuglogs enthalten Session-Objekte: auch im Debug-Build ausdrücklich abschalten.
             defaultLogLevel = LogLevel.NONE
-            install(Auth) { sessionManager = storage }
+            install(Auth) {
+                sessionManager = storage
+                // Sonst setzt das SDK im Hintergrund `Initializing` (keine Sitzung) und stoppt die Erneuerung – auch für
+                // geplante Hintergrund-Synchronisation. Die Erneuerung läuft prozessweit weiter.
+                enableLifecycleCallbacks = false
+            }
             install(Postgrest)
         }
     private val session = AndroidMatchSessions.get(context, PeerKind.PHONE)

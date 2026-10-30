@@ -110,8 +110,14 @@ class SupabasePhoneAuth(
         val rejection: CloudException,
     ) : Exception()
 
-    /** Abgelaufene gespeicherte Sitzung, deren Erneuerung scheiterte (offline/Serverfehler); das SDK versucht es weiter. */
-    private fun refreshPending() = client.auth.sessionStatus.value is SessionStatus.RefreshFailure
+    /**
+     * Abgelaufene gespeicherte Sitzung, deren Erneuerung scheiterte (offline/Serverfehler); das SDK versucht es weiter.
+     * Ebenso `Initializing`: Das Android-SDK setzt es beim Wechsel in den Hintergrund (Lifecycle-Callbacks) – das ist keine
+     * Abmeldung. Sonst verließe die Session das Konto und käme beim Zurückkehren wieder (Login-Aufblitzen, Kopplung rotiert).
+     */
+    private fun refreshPending() =
+        client.auth.sessionStatus.value
+            .let { it is SessionStatus.RefreshFailure || it is SessionStatus.Initializing }
 
     init {
         lifecycle.launch(start = CoroutineStart.UNDISPATCHED) {
