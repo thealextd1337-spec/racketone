@@ -257,12 +257,13 @@ fun ChoiceChip(
     }
 }
 
-/** Stat-Kachel (04 §5.6): Wert groß, Label klein. */
+/** Stat-Kachel (04 §5.6): Wert groß, Label klein ([labelLines] Zeilen, danach „…“). */
 @Composable
 fun StatTile(
     value: String,
     label: String,
     modifier: Modifier = Modifier,
+    labelLines: Int = 1,
 ) {
     Column(
         modifier
@@ -275,8 +276,8 @@ fun StatTile(
             label,
             style = AdvantlyTheme.typography.caption,
             color = AdvantlyTheme.colors.text2,
-            softWrap = false,
-            maxLines = 1,
+            softWrap = labelLines > 1,
+            maxLines = labelLines,
             overflow = TextOverflow.Ellipsis,
         )
     }
