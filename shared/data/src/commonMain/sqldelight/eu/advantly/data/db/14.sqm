@@ -1,0 +1,17 @@
+-- Plan Puls H4: Puls und Schritte je Match und Quelle, getrennt von den Spieldaten (siehe HealthSeries.sq).
+CREATE TABLE health_series (
+    match_id TEXT NOT NULL,
+    source_device_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    interval_ms INTEGER NOT NULL,
+    bpm_csv TEXT NOT NULL,
+    steps_csv TEXT NOT NULL,
+    clock_offset_ms INTEGER NOT NULL,
+    quality TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (match_id, source_device_id)
+);
+
+CREATE TRIGGER health_series_cleanup AFTER DELETE ON match_header BEGIN
+    DELETE FROM health_series WHERE match_id = old.id;
+END;

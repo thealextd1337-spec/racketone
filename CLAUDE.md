@@ -35,7 +35,8 @@ Wear OS mit Compose for Wear OS, Apple Watch mit SwiftUI + KMP-Framework.
 shared/core-model      pure  IDs, Sport, Spieler, Team, Lineup
 shared/core-scoring    pure  Events, RuleSets, Reducer, Undo, Zählerrolle  → core-model
 shared/sync-protocol   pure  Wire-DTOs, JSON-Codec, Anti-Entropy           → core-scoring
-shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring
+shared/health          pure  Puls/Schritte im 5-s-Raster, Qualität, Offset (ohne Modulabhängigkeit)
+shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring, health
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
 shared/match-session         Session: Zähler/Anzeige, Event→Store→Engine   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
@@ -51,10 +52,10 @@ watchApp/                    SwiftUI-Quellen der watchOS-App               → A
 tools/gate-check             JVM-Werkzeug P1-Gate (kein App-Teil)          → data
 ```
 Backend (P2-Spike): `supabase/` (Migrationen, pgTAP-Tests, siehe `supabase/README.md`, Plan `docs/p2-plan.md`).
-Später (noch nicht angelegt): `shared/health` (P3), `shared/device-link-garmin` + `garminApp/` (P4), `testvectors/`.
+Später (noch nicht angelegt): `shared/device-link-garmin` + `garminApp/` (P4), `testvectors/`.
 
 **Harte Regeln**
-1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`): nur `kotlin-stdlib` + `kotlinx-serialization-core`
+1. **Pure-Module** (`core-model`, `core-scoring`, `sync-protocol`, `health`): nur `kotlin-stdlib` + `kotlinx-serialization-core`
    (Ausnahme: `sync-protocol` zusätzlich `kotlinx-serialization-json` für den Wire-Codec, 01 §4.3).
    **Kein `Clock.System`/`Clock`, kein I/O, keine Coroutines, keine Plattform-APIs, kein Zufall, keine Floats** in der Engine-Logik.
    Zeit und IDs kommen als Parameter herein. Deterministisch: gleiche Events → gleicher Zustand auf jedem Gerät.
