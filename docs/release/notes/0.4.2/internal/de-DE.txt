@@ -1,0 +1,3 @@
+Neu in 0.4.2:
+• Auf dem Handy gestartete Matches erscheinen wieder auf der Uhr, auch wenn die Uhr-App neu installiert und aus einer Sicherung wiederhergestellt wurde.
+Bitte testen: Match auf dem Handy mit Zähler „Meine Uhr“ starten – Hinweis und Match müssen auf der Uhr erscheinen.
