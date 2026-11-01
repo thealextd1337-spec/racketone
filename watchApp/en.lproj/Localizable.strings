@@ -171,6 +171,8 @@
 "start.telemetry.privateHint" = "Only on this watch and your iPhone.";
 "start.telemetry.offHint" = "Not shown, nothing is sent.";
 "fitness.telemetryOff" = "Heart rate hidden (Heart rate & steps: Off).";
+/* Plan Puls H7: roter Aufnahme-Punkt neben dem Puls (VoiceOver) */
+"health.recording" = "Recording heart rate history";
 
 /* Satzende-Dialog: Satznummer und Stand */
 "setend.title %@ %@" = "Set %1$@ · %2$@";

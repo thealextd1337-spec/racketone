@@ -1,3 +1,4 @@
+import AdvantlyWatchKit
 import Foundation
 import HealthKit
 
@@ -9,8 +10,9 @@ import HealthKit
 ///   Satzende-Dialog sind keine Workout-Pause.
 /// - Jede asynchrone Antwort (Berechtigung, Recovery) ist an eine Generation gebunden: Kommt sie nach `end()` oder
 ///   nach dem Start eines anderen Matches an, wird sie verworfen – eine dabei wiederhergestellte Session wird beendet.
-/// - P1: Puls wird nur angezeigt; das Workout wird am Ende verworfen, nicht in Apple Health gespeichert
-///   (Speichern und Statistik kommen in P3 → `saveToHealth`).
+/// - Puls und Schritte gehen an `WatchHealth` (Plan Puls H7); die Match-Session entscheidet nach Einwilligung und Stufe,
+///   ob sie aufnimmt, und sendet den Pulsverlauf am Workout-Ende ans iPhone. Das Workout selbst wird am Ende verworfen,
+///   nicht in Apple Health gespeichert (→ `saveToHealth`).
 final class WorkoutManager: NSObject, ObservableObject {
     enum State {
         case idle
@@ -28,6 +30,8 @@ final class WorkoutManager: NSObject, ObservableObject {
     @Published private(set) var heartRate: Int = 0
     /// Puls für Always-on: höchstens einmal pro Minute aktualisiert (04 §4.3.6)
     @Published private(set) var heartRateAmbient: Int = 0
+    /// Pulsverlauf wird für das Match aufgezeichnet (roter Aufnahme-Punkt, Plan Puls E3)
+    @Published private(set) var healthRecording = false
 
     /// Telemetrie-Sichtbarkeit (P2-J): `false` bei „Gar nicht“ – Pulswerte werden verworfen und nicht angezeigt.
     /// Die Workout-Session läuft als Laufzeitanker (Always-on) weiter; sie wird am Ende ohnehin verworfen.
@@ -50,6 +54,7 @@ final class WorkoutManager: NSObject, ObservableObject {
     var onSystemPauseChange: ((Bool) -> Void)?
 
     private let store = HKHealthStore()
+    private let health = AdvantlyWatch.shared.health()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private(set) var matchId: String?
@@ -85,6 +90,9 @@ final class WorkoutManager: NSObject, ObservableObject {
         if let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) {
             read.insert(heartRate)
         }
+        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) {
+            read.insert(steps)
+        }
         store.requestAuthorization(toShare: share, read: read) { [weak self] success, error in
             DispatchQueue.main.async {
                 guard let self, self.generation == current else { return }
@@ -102,6 +110,7 @@ final class WorkoutManager: NSObject, ObservableObject {
         generation += 1
         heartRate = 0
         heartRateAmbient = 0
+        finishHealth()
         matchId = nil
         wantsPaused = false
         // Abwählen/erneut Anwählen ist ein ausdrücklicher neuer Versuch, auch nach transientem Fehler.
@@ -164,7 +173,7 @@ final class WorkoutManager: NSObject, ObservableObject {
                     return
                 }
                 let builder = session.associatedWorkoutBuilder()
-                builder.dataSource = HKLiveWorkoutDataSource(healthStore: self.store, workoutConfiguration: session.workoutConfiguration)
+                builder.dataSource = Self.dataSource(store: self.store, configuration: session.workoutConfiguration)
                 session.delegate = self
                 builder.delegate = self
                 self.session = session
@@ -184,7 +193,7 @@ final class WorkoutManager: NSObject, ObservableObject {
         do {
             let session = try HKWorkoutSession(healthStore: store, configuration: configuration)
             let builder = session.associatedWorkoutBuilder()
-            builder.dataSource = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: configuration)
+            builder.dataSource = Self.dataSource(store: store, configuration: configuration)
             session.delegate = self
             builder.delegate = self
             self.session = session
@@ -192,6 +201,9 @@ final class WorkoutManager: NSObject, ObservableObject {
             let start = Date()
             session.startActivity(with: start)
             builder.beginCollection(withStart: start) { _, _ in }
+            // Schritte sind kumuliert seit Workout-Start → Basis 0 zum Matchstart
+            _ = health.recordSteps(matchId: matchId, atMs: Self.epochMs(start), cumulativeSteps: 0)
+            healthRecording = health.isRecording(matchId: matchId)
             builder.addMetadata(Self.metadata(matchId: matchId, sport: sport, presetId: presetId, doubles: doubles)) { _, _ in }
             state = .running
             onRunning?()
@@ -225,9 +237,27 @@ final class WorkoutManager: NSObject, ObservableObject {
         requested = nil
         heartRate = 0
         heartRateAmbient = 0
+        finishHealth()
         state = .unavailable
         onUnavailable?()
     }
+
+    /// Workout-Ende: Pulsverlauf speichern und ans iPhone senden (Wiederholung bis zum Ack macht die Session).
+    private func finishHealth() {
+        if let matchId { health.finish(matchId: matchId) }
+        healthRecording = false
+    }
+
+    /// Live-Daten der Workout-Session; Schritte ausdrücklich dazu, falls die Sportart sie nicht von selbst sammelt.
+    private static func dataSource(store: HKHealthStore, configuration: HKWorkoutConfiguration) -> HKLiveWorkoutDataSource {
+        let source = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: configuration)
+        if let steps = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+            source.enableCollection(for: steps, predicate: nil)
+        }
+        return source
+    }
+
+    static func epochMs(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
 
     private static func finish(session: HKWorkoutSession, builder: HKLiveWorkoutBuilder?) {
         session.end()
@@ -322,14 +352,33 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
     func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
 
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didCollectDataOf collectedTypes: Set<HKSampleType>) {
+        // Schritte: kumulierte Summe seit Workout-Start, Zeitpunkt = Ende des Statistik-Intervalls
+        if let type = HKQuantityType.quantityType(forIdentifier: .stepCount), collectedTypes.contains(type),
+           let statistics = workoutBuilder.statistics(for: type), let sum = statistics.sumQuantity() {
+            let steps = Int64(sum.doubleValue(for: HKUnit.count()).rounded())
+            let atMs = Self.epochMs(statistics.endDate)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, workoutBuilder === self.builder, let matchId = self.matchId else { return }
+                _ = self.health.recordSteps(matchId: matchId, atMs: atMs, cumulativeSteps: steps)
+            }
+        }
         guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate),
               collectedTypes.contains(type),
-              let quantity = workoutBuilder.statistics(for: type)?.mostRecentQuantity()
+              let statistics = workoutBuilder.statistics(for: type),
+              let quantity = statistics.mostRecentQuantity()
         else { return }
         let bpm = Int(quantity.doubleValue(for: HKUnit.count().unitDivided(by: HKUnit.minute())).rounded())
+        // Zeitpunkt des Samples, nicht des Empfangs (Always-on bündelt)
+        let atMs = Self.epochMs(statistics.mostRecentQuantityDateInterval()?.end ?? statistics.endDate)
         DispatchQueue.main.async { [weak self] in
+            guard let self, workoutBuilder === self.builder else { return }
+            // Die Session prüft Einwilligung und Stufe selbst (auch „Gar nicht“)
+            if let matchId = self.matchId {
+                _ = self.health.recordHeartRate(matchId: matchId, atMs: atMs, bpm: Int32(bpm))
+                self.healthRecording = self.health.isRecording(matchId: matchId)
+            }
             // „Gar nicht“ (P2-J): Wert verwerfen, nichts anzeigen
-            guard let self, workoutBuilder === self.builder, self.telemetryAllowed else { return }
+            guard self.telemetryAllowed else { return }
             self.heartRate = bpm
             let now = Date()
             if self.heartRateAmbient == 0 || now.timeIntervalSince(self.ambientUpdatedAt) >= 60 {

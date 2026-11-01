@@ -28,6 +28,8 @@ object AdvantlyWatch {
         WatchScoring({ sharedData.let { WatchScoring.Backend(platformWatchSession(it), it) } })
     }
 
+    private val sharedHealth: WatchHealth by lazy { WatchHealth(sharedScoring::session) }
+
     /** Name des Engine-Moduls – Platzhalter-Aufruf, der beweist, dass die Uhr Kotlin-Code ausführt. */
     fun engineModule(): String = CoreScoringInfo.MODULE
 
@@ -36,6 +38,9 @@ object AdvantlyWatch {
 
     /** Zählen bzw. Anzeigen auf der Uhr über die gemeinsame Match-Session (W1-E); eine Instanz je Prozess. */
     fun scoring(): WatchScoring = sharedScoring
+
+    /** Pulsverlauf zum Match (Plan Puls H7) über dieselbe Session wie [scoring]; eine Instanz je Prozess. */
+    fun health(): WatchHealth = sharedHealth
 
     /** Aufschlag-Leiste: sichtbar ohne Auswahl (ms) – gleiche Zeit wie Wear OS (`OperationTimings`). */
     fun serveBarVisibleMillis(): Long = OperationTimings.SERVE_BAR_VISIBLE_MILLIS

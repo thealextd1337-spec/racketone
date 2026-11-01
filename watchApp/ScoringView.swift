@@ -590,10 +590,13 @@ struct MiddleBand: View {
                 HintPill(snap: snap, dimmed: dimmed)
             } else if model.telemetryShown && heartRate > 0 {
                 // „Gar nicht“ (P2-J): kein Puls, das Band bleibt leer
-                Label(String(heartRate), systemImage: "heart.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .labelStyle(.titleAndIcon)
-                    .foregroundStyle(Color.red.opacity(dimmed ? 0.65 : 1))
+                HStack(spacing: 3) {
+                    if workout.healthRecording { RecordingDot() }
+                    Label(String(heartRate), systemImage: "heart.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .labelStyle(.titleAndIcon)
+                }
+                .foregroundStyle(Color.red.opacity(dimmed ? 0.65 : 1))
             }
         }
         .padding(.horizontal, 6)
@@ -793,6 +796,16 @@ struct ControlsPage: View {
     }
 }
 
+/// Roter Aufnahme-Punkt neben dem Puls: Pulsverlauf wird zum Match aufgezeichnet (Plan Puls E3).
+struct RecordingDot: View {
+    var body: some View {
+        Circle()
+            .fill(Color.red)
+            .frame(width: 6, height: 6)
+            .accessibilityLabel(Text("health.recording"))
+    }
+}
+
 /// W5 Fitness: Puls groß, Dauer. Puls nur anzeigen (P1), ohne Health-Zugriff ein Hinweis.
 struct FitnessPage: View {
     @ObservedObject var workout: WorkoutManager
@@ -803,6 +816,7 @@ struct FitnessPage: View {
         VStack(spacing: 6) {
             if workout.telemetryAllowed {
                 HStack(spacing: 6) {
+                    if workout.healthRecording { RecordingDot() }
                     Image(systemName: "heart.fill")
                         .foregroundStyle(Color.red)
                     // Always-on: höchstens minütlich aktualisiert (04 §4.3.6)
