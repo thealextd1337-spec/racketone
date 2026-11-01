@@ -36,7 +36,7 @@ shared/core-model      pure  IDs, Sport, Spieler, Team, Lineup
 shared/core-scoring    pure  Events, RuleSets, Reducer, Undo, Zählerrolle  → core-model
 shared/sync-protocol   pure  Wire-DTOs, JSON-Codec, Anti-Entropy           → core-scoring
 shared/health          pure  Puls/Schritte im 5-s-Raster, Qualität, Offset (ohne Modulabhängigkeit)
-shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring
+shared/data                  SQLDelight, EventStore, Repositories, Outbox  → core-scoring, health
 shared/device-link           Transport Uhr <-> Handy                       → sync-protocol
 shared/match-session         Session: Zähler/Anzeige, Event→Store→Engine   → data, device-link (+ coroutines; kein Compose/Ktor/Koin)
 shared/entitlements          Freemium-Gates (Stub: alles frei)
