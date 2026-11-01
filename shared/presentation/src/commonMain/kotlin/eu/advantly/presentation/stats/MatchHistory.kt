@@ -4,6 +4,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.SetKind
 import eu.advantly.presentation.match.LocalDay
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchSummary
@@ -22,6 +23,20 @@ fun MatchSummary.outcome(): HistoryOutcome =
         result.winner == Side.A -> HistoryOutcome.WIN
         else -> HistoryOutcome.LOSS
     }
+
+/**
+ * Gewonnene Games der eigenen Seite A (Gesamtstatistik am Start). Tennis/Padel: Spiele über alle regulären Sätze,
+ * einschließlich des bei vorzeitigem Ende eingefrorenen Satzes; ein Match-Tiebreak ist kein Spiel. Pickleball,
+ * Badminton und Tischtennis: Dort heißen die Sätze „Games“, es zählen die gewonnenen Sätze.
+ */
+val MatchSummary.gamesWon: Int
+    get() =
+        if (setup.sport.isTennisLike) {
+            val current = interruptedSet?.takeIf { it.setKind == SetKind.REGULAR }?.games?.a ?: 0
+            sets.filter { it.kind == SetKind.REGULAR }.sumOf { it.games?.a ?: 0 } + current
+        } else {
+            sets.count { it.winner == Side.A }
+        }
 
 data class HistoryPerson(
     val player: Player,

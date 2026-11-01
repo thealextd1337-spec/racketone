@@ -902,4 +902,11 @@
     <string name="moment_comeback">Comeback</string>
     <string name="moment_converted">Verwertet von %1$s</string>
     <string name="moment_saved">Abgewehrt von %1$s</string>
+    <string name="home_section_total">Gesamtstatistik</string>
+    <string name="home_total_matches">Gespielte Matches</string>
+    <string name="home_total_games">Gewonnene Games</string>
+    <string name="home_total_max_pulse">Höchster Puls</string>
+    <string name="home_total_max_steps">Meiste Schritte in einem Satz</string>
+    <string name="home_total_bpm">%1$d bpm</string>
+    <string name="home_section_recent">Letzte Matches</string>
 </resources>

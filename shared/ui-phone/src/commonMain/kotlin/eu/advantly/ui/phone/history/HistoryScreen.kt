@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
@@ -254,18 +255,21 @@ private fun FilterRow(content: @Composable androidx.compose.foundation.layout.Ro
     )
 }
 
+/** Verlaufszeile eines Matches (auch „Letzte Matches“ am Start); Tipp öffnet das Match-Detail. */
 @Composable
-private fun HistoryItem(
+internal fun HistoryItem(
     match: MatchSummary,
     index: Int,
     onClick: () -> Unit,
+    tag: String = "history_item_$index",
+    edgePadding: Dp = Spacing.screenEdgeCompact,
 ) {
     val colors = AdvantlyTheme.colors
     val sport = match.setup.sport
     Row(
         Modifier
-            .testTag("history_item_$index")
-            .padding(horizontal = Spacing.screenEdgeCompact)
+            .testTag(tag)
+            .padding(horizontal = edgePadding)
             .fillMaxWidth()
             .heightIn(min = 72.dp)
             .background(colors.surface, Radii.cardShape)
