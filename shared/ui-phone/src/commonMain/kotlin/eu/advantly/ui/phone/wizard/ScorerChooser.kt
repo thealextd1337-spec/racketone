@@ -22,15 +22,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.ui.phone.app.LocalHealthConsent
+import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.health_pulse_off
+import eu.advantly.ui.phone.resources.health_pulse_private
+import eu.advantly.ui.phone.resources.health_pulse_share
+import eu.advantly.ui.phone.resources.health_pulse_share_pending
+import eu.advantly.ui.phone.resources.health_pulse_title
+import eu.advantly.ui.phone.resources.health_pulse_unavailable
 import eu.advantly.ui.phone.resources.wizard_scorer_no_watch
 import eu.advantly.ui.phone.resources.wizard_scorer_not_installed
 import eu.advantly.ui.phone.resources.wizard_scorer_phone
@@ -62,6 +71,8 @@ internal fun ScorerChooser(
     modifier: Modifier = Modifier,
     onRecheck: (() -> Unit)? = null,
     busyMatch: LiveMatchSnapshot? = null,
+    pulseVisibility: TelemetryVisibility? = null,
+    onPulseVisibility: (TelemetryVisibility) -> Unit = {},
 ) {
     val watchAvailable = watchStatus == WatchStatus.AVAILABLE
     Column(modifier.fillMaxWidth()) {
@@ -120,8 +131,65 @@ internal fun ScorerChooser(
             tag = "toggle_watch_workout",
             modifier = Modifier.padding(top = Spacing.m),
         )
+        if (watchWorkout) PulseChoice(pulseVisibility, onPulseVisibility)
     }
 }
+
+/**
+ * Pulsverlauf des Matches (Plan Puls E2): „Gar nicht“ / „Nur für mich“ / „Für alle“, vorbelegt mit der Telemetrie-
+ * Sichtbarkeit. Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ nur der Hinweis auf die Einstellung (kein Dialog).
+ */
+@Composable
+private fun PulseChoice(
+    chosen: TelemetryVisibility?,
+    onSelect: (TelemetryVisibility) -> Unit,
+) {
+    val telemetry = LocalTelemetryVisibility.current
+    val available = LocalHealthConsent.current && telemetry.allowsLive
+    Text(
+        stringResource(Res.string.health_pulse_title),
+        style = AdvantlyTheme.typography.label,
+        color = AdvantlyTheme.colors.text,
+        modifier = Modifier.padding(top = Spacing.m, bottom = Spacing.xs),
+    )
+    if (!available) {
+        Text(
+            stringResource(Res.string.health_pulse_unavailable),
+            style = AdvantlyTheme.typography.caption,
+            color = AdvantlyTheme.colors.text2,
+            modifier = Modifier.testTag("pulse_unavailable"),
+        )
+        return
+    }
+    val selected = chosen ?: telemetry
+    WizardChoices(
+        options = PULSE_LEVELS,
+        selected = selected,
+        label = { pulseLevelLabel(it) },
+        onSelect = onSelect,
+        tagPrefix = "pulse",
+    )
+    if (selected.sharesWithOthers) {
+        Text(
+            stringResource(Res.string.health_pulse_share_pending),
+            style = AdvantlyTheme.typography.caption,
+            color = AdvantlyTheme.colors.text2,
+        )
+    }
+}
+
+/** Reihenfolge der Stufen in Assistent und Match-Detail. */
+internal val PULSE_LEVELS = listOf(TelemetryVisibility.OFF, TelemetryVisibility.PRIVATE, TelemetryVisibility.SHARE)
+
+@Composable
+internal fun pulseLevelLabel(level: TelemetryVisibility): String =
+    stringResource(
+        when (level) {
+            TelemetryVisibility.OFF -> Res.string.health_pulse_off
+            TelemetryVisibility.PRIVATE -> Res.string.health_pulse_private
+            TelemetryVisibility.SHARE -> Res.string.health_pulse_share
+        },
+    )
 
 /** Auswahlkarte mit Radio-Punkt (Rolle `RadioButton`, ≥ 64 dp). */
 @Composable

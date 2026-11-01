@@ -1,29 +1,96 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Telemetrie-Sichtbarkeit für Puls und Schritte (P2-J, F19/F29): „Teilen“, „Nur für mich“ (Standard) oder „Gar nicht“.
- * Wirkt auf Uhr und Handy; die App-Implementierung speichert über die Match-Session und gleicht mit der eigenen Uhr ab.
- * Nur vom UI-Thread benutzen.
+ * Telemetrie-Sichtbarkeit für Puls und Schritte (P2-J, F19/F29): „Teilen“, „Nur für mich“ (Standard) oder „Gar nicht“,
+ * dazu die Einwilligung „Pulsverlauf aufzeichnen“ und die Stufe je Match (Plan Puls H5). Wirkt auf Uhr und Handy; die
+ * App-Implementierung speichert über die Match-Session und gleicht mit der eigenen Uhr ab. Nur vom UI-Thread benutzen.
  */
 interface TelemetrySettingsPort {
     val telemetryVisibility: StateFlow<TelemetryVisibility>
 
     fun setTelemetryVisibility(visibility: TelemetryVisibility)
+
+    /** Einwilligung „Pulsverlauf aufzeichnen“ (E1, Standard aus); wirkt nur, solange die Telemetrie nicht „Gar nicht“ ist. */
+    val healthConsent: StateFlow<Boolean>
+
+    /** Ein Widerruf löscht alle Pulsverläufe auf Handy und Uhr (die Rückfrage stellt die UI). */
+    fun setHealthConsent(enabled: Boolean)
+
+    /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät. */
+    fun deleteAllHealthData()
+
+    /** Steigt, wenn sich Pulsverläufe oder Stufen geändert haben können ([pulseSetting] erneut lesen). */
+    val healthRevision: StateFlow<Long>
+
+    fun pulseSetting(matchId: MatchId): PulseSetting
+
+    /** Stufe nachträglich ändern; „Gar nicht“ löscht den Pulsverlauf auf Handy und Uhr (Rückfrage in der UI). */
+    fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    )
 }
+
+/**
+ * Pulsverlauf eines Matches im Match-Detail (E2).
+ *
+ * @property visibility wirksame Stufe („Gar nicht“, „Nur für mich“, „Für alle“)
+ * @property recorded es liegt ein Pulsverlauf vor; ohne sind nur „Gar nicht“ wählbar
+ */
+data class PulseSetting(
+    val visibility: TelemetryVisibility = TelemetryVisibility.OFF,
+    val recorded: Boolean = false,
+)
 
 /** Nur im Speicher (Tests, Previews). */
 class InMemoryTelemetrySettings(
     initial: TelemetryVisibility = TelemetryVisibility.DEFAULT,
+    consent: Boolean = false,
 ) : TelemetrySettingsPort {
     private val mutable = MutableStateFlow(initial)
+    private val consentFlow = MutableStateFlow(consent)
+    private val revisionFlow = MutableStateFlow(0L)
+    private val pulse = mutableMapOf<MatchId, PulseSetting>()
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = mutable.asStateFlow()
+    override val healthConsent: StateFlow<Boolean> = consentFlow.asStateFlow()
+    override val healthRevision: StateFlow<Long> = revisionFlow.asStateFlow()
 
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) {
         mutable.value = visibility
+    }
+
+    override fun setHealthConsent(enabled: Boolean) {
+        if (consentFlow.value && !enabled) deleteAllHealthData()
+        consentFlow.value = enabled
+    }
+
+    override fun deleteAllHealthData() {
+        pulse.keys.toList().forEach { pulse[it] = pulse.getValue(it).copy(recorded = false) }
+        revisionFlow.value++
+    }
+
+    override fun pulseSetting(matchId: MatchId): PulseSetting = pulse[matchId] ?: PulseSetting()
+
+    /** Tests/Previews: Ausgangslage eines Matches. */
+    fun setPulse(
+        matchId: MatchId,
+        setting: PulseSetting,
+    ) {
+        pulse[matchId] = setting
+        revisionFlow.value++
+    }
+
+    override fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    ) {
+        val current = pulseSetting(matchId)
+        setPulse(matchId, PulseSetting(visibility, current.recorded && visibility != TelemetryVisibility.OFF))
     }
 }

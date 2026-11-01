@@ -583,6 +583,8 @@ private fun ScorerStep(
         onSelect = wizard::setScorer,
         onWatchWorkout = wizard::setWatchWorkout,
         onRecheck = wizard::refreshWatchStatus,
+        pulseVisibility = state.input.pulseVisibility,
+        onPulseVisibility = wizard::setPulseVisibility,
         busyMatch = busyMatch.takeIf { state.input.watchBusy },
     )
 }

@@ -204,24 +204,30 @@ fun ToggleRow(
     onChange: (Boolean) -> Unit,
     tag: String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = Spacing.minTouchTarget)
-            .clickable(role = Role.Switch) { onChange(!checked) }
+            .clickable(enabled = enabled, role = Role.Switch) { onChange(!checked) }
             .testTag(tag)
             .padding(vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = AdvantlyTheme.typography.label, color = AdvantlyTheme.colors.text)
+            Text(
+                title,
+                style = AdvantlyTheme.typography.label,
+                color = if (enabled) AdvantlyTheme.colors.text else AdvantlyTheme.colors.text3,
+            )
             if (subtitle != null) Text(subtitle, style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
         }
         Switch(
             checked = checked,
             onCheckedChange = null,
+            enabled = enabled,
             colors = SwitchDefaults.colors(checkedTrackColor = AdvantlyTheme.colors.brand),
         )
     }
@@ -238,6 +244,7 @@ fun ChoiceChip(
     leading: (@Composable () -> Unit)? = null,
     role: Role = Role.Checkbox,
     accent: Color = AdvantlyTheme.colors.brand,
+    enabled: Boolean = true,
 ) {
     val colors = AdvantlyTheme.colors
     Row(
@@ -246,14 +253,14 @@ fun ChoiceChip(
             .heightIn(min = Spacing.minTouchTarget)
             .background(if (selected) accent.copy(alpha = 0.18f) else colors.surface2, Radii.pillShape)
             .border(1.5.dp, if (selected) accent else Color.Transparent, Radii.pillShape)
-            .clickable(role = role, onClick = onClick)
+            .clickable(enabled = enabled, role = role, onClick = onClick)
             .semantics { this.selected = selected }
             .padding(horizontal = Spacing.l, vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         leading?.invoke()
-        Text(text, style = AdvantlyTheme.typography.label, color = colors.text)
+        Text(text, style = AdvantlyTheme.typography.label, color = if (enabled) colors.text else colors.text3)
     }
 }
 

@@ -9,6 +9,7 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.CorrectedSet
 import eu.advantly.core.scoring.CurrentSet
 import eu.advantly.core.scoring.EndReason
@@ -129,6 +130,8 @@ enum class ScorerOption {
  * Start-Optionen, die nicht zum Setup gehören – Presets und Favoriten vergeben keine Zählrechte (04 §3.1).
  *
  * @property watchWorkout „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, unabhängig vom Zähler)
+ * @property pulseVisibility Pulsverlauf des Matches (Plan Puls E2); `null` = Vorbelegung aus den Einstellungen. Ohne
+ *   Einwilligung bzw. bei Telemetrie „Gar nicht“ gilt immer „Gar nicht“.
  * @property takeOverWatchMatch bestätigt: Die nicht erreichbare Uhr zählt noch ein anderes Match
  *   ([LiveMatchPort.watchTakeOverNeeded]) – das Handy übernimmt es sofort, spätere Uhr-Eingaben dort werden verworfen
  */
@@ -136,6 +139,7 @@ data class StartOptions(
     val scorer: ScorerOption = ScorerOption.THIS_PHONE,
     val watchWorkout: Boolean = true,
     val takeOverWatchMatch: Boolean = false,
+    val pulseVisibility: TelemetryVisibility? = null,
 )
 
 /**

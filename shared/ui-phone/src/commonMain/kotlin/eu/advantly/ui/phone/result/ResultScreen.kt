@@ -134,6 +134,8 @@ fun ResultScreen(
     onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
     /** Pulsverlauf für die Zeitleiste; `null` = nur Highlights. */
     pulse: PulseTrack? = null,
+    /** Stufe des Pulsverlaufs nachträglich ändern bzw. löschen (Plan Puls E2, [PulseVisibilitySection]). */
+    pulseSettings: @Composable (MatchRecord) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -266,6 +268,7 @@ fun ResultScreen(
             headToHead(record.summary.setup)
             playerAssignments(record)
             sharing(record)
+            pulseSettings(record)
             SectionTitle(stringResource(Res.string.detail_format))
             Text(
                 formatLabel(record.summary.setup.format),

@@ -359,7 +359,7 @@
     <string name="wizard_scorer_phone">Dieses Handy (Director)</string>
     <string name="wizard_scorer_phone_sub">Eine Person am Spielfeldrand zählt am Handy, Uhren zeigen nur an.</string>
     <string name="wizard_watch_workout">Workout auf meiner Uhr mitlaufen lassen</string>
-    <string name="wizard_watch_workout_hint">Hält die Uhr-App wach und zeigt deinen Puls. Wird nach dem Match verworfen.</string>
+    <string name="wizard_watch_workout_hint">Hält die Uhr-App wach und zeigt deinen Puls. Gespeichert wird er nur als Pulsverlauf (unten).</string>
     <string name="wizard_summary_scorer">Zähler: %1$s</string>
     <string name="live_role_director">Zähler · Director</string>
     <string name="live_role_display">Anzeige</string>
@@ -468,7 +468,7 @@
     <string name="live_telemetry_unknown">—</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Profil) -->
     <string name="telemetry_section">Puls &amp; Schritte</string>
-    <string name="telemetry_intro">Wer Puls und Schritte deiner Uhr sehen darf. Gilt für deine Uhr und dieses Handy, mit Konto für alle deine Geräte. Puls und Schritte werden nicht gespeichert.</string>
+    <string name="telemetry_intro">Wer Puls und Schritte deiner Uhr sehen darf. Gilt für deine Uhr und dieses Handy, mit Konto für alle deine Geräte. Gespeichert werden sie nur, wenn du „Pulsverlauf aufzeichnen“ einschaltest.</string>
     <string name="telemetry_share">Teilen</string>
     <string name="telemetry_share_sub">Vorerst wie „Nur für mich“; später auch für Freunde und die Live-Ansicht.</string>
     <string name="telemetry_private">Nur für mich (Standard)</string>
@@ -476,6 +476,23 @@
     <string name="telemetry_off">Gar nicht</string>
     <string name="telemetry_off_sub">Keine Live-Anzeige, die Uhr sendet nichts und gepufferte Werte werden verworfen.</string>
     <string name="telemetry_share_pending">Gesundheitsdaten werden derzeit nicht in die Cloud übertragen, andere sehen also noch nichts. Deine Wahl gilt für dein ganzes Konto.</string>
+    <string name="health_record_toggle">Pulsverlauf aufzeichnen</string>
+    <string name="health_record_toggle_sub">Speichert Puls und Schritte je Match auf deiner Uhr und diesem Handy. Standard: aus.</string>
+    <string name="health_record_locked">Nicht verfügbar, solange „Puls &amp; Schritte“ auf „Gar nicht“ steht.</string>
+    <string name="health_revoke_title">Pulsverlauf nicht mehr aufzeichnen?</string>
+    <string name="health_revoke_text">Alle aufgezeichneten Pulsverläufe werden auf diesem Handy und deiner Uhr gelöscht.</string>
+    <string name="health_revoke_confirm">Beenden und löschen</string>
+    <string name="health_delete_all">Alle Gesundheitsdaten löschen</string>
+    <string name="health_delete_all_text">Löscht alle Pulsverläufe auf diesem Handy. Noch nicht übertragene Aufnahmen deiner Uhr werden beim nächsten Verbinden gelöscht.</string>
+    <string name="health_pulse_title">Pulsverlauf</string>
+    <string name="health_pulse_off">Gar nicht</string>
+    <string name="health_pulse_private">Nur für mich</string>
+    <string name="health_pulse_share">Für alle</string>
+    <string name="health_pulse_share_pending">„Für alle“ wirkt vorerst wie „Nur für mich“: Es wird noch nichts hochgeladen.</string>
+    <string name="health_pulse_unavailable">Schalte im Profil „Pulsverlauf aufzeichnen“ ein, um ihn für ein Match zu speichern.</string>
+    <string name="health_pulse_not_recorded">Kein Pulsverlauf aufgezeichnet</string>
+    <string name="health_delete_match">Pulsverlauf löschen</string>
+    <string name="health_delete_match_text">Der Pulsverlauf dieses Matches wird auf diesem Handy und deiner Uhr gelöscht.</string>
     <string name="home_open_matches">Laufende Matches (%1$d)</string>
     <string name="home_new_match_parallel">Weiteren Platz starten – laufende Matches laufen weiter.</string>
     <string name="open_match_watch_scores">Deine Uhr zählt</string>

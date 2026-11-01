@@ -262,7 +262,7 @@ class ReviewRound1UiTest {
                 }
             }
             click("tab_profile")
-            click("profile_imprint")
+            onNodeWithTag("profile_imprint").performScrollTo().performClick()
             onNodeWithTag("link_failed_dialog").assertExists()
             onNodeWithTag("link_failed_url", useUnmergedTree = true).assertTextEquals("https://advantly.eu/impressum.html")
             click("link_copy")
@@ -287,8 +287,8 @@ class ReviewRound1UiTest {
             )
             click("tab_profile")
             onNodeWithTag("profile").assertExists()
-            click("profile_privacy")
-            click("profile_imprint")
+            onNodeWithTag("profile_privacy").performScrollTo().performClick()
+            onNodeWithTag("profile_imprint").performScrollTo().performClick()
             assertTrue(
                 opened[0] in listOf("https://advantly.eu/app-datenschutz.html", "https://advantly.eu/en/app-privacy.html"),
                 opened[0],

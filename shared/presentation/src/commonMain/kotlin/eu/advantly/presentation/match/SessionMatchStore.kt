@@ -154,6 +154,10 @@ class SessionMatchStore(
     override val updateRequired: StateFlow<UpdateRequired?> = updateRequiredFlow.asStateFlow()
     private val telemetryFlow = MutableStateFlow(session.state.value.telemetryVisibility)
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
+    private val healthConsentFlow = MutableStateFlow(session.state.value.healthConsent.enabled)
+    override val healthConsent: StateFlow<Boolean> = healthConsentFlow.asStateFlow()
+    private val healthRevisionFlow = MutableStateFlow(session.state.value.dataRevision)
+    override val healthRevision: StateFlow<Long> = healthRevisionFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
 
     // Zustand für Revision und „Stand vor X s“
@@ -260,6 +264,18 @@ class SessionMatchStore(
     /** Speichert über die Session; sie gleicht mit der eigenen Uhr ab (letzte Änderung gewinnt). */
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) = session.setTelemetryVisibility(visibility)
 
+    override fun setHealthConsent(enabled: Boolean) = session.setHealthConsent(enabled)
+
+    override fun deleteAllHealthData() = session.deleteAllHealthData()
+
+    override fun pulseSetting(matchId: MatchId): PulseSetting =
+        PulseSetting(session.pulseVisibility(matchId), data.health.forMatch(matchId).isNotEmpty())
+
+    override fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    ) = session.setPulseVisibility(matchId, visibility)
+
     /** Workout-Wunsch des Matches (`MatchMeta.watchWorkout`, geht mit dem Match-Kopf an die Uhr), `null` = unbekannt. */
     fun watchWorkout(matchId: MatchId): Boolean? =
         data.matches
@@ -303,7 +319,10 @@ class SessionMatchStore(
             )
         rememberPlayers(assigned.values.toList())
         val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newId().value) }
-        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
+        // Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ ist die Vorbelegung OFF – dann gilt keine andere Wahl
+        val allowed = session.defaultPulseVisibility()
+        val pulse = if (allowed == TelemetryVisibility.OFF) allowed else options.pulseVisibility ?: allowed
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout, pulseVisibility = pulse)
         return session.create(setup.format, fresh, meta, scorer, takeOverWatchMatch = options.takeOverWatchMatch)
     }
 
@@ -595,6 +614,8 @@ class SessionMatchStore(
         updateRequiredFlow.value = updateRequiredOf(state)
         // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
+        healthConsentFlow.value = state.healthConsent.enabled
+        healthRevisionFlow.value = state.dataRevision
         // Nur auf Ungleichheit: der Zähler beginnt nach einem Neustart wieder bei 0.
         val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision
         if (lifecycleChanged) {

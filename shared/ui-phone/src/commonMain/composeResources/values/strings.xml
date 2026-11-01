@@ -359,7 +359,7 @@
     <string name="wizard_scorer_phone">This phone (director)</string>
     <string name="wizard_scorer_phone_sub">Someone courtside scores on this phone, watches only show the score.</string>
     <string name="wizard_watch_workout">Run a workout on my watch</string>
-    <string name="wizard_watch_workout_hint">Keeps the watch app awake and shows your heart rate. Discarded after the match.</string>
+    <string name="wizard_watch_workout_hint">Keeps the watch app awake and shows your heart rate. Only stored as heart rate history (below).</string>
     <string name="wizard_summary_scorer">Scorer: %1$s</string>
     <string name="live_role_director">Scorer · director</string>
     <string name="live_role_display">Display</string>
@@ -468,7 +468,7 @@
     <string name="live_telemetry_unknown">—</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Profil) -->
     <string name="telemetry_section">Heart rate &amp; steps</string>
-    <string name="telemetry_intro">Who may see heart rate and steps from your watch. Applies to your watch and this phone, and with an account to all your devices. Heart rate and steps are not stored.</string>
+    <string name="telemetry_intro">Who may see heart rate and steps from your watch. Applies to your watch and this phone, and with an account to all your devices. They are only stored if you turn on “Record heart rate history”.</string>
     <string name="telemetry_share">Share</string>
     <string name="telemetry_share_sub">Like “Only me” for now; later also for friends and the live view.</string>
     <string name="telemetry_private">Only me (default)</string>
@@ -476,6 +476,23 @@
     <string name="telemetry_off">Off</string>
     <string name="telemetry_off_sub">No live display, your watch sends nothing and buffered values are discarded.</string>
     <string name="telemetry_share_pending">Health data is currently not uploaded to the cloud, so nobody else sees it yet. Your choice applies to your whole account.</string>
+    <string name="health_record_toggle">Record heart rate history</string>
+    <string name="health_record_toggle_sub">Saves heart rate and steps per match on your watch and this phone. Off by default.</string>
+    <string name="health_record_locked">Not available while heart rate &amp; steps is set to “Off”.</string>
+    <string name="health_revoke_title">Stop recording heart rate?</string>
+    <string name="health_revoke_text">All recorded heart rate histories will be deleted on this phone and your watch.</string>
+    <string name="health_revoke_confirm">Stop and delete</string>
+    <string name="health_delete_all">Delete all health data</string>
+    <string name="health_delete_all_text">Deletes all heart rate histories on this phone. Recordings not yet sent by your watch are deleted when it next connects.</string>
+    <string name="health_pulse_title">Heart rate history</string>
+    <string name="health_pulse_off">Off</string>
+    <string name="health_pulse_private">Only me</string>
+    <string name="health_pulse_share">Everyone</string>
+    <string name="health_pulse_share_pending">“Everyone” works like “Only me” for now: nothing is uploaded yet.</string>
+    <string name="health_pulse_unavailable">Turn on “Record heart rate history” in Profile to save it for a match.</string>
+    <string name="health_pulse_not_recorded">No heart rate history recorded</string>
+    <string name="health_delete_match">Delete heart rate history</string>
+    <string name="health_delete_match_text">The heart rate history of this match will be deleted on this phone and your watch.</string>
     <string name="home_open_matches">Running matches (%1$d)</string>
     <string name="home_new_match_parallel">Start another court – running matches keep going.</string>
     <string name="open_match_watch_scores">Your watch scores</string>
