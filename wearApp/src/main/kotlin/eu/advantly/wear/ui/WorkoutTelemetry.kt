@@ -1,9 +1,14 @@
 package eu.advantly.wear.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
@@ -53,7 +58,9 @@ internal fun TelemetrySide(
     val locale = LocalConfiguration.current.locales[0]
     // Anzeige kompakt (ab 10.000 „12,3k“), TalkBack ausgeschrieben
     val steps = workout.steps?.let { TelemetryFormat.steps(it, locale) } ?: unknown
-    val description = stringResource(R.string.live_workout_telemetry_description, pulse, workout.steps?.toString() ?: unknown)
+    val values = stringResource(R.string.live_workout_telemetry_description, pulse, workout.steps?.toString() ?: unknown)
+    val recording = workout.healthRecording && workout.telemetryAllowed
+    val description = if (recording) stringResource(R.string.health_recording_description, values) else values
     val color = if (isAmbient) AmbientDigits else Color.White
     // Untergrenze physisch (dp): bei großer Systemschrift so klein wie bei normaler, statt abgeschnitten zu werden
     val minSize = with(LocalDensity.current) { TELEMETRY_MIN_DP.dp.toSp() }
@@ -73,14 +80,25 @@ internal fun TelemetrySide(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (kind == TelemetryKind.HEART_RATE) {
-            Text(
-                "♥",
-                modifier = Modifier.semantics { hideFromAccessibility() },
-                fontSize = 10.sp,
-                lineHeight = 11.sp,
-                color = if (isAmbient) AmbientDigits else ErrorRed,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "♥",
+                    modifier = Modifier.semantics { hideFromAccessibility() },
+                    fontSize = 10.sp,
+                    lineHeight = 11.sp,
+                    color = if (isAmbient) AmbientDigits else ErrorRed,
+                    maxLines = 1,
+                )
+                // Aufnahme-Punkt (E3): Pulsverlauf wird gespeichert
+                if (recording) {
+                    Box(
+                        Modifier
+                            .testTag(LiveTags.HEALTH_RECORDING)
+                            .size(4.dp)
+                            .background(if (isAmbient) AmbientDigits else ErrorRed, CircleShape),
+                    )
+                }
+            }
         } else {
             Icon(painterResource(R.drawable.ic_steps), contentDescription = null, tint = color, modifier = Modifier.size(11.dp))
         }

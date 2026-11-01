@@ -274,6 +274,7 @@
     <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
     <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <string name="health_recording_description">Pulsverlauf wird aufgezeichnet. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Puls &amp; Schritte</string>
     <string name="telemetry_visibility_share">Teilen</string>

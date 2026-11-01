@@ -282,6 +282,7 @@
     <string name="notification_match_display">Live score from the phone – tap to open</string>
     <string name="live_workout_telemetry_description">Heart rate: %1$s beats per minute, steps: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <string name="health_recording_description">Recording heart rate history. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Heart rate &amp; steps</string>
     <string name="telemetry_visibility_share">Share</string>
