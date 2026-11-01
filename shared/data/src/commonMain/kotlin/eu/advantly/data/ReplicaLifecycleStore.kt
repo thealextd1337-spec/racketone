@@ -248,7 +248,8 @@ class ReplicaLifecycleStore internal constructor(
                 (
                     (source.local == 1L && source.scope_id == scope) ||
                         (
-                            scope != null &&
+                            owner == null &&
+                                scope != null &&
                                 database.localIdentityQueries.acceptedScopeForSource(source.device_id).executeAsOneOrNull() == scope
                         ) ||
                         (owner != null && owner == (data.accountIdentities.profile ?: data.accountIdentities.scope))

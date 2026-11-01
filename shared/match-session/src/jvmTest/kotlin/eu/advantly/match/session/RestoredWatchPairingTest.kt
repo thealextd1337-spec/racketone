@@ -1,5 +1,6 @@
 package eu.advantly.match.session
 
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.Presets
@@ -14,6 +15,8 @@ import eu.advantly.sync.protocol.PeerKind
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 
 /**
  * Feldfehler 0.4.1: Wear-App neu installiert, Android spielt das Cloud-Backup (Datenbank mit Kopplung) zurück, der Guard
@@ -55,8 +58,8 @@ class RestoredWatchPairingTest {
     private var watchData = LocalData(watchDriver)
     private var watch = session(watchData, link("watch"), PeerKind.WATCH)
 
-    @Test
-    fun phoneStartedWatchScoredMatchOpensOnARestoredWatch() {
+    /** Gekoppelt, Match gezählt, dann Neuinstallation mit Restore: dasselbe Abbild, umgestellt vor der ersten Session. */
+    private fun restoredPair() {
         phoneData.players.ensureSelf("Alex", 0) { PlayerId("phone-self") }
         watchData.players.ensureSelf("Alex", 0) { PlayerId("watch-self") }
         phone.start()
@@ -68,8 +71,6 @@ class RestoredWatchPairingTest {
         phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, scorer = ScorerChoice.MyWatch)
         watch.recordPoint(Side.A)
         settle()
-
-        // Neuinstallation mit Restore: dasselbe Abbild (Stand des Backups), umgestellt vor der ersten Session
         watch.close()
         network.setConnected("watch", false)
         watchData = LocalData(watchDriver)
@@ -79,10 +80,19 @@ class RestoredWatchPairingTest {
         watch.start()
         network.setConnected("watch", true)
         settle()
+    }
 
+    private fun startOnWatch(): MatchId {
         val match = phone.create(Presets.TENNIS_SINGLES_BO3.format(), SINGLES, scorer = ScorerChoice.MyWatch, takeOverWatchMatch = true)
         settle()
         scheduler.advanceBy(31_000)
+        return match
+    }
+
+    @Test
+    fun phoneStartedWatchScoredMatchOpensOnARestoredWatch() {
+        restoredPair()
+        val match = startOnWatch()
         assertEquals(
             watch.deviceId,
             phone.state.value.match
@@ -94,6 +104,21 @@ class RestoredWatchPairingTest {
             watch.state.value.match
                 ?.id,
             "Uhr öffnet das Match",
+        )
+    }
+
+    @Test
+    fun sourceConfirmedForAnotherScopeStaysRejectedOnARestoredWatch() {
+        restoredPair()
+        // Bestätigung gilt nur für genau den aktuellen Scope
+        watchDriver.execute(null, "UPDATE local_scope_source SET scope_id = 'other-scope'", 0)
+        val match = startOnWatch()
+        assertNull(watchData.matches.get(match), "Kopf bleibt unlesbar")
+        assertEquals(0L, watchData.events.count(match.value), "Genesis abgelehnt")
+        assertNotEquals(
+            match,
+            watch.state.value.match
+                ?.id,
         )
     }
 }
