@@ -76,3 +76,31 @@ data class TelemetryPreference(
             compareBy<TelemetryPreference>({ it.counter }, { it.visibility.restriction }, { it.origin ?: "" })
     }
 }
+
+/**
+ * Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls §4, E1; Stufe 1 „Messen & lokal speichern“), Standard **aus**. Ein
+ * eigener Schalter neben der Telemetrie-Sichtbarkeit; wirkt nur, solange diese Live-Werte erlaubt. Abgleich zwischen den
+ * eigenen Geräten mit derselben Lamport-Regel wie [TelemetryPreference]: höherer Zähler gewinnt, bei Gleichstand „aus“
+ * (restriktiv), dann die Herkunft.
+ *
+ * @property counter Lamport-Zähler; `0` = nie geändert (Standard „aus“), ein Standard verdrängt nie eine Änderung
+ * @property origin Installations-ID des ändernden Geräts; `null` beim Standard
+ */
+data class HealthConsent(
+    val enabled: Boolean = false,
+    val counter: Long = 0,
+    val origin: String? = null,
+) {
+    val isDefault: Boolean get() = counter == 0L
+
+    fun changedBy(
+        device: String,
+        enabled: Boolean,
+    ): HealthConsent = HealthConsent(enabled, counter + 1, device)
+
+    fun merge(other: HealthConsent): HealthConsent = if (ORDER.compare(other, this) > 0) other else this
+
+    companion object {
+        val ORDER: Comparator<HealthConsent> = compareBy<HealthConsent>({ it.counter }, { !it.enabled }, { it.origin ?: "" })
+    }
+}

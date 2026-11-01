@@ -35,6 +35,12 @@ package eu.advantly.sync.protocol
  *   Aufschläger nach Matchende am Handy korrigieren). Ein Gerät mit Version 4 kann sie nicht dekodieren und verwürfe
  *   ganze `Events`-Nachrichten. Mit Konto meldet die Session deshalb `minV = 5`: 4↔5 ist auf beiden Seiten ein
  *   Updatezustand (wie 3↔4). Ohne Konto bleibt es bei 3, und die Session bietet keine Korrektur an.
+ * - **6** (Puls H6, 2026-11-02): rein **additiv**, keine neuen Event-Inhalte – 5↔6 bleibt kompatibel (`minV` bleibt 5).
+ *   Neu sind die Nachrichten `HealthSeries`/`HealthAck` (Pulsverlauf Uhr → Handy, Löschung in beide Richtungen) sowie
+ *   die Felder `Hello.healthProtocol`, `MatchMeta.healthConsent` und `MatchMeta.pulseVisibility` im Match-Kopf. Gesendet
+ *   werden Gesundheitsnachrichten nur an Gegenstellen, die `healthProtocol = 1` melden (mit Konto zusätzlich
+ *   ausgehandelt ≥ 6); ein älteres Gerät bekäme sie sonst als unbekannten Typ und verwürfe sie still. Weil eine Session
+ *   ohne Konto nur 3 spricht, gilt dort allein die Ankündigung im `Hello`.
  *
  * **Warum 3↔4 mit Konto inkompatibel ist:** Eine Uhr mit Protokoll 3 versteht weder Belege noch Redaktion. Über 3 kämen
  * Events an, Zugriffsentzug und Redaktion nie – die Uhr behielte gelöschte Klarnamen (Datenschutzfehler, kein
@@ -57,7 +63,7 @@ package eu.advantly.sync.protocol
  */
 object ProtocolVersion {
     /** Höchste Version, die dieses Gerät spricht und schreibt (mit Konto). */
-    const val CURRENT: Int = 5
+    const val CURRENT: Int = 6
 
     /** Älteste Version, die dieses Gerät noch lesen kann. */
     const val MIN_SUPPORTED: Int = 3

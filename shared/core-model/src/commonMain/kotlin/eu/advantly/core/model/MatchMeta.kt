@@ -53,6 +53,9 @@ enum class ServeTracking {
  * @property serveTracking „Aufschläge“ (Standard [ServeTracking.FULL]). Wire-Form abwärtskompatibel
  *   ([MatchMetaSerializer]): `serveStats` (seit 2026-10-15) wird weiter geschrieben, `serveTracking` nur zusätzlich für
  *   [ServeTracking.DOUBLE_FAULTS_ONLY].
+ * @property pulseVisibility Pulsverlauf dieses Matches (Plan Puls §4, E2): „Gar nicht“ ([TelemetryVisibility.OFF],
+ *   Standard), „Nur für mich“ oder „Für alle“ – dieselben Stufen wie F19. Nur bei ≠ OFF zeichnet die Uhr auf. Ohne
+ *   Regelwirkung; nachträgliche Änderungen stehen nicht hier, sondern gerätelokal in der Session (kein Event).
  */
 @Serializable(with = MatchMetaSerializer::class)
 data class MatchMeta(
@@ -63,6 +66,7 @@ data class MatchMeta(
     val venue: String? = null,
     val watchWorkout: Boolean = true,
     val serveTracking: ServeTracking = ServeTracking.FULL,
+    val pulseVisibility: TelemetryVisibility = TelemetryVisibility.OFF,
 ) {
     /** Altes Ja/Nein „Aufschlag-Statistik erfassen“: Aufschlag-Leiste überhaupt anbieten. */
     val serveStats: Boolean get() = serveTracking != ServeTracking.OFF
@@ -73,6 +77,8 @@ data class MatchMeta(
  * - alt → neu: fehlt `serveTracking`, gilt `serveStats` (`true`/fehlend → FULL, `false` → OFF);
  * - neu → alt: `serveStats = serveTracking != OFF` bleibt erhalten, ältere Geräte (0.2.0) ignorieren das unbekannte
  *   `serveTracking` und zeigen bei „Nur Doppelfehler“ ihre volle Leiste. FULL und OFF erzeugen dasselbe JSON wie bisher.
+ * - `pulseVisibility` (Puls H5) steht nur bei ≠ „Gar nicht“ im JSON, als Text (`share`/`private`): Ein unbekannter Wert
+ *   einer künftigen Version gilt als „Gar nicht“ und macht nie das ganze Event unlesbar.
  */
 @Serializable
 @SerialName("eu.advantly.core.model.MatchMeta")
@@ -85,6 +91,7 @@ private class MatchMetaWire(
     val watchWorkout: Boolean = true,
     val serveStats: Boolean = true,
     val serveTracking: ServeTracking? = null,
+    val pulseVisibility: String? = null,
 )
 
 object MatchMetaSerializer : KSerializer<MatchMeta> {
@@ -106,6 +113,7 @@ object MatchMetaSerializer : KSerializer<MatchMeta> {
                 watchWorkout,
                 serveStats,
                 serveTracking.takeIf { it == ServeTracking.DOUBLE_FAULTS_ONLY },
+                pulseVisibility.takeIf { it != TelemetryVisibility.OFF }?.wire,
             )
         },
     )
@@ -120,6 +128,7 @@ object MatchMetaSerializer : KSerializer<MatchMeta> {
                 venue,
                 watchWorkout,
                 serveTracking ?: if (serveStats) ServeTracking.FULL else ServeTracking.OFF,
+                TelemetryVisibility.fromWire(pulseVisibility) ?: TelemetryVisibility.OFF,
             )
         }
 }

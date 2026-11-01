@@ -22,9 +22,9 @@ class ProtocolVersionTest {
 
     @Test
     fun disjointRangesAreIncompatible() {
-        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(6, 6).status)
+        assertEquals(CompatibilityStatus.PEER_TOO_NEW, ProtocolVersion.negotiate(7, 7).status)
         assertEquals(CompatibilityStatus.PEER_TOO_OLD, ProtocolVersion.negotiate(1, 1, localVersion = 3, localMinSupported = 2).status)
-        assertFalse(ProtocolVersion.negotiate(6, 6).isCompatible)
+        assertFalse(ProtocolVersion.negotiate(7, 7).isCompatible)
     }
 
     /** W2 (Protokoll 2) ↔ W3-M (Protokoll 3, STOPPED + Uhr-Zuweisung): auf beiden Seiten sichtbar inkompatibel. */
@@ -64,7 +64,7 @@ class ProtocolVersionTest {
      */
     @Test
     fun version5WithAccountMakesVersion4AnUpdateState() {
-        assertEquals(5, ProtocolVersion.CURRENT)
+        assertTrue(ProtocolVersion.CURRENT >= 5)
         assertTrue(ProtocolVersion.accepts(4) && ProtocolVersion.accepts(5))
         assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 5), ProtocolVersion.negotiate(5, 5))
         assertEquals(Compatibility(CompatibilityStatus.PEER_TOO_OLD, null), ProtocolVersion.negotiate(4, 4, 5, 5))
@@ -76,5 +76,14 @@ class ProtocolVersionTest {
         assertTrue(ProtocolVersion.accepts(ProtocolVersion.CURRENT))
         assertFalse(ProtocolVersion.accepts(ProtocolVersion.CURRENT + 1))
         assertFalse(ProtocolVersion.accepts(0))
+    }
+
+    /** Protokoll 6 (Puls H6) ist rein additiv: 5↔6 bleibt kompatibel und schreibt 5. */
+    @Test
+    fun version6StaysCompatibleWithVersion5() {
+        assertEquals(6, ProtocolVersion.CURRENT)
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 6), ProtocolVersion.negotiate(6, 5, 6, 5))
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 5), ProtocolVersion.negotiate(5, 5, 6, 5))
+        assertEquals(Compatibility(CompatibilityStatus.COMPATIBLE, 5), ProtocolVersion.negotiate(6, 5, 5, 5))
     }
 }
