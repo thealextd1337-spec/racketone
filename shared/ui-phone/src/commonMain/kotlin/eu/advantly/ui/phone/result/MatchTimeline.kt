@@ -35,6 +35,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.Callout
 import eu.advantly.core.scoring.MomentKind
 import eu.advantly.core.scoring.MomentOutcome
+import eu.advantly.health.HealthQuality
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.stats.MatchStats
 import eu.advantly.presentation.stats.PulseTrack
@@ -65,12 +66,16 @@ import eu.advantly.ui.phone.resources.moment_set_point
 import eu.advantly.ui.phone.resources.moment_set_won
 import eu.advantly.ui.phone.resources.moment_star_point
 import eu.advantly.ui.phone.resources.moment_tiebreak
+import eu.advantly.ui.phone.resources.timeline_card_pulse
 import eu.advantly.ui.phone.resources.timeline_clock
 import eu.advantly.ui.phone.resources.timeline_empty
 import eu.advantly.ui.phone.resources.timeline_highlights
 import eu.advantly.ui.phone.resources.timeline_hint
 import eu.advantly.ui.phone.resources.timeline_marker_a11y
 import eu.advantly.ui.phone.resources.timeline_pulse
+import eu.advantly.ui.phone.resources.timeline_quality_gaps
+import eu.advantly.ui.phone.resources.timeline_quality_no_hr
+import eu.advantly.ui.phone.resources.timeline_quality_sparse
 import eu.advantly.ui.phone.resources.timeline_score_before
 import eu.advantly.ui.phone.resources.timeline_title
 import org.jetbrains.compose.resources.stringResource
@@ -92,8 +97,9 @@ private val KIND_ORDER =
 /**
  * Zeitleiste im Match-Detail (Plan Puls-Highlights §5): x-Achse Spielzeit ohne Pausen, Marker je Highlight; Antippen
  * zeigt den Stand **vor** dem Punkt und ob die Chance verwertet oder abgewehrt wurde. Darunter dieselben Highlights als
- * barrierefreie Liste. Mit [pulse] zeichnet sie zusätzlich die Pulskurve (Lücken und Pausen unterbrechen die Linie);
- * ohne Puls bleibt es bei den Highlights.
+ * barrierefreie Liste. Mit [pulse] zeichnet sie zusätzlich die Pulskurve (Lücken und Pausen unterbrechen die Linie),
+ * darunter einen Hinweis bei schlechter Datenqualität, und die Karte zeigt den Ø-Puls (Trend); ohne Puls bleibt es bei
+ * den Highlights.
  */
 @Composable
 internal fun MatchTimeline(
@@ -171,7 +177,24 @@ internal fun MatchTimeline(
                 }
             }
         }
-        selected?.let { moments.getOrNull(it) }?.let { MomentCard(it, setup) }
+        pulse?.quality?.let { quality ->
+            val hint =
+                when (quality) {
+                    HealthQuality.OK -> null
+                    HealthQuality.SPARSE_HR -> Res.string.timeline_quality_sparse
+                    HealthQuality.GAPS -> Res.string.timeline_quality_gaps
+                    HealthQuality.NO_HR -> Res.string.timeline_quality_no_hr
+                }
+            if (hint != null) {
+                Text(
+                    stringResource(hint),
+                    style = AdvantlyTheme.typography.caption,
+                    color = colors.text2,
+                    modifier = Modifier.padding(top = Spacing.xs).testTag("timeline_quality"),
+                )
+            }
+        }
+        selected?.let { moments.getOrNull(it) }?.let { MomentCard(it, setup, pulse?.averageAround(it.moment.wallClockMs)) }
         SectionTitle(stringResource(Res.string.timeline_highlights))
         Column(Modifier.testTag("timeline_list"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             moments.forEachIndexed { index, moment ->
@@ -192,11 +215,12 @@ internal fun MatchTimeline(
     }
 }
 
-/** Karte zum angetippten Highlight: Arten, Stand vor dem Punkt, verwertet/abgewehrt, Spielzeit. */
+/** Karte zum angetippten Highlight: Arten, Stand vor dem Punkt, verwertet/abgewehrt, Ø-Puls (falls bekannt), Spielzeit. */
 @Composable
 private fun MomentCard(
     moment: TimelineMoment,
     setup: MatchSetup,
+    averageBpm: Int?,
 ) {
     AdvantlyCard(Modifier.padding(top = Spacing.s).testTag("timeline_card")) {
         Text(momentTitle(moment, setup.sport), style = AdvantlyTheme.typography.label, color = AdvantlyTheme.colors.text)
@@ -212,6 +236,14 @@ private fun MomentCard(
             color = AdvantlyTheme.colors.text2,
             modifier = Modifier.testTag("timeline_card_outcome"),
         )
+        averageBpm?.let {
+            Text(
+                stringResource(Res.string.timeline_card_pulse, it),
+                style = AdvantlyTheme.typography.body,
+                color = AdvantlyTheme.colors.text2,
+                modifier = Modifier.testTag("timeline_card_pulse"),
+            )
+        }
         Text(playTime(moment.playMs), style = AdvantlyTheme.typography.caption, color = AdvantlyTheme.colors.text2)
     }
 }

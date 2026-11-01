@@ -17,6 +17,7 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
+import eu.advantly.health.HealthQuality
 import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AdvantlyAppModel
@@ -98,6 +99,9 @@ class MatchTimelineUiTest {
                 onNodeWithTag("timeline_marker_0").performScrollTo().performClick()
                 onNodeWithTag("timeline_card_score").assertTextContains("30:40", substring = true)
                 onNodeWithTag("timeline_card_outcome").assertTextContains("Verwertet von Jonas")
+                // Ohne Pulsverlauf wie vor H8: kein Ø-Puls, kein Qualitätshinweis
+                onNodeWithTag("timeline_card_pulse").assertDoesNotExist()
+                onNodeWithTag("timeline_quality").assertDoesNotExist()
                 onNodeWithTag("timeline_card").assert(hasAnyDescendant(hasText("Break · Breakball", substring = true)))
                 // Barrierefreie Liste: dieselben Highlights als antippbare Zeilen
                 onNodeWithTag("timeline_item_0").performScrollTo().assertTextContains("Breakball", substring = true)
@@ -128,6 +132,31 @@ class MatchTimelineUiTest {
                 // PNG zur Sichtprüfung, kein Pixelvergleich
                 val file = File("build/reports/screenshots/timeline/pulse-de.png").apply { parentFile.mkdirs() }
                 ImageIO.write(onRoot().captureToImage().toAwtImage(), "png", file)
+            }
+        }
+
+    @Test
+    fun cardShowsAveragePulseAndCurveShowsQualityHint() =
+        german {
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                val model = testModel()
+                val record = model.history.record(model.breakMatch())!!
+                val start = record.summary.startedAtMs
+                setContent {
+                    AdvantlyTheme {
+                        ResultScreen(
+                            record = record,
+                            onBack = {},
+                            onPlayAgain = {},
+                            onDelete = {},
+                            pulse = PulseTrack(start - 60_000, 5_000, List(60) { 150 }, HealthQuality.GAPS),
+                        )
+                    }
+                }
+                waitForIdle()
+                onNodeWithTag("timeline_quality").performScrollTo().assertTextContains("Lücken", substring = true)
+                onNodeWithTag("timeline_marker_0").performClick()
+                onNodeWithTag("timeline_card_pulse").performScrollTo().assertTextContains("Ø-Puls (Trend): 150 bpm")
             }
         }
 }
