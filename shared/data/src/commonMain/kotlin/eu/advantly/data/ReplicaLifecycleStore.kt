@@ -240,11 +240,18 @@ class ReplicaLifecycleStore internal constructor(
                 creator == source.self_id ||
                     (owner != null && database.cloudMetadataQueries.ownedSelfAlias(creator, owner).executeAsOne() > 0)
             )
-        // Eigene Quelle: lokal im aktuellen Scope oder per UID an das aktuelle Konto gebunden (z. B. die eigene Uhr am Handy).
+        // Eigene Quelle: lokal im aktuellen Scope, vom gekoppelten Handy für ihn bestätigt (wie in replica_readable_match, z. B.
+        // das Handy an einer Uhr mit übernommenem Abbild) oder per UID an das aktuelle Konto gebunden (die eigene Uhr am Handy).
+        val scope = data.accountIdentities.scope
         val ownSource =
             source != null &&
                 (
-                    (source.local == 1L && source.scope_id == data.accountIdentities.scope) ||
+                    (source.local == 1L && source.scope_id == scope) ||
+                        (
+                            owner == null &&
+                                scope != null &&
+                                database.localIdentityQueries.acceptedScopeForSource(source.device_id).executeAsOneOrNull() == scope
+                        ) ||
                         (owner != null && owner == (data.accountIdentities.profile ?: data.accountIdentities.scope))
                 )
         check(ownSource && ownCreator) {
