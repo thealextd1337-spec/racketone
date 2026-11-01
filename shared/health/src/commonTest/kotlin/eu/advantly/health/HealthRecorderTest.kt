@@ -137,4 +137,26 @@ class HealthRecorderTest {
         assertNull(maxBpm(series(listOf(null))))
         assertEquals("HealthSeries(<redacted>)", s.toString())
     }
+
+    @Test
+    fun resumeContinuesTheStoredSeriesAfterProcessDeath() {
+        val before = HealthRecorder(start)
+        before.steps(at(0), 0)
+        before.heartRate(at(0), 100)
+        before.heartRate(at(4), 101)
+        before.steps(at(9), 30)
+        val stored = before.series(clockOffsetMs = 700)
+        val resumed = HealthRecorder.resume(stored)
+        assertEquals(stored.copy(clockOffsetMs = 0), resumed.series())
+        // Nach dem Neustart beginnt der Schrittzähler wieder bei 0 und wird angehängt
+        resumed.steps(at(12), 0)
+        resumed.steps(at(16), 8)
+        resumed.heartRate(at(16), 140)
+        assertEquals(listOf(101, null, null, 140), resumed.series().bpm)
+        assertEquals(listOf(0L, 30L, 30L, 38L), resumed.series().steps)
+        // Läuft der Rohzähler weiter (gleiche Zählung wie die Summen), zählt nur die Differenz
+        val continued = HealthRecorder.resume(stored)
+        continued.steps(at(12), 45)
+        assertEquals(listOf(0L, 30L, 45L), continued.series().steps)
+    }
 }

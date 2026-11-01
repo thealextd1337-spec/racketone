@@ -80,6 +80,22 @@ class HealthRecorder(
     }
 
     companion object {
+        /**
+         * Setzt eine gespeicherte Aufnahme fort (Prozess-Tod während des Matches). Ein Puls-Bucket zählt danach als ein
+         * Sample (Gewichtung im angefangenen Bucket geht verloren). Die gespeicherten Schrittsummen gelten als letzter
+         * Rohzähler: Ein kleinerer nächster Wert (z. B. neu bei 0 beginnender Zähler) gilt als Neustart und wird addiert.
+         */
+        fun resume(series: HealthSeries): HealthRecorder =
+            HealthRecorder(series.startMs, series.intervalMs).apply {
+                series.bpm.forEachIndexed { i, bpm ->
+                    if (bpm != null) {
+                        bpmSums[i] = bpm.toLong()
+                        bpmCounts[i] = 1
+                    }
+                }
+                series.steps.forEachIndexed { i, total -> if (total != null) lastSteps[i] = (startMs + i * intervalMs) to total }
+            }
+
         /** Raster für Statistik und Sync (05 §5.3). */
         const val INTERVAL_MS: Long = 5_000
 
