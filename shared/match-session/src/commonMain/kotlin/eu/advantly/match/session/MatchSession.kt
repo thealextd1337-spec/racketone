@@ -2,6 +2,7 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.HealthConsent
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -78,6 +79,8 @@ import eu.advantly.sync.protocol.Deleted
 import eu.advantly.sync.protocol.DeletedMatch
 import eu.advantly.sync.protocol.DeviceSeq
 import eu.advantly.sync.protocol.Events
+import eu.advantly.sync.protocol.HealthConsentSetting
+import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.IdentityEnvelope
 import eu.advantly.sync.protocol.LocalMatchStamp
@@ -288,6 +291,7 @@ class MatchSession(
         genesisCache.clear()
         blockedMatches.clear()
         telemetry = loadTelemetry()
+        health.reload()
         dataRevision++
         publish()
         if (started && config.kind == PeerKind.PHONE) link?.peers.orEmpty().forEach(::sendHello)
@@ -348,6 +352,12 @@ class MatchSession(
 
     /** Telemetrie-Sichtbarkeit des Besitzers (P2-J), persistent in den Settings; Abgleich über `MatchMeta.telemetry`. */
     private var telemetry: TelemetryPreference = loadTelemetry()
+
+    /** Pulsverlauf (Plan Puls H5/H6): Einwilligung, Stufe je Match, Aufnahme und Übertragung. */
+    private val health =
+        HealthSync(data, config.kind, { deviceId }, clock::nowMs, { scopedKey(HealthSync.CONSENT_KEY) }) { message ->
+            targets().forEach { send(it, message) }
+        }
 
     /**
      * Matches, die nachweislich noch nie an eine Uhr gesendet wurden (Cache der Settings `session.neverSentToWatch.*`).
@@ -469,6 +479,7 @@ class MatchSession(
         checkThread()
         if (!started) return
         started = false
+        health.saveAll()
         removeDirectoryObserver?.invoke()
         removeDirectoryObserver = null
         timer?.cancel()
@@ -617,9 +628,116 @@ class MatchSession(
         return true
     }
 
+    // --- Pulsverlauf (Plan Puls H5/H6) ----------------------------------------------------------------------------
+
+    /**
+     * Einwilligung „Pulsverlauf aufzeichnen“ (E1, Standard aus) auf diesem Gerät ändern; Abgleich mit den eigenen Geräten
+     * wie [setTelemetryVisibility]. Ein Widerruf löscht alle Gesundheitsdaten – hier sofort, auf den anderen Geräten,
+     * sobald sie ihn erhalten.
+     */
+    fun setHealthConsent(enabled: Boolean) {
+        checkThread()
+        if (enabled == health.consent.enabled) return
+        adoptHealthConsent(health.consent.changedBy(deviceId.value, enabled))
+    }
+
+    private fun adoptHealthConsent(next: HealthConsent) {
+        if (!health.adoptConsent(next)) return
+        broadcast(MatchMetaMessage(healthConsent = HealthConsentSetting.of(next)))
+        dataRevision++
+        publish()
+    }
+
+    /** Vorbelegung der Stufe im Assistenten: die Telemetrie-Sichtbarkeit, ohne Einwilligung bzw. bei „Gar nicht“ OFF. */
+    fun defaultPulseVisibility(): TelemetryVisibility {
+        checkThread()
+        return if (health.consent.enabled && telemetry.visibility.allowsLive) telemetry.visibility else TelemetryVisibility.OFF
+    }
+
+    /** Wirksame Stufe des Matches (nachträgliche Wahl, sonst `MatchMeta.pulseVisibility`). */
+    fun pulseVisibility(matchId: MatchId): TelemetryVisibility {
+        checkThread()
+        return health.visibility(matchId)
+    }
+
+    /**
+     * Stufe nachträglich ändern (gerätelokal, kein Event). „Gar nicht“ löscht den Pulsverlauf des Matches hier sofort und
+     * schickt die Löschung an die eigenen Geräte; danach nimmt keines mehr dazu auf oder an. Die Rückfrage stellt die UI.
+     */
+    fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    ) {
+        checkThread()
+        health.setVisibility(matchId, visibility)
+        dataRevision++
+        publish()
+    }
+
+    /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. */
+    fun deleteAllHealthData() {
+        checkThread()
+        health.deleteAll()
+        dataRevision++
+        publish()
+    }
+
+    /**
+     * Pulswert der Uhr für [matchId] ([atMs] = Sample-Zeit als Wanduhr-ms dieses Geräts). Startet bzw. setzt die Aufnahme
+     * fort, wenn Einwilligung, Telemetrie und Stufe sie erlauben. `true` = übernommen.
+     */
+    fun recordHeartRate(
+        matchId: MatchId,
+        atMs: Long,
+        bpm: Int,
+    ): Boolean {
+        checkThread()
+        return health.record(matchId, atMs, telemetry.visibility) { it.heartRate(atMs, bpm) }
+    }
+
+    /**
+     * Kumulierter Schrittzähler (z. B. Schritte seit Matchbeginn). Der erste Wert ist die Basis; ein Rücksprung gilt als
+     * Neustart des Zählers. Beim Matchstart sofort einmal mit dem aktuellen Stand aufrufen.
+     */
+    fun recordSteps(
+        matchId: MatchId,
+        atMs: Long,
+        cumulativeSteps: Long,
+    ): Boolean {
+        checkThread()
+        return health.record(matchId, atMs, telemetry.visibility) { it.steps(atMs, cumulativeSteps) }
+    }
+
+    /** Läuft für [matchId] eine erlaubte Aufnahme (roter Punkt auf der Uhr, E3)? */
+    fun isRecordingHealth(matchId: MatchId): Boolean {
+        checkThread()
+        return health.isRecording(matchId, telemetry.visibility)
+    }
+
+    /** Ende der Aufnahme (Workout-Ende): speichern und an das Handy senden; Wiederholung bei jedem Verbinden bis zum Ack. */
+    fun finishHealthRecording(matchId: MatchId) {
+        checkThread()
+        if (health.finish(matchId)) targets().forEach(::sendHealth)
+    }
+
+    private fun sendHealth(peer: String) = health.pending().forEach { send(peer, it) }
+
+    private fun onHealth(
+        peer: String,
+        message: HealthMessage,
+    ) {
+        health.receive(peerDeviceOf(peer), message) { dataRevision++ }?.let { send(peer, it) }
+    }
+
+    /** Gegenstelle versteht Gesundheitsnachrichten (Protokoll 6); mit Konto zusätzlich ausgehandelt ≥ 6. */
+    private fun healthPeer(peer: String): Boolean =
+        config.protocolVersions.last >= HEALTH_VERSION && hellos[peer]?.healthProtocol == 1 &&
+            (!data.accountIdentities.managed || version(peer) >= HEALTH_VERSION)
+
     /** Gespeicherte Einstellung; fehlt sie oder ist sie unlesbar, gilt der Standard (nie ein halber Stand). */
-    private fun telemetryKey(): String =
-        if (data.accountIdentities.managed) "$TELEMETRY_KEY.${data.accountIdentities.scope}" else TELEMETRY_KEY
+    private fun telemetryKey(): String = scopedKey(TELEMETRY_KEY)
+
+    private fun scopedKey(key: String): String = if (data.accountIdentities.managed) "$key.${data.accountIdentities.scope}" else key
 
     private fun loadTelemetry(): TelemetryPreference {
         val stored = data.settings.get(telemetryKey()) ?: return TelemetryPreference()
@@ -1720,6 +1838,7 @@ class MatchSession(
                     is MatchMetaMessage -> onMatchMeta(peer, message)
                     is Deleted -> onDeleted(peer, message).let { null }
                     is ReplicaControlMessage -> onControl(peer, message, decoded.identity).let { null }
+                    is HealthMessage -> onHealth(peer, message).let { null }
                 }
             } catch (e: IllegalArgumentException) {
                 // passt nicht zum lokalen Log (z. B. kollidierende Genesis-ID) â†’ verwerfen; der Rest bleibt konsistent
@@ -1783,6 +1902,7 @@ class MatchSession(
         sendArchives(peer)
         send(peer, summaryOf(summaryMatches(), reply = false))
         send(peer, metaMessage(primaryRecord()))
+        sendHealth(peer)
         // jetzt identifiziert: zulässigen Rückstand nachschieben (vorher hielt das Routing alles zurück)
         if (config.parallelMatches || data.accountIdentities.managed) pushBacklog(peer)
         // E7: die Uhr aus dem bestätigten Hello registrieren, dann offene Zustellungen (Wiederanlauf nach Reconnect)
@@ -1884,6 +2004,7 @@ class MatchSession(
         neverSentCache.remove(matchId)
         genesisCache.remove(matchId)
         blockedMatches.remove(matchId)
+        health.forgetMatch(matchId)
     }
 
     /** Speichert neue Events sofort und wendet sie als Batch an (kein Puffern, `more` ist nur ein Hinweis). */
@@ -1912,6 +2033,7 @@ class MatchSession(
             return matchId
         }
         lastEventReceivedAtMs = clock.nowMs()
+        health.observe(matchId, inserted)
         val relevantBefore = replicates(peer, matchId)
         devicesIn(matchId) += inserted.map { it.deviceId.value }
         // die Uhr kennt dieses Match (z. B. offline weitergezählt): jetzt gehört es zu ihrem Abgleich – sofort Stand tauschen
@@ -2002,6 +2124,7 @@ class MatchSession(
         message.watchMatch?.let { adoptAssignment(peer, it) }
         // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
         message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
+        message.healthConsent?.toConsent()?.let { adoptHealthConsent(health.consent.merge(it)) }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -2324,6 +2447,7 @@ class MatchSession(
                 appBuild = config.appBuild,
                 session = sessionId,
                 identityProtocol = 1,
+                healthProtocol = 1.takeIf { config.protocolVersions.last >= HEALTH_VERSION },
                 ownerContext = pairing.context,
                 recipientSession = known?.session,
                 localSources =
@@ -2460,6 +2584,10 @@ class MatchSession(
 
             is ReplicaControlMessage -> {
                 message.takeIf { version(peer) >= 4 }
+            }
+
+            is HealthMessage -> {
+                message.takeIf { healthPeer(peer) }
             }
         }
 
@@ -2784,6 +2912,7 @@ class MatchSession(
                 self = data.players.self()?.toPlayer(),
                 watchMatch = watchAssignment?.takeIf { config.parallelMatches },
                 telemetry = TelemetrySetting.of(telemetry),
+                healthConsent = HealthConsentSetting.of(health.consent),
             )
         }
         val archived = data.players.archivedIds()
@@ -2804,6 +2933,7 @@ class MatchSession(
             selfAliases = data.selfAliases().toList(),
             watchMatch = watchAssignment?.takeIf { config.parallelMatches },
             telemetry = TelemetrySetting.of(telemetry),
+            healthConsent = HealthConsentSetting.of(health.consent),
         )
     }
 
@@ -2870,6 +3000,7 @@ class MatchSession(
             },
             lifecycleRevision,
             pairingConflict = pairing.conflict,
+            healthConsent = health.consent,
         )
     }
 
@@ -2971,6 +3102,9 @@ class MatchSession(
 
         /** Settings: Telemetrie-Sichtbarkeit samt Versionsangabe als ein JSON-Eintrag (`TelemetrySetting`, P2-J). */
         private const val TELEMETRY_KEY = "session.telemetry"
+
+        /** Protokollversion der Gesundheitsnachrichten (Plan Puls §3.5). */
+        private const val HEALTH_VERSION = 6
 
         /** Settings-Suffix: Zähler der aus einem anderen Konto übernommenen Telemetrie-Wahl (nur lokal, H0). */
         private const val INHERITED_SUFFIX = ".inherited"
