@@ -17,6 +17,7 @@ import eu.advantly.device.link.CompanionState
 import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.presentation.match.HealthRecordsPort
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchStore
 import eu.advantly.presentation.match.SessionMatchStore
@@ -28,6 +29,7 @@ internal class AndroidPhoneMatchStore private constructor(
     private val raw: SessionMatchStore,
     private val calls: AndroidSessionBoundary,
 ) : MatchStore by raw,
+    HealthRecordsPort by raw,
     AutoCloseable {
     override fun tryStart(
         setup: MatchSetup,
@@ -139,6 +141,8 @@ internal class AndroidPhoneMatchStore private constructor(
     override fun record(matchId: MatchId) = calls.run { raw.record(matchId) }
 
     override fun delete(matchId: MatchId) = calls.run { raw.delete(matchId) } ?: false
+
+    override fun pulseTrack(matchId: MatchId) = calls.run { raw.pulseTrack(matchId) }
 
     override fun recentPlayers(sport: Sport) = calls.run { raw.recentPlayers(sport) }.orEmpty()
 

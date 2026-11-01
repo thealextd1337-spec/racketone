@@ -49,6 +49,7 @@ class HealthRepositoryTest {
         val empty = StoredHealthSeries(m, phone, 1, series(emptyList()))
         assertTrue(data.health.upsert(empty))
         assertEquals(listOf(empty, newer), data.health.forMatch(m))
+        assertEquals(listOf(Triple(m, phone, 1L), Triple(m, watch, 3L)), data.health.revisions())
     }
 
     @Test

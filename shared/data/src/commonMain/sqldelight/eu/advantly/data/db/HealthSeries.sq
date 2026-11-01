@@ -42,6 +42,12 @@ SELECT * FROM health_series
 WHERE source_device_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY match_id;
 
+-- Nur die Schlüssel samt Revision: billiger Fingerabdruck, ob sich lesbare Serien geändert haben.
+revisions:
+SELECT match_id, source_device_id, revision FROM health_series
+WHERE match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY match_id, source_device_id;
+
 deleteForMatch:
 DELETE FROM health_series WHERE match_id = ?;
 

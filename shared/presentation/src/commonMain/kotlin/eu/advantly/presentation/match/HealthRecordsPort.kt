@@ -11,16 +11,19 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * @property maxBpm höchster gemessener Puls über alle Matches
  * @property maxStepsInSet meiste Schritte in einem Satz über alle Matches
+ * @property revision steigt, wenn sich gespeicherte Serien geändert haben können – das Match-Detail liest dann den
+ *   Pulsverlauf neu ([HealthRecordsPort.pulseTrack]), auch wenn die Höchstwerte gleich bleiben
  */
 data class HealthRecords(
     val maxBpm: Int? = null,
     val maxStepsInSet: Long? = null,
+    val revision: Long = 0,
 )
 
 /**
  * Gesundheitsdaten für die Phone-UI (Plan Puls-Highlights): Höchstwerte für den Start und der Pulsverlauf je Match für
- * die Zeitleiste. `ui-phone` darf nicht auf `data` zugreifen, deshalb dieser Port. Bis die Aufzeichnung angebunden ist,
- * liefert der Default ([InMemoryHealthRecords]) nichts. Nur vom UI-Thread benutzen.
+ * die Zeitleiste. `ui-phone` darf nicht auf `data` zugreifen, deshalb dieser Port. Die App nutzt [SessionMatchStore];
+ * ohne ihn (Tests, Previews) liefert der Default ([InMemoryHealthRecords]) nichts. Nur vom UI-Thread benutzen.
  */
 interface HealthRecordsPort {
     val records: StateFlow<HealthRecords>

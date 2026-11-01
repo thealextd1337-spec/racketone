@@ -218,6 +218,7 @@ fun AdvantlyApp(
                         val history by model.history.matches.collectAsState()
                         val revision = history.firstOrNull { it.matchId == top.matchId }
                         val record = remember(top.matchId, revision) { model.history.record(top.matchId) }
+                        val health by model.health.records.collectAsState()
                         ResultScreen(
                             record = record,
                             statisticsCache = model.statistics,
@@ -235,8 +236,8 @@ fun AdvantlyApp(
                             canEditResult = remember(top.matchId, revision) { model.history.canCorrectResult(top.matchId) },
                             onCorrectResult = { sets, servers -> model.history.correctResult(top.matchId, sets, servers) },
                             onPlayAgain = { model.startMatch(it) },
-                            // shortcut: einmal je Öffnen gelesen, nicht reaktiv – H8 macht den Pulsverlauf beobachtbar
-                            pulse = remember(top.matchId) { model.health.pulseTrack(top.matchId) },
+                            // Neu gelesen, sobald sich gespeicherte Serien ändern (nachgelieferte Serie der Uhr)
+                            pulse = remember(top.matchId, health.revision) { model.health.pulseTrack(top.matchId) },
                             onDelete = {
                                 model.history.delete(top.matchId)
                                 navigator.pop()

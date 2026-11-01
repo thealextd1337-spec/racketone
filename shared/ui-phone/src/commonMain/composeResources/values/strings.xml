@@ -900,6 +900,10 @@
     <string name="timeline_empty">No highlights in this match.</string>
     <string name="timeline_highlights">Highlights</string>
     <string name="timeline_pulse">Heart rate (trend): %1$d–%2$d bpm</string>
+    <string name="timeline_card_pulse">Avg. heart rate (trend): %1$d bpm</string>
+    <string name="timeline_quality_sparse">Few heart rate values – the curve shows only a rough trend.</string>
+    <string name="timeline_quality_gaps">The heart rate has gaps or does not fit the match time.</string>
+    <string name="timeline_quality_no_hr">No heart rate was recorded.</string>
     <string name="timeline_clock">%1$d:%2$s</string>
     <string name="timeline_score_before">Score before the point: %1$s</string>
     <string name="timeline_marker_a11y">%1$s, %2$s</string>
