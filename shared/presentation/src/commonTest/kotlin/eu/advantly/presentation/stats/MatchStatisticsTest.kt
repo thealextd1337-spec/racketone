@@ -17,6 +17,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** Ohne Zeitbezug: Undo/Redo verschieben das Matchende, nicht die Kennzahlen. */
+private fun MatchStats.timeless() = copy(netDurationMs = 0, playClock = PlayClock(0, 0), moments = moments.map { it.copy(playMs = 0) })
+
 class MatchStatisticsTest {
     @Test
     fun placeholderKeepsPointAttributionAndOnlyResolvedPersonGetsPersonalStatistics() {
@@ -96,11 +99,11 @@ class MatchStatisticsTest {
             )
             store.undo()
             assertEquals(
-                MatchStatistics.compute(before).copy(netDurationMs = 0),
-                MatchStatistics.compute(store.record(id)!!).copy(netDurationMs = 0),
+                MatchStatistics.compute(before).timeless(),
+                MatchStatistics.compute(store.record(id)!!).timeless(),
             )
             store.redo()
-            assertEquals(stats.copy(netDurationMs = 0), MatchStatistics.compute(store.record(id)!!).copy(netDurationMs = 0))
+            assertEquals(stats.timeless(), MatchStatistics.compute(store.record(id)!!).timeless())
             assertEquals(record.finalState, ScoringEngine.fold(record.events.reversed()))
         }
     }

@@ -141,6 +141,14 @@ class HistoryStatisticsUiTest {
             model.openResult(id)
             show(model)
             capture("detail-top-$suffix")
+            onNodeWithTag("show_game_history").performScrollTo()
+            onNodeWithTag("momentum_chart").assertIsDisplayed().assertContentDescriptionContains("Break", substring = true)
+            capture("detail-momentum-$suffix")
+            click("show_game_history")
+            click("show_points_0")
+            onNodeWithTag("point_0_1").performScrollTo().assertIsDisplayed()
+            capture("detail-points-$suffix")
+            // Spielformat steht ganz unten im Detail
             onNodeWithTag("result_format_title").performScrollTo().assertTextEquals(
                 if (locale ==
                     Locale.GERMANY
@@ -152,13 +160,6 @@ class HistoryStatisticsUiTest {
             )
             onNodeWithTag("result_format_description").assertTextContains("4", substring = true)
             capture("detail-format-$suffix")
-            onNodeWithTag("show_game_history").performScrollTo()
-            onNodeWithTag("momentum_chart").assertIsDisplayed().assertContentDescriptionContains("Break", substring = true)
-            capture("detail-momentum-$suffix")
-            click("show_game_history")
-            click("show_points_0")
-            onNodeWithTag("point_0_1").performScrollTo().assertIsDisplayed()
-            capture("detail-points-$suffix")
             val opponent = setup.lineup.b.single()
             click("h2h_person_${opponent.value}")
             onNodeWithTag("h2h").assertExists()

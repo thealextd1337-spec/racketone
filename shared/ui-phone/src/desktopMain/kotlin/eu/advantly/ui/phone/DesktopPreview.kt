@@ -1,11 +1,14 @@
 package eu.advantly.ui.phone
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import eu.advantly.core.model.Side
+import eu.advantly.presentation.match.InMemoryMatchStore
+import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
@@ -37,8 +40,12 @@ fun main(args: Array<String>) {
             state = rememberWindowState(width = 412.dp, height = 892.dp),
         ) {
             // Gleicher Weg wie auf Android/iOS: ViewModel vom ViewModelStoreOwner des Fensters
-            val model = rememberAdvantlyAppModel()
-            LaunchedEffect(model) { if (!bench) DemoData.seed(model) }
+            val clock = remember { DemoClock() }
+            val model = rememberAdvantlyAppModel { InMemoryMatchStore(clock) }
+            LaunchedEffect(model) {
+                if (!bench) DemoData.seed(model)
+                clock.live()
+            }
             AdvantlyApp(model = model, darkTheme = true, debugTools = true)
             if (bench) {
                 LaunchedEffect(Unit) {
@@ -51,6 +58,17 @@ fun main(args: Array<String>) {
             }
         }
     }
+}
+
+/** Preview-Uhr: Beispielmatches liegen in der Vergangenheit (15 s je Abfrage, sichtbare Zeitleiste), danach Systemzeit. */
+private class DemoClock : WallClock {
+    private var demo: Long? = System.currentTimeMillis() - 3 * 60 * 60 * 1_000L
+
+    fun live() {
+        demo = null
+    }
+
+    override fun nowMs(): Long = demo?.also { demo = it + 15_000 } ?: System.currentTimeMillis()
 }
 
 /** Klickt per AWT-Event-Queue auf die Tap-Flächen und liest danach den LatencyTracker aus. */
