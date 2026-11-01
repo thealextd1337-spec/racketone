@@ -96,4 +96,21 @@ class HealthRepositoryTest {
                 .sortedBy { it.value },
         )
     }
+
+    @Test
+    fun watchListsItsOwnSeriesDeletesSinglySourcesAndExpiresOldOnes() {
+        val data = LocalData(createTestDriver())
+        val m = data.match("m")
+        val n = data.match("n")
+        val own = StoredHealthSeries(m, watch, 1, series(listOf(100)))
+        val old = StoredHealthSeries(n, watch, 1, series(listOf(100)).copy(startMs = 10))
+        data.health.upsert(own)
+        data.health.upsert(old)
+        data.health.upsert(StoredHealthSeries(m, phone, 1, series(listOf(80))))
+        assertEquals(listOf(own, old), data.health.forSource(watch))
+        data.health.delete(m, phone)
+        assertEquals(listOf(own), data.health.forMatch(m))
+        data.health.deleteStartedBefore(500)
+        assertEquals(listOf(own), data.health.forSource(watch))
+    }
 }

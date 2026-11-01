@@ -63,7 +63,18 @@ class HealthRepository internal constructor(
         return HealthRecords(best?.second, best?.first)
     }
 
+    /** Lesbare Serien der Quelle [source] (Uhr: eigene, noch nicht vom Handy bestätigte Aufnahmen). */
+    fun forSource(source: DeviceId): List<StoredHealthSeries> = queries.forSource(source.value).executeAsList().map { it.toStored() }
+
     fun deleteForMatch(matchId: MatchId) = queries.deleteForMatch(matchId.value)
+
+    fun delete(
+        matchId: MatchId,
+        source: DeviceId,
+    ) = queries.deleteOne(matchId.value, source.value)
+
+    /** Alle Serien, die vor [startMs] begonnen haben (Haltedauer auf der Uhr). */
+    fun deleteStartedBefore(startMs: Long) = queries.deleteStartedBefore(startMs)
 
     /** „Alle Gesundheitsdaten löschen“ bzw. Widerruf der Einwilligung: alle Serien aller Konten auf diesem Gerät. */
     fun deleteAll() = queries.deleteAll()

@@ -36,8 +36,21 @@ SELECT * FROM health_series
 WHERE match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY match_id, source_device_id;
 
+-- Eigene, noch nicht bestätigte Serien einer Uhr (Plan Puls §3.5).
+forSource:
+SELECT * FROM health_series
+WHERE source_device_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY match_id;
+
 deleteForMatch:
 DELETE FROM health_series WHERE match_id = ?;
+
+deleteOne:
+DELETE FROM health_series WHERE match_id = ? AND source_device_id = ?;
+
+-- Unbestätigte Serien bleiben höchstens 7 Tage auf der Uhr (E5).
+deleteStartedBefore:
+DELETE FROM health_series WHERE start_ms < ?;
 
 deleteAll:
 DELETE FROM health_series;
