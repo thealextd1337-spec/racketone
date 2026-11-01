@@ -238,6 +238,11 @@ fun AdvantlyApp(
                             onPlayAgain = { model.startMatch(it) },
                             // Neu gelesen, sobald sich gespeicherte Serien ändern (nachgelieferte Serie der Uhr)
                             pulse = remember(top.matchId, health.revision) { model.health.pulseTrack(top.matchId) },
+                            // Einwilligung „Pulsverlauf aufzeichnen“ steht im Profil unter „Puls & Schritte“
+                            onEnablePulse = {
+                                navigator.stack.clear()
+                                navigator.tab = AppTab.Profile
+                            },
                             onDelete = {
                                 model.history.delete(top.matchId)
                                 navigator.pop()

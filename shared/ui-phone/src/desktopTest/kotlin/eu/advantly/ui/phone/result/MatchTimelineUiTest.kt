@@ -21,6 +21,7 @@ import eu.advantly.health.HealthQuality
 import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AdvantlyAppModel
+import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.play
 import eu.advantly.ui.phone.setupFor
@@ -29,6 +30,8 @@ import java.io.File
 import java.util.Locale
 import javax.imageio.ImageIO
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Match-Detail: Reihenfolge der Abschnitte und Zeitleiste (Marker → Stand vor dem Punkt, Pulskurve optional). */
@@ -157,6 +160,56 @@ class MatchTimelineUiTest {
                 onNodeWithTag("timeline_quality").performScrollTo().assertTextContains("Lücken", substring = true)
                 onNodeWithTag("timeline_marker_0").performClick()
                 onNodeWithTag("timeline_card_pulse").performScrollTo().assertTextContains("Ø-Puls (Trend): 150 bpm")
+            }
+        }
+
+    @Test
+    fun enablePulseLinkOpensTheProfileOnlyWithoutConsentAndPulse() =
+        german {
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                val model = testModel()
+                model.openResult(model.breakMatch())
+                setContent { AdvantlyApp(model = model, darkTheme = true) }
+                waitForIdle()
+                onNodeWithTag("timeline_enable_pulse").performScrollTo().assertTextContains("Pulsverlauf aktivieren").performClick()
+                waitForIdle()
+                assertNull(model.navigator.top)
+                assertEquals(AppTab.Profile, model.navigator.tab)
+                onNodeWithTag("health_record_toggle").performScrollTo().assertIsDisplayed()
+                // mit Einwilligung kein Link mehr
+                model.telemetry.setHealthConsent(true)
+                model.openResult(
+                    model.history.matches.value
+                        .first()
+                        .matchId,
+                )
+                waitForIdle()
+                onNodeWithTag("timeline").assertExists()
+                onNodeWithTag("timeline_enable_pulse").assertDoesNotExist()
+            }
+        }
+
+    @Test
+    fun noEnablePulseLinkWhenAPulseCurveExists() =
+        german {
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                val model = testModel()
+                val record = model.history.record(model.breakMatch())!!
+                setContent {
+                    AdvantlyTheme {
+                        ResultScreen(
+                            record = record,
+                            onBack = {},
+                            onPlayAgain = {},
+                            onDelete = {},
+                            pulse = PulseTrack(record.summary.startedAtMs, 1_000, listOf(96, 120)),
+                            onEnablePulse = {},
+                        )
+                    }
+                }
+                waitForIdle()
+                onNodeWithTag("timeline_pulse").performScrollTo().assertIsDisplayed()
+                onNodeWithTag("timeline_enable_pulse").assertDoesNotExist()
             }
         }
 }

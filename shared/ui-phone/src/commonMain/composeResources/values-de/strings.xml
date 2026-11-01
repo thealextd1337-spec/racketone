@@ -903,6 +903,7 @@
     <string name="timeline_card_pulse">Ø-Puls (Trend): %1$d bpm</string>
     <string name="timeline_quality_sparse">Wenige Pulswerte – die Kurve zeigt nur einen groben Trend.</string>
     <string name="timeline_quality_gaps">Der Pulsverlauf hat Lücken oder passt nicht zur Matchzeit.</string>
+    <string name="timeline_enable_pulse">Pulsverlauf aktivieren</string>
     <string name="timeline_quality_no_hr">Es wurde kein Puls aufgezeichnet.</string>
     <string name="timeline_clock">%1$d:%2$s</string>
     <string name="timeline_score_before">Stand vor dem Punkt: %1$s</string>

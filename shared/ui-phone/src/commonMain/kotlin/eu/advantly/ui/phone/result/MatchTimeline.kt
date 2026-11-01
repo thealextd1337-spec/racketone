@@ -41,6 +41,7 @@ import eu.advantly.presentation.stats.MatchStats
 import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.presentation.stats.TimelineMoment
 import eu.advantly.presentation.stats.pulseSegments
+import eu.advantly.ui.phone.app.LocalHealthConsent
 import eu.advantly.ui.phone.common.AdvantlyCard
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.stateScore
@@ -69,6 +70,7 @@ import eu.advantly.ui.phone.resources.moment_tiebreak
 import eu.advantly.ui.phone.resources.timeline_card_pulse
 import eu.advantly.ui.phone.resources.timeline_clock
 import eu.advantly.ui.phone.resources.timeline_empty
+import eu.advantly.ui.phone.resources.timeline_enable_pulse
 import eu.advantly.ui.phone.resources.timeline_highlights
 import eu.advantly.ui.phone.resources.timeline_hint
 import eu.advantly.ui.phone.resources.timeline_marker_a11y
@@ -99,7 +101,7 @@ private val KIND_ORDER =
  * zeigt den Stand **vor** dem Punkt und ob die Chance verwertet oder abgewehrt wurde. Darunter dieselben Highlights als
  * barrierefreie Liste. Mit [pulse] zeichnet sie zusätzlich die Pulskurve (Lücken und Pausen unterbrechen die Linie),
  * darunter einen Hinweis bei schlechter Datenqualität, und die Karte zeigt den Ø-Puls (Trend); ohne Puls bleibt es bei
- * den Highlights.
+ * den Highlights. Ohne Puls und ohne Einwilligung führt ein Link „Pulsverlauf aktivieren“ zu [onEnablePulse].
  */
 @Composable
 internal fun MatchTimeline(
@@ -107,6 +109,7 @@ internal fun MatchTimeline(
     stats: MatchStats,
     modifier: Modifier = Modifier,
     pulse: PulseTrack? = null,
+    onEnablePulse: (() -> Unit)? = null,
 ) {
     val colors = AdvantlyTheme.colors
     val moments = stats.moments
@@ -193,6 +196,19 @@ internal fun MatchTimeline(
                     modifier = Modifier.padding(top = Spacing.xs).testTag("timeline_quality"),
                 )
             }
+        }
+        if (pulse == null && onEnablePulse != null && !LocalHealthConsent.current) {
+            Text(
+                stringResource(Res.string.timeline_enable_pulse),
+                style = AdvantlyTheme.typography.label,
+                color = colors.brand,
+                modifier =
+                    Modifier
+                        .heightIn(min = Spacing.minTouchTarget)
+                        .clickable(role = Role.Button, onClick = onEnablePulse)
+                        .padding(vertical = Spacing.xs)
+                        .testTag("timeline_enable_pulse"),
+            )
         }
         selected?.let { moments.getOrNull(it) }?.let { MomentCard(it, setup, pulse?.averageAround(it.moment.wallClockMs)) }
         SectionTitle(stringResource(Res.string.timeline_highlights))

@@ -134,6 +134,8 @@ fun ResultScreen(
     onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
     /** Pulsverlauf für die Zeitleiste; `null` = nur Highlights. */
     pulse: PulseTrack? = null,
+    /** Link „Pulsverlauf aktivieren“ (ohne Puls und ohne Einwilligung) → Einstellung im Profil; `null` = kein Link. */
+    onEnablePulse: (() -> Unit)? = null,
     /** Stufe des Pulsverlaufs nachträglich ändern bzw. löschen (Plan Puls E2, [PulseVisibilitySection]). */
     pulseSettings: @Composable (MatchRecord) -> Unit = {},
 ) {
@@ -255,7 +257,7 @@ fun ResultScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).testTag("result_edit"),
                 )
             }
-            MatchTimeline(record.summary.setup, stats, pulse = pulse)
+            MatchTimeline(record.summary.setup, stats, pulse = pulse, onEnablePulse = onEnablePulse)
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
