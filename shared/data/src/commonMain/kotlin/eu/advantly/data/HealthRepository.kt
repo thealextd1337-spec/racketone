@@ -54,6 +54,10 @@ class HealthRepository internal constructor(
     /** Alle lesbaren Serien, z. B. für „meiste Schritte in einem Satz“ (Satzgrenzen rechnet `presentation`). */
     fun allSeries(): List<StoredHealthSeries> = queries.readable().executeAsList().map { it.toStored() }
 
+    /** (Match, Quelle, Revision) aller lesbaren Serien ohne Messwerte: ändert sich, sobald eine Serie dazukommt, ersetzt oder gelöscht wird. */
+    fun revisions(): List<Triple<MatchId, DeviceId, Long>> =
+        queries.revisions().executeAsList().map { Triple(MatchId(it.match_id), DeviceId(it.source_device_id), it.revision) }
+
     /** Höchster Puls über alle lesbaren Serien. */
     fun records(): HealthRecords {
         val best =

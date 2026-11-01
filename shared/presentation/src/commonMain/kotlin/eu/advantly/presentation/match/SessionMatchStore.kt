@@ -49,6 +49,7 @@ import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.CompanionDetector
 import eu.advantly.device.link.CompanionState
+import eu.advantly.health.maxBpm
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceStatus
 import eu.advantly.match.session.MatchSession
@@ -56,6 +57,8 @@ import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.stats.HealthTracks
+import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,7 +70,7 @@ import kotlinx.serialization.json.Json
 import eu.advantly.data.MatchRecord as StoredMatch
 
 /**
- * Session-Adapter der Phone-UI: erfüllt [LiveMatchPort], [MatchHistoryPort] und [PlayersPort] über einer
+ * Session-Adapter der Phone-UI: erfüllt [LiveMatchPort], [MatchHistoryPort], [PlayersPort] und [HealthRecordsPort] über einer
  * [MatchSession] (Single-Scorer, Event-Log, Geräte-Sync) und deren [LocalData] (Historie, Spieler, Favoriten).
  *
  * Vertrag der Ports:
@@ -83,6 +86,8 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
  * Matches, Spieler, Identität); Ergebnis-Köpfe beendeter Matches sind samt Setup zwischengespeichert; nur Details lesen das Event-Log.
  * Eine neue `lifecycleRevision` (Access, Redaktion oder Directory aus Data) verwirft alle abgeleiteten Namen, Köpfe und Details.
+ * Die Gesundheits-Höchstwerte rechnet er mit dem Verlauf neu, aber nur, wenn sich Serien (Revisionen) oder gewertete
+ * Matches geändert haben; Satzfenster je Match sind zwischengespeichert (ein Punkt-Replay je Matchänderung).
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
@@ -106,7 +111,8 @@ class SessionMatchStore(
     private val historyLimit: Long = DEFAULT_HISTORY_LIMIT,
     private val monotonic: MonotonicClock = MonotonicClock.System,
     private val companion: CompanionDetector? = null,
-) : MatchStore {
+) : MatchStore,
+    HealthRecordsPort {
     private val data: LocalData = session.data
     private var aliases: Set<PlayerId> = emptySet()
     private val aliasesFlow = MutableStateFlow<Set<PlayerId>>(emptySet())
@@ -115,7 +121,7 @@ class SessionMatchStore(
     private val players = HashMap<PlayerId, Player>()
     private val summaries = HashMap<MatchId, Pair<StoredMatch, MatchSummary>>()
     private var summaryPeople: Map<PlayerId, Player> = emptyMap()
-    private val records = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
+    private val detailRecords = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
     private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
     private val selfFlow = MutableStateFlow(ensureSelf())
@@ -155,6 +161,10 @@ class SessionMatchStore(
     private val telemetryFlow = MutableStateFlow(session.state.value.telemetryVisibility)
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
+    private val healthFlow = MutableStateFlow(HealthRecords())
+    override val records: StateFlow<HealthRecords> = healthFlow.asStateFlow()
+    private var healthKey: Any? = null
+    private val setWindows = HashMap<MatchId, Pair<Pair<Long, Int>, List<LongRange>>>()
 
     // Zustand für Revision und „Stand vor X s“
     private var lastState: SessionState? = null
@@ -444,7 +454,7 @@ class SessionMatchStore(
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
         val cached =
-            records[matchId]
+            detailRecords[matchId]
                 ?.takeIf {
                     it.first == header.updatedAtMs &&
                         it.second.events.size
@@ -471,9 +481,9 @@ class SessionMatchStore(
                 engine.events.size + 1,
             )
         val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
-        records.remove(matchId)
-        records[matchId] = header.updatedAtMs to record
-        if (records.size > 8) records.remove(records.keys.first())
+        detailRecords.remove(matchId)
+        detailRecords[matchId] = header.updatedAtMs to record
+        if (detailRecords.size > 8) detailRecords.remove(detailRecords.keys.first())
         return record
     }
 
@@ -485,7 +495,7 @@ class SessionMatchStore(
         session.deleteMatch(matchId)
         data.settings.remove(contactKey(matchId))
         summaries.remove(matchId)
-        records.remove(matchId)
+        detailRecords.remove(matchId)
         finishedAt.remove(matchId)
         refreshStored()
         return true
@@ -599,7 +609,7 @@ class SessionMatchStore(
         val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision
         if (lifecycleChanged) {
             summaries.clear()
-            records.clear()
+            detailRecords.clear()
         }
         if (lifecycleChanged || storedDataMayHaveChanged(previous, state)) refreshStored(directoryChanged = lifecycleChanged)
         publishActive(state)
@@ -795,8 +805,50 @@ class SessionMatchStore(
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
         historyFlow.value = loadHistory()
+        refreshHealth()
         // Erst nach dem Neuladen: Listener lösen Namen aus den frischen Gästen auf
         if (directoryChanged || previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
+    }
+
+    // --- Gesundheitsdaten (Plan Puls H8) ------------------------------------------------------------
+
+    /** Pulsverlauf der besten Quelle, auf Handyzeit abgeglichen und gegen Genesis…Matchende geprüft. */
+    override fun pulseTrack(matchId: MatchId): PulseTrack? {
+        val series = data.health.forMatch(matchId).map { it.series }
+        if (series.isEmpty()) return null
+        val header = data.matches.get(matchId) ?: return null
+        return HealthTracks.pulseTrack(series, header.createdAtMs, header.score.lastEventAtMs ?: header.updatedAtMs)
+    }
+
+    /** Höchstwerte über die Serien gewerteter Matches; nur neu, wenn sich Serien-Revisionen oder gewertete Matches ändern. */
+    private fun refreshHealth() {
+        val rated = historyFlow.value.filter { it.isRated }.associateBy { it.matchId }
+        val key = data.health.revisions() to rated.values.map { Triple(it.matchId, it.updatedAtMs, it.eventCount) }
+        if (key == healthKey) return
+        healthKey = key
+        val series = data.health.allSeries().filter { it.matchId in rated }
+        setWindows.keys.retainAll(series.map { it.matchId }.toSet())
+        healthFlow.value =
+            HealthRecords(
+                maxBpm = series.mapNotNull { maxBpm(it.series) }.maxOrNull(),
+                maxStepsInSet =
+                    series
+                        .mapNotNull { HealthTracks.maxStepsInSet(HealthTracks.aligned(it.series), windowsOf(rated.getValue(it.matchId))) }
+                        .maxOrNull(),
+                revision = healthFlow.value.revision + 1,
+            )
+    }
+
+    private fun windowsOf(summary: MatchSummary): List<LongRange> {
+        val version = summary.updatedAtMs to summary.eventCount
+        setWindows[summary.matchId]?.let { (cached, windows) -> if (cached == version) return windows }
+        val points =
+            try {
+                ScoringEngine.pointHistory(data.events.scoreEvents(summary.matchId))
+            } catch (e: IllegalArgumentException) {
+                emptyList()
+            }
+        return HealthTracks.setWindows(points).also { setWindows[summary.matchId] = version to it }
     }
 
     private fun ensureSelf(): Player =

@@ -2,6 +2,9 @@ package eu.advantly.presentation.stats
 
 import eu.advantly.core.scoring.MatchMoment
 import eu.advantly.core.scoring.MatchState
+import eu.advantly.health.HealthQuality
+import eu.advantly.health.HealthSeries
+import eu.advantly.health.pulseAround
 
 /**
  * Spielzeit-Achse der Zeitleiste: Wanduhr ab Genesis bis Matchende, Pausen herausgeschnitten (wie
@@ -43,14 +46,30 @@ data class TimelineMoment(
 )
 
 /**
- * Pulsverlauf eines Matches für die Zeitleiste – schlichte Anzeigeform ohne Abhängigkeit zu `shared/health`.
- * Wert `i` gilt ab `startMs + i * intervalMs` (Wanduhr); `null` ist eine Lücke.
+ * Pulsverlauf eines Matches für die Zeitleiste, schon auf Handyzeit abgeglichen ([HealthTracks.pulseTrack]).
+ * Wert `i` gilt ab `startMs + i * intervalMs` (Wanduhr); `null` ist eine Lücke. [quality] steuert den Hinweis unter
+ * der Kurve.
  */
 data class PulseTrack(
     val startMs: Long,
     val intervalMs: Long,
     val bpm: List<Int?>,
-)
+    val quality: HealthQuality = HealthQuality.OK,
+) {
+    /**
+     * Ø-Puls um den Wanduhr-Zeitpunkt [atMs] (Fenster −20 s … +10 s, nur als „Trend“ zeigen); `null` ohne Werte und bei
+     * [HealthQuality.SPARSE_HR] (dann keine Punkt-Auswertung, 05 §5.5).
+     */
+    fun averageAround(atMs: Long): Int? =
+        if (quality == HealthQuality.SPARSE_HR) {
+            null
+        } else {
+            pulseAround(HealthSeries(startMs, intervalMs, bpm, bpm.map { null }, 0, quality), atMs)
+        }
+
+    // Gesundheitsdaten nie in Logs (Plan Puls §3.4).
+    override fun toString(): String = "PulseTrack(<redacted>)"
+}
 
 /** Ein Punkt der Pulskurve auf der Spielzeit-Achse. */
 data class PulsePoint(
