@@ -487,6 +487,8 @@
 "serve.first" = "1. Aufschlag";
 "serve.second" = "2. Aufschlag";
 "serve.df" = "Doppelfehler";
+"serve.panel.second" = "2. Auf-\nschlag";
+"serve.panel.df" = "Doppel-\nfehler";
 "serve.choose" = "Aufschläger wählen";
 "serve.choice.first" = "Wer schlägt auf?";
 "serve.choice.second.us" = "Wer schlägt bei uns auf?";
