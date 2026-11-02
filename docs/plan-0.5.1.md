@@ -173,25 +173,29 @@ Heute stehen im Match-Detail zwei getrennte Grafiken:
 - „Momentum“ (`result/MatchProgression.kt`): Balken je Game nach Ballwechseldifferenz, Achse nach Game-Index.
 
 Ziel ist **eine** Grafik direkt unter den Sätzen:
-- **Achse:** Spielzeit wie in der Zeitleiste. Sätze als abwechselnd schattierte Bänder mit Satznummer und Satzergebnis.
+- **Ein Diagramm je Satz, untereinander** (Nutzerwunsch 02.11.): Überschrift „Satz 1 · 6:4 · 42 min“, darunter die Grafik
+  über die volle Breite; Achse ist die Spielzeit des Satzes (Uhrzeit seit Matchbeginn). Gleiche Puls-Skala in allen Sätzen.
 - **Momentum:**
   - Ein Balken je Game, so breit wie die Dauer des Games (Start/Ende aus `GameProgress.points`).
   - Höhe nach `margin`, nach oben „Wir“ (`teamUsChart`), nach unten „Gegner“ (`teamThemChart`), halbtransparent.
   - Breaks bleiben als Punkt am Balken erkennbar.
 - **Puls:** Die Kurve liegt über den Balken, mit eigener Skala rechts (bpm) und Ø/Max-Angabe. Ohne Pulsverlauf entfällt nur
   die Kurve; der Link „Pulsverlauf aktivieren“ bleibt.
-- **Highlights:** Marker am oberen Rand wie heute (48-dp-Tippflächen, nahe Marker teilen sich eine Fläche). Die Karte zeigt
-  zusätzlich den Spielstand des Games und den Puls zu diesem Zeitpunkt.
+- **Highlights unter der Grafik** (Nutzerwunsch 02.11.): eigene Symbolreihe unter der Zeitachse jedes Satzes, damit die Hand
+  beim Tippen die Grafik nicht verdeckt. Tippflächen ≥ 48 dp, nahe Symbole rücken auseinander bzw. teilen sich eine Fläche.
+  Beim Antippen zeigt eine gestrichelte Linie den Zeitpunkt in der Grafik, die Karte erscheint direkt unter diesem Satz
+  (Spielstand, Zeit, Puls in diesem Moment).
 - **Antippen eines Balkens:** zeigt das Game (Spielstand, Ballwechsel, Break, Puls Ø im Game). Die aufklappbare Game-Liste
   der Momentum-Grafik bleibt darunter.
-- **Breite:** passt sich der Bildschirmbreite an; bei langen Matches horizontal scrollbar (mindestens etwa 16 dp je Game).
+- **Breite:** jede Satz-Grafik passt sich der Bildschirmbreite an; kein waagerechtes Scrollen nötig, weil je Satz nur
+  dessen Games gezeigt werden. Rally-Sportarten (Badminton, Tischtennis, Pickleball) entsprechend je Satz/Game.
 - **Barrierefreiheit:** Die Grafik bekommt einen zusammenfassenden Text (Sätze, Breaks, Ø/Max-Puls). Marker und Balken sind
   einzeln fokussierbar.
 - **Fällt weg:** die eigene Momentum-Grafik samt Überschrift.
 - **Tests:** Abbildung Zeit → Balkenbreite, Pausen (Spielzeit), Match ohne Zeitstempel bzw. korrigiertes Ergebnis,
   Desktop-UI-Tests für Antippen von Balken und Marker, DE/EN.
 
-**Entwurf:** `H:/advantly-temp/timeline-mock/` (gen2.py, mock.html), gezeigt am 02.11.: Überschrift „Spielverlauf“,
+**Entwurf:** `H:/advantly-temp/timeline-mock/` (gen3.py, mock3.html = gültiger Entwurf; gen2/mock = erste Fassung), gezeigt am 02.11.: Überschrift „Spielverlauf“,
 Legende Wir/Gegner/Puls Ø/Max, Satzbänder, Balken je Game, Pulslinie mit bpm-Skala rechts, Highlight-Marker oben,
 Karte beim Antippen von Game oder Marker.
 
