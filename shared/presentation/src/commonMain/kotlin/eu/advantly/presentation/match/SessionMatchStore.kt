@@ -44,6 +44,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
+import eu.advantly.data.StoredHealthSeries
 import eu.advantly.data.assignments
 import eu.advantly.data.freshPlaceholders
 import eu.advantly.data.resolvedLineup
@@ -53,6 +54,7 @@ import eu.advantly.device.link.CompanionState
 import eu.advantly.health.maxBpm
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceStatus
+import eu.advantly.match.session.HealthArchiveContent
 import eu.advantly.match.session.HealthImportResult
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
@@ -304,9 +306,9 @@ class SessionMatchStore(
 
     override fun deleteAllHealthData() = session.deleteAllHealthData()
 
-    override fun exportHealth(): String? = session.exportHealth()
+    override fun exportHealthSeries(): List<StoredHealthSeries> = session.exportHealthSeries()
 
-    override fun importHealth(bytes: ByteArray): HealthImportResult = session.importHealth(bytes)
+    override fun importHealth(content: HealthArchiveContent): HealthImportResult = session.importHealth(content)
 
     override fun pulseSetting(matchId: MatchId): PulseSetting =
         PulseSetting(session.pulseVisibility(matchId), data.health.forMatch(matchId).isNotEmpty())

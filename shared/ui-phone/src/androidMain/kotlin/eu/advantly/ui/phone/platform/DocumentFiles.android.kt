@@ -60,7 +60,7 @@ actual fun rememberDocumentFiles(): DocumentFiles? {
 
             override fun open(
                 maxBytes: Int,
-                onDone: (ByteArray?) -> Unit,
+                onDone: (Result<ByteArray>?) -> Unit,
             ) {
                 pending.open = maxBytes to onDone
                 open.launch(OPEN_MIME_TYPES)
@@ -71,17 +71,26 @@ actual fun rememberDocumentFiles(): DocumentFiles? {
 
 private class Pending {
     var save: Pair<String, (Boolean?) -> Unit>? = null
-    var open: Pair<Int, (ByteArray?) -> Unit>? = null
+    var open: Pair<Int, (Result<ByteArray>?) -> Unit>? = null
 }
 
+/** "wt" ersetzt eine vorhandene Datei gleichen Namens; manche Anbieter (Cloud-Speicher) kennen "wt" nicht, dann "w". */
 private fun write(
     context: Context,
     uri: Uri,
     content: String,
+): Boolean = writeMode(context, uri, content, "wt") || writeMode(context, uri, content, "w")
+
+private fun writeMode(
+    context: Context,
+    uri: Uri,
+    content: String,
+    mode: String,
 ): Boolean =
     try {
-        // "wt": eine vorhandene Datei gleichen Namens wird ersetzt, nicht nur überschrieben
-        context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(content.encodeToByteArray()) } != null
+        context.contentResolver.openOutputStream(uri, mode)?.use { it.write(content.encodeToByteArray()) } != null
+    } catch (_: IllegalArgumentException) {
+        false
     } catch (_: IOException) {
         false
     } catch (_: SecurityException) {
@@ -92,20 +101,22 @@ private fun read(
     context: Context,
     uri: Uri,
     maxBytes: Int,
-): ByteArray =
+): Result<ByteArray> =
     try {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val out = ByteArrayOutputStream()
-            val buffer = ByteArray(64 * 1024)
-            while (out.size() <= maxBytes) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                out.write(buffer, 0, n)
+        val bytes =
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val out = ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (out.size() <= maxBytes) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    out.write(buffer, 0, n)
+                }
+                out.toByteArray()
             }
-            out.toByteArray()
-        } ?: ByteArray(0)
-    } catch (_: IOException) {
-        ByteArray(0)
-    } catch (_: SecurityException) {
-        ByteArray(0)
+        bytes?.let { Result.success(it) } ?: Result.failure(IOException("kein Datenstrom"))
+    } catch (e: IOException) {
+        Result.failure(e)
+    } catch (e: SecurityException) {
+        Result.failure(e)
     }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,9 +34,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -109,6 +114,7 @@ import eu.advantly.ui.phone.resources.timeline_game_pulse
 import eu.advantly.ui.phone.resources.timeline_legend_pulse
 import eu.advantly.ui.phone.resources.timeline_legend_serve
 import eu.advantly.ui.phone.resources.timeline_marker_a11y
+import eu.advantly.ui.phone.resources.timeline_pulse_missing
 import eu.advantly.ui.phone.resources.timeline_pulse_overdue
 import eu.advantly.ui.phone.resources.timeline_pulse_pending
 import eu.advantly.ui.phone.resources.timeline_quality_gaps
@@ -411,6 +417,8 @@ private fun CourseChart(
                 drawText(layout, topLeft = Offset(x, chart + 2.dp.toPx()))
             }
         }
+        // Je Balken ein fokussierbarer Knoten für Screenreader; Tippen wertet eine gemeinsame Fläche darüber aus, damit
+        // auch Games, die kürzer als die Mindest-Tippbreite sind, gut treffbar bleiben (Review N6).
         for (game in section.games) {
             val description = gameDescription(game.game, setup)
             Box(
@@ -418,10 +426,25 @@ private fun CourseChart(
                     .offset(x = xOf(game.startMs))
                     .size(xOf(game.endMs) - xOf(game.startMs), CHART_HEIGHT)
                     .testTag("timeline_game_${game.index}")
-                    .clickable(role = Role.Button) { onGame(game.index) }
-                    .semantics { this.contentDescription = description },
+                    .semantics {
+                        role = Role.Button
+                        this.contentDescription = description
+                        onClick {
+                            onGame(game.index)
+                            true
+                        }
+                    },
             )
         }
+        val bars = section.games.map { xOf(it.startMs).value..xOf(it.endMs).value }
+        val currentOnGame by rememberUpdatedState(onGame)
+        Box(
+            Modifier.size(plotWidth, CHART_HEIGHT).pointerInput(section, bars, touch) {
+                detectTapGestures { tap ->
+                    gameAt(tap.x.toDp().value, bars, touch.value)?.let { currentOnGame(section.games[it].index) }
+                }
+            },
+        )
         val slots = placeSymbols(section.moments.map { xOf(it.atMs).value }, plotWidth.value, touch.value)
         for (slot in slots) {
             val members = slot.members.map { section.moments[it].index }
@@ -568,6 +591,7 @@ private fun PulseNotes(
             when (transfer) {
                 PulseTransfer.PENDING -> Res.string.timeline_pulse_pending
                 PulseTransfer.OVERDUE -> Res.string.timeline_pulse_overdue
+                PulseTransfer.MISSING -> Res.string.timeline_pulse_missing
                 null -> return
             }
         Note(stringResource(text), "timeline_pulse_transfer")
@@ -613,6 +637,22 @@ private fun momentSymbol(
         MomentKind.SET_WON -> "✓"
         else -> kindLabel(kind, moment, sport).take(1).uppercase()
     }
+
+/**
+ * Game unter einem Tippen bei [x] (dp) in der Grafik (Review N6): Jeder Balken ([bars], von–bis in dp) ist mindestens
+ * [minWidth] breit treffbar, um seine Mitte; breitere behalten ihre Fläche. Liegt [x] in mehreren Flächen, gewinnt die
+ * nächste Mitte – so ist jedes Game an seiner Mitte erreichbar. `null` ohne Balken.
+ */
+internal fun gameAt(
+    x: Float,
+    bars: List<ClosedFloatingPointRange<Float>>,
+    minWidth: Float,
+): Int? {
+    fun center(bar: ClosedFloatingPointRange<Float>) = (bar.start + bar.endInclusive) / 2
+
+    fun outside(bar: ClosedFloatingPointRange<Float>) = maxOf(0f, abs(x - center(bar)) - maxOf(bar.endInclusive - bar.start, minWidth) / 2)
+    return bars.indices.minWithOrNull(compareBy({ outside(bars[it]) }, { abs(x - center(bars[it])) }))
+}
 
 /** Spielzeit „m:ss“ ab Matchbeginn ohne Pausen. */
 @Composable

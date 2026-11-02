@@ -12,23 +12,29 @@ import eu.advantly.cloud.sync.ConsentDocument
 import eu.advantly.cloud.sync.ConsentDocumentType
 import eu.advantly.cloud.sync.ConsentSnapshot
 import eu.advantly.cloud.sync.ConsentStatus
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.match.session.DeviceStatus
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.match.InMemoryMatchStore
 import eu.advantly.presentation.match.InMemoryTelemetrySettings
+import eu.advantly.presentation.match.TelemetrySettingsPort
 import eu.advantly.sync.protocol.AppBuild
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.auth.FakePhoneAuth
+import eu.advantly.ui.phone.play
 import eu.advantly.ui.phone.setupFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.util.Properties
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -41,7 +47,7 @@ class WhatsNewUiTest {
 
     private fun app(
         store: InMemoryMatchStore,
-        port: InMemoryTelemetrySettings = InMemoryTelemetrySettings(),
+        port: TelemetrySettingsPort = InMemoryTelemetrySettings(),
     ) = AdvantlyAppModel(store, store, store, telemetry = port)
 
     private fun signedIn(consent: ConsentStatus = ConsentStatus.CURRENT) =
@@ -120,6 +126,68 @@ class WhatsNewUiTest {
             onNodeWithTag("whats_new").assertDoesNotExist()
             runOnIdle { assertEquals("11", fresh.localNote(WHATS_NEW_KEY)) }
         }
+
+    /** Review N5: Ohne Konto-Host ist nur ein Gerät ohne jedes Match neu; wer schon gespielt hat, sieht das Blatt. */
+    @Test
+    fun withoutAccountHostAnUpdateWithPlayedMatchesShowsTheSheet() =
+        runDesktopComposeUiTest(width = 412, height = 892) {
+            val store = store(lastSeen = null)
+            val model = app(store)
+            model.live.start(model.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
+            model.live.play("AAAA")
+            model.live.endMatch(EndReason.STOPPED)
+            setContent { AdvantlyApp(model = model, buildNumber = build) }
+            onNodeWithTag("whats_new").assertIsDisplayed()
+            runOnIdle { assertNull(store.localNote(WHATS_NEW_KEY), "erst mit „Fertig“ gesehen") }
+        }
+
+    /** Review N7: Die Rückfrage zur Einwilligung der Uhr stapelt sich nicht über Blatt, Vollbild-Ebene oder Profil-Dialog. */
+    @Test
+    fun adoptedConsentQuestionWaitsForSheetOverlaysAndProfileDialogs() =
+        runDesktopComposeUiTest(width = 412, height = 892) {
+            val port = ConfirmPort(InMemoryTelemetrySettings(consent = true))
+            val store = store(lastSeen = 10)
+            val model = app(store, port)
+            setContent { AdvantlyApp(model = model, buildNumber = build) }
+            runOnIdle { port.confirm.value = true }
+            onNodeWithTag("whats_new").assertIsDisplayed()
+            onNodeWithTag("health_adopted").assertDoesNotExist()
+            onNodeWithTag("whats_new_done").performScrollTo().performClick()
+            onNodeWithTag("health_adopted").assertIsDisplayed()
+
+            runOnIdle {
+                port.confirm.value = false
+                model.navigator.push(Overlay.Wizard)
+                port.confirm.value = true
+            }
+            onNodeWithTag("health_adopted").assertDoesNotExist()
+            runOnIdle {
+                model.navigator.pop()
+                port.confirm.value = false
+                model.navigator.tab = AppTab.Profile
+            }
+            onNodeWithTag("health_delete_all").performScrollTo().performClick()
+            runOnIdle {
+                assertTrue(model.healthDialogOpen)
+                port.confirm.value = true
+            }
+            onNodeWithTag("health_adopted").assertDoesNotExist()
+            onNodeWithTag("health_confirm").performClick()
+            onNodeWithTag("health_adopted").assertIsDisplayed()
+            runOnIdle { assertFalse(model.healthDialogOpen) }
+        }
+
+    /** Rückfrage von außen schaltbar (InMemory kennt sie nur beim Anlegen). */
+    private class ConfirmPort(
+        inner: InMemoryTelemetrySettings,
+    ) : TelemetrySettingsPort by inner {
+        val confirm = MutableStateFlow(false)
+        override val healthConsentToConfirm: StateFlow<Boolean> = confirm
+
+        override fun confirmHealthConsent(keep: Boolean) {
+            confirm.value = false
+        }
+    }
 
     @Test
     fun theSignInFlowCountsAsSeen() =

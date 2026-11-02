@@ -4,8 +4,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -16,12 +18,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -412,6 +417,51 @@ class MatchTimelineUiTest {
                 onNodeWithTag("timeline_game_serve").assertTextContains("Serve: ", substring = true)
             }
         }
+
+    /** Review N6: Ein Game, kürzer als die Mindest-Tippbreite, bleibt neben langen Games gut treffbar. */
+    @Test
+    fun shortGamesStayHittableNextToLongOnes() =
+        german {
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                val (model, clock) = realisticModel()
+                val id = model.live.start(model.setupFor(Presets.TENNIS_SINGLES_BO3.format()))
+                for ((winner, stepMs) in listOf(Side.A to 120_000L, Side.B to 1_000L, Side.A to 120_000L)) {
+                    repeat(4) {
+                        clock.now += stepMs
+                        model.live.recordPoint(winner)
+                    }
+                }
+                model.live.endMatch(EndReason.STOPPED)
+                showResult(model.history.record(id)!!)
+                val short = onNodeWithTag("timeline_game_1").performScrollTo()
+                val bounds = short.getBoundsInRoot()
+                assertTrue(bounds.right - bounds.left < 48.dp, "schmaler Balken: $bounds")
+                short.assertContentDescriptionContains("Spiel 2", substring = true)
+                // knapp neben dem schmalen Balken (schon im langen Nachbarn): trifft trotzdem Spiel 2
+                short.performTouchInput { click(center + Offset(16.dp.toPx(), 0f)) }
+                onNodeWithTag("timeline_game_card").assert(hasAnyDescendant(hasText("Spiel 2", substring = true)))
+                // tief im langen Nachbarn: dessen Game
+                onNodeWithTag("timeline_game_2").performClick()
+                onNodeWithTag("timeline_game_card").assert(hasAnyDescendant(hasText("Spiel 3", substring = true)))
+                // per Semantik (Screenreader) bleibt jeder Balken einzeln auslösbar
+                onNodeWithTag("timeline_game_1").performSemanticsAction(SemanticsActions.OnClick)
+                onNodeWithTag("timeline_game_card").assert(hasAnyDescendant(hasText("Spiel 2", substring = true)))
+            }
+        }
+
+    @Test
+    fun gameAtGivesNarrowBarsTheMinimumWidthAndKeepsEveryGameReachable() {
+        val bars = listOf(0f..100f, 100f..102f, 102f..202f)
+        assertEquals(0, gameAt(50f, bars, 48f))
+        assertEquals(1, gameAt(95f, bars, 48f), "innerhalb der Mindestbreite um den schmalen Balken")
+        assertEquals(1, gameAt(118f, bars, 48f))
+        assertEquals(2, gameAt(130f, bars, 48f))
+        assertEquals(2, gameAt(250f, bars, 48f), "rechts außerhalb: nächstes Game")
+        // viele kurze Games dicht beieinander: jedes an seiner Mitte erreichbar
+        val dense = List(10) { (it * 3f)..(it * 3f + 3f) }
+        assertEquals(dense.indices.toList(), dense.map { gameAt((it.start + it.endInclusive) / 2, dense, 48f) })
+        assertNull(gameAt(10f, emptyList(), 48f))
+    }
 
     // --- Screenshots zur Sichtprüfung (nur mit ADVANTLY_SCREENSHOT_DIR) ------------------------------------------------
 

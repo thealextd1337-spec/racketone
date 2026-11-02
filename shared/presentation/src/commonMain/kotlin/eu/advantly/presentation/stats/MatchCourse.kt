@@ -3,6 +3,7 @@ package eu.advantly.presentation.stats
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.match.session.WATCH_HEALTH_RETENTION_MS
 import eu.advantly.presentation.match.PulseSetting
 import kotlin.math.abs
 
@@ -187,6 +188,12 @@ enum class PulseTransfer {
 
     /** Länger als [PULSE_OVERDUE_MS] nach Matchende noch nichts da: Uhr in der Nähe des Handys öffnen. */
     OVERDUE,
+
+    /**
+     * Länger als die Aufbewahrung auf der Uhr ([WATCH_HEALTH_RETENTION_MS]) nach Matchende: Es kommt keiner mehr, neutral
+     * „Kein Pulsverlauf von der Uhr erhalten“ statt einer dauerhaften Aufforderung.
+     */
+    MISSING,
 }
 
 /** Ab dieser Zeit nach Matchende gilt ein ausstehender Pulsverlauf als überfällig. */
@@ -200,6 +207,7 @@ fun PulseSetting.transfer(
 ): PulseTransfer? =
     when {
         visibility == TelemetryVisibility.OFF || recorded || hasTrack -> null
+        nowMs - finishedAtMs > WATCH_HEALTH_RETENTION_MS -> PulseTransfer.MISSING
         nowMs - finishedAtMs > PULSE_OVERDUE_MS -> PulseTransfer.OVERDUE
         else -> PulseTransfer.PENDING
     }

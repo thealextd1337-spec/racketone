@@ -53,6 +53,7 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.MatchRecord
 import eu.advantly.data.PlayerKind
 import eu.advantly.data.ScoreSummary
+import eu.advantly.data.StoredHealthSeries
 import eu.advantly.data.StoredSequence
 import eu.advantly.data.assignments
 import eu.advantly.data.freshPlaceholders
@@ -293,6 +294,7 @@ class MatchSession(
         genesisCache.clear()
         blockedMatches.clear()
         telemetry = loadTelemetry()
+        if (started) retireSharedTelemetry()
         health.reload()
         dataRevision++
         publish()
@@ -470,6 +472,7 @@ class MatchSession(
         link?.setListener(linkListener)
         link?.start()
         peersChanged(link?.peers.orEmpty())
+        retireSharedTelemetry()
         scheduleAntiEntropy()
         // Ausstehendes aus Data sichtbar, auch bevor (oder ohne dass) der Host die Kontositzung bindet
         refreshLifecyclePending()
@@ -594,6 +597,15 @@ class MatchSession(
     }
 
     /**
+     * Seit 0.5.1 ist „Teilen“ nicht mehr wählbar, alle UIs zeigen „Nur für mich“. Ein gespeichertes „Teilen“ (Wahl in
+     * 0.5.0) wird beim Laden einmal als eigene Änderung zu „Nur für mich“ (Zähler + 1): Uhr und Konto übernehmen es nach
+     * der üblichen Regel, statt kontoweit ein unsichtbares „Teilen“ zu behalten.
+     */
+    private fun retireSharedTelemetry() {
+        if (telemetry.visibility == TelemetryVisibility.SHARE) setTelemetryVisibility(TelemetryVisibility.PRIVATE)
+    }
+
+    /**
      * Stand für den Konto-Abgleich (H0): ein beim Kontowechsel aus einem anderen Konto übernommenes OFF gilt nur lokal und
      * wird als Standard gemeldet (nur lesen), bis eine spätere Änderung (Nutzer am Handy oder an der Uhr) den Zähler über
      * den übernommenen hebt. Die übernommene Kopie der Uhr (gleicher Zähler) zählt nicht als eigene Wahl.
@@ -691,17 +703,23 @@ class MatchSession(
         publish()
     }
 
-    /** „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien als [HealthArchive]-JSON, `null` ohne Serien. */
-    fun exportHealth(): String? {
+    /**
+     * „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien, leer ohne Serien. Nur der Datenbankteil – die
+     * Datei baut [HealthArchive.encode] abseits des Session-Threads (große Dateien).
+     */
+    fun exportHealthSeries(): List<StoredHealthSeries> {
         checkThread()
-        val all = data.health.allSeries()
-        return if (all.isEmpty()) null else HealthArchive.encode(all, clock.nowMs())
+        return data.health.allSeries()
     }
 
-    /** „Pulsverläufe importieren“ (Plan 0.5.1 §7b); Statistik und Zeitleiste lesen danach neu wie beim Empfang von der Uhr. */
-    fun importHealth(bytes: ByteArray): HealthImportResult {
+    /**
+     * „Pulsverläufe importieren“ (Plan 0.5.1 §7b) aus einer schon geprüften Datei ([HealthArchive.decode], abseits des
+     * Session-Threads); alle Serien in einer Transaktion. Statistik und Zeitleiste lesen danach neu wie beim Empfang
+     * von der Uhr.
+     */
+    fun importHealth(content: HealthArchiveContent): HealthImportResult {
         checkThread()
-        val result = health.import(bytes)
+        val result = data.transaction { health.import(content) }
         if (result.imported > 0) {
             dataRevision++
             publish()

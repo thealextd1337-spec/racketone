@@ -20,6 +20,9 @@ import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.math.abs
 
+/** Unbestätigte Pulsverläufe bleiben höchstens so lange auf der Uhr (E5); danach kommt keiner mehr ans Handy. */
+const val WATCH_HEALTH_RETENTION_MS: Long = 7L * 24 * 60 * 60 * 1000
+
 /**
  * Pulsverlauf eines Geräts (Plan Puls H5/H6), gemeinsam für Wear OS und watchOS: Einwilligung, Stufe je Match, Aufnahme
  * mit Zwischenspeicher, Übertragung Uhr → Handy bis zur Bestätigung und Löschung in beide Richtungen. Die Plattform liefert
@@ -31,6 +34,7 @@ import kotlin.math.abs
  * dessen Ende, spätestens nach 7 Tagen (E5) – löscht sie sie. Das Handy speichert idempotent über
  * `(matchId, sourceDeviceId, revision)`.
  */
+
 internal class HealthSync(
     private val data: LocalData,
     private val kind: PeerKind,
@@ -315,8 +319,8 @@ internal class HealthSync(
      * ersetzt nur eine höhere Revision. Ein hier gewähltes „Gar nicht“ bleibt; `deletedBefore` gilt nicht, weil der Nutzer
      * den Import selbst auslöst (die Sperre ist für verspätete Uhr-Sendungen gedacht).
      */
-    fun import(bytes: ByteArray): HealthImportResult =
-        HealthArchive.import(bytes, consent.enabled) { stored ->
+    fun import(content: HealthArchiveContent): HealthImportResult =
+        HealthArchive.import(content, consent.enabled) { stored ->
             when {
                 data.matches.get(stored.matchId) == null -> HealthImportPlacement.UNKNOWN_MATCH
                 data.settings.get(PULSE_PREFIX + stored.matchId.value) == TelemetryVisibility.OFF.wire -> HealthImportPlacement.SKIPPED
@@ -355,7 +359,7 @@ internal class HealthSync(
         const val SAVE_INTERVAL_MS: Long = 60_000
 
         /** Unbestätigte Serien bleiben höchstens so lange auf der Uhr (E5). */
-        const val RETENTION_MS: Long = 7L * 24 * 60 * 60 * 1000
+        const val RETENTION_MS: Long = WATCH_HEALTH_RETENTION_MS
 
         /** Größere Abstände Empfang − Event-Zeit gelten als Nachlieferung, nicht als Uhrenabweichung. */
         const val MAX_OFFSET_MS: Long = 60_000

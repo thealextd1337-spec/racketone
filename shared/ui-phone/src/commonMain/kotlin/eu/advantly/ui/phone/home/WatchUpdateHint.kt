@@ -39,7 +39,8 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * Plan 0.5.1 §3: verbundene Uhren, deren App älter ist als die dieses Handys. Verglichen wird die `versionName` aus dem
  * Hello ([AppBuild.version]): Den `buildNumber` senden Uhren bis 0.5.0 nicht, und die Version steigt mit jedem Release.
- * Unbekannte oder unlesbare Versionen zählen nicht als älter.
+ * Deshalb muss auch jeder Hotfix die `versionName` anheben (z. B. 0.5.1 → 0.5.2); ein neuer Build mit gleicher
+ * `versionName` gilt hier nicht als neuer. Unbekannte oder unlesbare Versionen zählen nicht als älter.
  */
 internal fun watchUpdateTargets(
     devices: List<DeviceStatus>,

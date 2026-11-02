@@ -2,6 +2,7 @@ package eu.advantly.ui.phone.app
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -9,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -26,6 +28,7 @@ import eu.advantly.ui.phone.platform.DocumentFiles
 import eu.advantly.ui.phone.platform.rememberDocumentFiles
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
+import eu.advantly.ui.phone.resources.health_archive_working
 import eu.advantly.ui.phone.resources.health_export
 import eu.advantly.ui.phone.resources.health_export_confirm
 import eu.advantly.ui.phone.resources.health_export_done
@@ -40,15 +43,23 @@ import eu.advantly.ui.phone.resources.health_import_done
 import eu.advantly.ui.phone.resources.health_import_invalid
 import eu.advantly.ui.phone.resources.health_import_newer
 import eu.advantly.ui.phone.resources.health_import_no_consent
+import eu.advantly.ui.phone.resources.health_import_read_failed
 import eu.advantly.ui.phone.resources.health_import_too_large
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import kotlin.coroutines.CoroutineContext
 
 /**
  * „Pulsverläufe exportieren“ und „Pulsverläufe importieren“ (Plan 0.5.1 §7b) unter „Puls & Schritte“: Gerätewechsel ohne
  * Cloud, die Datei legt der Nutzer selbst ab. Export erst nach dem Hinweis auf Gesundheitsdaten; Import nur mit Einwilligung
  * „Pulsverlauf aufzeichnen“ (sonst zuerst deren Dialog) und nicht bei „Gar nicht“ ([locked]). Ohne Dateiauswahl der
  * Plattform ([files] `null`, Desktop) entfällt der Abschnitt.
+ *
+ * Dateien bis 20 MB: Prüfen bzw. Bauen der Datei ([HealthArchive], rein) läuft auf [worker], nur der Datenbankteil über
+ * den Port auf dem UI-Thread; währenddessen ein Fortschritt und beide Tasten gesperrt.
  */
 @Composable
 internal fun HealthArchiveSection(
@@ -56,23 +67,54 @@ internal fun HealthArchiveSection(
     locked: Boolean,
     files: DocumentFiles? = rememberDocumentFiles(),
     clock: WallClock = WallClock.System,
+    worker: CoroutineContext = Dispatchers.Default,
 ) {
     files ?: return
     val consent by port.healthConsent.collectAsState()
     var dialog by remember { mutableStateOf<ArchiveDialog?>(null) }
     var message by remember { mutableStateOf<Message?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     fun pickImport() {
         message = null
-        files.open(HealthArchive.MAX_BYTES) { bytes -> bytes?.let { message = importMessage(port.importHealth(it)) } }
+        files.open(HealthArchive.MAX_BYTES) { read ->
+            val bytes = read?.getOrNull()
+            if (bytes == null) {
+                // abgebrochen: still; Lese-/Berechtigungsfehler sagt nichts über den Inhalt der Datei
+                if (read != null) message = importMessage(HealthImportResult(error = HealthImportError.READ_FAILED))
+                return@open
+            }
+            busy = true
+            scope.launch {
+                try {
+                    val content = withContext(worker) { HealthArchive.decode(bytes) }
+                    message = importMessage(port.importHealth(content))
+                } finally {
+                    busy = false
+                }
+            }
+        }
     }
 
     fun export() {
-        val content = port.exportHealth()
-        message = if (content == null) Message(Res.string.health_export_empty) else null
-        content ?: return
-        files.save(HealthArchive.fileName(clock.nowMs()), content) { saved ->
-            message = saved?.let { Message(if (it) Res.string.health_export_done else Res.string.health_export_failed) }
+        val series = port.exportHealthSeries()
+        if (series.isEmpty()) {
+            message = Message(Res.string.health_export_empty)
+            return
+        }
+        message = null
+        busy = true
+        scope.launch {
+            val content =
+                try {
+                    withContext(worker) { HealthArchive.encode(series, clock.nowMs()) }
+                } finally {
+                    busy = false
+                }
+            files.save(HealthArchive.fileName(clock.nowMs()), content) { saved ->
+                message = saved?.let { Message(if (it) Res.string.health_export_done else Res.string.health_export_failed) }
+            }
         }
     }
 
@@ -81,14 +123,24 @@ internal fun HealthArchiveSection(
         primary = false,
         onClick = { dialog = ArchiveDialog.EXPORT },
         modifier = Modifier.fillMaxWidth().testTag("health_export"),
+        enabled = !busy,
     )
     AdvantlyButton(
         text = stringResource(Res.string.health_import),
         primary = false,
         onClick = { if (consent) pickImport() else dialog = ArchiveDialog.GRANT },
         modifier = Modifier.fillMaxWidth().testTag("health_import"),
-        enabled = !locked,
+        enabled = !locked && !busy,
     )
+    if (busy) {
+        LinearProgressIndicator(Modifier.fillMaxWidth().testTag("health_archive_busy"))
+        Text(
+            stringResource(Res.string.health_archive_working),
+            style = AdvantlyTheme.typography.caption,
+            color = AdvantlyTheme.colors.text2,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
     message?.let {
         Text(
             stringResource(it.text, *it.args.toTypedArray()),
@@ -98,6 +150,7 @@ internal fun HealthArchiveSection(
         )
     }
     dialog?.let { kind ->
+        ReportHealthDialog()
         // Gleicher Einwilligungstext wie der Schalter „Pulsverlauf aufzeichnen“.
         val (title, text, action) =
             when (kind) {
@@ -145,4 +198,5 @@ private fun importMessage(result: HealthImportResult): Message =
         HealthImportError.TOO_LARGE -> Message(Res.string.health_import_too_large)
         HealthImportError.INVALID -> Message(Res.string.health_import_invalid)
         HealthImportError.NEWER_VERSION -> Message(Res.string.health_import_newer)
+        HealthImportError.READ_FAILED -> Message(Res.string.health_import_read_failed)
     }

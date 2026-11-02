@@ -17,11 +17,11 @@ interface DocumentFiles {
 
     /**
      * Liest eine gewählte Datei, höchstens [maxBytes] + 1 Byte (so erkennt der Aufrufer „zu groß“, ohne alles zu laden).
-     * [onDone]: Inhalt, leer bei Lesefehler, `null` abgebrochen.
+     * [onDone]: Inhalt, Fehlschlag bei Lese- oder Berechtigungsfehler (kein Urteil über den Inhalt), `null` abgebrochen.
      */
     fun open(
         maxBytes: Int,
-        onDone: (ByteArray?) -> Unit,
+        onDone: (Result<ByteArray>?) -> Unit,
     )
 }
 

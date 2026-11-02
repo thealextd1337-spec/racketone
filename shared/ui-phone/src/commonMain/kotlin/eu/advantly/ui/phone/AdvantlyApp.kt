@@ -38,6 +38,7 @@ import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
 import eu.advantly.ui.phone.app.LocalHealthConsent
+import eu.advantly.ui.phone.app.LocalHealthDialogOpen
 import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
@@ -158,9 +159,12 @@ fun AdvantlyApp(
         lastSeenBuild = buildNumber
     }
     // Neuinstallation bzw. neue Anmeldung: Der Einstieg fragt selbst (Schritt HEALTH) und übernimmt den Stand. Ohne
-    // Konto-Host (iOS, Build ohne Backend) gilt ein fehlender Stand als Neuinstallation.
+    // Konto-Host (iOS, Build ohne Backend) gilt nur ein fehlender Stand ohne jedes Match als Neuinstallation – wer schon
+    // gespielt hat, aktualisiert von einer Version vor „Was ist neu?“ (Review N5).
+    val pastMatches by model.history.matches.collectAsState()
+    val freshInstall = lastSeenBuild == null && pastMatches.isEmpty() && openMatches.isEmpty()
     val signingIn =
-        (accountState?.unconfirmed == false && accountState.step in SIGN_IN_STEPS) || (authModel == null && lastSeenBuild == null)
+        (accountState?.unconfirmed == false && accountState.step in SIGN_IN_STEPS) || (authModel == null && freshInstall)
     // Im Recovery-Hold schreibt die App nichts (geschützte Daten bleiben unverändert).
     LaunchedEffect(signingIn, buildNumber, recoveryHold) {
         if (signingIn && !recoveryHold && buildNumber > 0 && lastSeenBuild != buildNumber) seeWhatsNew()
@@ -182,6 +186,7 @@ fun AdvantlyApp(
         LocalArchivedPlayerIds provides archived,
         LocalTelemetryVisibility provides telemetryVisibility,
         LocalHealthConsent provides healthConsent,
+        LocalHealthDialogOpen provides remember(model) { { open: Boolean -> model.healthDialogOpen = open } },
     ) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
@@ -341,8 +346,11 @@ fun AdvantlyApp(
                 if (!accountRequired) {
                     model.pendingScorerChoice?.let { ScorerDialog(model) }
                     model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
-                    // Plan 0.5.1 §5.4: nicht über dem laufenden Live-Score
-                    if (healthToConfirm && navigator.top != Overlay.Live) AdoptedHealthConsentDialog(model.telemetry)
+                    // Plan 0.5.1 §5.4: nie über einer Vollbild-Ebene, „Was ist neu?“ oder einem anderen Dialog (Review N7)
+                    val calm =
+                        navigator.top == null && !showWhatsNew && !model.healthDialogOpen &&
+                            model.pendingScorerChoice == null && model.pendingWatchTakeOver == null
+                    if (healthToConfirm && calm) AdoptedHealthConsentDialog(model.telemetry)
                 }
             }
         }

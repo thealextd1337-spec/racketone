@@ -17,7 +17,9 @@ import platform.Foundation.writeToURL
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UIKit.UIDocumentPickerViewController
 import platform.UIKit.UIViewController
+import platform.UniformTypeIdentifiers.UTTypeData
 import platform.UniformTypeIdentifiers.UTTypeJSON
+import platform.UniformTypeIdentifiers.UTTypeText
 import platform.darwin.NSObject
 import platform.posix.memcpy
 
@@ -56,13 +58,15 @@ private class IosDocumentFiles(
 
     override fun open(
         maxBytes: Int,
-        onDone: (ByteArray?) -> Unit,
+        onDone: (Result<ByteArray>?) -> Unit,
     ) {
-        present(UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeJSON), asCopy = true)) { picked ->
+        // Auch falsch typisierte Ablagen (Text, beliebige Daten) zulassen; den Inhalt prüft `HealthArchive`.
+        val types = listOf(UTTypeJSON, UTTypeText, UTTypeData)
+        present(UIDocumentPickerViewController(forOpeningContentTypes = types, asCopy = true)) { picked ->
             val url = picked ?: return@present onDone(null)
             val data = NSData.dataWithContentsOfURL(url)
             NSFileManager.defaultManager.removeItemAtURL(url, null)
-            onDone(data?.let { read(it, maxBytes) } ?: ByteArray(0))
+            onDone(data?.let { Result.success(read(it, maxBytes)) } ?: Result.failure(IllegalStateException("Datei nicht lesbar")))
         }
     }
 

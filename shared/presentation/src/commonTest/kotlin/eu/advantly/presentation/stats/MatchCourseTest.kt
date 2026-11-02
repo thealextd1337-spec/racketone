@@ -5,6 +5,7 @@ import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MomentKind
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.match.session.WATCH_HEALTH_RETENTION_MS
 import eu.advantly.presentation.match.CountingIds
 import eu.advantly.presentation.match.InMemoryMatchStore
 import eu.advantly.presentation.match.PulseSetting
@@ -148,6 +149,9 @@ class MatchCourseTest {
         val chosen = PulseSetting(TelemetryVisibility.PRIVATE, recorded = false)
         assertEquals(PulseTransfer.PENDING, chosen.transfer(false, finishedAtMs = 0, nowMs = PULSE_OVERDUE_MS))
         assertEquals(PulseTransfer.OVERDUE, chosen.transfer(false, finishedAtMs = 0, nowMs = PULSE_OVERDUE_MS + 1))
+        // nach der Aufbewahrung auf der Uhr kommt nichts mehr: neutral statt dauerhafter Aufforderung
+        assertEquals(PulseTransfer.OVERDUE, chosen.transfer(false, finishedAtMs = 0, nowMs = WATCH_HEALTH_RETENTION_MS))
+        assertEquals(PulseTransfer.MISSING, chosen.transfer(false, finishedAtMs = 0, nowMs = WATCH_HEALTH_RETENTION_MS + 1))
         assertNull(chosen.transfer(true, 0, 0))
         assertNull(chosen.copy(recorded = true).transfer(false, 0, 0))
         assertNull(PulseSetting().transfer(false, 0, 0), "keine Aufzeichnung gewählt")

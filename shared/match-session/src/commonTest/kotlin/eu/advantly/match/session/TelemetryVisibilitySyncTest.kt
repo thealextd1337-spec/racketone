@@ -170,6 +170,37 @@ class TelemetryVisibilitySyncTest {
         assertNull(MatchMetaMessage().telemetry)
     }
 
+    /** Review M2: ein in 0.5.0 gespeichertes „Teilen“ wird beim Laden einmal zu „Nur für mich“ und geht an Uhr/Konto. */
+    @Test
+    fun storedShareBecomesPrivateOnStartAsARegularChange() {
+        val phone = WireNode("phone", 1)
+        phone.session.setTelemetryVisibility(TelemetryVisibility.SHARE)
+        phone.session.close()
+        val link = WireLink()
+        val restarted = MatchSession(phone.data, link, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        assertEquals(TelemetryVisibility.SHARE, restarted.state.value.telemetryVisibility, "vor dem Start unverändert")
+
+        restarted.start()
+
+        val private = TelemetryPreference(TelemetryVisibility.PRIVATE, 2, "phone")
+        assertEquals(private, restarted.state.value.telemetry)
+        assertEquals(private, restarted.accountTelemetry(), "Kontoabgleich meldet die neue Wahl")
+        assertEquals(
+            TelemetrySetting.of(private),
+            link.sent
+                .filterIsInstance<MatchMetaMessage>()
+                .last { it.telemetry != null }
+                .telemetry,
+        )
+        // ein „Teilen“ mit älterem Zähler (Uhr, Konto) setzt sich nicht mehr durch
+        assertFalse(restarted.mergeTelemetryPreference(TelemetryPreference(TelemetryVisibility.SHARE, 1, "server")))
+        // einmalig: ein weiterer Start ändert nichts mehr
+        restarted.close()
+        val again = MatchSession(phone.data, null, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE))
+        again.start()
+        assertEquals(private, again.state.value.telemetry)
+    }
+
     private companion object {
         const val MINUTE = 60_000L
         const val HOUR = 60 * MINUTE

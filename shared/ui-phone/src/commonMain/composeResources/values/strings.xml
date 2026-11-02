@@ -503,6 +503,8 @@
     <string name="health_import_no_consent">Turn on “Record heart rate history” first.</string>
     <string name="health_import_too_large">The file is too large (max. 20 MB).</string>
     <string name="health_import_invalid">This file is not an Advantly heart rate export or it is damaged.</string>
+    <string name="health_import_read_failed">The file could not be read.</string>
+    <string name="health_archive_working">Processing file …</string>
     <string name="health_import_newer">This file comes from a newer Advantly version. Please update the app.</string>
     <string name="health_choice_watch">Recording happens while you score with your watch. Without a watch, the setting takes effect once you pair one.</string>
     <string name="health_adopted_title">Record heart rate history</string>
@@ -938,6 +940,7 @@
     <string name="timeline_serve">Serve: %1$s</string>
     <string name="timeline_pulse_pending">Heart rate history is being transferred from the watch …</string>
     <string name="timeline_pulse_overdue">No heart rate history from the watch yet – open the watch app near your phone</string>
+    <string name="timeline_pulse_missing">No heart rate history received from the watch</string>
     <string name="moment_break_point">Break point</string>
     <string name="moment_break">Break</string>
     <string name="moment_golden_point">Golden point</string>

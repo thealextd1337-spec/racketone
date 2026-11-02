@@ -503,6 +503,8 @@
     <string name="health_import_no_consent">Schalte zuerst „Pulsverlauf aufzeichnen“ ein.</string>
     <string name="health_import_too_large">Die Datei ist zu groß (höchstens 20 MB).</string>
     <string name="health_import_invalid">Diese Datei ist kein Advantly-Pulsexport oder beschädigt.</string>
+    <string name="health_import_read_failed">Die Datei konnte nicht gelesen werden.</string>
+    <string name="health_archive_working">Datei wird verarbeitet …</string>
     <string name="health_import_newer">Die Datei stammt aus einer neueren Advantly-Version. Bitte aktualisiere die App.</string>
     <string name="health_choice_watch">Aufgezeichnet wird beim Zählen mit deiner Uhr. Ohne Uhr wirkt die Einstellung, sobald du eine koppelst.</string>
     <string name="health_adopted_title">Pulsverlauf aufzeichnen</string>
@@ -938,6 +940,7 @@
     <string name="timeline_serve">Aufschlag: %1$s</string>
     <string name="timeline_pulse_pending">Pulsverlauf wird von der Uhr übertragen …</string>
     <string name="timeline_pulse_overdue">Noch kein Pulsverlauf von der Uhr – Uhr in der Nähe des Handys öffnen</string>
+    <string name="timeline_pulse_missing">Kein Pulsverlauf von der Uhr erhalten</string>
     <string name="moment_break_point">Breakball</string>
     <string name="moment_break">Break</string>
     <string name="moment_golden_point">Golden Point</string>

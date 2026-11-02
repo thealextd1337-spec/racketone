@@ -32,7 +32,7 @@ class HealthArchiveTest {
     ): Pair<HealthImportResult, List<StoredHealthSeries>> {
         val seen = mutableListOf<StoredHealthSeries>()
         val result =
-            HealthArchive.import(text.encodeToByteArray(), consent) {
+            HealthArchive.import(HealthArchive.decode(text.encodeToByteArray()), consent) {
                 seen += it
                 HealthImportPlacement.IMPORTED
             }
@@ -65,7 +65,7 @@ class HealthArchiveTest {
     fun placementsAreCounted() {
         val text = HealthArchive.encode(List(4) { series.copy(matchId = MatchId("m$it")) }, 0)
         val result =
-            HealthArchive.import(text.encodeToByteArray(), consent = true) {
+            HealthArchive.import(HealthArchive.decode(text.encodeToByteArray()), consent = true) {
                 when (it.matchId.value) {
                     "m0", "m1" -> HealthImportPlacement.IMPORTED
                     "m2" -> HealthImportPlacement.UNKNOWN_MATCH
@@ -85,7 +85,7 @@ class HealthArchiveTest {
     @Test
     fun tooLargeFilesAreRejectedBeforeParsing() {
         val bytes = ByteArray(HealthArchive.MAX_BYTES + 1) { ' '.code.toByte() }
-        assertEquals(HealthImportError.TOO_LARGE, HealthArchive.import(bytes, true) { error("nicht lesen") }.error)
+        assertEquals(HealthImportError.TOO_LARGE, HealthArchive.decode(bytes).error)
     }
 
     @Test
@@ -127,7 +127,7 @@ class HealthArchiveTest {
             assertTrue(seen.isEmpty(), text.take(80))
         }
         val invalidUtf8 = byteArrayOf(0xC3.toByte(), 0x28)
-        assertEquals(HealthImportError.INVALID, HealthArchive.import(invalidUtf8, true) { error("nicht lesen") }.error)
+        assertEquals(HealthImportError.INVALID, HealthArchive.decode(invalidUtf8).error)
     }
 
     @Test
@@ -139,13 +139,9 @@ class HealthArchiveTest {
 
     @Test
     fun noHealthValuesInStrings() {
-        assertFalse(
-            HealthArchive
-                .import(HealthArchive.encode(listOf(series), 0).encodeToByteArray(), true) {
-                    HealthImportPlacement.IMPORTED
-                }.toString()
-                .contains("110"),
-        )
+        val content = HealthArchive.decode(HealthArchive.encode(listOf(series), 0).encodeToByteArray())
+        assertFalse(content.toString().contains("110"))
+        assertFalse(HealthArchive.import(content, true) { HealthImportPlacement.IMPORTED }.toString().contains("110"))
     }
 
     @Test
@@ -157,6 +153,12 @@ class HealthArchiveTest {
 
     // --- über die Session (Datenbank, Revision, Einwilligung) ---------------------------------------------------------
 
+    /** Wie die App: Datei bauen bzw. prüfen abseits des Session-Threads, nur der Datenbankteil in der Session. */
+    private fun MatchSession.exportHealthText(): String? =
+        exportHealthSeries().takeIf { it.isNotEmpty() }?.let { HealthArchive.encode(it, 0) }
+
+    private fun MatchSession.importBytes(bytes: ByteArray): HealthImportResult = importHealth(HealthArchive.decode(bytes))
+
     private val format = Presets.TENNIS_SINGLES_BO3.format()
 
     @Test
@@ -164,20 +166,20 @@ class HealthArchiveTest {
         val phone = WireNode("phone", 1)
         phone.session.setHealthConsent(true)
         val id = phone.session.create(format, SINGLES, MatchMeta(pulseVisibility = TelemetryVisibility.PRIVATE))
-        assertNull(phone.session.exportHealth(), "ohne Serien keine Datei")
+        assertNull(phone.session.exportHealthText(), "ohne Serien keine Datei")
         val stored = series.copy(matchId = id)
         assertTrue(phone.data.health.upsert(stored))
-        val text = assertNotNull(phone.session.exportHealth())
+        val text = assertNotNull(phone.session.exportHealthText())
         val withUnknown = HealthArchive.encode(listOf(stored, series.copy(matchId = MatchId("fremd"))), 0)
         phone.session.deleteAllHealthData()
         val before = phone.session.state.value.dataRevision
 
-        val result = phone.session.importHealth(withUnknown.encodeToByteArray())
+        val result = phone.session.importBytes(withUnknown.encodeToByteArray())
 
         assertEquals(HealthImportResult(imported = 1, unknownMatch = 1), result)
         assertEquals(listOf(stored), phone.data.health.forMatch(id))
         assertTrue(phone.session.state.value.dataRevision > before, "Statistik und Zeitleiste lesen neu")
-        assertEquals(HealthImportResult(skipped = 1), phone.session.importHealth(text.encodeToByteArray()), "gleiche Revision")
+        assertEquals(HealthImportResult(skipped = 1), phone.session.importBytes(text.encodeToByteArray()), "gleiche Revision")
     }
 
     @Test
@@ -190,20 +192,20 @@ class HealthArchiveTest {
         val older = stored.copy(revision = 6, series = stored.series.copy(bpm = listOf(90, 90, 90)))
         assertEquals(
             HealthImportResult(skipped = 1),
-            phone.session.importHealth(HealthArchive.encode(listOf(older), 0).encodeToByteArray()),
+            phone.session.importBytes(HealthArchive.encode(listOf(older), 0).encodeToByteArray()),
         )
         assertEquals(listOf(stored), phone.data.health.forMatch(id))
         val newer = older.copy(revision = 8)
         assertEquals(
             HealthImportResult(imported = 1),
-            phone.session.importHealth(HealthArchive.encode(listOf(newer), 0).encodeToByteArray()),
+            phone.session.importBytes(HealthArchive.encode(listOf(newer), 0).encodeToByteArray()),
         )
         assertEquals(listOf(newer), phone.data.health.forMatch(id))
 
         phone.session.setPulseVisibility(id, TelemetryVisibility.OFF)
         assertEquals(
             HealthImportResult(skipped = 1),
-            phone.session.importHealth(HealthArchive.encode(listOf(newer), 0).encodeToByteArray()),
+            phone.session.importBytes(HealthArchive.encode(listOf(newer), 0).encodeToByteArray()),
         )
         assertTrue(
             phone.data.health
@@ -217,7 +219,7 @@ class HealthArchiveTest {
     fun sessionImportNeedsConsent() {
         val phone = WireNode("phone", 1)
         val id = phone.session.create(format, SINGLES, MatchMeta())
-        val result = phone.session.importHealth(HealthArchive.encode(listOf(series.copy(matchId = id)), 0).encodeToByteArray())
+        val result = phone.session.importBytes(HealthArchive.encode(listOf(series.copy(matchId = id)), 0).encodeToByteArray())
         assertEquals(HealthImportError.NO_CONSENT, result.error)
         assertTrue(
             phone.data.health

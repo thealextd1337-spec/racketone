@@ -26,6 +26,9 @@ enum class HealthImportError {
 
     /** Formatversion neuer als [HealthArchive.VERSION]: zuerst die App aktualisieren. */
     NEWER_VERSION,
+
+    /** Die Datei konnte nicht gelesen werden (Lese- oder Berechtigungsfehler der Dateiauswahl), Inhalt unbekannt. */
+    READ_FAILED,
 }
 
 /**
@@ -40,6 +43,18 @@ data class HealthImportResult(
     val skipped: Int = 0,
     val error: HealthImportError? = null,
 )
+
+/**
+ * Geprüfter Inhalt einer Datei aus [HealthArchive.decode]: alle Serien, wenn die ganze Datei gültig ist, sonst [error].
+ * Ergebnis der reinen Prüfung (ohne Datenbank), damit die App sie abseits des UI-Threads ausführen kann.
+ */
+class HealthArchiveContent internal constructor(
+    val series: List<StoredHealthSeries>,
+    val error: HealthImportError? = null,
+) {
+    // Gesundheitsdaten nie in Logs (Plan Puls §3.4).
+    override fun toString(): String = "HealthArchiveContent(${series.size} series, $error)"
+}
 
 /** Was mit einer gültigen Serie aus der Datei geschehen ist. */
 enum class HealthImportPlacement { IMPORTED, UNKNOWN_MATCH, SKIPPED }
@@ -94,23 +109,27 @@ object HealthArchive {
         )
 
     /**
-     * Prüft [bytes] und reicht jede Serie an [place] (nur wenn die ganze Datei gültig ist). Ohne [consent] wird die Datei
-     * gar nicht erst gelesen.
+     * Prüft [bytes] (Größe, Format, Version, Wertebereiche) ohne Datenbank: rein und ohne Zustand, darf auf jedem Thread
+     * laufen. Eine ungültige Serie verwirft die ganze Datei.
      */
+    fun decode(bytes: ByteArray): HealthArchiveContent {
+        if (bytes.size > MAX_BYTES) return HealthArchiveContent(emptyList(), HealthImportError.TOO_LARGE)
+        return try {
+            HealthArchiveContent(parse(bytes))
+        } catch (e: ArchiveException) {
+            HealthArchiveContent(emptyList(), e.error)
+        }
+    }
+
+    /** Reicht jede Serie aus [content] an [place] (nur wenn die ganze Datei gültig ist und [consent] besteht). */
     fun import(
-        bytes: ByteArray,
+        content: HealthArchiveContent,
         consent: Boolean,
         place: (StoredHealthSeries) -> HealthImportPlacement,
     ): HealthImportResult {
         if (!consent) return HealthImportResult(error = HealthImportError.NO_CONSENT)
-        if (bytes.size > MAX_BYTES) return HealthImportResult(error = HealthImportError.TOO_LARGE)
-        val series =
-            try {
-                decode(bytes)
-            } catch (e: ArchiveException) {
-                return HealthImportResult(error = e.error)
-            }
-        val placed = series.groupingBy(place).eachCount()
+        content.error?.let { return HealthImportResult(error = it) }
+        val placed = content.series.groupingBy(place).eachCount()
         return HealthImportResult(
             placed[HealthImportPlacement.IMPORTED] ?: 0,
             placed[HealthImportPlacement.UNKNOWN_MATCH] ?: 0,
@@ -118,7 +137,7 @@ object HealthArchive {
         )
     }
 
-    private fun decode(bytes: ByteArray): List<StoredHealthSeries> {
+    private fun parse(bytes: ByteArray): List<StoredHealthSeries> {
         val file =
             try {
                 val root = json.parseToJsonElement(bytes.decodeToString(throwOnInvalidSequence = true)).jsonObject

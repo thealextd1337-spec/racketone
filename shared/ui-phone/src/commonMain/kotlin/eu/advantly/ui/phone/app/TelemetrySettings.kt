@@ -17,12 +17,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,6 +71,19 @@ val LocalTelemetryVisibility = compositionLocalOf { TelemetryVisibility.DEFAULT 
 
 /** Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls E1) für den Assistenten; ohne Bereitstellung aus. */
 val LocalHealthConsent = compositionLocalOf { false }
+
+/** Meldet offene Gesundheitsdialoge an [AdvantlyAppModel.healthDialogOpen]; ohne Bereitstellung wirkungslos. */
+internal val LocalHealthDialogOpen = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
+
+/** Solange dieser Aufruf in der Komposition ist, gilt ein Gesundheitsdialog als offen. */
+@Composable
+internal fun ReportHealthDialog() {
+    val report = LocalHealthDialogOpen.current
+    DisposableEffect(report) {
+        report(true)
+        onDispose { report(false) }
+    }
+}
 
 /**
  * Einstellung „Puls & Schritte“ (P2-J, F19/F29) im Profil: „Nur für mich“ (Standard) oder „Gar nicht“, je mit kurzer
@@ -134,6 +149,7 @@ private fun HealthConsentSection(
         modifier = Modifier.fillMaxWidth().testTag("health_delete_all"),
     )
     confirm?.let { kind ->
+        ReportHealthDialog()
         val (title, text, action) =
             when (kind) {
                 HealthConfirm.GRANT -> {
