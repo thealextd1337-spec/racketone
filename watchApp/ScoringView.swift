@@ -52,6 +52,7 @@ struct ScorePage: View {
     let snap: WatchScoreSnapshot
     @Environment(\.isLuminanceReduced) private var dimmed
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmTakeOver = false
     @State private var target: ScoreTouchTarget?
     @State private var touchId: SpatialEventCollection.Event.ID?
@@ -70,33 +71,54 @@ struct ScorePage: View {
         GeometryReader { geo in
             let height = geo.size.height
             let deadTop = height * 0.12
-            let action = !dimmed && OperationStrip.hasAction(model, snap)
+            // Aufschlag-Auswahl (Plan 0.5.1 §4a, wie Wear OS): Spielstand links, rechts große Tasten übereinander; die
+            // Hälften zählen links weiter (gleiche Höhen, nur schmaler)
+            let serving = !dimmed && OperationStrip.hasServe(model, snap)
+            let action = !dimmed && !serving && OperationStrip.hasAction(model, snap)
             let middle = action ? max(44, height * 0.16) : height * 0.16
             let guardHeight: CGFloat = action ? 4 : 0
             let halfHeight = (height - deadTop - middle - 2 * guardHeight) / 2
             let middleTop = deadTop + halfHeight
+            let scoreInset = serving ? ServePanelLayout.scoreInset(geo.size.width) : 0
+            let serveCount = ServeOption.options(snap).count
             VStack(spacing: 0) {
                 StatusStrip(snap: snap, dimmed: dimmed)
                     .frame(height: deadTop)
                     .allowsHitTesting(false)
-                half(sideA: true).frame(height: halfHeight)
+                half(sideA: true, trailingInset: scoreInset).frame(height: halfHeight)
                 Color.clear.frame(height: guardHeight)
                 if action {
                     OperationStrip(model: model, snap: snap) { model.openServerChoice() }
                         .frame(height: middle)
                         .padding(.horizontal, 6)
+                } else if serving {
+                    MiddleBand.summary(snap)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.5)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Color.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: middle)
+                        .padding(.leading, 6)
+                        .padding(.trailing, scoreInset)
+                        .allowsHitTesting(false)
                 } else {
                     MiddleBand(model: model, workout: workout, snap: snap, dimmed: dimmed)
                         .frame(height: middle)
                 }
                 Color.clear.frame(height: guardHeight)
-                half(sideA: false).frame(height: halfHeight)
+                half(sideA: false, trailingInset: scoreInset).frame(height: halfHeight)
             }
+            // hin sofort (keine Überlappung mit den Tasten), zurück in die Mitte gleitend
+            .animation(serving || reduceMotion || dimmed ? nil : Animation.easeOut(duration: 0.3), value: serving)
             .contentShape(Rectangle())
             .simultaneousGesture(
                 SpatialEventGesture(coordinateSpace: .local)
                     .onChanged { events in
-                        trackTouch(events, deadTop: deadTop, middleTop: middleTop, middleBottom: middleTop + middle + 2 * guardHeight)
+                        trackTouch(events, deadTop: deadTop, middleTop: middleTop, middleBottom: middleTop + middle + 2 * guardHeight,
+                                   scoreRight: serving ? geo.size.width - scoreInset : nil)
                     }
                     .onEnded { events in
                         let fired = holdFired
@@ -125,6 +147,16 @@ struct ScorePage: View {
                         }
                     }
             )
+            .overlay(alignment: .topTrailing) {
+                if serving {
+                    // mittig auf Höhe des Mittelbands; Tasten tippbar, die Zählgeste ignoriert diesen Bereich (scoreRight)
+                    let column = ServePanelLayout.columnHeight(height, count: serveCount)
+                    ServePanel(model: model, snap: snap, buttonHeight: ServePanelLayout.buttonHeight(height))
+                        .frame(width: ServePanelLayout.buttonWidth(geo.size.width))
+                        .padding(.trailing, ServePanelLayout.edge)
+                        .padding(.top, max(deadTop, min(height - column - deadTop, middleTop + middle / 2 - column / 2)))
+                }
+            }
             .overlay {
                 if let banner = model.banner, banner != .pointRemoved, !dimmed {
                     BannerView(banner: banner).allowsHitTesting(false)
@@ -156,7 +188,10 @@ struct ScorePage: View {
         .takeOverConfirmation(isPresented: $confirmTakeOver, snap: snap, model: model)
     }
 
-    private func trackTouch(_ events: SpatialEventCollection, deadTop: CGFloat, middleTop: CGFloat, middleBottom: CGFloat) {
+    /// `scoreRight`: während der Aufschlag-Auswahl rechter Rand der Zählflächen – rechts davon (Schutzstreifen, Tasten)
+    /// zählt keine Berührung.
+    private func trackTouch(_ events: SpatialEventCollection, deadTop: CGFloat, middleTop: CGFloat, middleBottom: CGFloat,
+                            scoreRight: CGFloat?) {
         guard !events.isEmpty else { return }
         // Neue IDs erkennen auch nach einem Abbruch ohne onEnded eine neue Berührung – selbst am selben Ort.
         if events.allSatisfy({ !touchIds.contains($0.id) }) {
@@ -183,7 +218,9 @@ struct ScorePage: View {
             touchMatchId = snap.matchId
             furthestTravel = 0
             let y = event.location.y
-            if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
+            if let scoreRight, event.location.x >= scoreRight {
+                target = .ignored
+            } else if snap.isScorer && !dimmed && scenePhase == .active && y >= deadTop && y < middleTop {
                 target = .half(sideA: true, canRemove: snap.canRemovePointA)
                 if snap.canRemovePointA { startHold(sideA: true) }
             } else if snap.isScorer && !dimmed && scenePhase == .active && y > middleBottom {
@@ -226,8 +263,8 @@ struct ScorePage: View {
     }
 
     @ViewBuilder
-    private func half(sideA: Bool) -> some View {
-        let team = TeamHalf(sideA: sideA, snap: snap, flash: model.flashSideA == sideA, dimmed: dimmed)
+    private func half(sideA: Bool, trailingInset: CGFloat) -> some View {
+        let team = TeamHalf(sideA: sideA, snap: snap, flash: model.flashSideA == sideA, dimmed: dimmed, trailingInset: trailingInset)
             .overlay {
                 if let start = holdStart, holdSideA == sideA, !dimmed {
                     HoldFill(start: start, fired: holdFired, color: Brand.team(sideA: sideA))
@@ -407,6 +444,8 @@ struct TeamHalf: View {
     let snap: WatchScoreSnapshot
     let flash: Bool
     let dimmed: Bool
+    /// Aufschlag-Auswahl: rechts freigehaltene Breite (Tasten); Name, Aufschläger und Ziffern rücken nach links.
+    var trailingInset: CGFloat = 0
 
     var body: some View {
         let color = Brand.team(sideA: sideA)
@@ -453,6 +492,7 @@ struct TeamHalf: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentTransition(.numericText())
             }
+            .padding(.trailing, trailingInset)
         }
         .padding(.horizontal, 4)
     }
@@ -571,7 +611,7 @@ struct MiddleBand: View {
             } else {
                 StalenessLabel(snap: snap, dimmed: dimmed)
             }
-            summary
+            Self.summary(snap)
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -606,7 +646,7 @@ struct MiddleBand: View {
     private var heartRate: Int { dimmed ? workout.heartRateAmbient : workout.heartRate }
 
     /// Tennis/Padel: frühere Sätze grau + laufende Games; Pickleball: Ansage „4-2-1“; Badminton/TT: Satzstand.
-    private var summary: Text {
+    static func summary(_ snap: WatchScoreSnapshot) -> Text {
         let previous = ScoreText.sets(snap)
         let prefix = previous.isEmpty ? Text(verbatim: "") : Text(verbatim: previous + " ").foregroundStyle(Brand.text2)
         if snap.sport == "PICKLEBALL" {

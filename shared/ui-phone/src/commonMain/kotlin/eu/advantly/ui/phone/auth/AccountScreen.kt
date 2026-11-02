@@ -32,10 +32,14 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
+import eu.advantly.presentation.match.TelemetrySettingsPort
+import eu.advantly.ui.phone.app.HealthConsentChoice
+import eu.advantly.ui.phone.app.rememberHealthChoice
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.account_deletion_pending
 import eu.advantly.ui.phone.resources.account_recover
 import eu.advantly.ui.phone.resources.account_suspended
+import eu.advantly.ui.phone.resources.action_later
 import eu.advantly.ui.phone.resources.auth_account_not_found
 import eu.advantly.ui.phone.resources.auth_alias
 import eu.advantly.ui.phone.resources.auth_birth
@@ -90,6 +94,7 @@ fun AccountScreen(
     google: (suspend () -> GoogleCredential)?,
     onSupport: (() -> Unit)? = null,
     onShareExport: (() -> Unit)? = null,
+    telemetry: TelemetrySettingsPort? = null,
 ) {
     val state by model.state.collectAsState()
     val uriHandler = LocalUriHandler.current
@@ -207,6 +212,23 @@ fun AccountScreen(
 
                 AuthStep.CONSENT -> {
                     Unit
+                }
+
+                AuthStep.HEALTH -> {
+                    // Plan 0.5.1 §5.1: freiwillig, nach AGB/Datenschutz; „Später“ entscheidet nichts.
+                    val choice = telemetry?.let { rememberHealthChoice(it) }
+                    choice?.let { HealthConsentChoice(it) }
+                    Button(
+                        {
+                            if (telemetry != null) choice?.apply(telemetry)
+                            model.continueAfterHealth()
+                        },
+                        enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("health_step_continue"),
+                    ) { Text(stringResource(Res.string.auth_continue)) }
+                    TextButton(model::continueAfterHealth, enabled = !state.busy, modifier = Modifier.testTag("health_step_later")) {
+                        Text(stringResource(Res.string.action_later))
+                    }
                 }
 
                 AuthStep.ACCOUNT -> {

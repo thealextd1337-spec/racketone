@@ -74,6 +74,7 @@ Alternativ (CI) die Umgebungsvariablen `ADVANTLY_UPLOAD_KEYSTORE`, `ADVANTLY_UPL
 Ohne beides baut `release` **unsigniert**. Ist eine Konfiguration nur teilweise gesetzt, bricht der Build mit einer Meldung ab.
 
 1. [ ] `advantly.buildNumber` in `gradle.properties` für neue Binary-Uploads erhöhen, auch im internen Test. Der erste Upload darf mit `1` laufen; Promotion desselben vorhandenen Artefakts erhöht nichts ([Versionsführung](veroeffentlichungsplan.md#versionen-und-tags)).
+   Dazu „Was ist neu?“ (ab 0.5.1): Texte `whats_new_<buildNumber>_1..4` in `shared/ui-phone/.../composeResources/values` und `values-de` anlegen; `WhatsNewUiTest` prüft, dass es sie für den aktuellen `buildNumber` gibt.
 2. [ ] `gradlew.bat bundleAllRelease`
 3. [ ] Ergebnis:
    - Phone: `androidApp\build\outputs\bundle\release\androidApp-release.aab` (versionCode `buildNumber*10+1`, minSdk 28, targetSdk 36)
@@ -225,6 +226,18 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
     ('PRIVACY', '7', 'de', 'https://advantly.eu/app-datenschutz.html'),
     ('PRIVACY', '7', 'en', 'https://advantly.eu/en/app-privacy.html');
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '7');
+  commit;
+  ```
+  **0.5.1 (Datenschutzerklärung Version 8, Pulsverlauf-Export, Abfrage bei Anmeldung):** nur PRIVACY wechselt. Vorher prüfen,
+  dass PRIVACY 7 aktuell ist. Keine neue Migration. Reihenfolge: Merge, Seite live, App 0.5.1 ausrollen, dann freigeben.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '8', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '8', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '8', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '8');
   commit;
   ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).

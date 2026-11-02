@@ -100,10 +100,10 @@ class HistoryStatisticsUiTest {
                 model.live.endMatch(EndReason.STOPPED)
                 model.openResult(id)
                 show(model)
-                onNodeWithTag("show_game_history").performScrollTo()
+                onNodeWithTag("timeline_game_0").performScrollTo()
                 val description =
                     onNodeWithTag(
-                        "momentum_chart",
+                        "timeline_game_0",
                     ).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
                 val expected =
                     if (locale == Locale.GERMANY &&
@@ -141,8 +141,9 @@ class HistoryStatisticsUiTest {
             model.openResult(id)
             show(model)
             capture("detail-top-$suffix")
-            onNodeWithTag("show_game_history").performScrollTo()
-            onNodeWithTag("momentum_chart").assertIsDisplayed().assertContentDescriptionContains("Break", substring = true)
+            onNodeWithTag(
+                "timeline_game_0",
+            ).performScrollTo().assertIsDisplayed().assertContentDescriptionContains("Break", substring = true)
             capture("detail-momentum-$suffix")
             click("show_game_history")
             click("show_points_0")

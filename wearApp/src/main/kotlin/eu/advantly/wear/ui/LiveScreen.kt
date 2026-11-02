@@ -1,6 +1,9 @@
 package eu.advantly.wear.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -90,6 +95,7 @@ import eu.advantly.wear.live.LiveUi
 import eu.advantly.wear.live.OperationRules
 import eu.advantly.wear.live.PlayerUi
 import eu.advantly.wear.live.ServeUi
+import eu.advantly.wear.live.StripAction
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.TouchDecision
 import eu.advantly.wear.live.TouchRouting
@@ -98,12 +104,15 @@ import eu.advantly.wear.live.telemetryActive
 import eu.advantly.wear.scoring.ActionStrip
 import eu.advantly.wear.scoring.GestureClassifier
 import eu.advantly.wear.scoring.ScoreLayout
+import eu.advantly.wear.scoring.ServePanel
 import eu.advantly.wear.scoring.TapGuard
 import eu.advantly.wear.scoring.TapZones
 import eu.advantly.wear.workout.WorkoutPhase
 import eu.advantly.wear.workout.WorkoutUiState
 import kotlinx.coroutines.delay
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Aktionen des Live-Screens (Zähler und Anzeige). */
 interface LiveActions : OperationActions {
@@ -247,13 +256,27 @@ private fun ScorePage(
     // Aktionsleiste im Mittelband (Aufschlag-Leiste, „Rückgängig“ nach Punkt abziehen, „Aufschlag wählen“)
     val strip = if (isAmbient) null else OperationRules.stripAction(live, toast)
     val currentStrip by rememberUpdatedState(strip)
+    // Aufschlag-Auswahl (Plan 0.5.1 §4a): Spielstand links, Tasten rechts. Hin springt er sofort (keine Überlappung mit
+    // den Tasten), zurück in die Mitte gleitet er; im Ambient-Modus ohne Animation (seltene Bildwechsel)
+    val serveBar = (strip as? StripAction.Serve)?.bar
+    val serveShift by animateFloatAsState(
+        targetValue = if (serveBar != null) 1f else 0f,
+        animationSpec = if (serveBar != null) snap() else tween(SERVE_RETURN_MILLIS),
+        label = "serveShift",
+    )
+    val shift =
+        when {
+            isAmbient -> 0f
+            serveBar != null -> 1f
+            else -> serveShift
+        }
     val touchSlop = LocalViewConfiguration.current.touchSlop
     val swipeThreshold = with(LocalDensity.current) { SWIPE_THRESHOLD.toPx() }
     val scorer = live.role == LiveRole.SCORER
 
     // Status („3 ausstehend“, „ANZEIGE · Handy zählt“, Sperre) gebogen neben der Uhrzeit oben am Rand: kostet keine
     // eigene Zeile über „Wir“ (Feldtest 2026-10-16: Statuszeile, Uhrzeit und Namenszeile lagen übereinander)
-    ScreenScaffold(timeText = { StatusTimeText(live, isAmbient) }) { _ ->
+    ScreenScaffold(timeText = { StatusTimeText(live, isAmbient, compact = serveBar != null) }) { _ ->
         BoxWithConstraints(
             modifier =
                 Modifier
@@ -266,7 +289,17 @@ private fun ScorePage(
                             val down = awaitFirstDown(requireUnconsumed = false)
                             // Ziel beim Aufsetzen festlegen: wer auf der Aktionsleiste beginnt, zählt und zieht nie ab
                             val stripGeometry = ActionStrip.geometry(size.width.toFloat(), size.height.toFloat(), density)
-                            val target = TouchRouting.target(currentStrip, ActionStrip.hit(down.position.x, down.position.y, stripGeometry))
+                            val serveGeometry =
+                                (currentStrip as? StripAction.Serve)?.let {
+                                    ServePanel.geometry(size.width.toFloat(), size.height.toFloat(), density, it.bar.options.size)
+                                }
+                            val stripHit =
+                                if (serveGeometry != null) {
+                                    ServePanel.hit(down.position.x, down.position.y, serveGeometry)
+                                } else {
+                                    ActionStrip.hit(down.position.x, down.position.y, stripGeometry)
+                                }
+                            val target = TouchRouting.target(currentStrip, stripHit)
                             var last = down.position
                             var endTime = down.uptimeMillis
                             var multiTouch = false
@@ -371,7 +404,7 @@ private fun ScorePage(
                                 }
 
                                 is TouchDecision.Strip -> {
-                                    onStripTap(decision.action, down.position.x, stripGeometry, currentActions)
+                                    onStripTap(decision.action, down.position.x, down.position.y, serveGeometry, currentActions)
                                 }
 
                                 TouchDecision.None -> {
@@ -390,9 +423,15 @@ private fun ScorePage(
             val bandHeight = maxHeight * TapZones.MIDDLE_BAND
             // Die Aktionsleiste ist höher als das Mittelband: so weit sie in eine Hälfte ragt, bleiben deren Ziffern frei
             // (sie werden dafür etwas kleiner) – der Spielstand ist auch bei sichtbarer Leiste nie verdeckt (0.3.0)
+            val servePanel =
+                with(LocalDensity.current) { ServePanel.geometry(maxWidth.toPx(), maxHeight.toPx(), density, serveBar?.options?.size ?: 2) }
+            val scoreRight = with(LocalDensity.current) { servePanel.scoreRight.toDp() }
+            // Satzstand links neben den Tasten: zweizeilig möglich, ragt dafür etwas in beide Hälften (Ziffern weichen aus)
+            val serveSetsHeight = maxOf(bandHeight, SERVE_SETS_HEIGHT)
             val stripClearance =
-                if (strip == null) {
-                    SidePair(0.dp, 0.dp)
+                if (strip == null || strip is StripAction.Serve) {
+                    val clear = ((serveSetsHeight - bandHeight) / 2 + STRIP_DIGIT_GAP) * shift
+                    SidePair(clear, clear)
                 } else {
                     with(LocalDensity.current) {
                         val g = ActionStrip.geometry(maxWidth.toPx(), maxHeight.toPx(), density)
@@ -445,11 +484,13 @@ private fun ScorePage(
                         sideInset = if (side == Side.B) telemetryInset else 0.dp,
                         digitSize = digitSize.value,
                         isAmbient = isAmbient,
+                        scoreShift = shift,
+                        scoreRight = scoreRight,
                         flashing = flashSide == side,
                         holdProgress = { if (holdProgress.side == side) holdProgress.fraction else 0f },
                         // „Gegner“-Namen liegen am Mittelband unter der Aktionsleiste: solange sie steht, ausblenden
                         // (statt halb verdeckt durchzuscheinen); Layout bleibt gleich
-                        labelHidden = side == Side.B && strip != null,
+                        labelHidden = side == Side.B && strip != null && strip !is StripAction.Serve,
                         bandClearance = stripClearance[side],
                         // Statuszeile oben und Hinweise unten bekommen eigenen Platz in ihrer Hälfte (keine Überlagerung)
                         header = {
@@ -484,16 +525,29 @@ private fun ScorePage(
                             },
                     )
                     if (i == 0) {
-                        if (strip == null) {
+                        if (strip == null && shift == 0f) {
                             MiddleBand(live, workout, toast.takeUnless { isAmbient }, isAmbient, Modifier.height(bandHeight))
                         } else {
-                            // die Aktionsleiste liegt darüber (Puls/Schritte am Rand pausieren, solange sie steht)
+                            // Aktionsleiste bzw. Satzstand der Aufschlag-Auswahl liegen darüber (Puls/Schritte am Rand
+                            // pausieren so lange)
                             Spacer(Modifier.height(bandHeight))
                         }
                     }
                 }
             }
-            if (strip != null) {
+            if ((strip == null || strip is StripAction.Serve) && shift > 0f) {
+                ServeSets(
+                    text = live.scoreCall ?: LiveModel.setsText(live.sets),
+                    screen = screen,
+                    top = halfHeight + bandHeight / 2 - serveSetsHeight / 2,
+                    height = serveSetsHeight,
+                    scoreRight = scoreRight,
+                    shift = shift,
+                )
+            }
+            if (serveBar != null) {
+                ServeButtons(serveBar, servePanel, actions)
+            } else if (strip != null) {
                 val density = LocalDensity.current
                 val geometry = with(density) { ActionStrip.geometry(maxWidth.toPx(), maxHeight.toPx(), density.density) }
                 val stripTop = with(density) { geometry.visualTop.toDp() }
@@ -521,6 +575,8 @@ private fun TeamHalf(
     sideInset: Dp,
     digitSize: Float,
     isAmbient: Boolean,
+    scoreShift: Float,
+    scoreRight: Dp,
     flashing: Boolean,
     holdProgress: () -> Float,
     labelHidden: Boolean,
@@ -636,6 +692,9 @@ private fun TeamHalf(
                 screen = screen,
                 sideInset = sideInset,
                 bandClearance = bandClearance,
+                labelHidden = labelHidden,
+                scoreShift = scoreShift,
+                scoreRight = scoreRight,
                 label = {
                     Column(
                         modifier = if (labelHidden) Modifier.alpha(0f) else Modifier,
@@ -658,7 +717,9 @@ private fun TeamHalf(
  * randnächsten Kante erlaubt ([ScoreLayout.chordWidth]), der Rest endet mit „…“. [halfTop]/[halfHeight] = Lage der
  * Hälfte im Screen, [screen] = Displaydurchmesser, [sideInset] = links und rechts freizuhaltender Rand (Telemetrie-
  * Spalten neben der „Gegner“-Zeile am Mittelband), [bandClearance] = am Mittelband freizuhaltender Streifen (dort liegt
- * gerade die Aktionsleiste; „Gegner“: die ausgeblendete Namenszeile zählt dazu).
+ * gerade die Aktionsleiste; „Gegner“: die ausgeblendete Namenszeile zählt dazu, eine sichtbare steht darunter).
+ * Aufschlag-Auswahl ([scoreShift] 0 = Mitte … 1 = links): Namen und Ziffern rücken in den Bereich zwischen rundem Rand
+ * und [scoreRight] (links der Tasten, [eu.advantly.wear.scoring.ServePanel]) und werden dafür schmaler.
  */
 @Composable
 private fun NamesAndDigits(
@@ -668,6 +729,9 @@ private fun NamesAndDigits(
     screen: Dp,
     sideInset: Dp,
     bandClearance: Dp,
+    labelHidden: Boolean,
+    scoreShift: Float,
+    scoreRight: Dp,
     label: @Composable () -> Unit,
     digits: @Composable () -> Unit,
     modifier: Modifier,
@@ -678,26 +742,111 @@ private fun NamesAndDigits(
         val labelMeasurable = labels.single()
         val labelHeight = labelMeasurable.minIntrinsicHeight(width)
         val clear = bandClearance.roundToPx()
-        // „Gegner“: die Namenszeile liegt ohnehin am Mittelband – frei bleibt der größere der beiden Streifen
-        val digitsTop = if (side == Side.A) labelHeight else maxOf(labelHeight, clear)
-        val digitsRoom = height - digitsTop - if (side == Side.A) clear else 0
-        val digitsPlaceable = numbers.single().measure(Constraints(maxWidth = width, maxHeight = digitsRoom.coerceAtLeast(0)))
+        // „Gegner“: eine ausgeblendete Namenszeile liegt am Mittelband unter der Leiste, eine sichtbare unter dem Streifen
+        val labelTopB = if (labelHidden) 0 else clear
+        val digitsTop =
+            if (side == Side.A) {
+                labelHeight
+            } else if (labelHidden) {
+                maxOf(labelHeight, clear)
+            } else {
+                clear + labelHeight
+            }
+        val digitsRoom = (height - digitsTop - if (side == Side.A) clear else 0).coerceAtLeast(0)
         // „Wir“: Kopf (Uhrzeit) liegt darüber, dieser Bereich endet am Mittelband; „Gegner“: beginnt am Mittelband
         val top = halfTop.toPx() + if (side == Side.A) halfHeight.toPx() - height else 0f
-        val labelY = if (side == Side.A) height - clear - digitsPlaceable.height - labelHeight else 0
-        val digitsY = if (side == Side.A) labelY + labelHeight else digitsTop
+        val diameter = screen.toPx()
         val margin = ScoreLayout.EDGE_MARGIN_DP.dp.toPx()
+        val right = scoreRight.toPx()
+
+        // Bereich zwischen rundem Rand (Zeile [from]..[to]) und den Tasten: (Mitte, Breite) bei voller Verschiebung
+        fun left(
+            from: Float,
+            to: Float,
+        ): Pair<Float, Float> {
+            val l = (diameter - min(ScoreLayout.chordWidth(diameter, from, margin), ScoreLayout.chordWidth(diameter, to, margin))) / 2
+            return (l + right) / 2 to max(0f, right - l)
+        }
+        // links: größte Ziffern-Box (Höhe h am Mittelband, Breite bis zum runden Rand), die im Kreis liegt
+        var digitsBox = Triple(width / 2f, 0f, 0f) // Mitte, Breite, Höhe
+        if (scoreShift > 0f) {
+            for (step in DIGIT_FIT_STEPS downTo 1) {
+                val h = digitsRoom * step / DIGIT_FIT_STEPS.toFloat()
+                val from = top + if (side == Side.A) height - clear - h else digitsTop.toFloat()
+                val (center, w) = left(from, from + h)
+                if (w >= h * DIGIT_ASPECT || step == 1) {
+                    digitsBox = Triple(center, w, h)
+                    break
+                }
+            }
+        }
+        val (digitsCenter, digitsWidth, digitsHeight) = digitsBox
+        val digitsMaxWidth = lerp(width.toFloat(), digitsWidth, scoreShift).toInt().coerceIn(0, width)
+        val digitsMaxHeight = lerp(digitsRoom.toFloat(), digitsHeight, scoreShift).toInt().coerceIn(0, digitsRoom)
+        val digitsPlaceable = numbers.single().measure(Constraints(maxWidth = digitsMaxWidth, maxHeight = digitsMaxHeight))
+        val labelY = if (side == Side.A) height - clear - digitsPlaceable.height - labelHeight else labelTopB
+        val digitsY = if (side == Side.A) labelY + labelHeight else digitsTop
         val chord =
             min(
-                ScoreLayout.chordWidth(screen.toPx(), top + labelY, margin),
-                ScoreLayout.chordWidth(screen.toPx(), top + labelY + labelHeight, margin),
+                ScoreLayout.chordWidth(diameter, top + labelY, margin),
+                ScoreLayout.chordWidth(diameter, top + labelY + labelHeight, margin),
             )
-        val labelWidth = min(min(chord, width * LABEL_WIDTH_FRACTION), width - 2 * sideInset.toPx()).toInt().coerceIn(0, width)
+        val centered = min(min(chord, width * LABEL_WIDTH_FRACTION), width - 2 * sideInset.toPx())
+        val (labelCenter, labelLeftWidth) = left(top + labelY, top + labelY + labelHeight)
+        val labelWidth = lerp(centered, labelLeftWidth, scoreShift).toInt().coerceIn(0, width)
         val labelPlaceable = labelMeasurable.measure(Constraints(maxWidth = labelWidth, maxHeight = labelHeight.coerceAtLeast(0)))
+        val labelX = lerp(width / 2f, labelCenter, scoreShift)
+        val digitsX = lerp(width / 2f, digitsCenter, scoreShift)
         layout(width, height) {
-            labelPlaceable.place((width - labelPlaceable.width) / 2, labelY)
-            digitsPlaceable.place((width - digitsPlaceable.width) / 2, digitsY)
+            labelPlaceable.place((labelX - labelPlaceable.width / 2f).roundToInt(), labelY)
+            digitsPlaceable.place((digitsX - digitsPlaceable.width / 2f).roundToInt(), digitsY)
         }
+    }
+}
+
+/**
+ * Satzstand während der Aufschlag-Auswahl: links neben den Tasten auf Höhe des Mittelbands ([top], [height] im Screen),
+ * höchstens zweizeilig, Schrift passt sich an. Gleitet mit [shift] (1 = links bis [scoreRight], 0 = Mitte) zurück.
+ */
+@Composable
+private fun ServeSets(
+    text: String,
+    screen: Dp,
+    top: Dp,
+    height: Dp,
+    scoreRight: Dp,
+    shift: Float,
+) {
+    if (text.isEmpty()) return
+    val margin = ScoreLayout.EDGE_MARGIN_DP.dp
+    val chord =
+        min(
+            ScoreLayout.chordWidth(screen.value, top.value, margin.value),
+            ScoreLayout.chordWidth(screen.value, (top + height).value, margin.value),
+        ).dp
+    val edge = (screen - chord) / 2
+    val width = lerp(chord.value, (scoreRight - edge).value.coerceAtLeast(0f), shift).dp
+    val minSize = with(LocalDensity.current) { BAND_MIN_DP.dp.toSp() }
+    Box(
+        modifier = Modifier.offset(x = edge, y = top).size(width, height),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text,
+            modifier = Modifier.testTag(LiveTags.SETS),
+            style =
+                LocalTextStyle.current.merge(
+                    TextStyle(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        platformStyle = NO_FONT_PADDING,
+                        lineHeight = 1.1.em,
+                    ),
+                ),
+            maxLines = 2,
+            autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = SERVE_SETS_MAX_SP.sp, stepSize = 0.25.sp),
+        )
     }
 }
 
@@ -837,6 +986,7 @@ internal fun statusText(live: LiveUi): String =
 private fun StatusTimeText(
     live: LiveUi,
     isAmbient: Boolean,
+    compact: Boolean = false,
 ) {
     val text = statusText(live)
     val color =
@@ -847,6 +997,13 @@ private fun StatusTimeText(
             live.sync is SyncUi.Pending || live.sync == SyncUi.Blocked -> HintAmber
             else -> TextSecondary
         }
+    if (compact) {
+        // Aufschlag-Auswahl: nur die Uhrzeit oben – ein langer Bogen liefe über Tasten und Namenszeile (Plan 0.5.1 §4a)
+        TimeText(modifier = Modifier.semantics { contentDescription = text }.testTag(LiveTags.TOP_STATUS)) { time ->
+            timeTextCurvedText(time)
+        }
+        return
+    }
     TimeText(
         modifier = Modifier.semantics { contentDescription = text }.testTag(LiveTags.TOP_STATUS),
         maxSweepAngle = STATUS_SWEEP_DEGREES,
@@ -1041,6 +1198,23 @@ internal object LiveTags {
 }
 
 private const val HALF_FRACTION = (1f - TapZones.MIDDLE_BAND) / 2f
+
+/** Aufschlag-Auswahl: Ziffern links – Breite/Höhe der Box (zwei Ziffern) und Suchschritte für ihre Höhe. */
+private const val DIGIT_ASPECT = 1.2f
+private const val DIGIT_FIT_STEPS = 24
+
+/** Aufschlag-Auswahl: Dauer, mit der der Spielstand zurück in die Mitte gleitet. */
+private const val SERVE_RETURN_MILLIS = 300
+
+/** Aufschlag-Auswahl: Höhe des Satzstands links (zwei Zeilen), größte Schrift. */
+private val SERVE_SETS_HEIGHT = 30.dp
+private const val SERVE_SETS_MAX_SP = 13f
+
+private fun lerp(
+    from: Float,
+    to: Float,
+    fraction: Float,
+): Float = from + (to - from) * fraction
 
 /** Abstand der Ziffern zur sichtbaren Aktionsleiste. */
 private val STRIP_DIGIT_GAP = 2.dp

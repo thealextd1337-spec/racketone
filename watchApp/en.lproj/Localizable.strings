@@ -164,10 +164,8 @@
 "fitness.noHealth" = "No Health access: counting only. The app may pause when your wrist is down.";
 /* P2-J: Telemetrie-Sichtbarkeit (Startliste, mit dem iPhone abgeglichen) */
 "start.telemetry" = "Heart rate & steps";
-"start.telemetry.share" = "Share";
 "start.telemetry.private" = "Only me";
 "start.telemetry.off" = "Off";
-"start.telemetry.shareHint" = "Like “Only me” for now – sharing starts once friends and live view are available.";
 "start.telemetry.privateHint" = "Only on this watch and your iPhone.";
 "start.telemetry.offHint" = "Not shown, nothing is sent.";
 "fitness.telemetryOff" = "Heart rate hidden (Heart rate & steps: Off).";
@@ -209,6 +207,8 @@
 
 /* Matchende */
 "matchend.done" = "Done";
+"matchend.steps %@" = "Steps %@";
+"matchend.maxHeartRate %@" = "Max HR %@";
 
 /* Action-Taste (AppIntent) */
 "intent.undo.title" = "Undo last point";
@@ -489,6 +489,8 @@
 "serve.first" = "1st serve";
 "serve.second" = "2nd serve";
 "serve.df" = "Double fault";
+"serve.panel.second" = "2nd\nserve";
+"serve.panel.df" = "Double\nfault";
 "serve.choose" = "Choose server";
 "serve.choice.first" = "Who serves first?";
 "serve.choice.second.us" = "Who serves for us?";

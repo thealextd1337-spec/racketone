@@ -193,6 +193,8 @@
     <string name="dialog_next_game">%1$d. Spiel?</string>
     <string name="decision_waiting">%1$s entscheidet</string>
     <string name="finished_title">Match beendet</string>
+    <string name="finished_steps">Schritte %1$s</string>
+    <string name="finished_max_heart_rate">Max. Puls %1$s</string>
 
     <!-- Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md) -->
     <string name="setup_tiebreak_only_7">Nur Tiebreak (bis 7)</string>
@@ -217,6 +219,8 @@
     <string name="serve_first_in">1. Aufschlag</string>
     <string name="serve_second_in">2. Aufschlag</string>
     <string name="serve_double_fault">Doppelfehler</string>
+    <string name="serve_panel_second_in">2. Auf-\nschlag</string>
+    <string name="serve_panel_double_fault">Doppel-\nfehler</string>
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>
@@ -277,10 +281,8 @@
     <string name="health_recording_description">Pulsverlauf wird aufgezeichnet. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Puls &amp; Schritte</string>
-    <string name="telemetry_visibility_share">Teilen</string>
     <string name="telemetry_visibility_private">Nur für mich</string>
     <string name="telemetry_visibility_off">Gar nicht</string>
-    <string name="telemetry_visibility_share_hint">Vorerst wie „Nur für mich“ – Teilen wirkt, sobald Freunde und Live-Ansicht verfügbar sind</string>
     <string name="telemetry_visibility_private_hint">Nur auf dieser Uhr und deinem Handy</string>
     <string name="telemetry_visibility_off_hint">Keine Anzeige, es wird nichts gesendet</string>
     <string name="telemetry_controls_off">Puls &amp; Schritte: Gar nicht</string>

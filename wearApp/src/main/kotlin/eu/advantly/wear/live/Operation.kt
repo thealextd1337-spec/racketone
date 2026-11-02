@@ -65,6 +65,7 @@ class ServeBarTimer(
 ) {
     private var pointId: EventId? = null
     private var hideAt: Long = Long.MIN_VALUE
+    private var shownAt: Long = Long.MIN_VALUE
 
     /** Ein Punkt wurde hier gezählt: Leiste für [point] zeigen. */
     fun onPoint(
@@ -72,8 +73,12 @@ class ServeBarTimer(
         nowMillis: Long,
     ) {
         pointId = point
+        shownAt = nowMillis
         hideAt = nowMillis + visibleMillis
     }
+
+    /** Schutzfenster wie [eu.advantly.wear.scoring.TapGuard]: Tasten wählen erst [ARM_MILLIS] nach dem Erscheinen. */
+    fun isArmed(nowMillis: Long): Boolean = nowMillis - shownAt >= ARM_MILLIS
 
     /** Wert gewählt: noch kurz zeigen, dann ausblenden (verkürzt nur, verlängert nie). */
     fun onChosen(nowMillis: Long) {
@@ -100,12 +105,13 @@ class ServeBarTimer(
     companion object {
         const val VISIBLE_MILLIS = OperationTimings.SERVE_BAR_VISIBLE_MILLIS
         const val AFTER_CHOICE_MILLIS = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
+        const val ARM_MILLIS = OperationTimings.SERVE_BAR_ARM_MILLIS
     }
 }
 
 /** Was ein Tap auf die Aktionsleiste ([eu.advantly.wear.scoring.ActionStrip]) gerade bewirkt. */
 sealed interface StripAction {
-    /** Aufschlag-Info für den letzten Punkt wählen (Segmente = [ServeBarUi.options]). */
+    /** Aufschlag-Info für den letzten Punkt wählen (Tasten = [ServeBarUi.options], [eu.advantly.wear.scoring.ServePanel]). */
     data class Serve(
         val bar: ServeBarUi,
     ) : StripAction
@@ -119,25 +125,6 @@ sealed interface StripAction {
 
 /** Reine Regeln für Aufschlag-Leiste, Aufschlägerwahl, Aktionsleiste und Versionshinweis. */
 object OperationRules {
-    /**
-     * Relative Breite des Segments „Doppelfehler“: ein langes Wort ohne Umbruchstelle („Doppelfehler“), die anderen
-     * Labels brechen zweizeilig um („2.“ / „Aufschlag“).
-     */
-    const val DOUBLE_FAULT_WEIGHT = 1.3f
-
-    /**
-     * Relative Breite des Satzstand-Felds ganz links in der Aufschlag-Leiste: Die Leiste liegt im Mittelband, wo sonst
-     * die Sätze und Games stehen – sie zeigt sie deshalb selbst an (nicht antippbar), so bleibt der Stand sichtbar.
-     */
-    const val SETS_WEIGHT = 1f
-
-    /**
-     * Relative Breiten der Aufschlag-Leiste (Darstellung und Treffer, [eu.advantly.wear.scoring.ActionStrip]): erst das
-     * Satzstand-Feld ([SETS_WEIGHT]), dann je Wert aus [ServeBarUi.options] ein Segment.
-     */
-    fun serveWeights(bar: ServeBarUi): List<Float> =
-        listOf(SETS_WEIGHT) + bar.options.map { if (it == ServeOutcome.DOUBLE_FAULT) DOUBLE_FAULT_WEIGHT else 1f }
-
     /**
      * Aufschlag-Leiste für [match], falls sie für [visiblePoint] gerade sichtbar ist (nur Zähler, Modus „Aufschläge“ ≠
      * „Nein“); `null` auch, wenn der Modus für diesen Punkt nichts anbietet („Nur Doppelfehler“, Punkt des Aufschlägers).
@@ -188,11 +175,11 @@ object OperationRules {
         return null
     }
 
-    /** Segment [index] der Aufschlag-Leiste ([serveWeights]) → Wert; das Satzstand-Feld (0) wählt nichts. */
+    /** Taste [index] der Aufschlag-Auswahl ([eu.advantly.wear.scoring.ServePanel.button], von oben) → Wert. */
     fun serveOption(
         bar: ServeBarUi,
         index: Int,
-    ): ServeOutcome? = bar.options.getOrNull(index - 1)
+    ): ServeOutcome? = bar.options.getOrNull(index)
 
     /**
      * Versionsunterschied zu einer erreichbaren Gegenstelle (W2-Vertrag §5): `PEER_TOO_OLD` → das andere Gerät (Handy)

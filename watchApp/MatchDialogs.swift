@@ -114,6 +114,13 @@ struct MatchEndView: View {
                         .font(.headline)
                         .monospacedDigit()
                 }
+                if let summary = healthSummary {
+                    Text(verbatim: summary)
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("matchendHealth")
+                }
                 Button {
                     model.closeMatch()
                 } label: {
@@ -133,6 +140,28 @@ struct MatchEndView: View {
                 }
             }
         }
+    }
+
+    /// Kleine Bilanz der Uhr (0.5.1): Schritte und höchster Puls der Partie – je Wert aus dem eigenen Pulsverlauf, sonst
+    /// aus den Live-Werten des Workouts (nur Arbeitsspeicher). Nichts bei „Gar nicht“ oder ohne Workout; fehlt ein Wert,
+    /// steht nur der andere da.
+    private var healthSummary: String? {
+        guard model.workout.telemetryAllowed, !snap.matchId.isEmpty else { return nil }
+        let health = AdvantlyWatch.shared.health()
+        let live = model.workout.liveSummary[snap.matchId]
+        let recordedSteps = health.recordedSteps(matchId: snap.matchId)
+        let recordedBpm = Int(health.recordedMaxBpm(matchId: snap.matchId))
+        let steps = recordedSteps >= 0 ? recordedSteps : (live?.steps ?? -1)
+        let maxBpm = recordedBpm >= 0 ? recordedBpm : (live?.maxBpm ?? -1)
+        var parts: [String] = []
+        if steps >= 0 { parts.append(loc("matchend.steps %@", Self.number(steps))) }
+        if maxBpm > 0 { parts.append(loc("matchend.maxHeartRate %@", Self.number(Int64(maxBpm)))) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Ganze Zahl nach Region („4.312“ bzw. „4,312“).
+    private static func number(_ value: Int64) -> String {
+        NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
     }
 
     /// Ergebnis-Codes aus Kotlin → Text-Schlüssel (keine UI-Texte aus der Facade).

@@ -84,17 +84,17 @@ struct StartView: View {
     }
 }
 
-/// „Puls & Schritte“ (P2-J): Teilen / Nur für mich (Standard) / Gar nicht, mit kurzer Erklärung der Wahl.
+/// „Puls & Schritte“ (P2-J): Nur für mich (Standard) / Gar nicht, mit kurzer Erklärung der Wahl. „Teilen“ bietet die Uhr
+/// nicht mehr an (Nutzerentscheid 02.11.2026); ein vom iPhone übernommenes „share“ wird als „Nur für mich“ angezeigt.
 struct TelemetrySection: View {
     @ObservedObject var model: ScoringModel
 
     var body: some View {
         Section {
             Picker("start.telemetry", selection: Binding(
-                get: { model.telemetryVisibility },
+                get: { model.telemetryVisibility == "off" ? "off" : "private" },
                 set: { model.setTelemetryVisibility($0) }
             )) {
-                Text("start.telemetry.share").tag("share")
                 Text("start.telemetry.private").tag("private")
                 Text("start.telemetry.off").tag("off")
             }
@@ -107,7 +107,6 @@ struct TelemetrySection: View {
 
     private var hint: LocalizedStringKey {
         switch model.telemetryVisibility {
-        case "share": return "start.telemetry.shareHint"
         case "off": return "start.telemetry.offHint"
         default: return "start.telemetry.privateHint"
         }

@@ -1,6 +1,7 @@
 package eu.advantly.wear.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.advantly.core.model.MatchFormat
@@ -10,6 +11,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.health.HealthSummary
 import eu.advantly.presentation.live.PointLabel
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.match.UpdateRequired
@@ -19,6 +21,7 @@ import eu.advantly.wear.live.PlayerUi
 import eu.advantly.wear.live.SyncUi
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.match.FormatChoice
+import java.text.NumberFormat
 
 // Texte der Wear-UI aus res/values[-de]/strings.xml; die Logik liefert nur Enums/Zahlen (CLAUDE.md „UI-Strings“).
 
@@ -392,6 +395,25 @@ fun serveText(outcome: ServeOutcome): String =
             ServeOutcome.DOUBLE_FAULT -> R.string.serve_double_fault
         },
     )
+
+/** Aufschlag-Wert als große Taste: zwei Zeilen mit fester Trennstelle („2. Auf-“ / „schlag“, „Doppel-“ / „fehler“). */
+@Composable
+fun servePanelText(outcome: ServeOutcome): String =
+    when (outcome) {
+        ServeOutcome.FIRST_SERVE_IN -> serveText(outcome)
+        ServeOutcome.SECOND_SERVE_IN -> stringResource(R.string.serve_panel_second_in)
+        ServeOutcome.DOUBLE_FAULT -> stringResource(R.string.serve_panel_double_fault)
+    }
+
+/** Matchende-Bilanz der Uhr: „Schritte 4.312 · Max. Puls 176“, Zahlen nach Sprache; fehlende Werte entfallen. */
+@Composable
+fun healthSummaryText(health: HealthSummary): String {
+    val format = NumberFormat.getIntegerInstance(LocalConfiguration.current.locales[0])
+    return listOfNotNull(
+        health.steps?.let { stringResource(R.string.finished_steps, format.format(it)) },
+        health.maxBpm?.let { stringResource(R.string.finished_max_heart_rate, format.format(it)) },
+    ).joinToString(" · ")
+}
 
 /** Satzende-Option (02 §5.2): normaler Satz, Tiebreak bis 7, Champions- bzw. (Padel) Super-Tiebreak bis 10. */
 @Composable

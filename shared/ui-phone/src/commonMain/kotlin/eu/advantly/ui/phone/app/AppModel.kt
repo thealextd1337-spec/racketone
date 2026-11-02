@@ -143,6 +143,12 @@ class AdvantlyAppModel(
     /** Das laufende Match, das die eigene Uhr gerade zählt (sie ist dann nicht frei, F22), sonst `null`. */
     fun watchMatch(): LiveMatchSnapshot? = live.openMatches.value.firstOrNull { it.watchScores }
 
+    /**
+     * Ein Dialog unter „Puls & Schritte“ im Profil (Einwilligung, Widerruf, Export/Import) ist offen: Die Rückfrage
+     * „Pulsverlauf von der Uhr beibehalten?“ wartet so lange, statt sich darüber zu stapeln (Review N7).
+     */
+    var healthDialogOpen: Boolean by mutableStateOf(false)
+
     /** Schnellstart, der noch auf „Wer zählt?“ wartet (nur mit verbundener Uhr, 04 §3.1). */
     var pendingScorerChoice: MatchSetup? by mutableStateOf(null)
         private set

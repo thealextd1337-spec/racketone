@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-enum class AuthStep { AGE, PROVIDER, CODE, CONSENT, ALIAS, ACCOUNT }
+/** [HEALTH] (Plan 0.5.1 §5.1): „Puls & Schritte“ und „Pulsverlauf aufzeichnen“ nach der Anmeldung, nur ohne Entscheidung. */
+enum class AuthStep { AGE, PROVIDER, CODE, CONSENT, HEALTH, ALIAS, ACCOUNT }
 
 data class AuthState(
     val step: AuthStep = AuthStep.AGE,
@@ -108,6 +109,15 @@ class AuthViewModel(
     private var actionRevision = 0L
     private val scope get() = workScope ?: viewModelScope
 
+    /**
+     * Ist „Pulsverlauf aufzeichnen“ auf diesem Gerät noch offen (`HealthConsent.isDefault`)? Setzt die Phone-UI aus den
+     * Session-Einstellungen (wie `onVisitorsChosen`); `null` = nie fragen. Nur auf dem Main-Thread lesen.
+     */
+    var healthDecisionOpen: (() -> Boolean)? = null
+
+    /** Anmeldung in diesem ViewModel (neues oder bestehendes Konto): Schritt HEALTH fragen, bis er beantwortet ist. */
+    private var askHealth = false
+
     init {
         scope.launch {
             var previous = auth.accountSession.value
@@ -175,6 +185,7 @@ class AuthViewModel(
         runAction {
             auth.verifyEmailCode(email, code)
             email = ""
+            askHealth = true
             showSession()
         }
 
@@ -197,7 +208,18 @@ class AuthViewModel(
             )
         }
         ticket = null
+        askHealth = true
         showSession()
+    }
+
+    /**
+     * Schritt HEALTH verlassen: „Weiter“ und „Später“ (die Einstellungen übernimmt die UI vorher selbst über den
+     * Session-Port); „Später“ entscheidet nichts, der Schalter im Profil bleibt.
+     */
+    fun continueAfterHealth() {
+        if (mutable.value.step != AuthStep.HEALTH || mutable.value.busy) return
+        askHealth = false
+        mutable.value = mutable.value.copy(step = if (mutable.value.onboarded) AuthStep.ACCOUNT else AuthStep.ALIAS)
     }
 
     fun finish(
@@ -264,6 +286,7 @@ class AuthViewModel(
                 ticket = null
                 email = ""
                 existingAccount = false
+                askHealth = false
                 mutable.value = AuthState()
             }
         }
@@ -275,6 +298,7 @@ class AuthViewModel(
             ticket = null
             email = ""
             existingAccount = false
+            askHealth = false
             try {
                 if (abandoned != null) auth.cancelAgeTicket(abandoned)
             } catch (e: CancellationException) {
@@ -301,20 +325,22 @@ class AuthViewModel(
         // Angemeldet: die Umdeutung „kein Konto“ gilt nur für den Anmeldeversuch selbst.
         if (session != null) existingAccount = false
         displayedSession = session
+        val asksHealth = askHealth && healthDecisionOpen?.invoke() == true
         // Bis der Katalog geladen ist: ohne Profil gesperrt, mit Profil unbestätigt (scheitert das Laden, wird weitergezählt).
         mutable.value =
             AuthState(
                 step =
                     when {
                         session == null -> AuthStep.AGE
-                        !session.onboarded && !session.deletionRequested -> AuthStep.CONSENT
+                        (asksHealth || !session.onboarded) && !session.deletionRequested -> AuthStep.CONSENT
                         else -> AuthStep.ACCOUNT
                     },
                 busy = mutable.value.busy,
                 authenticated = session != null,
                 deletionRequested = session?.deletionRequested == true,
                 suspended = session?.suspended == true,
-                unconfirmed = session?.onboarded == true && !session.deletionRequested,
+                // Nach einer Anmeldung kein kurzes Aufblitzen der App vor dem Schritt HEALTH
+                unconfirmed = session?.onboarded == true && !session.deletionRequested && !asksHealth,
                 onboarded = session?.onboarded == true,
             )
         val consent = session?.let { auth.consent(consentLanguage) }
@@ -323,16 +349,20 @@ class AuthViewModel(
             throw CloudException("cloud_session_changed", true)
         }
         displayedSession = session
+        val step =
+            when {
+                session == null -> AuthStep.AGE
+                session.deletionRequested -> AuthStep.ACCOUNT
+                consent?.status != ConsentStatus.CURRENT -> AuthStep.CONSENT
+                asksHealth -> AuthStep.HEALTH
+                session.onboarded -> AuthStep.ACCOUNT
+                else -> AuthStep.ALIAS
+            }
+        // Schon entschieden oder Anmeldung vorbei: später erneuerte Sitzungen fragen nicht mehr.
+        if (step != AuthStep.CONSENT && step != AuthStep.HEALTH) askHealth = false
         mutable.value =
             AuthState(
-                step =
-                    when {
-                        session == null -> AuthStep.AGE
-                        session.deletionRequested -> AuthStep.ACCOUNT
-                        consent?.status != ConsentStatus.CURRENT -> AuthStep.CONSENT
-                        session.onboarded -> AuthStep.ACCOUNT
-                        else -> AuthStep.ALIAS
-                    },
+                step = step,
                 busy = mutable.value.busy,
                 deletionRequested = session?.deletionRequested == true,
                 authenticated = session != null,

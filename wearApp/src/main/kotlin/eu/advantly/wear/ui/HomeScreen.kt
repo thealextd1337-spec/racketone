@@ -193,8 +193,9 @@ fun permissionHints(permissions: WorkoutPermissions): List<Int> =
     }
 
 /**
- * „Puls & Schritte“ (P2-J): Tippen wechselt reihum Teilen → Nur für mich → Gar nicht; die Zeile darunter erklärt die
- * aktuelle Wahl. Von „Nur für mich“ (Standard) ist „Gar nicht“ einen Tipp entfernt.
+ * „Puls & Schritte“ (P2-J): Tippen wechselt zwischen „Nur für mich“ (Standard) und „Gar nicht“; die Zeile darunter
+ * erklärt die aktuelle Wahl. „Teilen“ bietet die Uhr nicht mehr an (Nutzerentscheid 02.11.2026, das Teilen wird anders
+ * gelöst); ein vom Handy übernommenes „Teilen“ wirkt hier wie „Nur für mich“.
  */
 @Composable
 internal fun TelemetryVisibilityButton(
@@ -217,21 +218,19 @@ internal fun TelemetryVisibilityButton(
     )
 }
 
-/** Reihum in der Reihenfolge der Optionen. */
+/** Umschalten „Nur für mich“ ↔ „Gar nicht“. */
 fun nextTelemetryVisibility(current: TelemetryVisibility): TelemetryVisibility =
-    TelemetryVisibility.entries[(current.ordinal + 1) % TelemetryVisibility.entries.size]
+    if (current == TelemetryVisibility.OFF) TelemetryVisibility.PRIVATE else TelemetryVisibility.OFF
 
 fun telemetryVisibilityName(visibility: TelemetryVisibility): Int =
     when (visibility) {
-        TelemetryVisibility.SHARE -> R.string.telemetry_visibility_share
-        TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private
+        TelemetryVisibility.SHARE, TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private
         TelemetryVisibility.OFF -> R.string.telemetry_visibility_off
     }
 
 fun telemetryVisibilityHint(visibility: TelemetryVisibility): Int =
     when (visibility) {
-        TelemetryVisibility.SHARE -> R.string.telemetry_visibility_share_hint
-        TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private_hint
+        TelemetryVisibility.SHARE, TelemetryVisibility.PRIVATE -> R.string.telemetry_visibility_private_hint
         TelemetryVisibility.OFF -> R.string.telemetry_visibility_off_hint
     }
 

@@ -191,14 +191,12 @@ class OperationRulesTest {
     }
 
     @Test
-    fun serveOptionMapsSegments() {
+    fun serveOptionMapsButtonsFromTop() {
         val bar = ServeBarUi(EventId("p"), listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), null)
-        // Feld 0 = Satzstand (nicht antippbar), dann die Werte
-        assertEquals(listOf(OperationRules.SETS_WEIGHT, 1f, OperationRules.DOUBLE_FAULT_WEIGHT), OperationRules.serveWeights(bar))
-        assertNull(OperationRules.serveOption(bar, 0))
-        assertEquals(ServeOutcome.SECOND_SERVE_IN, OperationRules.serveOption(bar, 1))
-        assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveOption(bar, 2))
-        assertNull(OperationRules.serveOption(bar, 3))
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, OperationRules.serveOption(bar, 0))
+        assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveOption(bar, 1))
+        assertNull(OperationRules.serveOption(bar, 2))
+        assertNull(OperationRules.serveOption(bar, -1))
     }
 
     @Test
@@ -227,6 +225,16 @@ class OperationRulesTest {
         timer.onPoint(p1, 30_000)
         timer.dismiss()
         assertNull(timer.visiblePoint(30_001))
+    }
+
+    @Test
+    fun serveBarTimerArmsTheButtonsShortlyAfterAppearing() {
+        val timer = ServeBarTimer()
+        timer.onPoint(EventId("p1"), 1_000)
+        assertFalse(timer.isArmed(1_000))
+        assertFalse(timer.isArmed(1_000 + ServeBarTimer.ARM_MILLIS - 1))
+        assertTrue(timer.isArmed(1_000 + ServeBarTimer.ARM_MILLIS))
+        assertEquals(250L, ServeBarTimer.ARM_MILLIS)
     }
 
     @Test

@@ -44,6 +44,7 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.core.scoring.Undo
 import eu.advantly.data.LocalData
 import eu.advantly.data.PlayerKind
+import eu.advantly.data.StoredHealthSeries
 import eu.advantly.data.assignments
 import eu.advantly.data.freshPlaceholders
 import eu.advantly.data.resolvedLineup
@@ -53,6 +54,8 @@ import eu.advantly.device.link.CompanionState
 import eu.advantly.health.maxBpm
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceStatus
+import eu.advantly.match.session.HealthArchiveContent
+import eu.advantly.match.session.HealthImportResult
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
@@ -153,6 +156,15 @@ class SessionMatchStore(
     override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     override val localAppBuild get() = session.config.appBuild
+
+    // Gerätelokal und kontounabhängig (wie die Gerätenamen); geht nie an die Uhr oder in die Cloud.
+    override fun localNote(key: String): String? = data.settings.get(NOTE_PREFIX + key)
+
+    override fun putLocalNote(
+        key: String,
+        value: String,
+    ) = data.settings.put(NOTE_PREFIX + key, value)
+
     private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
     override val deviceStatuses = deviceStatusFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
@@ -163,6 +175,10 @@ class SessionMatchStore(
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
     private val healthConsentFlow = MutableStateFlow(session.state.value.healthConsent.enabled)
     override val healthConsent: StateFlow<Boolean> = healthConsentFlow.asStateFlow()
+    private val healthOpenFlow = MutableStateFlow(session.state.value.healthConsent.isDefault)
+    override val healthConsentOpen: StateFlow<Boolean> = healthOpenFlow.asStateFlow()
+    private val healthToConfirmFlow = MutableStateFlow(session.state.value.healthConsentToConfirm)
+    override val healthConsentToConfirm: StateFlow<Boolean> = healthToConfirmFlow.asStateFlow()
     private val healthRevisionFlow = MutableStateFlow(session.state.value.dataRevision)
     override val healthRevision: StateFlow<Long> = healthRevisionFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
@@ -286,7 +302,13 @@ class SessionMatchStore(
 
     override fun setHealthConsent(enabled: Boolean) = session.setHealthConsent(enabled)
 
+    override fun confirmHealthConsent(keep: Boolean) = session.confirmHealthConsent(keep)
+
     override fun deleteAllHealthData() = session.deleteAllHealthData()
+
+    override fun exportHealthSeries(): List<StoredHealthSeries> = session.exportHealthSeries()
+
+    override fun importHealth(content: HealthArchiveContent): HealthImportResult = session.importHealth(content)
 
     override fun pulseSetting(matchId: MatchId): PulseSetting =
         PulseSetting(session.pulseVisibility(matchId), data.health.forMatch(matchId).isNotEmpty())
@@ -636,6 +658,8 @@ class SessionMatchStore(
         // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
         healthConsentFlow.value = state.healthConsent.enabled
+        healthOpenFlow.value = state.healthConsent.isDefault
+        healthToConfirmFlow.value = state.healthConsentToConfirm
         healthRevisionFlow.value = state.dataRevision
         // Nur auf Ungleichheit: der Zähler beginnt nach einem Neustart wieder bei 0.
         val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision
@@ -1174,6 +1198,7 @@ class SessionMatchStore(
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
         const val FAVORITES_KEY = "phone.favorites"
+        const val NOTE_PREFIX = "presentation.note."
         const val CONTACT_PERSIST_INTERVAL_MS = 10_000L
 
         /** Matches je Scheduler-Häppchen beim Neurechnen der Gesundheits-Höchstwerte. */

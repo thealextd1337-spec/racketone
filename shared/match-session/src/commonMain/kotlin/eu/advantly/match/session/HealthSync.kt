@@ -11,6 +11,7 @@ import eu.advantly.data.StoredHealthSeries
 import eu.advantly.health.HealthQuality
 import eu.advantly.health.HealthRecorder
 import eu.advantly.health.HealthSeries
+import eu.advantly.health.HealthSummary
 import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthConsentSetting
 import eu.advantly.sync.protocol.HealthMessage
@@ -18,6 +19,9 @@ import eu.advantly.sync.protocol.HealthSeriesMessage
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
 import kotlin.math.abs
+
+/** Unbestätigte Pulsverläufe bleiben höchstens so lange auf der Uhr (E5); danach kommt keiner mehr ans Handy. */
+const val WATCH_HEALTH_RETENTION_MS: Long = 7L * 24 * 60 * 60 * 1000
 
 /**
  * Pulsverlauf eines Geräts (Plan Puls H5/H6), gemeinsam für Wear OS und watchOS: Einwilligung, Stufe je Match, Aufnahme
@@ -30,6 +34,7 @@ import kotlin.math.abs
  * dessen Ende, spätestens nach 7 Tagen (E5) – löscht sie sie. Das Handy speichert idempotent über
  * `(matchId, sourceDeviceId, revision)`.
  */
+
 internal class HealthSync(
     private val data: LocalData,
     private val kind: PeerKind,
@@ -41,6 +46,15 @@ internal class HealthSync(
     var consent: HealthConsent = loadConsent()
         private set
 
+    /** Plan 0.5.1 §5.4: Merker „vom Gerät ohne eigene Entscheidung übernommen“, überdauert Neustarts. */
+    private var adoptedUnconfirmed = data.settings.get(confirmKey()) != null
+
+    /**
+     * Handy: „an“ kam per Abgleich von der Uhr, ohne dass das Handy je selbst entschieden hat (Zähler 0) – einmal
+     * nachfragen. Eine eigene Entscheidung beendet die Frage; ein späteres „aus“ macht sie gegenstandslos.
+     */
+    val toConfirm: Boolean get() = adoptedUnconfirmed && consent.enabled
+
     private val recorders = HashMap<MatchId, HealthRecorder>()
     private val savedAtMs = HashMap<MatchId, Long>()
 
@@ -49,6 +63,7 @@ internal class HealthSync(
 
     fun reload() {
         consent = loadConsent()
+        adoptedUnconfirmed = data.settings.get(confirmKey()) != null
         recorders.clear()
         savedAtMs.clear()
         offsets.clear()
@@ -56,11 +71,23 @@ internal class HealthSync(
 
     // --- Einwilligung und Stufe -------------------------------------------------------------------------------------
 
-    /** Übernimmt [next] (lokal oder per Merge); ein Widerruf löscht alle Gesundheitsdaten dieses Geräts. `true` = geändert. */
-    fun adoptConsent(next: HealthConsent): Boolean {
+    /**
+     * Übernimmt [next] (lokal oder mit [merged] per Abgleich); ein Widerruf löscht alle Gesundheitsdaten dieses Geräts.
+     * `true` = geändert.
+     */
+    fun adoptConsent(
+        next: HealthConsent,
+        merged: Boolean = false,
+    ): Boolean {
         if (next == consent) return false
         val setting = checkNotNull(HealthConsentSetting.of(next)) { "Einwilligung ohne Versionsangabe" }
         data.settings.put(consentKey(), SyncCodec.json.encodeToString(HealthConsentSetting.serializer(), setting))
+        val unconfirmed =
+            if (merged) adoptedUnconfirmed || (kind == PeerKind.PHONE && consent.isDefault && next.enabled) else false
+        if (unconfirmed != adoptedUnconfirmed) {
+            if (unconfirmed) data.settings.put(confirmKey(), "1") else data.settings.remove(confirmKey())
+            adoptedUnconfirmed = unconfirmed
+        }
         val revoked = consent.enabled && !next.enabled
         consent = next
         if (revoked) deleteAll()
@@ -183,6 +210,9 @@ internal class HealthSync(
         savedAtMs[matchId] = nowMs()
     }
 
+    /** Bilanz der eigenen gespeicherten Serie (Matchende-Seite der Uhr). */
+    fun recordedSummary(matchId: MatchId): HealthSummary? = own(matchId)?.let { HealthSummary.of(it.series) }
+
     private fun own(matchId: MatchId): StoredHealthSeries? = data.health.forMatch(matchId).firstOrNull { it.sourceDeviceId == deviceId() }
 
     private fun forget(matchId: MatchId) {
@@ -282,6 +312,23 @@ internal class HealthSync(
             }
         }
 
+    // --- Datei-Import (Plan 0.5.1 §7b) -------------------------------------------------------------------------------
+
+    /**
+     * Pulsverläufe aus einer [HealthArchive]-Datei: Zuordnung über die Match-ID zu lesbaren Matches, eine vorhandene Serie
+     * ersetzt nur eine höhere Revision. Ein hier gewähltes „Gar nicht“ bleibt; `deletedBefore` gilt nicht, weil der Nutzer
+     * den Import selbst auslöst (die Sperre ist für verspätete Uhr-Sendungen gedacht).
+     */
+    fun import(content: HealthArchiveContent): HealthImportResult =
+        HealthArchive.import(content, consent.enabled) { stored ->
+            when {
+                data.matches.get(stored.matchId) == null -> HealthImportPlacement.UNKNOWN_MATCH
+                data.settings.get(PULSE_PREFIX + stored.matchId.value) == TelemetryVisibility.OFF.wire -> HealthImportPlacement.SKIPPED
+                data.health.upsert(stored) -> HealthImportPlacement.IMPORTED
+                else -> HealthImportPlacement.SKIPPED
+            }
+        }
+
     private fun store(message: HealthSeriesMessage): HealthAck? {
         val validBpm = message.bpm.all { it == null || it in HealthRecorder.BPM_RANGE }
         if (!validBpm || message.steps.any { it != null && it < 0 }) return null
@@ -295,6 +342,8 @@ internal class HealthSync(
     private fun deletion(matchId: MatchId) = HealthSeriesMessage(matchId, deviceId(), revision = 0, deleted = true)
 
     private fun deletedBefore(): Long = data.settings.get(DELETED_BEFORE_KEY)?.toLongOrNull() ?: Long.MIN_VALUE
+
+    private fun confirmKey(): String = consentKey() + CONFIRM_SUFFIX
 
     private fun loadConsent(): HealthConsent {
         val stored = data.settings.get(consentKey()) ?: return HealthConsent()
@@ -310,12 +359,13 @@ internal class HealthSync(
         const val SAVE_INTERVAL_MS: Long = 60_000
 
         /** Unbestätigte Serien bleiben höchstens so lange auf der Uhr (E5). */
-        const val RETENTION_MS: Long = 7L * 24 * 60 * 60 * 1000
+        const val RETENTION_MS: Long = WATCH_HEALTH_RETENTION_MS
 
         /** Größere Abstände Empfang − Event-Zeit gelten als Nachlieferung, nicht als Uhrenabweichung. */
         const val MAX_OFFSET_MS: Long = 60_000
 
         const val CONSENT_KEY = "session.healthConsent"
+        private const val CONFIRM_SUFFIX = ".toConfirm"
         private const val PULSE_PREFIX = "health.pulse."
         private const val DELETED_BEFORE_KEY = "health.deletedBefore"
 

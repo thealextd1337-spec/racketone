@@ -50,19 +50,15 @@ class TelemetrySettingsUiTest {
                 model.navigator.tab = AppTab.Profile
                 setContent { AdvantlyApp(model = model, darkTheme = false) }
                 onNodeWithTag("telemetry_private").performScrollTo().assertIsSelected().assertTextContains("Nur für mich", substring = true)
-                onNodeWithTag("telemetry_share").assertIsNotSelected()
+                onNodeWithTag("telemetry_share").assertDoesNotExist()
                 onNodeWithTag("telemetry_off").assertTextContains("die Uhr sendet nichts", substring = true).performClick()
                 runOnIdle { assertEquals(TelemetryVisibility.OFF, model.telemetry.telemetryVisibility.value) }
                 onNodeWithTag("telemetry_off").assertIsSelected()
-                onNodeWithTag("telemetry_share_pending").assertDoesNotExist()
-                onNodeWithTag("telemetry_share").performClick()
-                onNodeWithTag("telemetry_share_pending").performScrollTo().assertIsDisplayed()
-                runOnIdle { assertEquals(TelemetryVisibility.SHARE, model.telemetry.telemetryVisibility.value) }
             }
         }
 
     @Test
-    fun englishLargeFontScreenshotWithShareHint() =
+    fun storedShareShowsAsOnlyMe() =
         withLocale(Locale.US) {
             runDesktopComposeUiTest(width = 360, height = 720) {
                 val port = InMemoryTelemetrySettings(TelemetryVisibility.SHARE)
@@ -71,11 +67,10 @@ class TelemetrySettingsUiTest {
                         AdvantlyTheme { TelemetryVisibilitySection(port) }
                     }
                 }
-                onNodeWithTag("telemetry_share").assertIsSelected().assertTextContains("Share", substring = true)
-                onNodeWithTag("telemetry_private").assertTextContains("Only me (default)", substring = true)
-                onNodeWithTag("telemetry_share_pending")
-                    .assertTextContains("not uploaded to the cloud", substring = true)
-                    .assertIsDisplayed()
+                // „Teilen“ vom Konto bzw. einer alten Version: am Handy als „Nur für mich“, ohne den Wert umzuschreiben
+                onNodeWithTag("telemetry_share").assertDoesNotExist()
+                onNodeWithTag("telemetry_private").assertIsSelected().assertTextContains("Only me (default)", substring = true)
+                runOnIdle { assertEquals(TelemetryVisibility.SHARE, port.telemetryVisibility.value) }
                 val output = File("build/reports/screenshots/telemetry-settings-en-large.png")
                 output.parentFile.mkdirs()
                 ImageIO.write(onRoot().captureToImage().toAwtImage(), "png", output)

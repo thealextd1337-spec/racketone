@@ -48,6 +48,9 @@ object AdvantlyWatch {
     /** Aufschlag-Leiste: nach einer Auswahl noch sichtbar (ms), verlängert nie. */
     fun serveBarAfterChoiceMillis(): Long = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
 
+    /** Schutzfenster nach dem Erscheinen der Aufschlag-Tasten (Fehl-Tipp direkt nach dem Punkt). */
+    fun serveBarArmMillis(): Long = OperationTimings.SERVE_BAR_ARM_MILLIS
+
     /** Halten auf einer Hälfte zum Abziehen des letzten Punktes (ms). */
     fun holdToRemoveMillis(): Long = OperationTimings.HOLD_TO_REMOVE_MILLIS
 }

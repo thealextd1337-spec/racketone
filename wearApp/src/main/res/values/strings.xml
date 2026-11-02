@@ -200,6 +200,8 @@
     <string name="dialog_next_game">Game %1$d?</string>
     <string name="decision_waiting">%1$s decides</string>
     <string name="finished_title">Match over</string>
+    <string name="finished_steps">Steps %1$s</string>
+    <string name="finished_max_heart_rate">Max HR %1$s</string>
 
     <!-- Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md) -->
     <string name="setup_tiebreak_only_7">Tiebreak only (to 7)</string>
@@ -224,6 +226,8 @@
     <string name="serve_first_in">1st serve</string>
     <string name="serve_second_in">2nd serve</string>
     <string name="serve_double_fault">Double fault</string>
+    <string name="serve_panel_second_in">2nd\nserve</string>
+    <string name="serve_panel_double_fault">Double\nfault</string>
     <string name="server_choice_title_game1">Who serves first?</string>
     <string name="server_choice_title_game2_us">Who serves for us?</string>
     <string name="server_choice_title_game2_them">Who serves for the opponents?</string>
@@ -285,10 +289,8 @@
     <string name="health_recording_description">Recording heart rate history. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Heart rate &amp; steps</string>
-    <string name="telemetry_visibility_share">Share</string>
     <string name="telemetry_visibility_private">Only me</string>
     <string name="telemetry_visibility_off">Off</string>
-    <string name="telemetry_visibility_share_hint">Like “Only me” for now – sharing starts once friends and live view are available</string>
     <string name="telemetry_visibility_private_hint">Only on this watch and your phone</string>
     <string name="telemetry_visibility_off_hint">Not shown, nothing is sent</string>
     <string name="telemetry_controls_off">Heart rate &amp; steps: Off</string>

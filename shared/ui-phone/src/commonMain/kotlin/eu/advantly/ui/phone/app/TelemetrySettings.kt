@@ -17,12 +17,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,10 +61,6 @@ import eu.advantly.ui.phone.resources.telemetry_off_sub
 import eu.advantly.ui.phone.resources.telemetry_private
 import eu.advantly.ui.phone.resources.telemetry_private_sub
 import eu.advantly.ui.phone.resources.telemetry_section
-import eu.advantly.ui.phone.resources.telemetry_share
-import eu.advantly.ui.phone.resources.telemetry_share_pending
-import eu.advantly.ui.phone.resources.telemetry_share_sub
-import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -74,10 +72,23 @@ val LocalTelemetryVisibility = compositionLocalOf { TelemetryVisibility.DEFAULT 
 /** Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls E1) für den Assistenten; ohne Bereitstellung aus. */
 val LocalHealthConsent = compositionLocalOf { false }
 
+/** Meldet offene Gesundheitsdialoge an [AdvantlyAppModel.healthDialogOpen]; ohne Bereitstellung wirkungslos. */
+internal val LocalHealthDialogOpen = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
+
+/** Solange dieser Aufruf in der Komposition ist, gilt ein Gesundheitsdialog als offen. */
+@Composable
+internal fun ReportHealthDialog() {
+    val report = LocalHealthDialogOpen.current
+    DisposableEffect(report) {
+        report(true)
+        onDispose { report(false) }
+    }
+}
+
 /**
- * Einstellung „Puls & Schritte“ (P2-J, F19/F29) im Profil: „Teilen“, „Nur für mich“ (Standard) oder „Gar nicht“, je mit
- * kurzer Erklärung. Gilt für Uhr und Handy (Abgleich über die Match-Session, letzte Änderung gewinnt). Bei „Teilen“ steht
- * der Hinweis, dass es erst mit Freunden/Live-Ansicht wirkt. Eigener Baustein, damit er mit dem Profil (P2) umziehen kann.
+ * Einstellung „Puls & Schritte“ (P2-J, F19/F29) im Profil: „Nur für mich“ (Standard) oder „Gar nicht“, je mit kurzer
+ * Erklärung. Gilt für Uhr und Handy (Abgleich über die Match-Session, letzte Änderung gewinnt). Eigener Baustein, damit
+ * er mit dem Profil (P2) umziehen kann.
  */
 @Composable
 fun TelemetryVisibilitySection(
@@ -95,20 +106,12 @@ fun TelemetryVisibilitySection(
         )
         Text(stringResource(Res.string.telemetry_intro), style = AdvantlyTheme.typography.caption, color = colors.text2)
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            TelemetryVisibility.entries.forEach { option ->
-                val (title, subtitle) = texts(option)
-                TelemetryOptionCard(option, title, subtitle, selected == option) { port.setTelemetryVisibility(option) }
+            TELEMETRY_CHOICES.forEach { option ->
+                TelemetryOptionCard(option, selected.shown == option) { port.setTelemetryVisibility(option) }
             }
         }
-        if (selected.sharesWithOthers) {
-            Text(
-                stringResource(Res.string.telemetry_share_pending),
-                style = AdvantlyTheme.typography.caption,
-                color = colors.brand,
-                modifier = Modifier.testTag("telemetry_share_pending"),
-            )
-        }
         HealthConsentSection(port, locked = !selected.allowsLive)
+        HealthArchiveSection(port, locked = !selected.allowsLive)
     }
 }
 
@@ -146,6 +149,7 @@ private fun HealthConsentSection(
         modifier = Modifier.fillMaxWidth().testTag("health_delete_all"),
     )
     confirm?.let { kind ->
+        ReportHealthDialog()
         val (title, text, action) =
             when (kind) {
                 HealthConfirm.GRANT -> {
@@ -197,23 +201,27 @@ private fun HealthConsentSection(
 
 private enum class HealthConfirm { GRANT, REVOKE, DELETE_ALL }
 
-private fun texts(option: TelemetryVisibility): Pair<StringResource, StringResource> =
-    when (option) {
-        TelemetryVisibility.SHARE -> Res.string.telemetry_share to Res.string.telemetry_share_sub
-        TelemetryVisibility.PRIVATE -> Res.string.telemetry_private to Res.string.telemetry_private_sub
-        TelemetryVisibility.OFF -> Res.string.telemetry_off to Res.string.telemetry_off_sub
-    }
+/** Am Handy nur noch „Nur für mich“ / „Gar nicht“ (Nutzerentscheid 0.5.1, wie die Uhr); Draht und Konto kennen „Teilen“ weiter. */
+internal val TELEMETRY_CHOICES = listOf(TelemetryVisibility.PRIVATE, TelemetryVisibility.OFF)
+
+/** Ein gespeichertes oder vom Konto übernommenes „Teilen“ erscheint als „Nur für mich“ (wirkt heute gleich). */
+internal val TelemetryVisibility.shown: TelemetryVisibility
+    get() = if (this == TelemetryVisibility.SHARE) TelemetryVisibility.PRIVATE else this
 
 /** Auswahlkarte mit Radio-Punkt (Rolle `RadioButton`, ≥ 64 dp) wie „Wer zählt?“. */
 @Composable
-private fun TelemetryOptionCard(
+internal fun TelemetryOptionCard(
     option: TelemetryVisibility,
-    title: StringResource,
-    subtitle: StringResource,
     selected: Boolean,
     onSelect: () -> Unit,
 ) {
     val colors = AdvantlyTheme.colors
+    val (title, subtitle) =
+        if (option == TelemetryVisibility.OFF) {
+            Res.string.telemetry_off to Res.string.telemetry_off_sub
+        } else {
+            Res.string.telemetry_private to Res.string.telemetry_private_sub
+        }
     Row(
         Modifier
             .testTag("telemetry_${option.wire}")

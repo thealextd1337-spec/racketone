@@ -9,6 +9,7 @@ import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.health.HealthRecorder
+import eu.advantly.health.HealthSummary
 import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.HealthSeriesMessage
@@ -40,6 +41,61 @@ class HealthSyncTest {
         val id = c["phone"].session.create(format, SINGLES, meta, scorer = watchScores)
         c.settle()
         return c to id
+    }
+
+    private fun Device.toConfirm() = session.state.value.healthConsentToConfirm
+
+    /** Plan 0.5.1 §5.4: Handy ohne eigene Entscheidung übernimmt „an“ von der Uhr → einmal nachfragen; Beibehalten. */
+    @Test
+    fun anAdoptedConsentIsConfirmedOnceOnThePhone() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        assertTrue(c["phone"].consent())
+        assertTrue(c["phone"].toConfirm())
+        assertFalse(c["watch"].toConfirm(), "nur das Handy fragt")
+        assertEquals("1", c["phone"].data.settings.get("session.healthConsent.toConfirm"), "überdauert einen Neustart")
+        c["phone"].session.confirmHealthConsent(keep = true)
+        c.settle()
+        assertFalse(c["phone"].toConfirm())
+        assertNull(c["phone"].data.settings.get("session.healthConsent.toConfirm"))
+        val consent =
+            c["phone"]
+                .session.state.value.healthConsent
+        assertEquals(2, consent.counter)
+        assertEquals(
+            c["phone"]
+                .session.state.value.healthConsent,
+            c["watch"]
+                .session.state.value.healthConsent,
+        )
+        assertTrue(c["watch"].consent())
+        c["phone"].session.confirmHealthConsent(keep = false)
+        assertTrue(c["phone"].consent(), "ohne offene Frage ändert die Antwort nichts")
+    }
+
+    @Test
+    fun switchingOffTheAdoptedConsentRevokesOnBothDevices() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        c["phone"].session.confirmHealthConsent(keep = false)
+        c.settle()
+        assertFalse(c["phone"].consent())
+        assertFalse(c["watch"].consent())
+        assertFalse(c["phone"].toConfirm())
+    }
+
+    @Test
+    fun aPhoneThatDecidedItselfIsNotAskedAgain() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["phone"].session.setHealthConsent(true)
+        c["phone"].session.setHealthConsent(false)
+        c.settle()
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        assertTrue(c["phone"].consent())
+        assertFalse(c["phone"].toConfirm())
     }
 
     @Test
@@ -80,6 +136,9 @@ class HealthSyncTest {
         assertEquals(0, stored.series.clockOffsetMs, "Uhr zählt selbst")
         assertEquals(1, c["watch"].own().size, "bestätigt, bleibt aber bis zum Matchende zum Fortsetzen")
         assertFalse(watch.isRecordingHealth(id))
+        // Matchende-Bilanz der Uhr aus der eigenen Serie; das Handy hat keine eigene
+        assertEquals(HealthSummary(steps = 9, maxBpm = 120), watch.recordedHealthSummary(id))
+        assertNull(c["phone"].session.recordedHealthSummary(id))
     }
 
     /** Review H1: Ein neues Workout im selben laufenden Match setzt die bestätigte Serie fort, statt sie zu ersetzen. */
