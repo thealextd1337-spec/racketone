@@ -84,6 +84,13 @@ class ManifestTest {
             // Die Startbildschirm-Wahl gehört zu diesem Gerät: die Anmeldung wird ja auch nicht übertragen.
             assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("start_login.xml").size)
         }
+        // Matches und Pulsverläufe (alle Datenbankfamilien der Recovery) gehen auf Handy und Uhr nicht in Googles Backup.
+        for (app in listOf("", "../wearApp/")) {
+            for ((rules, sections) in listOf("backup_rules.xml" to 1, "data_extraction_rules.xml" to 2)) {
+                val text = File("${app}src/main/res/xml/$rules").readText()
+                assertEquals(app + rules, sections, text.split("""<exclude domain="database" path="." />""").size - 1)
+            }
+        }
     }
 
     @Test

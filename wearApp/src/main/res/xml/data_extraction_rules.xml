@@ -1,18 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Android 12+ (minSdk 34): Cloud-Backup und Gerätetransfer.
-  Ausgeschlossen: Diagnose-Log mit Pulswerten (Spike S5, intern + extern), Feldtest-Protokoll und -Schalter (P1-Gate,
-  diag/fieldtest.jsonl, fieldtest_prefs.xml) und der Session-Zustand
-  (ein wiederhergestelltes "sessionActive" würde auf dem neuen Gerät eine Wiederaufnahme auslösen).
+  Ausgeschlossen: die ganze App-Datenbank (Domain "database", path=".": Matches und Pulsverläufe, alle Datenbankfamilien
+  der Recovery-Logik samt -wal/-shm/-journal; ein Restore startet wie eine Neuinstallation), Diagnose-Log mit Pulswerten
+  (Spike S5, intern + extern), Feldtest-Protokoll und -Schalter (P1-Gate, diag/fieldtest.jsonl, fieldtest_prefs.xml) und
+  der Session-Zustand (ein wiederhergestelltes "sessionActive" würde auf dem neuen Gerät eine Wiederaufnahme auslösen).
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="database" path="." />
         <exclude domain="file" path="diag/" />
         <exclude domain="external" path="diag/" />
         <exclude domain="sharedpref" path="s5_session.xml" />
         <exclude domain="sharedpref" path="fieldtest_prefs.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="database" path="." />
         <exclude domain="file" path="diag/" />
         <exclude domain="external" path="diag/" />
         <exclude domain="sharedpref" path="s5_session.xml" />
