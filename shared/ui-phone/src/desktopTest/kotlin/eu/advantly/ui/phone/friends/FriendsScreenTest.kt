@@ -3,6 +3,9 @@ package eu.advantly.ui.phone.friends
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
@@ -30,6 +33,9 @@ import eu.advantly.cloud.sync.FriendsPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.push.FriendsSection
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.auth.FakePhoneAuth
@@ -39,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 import java.util.Locale
 import javax.imageio.ImageIO
@@ -245,6 +252,40 @@ class FriendsScreenTest {
                     friends.close()
                     scope.cancel()
                 }
+            }
+        }
+
+    @Test fun notificationHintIsDismissableAndPushLinkOpensItsSegment() =
+        withLocale(Locale.ENGLISH) {
+            runDesktopComposeUiTest(width = 360, height = 1600) {
+                val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+                val auth = FakePhoneAuth().apply { session.value = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT) }
+                val model = FriendsViewModel(auth, UiFriends(), { if (it == "alice") local else emptyList() }, null, scope)
+                val settings =
+                    object : NotificationSettingsPort {
+                        override val enabled = MutableStateFlow(false)
+                        override val hint = MutableStateFlow(true)
+
+                        override fun setEnabled(enabled: Boolean) = Unit
+
+                        override fun dismissHint() {
+                            hint.value = false
+                        }
+                    }
+                var link by mutableStateOf<PushTarget?>(null)
+                setContent {
+                    AdvantlyTheme(darkTheme = false) {
+                        FriendsScreen(model, {}, null, notifications = settings, link = link, onLinkHandled = { link = null })
+                    }
+                }
+                onNodeWithText("Not now").assertIsDisplayed()
+                click("notifications_hint_later")
+                onNodeWithTag("notifications_hint").assertDoesNotExist()
+                onNodeWithTag("friends_accept_carl").assertDoesNotExist()
+                link = PushTarget(FriendsSection.REQUESTS)
+                onNodeWithTag("friends_accept_carl").assertIsDisplayed()
+                assertEquals(null, link)
+                scope.cancel()
             }
         }
 }

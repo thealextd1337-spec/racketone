@@ -974,4 +974,10 @@
     <string name="live_gone">This match is no longer live.</string>
     <string name="live_only_display">View only – another device keeps the score.</string>
     <string name="live_back">Back</string>
+    <string name="notifications_section">Notifications</string>
+    <string name="notifications_toggle">Push notifications</string>
+    <string name="notifications_toggle_sub">Friend requests, match invitations and requests to keep score. Your phone adds the names; Google only sees IDs. Off by default.</string>
+    <string name="notifications_hint">Get notified when friends add you to a match or ask you to watch or keep score?</string>
+    <string name="notifications_hint_enable">Turn on</string>
+    <string name="notifications_hint_later">Not now</string>
 </resources>

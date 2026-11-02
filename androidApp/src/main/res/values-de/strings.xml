@@ -19,4 +19,28 @@
     <string name="installation_error_body">Die lokalen Daten konnten nicht geprüft werden. Zählen, Gerätesynchronisierung und Kontofunktionen sind pausiert. „Erneut versuchen“ wiederholt diese Prüfung. Vorhandene Matchdaten bleiben erhalten.</string>
     <string name="installation_error_retry">Erneut versuchen</string>
     <string name="installation_loading">Lokale Daten werden geprüft…</string>
+    <!-- Push (Plan Live §3.3): Text entsteht lokal aus Art und Freundes-Cache; ohne Namen neutral -->
+    <string name="push_channel_friends">Freunde</string>
+    <string name="push_channel_friends_description">Freundschaftsanfragen und angenommene Anfragen</string>
+    <string name="push_channel_matches">Matches</string>
+    <string name="push_channel_matches_description">Du wurdest in ein Match eingetragen oder zum Zuschauen eingeladen</string>
+    <string name="push_channel_scoring">Zählen</string>
+    <string name="push_channel_scoring_description">Bitten zu zählen, Antworten und Zählerwechsel</string>
+    <string name="push_friend_request">%1$s möchte mit dir befreundet sein</string>
+    <string name="push_friend_request_neutral">Du hast eine neue Freundschaftsanfrage</string>
+    <string name="push_friend_accepted">%1$s hat deine Freundschaftsanfrage angenommen</string>
+    <string name="push_friend_accepted_neutral">Deine Freundschaftsanfrage wurde angenommen</string>
+    <string name="push_player_assigned">%1$s hat dich in ein Match eingetragen</string>
+    <string name="push_player_assigned_neutral">Du wurdest in ein Match eingetragen</string>
+    <string name="push_match_shared">%1$s hat ein Match mit dir geteilt</string>
+    <string name="push_match_shared_neutral">Ein Match wurde mit dir geteilt</string>
+    <string name="push_visitor_invited">%1$s lädt dich zum Zuschauen ein</string>
+    <string name="push_visitor_invited_neutral">Du wurdest zum Zuschauen eingeladen</string>
+    <string name="push_scorer_invited">%1$s bittet dich zu zählen</string>
+    <string name="push_scorer_invited_neutral">Du wurdest gebeten zu zählen</string>
+    <string name="push_scorer_responded">%1$s hat auf deine Bitte zu zählen geantwortet</string>
+    <string name="push_scorer_responded_neutral">Deine Bitte zu zählen wurde beantwortet</string>
+    <string name="push_scorer_changed">%1$s hat den Zähler deines Matches gewechselt</string>
+    <string name="push_scorer_changed_neutral">Der Zähler eines Matches hat gewechselt</string>
+    <string name="push_open">Antippen zum Öffnen</string>
 </resources>

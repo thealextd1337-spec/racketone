@@ -41,6 +41,8 @@ import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
@@ -130,7 +132,8 @@ private data class Confirm(
  * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Live
  * (Ich spiele mit / Ich schaue zu, plan-live-mitspieler §3.1; [onOpenLive] öffnet die Live-Ansicht). Ohne Konto, Zustimmung oder
  * bei pausiertem Konto nur ein Hinweis; das Zählen ohne Konto bleibt unberührt. [onShareText] öffnet das
- * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus.
+ * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus. [link] (angetippte
+ * Benachrichtigung) wählt Segment und Match-Detail; [notifications] zeigt einmalig den Hinweis „Benachrichtigungen“.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -141,6 +144,9 @@ fun FriendsScreen(
     modifier: Modifier = Modifier,
     onOpenLive: (String) -> Unit = {},
     clock: WallClock = WallClock.System,
+    notifications: NotificationSettingsPort? = null,
+    link: PushTarget? = null,
+    onLinkHandled: () -> Unit = {},
 ) {
     val state by model.state.collectAsState()
     var segment by rememberSaveable { mutableStateOf(Segment.FRIENDS) }
@@ -149,6 +155,13 @@ fun FriendsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var openFeed by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.access) { if (state.access == FriendsAccess.READY) model.open() }
+    LaunchedEffect(link) {
+        if (link != null) {
+            segment = Segment.valueOf(link.section.name)
+            openFeed = link.matchId
+            onLinkHandled()
+        }
+    }
     val colors = AdvantlyTheme.colors
     Column(
         modifier
@@ -178,6 +191,7 @@ fun FriendsScreen(
             }
             return@Column
         }
+        if (notifications != null && (state.friends.isNotEmpty() || state.incoming.isNotEmpty())) NotificationsHint(notifications)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val requests = state.incoming.size
             listOf(

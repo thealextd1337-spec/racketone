@@ -1,6 +1,7 @@
 package eu.advantly.android
 
 import android.app.Application
+import eu.advantly.android.push.AndroidPush
 import eu.advantly.android.sync.scheduleSyncAfterMatchEnd
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
@@ -20,6 +21,8 @@ class AdvantlyPhoneApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Push: Firebase nur mit Werten im Build und ohne Token vor der Einwilligung (Auto-Init aus).
+        AndroidPush.initialize(this)
         // Installationsprüfung (Kopie, quick_check) im Hintergrund; Session und Beobachter danach auf dem Main-Thread.
         AndroidInstallationGuard.checkAsync(this) { bootstrap() }
     }

@@ -13,6 +13,10 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
+import eu.advantly.android.push.AndroidNotificationSettings
+import eu.advantly.android.push.AndroidPush
+import eu.advantly.android.push.AndroidPushPreferences
+import eu.advantly.android.push.FirebaseTokens
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.CloudAuthPort
@@ -37,6 +41,8 @@ import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
@@ -49,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.security.SecureRandom
 import kotlin.coroutines.resume
@@ -65,7 +72,7 @@ internal fun ComponentActivity.createPhoneAccount(
     lateinit var model: AuthViewModel
     val refresh: () -> Unit = { model.refresh() }
     val account =
-        PhoneAccountPort(core.auth, core.runtime.scope, core.record) {
+        PhoneAccountPort(core.auth, core.runtime.scope, core.record, core.push) {
             if (core.refreshAccount === refresh) core.refreshAccount = null
         }
     val pull =
@@ -116,6 +123,8 @@ internal class PhoneAccountPort(
     private val auth: CloudAuthPort,
     processScope: CoroutineScope,
     private val record: PhoneSyncRecord,
+    /** Push (Plan Live §3.3); Abmelden und Löschantrag leeren das Token, solange die Sitzung noch gilt. */
+    private val push: PushRegistration? = null,
     private val release: () -> Unit,
 ) : CloudAuthPort by auth {
     private val work = SupervisorJob(processScope.coroutineContext[Job])
@@ -123,6 +132,8 @@ internal class PhoneAccountPort(
 
     override suspend fun signOut() {
         val profile = auth.accountSession.value?.profileId
+        // Ohne Netz nicht aufhalten: bleibt das Server-Token, meldet FCM es nach deleteToken als ungültig.
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable() } }
         // Die lokale Sitzung endet auch bei Netzfehler oder Abbruch (SupabasePhoneAuth.signOut).
         try {
             auth.signOut()
@@ -135,11 +146,16 @@ internal class PhoneAccountPort(
         val profile = auth.accountSession.value?.profileId
         auth.requestDeletion()
         profile?.let(record::forget)
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable() } }
     }
 
     override fun close() {
         work.cancel()
         release()
+    }
+
+    private companion object {
+        const val PUSH_SIGN_OUT_MS = 5_000L
     }
 }
 
@@ -243,6 +259,18 @@ internal class PhoneAccountCore private constructor(
         }
     }
 
+    /** Push nur mit Firebase-Werten im Build; der Upload wartet auf Zustimmung und eine nutzbare Sitzung. */
+    val push: PushRegistration? =
+        if (AndroidPush.configured) {
+            PushRegistration(
+                AndroidPushPreferences(context),
+                FirebaseTokens,
+                backend,
+            ) { auth.session.value }
+        } else {
+            null
+        }
+
     /** Gezogene Freundschaften nur innerhalb der Session-Grenze; nach Widerruf eine leere Liste statt SQL-Zugriff. */
     fun localFriendships(profile: String): List<PulledFriendship> = guarded(emptyList()) { cloudPulls.pulledFriendships(profile) }
 
@@ -288,7 +316,11 @@ internal class PhoneAccountCore private constructor(
         runtime.scope.launch {
             var running = false
             sync.state.collect { state ->
-                if (running && !state.running) flushVisitors()
+                if (running && !state.running) {
+                    flushVisitors()
+                    // Nach dem Lauf ist das Gerät gebunden: ausstehendes Token hochladen bzw. leeren.
+                    push?.sync()
+                }
                 running = state.running
             }
         }
@@ -374,6 +406,12 @@ internal suspend fun runScheduledSync(
     }
     core.sync.request(profile)?.join()
     return false
+}
+
+/** Profil-Schalter „Benachrichtigungen“; `null` ohne Backend- oder Firebase-Werte (dann ist Push einfach aus). */
+internal fun ComponentActivity.phoneNotifications(requestPermission: (onResult: (Boolean) -> Unit) -> Unit): NotificationSettingsPort? {
+    val core = PhoneAccountCore.get(applicationContext, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY) ?: return null
+    return core.push?.let { AndroidNotificationSettings(this, it, core.runtime.scope, requestPermission) }
 }
 
 /** Ohne Backendkonfiguration bleiben lokale Entwürfe möglich; Versand zeigt ausdrücklich „nicht verfügbar“. */

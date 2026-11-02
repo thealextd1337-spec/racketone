@@ -44,7 +44,8 @@ class SupabaseCloudBackend internal constructor(
     CloudTelemetryPort,
     SharedMatchesPort,
     VisitorsPort,
-    LiveMatchesPort {
+    LiveMatchesPort,
+    PushTokenPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -525,6 +526,22 @@ class SupabaseCloudBackend internal constructor(
     override suspend fun liveMatches(profileId: String): List<LiveMatch> =
         decode<List<LiveMatch>>(rpc(lease(profileId), "cloud_my_live_matches_v1", buildJsonObject {}))
             .also { live -> if (live.any { it.matchId.isBlank() }) throw CloudException("cloud_response_invalid", false) }
+
+    override suspend fun setPushToken(
+        profileId: String,
+        provider: String,
+        token: String?,
+    ) {
+        require(provider.isNotBlank() && token?.isBlank() != true)
+        rpc(
+            lease(profileId),
+            "cloud_set_push_token_v1",
+            buildJsonObject {
+                put("p_provider", provider)
+                put("p_token", token)
+            },
+        )
+    }
 
     private suspend fun visitorRpc(
         name: String,

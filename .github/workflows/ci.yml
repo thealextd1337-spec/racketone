@@ -421,7 +421,7 @@ jobs:
         run: uv run .github/scripts/d1_stack_ci_test.py
       - name: Edge Functions prüfen (Typen, Format, Lint, Tests)
         run: |
-          for function in export-my-data cleanup-data-exports; do
+          for function in export-my-data cleanup-data-exports push-dispatch; do
             (cd "supabase/functions/$function" && deno task check && deno fmt --check --indent-width 2 && deno lint && deno task test)
           done
       - name: Zufälligen lokalen Cleanup-Schlüssel vorbereiten

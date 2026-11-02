@@ -974,4 +974,10 @@
     <string name="live_gone">Dieses Match läuft nicht mehr live.</string>
     <string name="live_only_display">Nur Anzeige – gezählt wird auf einem anderen Gerät.</string>
     <string name="live_back">Zurück</string>
+    <string name="notifications_section">Benachrichtigungen</string>
+    <string name="notifications_toggle">Push-Benachrichtigungen</string>
+    <string name="notifications_toggle_sub">Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs. Standardmäßig aus.</string>
+    <string name="notifications_hint">Benachrichtigen, wenn Freunde dich in ein Match eintragen oder zum Zuschauen oder Zählen einladen?</string>
+    <string name="notifications_hint_enable">Einschalten</string>
+    <string name="notifications_hint_later">Nicht jetzt</string>
 </resources>
