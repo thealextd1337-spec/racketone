@@ -27,8 +27,8 @@ begin
              'scorerConnected', coalesce((vv.v -> 'live' ->> 'scorerConnected')::boolean, false),
              'updatedAt', m.updated_at)
            order by m.updated_at desc, m.id), '[]'::jsonb)
-    from public.matches m
-    cross join lateral (select private.visitor_view(m.id) as v offset 0) vv
+    -- visitor_view erst für die gefilterten Matches (OFFSET 0 als Planungsgrenze), nicht für jede Teilnahme.
+    from (select m.* from public.matches m
     -- Kandidaten ohne Join (Planner-Statistik, siehe Bereinigungspfade), danach die maßgebliche Rechteprüfung.
     where m.id = any (array(
             select mp.match_id from public.match_participants mp where mp.profile_id = v_uid
@@ -42,7 +42,9 @@ begin
       and not private.is_blocked(v_uid, m.created_by)
       and not exists (select 1 from public.match_participants mp
                       where mp.match_id = m.id and mp.profile_id = v_uid and mp.hidden)
-      and (private.is_match_member(m.id, v_uid) or private.is_match_visitor(m.id, v_uid)));
+      and (private.is_match_member(m.id, v_uid) or private.is_match_visitor(m.id, v_uid))
+    offset 0) m
+    cross join lateral (select private.visitor_view(m.id) as v offset 0) vv);
 end;
 $$;
 
