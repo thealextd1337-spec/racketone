@@ -153,6 +153,40 @@ Rückmeldungen nach 0.5.0:
   aber eine Passwortabfrage beim Import. Vorschlag: zunächst unverschlüsselt mit deutlichem Hinweis.
 - **Tests:** Rundreise Export → Import, unbekannte Matches, ältere Revision, kaputte bzw. zu große Datei, ohne Einwilligung.
 
+## 7c. Eine gemeinsame Leiste: Zeitleiste, Momentum und Puls (Nutzerwunsch 02.11.)
+
+Heute stehen im Match-Detail zwei getrennte Grafiken:
+- „Zeitleiste“ (`result/MatchTimeline.kt`): Zeitachse der Spielzeit (`stats.playClock`), Highlight-Marker, Pulskurve.
+- „Momentum“ (`result/MatchProgression.kt`): Balken je Game nach Ballwechseldifferenz, Achse nach Game-Index.
+
+Ziel ist **eine** Grafik direkt unter den Sätzen:
+- **Achse:** Spielzeit wie in der Zeitleiste. Sätze als abwechselnd schattierte Bänder mit Satznummer und Satzergebnis.
+- **Momentum:**
+  - Ein Balken je Game, so breit wie die Dauer des Games (Start/Ende aus `GameProgress.points`).
+  - Höhe nach `margin`, nach oben „Wir“ (`teamUsChart`), nach unten „Gegner“ (`teamThemChart`), halbtransparent.
+  - Breaks bleiben als Punkt am Balken erkennbar.
+- **Puls:** Die Kurve liegt über den Balken, mit eigener Skala rechts (bpm) und Ø/Max-Angabe. Ohne Pulsverlauf entfällt nur
+  die Kurve; der Link „Pulsverlauf aktivieren“ bleibt.
+- **Highlights:** Marker am oberen Rand wie heute (48-dp-Tippflächen, nahe Marker teilen sich eine Fläche). Die Karte zeigt
+  zusätzlich den Spielstand des Games und den Puls zu diesem Zeitpunkt.
+- **Antippen eines Balkens:** zeigt das Game (Spielstand, Ballwechsel, Break, Puls Ø im Game). Die aufklappbare Game-Liste
+  der Momentum-Grafik bleibt darunter.
+- **Breite:** passt sich der Bildschirmbreite an; bei langen Matches horizontal scrollbar (mindestens etwa 16 dp je Game).
+- **Barrierefreiheit:** Die Grafik bekommt einen zusammenfassenden Text (Sätze, Breaks, Ø/Max-Puls). Marker und Balken sind
+  einzeln fokussierbar.
+- **Fällt weg:** die eigene Momentum-Grafik samt Überschrift.
+- **Tests:** Abbildung Zeit → Balkenbreite, Pausen (Spielzeit), Match ohne Zeitstempel bzw. korrigiertes Ergebnis,
+  Desktop-UI-Tests für Antippen von Balken und Marker, DE/EN.
+
+**Warum heute oft keine Pulskurve zu sehen ist:** Sie erscheint nur, wenn alles zutrifft:
+- „Pulsverlauf aufzeichnen“ ist am Handy an.
+- Im Match ist „Workout auf meiner Uhr“ an und die Stufe ist „Nur für mich“.
+- Die Uhr hat schon 0.5.0.
+- Die Uhr hat die Serie nach dem Match ans Handy übertragen.
+
+Ältere Matches und Matches mit Uhr-App 0.4.2 haben keine Kurve. Genau das sollen §3 (Uhr-Update-Hinweis) und §5/§6
+(Einwilligung im Einstieg bzw. „Was ist neu?“) beheben.
+
 ## 8. Datenschutzerklärung Fassung 8 (entschieden 02.11.)
 
 Mit 0.5.1 kommt Fassung 8 mit erneuter Zustimmung. §3.4 beschreibt dann:
@@ -176,9 +210,10 @@ Mit 0.5.1 kommt Fassung 8 mit erneuter Zustimmung. §3.4 beschreibt dann:
 | D | „Was ist neu?“ (§6), nutzt A und C | presentation, ui-phone, docs/release |
 | E | Wear-Backup-Regel (§7) | wearApp |
 | F | Export/Import der Pulsverläufe (§7b) | data, match-session, presentation, ui-phone, androidApp |
+| H | Gemeinsame Leiste Zeit/Momentum/Puls (§7c) | presentation, ui-phone |
 | G | Datenschutzerklärung Fassung 8 (§8) | site |
 
-A, B, C, E und F sind unabhängig voneinander; D kommt nach A und C, G zuletzt (beschreibt C, D und F). Danach Review, Release 0.5.1 (Build 11) mit Texten für
+A, B, C, E, F und H sind unabhängig voneinander; D kommt nach A und C, G zuletzt (beschreibt C, D und F). Danach Review, Release 0.5.1 (Build 11) mit Texten für
 „Was ist neu?“, internem Test auf Handy und Uhr und Feldtest für B.
 
 ## 10. Offene Entscheidungen
