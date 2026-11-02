@@ -821,7 +821,8 @@ class MatchSession(
 
     /**
      * Handy: öffnet [matchId] in der Liste der offenen Matches, ohne den Fokus zu ändern (z. B. ältere laufende Matches
-     * nach einem Neustart – erreichbar, aber nicht automatisch im Vordergrund). `false`, wenn Kopf oder Genesis fehlen.
+     * nach einem Neustart – erreichbar, aber nicht automatisch im Vordergrund). `false`, wenn Kopf oder Genesis fehlen
+     * oder das Match eines anderen Kontos hier nur angezeigt wird ([displayOnly]).
      */
     fun openInBackground(matchId: MatchId): Boolean {
         checkThread()
@@ -1465,11 +1466,31 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return false
             }
+        if (displayOnly(matchId, checkNotNull(engine.genesis).deviceId, engine.state.scorerDeviceId)) return false
         if (!config.parallelMatches) opened.clear()
         opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine, lifecycleOf(matchId))
         // Handy: im Hintergrund geöffnete Matches (Neustart, Übergabe) bekommen nie automatisch den Fokus
         if (focus || !config.parallelMatches) focusedId = matchId
         return true
+    }
+
+    /**
+     * Mitspieler-Replikat (plan-live-mitspieler §2, PR 0): Laut Pull hat ein anderes Konto das Match erstellt (`createdBy`),
+     * die Genesis stammt aus keiner eigenen Quelle und keines meiner Geräte zählt. Dieses Gerät zeigt es dann nur an
+     * (Verlauf/Detail aus dem Store) und öffnet es nie: kein Fortsetzen, Übernehmen, Beenden/Abbrechen, keine Uhr-Zuweisung,
+     * keine Zähl-Events. Ohne Beleg vom Server (kein Snapshot, kein `createdBy`) gilt das Match wie bisher als eigenes.
+     */
+    private fun displayOnly(
+        matchId: MatchId,
+        source: DeviceId,
+        scorer: DeviceId?,
+    ): Boolean {
+        if (!data.accountIdentities.managed) return false
+        val profile = data.accountIdentities.profile ?: return false
+        val creator = data.cloudPulls.matchCreatedBy(profile, matchId.value) ?: return false
+        if (creator == profile || scorer == deviceId) return false
+        val mine = data.accountIdentities.currentSources()
+        return source.value !in mine && scorer?.value !in mine
     }
 
     /** Handy: öffnet [matchId] im Hintergrund (ohne Fokuswechsel), z. B. für die Übergabe des Uhr-Matches. */
