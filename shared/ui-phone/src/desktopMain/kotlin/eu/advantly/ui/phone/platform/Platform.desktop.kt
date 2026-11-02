@@ -81,3 +81,8 @@ actual fun countryName(code: String): String =
             .build()
             .displayCountry
     }.getOrNull()?.ifBlank { null } ?: code
+
+actual fun formatCount(value: Long): String =
+    java.text.NumberFormat
+        .getIntegerInstance()
+        .format(value)

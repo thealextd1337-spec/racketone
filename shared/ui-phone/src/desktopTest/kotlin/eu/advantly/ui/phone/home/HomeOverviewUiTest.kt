@@ -16,11 +16,14 @@ import eu.advantly.presentation.match.InMemoryHealthRecords
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.platform.formatCount
 import eu.advantly.ui.phone.play
 import eu.advantly.ui.phone.setupFor
 import eu.advantly.ui.phone.testModel
+import java.util.Locale
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** Start: Gesamtstatistik (gewertete Matches) und „Letzte Matches“ mit Navigation ins Match-Detail. */
 @OptIn(ExperimentalTestApi::class)
@@ -60,16 +63,39 @@ class HomeOverviewUiTest {
             onNodeWithTag("recent_item_4").assertExists()
             onNodeWithTag("recent_item_5").assertDoesNotExist()
 
-            (model.health as InMemoryHealthRecords).setRecords(HealthRecords(maxBpm = 171, maxStepsInSet = 1_234))
+            (model.health as InMemoryHealthRecords).setRecords(HealthRecords(maxBpm = 171, maxStepsInSet = 987))
             waitForIdle()
             onNodeWithTag("total_max_pulse").assert(hasAnyDescendant(hasText("171", substring = true)))
-            onNodeWithTag("total_max_steps").assert(hasAnyDescendant(hasText("1234")))
+            onNodeWithTag("total_max_steps").assert(hasAnyDescendant(hasText("987")))
 
             onNodeWithTag("recent_item_0").performScrollTo().performClick()
             waitForIdle()
             assertEquals(Overlay.Result(newest), model.navigator.top)
             onNodeWithTag("result").assertExists()
         }
+
+    @Test
+    fun recentMatchesFollowTheTotalsAndStepsAreGroupedPerLocale() {
+        val previous = Locale.getDefault()
+        Locale.setDefault(Locale.GERMANY)
+        try {
+            runDesktopComposeUiTest(width = 720, height = 1280) {
+                val model = testModel()
+                model.finished("AAAA")
+                (model.health as InMemoryHealthRecords).setRecords(HealthRecords(maxStepsInSet = 12_345))
+                setContent { AdvantlyApp(model = model, darkTheme = true) }
+                waitForIdle()
+                onNodeWithTag("total_max_steps").performScrollTo().assert(hasAnyDescendant(hasText("12.345")))
+
+                fun y(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y
+                assertTrue(y("total_summary") < y("recent_matches") && y("recent_matches") < y("week_summary"))
+            }
+            Locale.setDefault(Locale.US)
+            assertEquals("12,345", formatCount(12_345))
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
 
     @Test
     fun withoutMatchesTotalsAndRecentAreHidden() =
