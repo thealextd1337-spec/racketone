@@ -66,7 +66,7 @@ select lives_ok($$ select public.revoke_scorer('a2000000-0000-7000-8000-00000000
 select tests.authenticate_as('bob');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e2000000-0000-7000-8000-000000000013', 'a2000000-0000-7000-8000-000000000001', tests.device('b1'), 3, 'PointWon', '{"side":"B"}')))), 'events', 0),
-          'accepted', 'verspätetes Event des früheren Zählers wird gespeichert (Engine entscheidet über Wirkung)');
+          'rejected:scoring_revoked', 'neues Event des früheren Zählers nach Widerruf abgelehnt (Nachlieferungen: 430)');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e2000000-0000-7000-8000-000000000014', 'a2000000-0000-7000-8000-000000000001', tests.device('b1'), 4, 'ScorerChanged',
                         jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
