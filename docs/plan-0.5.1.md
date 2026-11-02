@@ -221,6 +221,14 @@ Karte beim Antippen von Game oder Marker.
   „Pulsverlauf wird von der Uhr übertragen …“ statt nichts. Nach einer Weile ohne Daten heißt der Hinweis
   „Noch kein Pulsverlauf von der Uhr – Uhr in der Nähe des Handys öffnen“.
 
+## 7e. Match-Bilanz auf der Uhr (Nutzerwunsch 02.11.)
+
+- Nach Ende einer Partie zeigt die Uhr auf der Matchende-Seite **Schritte** und **maximalen Puls** dieser Partie
+  (Wear OS und Apple Watch).
+- **Quelle:** der aufgezeichnete Pulsverlauf, falls vorhanden. Sonst die Live-Werte des Workouts, nur im Arbeitsspeicher
+  und nicht gespeichert.
+- Wird nicht angezeigt bei „Puls & Schritte: Gar nicht“ oder ohne Workout. Fehlt ein Wert, erscheint nur der andere.
+
 ## 8. Datenschutzerklärung Fassung 8 (entschieden 02.11.)
 
 Mit 0.5.1 kommt Fassung 8 mit erneuter Zustimmung. §3.4 beschreibt dann:
