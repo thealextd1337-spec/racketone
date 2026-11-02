@@ -25,6 +25,7 @@ import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.platform.DocumentFiles
+import eu.advantly.ui.phone.platform.FileTooLargeException
 import eu.advantly.ui.phone.platform.rememberDocumentFiles
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
@@ -82,7 +83,9 @@ internal fun HealthArchiveSection(
             val bytes = read?.getOrNull()
             if (bytes == null) {
                 // abgebrochen: still; Lese-/Berechtigungsfehler sagt nichts über den Inhalt der Datei
-                if (read != null) message = importMessage(HealthImportResult(error = HealthImportError.READ_FAILED))
+                val tooLarge = read?.exceptionOrNull() is FileTooLargeException
+                val error = if (tooLarge) HealthImportError.TOO_LARGE else HealthImportError.READ_FAILED
+                if (read != null) message = importMessage(HealthImportResult(error = error))
                 return@open
             }
             busy = true

@@ -23,6 +23,7 @@ import eu.advantly.presentation.match.TelemetrySettingsPort
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.platform.DocumentFiles
+import eu.advantly.ui.phone.platform.FileTooLargeException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import java.util.Locale
@@ -233,6 +234,20 @@ class HealthArchiveUiTest {
                 setContent { AdvantlyTheme { Column { HealthArchiveSection(port, locked = false, files, clock, Dispatchers.Unconfined) } } }
                 onNodeWithTag("health_import").performClick()
                 onNodeWithTag("health_archive_message").assertTextContains("Die Datei konnte nicht gelesen werden.")
+                runOnIdle { assertTrue(port.imported.isEmpty()) }
+            }
+        }
+
+    /** Review M3: Meldet die Plattform die Größe schon vor dem Lesen als zu groß, heißt es „zu groß“, nicht „unlesbar“. */
+    @Test
+    fun aFileKnownToBeTooLargeIsReportedAsSuch() =
+        withLocale(Locale.GERMANY) {
+            runDesktopComposeUiTest {
+                val port = FilePort(InMemoryTelemetrySettings(consent = true), emptyList(), HealthImportResult())
+                val files = FakeFiles(opened = Result.failure(FileTooLargeException()))
+                setContent { AdvantlyTheme { Column { HealthArchiveSection(port, locked = false, files, clock, Dispatchers.Unconfined) } } }
+                onNodeWithTag("health_import").performClick()
+                onNodeWithTag("health_archive_message").assertTextContains("Die Datei ist zu groß (höchstens 20 MB).")
                 runOnIdle { assertTrue(port.imported.isEmpty()) }
             }
         }
