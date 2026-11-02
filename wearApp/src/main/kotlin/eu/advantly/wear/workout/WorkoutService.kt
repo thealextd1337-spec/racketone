@@ -682,6 +682,7 @@ class WorkoutService : Service() {
             caloriesCounter = caloriesCounter.restarted()
             fallbackStepsTotal = 0
             LiveTelemetrySubscriptions.Watch.clear()
+            MatchHealthTallies.clear()
         }
         WorkoutStateHolder.update { WatchTelemetryPolicy.apply(it, visibility) }
     }
@@ -825,6 +826,8 @@ class WorkoutService : Service() {
             val heartRates = hrPoints.map { it.getTimeInstant(bootInstant).toEpochMilli() to it.value.roundToInt() }
             val stepsAtMs = metrics.getData(DataType.STEPS_TOTAL)?.end?.toEpochMilli() ?: System.currentTimeMillis()
             recordHealth(id, heartRates, stepsAtMs, stepCounter.steps)
+            // Matchende-Bilanz ohne Aufzeichnung: Live-Werte nur im Arbeitsspeicher, nie bei „Gar nicht“
+            if (visibility.allowsLive) MatchHealthTallies.record(id, heartRates.map { it.second }, stepCounter.steps)
         }
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->

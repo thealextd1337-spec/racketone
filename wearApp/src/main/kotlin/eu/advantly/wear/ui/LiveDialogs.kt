@@ -360,7 +360,10 @@ fun DecisionScreen(
     }
 }
 
-/** Matchende (04 W7): Ergebnis, Sätze; Zähler: „Noch einer?“ (Best-of, regulär) und Rückgängig; „Fertig“ schließt. */
+/**
+ * Matchende (04 W7): Ergebnis, Sätze, Bilanz der Uhr (Schritte, höchster Puls); Zähler: „Noch einer?“ (Best-of, regulär)
+ * und Rückgängig; „Fertig“ schließt.
+ */
 @Composable
 fun FinishedScreen(
     live: LiveUi,
@@ -378,6 +381,7 @@ fun FinishedScreen(
             )
         }
         textItem(secondary = false) { "${sportName(live.sport)} · ${LiveModel.setsText(finished.sets)}" }
+        finished.health?.let { health -> textItem { healthSummaryText(health) } }
         live.serveBar?.let { bar -> item { ServeChips(bar, actions) } }
         if (finished.canFollowUp) actionItem(R.string.action_follow_up, primary = true) { actions.followUp() }
         if (live.role == LiveRole.SCORER && live.canUndo) actionItem(R.string.action_undo) { actions.undo() }

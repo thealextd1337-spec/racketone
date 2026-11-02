@@ -9,6 +9,7 @@ import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.presentation.match.LocalDay
@@ -28,13 +29,14 @@ class WatchController(
     uptime: () -> Long,
     today: () -> LocalDay,
     tapGuard: TapGuard = TapGuard(),
+    liveHealth: (MatchId) -> HealthSummary? = { null },
     private val operationBoundary: (() -> Unit) -> Boolean = {
         it()
         true
     },
     private val disposeBoundary: () -> Unit = {},
 ) {
-    private val core = WatchControllerCore(session, directory, prefs, wallClock, elapsed, uptime, today, tapGuard)
+    private val core = WatchControllerCore(session, directory, prefs, wallClock, elapsed, uptime, today, tapGuard, liveHealth)
     val state: StateFlow<WatchUiState> get() = core.state
     var effects: ((WatchEffect) -> Unit)?
         get() = core.effects

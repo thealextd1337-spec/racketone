@@ -69,6 +69,7 @@ import eu.advantly.device.link.LinkState
 import eu.advantly.device.link.LinkStats
 import eu.advantly.device.link.SendCallback
 import eu.advantly.device.link.SendFailure
+import eu.advantly.health.HealthSummary
 import eu.advantly.sync.protocol.AccessAck
 import eu.advantly.sync.protocol.AccessState
 import eu.advantly.sync.protocol.AntiEntropy
@@ -740,6 +741,15 @@ class MatchSession(
     ): Boolean {
         checkThread()
         return health.record(matchId, atMs, telemetry.visibility) { it.steps(atMs, cumulativeSteps) }
+    }
+
+    /**
+     * Bilanz aus dem eigenen gespeicherten Pulsverlauf von [matchId] (Schritte, höchster Puls) für die Matchende-Seite der
+     * Uhr; `null` ohne Aufnahme (nie aufgezeichnet oder nach der Bestätigung durch das Handy schon gelöscht).
+     */
+    fun recordedHealthSummary(matchId: MatchId): HealthSummary? {
+        checkThread()
+        return health.recordedSummary(matchId)
     }
 
     /** Läuft für [matchId] eine erlaubte Aufnahme (roter Punkt auf der Uhr, E3)? */

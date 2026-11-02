@@ -4,7 +4,7 @@
   Ausgeschlossen: die ganze App-Datenbank (Domain "database", path=".": Matches und Pulsverläufe, alle Datenbankfamilien
   der Recovery-Logik samt -wal/-shm/-journal; ein Restore startet wie eine Neuinstallation), Diagnose-Log mit Pulswerten
   (Spike S5, intern + extern), Feldtest-Protokoll und -Schalter (P1-Gate, diag/fieldtest.jsonl, fieldtest_prefs.xml) und
-  der Session-Zustand (ein wiederhergestelltes "sessionActive" würde auf dem neuen Gerät eine Wiederaufnahme auslösen).
+  der Workout-Zustand (workout_session.xml, früher s5_session.xml; ein wiederhergestelltes "sessionActive" würde auf dem neuen Gerät eine Wiederaufnahme auslösen).
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -12,6 +12,7 @@
         <exclude domain="file" path="diag/" />
         <exclude domain="external" path="diag/" />
         <exclude domain="sharedpref" path="s5_session.xml" />
+        <exclude domain="sharedpref" path="workout_session.xml" />
         <exclude domain="sharedpref" path="fieldtest_prefs.xml" />
     </cloud-backup>
     <device-transfer>
@@ -19,6 +20,7 @@
         <exclude domain="file" path="diag/" />
         <exclude domain="external" path="diag/" />
         <exclude domain="sharedpref" path="s5_session.xml" />
+        <exclude domain="sharedpref" path="workout_session.xml" />
         <exclude domain="sharedpref" path="fieldtest_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>

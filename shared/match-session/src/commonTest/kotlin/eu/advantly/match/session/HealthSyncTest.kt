@@ -9,6 +9,7 @@ import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.health.HealthRecorder
+import eu.advantly.health.HealthSummary
 import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.HealthSeriesMessage
@@ -135,6 +136,9 @@ class HealthSyncTest {
         assertEquals(0, stored.series.clockOffsetMs, "Uhr zählt selbst")
         assertEquals(1, c["watch"].own().size, "bestätigt, bleibt aber bis zum Matchende zum Fortsetzen")
         assertFalse(watch.isRecordingHealth(id))
+        // Matchende-Bilanz der Uhr aus der eigenen Serie; das Handy hat keine eigene
+        assertEquals(HealthSummary(steps = 9, maxBpm = 120), watch.recordedHealthSummary(id))
+        assertNull(c["phone"].session.recordedHealthSummary(id))
     }
 
     /** Review H1: Ein neues Workout im selben laufenden Match setzt die bestätigte Serie fort, statt sie zu ersetzen. */

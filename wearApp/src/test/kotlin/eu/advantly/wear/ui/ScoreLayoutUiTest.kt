@@ -207,7 +207,7 @@ class ScoreLayoutUiTest {
         assertTrue(rule.onAllNodesWithTag(LiveTags.STEPS, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 
-    // 0.3.0: Die Aufschlag-Leiste verdeckt den Spielstand nicht – Sätze/Games stehen links in der Leiste, Punkte frei
+    // Die Aufschlag-Auswahl verdeckt den Spielstand nicht – Punkte und Sätze/Games stehen links neben den Tasten (0.5.1)
 
     @Test
     @Config(qualifiers = "de-w192dp-h192dp-round-watch-xhdpi")
@@ -256,7 +256,7 @@ class ScoreLayoutUiTest {
         val app = RuntimeEnvironment.getApplication()
         val segments =
             bar.options.map {
-                val label = if (it == ServeOutcome.DOUBLE_FAULT) R.string.serve_double_fault else R.string.serve_second_in
+                val label = if (it == ServeOutcome.DOUBLE_FAULT) R.string.serve_panel_double_fault else R.string.serve_panel_second_in
                 rule.onNodeWithText(app.getString(label)).fetchSemanticsNode().boundsInRoot
             }
         segments.forEach { assertFalse("Satzstand unter einem Segment ($it)", setsBox.overlaps(it)) }

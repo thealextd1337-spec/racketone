@@ -207,6 +207,8 @@
 
 /* Matchende */
 "matchend.done" = "Fertig";
+"matchend.steps %@" = "Schritte %@";
+"matchend.maxHeartRate %@" = "Max. Puls %@";
 
 /* Action-Taste (AppIntent) */
 "intent.undo.title" = "Letzten Punkt rückgängig";
@@ -487,6 +489,8 @@
 "serve.first" = "1. Aufschlag";
 "serve.second" = "2. Aufschlag";
 "serve.df" = "Doppelfehler";
+"serve.panel.second" = "2. Auf-\nschlag";
+"serve.panel.df" = "Doppel-\nfehler";
 "serve.choose" = "Aufschläger wählen";
 "serve.choice.first" = "Wer schlägt auf?";
 "serve.choice.second.us" = "Wer schlägt bei uns auf?";

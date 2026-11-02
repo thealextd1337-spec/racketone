@@ -207,6 +207,8 @@
 
 /* Matchende */
 "matchend.done" = "Done";
+"matchend.steps %@" = "Steps %@";
+"matchend.maxHeartRate %@" = "Max HR %@";
 
 /* Action-Taste (AppIntent) */
 "intent.undo.title" = "Undo last point";
@@ -487,6 +489,8 @@
 "serve.first" = "1st serve";
 "serve.second" = "2nd serve";
 "serve.df" = "Double fault";
+"serve.panel.second" = "2nd\nserve";
+"serve.panel.df" = "Double\nfault";
 "serve.choose" = "Choose server";
 "serve.choice.first" = "Who serves first?";
 "serve.choice.second.us" = "Who serves for us?";

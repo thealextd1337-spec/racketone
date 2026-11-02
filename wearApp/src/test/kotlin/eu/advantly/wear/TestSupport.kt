@@ -60,6 +60,9 @@ class WatchHarness(
     val effects = mutableListOf<WatchEffect>()
     private val ids = PlayerIds()
     val directory = WatchDirectory(watchData, clock::nowMs, ids::next)
+
+    /** Live-Werte des Workouts (Matchende-Bilanz ohne Aufzeichnung). */
+    var liveHealth: eu.advantly.health.HealthSummary? = null
     val controller =
         WatchController(
             session = watch,
@@ -69,6 +72,7 @@ class WatchHarness(
             elapsed = scheduler::nowMs,
             uptime = scheduler::nowMs,
             today = { today },
+            liveHealth = { liveHealth },
         )
 
     init {

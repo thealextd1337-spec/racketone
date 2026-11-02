@@ -7,11 +7,13 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.device.link.ReliableDeviceLink
+import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.presentation.live.PointLabel
@@ -303,6 +305,21 @@ class WatchControllerTest {
         assertTrue(c.continueDecision(anotherSet = true))
         assertNull(live.decision)
         assertEquals(MatchStatus.IN_PROGRESS, live.status)
+    }
+
+    /** Matchende-Bilanz der Uhr (0.5.1): Live-Werte ohne Aufzeichnung; bei „Gar nicht“ nichts. */
+    @Test
+    fun finishedMatchShowsTheHealthSummaryUnlessTelemetryIsOff() {
+        h.liveHealth = HealthSummary(steps = 4_312, maxBpm = 176)
+        startOnWatch(format = FormatChoice.TENNIS_ONE_SET)
+        repeat(6 * 4) {
+            c.point(Side.A)
+            h.scheduler.advanceBy(700)
+        }
+        assertEquals(HealthSummary(4_312, 176), live.finished?.health)
+        h.watch.setTelemetryVisibility(TelemetryVisibility.OFF)
+        h.settle()
+        assertNull("Gar nicht", live.finished?.health)
     }
 
     @Test
