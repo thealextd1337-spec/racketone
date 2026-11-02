@@ -185,3 +185,13 @@ auf Staging (siehe Release-Weg).
   `scorer_responded`, `scorer_changed`.
 - Sync-Protokoll (Uhr): `LiveViewSubscription(v)` Uhr → Handy auf `/advantly/live/subscribe`;
   `LiveViews(v, matches ≤ 5)` Handy → Uhr auf `/advantly/live/views`, höchstens 2 KB, ohne Telemetrie.
+
+## 9. Hinweise aus dem Review (02.11.2026)
+
+- **Alte App-Versionen gegen Migration 0300:** Verknüpfte Mitspieler ohne Rolle dürfen keine Projektion mehr schreiben
+  und nicht mehr übernehmen. Wer mit App ≤ 0.5.1 ein fremdes Match übernommen hat, dessen Server-Stand friert ein, bis der
+  Ersteller abgleicht. Heute gibt es nur interne Tester mit aktueller App. Für einen späteren öffentlichen Betrieb gilt:
+  App mit PR 0 zuerst ausrollen, Migration 0300 danach.
+- **Weitergeben nur durch den Ersteller:** `invite_scorer` erlaubt nur Ersteller und Turnierleitung. Wer per Rolle zählt,
+  kann nicht an Dritte weitergeben und nicht direkt an den Ersteller zurückgeben; der Ersteller übernimmt selbst.
+  Erweiterung bei Bedarf in einer späteren Phase.
