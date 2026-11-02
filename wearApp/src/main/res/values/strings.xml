@@ -315,4 +315,19 @@
     <string name="installation_error_body">Local data could not be checked. Counting, device sync and account features are paused. Try again to repeat this check. Existing match data is kept.</string>
     <string name="installation_error_retry">Try again</string>
     <string name="installation_loading">Checking local data…</string>
+    <!-- Zuschauen auf der Uhr (plan-live-mitspieler §3.2): fremde Matches nur ansehen, nie zählen -->
+    <string name="spectate_entry">Live</string>
+    <string name="spectate_entry_hint">Follow friends live</string>
+    <string name="spectate_title">Watching</string>
+    <string name="spectate_badge">WATCHING · %1$s</string>
+    <string name="spectate_waiting">Asking phone…</string>
+    <string name="spectate_empty">No match live right now</string>
+    <string name="spectate_empty_hint">Matches you play in or watch appear here. Sign in on the phone for this.</string>
+    <string name="spectate_relation_player">You play in this match</string>
+    <string name="spectate_relation_visitor">You are watching</string>
+    <string name="spectate_relation_scorer">You may score</string>
+    <string name="spectate_finished">Finished</string>
+    <string name="spectate_scorer_offline">Scorer offline</string>
+    <string name="spectate_games">Games %1$d:%2$d</string>
+    <string name="spectate_serving">serving</string>
 </resources>

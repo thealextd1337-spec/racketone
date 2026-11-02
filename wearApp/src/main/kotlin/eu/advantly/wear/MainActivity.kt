@@ -27,6 +27,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.wear.ambient.AmbientLifecycleObserver
+import com.google.android.gms.wearable.Wearable
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
@@ -58,6 +59,7 @@ import eu.advantly.wear.match.PlayerSlot
 import eu.advantly.wear.match.WatchDirectory
 import eu.advantly.wear.sync.MatchNotifier
 import eu.advantly.wear.sync.UiVisibility
+import eu.advantly.wear.sync.WatchLiveViews
 import eu.advantly.wear.sync.WearSessions
 import eu.advantly.wear.ui.Haptics
 import eu.advantly.wear.ui.WatchActions
@@ -318,6 +320,7 @@ class MainActivity : ComponentActivity() {
                     .map { it.telemetryVisibility }
                     .distinctUntilChanged()
             }.collectAsState(TelemetryVisibility.DEFAULT)
+            val liveViews by WatchLiveViews.Watch.received.collectAsState()
             val ambient = isAmbient.value
             // Sekundentakt nur interaktiv (Staleness „Stand vor X s“); im Ambient über onUpdateAmbient
             LaunchedEffect(ambient) {
@@ -345,6 +348,8 @@ class MainActivity : ComponentActivity() {
                     availability.installation
                         .takeIf { it.privateTransportAllowed && it.restorable != null }
                         ?.let { { showLaterRestore(holder.session) } },
+                liveViews = liveViews,
+                subscribeLiveViews = ::subscribeLiveViews,
             )
         }
         // Kam das Ergebnis erst nach onStart/onResume, die dort ausgelassenen Schritte nachholen.
@@ -603,6 +608,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         evaluateWorkout()
+    }
+
+    /** Zuschauen (plan-live-mitspieler §3.2): ein Abo an das eigene Handy; Fehlschlag verwerfen, das nächste folgt in 10 s. */
+    private fun subscribeLiveViews() {
+        if (!currentSession()) return
+        WatchLiveViews.Watch.subscribe(holder.session.state.value.sync.peers) { node, path, payload ->
+            if (AndroidInstallationGuard.privateTransportAllowed(this)) {
+                Wearable.getMessageClient(applicationContext).sendMessage(node, path, payload)
+            }
+        }
     }
 
     /** Benachrichtigungen unabhängig vom Workout einmal anbieten (Hinweis auf Handy-Matches, Zifferblatt-Symbol). */
