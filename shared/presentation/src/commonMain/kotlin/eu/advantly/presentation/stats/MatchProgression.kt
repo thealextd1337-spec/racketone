@@ -9,12 +9,17 @@ import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.match.MatchRecord
 import eu.advantly.presentation.match.MatchSetup
 
-/** Ballwechsel mit Stand vor dem Punkt; Side-Outs sind ausdrücklich keine Zählpunkte. */
+/**
+ * Ballwechsel mit Stand vor dem Punkt; Side-Outs sind ausdrücklich keine Zählpunkte.
+ *
+ * @property wallClockMs Wanduhr des Punkt-Events (Ende des Ballwechsels), für die Breite der Game-Balken im Spielverlauf
+ */
 data class PointProgress(
     val number: Int,
     val winner: Side,
     val before: SidePair<String>,
     val scored: Boolean,
+    val wallClockMs: Long = 0,
 )
 
 /** Ein Spiel bzw. Rally-Satz, einschließlich eines bei Abbruch noch laufenden Spiels. */
@@ -53,7 +58,13 @@ fun matchProgression(points: List<PointRecord>): List<GameProgress> =
                         .takeIf { key.third == GameKind.STANDARD },
                 points =
                     gamePoints.mapIndexed { index, p ->
-                        PointProgress(index + 1, p.point.side, checkNotNull(p.before.current).display, Effect.POINT in p.after.effects)
+                        PointProgress(
+                            index + 1,
+                            p.point.side,
+                            checkNotNull(p.before.current).display,
+                            Effect.POINT in p.after.effects,
+                            p.event.wallClockMs,
+                        )
                     },
             )
         }
