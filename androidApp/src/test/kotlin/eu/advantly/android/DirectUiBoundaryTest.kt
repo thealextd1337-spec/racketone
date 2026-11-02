@@ -198,6 +198,12 @@ class DirectUiBoundaryTest {
         assertEquals(eu.advantly.presentation.match.WatchStatus.UNKNOWN, store.watchStatus.value)
         // Puls-Einstellungen laufen ebenfalls über die Grenze: nach Close kein SQL, kein Absturz
         store.deleteAllHealthData()
+        assertNull(store.exportHealth())
+        assertEquals(
+            eu.advantly.match.session
+                .HealthImportResult(),
+            store.importHealth(ByteArray(0)),
+        )
         assertEquals(
             eu.advantly.presentation.match
                 .PulseSetting(),

@@ -53,6 +53,7 @@ import eu.advantly.device.link.CompanionState
 import eu.advantly.health.maxBpm
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceStatus
+import eu.advantly.match.session.HealthImportResult
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
@@ -287,6 +288,10 @@ class SessionMatchStore(
     override fun setHealthConsent(enabled: Boolean) = session.setHealthConsent(enabled)
 
     override fun deleteAllHealthData() = session.deleteAllHealthData()
+
+    override fun exportHealth(): String? = session.exportHealth()
+
+    override fun importHealth(bytes: ByteArray): HealthImportResult = session.importHealth(bytes)
 
     override fun pulseSetting(matchId: MatchId): PulseSetting =
         PulseSetting(session.pulseVisibility(matchId), data.health.forMatch(matchId).isNotEmpty())

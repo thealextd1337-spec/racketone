@@ -2,6 +2,9 @@ package eu.advantly.presentation.match
 
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.match.session.HealthArchive
+import eu.advantly.match.session.HealthImportPlacement
+import eu.advantly.match.session.HealthImportResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +27,12 @@ interface TelemetrySettingsPort {
 
     /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät. */
     fun deleteAllHealthData()
+
+    /** „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): Datei-Inhalt aller lesbaren Serien, `null` ohne Serien. */
+    fun exportHealth(): String?
+
+    /** „Pulsverläufe importieren“: prüft die Datei, ordnet über die Match-ID zu, höhere Revision gewinnt. */
+    fun importHealth(bytes: ByteArray): HealthImportResult
 
     /** Steigt, wenn sich Pulsverläufe oder Stufen geändert haben können ([pulseSetting] erneut lesen). */
     val healthRevision: StateFlow<Long>
@@ -74,6 +83,13 @@ class InMemoryTelemetrySettings(
         pulse.keys.toList().forEach { pulse[it] = pulse.getValue(it).copy(recorded = false) }
         revisionFlow.value++
     }
+
+    /** Ohne Serien im Speicher: keine Datei. */
+    override fun exportHealth(): String? = null
+
+    /** Prüft wie die App; ohne Matches im Speicher fehlt jeder Serie das passende Match. */
+    override fun importHealth(bytes: ByteArray): HealthImportResult =
+        HealthArchive.import(bytes, consentFlow.value) { HealthImportPlacement.UNKNOWN_MATCH }
 
     override fun pulseSetting(matchId: MatchId): PulseSetting = pulse[matchId] ?: PulseSetting()
 
