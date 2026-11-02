@@ -900,7 +900,6 @@
     <string name="start_login_sign_in">Anmelden</string>
     <string name="visitors_limit">Höchstens 10 Zuschauer pro Match.</string>
     <string name="friends_error_visitor_limit">Dieses Match hat schon 10 Zuschauer.</string>
-    <string name="friends_segment_watching">Ich schaue zu</string>
     <string name="visitors_title">Zuschauer</string>
     <string name="visitors_hint">Hinzugefügte Freunde sehen nur den Live-Stand und das Ergebnis, nie deine Gesundheitsdaten. Sie bleiben, bis du sie entfernst.</string>
     <string name="visitors_empty">Noch keine Zuschauer.</string>
@@ -964,4 +963,15 @@
     <string name="home_total_max_steps">Meiste Schritte in einem Satz</string>
     <string name="home_total_bpm">%1$d bpm</string>
     <string name="home_section_recent">Letzte Matches</string>
+    <string name="friends_segment_live">Live</string>
+    <string name="live_badge">Live</string>
+    <string name="live_playing_title">Ich spiele mit</string>
+    <string name="live_watching_title">Ich schaue zu</string>
+    <string name="live_playing_empty">Gerade läuft kein Match, in dem du mitspielst.</string>
+    <string name="live_age_seconds">Stand vor %1$d s</string>
+    <string name="live_age_minutes">Stand vor %1$d min</string>
+    <string name="live_scorer_offline">Zähler nicht verbunden – der Stand kann veraltet sein.</string>
+    <string name="live_gone">Dieses Match läuft nicht mehr live.</string>
+    <string name="live_only_display">Nur Anzeige – gezählt wird auf einem anderen Gerät.</string>
+    <string name="live_back">Zurück</string>
 </resources>

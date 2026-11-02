@@ -91,6 +91,38 @@ class WireFixturesTest {
         assertTrue(view.channel.startsWith("match-live:${view.matchId}:"))
     }
 
+    /** Vertrag §8 (plan-live-mitspieler): Fixture von Hand nach dem Vertrag, bis `generate.psql` sie erzeugt. */
+    @Test
+    fun liveMatches() {
+        val json = fixture("cloud_my_live_matches.json").jsonArray.map { it.jsonObject }
+        keysMatch(LiveMatch.serializer(), json, "cloud_my_live_matches")
+        keysMatch(
+            VisitorTeamMember.serializer(),
+            json.flatMap { m ->
+                m.getValue("participants").jsonArray.map { it.jsonObject }
+            },
+            "Teilnehmer",
+        )
+        val live = CloudJson.decodeFromJsonElement(ListSerializer(LiveMatch.serializer()), fixture("cloud_my_live_matches.json"))
+        assertEquals(listOf("player", "visitor"), live.map { it.relation })
+        // Bereinigt wie visitor_view: keine Telemetrie- oder ID-Schlüssel in der Projektion.
+        val allowed =
+            setOf(
+                "sets",
+                "games",
+                "points",
+                "serving",
+                "flags",
+                "status",
+                "winner",
+                "tiebreak",
+                "scorerConnected",
+                "updatedAtMs",
+                "corrected",
+            )
+        assertTrue(live.all { allowed.containsAll(it.projection?.keys.orEmpty()) })
+    }
+
     @Test
     fun matchReadinessResponse() {
         val json = fixture("cloud_match_readiness.json").jsonObject

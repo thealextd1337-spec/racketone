@@ -43,7 +43,8 @@ class SupabaseCloudBackend internal constructor(
     FriendsPort,
     CloudTelemetryPort,
     SharedMatchesPort,
-    VisitorsPort {
+    VisitorsPort,
+    LiveMatchesPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -520,6 +521,10 @@ class SupabaseCloudBackend internal constructor(
 
     override suspend fun myVisitorMatches(profileId: String): List<VisitorView> =
         decode<List<VisitorView>>(rpc(lease(profileId), "my_visitor_matches", buildJsonObject {}))
+
+    override suspend fun liveMatches(profileId: String): List<LiveMatch> =
+        decode<List<LiveMatch>>(rpc(lease(profileId), "cloud_my_live_matches_v1", buildJsonObject {}))
+            .also { live -> if (live.any { it.matchId.isBlank() }) throw CloudException("cloud_response_invalid", false) }
 
     private suspend fun visitorRpc(
         name: String,

@@ -40,6 +40,7 @@ import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
@@ -94,8 +95,8 @@ import eu.advantly.ui.phone.resources.friends_result_requested
 import eu.advantly.ui.phone.resources.friends_search
 import eu.advantly.ui.phone.resources.friends_segment_feed
 import eu.advantly.ui.phone.resources.friends_segment_friends
+import eu.advantly.ui.phone.resources.friends_segment_live
 import eu.advantly.ui.phone.resources.friends_segment_requests
-import eu.advantly.ui.phone.resources.friends_segment_watching
 import eu.advantly.ui.phone.resources.friends_share
 import eu.advantly.ui.phone.resources.friends_share_text
 import eu.advantly.ui.phone.resources.friends_unblock
@@ -107,7 +108,7 @@ import eu.advantly.ui.phone.resources.tab_friends
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
-private enum class Segment { FEED, FRIENDS, REQUESTS, WATCHING }
+private enum class Segment { FEED, FRIENDS, REQUESTS, LIVE }
 
 private enum class ConfirmKind(
     val action: StringResource,
@@ -126,8 +127,8 @@ private data class Confirm(
 )
 
 /**
- * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Ich schaue zu
- * (Zuschauer, F16). Ohne Konto, Zustimmung oder
+ * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Live
+ * (Ich spiele mit / Ich schaue zu, plan-live-mitspieler §3.1; [onOpenLive] öffnet die Live-Ansicht). Ohne Konto, Zustimmung oder
  * bei pausiertem Konto nur ein Hinweis; das Zählen ohne Konto bleibt unberührt. [onShareText] öffnet das
  * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus.
  */
@@ -138,6 +139,8 @@ fun FriendsScreen(
     onOpenAccount: () -> Unit,
     onShareText: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
+    onOpenLive: (String) -> Unit = {},
+    clock: WallClock = WallClock.System,
 ) {
     val state by model.state.collectAsState()
     var segment by rememberSaveable { mutableStateOf(Segment.FRIENDS) }
@@ -181,7 +184,7 @@ fun FriendsScreen(
                 Segment.FEED to stringResource(Res.string.friends_segment_feed),
                 Segment.FRIENDS to stringResource(Res.string.friends_segment_friends),
                 Segment.REQUESTS to stringResource(Res.string.friends_segment_requests) + if (requests > 0) " ($requests)" else "",
-                Segment.WATCHING to stringResource(Res.string.friends_segment_watching),
+                Segment.LIVE to stringResource(Res.string.friends_segment_live),
             ).forEach { (value, label) ->
                 FilterChip(
                     selected = segment == value,
@@ -290,8 +293,8 @@ fun FriendsScreen(
                 }
             }
 
-            Segment.WATCHING -> {
-                WatchingList(model, state)
+            Segment.LIVE -> {
+                LiveSection(model, state, clock, onOpenLive)
             }
         }
     }
