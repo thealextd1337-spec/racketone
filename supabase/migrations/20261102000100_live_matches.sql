@@ -24,7 +24,8 @@ begin
              'sport', m.sport, 'discipline', m.discipline,
              'participants', vv.v -> 'teams',
              'projection', vv.v -> 'live',
-             'scorerConnected', coalesce((vv.v -> 'live' ->> 'scorerConnected')::boolean, false),
+             -- vom zählenden Konto gemeldete Erreichbarkeit des Zählers; fehlt sie, bleibt sie unbekannt (null), nie „offline“
+             'scorerConnected', vv.v -> 'live' -> 'scorerConnected',
              'updatedAt', m.updated_at)
            order by m.updated_at desc, m.id), '[]'::jsonb)
     -- visitor_view erst für die gefilterten Matches (OFFSET 0 als Planungsgrenze), nicht für jede Teilnahme.

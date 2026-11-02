@@ -188,7 +188,7 @@ private fun SpectateDetail(
             item {
                 Hint(if (match.finished) stringResource(R.string.spectate_finished) else agoText(ageSeconds), secondary = true)
             }
-            if (!match.finished && !match.scorerConnected) {
+            if (!match.finished && match.scorerConnected == false) {
                 item { Hint(stringResource(R.string.spectate_scorer_offline), color = HintAmber) }
             }
             item { Hint(stringResource(relationText(match.relation)), secondary = true) }

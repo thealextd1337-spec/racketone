@@ -225,7 +225,7 @@ private fun LiveStatus(
             modifier = Modifier.testTag("live_age_${entry.matchId}"),
         )
     }
-    if (!entry.scorerConnected) {
+    if (entry.scorerConnected == false) {
         Text(
             stringResource(Res.string.live_scorer_offline),
             style = AdvantlyTheme.typography.caption,

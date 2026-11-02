@@ -78,7 +78,8 @@ data class LiveView(
     val points: List<String>? = null,
     val serving: Side? = null,
     val finished: Boolean = false,
-    val scorerConnected: Boolean = false,
+    /** `false` = Zähler offline, `null` = unbekannt (fehlt auf dem Draht; ältere Uhren lesen das als `false`). */
+    val scorerConnected: Boolean? = null,
     val ageMs: Long? = null,
 ) {
     override fun toString(): String = "LiveView(<redacted>)"

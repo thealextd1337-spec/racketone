@@ -1,15 +1,19 @@
 {
   "live": {
-    "sets": [
-      [
-        1,
-        0
-      ]
+    "sets": [],
+    "games": [
+      0,
+      0
     ],
     "points": [
       "15",
       "0"
-    ]
+    ],
+    "status": "in_progress",
+    "serving": "A",
+    "tiebreak": false,
+    "updatedAtMs": 2000,
+    "scorerConnected": true
   },
   "sport": "tennis",
   "teams": [

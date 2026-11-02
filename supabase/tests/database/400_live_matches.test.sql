@@ -1,7 +1,7 @@
 -- Plan Live PR 1: cloud_my_live_matches_v1 – Mitspieler, Zähler-Person und Zuschauer sehen laufende fremde Matches,
 -- Ersteller, Fremde und Feed-Leser nicht; Widerruf, Blockierung, „War ich nicht“, Ausblenden, Löschen, Alter > 12 h.
 begin;
-select plan(32);
+select plan(33);
 
 select tests.world();
 select tests.create_user('erin');
@@ -58,6 +58,9 @@ select is(current_setting('tests.m1')::jsonb -> 'participants',
           '[{"team":"A","position":1,"name":"Alice"},{"team":"B","position":1,"name":"Bob"}]'::jsonb,
           'Teilnehmer mit Anzeigename, Team und Position');
 select is(current_setting('tests.m1')::jsonb -> 'scorerConnected', 'true'::jsonb, 'scorerConnected aus dem Live-Stand');
+select is((select e -> 'scorerConnected' from jsonb_array_elements(public.cloud_my_live_matches_v1()) e
+           where e ->> 'matchId' = 'a4000000-0000-7000-8000-000000000003'), 'null'::jsonb,
+          'ohne Meldung des Zählers: scorerConnected unbekannt (null), nicht false');
 select is(current_setting('tests.m1')::jsonb ->> 'sport' || '/' || (current_setting('tests.m1')::jsonb ->> 'discipline'),
           'tennis/singles', 'Sport und Disziplin');
 

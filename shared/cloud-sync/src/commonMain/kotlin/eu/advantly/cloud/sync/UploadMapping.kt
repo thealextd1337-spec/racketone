@@ -103,8 +103,9 @@ private val LIVE_POINTS = Regex("^[0-9A-Za-z]{1,3}$")
 
 /**
  * Live-Stand eines laufenden Matches für Visitor (F16): nur Felder, die `private.sanitize_projection` behält
- * (Sätze, Spiele, Punktanzeige, Tiebreak, Status, Zeit) – nie Telemetrie, Gesundheitsdaten oder IDs.
- * Aufschlag fehlt, weil die Projektion ([ScoreSummary]) ihn nicht enthält. Beendete Matches: `null` (Ergebnis kommt aus summary).
+ * (Sätze, Spiele, Punktanzeige, Tiebreak, Aufschlag, Erreichbarkeit des Zählers, Status, Zeit) – nie Telemetrie,
+ * Gesundheitsdaten oder IDs. Fehlt die Erreichbarkeit, bleibt sie beim Betrachter „unbekannt“. Beendete Matches: `null`
+ * (Ergebnis kommt aus summary).
  */
 internal fun liveStateOf(
     status: String,
@@ -135,6 +136,8 @@ internal fun liveStateOf(
             }
         }
         current?.let { put("tiebreak", it.gameKind == GameKind.TIEBREAK || it.gameKind == GameKind.MATCH_TIEBREAK) }
+        score.serving?.let { put("serving", it.name) }
+        score.scorerConnected?.let { put("scorerConnected", it) }
         put("status", status)
         score.lastEventAtMs?.let { put("updatedAtMs", it) }
     }

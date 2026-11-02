@@ -1944,13 +1944,33 @@ class MatchSession(
                 lastEventAtMs =
                     EventLog.matchEnd(m.engine.events)?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
+                scorerConnected = scorerReachable(m),
             )
+        reachabilityWritten[m.id] = score.scorerConnected == true
         writingProgress = true
         try {
             data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
         } finally {
             writingProgress = false
         }
+    }
+
+    /** Handy: Zähler von [m] erreichbar – dieses Gerät, kein Zähler (Altformat) oder eine verbundene, kompatible Gegenstelle. */
+    private fun scorerReachable(m: OpenMatch): Boolean = m.scorer.let { it == null || it == deviceId || reachable(it) }
+
+    /** Zuletzt in den Kopf geschriebene Erreichbarkeit je offenem Match ([persistProgress]). */
+    private val reachabilityWritten = HashMap<MatchId, Boolean>()
+
+    /**
+     * Handy (plan-live-mitspieler §8): Verbindung zur Uhr geändert – laufende Matches mit geänderter Erreichbarkeit des
+     * Zählers neu in den Kopf schreiben, damit die Live-Projektion „Zähler offline“ bzw. wieder erreichbar meldet.
+     */
+    private fun refreshScorerReachability() {
+        if (!config.parallelMatches || !started) return
+        opened.values
+            .filter { it.status != MatchStatus.FINISHED && reachabilityWritten[it.id] != scorerReachable(it) }
+            .toList()
+            .forEach(::persistProgress)
     }
 
     // --- Data-Änderungen (Pull, Zustellung, Redaktion) ---------------------------------------------------------
@@ -2174,6 +2194,7 @@ class MatchSession(
         if (sessionChanged || forceSync) helloSent.remove(peer)
         val result = ProtocolVersion.negotiate(hello.v, hello.minV, maxVersion(), minVersion())
         compatibility[peer] = result
+        refreshScorerReachability()
         deviceStatuses[peer] =
             DeviceStatus(
                 peer,
@@ -2652,6 +2673,7 @@ class MatchSession(
                 pushBacklog(peer)
             }
         }
+        refreshScorerReachability()
         publish()
     }
 

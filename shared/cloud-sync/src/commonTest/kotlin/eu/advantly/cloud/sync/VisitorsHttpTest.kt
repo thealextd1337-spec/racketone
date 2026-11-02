@@ -108,7 +108,7 @@ class VisitorsHttpTest {
             assertTrue(calls.isEmpty())
             val live = backend.liveMatches("alice").single()
             assertEquals(listOf("m9", "player", "Bob"), listOf(live.matchId, live.relation, live.participants.single().name))
-            assertTrue(live.scorerConnected)
+            assertEquals(true, live.scorerConnected)
             assertEquals("rpc/cloud_my_live_matches_v1", calls.single().path)
             assertEquals(JsonObject(emptyMap()), calls.single().body)
             assertEquals("Bearer token-a", calls.single().bearer)

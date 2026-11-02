@@ -1,5 +1,5 @@
 {
-  "cursor": 44,
+  "cursor": 22,
   "hasMore": false,
   "matches": [
     {
@@ -11,7 +11,7 @@
           "alias": "Bob",
           "status": "invited",
           "deviceId": null,
-          "profileId": "db384f78-13d0-4765-b5f0-63ee28c72ead"
+          "profileId": "3ef57dbc-97ef-4551-83c2-dbac1ec72c6a"
         }
       ],
       "sport": "tennis",
@@ -26,18 +26,22 @@
       "deleted": false,
       "endedAt": null,
       "summary": null,
-      "createdBy": "9b09e391-56be-48c3-afe1-be15b2f53948",
+      "createdBy": "282fb248-901b-4e62-b1a1-dcfa3db31a51",
       "liveState": {
-        "sets": [
-          [
-            1,
-            0
-          ]
+        "sets": [],
+        "games": [
+          0,
+          0
         ],
         "points": [
           "15",
           "0"
-        ]
+        ],
+        "status": "in_progress",
+        "serving": "A",
+        "tiebreak": false,
+        "updatedAtMs": 2000,
+        "scorerConnected": true
       },
       "startedAt": "2026-10-16T12:00:00+02:00",
       "discipline": "singles",
@@ -50,7 +54,7 @@
           "slotId": "s-a",
           "playerId": null,
           "position": 1,
-          "profileId": "9b09e391-56be-48c3-afe1-be15b2f53948",
+          "profileId": "282fb248-901b-4e62-b1a1-dcfa3db31a51",
           "linkStatus": "self",
           "displayName": "Alice",
           "deletedProfile": false,
@@ -71,7 +75,7 @@
       ],
       "resultReason": null,
       "tournamentId": null,
-      "serverVersion": 44,
+      "serverVersion": 22,
       "redactionEpoch": 0,
       "previousMatchId": null,
       "projectionEventCount": 2
@@ -85,7 +89,7 @@
       "deleted": false,
       "profileId": null,
       "displayName": "Max",
-      "serverVersion": 36,
+      "serverVersion": 14,
       "assignmentSource": null
     }
   ],
@@ -94,16 +98,16 @@
       "alias": "Bob",
       "status": "accepted",
       "outgoing": true,
-      "profileId": "db384f78-13d0-4765-b5f0-63ee28c72ead",
-      "serverVersion": 33
+      "profileId": "3ef57dbc-97ef-4551-83c2-dbac1ec72c6a",
+      "serverVersion": 11
     },
     {
       "alias": "Vera",
       "status": "accepted",
       "outgoing": true,
-      "profileId": "37c703b3-d373-4fc1-a09a-8569e23122ca",
-      "serverVersion": 34
+      "profileId": "bb191270-8d04-461e-96f9-21f80fab14c3",
+      "serverVersion": 12
     }
   ],
-  "visibilityEpoch": 2
+  "visibilityEpoch": 7
 }

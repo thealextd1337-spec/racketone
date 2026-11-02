@@ -16,7 +16,8 @@ data class LiveMatch(
     val discipline: String,
     val participants: List<VisitorTeamMember> = emptyList(),
     val projection: JsonObject? = null,
-    val scorerConnected: Boolean = false,
+    /** Vom zählenden Konto gemeldet; `null` = unbekannt (ältere App, noch kein Live-Stand) – nie als „offline“ zeigen. */
+    val scorerConnected: Boolean? = null,
     /** Letzte Änderung am Server (ISO-8601). */
     val updatedAt: String,
 )

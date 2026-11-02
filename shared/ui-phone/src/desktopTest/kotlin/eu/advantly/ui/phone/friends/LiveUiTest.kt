@@ -142,7 +142,8 @@ private val running =
         "singles",
         listOf(VisitorTeamMember("A", 1, "Bob"), VisitorTeamMember("B", 1, "Alice")),
         json("""{"sets":[[6,4]],"games":[3,2],"points":["40","AD"],"serving":"B","tiebreak":false}"""),
-        scorerConnected = true,
+        // M2: unbekannt (ältere App des Zählers) – kein „Zähler nicht verbunden“
+        scorerConnected = null,
         updatedAt = "2026-11-02T11:00:05Z",
     )
 
