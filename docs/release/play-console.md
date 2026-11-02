@@ -317,9 +317,15 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
-- **0.5.0 (Pulsverlauf):** keine Änderung nötig. Pulsverläufe liegen nur auf Uhr und Handy (Entscheidung 02.11.2026), Puls- und
-  Schrittwerte bleiben **nicht erhoben**. Je Match geht nur die gewählte Stufe (`pulseVisibility` in `matches.meta`) in die Cloud –
-  eine Präferenz ohne Messwerte, wie „Puls & Schritte“. Erst wenn der geparkte Cloud-Stand (`w9/puls-cloud-geparkt`) kommt, neu ausfüllen.
+- **0.5.0 (Pulsverlauf) – neu ausfüllen (Entscheidung 02.11.2026, vorsichtige Auslegung):** Puls und Schritte gehen von der Uhr
+  ans Handy (live und als Pulsverlauf nach dem Match). Die Wear Data Layer API kann dafür Server von Google nutzen, die Daten
+  verlassen also unter Umständen das Gerät. Deshalb angeben, obwohl sie nie bei uns ankommen:
+  - **Gesundheit und Fitness → Gesundheitsinfo** (Herzfrequenz) und **Fitnessinfo** (Schritte im Match): erhoben = **ja**,
+    geteilt = **nein**, Verarbeitung **nicht** ephemer (der Pulsverlauf wird auf dem Handy gespeichert), **optional**
+    (Nutzer kann wählen: Puls-Anzeige und „Pulsverlauf aufzeichnen“), Zweck **App-Funktionen**.
+  - Verschlüsselung bei der Übertragung: ja (bleibt für die ganze App ja). Löschung: Nutzer können die Daten in der App löschen.
+  - Je Match geht nur die gewählte Stufe (`pulseVisibility` in `matches.meta`) in unsere Cloud – eine Präferenz ohne Messwerte.
+  - Erst wenn der geparkte Cloud-Stand (`w9/puls-cloud-geparkt`) kommt, erneut prüfen.
 
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
 Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch für geschlossene/offene Tests [P10]. Vor dem Pilot abschließen und bereits intern vorbereiten; die Quelle nennt interne Tests nicht ausdrücklich.
