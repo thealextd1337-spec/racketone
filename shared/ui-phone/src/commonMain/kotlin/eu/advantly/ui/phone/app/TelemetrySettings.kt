@@ -49,6 +49,7 @@ import eu.advantly.ui.phone.resources.health_record_toggle_sub
 import eu.advantly.ui.phone.resources.health_revoke_confirm
 import eu.advantly.ui.phone.resources.health_revoke_text
 import eu.advantly.ui.phone.resources.health_revoke_title
+import eu.advantly.ui.phone.resources.health_watch_retention
 import eu.advantly.ui.phone.resources.telemetry_intro
 import eu.advantly.ui.phone.resources.telemetry_off
 import eu.advantly.ui.phone.resources.telemetry_off_sub
@@ -127,6 +128,12 @@ private fun HealthConsentSection(
         onChange = { on -> if (on) port.setHealthConsent(true) else confirm = HealthConfirm.REVOKE },
         tag = "health_record_toggle",
         enabled = !locked,
+    )
+    Text(
+        stringResource(Res.string.health_watch_retention),
+        style = AdvantlyTheme.typography.caption,
+        color = AdvantlyTheme.colors.text2,
+        modifier = Modifier.testTag("health_watch_retention"),
     )
     AdvantlyButton(
         text = stringResource(Res.string.health_delete_all),
