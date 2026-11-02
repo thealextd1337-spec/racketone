@@ -65,6 +65,20 @@ Rückmeldungen nach 0.5.0:
   - Entschieden wird nach Screenshots beider Varianten auf beiden Gerätegrößen.
 - **Tests:** Geometrie-Tests (`ActionStrip`), Screenshot-/UI-Tests der Wear-App, Feldtest im Match.
 
+### 4a. Bevorzugte Gestaltung (Nutzervorschlag 02.11.)
+
+- Solange die Aufschlag-Tasten stehen, rückt der Spielstand (Punkte beider Seiten und Satzstand) in die linke Hälfte.
+- Rechts stehen „2. Aufschlag“ und „Doppelfehler“ **übereinander**, jede Taste etwa 45 % der Breite und ein Viertel der
+  Höhe. Die Schrift ist groß, die Wörter werden getrennt („2. Auf-/schlag“, „Doppel-/fehler“).
+- Nach der Auswahl oder wenn die Zeit abgelaufen ist, gleitet der Spielstand zurück in die Mitte.
+- **Tippflächen in dieser Zeit:** links oben „Punkt Wir“, links unten „Punkt Gegner“ (je ≥ 48 dp), rechts die beiden Tasten.
+  Die Zählflächen werden schmaler, aber nicht niedriger.
+- **Ersetzt** die waagerechte Leiste aus `ActionStrip` für die Aufschlag-Auswahl. „Rückgängig“ und „Aufschläger wählen“
+  bleiben wie bisher.
+- **Vergleichsvarianten:** A–F als Screenshots unter `H:/advantly-temp/serve-shots/`. Die Gestaltung wird vor dem Einbau
+  mit echten Screenshots (Galaxy Watch8 40 mm, Pixel Watch 41/45 mm, kleine Uhr, größte Schrift) bestätigt.
+- **Apple Watch:** gleiches Layout in `OperationViews.swift`.
+
 ## 5. Einwilligungen beim Einstieg
 
 ### 5.1 Neuer Schritt „Puls & Schritte“ im Konto-Einstieg
@@ -149,8 +163,7 @@ Rückmeldungen nach 0.5.0:
   - Vorhandene Serien werden nur durch eine höhere Revision ersetzt (gleiche Regel wie beim Empfang von der Uhr).
 - **Prüfung an der Vertrauensgrenze:** Formatversion, Größenlimit, Wertebereiche wie `HealthSeries`/`MAX_BUCKETS`.
   Kaputte Dateien werden ohne Absturz abgelehnt.
-- **Offen (E4):** Datei mit einem selbst gewählten Passwort verschlüsseln? Das schützt bei Ablage in fremden Clouds, kostet
-  aber eine Passwortabfrage beim Import. Vorschlag: zunächst unverschlüsselt mit deutlichem Hinweis.
+- **Entschieden (E4, 02.11.):** zunächst ohne Passwort, mit deutlichem Hinweis, dass die Datei Gesundheitsdaten enthält.
 - **Tests:** Rundreise Export → Import, unbekannte Matches, ältere Revision, kaputte bzw. zu große Datei, ohne Einwilligung.
 
 ## 7c. Eine gemeinsame Leiste: Zeitleiste, Momentum und Puls (Nutzerwunsch 02.11.)
@@ -187,6 +200,16 @@ Ziel ist **eine** Grafik direkt unter den Sätzen:
 Ältere Matches und Matches mit Uhr-App 0.4.2 haben keine Kurve. Genau das sollen §3 (Uhr-Update-Hinweis) und §5/§6
 (Einwilligung im Einstieg bzw. „Was ist neu?“) beheben.
 
+## 7d. Kleinigkeiten aus dem ersten Test (02.11.)
+
+- **Uhr ohne „Teilen“ (umgesetzt):** „Puls & Schritte“ auf Wear OS und Apple Watch bietet nur noch „Nur für mich“ /
+  „Gar nicht“. Ein vom Handy übernommenes „Teilen“ zeigt die Uhr als „Nur für mich“. Das Teilen wird später anders gelöst.
+  Offen: Bleibt „Teilen“ am Handy (Profil) vorerst stehen?
+- **Pulslinie kommt verzögert:** Die Uhr sendet den Pulsverlauf erst nach Ende des Workouts; je nach Verbindung dauert das
+  Sekunden bis Minuten. Solange für ein Match eine Aufzeichnung gewählt, aber noch keine Serie da ist, zeigt die Zeitleiste
+  „Pulsverlauf wird von der Uhr übertragen …“ statt nichts. Nach einer Weile ohne Daten heißt der Hinweis
+  „Noch kein Pulsverlauf von der Uhr – Uhr in der Nähe des Handys öffnen“.
+
 ## 8. Datenschutzerklärung Fassung 8 (entschieden 02.11.)
 
 Mit 0.5.1 kommt Fassung 8 mit erneuter Zustimmung. §3.4 beschreibt dann:
@@ -220,5 +243,5 @@ A, B, C, E, F und H sind unabhängig voneinander; D kommt nach A und C, G zuletz
 
 - ~~E1~~ **entschieden 02.11.:** Sonderfall §5.4 – das Handy fragt einmal nach.
 - ~~E2~~ **entschieden 02.11.:** Fassung 8 mit 0.5.1, Inhalt §8.
-- **E4:** Export-Datei verschlüsseln (§7b)?
-- **E3:** Aufschlag-Tasten – mehr Höhe für die Leiste oder eigene Zeile für „Doppelfehler“ (nach Screenshots)?
+- ~~E4~~ **entschieden 02.11.:** Export ohne Passwort, mit Hinweis.
+- **E3:** siehe §4a – Spielstand links, Tasten rechts übereinander (Nutzervorschlag); vor dem Einbau mit echten Screenshots bestätigen.
