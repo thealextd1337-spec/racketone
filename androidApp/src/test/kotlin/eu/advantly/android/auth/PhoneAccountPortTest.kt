@@ -170,7 +170,7 @@ class PhoneAccountPortTest {
             push.enable()
             val port = PhoneAccountPort(auth, this, Record(), push) {}
             port.signOut()
-            assertEquals(listOf("set:t1:session=alice", "set:null:session=alice", "delete"), log)
+            assertEquals(listOf("set:t1:session=alice", "delete", "set:null:session=alice"), log)
             assertEquals(false, prefs.enabled)
             port.close()
         }

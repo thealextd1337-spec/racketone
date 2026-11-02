@@ -102,7 +102,7 @@ class PushRegistrationTest {
             push.enable()
             rig.log.clear()
             push.disable()
-            assertEquals(listOf("set:alice:fcm:null", "delete"), rig.log)
+            assertEquals(listOf("delete", "set:alice:fcm:null"), rig.log)
             assertNull(rig.prefs.uploaded)
             assertFalse(rig.prefs.enabled)
             rig.log.clear()
@@ -116,8 +116,20 @@ class PushRegistrationTest {
             val push = rig.registration()
             push.enable()
             rig.serverDown = true
+            rig.log.clear()
             push.disable()
-            assertEquals("alice\nt1", rig.prefs.uploaded)
+            assertEquals(listOf("delete"), rig.log, "M1: lokal sofort aus (Token gelöscht), auch ohne Server")
+            assertEquals("alice\nt1", rig.prefs.uploaded, "Server-Bereinigung bleibt vorgemerkt")
+            rig.serverDown = false
+            rig.log.clear()
+            push.sync()
+            assertEquals(listOf("delete", "set:alice:fcm:null"), rig.log, "beim nächsten Abgleich nachgeholt")
+            assertNull(rig.prefs.uploaded)
+
+            push.enable()
+            rig.serverDown = true
+            push.disable()
+            assertEquals("alice\nt3", rig.prefs.uploaded)
             // Abmelden inzwischen erfolgt: Server-Token unerreichbar, lokales Token wird trotzdem verworfen.
             rig.session = null
             rig.log.clear()
