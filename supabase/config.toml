@@ -407,6 +407,10 @@ verify_jwt = false
 [functions.cleanup-data-exports]
 verify_jwt = false
 
+# Push-Versand: Trigger/Cron rufen per pg_net mit eigenem Schlüssel (x-push-dispatch-secret) auf.
+[functions.push-dispatch]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
