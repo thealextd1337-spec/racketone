@@ -14,13 +14,16 @@ import eu.advantly.android.auth.PhoneSyncScheduler
 import eu.advantly.android.auth.runScheduledSync
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.friends.AcceptIssue
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.PendingVisitorStore
+import eu.advantly.presentation.friends.ScorerAccept
 import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -139,6 +142,7 @@ internal class AndroidPhoneSyncRecord(
             .remove("failures.$profile")
             .remove("visitors.pending.$profile")
             .remove("scorers.pending.$profile")
+            .remove("scorers.accepted.$profile")
             // Altlast bis 0.5.x (Live-Upload nur mit Zuschauern); wird nicht mehr geschrieben.
             .remove("visitors.watched.$profile")
             .apply()
@@ -187,6 +191,29 @@ internal class AndroidPhoneSyncRecord(
         prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
     }
 
+    // Empfänger (§3.4): „Match/Gerät/angenommen um/Wechsel|-/Grund|-“; UUIDs ohne Schrägstrich.
+    override fun scorerAccepts(profileId: String): Map<String, ScorerAccept> =
+        prefs
+            .getStringSet("scorers.accepted.$profileId", null)
+            .orEmpty()
+            .mapNotNull { entry ->
+                val parts = entry.split('/').takeIf { it.size == 5 } ?: return@mapNotNull null
+                val at = parts[2].toLongOrNull() ?: return@mapNotNull null
+                val issue = AcceptIssue.entries.firstOrNull { it.name == parts[4] }
+                parts[0] to ScorerAccept(parts[1], at, parts[3].toIntOrNull(), issue)
+            }.toMap()
+
+    override fun setScorerAccepts(
+        profileId: String,
+        accepts: Map<String, ScorerAccept>,
+    ) {
+        val entries =
+            accepts
+                .map { (match, a) -> "$match/${a.device}/${a.acceptedAtMs}/${a.changes ?: "-"}/${a.issue?.name ?: "-"}" }
+                .toSet()
+        prefs.edit().putStringSet("scorers.accepted.$profileId", entries).apply()
+    }
+
     companion object {
         const val FILE = "advantly_sync"
     }
@@ -196,7 +223,8 @@ internal class AndroidPhoneSyncRecord(
  * Matchende auch ohne Activity (etwa ein empfangenes Uhr-Match über den Listener-Service): ein Abgleich, sobald Netz
  * da ist. Nur mit lokalem Konto; der Auftrag läuft ausschließlich für dieses Konto. Ebenso eine geänderte
  * Telemetrie-Wahl (H0, auch von der Uhr): der Lauf bringt sie ins Konto. Und der Live-Stand ([onLiveScore]): Punkte
- * der Uhr kommen auch ohne Activity und ohne Konto-Host über den Listener-Service herein.
+ * der Uhr kommen auch ohne Activity und ohne Konto-Host über den Listener-Service herein; läuft die Live-Übertragung
+ * ([onLiveRelay]), lädt sie direkt hoch, sonst ein (Expedited) Job.
  */
 internal fun scheduleSyncAfterMatchEnd(
     context: Context,
@@ -219,13 +247,54 @@ internal fun scheduleSyncAfterMatchEnd(
     val removeMatch = onMatchFinished(session, schedule)
     val removeTelemetry = onTelemetryChanged(session, schedule)
     val live =
-        LiveScoreUpload(System::currentTimeMillis, { account, delayMs -> scheduler.scheduleUnlessBackingOff(account, record, delayMs) })
+        LiveScoreUpload(System::currentTimeMillis, { account, delayMs ->
+            // Während eines Backoffs (offline, gestört) nicht am Job vorbei hämmern.
+            if (record.failures(account) > 0 || !LiveRelayService.upload(account, delayMs)) {
+                scheduler.scheduleUnlessBackingOff(account, record, delayMs)
+            }
+        })
     val removeLive = onLiveScore(session, live, profile)
+    val audience = { match: ActiveMatch ->
+        AndroidInstallationGuard.storage(context) {
+            val account = session.data.accountIdentities.profile
+            account != null &&
+                (
+                    record.pending(account)[match.id.value].orEmpty().isNotEmpty() ||
+                        (match.lineup.a + match.lineup.b).any { session.data.players.friendProfile(account, it) != null }
+                )
+        } == true
+    }
+    val removeRelay = onLiveRelay(session, LiveRelayGate(audience), { profile() != null }) { LiveRelayService.update(context, it) }
     return {
         removeMatch()
         removeTelemetry()
         removeLive()
+        removeRelay()
+        LiveRelayService.update(context, false)
     }
+}
+
+/**
+ * Live-Übertragung im Vordergrund ([LiveRelayService]): nach jedem Session-Zustand neu bewerten, ob die eigene Uhr ein
+ * laufendes Match mit Publikum zählt ([LiveRelayGate]); [run] startet bzw. beendet den Dienst.
+ */
+internal fun onLiveRelay(
+    session: MatchSession,
+    gate: LiveRelayGate,
+    signedIn: () -> Boolean,
+    run: (Boolean) -> Unit,
+): () -> Unit {
+    val listener =
+        SessionListener { state ->
+            run(
+                gate.update(signedIn(), state.matches) {
+                    // Uhr zählt: „Meine Uhr“ vor ihrer Meldung oder eines meiner Geräte, aber nicht dieses Handy
+                    it.scorerDeviceId == MatchSession.PENDING_WATCH || (!it.isScorer && session.scoresHere(it.id))
+                },
+            )
+        }
+    session.addListener(listener)
+    return { session.removeListener(listener) }
 }
 
 /**

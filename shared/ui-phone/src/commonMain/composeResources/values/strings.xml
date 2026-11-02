@@ -978,6 +978,10 @@
     <string name="scorer_accept_watch">Score on my watch</string>
     <string name="scorer_decline">Decline</string>
     <string name="scorer_waiting">Accepted – waiting for the handover …</string>
+    <string name="scorer_fell_back">Handover not completed – the previous scorer keeps scoring.</string>
+    <string name="scorer_handover_ended">Handover cancelled – the invitation or the match has ended.</string>
+    <string name="scorer_handover_pending">Handover still pending – we’ll check again later.</string>
+    <string name="scorer_retry">Try again</string>
     <string name="scorer_open">Open scoring</string>
     <string name="scorer_takeover">Take over scoring (emergency)</string>
     <string name="scorer_takeover_pending">Possible once the full score has been synced.</string>

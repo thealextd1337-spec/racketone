@@ -25,13 +25,49 @@ data class Handover(
     val to: String,
 )
 
-/** Persistente Zähl-Einladungen je Konto (Host: z. B. SharedPreferences): Match-ID → Einladung. */
+/** Warum eine angenommene Übergabe beim Empfänger ohne Wechsel endete (Hinweis in der Live-Ansicht). */
+enum class AcceptIssue {
+    /** Ein späterer Zählerwechsel ging an ein anderes Gerät: Der bisherige Zähler zählt weiter. */
+    FELL_BACK,
+
+    /** Rolle widerrufen oder abgelehnt, Match beendet oder gelöscht. */
+    ENDED,
+
+    /** Frist abgelaufen: normaler Abgleich, der Wechsel kann noch kommen. */
+    TIMED_OUT,
+}
+
+/**
+ * Angenommene Zähl-Einladung des Empfängers, deren Wechsel noch aussteht: angenommen mit [device] um [acceptedAtMs]
+ * (Wanduhr, übersteht Neustarts); [changes]: Zählerwechsel im lokalen Log bei Annahme (`null`: Log war noch leer).
+ */
+data class ScorerAccept(
+    val device: String,
+    val acceptedAtMs: Long,
+    val changes: Int? = null,
+    val issue: AcceptIssue? = null,
+)
+
+/** Zählerwechsel im lokalen Log eines Matches: Anzahl und Zielgerät des jüngsten. */
+data class ScorerChanges(
+    val count: Int,
+    val lastTarget: String?,
+)
+
+/** Persistente Zähl-Einladungen je Konto (Host: z. B. SharedPreferences): Match-ID → Einladung bzw. Annahme. */
 interface PendingScorerStore {
     fun scorerInvites(profileId: String): Map<String, ScorerInvite>
 
     fun setScorerInvites(
         profileId: String,
         invites: Map<String, ScorerInvite>,
+    )
+
+    fun scorerAccepts(profileId: String): Map<String, ScorerAccept>
+
+    fun setScorerAccepts(
+        profileId: String,
+        accepts: Map<String, ScorerAccept>,
     )
 }
 
@@ -45,6 +81,9 @@ interface ScorerDevices {
 
     /** Eines meiner Geräte zählt das laufende Match [matchId]. */
     fun scoring(matchId: String): Boolean
+
+    /** Zählerwechsel im lokalen Log von [matchId]; `null`, solange es leer ist. */
+    fun scorerChanges(matchId: String): ScorerChanges?
 
     /** Abgabe an [deviceId] (`ScorerChanged`); `null`, wenn keines meiner Geräte zählt. */
     fun handOver(
@@ -93,8 +132,10 @@ data class HandoverStatus(
  *   [reconcile] nach jedem Abgleich: Sobald die gezogene Rolle angenommen ist, erzeugt dieses Handy `ScorerChanged` auf das
  *   angenommene Gerät; erledigt ist die Abgabe erst, wenn der Server es angenommen hat. Lehnt er es ab, zählt das vorige
  *   eigene Gerät wieder ([HandoverPhase.FAILED]). Ablehnung oder Widerruf der Einladung beenden die Abgabe.
- * - **Empfänger:** [accept] registriert bei Bedarf die eigene Uhr, nimmt an und wartet, bis der Wechsel gezogen ist.
- * [requestSync] stößt einen Abgleich an. Aufrufe auf dem seriellen Host-Kontext.
+ * - **Empfänger:** [accept] registriert bei Bedarf die eigene Uhr, nimmt an und wartet (gespeichert), bis der Wechsel
+ *   gezogen ist – höchstens [ACCEPT_LIMIT_MS]. Ein späterer Wechsel auf ein anderes Gerät, Widerruf oder Matchende beenden
+ *   das Warten vorher; der Grund bleibt als [AcceptIssue] sichtbar, bis er weggeklickt ist.
+ * [requestSync] stößt einen Abgleich an; [nowMs] ist Wanduhrzeit. Aufrufe auf dem seriellen Host-Kontext.
  */
 class ScorerHandovers(
     private val store: PendingScorerStore,
@@ -102,12 +143,10 @@ class ScorerHandovers(
     private val onServer: (profileId: String, matchId: String) -> Boolean,
     private val pulled: (profileId: String, matchId: String) -> PulledMatch?,
     val devices: ScorerDevices,
+    private val nowMs: () -> Long,
     private val requestSync: () -> Unit,
 ) {
     private val flushing = Mutex()
-
-    /** Angenommene Einladungen, deren Zählerwechsel noch nicht gezogen ist (nur im Speicher). */
-    private val awaiting = mutableSetOf<String>()
 
     /** Vom Server abgelehnte Abgaben (Konto, Match) → eingeladene Person, bis der Hinweis weggeklickt ist (nur im Speicher). */
     private val failed = mutableMapOf<Pair<String, String>, String>()
@@ -186,6 +225,7 @@ class ScorerHandovers(
      * `true`: Es gibt noch offene Übergaben – der Host fragt dann alle 5 s ab, bis der Wechsel gesehen ist.
      */
     fun reconcile(profileId: String): Boolean {
+        val waiting = reconcileAccepts(profileId)
         for ((matchId, invite) in store.scorerInvites(profileId)) {
             if (!invite.sent) continue
             val handover = invite.handover
@@ -227,9 +267,60 @@ class ScorerHandovers(
                 }
             }
         }
-        awaiting.removeAll { devices.scoring(it) }
-        return awaiting.isNotEmpty() || store.scorerInvites(profileId).isNotEmpty()
+        return waiting || store.scorerInvites(profileId).isNotEmpty()
     }
+
+    /** Empfänger: Annahmen abhaken oder mit Grund beenden; `true`, solange eine noch auf den Wechsel wartet. */
+    private fun reconcileAccepts(profileId: String): Boolean {
+        val now = nowMs()
+        val accepts =
+            store
+                .scorerAccepts(profileId)
+                .mapNotNull { (matchId, accept) ->
+                    val match = pulled(profileId, matchId)
+                    val role = match?.roleOf(profileId)?.status
+                    val changes = devices.scorerChanges(matchId)
+                    val next =
+                        when {
+                            // (a) Wechsel gesehen
+                            devices.scoring(matchId) -> {
+                                null
+                            }
+
+                            // nicht (mehr) gezogen: nur bis zur Frist warten; einen Hinweis zeigte kein Eintrag mehr
+                            match == null -> {
+                                accept.takeIf { it.issue == null }?.timedOut(now)
+                            }
+
+                            // erneut eingeladen: Die Einladung zeigt sich wieder statt des Hinweises
+                            accept.issue != null && role == "invited" -> {
+                                null
+                            }
+
+                            // (c) Rolle oder Match beendet
+                            match.deleted || match.status == "finished" || role == "declined" || role == "revoked" -> {
+                                accept.copy(issue = AcceptIssue.ENDED)
+                            }
+
+                            // (b) später ein Wechsel auf ein anderes Gerät, z. B. die Rückgabe nach einer abgelehnten Abgabe
+                            accept.changes != null && changes != null && changes.count > accept.changes &&
+                                changes.lastTarget != accept.device -> {
+                                accept.copy(issue = AcceptIssue.FELL_BACK)
+                            }
+
+                            // (d) Frist; war das Log bei Annahme leer, gilt der erste bekannte Stand als Ausgangspunkt
+                            else -> {
+                                (if (accept.changes == null) accept.copy(changes = changes?.count) else accept).timedOut(now)
+                            }
+                        }
+                    next?.let { matchId to it }
+                }.toMap()
+        store.setScorerAccepts(profileId, accepts)
+        return accepts.values.any { it.issue == null }
+    }
+
+    private fun ScorerAccept.timedOut(now: Long) =
+        if (issue == null && now - acceptedAtMs >= ACCEPT_LIMIT_MS) copy(issue = AcceptIssue.TIMED_OUT) else this
 
     /**
      * Einladung annehmen: auf diesem Handy oder auf der eigenen Uhr ([onWatch]; sie wird vorher am Server registriert).
@@ -249,7 +340,8 @@ class ScorerHandovers(
                 devices.phoneId
             }
         port.respondScorerInvitation(profileId, matchId, true, device)
-        awaiting += matchId
+        val accept = ScorerAccept(device, nowMs(), devices.scorerChanges(matchId)?.count)
+        store.setScorerAccepts(profileId, store.scorerAccepts(profileId) + (matchId to accept))
         requestSync()
     }
 
@@ -258,12 +350,46 @@ class ScorerHandovers(
         matchId: String,
     ) {
         port.respondScorerInvitation(profileId, matchId, false, null)
-        awaiting -= matchId
+        store.setScorerAccepts(profileId, store.scorerAccepts(profileId) - matchId)
         requestSync()
     }
 
-    /** Ich habe angenommen und warte noch auf den Wechsel. */
-    fun awaiting(matchId: String): Boolean = matchId in awaiting
+    /** Ich habe angenommen und warte noch auf den Wechsel (innerhalb der Frist). */
+    fun awaiting(
+        profileId: String,
+        matchId: String,
+    ): Boolean = !devices.scoring(matchId) && current(profileId, matchId)?.let { it.issue == null } == true
+
+    /** Grund, warum meine Annahme ohne Wechsel endete; `null` beim Warten, nach dem Wechsel oder ohne Annahme. */
+    fun acceptIssue(
+        profileId: String,
+        matchId: String,
+    ): AcceptIssue? = if (devices.scoring(matchId)) null else current(profileId, matchId)?.issue
+
+    /** Nach Ablauf der Frist erneut warten (wieder [ACCEPT_LIMIT_MS] lang mit schneller Abfrage). */
+    fun retryAccept(
+        profileId: String,
+        matchId: String,
+    ) {
+        val accepts = store.scorerAccepts(profileId)
+        val accept = current(profileId, matchId)?.takeIf { it.issue == AcceptIssue.TIMED_OUT } ?: return
+        store.setScorerAccepts(profileId, accepts + (matchId to accept.copy(acceptedAtMs = nowMs(), issue = null)))
+        requestSync()
+    }
+
+    /** Hinweis wegklicken; eine noch wartende Annahme bleibt. */
+    fun dismissAcceptIssue(
+        profileId: String,
+        matchId: String,
+    ) {
+        if (acceptIssue(profileId, matchId) != null) store.setScorerAccepts(profileId, store.scorerAccepts(profileId) - matchId)
+    }
+
+    /** Gespeicherte Annahme; die Frist gilt auch ohne Abgleich (etwa offline). */
+    private fun current(
+        profileId: String,
+        matchId: String,
+    ) = store.scorerAccepts(profileId)[matchId]?.timedOut(nowMs())
 
     private fun put(
         profileId: String,
@@ -279,5 +405,8 @@ class ScorerHandovers(
     companion object {
         /** Endgültig: Person darf nicht (mehr) zählen; `forbidden` bleibt wie bei Zuschauern kein Abbruch (auch abgelaufenes Token). */
         val FINAL_REASONS = setOf("scorer_not_allowed", "is_visitor", "cannot_invite_self")
+
+        /** Höchstens so lange nach der Annahme schnell abfragen; danach gilt der normale Abgleich. */
+        const val ACCEPT_LIMIT_MS = 2 * 60_000L
     }
 }

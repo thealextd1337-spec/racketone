@@ -978,6 +978,10 @@
     <string name="scorer_accept_watch">Auf meiner Uhr zählen</string>
     <string name="scorer_decline">Ablehnen</string>
     <string name="scorer_waiting">Angenommen – warte auf die Übergabe …</string>
+    <string name="scorer_fell_back">Übergabe nicht abgeschlossen – der bisherige Zähler zählt weiter.</string>
+    <string name="scorer_handover_ended">Übergabe abgebrochen – Einladung oder Match ist beendet.</string>
+    <string name="scorer_handover_pending">Übergabe noch offen – wir prüfen später erneut.</string>
+    <string name="scorer_retry">Erneut versuchen</string>
     <string name="scorer_open">Zählen öffnen</string>
     <string name="scorer_takeover">Zählen übernehmen (Notfall)</string>
     <string name="scorer_takeover_pending">Erst möglich, wenn der Stand vollständig geladen ist.</string>

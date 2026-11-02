@@ -8,7 +8,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
+import eu.advantly.presentation.friends.AcceptIssue
 import eu.advantly.presentation.friends.Handover
+import eu.advantly.presentation.friends.ScorerAccept
 import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -127,6 +129,23 @@ class PhoneSyncJobsTest {
         assertEquals(mapOf("m9" to ScorerInvite("eve", sent = true)), reopened.scorerInvites("bob"))
     }
 
+    /** Empfänger: angenommene Übergaben samt Frist, Ausgangsstand und Grund überstehen einen Neustart. */
+    @Test fun scorerAcceptsSurviveReopenAndAreForgottenWithTheAccount() {
+        val record = AndroidPhoneSyncRecord(app)
+        val accepts =
+            mapOf(
+                "m1" to ScorerAccept("jonas-watch", 1_700_000_000_000),
+                "m2" to ScorerAccept("jonas-phone", 5, changes = 2, issue = AcceptIssue.FELL_BACK),
+            )
+        record.setScorerAccepts("jonas", accepts)
+        record.setScorerAccepts("bob", mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)))
+        val reopened = AndroidPhoneSyncRecord(app)
+        assertEquals(accepts, reopened.scorerAccepts("jonas"))
+        record.forget("jonas")
+        assertEquals(emptyMap<String, ScorerAccept>(), reopened.scorerAccepts("jonas"))
+        assertEquals(mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)), reopened.scorerAccepts("bob"))
+    }
+
     /** P3-3: Ein Matchende plant nach 10 s, verkürzt aber keinen aktiven Backoff. */
     @Test fun matchEndKeepsAnActiveBackoffButReplacesOtherPendingWork() {
         val scheduler = AndroidPhoneSyncScheduler(app)
@@ -169,6 +188,33 @@ class PhoneSyncJobsTest {
         scheduler.schedule("alice", 60_000)
         scheduler.scheduleUnlessBackingOff("alice", record, 0)
         assertEquals(60_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+    }
+
+    /** Live-Übertragung: Start als Vordergrunddienst mit Benachrichtigung, Stopp, Upload nur über den laufenden Dienst. */
+    @Test fun liveRelayRunsAsConnectedDeviceForegroundServiceUntilStopped() {
+        assertFalse("ohne Dienst plant der Aufrufer einen Job", LiveRelayService.upload("alice", 0))
+        LiveRelayService.update(app, true)
+        assertEquals(LiveRelayService::class.java.name, shadowOf(app).nextStartedService.component?.className)
+
+        val controller = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
+        val service = controller.get()
+        val shadow = shadowOf(service)
+        assertEquals(LiveRelayService.NOTIFICATION_ID, shadow.lastForegroundNotificationId)
+        assertEquals("Sharing live score", shadow.lastForegroundNotification.extras.getString("android.title"))
+        assertFalse(shadow.isStoppedBySelf)
+        assertTrue(LiveRelayService.upload("alice", 10_000))
+
+        LiveRelayService.update(app, false)
+        assertTrue(shadow.isStoppedBySelf)
+        controller.destroy()
+        assertFalse(LiveRelayService.upload("alice", 0))
+
+        // Stopp vor dem Start: erst in den Vordergrund (Pflicht), dann sofort wieder beenden
+        LiveRelayService.update(app, true)
+        LiveRelayService.update(app, false)
+        val late = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
+        assertTrue(shadowOf(late.get()).isStoppedBySelf)
+        late.destroy()
     }
 
     /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */

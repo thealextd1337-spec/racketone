@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Push (Plan Live §3.3): Android 13+ fragt erst bei Bedarf (Profil, Hinweis im Freunde-Tab) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Live-Übertragung, solange die eigene Uhr ein Match mit Publikum zählt (LiveRelayService): Vordergrunddienst
+         Typ connectedDevice (Voraussetzung ab Android 14: CHANGE_NETWORK_STATE), Wakelock bis zum Upload -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".AdvantlyPhoneApplication"
@@ -57,6 +63,12 @@
             android:name=".sync.PhoneSyncJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- Live-Stand der zählenden Uhr an Mitspieler/Zuschauer, auch im Doze (Handy in der Tasche) -->
+        <service
+            android:name=".sync.LiveRelayService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- W1-I: Uhr-Events auch ohne laufende Activity empfangen (Wear Data Layer, Pfade aus device-link) -->
         <service
