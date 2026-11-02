@@ -99,23 +99,36 @@ class WhatsNewUiTest {
 
     @Test
     fun afterAnUpdateTheSheetShowsTheCurrentPointsAndOpenActions() =
-        runDesktopComposeUiTest(width = 412, height = 892) {
-            // Übersprungene Version (9 → 11): nur die Punkte von 11
-            val store = store(lastSeen = 9).apply { localAppBuild = AppBuild("0.5.1", "") }
-            store.setDeviceStatuses(listOf(DeviceStatus("w", PeerKind.WATCH, appBuild = AppBuild("0.5.0", ""), reachable = true)))
-            val port = InMemoryTelemetrySettings()
-            setContent { AdvantlyApp(model = app(store, port), authModel = signedIn(), versionName = "0.5.1", buildNumber = build) }
-            onNodeWithText("Advantly 0.5.1", substring = true).assertIsDisplayed()
-            onNodeWithText("Spielverlauf", substring = true).assertExists()
-            onNodeWithTag("watch_update_w").performScrollTo().assertIsDisplayed()
-            onNodeWithTag("health_choice_record").performScrollTo().performClick()
-            onNodeWithTag("whats_new_done").performScrollTo().performClick()
-            onNodeWithTag("whats_new").assertDoesNotExist()
-            runOnIdle {
-                assertEquals("11", store.localNote(WHATS_NEW_KEY))
-                assertTrue(port.healthConsent.value)
+        inGerman {
+            runDesktopComposeUiTest(width = 412, height = 892) {
+                // Übersprungene Version (9 → 11): nur die Punkte von 11
+                val store = store(lastSeen = 9).apply { localAppBuild = AppBuild("0.5.1", "") }
+                store.setDeviceStatuses(listOf(DeviceStatus("w", PeerKind.WATCH, appBuild = AppBuild("0.5.0", ""), reachable = true)))
+                val port = InMemoryTelemetrySettings()
+                setContent { AdvantlyApp(model = app(store, port), authModel = signedIn(), versionName = "0.5.1", buildNumber = build) }
+                onNodeWithText("Advantly 0.5.1", substring = true).assertIsDisplayed()
+                onNodeWithText("Spielverlauf", substring = true).assertExists()
+                onNodeWithTag("watch_update_w").performScrollTo().assertIsDisplayed()
+                onNodeWithTag("health_choice_record").performScrollTo().performClick()
+                onNodeWithTag("whats_new_done").performScrollTo().performClick()
+                onNodeWithTag("whats_new").assertDoesNotExist()
+                runOnIdle {
+                    assertEquals("11", store.localNote(WHATS_NEW_KEY))
+                    assertTrue(port.healthConsent.value)
+                }
             }
         }
+
+    /** Der Test prüft deutsche Texte; CI läuft mit englischer Systemsprache. */
+    private fun inGerman(block: () -> Unit) {
+        val previous = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.GERMANY)
+        try {
+            block()
+        } finally {
+            java.util.Locale.setDefault(previous)
+        }
+    }
 
     @Test
     fun notAfterAFreshInstallOrWhenAlreadySeen() =
