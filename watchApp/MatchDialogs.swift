@@ -119,7 +119,7 @@ struct MatchEndView: View {
                         .font(.footnote)
                         .monospacedDigit()
                         .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("matchend.health")
+                        .accessibilityIdentifier("matchendHealth")
                 }
                 Button {
                     model.closeMatch()
