@@ -1107,8 +1107,12 @@ class MatchSession(
     /**
      * Handy: gibt das Zählen von [matchId] an [target] ab (plan-live-mitspieler §3.4), auch an ein Gerät eines anderen
      * Kontos, das seine Zähl-Rolle mit diesem Gerät angenommen hat (prüft der Server beim Upload). Nur wenn eines meiner
-     * Geräte zählt: dieses Handy oder die eigene Uhr – dann erzeugt das Handy das `ScorerChanged`; Uhr-Eingaben, die es
-     * noch nicht kennt, verwirft die Rollenprüfung. Das Event geht sofort an die eigene Uhr, die in die Anzeige wechselt.
+     * Geräte zählt:
+     * - dieses Handy: Es erzeugt das `ScorerChanged` sofort;
+     * - die eigene Uhr: Sie erzeugt es selbst nach ihrer letzten Eingabe (Auftrag `WatchAssignment.handOverTo`, gilt auch
+     *   nach einer Funkpause). Erzeugte das Handy es, verwürfe die Rollenprüfung offline gezählte Uhr-Punkte, die es noch
+     *   nicht kennt. Bis die Uhr abgegeben hat, liefert der Aufruf `null` ([watchHandOverPending]); danach das Event der Uhr.
+     * Wiederholte Aufrufe liefern dieselbe Abgabe, solange [target] zählt.
      */
     fun handOverScoring(
         matchId: MatchId,
@@ -1117,10 +1121,59 @@ class MatchSession(
         checkThread()
         if (!config.parallelMatches) return null
         val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return null
+        if (m.status == MatchStatus.FINISHED) return null
         val from = m.scorer
-        if (m.status == MatchStatus.FINISHED || from == null || from == target || !isMine(from)) return null
+        if (from == target) {
+            val last = m.engine.events.lastOrNull { it.payload is ScorerChanged }
+            if (last == null || (last.payload as ScorerChanged).scorerDeviceId != target || !isMine(last.deviceId)) return null
+            clearWatchHandOver(matchId)
+            return ScorerHandover(last.id, last.deviceId, target)
+        }
+        if (from == null || !isMine(from)) return null
+        if (from != deviceId) {
+            requestWatchHandOver(m, target)
+            return null
+        }
         val event = emit(m, ScorerChanged(target)) ?: return null
         return ScorerHandover(event.id, from, target)
+    }
+
+    /** Handy: Die eigene Uhr zählt [matchId] noch und hat den Abgabe-Auftrag noch nicht ausgeführt (z. B. nicht verbunden). */
+    fun watchHandOverPending(matchId: MatchId): Boolean {
+        checkThread()
+        val assignment = watchAssignment ?: return false
+        val scorer = opened[matchId]?.scorer ?: detachedHead(matchId)?.scorer
+        return assignment.matchId == matchId && assignment.handOverTo != null && isMine(scorer) && scorer != deviceId
+    }
+
+    /**
+     * Handy: offenen Abgabe-Auftrag an die Uhr für [matchId] zurücknehmen (Einladung zurückgenommen, abgelehnt oder
+     * widerrufen). Neue Zuweisungs-Generation, damit eine noch nicht verbundene Uhr ihn nicht mehr ausführt.
+     */
+    fun cancelWatchHandOver(matchId: MatchId) {
+        checkThread()
+        val current = watchAssignment ?: return
+        if (!config.parallelMatches || current.matchId != matchId || current.handOverTo == null) return
+        storeAssignment(current.copy(assignedAtMs = maxOf(clock.nowMs(), current.assignedAtMs + 1), handOverTo = null))
+        broadcastMeta(opened[matchId]?.record ?: data.matches.get(matchId))
+    }
+
+    /** Abgabe-Auftrag an die eigene Uhr (neue Zuweisungs-Generation auf [m]); ein gleicher offener Auftrag bleibt bestehen. */
+    private fun requestWatchHandOver(
+        m: OpenMatch,
+        target: DeviceId,
+    ) {
+        val current = watchAssignment
+        if (current?.matchId == m.id && current.handOverTo == target) return
+        val explicit = current?.matchId == m.id && current.explicit
+        storeAssignment(WatchAssignment(m.id, maxOf(clock.nowMs(), (current?.assignedAtMs ?: 0) + 1), explicit, target))
+        broadcastMeta(m.record)
+    }
+
+    /** Erledigter Auftrag: nur lokal vergessen (die Uhr hat diese Generation schon verarbeitet), damit ein neuer möglich ist. */
+    private fun clearWatchHandOver(matchId: MatchId) {
+        val current = watchAssignment ?: return
+        if (current.matchId == matchId && current.handOverTo != null) storeAssignment(current.copy(handOverTo = null))
     }
 
     /**
@@ -1136,6 +1189,7 @@ class MatchSession(
         if (!config.parallelMatches || !isMine(handover.from)) return false
         val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return false
         if (m.status == MatchStatus.FINISHED || m.scorer != handover.to) return false
+        clearWatchHandOver(matchId)
         return emit(m, ScorerChanged(handover.from)) != null
     }
 
@@ -1837,6 +1891,19 @@ class MatchSession(
         val keep = target != null && open?.let { it.status != MatchStatus.FINISHED && keepsOwnMatch(it, target) } == true
         assignmentPending = target != null && target != focusedId && !keep
         handOverStrayMatches()
+        assignment.handOverTo?.let { to -> target?.let { handOverOnRequest(it, to) } }
+    }
+
+    /**
+     * Uhr: Abgabe-Auftrag des Handys (plan-live-mitspieler §3.4) – zählt diese Uhr [matchId], gibt sie es per
+     * `ScorerChanged` an [to] ab, geordnet nach ihrer letzten Eingabe (auch offline gezählte Punkte bleiben gültig).
+     */
+    private fun handOverOnRequest(
+        matchId: MatchId,
+        to: DeviceId,
+    ) {
+        val m = opened[matchId] ?: detached(matchId) ?: return
+        if (m.status != MatchStatus.FINISHED && m.scorer == deviceId && to != deviceId) emit(m, ScorerChanged(to))
     }
 
     private fun storeAssignment(assignment: WatchAssignment) {
@@ -1844,6 +1911,7 @@ class MatchSession(
         data.settings.put(WATCH_MATCH_KEY, assignment.matchId?.value.orEmpty())
         data.settings.putLong(WATCH_MATCH_AT_KEY, assignment.assignedAtMs)
         data.settings.putBoolean(WATCH_MATCH_EXPLICIT_KEY, assignment.explicit)
+        data.settings.put(WATCH_MATCH_HANDOVER_KEY, assignment.handOverTo?.value.orEmpty())
     }
 
     /**
@@ -1856,7 +1924,12 @@ class MatchSession(
         if (stored != null) {
             val at = data.settings.getLong(WATCH_MATCH_AT_KEY, 0)
             val explicit = data.settings.getBoolean(WATCH_MATCH_EXPLICIT_KEY, false)
-            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit)
+            val handOverTo =
+                data.settings
+                    .get(WATCH_MATCH_HANDOVER_KEY)
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let(::DeviceId)
+            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit, handOverTo)
         }
         if (!config.parallelMatches) return null
         if (data.accountIdentities.managed) return null
@@ -3363,6 +3436,9 @@ class MatchSession(
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"
+
+        /** Settings: offener Abgabe-Auftrag der Zuweisung (`WatchAssignment.handOverTo`), leer = keiner. */
+        private const val WATCH_MATCH_HANDOVER_KEY = "session.watchMatchHandOver"
 
         /** Settings: Uhr-Match (Handy) bzw. erhaltene Zuweisung (Uhr), leer = keins; dazu ihr Zeitstempel. */
         internal const val WATCH_MATCH_KEY = "session.watchMatch"

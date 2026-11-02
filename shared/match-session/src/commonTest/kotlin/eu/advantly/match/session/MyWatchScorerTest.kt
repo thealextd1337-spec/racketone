@@ -129,7 +129,9 @@ class MyWatchScorerTest {
                 ?.rejectedByRoleCount,
         )
         assertTrue(rig.phone.scoresHere(id))
-        assertNotNull(rig.phone.handOverScoring(id, DeviceId("jonas-phone")), "gemeldete Uhr: Abgabe möglich")
+        assertNull(rig.phone.handOverScoring(id, DeviceId("jonas-phone")), "gemeldete Uhr: Auftrag an die Uhr")
+        rig.settle()
+        assertNotNull(rig.phone.handOverScoring(id, DeviceId("jonas-phone")), "die Uhr hat abgegeben")
     }
 
     @Test

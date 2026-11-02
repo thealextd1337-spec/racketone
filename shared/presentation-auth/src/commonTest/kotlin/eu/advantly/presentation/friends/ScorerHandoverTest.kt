@@ -93,6 +93,17 @@ internal class FakeDevices : ScorerDevices {
     /** Server-Antwort je Event (fehlt: ausstehend). */
     val uploads = mutableMapOf<String, Boolean>()
 
+    /** Die eigene Uhr zählt und hat den Auftrag noch nicht ausgeführt (nicht verbunden). */
+    val watchPending = mutableSetOf<String>()
+    val cancelled = mutableListOf<String>()
+
+    override fun watchPending(matchId: String) = matchId in watchPending
+
+    override fun cancelHandOver(matchId: String) {
+        cancelled += matchId
+        watchPending -= matchId
+    }
+
     override fun watchId() = watch
 
     override fun scoring(matchId: String) = matchId in scoring
@@ -103,7 +114,7 @@ internal class FakeDevices : ScorerDevices {
         matchId: String,
         deviceId: String,
     ): Handover? {
-        if (matchId !in scoring || matchId in blocked) return null
+        if (matchId !in scoring || matchId in blocked || matchId in watchPending) return null
         scoring -= matchId
         handedOver += matchId to deviceId
         return Handover("sc-$matchId", phoneId, deviceId)
@@ -234,10 +245,11 @@ class ScorerHandoverTest {
 
             pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-watch"))
             devices.uploads["sc-m1"] = false
-            assertTrue(handovers.reconcile("alex"), "neue Abgabe wartet auf den Server")
+            assertTrue(handovers.reconcile("alex"), "neue Abgabe beim nächsten Abgleich")
             assertEquals(listOf("m1" to "phone-1"), devices.handedBack)
-            assertEquals(listOf("m1" to "jonas-phone", "m1" to "jonas-watch"), devices.handedOver)
             assertEquals(HandoverPhase.ACCEPTED, handovers.status("alex", "m1")?.phase)
+            assertTrue(handovers.reconcile("alex"), "neue Abgabe wartet auf den Server")
+            assertEquals(listOf("m1" to "jonas-phone", "m1" to "jonas-watch"), devices.handedOver)
 
             // Auch das neue Gerät abgelehnt (gleich dem angenommenen): keine Schleife, FAILED
             assertFalse(handovers.reconcile("alex"))
@@ -260,6 +272,28 @@ class ScorerHandoverTest {
             devices.blocked -= "m1" // Uhr meldet sich
             assertTrue(handovers.reconcile("alex"))
             assertEquals(listOf("m1" to "jonas-phone"), devices.handedOver)
+        }
+
+    /** H2: Zählt die eigene Uhr ohne Verbindung, wartet die Abgabe sichtbar; beendet die Einladung, fällt der Auftrag weg. */
+    @Test fun aHandoverThroughTheWatchWaitsVisiblyAndIsCancelledWithTheInvitation() =
+        runBlocking {
+            onServer += setOf("m1", "m2")
+            devices.scoring += setOf("m1", "m2")
+            devices.watchPending += setOf("m1", "m2")
+            handovers.invite("alex", "m1", "jonas")
+            handovers.invite("alex", "m2", "jonas")
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            pulled["m2"] = memberMatch("m2", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            assertTrue(handovers.reconcile("alex"))
+            assertEquals(HandoverPhase.AWAITING_WATCH, handovers.status("alex", "m1")?.phase)
+            assertTrue(devices.handedOver.isEmpty())
+
+            handovers.cancel("alex", "m1")
+            assertEquals(listOf("m1"), devices.cancelled)
+            pulled["m2"] = memberMatch("m2", PulledRole("jonas", "Jonas", "scorer", "revoked", "jonas-phone"))
+            handovers.reconcile("alex")
+            assertEquals(listOf("m1", "m2"), devices.cancelled)
+            assertTrue(handovers.statuses("alex").isEmpty())
         }
 
     @Test fun declinedRevokedOrNoLongerScoredInvitationsEnd() =

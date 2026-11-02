@@ -60,6 +60,12 @@ internal class PhoneScorerDevices(
         return Handover(handover.eventId.value, handover.from.value, handover.to.value)
     }
 
+    override fun watchPending(matchId: String): Boolean = allowed() && session.watchHandOverPending(MatchId(matchId))
+
+    override fun cancelHandOver(matchId: String) {
+        if (allowed()) session.cancelWatchHandOver(MatchId(matchId))
+    }
+
     override fun uploaded(eventId: String): Boolean? = if (allowed()) cloudAnswer(eventId) else null
 
     override fun handBack(

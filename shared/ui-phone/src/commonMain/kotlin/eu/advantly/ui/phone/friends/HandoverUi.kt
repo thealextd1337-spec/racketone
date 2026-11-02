@@ -37,6 +37,7 @@ import eu.advantly.ui.phone.resources.account_cancel
 import eu.advantly.ui.phone.resources.friends_dismiss
 import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.handover_accepted
+import eu.advantly.ui.phone.resources.handover_awaiting_watch
 import eu.advantly.ui.phone.resources.handover_button
 import eu.advantly.ui.phone.resources.handover_cancel
 import eu.advantly.ui.phone.resources.handover_failed
@@ -138,6 +139,7 @@ fun LiveHandoverButton(
                             HandoverPhase.QUEUED -> Res.string.handover_queued
                             HandoverPhase.INVITED -> Res.string.handover_invited
                             HandoverPhase.ACCEPTED -> Res.string.handover_accepted
+                            HandoverPhase.AWAITING_WATCH -> Res.string.handover_awaiting_watch
                             HandoverPhase.FAILED -> Res.string.handover_failed
                         }
                     Text(stringResource(text, name(status.scorerId)), modifier = Modifier.testTag("live_handover_status"))

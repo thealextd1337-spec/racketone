@@ -111,6 +111,21 @@ class CrossAccountHandoverTest {
         match: MatchId,
     ) = data.events.scoreEvents(match).mapNotNull { (it.payload as? ScorerChanged)?.scorerDeviceId }
 
+    /** Zählt Alex' Uhr, gibt sie selbst ab: erst Auftrag (`null`), nach dem Abgleich liefert das Handy die Abgabe der Uhr. */
+    private fun watchHandOver(
+        match: MatchId,
+        target: DeviceId,
+    ): ScorerHandover {
+        assertNull(alex.phone.handOverScoring(match, target), "die Uhr erzeugt das ScorerChanged")
+        assertTrue(alex.phone.watchHandOverPending(match))
+        settle()
+        assertFalse(alex.phone.watchHandOverPending(match))
+        val handover = assertNotNull(alex.phone.handOverScoring(match, target))
+        assertEquals(alex.watch.deviceId, handover.from)
+        assertEquals(handover, alex.phone.handOverScoring(match, target), "wiederholbar")
+        return handover
+    }
+
     @Test
     fun alexPhoneHandsOverToJonasPhoneWithoutLosingAPoint() {
         val match = start(ScorerChoice.ThisDevice)
@@ -152,8 +167,7 @@ class CrossAccountHandoverTest {
         assertTrue(alex.watch.recordPoint(Side.A))
         settle()
 
-        assertNotNull(alex.phone.handOverScoring(match, jonas.watch.deviceId))
-        settle()
+        watchHandOver(match, jonas.watch.deviceId)
         assertFalse(alex.watch.recordPoint(Side.B), "Alex' Uhr wechselt sofort in die Anzeige")
         assertEquals(
             jonas.watch.deviceId,
@@ -195,8 +209,7 @@ class CrossAccountHandoverTest {
         assertTrue(alex.watch.recordPoint(Side.A))
         settle()
 
-        assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
-        settle()
+        watchHandOver(match, jonas.phone.deviceId)
         assertFalse(alex.watch.recordPoint(Side.A))
         toJonas(match)
 
@@ -223,10 +236,8 @@ class CrossAccountHandoverTest {
         settle()
         assertTrue(alex.watch.recordPoint(Side.A))
         settle()
-        val handover = assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
-        assertEquals(alex.watch.deviceId, handover.from)
+        val handover = watchHandOver(match, jonas.phone.deviceId)
         assertEquals(jonas.phone.deviceId, handover.to)
-        settle()
         assertFalse(alex.watch.recordPoint(Side.A))
 
         assertTrue(alex.phone.handBackScoring(match, handover))
@@ -236,6 +247,65 @@ class CrossAccountHandoverTest {
         assertEquals(2, points(alex.phone, match))
         assertEquals(listOf(jonas.phone.deviceId, alex.watch.deviceId), scorerChanges(alex.phoneData, match).takeLast(2))
         assertFalse(alex.phone.handBackScoring(match, handover), "nur solange das abgelehnte Ziel zählt")
+    }
+
+    /** H2: Die Uhr zählt im Funkloch weiter; die Abgabe kommt erst nach ihrer letzten Eingabe – kein Uhr-Punkt geht verloren. */
+    @Test
+    fun watchCountingOfflineKeepsItsPointsThroughTheHandover() {
+        val match = start(ScorerChoice.MyWatch)
+        settle()
+        assertTrue(alex.watch.recordPoint(Side.A))
+        settle()
+        alex.network.setConnected("watch", false)
+        assertTrue(alex.watch.recordPoint(Side.A))
+        assertTrue(alex.watch.recordPoint(Side.B))
+        assertTrue(alex.watch.recordPoint(Side.B))
+        settle()
+        assertEquals(1, points(alex.phone, match), "das Handy kennt die Offline-Punkte noch nicht")
+
+        assertNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        assertTrue(alex.phone.watchHandOverPending(match), "ohne Uhr keine Abgabe am Handy")
+        assertTrue(alex.phone.scoresHere(match))
+        assertTrue(alex.watch.recordPoint(Side.A), "die Uhr zählt bis zum Auftrag weiter")
+        alex.network.setConnected("watch", true)
+        settle()
+
+        val handover = assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        assertEquals(alex.watch.deviceId, handover.from)
+        assertFalse(alex.watch.recordPoint(Side.A))
+        toJonas(match)
+        assertTrue(jonas.phone.resume(match))
+        assertTrue(jonas.phone.recordPoint(Side.B))
+        toAlex(match)
+        settle()
+
+        assertEquals(6, points(alex.phone, match))
+        assertEquals(6, points(jonas.phone, match))
+        assertEquals(
+            0,
+            alex.phone.state.value
+                .match(match)!!
+                .rejectedByRoleCount,
+            "kein Uhr-Punkt verworfen",
+        )
+    }
+
+    /** Zurückgenommener Auftrag (Einladung beendet): Die Uhr führt ihn nach der Funkpause nicht mehr aus. */
+    @Test
+    fun cancelledWatchHandOverIsNotExecutedLater() {
+        val match = start(ScorerChoice.MyWatch)
+        settle()
+        alex.network.setConnected("watch", false)
+        assertNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        alex.phone.cancelWatchHandOver(match)
+        assertFalse(alex.phone.watchHandOverPending(match))
+        alex.network.setConnected("watch", true)
+        settle()
+
+        assertTrue(alex.watch.recordPoint(Side.A), "die Uhr zählt weiter")
+        settle()
+        assertEquals(emptyList(), scorerChanges(alex.phoneData, match).filter { it == jonas.phone.deviceId })
+        assertTrue(alex.phone.scoresHere(match))
     }
 
     /** N4: Die Antwort kommt ohne Replay aus dem Cache, bis neue Events ankommen (hier: Alex beendet das Match). */
