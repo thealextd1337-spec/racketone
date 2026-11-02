@@ -109,6 +109,7 @@ fun TelemetryVisibilitySection(
             )
         }
         HealthConsentSection(port, locked = !selected.allowsLive)
+        HealthArchiveSection(port, locked = !selected.allowsLive)
     }
 }
 

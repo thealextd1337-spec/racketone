@@ -15,6 +15,8 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.play.services.wearable)
+            // Dateiauswahl (Storage Access Framework) für den Export/Import der Pulsverläufe
+            implementation(libs.androidx.activity.compose)
         }
         named("desktopMain") {
             dependencies {
