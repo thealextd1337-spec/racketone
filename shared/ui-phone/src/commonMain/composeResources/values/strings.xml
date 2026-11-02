@@ -478,6 +478,7 @@
     <string name="telemetry_share_pending">Health data is currently not uploaded to the cloud, so nobody else sees it yet. Your choice applies to your whole account.</string>
     <string name="health_record_toggle">Record heart rate history</string>
     <string name="health_record_toggle_sub">Saves heart rate and steps per match on your watch and this phone. Off by default.</string>
+    <string name="health_watch_retention">Your watch deletes heart rate data once it has reached this phone after the match, at the latest after 7 days.</string>
     <string name="health_record_locked">Not available while heart rate &amp; steps is set to “Off”.</string>
     <string name="health_revoke_title">Stop recording heart rate?</string>
     <string name="health_revoke_text">All recorded heart rate histories will be deleted on this phone and your watch.</string>

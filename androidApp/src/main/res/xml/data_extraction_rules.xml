@@ -1,12 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+: Cloud-Backup und Gerätetransfer; gleiche Ausschlüsse wie backup_rules.xml.
+  Ausgeschlossen: Anmeldung, Sync- und Installationszustand und die ganze App-Datenbank (Domain "database", path="."):
+  Matches und Pulsverläufe gehen nicht in Googles Backup. Das erfasst alle Datenbankfamilien der Recovery-Logik
+  (advantly-install-*.db samt -wal/-shm/-journal und Kopien); der Zeiger auf die aktive Datenbank liegt in no_backup.
+  Ein Restore startet damit wie eine Neuinstallation.
+-->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="advantly_auth.xml" />
         <exclude domain="sharedpref" path="advantly_sync.xml" />
         <exclude domain="sharedpref" path="watch_install.xml" />
         <exclude domain="sharedpref" path="start_login.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="advantly_auth.xml" />
         <exclude domain="sharedpref" path="advantly_sync.xml" />
         <exclude domain="sharedpref" path="watch_install.xml" />

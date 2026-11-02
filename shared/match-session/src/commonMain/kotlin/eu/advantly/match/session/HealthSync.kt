@@ -26,8 +26,9 @@ import kotlin.math.abs
  *
  * Ablauf: Die Uhr nimmt nur auf, wenn Einwilligung, Telemetrie (nicht „Gar nicht“) und die Stufe des Matches es erlauben,
  * speichert etwa einmal pro Minute in `health_series` (Fortsetzen nach Prozess-Tod) und sendet am Ende sowie bei jedem
- * Wiederverbinden alle eigenen Serien, bis das Handy sie mit [HealthAck] bestätigt; dann – spätestens nach 7 Tagen (E5) –
- * löscht sie sie. Das Handy speichert idempotent über `(matchId, sourceDeviceId, revision)`.
+ * Wiederverbinden alle eigenen Serien, bis das Handy sie mit [HealthAck] bestätigt; dann – bei laufendem Match erst nach
+ * dessen Ende, spätestens nach 7 Tagen (E5) – löscht sie sie. Das Handy speichert idempotent über
+ * `(matchId, sourceDeviceId, revision)`.
  */
 internal class HealthSync(
     private val data: LocalData,
@@ -186,6 +187,7 @@ internal class HealthSync(
 
     private fun forget(matchId: MatchId) {
         data.health.deleteForMatch(matchId)
+        data.settings.remove(DONE_PREFIX + matchId.value)
         recorders.remove(matchId)
         savedAtMs.remove(matchId)
         offsets.remove(matchId)
@@ -223,11 +225,12 @@ internal class HealthSync(
     }
 
     /**
-     * Empfang von [sender] (Geräte-ID aus dessen `Hello`). Liefert die Antwort an den Absender (Bestätigung bzw. Löschung)
-     * oder `null`; [changed] meldet geänderte gespeicherte Daten.
+     * Empfang von [sender] (Geräte-ID und [senderKind] aus dessen `Hello`). Liefert die Antwort an den Absender (Bestätigung
+     * bzw. Löschung) oder `null`; [changed] meldet geänderte gespeicherte Daten.
      */
     fun receive(
         sender: DeviceId?,
+        senderKind: PeerKind?,
         message: HealthMessage,
         changed: () -> Unit,
     ): HealthMessage? =
@@ -235,7 +238,11 @@ internal class HealthSync(
             is HealthAck -> {
                 val stored = own(message.matchId)
                 if (message.sourceDeviceId == deviceId() && message.matchId !in recorders && stored?.revision == message.revision) {
-                    data.health.delete(message.matchId, message.sourceDeviceId)
+                    // Läuft das Match noch, bleibt die Serie zum Fortsetzen (neues Workout im selben Match): Eine frische
+                    // Aufnahme mit höherer Revision ersetzte sonst die bestätigte Serie beim Handy durch ihren Rest.
+                    // Bis zum nächsten Ende nicht erneut senden; Reste räumt die 7-Tage-Grenze ab.
+                    val running = data.matches.get(message.matchId)?.isFinished == false
+                    if (!running) data.health.delete(message.matchId, message.sourceDeviceId)
                     data.settings.remove(DONE_PREFIX + message.matchId.value)
                 }
                 null
@@ -243,9 +250,18 @@ internal class HealthSync(
 
             is HealthSeriesMessage -> {
                 when {
+                    // Löschung nur vom Absender selbst; das Handy besitzt die Stufe und löscht alles, sonst nur dessen Serie
+                    message.deleted && message.sourceDeviceId != sender -> {
+                        null
+                    }
+
                     message.deleted -> {
-                        data.settings.put(PULSE_PREFIX + message.matchId.value, TelemetryVisibility.OFF.wire)
-                        forget(message.matchId)
+                        if (senderKind == PeerKind.PHONE) {
+                            data.settings.put(PULSE_PREFIX + message.matchId.value, TelemetryVisibility.OFF.wire)
+                            forget(message.matchId)
+                        } else {
+                            data.health.delete(message.matchId, message.sourceDeviceId)
+                        }
                         changed()
                         null
                     }

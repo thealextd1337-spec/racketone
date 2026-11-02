@@ -5,8 +5,10 @@ import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.MatchMeta
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.health.HealthRecorder
 import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.HealthSeriesMessage
@@ -76,8 +78,105 @@ class HealthSyncTest {
         assertEquals(listOf(110, 120), stored.series.bpm)
         assertEquals(listOf(0L, 9L), stored.series.steps)
         assertEquals(0, stored.series.clockOffsetMs, "Uhr zählt selbst")
-        assertTrue(c["watch"].own().isEmpty(), "nach dem Ack gelöscht")
+        assertEquals(1, c["watch"].own().size, "bestätigt, bleibt aber bis zum Matchende zum Fortsetzen")
         assertFalse(watch.isRecordingHealth(id))
+    }
+
+    /** Review H1: Ein neues Workout im selben laufenden Match setzt die bestätigte Serie fort, statt sie zu ersetzen. */
+    @Test
+    fun aNewWorkoutInTheSameRunningMatchContinuesTheAcknowledgedSeries() {
+        val (c, id) = recordingCluster()
+        val watch = c["watch"].session
+        val t = c.clock.nowMs()
+        assertTrue(watch.recordHeartRate(id, t, 100))
+        assertTrue(watch.recordSteps(id, t, 0))
+        assertTrue(watch.recordSteps(id, t + 6_000, 40))
+        watch.finishHealthRecording(id)
+        c.settle()
+        assertEquals(
+            1,
+            c["phone"]
+                .data.health
+                .forMatch(id)
+                .size,
+            "bestätigt",
+        )
+        // neues Workout (Match ab- und wieder angewählt): Schrittzähler beginnt wieder bei 0
+        assertTrue(watch.recordHeartRate(id, t + 20_000, 130))
+        assertTrue(watch.recordSteps(id, t + 20_000, 0))
+        assertTrue(watch.recordSteps(id, t + 25_000, 5))
+        watch.finishHealthRecording(id)
+        c.settle()
+        val stored =
+            c["phone"]
+                .data.health
+                .forMatch(id)
+                .single()
+                .series
+        assertEquals(listOf(100, null, null, null, 130, null), stored.bpm)
+        assertEquals(listOf(0L, 40L, null, null, 40L, 45L), stored.steps)
+    }
+
+    /** Review M2: Eine Uhr löscht beim Handy nur ihre eigene Serie und ändert die Stufe nicht; fremde Löschungen zählen nicht. */
+    @Test
+    fun aWatchDeletionRemovesOnlyItsOwnSeriesAndKeepsTheLevel() {
+        val phone = WireNode("phone", 1)
+        phone.session.setHealthConsent(true)
+        val id = phone.session.create(format, SINGLES, pulse)
+        val other = DeviceId("other")
+        for (source in listOf(lab, other)) {
+            phone.link.deliver(Hello(source, PeerKind.WATCH, healthProtocol = 1))
+            phone.link.deliver(HealthSeriesMessage(id, source, 1, phone.time, bpm = listOf(100), steps = listOf(null), quality = "OK"))
+        }
+        assertEquals(
+            2,
+            phone.data.health
+                .forMatch(id)
+                .size,
+        )
+        phone.link.deliver(HealthSeriesMessage(id, lab, revision = 0, deleted = true))
+        assertEquals(
+            2,
+            phone.data.health
+                .forMatch(id)
+                .size,
+            "Löschung im Namen eines anderen Geräts",
+        )
+        phone.link.deliver(HealthSeriesMessage(id, other, revision = 0, deleted = true))
+        assertEquals(
+            listOf(lab),
+            phone.data.health
+                .forMatch(id)
+                .map { it.sourceDeviceId },
+        )
+        assertEquals(TelemetryVisibility.PRIVATE, phone.session.pulseVisibility(id))
+    }
+
+    /** Review N2: Eine Löschung vom Handy räumt auch den Merker „Aufnahme beendet“ der Uhr ab. */
+    @Test
+    fun aPhoneDeletionAlsoClearsTheFinishedMarker() {
+        val watch = WireNode("watch", 2, PeerKind.WATCH)
+        watch.session.setHealthConsent(true)
+        val id = watch.session.create(format, SINGLES, pulse)
+        assertTrue(watch.session.recordHeartRate(id, watch.time, 100))
+        watch.session.finishHealthRecording(id)
+        assertEquals("1", watch.data.settings.get("health.done.${id.value}"))
+        val phoneId = DeviceId("phone")
+        watch.link.deliver(Hello(phoneId, PeerKind.PHONE, healthProtocol = 1))
+        watch.link.deliver(HealthSeriesMessage(id, phoneId, revision = 0, deleted = true))
+        assertTrue(
+            watch.data.health
+                .allSeries()
+                .isEmpty(),
+        )
+        assertNull(watch.data.settings.get("health.done.${id.value}"))
+        assertEquals(TelemetryVisibility.OFF, watch.session.pulseVisibility(id))
+    }
+
+    /** Review N1: Der Recorder erzeugt nie mehr Buckets, als eine Nachricht tragen darf. */
+    @Test
+    fun recorderLimitMatchesTheWireLimit() {
+        assertEquals(HealthSeriesMessage.MAX_BUCKETS.toLong(), HealthRecorder.MAX_DURATION_MS / HealthRecorder.INTERVAL_MS)
     }
 
     @Test
@@ -206,7 +305,7 @@ class HealthSyncTest {
                 .forMatch(id)
                 .isEmpty(),
         )
-        assertEquals(TelemetryVisibility.OFF, c["phone"].session.pulseVisibility(id))
+        assertEquals(TelemetryVisibility.SHARE, c["phone"].session.pulseVisibility(id), "die Stufe gehört dem Handy")
     }
 
     @Test
@@ -339,6 +438,15 @@ class HealthSyncTest {
                 .size,
             "Ack einer älteren Revision löscht nicht",
         )
+        watch.link.deliver(HealthAck(id, watchId, sent.revision))
+        assertEquals(
+            1,
+            watch.data.health
+                .forSource(watchId)
+                .size,
+            "laufendes Match: bleibt zum Fortsetzen",
+        )
+        assertTrue(watch.session.endMatch(EndReason.STOPPED))
         watch.link.deliver(HealthAck(id, watchId, sent.revision))
         assertTrue(
             watch.data.health

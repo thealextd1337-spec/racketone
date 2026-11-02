@@ -478,6 +478,7 @@
     <string name="telemetry_share_pending">Gesundheitsdaten werden derzeit nicht in die Cloud übertragen, andere sehen also noch nichts. Deine Wahl gilt für dein ganzes Konto.</string>
     <string name="health_record_toggle">Pulsverlauf aufzeichnen</string>
     <string name="health_record_toggle_sub">Speichert Puls und Schritte je Match auf deiner Uhr und diesem Handy. Standard: aus.</string>
+    <string name="health_watch_retention">Die Uhr löscht Pulsdaten, sobald sie nach dem Match auf diesem Handy angekommen sind, spätestens nach 7 Tagen.</string>
     <string name="health_record_locked">Nicht verfügbar, solange „Puls &amp; Schritte“ auf „Gar nicht“ steht.</string>
     <string name="health_revoke_title">Pulsverlauf nicht mehr aufzeichnen?</string>
     <string name="health_revoke_text">Alle aufgezeichneten Pulsverläufe werden auf diesem Handy und deiner Uhr gelöscht.</string>

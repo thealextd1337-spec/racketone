@@ -102,7 +102,7 @@ class HealthRecorder(
         /** Plausibler Pulsbereich wie der CHECK in 03 §3.3.5. */
         val BPM_RANGE: IntRange = 25..250
 
-        /** Obergrenze gegen kaputte Zeitstempel (sonst riesige Serien); 12 h. */
-        const val MAX_DURATION_MS: Long = 12 * 60 * 60 * 1000L
+        /** Obergrenze gegen kaputte Zeitstempel und für die Übertragung (`HealthSeriesMessage.MAX_BUCKETS`); 7 h. */
+        const val MAX_DURATION_MS: Long = 7 * 60 * 60 * 1000L
     }
 }
