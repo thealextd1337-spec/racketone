@@ -277,10 +277,8 @@
     <string name="health_recording_description">Pulsverlauf wird aufgezeichnet. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Puls &amp; Schritte</string>
-    <string name="telemetry_visibility_share">Teilen</string>
     <string name="telemetry_visibility_private">Nur für mich</string>
     <string name="telemetry_visibility_off">Gar nicht</string>
-    <string name="telemetry_visibility_share_hint">Vorerst wie „Nur für mich“ – Teilen wirkt, sobald Freunde und Live-Ansicht verfügbar sind</string>
     <string name="telemetry_visibility_private_hint">Nur auf dieser Uhr und deinem Handy</string>
     <string name="telemetry_visibility_off_hint">Keine Anzeige, es wird nichts gesendet</string>
     <string name="telemetry_controls_off">Puls &amp; Schritte: Gar nicht</string>

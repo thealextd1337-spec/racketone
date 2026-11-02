@@ -47,13 +47,23 @@ class TelemetryVisibilityUiTest {
     }
 
     @Test
-    fun offExplainsThatNothingIsSentAndShareMentionsLaterSharing() {
+    fun offExplainsThatNothingIsSentAndOneTapSwitchesBackToOnlyMe() {
         val calls = mutableListOf<String>()
         render(TelemetryVisibility.OFF, calls)
         rule.onNodeWithText("Gar nicht", substring = true).assertIsDisplayed()
         rule.onNodeWithText("es wird nichts gesendet", substring = true).assertIsDisplayed()
         rule.onNodeWithTag(TELEMETRY_VISIBILITY_TAG).performClick()
-        assertEquals(listOf("setTelemetryVisibility(SHARE)"), calls)
-        assertEquals(TelemetryVisibility.PRIVATE, nextTelemetryVisibility(TelemetryVisibility.SHARE))
+        assertEquals(listOf("setTelemetryVisibility(PRIVATE)"), calls)
+    }
+
+    @Test
+    fun shareFromThePhoneIsShownAsOnlyMeAndTheWatchNeverOffersShare() {
+        val calls = mutableListOf<String>()
+        render(TelemetryVisibility.SHARE, calls)
+        rule.onNodeWithText("Nur für mich", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Teilen", substring = true).assertDoesNotExist()
+        rule.onNodeWithTag(TELEMETRY_VISIBILITY_TAG).performClick()
+        assertEquals(listOf("setTelemetryVisibility(OFF)"), calls)
+        assertEquals(TelemetryVisibility.PRIVATE, nextTelemetryVisibility(TelemetryVisibility.OFF))
     }
 }
