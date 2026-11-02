@@ -153,6 +153,7 @@ class SessionMatchStore(
     override val openMatches: StateFlow<List<LiveMatchSnapshot>> = openFlow.asStateFlow()
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     override val localAppBuild get() = session.config.appBuild
+
     private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
     override val deviceStatuses = deviceStatusFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
@@ -163,6 +164,10 @@ class SessionMatchStore(
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
     private val healthConsentFlow = MutableStateFlow(session.state.value.healthConsent.enabled)
     override val healthConsent: StateFlow<Boolean> = healthConsentFlow.asStateFlow()
+    private val healthOpenFlow = MutableStateFlow(session.state.value.healthConsent.isDefault)
+    override val healthConsentOpen: StateFlow<Boolean> = healthOpenFlow.asStateFlow()
+    private val healthToConfirmFlow = MutableStateFlow(session.state.value.healthConsentToConfirm)
+    override val healthConsentToConfirm: StateFlow<Boolean> = healthToConfirmFlow.asStateFlow()
     private val healthRevisionFlow = MutableStateFlow(session.state.value.dataRevision)
     override val healthRevision: StateFlow<Long> = healthRevisionFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
@@ -285,6 +290,8 @@ class SessionMatchStore(
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) = session.setTelemetryVisibility(visibility)
 
     override fun setHealthConsent(enabled: Boolean) = session.setHealthConsent(enabled)
+
+    override fun confirmHealthConsent(keep: Boolean) = session.confirmHealthConsent(keep)
 
     override fun deleteAllHealthData() = session.deleteAllHealthData()
 
@@ -636,6 +643,8 @@ class SessionMatchStore(
         // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
         healthConsentFlow.value = state.healthConsent.enabled
+        healthOpenFlow.value = state.healthConsent.isDefault
+        healthToConfirmFlow.value = state.healthConsentToConfirm
         healthRevisionFlow.value = state.dataRevision
         // Nur auf Ungleichheit: der Zähler beginnt nach einem Neustart wieder bei 0.
         val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision

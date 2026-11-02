@@ -18,7 +18,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class FakePhoneAuth : CloudAuthPort {
+open class FakePhoneAuth : CloudAuthPort {
     override val session = MutableStateFlow<CloudSession?>(null)
     val calls = mutableListOf<String>()
     var failure: String? = null

@@ -492,6 +492,11 @@
     <string name="health_pulse_not_recorded">No heart rate history recorded</string>
     <string name="health_delete_match">Delete heart rate history</string>
     <string name="health_delete_match_text">The heart rate history of this match will be deleted on this phone and your watch.</string>
+    <string name="health_choice_watch">Recording happens while you score with your watch. Without a watch, the setting takes effect once you pair one.</string>
+    <string name="health_adopted_title">Record heart rate history</string>
+    <string name="health_adopted_text">“Record heart rate history” is on on your watch. Keep it? Turning it off deletes all heart rate histories on this phone and your watch.</string>
+    <string name="health_adopted_keep">Keep</string>
+    <string name="health_adopted_off">Turn off</string>
     <string name="home_open_matches">Running matches (%1$d)</string>
     <string name="home_new_match_parallel">Start another court – running matches keep going.</string>
     <string name="open_match_watch_scores">Your watch scores</string>

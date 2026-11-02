@@ -642,8 +642,22 @@ class MatchSession(
         adoptHealthConsent(health.consent.changedBy(deviceId.value, enabled))
     }
 
-    private fun adoptHealthConsent(next: HealthConsent) {
-        if (!health.adoptConsent(next)) return
+    /**
+     * Plan 0.5.1 §5.4: Antwort auf „Auf deiner Uhr ist ‚Pulsverlauf aufzeichnen‘ an. Beibehalten?“
+     * ([SessionState.healthConsentToConfirm]). [keep] = eigene Entscheidung „an“ (Zähler + 1), sonst Widerruf wie
+     * [setHealthConsent] (löscht auf allen eigenen Geräten).
+     */
+    fun confirmHealthConsent(keep: Boolean) {
+        checkThread()
+        if (!health.toConfirm) return
+        adoptHealthConsent(health.consent.changedBy(deviceId.value, keep))
+    }
+
+    private fun adoptHealthConsent(
+        next: HealthConsent,
+        merged: Boolean = false,
+    ) {
+        if (!health.adoptConsent(next, merged)) return
         broadcast(MatchMetaMessage(healthConsent = HealthConsentSetting.of(next)))
         dataRevision++
         publish()
@@ -2126,7 +2140,7 @@ class MatchSession(
         message.watchMatch?.let { adoptAssignment(peer, it) }
         // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
         message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
-        message.healthConsent?.toConsent()?.let { adoptHealthConsent(health.consent.merge(it)) }
+        message.healthConsent?.toConsent()?.let { adoptHealthConsent(health.consent.merge(it), merged = true) }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -3003,6 +3017,7 @@ class MatchSession(
             lifecycleRevision,
             pairingConflict = pairing.conflict,
             healthConsent = health.consent,
+            healthConsentToConfirm = health.toConfirm,
         )
     }
 

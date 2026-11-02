@@ -492,6 +492,11 @@
     <string name="health_pulse_not_recorded">Kein Pulsverlauf aufgezeichnet</string>
     <string name="health_delete_match">Pulsverlauf löschen</string>
     <string name="health_delete_match_text">Der Pulsverlauf dieses Matches wird auf diesem Handy und deiner Uhr gelöscht.</string>
+    <string name="health_choice_watch">Aufgezeichnet wird beim Zählen mit deiner Uhr. Ohne Uhr wirkt die Einstellung, sobald du eine koppelst.</string>
+    <string name="health_adopted_title">Pulsverlauf aufzeichnen</string>
+    <string name="health_adopted_text">Auf deiner Uhr ist „Pulsverlauf aufzeichnen“ an. Beibehalten? Ausschalten löscht alle Pulsverläufe auf diesem Handy und deiner Uhr.</string>
+    <string name="health_adopted_keep">Beibehalten</string>
+    <string name="health_adopted_off">Ausschalten</string>
     <string name="home_open_matches">Laufende Matches (%1$d)</string>
     <string name="home_new_match_parallel">Weiteren Platz starten – laufende Matches laufen weiter.</string>
     <string name="open_match_watch_scores">Deine Uhr zählt</string>

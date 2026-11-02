@@ -33,6 +33,20 @@ class PulseSettingsPresentationTest {
         assertEquals(PulseSetting(TelemetryVisibility.OFF, recorded = false), store.pulseSetting(id))
     }
 
+    /** Plan 0.5.1 §5/§5.4: offene Entscheidung und Rückfrage kommen aus dem Session-Zustand. */
+    @Test
+    fun openDecisionAndAdoptedConsentReachThePort() {
+        assertTrue(store.healthConsentOpen.value)
+        assertFalse(store.healthConsentToConfirm.value)
+        store.setHealthConsent(false)
+        assertTrue(store.healthConsentOpen.value, "„aus“ ohne Änderung entscheidet nichts")
+        store.onSessionState(session.state.value.copy(healthConsentToConfirm = true))
+        assertTrue(store.healthConsentToConfirm.value)
+        store.setHealthConsent(true)
+        assertFalse(store.healthConsentOpen.value)
+        assertFalse(store.healthConsentToConfirm.value)
+    }
+
     @Test
     fun consentPrefillsFromTelemetryAndTheChoiceWins() {
         store.setHealthConsent(true)

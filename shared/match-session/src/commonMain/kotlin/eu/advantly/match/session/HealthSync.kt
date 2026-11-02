@@ -41,6 +41,15 @@ internal class HealthSync(
     var consent: HealthConsent = loadConsent()
         private set
 
+    /** Plan 0.5.1 §5.4: Merker „vom Gerät ohne eigene Entscheidung übernommen“, überdauert Neustarts. */
+    private var adoptedUnconfirmed = data.settings.get(confirmKey()) != null
+
+    /**
+     * Handy: „an“ kam per Abgleich von der Uhr, ohne dass das Handy je selbst entschieden hat (Zähler 0) – einmal
+     * nachfragen. Eine eigene Entscheidung beendet die Frage; ein späteres „aus“ macht sie gegenstandslos.
+     */
+    val toConfirm: Boolean get() = adoptedUnconfirmed && consent.enabled
+
     private val recorders = HashMap<MatchId, HealthRecorder>()
     private val savedAtMs = HashMap<MatchId, Long>()
 
@@ -49,6 +58,7 @@ internal class HealthSync(
 
     fun reload() {
         consent = loadConsent()
+        adoptedUnconfirmed = data.settings.get(confirmKey()) != null
         recorders.clear()
         savedAtMs.clear()
         offsets.clear()
@@ -56,11 +66,23 @@ internal class HealthSync(
 
     // --- Einwilligung und Stufe -------------------------------------------------------------------------------------
 
-    /** Übernimmt [next] (lokal oder per Merge); ein Widerruf löscht alle Gesundheitsdaten dieses Geräts. `true` = geändert. */
-    fun adoptConsent(next: HealthConsent): Boolean {
+    /**
+     * Übernimmt [next] (lokal oder mit [merged] per Abgleich); ein Widerruf löscht alle Gesundheitsdaten dieses Geräts.
+     * `true` = geändert.
+     */
+    fun adoptConsent(
+        next: HealthConsent,
+        merged: Boolean = false,
+    ): Boolean {
         if (next == consent) return false
         val setting = checkNotNull(HealthConsentSetting.of(next)) { "Einwilligung ohne Versionsangabe" }
         data.settings.put(consentKey(), SyncCodec.json.encodeToString(HealthConsentSetting.serializer(), setting))
+        val unconfirmed =
+            if (merged) adoptedUnconfirmed || (kind == PeerKind.PHONE && consent.isDefault && next.enabled) else false
+        if (unconfirmed != adoptedUnconfirmed) {
+            if (unconfirmed) data.settings.put(confirmKey(), "1") else data.settings.remove(confirmKey())
+            adoptedUnconfirmed = unconfirmed
+        }
         val revoked = consent.enabled && !next.enabled
         consent = next
         if (revoked) deleteAll()
@@ -296,6 +318,8 @@ internal class HealthSync(
 
     private fun deletedBefore(): Long = data.settings.get(DELETED_BEFORE_KEY)?.toLongOrNull() ?: Long.MIN_VALUE
 
+    private fun confirmKey(): String = consentKey() + CONFIRM_SUFFIX
+
     private fun loadConsent(): HealthConsent {
         val stored = data.settings.get(consentKey()) ?: return HealthConsent()
         return try {
@@ -316,6 +340,7 @@ internal class HealthSync(
         const val MAX_OFFSET_MS: Long = 60_000
 
         const val CONSENT_KEY = "session.healthConsent"
+        private const val CONFIRM_SUFFIX = ".toConfirm"
         private const val PULSE_PREFIX = "health.pulse."
         private const val DELETED_BEFORE_KEY = "health.deletedBefore"
 

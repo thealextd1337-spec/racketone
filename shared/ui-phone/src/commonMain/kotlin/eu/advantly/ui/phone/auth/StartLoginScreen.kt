@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
+import eu.advantly.presentation.match.TelemetrySettingsPort
 import eu.advantly.ui.phone.app.rememberSafeLinkOpener
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -53,6 +54,7 @@ internal fun AccountGate(
     google: (suspend () -> GoogleCredential)?,
     onSupport: (() -> Unit)?,
     onShareExport: (() -> Unit)?,
+    telemetry: TelemetrySettingsPort? = null,
 ) {
     val state by model.state.collectAsState()
     var started by remember { mutableStateOf(false) }
@@ -61,7 +63,7 @@ internal fun AccountGate(
     if (state.step == AuthStep.AGE && state.error == null && !started) {
         StartLoginScreen(onCreate = { started = true }, onSignIn = model::signInExisting)
     } else {
-        AccountScreen(model, google, onSupport, onShareExport)
+        AccountScreen(model, google, onSupport, onShareExport, telemetry)
     }
 }
 

@@ -31,6 +31,7 @@ import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.presentation.support.SupportViewModel
+import eu.advantly.ui.phone.app.AdoptedHealthConsentDialog
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
@@ -136,6 +137,12 @@ fun AdvantlyApp(
         model.onVisitorsChosen = authModel?.friends?.let { friends -> { id, visitors -> friends.queueVisitors(id.value, visitors) } }
         onDispose { model.onVisitorsChosen = null }
     }
+    // Schritt HEALTH im Konto-Einstieg nur, solange „Pulsverlauf aufzeichnen“ auf diesem Gerät offen ist (Plan 0.5.1 §5.1).
+    DisposableEffect(model, authModel) {
+        authModel?.healthDecisionOpen = { model.telemetry.healthConsentOpen.value }
+        onDispose { authModel?.healthDecisionOpen = null }
+    }
+    val healthToConfirm by model.telemetry.healthConsentToConfirm.collectAsState()
     CompositionLocalProvider(
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
@@ -289,6 +296,8 @@ fun AdvantlyApp(
                 if (!accountRequired) {
                     model.pendingScorerChoice?.let { ScorerDialog(model) }
                     model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
+                    // Plan 0.5.1 §5.4: nicht über dem laufenden Live-Score
+                    if (healthToConfirm && navigator.top != Overlay.Live) AdoptedHealthConsentDialog(model.telemetry)
                 }
             }
         }
@@ -332,7 +341,7 @@ private fun TabLayer(
                         showSupport = false
                     }
                 } else {
-                    AccountGate(authModel, googleCredential, onSupport, onShareExport)
+                    AccountGate(authModel, googleCredential, onSupport, onShareExport, model.telemetry)
                 }
             }
             active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }, more = open.size - 1) }
