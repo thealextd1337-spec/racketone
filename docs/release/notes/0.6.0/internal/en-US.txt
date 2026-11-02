@@ -1,0 +1,6 @@
+New in 0.6.0:
+• Live: follow your fellow players' running matches on phone and Wear OS watch.
+• Hand over scoring: to a player, on their phone or watch.
+• Push notifications (optional, turn on in your profile).
+• Better protection for heart rate data. Privacy policy version 9.
+Please test: two accounts, live view, handover, notifications.

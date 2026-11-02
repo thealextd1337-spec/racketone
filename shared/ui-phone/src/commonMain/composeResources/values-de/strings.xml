@@ -699,6 +699,10 @@
     <string name="whats_new_11_2">Größere Aufschlag-Tasten auf der Uhr: „2. Aufschlag“ und „Doppelfehler“ stehen groß rechts neben dem Spielstand.</string>
     <string name="whats_new_11_3">Pulsverläufe exportieren und importieren: im Profil unter „Puls &amp; Schritte“ – für ein neues Handy, ganz ohne Cloud.</string>
     <string name="whats_new_11_4">„Pulsverlauf aufzeichnen“ kannst du jetzt direkt hier einschalten. Aktualisiere auch die App auf deiner Uhr, damit alles zusammenpasst.</string>
+    <string name="whats_new_12_1">Live mitverfolgen: Spielst du mit oder schaust zu, siehst du den Spielstand unter „Live“ – am Handy und auf deiner Wear-OS-Uhr.</string>
+    <string name="whats_new_12_2">Zählen weitergeben: Als Ersteller gibst du das Zählen an einen Mitspieler ab – auf sein Handy oder seine Uhr.</string>
+    <string name="whats_new_12_3">Push-Benachrichtigungen (optional): bei Einladungen, Freundschaftsanfragen und wenn du zählen sollst. Einschalten im Profil unter „Benachrichtigungen“.</string>
+    <string name="whats_new_12_4">Mehr Sicherheit: Pulsverläufe gehören jetzt fest zu deinem Konto, und Löschungen erreichen auch deine Uhr zuverlässig.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>
