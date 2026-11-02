@@ -17,10 +17,12 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.friends.AcceptIssue
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.PendingVisitorStore
+import eu.advantly.presentation.friends.ScorerAccept
 import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -139,6 +141,7 @@ internal class AndroidPhoneSyncRecord(
             .remove("failures.$profile")
             .remove("visitors.pending.$profile")
             .remove("scorers.pending.$profile")
+            .remove("scorers.accepted.$profile")
             // Altlast bis 0.5.x (Live-Upload nur mit Zuschauern); wird nicht mehr geschrieben.
             .remove("visitors.watched.$profile")
             .apply()
@@ -185,6 +188,29 @@ internal class AndroidPhoneSyncRecord(
                         invite.handover?.let { "/${it.eventId}/${it.from}/${it.to}" }.orEmpty()
                 }.toSet()
         prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
+    }
+
+    // Empfänger (§3.4): „Match/Gerät/angenommen um/Wechsel|-/Grund|-“; UUIDs ohne Schrägstrich.
+    override fun scorerAccepts(profileId: String): Map<String, ScorerAccept> =
+        prefs
+            .getStringSet("scorers.accepted.$profileId", null)
+            .orEmpty()
+            .mapNotNull { entry ->
+                val parts = entry.split('/').takeIf { it.size == 5 } ?: return@mapNotNull null
+                val at = parts[2].toLongOrNull() ?: return@mapNotNull null
+                val issue = AcceptIssue.entries.firstOrNull { it.name == parts[4] }
+                parts[0] to ScorerAccept(parts[1], at, parts[3].toIntOrNull(), issue)
+            }.toMap()
+
+    override fun setScorerAccepts(
+        profileId: String,
+        accepts: Map<String, ScorerAccept>,
+    ) {
+        val entries =
+            accepts
+                .map { (match, a) -> "$match/${a.device}/${a.acceptedAtMs}/${a.changes ?: "-"}/${a.issue?.name ?: "-"}" }
+                .toSet()
+        prefs.edit().putStringSet("scorers.accepted.$profileId", entries).apply()
     }
 
     companion object {

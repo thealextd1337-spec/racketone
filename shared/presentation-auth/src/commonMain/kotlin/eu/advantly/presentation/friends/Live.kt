@@ -26,6 +26,8 @@ data class LiveEntry(
     val canTakeOver: Boolean = false,
     /** Angenommen, der Zählerwechsel ist noch nicht angekommen. */
     val awaiting: Boolean = false,
+    /** Angenommen, aber die Übergabe kam nicht zustande bzw. noch nicht (Hinweis bis zum Wegklicken). */
+    val acceptIssue: AcceptIssue? = null,
 ) {
     val matchId: String get() = score.match.id
 }

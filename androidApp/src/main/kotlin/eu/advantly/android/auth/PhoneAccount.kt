@@ -31,8 +31,10 @@ import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.cloud.sync.pulledFeed
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.cloud.sync.pulledMatch
+import eu.advantly.core.model.MatchId
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
+import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.auth.AuthViewModel
@@ -248,7 +250,8 @@ internal class PhoneAccountCore private constructor(
     /**
      * Zählen weitergeben (plan-live-mitspieler §3.4): Einladungen warten wie Zuschauer auf den Upload des Match-Kopfs.
      * Nach jedem Abgleich gibt das zählende Handy bei angenommener Rolle selbst ab ([afterSync]); während einer offenen
-     * Übergabe wird alle 5 s abgeglichen, bis der Wechsel gesehen ist ([HandoverPoll]). Push (`scorer_responded`,
+     * Übergabe wird alle 5 s abgeglichen, bis der Wechsel gesehen ist ([HandoverPoll]) – beim Empfänger höchstens
+     * [ScorerHandovers.ACCEPT_LIMIT_MS] ab der Annahme, oder bis ein Rückfall, Widerruf oder das Matchende es beendet. Push (`scorer_responded`,
      * `scorer_changed`) stößt nur einen Abgleich an – gezogene Events gibt die Session sofort an die Uhr weiter.
      */
     val scorers =
@@ -257,7 +260,12 @@ internal class PhoneAccountCore private constructor(
             backend,
             ::onServer,
             { profile, match -> guarded(null) { cloudPulls.pulledMatch(profile, match) } },
-            PhoneScorerDevices(session, { event -> guarded(null) { cloud.uploaded(event) } }) { runtime.allowed },
+            PhoneScorerDevices(
+                session,
+                { event -> guarded(null) { cloud.uploaded(event) } },
+                { match -> guarded(emptyList()) { events.scoreEvents(MatchId(match)) } },
+            ) { runtime.allowed },
+            System::currentTimeMillis,
         ) {
             handoverPoll.restart()
             sync.syncNow()

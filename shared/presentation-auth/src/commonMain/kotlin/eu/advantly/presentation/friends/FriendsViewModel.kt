@@ -415,6 +415,13 @@ class FriendsViewModel(
 
     fun declineScoring(matchId: String) = handoverAction { session -> checkNotNull(scorers).decline(session.profileId, matchId) }
 
+    /** Empfänger nach Ablauf der Frist: noch einmal auf den Wechsel warten. */
+    fun retryScoring(matchId: String) = handoverAction { session -> checkNotNull(scorers).retryAccept(session.profileId, matchId) }
+
+    /** Empfänger: Hinweis zur nicht abgeschlossenen Übergabe wegklicken. */
+    fun dismissScoringIssue(matchId: String) =
+        handoverAction { session -> checkNotNull(scorers).dismissAcceptIssue(session.profileId, matchId) }
+
     /**
      * Notfall-Übernahme (§3.4): nur mit angenommener Rolle und vollständigem Stand; die Warnung bestätigt die UI vorher.
      * Spätere Eingaben des bisherigen Zählers verwirft die Engine („N Eingaben nicht übernommen“).
@@ -480,7 +487,8 @@ class FriendsViewModel(
                 scorerRole = role,
                 scoring = handovers.devices.scoring(entry.matchId),
                 canTakeOver = role == "accepted" && handovers.devices.canTakeOver(entry.matchId),
-                awaiting = handovers.awaiting(entry.matchId),
+                awaiting = handovers.awaiting(profileId, entry.matchId),
+                acceptIssue = handovers.acceptIssue(profileId, entry.matchId),
             )
         }
     }

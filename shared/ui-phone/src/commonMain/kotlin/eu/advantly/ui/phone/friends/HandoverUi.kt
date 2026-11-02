@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import eu.advantly.presentation.friends.AcceptIssue
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
@@ -47,8 +48,12 @@ import eu.advantly.ui.phone.resources.handover_to
 import eu.advantly.ui.phone.resources.scorer_accept_phone
 import eu.advantly.ui.phone.resources.scorer_accept_watch
 import eu.advantly.ui.phone.resources.scorer_decline
+import eu.advantly.ui.phone.resources.scorer_fell_back
+import eu.advantly.ui.phone.resources.scorer_handover_ended
+import eu.advantly.ui.phone.resources.scorer_handover_pending
 import eu.advantly.ui.phone.resources.scorer_invitation
 import eu.advantly.ui.phone.resources.scorer_open
+import eu.advantly.ui.phone.resources.scorer_retry
 import eu.advantly.ui.phone.resources.scorer_takeover
 import eu.advantly.ui.phone.resources.scorer_takeover_confirm
 import eu.advantly.ui.phone.resources.scorer_takeover_pending
@@ -154,6 +159,30 @@ fun LiveHandoverButton(
     )
 }
 
+/** Empfänger: Die angenommene Übergabe kam nicht (rechtzeitig); nach Ablauf der Frist kann erneut gewartet werden. */
+@Composable
+private fun AcceptIssueHint(
+    model: FriendsViewModel,
+    matchId: String,
+    issue: AcceptIssue,
+) {
+    val text =
+        when (issue) {
+            AcceptIssue.FELL_BACK -> Res.string.scorer_fell_back
+            AcceptIssue.ENDED -> Res.string.scorer_handover_ended
+            AcceptIssue.TIMED_OUT -> Res.string.scorer_handover_pending
+        }
+    Text(stringResource(text), color = AdvantlyTheme.colors.hint, modifier = Modifier.testTag("scorer_issue_${issue.name.lowercase()}"))
+    if (issue == AcceptIssue.TIMED_OUT) {
+        TextButton({ model.retryScoring(matchId) }, modifier = Modifier.testTag("scorer_retry")) {
+            Text(stringResource(Res.string.scorer_retry))
+        }
+    }
+    TextButton({ model.dismissScoringIssue(matchId) }, modifier = Modifier.testTag("scorer_issue_dismiss")) {
+        Text(stringResource(Res.string.friends_dismiss))
+    }
+}
+
 @Composable
 private fun HandoverError(
     model: FriendsViewModel,
@@ -215,6 +244,7 @@ internal fun ScorerActions(
     val id = entry.matchId
     var confirm by remember(id) { mutableStateOf(false) }
     val colors = AdvantlyTheme.colors
+    entry.acceptIssue?.let { AcceptIssueHint(model, id, it) }
     when {
         entry.scoring -> {
             TextButton({ onScore(id) }, modifier = Modifier.testTag("scorer_open")) { Text(stringResource(Res.string.scorer_open)) }

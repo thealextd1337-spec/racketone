@@ -22,6 +22,16 @@ import kotlin.test.assertTrue
 
 internal class MemoryScorerStore : PendingScorerStore {
     val invites = mutableMapOf<String, Map<String, ScorerInvite>>()
+    val accepts = mutableMapOf<String, Map<String, ScorerAccept>>()
+
+    override fun scorerAccepts(profileId: String) = accepts[profileId].orEmpty()
+
+    override fun setScorerAccepts(
+        profileId: String,
+        accepts: Map<String, ScorerAccept>,
+    ) {
+        this.accepts[profileId] = accepts
+    }
 
     override fun scorerInvites(profileId: String) = invites[profileId].orEmpty()
 
@@ -75,6 +85,7 @@ internal class FakeDevices : ScorerDevices {
     val ready = mutableSetOf<String>()
     val handedOver = mutableListOf<Pair<String, String>>()
     val handedBack = mutableListOf<Pair<String, String>>()
+    val changes = mutableMapOf<String, ScorerChanges>()
 
     /** Server-Antwort je Event (fehlt: ausstehend). */
     val uploads = mutableMapOf<String, Boolean>()
@@ -82,6 +93,8 @@ internal class FakeDevices : ScorerDevices {
     override fun watchId() = watch
 
     override fun scoring(matchId: String) = matchId in scoring
+
+    override fun scorerChanges(matchId: String) = changes[matchId]
 
     override fun handOver(
         matchId: String,
@@ -136,7 +149,11 @@ class ScorerHandoverTest {
     private val onServer = mutableSetOf<String>()
     private val pulled = mutableMapOf<String, PulledMatch>()
     private var syncs = 0
-    private val handovers = ScorerHandovers(store, port, { _, m -> m in onServer }, { _, m -> pulled[m] }, devices) { syncs++ }
+    private var now = 1_000_000L
+    private val handovers = handovers()
+
+    /** Neue Instanz über demselben Speicher (wie nach einem Prozess-Neustart). */
+    private fun handovers() = ScorerHandovers(store, port, { _, m -> m in onServer }, { _, m -> pulled[m] }, devices, { now }) { syncs++ }
 
     @Test fun invitationWaitsForTheUploadAndHandsOverOnceAccepted() =
         runBlocking {
@@ -227,13 +244,16 @@ class ScorerHandoverTest {
 
     @Test fun acceptingOnTheWatchRegistersItFirstAndWaitsForTheChange() =
         runBlocking {
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "watch-1"))
             handovers.accept("jonas", "m1", onWatch = true)
             assertEquals(listOf("register watch-1 phone-1", "respond m1 true watch-1"), port.calls)
-            assertTrue(handovers.awaiting("m1"))
+            assertTrue(handovers.awaiting("jonas", "m1"))
             assertTrue(handovers.reconcile("jonas"), "bis der Wechsel gezogen ist")
             devices.scoring += "m1"
             assertFalse(handovers.reconcile("jonas"))
-            assertFalse(handovers.awaiting("m1"))
+            assertFalse(handovers.awaiting("jonas", "m1"))
+            assertNull(handovers.acceptIssue("jonas", "m1"))
+            assertTrue(store.scorerAccepts("jonas").isEmpty())
 
             port.calls.clear()
             handovers.accept("jonas", "m2", onWatch = false)
@@ -242,6 +262,96 @@ class ScorerHandoverTest {
 
             devices.watch = null
             assertEquals("watch_unavailable", assertFailsWith<CloudException> { handovers.accept("jonas", "m4", onWatch = true) }.reason)
+        }
+
+    private suspend fun acceptOnPhone(match: String) {
+        pulled[match] = memberMatch(match, PulledRole("jonas", "Jonas", "scorer", "accepted", "phone-1"))
+        handovers.accept("jonas", match, onWatch = false)
+    }
+
+    @Test fun waitingEndsAfterTheTimeLimitAndSurvivesARestart() =
+        runBlocking {
+            acceptOnPhone("m1")
+            now += ScorerHandovers.ACCEPT_LIMIT_MS - 1
+            // Neustart: Annahme und Frist kommen aus dem Speicher
+            val restarted = handovers()
+            assertTrue(restarted.awaiting("jonas", "m1"))
+            assertTrue(restarted.reconcile("jonas"))
+
+            now += 1
+            // offline ohne Abgleich zeigt die Anzeige trotzdem den Ablauf
+            assertFalse(restarted.awaiting("jonas", "m1"))
+            assertEquals(AcceptIssue.TIMED_OUT, restarted.acceptIssue("jonas", "m1"))
+            assertFalse(restarted.reconcile("jonas"), "nach der Frist keine schnelle Abfrage mehr")
+            assertEquals(AcceptIssue.TIMED_OUT, handovers().acceptIssue("jonas", "m1"), "Hinweis übersteht einen Neustart")
+
+            // erneut versuchen: wieder Frist und schnelle Abfrage
+            val before = syncs
+            restarted.retryAccept("jonas", "m1")
+            assertEquals(before + 1, syncs)
+            assertTrue(restarted.awaiting("jonas", "m1"))
+            assertTrue(restarted.reconcile("jonas"))
+
+            // kommt der Wechsel doch noch, ist der Hinweis weg
+            now += ScorerHandovers.ACCEPT_LIMIT_MS
+            assertFalse(restarted.reconcile("jonas"))
+            devices.scoring += "m1"
+            assertNull(restarted.acceptIssue("jonas", "m1"))
+            assertFalse(restarted.reconcile("jonas"))
+            assertTrue(store.scorerAccepts("jonas").isEmpty())
+        }
+
+    @Test fun aLaterChangeToAnotherDeviceMeansTheGiverKeepsScoring() =
+        runBlocking {
+            devices.changes["m1"] = ScorerChanges(1, "alex-watch")
+            acceptOnPhone("m1")
+            assertTrue(handovers.reconcile("jonas"))
+            // Wechsel auf mein Gerät gezogen, die Session hat ihn noch nicht übernommen: weiter warten
+            devices.changes["m1"] = ScorerChanges(2, "phone-1")
+            assertTrue(handovers.reconcile("jonas"))
+            // Abgabe am Server abgelehnt, die Rückgabe an die Uhr des Abgebenden kommt an
+            devices.changes["m1"] = ScorerChanges(3, "alex-watch")
+            assertFalse(handovers.reconcile("jonas"))
+            assertEquals(AcceptIssue.FELL_BACK, handovers.acceptIssue("jonas", "m1"))
+            assertFalse(handovers.awaiting("jonas", "m1"))
+
+            // Wegklicken; die Notfall-Übernahme bleibt über die angenommene Rolle möglich
+            handovers.dismissAcceptIssue("jonas", "m1")
+            assertNull(handovers.acceptIssue("jonas", "m1"))
+            assertTrue(store.scorerAccepts("jonas").isEmpty())
+        }
+
+    @Test fun anEmptyLogAtAcceptanceTakesTheFirstKnownStateAsBaseline() =
+        runBlocking {
+            acceptOnPhone("m1")
+            devices.changes["m1"] = ScorerChanges(1, "alex-watch")
+            assertTrue(handovers.reconcile("jonas"), "erster Stand, kein Rückfall")
+            devices.changes["m1"] = ScorerChanges(2, "alex-phone")
+            assertFalse(handovers.reconcile("jonas"))
+            assertEquals(AcceptIssue.FELL_BACK, handovers.acceptIssue("jonas", "m1"))
+        }
+
+    @Test fun revocationOrTheMatchEndEndsTheWaitAndANewInvitationReplacesTheHint() =
+        runBlocking {
+            for (m in listOf("m1", "m2", "m3", "m4")) acceptOnPhone(m)
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "revoked"))
+            pulled["m2"] = memberMatch("m2", PulledRole("jonas", "Jonas", "scorer", "accepted", "phone-1")).copy(status = "finished")
+            pulled["m3"] = memberMatch("m3", PulledRole("jonas", "Jonas", "scorer", "accepted", "phone-1")).copy(deleted = true)
+            assertTrue(handovers.reconcile("jonas"), "m4 wartet noch")
+            for (m in listOf("m1", "m2", "m3")) assertEquals(AcceptIssue.ENDED, handovers.acceptIssue("jonas", m), m)
+            assertTrue(handovers.awaiting("jonas", "m4"))
+
+            // neu eingeladen: Die Einladung zeigt sich wieder, der Hinweis verschwindet
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "invited"))
+            // Match nicht mehr gezogen: Eintrag weg, ohne Hinweis
+            pulled.remove("m2")
+            handovers.reconcile("jonas")
+            assertNull(handovers.acceptIssue("jonas", "m1"))
+            assertEquals(setOf("m3", "m4"), store.scorerAccepts("jonas").keys)
+
+            handovers.decline("jonas", "m4")
+            assertFalse(handovers.awaiting("jonas", "m4"))
+            assertFalse(handovers.reconcile("jonas"))
         }
 
     private class Local(
@@ -269,7 +379,7 @@ class ScorerHandoverTest {
                 "m1" to memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "invited")),
                 "m2" to memberMatch("m2", PulledRole("jonas", "Jonas", "scorer", "accepted", "phone-1")),
             )
-        val handovers = ScorerHandovers(store, port, { _, _ -> true }, { _, m -> roles[m] }, devices) { syncs++ }
+        val handovers = ScorerHandovers(store, port, { _, _ -> true }, { _, m -> roles[m] }, devices, { now }) { syncs++ }
         val model =
             FriendsViewModel(
                 auth,

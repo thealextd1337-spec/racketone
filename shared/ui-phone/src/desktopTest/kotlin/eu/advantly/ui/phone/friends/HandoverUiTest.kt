@@ -37,10 +37,13 @@ import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.cloud.sync.PulledRole
 import eu.advantly.cloud.sync.ScorerRolesPort
 import eu.advantly.cloud.sync.VisitorTeamMember
+import eu.advantly.presentation.friends.AcceptIssue
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.PendingScorerStore
+import eu.advantly.presentation.friends.ScorerAccept
+import eu.advantly.presentation.friends.ScorerChanges
 import eu.advantly.presentation.friends.ScorerDevices
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.ScorerInvite
@@ -131,6 +134,10 @@ private class Devices : ScorerDevices {
 
     override fun scoring(matchId: String) = matchId in scoring
 
+    var changes: ScorerChanges? = null
+
+    override fun scorerChanges(matchId: String) = changes
+
     override fun handOver(
         matchId: String,
         deviceId: String,
@@ -158,6 +165,17 @@ private class Store : PendingScorerStore {
         invites: Map<String, ScorerInvite>,
     ) {
         this.invites = invites
+    }
+
+    var accepts = emptyMap<String, ScorerAccept>()
+
+    override fun scorerAccepts(profileId: String) = accepts
+
+    override fun setScorerAccepts(
+        profileId: String,
+        accepts: Map<String, ScorerAccept>,
+    ) {
+        this.accepts = accepts
     }
 }
 
@@ -220,6 +238,7 @@ class HandoverUiTest {
     private val pulled = Pulled(emptyMap())
     private val onServer = mutableSetOf<String>()
     private var handovers: ScorerHandovers? = null
+    private var now = 0L
 
     private fun withLocale(
         locale: Locale,
@@ -252,7 +271,7 @@ class HandoverUiTest {
     ) {
         val scope = CoroutineScope(Dispatchers.Unconfined + Job())
         val auth = FakePhoneAuth().apply { session.value = CloudSession(profile, true, consentStatus = ConsentStatus.CURRENT) }
-        val handovers = ScorerHandovers(store, roles, { _, m -> m in onServer }, { p, m -> pulled.match(p, m) }, devices) {}
+        val handovers = ScorerHandovers(store, roles, { _, m -> m in onServer }, { p, m -> pulled.match(p, m) }, devices, { now }) {}
         this.handovers = handovers
         val model = FriendsViewModel(auth, Nobody, { emptyList() }, null, scope, local = pulled, liveMatches = Live(), scorers = handovers)
         try {
@@ -337,6 +356,51 @@ class HandoverUiTest {
                     waitForIdle()
                     onNodeWithTag("scorer_open").assertTextContains("Zählen öffnen").performClick()
                     assertEquals("m1", scored)
+                }
+            }
+        }
+
+    @Test fun anOpenHandoverEndsAfterTheTimeLimitWithAHintAndCanBeRetriedInGerman() =
+        withLocale(Locale.GERMAN) {
+            pulled.roles = mapOf("m1" to PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, changes = 1))
+            withModel("jonas") { model ->
+                runDesktopComposeUiTest(width = 400, height = 1000) {
+                    setContent { Dark { LiveFollowScreen(model, "m1", onBack = {}, clock = clock) } }
+                    waitForIdle()
+                    onNodeWithTag("scorer_waiting").assertExists()
+                    now += ScorerHandovers.ACCEPT_LIMIT_MS
+                    model.loadLive()
+                    waitForIdle()
+                    onNodeWithTag("scorer_waiting").assertDoesNotExist()
+                    onNodeWithTag("scorer_issue_timed_out").assertTextContains("Übergabe noch offen – wir prüfen später erneut.")
+                    screenshot("handover-empfaenger-frist-de")
+                    onNodeWithTag("scorer_retry").assertTextContains("Erneut versuchen").performClick()
+                    waitForIdle()
+                    onNodeWithTag("scorer_waiting").assertExists()
+                    onNodeWithTag("scorer_issue_timed_out").assertDoesNotExist()
+                }
+            }
+        }
+
+    @Test fun aFallbackToThePreviousScorerShowsAHintUntilDismissedInEnglish() =
+        withLocale(Locale.ENGLISH) {
+            pulled.roles = mapOf("m1" to PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, changes = 1))
+            devices.changes = ScorerChanges(2, "alex-watch")
+            withModel("jonas") { model ->
+                checkNotNull(handovers).reconcile("jonas")
+                assertEquals(AcceptIssue.FELL_BACK, store.accepts["m1"]?.issue)
+                runDesktopComposeUiTest(width = 400, height = 1000) {
+                    setContent { Dark { LiveFollowScreen(model, "m1", onBack = {}, clock = clock) } }
+                    waitForIdle()
+                    onNodeWithTag("scorer_issue_fell_back").assertTextContains("the previous scorer keeps scoring", substring = true)
+                    onNodeWithTag("scorer_retry").assertDoesNotExist()
+                    screenshot("handover-empfaenger-rueckfall-en")
+                    onNodeWithTag("scorer_issue_dismiss").performClick()
+                    waitForIdle()
+                    onNodeWithTag("scorer_issue_fell_back").assertDoesNotExist()
+                    onNodeWithTag("scorer_takeover").assertExists()
                 }
             }
         }
