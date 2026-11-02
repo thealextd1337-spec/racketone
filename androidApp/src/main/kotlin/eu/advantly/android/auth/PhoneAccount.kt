@@ -13,8 +13,10 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
+import eu.advantly.android.sync.AccountLiveViews
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
+import eu.advantly.android.sync.PhoneLiveViews
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
@@ -27,6 +29,7 @@ import eu.advantly.cloud.sync.pulledMatch
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
+import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.SessionListener
 import eu.advantly.presentation.auth.AuthViewModel
@@ -285,6 +288,8 @@ internal class PhoneAccountCore private constructor(
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
         session.addListener(scoreListener)
+        // Uhr-Zuschauen (plan-live-mitspieler §3.2): Abruf nur mit angemeldetem Konto.
+        PhoneLiveViews.provider = AccountLiveViews(backend, { auth.session.value?.profileId })
         runtime.scope.launch {
             var running = false
             sync.state.collect { state ->
@@ -298,6 +303,7 @@ internal class PhoneAccountCore private constructor(
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
         session.removeListener(scoreListener)
+        PhoneLiveViews.provider = LiveViewsProvider.Empty
         refreshAccount = null
         sync.close()
         var pending = if (pull == null) 1 else 2

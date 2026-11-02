@@ -1,6 +1,10 @@
 package eu.advantly.android.sync
 
+import eu.advantly.cloud.sync.LiveMatch
+import eu.advantly.cloud.sync.LiveMatchesPort
+import eu.advantly.cloud.sync.VisitorTeamMember
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.PeerInfo
@@ -13,10 +17,14 @@ import eu.advantly.sync.protocol.LiveViews
 import eu.advantly.sync.protocol.LiveViewsCodec
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.time.Instant
 
 class PhoneLiveViewsTest {
     private val watch = PeerInfo("watch", null, PeerKind.WATCH, CompatibilityStatus.COMPATIBLE)
@@ -84,5 +92,62 @@ class PhoneLiveViewsTest {
             ),
         )
         assertTrue(sent.isEmpty())
+    }
+
+    private fun live(
+        relation: String,
+        sport: String = "tennis",
+    ) = LiveMatch(
+        "m-$relation",
+        relation,
+        sport,
+        "singles",
+        listOf(VisitorTeamMember("A", 1, "Alex"), VisitorTeamMember("B", 1, "Jonas")),
+        Json.parseToJsonElement("""{"sets":[[6,4]],"games":[2,1],"points":["40","AD"],"serving":"B","heartRate":150}""")
+            as JsonObject,
+        scorerConnected = true,
+        updatedAt = "2026-11-02T20:00:00Z",
+    )
+
+    private class Port(
+        val result: () -> List<LiveMatch>,
+    ) : LiveMatchesPort {
+        val profiles = mutableListOf<String>()
+
+        override suspend fun liveMatches(profileId: String): List<LiveMatch> {
+            profiles += profileId
+            return result()
+        }
+    }
+
+    @Test
+    fun accountProviderMapsTheSanitizedProjectionOncePerCall() {
+        val port = Port { listOf(live("player"), live("visitor"), live("future"), live("scorer", sport = "squash")) }
+        val now = Instant.parse("2026-11-02T20:00:12Z").toEpochMilliseconds()
+        val views = runBlocking { AccountLiveViews(port, { "jonas" }, { now }).current() }
+
+        assertEquals(listOf("jonas"), port.profiles)
+        assertEquals(listOf(LiveRelation.PLAYER, LiveRelation.VISITOR), views.map { it.relation })
+        val first = views.first()
+        assertEquals(MatchId("m-player"), first.matchId)
+        assertEquals("Alex" to "Jonas", first.teamA to first.teamB)
+        assertEquals(listOf(listOf(6, 4)), first.sets)
+        assertEquals(listOf(2, 1), first.games)
+        assertEquals(listOf("40", "AD"), first.points)
+        assertEquals(Side.B, first.serving)
+        assertTrue(first.scorerConnected)
+        assertEquals(12_000L, first.ageMs)
+        // Codec-Rundweg ohne Telemetrie
+        val bytes = LiveViewsCodec.encode(LiveViews(LiveViews.CURRENT_VERSION, views))
+        assertFalse(bytes.decodeToString().contains("heartRate"))
+    }
+
+    @Test
+    fun accountProviderIsEmptyWithoutAccountAndThrowsOnFailure() {
+        val port = Port { error("offline") }
+        assertEquals(emptyList<LiveView>(), runBlocking { AccountLiveViews(port, { null }).current() })
+        assertTrue(port.profiles.isEmpty())
+        assertTrue(runCatching { runBlocking { AccountLiveViews(port, { "jonas" }).current() } }.isFailure)
+        assertFalse(respond(AccountLiveViews(port, { "jonas" })))
     }
 }
