@@ -676,6 +676,24 @@ class MatchSession(
         publish()
     }
 
+    /** „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien als [HealthArchive]-JSON, `null` ohne Serien. */
+    fun exportHealth(): String? {
+        checkThread()
+        val all = data.health.allSeries()
+        return if (all.isEmpty()) null else HealthArchive.encode(all, clock.nowMs())
+    }
+
+    /** „Pulsverläufe importieren“ (Plan 0.5.1 §7b); Statistik und Zeitleiste lesen danach neu wie beim Empfang von der Uhr. */
+    fun importHealth(bytes: ByteArray): HealthImportResult {
+        checkThread()
+        val result = health.import(bytes)
+        if (result.imported > 0) {
+            dataRevision++
+            publish()
+        }
+        return result
+    }
+
     /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. */
     fun deleteAllHealthData() {
         checkThread()
