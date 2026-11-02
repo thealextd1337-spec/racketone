@@ -64,7 +64,7 @@ class PushNotificationsTest {
         assertEquals("push_scoring", notification.channelId)
         assertEquals("Alex asks you to keep score", shadowOf(notification).contentTitle)
         val intent = shadowOf(notification.contentIntent).savedIntent
-        assertEquals(PushTarget(FriendsSection.FEED, MATCH), intent.pushTarget())
+        assertEquals(PushTarget(FriendsSection.LIVE, MATCH), intent.pushTarget())
     }
 
     @Test fun deliveryIsDroppedWhenSwitchedOff() {

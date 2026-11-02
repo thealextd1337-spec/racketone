@@ -366,11 +366,12 @@ class FriendsViewModel(
 
     /**
      * Bereich „Live“ laden; die UI ruft das alle paar Sekunden, solange er sichtbar ist. Eine noch laufende Abfrage
-     * deckt den nächsten Aufruf ab (langsames Netz stapelt keine Anfragen).
+     * deckt den nächsten Aufruf ab (langsames Netz stapelt keine Anfragen). Liefert die Abfrage zum Abwarten, `null` ohne
+     * Port oder nutzbare Sitzung.
      */
-    fun loadLive() {
-        val port = liveMatches ?: return
-        if (liveLoad?.isActive == true) return
+    fun loadLive(): Job? {
+        val port = liveMatches ?: return null
+        liveLoad?.takeIf { it.isActive }?.let { return it }
         val revision = watchingRevision
         liveLoad =
             quiet({ error -> show { copy(liveError = error) } }) { session ->
@@ -379,6 +380,7 @@ class FriendsViewModel(
                 if (revision != watchingRevision) return@quiet
                 show { copy(live = withRoles(session.profileId, live), liveError = null) }
             }
+        return liveLoad
     }
 
     /** `true`: Zählen weitergeben gibt es hier (Konto-Host mit Session). */
