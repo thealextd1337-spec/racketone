@@ -196,6 +196,16 @@ class DirectUiBoundaryTest {
         callback?.invoke(eu.advantly.device.link.CompanionState.APP_INSTALLED)
         assertNull(store.tryAddGuest("Closed"))
         assertEquals(eu.advantly.presentation.match.WatchStatus.UNKNOWN, store.watchStatus.value)
+        // Puls-Einstellungen laufen ebenfalls über die Grenze: nach Close kein SQL, kein Absturz
+        store.deleteAllHealthData()
+        assertEquals(
+            eu.advantly.presentation.match
+                .PulseSetting(),
+            store.pulseSetting(
+                eu.advantly.core.model
+                    .MatchId("closed"),
+            ),
+        )
     }
 }
 

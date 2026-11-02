@@ -20,6 +20,7 @@ import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.presentation.match.HealthRecordsPort
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchStore
+import eu.advantly.presentation.match.PulseSetting
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.ui.phone.app.AdvantlyAppModel
@@ -61,6 +62,23 @@ internal class AndroidPhoneMatchStore private constructor(
 
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) {
         calls.run { raw.setTelemetryVisibility(visibility) }
+    }
+
+    override fun setHealthConsent(enabled: Boolean) {
+        calls.run { raw.setHealthConsent(enabled) }
+    }
+
+    override fun deleteAllHealthData() {
+        calls.run { raw.deleteAllHealthData() }
+    }
+
+    override fun pulseSetting(matchId: MatchId) = calls.run { raw.pulseSetting(matchId) } ?: PulseSetting()
+
+    override fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    ) {
+        calls.run { raw.setPulseVisibility(matchId, visibility) }
     }
 
     override fun watchTakeOverNeeded() = calls.run { raw.watchTakeOverNeeded() }
