@@ -131,7 +131,7 @@ enum class ScorerOption {
  *
  * @property watchWorkout „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, unabhängig vom Zähler)
  * @property pulseVisibility Pulsverlauf des Matches (Plan Puls E2); `null` = Vorbelegung aus den Einstellungen. Ohne
- *   Einwilligung bzw. bei Telemetrie „Gar nicht“ gilt immer „Gar nicht“.
+ *   Einwilligung, bei Telemetrie „Gar nicht“ oder ohne [watchWorkout] gilt immer „Gar nicht“.
  * @property takeOverWatchMatch bestätigt: Die nicht erreichbare Uhr zählt noch ein anderes Match
  *   ([LiveMatchPort.watchTakeOverNeeded]) – das Handy übernimmt es sofort, spätere Uhr-Eingaben dort werden verworfen
  */

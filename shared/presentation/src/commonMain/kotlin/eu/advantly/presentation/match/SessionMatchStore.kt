@@ -329,8 +329,9 @@ class SessionMatchStore(
             )
         rememberPlayers(assigned.values.toList())
         val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newId().value) }
-        // Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ ist die Vorbelegung OFF – dann gilt keine andere Wahl
-        val allowed = session.defaultPulseVisibility()
+        // Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ ist die Vorbelegung OFF – dann gilt keine andere Wahl.
+        // Ohne Workout auf der Uhr wird kein Puls aufgezeichnet, also auch keine Stufe (sonst „Kein Pulsverlauf aufgezeichnet“).
+        val allowed = if (options.watchWorkout) session.defaultPulseVisibility() else TelemetryVisibility.OFF
         val pulse = if (allowed == TelemetryVisibility.OFF) allowed else options.pulseVisibility ?: allowed
         val meta = setup.meta.copy(watchWorkout = options.watchWorkout, pulseVisibility = pulse)
         return session.create(setup.format, fresh, meta, scorer, takeOverWatchMatch = options.takeOverWatchMatch)
