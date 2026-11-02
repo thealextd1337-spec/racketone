@@ -61,6 +61,11 @@ sealed interface Overlay {
     data class Result(
         val matchId: MatchId,
     ) : Overlay
+
+    /** Live-Ansicht eines fremden laufenden Matches (nur Anzeige, plan-live-mitspieler §3.1). */
+    data class Following(
+        val matchId: String,
+    ) : Overlay
 }
 
 /** Einfache Navigation: aktiver Tab + Stapel von Vollbild-Ebenen. Compose-State, nur vom UI-Thread benutzen. */

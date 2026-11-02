@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,16 +18,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
-import eu.advantly.presentation.friends.FriendsState
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.WatchedMatch
 import eu.advantly.ui.phone.common.ChoiceChip
@@ -51,20 +47,13 @@ import eu.advantly.ui.phone.resources.visitors_no_friends
 import eu.advantly.ui.phone.resources.visitors_pending
 import eu.advantly.ui.phone.resources.visitors_remove
 import eu.advantly.ui.phone.resources.visitors_title
-import eu.advantly.ui.phone.resources.watching_empty
 import eu.advantly.ui.phone.resources.watching_games
 import eu.advantly.ui.phone.resources.watching_live
-import eu.advantly.ui.phone.resources.watching_loading
 import eu.advantly.ui.phone.resources.watching_stop
 import eu.advantly.ui.phone.resources.watching_tiebreak
 import eu.advantly.ui.phone.resources.wizard_visitors_hint
 import eu.advantly.ui.phone.resources.wizard_visitors_title
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
-
-/** Abfrageintervall von „Ich schaue zu“: Realtime ist serverseitig aus (`can_receive_realtime`), daher Polling. */
-internal const val WATCHING_POLL_MS = 15_000L
 
 /** Höchstens so viele aktive Zuschauer pro Match; der Server setzt dieselbe Grenze durch (`visitor_limit_reached`). */
 internal const val MAX_VISITORS = 10
@@ -239,51 +228,9 @@ fun LiveVisitorsButton(
     }
 }
 
-/** Freunde-Tab, Segment „Ich schaue zu“: Live-Stand bzw. Ergebnis, alle [WATCHING_POLL_MS] neu, solange sichtbar. */
+/** Zugeschautes Match aus `my_visitor_matches` (z. B. beendet, mit Ergebnis) mit „Nicht mehr zuschauen“. */
 @Composable
-internal fun WatchingList(
-    model: FriendsViewModel,
-    state: FriendsState,
-) {
-    val scope = rememberCoroutineScope()
-    LifecycleResumeEffect(model) {
-        val job =
-            scope.launch {
-                while (true) {
-                    model.loadWatching()
-                    delay(WATCHING_POLL_MS)
-                }
-            }
-        onPauseOrDispose { job.cancel() }
-    }
-    val colors = AdvantlyTheme.colors
-    Column(Modifier.fillMaxWidth().testTag("friends_watching")) {
-        state.watchingError?.let { error ->
-            Text(stringResource(errorLabel(error)), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("watching_error"))
-        }
-        val watching = state.watching
-        when {
-            watching == null -> {
-                Text(stringResource(Res.string.watching_loading), color = colors.text2)
-            }
-
-            watching.isEmpty() -> {
-                Text(
-                    stringResource(Res.string.watching_empty),
-                    color = colors.text2,
-                    modifier = Modifier.testTag("watching_empty"),
-                )
-            }
-        }
-        watching.orEmpty().forEach { watched ->
-            WatchedRow(watched) { model.stopWatching(watched.match.id) }
-            HorizontalDivider()
-        }
-    }
-}
-
-@Composable
-private fun WatchedRow(
+internal fun WatchedRow(
     watched: WatchedMatch,
     onStop: () -> Unit,
 ) {

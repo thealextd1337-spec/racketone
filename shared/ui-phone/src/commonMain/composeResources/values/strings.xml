@@ -900,7 +900,6 @@
     <string name="start_login_sign_in">Sign in</string>
     <string name="visitors_limit">At most 10 spectators per match.</string>
     <string name="friends_error_visitor_limit">This match already has 10 spectators.</string>
-    <string name="friends_segment_watching">Watching</string>
     <string name="visitors_title">Spectators</string>
     <string name="visitors_hint">Friends you add see only the live score and the result, never your health data. They stay until removed.</string>
     <string name="visitors_empty">No spectators yet.</string>
@@ -964,4 +963,15 @@
     <string name="home_total_max_steps">Most steps in a set</string>
     <string name="home_total_bpm">%1$d bpm</string>
     <string name="home_section_recent">Recent matches</string>
+    <string name="friends_segment_live">Live</string>
+    <string name="live_badge">Live</string>
+    <string name="live_playing_title">I'm playing</string>
+    <string name="live_watching_title">I'm watching</string>
+    <string name="live_playing_empty">No match you play in is running right now.</string>
+    <string name="live_age_seconds">Score from %1$d s ago</string>
+    <string name="live_age_minutes">Score from %1$d min ago</string>
+    <string name="live_scorer_offline">Scorer not connected – the score may be out of date.</string>
+    <string name="live_gone">This match is no longer live.</string>
+    <string name="live_only_display">View only – another device keeps the score.</string>
+    <string name="live_back">Back</string>
 </resources>

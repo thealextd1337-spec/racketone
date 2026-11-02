@@ -311,7 +311,7 @@ class VisitorsUiTest {
                     }
                 }
                 try {
-                    click("friends_segment_watching")
+                    click("friends_segment_live")
                     waitForIdle()
                     text("Tennis · Läuft · 2026-10-28", "watching_m9")
                     text("Bob gegen Alice", "watching_m9")

@@ -57,6 +57,8 @@ import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.FriendsScreen
+import eu.advantly.ui.phone.friends.HomeLiveSection
+import eu.advantly.ui.phone.friends.LiveFollowScreen
 import eu.advantly.ui.phone.friends.LiveVisitorsButton
 import eu.advantly.ui.phone.friends.MatchSharingSection
 import eu.advantly.ui.phone.friends.MatchVisitorsSection
@@ -324,6 +326,14 @@ fun AdvantlyApp(
                         )
                     }
 
+                    is Overlay.Following -> {
+                        Column(Modifier.fillMaxSize().safeContentPadding()) {
+                            authModel?.friends?.let { friends ->
+                                LiveFollowScreen(friends, top.matchId, onBack = { navigator.pop() }, clock = model.clock)
+                            }
+                        }
+                    }
+
                     is Overlay.PlayerHistory -> {
                         HeadToHeadScreen(
                             top.playerId,
@@ -416,6 +426,11 @@ private fun TabLayer(
                             clock = model.clock,
                             onSupport = if (supportModel != null) ({ showSupport = true }) else null,
                             watchInstall = watchInstall,
+                            live = {
+                                authModel?.friends?.let { friends ->
+                                    HomeLiveSection(friends, model.clock) { navigator.push(Overlay.Following(it)) }
+                                }
+                            },
                         )
                     }
 
@@ -433,6 +448,8 @@ private fun TabLayer(
                                 friends,
                                 onOpenAccount = openAccount,
                                 onShareText = onShareText,
+                                onOpenLive = { navigator.push(Overlay.Following(it)) },
+                                clock = model.clock,
                             )
                         }
                     }
