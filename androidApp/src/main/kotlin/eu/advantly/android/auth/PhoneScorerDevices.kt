@@ -66,6 +66,17 @@ internal class PhoneScorerDevices(
         if (allowed()) session.cancelWatchHandOver(MatchId(matchId))
     }
 
+    override fun runningMatches(): List<String> = if (allowed()) session.runningMatchIds().map { it.value } else emptyList()
+
+    override fun reclaim(matchId: String): Boolean = allowed() && session.reclaimScoring(MatchId(matchId))
+
+    override fun revokedInputs(matchId: String): Int = if (allowed()) session.revokedInputs(MatchId(matchId)) else 0
+
+    override fun stopScoring(
+        matchId: String,
+        rejectedInputs: Int,
+    ): Boolean = allowed() && session.stopScoring(MatchId(matchId), rejectedInputs)
+
     override fun uploaded(eventId: String): Boolean? = if (allowed()) cloudAnswer(eventId) else null
 
     override fun handBack(

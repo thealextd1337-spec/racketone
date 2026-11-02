@@ -99,6 +99,33 @@ internal class FakeDevices : ScorerDevices {
 
     override fun watchPending(matchId: String) = matchId in watchPending
 
+    val running = mutableListOf<String>()
+    val reclaimed = mutableListOf<String>()
+    val stopped = mutableListOf<Pair<String, Int>>()
+    val revoked = mutableMapOf<String, Int>()
+
+    override fun runningMatches() = running
+
+    override fun reclaim(matchId: String): Boolean {
+        if (matchId in scoring) return false
+        reclaimed += matchId
+        scoring += matchId
+        changes[matchId] = ScorerChanges(EventOrder(99, phoneId), phoneId)
+        return true
+    }
+
+    override fun revokedInputs(matchId: String) = revoked[matchId] ?: 0
+
+    override fun stopScoring(
+        matchId: String,
+        rejectedInputs: Int,
+    ): Boolean {
+        if (matchId !in scoring) return false
+        stopped += matchId to rejectedInputs
+        scoring -= matchId
+        return true
+    }
+
     override fun cancelHandOver(matchId: String) {
         cancelled += matchId
         watchPending -= matchId
@@ -294,6 +321,49 @@ class ScorerHandoverTest {
             handovers.reconcile("alex")
             assertEquals(listOf("m1", "m2"), devices.cancelled)
             assertTrue(handovers.statuses("alex").isEmpty())
+        }
+
+    /** Review H4 (a): Zählt ein fremdes Gerät ohne angenommene Rolle mein Match, hole ich das Zählen einmal zurück. */
+    @Test fun theCreatorReclaimsScoringFromADeviceWithoutAnAcceptedRole() =
+        runBlocking {
+            devices.running += listOf("m1", "m2", "m3", "m4")
+            devices.changes["m1"] = change(5, "jonas-phone")
+            devices.changes["m2"] = change(5, "jonas-phone")
+            devices.changes["m3"] = change(5, "old-app-phone")
+            devices.changes["m4"] = change(5, "jonas-phone")
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "revoked", "jonas-phone"))
+            pulled["m2"] = memberMatch("m2", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            pulled["m3"] = memberMatch("m3") // verknüpfter Mitspieler mit alter App, keine Rolle
+            // m4: Rolle angenommen, aber mit einem anderen Gerät
+            pulled["m4"] = memberMatch("m4", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-watch"))
+            val before = syncs
+            handovers.reconcile("alex")
+            assertEquals(listOf("m1", "m3", "m4"), devices.reclaimed)
+            assertEquals(before + 3, syncs, "Rückholung sofort hochladen")
+            handovers.reconcile("alex")
+            assertEquals(3, devices.reclaimed.size, "keine Wiederholung")
+        }
+
+    /** Review H4 (b): Rolle entzogen oder Eingaben mit scoring_revoked abgelehnt – fremdes Match nur noch anzeigen. */
+    @Test fun aRevokedScorerStopsScoringAndReportsRejectedInputs() =
+        runBlocking {
+            devices.running += listOf("f1", "f2", "f3")
+            devices.scoring += listOf("f1", "f2", "f3")
+
+            fun foreign(
+                id: String,
+                status: String,
+            ) = memberMatch(id, PulledRole("alex", "Alex", "scorer", status, "phone-1")).copy(createdBy = "jonas")
+            pulled["f1"] = foreign("f1", "revoked")
+            pulled["f2"] = foreign("f2", "accepted")
+            pulled["f3"] = foreign("f3", "accepted")
+            devices.revoked["f3"] = 2
+            handovers.reconcile("alex")
+            assertEquals(listOf("f1" to 0, "f3" to 2), devices.stopped)
+            assertTrue(devices.scoring("f2"), "angenommene Rolle zählt weiter")
+            handovers.reconcile("alex")
+            assertEquals(2, devices.stopped.size, "einmalig")
+            assertTrue(devices.reclaimed.isEmpty(), "fremde Matches holt nur ihr Ersteller zurück")
         }
 
     @Test fun declinedRevokedOrNoLongerScoredInvitationsEnd() =

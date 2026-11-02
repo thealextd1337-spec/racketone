@@ -1193,6 +1193,86 @@ class MatchSession(
         return emit(m, ScorerChanged(handover.from)) != null
     }
 
+    /** Handy: laufende Matches im Store (eigene und gezogene) für den Rollen-Abgleich der Übergabe. */
+    fun runningMatchIds(): List<MatchId> {
+        checkThread()
+        return data.matches
+            .active()
+            .filter { !it.isFinished && inCurrentScope(it.id) }
+            .map { it.id }
+    }
+
+    /**
+     * Ersteller (plan-live-mitspieler §3.4, Review H4): Ein Gerät eines anderen Kontos zählt mein laufendes Match, ohne dass
+     * es (noch) eine angenommene Rolle hat (Widerruf, Blockieren, Entfreunden, alte App ohne Rolle; prüft der Host). Das
+     * Zählen kommt zurück: an die eigene Uhr, wenn sie zuvor zählte und das Match noch ihr Uhr-Match ist, sonst an dieses
+     * Handy. Der Server erlaubt dem Ersteller das jederzeit (`can_take_over`).
+     */
+    fun reclaimScoring(matchId: MatchId): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !data.accountIdentities.managed || foreign(matchId)) return false
+        val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return false
+        val scorer = m.scorer
+        if (m.status == MatchStatus.FINISHED || scorer == null || scorer == PENDING_WATCH || isMine(scorer)) return false
+        val previous =
+            (listOfNotNull(m.engine.initialScorer) + m.engine.events.mapNotNull { (it.payload as? ScorerChanged)?.scorerDeviceId })
+                .lastOrNull { isMine(it) }
+        val target = previous?.takeIf { isWatchDevice(it) && watchAssignment?.matchId == matchId } ?: deviceId
+        return emit(m, ScorerChanged(target)) != null
+    }
+
+    /**
+     * Fremdes Match, dessen Zähl-Recht ich verloren habe (Rolle nicht mehr angenommen bzw. `scoring_revoked`, Review H4):
+     * nur noch Anzeige ([displayOnly]), bis ein neuer Zählerwechsel kommt. Zählt die eigene Uhr, wechselt sie per
+     * `ScorerChanged` auf dieses Handy in die Anzeige (ihr Hinweis meldet danach noch gezählte Eingaben); [rejectedInputs]
+     * vom Server abgelehnte eigene Eingaben meldet [SessionState.droppedInputs]. `false`, wenn nichts zu tun war.
+     */
+    fun stopScoring(
+        matchId: MatchId,
+        rejectedInputs: Int,
+    ): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !foreign(matchId)) return false
+        val m = opened[matchId] ?: detached(matchId) ?: return false
+        if (!isMine(m.scorer) && m.scorer != PENDING_WATCH) return false
+        val known =
+            m.engine.events
+                .lastOrNull { it.payload is ScorerChanged }
+                ?.id ?: m.genesis.id
+        if (data.settings.get(REVOKED_PREFIX + matchId.value) == known.value) return false
+        if (m.status != MatchStatus.FINISHED && isWatchDevice(m.scorer) && m.scorer != PENDING_WATCH) emit(m, ScorerChanged(deviceId))
+        val last =
+            (opened[matchId] ?: m)
+                .engine.events
+                .lastOrNull { it.payload is ScorerChanged }
+                ?.id ?: m.genesis.id
+        data.settings.put(REVOKED_PREFIX + matchId.value, last.value)
+        closeOpened(matchId)
+        if (watchAssignment?.matchId == matchId) {
+            assignWatch(null)
+            broadcastMeta(null)
+        }
+        if (rejectedInputs > 0) {
+            droppedInputs = DroppedInputs(matchId, rejectedInputs)
+            data.settings.put(DROPPED_NOTICE_KEY, matchId.value + "|" + rejectedInputs)
+        }
+        dataRevision++
+        publish()
+        return true
+    }
+
+    /** Vom Server mit `scoring_revoked` abgelehnte eigene Events in [matchId] (Zähl-Recht verloren, Review H4). */
+    fun revokedInputs(matchId: MatchId): Int {
+        checkThread()
+        val revoked =
+            data.cloud
+                .rejectedEvents()
+                .filterValues { it == SCORING_REVOKED }
+                .keys
+        if (revoked.isEmpty()) return 0
+        return data.events.scoreEvents(matchId).count { it.id.value in revoked }
+    }
+
     /**
      * Handy: Eines meiner Geräte zählt das laufende offene Match [matchId] – dieses Handy, die eigene Uhr oder „Meine Uhr“
      * vor ihrer ersten Meldung ([PENDING_WATCH]; abgeben lässt sich erst, wenn sie sich gemeldet hat).
@@ -1587,7 +1667,10 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return false
             }
-        if (!allowForeign && displayOnly(matchId, checkNotNull(engine.genesis).deviceId, engine.state.scorerDeviceId)) return false
+        val lastChange = engine.events.lastOrNull { it.payload is ScorerChanged }?.id
+        if (!allowForeign && displayOnly(matchId, checkNotNull(engine.genesis).deviceId, engine.state.scorerDeviceId, lastChange)) {
+            return false
+        }
         if (!config.parallelMatches) opened.clear()
         opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine, lifecycleOf(matchId))
         // Handy: im Hintergrund geöffnete Matches (Neustart, Übergabe) bekommen nie automatisch den Fokus
@@ -1605,11 +1688,15 @@ class MatchSession(
         matchId: MatchId,
         source: DeviceId,
         scorer: DeviceId?,
+        lastChange: EventId? = null,
     ): Boolean {
         if (!data.accountIdentities.managed) return false
         val profile = data.accountIdentities.profile ?: return false
         val creator = data.cloudPulls.matchCreatedBy(profile, matchId.value) ?: return false
-        if (creator == profile || isMine(scorer)) return false
+        if (creator == profile) return false
+        // Zähl-Recht verloren (stopScoring): Anzeige, bis ein neuer Zählerwechsel kommt (z. B. erneute Abgabe)
+        if (lastChange != null && data.settings.get(REVOKED_PREFIX + matchId.value) == lastChange.value) return true
+        if (isMine(scorer)) return false
         val mine = data.accountIdentities.currentSources()
         return source.value !in mine && scorer?.value !in mine
     }
@@ -3440,6 +3527,12 @@ class MatchSession(
 
         /** Settings: schon gemeldete Zahl verworfener eigener Eingaben je Match (Uhr). */
         private const val DROPPED_PREFIX = "session.dropped."
+
+        /** Settings: Zähl-Recht in einem fremden Match verloren – Wert ist der damals letzte Zählerwechsel (Event-ID). */
+        private const val REVOKED_PREFIX = "session.scoringRevoked."
+
+        /** Ablehnungsgrund des Servers für Events ohne Zähl-Recht oberhalb des bekannten Stands (Review H4). */
+        const val SCORING_REVOKED = "scoring_revoked"
 
         /** Settings: noch nicht quittierter Hinweis „matchId|Anzahl“ (Uhr). */
         internal const val DROPPED_NOTICE_KEY = "session.droppedNotice"

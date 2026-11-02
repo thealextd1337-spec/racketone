@@ -114,6 +114,21 @@ interface ScorerDevices {
     /** Offenen Abgabe-Auftrag an die eigene Uhr zurücknehmen (Einladung beendet), damit sie ihn nicht später ausführt. */
     fun cancelHandOver(matchId: String) {}
 
+    /** Laufende Matches im lokalen Store (eigene und gezogene) für den Rollen-Abgleich. */
+    fun runningMatches(): List<String> = emptyList()
+
+    /** Ersteller: Zählen von einem fremden Gerät ohne angenommene Rolle zurückholen (eigene Uhr bzw. dieses Handy). */
+    fun reclaim(matchId: String): Boolean = false
+
+    /** Vom Server mit `scoring_revoked` abgelehnte eigene Eingaben in [matchId]. */
+    fun revokedInputs(matchId: String): Int = 0
+
+    /** Zähl-Recht in einem fremden Match verloren: nur noch anzeigen, Uhr in die Anzeige; [rejectedInputs] melden. */
+    fun stopScoring(
+        matchId: String,
+        rejectedInputs: Int,
+    ): Boolean = false
+
     /** Antwort des Servers auf das Event: `true` angenommen (oder lokal unbekannt), `false` abgelehnt, `null` ausstehend. */
     fun uploaded(eventId: String): Boolean?
 
@@ -255,6 +270,7 @@ class ScorerHandovers(
      */
     fun reconcile(profileId: String): Boolean {
         val waiting = reconcileAccepts(profileId)
+        reconcileRights(profileId)
         for ((matchId, invite) in store.scorerInvites(profileId)) {
             if (!invite.sent) continue
             val handover = invite.handover
@@ -308,6 +324,34 @@ class ScorerHandovers(
             }
         }
         return waiting || store.scorerInvites(profileId).isNotEmpty()
+    }
+
+    /**
+     * Zähl-Rechte laut letztem Pull durchsetzen (Review H4; der Server lehnt Eingaben ohne Recht mit `scoring_revoked` ab):
+     * - **Ersteller:** Zählt ein fremdes Gerät mein laufendes Match ohne angenommene Rolle mit genau diesem Gerät
+     *   (Widerruf, Blockieren, Entfreunden, alte App), holt dieses Handy das Zählen zurück. Matches mit laufender Abgabe
+     *   (Einladung) regelt [reconcile] selbst.
+     * - **Zähler eines fremden Matches:** Ist meine Rolle nicht mehr angenommen oder lehnte der Server eigene Eingaben mit
+     *   `scoring_revoked` ab, zählt keines meiner Geräte mehr; das Match wird nur noch angezeigt.
+     * Ohne gezogenen Stand (`pulled == null`) geschieht nichts. Nach dem Wechsel ist die Bedingung erfüllt: keine Schleife.
+     */
+    private fun reconcileRights(profileId: String) {
+        val invites = store.scorerInvites(profileId)
+        for (matchId in devices.runningMatches()) {
+            val match = pulled(profileId, matchId) ?: continue
+            if (match.deleted || match.status == "finished") continue
+            if (match.createdBy == profileId) {
+                if (matchId in invites || devices.scoring(matchId)) continue
+                val target = devices.scorerChanges(matchId)?.lastTarget ?: continue
+                val allowed = match.roles.any { it.status == "accepted" && it.deviceId == target }
+                if (!allowed && devices.reclaim(matchId)) requestSync()
+            } else if (match.createdBy != null && devices.scoring(matchId)) {
+                val revoked = devices.revokedInputs(matchId)
+                if ((match.roleOf(profileId)?.status != "accepted" || revoked > 0) && devices.stopScoring(matchId, revoked)) {
+                    requestSync()
+                }
+            }
+        }
     }
 
     /** Empfänger: Annahmen abhaken oder mit Grund beenden; `true`, solange eine noch auf den Wechsel wartet. */

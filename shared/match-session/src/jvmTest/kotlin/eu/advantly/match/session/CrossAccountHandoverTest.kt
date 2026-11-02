@@ -308,6 +308,84 @@ class CrossAccountHandoverTest {
         assertTrue(alex.phone.scoresHere(match))
     }
 
+    /** Review H4 (a): Jonas' Rolle ist entzogen, sein Handy zählt noch – Alex holt das Zählen auf sein Handy zurück. */
+    @Test
+    fun creatorReclaimsScoringAndLaterForeignPointsAreDropped() {
+        val match = start(ScorerChoice.ThisDevice)
+        assertTrue(alex.phone.recordPoint(Side.A))
+        toJonas(match)
+        assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        toJonas(match)
+        assertTrue(jonas.phone.resume(match))
+        assertTrue(jonas.phone.recordPoint(Side.B))
+        toAlex(match)
+
+        assertTrue(alex.phone.reclaimScoring(match))
+        assertFalse(alex.phone.reclaimScoring(match), "nur einmal")
+        assertTrue(alex.phone.scoresHere(match))
+        assertTrue(jonas.phone.recordPoint(Side.B), "Jonas' Handy weiß es noch nicht")
+        toAlex(match)
+        assertEquals(2, points(alex.phone, match), "Jonas' Punkt danach zählt nicht")
+        assertTrue(
+            alex.phone.state.value
+                .match(match)!!
+                .rejectedByRoleCount >= 1,
+            "„N Eingaben nicht übernommen“",
+        )
+        assertTrue(alex.phone.recordPoint(Side.A))
+    }
+
+    /** Review H4 (a): zählte vorher Alex' Uhr und ist es noch ihr Match, geht das Zählen an die Uhr zurück. */
+    @Test
+    fun creatorReclaimsScoringToHisWatch() {
+        val match = start(ScorerChoice.MyWatch)
+        settle()
+        assertTrue(alex.watch.recordPoint(Side.A))
+        settle()
+        watchHandOver(match, jonas.phone.deviceId)
+        assertTrue(alex.phone.reclaimScoring(match))
+        settle()
+        assertTrue(alex.watch.recordPoint(Side.A), "Alex' Uhr zählt wieder")
+        settle()
+        assertEquals(2, points(alex.phone, match))
+    }
+
+    /** Review H4 (b): Jonas' Rolle ist entzogen – seine Uhr wechselt in die Anzeige, das Match wird nur noch angezeigt. */
+    @Test
+    fun revokedScorerStopsScoringOnPhoneAndWatch() {
+        val match = start(ScorerChoice.ThisDevice)
+        assertTrue(alex.phone.recordPoint(Side.A))
+        toJonas(match)
+        assertNotNull(alex.phone.handOverScoring(match, jonas.watch.deviceId))
+        toJonas(match)
+        assertEquals(
+            match,
+            jonas.watch.state.value.match
+                ?.id,
+        )
+        assertTrue(jonas.watch.recordPoint(Side.B))
+        settle()
+        assertTrue(jonas.phone.scoresHere(match))
+        assertFalse(alex.phone.stopScoring(match, 0), "eigenes Match: kein Rechteverlust")
+
+        assertTrue(jonas.phone.stopScoring(match, 2))
+        settle()
+        assertFalse(jonas.phone.scoresHere(match))
+        assertFalse(jonas.phone.resume(match), "nur noch Anzeige")
+        assertFalse(jonas.watch.recordPoint(Side.B), "Uhr in der Anzeige")
+        assertEquals(DroppedInputs(match, 2), jonas.phone.state.value.droppedInputs)
+        assertFalse(jonas.phone.stopScoring(match, 0), "einmalig")
+        jonas.restartPhone()
+        assertFalse(jonas.phone.resume(match), "übersteht den Neustart")
+
+        // erneute Abgabe (neuer Zählerwechsel) hebt die Sperre auf
+        toAlex(match)
+        assertTrue(alex.phone.reclaimScoring(match))
+        assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        toJonas(match)
+        assertTrue(jonas.phone.scoresHere(match))
+    }
+
     /** N4: Die Antwort kommt ohne Replay aus dem Cache, bis neue Events ankommen (hier: Alex beendet das Match). */
     @Test
     fun theTakeOverAnswerFollowsNewlyPulledEvents() {
