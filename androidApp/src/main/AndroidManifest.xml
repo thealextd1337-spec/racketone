@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- B4: Netzbedingung geplanter Abgleiche (ab Android 14 Pflicht) und Netz-Auslöser im Vordergrund -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- B4: geplante Abgleiche überstehen einen Neustart (JobInfo.setPersisted) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Push (Plan Live §3.3): Android 13+ fragt erst bei Bedarf (Profil, Hinweis im Freunde-Tab) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".AdvantlyPhoneApplication"
@@ -81,6 +84,25 @@
                     android:scheme="wear" />
             </intent-filter>
         </service>
+
+        <!-- Push: Firebase nur manuell initialisiert (AndroidPush), ohne Token vor der Einwilligung, ohne Analytics -->
+        <service
+            android:name=".push.AdvantlyMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_deactivated"
+            android:value="true" />
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
     </application>
 
 </manifest>

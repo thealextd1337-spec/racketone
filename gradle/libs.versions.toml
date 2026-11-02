@@ -66,6 +66,8 @@ ktor = "3.5.1"
 credentials = "1.5.0"
 googleid = "1.1.1"
 security-crypto = "1.1.0"
+# Push (Plan Live §3.3): nur firebase-messaging, keine Analytics; Google Maven, geprüft 2026-11-02
+firebase-bom = "35.1.0"
 
 [libraries]
 supabase-auth = { module = "io.github.jan-tennert.supabase:auth-kt", version.ref = "supabase" }
@@ -77,6 +79,8 @@ ktor-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 androidx-credentials-play = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 google-id = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
 # core-model/core-scoring: nur Tests/Werkzeuge (Testvektoren). Einzige Pure-Ausnahme in commonMain: sync-protocol (Wire-Codec, 01 §4.3)

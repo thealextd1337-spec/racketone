@@ -964,4 +964,10 @@
     <string name="home_total_max_steps">Meiste Schritte in einem Satz</string>
     <string name="home_total_bpm">%1$d bpm</string>
     <string name="home_section_recent">Letzte Matches</string>
+    <string name="notifications_section">Benachrichtigungen</string>
+    <string name="notifications_toggle">Push-Benachrichtigungen</string>
+    <string name="notifications_toggle_sub">Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs. Standardmäßig aus.</string>
+    <string name="notifications_hint">Benachrichtigen, wenn Freunde dich in ein Match eintragen oder zum Zuschauen oder Zählen einladen?</string>
+    <string name="notifications_hint_enable">Einschalten</string>
+    <string name="notifications_hint_later">Nicht jetzt</string>
 </resources>

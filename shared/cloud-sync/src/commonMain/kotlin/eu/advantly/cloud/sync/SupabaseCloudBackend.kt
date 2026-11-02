@@ -43,7 +43,8 @@ class SupabaseCloudBackend internal constructor(
     FriendsPort,
     CloudTelemetryPort,
     SharedMatchesPort,
-    VisitorsPort {
+    VisitorsPort,
+    PushTokenPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -520,6 +521,22 @@ class SupabaseCloudBackend internal constructor(
 
     override suspend fun myVisitorMatches(profileId: String): List<VisitorView> =
         decode<List<VisitorView>>(rpc(lease(profileId), "my_visitor_matches", buildJsonObject {}))
+
+    override suspend fun setPushToken(
+        profileId: String,
+        provider: String,
+        token: String?,
+    ) {
+        require(provider.isNotBlank() && token?.isBlank() != true)
+        rpc(
+            lease(profileId),
+            "cloud_set_push_token_v1",
+            buildJsonObject {
+                put("p_provider", provider)
+                put("p_token", token)
+            },
+        )
+    }
 
     private suspend fun visitorRpc(
         name: String,

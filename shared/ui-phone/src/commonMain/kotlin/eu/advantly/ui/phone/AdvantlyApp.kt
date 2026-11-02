@@ -31,6 +31,8 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.presentation.stats.transfer
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdoptedHealthConsentDialog
@@ -96,6 +98,8 @@ import org.jetbrains.compose.resources.stringResource
  *   iOS) zählt ohne Konto
  * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Konto-Fluss wartet, bis er entschieden ist
  * @param buildNumber `advantly.buildNumber` dieser App für „Was ist neu?“ (Plan 0.5.1 §6); `0` = nie zeigen (Preview)
+ * @param notifications Push-Einstellung (nur Android mit Firebase); `null` blendet Profil-Abschnitt und Hinweis aus
+ * @param pushTarget angetippte Benachrichtigung: öffnet den Freunde-Tab am Ziel, danach [onPushTargetHandled]
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -120,6 +124,9 @@ fun AdvantlyApp(
     watchInstall: WatchInstallHost? = null,
     recoveryHold: Boolean = false,
     buildNumber: Int = 0,
+    notifications: NotificationSettingsPort? = null,
+    pushTarget: PushTarget? = null,
+    onPushTargetHandled: () -> Unit = {},
 ) {
     val accountState = authModel?.state?.collectAsState()?.value
     val archived by model.players.archivedPlayerIds.collectAsState()
@@ -135,6 +142,13 @@ fun AdvantlyApp(
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
     }
     BackHandler(enabled = navigator.top != null && !accountRequired) { model.onBack() }
+    // Angetippte Benachrichtigung: Freunde-Tab; das Ziel übernimmt der Tab, sobald er sichtbar ist.
+    LaunchedEffect(pushTarget) {
+        if (pushTarget != null) {
+            navigator.stack.clear()
+            navigator.tab = AppTab.Friends
+        }
+    }
     // App wieder im Vordergrund: Stand der Uhr neu prüfen (Uhr-App evtl. inzwischen installiert/geöffnet)
     LifecycleResumeEffect(model) {
         model.live.refreshWatchStatus()
@@ -210,6 +224,9 @@ fun AdvantlyApp(
                                 onShareText,
                                 watchInstall,
                                 accountRequired = accountRequired,
+                                notifications = notifications,
+                                pushTarget = pushTarget,
+                                onPushTargetHandled = onPushTargetHandled,
                             )
                         }
                     }
@@ -374,6 +391,9 @@ private fun TabLayer(
     onShareText: ((String) -> Unit)?,
     watchInstall: WatchInstallHost?,
     accountRequired: Boolean,
+    notifications: NotificationSettingsPort?,
+    pushTarget: PushTarget?,
+    onPushTargetHandled: () -> Unit,
 ) {
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
@@ -433,6 +453,9 @@ private fun TabLayer(
                                 friends,
                                 onOpenAccount = openAccount,
                                 onShareText = onShareText,
+                                notifications = notifications,
+                                link = pushTarget,
+                                onLinkHandled = onPushTargetHandled,
                             )
                         }
                     }
@@ -451,6 +474,7 @@ private fun TabLayer(
                             onSupport = onSupport,
                             onRestorePrevious = onRestorePrevious,
                             onShareExport = onShareExport,
+                            notifications = notifications,
                         )
                     }
                 }
