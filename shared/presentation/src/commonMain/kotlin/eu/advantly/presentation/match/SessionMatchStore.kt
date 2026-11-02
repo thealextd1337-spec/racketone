@@ -1,5 +1,6 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
@@ -86,8 +87,8 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
  * Matches, Spieler, Identität); Ergebnis-Köpfe beendeter Matches sind samt Setup zwischengespeichert; nur Details lesen das Event-Log.
  * Eine neue `lifecycleRevision` (Access, Redaktion oder Directory aus Data) verwirft alle abgeleiteten Namen, Köpfe und Details.
- * Die Gesundheits-Höchstwerte rechnet er mit dem Verlauf neu, aber nur, wenn sich Serien (Revisionen) oder gewertete
- * Matches geändert haben; Satzfenster je Match sind zwischengespeichert (ein Punkt-Replay je Matchänderung).
+ * Die Gesundheits-Höchstwerte cacht er je Match (Serien-Revisionen + Match-Stand) und rechnet nur geänderte Matches neu,
+ * in Häppchen über den Scheduler der Session (ein Punkt-Replay je Matchänderung, nur bei Schritten).
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
@@ -167,8 +168,16 @@ class SessionMatchStore(
     private var companionState = CompanionState.UNKNOWN
     private val healthFlow = MutableStateFlow(HealthRecords())
     override val records: StateFlow<HealthRecords> = healthFlow.asStateFlow()
-    private var healthKey: Any? = null
-    private val setWindows = HashMap<MatchId, Pair<Pair<Long, Int>, List<LongRange>>>()
+    private val matchHealth = HashMap<MatchId, MatchHealth>()
+    private var seenHealthRevisions: List<Triple<MatchId, DeviceId, Long>>? = null
+    private var healthGeneration = 0
+
+    // Änderung noch nicht veröffentlicht (z. B. Löschung, während ein überholter Durchlauf noch rechnete)
+    private var healthDirty = false
+
+    /** Nur für Tests: so oft wurden Höchstwerte eines einzelnen Matches berechnet. */
+    internal var healthComputations = 0
+        private set
 
     // Zustand für Revision und „Stand vor X s“
     private var lastState: SessionState? = null
@@ -195,6 +204,7 @@ class SessionMatchStore(
 
     /** Meldet den Adapter von der Session ab (die Session selbst läuft prozessweit weiter). */
     fun close() {
+        healthGeneration++
         companion?.stop()
         session.removeListener(listener)
         ownerIdentityListeners.clear()
@@ -842,36 +852,92 @@ class SessionMatchStore(
         return HealthTracks.pulseTrack(series, header.createdAtMs, header.score.lastEventAtMs ?: header.updatedAtMs)
     }
 
-    /** Höchstwerte über die Serien gewerteter Matches; nur neu, wenn sich Serien-Revisionen oder gewertete Matches ändern. */
+    /**
+     * Höchstwerte über die Serien gewerteter Matches, je Match zwischengespeichert (Quellen-Revisionen + Match-Stand):
+     * Nur geänderte Matches werden neu gerechnet, in Häppchen à [HEALTH_SLICE] Matches über den Scheduler, damit ein
+     * Kaltstart mit vielen Serien den Main-Thread nicht blockiert (Data ist nicht thread-sicher, deshalb kein Hintergrund).
+     */
     private fun refreshHealth() {
         val rated = historyFlow.value.filter { it.isRated }.associateBy { it.matchId }
-        val key = data.health.revisions() to rated.values.map { Triple(it.matchId, it.updatedAtMs, it.eventCount) }
-        if (key == healthKey) return
-        healthKey = key
-        val series = data.health.allSeries().filter { it.matchId in rated }
-        setWindows.keys.retainAll(series.map { it.matchId }.toSet())
+        val revisions = data.health.revisions()
+        val versions =
+            revisions
+                .filter { it.first in rated }
+                .groupBy({ it.first }, { it.second to it.third })
+                .mapValues { (id, sources) -> rated.getValue(id).let { HealthVersion(sources, it.updatedAtMs, it.eventCount) } }
+        val generation = ++healthGeneration
+        // Auch Serien ungewerteter Matches zählen: das Match-Detail liest den Pulsverlauf bei neuer Revision neu.
+        if (matchHealth.keys.retainAll(versions.keys) || revisions != seenHealthRevisions) healthDirty = true
+        seenHealthRevisions = revisions
+        val pending = ArrayDeque(versions.filter { (id, version) -> matchHealth[id]?.version != version }.keys.map(rated::getValue))
+        if (pending.isEmpty()) {
+            if (healthDirty) publishHealth()
+        } else {
+            session.scheduler.post { computeHealthSlice(generation, pending, versions) }
+        }
+    }
+
+    private fun computeHealthSlice(
+        generation: Int,
+        pending: ArrayDeque<MatchSummary>,
+        versions: Map<MatchId, HealthVersion>,
+    ) {
+        // Ein neuerer Durchlauf (oder close) hat übernommen; bereits Gerechnetes bleibt im Cache.
+        if (generation != healthGeneration) return
+        repeat(minOf(HEALTH_SLICE, pending.size)) {
+            val summary = pending.removeFirst()
+            matchHealth[summary.matchId] = computeMatchHealth(summary, versions.getValue(summary.matchId))
+        }
+        if (pending.isEmpty()) publishHealth() else session.scheduler.post { computeHealthSlice(generation, pending, versions) }
+    }
+
+    private fun computeMatchHealth(
+        summary: MatchSummary,
+        version: HealthVersion,
+    ): MatchHealth {
+        healthComputations++
+        val series = data.health.forMatch(summary.matchId).map { HealthTracks.aligned(it.series) }
+        // Das Punkt-Replay für die Satzfenster nur, wenn es überhaupt Schritte gibt
+        val windows = if (series.any { s -> s.steps.any { it != null } }) setWindowsOf(summary.matchId) else emptyList()
+        return MatchHealth(
+            version,
+            series.mapNotNull { maxBpm(it) }.maxOrNull(),
+            series.mapNotNull { HealthTracks.maxStepsInSet(it, windows) }.maxOrNull(),
+        )
+    }
+
+    private fun publishHealth() {
+        healthDirty = false
         healthFlow.value =
             HealthRecords(
-                maxBpm = series.mapNotNull { maxBpm(it.series) }.maxOrNull(),
-                maxStepsInSet =
-                    series
-                        .mapNotNull { HealthTracks.maxStepsInSet(HealthTracks.aligned(it.series), windowsOf(rated.getValue(it.matchId))) }
-                        .maxOrNull(),
+                maxBpm = matchHealth.values.mapNotNull { it.maxBpm }.maxOrNull(),
+                maxStepsInSet = matchHealth.values.mapNotNull { it.maxStepsInSet }.maxOrNull(),
                 revision = healthFlow.value.revision + 1,
             )
     }
 
-    private fun windowsOf(summary: MatchSummary): List<LongRange> {
-        val version = summary.updatedAtMs to summary.eventCount
-        setWindows[summary.matchId]?.let { (cached, windows) -> if (cached == version) return windows }
+    private fun setWindowsOf(matchId: MatchId): List<LongRange> {
         val points =
             try {
-                ScoringEngine.pointHistory(data.events.scoreEvents(summary.matchId))
+                ScoringEngine.pointHistory(data.events.scoreEvents(matchId))
             } catch (e: IllegalArgumentException) {
                 emptyList()
             }
-        return HealthTracks.setWindows(points).also { setWindows[summary.matchId] = version to it }
+        return HealthTracks.setWindows(points)
     }
+
+    /** Stand, aus dem die Höchstwerte eines Matches entstanden: (Quelle, Revision) je Serie und Match-Kopf. */
+    private data class HealthVersion(
+        val sources: List<Pair<DeviceId, Long>>,
+        val updatedAtMs: Long,
+        val eventCount: Int,
+    )
+
+    private class MatchHealth(
+        val version: HealthVersion,
+        val maxBpm: Int?,
+        val maxStepsInSet: Long?,
+    )
 
     private fun ensureSelf(): Player =
         data.players
@@ -1109,6 +1175,9 @@ class SessionMatchStore(
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
         const val FAVORITES_KEY = "phone.favorites"
         const val CONTACT_PERSIST_INTERVAL_MS = 10_000L
+
+        /** Matches je Scheduler-Häppchen beim Neurechnen der Gesundheits-Höchstwerte. */
+        const val HEALTH_SLICE = 4
         val FAVORITES = ListSerializer(StoredFavorite.serializer())
         val FavoritesJson = Json { ignoreUnknownKeys = true }
 

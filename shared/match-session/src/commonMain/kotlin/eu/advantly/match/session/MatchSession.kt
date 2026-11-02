@@ -133,12 +133,13 @@ import eu.advantly.sync.protocol.FavoriteLineup as WireFavorite
  *   Instanz nutzen statt eine zweite Verbindung auf dieselbe Datei zu öffnen. Nur lesen bzw. Spieler/Favoriten/
  *   Settings schreiben – Events und Match-Köpfe ändert ausschließlich die Session. Nur auf dem Scheduler-Thread.
  * @param link Geräte-Link oder `null` (Standalone, nur lokal zählen)
+ * @param scheduler öffentlich, damit UI-Adapter längere Arbeit auf demselben Thread in Häppchen aufteilen können
  */
 @Suppress("TooManyFunctions")
 class MatchSession(
     val data: LocalData,
     private val link: DeviceLink?,
-    private val scheduler: LinkScheduler,
+    val scheduler: LinkScheduler,
     val config: SessionConfig,
     private val clock: WallClock = SystemWallClock,
     private val ids: IdGenerator = RandomIdGenerator(),
