@@ -193,6 +193,8 @@
     <string name="dialog_next_game">%1$d. Spiel?</string>
     <string name="decision_waiting">%1$s entscheidet</string>
     <string name="finished_title">Match beendet</string>
+    <string name="finished_steps">Schritte %1$s</string>
+    <string name="finished_max_heart_rate">Max. Puls %1$s</string>
 
     <!-- Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md) -->
     <string name="setup_tiebreak_only_7">Nur Tiebreak (bis 7)</string>

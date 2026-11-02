@@ -63,6 +63,7 @@ import eu.advantly.wear.ui.Haptics
 import eu.advantly.wear.ui.WatchActions
 import eu.advantly.wear.ui.WearApp
 import eu.advantly.wear.workout.CapabilitiesRepository
+import eu.advantly.wear.workout.MatchHealthTallies
 import eu.advantly.wear.workout.Permissions
 import eu.advantly.wear.workout.SessionStore
 import eu.advantly.wear.workout.WorkoutAction
@@ -493,6 +494,7 @@ class MainActivity : ComponentActivity() {
                 elapsed = SystemClock::elapsedRealtime,
                 uptime = SystemClock::uptimeMillis,
                 today = ::systemLocalDay,
+                liveHealth = MatchHealthTallies::summary,
                 operationBoundary = { action ->
                     calls.run {
                         action()

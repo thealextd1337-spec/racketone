@@ -13,6 +13,7 @@ import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.data.assignments
+import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceLight
 import eu.advantly.match.session.DroppedInputs
@@ -49,6 +50,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * @param wallClock Wanduhr (ms seit Epoche) – nur zum einmaligen Umrechnen der Zeitstempel aus `SyncStatus`
  * @param elapsed monotone Uhr inkl. Tiefschlaf (`SystemClock.elapsedRealtime()`) – Staleness und 30-s-Schwelle
  * @param uptime monotone Uhr für die Entprellung
+ * @param liveHealth Live-Werte des Workouts je Match aus dem Arbeitsspeicher (Matchende-Bilanz ohne Aufnahme)
  */
 @Suppress("TooManyFunctions")
 internal class WatchControllerCore(
@@ -60,6 +62,7 @@ internal class WatchControllerCore(
     private val uptime: () -> Long,
     private val today: () -> LocalDay,
     private val tapGuard: TapGuard = TapGuard(),
+    private val liveHealth: (MatchId) -> HealthSummary? = { null },
 ) {
     /** Entwurf des Kurz-Wizards; `null` = nicht im Wizard. */
     private data class Draft(
@@ -713,6 +716,12 @@ internal class WatchControllerCore(
         }
     }
 
+    /** Matchende-Bilanz (Schritte, höchster Puls): aufgezeichnete Serie, sonst Live-Werte; nichts bei „Gar nicht“. */
+    private fun finishedHealth(
+        matchId: MatchId,
+        telemetry: TelemetryVisibility,
+    ): HealthSummary? = HealthSummary.shown(session.recordedHealthSummary(matchId), liveHealth(matchId), telemetry.allowsLive)
+
     private fun screen(): WatchScreen {
         val sessionState = session.state.value
         val match = sessionState.match
@@ -730,6 +739,7 @@ internal class WatchControllerCore(
                         overlay = overlay,
                         serveBarPoint = serveBar.visiblePoint(elapsed()),
                         serveBarHideAtMillis = serveBar.hideAtMillis,
+                        health = { finishedHealth(match.id, sessionState.telemetryVisibility) },
                     ).copy(correctionRejected = correctionRejected),
             )
         }

@@ -207,6 +207,8 @@
 
 /* Matchende */
 "matchend.done" = "Done";
+"matchend.steps %@" = "Steps %@";
+"matchend.maxHeartRate %@" = "Max HR %@";
 
 /* Action-Taste (AppIntent) */
 "intent.undo.title" = "Undo last point";

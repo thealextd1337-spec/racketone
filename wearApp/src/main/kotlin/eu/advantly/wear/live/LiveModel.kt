@@ -16,6 +16,7 @@ import eu.advantly.core.scoring.ServeCourt
 import eu.advantly.core.scoring.SetKind
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.data.ScoreSummary
+import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.presentation.live.LiveScoreRules
@@ -106,6 +107,8 @@ data class FinishedUi(
     val sets: List<SetColumn>,
     /** „Noch einer in gleicher Besetzung?“ (02 §5.2): nur am Zähler, nach regulärem Ende eines Best-of. */
     val canFollowUp: Boolean,
+    /** Kleine Bilanz der Uhr (Schritte, höchster Puls in der Partie); `null` = nicht anzeigen. */
+    val health: HealthSummary? = null,
 )
 
 /** Bestätigungen über dem Live-Screen. */
@@ -209,6 +212,7 @@ object LiveModel {
         isSelf: (PlayerId) -> Boolean = { false },
         serveBarPoint: EventId? = null,
         serveBarHideAtMillis: Long = 0,
+        health: () -> HealthSummary? = { null },
     ): LiveUi {
         val state = match.state
         val role = if (match.isScorer) LiveRole.SCORER else LiveRole.DISPLAY
@@ -261,7 +265,7 @@ object LiveModel {
             canUndo = match.canUndo,
             canRedo = match.canRedo,
             decision = decision(match),
-            finished = if (finished) finishedUi(match) else null,
+            finished = if (finished) finishedUi(match).copy(health = health()) else null,
             locked = locked && role == LiveRole.SCORER,
             overlay = overlay,
             corrections = if (role == LiveRole.SCORER) corrections(match, teams) else null,

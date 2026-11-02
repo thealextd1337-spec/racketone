@@ -11,6 +11,7 @@ import eu.advantly.data.StoredHealthSeries
 import eu.advantly.health.HealthQuality
 import eu.advantly.health.HealthRecorder
 import eu.advantly.health.HealthSeries
+import eu.advantly.health.HealthSummary
 import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthConsentSetting
 import eu.advantly.sync.protocol.HealthMessage
@@ -182,6 +183,9 @@ internal class HealthSync(
         data.health.upsert(StoredHealthSeries(matchId, deviceId(), revision, recorder.series(offset)))
         savedAtMs[matchId] = nowMs()
     }
+
+    /** Bilanz der eigenen gespeicherten Serie (Matchende-Seite der Uhr). */
+    fun recordedSummary(matchId: MatchId): HealthSummary? = own(matchId)?.let { HealthSummary.of(it.series) }
 
     private fun own(matchId: MatchId): StoredHealthSeries? = data.health.forMatch(matchId).firstOrNull { it.sourceDeviceId == deviceId() }
 

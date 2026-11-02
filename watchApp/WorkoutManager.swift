@@ -32,6 +32,9 @@ final class WorkoutManager: NSObject, ObservableObject {
     @Published private(set) var heartRateAmbient: Int = 0
     /// Pulsverlauf wird für das Match aufgezeichnet (roter Aufnahme-Punkt, Plan Puls E3)
     @Published private(set) var healthRecording = false
+    /// Matchende-Bilanz ohne Aufzeichnung (0.5.1): je Match Schritte seit Workout-Start und höchster Puls, -1 = unbekannt.
+    /// Nur im Arbeitsspeicher, nie gespeichert; „Gar nicht“ verwirft alles.
+    private(set) var liveSummary: [String: (steps: Int64, maxBpm: Int)] = [:]
 
     /// Telemetrie-Sichtbarkeit (P2-J): `false` bei „Gar nicht“ – Pulswerte werden verworfen und nicht angezeigt.
     /// Die Workout-Session läuft als Laufzeitanker (Always-on) weiter; sie wird am Ende ohnehin verworfen.
@@ -40,6 +43,7 @@ final class WorkoutManager: NSObject, ObservableObject {
             if !telemetryAllowed {
                 heartRate = 0
                 heartRateAmbient = 0
+                liveSummary = [:]
             }
         }
     }
@@ -360,6 +364,10 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
             DispatchQueue.main.async { [weak self] in
                 guard let self, workoutBuilder === self.builder, let matchId = self.matchId else { return }
                 _ = self.health.recordSteps(matchId: matchId, atMs: atMs, cumulativeSteps: steps)
+                if self.telemetryAllowed {
+                    let current = self.liveSummary[matchId] ?? (steps: -1, maxBpm: -1)
+                    self.liveSummary[matchId] = (steps: max(current.steps, steps), maxBpm: current.maxBpm)
+                }
             }
         }
         guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate),
@@ -379,6 +387,11 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
             }
             // „Gar nicht“ (P2-J): Wert verwerfen, nichts anzeigen
             guard self.telemetryAllowed else { return }
+            // gleicher Plausibilitätsbereich wie die Aufnahme (HealthRecorder.BPM_RANGE)
+            if let matchId = self.matchId, (25...250).contains(bpm) {
+                let current = self.liveSummary[matchId] ?? (steps: -1, maxBpm: -1)
+                self.liveSummary[matchId] = (steps: current.steps, maxBpm: max(current.maxBpm, bpm))
+            }
             self.heartRate = bpm
             let now = Date()
             if self.heartRateAmbient == 0 || now.timeIntervalSince(self.ambientUpdatedAt) >= 60 {

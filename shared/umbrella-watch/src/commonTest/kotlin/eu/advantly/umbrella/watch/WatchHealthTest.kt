@@ -46,6 +46,11 @@ class WatchHealthTest {
                 .single()
         assertEquals(listOf(110, 120), stored.series.bpm)
         assertEquals(listOf(0L, 12L), stored.series.steps)
+        // Matchende-Bilanz (0.5.1) nur mit primitiven Typen; -1 = unbekannt
+        assertEquals(12L, health.recordedSteps(id))
+        assertEquals(120, health.recordedMaxBpm(id))
+        assertEquals(-1L, health.recordedSteps(""))
+        assertEquals(-1, health.recordedMaxBpm("unknown"))
     }
 
     @Test

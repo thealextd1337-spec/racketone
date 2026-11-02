@@ -200,6 +200,8 @@
     <string name="dialog_next_game">Game %1$d?</string>
     <string name="decision_waiting">%1$s decides</string>
     <string name="finished_title">Match over</string>
+    <string name="finished_steps">Steps %1$s</string>
+    <string name="finished_max_heart_rate">Max HR %1$s</string>
 
     <!-- Bedienung W2 (Feldtest 2026-10-15, docs/w2-ui-vertrag.md) -->
     <string name="setup_tiebreak_only_7">Tiebreak only (to 7)</string>

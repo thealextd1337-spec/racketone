@@ -34,6 +34,12 @@ class WatchHealth internal constructor(
         call(matchId, Unit) { s, id -> s.finishHealthRecording(id) }
     }
 
+    /** Matchende-Bilanz aus dem eigenen gespeicherten Pulsverlauf: Schritte in der Partie, -1 = keine Aufnahme/kein Wert. */
+    fun recordedSteps(matchId: String): Long = call(matchId, -1L) { s, id -> s.recordedHealthSummary(id)?.steps ?: -1L }
+
+    /** Matchende-Bilanz aus dem eigenen gespeicherten Pulsverlauf: höchster Puls, -1 = keine Aufnahme/kein Wert. */
+    fun recordedMaxBpm(matchId: String): Int = call(matchId, -1) { s, id -> s.recordedHealthSummary(id)?.maxBpm ?: -1 }
+
     /** Läuft für das Match eine erlaubte Aufnahme? (roter Aufnahme-Punkt neben dem Puls) */
     fun isRecording(matchId: String): Boolean = call(matchId, false) { s, id -> s.isRecordingHealth(id) }
 
