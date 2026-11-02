@@ -16,7 +16,9 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.PendingVisitorStore
+import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +96,8 @@ internal class AndroidPhoneSyncScheduler(
 internal class AndroidPhoneSyncRecord(
     context: Context,
 ) : PhoneSyncRecord,
-    PendingVisitorStore {
+    PendingVisitorStore,
+    PendingScorerStore {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     override fun lastBackupAtMs(profile: String): Long? = prefs.getLong("last_backup.$profile", -1).takeIf { it >= 0 }
@@ -120,6 +123,7 @@ internal class AndroidPhoneSyncRecord(
             .remove("last_backup.$profile")
             .remove("failures.$profile")
             .remove("visitors.pending.$profile")
+            .remove("scorers.pending.$profile")
             // Altlast bis 0.5.x (Live-Upload nur mit Zuschauern); wird nicht mehr geschrieben.
             .remove("visitors.watched.$profile")
             .apply()
@@ -140,6 +144,22 @@ internal class AndroidPhoneSyncRecord(
     ) {
         val entries = pending.flatMap { (match, visitors) -> visitors.map { "$match/$it" } }.toSet()
         prefs.edit().putStringSet("visitors.pending.$profileId", entries).apply()
+    }
+
+    // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), UUIDs ohne Schrägstrich.
+    override fun scorerInvites(profileId: String): Map<String, ScorerInvite> =
+        prefs
+            .getStringSet("scorers.pending.$profileId", null)
+            .orEmpty()
+            .mapNotNull { entry -> entry.split('/').takeIf { it.size == 3 }?.let { it[0] to ScorerInvite(it[1], it[2] == "1") } }
+            .toMap()
+
+    override fun setScorerInvites(
+        profileId: String,
+        invites: Map<String, ScorerInvite>,
+    ) {
+        val entries = invites.map { (match, invite) -> "$match/${invite.scorerId}/${if (invite.sent) 1 else 0}" }.toSet()
+        prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
     }
 
     companion object {
