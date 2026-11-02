@@ -3,6 +3,8 @@ package eu.advantly.android
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.sync.protocol.LiveTelemetry
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
+import eu.advantly.sync.protocol.LiveViewSubscription
+import eu.advantly.sync.protocol.LiveViews
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +65,7 @@ class ManifestTest {
         assertEquals("/advantly/telemetry/live", LiveTelemetry.MESSAGE_PATH)
         assertEquals("/advantly/telemetry/subscribe", LiveTelemetrySubscription.MESSAGE_PATH)
         assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveTelemetry.MESSAGE_PATH })
+        assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveViewSubscription.MESSAGE_PATH })
         assertTrue(dataItems.all { it.getAttributeNS(android, "pathPrefix") == WearDataLayerTransport.QUEUE_PREFIX })
     }
 
@@ -115,6 +118,7 @@ class ManifestTest {
                         "com.google.android.gms.wearable.MESSAGE_RECEIVED"
                 }.map { (it.getElementsByTagName("data").item(0) as Element).getAttributeNS(android, "path") }
         assertTrue(paths.contains(LiveTelemetrySubscription.MESSAGE_PATH))
+        assertTrue(paths.contains(LiveViews.MESSAGE_PATH))
         assertTrue(paths.contains(WearDataLayerTransport.MESSAGE_PATH))
     }
 }

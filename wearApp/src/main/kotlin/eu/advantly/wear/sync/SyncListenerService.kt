@@ -19,6 +19,7 @@ import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
 import eu.advantly.sync.protocol.LiveTelemetrySubscriptionCodec
+import eu.advantly.sync.protocol.LiveViews
 import eu.advantly.wear.AdvantlyWearApplication
 import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.live.telemetryActive
@@ -39,6 +40,7 @@ import java.util.concurrent.TimeoutException
  *   wenn die Session den Frame auf dem Main-Thread verarbeitet (und bestätigt) hat.
  * - **Queue-DataItem** (`/advantly/link/q/<diese-node>/…`): einfrieren, an den Transport geben, erst NACH dem Speichern
  *   löschen (bleibt es liegen, liest es der Transport beim nächsten Start erneut, idempotent).
+ * - **Zuschauen** (`/advantly/live/views`): Antwort des Handys auf das Uhr-Abo, nur RAM ([WatchLiveViews]).
  * - **Capability** (Handy wieder erreichbar): sofort abgleichen.
  *
  * Wurde der Prozess für den Aufruf frisch gestartet (Kaltstart), bleibt der Dienst gebunden, bis der Abgleich
@@ -67,6 +69,21 @@ class SyncListenerService : WearableListenerService() {
                         .session.state.value,
                     receivedAtMs,
                 )
+            }
+            return
+        }
+        if (event.path == LiveViews.MESSAGE_PATH) {
+            // Nur in eine laufende Session (Zuschau-Ansicht offen); eine späte Antwort baut keine Session kalt auf.
+            val receivedAtMs = SystemClock.elapsedRealtime()
+            runOnMain {
+                val peers =
+                    AndroidMatchSessions
+                        .current()
+                        ?.state
+                        ?.value
+                        ?.sync
+                        ?.peers ?: return@runOnMain
+                WatchLiveViews.Watch.receive(event.data, event.sourceNodeId, peers, receivedAtMs)
             }
             return
         }
