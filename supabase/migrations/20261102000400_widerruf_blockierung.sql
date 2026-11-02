@@ -35,3 +35,76 @@ begin
     || v_marker);
 end;
 $$;
+
+-- Review H5: Eine Blockierung mit dem Ersteller sperrt die Live-Daten laufender Matches auf allen Lesewegen, nicht nur in
+-- cloud_my_live_matches_v1 (20261102000100, dort schon gleichwertig über is_blocked).
+--
+-- Entscheidung (Datenschutzerklärung §4.3 „Live für Mitspieler“: „Wer Sie blockiert hat oder von Ihnen blockiert wurde,
+-- sieht nichts“): Die Sperre gilt für laufende Matches (in_progress, paused, awaiting_decision) – in jeder Richtung der
+-- Blockierung, für Mitglieder, Zuschauer, Feed-Leser und Turnierhelfer, nie für den Ersteller selbst. Beendete gemeinsame
+-- Matches bleiben bewusst sichtbar: §4.3 verspricht für den Verlauf („erscheint auch in seinem Verlauf“) keine Sperre, die
+-- Verknüpfung löst nur „War ich nicht“. Nach Matchende erscheint das Match daher wieder im Abgleich (neue serverVersion).
+-- Blockieren und Entsperren erhöhen die Sichtbarkeitsepoche beider Konten (user_blocks_visibility): Der Client lädt den
+-- Katalog neu, ein gesperrtes laufendes Match fällt dort weg (ABSENT), nach dem Entsperren kommt es zurück.
+-- Gesperrt werden: Basistabellen matches/match_participants/match_events per restriktiver RLS-Policy (damit auch
+-- pull_match_events, match_event_watermarks und deren cloud_*_v1-Hüllen, die als Aufrufer lesen), sync_pull,
+-- get_visitor_match (damit cloud_get_visitor_match_v1), my_visitor_matches, tournament_overview sowie Readiness und
+-- Redaktions-Paging (nach der Epochenprüfung, damit veraltete Clients weiter restart_required bekommen).
+-- Antwort jeweils wie ohne Recht (forbidden bzw. leer), kein eigener Fehlercode als Orakel.
+-- Nicht betroffen: Zählerwechsel- und Push-Prüfungen (eigene Regeln), der Konto-Export (Art. 15, eigene Daten).
+create function private.blocked_from_live(p_match uuid, p_profile uuid default auth.uid())
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.matches m
+                 where m.id = p_match and m.created_by <> p_profile
+                   and m.status in ('in_progress', 'paused', 'awaiting_decision')
+                   and private.is_blocked(p_profile, m.created_by));
+$$;
+revoke all on function private.blocked_from_live(uuid, uuid) from public, anon, authenticated, service_role;
+grant execute on function private.blocked_from_live(uuid, uuid) to authenticated;
+
+create policy live_not_blocked on public.matches as restrictive for select to authenticated
+  using (not private.blocked_from_live(id, (select auth.uid())));
+create policy live_not_blocked on public.match_participants as restrictive for select to authenticated
+  using (not private.blocked_from_live(match_id, (select auth.uid())));
+create policy live_not_blocked on public.match_events as restrictive for select to authenticated
+  using (not private.blocked_from_live(match_id, (select auth.uid())));
+
+-- Gleiche Seam-Technik wie 20261028000200: Funktionskörper per Textersetzung, Signatur/Owner/ACL/Konfiguration bleiben.
+do $$
+declare
+  v_seam record;
+  v_definition text;
+begin
+  for v_seam in select * from (values
+    ('public.sync_pull(bigint,integer)',
+     'and (m.created_by = v_uid or private.can_view_match(m.id, v_uid))',
+     'and (m.created_by = v_uid or private.can_view_match(m.id, v_uid)) and not private.blocked_from_live(m.id, v_uid)'),
+    ('public.get_visitor_match(uuid)',
+     'or not (private.is_match_visitor(p_match_id, v_uid) or private.is_match_member(p_match_id, v_uid)) then',
+     'or not (private.is_match_visitor(p_match_id, v_uid) or private.is_match_member(p_match_id, v_uid))' || E'\n'
+       || '     or private.blocked_from_live(p_match_id, v_uid) then'),
+    ('public.my_visitor_matches()',
+     'where v.profile_id = v_uid and private.is_match_visitor(v.match_id, v_uid)',
+     'where v.profile_id = v_uid and private.is_match_visitor(v.match_id, v_uid)'
+       || ' and not private.blocked_from_live(v.match_id, v_uid)'),
+    ('public.tournament_overview(uuid)',
+     'from public.matches m where m.tournament_id = t.id and m.deleted_at is null',
+     'from public.matches m where m.tournament_id = t.id and m.deleted_at is null'
+       || ' and not private.blocked_from_live(m.id, v_uid)'),
+    ('public.cloud_match_readiness_v1(uuid,bigint,integer,bigint)',
+     E'    perform private.fail(''restart_required'',''40001'');\n  end if;\n',
+     E'    perform private.fail(''restart_required'',''40001'');\n  end if;\n'
+       || E'  if private.blocked_from_live(p_match_id,v_uid) then\n    perform private.fail(''forbidden'',''42501'');\n  end if;\n'),
+    ('public.cloud_pull_match_redaction_v1(uuid,bigint,integer,uuid,bigint,bigint,integer,integer)',
+     E'    perform private.fail(''restart_required'',''40001'');\n  end if;\n',
+     E'    perform private.fail(''restart_required'',''40001'');\n  end if;\n'
+       || E'  if private.blocked_from_live(p_match_id,v_uid) then\n    perform private.fail(''forbidden'',''42501'');\n  end if;\n')
+  ) s(signature, old, new) loop
+    select pg_get_functiondef(v_seam.signature::regprocedure) into v_definition;
+    if array_length(string_to_array(v_definition, v_seam.old), 1) <> 2 then
+      raise exception 'Unerwartete Seam in %', v_seam.signature;
+    end if;
+    execute replace(v_definition, v_seam.old, v_seam.new);
+  end loop;
+end;
+$$;
