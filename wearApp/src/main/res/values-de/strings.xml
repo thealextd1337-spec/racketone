@@ -246,7 +246,7 @@
     <string name="a11y_view_only">Anzeige, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->
-    <string name="permission_rationale">Der Puls wird während des Matches live angezeigt und nicht gespeichert.</string>
+    <string name="permission_rationale">Der Puls wird während des Matches live angezeigt. Gespeichert wird er nur, wenn du am Handy „Pulsverlauf aufzeichnen“ einschaltest.</string>
     <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: kein Workout, die Uhr kann die App im Hintergrund beenden</string>
     <string name="hint_no_heart_rate">Ohne Pulsrecht: Workout ohne Puls</string>
     <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte und Kalorien</string>

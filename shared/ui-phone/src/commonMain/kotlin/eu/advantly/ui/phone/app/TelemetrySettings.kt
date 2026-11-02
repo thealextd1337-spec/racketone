@@ -43,6 +43,9 @@ import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_delete
 import eu.advantly.ui.phone.resources.health_delete_all
 import eu.advantly.ui.phone.resources.health_delete_all_text
+import eu.advantly.ui.phone.resources.health_grant_confirm
+import eu.advantly.ui.phone.resources.health_grant_text
+import eu.advantly.ui.phone.resources.health_grant_title
 import eu.advantly.ui.phone.resources.health_record_locked
 import eu.advantly.ui.phone.resources.health_record_toggle
 import eu.advantly.ui.phone.resources.health_record_toggle_sub
@@ -111,6 +114,7 @@ fun TelemetryVisibilitySection(
 
 /**
  * Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls §4, E1): eigener Schalter, Standard aus, gesperrt bei „Gar nicht“.
+ * Einschalten erst nach ausdrücklicher Bestätigung im Dialog (Art. 9 Abs. 2 lit. a DSGVO).
  * Ausschalten widerruft und löscht nach Rückfrage alle Pulsverläufe auf Handy und Uhr; „Alle Gesundheitsdaten löschen“
  * ebenfalls nur nach Rückfrage (04 Prinzip 4).
  */
@@ -125,7 +129,7 @@ private fun HealthConsentSection(
         title = stringResource(Res.string.health_record_toggle),
         subtitle = stringResource(if (locked) Res.string.health_record_locked else Res.string.health_record_toggle_sub),
         checked = consent && !locked,
-        onChange = { on -> if (on) port.setHealthConsent(true) else confirm = HealthConfirm.REVOKE },
+        onChange = { on -> confirm = if (on) HealthConfirm.GRANT else HealthConfirm.REVOKE },
         tag = "health_record_toggle",
         enabled = !locked,
     )
@@ -142,22 +146,47 @@ private fun HealthConsentSection(
         modifier = Modifier.fillMaxWidth().testTag("health_delete_all"),
     )
     confirm?.let { kind ->
-        val revoke = kind == HealthConfirm.REVOKE
+        val (title, text, action) =
+            when (kind) {
+                HealthConfirm.GRANT -> {
+                    Triple(Res.string.health_grant_title, Res.string.health_grant_text, Res.string.health_grant_confirm)
+                }
+
+                HealthConfirm.REVOKE -> {
+                    Triple(
+                        Res.string.health_revoke_title,
+                        Res.string.health_revoke_text,
+                        Res.string.health_revoke_confirm,
+                    )
+                }
+
+                HealthConfirm.DELETE_ALL -> {
+                    Triple(
+                        Res.string.health_delete_all,
+                        Res.string.health_delete_all_text,
+                        Res.string.action_delete,
+                    )
+                }
+            }
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(stringResource(if (revoke) Res.string.health_revoke_title else Res.string.health_delete_all)) },
-            text = { Text(stringResource(if (revoke) Res.string.health_revoke_text else Res.string.health_delete_all_text)) },
+            title = { Text(stringResource(title)) },
+            text = { Text(stringResource(text)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirm = null
-                        if (revoke) port.setHealthConsent(false) else port.deleteAllHealthData()
+                        when (kind) {
+                            HealthConfirm.GRANT -> port.setHealthConsent(true)
+                            HealthConfirm.REVOKE -> port.setHealthConsent(false)
+                            HealthConfirm.DELETE_ALL -> port.deleteAllHealthData()
+                        }
                     },
                     modifier = Modifier.testTag("health_confirm"),
                 ) {
                     Text(
-                        stringResource(if (revoke) Res.string.health_revoke_confirm else Res.string.action_delete),
-                        color = AdvantlyTheme.colors.danger,
+                        stringResource(action),
+                        color = if (kind == HealthConfirm.GRANT) AdvantlyTheme.colors.brand else AdvantlyTheme.colors.danger,
                     )
                 }
             },
@@ -166,7 +195,7 @@ private fun HealthConsentSection(
     }
 }
 
-private enum class HealthConfirm { REVOKE, DELETE_ALL }
+private enum class HealthConfirm { GRANT, REVOKE, DELETE_ALL }
 
 private fun texts(option: TelemetryVisibility): Pair<StringResource, StringResource> =
     when (option) {

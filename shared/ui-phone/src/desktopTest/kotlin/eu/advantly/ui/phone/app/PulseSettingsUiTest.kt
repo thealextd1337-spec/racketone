@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
@@ -55,6 +56,12 @@ class PulseSettingsUiTest {
                 onNodeWithTag("health_record_toggle").performScrollTo().assertTextContains("Pulsverlauf aufzeichnen", substring = true)
                 runOnIdle { assertFalse(model.telemetry.healthConsent.value) }
                 onNodeWithTag("health_record_toggle").performClick()
+                // erst nach ausdrücklicher Bestätigung (Art. 9); Abbrechen lässt den Schalter aus
+                onNodeWithTag("health_confirm").assertTextContains("Einwilligen")
+                onNodeWithText("Abbrechen").performClick()
+                runOnIdle { assertFalse(model.telemetry.healthConsent.value) }
+                onNodeWithTag("health_record_toggle").performClick()
+                onNodeWithTag("health_confirm").performClick()
                 runOnIdle { assertTrue(model.telemetry.healthConsent.value) }
                 onNodeWithTag("health_record_toggle").performClick()
                 onNodeWithTag("health_confirm").assertTextContains("Beenden und löschen").performClick()

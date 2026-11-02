@@ -480,6 +480,9 @@
     <string name="health_record_toggle_sub">Saves heart rate and steps per match only on your watch and this phone, never in the cloud. They are not carried over when you switch devices. Off by default.</string>
     <string name="health_watch_retention">Your watch deletes heart rate data once it has reached this phone after the match, at the latest after 7 days.</string>
     <string name="health_record_locked">Not available while heart rate &amp; steps is set to “Off”.</string>
+    <string name="health_grant_title">Record heart rate history?</string>
+    <string name="health_grant_text">I consent to Advantly storing my heart rate and steps – health data – per match on my watch and this phone. The data does not leave my devices. I can withdraw my consent at any time by switching this off; all heart rate histories are then deleted. Details: privacy policy, section 3.4.</string>
+    <string name="health_grant_confirm">I consent</string>
     <string name="health_revoke_title">Stop recording heart rate?</string>
     <string name="health_revoke_text">All recorded heart rate histories will be deleted on this phone and your watch.</string>
     <string name="health_revoke_confirm">Stop and delete</string>

@@ -480,6 +480,9 @@
     <string name="health_record_toggle_sub">Speichert Puls und Schritte je Match nur auf deiner Uhr und diesem Handy, nie in der Cloud. Bei einem Gerätewechsel werden sie nicht übernommen. Standard: aus.</string>
     <string name="health_watch_retention">Die Uhr löscht Pulsdaten, sobald sie nach dem Match auf diesem Handy angekommen sind, spätestens nach 7 Tagen.</string>
     <string name="health_record_locked">Nicht verfügbar, solange „Puls &amp; Schritte“ auf „Gar nicht“ steht.</string>
+    <string name="health_grant_title">Pulsverlauf aufzeichnen?</string>
+    <string name="health_grant_text">Ich willige ein, dass Advantly meinen Puls und meine Schritte – Gesundheitsdaten – je Match auf meiner Uhr und diesem Handy speichert. Die Daten verlassen meine Geräte nicht. Ich kann die Einwilligung jederzeit durch Ausschalten widerrufen; dann werden alle Pulsverläufe gelöscht. Details: Datenschutzerklärung, Abschnitt 3.4.</string>
+    <string name="health_grant_confirm">Einwilligen</string>
     <string name="health_revoke_title">Pulsverlauf nicht mehr aufzeichnen?</string>
     <string name="health_revoke_text">Alle aufgezeichneten Pulsverläufe werden auf diesem Handy und deiner Uhr gelöscht.</string>
     <string name="health_revoke_confirm">Beenden und löschen</string>

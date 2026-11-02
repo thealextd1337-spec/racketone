@@ -253,7 +253,7 @@
     <string name="a11y_view_only">View only, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->
-    <string name="permission_rationale">Heart rate is shown live during the match and not stored.</string>
+    <string name="permission_rationale">Heart rate is shown live during the match. It is only stored if you switch on “Record heart rate history” on your phone.</string>
     <string name="hint_no_health">Without heart rate and activity permission: no workout, the watch may close the app in the background</string>
     <string name="hint_no_heart_rate">Without heart rate permission: workout without heart rate</string>
     <string name="hint_no_activity">Without activity permission: no steps or calories</string>

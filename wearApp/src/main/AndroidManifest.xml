@@ -3,7 +3,7 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
-    <!-- 05 §2.2, §6.2: Live-Puls im Workout (keine Speicherung in P1). Wear OS 6 (API 36) ersetzt BODY_SENSORS durch health.READ_HEART_RATE. -->
+    <!-- 05 §2.2, §6.2: Live-Puls im Workout; gespeichert nur mit Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls §4), nur lokal. Wear OS 6 (API 36) ersetzt BODY_SENSORS durch health.READ_HEART_RATE. -->
     <uses-permission
         android:name="android.permission.BODY_SENSORS"
         android:maxSdkVersion="35" />
