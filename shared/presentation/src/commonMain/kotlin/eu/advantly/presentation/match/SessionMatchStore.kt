@@ -154,6 +154,14 @@ class SessionMatchStore(
     override val watchAvailable: StateFlow<Boolean> = watchFlow.asStateFlow()
     override val localAppBuild get() = session.config.appBuild
 
+    // Gerätelokal und kontounabhängig (wie die Gerätenamen); geht nie an die Uhr oder in die Cloud.
+    override fun localNote(key: String): String? = data.settings.get(NOTE_PREFIX + key)
+
+    override fun putLocalNote(
+        key: String,
+        value: String,
+    ) = data.settings.put(NOTE_PREFIX + key, value)
+
     private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
     override val deviceStatuses = deviceStatusFlow.asStateFlow()
     private val watchStatusFlow = MutableStateFlow(WatchStatus.UNKNOWN)
@@ -1183,6 +1191,7 @@ class SessionMatchStore(
         /** Nach einem Neustart wird ein laufendes Match nur wieder geöffnet, wenn es in diesem Zeitraum geändert wurde. */
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
         const val FAVORITES_KEY = "phone.favorites"
+        const val NOTE_PREFIX = "presentation.note."
         const val CONTACT_PERSIST_INTERVAL_MS = 10_000L
 
         /** Matches je Scheduler-Häppchen beim Neurechnen der Gesundheits-Höchstwerte. */

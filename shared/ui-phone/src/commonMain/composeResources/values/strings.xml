@@ -672,6 +672,13 @@
     <string name="watch_install_dismiss">Don’t show again</string>
     <string name="watch_install_opened">Opened on the watch – please install it there.</string>
     <string name="watch_install_failed">Couldn’t reach the watch. Open the Play Store on your watch and search for Advantly.</string>
+    <string name="watch_update_title">Update the watch app</string>
+    <string name="watch_update_text">Your watch is still running version %1$s.</string>
+    <string name="watch_update_pulse">Heart rate history needs watch app 0.5.0.</string>
+    <string name="watch_update_action">Open on watch</string>
+    <string name="watch_update_opened">Opened on your watch – tap Update there.</string>
+    <string name="watch_update_failed">Watch not reachable. On your watch: Play Store → Manage apps → Advantly.</string>
+    <string name="watch_update_manual">Update Advantly on your watch in the App Store.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

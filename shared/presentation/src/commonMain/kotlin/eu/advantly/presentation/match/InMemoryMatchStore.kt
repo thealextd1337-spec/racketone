@@ -116,6 +116,16 @@ class InMemoryMatchStore(
     private val deviceStatusFlow = MutableStateFlow<List<DeviceStatus>>(emptyList())
     override val deviceStatuses = deviceStatusFlow.asStateFlow()
     override var localAppBuild: AppBuild? = null
+    private val notes = HashMap<String, String>()
+
+    override fun localNote(key: String): String? = notes[key]
+
+    override fun putLocalNote(
+        key: String,
+        value: String,
+    ) {
+        notes[key] = value
+    }
 
     fun setDeviceStatuses(devices: List<DeviceStatus>) {
         deviceStatusFlow.value = devices

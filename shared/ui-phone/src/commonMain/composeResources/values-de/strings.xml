@@ -672,6 +672,13 @@
     <string name="watch_install_dismiss">Nicht mehr anzeigen</string>
     <string name="watch_install_opened">Auf der Uhr geöffnet – bitte dort installieren.</string>
     <string name="watch_install_failed">Uhr nicht erreichbar. Öffne auf der Uhr den Play Store und suche nach Advantly.</string>
+    <string name="watch_update_title">Uhr-App aktualisieren</string>
+    <string name="watch_update_text">Auf deiner Uhr läuft noch Version %1$s.</string>
+    <string name="watch_update_pulse">Pulsverlauf braucht Uhr-App 0.5.0.</string>
+    <string name="watch_update_action">Auf der Uhr öffnen</string>
+    <string name="watch_update_opened">Auf der Uhr geöffnet – dort auf Aktualisieren tippen.</string>
+    <string name="watch_update_failed">Uhr nicht erreichbar. Auf der Uhr: Play Store → Apps verwalten → Advantly.</string>
+    <string name="watch_update_manual">Aktualisiere Advantly auf der Uhr im App Store.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>
