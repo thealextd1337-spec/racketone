@@ -161,6 +161,11 @@ data class MatchMetaMessage(
     @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val stamp: MatchDataStamp? = null,
     val healthConsent: HealthConsentSetting? = null,
+    /**
+     * Additiv in Protokoll 6 (Review H6): Zeitpunkt von „Alle Gesundheitsdaten löschen“ am Handy (Wanduhr-ms). Die Uhr löscht
+     * alle Serien, die vorher begonnen haben; ältere Uhren ignorieren das Feld.
+     */
+    val healthDeletedBefore: Long? = null,
 ) : SyncMessage {
     init {
         require(v >= 4 || stamp == null)

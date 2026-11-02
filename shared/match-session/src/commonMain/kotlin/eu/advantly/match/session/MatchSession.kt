@@ -359,7 +359,7 @@ class MatchSession(
 
     /** Pulsverlauf (Plan Puls H5/H6): Einwilligung, Stufe je Match, Aufnahme und Übertragung. */
     private val health =
-        HealthSync(data, config.kind, { deviceId }, clock::nowMs, { scopedKey(HealthSync.CONSENT_KEY) }) { message ->
+        HealthSync(data, config.kind, { deviceId }, clock::nowMs, ::scopedKey) { message ->
             targets().forEach { send(it, message) }
         }
 
@@ -727,10 +727,14 @@ class MatchSession(
         return result
     }
 
-    /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. */
+    /**
+     * „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. Die
+     * eigenen Uhren löschen ebenfalls, sobald sie das `MatchMeta` erhalten (jetzt oder beim nächsten Verbinden).
+     */
     fun deleteAllHealthData() {
         checkThread()
         health.deleteAll()
+        health.deletedBeforeForPeers()?.let { broadcast(MatchMetaMessage(healthDeletedBefore = it)) }
         dataRevision++
         publish()
     }
@@ -782,7 +786,7 @@ class MatchSession(
         if (health.finish(matchId)) targets().forEach(::sendHealth)
     }
 
-    private fun sendHealth(peer: String) = health.pending().forEach { send(peer, it) }
+    private fun sendHealth(peer: String) = (health.pending() + health.deletions(peerDeviceOf(peer))).forEach { send(peer, it) }
 
     private fun onHealth(
         peer: String,
@@ -2370,6 +2374,7 @@ class MatchSession(
         // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
         message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
         message.healthConsent?.toConsent()?.let { adoptHealthConsent(health.consent.merge(it), merged = true) }
+        message.healthDeletedBefore?.let { if (health.adoptDeletedBefore(it, peerKindOf(peer))) dataRevision++ }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -3164,6 +3169,7 @@ class MatchSession(
                 watchMatch = watchAssignment?.takeIf { config.parallelMatches },
                 telemetry = TelemetrySetting.of(telemetry),
                 healthConsent = HealthConsentSetting.of(health.consent),
+                healthDeletedBefore = health.deletedBeforeForPeers(),
             )
         }
         val archived = data.players.archivedIds()
@@ -3185,6 +3191,7 @@ class MatchSession(
             watchMatch = watchAssignment?.takeIf { config.parallelMatches },
             telemetry = TelemetrySetting.of(telemetry),
             healthConsent = HealthConsentSetting.of(health.consent),
+            healthDeletedBefore = health.deletedBeforeForPeers(),
         )
     }
 
