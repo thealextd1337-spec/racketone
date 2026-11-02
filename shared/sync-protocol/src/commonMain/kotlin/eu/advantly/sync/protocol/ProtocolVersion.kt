@@ -40,7 +40,8 @@ package eu.advantly.sync.protocol
  *   die Felder `Hello.healthProtocol`, `MatchMeta.healthConsent` und `MatchMeta.pulseVisibility` im Match-Kopf. Gesendet
  *   werden Gesundheitsnachrichten nur an Gegenstellen, die `healthProtocol = 1` melden (mit Konto zusätzlich
  *   ausgehandelt ≥ 6); ein älteres Gerät bekäme sie sonst als unbekannten Typ und verwürfe sie still. Weil eine Session
- *   ohne Konto nur 3 spricht, gilt dort allein die Ankündigung im `Hello`.
+ *   ohne Konto nur 3 spricht, gilt dort allein die Ankündigung im `Hello`. Ebenfalls additiv: `WatchAssignment.handOverTo`
+ *   (Abgabe durch die zählende Uhr, plan-live-mitspieler §3.4); ältere Uhren ignorieren es.
  *
  *   Additiv in 6 (Review H6, ohne Versionssprung): `MatchMeta.healthDeletedBefore` („Alle Gesundheitsdaten löschen“) und
  *   Löschaufträge je Match mit Revision > 0, die der Empfänger mit `HealthAck` bestätigt. Ein 0.5.x-Gerät ignoriert das

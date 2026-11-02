@@ -164,7 +164,7 @@ class PhoneLiveViewsTest {
         assertEquals(listOf(2, 1), first.games)
         assertEquals(listOf("40", "AD"), first.points)
         assertEquals(Side.B, first.serving)
-        assertTrue(first.scorerConnected)
+        assertEquals(true, first.scorerConnected)
         assertEquals(12_000L, first.ageMs)
         // Codec-Rundweg ohne Telemetrie
         val bytes = LiveViewsCodec.encode(LiveViews(LiveViews.CURRENT_VERSION, views))

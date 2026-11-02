@@ -139,21 +139,23 @@ class LiveScoreUpload(
     private val schedule: (profileId: String, delayMs: Long) -> Unit,
     private val intervalMs: Long = INTERVAL_MS,
 ) {
-    private val counts = mutableMapOf<String, Int>()
+    private val counts = mutableMapOf<String, Pair<Int, Boolean?>>()
     private var plannedAtMs: Long? = null
 
     /**
-     * Stand eines laufenden Matches; nur ein neues Match oder eine geänderte [eventCount] zählt, und nur, wenn eines
-     * meiner Geräte zählt ([scoring]).
+     * Stand eines laufenden Matches; nur ein neues Match, eine geänderte [eventCount] oder eine geänderte Erreichbarkeit
+     * des Zählers ([scorerConnected], Live-Stand „Zähler offline“) zählt, und nur, wenn eines meiner Geräte zählt ([scoring]).
      */
     fun onScore(
         profileId: String?,
         matchId: String,
         eventCount: Int,
         scoring: Boolean,
+        scorerConnected: Boolean? = null,
     ) {
-        val previous = counts.put(matchId, eventCount)
-        if (profileId == null || !scoring || previous == eventCount) return
+        val stand = eventCount to scorerConnected
+        val previous = counts.put(matchId, stand)
+        if (profileId == null || !scoring || previous == stand) return
         val now = nowMs()
         val planned = plannedAtMs
         if (planned != null && planned > now) return

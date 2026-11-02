@@ -15,7 +15,8 @@ data class LiveEntry(
     /** Teams, Sätze, Games, Punkte, Tiebreak wie bei „Ich schaue zu“. */
     val score: WatchedMatch,
     val serving: Side?,
-    val scorerConnected: Boolean,
+    /** `false` = Zähler offline (gemeldet), `null` = unbekannt. */
+    val scorerConnected: Boolean?,
     /** Letzte Änderung am Server; `null` bei unlesbarem Zeitstempel. */
     val updatedAtMs: Long?,
     /** Meine Zähl-Rolle laut letztem Abgleich: `invited` (Einladung offen), `accepted`, sonst `null` (§3.4). */

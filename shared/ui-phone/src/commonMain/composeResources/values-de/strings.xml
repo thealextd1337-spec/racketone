@@ -976,6 +976,7 @@
     <string name="handover_queued">Die Einladung an %1$s geht raus, sobald das Match hochgeladen ist.</string>
     <string name="handover_invited">%1$s ist eingeladen. Du zählst weiter, bis angenommen wird.</string>
     <string name="handover_accepted">%1$s hat angenommen – Übergabe läuft …</string>
+    <string name="handover_awaiting_watch">%1$s hat angenommen – deine Uhr gibt ab, sobald sie verbunden ist (nach ihrem letzten Punkt).</string>
     <string name="handover_failed">Übergabe an %1$s fehlgeschlagen – du zählst weiter.</string>
     <string name="handover_cancel">Einladung zurücknehmen</string>
     <string name="scorer_invitation">Du bist zum Zählen eingeladen</string>

@@ -164,7 +164,12 @@ internal fun CloudSyncRepository.uploadPlayer(id: String): CloudPlayer? =
 
 internal fun CloudSyncRepository.uploadProjection(id: String): CloudProjection? =
     database.matchHeaderQueries.selectById(id).executeAsOneOrNull()?.let {
-        CloudProjection(it.id, it.status.lowercase(), it.score_json, it.created_at_ms)
+        val rejected =
+            database.cloudUploadQueries
+                .finalRejectedCountForMatch(id)
+                .executeAsOne()
+                .toInt()
+        CloudProjection(it.id, it.status.lowercase(), it.score_json, it.created_at_ms, rejected)
     }
 
 /**

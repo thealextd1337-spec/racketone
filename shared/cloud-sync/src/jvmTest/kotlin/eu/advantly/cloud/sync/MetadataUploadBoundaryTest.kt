@@ -180,7 +180,7 @@ class MetadataUploadBoundaryTest {
     }
 
     @Test
-    fun limitedSelectionDoesNotAdvertiseProjectionAsFinalAndRejectedEventsKeepItBlocked() {
+    fun limitedSelectionDoesNotAdvertiseProjectionAsFinalAndFinalRejectionsDoNotBlockIt() {
         val driver = createInMemoryJvmDriver()
         try {
             val data = LocalData(driver)
@@ -217,14 +217,16 @@ class MetadataUploadBoundaryTest {
                     ?.eventCount,
             )
             data.cloudUploads.acknowledge(last, setOf("e501"), mapOf("e502" to "forbidden"))
+            // H3: endgültig abgelehnt – die Projektion geht trotzdem hoch, mit der Event-Anzahl des Servers
             assertEquals(
-                null,
+                501,
                 data.cloudUploads
                     .capture(session, 500)
                     .toPushBatch()
                     .matches
                     .single()
-                    .projection,
+                    .projection
+                    ?.eventCount,
             )
         } finally {
             driver.close()

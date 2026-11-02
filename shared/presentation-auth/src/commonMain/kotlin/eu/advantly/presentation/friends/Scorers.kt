@@ -98,11 +98,36 @@ interface ScorerDevices {
     /** Zählerwechsel im lokalen Log von [matchId]; `null`, solange es leer ist. */
     fun scorerChanges(matchId: String): ScorerChanges?
 
-    /** Abgabe an [deviceId] (`ScorerChanged`); `null`, wenn keines meiner Geräte zählt. */
+    /**
+     * Abgabe an [deviceId] (`ScorerChanged`): zählt dieses Handy, sofort; zählt die eigene Uhr, erzeugt sie es nach ihrer
+     * letzten Eingabe ([watchPending] bis dahin). Liefert die Abgabe, sobald es das Event gibt (wiederholbar, solange
+     * [deviceId] zählt); `null`, solange die Uhr noch aussteht oder keines meiner Geräte zählt.
+     */
     fun handOver(
         matchId: String,
         deviceId: String,
     ): Handover?
+
+    /** Die eigene Uhr zählt [matchId] und hat den Abgabe-Auftrag noch nicht ausgeführt (z. B. nicht verbunden). */
+    fun watchPending(matchId: String): Boolean = false
+
+    /** Offenen Abgabe-Auftrag an die eigene Uhr zurücknehmen (Einladung beendet), damit sie ihn nicht später ausführt. */
+    fun cancelHandOver(matchId: String) {}
+
+    /** Laufende Matches im lokalen Store (eigene und gezogene) für den Rollen-Abgleich. */
+    fun runningMatches(): List<String> = emptyList()
+
+    /** Ersteller: Zählen von einem fremden Gerät ohne angenommene Rolle zurückholen (eigene Uhr bzw. dieses Handy). */
+    fun reclaim(matchId: String): Boolean = false
+
+    /** Vom Server mit `scoring_revoked` abgelehnte eigene Eingaben in [matchId]. */
+    fun revokedInputs(matchId: String): Int = 0
+
+    /** Zähl-Recht in einem fremden Match verloren: nur noch anzeigen, Uhr in die Anzeige; [rejectedInputs] melden. */
+    fun stopScoring(
+        matchId: String,
+        rejectedInputs: Int,
+    ): Boolean = false
 
     /** Antwort des Servers auf das Event: `true` angenommen (oder lokal unbekannt), `false` abgelehnt, `null` ausstehend. */
     fun uploaded(eventId: String): Boolean?
@@ -129,6 +154,9 @@ enum class HandoverPhase {
 
     /** Angenommen; die Abgabe folgt beim nächsten Abgleich. */
     ACCEPTED,
+
+    /** Angenommen; die eigene Uhr zählt und gibt ab, sobald sie verbunden ist (nach ihrer letzten Eingabe). */
+    AWAITING_WATCH,
 
     /** Der Server lehnte die Abgabe ab; dieses Handy bzw. die eigene Uhr zählt weiter (Hinweis bis zum Wegklicken). */
     FAILED,
@@ -175,6 +203,7 @@ class ScorerHandovers(
         val phase =
             when {
                 !invite.sent -> HandoverPhase.QUEUED
+                accepted && devices.watchPending(matchId) -> HandoverPhase.AWAITING_WATCH
                 accepted -> HandoverPhase.ACCEPTED
                 else -> HandoverPhase.INVITED
             }
@@ -211,6 +240,7 @@ class ScorerHandovers(
         if (failed.remove(profileId to matchId) != null) return
         val invite = store.scorerInvites(profileId)[matchId] ?: return
         if (invite.sent) port.revokeScorer(profileId, matchId, invite.scorerId)
+        if (invite.handover == null) devices.cancelHandOver(matchId)
         remove(profileId, matchId)
     }
 
@@ -240,6 +270,7 @@ class ScorerHandovers(
      */
     fun reconcile(profileId: String): Boolean {
         val waiting = reconcileAccepts(profileId)
+        reconcileRights(profileId)
         for ((matchId, invite) in store.scorerInvites(profileId)) {
             if (!invite.sent) continue
             val handover = invite.handover
@@ -252,21 +283,17 @@ class ScorerHandovers(
 
                     false -> {
                         devices.handBack(matchId, handover)
-                        // Annahme inzwischen mit einem anderen Gerät: an dieses abgeben statt aufzugeben. Wird auch das
-                        // abgelehnt, ist es das angenommene Gerät – dann FAILED; erneut nur nach echtem Gerätewechsel.
+                        // Annahme inzwischen mit einem anderen Gerät: an dieses abgeben statt aufzugeben (beim nächsten
+                        // Abgleich, zählt die Uhr wieder, über sie). Wird auch das abgelehnt, ist es das angenommene Gerät –
+                        // dann FAILED; erneut nur nach echtem Gerätewechsel.
                         val role = pulled(profileId, matchId)?.roleOf(invite.scorerId)
-                        val again =
-                            role
-                                ?.deviceId
-                                ?.takeIf { role.status == "accepted" && it != handover.to }
-                                ?.let { devices.handOver(matchId, it) }
-                        if (again != null) {
-                            put(profileId, matchId, invite.copy(handover = again))
+                        if (role?.status == "accepted" && role.deviceId != null && role.deviceId != handover.to) {
+                            put(profileId, matchId, invite.copy(handover = null))
                         } else {
                             remove(profileId, matchId)
                             failed[profileId to matchId] = invite.scorerId
                         }
-                        requestSync() // Rückgabe bzw. neue Abgabe sofort hochladen
+                        requestSync() // Rückgabe sofort hochladen
                     }
 
                     null -> {}
@@ -275,7 +302,14 @@ class ScorerHandovers(
             }
             val role = pulled(profileId, matchId)?.roleOf(invite.scorerId)
             val device = role?.deviceId
+            // zählt die eigene Uhr, gibt sie selbst ab: erst dann gibt es das Event (zuvor zählt sie noch, siehe unten)
+            val handed = device?.takeIf { role.status == "accepted" }?.let { devices.handOver(matchId, it) }
             when {
+                handed != null -> {
+                    put(profileId, matchId, invite.copy(handover = handed))
+                    requestSync() // ScorerChanged sofort hochladen
+                }
+
                 // Match beendet oder ein anderes Gerät zählt inzwischen (Notfall-Übernahme): nichts mehr abzugeben.
                 // „Meine Uhr“ vor ihrer Meldung zählt als meines: Die Abgabe wartet, bis sie sich gemeldet hat.
                 !devices.scoring(matchId) -> {
@@ -284,18 +318,40 @@ class ScorerHandovers(
 
                 // Angenommen ohne Gerät gibt es kein Ziel (der Server lässt das nicht mehr zu): wie ein Widerruf
                 role?.status in setOf("declined", "revoked") || (role?.status == "accepted" && device == null) -> {
+                    devices.cancelHandOver(matchId)
                     remove(profileId, matchId)
-                }
-
-                role?.status == "accepted" && device != null -> {
-                    devices.handOver(matchId, device)?.let {
-                        put(profileId, matchId, invite.copy(handover = it))
-                        requestSync() // ScorerChanged sofort hochladen
-                    }
                 }
             }
         }
         return waiting || store.scorerInvites(profileId).isNotEmpty()
+    }
+
+    /**
+     * Zähl-Rechte laut letztem Pull durchsetzen (Review H4; der Server lehnt Eingaben ohne Recht mit `scoring_revoked` ab):
+     * - **Ersteller:** Zählt ein fremdes Gerät mein laufendes Match ohne angenommene Rolle mit genau diesem Gerät
+     *   (Widerruf, Blockieren, Entfreunden, alte App), holt dieses Handy das Zählen zurück. Matches mit laufender Abgabe
+     *   (Einladung) regelt [reconcile] selbst.
+     * - **Zähler eines fremden Matches:** Ist meine Rolle nicht mehr angenommen oder lehnte der Server eigene Eingaben mit
+     *   `scoring_revoked` ab, zählt keines meiner Geräte mehr; das Match wird nur noch angezeigt.
+     * Ohne gezogenen Stand (`pulled == null`) geschieht nichts. Nach dem Wechsel ist die Bedingung erfüllt: keine Schleife.
+     */
+    private fun reconcileRights(profileId: String) {
+        val invites = store.scorerInvites(profileId)
+        for (matchId in devices.runningMatches()) {
+            val match = pulled(profileId, matchId) ?: continue
+            if (match.deleted || match.status == "finished") continue
+            if (match.createdBy == profileId) {
+                if (matchId in invites || devices.scoring(matchId)) continue
+                val target = devices.scorerChanges(matchId)?.lastTarget ?: continue
+                val allowed = match.roles.any { it.status == "accepted" && it.deviceId == target }
+                if (!allowed && devices.reclaim(matchId)) requestSync()
+            } else if (match.createdBy != null && devices.scoring(matchId)) {
+                val revoked = devices.revokedInputs(matchId)
+                if ((match.roleOf(profileId)?.status != "accepted" || revoked > 0) && devices.stopScoring(matchId, revoked)) {
+                    requestSync()
+                }
+            }
+        }
     }
 
     /** Empfänger: Annahmen abhaken oder mit Grund beenden; `true`, solange eine noch auf den Wechsel wartet. */

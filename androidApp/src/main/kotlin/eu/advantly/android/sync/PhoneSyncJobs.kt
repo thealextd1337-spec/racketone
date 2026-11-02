@@ -308,7 +308,7 @@ internal fun onLiveScore(
             if (running.isEmpty()) return@SessionListener
             val account = profile()
             running.forEach {
-                upload.onScore(account, it.id.value, it.eventCount, session.scoresHere(it.id))
+                upload.onScore(account, it.id.value, it.eventCount, session.scoresHere(it.id), state.scorerConnected(it))
             }
         }
     session.addListener(listener)

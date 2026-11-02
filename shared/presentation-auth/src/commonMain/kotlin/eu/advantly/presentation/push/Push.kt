@@ -190,13 +190,26 @@ class PushRegistration(
         confirmed = key
     }
 
+    /**
+     * Lokal zuerst (Auto-Init aus, Token löschen): Push ist sofort aus, auch wenn der Server gerade nicht erreichbar ist.
+     * Das Leeren des Server-Tokens holt [sync] nach, solange [PushPreferences.uploaded] gesetzt bleibt.
+     */
     private suspend fun clear() {
+        confirmed = null
+        val local =
+            try {
+                tokens.delete()
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e
+            }
         val profile = prefs.uploaded?.substringBefore('\n')
         // Ohne passende Sitzung bleibt das Server-Token liegen; nach deleteToken meldet FCM es als UNREGISTERED.
         if (profile != null && session()?.profileId == profile) port.setPushToken(profile, PUSH_PROVIDER_FCM, null)
-        tokens.delete()
+        local?.let { throw it }
         prefs.uploaded = null
-        confirmed = null
     }
 
     private suspend fun quietly(block: suspend () -> Unit) {

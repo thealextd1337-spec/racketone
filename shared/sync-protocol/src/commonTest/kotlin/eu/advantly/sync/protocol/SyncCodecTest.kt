@@ -91,6 +91,8 @@ class SyncCodecTest {
     fun watchAssignmentAndStoppedRoundTrip() {
         roundTrip(MatchMetaMessage(watchMatch = WatchAssignment(MATCH, assignedAtMs = 42)))
         roundTrip(MatchMetaMessage(watchMatch = WatchAssignment(null, assignedAtMs = 43)))
+        roundTrip(MatchMetaMessage(watchMatch = WatchAssignment(MATCH, assignedAtMs = 44, handOverTo = DeviceId("jonas-watch"))))
+        assertTrue("handOverTo" !in SyncCodec.encodeToString(MatchMetaMessage(watchMatch = WatchAssignment(MATCH, 45))))
         val stop =
             ScoreEvent(EventId("s"), MATCH, DeviceId("phone"), 2, 2, 2_000, null, MatchEnded(EndReason.STOPPED))
         roundTrip(Events(MATCH, listOf(stop)))

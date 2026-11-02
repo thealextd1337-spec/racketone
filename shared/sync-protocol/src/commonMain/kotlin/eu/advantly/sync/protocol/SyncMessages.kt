@@ -226,12 +226,16 @@ data class TelemetrySetting(
  * @property explicit vom Nutzer gewählt („Meine Uhr“, „Auf der Uhr zählen“): Die Uhr folgt ihr auch weg von einem auf ihr
  *   gestarteten Match, das vor der Zuweisung begann; implizite Zuweisungen (freie Uhr, Folge-Match, Uhr-Start) unterliegen
  *   der Rennregel „jüngeres Uhr-Match gewinnt“ (01 §4.9)
+ * @property handOverTo Abgabe-Auftrag (plan-live-mitspieler §3.4, additiv in Protokoll 6): Zählt die Uhr [matchId], gibt
+ *   sie selbst per `ScorerChanged` an dieses Gerät ab – nach ihrer letzten Eingabe, damit offline gezählte Uhr-Punkte
+ *   gültig bleiben. Ältere Uhren ignorieren das Feld (die Abgabe wartet dann). `null` = kein Auftrag
  */
 @Serializable
 data class WatchAssignment(
     val matchId: MatchId?,
     val assignedAtMs: Long,
     val explicit: Boolean = false,
+    val handOverTo: DeviceId? = null,
 )
 
 /**

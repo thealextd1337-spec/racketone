@@ -71,6 +71,7 @@ class SpectateUiTest {
             sets = listOf(listOf(21, 17)),
             points = listOf("19", "21"),
             serving = Side.A,
+            scorerConnected = false,
         )
     private val padel =
         LiveView(MatchId("m3"), LiveRelation.SCORER, Sport.PADEL, "Tom", "Ben", games = listOf(1, 0), points = listOf("15", "0"))
@@ -163,6 +164,14 @@ class SpectateUiTest {
         rule.screenshot("spectate-detail-badminton-de-206dp-font130")
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Zähler offline"))
         rule.screenshot("spectate-detail-badminton-scrolled-de-206dp-font130")
+    }
+
+    /** M2: Erreichbarkeit unbekannt (ältere App des Zählers) – kein „Zähler offline“. */
+    @Test
+    fun unknownScorerReachabilityShowsNoOfflineHint() {
+        show(views(padel))
+        rule.onAllNodesWithTag(SPECTATE_ITEM_TAG)[0].performClick()
+        rule.onNodeWithText("Zähler offline").assertDoesNotExist()
     }
 
     @Test
