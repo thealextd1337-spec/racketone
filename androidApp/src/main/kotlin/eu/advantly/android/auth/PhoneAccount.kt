@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -17,8 +18,10 @@ import eu.advantly.android.push.AndroidNotificationSettings
 import eu.advantly.android.push.AndroidPush
 import eu.advantly.android.push.AndroidPushPreferences
 import eu.advantly.android.push.FirebaseTokens
+import eu.advantly.android.sync.AccountLiveViews
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
+import eu.advantly.android.sync.PhoneLiveViews
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
@@ -31,6 +34,7 @@ import eu.advantly.cloud.sync.pulledMatch
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
+import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.SessionListener
 import eu.advantly.presentation.auth.AuthViewModel
@@ -39,6 +43,7 @@ import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.LiveScoreUpload
+import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
 import eu.advantly.presentation.push.NotificationSettingsPort
@@ -53,6 +58,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -101,6 +107,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.sharedMatches,
                     core.visitors,
                     core.backend,
+                    core.scorers,
                 ),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
@@ -226,10 +233,38 @@ internal class PhoneAccountCore private constructor(
      * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
      * wurde), und gehen nach jedem Abgleich hinaus.
      */
-    val visitors =
-        VisitorQueue(record, backend, { profile, match ->
-            guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
-        }) { sync.syncNow() }
+    val visitors = VisitorQueue(record, backend, ::onServer) { sync.syncNow() }
+
+    private fun onServer(
+        profile: String,
+        match: String,
+    ) = guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
+
+    private val handoverPoll =
+        HandoverPoll(SystemClock::elapsedRealtime, { delayMs ->
+            runtime.scope.launch {
+                delay(delayMs)
+                sync.syncNow()
+            }
+        })
+
+    /**
+     * Zählen weitergeben (plan-live-mitspieler §3.4): Einladungen warten wie Zuschauer auf den Upload des Match-Kopfs.
+     * Nach jedem Abgleich gibt das zählende Handy bei angenommener Rolle selbst ab ([afterSync]); während einer offenen
+     * Übergabe wird alle 5 s abgeglichen, bis der Wechsel gesehen ist ([HandoverPoll]). Push (`scorer_responded`,
+     * `scorer_changed`) stößt nur einen Abgleich an – gezogene Events gibt die Session sofort an die Uhr weiter.
+     */
+    val scorers =
+        ScorerHandovers(
+            record,
+            backend,
+            ::onServer,
+            { profile, match -> guarded(null) { cloudPulls.pulledMatch(profile, match) } },
+            PhoneScorerDevices(session) { runtime.allowed },
+        ) {
+            handoverPoll.restart()
+            sync.syncNow()
+        }
 
     /**
      * Live-Stand für Mitspieler und Zuschauer (plan-live-mitspieler §3.1): jedes laufende Match dieses Handys (auch von
@@ -270,6 +305,19 @@ internal class PhoneAccountCore private constructor(
         } else {
             null
         }
+
+    /** Nach jedem Abgleich: vorgemerkte Zähl-Einladungen senden, angenommene Rollen abgeben, ggf. weiter abfragen. */
+    private suspend fun afterSync() {
+        val profile = auth.session.value?.profileId ?: return
+        try {
+            scorers.flush(profile)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Nicht endgültige Fehler bleiben vorgemerkt; der nächste Abgleich versucht es erneut.
+        }
+        handoverPoll.afterSync(runtime.allowed && scorers.reconcile(profile))
+    }
 
     /** Gezogene Freundschaften nur innerhalb der Session-Grenze; nach Widerruf eine leere Liste statt SQL-Zugriff. */
     fun localFriendships(profile: String): List<PulledFriendship> = guarded(emptyList()) { cloudPulls.pulledFriendships(profile) }
@@ -313,6 +361,8 @@ internal class PhoneAccountCore private constructor(
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
         session.addListener(scoreListener)
+        // Uhr-Zuschauen (plan-live-mitspieler §3.2): Abruf nur mit angemeldetem Konto.
+        PhoneLiveViews.provider = AccountLiveViews(backend, { auth.session.value?.profileId })
         runtime.scope.launch {
             var running = false
             sync.state.collect { state ->
@@ -320,6 +370,7 @@ internal class PhoneAccountCore private constructor(
                     flushVisitors()
                     // Nach dem Lauf ist das Gerät gebunden: ausstehendes Token hochladen bzw. leeren.
                     push?.sync()
+                    afterSync()
                 }
                 running = state.running
             }
@@ -330,6 +381,7 @@ internal class PhoneAccountCore private constructor(
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
         session.removeListener(scoreListener)
+        PhoneLiveViews.provider = LiveViewsProvider.Empty
         refreshAccount = null
         sync.close()
         var pending = if (pull == null) 1 else 2

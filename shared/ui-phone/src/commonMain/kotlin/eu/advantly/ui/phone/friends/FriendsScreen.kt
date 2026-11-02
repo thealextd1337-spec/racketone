@@ -71,16 +71,19 @@ import eu.advantly.ui.phone.resources.friends_error_already_member
 import eu.advantly.ui.phone.resources.friends_error_binding
 import eu.advantly.ui.phone.resources.friends_error_connection
 import eu.advantly.ui.phone.resources.friends_error_cooldown
+import eu.advantly.ui.phone.resources.friends_error_no_invitation
 import eu.advantly.ui.phone.resources.friends_error_no_participation
 import eu.advantly.ui.phone.resources.friends_error_not_found
 import eu.advantly.ui.phone.resources.friends_error_not_pending
 import eu.advantly.ui.phone.resources.friends_error_rate_limit
 import eu.advantly.ui.phone.resources.friends_error_revoked
+import eu.advantly.ui.phone.resources.friends_error_scorer_not_allowed
 import eu.advantly.ui.phone.resources.friends_error_self
 import eu.advantly.ui.phone.resources.friends_error_session
 import eu.advantly.ui.phone.resources.friends_error_unavailable
 import eu.advantly.ui.phone.resources.friends_error_visitor_limit
 import eu.advantly.ui.phone.resources.friends_error_visitor_not_friend
+import eu.advantly.ui.phone.resources.friends_error_watch_unavailable
 import eu.advantly.ui.phone.resources.friends_found_send
 import eu.advantly.ui.phone.resources.friends_incoming_title
 import eu.advantly.ui.phone.resources.friends_list_title
@@ -439,6 +442,9 @@ internal fun errorLabel(error: String): StringResource =
         "visitor_must_be_friend" -> Res.string.friends_error_visitor_not_friend
         "already_member" -> Res.string.friends_error_already_member
         "visitor_limit_reached" -> Res.string.friends_error_visitor_limit
+        "scorer_not_allowed", "is_visitor", "cannot_invite_self" -> Res.string.friends_error_scorer_not_allowed
+        "no_pending_invitation" -> Res.string.friends_error_no_invitation
+        "watch_unavailable" -> Res.string.friends_error_watch_unavailable
         "device_not_authorized" -> Res.string.friends_error_binding
         "device_revoked" -> Res.string.friends_error_revoked
         "cloud_session_changed" -> Res.string.friends_error_session

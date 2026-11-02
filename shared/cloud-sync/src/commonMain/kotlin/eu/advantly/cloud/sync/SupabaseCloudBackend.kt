@@ -45,7 +45,8 @@ class SupabaseCloudBackend internal constructor(
     SharedMatchesPort,
     VisitorsPort,
     LiveMatchesPort,
-    PushTokenPort {
+    PushTokenPort,
+    ScorerRolesPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -543,6 +544,55 @@ class SupabaseCloudBackend internal constructor(
         )
     }
 
+    override suspend fun inviteScorer(
+        profileId: String,
+        matchId: String,
+        scorerId: String,
+    ) = visitorRpc("invite_scorer", profileId, matchId, scorerId)
+
+    override suspend fun revokeScorer(
+        profileId: String,
+        matchId: String,
+        scorerId: String,
+    ) = visitorRpc("revoke_scorer", profileId, matchId, scorerId)
+
+    override suspend fun respondScorerInvitation(
+        profileId: String,
+        matchId: String,
+        accept: Boolean,
+        deviceId: String?,
+    ) {
+        require(matchId.isNotBlank() && (deviceId == null || accept))
+        rpc(
+            lease(profileId),
+            "respond_scorer_invitation",
+            buildJsonObject {
+                put("p_match_id", matchId)
+                put("p_accept", accept)
+                put("p_device_id", deviceId)
+            },
+        )
+    }
+
+    override suspend fun registerWatch(
+        profileId: String,
+        watchId: String,
+        phoneId: String,
+    ) {
+        require(watchId.isNotBlank() && phoneId.isNotBlank() && watchId != phoneId)
+        rpc(
+            lease(profileId),
+            "register_device",
+            buildJsonObject {
+                put("p_id", watchId)
+                put("p_kind", "watch")
+                put("p_platform", "wearos")
+                put("p_paired_with", phoneId)
+            },
+        )
+    }
+
+    /** `p_match_id` + `p_profile_id`: Zuschauer- und Zähler-RPCs. */
     private suspend fun visitorRpc(
         name: String,
         profileId: String,

@@ -56,6 +56,7 @@ import eu.advantly.ui.phone.resources.live_playing_title
 import eu.advantly.ui.phone.resources.live_scorer_offline
 import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_watching_title
+import eu.advantly.ui.phone.resources.scorer_invitation
 import eu.advantly.ui.phone.resources.watching_empty
 import eu.advantly.ui.phone.resources.watching_games
 import eu.advantly.ui.phone.resources.watching_live
@@ -188,6 +189,13 @@ private fun LiveCard(
             )
         if (score.isNotEmpty()) Text(score.joinToString(" · "), color = colors.text, modifier = Modifier.testTag("live_score_${match.id}"))
         LiveStatus(entry, now)
+        if (entry.scorerRole == "invited" && !entry.awaiting) {
+            Text(
+                stringResource(Res.string.scorer_invitation),
+                color = colors.brand,
+                modifier = Modifier.testTag("live_invited_${match.id}"),
+            )
+        }
     }
 }
 
@@ -232,6 +240,8 @@ fun LiveFollowScreen(
     matchId: String,
     onBack: () -> Unit,
     clock: WallClock = WallClock.System,
+    /** Eines meiner Geräte zählt nach der Übergabe: Zählansicht öffnen (plan-live-mitspieler §3.4). */
+    onScore: (String) -> Unit = {},
 ) {
     val state by model.state.collectAsState()
     val now = rememberLivePolling(model, LIVE_POLL_MS, clock)
@@ -273,6 +283,7 @@ fun LiveFollowScreen(
         }
         if (gone) Text(stringResource(Res.string.live_gone), color = colors.hint, modifier = Modifier.testTag("live_follow_gone"))
         LiveStatus(shown, now)
+        if (current != null) ScorerActions(model, current, onScore)
         if (shown.relation == LiveRelation.VISITOR) {
             TextButton({
                 model.stopWatching(matchId)

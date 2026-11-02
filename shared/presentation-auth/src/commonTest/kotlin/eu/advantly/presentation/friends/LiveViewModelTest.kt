@@ -25,7 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private object NoFriendsPort : FriendsPort {
+internal object NoFriendsPort : FriendsPort {
     override suspend fun friendCode() = "K7QF92MX"
 
     override suspend fun findProfile(query: String): FoundProfile? = null
