@@ -21,6 +21,7 @@ import eu.advantly.android.auth.createOfflineSupport
 import eu.advantly.android.auth.createPhoneAccount
 import eu.advantly.android.auth.googleCredential
 import eu.advantly.android.auth.phoneNotifications
+import eu.advantly.android.push.AndroidNotificationSettings
 import eu.advantly.android.push.pushTarget
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
@@ -39,13 +40,16 @@ class MainActivity : ComponentActivity() {
 
     /** Angetippte Benachrichtigung; der Freunde-Tab setzt sie nach dem Öffnen zurück. */
     private val pushTarget = mutableStateOf<PushTarget?>(null)
-    private var permissionResult: ((Boolean) -> Unit)? = null
+    private var notifications: AndroidNotificationSettings? = null
 
-    // Vor STARTED registriert (Pflicht der Activity-Result-API); die Abfrage selbst erst auf Wunsch im Profil.
+    /** Ergebnis vor [start] (neu erzeugte Activity, Installationsprüfung läuft noch): danach zustellen. */
+    private var permissionGranted: Boolean? = null
+
+    // Vor STARTED registriert (Pflicht der Activity-Result-API); die Abfrage selbst erst auf Wunsch im Profil. Das
+    // Ergebnis kommt auch bei einer neu erzeugten Instanz hier an, deshalb ohne Rückruf der fragenden Instanz.
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            permissionResult?.invoke(granted)
-            permissionResult = null
+            notifications?.permissionResult(granted) ?: run { permissionGranted = granted }
         }
     private var account: AuthViewModel? = null
     private val storageHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -55,6 +59,7 @@ class MainActivity : ComponentActivity() {
         sessionAccess?.close()
         sessionAccess = null
         account = null
+        notifications = null
         // Entfernen der Composition beendet ihre Subscriptions; Kontojobs nicht über Retry behalten.
         viewModelStore.clear()
         showInstallationError()
@@ -220,12 +225,12 @@ class MainActivity : ComponentActivity() {
                 null
             } else {
                 runCatching {
-                    phoneNotifications { onResult ->
-                        permissionResult = onResult
-                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
+                    phoneNotifications { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
                 }.getOrNull()
             }
+        this.notifications = notifications
+        permissionGranted?.let { granted -> notifications?.permissionResult(granted) }
+        permissionGranted = null
         setContent {
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
             AdvantlyApp(

@@ -55,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -163,6 +164,7 @@ class PhoneSyncCoordinatorTest {
 
         /** Nur das Gate des Koordinators: Seine Prüfung kann der eines Hosts vorauslaufen. */
         var coordinatorAccess = true
+        var runsEnded = 0
         var holdPull: Hold? = null
         var holdPush: Hold? = null
         var nowMs = 1_000_000L
@@ -266,7 +268,7 @@ class PhoneSyncCoordinatorTest {
             PhoneSyncCoordinator(auth, phone, pull, upload, scheduler, record, hostScope, { nowMs }, guard, {
                 hostAccess &&
                     coordinatorAccess
-            })
+            }, onRunEnded = { runsEnded++ })
 
         init {
             phone.start()
@@ -769,6 +771,7 @@ class PhoneSyncCoordinatorTest {
                 delay(200)
                 assertFalse(f.sync.state.value.running)
                 assertEquals("erster Lauf, Lauf, genau ein Folgelauf", 3, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("Laufende je Lauf, ein Folgelauf zählt zu seinem Lauf", 2, f.runsEnded)
                 live = false
 
                 val hold = Hold()
@@ -783,6 +786,7 @@ class PhoneSyncCoordinatorTest {
                 withTimeout(15_000) { running.join() }
                 withTimeout(15_000) { while (f.sync.state.value.running) yield() }
                 assertEquals(4, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("Auslöser während des Laufs: kein eigenes Ende", 3, f.runsEnded)
                 assertSerial(f.trace)
 
                 f.sync.onForeground()
@@ -795,6 +799,29 @@ class PhoneSyncCoordinatorTest {
             } finally {
                 f.close()
             }
+        }
+
+    /** M5: Endet ein Lauf, während die Arbeit nach dem vorigen noch läuft, folgt ihm danach eine eigene Runde. */
+    @Test fun aRunEndingDuringTheAfterWorkGetsItsOwnRound() =
+        runBlocking {
+            val ended = Channel<Unit>(Channel.CONFLATED)
+            val release = CompletableDeferred<Unit>()
+            var rounds = 0
+            val work =
+                afterEachRun(ended) {
+                    rounds++
+                    if (rounds == 1) release.await()
+                }
+            ended.trySend(Unit)
+            withTimeout(5_000) { while (rounds < 1) yield() }
+            // zwei weitere Läufe enden, während die erste Runde noch (suspendiert) arbeitet
+            ended.trySend(Unit)
+            ended.trySend(Unit)
+            release.complete(Unit)
+            withTimeout(5_000) { while (rounds < 2) yield() }
+            delay(100)
+            assertEquals("verpasst keinen Lauf, verdoppelt aber auch keinen", 2, rounds)
+            work.cancel()
         }
 
     @Test fun onlyAFinishedMatchTriggersTheMatchEndSync() =

@@ -146,6 +146,21 @@ class PushRegistrationTest {
         assertFalse(rig.registration().hint.value)
     }
 
+    /** N10: Abmelden lässt Push aus, der Hinweis kommt nach erneuter Anmeldung wieder; Ausschalten blendet ihn aus. */
+    @Test fun signingOutKeepsPushOffButShowsTheHintAgain(): Unit =
+        runBlocking {
+            val rig = Rig()
+            val push = rig.registration()
+            push.enable()
+            assertFalse(push.hint.value)
+            push.disable(signedOut = true)
+            assertFalse(push.enabled.value)
+            assertTrue(push.hint.value)
+            assertTrue(rig.registration().hint.value, "übersteht den Neustart")
+            push.disable()
+            assertFalse(push.hint.value)
+        }
+
     @Test fun parsesOnlyKnownVersionAndKindsAndValidIds() {
         assertEquals(
             PushMessage(PushKind.SCORER_INVITED, MATCH, ALEX),

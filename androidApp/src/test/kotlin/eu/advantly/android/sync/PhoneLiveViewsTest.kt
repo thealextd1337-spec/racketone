@@ -16,14 +16,17 @@ import eu.advantly.sync.protocol.LiveViewSubscriptionCodec
 import eu.advantly.sync.protocol.LiveViews
 import eu.advantly.sync.protocol.LiveViewsCodec
 import eu.advantly.sync.protocol.PeerKind
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.Executors
 import kotlin.time.Instant
 
 class PhoneLiveViewsTest {
@@ -42,13 +45,40 @@ class PhoneLiveViewsTest {
             }
         }
 
+    /** Host-Kontext wie Main am Handy: ein eigener Thread, auf dem allein Konto-Host und Cloud-Sitzung arbeiten dürfen. */
+    private var hostThread: Thread? = null
+    private val host = Executors.newSingleThreadExecutor { Thread(it, "host").also { hostThread = it } }.asCoroutineDispatcher()
+
+    @After fun closeHost() = host.close()
+
     private fun respond(
         provider: LiveViewsProvider,
         node: String = "watch",
         data: ByteArray = subscription,
         peers: List<PeerInfo> = listOf(watch),
         timeoutMs: Long = PhoneLiveViews.TIMEOUT_MS,
-    ) = PhoneLiveViews.respond(node, data, peers, { n, p, b -> sent += Triple(n, p, b) }, provider, timeoutMs)
+    ) = PhoneLiveViews.respond(node, data, peers, { n, p, b -> sent += Triple(n, p, b) }, provider, timeoutMs, host)
+
+    /**
+     * H1: Der Listener ruft auf einem Worker-Thread; der Abruf läuft trotzdem auf dem Host-Kontext, sonst wirft der
+     * Thread-Guard der Cloud-Sitzung und die Uhr bekäme nie eine Antwort.
+     */
+    @Test
+    fun theProviderRunsOnTheHostThreadEvenWhenCalledFromAWorker() {
+        val guarded =
+            counting {
+                // Wie CloudSessionGate.confined(): check(threadGuard())
+                check(Thread.currentThread() === hostThread) { "Cloud-Sitzung nur auf dem seriellen Host-Kontext verwenden" }
+                listOf(view)
+            }
+        var answered = false
+        val worker = Thread({ answered = respond(guarded) }, "wearable-worker")
+        worker.start()
+        worker.join()
+        assertTrue(answered)
+        assertEquals(1, guarded.calls)
+        assertEquals(listOf(view), LiveViewsCodec.decode(sent.single().third)?.matches)
+    }
 
     @Test
     fun eachSubscriptionFetchesOnceAndAnswersTheWatch() {
@@ -62,10 +92,9 @@ class PhoneLiveViewsTest {
     }
 
     @Test
-    fun defaultProviderAnswersEmpty() {
+    fun withoutAccountTheWatchHearsNothingIsLive() {
         assertTrue(respond(LiveViewsProvider.Empty))
         assertEquals(emptyList<LiveView>(), LiveViewsCodec.decode(sent.single().third)?.matches)
-        assertEquals(LiveViewsProvider.Empty, PhoneLiveViews.provider)
     }
 
     @Test
@@ -149,5 +178,25 @@ class PhoneLiveViewsTest {
         assertTrue(port.profiles.isEmpty())
         assertTrue(runCatching { runBlocking { AccountLiveViews(port, { "jonas" }).current() } }.isFailure)
         assertFalse(respond(AccountLiveViews(port, { "jonas" })))
+    }
+
+    /**
+     * M1: Hat die Uhr den Prozess gestartet, ist die Sitzung noch ungeprüft – erst die Kontoprüfung abwarten, dann
+     * abrufen. Scheitert sie (offline), keine Antwort statt „nichts live“; abgemeldet bleibt es leer.
+     */
+    @Test
+    fun aColdProcessChecksTheAccountBeforeFetching() {
+        val port = Port { listOf(live("player")) }
+        var profile: String? = null
+        var checks = 0
+        val cold = AccountLiveViews(port, { profile }, awaitAccount = { checks++.also { profile = "jonas" } })
+        assertEquals(1, runBlocking { cold.current() }.size)
+        runBlocking { cold.current() }
+        assertEquals("geprüfte Sitzung: keine zweite Prüfung", 1, checks)
+        assertEquals(listOf("jonas", "jonas"), port.profiles)
+
+        assertFalse(respond(AccountLiveViews(port, { null }, awaitAccount = { error("offline") })))
+        assertTrue(respond(AccountLiveViews(port, { null }, awaitAccount = {})))
+        assertEquals(emptyList<LiveView>(), LiveViewsCodec.decode(sent.single().third)?.matches)
     }
 }

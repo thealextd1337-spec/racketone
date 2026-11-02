@@ -74,6 +74,8 @@ internal class PhoneSyncCoordinator(
         it()
         true
     },
+    /** Nach jedem beendeten Lauf ohne Folgelauf (auch abgebrochen), auf dem Host-Kontext; jeder Lauf genau einmal. */
+    private val onRunEnded: () -> Unit = {},
 ) : PhoneSyncPort {
     private val lifecycle = SupervisorJob(scope.coroutineContext[Job])
     private val work = CoroutineScope(scope.coroutineContext + lifecycle)
@@ -174,7 +176,7 @@ internal class PhoneSyncCoordinator(
                         cycle = null
                         lastEndMs = nowMs()
                         mutable.value = mutable.value.copy(running = false)
-                        if (again && !closed) launch(expected, followUp = true)
+                        if (again && !closed) launch(expected, followUp = true) else onRunEnded()
                     }
                 }
             }

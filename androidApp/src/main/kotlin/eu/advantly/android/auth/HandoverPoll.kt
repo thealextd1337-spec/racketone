@@ -14,7 +14,10 @@ internal class HandoverPoll(
 ) {
     private var since: Long? = null
 
-    /** Neue Einladung, Annahme oder Push: Frist neu beginnen. */
+    /**
+     * Eigene Aktion der Übergabe (Einladung, Annahme, Abgabe; `ScorerHandovers.requestSync`): Frist neu beginnen. Ein
+     * Push stößt nur einen Abgleich an (Expedited Job) und verlängert die Frist nicht.
+     */
     fun restart() {
         since = null
     }

@@ -3,17 +3,31 @@ package eu.advantly.android.push
 import android.Manifest
 import android.app.Application
 import android.app.NotificationManager
+import android.app.job.JobScheduler
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import eu.advantly.android.sync.AndroidPhoneSyncRecord
+import eu.advantly.android.sync.AndroidPhoneSyncScheduler
+import eu.advantly.android.sync.PROFILE_EXTRA
+import eu.advantly.android.sync.SYNC_JOB_ID
+import eu.advantly.cloud.sync.PushTokenPort
 import eu.advantly.presentation.push.FriendsSection
 import eu.advantly.presentation.push.PushKind
 import eu.advantly.presentation.push.PushMessage
+import eu.advantly.presentation.push.PushPreferences
+import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.push.PushTarget
+import eu.advantly.presentation.push.PushTokenSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
@@ -79,6 +93,56 @@ class PushNotificationsTest {
             .edit()
             .clear()
             .commit()
+    }
+
+    /** M2: Ein Push stößt den Abgleich als Expedited Job an (Doze), ein laufender Backoff bleibt. */
+    @Test fun pushedSyncIsExpeditedButKeepsABackoff() {
+        val jobs = context.getSystemService(JobScheduler::class.java)
+        syncSoon(context, ALEX)
+        val job = jobs.getPendingJob(SYNC_JOB_ID)!!
+        assertTrue(job.isExpedited)
+        assertEquals(ALEX, job.extras.getString(PROFILE_EXTRA))
+        AndroidPhoneSyncRecord(context).save(ALEX, null, 1)
+        AndroidPhoneSyncScheduler(context).schedule(ALEX, 60_000)
+        syncSoon(context, ALEX)
+        assertEquals(60_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+    }
+
+    /**
+     * N6: Das Ergebnis des Systemdialogs erreicht auch eine neu erzeugte Activity (Drehen, Prozesstod), die selbst nie
+     * gefragt hat – und schaltet Push trotzdem ein bzw. führt bei dauerhafter Ablehnung in die Einstellungen.
+     */
+    @Test fun aPermissionResultReachesARecreatedActivity() {
+        val prefs =
+            object : PushPreferences {
+                override var enabled = false
+                override var hintDone = false
+                override var uploaded: String? = null
+            }
+        val tokens =
+            object : PushTokenSource {
+                override suspend fun token() = "t"
+
+                override suspend fun delete() {}
+            }
+        val port =
+            object : PushTokenPort {
+                override suspend fun setPushToken(
+                    profileId: String,
+                    provider: String,
+                    token: String?,
+                ) {}
+            }
+        val push = PushRegistration(prefs, tokens, port) { null }
+        val recreated = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        val settings = AndroidNotificationSettings(recreated, push, CoroutineScope(Dispatchers.Unconfined)) { error("fragt nicht erneut") }
+        settings.permissionResult(true)
+        assertTrue(push.enabled.value)
+
+        val other = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        AndroidNotificationSettings(other, PushRegistration(prefs, tokens, port) { null }, CoroutineScope(Dispatchers.Unconfined)) {}
+            .permissionResult(false)
+        assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, shadowOf(other).nextStartedActivity?.action)
     }
 
     @Test fun foreignIntentExtrasAreValidated() {
