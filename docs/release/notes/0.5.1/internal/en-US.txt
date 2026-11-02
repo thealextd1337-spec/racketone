@@ -1,0 +1,6 @@
+New in 0.5.1:
+• Match flow: momentum, heart rate and highlights in one chart per set.
+• Watch: large serve buttons, steps and max heart rate at match end.
+• Export/import heart rate history; question at sign-in and in "What's new".
+• Notice when the watch app is outdated. Privacy policy version 8.
+Please test: serve buttons in a match, match flow, export and import.

@@ -1,0 +1,6 @@
+Neu in 0.5.1:
+• Spielverlauf: je Satz Momentum, Puls und Highlights in einer Grafik.
+• Uhr: große Aufschlag-Tasten, Bilanz mit Schritten und Max-Puls am Matchende.
+• Pulsverläufe exportieren/importieren; Abfrage bei Anmeldung und in „Was ist neu?“.
+• Hinweis, wenn die Uhr-App veraltet ist. Datenschutzerklärung Version 8.
+Bitte testen: Aufschlag-Tasten im Match, Spielverlauf, Export und Import.
