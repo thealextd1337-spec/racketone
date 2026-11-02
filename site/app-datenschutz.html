@@ -13,7 +13,7 @@
 </head>
 <body>
   <!--
-    Datenschutzerklärung der Apps, Stand 0.5.0 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer, Pulsverlauf nur lokal). Diese URL ist in der Google Play Console
+    Datenschutzerklärung der Apps, Stand 0.5.1 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer, Pulsverlauf nur lokal mit Datei-Export). Diese URL ist in der Google Play Console
     als Datenschutz-URL und in private.consent_translations als PRIVACY-Dokument hinterlegt – Pfad nicht ändern.
     Jede inhaltliche Änderung braucht eine neue Fassung im Zustimmungskatalog (docs/support-admin-betrieb.md).
     Englische Fassung: en/app-privacy.html (inhaltlich synchron halten).
@@ -39,7 +39,7 @@
       <ul>
         <li>Für die Handy-App ist ein <strong>Konto erforderlich</strong>. Sie legen es beim ersten Start an; die Uhr braucht keine eigene Anmeldung.</li>
         <li>Die Handy-App sichert Ihre Matches – auch die auf der Uhr gezählten – <strong>automatisch</strong> in unserer Cloud (Rechenzentrum in Frankfurt am Main), damit Sie sie auf mehreren Geräten nutzen und wiederherstellen können. Gezählt wird auch offline; gesichert wird, sobald eine Internetverbindung besteht. Mit Freunden teilen Sie Matches nur, wenn Sie es einschalten – pro Match oder als Standard für neue Matches.</li>
-        <li>Die Herzfrequenz wird auf der Uhr gemessen und je nach Einstellung auch auf Ihrem Handy angezeigt. Nur wenn Sie „Pulsverlauf aufzeichnen“ einschalten, speichert die App Puls und Schritte je Match auf Ihrer Uhr und Ihrem Handy. Gesundheitsdaten werden <strong>nicht in unsere Cloud übertragen</strong>.</li>
+        <li>Die Herzfrequenz wird auf der Uhr gemessen und je nach Einstellung auch auf Ihrem Handy angezeigt. Nur wenn Sie „Pulsverlauf aufzeichnen“ einschalten, speichert die App Puls und Schritte je Match auf Ihrer Uhr und Ihrem Handy. Gesundheitsdaten werden <strong>nicht in unsere Cloud übertragen</strong> und bei einem Gerätewechsel nicht übernommen; Sie können sie aber selbst als Datei exportieren.</li>
         <li><strong>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge.</strong> Ihre Daten werden nicht verkauft.</li>
         <li>Sie können Ihre Kontodaten jederzeit in der App ansehen und exportieren und die Löschung Ihres Kontos beantragen.</li>
       </ul>
@@ -70,7 +70,8 @@
       <h3>3.3 Herzfrequenz und Workout-Session auf der Uhr</h3>
       <p>Während eines Matches startet die Uhr-App eine Trainings-Session (Wear OS: Health Services, Apple Watch: Workout-Session). Das sorgt dafür, dass die App bei ausgeschaltetem Display weiterläuft und den Spielstand nicht verliert. Wenn Sie es erlauben, zeigt die App dabei Ihre aktuelle Herzfrequenz und Ihre Schritte an.</p>
       <ul>
-        <li>Unter „Puls &amp; Schritte“ legen Sie fest, ob die Werte nur auf der Uhr, zusätzlich auf Ihrem gekoppelten Handy oder gar nicht angezeigt werden.</li>
+        <li>Unter „Puls &amp; Schritte“ legen Sie fest, ob die Werte auf der Uhr und Ihrem gekoppelten Handy angezeigt werden („Nur für mich“) oder gar nicht („Gar nicht“).</li>
+        <li>Nach dem Ende einer Partie zeigt die Uhr die Schritte und den höchsten Puls dieser Partie an. Ohne „Pulsverlauf aufzeichnen“ (Abschnitt 3.4) werden diese Werte nur angezeigt und nicht gespeichert.</li>
         <li>Solange Sie „Pulsverlauf aufzeichnen“ (Abschnitt 3.4) nicht einschalten, werden Puls und Schritte <strong>nicht gespeichert</strong>. Sie werden in keinem Fall <strong>in unsere Cloud übertragen</strong>, nicht an uns oder Dritte weitergegeben und nicht für Werbung verwendet.</li>
         <li>Advantly schreibt derzeit nichts in Health Connect, Apple Health oder andere Gesundheitsspeicher.</li>
         <li>Die Messung selbst übernehmen die Sensoren und Systemdienste Ihrer Uhr (Google bzw. Samsung unter Wear OS, Apple unter watchOS) nach deren eigenen Datenschutzbestimmungen.</li>
@@ -78,12 +79,14 @@
       <p>Die Herzfrequenz ist ein Gesundheitsdatum (Art. 9 DSGVO). Sie wird nur verarbeitet, wenn Sie die Berechtigung erteilen und ein Match starten; Rechtsgrundlage ist Ihre ausdrückliche Einwilligung (Art. 9 Abs. 2 lit. a DSGVO). Sie können die Berechtigung jederzeit in den Einstellungen der Uhr entziehen – das Zählen funktioniert dann weiterhin, nur ohne Pulsanzeige.</p>
 
       <h3>3.4 Pulsverlauf (optional)</h3>
-      <p>Unter Profil → „Puls &amp; Schritte“ können Sie „Pulsverlauf aufzeichnen“ einschalten (standardmäßig aus) und bestätigen das in einem eigenen Dialog. Der Schalter gilt für dieses Handy und die gekoppelte Uhr, nicht für Ihr Konto; auf einem weiteren Handy schalten Sie ihn bei Bedarf erneut ein. Beim Start eines Matches mit Workout auf der Uhr wählen Sie dann, ob für dieses Match ein Pulsverlauf aufgezeichnet wird („Nur für mich“, vorbelegt) oder nicht („Gar nicht“); die Wahl lässt sich im Match nachträglich ändern. Ohne Workout auf der Uhr wird nichts aufgezeichnet. Während der Aufzeichnung zeigt die Uhr einen kleinen Aufnahmepunkt.</p>
+      <p>Ob Sie „Pulsverlauf aufzeichnen“ einschalten möchten, fragt die App bei der Anmeldung und – wenn Sie noch nicht entschieden haben – nach einem Update im Hinweis „Was ist neu?“. Die Frage ist freiwillig, das Kästchen ist nicht vorausgewählt, und die App funktioniert auch ohne. Später können Sie die Aufzeichnung jederzeit unter Profil → „Puls &amp; Schritte“ ein- oder dauerhaft ausschalten (standardmäßig aus); das Einschalten bestätigen Sie in einem eigenen Dialog. Der Schalter gilt für dieses Handy und die gekoppelte Uhr, nicht für Ihr Konto; auf einem weiteren Handy schalten Sie ihn bei Bedarf erneut ein. Beim Start eines Matches mit Workout auf der Uhr wählen Sie dann, ob für dieses Match ein Pulsverlauf aufgezeichnet wird („Nur für mich“, vorbelegt) oder nicht („Gar nicht“); die Wahl lässt sich im Match nachträglich ändern. Ohne Workout auf der Uhr wird nichts aufgezeichnet. Während der Aufzeichnung zeigt die Uhr einen kleinen Aufnahmepunkt.</p>
+      <p class="note"><strong>Wichtig:</strong> Pulsverläufe liegen ausschließlich auf Ihrer Uhr und Ihrem Handy. Sie werden nicht in Ihr Konto übertragen und bei einem Gerätewechsel oder einer Neuinstallation <strong>nicht</strong> übernommen – es sei denn, Sie exportieren sie vorher selbst als Datei (siehe „Export und Import“).</p>
       <ul>
         <li><strong>Was gespeichert wird:</strong> Ihre Herzfrequenz als Mittelwert je 5 Sekunden, die Schrittzahl, Start und Dauer der Aufzeichnung, eine Angabe zur Messqualität und eine zufällig erzeugte Kennung der messenden Uhr. Daraus zeigt die App den Pulsverlauf im Match und Werte wie den höchsten gemessenen Puls oder die meisten Schritte in einem Satz.</li>
         <li><strong>Übertragung von der Uhr zum Handy:</strong> Nach dem Match überträgt die Uhr den Pulsverlauf an die Advantly-App auf Ihrem gekoppelten Handy, auf demselben Weg wie die Match-Daten (Abschnitt 3.2). Ist das Handy gerade nicht erreichbar, holt die Uhr die Übertragung später nach.</li>
         <li><strong>Wo und wie lange:</strong> ausschließlich im privaten Speicherbereich der App auf Ihrer Uhr und Ihrem Handy. Die Uhr löscht ihre Kopie, sobald der Pulsverlauf nach dem Match auf dem Handy angekommen ist, spätestens sieben Tage nach Beginn der Aufzeichnung, sobald die Uhr das nächste Mal mit der App auf dem Handy verbunden ist. Auf dem Handy bleibt der Pulsverlauf gespeichert, bis Sie ihn, das Match oder die App-Daten löschen.</li>
         <li><strong>Nicht in der Cloud:</strong> Pulsverläufe werden nicht in Ihr Konto übertragen, nicht geteilt und nicht in die Android-Datensicherung aufgenommen. Bei einem Gerätewechsel oder einer Neuinstallation werden Ihre Matches über Ihr Konto wiederhergestellt, Pulsverläufe nicht. In Ihrem Konto wird je Match nur vermerkt, ob Sie beim Start die Aufzeichnung gewählt haben – ohne Messwerte. Eingetragene Mitspieler und Freunde, die das Match sehen, können diesen Vermerk erkennen, nie die Werte.</li>
+        <li><strong>Export und Import:</strong> Mit „Pulsverläufe exportieren“ (Profil → „Puls &amp; Schritte“) erstellen Sie auf Ihrem Handy eine Datei (advantly-puls-&lt;Datum&gt;.json). Sie enthält für jedes Match die Match-ID, die Kennung des aufzeichnenden Geräts, eine Versionsnummer, Startzeit und Zeitraster, Ihre Pulswerte und kumulierten Schritte in 5-Sekunden-Abschnitten, den Zeitabgleich zwischen Uhr und Handy und eine Angabe zur Datenqualität. Die Datei geht nicht an uns; Sie entscheiden selbst, wo Sie sie ablegen (z. B. in Ihrem eigenen Cloud-Speicher), und sind für ihren Schutz verantwortlich – sie ist nicht verschlüsselt. Mit „Pulsverläufe importieren“ liest die App eine solche Datei auf einem Handy wieder ein und ordnet die Verläufe den Matches Ihres Kontos zu; dafür muss „Pulsverlauf aufzeichnen“ eingeschaltet sein.</li>
         <li><strong>Löschen:</strong> pro Match („Pulsverlauf löschen“ oder „Gar nicht“ wählen), alle auf einmal („Alle Gesundheitsdaten löschen“) oder durch Ausschalten von „Pulsverlauf aufzeichnen“. Gelöscht wird auf Handy und Uhr; Aufnahmen, die die Uhr noch nicht übertragen hat, beim nächsten Verbinden. Wird ein Match gelöscht, wird auch sein Pulsverlauf gelöscht.</li>
       </ul>
       <p>Rechtsgrundlage ist Ihre ausdrückliche Einwilligung (Art. 9 Abs. 2 lit. a DSGVO), die Sie mit dem Schalter und der anschließenden Bestätigung erteilen und jederzeit mit Wirkung für die Zukunft widerrufen können, indem Sie den Schalter ausschalten.</p>
@@ -108,7 +111,7 @@
         <li>Ihre Zustimmungen mit Dokument, Fassung, Sprache und Zeitpunkt.</li>
       </ul>
       <p>Zweck ist die Sicherung, Wiederherstellung und der Abgleich Ihrer Matches zwischen Ihren Geräten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Wer Ihre Matches außerdem sehen kann, legen Sie selbst fest (Abschnitt 4.3).</p>
-      <p>Ihre Einstellung „Puls &amp; Schritte“ (teilen, nur für mich, gar nicht) wird kontoweit gespeichert, damit sie auf all Ihren Geräten gleich gilt. Die Puls- und Schrittwerte selbst werden weiterhin nicht in die Cloud übertragen.</p>
+      <p>Ihre Einstellung „Puls &amp; Schritte“ (nur für mich, gar nicht) wird kontoweit gespeichert, damit sie auf all Ihren Geräten gleich gilt. Die Puls- und Schrittwerte selbst werden weiterhin nicht in die Cloud übertragen.</p>
 
       <h3>4.3 Freunde und geteilte Matches</h3>
       <ul>
@@ -186,7 +189,7 @@
       <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie die Übertragung von Gesundheitsdaten in die Cloud oder ihr Teilen verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert (Abschnitt 3.4).</p>
 
       <h2>14. Stand</h2>
-      <p>November 2026 (Version 7, Pulsverlauf)</p>
+      <p>November 2026 (Version 8, Pulsverlauf-Export, Abfrage bei Anmeldung)</p>
     </div>
   </main>
 
