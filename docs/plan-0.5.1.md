@@ -191,6 +191,10 @@ Ziel ist **eine** Grafik direkt unter den Sätzen:
 - **Tests:** Abbildung Zeit → Balkenbreite, Pausen (Spielzeit), Match ohne Zeitstempel bzw. korrigiertes Ergebnis,
   Desktop-UI-Tests für Antippen von Balken und Marker, DE/EN.
 
+**Entwurf:** `H:/advantly-temp/timeline-mock/` (gen2.py, mock.html), gezeigt am 02.11.: Überschrift „Spielverlauf“,
+Legende Wir/Gegner/Puls Ø/Max, Satzbänder, Balken je Game, Pulslinie mit bpm-Skala rechts, Highlight-Marker oben,
+Karte beim Antippen von Game oder Marker.
+
 **Warum heute oft keine Pulskurve zu sehen ist:** Sie erscheint nur, wenn alles zutrifft:
 - „Pulsverlauf aufzeichnen“ ist am Handy an.
 - Im Match ist „Workout auf meiner Uhr“ an und die Stufe ist „Nur für mich“.
@@ -244,4 +248,4 @@ A, B, C, E, F und H sind unabhängig voneinander; D kommt nach A und C, G zuletz
 - ~~E1~~ **entschieden 02.11.:** Sonderfall §5.4 – das Handy fragt einmal nach.
 - ~~E2~~ **entschieden 02.11.:** Fassung 8 mit 0.5.1, Inhalt §8.
 - ~~E4~~ **entschieden 02.11.:** Export ohne Passwort, mit Hinweis.
-- **E3:** siehe §4a – Spielstand links, Tasten rechts übereinander (Nutzervorschlag); vor dem Einbau mit echten Screenshots bestätigen.
+- ~~E3~~ **entschieden 02.11.:** §4a – Spielstand links, Tasten rechts übereinander. Echte Screenshots nach dem Einbau.
