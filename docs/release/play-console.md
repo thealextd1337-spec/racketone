@@ -240,6 +240,19 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '8');
   commit;
   ```
+  **0.6.0 (Datenschutzerklärung Version 9, Live für Mitspieler, Zählen weitergeben, Push):** nur PRIVACY wechselt. Reihenfolge:
+  Migrationen `20261102000100`–`0300` + Edge Function `push-dispatch` mit Secrets auf staging (Checkliste
+  `supabase/functions/push-dispatch/README.md`), Merge, Seite live, App ausrollen, dann freigeben.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '9', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '9', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '9', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '9');
+  commit;
+  ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
@@ -339,6 +352,15 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
   - Verschlüsselung bei der Übertragung: ja (bleibt für die ganze App ja). Löschung: Nutzer können die Daten in der App löschen.
   - Je Match geht nur die gewählte Stufe (`pulseVisibility` in `matches.meta`) in unsere Cloud – eine Präferenz ohne Messwerte.
   - Erst wenn der geparkte Cloud-Stand (`w9/puls-cloud-geparkt`) kommt, erneut prüfen.
+
+- **0.6.0 (Push, Live für Mitspieler):**
+  - „Geräte- oder andere IDs“: zusätzlich das FCM-Registrierungstoken bzw. die Firebase-Installations-ID. Erhoben ja,
+    geteilt nein (Google ist Auftragsverarbeiter), **optional** (nur mit eingeschalteten Benachrichtigungen), Zweck
+    App-Funktionen.
+  - Der Live-Spielstand für Mitspieler fällt unter die bestehenden Angaben (Fitnessinfo/App-Aktivität). Sichtbarkeit
+    für andere Nutzer der App ist kein „Teilen“ im Sinne von Play.
+  - `firebase-messaging` ist das erste eingebundene SDK. Ohne Analytics, Auto-Init aus. Den Eintrag im SDK-Index
+    abgleichen.
 
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
 Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch für geschlossene/offene Tests [P10]. Vor dem Pilot abschließen und bereits intern vorbereiten; die Quelle nennt interne Tests nicht ausdrücklich.

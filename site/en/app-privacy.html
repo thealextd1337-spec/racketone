@@ -109,10 +109,21 @@
         <li><strong>Sharing matches:</strong> for each match you decide whether your friends can see it (“Share with friends”, off by default; you can change the default under Profile). Friends then see a limited view with sport, date, score, match details such as surface or indoor/outdoor and the participants’ display names – without device details and without heart rate or steps. If a player added to the match shares it, their friends see this view too. You can hide a match or stop sharing at any time.</li>
         <li><strong>Friends as players:</strong> if you add a friend to a match, the match is linked to their account and also appears in their history; players added to a match see the display names of all participants. With “I wasn’t there” they can object to the link; the match then disappears from their view.</li>
         <li><strong>Spectators:</strong> the creator and players added to a match can name their own friends as spectators of a match – at the start or later; the other players do not have to agree. Under “Watching”, spectators see the current score, the result, sport, status and the participants’ display names – without device details, without individual match events and without heart rate or steps. Players added to the match also see the spectators’ display names. So that spectators can follow the score during play, for matches with spectators the phone app uploads the current score to our cloud while the match is running (at most about every 30 seconds). The spectator role lasts until it is ended: by whoever granted it, by the match creator or by the spectator (“Stop watching”); unfriending or blocking ends it automatically.</li>
+        <li><strong>Live for players:</strong> while you score a match, the phone app uploads the current score to our cloud about every 10 seconds. Players added to the match who have an account and spectators you named see it under “Live” on their phone and on their Wear OS watch: sport, score, sets, serve and the participants’ display names – without heart rate, steps or device details. Anyone who has blocked you or whom you have blocked sees nothing.</li>
+        <li><strong>Handing over scoring:</strong> as the creator of a match you can hand over scoring to a player added to the match. If they accept, their phone or watch scores from then on; for this we store which of their devices took over the role. You can take the role back at any time; unfriending or blocking ends it automatically.</li>
       </ul>
       <p>The legal basis is Art. 6(1)(b) GDPR (the friends and sharing features you use). When you add friends to matches, this is additionally based on your legitimate interest in recording your games together (Art. 6(1)(f) GDPR).</p>
 
-      <h3>4.4 Security, logs and abuse prevention</h3>
+      <h3>4.4 Push notifications (optional)</h3>
+      <p>If you switch on push notifications under Profile → “Notifications” and grant the Android permission, the app notifies you, for example, about friend requests, when you are added to a running match or invited as a spectator, or when you are asked to score or the scorer has changed. This is off by default.</p>
+      <ul>
+        <li><strong>What is processed:</strong> a Firebase Cloud Messaging (FCM) registration token and a Firebase installation identifier of your phone. We store the token with your device. The message itself only contains the type of event and technical identifiers (e.g. match and profile ID) – no names, no scores and no health data. The readable text is created by the app on your phone.</li>
+        <li><strong>Recipients:</strong> Google Ireland Limited and Google LLC (Firebase Cloud Messaging) as processors for delivery. We do not use Google Analytics or other Firebase services.</li>
+        <li><strong>Retention:</strong> we delete the token when you switch off notifications, sign out, remove the device or delete your account, at the latest after 180 days without use. Pending notifications are deleted after delivery, at the latest after 7 days.</li>
+      </ul>
+      <p>The legal basis is your consent (Art. 6(1)(a) GDPR), which you give with the switch and can withdraw at any time by switching it off.</p>
+
+      <h3>4.5 Security, logs and abuse prevention</h3>
       <p>All connections are encrypted with TLS. For every request, our service providers process technically necessary connection data such as IP address, time and app identifier in order to provide the service and protect it against attacks (Art. 6(1)(f) GDPR). Supabase keeps these access logs for one day, Cloudflare keeps security events for up to 31 days, and Resend keeps sending logs and email content for 30 days.</p>
 
       <h2>5. Messages to support</h2>
@@ -124,9 +135,10 @@
       <ul>
         <li><strong>Supabase</strong> (Supabase Pte. Ltd., Singapore): database, sign-in and file storage. The data is stored in an Amazon Web Services data centre in Frankfurt am Main. EU standard contractual clauses apply to support and operations access from third countries.</li>
         <li><strong>Cloudflare</strong> (Cloudflare, Inc., USA): upstream network for protection and delivery and operation of our administration interface.</li>
+        <li><strong>Google</strong> (Google Ireland Limited, Ireland; Google LLC, USA): delivery of push notifications via Firebase Cloud Messaging, only if you have switched them on (section 4.4).</li>
         <li><strong>Resend</strong> (Plus Five Five, Inc., USA): sending the emails with sign-in codes. Emails are sent from Ireland; Resend stores sending logs and email data in the USA.</li>
       </ul>
-      <p>Cloudflare and Resend are certified under the EU-US Data Privacy Framework; transfers to the USA are based on the European Commission's adequacy decision and, in the alternative, on EU standard contractual clauses. The data processing agreements are part of each provider's terms.</p>
+      <p>Cloudflare, Resend and Google LLC are certified under the EU-US Data Privacy Framework; transfers to the USA are based on the European Commission's adequacy decision and, in the alternative, on EU standard contractual clauses. The data processing agreements are part of each provider's terms.</p>
       <p>For Google sign-in and the exchange between phone and watch you use Google services under Google's own terms.</p>
 
       <h2>7. Retention and deletion</h2>
@@ -167,7 +179,7 @@
       <p>Advantly is under development. We extend this policy <strong>before</strong> new features such as uploading health data to the cloud or sharing it become available. For material changes we ask for your consent again in the app. Health data will only be stored with your separate, explicit consent (section 3.4).</p>
 
       <h2>14. Last updated</h2>
-      <p>November 2026 (version 8, heart rate history export, question at sign-in)</p>
+      <p>November 2026 (version 9, live for players, handing over scoring, push notifications)</p>
     </div>
   </main>
 
