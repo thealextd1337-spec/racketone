@@ -56,11 +56,12 @@ class HealthAccountTest {
                 .single()
         assertEquals(pair.watch.deviceId, stored.sourceDeviceId)
         assertEquals(listOf(120), stored.series.bpm)
-        assertTrue(
+        assertEquals(
+            1,
             pair.watchData.health
                 .allSeries()
-                .isEmpty(),
-            "nach dem Ack gelöscht",
+                .size,
+            "bestätigt, bleibt bis zum Matchende zum Fortsetzen",
         )
         assertTrue(pair.watchLink.decoded().any { it.message is HealthMessage && it.message.v == 6 && it.identity != null })
     }

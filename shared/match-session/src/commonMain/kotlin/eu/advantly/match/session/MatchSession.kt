@@ -726,7 +726,7 @@ class MatchSession(
         peer: String,
         message: HealthMessage,
     ) {
-        health.receive(peerDeviceOf(peer), message) { dataRevision++ }?.let { send(peer, it) }
+        health.receive(peerDeviceOf(peer), peerKindOf(peer), message) { dataRevision++ }?.let { send(peer, it) }
     }
 
     /** Gegenstelle versteht Gesundheitsnachrichten (Protokoll 6); mit Konto zusätzlich ausgehandelt ≥ 6. */

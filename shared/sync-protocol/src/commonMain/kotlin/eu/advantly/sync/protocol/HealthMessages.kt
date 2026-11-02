@@ -24,8 +24,9 @@ sealed interface HealthMessage : SyncMessage {
  * Der Empfang ist idempotent über `(matchId, sourceDeviceId, revision)`: Eine höhere [revision] ersetzt die gespeicherte
  * Serie, eine gleiche oder niedrigere wird nur bestätigt ([HealthAck]).
  *
- * @property deleted Löschung statt Serie (Pulsverlauf gelöscht, Stufe „Gar nicht“): Der Empfänger löscht die Serie dieser
- *   Quelle und zeichnet zu dem Match nichts mehr auf; [bpm]/[steps] sind dann leer
+ * @property deleted Löschung statt Serie (Pulsverlauf gelöscht, Stufe „Gar nicht“), [sourceDeviceId] = Absender: Vom Handy
+ *   (Besitzer der Stufe) löscht der Empfänger den Pulsverlauf des Matches und zeichnet dazu nichts mehr auf, von einer Uhr
+ *   nur deren Serie; [bpm]/[steps] sind dann leer
  * @property clockOffsetMs Uhr der Quelle minus Uhr des Handys (Plan Puls §3.6), 0 = gleiche Zeitbasis
  * @property quality Name einer `HealthQuality`; ein unbekannter Wert wird beim Empfang neu berechnet
  */
@@ -58,8 +59,11 @@ data class HealthSeriesMessage(
     override fun toString(): String = "HealthSeriesMessage(<redacted>)"
 
     companion object {
-        /** 12 h im 5-s-Raster (Obergrenze des Recorders). */
-        const val MAX_BUCKETS: Int = 8_640
+        /**
+         * 7 h im 5-s-Raster (Obergrenze des Recorders): Auch im ungünstigsten Fall (je Bucket `null` und eine sechsstellige
+         * Schrittsumme, ≈ 12 Byte) bleibt die Nachricht samt Beleg und Identität unter den 64 KiB eines Wirepakets.
+         */
+        const val MAX_BUCKETS: Int = 5_040
     }
 }
 

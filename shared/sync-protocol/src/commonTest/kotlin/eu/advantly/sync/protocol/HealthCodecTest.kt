@@ -58,9 +58,35 @@ class HealthCodecTest {
         assertFailsWith<IllegalArgumentException> { series.copy(steps = listOf(1)) }
         assertFailsWith<IllegalArgumentException> { series.copy(intervalMs = 0) }
         assertFailsWith<IllegalArgumentException> { series.copy(deleted = true) }
-        assertFailsWith<IllegalArgumentException> { series.copy(bpm = List(8_641) { 100 }, steps = List(8_641) { null }) }
+        val tooMany = HealthSeriesMessage.MAX_BUCKETS + 1
+        assertFailsWith<IllegalArgumentException> { series.copy(bpm = List(tooMany) { 100 }, steps = List(tooMany) { null }) }
         val json = SyncCodec.encodeToString(series).replace(""""steps":[0,null,12]""", """"steps":[0]""")
         assertIs<DecodeResult.Malformed>(decode(json))
+    }
+
+    /** Die längste erlaubte Serie passt im ungünstigsten Fall mit Beleg in ein Wirepaket (64 KiB, Rest für die Identität). */
+    @Test
+    fun theLongestSeriesFitsIntoOneWirePacket() {
+        val n = HealthSeriesMessage.MAX_BUCKETS
+        val worst =
+            series.copy(
+                revision = Long.MAX_VALUE,
+                startMs = Long.MIN_VALUE,
+                bpm = List(n) { null },
+                steps = List(n) { 999_999L },
+                clockOffsetMs = Long.MIN_VALUE,
+                quality = "INSUFFICIENT",
+                v = 6,
+                stamp =
+                    LocalMatchStamp(
+                        DeviceId("watch"),
+                        eu.advantly.core.model
+                            .EventId("g"),
+                        "s",
+                    ),
+            )
+        val size = SyncCodec.encode(worst).size
+        assertTrue(size <= 60 * 1024, "$size Byte")
     }
 
     /** Ein Gerät vor Protokoll 6 kennt den Typ nicht: Es verwirft die Nachricht still (kein Absturz, kein Teilzustand). */
