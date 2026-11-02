@@ -178,7 +178,10 @@ Ziel ist **eine** Grafik direkt unter den Sätzen:
 - **Momentum:**
   - Ein Balken je Game, so breit wie die Dauer des Games (Start/Ende aus `GameProgress.points`).
   - Höhe nach `margin`, nach oben „Wir“ (`teamUsChart`), nach unten „Gegner“ (`teamThemChart`), halbtransparent.
-  - Breaks bleiben als Punkt am Balken erkennbar.
+  - Breaks: weißer Punkt am Balkenende.
+  - Aufschlag (Nutzerwunsch 02.11.): gelber Punkt (`hint`-Farbe) an der Mittellinie, oben bei Aufschlag „Wir“, unten bei
+    „Gegner“ (`GameProgress.server`). Ohne bekannten Aufschläger kein Punkt.
+  - Legende unter der Überschrift: „■ Wir ■ Gegner ━ Puls Ø/Max“ und „● Break ● Aufschlag (oben Wir, unten Gegner)“.
 - **Puls:** Die Kurve liegt über den Balken, mit eigener Skala rechts (bpm) und Ø/Max-Angabe. Ohne Pulsverlauf entfällt nur
   die Kurve; der Link „Pulsverlauf aktivieren“ bleibt.
 - **Highlights unter der Grafik** (Nutzerwunsch 02.11.): eigene Symbolreihe unter der Zeitachse jedes Satzes, damit die Hand
@@ -195,7 +198,7 @@ Ziel ist **eine** Grafik direkt unter den Sätzen:
 - **Tests:** Abbildung Zeit → Balkenbreite, Pausen (Spielzeit), Match ohne Zeitstempel bzw. korrigiertes Ergebnis,
   Desktop-UI-Tests für Antippen von Balken und Marker, DE/EN.
 
-**Entwurf:** `H:/advantly-temp/timeline-mock/` (gen3.py, mock3.html = gültiger Entwurf; gen2/mock = erste Fassung), gezeigt am 02.11.: Überschrift „Spielverlauf“,
+**Entwurf:** `H:/advantly-temp/timeline-mock/` (gen4.py, mock4.html = gültiger Entwurf; frühere Fassungen gen2/gen3), gezeigt am 02.11.: Überschrift „Spielverlauf“,
 Legende Wir/Gegner/Puls Ø/Max, Satzbänder, Balken je Game, Pulslinie mit bpm-Skala rechts, Highlight-Marker oben,
 Karte beim Antippen von Game oder Marker.
 
