@@ -34,8 +34,8 @@ begin
 end;
 $$;
 
--- Bei angenommener Rolle darf das Gerät gewechselt werden (erneute Annahme mit Gerät); widerrufene Geräte nie. Eine
--- erneute Annahme ohne Gerät würde die Bindung leeren und wird wie eine fehlende Einladung abgelehnt.
+-- Bei angenommener Rolle darf das Gerät gewechselt werden (erneute Annahme mit Gerät); widerrufene Geräte nie. Annehmen
+-- immer mit Gerät: ohne Gerät könnte der Abgebende kein ScorerChanged erzeugen, die Übergabe bliebe offen.
 create or replace function public.respond_scorer_invitation(p_match_id uuid, p_accept boolean,
                                                             p_device_id uuid default null)
 returns void language plpgsql security definer set search_path = '' as $$
@@ -44,14 +44,17 @@ declare
   v_r   public.match_roles%rowtype;
 begin
   perform private.require_cloud_binding();
+  if p_accept and p_device_id is null then
+    perform private.fail('device_required');
+  end if;
   select * into v_r from public.match_roles r
    where r.match_id = p_match_id and r.profile_id = v_uid
-     and (r.status = 'invited' or (r.status = 'accepted' and p_accept and p_device_id is not null))
+     and (r.status = 'invited' or (r.status = 'accepted' and p_accept))
    for update;
   if not found then
     perform private.fail('no_pending_invitation');
   end if;
-  if p_accept and p_device_id is not null
+  if p_accept
      and not exists (select 1 from public.devices d
                      where d.id = p_device_id and d.profile_id = v_uid and d.revoked_at is null) then
     perform private.fail('device_not_owned', '42501');
