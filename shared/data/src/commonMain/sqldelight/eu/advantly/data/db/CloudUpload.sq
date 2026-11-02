@@ -36,8 +36,15 @@ eventById:
 SELECT id, match_id, device_id, device_seq, lamport, wall_clock_ms, parent_id, type, payload, confirmed
 FROM match_event WHERE id = ?;
 
+-- Ausstehend für die Projektion: noch nicht hochgeladen oder nur vorläufig abgelehnt (`device_not_owned` wird nach einer
+-- neuen Sitzung erneut gesendet). Endgültig abgelehnte Events kommen nie in die Cloud und blockieren nichts mehr.
 outstandingForMatch:
-SELECT id FROM match_event WHERE match_id = ? AND cloud_state != 1 ORDER BY id;
+SELECT id FROM match_event WHERE match_id = ?
+  AND (cloud_state = 0 OR (cloud_state = 2 AND cloud_rejection = 'device_not_owned')) ORDER BY id;
+
+-- Endgültig abgelehnte Events eines Matches: fehlen am Server, zählen also nicht zur Event-Anzahl der Projektion.
+finalRejectedCountForMatch:
+SELECT count(*) FROM match_event WHERE match_id = ? AND cloud_state = 2 AND cloud_rejection != 'device_not_owned';
 
 pendingCountForProfile:
 SELECT count(*) FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id

@@ -6,6 +6,7 @@ import eu.advantly.data.CloudMetadataRevision
 import eu.advantly.data.CloudUploadSnapshot
 import eu.advantly.data.ScoreSummary
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -24,7 +25,17 @@ internal fun CloudUploadSnapshot.toPushBatch(): PushBatch {
         (headers.keys + participants.keys + projections.keys).sorted().map { id ->
             val header = headers[id]?.value
             val projection = projections[id]?.value
-            val summary = projection?.let { CloudJson.parseToJsonElement(it.scoreJson).jsonObject }
+            // Server prüft eventCount gegen seine Events (apply_projection): endgültig abgelehnte fehlen dort
+            val summary =
+                projection?.let { p ->
+                    val local = CloudJson.parseToJsonElement(p.scoreJson).jsonObject
+                    val count = local["eventCount"]?.jsonPrimitive?.content?.toIntOrNull()
+                    if (count == null || p.finalRejected == 0) {
+                        local
+                    } else {
+                        JsonObject(local + ("eventCount" to JsonPrimitive((count - p.finalRejected).coerceAtLeast(0))))
+                    }
+                }
             MatchDto(
                 id = id,
                 sport = header?.sport?.lowercase(),

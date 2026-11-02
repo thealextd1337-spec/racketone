@@ -303,7 +303,8 @@ class CloudUploadRunnerTest {
                         .map { it.id }
                         .toSet(),
                 )
-                assertEquals(CloudUploadInventory(0, 1, 1), remaining.inventory)
+                // H3: das endgültig abgelehnte e2 blockiert die Projektion nicht mehr
+                assertEquals(CloudUploadInventory(0, 1, 0), remaining.inventory)
                 assertFalse(remaining.fullyUploaded)
                 val before = fixture.batches.size
                 assertFalse(runner.uploadNow().fullyUploaded)
