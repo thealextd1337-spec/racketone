@@ -1,5 +1,5 @@
 // FCM HTTP v1 ohne externe Bibliothek: OAuth per RS256-JWT (WebCrypto), Token im Speicher der Instanz.
-export type PushResult = "sent" | "failed" | "invalid_token";
+export type PushResult = "sent" | "error" | "invalid_token";
 export type Send = (
   token: string,
   data: Record<string, string>,
@@ -135,9 +135,9 @@ export function fcm(
       if (response.status === 401) cached = null;
       return isInvalidToken(await response.json().catch(() => null))
         ? "invalid_token"
-        : "failed";
+        : "error";
     } catch {
-      return "failed";
+      return "error";
     }
   };
 }

@@ -13,11 +13,17 @@ function req(key = secret) {
     headers: { "x-push-dispatch-secret": key, Authorization: "Bearer user" },
   });
 }
+// Vertrag aus 20261102000200_push_outbox.sql: je Eintrag message + alle Ziele des Empfängers.
+const message = {
+  v: 1,
+  kind: "scorer_invited",
+  matchId: match,
+  role: "scorer",
+};
 const entry = (id: number, token = `t${id}`, provider = "fcm") => ({
   id,
-  provider,
-  token,
-  payload: { v: 1, kind: "scorer_invited", matchId: match, role: "scorer" },
+  message,
+  targets: [{ deviceId: `d${id}`, provider, token }],
 });
 function fakeBackend(batches: unknown[][], log: unknown[]): Backend {
   return {
@@ -54,17 +60,33 @@ Deno.test("dispatch sends data-only strings and acknowledges every entry with it
     sent.push([token, data]);
     return Promise.resolve(token === "t2" ? "invalid_token" : "sent");
   };
-  const broken = { id: 4, provider: "fcm", token: "t4", payload: { v: 1 } };
+  const broken = { ...entry(4), message: { v: 1 } };
+  const phoneAndTablet = {
+    id: 5,
+    message,
+    targets: [
+      { deviceId: "a", provider: "fcm", token: "t2" },
+      { deviceId: "b", provider: "fcm", token: "t5" },
+    ],
+  };
+  const noTarget = { id: 6, message, targets: null };
   const response = await handler(
     () =>
-      fakeBackend([[entry(1), entry(2), entry(3, "t3", "apns"), broken]], log),
+      fakeBackend([[
+        entry(1),
+        entry(2),
+        entry(3, "t3", "apns"),
+        broken,
+        phoneAndTablet,
+        noTarget,
+      ]], log),
     () => secret,
     () => send,
   )(req());
   assert(response.status === 200);
   const body = await response.json();
-  assert(body.sent === 1 && body.invalid_token === 1 && body.failed === 2);
-  assert(sent.length === 2);
+  assert(body.sent === 2 && body.invalid_token === 2 && body.error === 3);
+  assert(sent.length === 4);
   assert(
     JSON.stringify(sent[0][1]) ===
       JSON.stringify({
@@ -77,9 +99,14 @@ Deno.test("dispatch sends data-only strings and acknowledges every entry with it
   assert(JSON.stringify(log[0]) === '["claim_push_batch_v1",{"p_limit":20}]');
   assert(
     JSON.stringify(log[1]) ===
-      '["ack_push_batch_v1",{"p_results":[{"id":1,"status":"sent"},' +
-        '{"id":2,"status":"invalid_token"},{"id":3,"status":"failed"},' +
-        '{"id":4,"status":"failed"}]}]',
+      '["ack_push_batch_v1",{"p_results":[' +
+        '{"id":1,"token":"t1","result":"sent"},' +
+        '{"id":2,"token":"t2","result":"invalid_token"},' +
+        '{"id":3,"token":"t3","result":"error","error":"unsupported_target"},' +
+        '{"id":4,"token":"t4","result":"error","error":"invalid_message"},' +
+        '{"id":5,"token":"t2","result":"invalid_token"},' +
+        '{"id":5,"token":"t5","result":"sent"},' +
+        '{"id":6,"result":"error","error":"no_target"}]}]',
   );
   assert(log.length === 2, "partial batch ends the run");
 });
@@ -245,9 +272,9 @@ Deno.test("fcm signs a verifiable RS256 assertion, caches the token and maps FCM
     assert(await send("ok", data) === "sent");
     assert(await send("gone", data) === "invalid_token");
     assert(await send("malformed", data) === "invalid_token");
-    assert(await send("own-bug", data) === "failed");
-    assert(await send("busy", data) === "failed");
-    assert(await send("offline", data) === "failed");
+    assert(await send("own-bug", data) === "error");
+    assert(await send("busy", data) === "error");
+    assert(await send("offline", data) === "error");
     assert(oauthCount() === 1, "token cached");
     clock += 3_600_000;
     assert(await send("ok", data) === "sent");
@@ -290,7 +317,9 @@ Deno.test("dispatch uses the real backend through PostgREST claim and void ackno
     }
     assert(url.endsWith("/rpc/ack_push_batch_v1"));
     const results = JSON.parse(init?.body as string).p_results;
-    assert(results[0].id === 7 && results[0].status === "sent");
+    assert(
+      JSON.stringify(results) === '[{"id":7,"token":"t7","result":"sent"}]',
+    );
     calls.push("ack");
     return Promise.resolve(new Response(null, { status: 204 }));
   };

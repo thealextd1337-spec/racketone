@@ -7,11 +7,21 @@ const CONCURRENCY = 10;
 const BUDGET_MS = 15_000;
 const DATA_KEYS = ["v", "kind", "matchId", "profileId", "role"];
 
+interface Target {
+  deviceId?: string;
+  provider?: string;
+  token?: string;
+}
 interface Claimed {
-  id: number | string;
-  provider: string;
-  token: string;
-  payload: Record<string, unknown>;
+  id: number;
+  message: Record<string, unknown>;
+  targets: Target[] | null;
+}
+interface Result {
+  id: number;
+  token?: string;
+  result: PushResult;
+  error?: string;
 }
 
 // FCM-data verlangt Strings; nur die Schlüssel aus plan-live-mitspieler §8, keine Namen/Spielstände.
@@ -65,7 +75,7 @@ export function handler(
     const started = now();
     const counts: Record<PushResult, number> = {
       sent: 0,
-      failed: 0,
+      error: 0,
       invalid_token: 0,
     };
     try {
@@ -78,24 +88,50 @@ export function handler(
           throw new Error();
         }
         if (!batch.length) break;
-        const results: { id: number | string; status: PushResult }[] = [];
-        for (let i = 0; i < batch.length; i += CONCURRENCY) {
+        // Ein Ergebnis je Ziel (Token); ein Eintrag ohne Ziel wird als Fehler quittiert (Server verwirft nach 5 Versuchen).
+        const jobs: (() => Promise<Result>)[] = [];
+        for (const entry of batch) {
+          const id = entry?.id;
+          if (typeof id !== "number") throw new Error();
+          const data = toData(entry.message);
+          const targets = Array.isArray(entry.targets) ? entry.targets : [];
+          if (!targets.length) {
+            jobs.push(() =>
+              Promise.resolve({ id, result: "error", error: "no_target" })
+            );
+          }
+          for (const target of targets) {
+            const token = typeof target?.token === "string" ? target.token : "";
+            jobs.push(async (): Promise<Result> => {
+              if (!data) {
+                return { id, token, result: "error", error: "invalid_message" };
+              }
+              // shortcut: nur FCM; APNs kommt mit dem iOS-Konto (E9).
+              if (target.provider !== "fcm" || !token) {
+                return {
+                  id,
+                  token,
+                  result: "error",
+                  error: "unsupported_target",
+                };
+              }
+              const result = await send(token, data);
+              return result === "error"
+                ? { id, token, result, error: "fcm_failed" }
+                : { id, token, result };
+            });
+          }
+        }
+        const results: Result[] = [];
+        for (let i = 0; i < jobs.length; i += CONCURRENCY) {
           results.push(
             ...await Promise.all(
-              batch.slice(i, i + CONCURRENCY).map(async (entry) => {
-                const data = toData(entry?.payload);
-                // Unbekannter Anbieter oder kaputter Eintrag: wiederholen lassen, der Server verwirft nach 5 Versuchen.
-                const status: PushResult = entry?.provider === "fcm" &&
-                    typeof entry.token === "string" && entry.token && data
-                  ? await send(entry.token, data)
-                  : "failed";
-                return { id: entry?.id, status };
-              }),
+              jobs.slice(i, i + CONCURRENCY).map((job) => job()),
             ),
           );
         }
         await api.rpc("ack_push_batch_v1", { p_results: results });
-        for (const r of results) counts[r.status]++;
+        for (const r of results) counts[r.result]++;
         if (batch.length < BATCH_LIMIT) break;
       }
       return reply(200, { contractVersion: 1, ...counts });
