@@ -114,4 +114,46 @@ class HealthRepositoryTest {
         data.health.deleteStartedBefore(500)
         assertEquals(listOf(own), data.health.forSource(watch))
     }
+
+    /** Review H1: Zwei Konten auf einem Gerät, beide im selben Match – jedes sieht und löscht nur seine eigenen Serien. */
+    @Test
+    fun twoAccountsOnOneDeviceSeeOnlyTheirOwnSeries() {
+        val data = LocalData(createTestDriver())
+        val m = data.match("m")
+        data.settings.put("identity.scope", "account-a")
+        val mine = StoredHealthSeries(m, watch, 5, series(listOf(150)))
+        assertTrue(data.health.upsert(mine))
+        data.settings.put("identity.scope", "account-b")
+        assertTrue(data.health.forMatch(m).isEmpty(), "Mitspieler-Konto sieht die Serie nicht")
+        assertTrue(data.health.allSeries().isEmpty())
+        assertTrue(data.health.revisions().isEmpty())
+        assertTrue(data.health.forSource(watch).isEmpty())
+        assertEquals(HealthRecords(null, null), data.health.records())
+        // eigene Serie desselben Matches und derselben Quelle, auch mit niedrigerer Revision: kein Überschreiben
+        val theirs = StoredHealthSeries(m, watch, 1, series(listOf(90)))
+        assertTrue(data.health.upsert(theirs))
+        assertEquals(listOf(theirs), data.health.forMatch(m))
+        data.settings.put("identity.scope", "account-a")
+        assertEquals(listOf(mine), data.health.forMatch(m))
+        data.health.deleteAll(startedBeforeMs = 1_000)
+        assertEquals(listOf(mine), data.health.allSeries(), "begann nicht vor dem Zeitpunkt")
+        data.health.deleteAll()
+        assertTrue(data.health.allSeries().isEmpty())
+        data.settings.put("identity.scope", "account-b")
+        assertEquals(listOf(theirs), data.health.allSeries(), "Löschen im anderen Konto lässt die Serie stehen")
+        data.health.delete(m, watch)
+        assertTrue(data.health.allSeries().isEmpty())
+    }
+
+    /** Vor dem ersten Kontobereich gespeichert (Uhr ohne Hello): gehört dem ersten Bereich des Geräts. */
+    @Test
+    fun seriesStoredBeforeTheFirstScopeBelongToIt() {
+        val data = LocalData(createTestDriver())
+        val m = data.match("m")
+        val early = StoredHealthSeries(m, watch, 1, series(listOf(100)))
+        assertTrue(data.health.upsert(early))
+        data.accountIdentities.initialize("watch", "self", "WATCH")
+        assertEquals("legacy:watch", data.accountIdentities.scope)
+        assertEquals(listOf(early), data.health.forMatch(m))
+    }
 }

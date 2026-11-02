@@ -498,6 +498,11 @@
     <string name="health_export_empty">There is no heart rate history on this phone yet.</string>
     <string name="health_export_done">File saved.</string>
     <string name="health_export_failed">The file could not be saved.</string>
+    <string name="health_export_part_title">File %1$d of %2$d saved</string>
+    <string name="health_export_part_text">Your heart rate history does not fit into one file. Save the remaining files as well and later import them one after another.</string>
+    <string name="health_export_part_next">Save next file</string>
+    <string name="health_export_parts_done">%1$d files saved.</string>
+    <string name="health_export_parts_partial">Only %1$d of %2$d files saved. Export again to save all of them.</string>
     <string name="health_import">Import heart rate history</string>
     <string name="health_import_done">%1$d imported, %2$d without a matching match, %3$d already present or turned off.</string>
     <string name="health_import_no_consent">Turn on “Record heart rate history” first.</string>

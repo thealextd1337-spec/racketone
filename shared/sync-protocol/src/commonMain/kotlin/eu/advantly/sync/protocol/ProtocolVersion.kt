@@ -42,6 +42,11 @@ package eu.advantly.sync.protocol
  *   ausgehandelt ≥ 6); ein älteres Gerät bekäme sie sonst als unbekannten Typ und verwürfe sie still. Weil eine Session
  *   ohne Konto nur 3 spricht, gilt dort allein die Ankündigung im `Hello`.
  *
+ *   Additiv in 6 (Review H6, ohne Versionssprung): `MatchMeta.healthDeletedBefore` („Alle Gesundheitsdaten löschen“) und
+ *   Löschaufträge je Match mit Revision > 0, die der Empfänger mit `HealthAck` bestätigt. Ein 0.5.x-Gerät ignoriert das
+ *   Feld, löscht bei einem Auftrag wie bisher und bestätigt nicht (der Auftrag geht dann bis zum Ablauf erneut hin); ein
+ *   `HealthAck` auf einen Auftrag passt bei ihm zu keiner eigenen Serie und bleibt wirkungslos.
+ *
  * **Warum 3↔4 mit Konto inkompatibel ist:** Eine Uhr mit Protokoll 3 versteht weder Belege noch Redaktion. Über 3 kämen
  * Events an, Zugriffsentzug und Redaktion nie – die Uhr behielte gelöschte Klarnamen (Datenschutzfehler, kein
  * Anzeigefehler), und das Handy hielte sie trotzdem für synchron. Mit Konto meldet die Session deshalb `minV = 4`: Gegen

@@ -14,6 +14,7 @@ import eu.advantly.sync.protocol.HealthAck
 import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.HealthSeriesMessage
 import eu.advantly.sync.protocol.Hello
+import eu.advantly.sync.protocol.MatchMetaMessage
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncMessage
 import kotlin.test.Test
@@ -606,6 +607,113 @@ class HealthSyncTest {
                 .series.clockOffsetMs,
         )
     }
+
+    /** Review H6: „Gar nicht“ bei getrennter Uhr mit laufender Aufnahme erreicht sie beim Wiederverbinden; sie bestätigt. */
+    @Test
+    fun aMatchDeletionWhileTheWatchIsOfflineReachesItOnReconnect() {
+        val (c, id) = recordingCluster()
+        val watch = c["watch"].session
+        c.offline("watch")
+        assertTrue(watch.recordHeartRate(id, c.clock.nowMs(), 100))
+        c["phone"].session.setPulseVisibility(id, TelemetryVisibility.OFF)
+        c.settle()
+        assertEquals(1, c["watch"].own().size, "offline: noch auf der Uhr")
+        c.online("watch")
+        c.settle(5_000)
+        assertTrue(c["watch"].own().isEmpty())
+        assertEquals(TelemetryVisibility.OFF, watch.pulseVisibility(id))
+        assertFalse(watch.isRecordingHealth(id))
+        assertFalse(watch.recordHeartRate(id, c.clock.nowMs(), 110), "laufendes Workout nimmt nichts mehr auf")
+        assertTrue(
+            "\"watch\"" in
+                c["phone"]
+                    .data.settings
+                    .get("health.deletionOrders")
+                    .orEmpty(),
+            "bestätigt",
+        )
+    }
+
+    /** Review H6: Der Löschauftrag überdauert einen Prozessneustart, geht bis zur Bestätigung erneut hin und läuft ab. */
+    @Test
+    fun deletionOrdersSurviveARestartUntilAcknowledgedOrExpired() {
+        val phone = WireNode("phone", 1)
+        phone.session.setHealthConsent(true)
+        val id = phone.session.create(format, SINGLES, pulse)
+        val expiring = phone.session.create(format, SINGLES, pulse)
+        // „lab“ ist hier ein Handy ohne Gesundheitsprotokoll: nichts geht hinaus
+        phone.session.setPulseVisibility(id, TelemetryVisibility.OFF)
+        phone.time += 1_000
+        phone.session.setPulseVisibility(expiring, TelemetryVisibility.OFF)
+        phone.session.deleteAllHealthData()
+        assertTrue(phone.link.sent.none { it is HealthMessage })
+
+        fun restart(): WireLink {
+            val link = WireLink()
+            val session =
+                MatchSession(
+                    phone.data,
+                    link,
+                    ManualScheduler(),
+                    SessionConfig(DeviceId("phone"), PeerKind.PHONE),
+                    WallClock { phone.time },
+                )
+            session.start()
+            link.deliver(Hello(watchId, PeerKind.WATCH, healthProtocol = 1))
+            return link
+        }
+
+        val first = restart()
+        val orders = first.sent.filterIsInstance<HealthSeriesMessage>()
+        assertEquals(setOf(id, expiring), orders.map { it.matchId }.toSet())
+        assertTrue(orders.all { it.deleted && it.revision > 0 })
+        assertTrue(first.sent.filterIsInstance<MatchMetaMessage>().any { it.healthDeletedBefore == phone.time })
+        val order = orders.single { it.matchId == id }
+        first.deliver(HealthAck(id, order.sourceDeviceId, order.revision))
+        assertEquals(listOf(expiring), restart().sent.filterIsInstance<HealthSeriesMessage>().map { it.matchId }, "bestätigt")
+        phone.time += HealthSync.ORDER_TTL_MS
+        assertTrue(restart().sent.none { it is HealthSeriesMessage }, "nach der Haltedauer der Uhr gegenstandslos")
+    }
+
+    /** Review H6: „Alle löschen“ des Handys räumt auf der Uhr auch die laufende Aufnahme ab; nur ein Handy darf das. */
+    @Test
+    fun deleteAllFromThePhoneClearsTheRunningWatchRecording() {
+        val watch = WireNode("watch", 2, PeerKind.WATCH)
+        watch.session.setHealthConsent(true)
+        val id = watch.session.create(format, SINGLES, pulse)
+        assertTrue(watch.session.recordHeartRate(id, watch.time, 100))
+        watch.time += 6_000
+        val deletedAt = watch.time
+        watch.link.deliver(Hello(DeviceId("other-watch"), PeerKind.WATCH, healthProtocol = 1))
+        watch.link.deliver(MatchMetaMessage(healthDeletedBefore = deletedAt))
+        assertEquals(1, watch.own().size, "nicht von einer Uhr")
+        watch.link.deliver(Hello(DeviceId("phone"), PeerKind.PHONE, healthProtocol = 1))
+        watch.link.deliver(MatchMetaMessage(healthDeletedBefore = deletedAt))
+        assertTrue(watch.own().isEmpty())
+        assertFalse(watch.session.isRecordingHealth(id))
+        // danach beginnt eine neue Aufnahme von vorn
+        assertTrue(watch.session.recordHeartRate(id, watch.time, 120))
+        val restarted = watch.own().single().series
+        assertEquals(deletedAt, restarted.startMs)
+        assertEquals(listOf(120), restarted.bpm)
+    }
+
+    /** Wire-Kompatibilität: Eine Löschung ohne Revision (0.5.x-Handy) wird nicht bestätigt. */
+    @Test
+    fun aDeletionWithoutRevisionIsNotAcknowledged() {
+        val watch = WireNode("watch", 2, PeerKind.WATCH)
+        watch.session.setHealthConsent(true)
+        val id = watch.session.create(format, SINGLES, pulse)
+        val phoneId = DeviceId("phone")
+        watch.link.deliver(Hello(phoneId, PeerKind.PHONE, healthProtocol = 1))
+        watch.link.sent.clear()
+        watch.link.deliver(HealthSeriesMessage(id, phoneId, revision = 0, deleted = true))
+        assertTrue(watch.link.sent.none { it is HealthAck })
+        watch.link.deliver(HealthSeriesMessage(id, phoneId, revision = 7, deleted = true))
+        assertEquals(listOf(HealthAck(id, phoneId, 7)), watch.link.sent.filterIsInstance<HealthAck>())
+    }
+
+    private fun WireNode.own() = data.health.forSource(watchId)
 
     private fun relay(
         from: WireNode,

@@ -498,6 +498,11 @@
     <string name="health_export_empty">Auf diesem Handy gibt es noch keine Pulsverläufe.</string>
     <string name="health_export_done">Datei gespeichert.</string>
     <string name="health_export_failed">Die Datei konnte nicht gespeichert werden.</string>
+    <string name="health_export_part_title">Datei %1$d von %2$d gespeichert</string>
+    <string name="health_export_part_text">Deine Pulsverläufe passen nicht in eine Datei. Speichere auch die übrigen Dateien und importiere sie später nacheinander.</string>
+    <string name="health_export_part_next">Nächste Datei speichern</string>
+    <string name="health_export_parts_done">%1$d Dateien gespeichert.</string>
+    <string name="health_export_parts_partial">Nur %1$d von %2$d Dateien gespeichert. Exportiere erneut, um alle zu sichern.</string>
     <string name="health_import">Pulsverläufe importieren</string>
     <string name="health_import_done">%1$d übernommen, %2$d ohne passendes Match, %3$d schon vorhanden oder abgewählt.</string>
     <string name="health_import_no_consent">Schalte zuerst „Pulsverlauf aufzeichnen“ ein.</string>

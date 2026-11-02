@@ -26,6 +26,7 @@ class AccountIdentityRepository internal constructor(
             queries.putIdentity(legacy, deviceId, selfId)
             recordSource(deviceId, selfId, kind, legacy, local = true)
             data.settings.put("identity.scope", legacy)
+            data.health.adoptUnscoped(legacy)
         }
     }
 

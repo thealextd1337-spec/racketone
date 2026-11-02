@@ -1,0 +1,51 @@
+-- Gesundheitsdaten je Kontobereich (Review H1): `health_series` bekommt `scope_id` (Teil des Schlüssels). Der Bereich bei
+-- der Aufzeichnung wurde bisher nicht gespeichert. Kennt das Gerät höchstens ein Konto, gehören die Serien dem beim Update
+-- aktiven Bereich (Einwilligung und Empfang galten je Bereich; Gast-Daten stammen dann vom selben Nutzer). Kennt es mehrere
+-- Konten, ist die Herkunft nicht bestimmbar: Die Serien werden gelöscht statt verborgen – verborgene Gesundheitsdaten
+-- könnte niemand mehr ansehen, exportieren oder löschen. Ohne aktiven Bereich bleibt `scope_id` leer; der erste Bereich des
+-- Geräts übernimmt die Serien (`AccountIdentityRepository.initialize`).
+-- Umweg über eine Zwischentabelle statt RENAME: so bleibt das Schema identisch mit einer frischen Datenbank.
+CREATE TABLE health_series_scoped (
+    scope_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    source_device_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    interval_ms INTEGER NOT NULL,
+    bpm_csv TEXT NOT NULL,
+    steps_csv TEXT NOT NULL,
+    clock_offset_ms INTEGER NOT NULL,
+    quality TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (scope_id, match_id, source_device_id)
+);
+
+INSERT INTO health_series_scoped
+SELECT coalesce((SELECT value FROM setting WHERE key = 'identity.scope'), ''), match_id, source_device_id, start_ms, interval_ms,
+    bpm_csv, steps_csv, clock_offset_ms, quality, revision
+FROM health_series
+WHERE (SELECT count(*) FROM setting WHERE key LIKE 'identity.account.%') <= 1;
+
+DROP TRIGGER health_series_cleanup;
+DROP TABLE health_series;
+
+CREATE TABLE health_series (
+    scope_id TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    source_device_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    interval_ms INTEGER NOT NULL,
+    bpm_csv TEXT NOT NULL,
+    steps_csv TEXT NOT NULL,
+    clock_offset_ms INTEGER NOT NULL,
+    quality TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (scope_id, match_id, source_device_id)
+);
+
+INSERT INTO health_series SELECT * FROM health_series_scoped;
+
+DROP TABLE health_series_scoped;
+
+CREATE TRIGGER health_series_cleanup AFTER DELETE ON match_header BEGIN
+    DELETE FROM health_series WHERE match_id = old.id;
+END;

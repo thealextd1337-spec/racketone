@@ -77,36 +77,47 @@ object HealthArchive {
             encodeDefaults = true
         }
 
-    /** `advantly-puls-<JJJJ-MM-TT>.json`; Datum in UTC (shortcut: kurz nach Mitternacht ggf. der Vortag, egal für einen Dateinamen). */
-    fun fileName(epochMs: Long): String = "advantly-puls-${isoDate(epochMs)}.json"
+    /**
+     * `advantly-puls-<JJJJ-MM-TT>.json`, bei mehreren Dateien `advantly-puls-<JJJJ-MM-TT>-<part>.json`; Datum in UTC
+     * (shortcut: kurz nach Mitternacht ggf. der Vortag, egal für einen Dateinamen).
+     */
+    fun fileName(
+        epochMs: Long,
+        part: Int = 1,
+        parts: Int = 1,
+    ): String = "advantly-puls-${isoDate(epochMs)}${if (parts > 1) "-$part" else ""}.json"
 
+    /** Eine Datei mit allen [series], ohne Größengrenze; für den Export [encodeParts]. */
     fun encode(
         series: List<StoredHealthSeries>,
         exportedAtMs: Long,
-    ): String =
-        json.encodeToString(
-            ArchiveFile.serializer(),
-            ArchiveFile(
-                FORMAT,
-                VERSION,
-                exportedAtMs,
-                series.map { stored ->
-                    with(stored.series) {
-                        ArchiveSeries(
-                            stored.matchId.value,
-                            stored.sourceDeviceId.value,
-                            stored.revision,
-                            startMs,
-                            intervalMs,
-                            bpm,
-                            steps,
-                            clockOffsetMs,
-                            quality.name,
-                        )
-                    }
-                },
-            ),
-        )
+    ): String = json.encodeToString(ArchiveFile.serializer(), ArchiveFile(FORMAT, VERSION, exportedAtMs, series.map { it.toArchive() }))
+
+    /**
+     * Export, den [decode] immer annimmt (Review M5): Dateien mit höchstens [maxBytes] Byte, meist eine. Passen die Serien
+     * nicht in eine Datei, ist jede Datei ein vollständiger Export eines Teils der Serien; importiert wird nacheinander.
+     */
+    fun encodeParts(
+        series: List<StoredHealthSeries>,
+        exportedAtMs: Long,
+        maxBytes: Int = MAX_BYTES,
+    ): List<String> {
+        val budget = maxBytes - utf8Size(encode(emptyList(), exportedAtMs))
+        val parts = mutableListOf(mutableListOf<StoredHealthSeries>())
+        var used = 0
+        for (stored in series) {
+            // + 1 für das Komma zwischen den Serien
+            val size = utf8Size(json.encodeToString(ArchiveSeries.serializer(), stored.toArchive())) + 1
+            if (parts.last().isNotEmpty() && used + size > budget) {
+                parts += mutableListOf<StoredHealthSeries>()
+                used = 0
+            }
+            parts.last() += stored
+            used += size
+        }
+        // Eine Serie ist durch MAX_BUCKETS auf wenige 10 KB begrenzt, passt also immer allein in eine Datei.
+        return parts.map { part -> encode(part, exportedAtMs).also { check(utf8Size(it) <= maxBytes) { "Serie größer als eine Datei" } } }
+    }
 
     /**
      * Prüft [bytes] (Größe, Format, Version, Wertebereiche) ohne Datenbank: rein und ohne Zustand, darf auf jedem Thread
@@ -176,6 +187,13 @@ object HealthArchive {
     }
 
     private fun invalid(): Nothing = throw ArchiveException(HealthImportError.INVALID)
+
+    private fun utf8Size(text: String): Int = text.encodeToByteArray().size
+
+    private fun StoredHealthSeries.toArchive(): ArchiveSeries =
+        with(series) {
+            ArchiveSeries(matchId.value, sourceDeviceId.value, revision, startMs, intervalMs, bpm, steps, clockOffsetMs, quality.name)
+        }
 
     /** Tage seit 1970 → Kalenderdatum (H. Hinnant, `civil_from_days`). */
     private fun isoDate(epochMs: Long): String {

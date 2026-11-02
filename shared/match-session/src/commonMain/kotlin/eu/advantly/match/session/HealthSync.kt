@@ -18,6 +18,8 @@ import eu.advantly.sync.protocol.HealthMessage
 import eu.advantly.sync.protocol.HealthSeriesMessage
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.sync.protocol.SyncCodec
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlin.math.abs
 
 /** Unbestätigte Pulsverläufe bleiben höchstens so lange auf der Uhr (E5); danach kommt keiner mehr ans Handy. */
@@ -33,6 +35,11 @@ const val WATCH_HEALTH_RETENTION_MS: Long = 7L * 24 * 60 * 60 * 1000
  * Wiederverbinden alle eigenen Serien, bis das Handy sie mit [HealthAck] bestätigt; dann – bei laufendem Match erst nach
  * dessen Ende, spätestens nach 7 Tagen (E5) – löscht sie sie. Das Handy speichert idempotent über
  * `(matchId, sourceDeviceId, revision)`.
+ *
+ * Löschungen erreichen die anderen Geräte auch offline (Review H6): „Gar nicht“ je Match wird ein dauerhafter, versionierter
+ * Auftrag, der bei jedem Verbinden erneut an jedes Gerät geht, bis es ihn mit [HealthAck] bestätigt hat (bzw. die
+ * Haltedauer der Uhr ihn gegenstandslos macht). „Alle Gesundheitsdaten löschen“ steht als Zeitpunkt im `MatchMeta`, das das
+ * Handy bei jedem Verbinden sendet; die Uhr löscht alle Serien, die vorher begonnen haben, auch eine laufende Aufnahme.
  */
 
 internal class HealthSync(
@@ -40,7 +47,7 @@ internal class HealthSync(
     private val kind: PeerKind,
     private val deviceId: () -> DeviceId,
     private val nowMs: () -> Long,
-    private val consentKey: () -> String,
+    private val scoped: (String) -> String,
     private val broadcast: (HealthMessage) -> Unit,
 ) {
     var consent: HealthConsent = loadConsent()
@@ -81,7 +88,7 @@ internal class HealthSync(
     ): Boolean {
         if (next == consent) return false
         val setting = checkNotNull(HealthConsentSetting.of(next)) { "Einwilligung ohne Versionsangabe" }
-        data.settings.put(consentKey(), SyncCodec.json.encodeToString(HealthConsentSetting.serializer(), setting))
+        data.settings.put(scoped(CONSENT_KEY), SyncCodec.json.encodeToString(HealthConsentSetting.serializer(), setting))
         val unconfirmed =
             if (merged) adoptedUnconfirmed || (kind == PeerKind.PHONE && consent.isDefault && next.enabled) else false
         if (unconfirmed != adoptedUnconfirmed) {
@@ -103,7 +110,10 @@ internal class HealthSync(
                 ?.pulseVisibility
             ?: TelemetryVisibility.OFF
 
-    /** „Gar nicht“ löscht den Pulsverlauf des Matches hier und (per Nachricht) auf den eigenen Geräten. */
+    /**
+     * „Gar nicht“ löscht den Pulsverlauf des Matches hier und per Löschauftrag auf den eigenen Geräten, auch auf später
+     * verbundenen ([deletions]).
+     */
     fun setVisibility(
         matchId: MatchId,
         visibility: TelemetryVisibility,
@@ -111,17 +121,46 @@ internal class HealthSync(
         data.settings.put(PULSE_PREFIX + matchId.value, visibility.wire)
         if (visibility == TelemetryVisibility.OFF) {
             forget(matchId)
-            broadcast(deletion(matchId))
+            val orders = orders()
+            val previous = orders.firstOrNull { it.matchId == matchId.value }?.revision ?: 0
+            val revision = maxOf(nowMs(), previous + 1)
+            saveOrders(orders.filter { it.matchId != matchId.value } + HealthDeletionOrder(matchId.value, revision))
+            broadcast(deletion(matchId, revision))
         }
     }
 
-    /** „Alle Gesundheitsdaten löschen“: Später eintreffende Serien, die vorher begonnen haben, lehnt dieses Gerät ab. */
+    /**
+     * „Alle Gesundheitsdaten löschen“: Später eintreffende Serien, die vorher begonnen haben, lehnt dieses Gerät ab; die Uhr
+     * erfährt den Zeitpunkt über [deletedBeforeForPeers].
+     */
     fun deleteAll() {
         data.health.deleteAll()
-        data.settings.put(DELETED_BEFORE_KEY, nowMs().toString())
+        data.settings.put(scoped(DELETED_BEFORE_KEY), nowMs().toString())
         recorders.clear()
         savedAtMs.clear()
         offsets.clear()
+    }
+
+    /** Zeitpunkt von „Alle Gesundheitsdaten löschen“ für das `MatchMeta` (nur ein Handy gibt ihn weiter), sonst `null`. */
+    fun deletedBeforeForPeers(): Long? = deletedBefore().takeIf { kind == PeerKind.PHONE && it != Long.MIN_VALUE }
+
+    /**
+     * „Alle Gesundheitsdaten löschen“ eines Handys ([senderKind]): alle eigenen Serien, die vor [atMs] begonnen haben,
+     * auch eine laufende Aufnahme (eine neue beginnt danach von vorn). `true` = neu übernommen.
+     */
+    fun adoptDeletedBefore(
+        atMs: Long,
+        senderKind: PeerKind?,
+    ): Boolean {
+        if (senderKind != PeerKind.PHONE || atMs <= deletedBefore()) return false
+        data.settings.put(scoped(DELETED_BEFORE_KEY), atMs.toString())
+        data.health.deleteAll(startedBeforeMs = atMs)
+        recorders.filterValues { it.startMs < atMs }.keys.forEach {
+            recorders.remove(it)
+            savedAtMs.remove(it)
+            offsets.remove(it)
+        }
+        return true
     }
 
     fun forgetMatch(matchId: MatchId) {
@@ -267,7 +306,9 @@ internal class HealthSync(
         when (message) {
             is HealthAck -> {
                 val stored = own(message.matchId)
-                if (message.sourceDeviceId == deviceId() && message.matchId !in recorders && stored?.revision == message.revision) {
+                val mine = message.sourceDeviceId == deviceId()
+                // zuerst: Bestätigung eines eigenen Löschauftrags
+                if (mine && !acknowledge(message, sender) && message.matchId !in recorders && stored?.revision == message.revision) {
                     // Läuft das Match noch, bleibt die Serie zum Fortsetzen (neues Workout im selben Match): Eine frische
                     // Aufnahme mit höherer Revision ersetzte sonst die bestätigte Serie beim Handy durch ihren Rest.
                     // Bis zum nächsten Ende nicht erneut senden; Reste räumt die 7-Tage-Grenze ab.
@@ -293,7 +334,8 @@ internal class HealthSync(
                             data.health.delete(message.matchId, message.sourceDeviceId)
                         }
                         changed()
-                        null
+                        // Löschauftrag (Revision > 0) bestätigen; ältere Geräte senden 0 und erwarten nichts
+                        HealthAck(message.matchId, message.sourceDeviceId, message.revision).takeIf { message.revision > 0 }
                     }
 
                     // nur die eigene Serie der Gegenstelle; ohne Einwilligung (noch nicht abgeglichen) nichts speichern
@@ -339,14 +381,61 @@ internal class HealthSync(
         return if (stored.revision >= message.revision) HealthAck(message.matchId, message.sourceDeviceId, message.revision) else null
     }
 
-    private fun deletion(matchId: MatchId) = HealthSeriesMessage(matchId, deviceId(), revision = 0, deleted = true)
+    // --- Löschaufträge (Review H6) -----------------------------------------------------------------------------------
 
-    private fun deletedBefore(): Long = data.settings.get(DELETED_BEFORE_KEY)?.toLongOrNull() ?: Long.MIN_VALUE
+    /** Offene Löschaufträge für die Gegenstelle [peerDevice] (unbekannt: alle), bei jedem Verbinden erneut. */
+    fun deletions(peerDevice: DeviceId?): List<HealthSeriesMessage> =
+        orders()
+            .filter { peerDevice == null || peerDevice.value !in it.acked }
+            .map { deletion(MatchId(it.matchId), it.revision) }
 
-    private fun confirmKey(): String = consentKey() + CONFIRM_SUFFIX
+    /** Bestätigung von [sender] für einen eigenen Löschauftrag vermerken. `true` = es war ein Löschauftrag. */
+    private fun acknowledge(
+        ack: HealthAck,
+        sender: DeviceId?,
+    ): Boolean {
+        val orders = orders()
+        val order = orders.firstOrNull { it.matchId == ack.matchId.value && it.revision == ack.revision } ?: return false
+        if (sender != null) saveOrders(orders.map { if (it == order) it.copy(acked = it.acked + sender.value) else it })
+        return true
+    }
+
+    /** Aufträge innerhalb der Haltedauer: Danach hat die Uhr jede Serie, die vor dem Auftrag begann, ohnehin gelöscht (E5). */
+    private fun orders(): List<HealthDeletionOrder> {
+        val stored = data.settings.get(scoped(ORDERS_KEY)) ?: return emptyList()
+        val orders =
+            try {
+                SyncCodec.json.decodeFromString(ORDERS_SERIALIZER, stored)
+            } catch (_: IllegalArgumentException) {
+                emptyList()
+            }
+        return orders.filter { nowMs() - it.revision < ORDER_TTL_MS }
+    }
+
+    private fun saveOrders(orders: List<HealthDeletionOrder>) {
+        val live = orders.filter { nowMs() - it.revision < ORDER_TTL_MS }
+        if (live.isEmpty()) {
+            data.settings.remove(scoped(ORDERS_KEY))
+        } else {
+            data.settings.put(scoped(ORDERS_KEY), SyncCodec.json.encodeToString(ORDERS_SERIALIZER, live))
+        }
+    }
+
+    private fun deletion(
+        matchId: MatchId,
+        revision: Long = 0,
+    ) = HealthSeriesMessage(matchId, deviceId(), revision = revision, deleted = true)
+
+    /** Zeitpunkt des Kontobereichs; ein Wert von vor der Trennung nach Konten (Schlüssel ohne Bereich) gilt weiter. */
+    private fun deletedBefore(): Long =
+        listOfNotNull(data.settings.get(scoped(DELETED_BEFORE_KEY)), data.settings.get(DELETED_BEFORE_KEY))
+            .mapNotNull { it.toLongOrNull() }
+            .maxOrNull() ?: Long.MIN_VALUE
+
+    private fun confirmKey(): String = scoped(CONSENT_KEY) + CONFIRM_SUFFIX
 
     private fun loadConsent(): HealthConsent {
-        val stored = data.settings.get(consentKey()) ?: return HealthConsent()
+        val stored = data.settings.get(scoped(CONSENT_KEY)) ?: return HealthConsent()
         return try {
             SyncCodec.json.decodeFromString(HealthConsentSetting.serializer(), stored).toConsent()
         } catch (_: IllegalArgumentException) {
@@ -371,5 +460,20 @@ internal class HealthSync(
 
         /** Aufnahme zu diesem Match wurde beendet (Workout-Ende): senden, auch wenn das Match noch läuft. */
         private const val DONE_PREFIX = "health.done."
+
+        private const val ORDERS_KEY = "health.deletionOrders"
+
+        /** Haltedauer der Uhr plus ein Tag Spielraum für abweichende Uhren. */
+        const val ORDER_TTL_MS: Long = RETENTION_MS + 24L * 60 * 60 * 1000
+
+        private val ORDERS_SERIALIZER = ListSerializer(HealthDeletionOrder.serializer())
     }
 }
+
+/** Löschauftrag „Gar nicht“ für [matchId] in Version [revision]; [acked] = Geräte, die ihn bestätigt haben. */
+@Serializable
+internal data class HealthDeletionOrder(
+    val matchId: String,
+    val revision: Long,
+    val acked: Set<String> = emptySet(),
+)

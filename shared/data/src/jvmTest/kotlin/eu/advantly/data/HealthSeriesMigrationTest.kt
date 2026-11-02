@@ -49,4 +49,58 @@ class HealthSeriesMigrationTest {
             file.delete()
         }
     }
+
+    /**
+     * Review H1: Bestand ohne Kontobereich. Bei höchstens einem bekannten Konto gehört er dem beim Update aktiven Bereich,
+     * bei mehreren ist die Herkunft unklar und er wird gelöscht.
+     */
+    @Test
+    fun schemaFifteenToSixteenAssignsSeriesToTheActiveScopeOnlyWhenUnambiguous() {
+        for (accounts in listOf(1, 2)) {
+            val file = File.createTempFile("health-schema-15", ".db")
+            try {
+                File("src/commonMain/sqldelight/databases/1.db").copyTo(file, overwrite = true)
+                JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+                    AdvantlyDatabase.Schema.migrate(driver, 1, 15).value
+                    val data = LocalData(driver)
+                    val self = data.players.ensureSelf("Alex", 1) { PlayerId("self") }.id
+                    data.matches.insertIfAbsent(
+                        MatchId("m"),
+                        Presets.BADMINTON_1GAME_15.format(),
+                        Lineup(listOf(self), listOf(PlayerId("x")), self),
+                        MatchMeta(),
+                        1,
+                    )
+                    data.settings.put("identity.scope", "scope-a")
+                    repeat(accounts) { data.settings.put("identity.account.profile-$it", "scope-$it") }
+                    driver.execute(
+                        null,
+                        "INSERT INTO health_series VALUES ('m', 'watch', 0, 5000, '99', '3', 0, 'OK', 7)",
+                        0,
+                    )
+                    AdvantlyDatabase.Schema.migrate(driver, 15, LocalData.SCHEMA_VERSION).value
+                }
+                JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+                    val data = LocalData(driver)
+                    val expected =
+                        StoredHealthSeries(
+                            MatchId("m"),
+                            DeviceId("watch"),
+                            7,
+                            HealthSeries(0, 5_000, listOf(99), listOf(3), 0, HealthQuality.OK),
+                        )
+                    if (accounts == 1) {
+                        assertEquals(listOf(expected), data.health.allSeries())
+                        data.settings.put("identity.scope", "scope-b")
+                        assertTrue(data.health.allSeries().isEmpty(), "anderer Bereich sieht den Bestand nicht")
+                    } else {
+                        assertTrue(data.health.allSeries().isEmpty(), "unklare Herkunft wird gelöscht")
+                    }
+                    data.deleteMatch(MatchId("m"))
+                }
+            } finally {
+                file.delete()
+            }
+        }
+    }
 }
