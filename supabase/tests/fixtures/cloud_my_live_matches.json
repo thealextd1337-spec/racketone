@@ -1,0 +1,34 @@
+[
+  {
+    "sport": "tennis",
+    "matchId": "a9500000-0000-7000-8000-000000000001",
+    "relation": "scorer",
+    "updatedAt": "2026-11-02T20:19:21.961346+01:00",
+    "discipline": "singles",
+    "projection": {
+      "sets": [
+        [
+          1,
+          0
+        ]
+      ],
+      "points": [
+        "15",
+        "0"
+      ]
+    },
+    "participants": [
+      {
+        "name": "Alice",
+        "team": "A",
+        "position": 1
+      },
+      {
+        "name": "Max",
+        "team": "B",
+        "position": 1
+      }
+    ],
+    "scorerConnected": false
+  }
+]

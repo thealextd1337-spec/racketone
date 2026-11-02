@@ -36,4 +36,7 @@ select 'get_visitor_match.json', public.get_visitor_match('a9500000-0000-7000-80
 select 'cloud_match_readiness.json', public.cloud_match_readiness_v1('a9500000-0000-7000-8000-000000000001',
   (select visibility_epoch from public.profile_settings where profile_id = auth.uid()),
   (select redaction_epoch from public.matches where id = 'a9500000-0000-7000-8000-000000000001'))::text;
+-- Plan Live PR 1: bob ist eingeladene Zähler-Person des laufenden Matches von alice.
+select tests.authenticate_as('bob');
+select 'cloud_my_live_matches.json', public.cloud_my_live_matches_v1()::text;
 rollback;
