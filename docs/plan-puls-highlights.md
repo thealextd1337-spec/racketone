@@ -1,6 +1,6 @@
 # Plan: Pulsverlauf und Highlights in der Match-Zeitleiste
 
-> Status: Entwurf 2026-10-28 · Bezug: [PLAN.md §P3](PLAN.md), [05 §5/§6](05-watches-health.md), [00 F19](00-entscheidungen.md), [01 §2](01-architektur.md), [03 §3.3.5](03-backend-datenmodell.md), [P3 Tracker-Import](p3-tracker-import.md)
+> Status: H1–H8 umgesetzt, nur lokal (Entscheidung 2026-11-02); H9/H10 gebaut, aber geparkt auf `w9/puls-cloud-geparkt` – siehe §10 · Bezug: [PLAN.md §P3](PLAN.md), [05 §5/§6](05-watches-health.md), [00 F19](00-entscheidungen.md), [01 §2](01-architektur.md), [03 §3.3.5](03-backend-datenmodell.md), [P3 Tracker-Import](p3-tracker-import.md)
 
 ## 1. Ziel und Abgrenzung
 
@@ -228,11 +228,11 @@ Reihenfolge:
 
 ## 8. Offene Entscheidungen
 
-- **E1:** Einwilligung 1 als eigener Schalter (Vorschlag) oder als vierte F19-Stufe?
+- **E1:** Einwilligung 1 als eigener Schalter (Vorschlag) oder als vierte F19-Stufe? *Umgesetzt nach Vorschlag: eigener Schalter „Pulsverlauf aufzeichnen“.*
 - ~~E2~~ **entschieden 28.10.:** Beim Matchstart gibt es einen Schalter mit drei Stufen (Gar nicht / Nur für mich / Für alle). Nachträglich ist jede der drei Stufen wählbar.
-- **E3:** Aufnahme-Punkt auf der Uhr: ja (Vorschlag, Transparenz) oder nichts Neues?
-- **E4:** Comeback-Schwellen: 2 Spiele, 5 Punkte oder abgewehrter Satz-/Matchball?
-- **E5:** Haltedauer einer unbestätigten Serie auf der Uhr: 7 Tage (Vorschlag)?
+- **E3:** Aufnahme-Punkt auf der Uhr: ja (Vorschlag, Transparenz) oder nichts Neues? *Umgesetzt nach Vorschlag: roter Punkt auf Wear OS und watchOS.*
+- **E4:** Comeback-Schwellen: 2 Spiele, 5 Punkte oder abgewehrter Satz-/Matchball? *Umgesetzt: alle drei – 2 Spiele im Tennis-/Padel-Satz, 5 Punkte in Rally-Sätzen und Tiebreaks, abgewehrter Satz-/Matchball, Satzrückstand beim Matchgewinn.*
+- **E5:** Haltedauer einer unbestätigten Serie auf der Uhr: 7 Tage (Vorschlag)? *Umgesetzt nach Vorschlag; der Hinweis steht im Profil.*
 - ~~E6~~ **entschieden 28.10.:** Alles ist kostenlos.
 - ~~E7~~ erledigt durch E2: H9 (Cloud) und H10 (Teilen) gehören in diesen Plan.
 
@@ -253,3 +253,26 @@ Reihenfolge:
 > - ob `match-session` neue Nachrichtentypen ohne Umbau annimmt
 >
 > Ohne DSFA und Datenschutzerklärung geht ab H5 nichts in einen Release.
+
+## 10. Umsetzungsstand 2026-11-02: nur lokal
+
+**Entscheidung 2026-11-02:** Gesundheitsdaten bleiben ausschließlich auf Uhr und Handy. Es gibt keine Cloud-Kopie
+und kein Teilen. Bei einem Gerätewechsel kommen die Matches (mit Konto) zurück, Pulsverläufe nicht.
+- **Stufen:** Je Match gibt es nur „Gar nicht“ / „Nur für mich“. Ein vorhandenes „Für alle“ wirkt wie „Nur für mich“.
+  Das Wire-Format bleibt unverändert.
+- **H9/H10:** fertig gebaut und getestet, aber nicht im Release. Liegen auf `w9/puls-cloud-geparkt`, inklusive der Migrationen
+  `20261102000100`/`…0200`. Reaktivieren braucht DSFA, Datenschutzerklärung, Supabase-DPA und eine juristisch geprüfte Einwilligung (Stufe 2).
+- **Server:** In `matches.meta` steht weiterhin die gewählte Stufe (`pulseVisibility`), wie `watchWorkout` auch. Sie enthält keine Messwerte.
+
+Umgesetzt mit Review (zwei unabhängige Durchgänge) und behobenen Befunden. Abweichungen vom Plan:
+- **UI:** Match-Detail in der Reihenfolge Sätze/Games → Zeitleiste → Details → Spielformat. Die Startseite zeigt die
+  Gesamtstatistik (gewonnene Games, gespielte Spiele, höchster Puls, meiste Schritte in einem Satz), direkt darunter die letzten 5 Spiele.
+- **Länge:** Eine Serie umfasst höchstens 7 h (5 040 Buckets), damit sie in eine Nachricht passt.
+- **Uhr nach Bestätigung:** Die Uhr löscht eine bestätigte Serie erst nach Matchende. Läuft das Match noch, setzt ein neues Workout die Serie fort.
+- **Backup:** Die App-Datenbank ist auf Handy und Uhr vom Android-Backup ausgeschlossen.
+
+Vor einem Release nötig:
+- Die Datenschutzerklärung nennt die lokale Pulsaufzeichnung; dazu eine neue Zustimmungsfassung.
+- Play-Health-Deklaration (Sensor-Berechtigung) und Data Safety: nichts wird erhoben.
+- App-Privacy-Label.
+- Realtests auf Wear OS und Apple Watch.

@@ -28,9 +28,9 @@ import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.health_delete_match
 import eu.advantly.ui.phone.resources.health_delete_match_text
 import eu.advantly.ui.phone.resources.health_pulse_not_recorded
-import eu.advantly.ui.phone.resources.health_pulse_share_pending
 import eu.advantly.ui.phone.resources.health_pulse_title
 import eu.advantly.ui.phone.wizard.PULSE_LEVELS
+import eu.advantly.ui.phone.wizard.asPulseLevel
 import eu.advantly.ui.phone.wizard.pulseLevelLabel
 import org.jetbrains.compose.resources.stringResource
 
@@ -54,10 +54,10 @@ fun PulseVisibilitySection(
             PULSE_LEVELS.forEach { level ->
                 ChoiceChip(
                     pulseLevelLabel(level),
-                    selected = setting.visibility == level,
+                    selected = setting.visibility.asPulseLevel() == level,
                     onClick = {
                         when {
-                            level == setting.visibility -> Unit
+                            level == setting.visibility.asPulseLevel() -> Unit
                             level == TelemetryVisibility.OFF && setting.recorded -> confirmDelete = true
                             else -> port.setPulseVisibility(matchId, level)
                         }
@@ -71,7 +71,6 @@ fun PulseVisibilitySection(
         val hint =
             when {
                 !setting.recorded -> Res.string.health_pulse_not_recorded
-                setting.visibility.sharesWithOthers -> Res.string.health_pulse_share_pending
                 else -> null
             }
         hint?.let {

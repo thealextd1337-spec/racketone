@@ -36,8 +36,6 @@ import eu.advantly.ui.phone.live.matchLabel
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.health_pulse_off
 import eu.advantly.ui.phone.resources.health_pulse_private
-import eu.advantly.ui.phone.resources.health_pulse_share
-import eu.advantly.ui.phone.resources.health_pulse_share_pending
 import eu.advantly.ui.phone.resources.health_pulse_title
 import eu.advantly.ui.phone.resources.health_pulse_unavailable
 import eu.advantly.ui.phone.resources.wizard_scorer_no_watch
@@ -136,7 +134,7 @@ internal fun ScorerChooser(
 }
 
 /**
- * Pulsverlauf des Matches (Plan Puls E2): „Gar nicht“ / „Nur für mich“ / „Für alle“, vorbelegt mit der Telemetrie-
+ * Pulsverlauf des Matches (Plan Puls E2): „Gar nicht“ / „Nur für mich“, vorbelegt aus der Telemetrie-
  * Sichtbarkeit. Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ nur der Hinweis auf die Einstellung (kein Dialog).
  */
 @Composable
@@ -161,7 +159,7 @@ private fun PulseChoice(
         )
         return
     }
-    val selected = chosen ?: telemetry
+    val selected = (chosen ?: telemetry).asPulseLevel()
     WizardChoices(
         options = PULSE_LEVELS,
         selected = selected,
@@ -169,25 +167,21 @@ private fun PulseChoice(
         onSelect = onSelect,
         tagPrefix = "pulse",
     )
-    if (selected.sharesWithOthers) {
-        Text(
-            stringResource(Res.string.health_pulse_share_pending),
-            style = AdvantlyTheme.typography.caption,
-            color = AdvantlyTheme.colors.text2,
-        )
-    }
 }
 
-/** Reihenfolge der Stufen in Assistent und Match-Detail. */
-internal val PULSE_LEVELS = listOf(TelemetryVisibility.OFF, TelemetryVisibility.PRIVATE, TelemetryVisibility.SHARE)
+/** Stufen in Assistent und Match-Detail. Gesundheitsdaten bleiben auf den eigenen Geräten, daher kein „Für alle“. */
+internal val PULSE_LEVELS = listOf(TelemetryVisibility.OFF, TelemetryVisibility.PRIVATE)
+
+/** Ältere Matches können „Für alle“ tragen; lokal wirkt das wie „Nur für mich“. */
+internal fun TelemetryVisibility.asPulseLevel(): TelemetryVisibility =
+    if (this == TelemetryVisibility.OFF) this else TelemetryVisibility.PRIVATE
 
 @Composable
 internal fun pulseLevelLabel(level: TelemetryVisibility): String =
     stringResource(
         when (level) {
             TelemetryVisibility.OFF -> Res.string.health_pulse_off
-            TelemetryVisibility.PRIVATE -> Res.string.health_pulse_private
-            TelemetryVisibility.SHARE -> Res.string.health_pulse_share
+            TelemetryVisibility.PRIVATE, TelemetryVisibility.SHARE -> Res.string.health_pulse_private
         },
     )
 

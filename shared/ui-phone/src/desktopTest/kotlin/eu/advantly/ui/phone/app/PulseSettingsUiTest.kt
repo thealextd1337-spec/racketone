@@ -72,15 +72,17 @@ class PulseSettingsUiTest {
                 port.setPulse(match, PulseSetting(TelemetryVisibility.PRIVATE, recorded = true))
                 setContent { AdvantlyTheme { PulseVisibilitySection(port, match) } }
                 onNodeWithTag("pulse_level_private").assertIsSelected()
-                onNodeWithTag("pulse_level_share").assertIsEnabled().performClick()
-                runOnIdle { assertEquals(TelemetryVisibility.SHARE, port.pulseSetting(match).visibility) }
+                onNodeWithTag("pulse_level_share").assertDoesNotExist()
+                // ältere Matches mit „Für alle“ zeigen „Nur für mich“
+                port.setPulse(match, PulseSetting(TelemetryVisibility.SHARE, recorded = true))
+                onNodeWithTag("pulse_level_private").assertIsSelected()
                 onNodeWithTag("pulse_level_off").performClick()
                 onNodeWithTag("pulse_delete_confirm").assertTextContains("Pulsverlauf löschen").performClick()
                 runOnIdle { assertEquals(PulseSetting(TelemetryVisibility.OFF, recorded = false), port.pulseSetting(match)) }
                 // nichts aufgezeichnet, Stufe gewählt: nur „Gar nicht“ wählbar
                 port.setPulse(match, PulseSetting(TelemetryVisibility.PRIVATE, recorded = false))
                 onNodeWithTag("pulse_hint").assertTextContains("Kein Pulsverlauf aufgezeichnet")
-                onNodeWithTag("pulse_level_share").assertIsNotEnabled()
+                onNodeWithTag("pulse_level_private").assertIsNotEnabled()
                 onNodeWithTag("pulse_level_off").assertIsEnabled()
             }
         }
@@ -109,8 +111,9 @@ class PulseSettingsUiTest {
                 onNodeWithTag("pulse_unavailable").assertTextContains("Pulsverlauf aufzeichnen", substring = true)
                 consent = true
                 onNodeWithTag("pulse_1").assertIsSelected().assertTextContains("Nur für mich")
-                onNodeWithTag("pulse_2").performClick()
-                runOnIdle { assertEquals(TelemetryVisibility.SHARE, chosen) }
+                onNodeWithTag("pulse_2").assertDoesNotExist()
+                onNodeWithTag("pulse_0").performClick()
+                runOnIdle { assertEquals(TelemetryVisibility.OFF, chosen) }
             }
         }
 }

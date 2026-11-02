@@ -241,7 +241,7 @@ class HealthSyncTest {
         assertFalse(watch.isRecordingHealth(id))
         phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
         c.settle()
-        assertEquals(TelemetryVisibility.SHARE, phone.defaultPulseVisibility())
+        assertEquals(TelemetryVisibility.PRIVATE, phone.defaultPulseVisibility(), "nie „Für alle“: nur lokal")
         assertTrue(
             c["watch"]
                 .data.health

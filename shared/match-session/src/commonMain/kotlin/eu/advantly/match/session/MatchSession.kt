@@ -652,7 +652,8 @@ class MatchSession(
     /** Vorbelegung der Stufe im Assistenten: die Telemetrie-Sichtbarkeit, ohne Einwilligung bzw. bei „Gar nicht“ OFF. */
     fun defaultPulseVisibility(): TelemetryVisibility {
         checkThread()
-        return if (health.consent.enabled && telemetry.visibility.allowsLive) telemetry.visibility else TelemetryVisibility.OFF
+        // Gesundheitsdaten bleiben auf den eigenen Geräten: höchstens „Nur für mich“, auch bei Telemetrie „Für alle“.
+        return if (health.consent.enabled && telemetry.visibility.allowsLive) TelemetryVisibility.PRIVATE else TelemetryVisibility.OFF
     }
 
     /** Wirksame Stufe des Matches (nachträgliche Wahl, sonst `MatchMeta.pulseVisibility`). */
