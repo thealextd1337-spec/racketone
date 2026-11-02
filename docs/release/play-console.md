@@ -74,6 +74,7 @@ Alternativ (CI) die Umgebungsvariablen `ADVANTLY_UPLOAD_KEYSTORE`, `ADVANTLY_UPL
 Ohne beides baut `release` **unsigniert**. Ist eine Konfiguration nur teilweise gesetzt, bricht der Build mit einer Meldung ab.
 
 1. [ ] `advantly.buildNumber` in `gradle.properties` für neue Binary-Uploads erhöhen, auch im internen Test. Der erste Upload darf mit `1` laufen; Promotion desselben vorhandenen Artefakts erhöht nichts ([Versionsführung](veroeffentlichungsplan.md#versionen-und-tags)).
+   Dazu „Was ist neu?“ (ab 0.5.1): Texte `whats_new_<buildNumber>_1..4` in `shared/ui-phone/.../composeResources/values` und `values-de` anlegen; `WhatsNewUiTest` prüft, dass es sie für den aktuellen `buildNumber` gibt.
 2. [ ] `gradlew.bat bundleAllRelease`
 3. [ ] Ergebnis:
    - Phone: `androidApp\build\outputs\bundle\release\androidApp-release.aab` (versionCode `buildNumber*10+1`, minSdk 28, targetSdk 36)
