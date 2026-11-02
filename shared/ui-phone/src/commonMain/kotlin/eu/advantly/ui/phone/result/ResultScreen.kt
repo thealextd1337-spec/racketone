@@ -48,6 +48,7 @@ import eu.advantly.presentation.match.isRated
 import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.stats.MatchStats
 import eu.advantly.presentation.stats.PulseTrack
+import eu.advantly.presentation.stats.PulseTransfer
 import eu.advantly.presentation.stats.Ratio
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.SectionTitle
@@ -112,7 +113,7 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * H8 Ergebnis (04 §4.1, §6): oben Ergebnis-Hero und Sätze, darunter die Zeitleiste ([MatchTimeline]), dann Details
+ * H8 Ergebnis (04 §4.1, §6): oben Ergebnis-Hero und Sätze, darunter der Spielverlauf ([MatchTimeline]), dann Details
  * (Dauer, Verlauf, Vergleich, Aufschläge aus `pointHistory`, 02 §11.1), Personen und ganz unten das Spielformat.
  */
 @Composable
@@ -132,8 +133,10 @@ fun ResultScreen(
     canEditResult: Boolean = false,
     /** Sätze und/oder Aufschläger in einem Vorgang speichern (`MatchHistoryPort.correctResult`). */
     onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
-    /** Pulsverlauf für die Zeitleiste; `null` = nur Highlights. */
+    /** Pulsverlauf für den Spielverlauf; `null` = nur Balken und Highlights. */
     pulse: PulseTrack? = null,
+    /** Gewählter Pulsverlauf, der noch nicht von der Uhr da ist (Hinweis im Spielverlauf); `null` = kein Hinweis. */
+    pulseTransfer: PulseTransfer? = null,
     /** Link „Pulsverlauf aktivieren“ (ohne Puls und ohne Einwilligung) → Einstellung im Profil; `null` = kein Link. */
     onEnablePulse: (() -> Unit)? = null,
     /** Stufe des Pulsverlaufs nachträglich ändern bzw. löschen (Plan Puls E2, [PulseVisibilitySection]). */
@@ -225,7 +228,7 @@ fun ResultScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
-            // Reihenfolge (Nutzerwunsch): Ergebnis und Sätze, Zeitleiste, Details, Personen, Spielformat ganz unten
+            // Reihenfolge (Nutzerwunsch): Ergebnis und Sätze, Spielverlauf, Details, Personen, Spielformat ganz unten
             Hero(record.summary)
             SectionTitle(stringResource(Res.string.detail_sets))
             record.summary.sets.forEachIndexed { index, set ->
@@ -258,17 +261,17 @@ fun ResultScreen(
                 )
             }
             MatchTimeline(
-                record.summary.setup,
+                record.summary,
                 stats,
                 pulse = pulse,
                 onEnablePulse = onEnablePulse,
                 corrected = record.summary.result.corrected,
+                pulseTransfer = pulseTransfer,
             )
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
             }
-            MatchProgression(record.summary.setup, stats.progression)
             SectionTitle(stringResource(Res.string.result_section_compare))
             Comparison(record, stats)
             ServeStatistics(record.summary.setup, stats)

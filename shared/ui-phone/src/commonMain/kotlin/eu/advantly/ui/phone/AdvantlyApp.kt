@@ -30,6 +30,7 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.presentation.stats.transfer
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
@@ -219,6 +220,9 @@ fun AdvantlyApp(
                         val revision = history.firstOrNull { it.matchId == top.matchId }
                         val record = remember(top.matchId, revision) { model.history.record(top.matchId) }
                         val health by model.health.records.collectAsState()
+                        val pulseRevision by model.telemetry.healthRevision.collectAsState()
+                        // Neu gelesen, sobald sich gespeicherte Serien ändern (nachgelieferte Serie der Uhr)
+                        val pulse = remember(top.matchId, health.revision) { model.health.pulseTrack(top.matchId) }
                         ResultScreen(
                             record = record,
                             statisticsCache = model.statistics,
@@ -236,8 +240,16 @@ fun AdvantlyApp(
                             canEditResult = remember(top.matchId, revision) { model.history.canCorrectResult(top.matchId) },
                             onCorrectResult = { sets, servers -> model.history.correctResult(top.matchId, sets, servers) },
                             onPlayAgain = { model.startMatch(it) },
-                            // Neu gelesen, sobald sich gespeicherte Serien ändern (nachgelieferte Serie der Uhr)
-                            pulse = remember(top.matchId, health.revision) { model.health.pulseTrack(top.matchId) },
+                            pulse = pulse,
+                            // shortcut: „überfällig“ nur beim Öffnen/bei neuen Serien bewertet; Ticker, falls nötig
+                            pulseTransfer =
+                                remember(top.matchId, pulseRevision, pulse, record) {
+                                    record?.let {
+                                        model.telemetry
+                                            .pulseSetting(top.matchId)
+                                            .transfer(pulse != null, it.summary.finishedAtMs, model.clock.nowMs())
+                                    }
+                                },
                             // Einwilligung „Pulsverlauf aufzeichnen“ steht im Profil unter „Puls & Schritte“
                             onEnablePulse = {
                                 navigator.stack.clear()
