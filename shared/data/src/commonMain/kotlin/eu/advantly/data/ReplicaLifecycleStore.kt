@@ -165,7 +165,12 @@ class ReplicaLifecycleStore internal constructor(
     }
 
     internal fun requireHeader(matchId: String) {
-        if (activated && (isCloudSeen(matchId) || access(captureContext(), matchId) != null)) requireReadable(matchId)
+        if (!activated) return
+        val access = access(captureContext(), matchId)
+        // Freigegebenes Mitglieds-Match ohne lokalen Kopf (Uhr: übergebenes Fremd-Match, plan-live-mitspieler §3.4): dieselbe
+        // Bedingung wie die Lesespur (MEMBER, ready), nur ohne den Kopf, der erst entsteht
+        if (access?.access == ReplicaAccessLevel.MEMBER && access.ready) return
+        if (isCloudSeen(matchId) || access != null) requireReadable(matchId)
     }
 
     /**

@@ -62,6 +62,8 @@ class LifecyclePair(
     private val phoneVersions: IntRange = ProtocolVersion.MIN_SUPPORTED..ProtocolVersion.CURRENT,
     /** Versionsbereich der Uhr; nach Änderung wirkt er beim nächsten [restartWatch] („Uhr aktualisiert“). */
     var watchVersions: IntRange = phoneVersions,
+    /** Startwert der ID-Generatoren; verschieden für mehrere Paare in einem Test (sonst gleiche Geräte-IDs). */
+    seedBase: Int = 0,
 ) {
     val scheduler = ManualScheduler()
     val network = InMemoryLinkNetwork(scheduler, queueWhenDisconnected = true)
@@ -71,7 +73,7 @@ class LifecyclePair(
         private set
     var watchData = LocalData(watchDriver)
         private set
-    private var seed = 0
+    private var seed = seedBase
 
     private fun link(name: String): RecordingLink {
         val transport = network.transport(name)
