@@ -94,8 +94,8 @@ Rückmeldungen nach 0.5.0:
   bestätigt man sie am Handy einmal in einem Dialog: „Auf deiner Uhr ist ‚Pulsverlauf aufzeichnen‘ an. Beibehalten?“
   - Beibehalten → Zähler + 1, bleibt an.
   - Ausschalten → Widerruf auf beiden Geräten.
-- **Zum Entscheiden:** Soll stattdessen die Uhr ihre Einwilligung verwerfen, wenn sich ein neues Handy-Abbild meldet?
-  Das wäre strenger, löscht aber nicht übertragene Aufnahmen.
+- **Entschieden 02.11.:** Das Handy fragt (Vorschlag oben). Die Uhr verwirft ihre Einwilligung nicht, damit nicht
+  übertragene Aufnahmen erhalten bleiben.
 
 ## 6. „Was ist neu?“ nach jedem Update
 
@@ -156,6 +156,6 @@ A, B, C und E sind unabhängig voneinander; D kommt zuletzt. Danach Review, Rele
 
 ## 10. Offene Entscheidungen
 
-- **E1:** Sonderfall §5.4 – Bestätigung am Handy (Vorschlag) oder Verwerfen auf der Uhr?
+- ~~E1~~ **entschieden 02.11.:** Sonderfall §5.4 – das Handy fragt einmal nach.
 - **E2:** Datenschutzerklärung – Fassung 8 mit 0.5.1 oder jetzt allgemein formulieren (§8)?
 - **E3:** Aufschlag-Tasten – mehr Höhe für die Leiste oder eigene Zeile für „Doppelfehler“ (nach Screenshots)?
