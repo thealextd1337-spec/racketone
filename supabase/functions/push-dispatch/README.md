@@ -45,7 +45,8 @@ Antwort 200 {contractVersion: 1, sent, error, invalid_token}; 401 falscher Schl�
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | stellt die Edge-Runtime bereit                                                                                                              |
 
 ```bash
-npx supabase secrets set PUSH_DISPATCH_SECRET=... FCM_SERVICE_ACCOUNT_JSON="$(cat service-account.json)"
+npx supabase secrets set PUSH_DISPATCH_SECRET="$(cat push-dispatch-secret.txt)" FCM_SERVICE_ACCOUNT_JSON="$(jq -c . fcm-service-account.json)"
+# JSON einzeilig (jq -c) übergeben; in einer .env-Datei den Wert in einfache Anführungszeichen setzen.
 ```
 
 Fehlt einer der beiden Werte, antwortet die Function mit 503 und versendet

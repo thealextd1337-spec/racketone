@@ -53,5 +53,10 @@ jobs:
       - name: Migrationen anwenden
         if: steps.config.outputs.ready == 'true'
         run: supabase db push --linked --skip-vault --yes
+      # Edge Function für Push; ihre Secrets (PUSH_DISPATCH_SECRET, FCM_SERVICE_ACCOUNT_JSON) setzt man einmalig von Hand
+      # (supabase/functions/push-dispatch/README.md). verify_jwt=false kommt aus supabase/config.toml.
+      - name: Edge Function push-dispatch deployen
+        if: steps.config.outputs.ready == 'true'
+        run: supabase functions deploy push-dispatch --project-ref "$SUPABASE_STAGING_PROJECT_REF"
       # Kein test db --linked: 000-setup-tests-hooks installiert dauerhaft Schema und SECURITY-DEFINER-Helfer.
       # pgTAP und Lint laufen isoliert im lokalen CI-Stack, siehe supabase/README.md.

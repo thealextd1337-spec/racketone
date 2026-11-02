@@ -296,7 +296,7 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
 
 ## Noch nicht enthalten (siehe Plan)
 
-Weitere Edge Functions (`push-dispatch`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
+Weitere Edge Functions (`delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`; `push-dispatch` ist enthalten, siehe unten),
 Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
 (staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
 P2-C liefert den Auth-Hook; produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben manuell
