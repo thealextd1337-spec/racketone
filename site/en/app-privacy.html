@@ -32,7 +32,7 @@
       <ul>
         <li>The phone app <strong>requires an account</strong>. You create it on first launch; the watch needs no sign-in of its own.</li>
         <li>The phone app backs up your matches – including those scored on the watch – <strong>automatically</strong> to our cloud (data centre in Frankfurt am Main, Germany) so you can use and restore them on several devices. Scoring also works offline; the backup runs as soon as you are online. You only share matches with friends if you switch it on – per match or as the default for new matches.</li>
-        <li>Your heart rate is measured on the watch and, depending on your setting, also shown on your phone. It is <strong>not sent to the cloud</strong> and not stored.</li>
+        <li>Your heart rate is measured on the watch and, depending on your setting, also shown on your phone. Only if you switch on “Record heart rate history” does the app store heart rate and steps per match on your watch and phone. Health data is <strong>not sent to the cloud</strong>.</li>
         <li><strong>No ads, no tracking, no analytics tools.</strong> Your data is not sold.</li>
         <li>You can view and export your account data in the app at any time and request deletion of your account.</li>
       </ul>
@@ -52,7 +52,7 @@
       <p>The purpose is to keep score, resume and display your matches. The legal basis is Art. 6(1)(b) GDPR (providing the app function you use). If you enter names of other players, this is based on your legitimate interest in recording your games (Art. 6(1)(f) GDPR).</p>
 
       <h3>3.2 Transfer between your own devices</h3>
-      <p>So that you can keep score on phone and watch at the same time, the apps exchange match data, connection and version status and, during a match, heart rate and steps between your phone and your paired watch:</p>
+      <p>So that you can keep score on phone and watch at the same time, the apps exchange match data, connection and version status and, during a match, heart rate and steps and – if recorded – after the match the heart rate history between your phone and your paired watch:</p>
       <ul>
         <li><strong>Android and Wear OS:</strong> via the Wear Data Layer API of Google Play services. The transfer runs directly over an encrypted Bluetooth connection or, if that is unavailable, end-to-end encrypted through Google servers. Only the Advantly app with the same signature on your paired devices can read this data.</li>
         <li><strong>iPhone and Apple Watch</strong> (once available): via Apple's WatchConnectivity between your paired devices.</li>
@@ -63,11 +63,21 @@
       <p>During a match, the watch app starts a workout session (Wear OS: Health Services, Apple Watch: workout session). This keeps the app running with the display off so the score is not lost. If you allow it, the app shows your current heart rate and steps.</p>
       <ul>
         <li>Under “Heart rate &amp; steps” you choose whether the values are shown only on the watch, also on your paired phone, or not at all.</li>
-        <li>Advantly does <strong>not store</strong> heart rate or steps permanently, does <strong>not send them to the cloud</strong>, does not pass them on to us or third parties and does not use them for advertising.</li>
+        <li>Without your consent “Record heart rate history” (section 3.4), heart rate and steps are <strong>not stored</strong>. They are never <strong>sent to the cloud</strong>, not passed on to us or third parties and not used for advertising.</li>
         <li>Advantly currently writes nothing to Health Connect, Apple Health or any other health store.</li>
         <li>The measurement itself is performed by your watch's sensors and system services (Google or Samsung on Wear OS, Apple on watchOS) under their own privacy terms.</li>
       </ul>
       <p>Heart rate is health data (Art. 9 GDPR). It is only processed if you grant the permission and start a match; the legal basis is your explicit consent (Art. 9(2)(a) GDPR). You can revoke the permission at any time in the watch settings – scoring keeps working, just without the heart rate display.</p>
+
+      <h3>3.4 Heart rate history (optional)</h3>
+      <p>Under Profile → “Heart rate &amp; steps” you can switch on “Record heart rate history” (off by default). When you start a match you then choose whether a heart rate history is recorded for this match (“Only me”) or not (“Off”); you can change this later in the match. While recording, the watch shows a red dot.</p>
+      <ul>
+        <li><strong>What is stored:</strong> your heart rate as an average per 5 seconds, the step count, start and duration of the recording, an indication of measurement quality and a randomly generated identifier of the measuring watch. From this the app shows the heart rate history in the match and values such as your highest measured heart rate or the most steps in one set.</li>
+        <li><strong>Where:</strong> only in the app's private storage on your watch and your phone. The watch deletes its copy as soon as the history has reached the phone after the match, at the latest after 7 days.</li>
+        <li><strong>Not in the cloud:</strong> heart rate histories are not uploaded to your account, not shared and not included in Android backup. When you switch devices or reinstall, your matches are restored from your account, heart rate histories are not. Your account only records for each match whether you chose recording – without any measured values.</li>
+        <li><strong>Deleting:</strong> per match (“Delete heart rate history” or choose “Off”), all at once (“Delete all health data”) or by switching off “Record heart rate history”. Data is deleted on phone and watch; recordings the watch has not yet transferred are deleted the next time it connects. Deleting a match also deletes its heart rate history.</li>
+      </ul>
+      <p>The legal basis is your explicit consent (Art. 9(2)(a) GDPR), which you give with the switch and can withdraw at any time with effect for the future.</p>
 
       <h2>4. Account and cloud backup</h2>
       <p>The phone app can only be used with an account. You create it when you first launch the phone app; the watch app has no sign-in of its own. Before you use the app, you accept the terms of use and confirm that you have taken note of this privacy policy in the version shown; we store the document, version, language and time. When a new version is released, the app asks again before you continue scoring. If you decline, you can sign out; data export and account deletion remain available, and you can use the app again once you confirm. Data that has already been backed up is kept until your account is deleted.</p>
@@ -117,18 +127,18 @@
 
       <h2>7. Retention and deletion</h2>
       <ul>
-        <li><strong>On your devices:</strong> delete individual matches in the phone app under History → match → Delete. Remove all local data by uninstalling the app on phone and watch or choosing “Clear app data”.</li>
+        <li><strong>On your devices:</strong> delete individual matches in the phone app under History → match → Delete; heart rate histories as described in section 3.4. Remove all local data by uninstalling the app on phone and watch or choosing “Clear app data”.</li>
         <li><strong>Account and cloud:</strong> the data is kept as long as your account exists. Under Profile → Account &amp; privacy you can <strong>request deletion</strong>; your account is hidden immediately and permanently deleted after 14 days. You can withdraw the request within this period. Without the app, you can request deletion via <a href="delete-account.html">advantly.eu/en/delete-account.html</a>.</li>
         <li>Matches involving other accounts remain available to them; your name and the names of guests you created are replaced by “Deleted player”. Matches without other accounts are deleted.</li>
         <li>We delete unfinished registrations after 24 hours and data exports after 24 hours.</li>
         <li><strong>Backups:</strong> there are currently no backup copies of the cloud data at the hosting provider. Deleted data is permanently removed once deletion is complete. Please also keep important matches via the data export.</li>
       </ul>
-      <p>If you have enabled Android backup in your Google account, the system may include the phone app's data in that backup. Google manages this backup for you; we have no access to it.</p>
+      <p>If you have enabled Android backup in your Google account, the system may include individual app settings in that backup. Matches and heart rate histories are excluded; you restore your matches from your account. Google manages this backup for you; we have no access to it.</p>
 
       <h2>8. Permissions and their purpose</h2>
       <ul>
         <li><strong>Internet</strong> (phone only): account, cloud backup and messages to support.</li>
-        <li><strong>Heart rate / body sensors</strong> (watch; <code>health.READ_HEART_RATE</code>, up to Wear OS 5 <code>BODY_SENSORS</code>): showing your heart rate during the match.</li>
+        <li><strong>Heart rate / body sensors</strong> (watch; <code>health.READ_HEART_RATE</code>, up to Wear OS 5 <code>BODY_SENSORS</code>): showing your heart rate during the match and, if you switch it on, recording your heart rate history.</li>
         <li><strong>Physical activity</strong> (watch; <code>ACTIVITY_RECOGNITION</code>): counting steps during the workout session.</li>
         <li><strong>Notifications</strong> (<code>POST_NOTIFICATIONS</code>): notice of the ongoing match that takes you back into the app.</li>
         <li><strong>Foreground service “health”</strong> and keeping the screen on (watch): so the match continues with the display off.</li>
@@ -149,10 +159,10 @@
       <p>Because the phone app requires an account, Advantly is intended for people aged 14 and over in Austria and 16 and over in all other countries, except countries where Advantly is not offered because of embargoes. Your data is processed as described in this policy regardless of your country of residence.</p>
 
       <h2>13. Changes</h2>
-      <p>Advantly is under development. We extend this policy <strong>before</strong> new features such as storing health data become available. For material changes we ask for your consent again in the app. Health data will only be stored with your separate, explicit consent.</p>
+      <p>Advantly is under development. We extend this policy <strong>before</strong> new features such as uploading health data to the cloud or sharing it become available. For material changes we ask for your consent again in the app. Health data will only be stored with your separate, explicit consent (section 3.4).</p>
 
       <h2>14. Last updated</h2>
-      <p>October 2026 (version 6, spectators)</p>
+      <p>November 2026 (version 7, heart rate history)</p>
     </div>
   </main>
 

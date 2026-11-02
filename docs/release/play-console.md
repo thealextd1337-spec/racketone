@@ -214,6 +214,19 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '6');
   commit;
   ```
+  **0.5.0 (Datenschutzerklärung Version 7, Pulsverlauf nur lokal):** nur PRIVACY wechselt, TERMS 2 bleibt aktuell. Vorher prüfen,
+  dass PRIVACY 6 die aktuelle Fassung ist. Keine neue Migration.
+  Reihenfolge: Merge, Seite live, App 0.5.0 ausrollen (Phone + Wear), dann freigeben.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '7', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '7', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '7', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '7');
+  commit;
+  ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
@@ -293,7 +306,7 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 - [ ] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
   **`https://advantly.eu/konto-loeschen.html`** (Feld „Link zum Löschen des Kontos“; englisch `https://advantly.eu/en/delete-account.html`).
 - IP-Adressen landen nur als ungesalzener Hash (Missbrauchsschutz bei Altersgate und Gastmeldungen) sowie in den Verbindungslogs der Anbieter; daraus wird kein Standort abgeleitet.
-- Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt.
+- Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt. Seit 0.5.0 ist die App-Datenbank (Matches, Pulsverläufe) auf Handy und Uhr davon ausgenommen.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
 - **0.2.0 (Freunde, geteilte Matches, Google-Login):** Datentypen bleiben gleich (Alias, Benutzername, Freundescode und
   Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). Die Sichtbarkeit für andere Nutzer der App
@@ -304,16 +317,19 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
+- **0.5.0 (Pulsverlauf):** keine Änderung nötig. Pulsverläufe liegen nur auf Uhr und Handy (Entscheidung 02.11.2026), Puls- und
+  Schrittwerte bleiben **nicht erhoben**. Je Match geht nur die gewählte Stufe (`pulseVisibility` in `matches.meta`) in die Cloud –
+  eine Präferenz ohne Messwerte, wie „Puls & Schritte“. Erst wenn der geparkte Cloud-Stand (`w9/puls-cloud-geparkt`) kommt, neu ausfüllen.
 
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
 Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch für geschlossene/offene Tests [P10]. Vor dem Pilot abschließen und bereits intern vorbereiten; die Quelle nennt interne Tests nicht ausdrücklich.
 Die Kategorie „Aktivität und Fitness“ umfasst ausdrücklich „tracking body vitals related to fitness (like heart rate)“ [P10].
 - [ ] Auswählen: **Gesundheit und Fitness → Aktivität und Fitness**. **Nicht** „Medizinisch“ und nicht „Medizinprodukt“.
 - [ ] Beschreibung (DE/EN, falls ein Feld kommt):
-  „Advantly zählt Racketsport-Matches auf Wear-OS-Uhr und Handy. Während eines Matches läuft auf der Uhr eine Trainings-Session (Health Services, Übungstyp Tennis bzw. Badminton/Tischtennis), damit die Zählung bei ausgeschaltetem Display weiterläuft. Die aktuelle Herzfrequenz wird dabei nur angezeigt, auf Wunsch auch auf dem gekoppelten Handy; sie wird nicht gespeichert, nicht in die Cloud übertragen und nicht geteilt. Keine medizinischen Funktionen.“
+  „Advantly zählt Racketsport-Matches auf Wear-OS-Uhr und Handy. Während eines Matches läuft auf der Uhr eine Trainings-Session (Health Services, Übungstyp Tennis bzw. Badminton/Tischtennis), damit die Zählung bei ausgeschaltetem Display weiterläuft. Die aktuelle Herzfrequenz wird dabei angezeigt, auf Wunsch auch auf dem gekoppelten Handy. Nur wenn der Nutzer „Pulsverlauf aufzeichnen“ einschaltet, speichert die App Puls und Schritte je Match lokal auf Uhr und Handy (Pulsverlauf im Match). Gesundheitsdaten werden nicht in die Cloud übertragen und nicht geteilt. Keine medizinischen Funktionen.“
 - **Health Connect** wird in Phase 1 **nicht** genutzt (keine `android.permission.health.*` außer `READ_HEART_RATE` für den Sensor der Uhr).
   Falls die Console wegen `health.READ_HEART_RATE` eine Begründung pro Berechtigung verlangt, diese verwenden:
-  - `health.READ_HEART_RATE` / `BODY_SENSORS` (≤ Wear OS 5): „Anzeige der aktuellen Herzfrequenz auf der Uhr während eines vom Nutzer gestarteten Matches. Nur im Vordergrund bzw. während der laufenden Trainings-Session, keine Hintergrundmessung, keine Speicherung.“
+  - `health.READ_HEART_RATE` / `BODY_SENSORS` (≤ Wear OS 5): „Anzeige der aktuellen Herzfrequenz auf der Uhr während eines vom Nutzer gestarteten Matches. Nur im Vordergrund bzw. während der laufenden Trainings-Session, keine Hintergrundmessung. Gespeichert wird nur mit Einwilligung „Pulsverlauf aufzeichnen“, ausschließlich lokal auf Uhr und Handy.“
   - `ACTIVITY_RECOGNITION`: „Schrittzählung der Trainings-Session über Health Services während eines Matches.“
 - Vor P3 (Health Connect: Exercise, Heart Rate, Calories, Steps) neu deklarieren. Dann jeder Datentyp mit nutzersichtbarem Zweck, nur das Minimum (05 §6.2).
 
