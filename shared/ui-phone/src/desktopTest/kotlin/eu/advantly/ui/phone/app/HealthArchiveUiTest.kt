@@ -129,6 +129,55 @@ class HealthArchiveUiTest {
             }
         }
 
+    /** Review M5: Ein Export über der Import-Grenze geht in mehrere Dateien; vor jeder weiteren fragt ein Dialog. */
+    @Test
+    fun aLargeExportIsSavedAsSeveralFiles() =
+        withLocale(Locale.GERMANY) {
+            runDesktopComposeUiTest(width = 412, height = 892) {
+                val series = List(3) { stored.copy(matchId = MatchId("m$it")) }
+                val port = FilePort(InMemoryTelemetrySettings(consent = true), series, HealthImportResult())
+                val files = FakeFiles()
+                val limit = HealthArchive.encode(series.take(1), clock.nowMs()).length
+                setContent {
+                    AdvantlyTheme { Column { HealthArchiveSection(port, false, files, clock, Dispatchers.Unconfined, maxBytes = limit) } }
+                }
+                onNodeWithTag("health_export").performClick()
+                onNodeWithTag("health_archive_confirm").performClick()
+                onNodeWithText("Datei 1 von 3 gespeichert").assertExists()
+                onNodeWithTag("health_export_next").assertTextContains("Nächste Datei speichern").performClick()
+                onNodeWithText("Datei 2 von 3 gespeichert").assertExists()
+                onNodeWithTag("health_export_next").performClick()
+                onNodeWithTag("health_archive_message").assertTextContains("3 Dateien gespeichert.")
+                runOnIdle {
+                    assertEquals(
+                        (1..3).map { "advantly-puls-2026-11-02-$it.json" },
+                        files.saves.map { it.first },
+                    )
+                    assertEquals(series.map { HealthArchive.encode(listOf(it), clock.nowMs()) }, files.saves.map { it.second })
+                }
+            }
+        }
+
+    @Test
+    fun cancellingALaterFileSaysHowManyWereSaved() =
+        withLocale(Locale.US) {
+            runDesktopComposeUiTest(width = 412, height = 892) {
+                val series = List(2) { stored.copy(matchId = MatchId("m$it")) }
+                val port = FilePort(InMemoryTelemetrySettings(consent = true), series, HealthImportResult())
+                val files = FakeFiles()
+                val limit = HealthArchive.encode(series.take(1), clock.nowMs()).length
+                setContent {
+                    AdvantlyTheme { Column { HealthArchiveSection(port, false, files, clock, Dispatchers.Unconfined, maxBytes = limit) } }
+                }
+                onNodeWithTag("health_export").performClick()
+                onNodeWithTag("health_archive_confirm").performClick()
+                onNodeWithText("File 1 of 2 saved").assertExists()
+                onNodeWithText("Cancel").performClick()
+                onNodeWithTag("health_archive_message").assertTextContains("Only 1 of 2 files saved.", substring = true)
+                runOnIdle { assertEquals(1, files.saves.size) }
+            }
+        }
+
     @Test
     fun exportWithoutSeriesSaysSoAndOpensNoPicker() =
         withLocale(Locale.GERMANY) {

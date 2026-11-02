@@ -35,6 +35,11 @@ import eu.advantly.ui.phone.resources.health_export_confirm
 import eu.advantly.ui.phone.resources.health_export_done
 import eu.advantly.ui.phone.resources.health_export_empty
 import eu.advantly.ui.phone.resources.health_export_failed
+import eu.advantly.ui.phone.resources.health_export_part_next
+import eu.advantly.ui.phone.resources.health_export_part_text
+import eu.advantly.ui.phone.resources.health_export_part_title
+import eu.advantly.ui.phone.resources.health_export_parts_done
+import eu.advantly.ui.phone.resources.health_export_parts_partial
 import eu.advantly.ui.phone.resources.health_export_text
 import eu.advantly.ui.phone.resources.health_grant_confirm
 import eu.advantly.ui.phone.resources.health_grant_text
@@ -59,8 +64,9 @@ import kotlin.coroutines.CoroutineContext
  * „Pulsverlauf aufzeichnen“ (sonst zuerst deren Dialog) und nicht bei „Gar nicht“ ([locked]). Ohne Dateiauswahl der
  * Plattform ([files] `null`, Desktop) entfällt der Abschnitt.
  *
- * Dateien bis 20 MB: Prüfen bzw. Bauen der Datei ([HealthArchive], rein) läuft auf [worker], nur der Datenbankteil über
- * den Port auf dem UI-Thread; währenddessen ein Fortschritt und beide Tasten gesperrt.
+ * Dateien bis 20 MB ([maxBytes]): Prüfen bzw. Bauen der Datei ([HealthArchive], rein) läuft auf [worker], nur der
+ * Datenbankteil über den Port auf dem UI-Thread; währenddessen ein Fortschritt und beide Tasten gesperrt. Ein größerer
+ * Export wird auf mehrere Dateien verteilt (jede einzeln importierbar); vor jeder weiteren fragt ein Dialog.
  */
 @Composable
 internal fun HealthArchiveSection(
@@ -69,10 +75,12 @@ internal fun HealthArchiveSection(
     files: DocumentFiles? = rememberDocumentFiles(),
     clock: WallClock = WallClock.System,
     worker: CoroutineContext = Dispatchers.Default,
+    maxBytes: Int = HealthArchive.MAX_BYTES,
 ) {
     files ?: return
     val consent by port.healthConsent.collectAsState()
     var dialog by remember { mutableStateOf<ArchiveDialog?>(null) }
+    var nextPart by remember { mutableStateOf<ExportParts?>(null) }
     var message by remember { mutableStateOf<Message?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -100,6 +108,26 @@ internal fun HealthArchiveSection(
         }
     }
 
+    /** Speichert Teil [index] von [export]; danach fragt [nextPart] nach dem nächsten oder es folgt die Meldung. */
+    fun savePart(
+        export: ExportParts,
+        index: Int,
+    ) {
+        val count = export.contents.size
+        files.save(HealthArchive.fileName(export.atMs, index + 1, count), export.contents[index]) { saved ->
+            if (saved == true && index + 1 < count) nextPart = export.copy(next = index + 1)
+            message =
+                when {
+                    saved == true && index + 1 < count -> null
+                    saved == true && count > 1 -> Message(Res.string.health_export_parts_done, listOf(count))
+                    saved == true -> Message(Res.string.health_export_done)
+                    saved == false -> Message(Res.string.health_export_failed)
+                    index > 0 -> Message(Res.string.health_export_parts_partial, listOf(index, count))
+                    else -> null
+                }
+        }
+    }
+
     fun export() {
         val series = port.exportHealthSeries()
         if (series.isEmpty()) {
@@ -108,16 +136,15 @@ internal fun HealthArchiveSection(
         }
         message = null
         busy = true
+        val atMs = clock.nowMs()
         scope.launch {
-            val content =
+            val contents =
                 try {
-                    withContext(worker) { HealthArchive.encode(series, clock.nowMs()) }
+                    withContext(worker) { HealthArchive.encodeParts(series, atMs, maxBytes) }
                 } finally {
                     busy = false
                 }
-            files.save(HealthArchive.fileName(clock.nowMs()), content) { saved ->
-                message = saved?.let { Message(if (it) Res.string.health_export_done else Res.string.health_export_failed) }
-            }
+            savePart(ExportParts(contents, atMs, next = 0), 0)
         }
     }
 
@@ -150,6 +177,29 @@ internal fun HealthArchiveSection(
             style = AdvantlyTheme.typography.caption,
             color = AdvantlyTheme.colors.text2,
             modifier = Modifier.testTag("health_archive_message").semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    nextPart?.let { export ->
+        ReportHealthDialog()
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(stringResource(Res.string.health_export_part_title, export.next, export.contents.size)) },
+            text = { Text(stringResource(Res.string.health_export_part_text)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        nextPart = null
+                        savePart(export, export.next)
+                    },
+                    modifier = Modifier.testTag("health_export_next"),
+                ) { Text(stringResource(Res.string.health_export_part_next), color = AdvantlyTheme.colors.brand) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    nextPart = null
+                    message = Message(Res.string.health_export_parts_partial, listOf(export.next, export.contents.size))
+                }) { Text(stringResource(Res.string.action_cancel)) }
+            },
         )
     }
     dialog?.let { kind ->
@@ -188,6 +238,13 @@ internal fun HealthArchiveSection(
 }
 
 private enum class ArchiveDialog { EXPORT, GRANT }
+
+/** Export in [contents] (Dateiinhalte); [next] = Index der nächsten zu speichernden Datei. */
+private data class ExportParts(
+    val contents: List<String>,
+    val atMs: Long,
+    val next: Int,
+)
 
 private class Message(
     val text: StringResource,

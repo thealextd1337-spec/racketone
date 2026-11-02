@@ -705,7 +705,7 @@ class MatchSession(
 
     /**
      * „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien, leer ohne Serien. Nur der Datenbankteil – die
-     * Datei baut [HealthArchive.encode] abseits des Session-Threads (große Dateien).
+     * Datei baut [HealthArchive.encodeParts] abseits des Session-Threads (große Dateien).
      */
     fun exportHealthSeries(): List<StoredHealthSeries> {
         checkThread()

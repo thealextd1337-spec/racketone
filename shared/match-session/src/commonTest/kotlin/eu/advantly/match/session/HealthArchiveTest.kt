@@ -61,6 +61,21 @@ class HealthArchiveTest {
         assertEquals(listOf(series, other), seen)
     }
 
+    /** Review M5: Jede Exportdatei bleibt unter der Import-Grenze; zusammen enthalten sie jede Serie genau einmal. */
+    @Test
+    fun aLargeExportIsSplitIntoFilesTheImportAccepts() {
+        val many = List(40) { series.copy(matchId = MatchId("m$it")) }
+        val single = HealthArchive.encodeParts(many, 0)
+        assertEquals(listOf(HealthArchive.encode(many, 0)), single, "passt in eine Datei")
+        val limit = HealthArchive.encode(many.take(5), 0).length
+        val parts = HealthArchive.encodeParts(many, 0, maxBytes = limit)
+        assertTrue(parts.size >= 8, "${parts.size} Dateien")
+        assertTrue(parts.all { it.encodeToByteArray().size <= limit })
+        assertEquals(many, parts.flatMap { importAll(it).second })
+        assertEquals(listOf(HealthArchive.encode(emptyList(), 0)), HealthArchive.encodeParts(emptyList(), 0))
+        assertEquals("advantly-puls-1970-01-01-2.json", HealthArchive.fileName(0, part = 2, parts = 3))
+    }
+
     @Test
     fun placementsAreCounted() {
         val text = HealthArchive.encode(List(4) { series.copy(matchId = MatchId("m$it")) }, 0)

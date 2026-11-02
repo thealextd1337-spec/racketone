@@ -41,7 +41,7 @@ interface TelemetrySettingsPort {
 
     /**
      * „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien, leer ohne Serien. Die Datei baut der Aufrufer mit
-     * [HealthArchive.encode] abseits des UI-Threads.
+     * [HealthArchive.encodeParts] abseits des UI-Threads.
      */
     fun exportHealthSeries(): List<StoredHealthSeries>
 
