@@ -132,14 +132,39 @@ Rückmeldungen nach 0.5.0:
 - Nutzerwunsch 02.11.: Reihenfolge jetzt Wochenbilanz (letzte 7 Tage) → Gesamtstatistik → letzte 5 Spiele
   (`HomeScreen.kt`, Test `HomeOverviewUiTest`).
 
-## 8. Datenschutzerklärung
+## 7b. Pulsverläufe lokal exportieren und importieren (Nutzeridee 02.11.)
 
-- §3.4 nennt als Ort für das Einschalten nur „Profil → Puls & Schritte“. Mit 0.5.1 kommen „bei der Anmeldung“ und
-  „Was ist neu?“ dazu.
-- Das ist eine Textänderung, also Fassung 8 mit neuer Zustimmung (`play-console.md` §6.1).
-- Alternative: §3.4 schon jetzt allgemein formulieren („in der App, z. B. unter Profil …“) und die Änderung mit dem nächsten
-  inhaltlichen Update bündeln.
-- `site/` nur mit ausdrücklichem Auftrag.
+- **Ziel:** Gerätewechsel ohne Cloud. Der Nutzer exportiert seine Pulsverläufe als Datei, legt sie selbst ab (z. B. eigenes
+  Google Drive oder per Mail an sich) und importiert sie auf dem neuen Handy. Die Datei geht **nie** an Advantly-Server.
+- **Export:**
+  - Profil → „Puls & Schritte“ → „Pulsverläufe exportieren“.
+  - Eine Datei `advantly-puls-<datum>.json` mit allen `health_series`: Match-ID, Quellgerät, Revision, Raster, Werte.
+  - Weitergabe über das System-Teilen-Menü bzw. „Speichern unter“ (Storage Access Framework).
+  - Vorher ein Hinweis: „Die Datei enthält Gesundheitsdaten. Bewahre sie sicher auf.“
+- **Import:**
+  - Gleicher Ort → „Pulsverläufe importieren“ → Dateiauswahl.
+  - Zugeordnet wird über die Match-ID zu den Matches, die über das Konto wiederhergestellt wurden.
+  - Nur mit Einwilligung „Pulsverlauf aufzeichnen“; ohne sie fragt die App zuerst danach.
+  - Serien zu unbekannten Matches werden übersprungen und gezählt: „12 übernommen, 2 ohne passendes Match“.
+  - Vorhandene Serien werden nur durch eine höhere Revision ersetzt (gleiche Regel wie beim Empfang von der Uhr).
+- **Prüfung an der Vertrauensgrenze:** Formatversion, Größenlimit, Wertebereiche wie `HealthSeries`/`MAX_BUCKETS`.
+  Kaputte Dateien werden ohne Absturz abgelehnt.
+- **Offen (E4):** Datei mit einem selbst gewählten Passwort verschlüsseln? Das schützt bei Ablage in fremden Clouds, kostet
+  aber eine Passwortabfrage beim Import. Vorschlag: zunächst unverschlüsselt mit deutlichem Hinweis.
+- **Tests:** Rundreise Export → Import, unbekannte Matches, ältere Revision, kaputte bzw. zu große Datei, ohne Einwilligung.
+
+## 8. Datenschutzerklärung Fassung 8 (entschieden 02.11.)
+
+Mit 0.5.1 kommt Fassung 8 mit erneuter Zustimmung. §3.4 beschreibt dann:
+- **Wann gefragt wird:** beim Konto-Einstieg (Anmeldung bzw. neues Konto) und nach einem Update im „Was ist neu?“, jeweils freiwillig.
+- **Dauerhaft abschalten:** jederzeit im Profil (Widerruf, löscht alle Pulsverläufe).
+- **Je Match:** beim Start „Gar nicht“ / „Nur für mich“, nachträglich im Match änderbar.
+- **Deutlich hervorgehoben:** Pulsverläufe liegen **nur** auf Uhr und Handy, nicht in unserer Cloud, und werden bei einem
+  Gerätewechsel **nicht** mitgenommen. Die einzige Ausnahme ist der eigene Datei-Export (§7b), den der Nutzer selbst
+  ablegt und wieder importiert.
+- Dazu passend: die Kurzfassung (§1), die Speicherdauer (§7) und ein Satz zur Export-Datei (Verantwortung des Nutzers für den
+  Ablageort, kein Zugriff durch uns).
+- Freigabe nach dem Ablauf in `play-console.md` §6.1 (PRIVACY 8).
 
 ## 9. Pakete und Reihenfolge
 
@@ -150,12 +175,15 @@ Rückmeldungen nach 0.5.0:
 | C | Einstieg `HEALTH` + Sonderfall §5.4 | presentation-auth, presentation, match-session, ui-phone |
 | D | „Was ist neu?“ (§6), nutzt A und C | presentation, ui-phone, docs/release |
 | E | Wear-Backup-Regel (§7) | wearApp |
+| F | Export/Import der Pulsverläufe (§7b) | data, match-session, presentation, ui-phone, androidApp |
+| G | Datenschutzerklärung Fassung 8 (§8) | site |
 
-A, B, C und E sind unabhängig voneinander; D kommt zuletzt. Danach Review, Release 0.5.1 (Build 11) mit Texten für
+A, B, C, E und F sind unabhängig voneinander; D kommt nach A und C, G zuletzt (beschreibt C, D und F). Danach Review, Release 0.5.1 (Build 11) mit Texten für
 „Was ist neu?“, internem Test auf Handy und Uhr und Feldtest für B.
 
 ## 10. Offene Entscheidungen
 
 - ~~E1~~ **entschieden 02.11.:** Sonderfall §5.4 – das Handy fragt einmal nach.
-- **E2:** Datenschutzerklärung – Fassung 8 mit 0.5.1 oder jetzt allgemein formulieren (§8)?
+- ~~E2~~ **entschieden 02.11.:** Fassung 8 mit 0.5.1, Inhalt §8.
+- **E4:** Export-Datei verschlüsseln (§7b)?
 - **E3:** Aufschlag-Tasten – mehr Höhe für die Leiste oder eigene Zeile für „Doppelfehler“ (nach Screenshots)?
