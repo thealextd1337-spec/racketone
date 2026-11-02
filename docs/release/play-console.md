@@ -386,6 +386,21 @@ Typ `health` ist für Fitness-Apps gedacht, z. B. „an exercise app that tracks
   Aufnahme auf der Uhr: `adb -s <uhr> shell screenrecord /sdcard/fgs.mp4` (Strg+C beendet) → `adb -s <uhr> pull /sdcard/fgs.mp4`.
   Alternativ die Uhr am Handgelenk filmen.
 
+**Ab 0.6.0 zusätzlich Handy-App: Typ „Verbundenes Gerät“ (`FOREGROUND_SERVICE_CONNECTED_DEVICE`, `LiveRelayService`)**
+- [ ] **Beschreibung:** „Zählt der Nutzer ein Match auf seiner gekoppelten Wear-OS-Uhr und verfolgen Mitspieler oder
+  Zuschauer es live, hält ein Vordergrunddienst auf dem Handy die Verbindung zur zählenden Uhr aufrecht und überträgt
+  deren Spielstand etwa alle 10 Sekunden. Der Dienst startet nur, wenn der Nutzer das Match am Handy startet bzw. die App
+  geöffnet ist, zeigt dauerhaft die Benachrichtigung ‚Live-Stand wird übertragen‘ und endet bei Pause, Matchende oder
+  Übergabe des Zählens.“
+- [ ] **Folgen bei Verzögerung oder Unterbrechung:** Der Live-Stand beim Mitspieler veraltet um Minuten. Lokal geht nichts
+  verloren.
+- [ ] **Video (Pflicht):** Uhr-Verbindung/-Status in der App → Match am Handy starten mit „Meine Uhr“ zählt → Punkte auf der
+  Uhr → Benachrichtigung „Live-Stand wird übertragen“ → Stand beim Mitspieler (optional). Aufnahme per WLAN-Debugging
+  (`adb shell screenrecord`, siehe Memory „Geräte per WLAN-Debugging“).
+- Zusätzliche Berechtigungen ohne Deklaration: `FOREGROUND_SERVICE`, `CHANGE_NETWORK_STATE` (Pflicht für diesen Typ ab
+  Android 14), `WAKE_LOCK`, `POST_NOTIFICATIONS`.
+- Fallback, falls Play den Typ ablehnt: `dataSync` (ab Android 15 auf 6 h je 24 h begrenzt, reicht für ein Match).
+
 ### 6.9 Weitere Erklärungen
 - [ ] **Behörden-App:** Nein. **Finanzfunktionen:** keine. **Nachrichten-App:** Nein. **Gesundheits-/Medizinprodukt:** Nein.
 - [ ] **Exportbeschränkungen bzw. Verschlüsselung:** Die App nutzt nur die Verschlüsselung des Systems (keine eigene Kryptografie).
