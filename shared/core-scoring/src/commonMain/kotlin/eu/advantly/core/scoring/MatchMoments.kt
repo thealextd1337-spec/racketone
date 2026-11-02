@@ -56,7 +56,8 @@ data class MatchMoment(
  * - [MomentKind.SET_WON] / [MomentKind.MATCH_WON]: Effekt nach dem Punkt
  * - [MomentKind.COMEBACK] (E4): beim Satzgewinn, wenn der Sieger im Satz einen Satz-/Matchball abgewehrt hat oder
  *   zurücklag – um mindestens [COMEBACK_GAMES] Spiele (Tennis/Padel-Satz) bzw. [COMEBACK_POINTS] Punkte (Rally-Sätze,
- *   Pickleball-Games, Match-Tiebreak). Beim Matchgewinn zusätzlich, wenn der Sieger Satz 1 verloren hat.
+ *   Pickleball-Games, Match-Tiebreak) bzw. um mindestens [COMEBACK_POINTS] Punkte im Tiebreak eines Tennis/Padel-Satzes
+ *   (z. B. 0:5 → 7:5). Beim Matchgewinn zusätzlich, wenn der Sieger Satz 1 verloren hat.
  */
 object MatchMoments {
     const val COMEBACK_GAMES = 2
@@ -66,6 +67,7 @@ object MatchMoments {
         val moments = mutableListOf<MatchMoment>()
         var set = -1
         var deficit = SidePair(0, 0)
+        var tiebreakDeficit = SidePair(0, 0)
         var saved = SidePair(false, false)
         points.forEachIndexed { index, record ->
             val before = record.before
@@ -75,6 +77,7 @@ object MatchMoments {
             if (before.sets.size != set) {
                 set = before.sets.size
                 deficit = SidePair(0, 0)
+                tiebreakDeficit = SidePair(0, 0)
                 saved = SidePair(false, false)
             }
             val flags = before.statusFlags
@@ -87,6 +90,11 @@ object MatchMoments {
                 val score = if (current.setKind == SetKind.REGULAR) current.games else null
                 val pair = score ?: current.points
                 deficit = SidePair.of { side -> maxOf(deficit[side], pair[side.other] - pair[side]) }
+                // Tiebreak im Standardsatz: Rückstand in Punkten, unabhängig von den Spielen
+                if (current.gameKind == GameKind.TIEBREAK) {
+                    val p = current.points
+                    tiebreakDeficit = SidePair.of { side -> maxOf(tiebreakDeficit[side], p[side.other] - p[side]) }
+                }
             }
             val against = matchPoint + setPoint
             if (winner.other in against && winner !in against) saved = saved.with(winner, true)
@@ -109,7 +117,8 @@ object MatchMoments {
             val matchWon = Effect.MATCH_WON in after.effects
             if (setWon) kinds += MomentKind.SET_WON
             if (matchWon) kinds += MomentKind.MATCH_WON
-            if (setWon && isComeback(current, deficit[winner], saved[winner])) kinds += MomentKind.COMEBACK
+            val tiebreakComeback = tiebreakDeficit[winner] >= COMEBACK_POINTS
+            if (setWon && (tiebreakComeback || isComeback(current, deficit[winner], saved[winner]))) kinds += MomentKind.COMEBACK
             if (matchWon && after.sets.firstOrNull()?.winner == winner.other) kinds += MomentKind.COMEBACK
             if (kinds.isEmpty()) return@forEachIndexed
 
