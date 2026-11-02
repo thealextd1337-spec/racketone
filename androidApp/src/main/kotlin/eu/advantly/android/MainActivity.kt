@@ -23,6 +23,7 @@ import eu.advantly.android.auth.googleCredential
 import eu.advantly.android.auth.phoneNotifications
 import eu.advantly.android.push.AndroidNotificationSettings
 import eu.advantly.android.push.pushTarget
+import eu.advantly.android.sync.LiveRelayService
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearCompanionDetector
@@ -274,7 +275,11 @@ class MainActivity : ComponentActivity() {
         // hier, damit ein Prüfergebnis nach onStart den Abgleich nachholt (der Lifecycle liefert ON_START nach).
         lifecycle.addObserver(
             object : DefaultLifecycleObserver {
-                override fun onStart(owner: LifecycleOwner) = foreground(this@MainActivity)
+                override fun onStart(owner: LifecycleOwner) {
+                    // Live-Übertragung: Ein im Hintergrund verbotener Dienststart gelingt jetzt.
+                    LiveRelayService.onForeground(applicationContext)
+                    foreground(this@MainActivity)
+                }
             },
         )
     }

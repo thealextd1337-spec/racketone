@@ -1,6 +1,7 @@
 package eu.advantly.android.sync
 
 import android.app.Application
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.job.JobInfo
 import android.app.job.JobParameters
 import android.app.job.JobScheduler
@@ -216,6 +217,30 @@ class PhoneSyncJobsTest {
         val late = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
         assertTrue(shadowOf(late.get()).isStoppedBySelf)
         late.destroy()
+    }
+
+    /** N5: Im Hintergrund verbotener Start wird nicht bei jedem Punkt wiederholt, erst im nächsten Vordergrund. */
+    @Test fun aForbiddenRelayStartWaitsForTheNextForeground() {
+        var starts = 0
+        val original = LiveRelayService.start
+        LiveRelayService.start = {
+            starts++
+            throw ForegroundServiceStartNotAllowedException("Hintergrund")
+        }
+        try {
+            LiveRelayService.update(app, true)
+            LiveRelayService.update(app, true)
+            LiveRelayService.update(app, true)
+            assertEquals("ein Versuch, keine Wiederholung je Zustand", 1, starts)
+            LiveRelayService.onForeground(app)
+            assertEquals("Vordergrund: erneut versuchen", 2, starts)
+            LiveRelayService.update(app, false)
+            LiveRelayService.onForeground(app)
+            assertEquals("nicht mehr gebraucht: kein Start", 2, starts)
+        } finally {
+            LiveRelayService.start = original
+            LiveRelayService.onForeground(app) // Sperre für andere Tests lösen (nicht gewünscht: kein Start)
+        }
     }
 
     /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */

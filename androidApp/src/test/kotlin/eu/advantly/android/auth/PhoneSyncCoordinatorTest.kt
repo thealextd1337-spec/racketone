@@ -2,7 +2,7 @@ package eu.advantly.android.auth
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import eu.advantly.android.sync.LiveRelayGate
+import eu.advantly.android.sync.liveRelayWanted
 import eu.advantly.android.sync.onLiveRelay
 import eu.advantly.android.sync.onLiveScore
 import eu.advantly.android.sync.onMatchFinished
@@ -869,17 +869,16 @@ class PhoneSyncCoordinatorTest {
         }
 
     /**
-     * Live-Übertragung im Vordergrund: nur solange die eigene Uhr ein laufendes Match mit Publikum zählt; Pause, Ende,
-     * Abgabe (hier: das Handy übernimmt) und Abmelden beenden sie, nach dem Senden verschwundene Zuschauer nicht.
+     * Live-Übertragung im Vordergrund: solange angemeldet und die eigene Uhr ein laufendes Match zählt – auch ohne
+     * lokal bekanntes Publikum (M6: am Server bestätigte Zuschauer kennt das Handy nicht). Pause, Ende, Abgabe (hier:
+     * das Handy übernimmt) und Abmelden beenden sie.
      */
-    @Test fun liveRelayRunsOnlyWhileMyWatchScoresARunningMatchWithAudience() =
+    @Test fun liveRelayRunsWhileMyWatchScoresARunningMatch() =
         runBlocking {
             val f = Fixture(this)
-            var audience = false
             var signedIn = true
             var running: Boolean? = null
-            val gate = LiveRelayGate { audience }
-            val remove = onLiveRelay(f.phone, gate, { signedIn }) { running = it }
+            val remove = onLiveRelay(f.phone, { signedIn }) { running = it }
             try {
                 val id =
                     f.phone.create(
@@ -887,34 +886,30 @@ class PhoneSyncCoordinatorTest {
                         Lineup(listOf(PlayerId("a")), listOf(PlayerId("b")), PlayerId("a")),
                         scorer = ScorerChoice.MyWatch,
                     )
-                assertEquals("ohne Publikum kein Dienst", false, running)
+                assertEquals("„Meine Uhr“ zählt, ohne verknüpfte Mitspieler oder Zuschauer", true, running)
                 val match =
                     checkNotNull(
                         f.phone.state.value
                             .match(id),
                     )
                 val watch: (ActiveMatch) -> Boolean = { true }
-                audience = true
-                assertTrue(gate.update(true, listOf(match), watch))
-                audience = false
-                assertTrue("Zuschauer gesendet und lokal vergessen: läuft weiter", gate.update(true, listOf(match), watch))
-                assertFalse("abgemeldet", gate.update(false, listOf(match), watch))
-                assertFalse("ohne Publikum kein Neustart", gate.update(true, listOf(match), watch))
-
-                audience = true
-                assertTrue(gate.update(true, listOf(match), watch))
+                assertTrue(liveRelayWanted(true, listOf(match), watch))
+                assertFalse("abgemeldet", liveRelayWanted(false, listOf(match), watch))
                 for (status in listOf(MatchStatus.PAUSED, MatchStatus.FINISHED)) {
-                    assertFalse(status.name, gate.update(true, listOf(match.copy(state = match.state.copy(status = status))), watch))
-                    assertTrue(gate.update(true, listOf(match), watch))
+                    val other = match.copy(state = match.state.copy(status = status))
+                    assertFalse(status.name, liveRelayWanted(true, listOf(other), watch))
                 }
-                assertFalse("Abgabe: die Uhr zählt nicht mehr", gate.update(true, listOf(match), { false }))
+                assertFalse("Abgabe: die Uhr zählt nicht mehr", liveRelayWanted(true, listOf(match), { false }))
 
-                // Über die Session: „Meine Uhr“ zählt → Dienst; das Handy übernimmt → kein Dienst
+                // Über die Session: abgemeldet → kein Dienst; „Meine Uhr“ zählt → Dienst; das Handy übernimmt → kein Dienst
+                signedIn = false
                 f.phone.setTelemetryVisibility(TelemetryVisibility.OFF) // irgendein neuer Session-Zustand
+                assertEquals(false, running)
+                signedIn = true
+                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
                 assertEquals(true, running)
                 assertTrue(f.phone.takeOverScoring(id))
                 assertEquals(false, running)
-                signedIn = false
             } finally {
                 remove()
                 f.close()

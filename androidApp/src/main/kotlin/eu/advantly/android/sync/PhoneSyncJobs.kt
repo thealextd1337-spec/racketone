@@ -14,7 +14,6 @@ import eu.advantly.android.auth.PhoneSyncScheduler
 import eu.advantly.android.auth.runScheduledSync
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
-import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
@@ -261,17 +260,7 @@ internal fun scheduleSyncAfterMatchEnd(
             }
         })
     val removeLive = onLiveScore(session, live, profile)
-    val audience = { match: ActiveMatch ->
-        AndroidInstallationGuard.storage(context) {
-            val account = session.data.accountIdentities.profile
-            account != null &&
-                (
-                    record.pending(account)[match.id.value].orEmpty().isNotEmpty() ||
-                        (match.lineup.a + match.lineup.b).any { session.data.players.friendProfile(account, it) != null }
-                )
-        } == true
-    }
-    val removeRelay = onLiveRelay(session, LiveRelayGate(audience), { profile() != null }) { LiveRelayService.update(context, it) }
+    val removeRelay = onLiveRelay(session, { profile() != null }) { LiveRelayService.update(context, it) }
     return {
         removeMatch()
         removeTelemetry()
@@ -283,20 +272,19 @@ internal fun scheduleSyncAfterMatchEnd(
 
 /**
  * Live-Übertragung im Vordergrund ([LiveRelayService]): nach jedem Session-Zustand neu bewerten, ob die eigene Uhr ein
- * laufendes Match mit Publikum zählt ([LiveRelayGate]); [run] startet bzw. beendet den Dienst.
+ * laufendes Match zählt ([liveRelayWanted]); [run] startet bzw. beendet den Dienst.
  */
 internal fun onLiveRelay(
     session: MatchSession,
-    gate: LiveRelayGate,
     signedIn: () -> Boolean,
     run: (Boolean) -> Unit,
 ): () -> Unit {
     val listener =
         SessionListener { state ->
             run(
-                gate.update(signedIn(), state.matches) {
-                    // Uhr zählt: „Meine Uhr“ vor ihrer Meldung oder eines meiner Geräte, aber nicht dieses Handy
-                    it.scorerDeviceId == MatchSession.PENDING_WATCH || (!it.isScorer && session.scoresHere(it.id))
+                liveRelayWanted(signedIn(), state.matches) {
+                    // Uhr zählt: eines meiner Geräte (auch „Meine Uhr“ vor ihrer Meldung), aber nicht dieses Handy
+                    !it.isScorer && session.scoresHere(it.id)
                 },
             )
         }
