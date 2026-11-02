@@ -148,7 +148,10 @@ class PhoneSyncJobsTest {
         assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
     }
 
-    /** Live-Stand: sofort bzw. nach der Drosselung, mit Netzbedingung; ein Backoff bleibt auch hier bestehen. */
+    /**
+     * Live-Stand: sofort als Expedited Job (läuft auch in Doze, Handy in der Tasche), nach der Drosselung als normaler
+     * Auftrag, beide mit Netzbedingung; ein Backoff bleibt auch hier bestehen.
+     */
     @Test fun liveUploadIsANetworkJobThatKeepsAnActiveBackoff() {
         val scheduler = AndroidPhoneSyncScheduler(app)
         val record = AndroidPhoneSyncRecord(app)
@@ -156,8 +159,11 @@ class PhoneSyncJobsTest {
         val job = jobs.getPendingJob(SYNC_JOB_ID)!!
         assertEquals(0L, job.minLatencyMillis)
         assertEquals(JobInfo.NETWORK_TYPE_ANY, job.networkType)
+        assertTrue(job.isExpedited)
+        assertEquals("alice", job.extras.getString(PROFILE_EXTRA))
         scheduler.scheduleUnlessBackingOff("alice", record, 6_000)
         assertEquals(6_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+        assertFalse(jobs.getPendingJob(SYNC_JOB_ID)!!.isExpedited)
 
         record.save("alice", null, 2)
         scheduler.schedule("alice", 60_000)

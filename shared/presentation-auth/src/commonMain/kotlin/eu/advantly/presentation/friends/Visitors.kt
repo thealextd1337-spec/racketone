@@ -127,8 +127,10 @@ class VisitorQueue(
 }
 
 /**
- * Live-Upload (plan-live-mitspieler §3.1, E2): Jedes laufende Match eines angemeldeten Kontos geht sofort beim ersten
- * Sehen hoch (Kopf, löst auch `match_shared` aus), danach nach jeder Zähländerung höchstens alle [intervalMs]. Ein
+ * Live-Upload (plan-live-mitspieler §3.1, E2): Jedes laufende Match eines angemeldeten Kontos, das dieses Gerät (oder
+ * seine Uhr) zählt, geht sofort beim ersten Sehen hoch (Kopf, löst auch `match_shared` aus), danach nach jeder
+ * Zähländerung höchstens alle [intervalMs]. Zählt ein anderes Konto (nach einer Übergabe), lösen gezogene Events
+ * keinen Upload aus – sonst stieße jeder Abgleich den nächsten an. Ein
  * geplanter Abgleich nimmt alle Änderungen bis zu seinem Lauf mit, deshalb plant eine Änderung davor nichts Neues.
  * [schedule] plant einen Abgleich nach der Wartezeit (Host: JobScheduler mit Netzbedingung, übersteht Doze).
  */
@@ -140,14 +142,18 @@ class LiveScoreUpload(
     private val counts = mutableMapOf<String, Int>()
     private var plannedAtMs: Long? = null
 
-    /** Stand eines laufenden Matches; nur ein neues Match oder eine geänderte [eventCount] zählt. */
+    /**
+     * Stand eines laufenden Matches; nur ein neues Match oder eine geänderte [eventCount] zählt, und nur, wenn eines
+     * meiner Geräte zählt ([scoring]).
+     */
     fun onScore(
         profileId: String?,
         matchId: String,
         eventCount: Int,
+        scoring: Boolean,
     ) {
         val previous = counts.put(matchId, eventCount)
-        if (profileId == null || previous == eventCount) return
+        if (profileId == null || !scoring || previous == eventCount) return
         val now = nowMs()
         val planned = plannedAtMs
         if (planned != null && planned > now) return
