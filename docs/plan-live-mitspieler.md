@@ -1,6 +1,6 @@
 # Plan: Mitspieler live, Push-Benachrichtigungen, Zählen weitergeben
 
-> Status: Entwurf 2026-11-02 · Bezug: [00 F16/F17/F25](00-entscheidungen.md), [03 §5.7](03-backend-datenmodell.md),
+> Status: in Umsetzung seit 2026-11-02 (Entscheidungen §6 nach Empfehlung angenommen) · Bezug: [00 F16/F17/F25](00-entscheidungen.md), [03 §5.7](03-backend-datenmodell.md),
 > [p2-plan §5.3/§11](p2-plan.md), Datenschutz-Entscheidung „Pulsdaten nur lokal“ ([plan-puls-highlights §10](plan-puls-highlights.md))
 
 ## 1. Ziel (Nutzerwunsch 02.11.2026)
@@ -162,3 +162,26 @@ auf Staging (siehe Release-Weg).
 | E7 | Firebase einbinden | ja (sonst kein Push auf Android) |
 | E8 | Uhr als Zuschauer | Wear OS jetzt, Apple Watch mit iOS-Konto |
 | E9 | Apple/APNs | zurückstellen bis Developer-Account |
+
+**Entschieden 02.11.2026:** E1–E9 wie empfohlen.
+
+## 7. Feste Bedingungen
+
+- **PR 0 umgesetzt** (`w11/p0-fremde-matches`): Ein Match eines anderen Kontos, das keines meiner Geräte zählt, wird nur
+  angezeigt (`MatchSession.openMatch` → `displayOnly`).
+- **Server-Regel vor jeder öffentlichen Veröffentlichung:** `private.can_take_over` erlaubt eine Übernahme nur dem
+  Ersteller, angenommenen Zähl-Rollen und der Turnierleitung, nicht mehr bloß verknüpften Mitspielern. Grund: Alte
+  App-Versionen und direkte API-Aufrufe umgehen die Prüfung in der App. Wird in PR 8 umgesetzt.
+
+## 8. Schnittstellen (gelten für alle Pakete)
+
+- `cloud_my_live_matches_v1() → jsonb[]`: je Eintrag `matchId`, `relation` (`player` | `visitor` | `scorer`), `sport`,
+  `discipline`, `participants` (Anzeigenamen, Team, Position), `projection` (bereinigt wie `visitor_view`),
+  `scorerConnected`, `updatedAt`. Nur laufende Matches, die sich in den letzten 12 h geändert haben.
+- `cloud_set_push_token_v1(provider text, token text|null) → void`: wirkt nur am gebundenen Gerät des Aufrufers;
+  `null` leert das Token.
+- Push-Nachricht (FCM data): `{"v":1,"kind":<art>,"matchId"?:uuid,"profileId"?:uuid,"role"?:"scorer"}`. Arten:
+  `friend_request`, `friend_accepted`, `player_assigned`, `match_shared`, `visitor_invited`, `scorer_invited`,
+  `scorer_responded`, `scorer_changed`.
+- Sync-Protokoll (Uhr): `LiveViewSubscription(v)` Uhr → Handy auf `/advantly/live/subscribe`;
+  `LiveViews(v, matches ≤ 5)` Handy → Uhr auf `/advantly/live/views`, höchstens 2 KB, ohne Telemetrie.
