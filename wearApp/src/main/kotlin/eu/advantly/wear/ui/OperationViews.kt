@@ -70,6 +70,8 @@ import eu.advantly.wear.live.OperationRules
 import eu.advantly.wear.live.ServeBarUi
 import eu.advantly.wear.live.StripAction
 import eu.advantly.wear.scoring.ActionStrip
+import eu.advantly.wear.scoring.ServePanel
+import eu.advantly.wear.scoring.ServePanelGeometry
 import eu.advantly.wear.scoring.StripGeometry
 
 /** Aktionen der W2-Bedienung (Punkt abziehen, Aufschlag-Leiste, Aufschlägerwahl, Satzende-Optionen). */
@@ -89,9 +91,10 @@ interface OperationActions {
 }
 
 /**
- * Inhalt der Aktionsleiste ([ActionStrip]) über dem Mittelband des Scores. Die Taps verteilt der Gesten-Handler des
- * Score-Screens (Segmente über [ActionStrip.segment]); hier nur Darstellung und TalkBack-Aktionen. Die sichtbare Leiste
- * ist [StripGeometry.visualHeight] hoch und [StripGeometry.width] breit (die Trefferzone ist etwas höher).
+ * Inhalt der Aktionsleiste ([ActionStrip]) über dem Mittelband des Scores: „Rückgängig“ nach „Punkt abziehen“ und
+ * „Aufschläger wählen“. Die Aufschlag-Auswahl hat ihre eigene Darstellung ([ServeButtons]). Die Taps verteilt der
+ * Gesten-Handler des Score-Screens; hier nur Darstellung und TalkBack-Aktionen. Die sichtbare Leiste ist
+ * [StripGeometry.visualHeight] hoch und [StripGeometry.width] breit (die Trefferzone ist etwas höher).
  */
 @Composable
 fun ActionStripContent(
@@ -104,67 +107,51 @@ fun ActionStripContent(
     val density = LocalDensity.current
     val strip = with(density) { modifier.size(geometry.width.toDp(), geometry.visualHeight.toDp()) }
     when (action) {
-        is StripAction.Serve -> ServeBar(action.bar, live.scoreCall ?: LiveModel.setsText(live.sets), geometry, actions, strip)
+        is StripAction.Serve -> Unit
         StripAction.UndoRemoval -> UndoRemovalStrip(actions, strip)
         StripAction.ChooseServer -> ChooseServerStrip(live, actions, strip)
     }
 }
 
 /**
- * Satzstand [sets] links, dann „2. Aufschlag · Doppelfehler“ (Modus „Ja“) bzw. „Doppelfehler“ – ausgeschriebene Labels
- * in großen Segmenten, gewählter Wert hell hinterlegt. Die Leiste liegt über dem Mittelband und zeigt dessen Sätze und
- * Games deshalb selbst (Spielstand bleibt sichtbar). Lage und Breite jedes Felds kommen aus [ActionStrip.segmentRanges] –
- * dieselben Bereiche nutzt die Trefferprüfung ([onStripTap]), Darstellung und Tap passen also exakt zusammen.
+ * Aufschlag-Auswahl nach dem Punkt (Plan 0.5.1 §4a): rechts große Tasten übereinander – „2. Aufschlag“ und
+ * „Doppelfehler“ (Modus „Ja“) bzw. nur „Doppelfehler“ –, gewählter Wert hell hinterlegt, unten die Restzeit. Lage und
+ * Größe jeder Taste kommen aus [ServePanel.geometry] – dieselben Flächen nutzt die Trefferprüfung ([onStripTap]).
+ * Der Spielstand steht währenddessen links (Score-Seite). Erwartet einen Container über den ganzen Screen.
  */
 @Composable
-private fun ServeBar(
+fun ServeButtons(
     bar: ServeBarUi,
-    sets: String,
-    geometry: StripGeometry,
+    geometry: ServePanelGeometry,
     actions: OperationActions,
-    modifier: Modifier,
 ) {
     val density = LocalDensity.current
-    val ranges = ActionStrip.segmentRanges(geometry, OperationRules.serveWeights(bar))
     val countdown = rememberServeCountdown(bar)
-
-    fun Modifier.at(range: ClosedFloatingPointRange<Float>) =
-        with(density) { offset(x = (range.start - geometry.left).toDp()).width((range.endInclusive - range.start).toDp()) }
-    // schwarz hinterlegt: darunter liegende Namenszeilen scheinen nicht durch die Lücken
-    Box(modifier = modifier.background(Color.Black, SEGMENT_SHAPE)) {
-        ranges.firstOrNull()?.let { range ->
-            Box(Modifier.at(range).fillMaxHeight().padding(horizontal = 2.dp), contentAlignment = Alignment.Center) {
-                val minSize = with(density) { ServeLabel.MIN_SP.dp.toSp() }
-                BasicText(
-                    sets,
-                    modifier = Modifier.testTag(LiveTags.SETS),
-                    style =
-                        LocalTextStyle.current.merge(
-                            TextStyle(color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 1.1.em),
-                        ),
-                    maxLines = 2,
-                    autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = ServeLabel.MAX_SP.sp, stepSize = 0.25.sp),
-                )
-            }
-        }
-        bar.options.zip(ranges.drop(1)).forEach { (outcome, range) ->
-            ServeSegment(
-                outcome = outcome,
-                selected = outcome == bar.selected,
-                countdown = countdown,
-                modifier =
-                    Modifier.at(range).fillMaxHeight().semantics(mergeDescendants = true) {
-                        role = Role.Button
-                        onClick { actions.setServe(outcome) }
-                    },
-            )
-        }
+    bar.options.zip(geometry.buttons).forEach { (outcome, rect) ->
+        val description = serveText(outcome)
+        ServeSegment(
+            outcome = outcome,
+            selected = outcome == bar.selected,
+            countdown = countdown,
+            text = servePanelText(outcome),
+            maxSp = ServeLabel.PANEL_MAX_SP,
+            modifier =
+                with(density) {
+                    Modifier
+                        .offset(x = rect.left.toDp(), y = rect.top.toDp())
+                        .size(rect.width.toDp(), rect.height.toDp())
+                }.semantics(mergeDescendants = true) {
+                    role = Role.Button
+                    contentDescription = description
+                    onClick { actions.setServe(outcome) }
+                },
+        )
     }
 }
 
 /**
- * Ein Segment der Aufschlag-Leiste: Langlabel („1. Aufschlag“, „Doppelfehler“) höchstens zweizeilig, die Schrift passt
- * sich der Segmentgröße an ([ServeLabel]) – auf kleinen runden Uhren und bei großer Systemschrift wird nichts abgeschnitten.
+ * Eine Aufschlag-Taste: Label [text] höchstens zweizeilig, die Schrift passt sich der Tastengröße an ([ServeLabel]) –
+ * auf kleinen runden Uhren und bei großer Systemschrift wird nichts abgeschnitten. Unten läuft die Restzeit.
  */
 @Composable
 private fun ServeSegment(
@@ -172,6 +159,8 @@ private fun ServeSegment(
     selected: Boolean,
     countdown: State<Float>,
     modifier: Modifier,
+    text: String = serveText(outcome),
+    maxSp: Float = ServeLabel.MAX_SP,
 ) {
     val barColor = if (selected) Color.Black.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.45f)
     Box(
@@ -185,11 +174,12 @@ private fun ServeSegment(
                     drawContent()
                     drawCountdown(countdown.value, barColor)
                     // unten Platz für den Restzeit-Balken: das Label bleibt frei lesbar
-                }.padding(start = 3.dp, end = 3.dp, top = 2.dp, bottom = COUNTDOWN_HEIGHT + COUNTDOWN_BOTTOM + 2.dp),
+                }.padding(start = 4.dp, end = 4.dp, top = 2.dp, bottom = COUNTDOWN_HEIGHT + COUNTDOWN_BOTTOM + 2.dp),
         contentAlignment = Alignment.Center,
     ) {
         ServeLabel(
-            outcome = outcome,
+            text = text,
+            maxSp = maxSp,
             color =
                 when {
                     selected -> Color.Black
@@ -200,15 +190,18 @@ private fun ServeSegment(
     }
 }
 
-/** Langlabel eines Aufschlag-Werts, zweizeilig an Leerzeichen, Schriftgröße automatisch zwischen [ServeLabel.MIN_SP] und [ServeLabel.MAX_SP]. */
+/**
+ * Label eines Aufschlag-Werts, Schriftgröße automatisch zwischen [ServeLabel.MIN_SP] und [maxSp]. Mit Zeilenumbruch im
+ * Text („Doppel-“ / „fehler“) stehen genau diese Zeilen da, sonst bricht es höchstens zweizeilig an Leerzeichen um.
+ */
 @Composable
 private fun ServeLabel(
-    outcome: ServeOutcome,
+    text: String,
+    maxSp: Float,
     color: Color,
 ) {
-    val text = serveText(outcome)
     // Untergrenze physisch (dp): bei großer Systemschrift darf das Label so klein werden wie bei normaler, statt
-    // abgeschnitten zu werden; nach oben wächst es mit der Systemschrift bis MAX_SP
+    // abgeschnitten zu werden; nach oben wächst es mit der Systemschrift bis maxSp
     val minSize = with(LocalDensity.current) { ServeLabel.MIN_SP.dp.toSp() }
     BasicText(
         text = text,
@@ -221,9 +214,10 @@ private fun ServeLabel(
                     lineHeight = 1.1.em,
                 ),
             ),
-        // nur an Leerzeichen umbrechen: ein Wort („Doppelfehler“) bleibt einzeilig und wird notfalls kleiner, nie getrennt
+        // ein Wort („Doppelfehler“) bleibt einzeilig und wird notfalls kleiner, nie mitten im Wort getrennt
+        softWrap = !ServeLabel.hasFixedLines(text),
         maxLines = ServeLabel.maxLines(text),
-        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = ServeLabel.MAX_SP.sp, stepSize = 0.25.sp),
+        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = maxSp.sp, stepSize = 0.25.sp),
     )
 }
 
@@ -286,18 +280,32 @@ private val COUNTDOWN_HEIGHT = 2.dp
 private val COUNTDOWN_INSET = 8.dp
 private val COUNTDOWN_BOTTOM = 3.dp
 
-/** Schriftgrenzen und Zeilen der Aufschlag-Labels: [MIN_SP] als dp (unabhängig von der Systemschrift), [MAX_SP] in sp. */
+/**
+ * Schriftgrenzen und Zeilen der Aufschlag-Labels: [MIN_SP] als dp (unabhängig von der Systemschrift), [MAX_SP]
+ * (Satzende-Liste) und [PANEL_MAX_SP] (große Tasten neben dem Spielstand) in sp.
+ */
 object ServeLabel {
     const val MIN_SP = 8f
-    const val MAX_SP = 13f
+    const val MAX_SP = 18f
+    const val PANEL_MAX_SP = 22f
 
-    /** Höchstens zwei Zeilen, aber nie mehr als Wörter – sonst würde ein einzelnes Wort mitten im Wort umbrechen. */
+    /** Der Text gibt seine Zeilen selbst vor („Doppel-“ / „fehler“): dann nur dort umbrechen. */
+    fun hasFixedLines(text: String): Boolean = '\n' in text
+
+    /**
+     * Feste Zeilen: genau so viele; sonst höchstens zwei, aber nie mehr als Wörter – sonst würde ein einzelnes Wort
+     * mitten im Wort umbrechen.
+     */
     fun maxLines(text: String): Int =
-        text
-            .trim()
-            .split(' ')
-            .count { it.isNotEmpty() }
-            .coerceIn(1, 2)
+        if (hasFixedLines(text)) {
+            text.trim().lines().size
+        } else {
+            text
+                .trim()
+                .split(' ')
+                .count { it.isNotEmpty() }
+                .coerceIn(1, 2)
+        }
 }
 
 /** „Punkt abgezogen · RÜCKGÄNGIG“ – die ganze Leiste ist die Schaltfläche (Redo). */
@@ -364,9 +372,8 @@ private fun ChooseServerStrip(
 }
 
 /**
- * Aufschlag-Leiste als Listeneintrag (Satzende-/Matchende-Seite): dieselben Segmente mit Langlabels wie im Score, hier
- * als normale Schaltflächen in zwei Zeilen – „1. Aufschlag · 2. Aufschlag“, darunter „Doppelfehler“ über die volle
- * Breite. So bleibt jedes Label einzeilig groß lesbar, auch wenn die Liste am runden Rand schmaler wird.
+ * Aufschlag-Auswahl als Listeneintrag (Satzende-/Matchende-Seite): je Wert eine Taste über die volle Breite, mindestens
+ * [CHIP_HEIGHT] hoch, Label einzeilig groß ([ServeLabel.MAX_SP]) – auch wenn die Liste am runden Rand schmaler wird.
  */
 @Composable
 fun ServeChips(
@@ -380,26 +387,19 @@ fun ServeChips(
     ) {
         Text(stringResource(R.string.serve_bar_title), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         val countdown = rememberServeCountdown(bar)
-        bar.options.chunked(2).forEach { row ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(ActionStrip.SEGMENT_GAP_DP.dp),
-                modifier = Modifier.fillMaxWidth().height(CHIP_HEIGHT),
-            ) {
-                row.forEach { outcome ->
-                    ServeSegment(
-                        outcome = outcome,
-                        selected = outcome == bar.selected,
-                        countdown = countdown,
-                        modifier =
-                            Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(SEGMENT_SHAPE)
-                                .clickable(role = Role.Button) { actions.setServe(outcome) }
-                                .semantics(mergeDescendants = true) {},
-                    )
-                }
-            }
+        bar.options.forEach { outcome ->
+            ServeSegment(
+                outcome = outcome,
+                selected = outcome == bar.selected,
+                countdown = countdown,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .height(CHIP_HEIGHT)
+                        .clip(SEGMENT_SHAPE)
+                        .clickable(role = Role.Button) { actions.setServe(outcome) }
+                        .semantics(mergeDescendants = true) {},
+            )
         }
     }
 }
@@ -437,19 +437,23 @@ private val PILL = RoundedCornerShape(50)
 private val SEGMENT_SHAPE = RoundedCornerShape(12.dp)
 private val SegmentGray = Color(0xFF2A2F38)
 private val CHIP = 44.dp
-private val CHIP_HEIGHT = 44.dp
+private val CHIP_HEIGHT = 56.dp
 
-/** Tap auf die Aktionsleiste an [x] (px): Segment der Aufschlag-Leiste, Redo bzw. Auswahl öffnen. */
+/**
+ * Tap auf die Aktionsleiste bzw. Aufschlag-Auswahl an [x]/[y] (px): Taste der Aufschlag-Auswahl ([serve], dieselbe
+ * Geometrie wie [ServeButtons]), Redo bzw. Auswahl öffnen.
+ */
 fun onStripTap(
     action: StripAction,
     x: Float,
-    geometry: StripGeometry,
+    y: Float,
+    serve: ServePanelGeometry?,
     actions: LiveActions,
 ) {
     when (action) {
         is StripAction.Serve -> {
-            ActionStrip
-                .segment(x, geometry, OperationRules.serveWeights(action.bar))
+            serve
+                ?.let { ServePanel.button(x, y, it) }
                 ?.let { OperationRules.serveOption(action.bar, it) }
                 ?.let { actions.setServe(it) }
         }

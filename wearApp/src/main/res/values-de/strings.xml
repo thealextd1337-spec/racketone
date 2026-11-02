@@ -217,6 +217,8 @@
     <string name="serve_first_in">1. Aufschlag</string>
     <string name="serve_second_in">2. Aufschlag</string>
     <string name="serve_double_fault">Doppelfehler</string>
+    <string name="serve_panel_second_in">2. Auf-\nschlag</string>
+    <string name="serve_panel_double_fault">Doppel-\nfehler</string>
     <string name="server_choice_title_game1">Wer schlägt auf?</string>
     <string name="server_choice_title_game2_us">Wer schlägt bei uns auf?</string>
     <string name="server_choice_title_game2_them">Wer schlägt bei den Gegnern auf?</string>

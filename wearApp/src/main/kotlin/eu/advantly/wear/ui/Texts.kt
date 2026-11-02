@@ -393,6 +393,15 @@ fun serveText(outcome: ServeOutcome): String =
         },
     )
 
+/** Aufschlag-Wert als große Taste: zwei Zeilen mit fester Trennstelle („2. Auf-“ / „schlag“, „Doppel-“ / „fehler“). */
+@Composable
+fun servePanelText(outcome: ServeOutcome): String =
+    when (outcome) {
+        ServeOutcome.FIRST_SERVE_IN -> serveText(outcome)
+        ServeOutcome.SECOND_SERVE_IN -> stringResource(R.string.serve_panel_second_in)
+        ServeOutcome.DOUBLE_FAULT -> stringResource(R.string.serve_panel_double_fault)
+    }
+
 /** Satzende-Option (02 §5.2): normaler Satz, Tiebreak bis 7, Champions- bzw. (Padel) Super-Tiebreak bis 10. */
 @Composable
 fun nextSetText(

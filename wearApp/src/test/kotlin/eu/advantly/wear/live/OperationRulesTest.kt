@@ -191,14 +191,12 @@ class OperationRulesTest {
     }
 
     @Test
-    fun serveOptionMapsSegments() {
+    fun serveOptionMapsButtonsFromTop() {
         val bar = ServeBarUi(EventId("p"), listOf(ServeOutcome.SECOND_SERVE_IN, ServeOutcome.DOUBLE_FAULT), null)
-        // Feld 0 = Satzstand (nicht antippbar), dann die Werte
-        assertEquals(listOf(OperationRules.SETS_WEIGHT, 1f, OperationRules.DOUBLE_FAULT_WEIGHT), OperationRules.serveWeights(bar))
-        assertNull(OperationRules.serveOption(bar, 0))
-        assertEquals(ServeOutcome.SECOND_SERVE_IN, OperationRules.serveOption(bar, 1))
-        assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveOption(bar, 2))
-        assertNull(OperationRules.serveOption(bar, 3))
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, OperationRules.serveOption(bar, 0))
+        assertEquals(ServeOutcome.DOUBLE_FAULT, OperationRules.serveOption(bar, 1))
+        assertNull(OperationRules.serveOption(bar, 2))
+        assertNull(OperationRules.serveOption(bar, -1))
     }
 
     @Test

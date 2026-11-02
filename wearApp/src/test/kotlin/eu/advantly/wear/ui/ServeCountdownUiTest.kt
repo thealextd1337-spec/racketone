@@ -127,6 +127,8 @@ class ServeCountdownUiTest {
                 R.string.serve_first_in,
                 R.string.serve_second_in,
                 R.string.serve_double_fault,
+                R.string.serve_panel_second_in,
+                R.string.serve_panel_double_fault,
             ).map(RuntimeEnvironment.getApplication()::getString)
         val values =
             labels.mapNotNull { label ->

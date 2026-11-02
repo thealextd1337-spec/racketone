@@ -224,6 +224,8 @@
     <string name="serve_first_in">1st serve</string>
     <string name="serve_second_in">2nd serve</string>
     <string name="serve_double_fault">Double fault</string>
+    <string name="serve_panel_second_in">2nd\nserve</string>
+    <string name="serve_panel_double_fault">Double\nfault</string>
     <string name="server_choice_title_game1">Who serves first?</string>
     <string name="server_choice_title_game2_us">Who serves for us?</string>
     <string name="server_choice_title_game2_them">Who serves for the opponents?</string>
