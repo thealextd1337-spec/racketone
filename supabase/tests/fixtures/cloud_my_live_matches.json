@@ -1,0 +1,75 @@
+[
+  {
+    "sport": "tennis",
+    "matchId": "a9500000-0000-7000-8000-000000000001",
+    "relation": "player",
+    "updatedAt": "2026-11-02T12:00:05+01:00",
+    "discipline": "singles",
+    "projection": {
+      "sets": [
+        [
+          6,
+          4
+        ]
+      ],
+      "games": [
+        2,
+        1
+      ],
+      "flags": [],
+      "points": [
+        "30",
+        "15"
+      ],
+      "status": "in_progress",
+      "serving": "A",
+      "tiebreak": false,
+      "updatedAtMs": 1793617205000,
+      "scorerConnected": true
+    },
+    "participants": [
+      {
+        "name": "Alice",
+        "team": "A",
+        "position": 1
+      },
+      {
+        "name": "Max",
+        "team": "B",
+        "position": 1
+      }
+    ],
+    "scorerConnected": true
+  },
+  {
+    "sport": "padel",
+    "matchId": "a9500000-0000-7000-8000-000000000002",
+    "relation": "visitor",
+    "updatedAt": "2026-11-02T11:58:40+01:00",
+    "discipline": "doubles",
+    "projection": null,
+    "participants": [
+      {
+        "name": "Alice",
+        "team": "A",
+        "position": 1
+      },
+      {
+        "name": "Bob",
+        "team": "A",
+        "position": 2
+      },
+      {
+        "name": "Max",
+        "team": "B",
+        "position": 1
+      },
+      {
+        "name": "Vera",
+        "team": "B",
+        "position": 2
+      }
+    ],
+    "scorerConnected": false
+  }
+]

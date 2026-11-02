@@ -94,6 +94,30 @@ class VisitorsHttpTest {
             assertEquals(JsonObject(mapOf("p_match_id" to JsonPrimitive("m1"))), calls[2].body)
         }
 
+    @Test fun liveMatchesUseBoundSessionOfTheExpectedAccount(): Unit =
+        runBlocking {
+            var reply =
+                """[{"matchId":"m9","relation":"player","sport":"tennis","discipline":"singles",
+                   "participants":[{"team":"A","position":1,"name":"Bob"}],"projection":{"points":["30","15"],"serving":"A"},
+                   "scorerConnected":true,"updatedAt":"2026-11-02T12:00:05Z"}]""" to HttpStatusCode.OK
+            val (backend, calls) = backend { reply }
+            assertEquals("device_not_authorized", assertFailsWith<CloudException> { backend.liveMatches("alice") }.reason)
+            backend.bindDevice("phone")
+            assertEquals("cloud_session_changed", assertFailsWith<CloudException> { backend.liveMatches("bob") }.reason)
+            assertTrue(calls.isEmpty())
+            val live = backend.liveMatches("alice").single()
+            assertEquals(listOf("m9", "player", "Bob"), listOf(live.matchId, live.relation, live.participants.single().name))
+            assertTrue(live.scorerConnected)
+            assertEquals("rpc/cloud_my_live_matches_v1", calls.single().path)
+            assertEquals(JsonObject(emptyMap()), calls.single().body)
+            assertEquals("Bearer token-a", calls.single().bearer)
+
+            reply = """[{"matchId":"","relation":"player","sport":"tennis","discipline":"singles","updatedAt":"x"}]""" to HttpStatusCode.OK
+            assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.liveMatches("alice") }.reason)
+            reply = """{"code":"P0001","message":"consent_required"}""" to HttpStatusCode.BadRequest
+            assertEquals("consent_required", assertFailsWith<CloudException> { backend.liveMatches("alice") }.reason)
+        }
+
     @Test fun serverErrorsSessionChangeAndBlankIdsAreStableReasons(): Unit =
         runBlocking {
             var reply = """{"code":"P0001","message":"visitor_must_be_friend"}""" to HttpStatusCode.BadRequest
