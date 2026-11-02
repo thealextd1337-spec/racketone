@@ -1,4 +1,9 @@
-import { BATCH_LIMIT, handler } from "./handler.ts";
+import {
+  BATCH_LIMIT,
+  BUDGET_MS,
+  handler,
+  SEND_DEADLINE_MS,
+} from "./handler.ts";
 import { fcm, type Send } from "./fcm.ts";
 import { type Backend, backend } from "../export-my-data/backend.ts";
 
@@ -96,7 +101,7 @@ Deno.test("dispatch sends data-only strings and acknowledges every entry with it
         role: "scorer",
       }),
   );
-  assert(JSON.stringify(log[0]) === '["claim_push_batch_v1",{"p_limit":20}]');
+  assert(JSON.stringify(log[0]) === '["claim_push_batch_v1",{"p_limit":10}]');
   assert(
     JSON.stringify(log[1]) ===
       '["ack_push_batch_v1",{"p_results":[' +
@@ -125,7 +130,8 @@ Deno.test("dispatch claims again after a full batch and stops at the time budget
     () => send,
     () => clock,
   )(req());
-  // 20 Sends je Batch = 20 s > Budget: nach dem ersten Batch kein weiterer Claim.
+  // 10 Sends je Batch = 10 s ≥ Budget: nach dem ersten Batch kein weiterer Claim.
+  assert(BATCH_LIMIT * 1_000 >= BUDGET_MS);
   assert(log.length === 2);
   clock = 0;
   log.length = 0;
@@ -136,6 +142,38 @@ Deno.test("dispatch claims again after a full batch and stops at the time budget
     () => clock,
   )(req());
   assert(log.length === 4);
+});
+
+Deno.test("dispatch starts no send round after the deadline and acknowledges the rest as deadline", async () => {
+  // 10 Einträge mit je 3 Zielen = 3 Runden à 10 s; die dritte begänne nach der Frist.
+  const batch = Array.from({ length: BATCH_LIMIT }, (_, i) => ({
+    id: i,
+    message,
+    targets: [0, 1, 2].map((t) => ({
+      deviceId: `d${i}-${t}`,
+      provider: "fcm",
+      token: `t${i}-${t}`,
+    })),
+  }));
+  const log: unknown[] = [];
+  let clock = 0;
+  const response = await handler(
+    () => fakeBackend([batch], log),
+    () => secret,
+    () => () => {
+      clock += 1_000;
+      return Promise.resolve("sent");
+    },
+    () => clock,
+  )(req());
+  const body = await response.json();
+  assert(2 * 10_000 > SEND_DEADLINE_MS && 10_000 < SEND_DEADLINE_MS);
+  assert(body.sent === 20 && body.error === 10, JSON.stringify(body));
+  const acked = (log[1] as [string, { p_results: { error?: string }[] }])[1]
+    .p_results;
+  assert(acked.length === 30);
+  assert(acked.slice(20).every((r) => r.error === "deadline"));
+  assert(log.length === 2, "no further claim after the deadline");
 });
 
 Deno.test("dispatch reports a failed claim without acknowledging", async () => {

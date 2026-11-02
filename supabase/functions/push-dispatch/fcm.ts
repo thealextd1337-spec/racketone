@@ -87,7 +87,7 @@ export function fcm(
     const assertion = await signJwt(account!, Math.floor(now() / 1000));
     const response = await fetch(account!.token_uri, {
       method: "POST",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(4_000),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -118,7 +118,7 @@ export function fcm(
     try {
       const response = await fetch(url, {
         method: "POST",
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(4_000),
         headers: {
           Authorization: `Bearer ${await accessToken()}`,
           "Content-Type": "application/json",
