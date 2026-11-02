@@ -17,7 +17,6 @@ import android.os.PowerManager
 import eu.advantly.android.MainActivity
 import eu.advantly.android.R
 import eu.advantly.android.auth.runScheduledSync
-import eu.advantly.core.model.MatchId
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.match.session.ActiveMatch
 import kotlinx.coroutines.CoroutineScope
@@ -27,41 +26,28 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Welche Matches die Live-Übertragung brauchen (plan-live-mitspieler §3.1, Doze): laufend (nicht pausiert/beendet), die
- * eigene Uhr zählt, und beim Eintritt gibt es Publikum ([audience]: verknüpfte Mitspieler oder vorgemerkte Zuschauer).
- * Ein aufgenommenes Match bleibt, bis es endet, pausiert, abgegeben wird oder nicht mehr die Uhr zählt – vorgemerkte
- * Zuschauer verschwinden nach dem Senden aus dem lokalen Speicher.
+ * Braucht es die Live-Übertragung (plan-live-mitspieler §3.1, Doze)? Angemeldet und die eigene Uhr zählt ein laufendes
+ * (nicht pausiertes oder beendetes) Match. Ohne Bedingung auf Publikum: Hochgeladen wird jedes laufende Match ohnehin
+ * ([onLiveScore]), und Zuschauer kommen meist erst während des Matches direkt am Server dazu – bestätigte kennt das
+ * Handy nicht, eine Publikumsprüfung verpasste sie also.
  */
-internal class LiveRelayGate(
-    private val audience: (ActiveMatch) -> Boolean,
-) {
-    private val relayed = HashSet<MatchId>()
+internal fun liveRelayWanted(
+    signedIn: Boolean,
+    matches: List<ActiveMatch>,
+    watchScores: (ActiveMatch) -> Boolean,
+) = signedIn && matches.any { it.state.status in RELAY_STATUSES && watchScores(it) }
 
-    /** `true`: Der Vordergrunddienst soll laufen. */
-    fun update(
-        signedIn: Boolean,
-        matches: List<ActiveMatch>,
-        watchScores: (ActiveMatch) -> Boolean,
-    ): Boolean {
-        val live =
-            if (signedIn) matches.filter { it.state.status in RUNNING && watchScores(it) } else emptyList()
-        relayed.retainAll(live.mapTo(HashSet()) { it.id })
-        live.forEach { if (it.id !in relayed && audience(it)) relayed += it.id }
-        return relayed.isNotEmpty()
-    }
-
-    private companion object {
-        val RUNNING = setOf(MatchStatus.IN_PROGRESS, MatchStatus.AWAITING_DECISION)
-    }
-}
+private val RELAY_STATUSES = setOf(MatchStatus.IN_PROGRESS, MatchStatus.AWAITING_DECISION)
 
 /**
- * Vordergrunddienst (Typ `connectedDevice`) „Live-Stand wird übertragen“, solange die eigene Uhr ein Match mit Publikum
- * zählt: Im Doze sind Netz und Jobs gesperrt, Expedited Jobs haben nur eine kleine Tagesquote. Ein Prozess mit
- * Vordergrunddienst hat Netz und Wakelocks auch im Doze; der Upload läuft deshalb direkt hier statt über JobScheduler.
+ * Vordergrunddienst (Typ `connectedDevice`) „Live-Stand wird übertragen“, solange die eigene Uhr ein laufendes Match
+ * zählt ([liveRelayWanted]): Im Doze sind Netz und Jobs gesperrt, Expedited Jobs haben nur eine kleine Tagesquote. Ein
+ * Prozess mit Vordergrunddienst hat Netz und Wakelocks auch im Doze; der Upload läuft deshalb direkt hier statt über
+ * JobScheduler.
  *
  * Android 12+ erlaubt den Start nur aus dem Vordergrund (z. B. Match am Handy gestartet oder App geöffnet). Scheitert
- * er, bleibt es beim Expedited Job; der nächste Zustandswechsel versucht es erneut. Aufrufe auf Main.
+ * er, bleibt es beim Expedited Job, bis die App wieder in den Vordergrund kommt ([onForeground]) – nicht bei jedem
+ * Punkt erneut. Aufrufe auf Main.
  */
 class LiveRelayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -160,6 +146,12 @@ class LiveRelayService : Service() {
             private set
         private var wanted = false
 
+        /** Start im Hintergrund verboten: erst im nächsten Vordergrund erneut versuchen. */
+        private var startBlocked = false
+
+        /** Testnaht; im Produkt immer `startForegroundService`. */
+        internal var start: (Context) -> Unit = { it.startForegroundService(Intent(it, LiveRelayService::class.java)) }
+
         /** Dienst starten bzw. beenden ([run]); ein im Hintergrund verbotener Start fällt still auf Jobs zurück. */
         fun update(
             context: Context,
@@ -171,14 +163,21 @@ class LiveRelayService : Service() {
                 running?.stop()
                 return
             }
-            if (running != null) return
+            if (running != null || startBlocked) return
             try {
-                context.startForegroundService(Intent(context, LiveRelayService::class.java))
+                start(context)
             } catch (e: IllegalStateException) {
                 // Android 12+: ForegroundServiceStartNotAllowedException (ist eine IllegalStateException), ältere
                 // Versionen: Hintergrundstart von Diensten verboten
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e !is ForegroundServiceStartNotAllowedException) throw e
+                startBlocked = true
             }
+        }
+
+        /** App im Vordergrund (Activity `ON_START`): Ein zuvor verbotener Start darf jetzt gelingen. */
+        fun onForeground(context: Context) {
+            startBlocked = false
+            if (wanted) update(context, true)
         }
 
         /** Upload über den laufenden Dienst; `false`: kein Dienst, der Aufrufer plant einen Job. */

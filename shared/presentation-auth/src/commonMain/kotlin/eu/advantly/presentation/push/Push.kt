@@ -136,10 +136,17 @@ class PushRegistration(
             quietly { upload() }
         }
 
-    /** Ausschalten, Abmelden, Löschantrag. */
-    suspend fun disable() =
+    /**
+     * Ausschalten, Abmelden, Löschantrag. Nach Abmelden oder Löschantrag ([signedOut]) bleibt Push aus, der einmalige
+     * Hinweis erscheint nach erneuter Anmeldung aber wieder.
+     */
+    suspend fun disable(signedOut: Boolean = false) =
         mutex.withLock {
             setEnabled(false)
+            if (signedOut) {
+                prefs.hintDone = false
+                mutableHint.value = true
+            }
             quietly { clear() }
         }
 

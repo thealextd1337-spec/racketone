@@ -3,7 +3,7 @@
 -- scorer_changed nur bei Kontowechsel in laufenden Matches, Widerruf durch Blockieren und Entfreunden, verspätete Events
 -- nach Widerruf.
 begin;
-select plan(44);
+select plan(45);
 
 select tests.world();
 select tests.publish_consent_documents();
@@ -53,6 +53,8 @@ select is((select r ->> 'deviceId' from jsonb_array_elements(public.sync_pull(0)
 select lives_ok($$ select public.invite_scorer('a4200000-0000-7000-8000-000000000001', tests.uid('vera')) $$,
                 'alice bittet auch vera zu zählen');
 select tests.authenticate_as('vera');
+select throws_ok($$ select public.respond_scorer_invitation('a4200000-0000-7000-8000-000000000001', true) $$,
+                 'P0001', 'device_required', 'Annahme ohne Gerät abgelehnt, Einladung bleibt offen');
 select lives_ok($$ select public.respond_scorer_invitation('a4200000-0000-7000-8000-000000000001', true, tests.device('e1')) $$,
                 'vera nimmt an');
 select is((select string_agg((r ->> 'profileId') || '=' || coalesce(r ->> 'deviceId', '-'), ',' order by r ->> 'profileId')
@@ -94,7 +96,7 @@ select is((select r ->> 'deviceId' || '/' || (r ->> 'status') from jsonb_array_e
 select throws_ok($$ select public.respond_scorer_invitation('a4200000-0000-7000-8000-000000000001', false) $$,
                  'P0001', 'no_pending_invitation', 'angenommene Rolle wird nicht per Ablehnung zurückgegeben');
 select throws_ok($$ select public.respond_scorer_invitation('a4200000-0000-7000-8000-000000000001', true) $$,
-                 'P0001', 'no_pending_invitation', 'erneute Annahme ohne Gerät abgelehnt');
+                 'P0001', 'device_required', 'erneute Annahme ohne Gerät abgelehnt');
 reset role;
 select is((select device_id from public.match_roles where profile_id = tests.uid('bob')), tests.device('b2'),
           'Gerätebindung bleibt erhalten');

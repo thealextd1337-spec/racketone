@@ -1,6 +1,7 @@
 package eu.advantly.android.sync
 
 import android.app.Application
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.job.JobInfo
 import android.app.job.JobParameters
 import android.app.job.JobScheduler
@@ -9,6 +10,7 @@ import android.content.Context
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
 import eu.advantly.presentation.friends.AcceptIssue
+import eu.advantly.presentation.friends.EventOrder
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.ScorerAccept
 import eu.advantly.presentation.friends.ScorerInvite
@@ -135,15 +137,15 @@ class PhoneSyncJobsTest {
         val accepts =
             mapOf(
                 "m1" to ScorerAccept("jonas-watch", 1_700_000_000_000),
-                "m2" to ScorerAccept("jonas-phone", 5, changes = 2, issue = AcceptIssue.FELL_BACK),
+                "m2" to ScorerAccept("jonas-phone", 5, EventOrder(12, "alex-watch"), AcceptIssue.FELL_BACK),
             )
         record.setScorerAccepts("jonas", accepts)
-        record.setScorerAccepts("bob", mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)))
+        record.setScorerAccepts("bob", mapOf("m9" to ScorerAccept("bob-phone", 7, EventOrder.START, AcceptIssue.TIMED_OUT)))
         val reopened = AndroidPhoneSyncRecord(app)
         assertEquals(accepts, reopened.scorerAccepts("jonas"))
         record.forget("jonas")
         assertEquals(emptyMap<String, ScorerAccept>(), reopened.scorerAccepts("jonas"))
-        assertEquals(mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)), reopened.scorerAccepts("bob"))
+        assertEquals(mapOf("m9" to ScorerAccept("bob-phone", 7, EventOrder.START, AcceptIssue.TIMED_OUT)), reopened.scorerAccepts("bob"))
     }
 
     /** P3-3: Ein Matchende plant nach 10 s, verkürzt aber keinen aktiven Backoff. */
@@ -215,6 +217,30 @@ class PhoneSyncJobsTest {
         val late = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
         assertTrue(shadowOf(late.get()).isStoppedBySelf)
         late.destroy()
+    }
+
+    /** N5: Im Hintergrund verbotener Start wird nicht bei jedem Punkt wiederholt, erst im nächsten Vordergrund. */
+    @Test fun aForbiddenRelayStartWaitsForTheNextForeground() {
+        var starts = 0
+        val original = LiveRelayService.start
+        LiveRelayService.start = {
+            starts++
+            throw ForegroundServiceStartNotAllowedException("Hintergrund")
+        }
+        try {
+            LiveRelayService.update(app, true)
+            LiveRelayService.update(app, true)
+            LiveRelayService.update(app, true)
+            assertEquals("ein Versuch, keine Wiederholung je Zustand", 1, starts)
+            LiveRelayService.onForeground(app)
+            assertEquals("Vordergrund: erneut versuchen", 2, starts)
+            LiveRelayService.update(app, false)
+            LiveRelayService.onForeground(app)
+            assertEquals("nicht mehr gebraucht: kein Start", 2, starts)
+        } finally {
+            LiveRelayService.start = original
+            LiveRelayService.onForeground(app) // Sperre für andere Tests lösen (nicht gewünscht: kein Start)
+        }
     }
 
     /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */

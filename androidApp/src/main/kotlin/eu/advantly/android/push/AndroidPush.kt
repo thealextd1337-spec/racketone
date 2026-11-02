@@ -16,6 +16,7 @@ import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
 import eu.advantly.android.MainActivity
 import eu.advantly.android.R
+import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.data.AndroidInstallationGuard
@@ -207,14 +208,23 @@ internal fun deliverPush(
             local?.let { (_, friends) -> friends[actor] }
         }
     showPush(app, message, name)
-    local?.first?.let { AndroidPhoneSyncScheduler(app).schedule(it, 0) }
+    local?.first?.let { syncSoon(app, it) }
 }
 
 /** Neues Token: der nächste Abgleich lädt es hoch (PushRegistration.sync nach jedem Lauf). */
 internal fun requestPushSync(context: Context) {
     val app = context.applicationContext
-    localAccount(app)?.first?.let { AndroidPhoneSyncScheduler(app).schedule(it, 0) }
+    localAccount(app)?.first?.let { syncSoon(app, it) }
 }
+
+/**
+ * Abgleich zeitnah als Expedited Job (läuft auch im Doze; ein Push öffnet dafür ein kurzes Fenster), ein aktiver
+ * Backoff bleibt bestehen (offline, gestört: kein Hämmern).
+ */
+internal fun syncSoon(
+    app: Context,
+    profile: String,
+) = AndroidPhoneSyncScheduler(app).scheduleUnlessBackingOff(profile, AndroidPhoneSyncRecord(app), 0)
 
 /** Lokales Konto und Aliase der Freunde; `null` ohne geprüfte Installation oder ohne Konto. */
 private fun localAccount(app: Context): Pair<String, Map<String, String?>>? {

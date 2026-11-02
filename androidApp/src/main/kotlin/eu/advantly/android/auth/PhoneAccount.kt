@@ -21,7 +21,6 @@ import eu.advantly.android.push.FirebaseTokens
 import eu.advantly.android.sync.AccountLiveViews
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
-import eu.advantly.android.sync.PhoneLiveViews
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.PhoneAuthStorage
@@ -45,9 +44,9 @@ import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
-import eu.advantly.presentation.push.NotificationSettingsPort
 import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
+import eu.advantly.sync.protocol.LiveView
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
@@ -57,6 +56,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -139,7 +141,7 @@ internal class PhoneAccountPort(
     override suspend fun signOut() {
         val profile = auth.accountSession.value?.profileId
         // Ohne Netz nicht aufhalten: bleibt das Server-Token, meldet FCM es nach deleteToken als ungültig.
-        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable() } }
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable(signedOut = true) } }
         // Die lokale Sitzung endet auch bei Netzfehler oder Abbruch (SupabasePhoneAuth.signOut).
         try {
             auth.signOut()
@@ -152,7 +154,7 @@ internal class PhoneAccountPort(
         val profile = auth.accountSession.value?.profileId
         auth.requestDeletion()
         profile?.let(record::forget)
-        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable() } }
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable(signedOut = true) } }
     }
 
     override fun close() {
@@ -215,6 +217,9 @@ internal class PhoneAccountCore private constructor(
             }, storageAction = runtime::storageAction, telemetry = backend)
         }
     private val syncScheduler = AndroidPhoneSyncScheduler(context)
+
+    /** Jeder beendete Lauf; verarbeitet erst nach dem Aufbau ([init], [afterEachRun]). */
+    private val runEnded = Channel<Unit>(Channel.CONFLATED)
     val sync =
         PhoneSyncCoordinator(
             auth,
@@ -226,6 +231,7 @@ internal class PhoneAccountCore private constructor(
             runtime.scope,
             hostAccessAllowed = { runtime.allowed },
             storageAction = runtime::storageAction,
+            onRunEnded = { runEnded.trySend(Unit) },
         )
 
     /**
@@ -337,6 +343,16 @@ internal class PhoneAccountCore private constructor(
     /** Profilprüfung über das zuletzt erzeugte Konto-ViewModel; ohne ViewModel prüft geplante Arbeit selbst. */
     var refreshAccount: (() -> Unit)? = null
 
+    /**
+     * Uhr-Zuschauen (plan-live-mitspieler §3.2), auch wenn die Uhr den Prozess gestartet hat: ohne geprüfte Sitzung und
+     * ohne Konto-ViewModel (das prüft selbst) erst die Kontoprüfung wie [runScheduledSync] – im Prozess-Scope, damit
+     * sie eine Zeitüberschreitung des Abrufs übersteht und der nächste Abruf die Sitzung vorfindet.
+     */
+    val liveViews =
+        AccountLiveViews(backend, { auth.session.value?.profileId }) {
+            if (refreshAccount == null) runtime.scope.async { auth.refreshProfile() }.await()
+        }
+
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val network =
         object : ConnectivityManager.NetworkCallback() {
@@ -348,26 +364,17 @@ internal class PhoneAccountCore private constructor(
 
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
-        // Uhr-Zuschauen (plan-live-mitspieler §3.2): Abruf nur mit angemeldetem Konto.
-        PhoneLiveViews.provider = AccountLiveViews(backend, { auth.session.value?.profileId })
-        runtime.scope.launch {
-            var running = false
-            sync.state.collect { state ->
-                if (running && !state.running) {
-                    flushVisitors()
-                    // Nach dem Lauf ist das Gerät gebunden: ausstehendes Token hochladen bzw. leeren.
-                    push?.sync()
-                    afterSync()
-                }
-                running = state.running
-            }
+        runtime.scope.afterEachRun(runEnded) {
+            flushVisitors()
+            // Nach dem Lauf ist das Gerät gebunden: ausstehendes Token hochladen bzw. leeren.
+            push?.sync()
+            afterSync()
         }
     }
 
     /** Nur für einen widerrufenen Kern: Hosts erst leeren, dann Auth und Laufzeit schließen. */
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
-        PhoneLiveViews.provider = LiveViewsProvider.Empty
         refreshAccount = null
         sync.close()
         var pending = if (pull == null) 1 else 2
@@ -408,6 +415,16 @@ internal class PhoneAccountCore private constructor(
 }
 
 /**
+ * Arbeit nach jedem Abgleich ([work], suspendierend) für die Signale aus [ended] (`Channel.CONFLATED`): Endet ein Lauf,
+ * während sie noch läuft, folgt danach genau eine weitere Runde – eine Flanke auf `running` im State-Collector ginge
+ * dabei verloren, und mit ihr die 5-s-Abfrage einer offenen Übergabe.
+ */
+internal fun CoroutineScope.afterEachRun(
+    ended: ReceiveChannel<Unit>,
+    work: suspend () -> Unit,
+) = launch { for (ignored in ended) work() }
+
+/**
  * Geplanter Abgleich (JobScheduler) über denselben Konto-Host wie die UI, also mit denselben Gates.
  * `true`: Die Kontoprüfung scheiterte vorübergehend; das System wiederholt mit seinem Backoff.
  */
@@ -446,8 +463,25 @@ internal suspend fun runScheduledSync(
     return false
 }
 
+/**
+ * Uhr-Zuschauen über den prozessweiten Konto-Host (nach Prozesstod wie [runScheduledSync] angelegt). Nur auf Main und
+ * nach dem Bootstrap; ohne Backendkonfiguration, im Restore-Hold oder bei Keystore-Fehlern nie etwas live.
+ */
+internal fun phoneLiveViews(context: Context): LiveViewsProvider =
+    object : LiveViewsProvider {
+        override suspend fun current(): List<LiveView> {
+            val core =
+                try {
+                    PhoneAccountCore.get(context.applicationContext, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+                } catch (_: Exception) {
+                    null
+                }
+            return (core?.liveViews ?: LiveViewsProvider.Empty).current()
+        }
+    }
+
 /** Profil-Schalter „Benachrichtigungen“; `null` ohne Backend- oder Firebase-Werte (dann ist Push einfach aus). */
-internal fun ComponentActivity.phoneNotifications(requestPermission: (onResult: (Boolean) -> Unit) -> Unit): NotificationSettingsPort? {
+internal fun ComponentActivity.phoneNotifications(requestPermission: () -> Unit): AndroidNotificationSettings? {
     val core = PhoneAccountCore.get(applicationContext, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY) ?: return null
     return core.push?.let { AndroidNotificationSettings(this, it, core.runtime.scope, requestPermission) }
 }
