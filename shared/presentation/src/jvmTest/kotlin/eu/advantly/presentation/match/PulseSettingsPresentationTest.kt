@@ -44,6 +44,19 @@ class PulseSettingsPresentationTest {
     }
 
     @Test
+    fun withoutWatchWorkoutNoPulseLevelIsStored() {
+        store.setHealthConsent(true)
+        val id = store.start(store.setupFor(format), StartOptions(ScorerOption.THIS_PHONE, watchWorkout = false, pulseVisibility = null))
+        assertEquals(TelemetryVisibility.OFF, store.pulseSetting(id).visibility)
+        val chosen =
+            store.start(
+                store.setupFor(format),
+                StartOptions(ScorerOption.THIS_PHONE, watchWorkout = false, pulseVisibility = TelemetryVisibility.SHARE),
+            )
+        assertEquals(TelemetryVisibility.OFF, store.pulseSetting(chosen).visibility)
+    }
+
+    @Test
     fun laterChangeAndDeletionInTheMatchDetail() {
         store.setHealthConsent(true)
         val id = start(TelemetryVisibility.PRIVATE)

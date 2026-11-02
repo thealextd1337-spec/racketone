@@ -1,7 +1,6 @@
 package eu.advantly.ui.phone.result
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,7 +47,6 @@ import eu.advantly.ui.phone.common.stateScore
 import eu.advantly.ui.phone.common.teamName
 import eu.advantly.ui.phone.designsystem.AdvantlyColors
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
-import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.moment_break
@@ -69,6 +67,7 @@ import eu.advantly.ui.phone.resources.moment_star_point
 import eu.advantly.ui.phone.resources.moment_tiebreak
 import eu.advantly.ui.phone.resources.timeline_card_pulse
 import eu.advantly.ui.phone.resources.timeline_clock
+import eu.advantly.ui.phone.resources.timeline_corrected
 import eu.advantly.ui.phone.resources.timeline_empty
 import eu.advantly.ui.phone.resources.timeline_enable_pulse
 import eu.advantly.ui.phone.resources.timeline_highlights
@@ -101,7 +100,11 @@ private val KIND_ORDER =
  * zeigt den Stand **vor** dem Punkt und ob die Chance verwertet oder abgewehrt wurde. Darunter dieselben Highlights als
  * barrierefreie Liste. Mit [pulse] zeichnet sie zusätzlich die Pulskurve (Lücken und Pausen unterbrechen die Linie),
  * darunter einen Hinweis bei schlechter Datenqualität, und die Karte zeigt den Ø-Puls (Trend); ohne Puls bleibt es bei
- * den Highlights. Ohne Puls und ohne Einwilligung führt ein Link „Pulsverlauf aktivieren“ zu [onEnablePulse].
+ * den Highlights. Ohne Puls und ohne Einwilligung führt ein Link „Pulsverlauf aktivieren“ zu [onEnablePulse] (auch ohne
+ * Highlights). Bei [corrected] weist sie darauf hin, dass sie die gezählten Punkte zeigt, nicht das korrigierte Ergebnis.
+ *
+ * Marker: Die Achse ist in gleich breite Tippfelder (≥ 48 dp) geteilt; nahe Marker teilen sich ein Feld, jedes Tippen
+ * wählt den nächsten davon. Die Punkte selbst bleiben klein und liegen genau auf ihrer Zeit.
  */
 @Composable
 internal fun MatchTimeline(
@@ -110,6 +113,7 @@ internal fun MatchTimeline(
     modifier: Modifier = Modifier,
     pulse: PulseTrack? = null,
     onEnablePulse: (() -> Unit)? = null,
+    corrected: Boolean = false,
 ) {
     val colors = AdvantlyTheme.colors
     val moments = stats.moments
@@ -119,6 +123,7 @@ internal fun MatchTimeline(
         SectionTitle(stringResource(Res.string.timeline_title))
         if (moments.isEmpty() && segments.isEmpty()) {
             Text(stringResource(Res.string.timeline_empty), color = colors.text2, modifier = Modifier.testTag("timeline_empty"))
+            EnablePulseLink(pulse, onEnablePulse)
             return@Column
         }
         val values = segments.flatten().map { it.bpm }
@@ -134,15 +139,22 @@ internal fun MatchTimeline(
             Text(stringResource(Res.string.timeline_hint), style = AdvantlyTheme.typography.caption, color = colors.text2)
         }
         val duration = stats.playClock.durationMs.coerceAtLeast(1)
-        val markerSize = 24.dp
-        BoxWithConstraints(Modifier.fillMaxWidth().height(if (values.isEmpty()) 40.dp else 140.dp).padding(top = Spacing.xs)) {
+        val touch = Spacing.minTouchTarget
+        BoxWithConstraints(Modifier.fillMaxWidth().height(if (values.isEmpty()) 56.dp else 140.dp).padding(top = Spacing.xs)) {
             val axisHeight = 12.dp
+            // Rand so groß wie der halbe gewählte Punkt: Marker am Anfang/Ende werden nicht abgeschnitten
+            val track = maxWidth - DOT_SELECTED
+            val xOf = { playMs: Long -> DOT_SELECTED / 2 + track * (playMs.toFloat() / duration) }
             Canvas(Modifier.matchParentSize().clearAndSetSemantics {}) {
-                val axisY = size.height - markerSize.toPx() / 2
+                val axisY = size.height - touch.toPx() / 2
                 drawLine(colors.line, Offset(0f, axisY), Offset(size.width, axisY), strokeWidth = 1.dp.toPx())
                 moments.forEach { m ->
-                    val x = m.playMs.toFloat() / duration * size.width
+                    val x = xOf(m.playMs).toPx()
                     drawLine(colors.line, Offset(x, axisY - axisHeight.toPx()), Offset(x, axisY), 1.dp.toPx())
+                }
+                moments.forEachIndexed { index, m ->
+                    val radius = (if (selected == index) DOT_SELECTED else DOT) / 2
+                    drawCircle(markerColor(m, colors), radius.toPx(), Offset(xOf(m.playMs).toPx(), axisY))
                 }
                 if (values.isEmpty()) return@Canvas
                 val min = values.min()
@@ -152,7 +164,7 @@ internal fun MatchTimeline(
                 for (segment in segments) {
                     val points =
                         segment.map {
-                            Offset(it.playMs.toFloat() / duration * size.width, bottom - (it.bpm - min).toFloat() / range * (bottom - top))
+                            Offset(xOf(it.playMs).toPx(), bottom - (it.bpm - min).toFloat() / range * (bottom - top))
                         }
                     if (points.size == 1) {
                         drawCircle(colors.danger, 2.dp.toPx(), points.single())
@@ -162,22 +174,28 @@ internal fun MatchTimeline(
                     }
                 }
             }
-            moments.forEachIndexed { index, moment ->
-                val x = maxWidth * (moment.playMs.toFloat() / duration) - markerSize / 2
-                val description = stringResource(Res.string.timeline_marker_a11y, playTime(moment.playMs), momentTitle(moment, setup.sport))
+            val slots = (maxWidth / touch).toInt().coerceAtLeast(1)
+            val slotWidth = maxWidth / slots
+            moments.indices.groupBy { (xOf(moments[it].playMs) / slotWidth).toInt().coerceIn(0, slots - 1) }.forEach { (slot, indices) ->
+                val description =
+                    indices
+                        .map { i ->
+                            stringResource(
+                                Res.string.timeline_marker_a11y,
+                                playTime(moments[i].playMs),
+                                momentTitle(moments[i], setup.sport),
+                            )
+                        }.joinToString("; ")
                 Box(
                     Modifier
                         .align(Alignment.BottomStart)
-                        .offset(x = x)
-                        .size(markerSize)
-                        .testTag("timeline_marker_$index")
-                        .clickable(role = Role.Button) { selected = index }
+                        .offset(x = slotWidth * slot)
+                        .size(slotWidth, touch)
+                        .testTag("timeline_marker_${indices.first()}")
+                        // erstes Tippen: erster Marker im Feld, jedes weitere der nächste
+                        .clickable(role = Role.Button) { selected = indices.getOrNull(indices.indexOf(selected) + 1) ?: indices.first() }
                         .semantics { contentDescription = description },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val size = if (selected == index) 14.dp else 10.dp
-                    Box(Modifier.size(size).background(markerColor(moment, colors), Radii.pillShape))
-                }
+                )
             }
         }
         pulse?.quality?.let { quality ->
@@ -197,19 +215,15 @@ internal fun MatchTimeline(
                 )
             }
         }
-        if (pulse == null && onEnablePulse != null && !LocalHealthConsent.current) {
+        if (corrected) {
             Text(
-                stringResource(Res.string.timeline_enable_pulse),
-                style = AdvantlyTheme.typography.label,
-                color = colors.brand,
-                modifier =
-                    Modifier
-                        .heightIn(min = Spacing.minTouchTarget)
-                        .clickable(role = Role.Button, onClick = onEnablePulse)
-                        .padding(vertical = Spacing.xs)
-                        .testTag("timeline_enable_pulse"),
+                stringResource(Res.string.timeline_corrected),
+                style = AdvantlyTheme.typography.caption,
+                color = colors.text2,
+                modifier = Modifier.padding(top = Spacing.xs).testTag("timeline_corrected"),
             )
         }
+        EnablePulseLink(pulse, onEnablePulse)
         selected?.let { moments.getOrNull(it) }?.let { MomentCard(it, setup, pulse?.averageAround(it.moment.wallClockMs)) }
         SectionTitle(stringResource(Res.string.timeline_highlights))
         Column(Modifier.testTag("timeline_list"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -229,6 +243,30 @@ internal fun MatchTimeline(
             }
         }
     }
+}
+
+/** Durchmesser eines Markers bzw. des gewählten Markers (sichtbarer Punkt; die Tippfläche ist größer). */
+private val DOT = 10.dp
+private val DOT_SELECTED = 14.dp
+
+/** Link „Pulsverlauf aktivieren“: nur ohne Pulsverlauf und ohne Einwilligung. */
+@Composable
+private fun EnablePulseLink(
+    pulse: PulseTrack?,
+    onEnablePulse: (() -> Unit)?,
+) {
+    if (pulse != null || onEnablePulse == null || LocalHealthConsent.current) return
+    Text(
+        stringResource(Res.string.timeline_enable_pulse),
+        style = AdvantlyTheme.typography.label,
+        color = AdvantlyTheme.colors.brand,
+        modifier =
+            Modifier
+                .heightIn(min = Spacing.minTouchTarget)
+                .clickable(role = Role.Button, onClick = onEnablePulse)
+                .padding(vertical = Spacing.xs)
+                .testTag("timeline_enable_pulse"),
+    )
 }
 
 /** Karte zum angetippten Highlight: Arten, Stand vor dem Punkt, verwertet/abgewehrt, Ø-Puls (falls bekannt), Spielzeit. */
@@ -264,6 +302,7 @@ private fun MomentCard(
     }
 }
 
+/** Markerfarbe nach der wichtigsten Art; `danger` bleibt der Pulskurve vorbehalten. */
 private fun markerColor(
     moment: TimelineMoment,
     colors: AdvantlyColors,
@@ -271,7 +310,7 @@ private fun markerColor(
     when (KIND_ORDER.first { it in moment.moment.kinds }) {
         MomentKind.MATCH_WON, MomentKind.MATCH_POINT -> colors.brand
         MomentKind.SET_WON, MomentKind.SET_POINT -> colors.success
-        MomentKind.COMEBACK -> colors.danger
+        MomentKind.COMEBACK -> colors.text
         MomentKind.BREAK, MomentKind.BREAK_POINT -> colors.hint
         else -> colors.text2
     }

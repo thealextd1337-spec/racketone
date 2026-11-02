@@ -24,8 +24,9 @@ import eu.advantly.match.session.WallClock as SessionClock
 class HealthRecordsPresentationTest {
     private var now = 1_760_000_000_000L
     private val data: LocalData = createInMemoryJvmLocalData()
+    private val scheduler = ManualScheduler()
     private val session =
-        MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId("phone"), PeerKind.PHONE), SessionClock { now })
+        MatchSession(data, null, scheduler, SessionConfig(DeviceId("phone"), PeerKind.PHONE), SessionClock { now })
     private val store = SessionMatchStore(session, WallClock { now }, CountingIds())
     private val watch = DeviceId("watch")
 
@@ -79,7 +80,11 @@ class HealthRecordsPresentationTest {
     /** Wie eine neue `dataRevision` der Session (z. B. Serie der Uhr empfangen). */
     private var fakeRevision = 1_000L
 
-    private fun dataChanged() = store.onSessionState(session.state.value.copy(dataRevision = ++fakeRevision))
+    /** Neue `dataRevision` und die Häppchen der Neuberechnung abarbeiten. */
+    private fun dataChanged() {
+        store.onSessionState(session.state.value.copy(dataRevision = ++fakeRevision))
+        scheduler.runUntilIdle()
+    }
 
     @Test
     fun recordsCoverRatedMatchesSetsAndGaps() {
@@ -115,6 +120,47 @@ class HealthRecordsPresentationTest {
         dataChanged()
         assertEquals(160, store.records.value.maxBpm)
         assertEquals(revision + 1, store.records.value.revision)
+    }
+
+    @Test
+    fun aChangeToOneMatchRecomputesOnlyThatMatch() {
+        val (a, aStart) = playMatch()
+        val (b, bStart) = playMatch()
+        put(a, aStart, 140, steps(1, 1))
+        put(b, bStart, 150, steps(1, 1))
+        dataChanged()
+        assertEquals(2, store.healthComputations)
+        put(a, aStart, 170, steps(1, 1), revision = 2)
+        dataChanged()
+        assertEquals(3, store.healthComputations, "nur Match A neu")
+        assertEquals(170, store.records.value.maxBpm)
+        // Ein weiteres Match ohne Serie rechnet keines der anderen neu
+        playMatch()
+        dataChanged()
+        assertEquals(3, store.healthComputations)
+    }
+
+    @Test
+    fun recomputationRunsLaterOnTheSchedulerNotInTheStateCallback() {
+        val matches = List(6) { playMatch() }
+        matches.forEach { (id, start) -> put(id, start, 140, steps(1, 1)) }
+        store.onSessionState(session.state.value.copy(dataRevision = ++fakeRevision))
+        assertEquals(0, store.healthComputations)
+        assertNull(store.records.value.maxBpm)
+        scheduler.runUntilIdle()
+        assertEquals(6, store.healthComputations)
+        assertEquals(140, store.records.value.maxBpm)
+    }
+
+    @Test
+    fun stepsBeforeTheFirstPointDoNotCountForTheFirstSet() {
+        val (id, start) = playMatch()
+        // Einspielen ab 60 s vor Genesis: 12 Buckets à 100 Schritte, danach 1 je Bucket
+        var total = 0L
+        put(id, start - 60_000, 140, List(110) { i -> total.also { total += if (i < 12) 100 else 1 } })
+        dataChanged()
+        // Satz 1 ab dem ersten Punkt (Genesis + 10 s) bis Punkt 21: 40 Buckets à 1 Schritt
+        assertEquals(40, store.records.value.maxStepsInSet)
     }
 
     @Test

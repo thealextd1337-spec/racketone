@@ -133,6 +133,22 @@ class MatchMomentsTest {
     }
 
     @Test
+    fun comebackWithinTheTiebreakFromFivePointsDown() {
+        fun setWonAfterTiebreak(points: String): Set<MomentKind> {
+            val m = MatchDriver(Presets.TENNIS_SINGLES_BO3.format()).holdGames(12)
+            assertEquals(GameKind.TIEBREAK, checkNotNull(m.state.current).gameKind)
+            return m
+                .points(points)
+                .moments()
+                .single { SET_WON in it.kinds }
+                .kinds
+        }
+        // 0:5 → 7:5: B hatte nie einen Satzball, die Spiele standen nie 2 auseinander
+        assertTrue(COMEBACK in setWonAfterTiebreak("BBBBB" + "AAAAAAA"))
+        assertFalse(COMEBACK in setWonAfterTiebreak("BBBB" + "AAAAAAA"), "0:4 → 7:4 reicht nicht")
+    }
+
+    @Test
     fun matchComebackAfterLosingFirstSet() {
         val m = MatchDriver(Presets.TENNIS_SINGLES_BO3.format()).points("B".repeat(24) + "A".repeat(48))
         val sets = m.moments().filter { SET_WON in it.kinds }

@@ -161,7 +161,7 @@ class InMemoryMatchStore(
         val meta =
             setup.meta.copy(
                 watchWorkout = options.watchWorkout,
-                pulseVisibility = options.pulseVisibility ?: TelemetryVisibility.OFF,
+                pulseVisibility = options.pulseVisibility?.takeIf { options.watchWorkout } ?: TelemetryVisibility.OFF,
             )
         val genesis =
             ScoreEvent(

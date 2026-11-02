@@ -57,6 +57,7 @@ import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.history.HistoryItem
 import eu.advantly.ui.phone.live.OpenMatchCardContent
+import eu.advantly.ui.phone.platform.formatCount
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.home_empty
 import eu.advantly.ui.phone.resources.home_greeting
@@ -172,8 +173,8 @@ fun HomeScreen(
             }
         }
         val rated = history.filter { it.isRated }
+        // Reihenfolge laut Nutzerwunsch: Gesamtstatistik, direkt darunter die letzten Spiele, dann die Wochenbilanz
         TotalSummary(rated, healthRecords)
-        WeekSummary(rated, clock.nowMs())
         if (rated.isNotEmpty()) {
             SectionTitle(stringResource(Res.string.home_section_recent))
             Column(Modifier.testTag("recent_matches"), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
@@ -183,6 +184,7 @@ fun HomeScreen(
                 }
             }
         }
+        WeekSummary(rated, clock.nowMs())
         if (history.isEmpty() && open.isEmpty()) {
             Text(
                 stringResource(Res.string.home_empty),
@@ -338,7 +340,7 @@ private fun TotalSummary(
                 labelLines = 2,
             )
             StatTile(
-                health.maxStepsInSet?.toString() ?: none,
+                health.maxStepsInSet?.let(::formatCount) ?: none,
                 stringResource(Res.string.home_total_max_steps),
                 Modifier.weight(1f).fillMaxHeight().testTag("total_max_steps"),
                 labelLines = 2,

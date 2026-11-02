@@ -909,6 +909,7 @@
     <string name="timeline_clock">%1$d:%2$s</string>
     <string name="timeline_score_before">Stand vor dem Punkt: %1$s</string>
     <string name="timeline_marker_a11y">%1$s, %2$s</string>
+    <string name="timeline_corrected">Das Ergebnis wurde nachträglich korrigiert – die Zeitleiste zeigt die Punkte, wie sie gezählt wurden.</string>
     <string name="moment_break_point">Breakball</string>
     <string name="moment_break">Break</string>
     <string name="moment_golden_point">Golden Point</string>

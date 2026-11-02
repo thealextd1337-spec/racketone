@@ -67,3 +67,6 @@ expect fun formatBuildDate(epochMs: Long): String
 
 /** Ländername zum ISO-3166-Code in der Systemsprache; unbekannte Codes bleiben unverändert. */
 expect fun countryName(code: String): String
+
+/** Ganzzahl mit Tausendertrennzeichen der Systemsprache (z. B. „12.345“ bzw. „12,345“). */
+expect fun formatCount(value: Long): String
