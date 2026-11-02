@@ -282,6 +282,23 @@ internal class HealthSync(
             }
         }
 
+    // --- Datei-Import (Plan 0.5.1 §7b) -------------------------------------------------------------------------------
+
+    /**
+     * Pulsverläufe aus einer [HealthArchive]-Datei: Zuordnung über die Match-ID zu lesbaren Matches, eine vorhandene Serie
+     * ersetzt nur eine höhere Revision. Ein hier gewähltes „Gar nicht“ bleibt; `deletedBefore` gilt nicht, weil der Nutzer
+     * den Import selbst auslöst (die Sperre ist für verspätete Uhr-Sendungen gedacht).
+     */
+    fun import(bytes: ByteArray): HealthImportResult =
+        HealthArchive.import(bytes, consent.enabled) { stored ->
+            when {
+                data.matches.get(stored.matchId) == null -> HealthImportPlacement.UNKNOWN_MATCH
+                data.settings.get(PULSE_PREFIX + stored.matchId.value) == TelemetryVisibility.OFF.wire -> HealthImportPlacement.SKIPPED
+                data.health.upsert(stored) -> HealthImportPlacement.IMPORTED
+                else -> HealthImportPlacement.SKIPPED
+            }
+        }
+
     private fun store(message: HealthSeriesMessage): HealthAck? {
         val validBpm = message.bpm.all { it == null || it in HealthRecorder.BPM_RANGE }
         if (!validBpm || message.steps.any { it != null && it < 0 }) return null

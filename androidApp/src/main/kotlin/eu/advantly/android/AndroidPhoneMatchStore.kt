@@ -15,6 +15,7 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.device.link.CompanionDetector
 import eu.advantly.device.link.CompanionState
 import eu.advantly.match.session.AndroidSessionBoundary
+import eu.advantly.match.session.HealthImportResult
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.presentation.match.HealthRecordsPort
@@ -71,6 +72,11 @@ internal class AndroidPhoneMatchStore private constructor(
     override fun deleteAllHealthData() {
         calls.run { raw.deleteAllHealthData() }
     }
+
+    override fun exportHealth(): String? = calls.run { raw.exportHealth() }
+
+    // Widerrufene Installation: nichts gelesen, nichts übernommen.
+    override fun importHealth(bytes: ByteArray) = calls.run { raw.importHealth(bytes) } ?: HealthImportResult()
 
     override fun pulseSetting(matchId: MatchId) = calls.run { raw.pulseSetting(matchId) } ?: PulseSetting()
 
