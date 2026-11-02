@@ -68,7 +68,9 @@ class InMemoryMatchStore(
     private val deviceId: DeviceId = DeviceId("phone"),
     selfName: String = "",
     watchAvailable: Boolean = false,
-) : MatchStore {
+    private val settings: InMemoryTelemetrySettings = InMemoryTelemetrySettings(),
+) : MatchStore,
+    TelemetrySettingsPort by settings {
     private class Entry(
         val id: MatchId,
         var setup: MatchSetup,
@@ -122,13 +124,6 @@ class InMemoryMatchStore(
     private val watchStatusFlow = MutableStateFlow(if (watchAvailable) WatchStatus.AVAILABLE else WatchStatus.UNKNOWN)
     override val watchStatus: StateFlow<WatchStatus> = watchStatusFlow.asStateFlow()
 
-    private val telemetryFlow = MutableStateFlow(TelemetryVisibility.DEFAULT)
-    override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
-
-    override fun setTelemetryVisibility(visibility: TelemetryVisibility) {
-        telemetryFlow.value = visibility
-    }
-
     /** Ein Gerät: nie ein Versionsunterschied. */
     override val updateRequired: StateFlow<UpdateRequired?> = MutableStateFlow<UpdateRequired?>(null).asStateFlow()
 
@@ -163,7 +158,11 @@ class InMemoryMatchStore(
         require(missing.isEmpty()) { "Spieler ohne Namen: $missing" }
 
         val id = MatchId.of(ids.newId())
-        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
+        val meta =
+            setup.meta.copy(
+                watchWorkout = options.watchWorkout,
+                pulseVisibility = options.pulseVisibility?.takeIf { options.watchWorkout } ?: TelemetryVisibility.OFF,
+            )
         val genesis =
             ScoreEvent(
                 id = EventId.of(ids.newId()),

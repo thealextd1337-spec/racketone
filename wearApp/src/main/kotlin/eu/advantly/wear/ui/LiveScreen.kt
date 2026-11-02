@@ -1031,6 +1031,7 @@ internal object LiveTags {
     const val TOAST = "live_toast"
     const val HEART_RATE = "live_heart_rate"
     const val STEPS = "live_steps"
+    const val HEALTH_RECORDING = "live_health_recording"
 
     fun label(side: Side): String = "live_label_${side.name}"
 

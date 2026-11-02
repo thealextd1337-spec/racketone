@@ -2,6 +2,7 @@ package eu.advantly.match.session
 
 import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
+import eu.advantly.core.model.HealthConsent
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
 import eu.advantly.core.model.MatchId
@@ -38,6 +39,7 @@ import eu.advantly.sync.protocol.PeerKind
  *   Speicher, beginnt nach Neustart bei 0: nur auf Ungleichheit vergleichen, nie auf Größe.
  * @property pairingConflict Uhr: ein vertrautes Handy mit anderer Pairing-Autorität wurde abgelehnt (Handy ersetzt,
  *   wiederhergestellt oder neu gekoppelt). Nur die ausdrückliche Neukopplung ([MatchSession.repairPairing]) löst das.
+ * @property healthConsent Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls H5), auf den eigenen Geräten abgeglichen
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -50,6 +52,7 @@ data class SessionState(
     val devices: List<DeviceStatus> = emptyList(),
     val lifecycleRevision: Long = 0,
     val pairingConflict: Boolean = false,
+    val healthConsent: HealthConsent = HealthConsent(),
 ) {
     /** Kurzform für Anzeige und Versandentscheidung. */
     val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility

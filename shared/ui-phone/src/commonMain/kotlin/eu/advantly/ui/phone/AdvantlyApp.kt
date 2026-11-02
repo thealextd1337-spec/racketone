@@ -23,6 +23,7 @@ import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.match.LiveMatchSnapshot
@@ -33,6 +34,7 @@ import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
+import eu.advantly.ui.phone.app.LocalHealthConsent
 import eu.advantly.ui.phone.app.LocalTelemetryVisibility
 import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
@@ -65,6 +67,7 @@ import eu.advantly.ui.phone.resources.watch_takeover_text
 import eu.advantly.ui.phone.resources.watch_takeover_title
 import eu.advantly.ui.phone.resources.wizard_start
 import eu.advantly.ui.phone.resources.wizard_title_scorer
+import eu.advantly.ui.phone.result.PulseVisibilitySection
 import eu.advantly.ui.phone.result.ResultScreen
 import eu.advantly.ui.phone.support.SupportScreen
 import eu.advantly.ui.phone.wizard.ScorerChooser
@@ -115,6 +118,7 @@ fun AdvantlyApp(
     val aliases by model.players.ownerAliases.collectAsState()
     val updateRequired by model.live.updateRequired.collectAsState()
     val telemetryVisibility by model.telemetry.telemetryVisibility.collectAsState()
+    val healthConsent by model.telemetry.healthConsent.collectAsState()
     val navigator = model.navigator
     // Ein laufendes Match wird nicht unterbrochen: der Konto-Fluss erscheint nach dem Verlassen des Live-Scores.
     val accountRequired = accountState?.accountRequired == true && !recoveryHold && navigator.top != Overlay.Live
@@ -137,6 +141,7 @@ fun AdvantlyApp(
         LocalSelfAliases provides aliases,
         LocalArchivedPlayerIds provides archived,
         LocalTelemetryVisibility provides telemetryVisibility,
+        LocalHealthConsent provides healthConsent,
     ) {
         AdvantlyTheme(darkTheme = darkTheme) {
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
@@ -213,6 +218,7 @@ fun AdvantlyApp(
                         val history by model.history.matches.collectAsState()
                         val revision = history.firstOrNull { it.matchId == top.matchId }
                         val record = remember(top.matchId, revision) { model.history.record(top.matchId) }
+                        val health by model.health.records.collectAsState()
                         ResultScreen(
                             record = record,
                             statisticsCache = model.statistics,
@@ -230,6 +236,13 @@ fun AdvantlyApp(
                             canEditResult = remember(top.matchId, revision) { model.history.canCorrectResult(top.matchId) },
                             onCorrectResult = { sets, servers -> model.history.correctResult(top.matchId, sets, servers) },
                             onPlayAgain = { model.startMatch(it) },
+                            // Neu gelesen, sobald sich gespeicherte Serien ändern (nachgelieferte Serie der Uhr)
+                            pulse = remember(top.matchId, health.revision) { model.health.pulseTrack(top.matchId) },
+                            // Einwilligung „Pulsverlauf aufzeichnen“ steht im Profil unter „Puls & Schritte“
+                            onEnablePulse = {
+                                navigator.stack.clear()
+                                navigator.tab = AppTab.Profile
+                            },
                             onDelete = {
                                 model.history.delete(top.matchId)
                                 navigator.pop()
@@ -251,6 +264,7 @@ fun AdvantlyApp(
                                     MatchVisitorsSection(friends, top.matchId.value)
                                 }
                             },
+                            pulseSettings = { PulseVisibilitySection(model.telemetry, top.matchId) },
                         )
                     }
 
@@ -398,6 +412,7 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
     // Zählt die Uhr schon ein anderes Match, ist „Dieses Handy“ der Standard (F22); „Meine Uhr“ wechselt das Uhr-Match
     var scorer by remember { mutableStateOf(if (watchAvailable && busy == null) ScorerOption.MY_WATCH else ScorerOption.THIS_PHONE) }
     var workout by remember { mutableStateOf(true) }
+    var pulse by remember { mutableStateOf<TelemetryVisibility?>(null) }
     val effective = if (watchAvailable) scorer else ScorerOption.THIS_PHONE
     AlertDialog(
         onDismissRequest = model::cancelScorerChoice,
@@ -409,13 +424,15 @@ private fun ScorerDialog(model: AdvantlyAppModel) {
                 watchWorkout = workout,
                 onSelect = { scorer = it },
                 onWatchWorkout = { workout = it },
+                pulseVisibility = pulse,
+                onPulseVisibility = { pulse = it },
                 onRecheck = model.live::refreshWatchStatus,
                 busyMatch = busy,
             )
         },
         confirmButton = {
             TextButton(
-                onClick = { model.confirmScorerChoice(StartOptions(effective, workout)) },
+                onClick = { model.confirmScorerChoice(StartOptions(effective, workout, pulseVisibility = pulse)) },
                 modifier = Modifier.testTag("scorer_dialog_start"),
             ) { Text(stringResource(Res.string.wizard_start)) }
         },

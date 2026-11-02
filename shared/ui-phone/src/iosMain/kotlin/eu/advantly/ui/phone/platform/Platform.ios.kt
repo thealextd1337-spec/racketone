@@ -157,3 +157,9 @@ actual fun formatBuildDate(epochMs: Long): String {
 }
 
 actual fun countryName(code: String): String = NSLocale.currentLocale.displayNameForKey(NSLocaleCountryCode, code) ?: code
+
+actual fun formatCount(value: Long): String {
+    val formatter = platform.Foundation.NSNumberFormatter()
+    formatter.numberStyle = platform.Foundation.NSNumberFormatterDecimalStyle
+    return formatter.stringFromNumber(platform.Foundation.NSNumber(longLong = value)) ?: value.toString()
+}

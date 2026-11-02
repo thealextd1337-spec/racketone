@@ -387,7 +387,7 @@ class ReplicaLifecycleCodecTest {
 
     @Test
     fun helloNegotiatesTheUpdateStateAndErrorsHideBodies() {
-        assertEquals(5, ProtocolVersion.CURRENT)
+        assertEquals(6, ProtocolVersion.CURRENT)
         assertEquals(3, ProtocolVersion.MIN_SUPPORTED)
         val hello = assertIs<DecodeResult.Ok>(SyncCodec.decode(SyncCodec.encode(Hello(DeviceId("watch"), PeerKind.WATCH, minV = 4, v = 4))))
         val watch = hello.message as Hello

@@ -1,5 +1,6 @@
 package eu.advantly.presentation.match
 
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.EventId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchFormat
@@ -49,6 +50,7 @@ import eu.advantly.data.resolvedLineup
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.CompanionDetector
 import eu.advantly.device.link.CompanionState
+import eu.advantly.health.maxBpm
 import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.DeviceStatus
 import eu.advantly.match.session.MatchSession
@@ -56,6 +58,8 @@ import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.stats.HealthTracks
+import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,7 +71,7 @@ import kotlinx.serialization.json.Json
 import eu.advantly.data.MatchRecord as StoredMatch
 
 /**
- * Session-Adapter der Phone-UI: erfüllt [LiveMatchPort], [MatchHistoryPort] und [PlayersPort] über einer
+ * Session-Adapter der Phone-UI: erfüllt [LiveMatchPort], [MatchHistoryPort], [PlayersPort] und [HealthRecordsPort] über einer
  * [MatchSession] (Single-Scorer, Event-Log, Geräte-Sync) und deren [LocalData] (Historie, Spieler, Favoriten).
  *
  * Vertrag der Ports:
@@ -83,6 +87,8 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * neu, wenn sich Match oder Status ändern oder die Session eine neue `dataRevision` meldet (Löschung, Köpfe/Stand anderer
  * Matches, Spieler, Identität); Ergebnis-Köpfe beendeter Matches sind samt Setup zwischengespeichert; nur Details lesen das Event-Log.
  * Eine neue `lifecycleRevision` (Access, Redaktion oder Directory aus Data) verwirft alle abgeleiteten Namen, Köpfe und Details.
+ * Die Gesundheits-Höchstwerte cacht er je Match (Serien-Revisionen + Match-Stand) und rechnet nur geänderte Matches neu,
+ * in Häppchen über den Scheduler der Session (ein Punkt-Replay je Matchänderung, nur bei Schritten).
  *
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
@@ -106,7 +112,8 @@ class SessionMatchStore(
     private val historyLimit: Long = DEFAULT_HISTORY_LIMIT,
     private val monotonic: MonotonicClock = MonotonicClock.System,
     private val companion: CompanionDetector? = null,
-) : MatchStore {
+) : MatchStore,
+    HealthRecordsPort {
     private val data: LocalData = session.data
     private var aliases: Set<PlayerId> = emptySet()
     private val aliasesFlow = MutableStateFlow<Set<PlayerId>>(emptySet())
@@ -115,7 +122,7 @@ class SessionMatchStore(
     private val players = HashMap<PlayerId, Player>()
     private val summaries = HashMap<MatchId, Pair<StoredMatch, MatchSummary>>()
     private var summaryPeople: Map<PlayerId, Player> = emptyMap()
-    private val records = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
+    private val detailRecords = LinkedHashMap<MatchId, Pair<Long, MatchRecord>>()
     private val finishedAt = HashMap<MatchId, Pair<Int, Long?>>()
 
     private val selfFlow = MutableStateFlow(ensureSelf())
@@ -154,7 +161,23 @@ class SessionMatchStore(
     override val updateRequired: StateFlow<UpdateRequired?> = updateRequiredFlow.asStateFlow()
     private val telemetryFlow = MutableStateFlow(session.state.value.telemetryVisibility)
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = telemetryFlow.asStateFlow()
+    private val healthConsentFlow = MutableStateFlow(session.state.value.healthConsent.enabled)
+    override val healthConsent: StateFlow<Boolean> = healthConsentFlow.asStateFlow()
+    private val healthRevisionFlow = MutableStateFlow(session.state.value.dataRevision)
+    override val healthRevision: StateFlow<Long> = healthRevisionFlow.asStateFlow()
     private var companionState = CompanionState.UNKNOWN
+    private val healthFlow = MutableStateFlow(HealthRecords())
+    override val records: StateFlow<HealthRecords> = healthFlow.asStateFlow()
+    private val matchHealth = HashMap<MatchId, MatchHealth>()
+    private var seenHealthRevisions: List<Triple<MatchId, DeviceId, Long>>? = null
+    private var healthGeneration = 0
+
+    // Änderung noch nicht veröffentlicht (z. B. Löschung, während ein überholter Durchlauf noch rechnete)
+    private var healthDirty = false
+
+    /** Nur für Tests: so oft wurden Höchstwerte eines einzelnen Matches berechnet. */
+    internal var healthComputations = 0
+        private set
 
     // Zustand für Revision und „Stand vor X s“
     private var lastState: SessionState? = null
@@ -181,6 +204,7 @@ class SessionMatchStore(
 
     /** Meldet den Adapter von der Session ab (die Session selbst läuft prozessweit weiter). */
     fun close() {
+        healthGeneration++
         companion?.stop()
         session.removeListener(listener)
         ownerIdentityListeners.clear()
@@ -260,6 +284,18 @@ class SessionMatchStore(
     /** Speichert über die Session; sie gleicht mit der eigenen Uhr ab (letzte Änderung gewinnt). */
     override fun setTelemetryVisibility(visibility: TelemetryVisibility) = session.setTelemetryVisibility(visibility)
 
+    override fun setHealthConsent(enabled: Boolean) = session.setHealthConsent(enabled)
+
+    override fun deleteAllHealthData() = session.deleteAllHealthData()
+
+    override fun pulseSetting(matchId: MatchId): PulseSetting =
+        PulseSetting(session.pulseVisibility(matchId), data.health.forMatch(matchId).isNotEmpty())
+
+    override fun setPulseVisibility(
+        matchId: MatchId,
+        visibility: TelemetryVisibility,
+    ) = session.setPulseVisibility(matchId, visibility)
+
     /** Workout-Wunsch des Matches (`MatchMeta.watchWorkout`, geht mit dem Match-Kopf an die Uhr), `null` = unbekannt. */
     fun watchWorkout(matchId: MatchId): Boolean? =
         data.matches
@@ -303,7 +339,11 @@ class SessionMatchStore(
             )
         rememberPlayers(assigned.values.toList())
         val fresh = data.freshPlaceholders(lineup) { PlayerId(ids.newId().value) }
-        val meta = setup.meta.copy(watchWorkout = options.watchWorkout)
+        // Ohne Einwilligung bzw. bei Telemetrie „Gar nicht“ ist die Vorbelegung OFF – dann gilt keine andere Wahl.
+        // Ohne Workout auf der Uhr wird kein Puls aufgezeichnet, also auch keine Stufe (sonst „Kein Pulsverlauf aufgezeichnet“).
+        val allowed = if (options.watchWorkout) session.defaultPulseVisibility() else TelemetryVisibility.OFF
+        val pulse = if (allowed == TelemetryVisibility.OFF) allowed else options.pulseVisibility ?: allowed
+        val meta = setup.meta.copy(watchWorkout = options.watchWorkout, pulseVisibility = pulse)
         return session.create(setup.format, fresh, meta, scorer, takeOverWatchMatch = options.takeOverWatchMatch)
     }
 
@@ -444,7 +484,7 @@ class SessionMatchStore(
     override fun record(matchId: MatchId): MatchRecord? {
         val header = data.matches.get(matchId) ?: return null
         val cached =
-            records[matchId]
+            detailRecords[matchId]
                 ?.takeIf {
                     it.first == header.updatedAtMs &&
                         it.second.events.size
@@ -471,9 +511,9 @@ class SessionMatchStore(
                 engine.events.size + 1,
             )
         val record = MatchRecord(summary, engine.state, listOf(genesis) + engine.events)
-        records.remove(matchId)
-        records[matchId] = header.updatedAtMs to record
-        if (records.size > 8) records.remove(records.keys.first())
+        detailRecords.remove(matchId)
+        detailRecords[matchId] = header.updatedAtMs to record
+        if (detailRecords.size > 8) detailRecords.remove(detailRecords.keys.first())
         return record
     }
 
@@ -485,7 +525,7 @@ class SessionMatchStore(
         session.deleteMatch(matchId)
         data.settings.remove(contactKey(matchId))
         summaries.remove(matchId)
-        records.remove(matchId)
+        detailRecords.remove(matchId)
         finishedAt.remove(matchId)
         refreshStored()
         return true
@@ -595,11 +635,13 @@ class SessionMatchStore(
         updateRequiredFlow.value = updateRequiredOf(state)
         // Den flüchtigen Telemetrie-Eingang leert die prozessweite Kopplung (clearWhenTelemetryOff), nicht dieser Adapter
         telemetryFlow.value = state.telemetryVisibility
+        healthConsentFlow.value = state.healthConsent.enabled
+        healthRevisionFlow.value = state.dataRevision
         // Nur auf Ungleichheit: der Zähler beginnt nach einem Neustart wieder bei 0.
         val lifecycleChanged = previous != null && previous.lifecycleRevision != state.lifecycleRevision
         if (lifecycleChanged) {
             summaries.clear()
-            records.clear()
+            detailRecords.clear()
         }
         if (lifecycleChanged || storedDataMayHaveChanged(previous, state)) refreshStored(directoryChanged = lifecycleChanged)
         publishActive(state)
@@ -795,9 +837,107 @@ class SessionMatchStore(
         favoritesFlow.value = loadFavorites()
         lastSetupFlow.value = loadLastSetup()
         historyFlow.value = loadHistory()
+        refreshHealth()
         // Erst nach dem Neuladen: Listener lösen Namen aus den frischen Gästen auf
         if (directoryChanged || previousSelf != selfFlow.value.id) ownerIdentityListeners.toList().forEach { it() }
     }
+
+    // --- Gesundheitsdaten (Plan Puls H8) ------------------------------------------------------------
+
+    /** Pulsverlauf der besten Quelle, auf Handyzeit abgeglichen und gegen Genesis…Matchende geprüft. */
+    override fun pulseTrack(matchId: MatchId): PulseTrack? {
+        val series = data.health.forMatch(matchId).map { it.series }
+        if (series.isEmpty()) return null
+        val header = data.matches.get(matchId) ?: return null
+        return HealthTracks.pulseTrack(series, header.createdAtMs, header.score.lastEventAtMs ?: header.updatedAtMs)
+    }
+
+    /**
+     * Höchstwerte über die Serien gewerteter Matches, je Match zwischengespeichert (Quellen-Revisionen + Match-Stand):
+     * Nur geänderte Matches werden neu gerechnet, in Häppchen à [HEALTH_SLICE] Matches über den Scheduler, damit ein
+     * Kaltstart mit vielen Serien den Main-Thread nicht blockiert (Data ist nicht thread-sicher, deshalb kein Hintergrund).
+     */
+    private fun refreshHealth() {
+        val rated = historyFlow.value.filter { it.isRated }.associateBy { it.matchId }
+        val revisions = data.health.revisions()
+        val versions =
+            revisions
+                .filter { it.first in rated }
+                .groupBy({ it.first }, { it.second to it.third })
+                .mapValues { (id, sources) -> rated.getValue(id).let { HealthVersion(sources, it.updatedAtMs, it.eventCount) } }
+        val generation = ++healthGeneration
+        // Auch Serien ungewerteter Matches zählen: das Match-Detail liest den Pulsverlauf bei neuer Revision neu.
+        if (matchHealth.keys.retainAll(versions.keys) || revisions != seenHealthRevisions) healthDirty = true
+        seenHealthRevisions = revisions
+        val pending = ArrayDeque(versions.filter { (id, version) -> matchHealth[id]?.version != version }.keys.map(rated::getValue))
+        if (pending.isEmpty()) {
+            if (healthDirty) publishHealth()
+        } else {
+            session.scheduler.post { computeHealthSlice(generation, pending, versions) }
+        }
+    }
+
+    private fun computeHealthSlice(
+        generation: Int,
+        pending: ArrayDeque<MatchSummary>,
+        versions: Map<MatchId, HealthVersion>,
+    ) {
+        // Ein neuerer Durchlauf (oder close) hat übernommen; bereits Gerechnetes bleibt im Cache.
+        if (generation != healthGeneration) return
+        repeat(minOf(HEALTH_SLICE, pending.size)) {
+            val summary = pending.removeFirst()
+            matchHealth[summary.matchId] = computeMatchHealth(summary, versions.getValue(summary.matchId))
+        }
+        if (pending.isEmpty()) publishHealth() else session.scheduler.post { computeHealthSlice(generation, pending, versions) }
+    }
+
+    private fun computeMatchHealth(
+        summary: MatchSummary,
+        version: HealthVersion,
+    ): MatchHealth {
+        healthComputations++
+        val series = data.health.forMatch(summary.matchId).map { HealthTracks.aligned(it.series) }
+        // Das Punkt-Replay für die Satzfenster nur, wenn es überhaupt Schritte gibt
+        val windows = if (series.any { s -> s.steps.any { it != null } }) setWindowsOf(summary.matchId) else emptyList()
+        return MatchHealth(
+            version,
+            series.mapNotNull { maxBpm(it) }.maxOrNull(),
+            series.mapNotNull { HealthTracks.maxStepsInSet(it, windows) }.maxOrNull(),
+        )
+    }
+
+    private fun publishHealth() {
+        healthDirty = false
+        healthFlow.value =
+            HealthRecords(
+                maxBpm = matchHealth.values.mapNotNull { it.maxBpm }.maxOrNull(),
+                maxStepsInSet = matchHealth.values.mapNotNull { it.maxStepsInSet }.maxOrNull(),
+                revision = healthFlow.value.revision + 1,
+            )
+    }
+
+    private fun setWindowsOf(matchId: MatchId): List<LongRange> {
+        val points =
+            try {
+                ScoringEngine.pointHistory(data.events.scoreEvents(matchId))
+            } catch (e: IllegalArgumentException) {
+                emptyList()
+            }
+        return HealthTracks.setWindows(points)
+    }
+
+    /** Stand, aus dem die Höchstwerte eines Matches entstanden: (Quelle, Revision) je Serie und Match-Kopf. */
+    private data class HealthVersion(
+        val sources: List<Pair<DeviceId, Long>>,
+        val updatedAtMs: Long,
+        val eventCount: Int,
+    )
+
+    private class MatchHealth(
+        val version: HealthVersion,
+        val maxBpm: Int?,
+        val maxStepsInSet: Long?,
+    )
 
     private fun ensureSelf(): Player =
         data.players
@@ -1035,6 +1175,9 @@ class SessionMatchStore(
         const val RESUME_WINDOW_MS = 12L * 60 * 60 * 1000
         const val FAVORITES_KEY = "phone.favorites"
         const val CONTACT_PERSIST_INTERVAL_MS = 10_000L
+
+        /** Matches je Scheduler-Häppchen beim Neurechnen der Gesundheits-Höchstwerte. */
+        const val HEALTH_SLICE = 4
         val FAVORITES = ListSerializer(StoredFavorite.serializer())
         val FavoritesJson = Json { ignoreUnknownKeys = true }
 

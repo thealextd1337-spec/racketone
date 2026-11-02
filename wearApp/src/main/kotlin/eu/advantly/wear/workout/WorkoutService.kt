@@ -36,6 +36,7 @@ import androidx.health.services.client.getCurrentExerciseInfo
 import androidx.health.services.client.startExercise
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
@@ -70,8 +71,11 @@ import kotlin.math.roundToInt
 /**
  * Foreground Service (Typ `health`) mit Health-Services-`ExerciseClient` und Ongoing Activity (05 §2.1/§2.2, 01 E15).
  * Hält die Zähl-App während des Matches am Leben – auch bei Display aus / Handgelenk unten –, zeigt den Live-Puls und
- * in der Ongoing Activity den Spielstand der Match-Session. Der Puls wird **nicht gespeichert** (P1, Health erst P3);
- * am Ende wird die Exercise beendet und verworfen. Flüchtige Werte gehen nur live ans eigene Handy.
+ * in der Ongoing Activity den Spielstand der Match-Session. Puls und Schritte gehen live ans eigene Handy. Gespeichert
+ * werden sie nur als Pulsverlauf des Matches (Plan Puls H6), wenn Einwilligung, Telemetrie und die Stufe des Matches es
+ * erlauben – das entscheidet die Match-Session ([MatchSession.recordHeartRate]); sie sichert etwa 1×/min lokal und
+ * überträgt die Serie am Ende ans Handy. Sonst bleibt alles flüchtig; die Exercise wird am Ende beendet und verworfen
+ * (kein Health Connect).
  * Das Debug-Diagnoselog enthält Lebenszyklus, Sensor-Lücken, Akku und Displaystatus, keine Messwerte.
  *
  * Telemetrie-Sichtbarkeit „Gar nicht“ (P2-J, F19/F29, [WatchTelemetryPolicy]): Die Exercise läuft als Laufzeitanker
@@ -79,7 +83,7 @@ import kotlin.math.roundToInt
  * nicht gesendet, Schritt-Basis und Abo des Handys verworfen. Was Health Services erzwingt: Die Datentypen einer
  * Exercise stehen ab `startExercise` fest (kein Abwählen während der Exercise; nur Beenden und Neustart, was das laufende
  * Match-Workout unterbrechen würde) – der Sensor misst also weiter, solange die Exercise läuft; die Werte erreichen nur
- * diesen Callback und werden mit der Exercise verworfen (keine Health-Speicherung, kein Health Connect).
+ * diesen Callback und werden verworfen (auch kein Pulsverlauf, kein Health Connect).
  *
  * Robustheit:
  * - Eine **fremde** Exercise wird nie stillschweigend ersetzt ([ExerciseOwnership]); die UI fragt nach ([WorkoutPhase.CONFLICT]).
@@ -135,6 +139,9 @@ class WorkoutService : Service() {
     private var fallbackStepsTotal = 0L
     private var lastStepEndMs = -1L
     private var updateCount = 0L
+
+    /** Match, dessen Pulsverlauf zuletzt Samples bekam; bei Wechsel bzw. Workout-Ende wird er abgeschlossen. */
+    private var healthMatch: MatchId? = null
     private val telemetry by lazy { LiveTelemetrySender(this, requireNotNull(matchSession)) }
 
     private val screenReceiver =
@@ -446,6 +453,7 @@ class WorkoutService : Service() {
         if (stopJob?.isActive == true) return
         DiagnosticLog.log("SESSION_STOP_REQUESTED", "sessionId" to store.sessionId)
         if (store.sessionActive) store.endRequested = true
+        finishHealth()
         WorkoutStateHolder.update { it.copy(phase = WorkoutPhase.ENDING, error = null, errorDetail = null) }
         sessionJob?.cancel()
         stopJob =
@@ -644,6 +652,10 @@ class WorkoutService : Service() {
                         val next = stepCounter.forMatch(it.match?.id)
                         if (next != stepCounter) {
                             stepCounter = next
+                            // Basis des neuen Matches sofort, damit Schritte ab Matchbeginn zählen
+                            next.matchId?.let { id ->
+                                next.steps?.let { steps -> recordHealth(id, emptyList(), System.currentTimeMillis(), steps) }
+                            }
                             WorkoutStateHolder.update { workout -> workout.copy(steps = next.steps) }
                         }
                         applyTelemetryVisibility(it.telemetryVisibility)
@@ -808,6 +820,12 @@ class WorkoutService : Service() {
             }
         }
         if (visibility.allowsLive && calories != null) caloriesCounter = caloriesCounter.withTotal(calories)
+        sessionState.match?.id?.let { id ->
+            // Sample-Zeit statt Empfangszeit (Ambient bündelt): HR-Punkte über bootInstant, Schritte über das Ende des Zählers
+            val heartRates = hrPoints.map { it.getTimeInstant(bootInstant).toEpochMilli() to it.value.roundToInt() }
+            val stepsAtMs = metrics.getData(DataType.STEPS_TOTAL)?.end?.toEpochMilli() ?: System.currentTimeMillis()
+            recordHealth(id, heartRates, stepsAtMs, stepCounter.steps)
+        }
         val checkpoint = update.activeDurationCheckpoint
         WorkoutStateHolder.update { current ->
             current
@@ -815,6 +833,7 @@ class WorkoutService : Service() {
                     heartRateBpm = hrPoints.lastOrNull()?.value?.roundToInt() ?: current.heartRateBpm,
                     caloriesKcal = if (calories != null) caloriesCounter.kcal else current.caloriesKcal,
                     steps = stepCounter.steps,
+                    healthRecording = sessionState.match?.id?.let { requireNotNull(matchSession).isRecordingHealth(it) } == true,
                     activeDurationMillis = checkpoint?.activeDuration?.toMillis() ?: current.activeDurationMillis,
                     durationAnchorElapsedMillis =
                         checkpoint?.let {
@@ -831,6 +850,30 @@ class WorkoutService : Service() {
             DiagnosticLog.log("EXERCISE_ENDED_EXTERNALLY", "state" to state.name, "endReason" to update.exerciseStateInfo.endReason)
             WorkoutStateHolder.fail(WorkoutError.EXTERNAL_END, state.name)
         }
+    }
+
+    /**
+     * Pulsverlauf (Plan Puls H6): Samples an die Session, die selbst prüft, ob aufgezeichnet werden darf. Zeitbasis ist
+     * die Wanduhr dieses Geräts: `DataPoint.getTimeInstant(bootInstant)` mit `bootInstant = currentTimeMillis −
+     * elapsedRealtime` rechnet die Sample-Zeit (Dauer seit Boot) in Wanduhr-ms um. Ein Matchwechsel schließt die vorige
+     * Aufnahme ab (Senden ans Handy).
+     */
+    private fun recordHealth(
+        matchId: MatchId,
+        heartRates: List<Pair<Long, Int>>,
+        stepsAtMs: Long,
+        steps: Long?,
+    ) {
+        val session = matchSession ?: return
+        if (healthMatch != matchId) finishHealth()
+        healthMatch = matchId
+        heartRates.forEach { (atMs, bpm) -> session.recordHeartRate(matchId, atMs, bpm) }
+        steps?.let { session.recordSteps(matchId, stepsAtMs, it) }
+    }
+
+    private fun finishHealth() {
+        healthMatch?.let { matchSession?.finishHealthRecording(it) }
+        healthMatch = null
     }
 
     // ---------------------------------------------------------------- Akku / Status

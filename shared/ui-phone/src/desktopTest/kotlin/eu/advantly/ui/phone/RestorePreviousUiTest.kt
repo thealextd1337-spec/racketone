@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import eu.advantly.ui.phone.app.AppTab
 import kotlin.test.Test
@@ -22,7 +23,7 @@ class RestorePreviousUiTest {
             runOnIdle { app.navigator.tab = AppTab.Profile }
             onNodeWithTag("profile_restore_previous").assertDoesNotExist()
             runOnIdle { callback.value = { restores++ } }
-            onNodeWithTag("profile_restore_previous").performClick()
+            onNodeWithTag("profile_restore_previous").performScrollTo().performClick()
             assertEquals(1, restores)
         }
     }

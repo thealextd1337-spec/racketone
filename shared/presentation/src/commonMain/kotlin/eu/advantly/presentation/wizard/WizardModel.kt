@@ -13,6 +13,7 @@ import eu.advantly.core.model.ServeTracking
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.FormatValidation
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.ScorerOption
@@ -109,6 +110,8 @@ data class WizardInput(
     val scorer: ScorerOption? = null,
     /** „Workout auf meiner Uhr mitlaufen lassen“ (Standard an, auch im Director-Modus, 04 §3.1). */
     val watchWorkout: Boolean = true,
+    /** Pulsverlauf dieses Matches (E2); `null` = Vorbelegung aus den Einstellungen. */
+    val pulseVisibility: TelemetryVisibility? = null,
     /** Stand der eigenen Uhr; nur `AVAILABLE` macht „Meine Uhr“ wählbar (sonst Hinweis, warum nicht). */
     val watchStatus: WatchStatus = WatchStatus.UNKNOWN,
     /**
@@ -202,5 +205,5 @@ data class WizardUiState(
     val canStart: Boolean get() = setup != null
 
     /** Zähler und Workout-Wunsch für `LiveMatchPort.start`. */
-    val startOptions: StartOptions get() = StartOptions(input.effectiveScorer, input.watchWorkout)
+    val startOptions: StartOptions get() = StartOptions(input.effectiveScorer, input.watchWorkout, pulseVisibility = input.pulseVisibility)
 }

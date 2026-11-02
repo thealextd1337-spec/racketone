@@ -1,0 +1,6 @@
+Neu in 0.5.0:
+• Pulsverlauf (optional, im Profil einschalten): Kurve mit Highlights wie Breaks, Satzbällen und Comebacks. Bleibt nur auf Uhr und Handy.
+• Match-Detail: Sätze oben, dann Zeitleiste, Details, Spielformat.
+• Startseite: Gesamtstatistik und deine letzten 5 Spiele.
+• Datenschutzerklärung Version 7 – einmal neu bestätigen.
+Bitte testen: Pulsverlauf an, Match mit der Uhr spielen, Kurve ansehen und löschen.

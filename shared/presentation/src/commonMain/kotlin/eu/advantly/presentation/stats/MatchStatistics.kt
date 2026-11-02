@@ -8,6 +8,7 @@ import eu.advantly.core.scoring.EventLog
 import eu.advantly.core.scoring.FlagLevel
 import eu.advantly.core.scoring.GameKind
 import eu.advantly.core.scoring.MatchCreated
+import eu.advantly.core.scoring.MatchMoments
 import eu.advantly.core.scoring.Paused
 import eu.advantly.core.scoring.PointDetailRules
 import eu.advantly.core.scoring.PointRecord
@@ -41,7 +42,7 @@ data class Ratio(
  * @property setPoints Satzbälle verwertet / erspielt (Pickleball: Spielbälle)
  * @property decidingPoints Entscheidungspunkte (Golden/Star/No-Ad bzw. Deckel) gewonnen / gespielt
  * @property games gewonnene Spiele (nur Tennis/Padel, ohne Match-Tiebreak), sonst `null`
- * @property netDurationMs Spielzeit ohne Pausen (Genesis bis letztes Event)
+ * @property netDurationMs Spielzeit ohne Pausen (Genesis bis letztes Event), gleich `playClock.durationMs`
  * @property serve Aufschlag-Kennzahlen je Team (02 §11.1/§11.2)
  * @property servers Aufschlag-Kennzahlen je Spieler (Doppel: nach Aufschlägerwahl bzw. Rotation), Lineup-Reihenfolge
  *   (erst A, dann B); Spieler ohne eigenen Aufschlag fehlen
@@ -50,6 +51,8 @@ data class Ratio(
  *   Doppelfehler (1./2.-Aufschlag-Quoten bleiben leer), OFF keine Werte aus Aufschlag-Info
  * @property breaks gewonnene / abgeschlossene Rückschlagspiele (Tennis/Padel) über [ScoringEngine.serviceGames]: mit
  *   korrigierten Aufschlägern und Spielen ohne Punkte, deren Sieger feststeht; Tiebreaks und laufende Spiele zählen nicht
+ * @property playClock Spielzeit-Achse der Zeitleiste (Pausen herausgeschnitten)
+ * @property moments Highlights der Zeitleiste ([MatchMoments]) aus demselben Punktverlauf, kein zweites Replay
  */
 data class MatchStats(
     val pointsWon: SidePair<Int>,
@@ -68,6 +71,8 @@ data class MatchStats(
     val progression: List<GameProgress> = emptyList(),
     val serveTracking: ServeTracking = ServeTracking.FULL,
     val breaks: SidePair<Ratio> = SidePair(Ratio(0, 0), Ratio(0, 0)),
+    val playClock: PlayClock = PlayClock(0, netDurationMs),
+    val moments: List<TimelineMoment> = emptyList(),
 ) {
     val totalPoints: Int get() = pointsWon.a + pointsWon.b
 }
@@ -124,6 +129,7 @@ object MatchStatistics {
                 .serviceGames(record.events)
                 .filter { it.winner != null }
                 .mapNotNull { game -> game.server?.let(created.lineup::sideOf)?.let { game to it } }
+        val clock = playClock(record)
         return MatchStats(
             pointsWon = count(points) { p, side -> p.point.side == side },
             servicePoints = ratio(points, { p, side -> p.before.serve?.side == side }) { p, side -> p.point.side == side },
@@ -139,7 +145,12 @@ object MatchStatistics {
             progression = matchProgression(points),
             longestStreak = streaks(points),
             games = games(record, created.config.sport.isTennisLike),
-            netDurationMs = netDuration(record),
+            netDurationMs = clock.durationMs,
+            playClock = clock,
+            moments =
+                MatchMoments.derive(points).map {
+                    TimelineMoment(it, points[it.pointIndex].before, clock.position(it.wallClockMs))
+                },
             serve =
                 SidePair.of { side ->
                     serveStats(points, games.filter { it.second == side }, tracking) { it.before.serve?.side == side }
@@ -260,16 +271,17 @@ object MatchStatistics {
     }
 
     /**
-     * Spielzeit ohne Pausen (02 §9.3): Eine Pause endet mit `Resumed` **oder** dem nächsten wirksamen `PointWon`
+     * Spielzeit-Achse ohne Pausen (02 §9.3): Eine Pause endet mit `Resumed` **oder** dem nächsten wirksamen `PointWon`
      * (implizite Fortsetzung); eine bis zum Schluss offene Pause zählt bis zum letzten Event nicht mit.
      * Rückgängig gemachte und übersprungene Events werden ignoriert.
      */
-    private fun netDuration(record: MatchRecord): Long {
+    private fun playClock(record: MatchRecord): PlayClock {
         val events = record.events.filterNot { it.payload is eu.advantly.core.scoring.PlayerAssigned }
-        if (events.size < 2) return 0
+        val start = events.firstOrNull()?.wallClockMs ?: 0
+        if (events.size < 2) return PlayClock(start, start)
         // Ende ohne Korrekturen nach Matchende (und deren vorgeschaltete Übernahme), Analyse über das volle Log
         val end = (EventLog.matchEnd(record.events) ?: events.last()).wallClockMs
-        var total = end - events.first().wallClockMs
+        val pauses = mutableListOf<LongRange>()
         val log = EventLog.analyze(events.drop(1))
         val skipped = log.undone + log.rejected + log.absorbed + record.finalState.ignoredEvents
         var pausedAt: Long? = null
@@ -281,7 +293,7 @@ object MatchStatistics {
                 }
 
                 Resumed, is PointWon -> {
-                    pausedAt?.let { total -= e.wallClockMs - it }
+                    pausedAt?.let { pauses += it..e.wallClockMs }
                     pausedAt = null
                 }
 
@@ -290,7 +302,7 @@ object MatchStatistics {
                 }
             }
         }
-        pausedAt?.let { total -= end - it }
-        return total.coerceAtLeast(0)
+        pausedAt?.let { pauses += it..end }
+        return PlayClock(start, end, pauses)
     }
 }

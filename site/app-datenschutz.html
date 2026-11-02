@@ -13,7 +13,7 @@
 </head>
 <body>
   <!--
-    Datenschutzerklärung der Apps, Stand 0.4.0 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer). Diese URL ist in der Google Play Console
+    Datenschutzerklärung der Apps, Stand 0.5.0 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer, Pulsverlauf nur lokal). Diese URL ist in der Google Play Console
     als Datenschutz-URL und in private.consent_translations als PRIVACY-Dokument hinterlegt – Pfad nicht ändern.
     Jede inhaltliche Änderung braucht eine neue Fassung im Zustimmungskatalog (docs/support-admin-betrieb.md).
     Englische Fassung: en/app-privacy.html (inhaltlich synchron halten).
@@ -39,7 +39,7 @@
       <ul>
         <li>Für die Handy-App ist ein <strong>Konto erforderlich</strong>. Sie legen es beim ersten Start an; die Uhr braucht keine eigene Anmeldung.</li>
         <li>Die Handy-App sichert Ihre Matches – auch die auf der Uhr gezählten – <strong>automatisch</strong> in unserer Cloud (Rechenzentrum in Frankfurt am Main), damit Sie sie auf mehreren Geräten nutzen und wiederherstellen können. Gezählt wird auch offline; gesichert wird, sobald eine Internetverbindung besteht. Mit Freunden teilen Sie Matches nur, wenn Sie es einschalten – pro Match oder als Standard für neue Matches.</li>
-        <li>Die Herzfrequenz wird auf der Uhr gemessen und je nach Einstellung auch auf Ihrem Handy angezeigt. Sie wird <strong>nicht in die Cloud übertragen</strong> und nicht gespeichert.</li>
+        <li>Die Herzfrequenz wird auf der Uhr gemessen und je nach Einstellung auch auf Ihrem Handy angezeigt. Nur wenn Sie „Pulsverlauf aufzeichnen“ einschalten, speichert die App Puls und Schritte je Match auf Ihrer Uhr und Ihrem Handy. Gesundheitsdaten werden <strong>nicht in unsere Cloud übertragen</strong>.</li>
         <li><strong>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge.</strong> Ihre Daten werden nicht verkauft.</li>
         <li>Sie können Ihre Kontodaten jederzeit in der App ansehen und exportieren und die Löschung Ihres Kontos beantragen.</li>
       </ul>
@@ -60,9 +60,9 @@
       <p>Zweck ist das Zählen, Fortsetzen und Anzeigen Ihrer Matches. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung der von Ihnen genutzten App-Funktion). Wenn Sie Namen von Mitspielern eingeben, geschieht das in Ihrem berechtigten Interesse, Ihre Spiele zu dokumentieren (Art. 6 Abs. 1 lit. f DSGVO).</p>
 
       <h3>3.2 Übertragung zwischen Ihren eigenen Geräten</h3>
-      <p>Damit Sie auf Handy und Uhr gleichzeitig zählen können, gleichen die Apps Match-Daten, den Verbindungs- und Versionsstand sowie während eines Matches Puls und Schritte zwischen Ihrem Handy und Ihrer gekoppelten Uhr ab:</p>
+      <p>Damit Sie auf Handy und Uhr gleichzeitig zählen können, gleichen die Apps Match-Daten, den Verbindungs- und Versionsstand sowie während eines Matches Puls und Schritte und – falls aufgezeichnet – nach dem Match den Pulsverlauf zwischen Ihrem Handy und Ihrer gekoppelten Uhr ab:</p>
       <ul>
-        <li><strong>Android und Wear OS:</strong> über die Wear Data Layer API der Google-Play-Dienste. Die Übertragung läuft direkt per verschlüsselter Bluetooth-Verbindung oder, wenn diese nicht verfügbar ist, Ende-zu-Ende-verschlüsselt über Server von Google. Nur die Advantly-App mit derselben Signatur auf Ihren gekoppelten Geräten kann diese Daten lesen.</li>
+        <li><strong>Android und Wear OS:</strong> über die Wear Data Layer API der Google-Play-Dienste. Die Übertragung läuft direkt per verschlüsselter Bluetooth-Verbindung oder, wenn diese nicht verfügbar ist, verschlüsselt über Server von Google. Nur die Advantly-App mit derselben Signatur auf Ihren gekoppelten Geräten kann diese Daten lesen.</li>
         <li><strong>iPhone und Apple Watch</strong> (sobald verfügbar): über Apples WatchConnectivity zwischen Ihren gekoppelten Geräten.</li>
       </ul>
       <p>Die Uhr-App selbst hat keinen Internetzugriff. In die Cloud gelangen Daten nur über die Handy-App (Abschnitt 4).</p>
@@ -71,12 +71,24 @@
       <p>Während eines Matches startet die Uhr-App eine Trainings-Session (Wear OS: Health Services, Apple Watch: Workout-Session). Das sorgt dafür, dass die App bei ausgeschaltetem Display weiterläuft und den Spielstand nicht verliert. Wenn Sie es erlauben, zeigt die App dabei Ihre aktuelle Herzfrequenz und Ihre Schritte an.</p>
       <ul>
         <li>Unter „Puls &amp; Schritte“ legen Sie fest, ob die Werte nur auf der Uhr, zusätzlich auf Ihrem gekoppelten Handy oder gar nicht angezeigt werden.</li>
-        <li>Puls und Schritte werden von Advantly <strong>nicht dauerhaft gespeichert</strong>, <strong>nicht in die Cloud übertragen</strong>, nicht an uns oder Dritte weitergegeben und nicht für Werbung verwendet.</li>
+        <li>Solange Sie „Pulsverlauf aufzeichnen“ (Abschnitt 3.4) nicht einschalten, werden Puls und Schritte <strong>nicht gespeichert</strong>. Sie werden in keinem Fall <strong>in unsere Cloud übertragen</strong>, nicht an uns oder Dritte weitergegeben und nicht für Werbung verwendet.</li>
         <li>Advantly schreibt derzeit nichts in Health Connect, Apple Health oder andere Gesundheitsspeicher.</li>
         <li>Die Messung selbst übernehmen die Sensoren und Systemdienste Ihrer Uhr (Google bzw. Samsung unter Wear OS, Apple unter watchOS) nach deren eigenen Datenschutzbestimmungen.</li>
       </ul>
       <p>Die Herzfrequenz ist ein Gesundheitsdatum (Art. 9 DSGVO). Sie wird nur verarbeitet, wenn Sie die Berechtigung erteilen und ein Match starten; Rechtsgrundlage ist Ihre ausdrückliche Einwilligung (Art. 9 Abs. 2 lit. a DSGVO). Sie können die Berechtigung jederzeit in den Einstellungen der Uhr entziehen – das Zählen funktioniert dann weiterhin, nur ohne Pulsanzeige.</p>
-      <!-- ÜBERARBEITEN vor Phase 3: Health-Speicherung, Cloud, Health Connect / Apple Health, getrennte Einwilligungen (05 §6.3). -->
+
+      <h3>3.4 Pulsverlauf (optional)</h3>
+      <p>Unter Profil → „Puls &amp; Schritte“ können Sie „Pulsverlauf aufzeichnen“ einschalten (standardmäßig aus) und bestätigen das in einem eigenen Dialog. Der Schalter gilt für dieses Handy und die gekoppelte Uhr, nicht für Ihr Konto; auf einem weiteren Handy schalten Sie ihn bei Bedarf erneut ein. Beim Start eines Matches mit Workout auf der Uhr wählen Sie dann, ob für dieses Match ein Pulsverlauf aufgezeichnet wird („Nur für mich“, vorbelegt) oder nicht („Gar nicht“); die Wahl lässt sich im Match nachträglich ändern. Ohne Workout auf der Uhr wird nichts aufgezeichnet. Während der Aufzeichnung zeigt die Uhr einen kleinen Aufnahmepunkt.</p>
+      <ul>
+        <li><strong>Was gespeichert wird:</strong> Ihre Herzfrequenz als Mittelwert je 5 Sekunden, die Schrittzahl, Start und Dauer der Aufzeichnung, eine Angabe zur Messqualität und eine zufällig erzeugte Kennung der messenden Uhr. Daraus zeigt die App den Pulsverlauf im Match und Werte wie den höchsten gemessenen Puls oder die meisten Schritte in einem Satz.</li>
+        <li><strong>Übertragung von der Uhr zum Handy:</strong> Nach dem Match überträgt die Uhr den Pulsverlauf an die Advantly-App auf Ihrem gekoppelten Handy, auf demselben Weg wie die Match-Daten (Abschnitt 3.2). Ist das Handy gerade nicht erreichbar, holt die Uhr die Übertragung später nach.</li>
+        <li><strong>Wo und wie lange:</strong> ausschließlich im privaten Speicherbereich der App auf Ihrer Uhr und Ihrem Handy. Die Uhr löscht ihre Kopie, sobald der Pulsverlauf nach dem Match auf dem Handy angekommen ist, spätestens sieben Tage nach Beginn der Aufzeichnung, sobald die Uhr das nächste Mal mit der App auf dem Handy verbunden ist. Auf dem Handy bleibt der Pulsverlauf gespeichert, bis Sie ihn, das Match oder die App-Daten löschen.</li>
+        <li><strong>Nicht in der Cloud:</strong> Pulsverläufe werden nicht in Ihr Konto übertragen, nicht geteilt und nicht in die Android-Datensicherung aufgenommen. Bei einem Gerätewechsel oder einer Neuinstallation werden Ihre Matches über Ihr Konto wiederhergestellt, Pulsverläufe nicht. In Ihrem Konto wird je Match nur vermerkt, ob Sie beim Start die Aufzeichnung gewählt haben – ohne Messwerte. Eingetragene Mitspieler und Freunde, die das Match sehen, können diesen Vermerk erkennen, nie die Werte.</li>
+        <li><strong>Löschen:</strong> pro Match („Pulsverlauf löschen“ oder „Gar nicht“ wählen), alle auf einmal („Alle Gesundheitsdaten löschen“) oder durch Ausschalten von „Pulsverlauf aufzeichnen“. Gelöscht wird auf Handy und Uhr; Aufnahmen, die die Uhr noch nicht übertragen hat, beim nächsten Verbinden. Wird ein Match gelöscht, wird auch sein Pulsverlauf gelöscht.</li>
+      </ul>
+      <p>Rechtsgrundlage ist Ihre ausdrückliche Einwilligung (Art. 9 Abs. 2 lit. a DSGVO), die Sie mit dem Schalter und der anschließenden Bestätigung erteilen und jederzeit mit Wirkung für die Zukunft widerrufen können, indem Sie den Schalter ausschalten.</p>
+      <!-- ÜBERARBEITEN vor Cloud-Sicherung oder Teilen von Pulsverläufen (geparkt: w9/puls-cloud-geparkt), Health Connect / Apple Health (05 §6.3).
+           Vor dem iOS-Release: Profilpfad und iCloud-/Geräte-Backup der iPhone-App (SQLite ggf. isExcludedFromBackup) ergänzen. -->
 
       <h2>4. Konto und Cloud-Sicherung</h2>
       <p>Die Handy-App lässt sich nur mit einem Konto nutzen. Sie legen es beim ersten Start der Handy-App an; die Uhr-App hat keine eigene Anmeldung. Bevor Sie die App nutzen, akzeptieren Sie die Nutzungsbedingungen und bestätigen, diese Datenschutzerklärung in der jeweils angezeigten Fassung zur Kenntnis genommen zu haben; wir speichern dazu Dokument, Fassung, Sprache und Zeitpunkt. Bei einer neuen Fassung fragt die App erneut, bevor Sie weiterzählen. Lehnen Sie ab, können Sie sich abmelden; Datenexport und Kontolöschung bleiben möglich, die App nutzen Sie erst nach Ihrer Bestätigung wieder. Bereits gesicherte Daten bleiben bis zur Löschung Ihres Kontos erhalten.</p>
@@ -134,7 +146,7 @@
 
       <h2>7. Speicherdauer und Löschung</h2>
       <ul>
-        <li><strong>Auf Ihren Geräten:</strong> Einzelne Matches löschen Sie in der Handy-App unter Verlauf → Match → Löschen. Alle lokalen Daten entfernen Sie, indem Sie die App auf Handy und Uhr deinstallieren oder „App-Daten löschen“ wählen.</li>
+        <li><strong>Auf Ihren Geräten:</strong> Einzelne Matches löschen Sie in der Handy-App unter Verlauf → Match → Löschen; Pulsverläufe wie in Abschnitt 3.4 beschrieben. Alle lokalen Daten entfernen Sie, indem Sie die App auf Handy und Uhr deinstallieren oder „App-Daten löschen“ wählen.</li>
         <li><strong>Konto und Cloud:</strong> Die Daten bleiben gespeichert, solange Ihr Konto besteht. Unter Profil → Konto &amp; Datenschutz können Sie die <strong>Löschung beantragen</strong>; Ihr Konto wird sofort ausgeblendet und nach einer Frist von 14 Tagen endgültig gelöscht. Innerhalb dieser Frist können Sie den Antrag zurücknehmen. Ohne App erreichen Sie die Löschung über <a href="konto-loeschen.html">advantly.eu/konto-loeschen.html</a>.</li>
         <li>Matches, an denen weitere Konten beteiligt sind, bleiben für diese erhalten; Ihr Name und die Namen der von Ihnen angelegten Gäste werden darin durch „Gelöschter Spieler“ ersetzt. Matches ohne weitere Konten werden gelöscht.</li>
         <li>Nicht abgeschlossene Registrierungen löschen wir nach 24 Stunden, Datenexporte nach 24 Stunden.</li>
@@ -142,14 +154,15 @@
       </ul>
       <!-- Nutzerentscheid 27.10.2026: Pilot bleibt auf Supabase Free (keine Backups). Bei Wechsel auf Pro ersetzen durch:
            tägliche Sicherung, nach 7 Tagen überschrieben; gelöschte Konten werden bei einer Wiederherstellung nicht reaktiviert. -->
-      <p>Wenn Sie die Android-Datensicherung in Ihrem Google-Konto aktiviert haben, kann das System die Daten der Handy-App in diese Sicherung aufnehmen. Diese Sicherung verwaltet Google für Sie; wir haben darauf keinen Zugriff.</p>
+      <p>Wenn Sie die Android-Datensicherung in Ihrem Google-Konto aktiviert haben, kann das System einzelne Einstellungen der Apps in diese Sicherung aufnehmen. Matches und Pulsverläufe sind davon ausgenommen; Ihre Matches stellen Sie über Ihr Konto wieder her. Diese Sicherung verwaltet Google für Sie; wir haben darauf keinen Zugriff.</p>
 
       <h2>8. Berechtigungen und ihr Zweck</h2>
       <ul>
         <li><strong>Internet</strong> (nur Handy): Konto, Cloud-Sicherung und Meldungen an den Support.</li>
-        <li><strong>Herzfrequenz / Körpersensoren</strong> (Uhr; <code>health.READ_HEART_RATE</code>, bis Wear OS 5 <code>BODY_SENSORS</code>): Anzeige Ihres Pulses während des Matches.</li>
+        <li><strong>Herzfrequenz / Körpersensoren</strong> (Uhr; <code>health.READ_HEART_RATE</code>, bis Wear OS 5 <code>BODY_SENSORS</code>): Anzeige Ihres Pulses während des Matches und, wenn Sie es einschalten, Aufzeichnung des Pulsverlaufs.</li>
         <li><strong>Körperliche Aktivität</strong> (Uhr; <code>ACTIVITY_RECOGNITION</code>): Erfassung der Schritte während der Trainings-Session.</li>
-        <li><strong>Benachrichtigungen</strong> (<code>POST_NOTIFICATIONS</code>): Hinweis auf das laufende Match, über den Sie zurück in die App gelangen.</li>
+        <li><strong>Benachrichtigungen</strong> (Uhr; <code>POST_NOTIFICATIONS</code>): Hinweis auf das laufende Match, über den Sie zurück in die App gelangen.</li>
+        <li><strong>Netzwerkstatus und Gerätestart</strong> (nur Handy; <code>ACCESS_NETWORK_STATE</code>, <code>RECEIVE_BOOT_COMPLETED</code>): geplante Abgleiche nur mit Internetverbindung ausführen und nach einem Neustart fortsetzen.</li>
         <li><strong>Vordergrunddienst „Gesundheit“</strong> und Bildschirm aktiv halten (Uhr): damit das Match bei ausgeschaltetem Display weiterläuft.</li>
         <li><strong>Vibration</strong> (Handy und Uhr): spürbare Bestätigung jedes Punkts.</li>
       </ul>
@@ -170,10 +183,10 @@
            CH: revDSG ohne feste Grenze (Urteilsfähigkeit, Art. 16/19 ZGB), DSGVO gilt über Art. 3 Abs. 2 → 16 beibehalten. -->
 
       <h2>13. Änderungen</h2>
-      <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie die Speicherung von Gesundheitsdaten verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert.</p>
+      <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie die Übertragung von Gesundheitsdaten in die Cloud oder ihr Teilen verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert (Abschnitt 3.4).</p>
 
       <h2>14. Stand</h2>
-      <p>Oktober 2026 (Version 6, Zuschauer)</p>
+      <p>November 2026 (Version 7, Pulsverlauf)</p>
     </div>
   </main>
 

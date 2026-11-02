@@ -163,7 +163,9 @@ internal class WatchControllerCore(
     fun repeatLast(): Boolean {
         val last = directory.lastSetup() ?: return false
         // Workout-Wunsch kommt immer aus der aktuellen Uhr-Einstellung (MatchMeta.watchWorkout)
-        return start(last.copy(meta = last.meta.copy(watchWorkout = prefs.workoutEnabled)))
+        return start(
+            last.copy(meta = last.meta.copy(watchWorkout = prefs.workoutEnabled, pulseVisibility = session.defaultPulseVisibility())),
+        )
     }
 
     fun resume(matchId: MatchId): Boolean = session.resume(matchId)
@@ -262,7 +264,10 @@ internal class WatchControllerCore(
             WatchSetup(
                 format = SetupCatalog.format(choice, discipline, today(), d.gamesPerSet),
                 lineup = SetupCatalog.lineup(discipline, directory.lineupPlayers(d.selectedPlayers), server, serverIndex),
-                meta = SetupCatalog.meta(sport, d.serveTracking).copy(watchWorkout = prefs.workoutEnabled),
+                meta =
+                    SetupCatalog
+                        .meta(sport, d.serveTracking)
+                        .copy(watchWorkout = prefs.workoutEnabled, pulseVisibility = session.defaultPulseVisibility()),
             )
         return start(setup)
     }

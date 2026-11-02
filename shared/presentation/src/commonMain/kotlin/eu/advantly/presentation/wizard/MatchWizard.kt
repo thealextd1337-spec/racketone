@@ -21,6 +21,7 @@ import eu.advantly.core.model.SetFormat
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.Surface
+import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.model.TiebreakFormat
 import eu.advantly.core.scoring.LineupValidator
 import eu.advantly.core.scoring.MatchFormatValidator
@@ -364,6 +365,8 @@ class MatchWizard(
     }
 
     fun setWatchWorkout(enabled: Boolean) = update { it.copy(watchWorkout = enabled) }
+
+    fun setPulseVisibility(visibility: TelemetryVisibility) = update { it.copy(pulseVisibility = visibility) }
 
     /** Stand der Uhr geändert (aus [watchStatus]); eine explizite Wahl bleibt erhalten. */
     fun setWatchStatus(status: WatchStatus) {

@@ -246,7 +246,7 @@
     <string name="a11y_view_only">Anzeige, %1$s</string>
 
     <!-- Workout / Health (05 §2) -->
-    <string name="permission_rationale">Der Puls wird während des Matches live angezeigt und nicht gespeichert.</string>
+    <string name="permission_rationale">Der Puls wird während des Matches live angezeigt. Gespeichert wird er nur, wenn du am Handy „Pulsverlauf aufzeichnen“ einschaltest.</string>
     <string name="hint_no_health">Ohne Puls- und Aktivitätsrecht: kein Workout, die Uhr kann die App im Hintergrund beenden</string>
     <string name="hint_no_heart_rate">Ohne Pulsrecht: Workout ohne Puls</string>
     <string name="hint_no_activity">Ohne Aktivitätsrecht: keine Schritte und Kalorien</string>
@@ -274,6 +274,7 @@
     <string name="notification_match_display">Spielstand vom Handy – tippen zum Öffnen</string>
     <string name="live_workout_telemetry_description">Puls: %1$s Schläge pro Minute, Schritte: %2$s</string>
     <string name="telemetry_unknown">—</string>
+    <string name="health_recording_description">Pulsverlauf wird aufgezeichnet. %1$s</string>
     <!-- P2-J: Telemetrie-Sichtbarkeit (Startliste) -->
     <string name="telemetry_visibility_title">Puls &amp; Schritte</string>
     <string name="telemetry_visibility_share">Teilen</string>

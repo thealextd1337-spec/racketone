@@ -10,6 +10,9 @@ import eu.advantly.data.ReplicaAccessLevel
 import eu.advantly.sync.protocol.CloudMatchStamp
 import eu.advantly.sync.protocol.Deleted
 import eu.advantly.sync.protocol.Events
+import eu.advantly.sync.protocol.HealthAck
+import eu.advantly.sync.protocol.HealthMessage
+import eu.advantly.sync.protocol.HealthSeriesMessage
 import eu.advantly.sync.protocol.Hello
 import eu.advantly.sync.protocol.LifecycleSummary
 import eu.advantly.sync.protocol.LocalMatchStamp
@@ -136,6 +139,14 @@ internal class MatchStamps(
                 message.copy(v = 4, matches = message.matches.filter { it.matchId.value in own }, stamps = own)
             }
 
+            is HealthSeriesMessage -> {
+                of(message.matchId)?.let { message.copy(v = HEALTH_V, stamp = it) }
+            }
+
+            is HealthAck -> {
+                of(message.matchId)?.let { message.copy(v = HEALTH_V, stamp = it) }
+            }
+
             is Hello, is ReplicaControlMessage -> {
                 message
             }
@@ -171,6 +182,10 @@ internal class MatchStamps(
                 message.copy(matches = message.matches.filter { accepts(it.matchId, message.stamps[it.matchId.value]) })
             }
 
+            is HealthMessage -> {
+                message.takeIf { accepts(it.matchId, it.stamp) }
+            }
+
             is Hello, is ReplicaControlMessage -> {
                 message
             }
@@ -190,6 +205,9 @@ internal class MatchStamps(
     private companion object {
         const val DELETED_STAMP_PREFIX = "session.deletedStamp."
         const val MAX_LIFECYCLE = 200
+
+        /** Gesundheitsnachrichten gibt es erst ab Protokoll 6. */
+        const val HEALTH_V = 6
     }
 }
 

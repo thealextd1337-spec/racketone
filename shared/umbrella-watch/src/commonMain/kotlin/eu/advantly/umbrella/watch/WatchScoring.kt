@@ -538,6 +538,9 @@ class WatchScoring internal constructor(
 
     // --- intern ---------------------------------------------------------------------------------------------------
 
+    /** Session für [WatchHealth] (gleiche Instanz, gleicher Thread), `null` ohne Datenbank. */
+    internal fun session(): MatchSession? = backend()?.session
+
     private fun backend(): Backend? {
         backend?.let { return it }
         if (openFailed) return null
@@ -646,7 +649,12 @@ class WatchScoring internal constructor(
             b.session.create(
                 format,
                 lineup,
-                MatchMeta(watchWorkout = watchWorkout, serveTracking = if (serveStats) ServeTracking.FULL else ServeTracking.OFF),
+                MatchMeta(
+                    watchWorkout = watchWorkout,
+                    serveTracking = if (serveStats) ServeTracking.FULL else ServeTracking.OFF,
+                    // Pulsverlauf-Stufe aus Einwilligung und Telemetrie-Sichtbarkeit (ohne sie nimmt die Uhr nie auf)
+                    pulseVisibility = b.session.defaultPulseVisibility(),
+                ),
                 scorer,
             )
         } catch (e: SessionThreadViolation) {

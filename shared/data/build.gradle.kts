@@ -11,6 +11,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.shared.coreScoring)
+            api(projects.shared.health)
             api(libs.sqldelight.runtime)
             // JSON-Spalten (MatchFormat, Lineup, Event-Payloads) – gleiche Form wie auf dem Draht (sync-protocol)
             implementation(libs.kotlinx.serialization.json)

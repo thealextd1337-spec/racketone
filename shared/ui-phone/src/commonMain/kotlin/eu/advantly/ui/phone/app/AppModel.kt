@@ -17,6 +17,8 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.live.LiveSettings
+import eu.advantly.presentation.match.HealthRecordsPort
+import eu.advantly.presentation.match.InMemoryHealthRecords
 import eu.advantly.presentation.match.InMemoryMatchStore
 import eu.advantly.presentation.match.InMemoryTelemetrySettings
 import eu.advantly.presentation.match.LiveMatchPort
@@ -100,6 +102,8 @@ class AdvantlyAppModel(
     val monotonic: MonotonicClock = MonotonicClock.System,
     /** Telemetrie-Sichtbarkeit (P2-J); Standard: der Store hinter [players], sonst nur im Speicher. */
     val telemetry: TelemetrySettingsPort = players as? TelemetrySettingsPort ?: InMemoryTelemetrySettings(),
+    /** Puls-/Schritt-Höchstwerte und Pulsverlauf (Plan Puls-Highlights); Standard: der Store hinter [players], sonst leer. */
+    val health: HealthRecordsPort = players as? HealthRecordsPort ?: InMemoryHealthRecords(),
 ) {
     val wizard =
         MatchWizard(

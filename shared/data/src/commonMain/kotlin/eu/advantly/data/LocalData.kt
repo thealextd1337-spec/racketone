@@ -12,7 +12,7 @@ import eu.advantly.data.db.AdvantlyDatabase
 
 /**
  * Lokale Datenbank eines Geräts (01 §5.1, Single Source of Truth): Event-Log, Match-Köpfe, Spieler,
- * Favoriten-Lineups und Settings über **einen** [SqlDriver].
+ * Favoriten-Lineups, Settings und Gesundheitsdaten über **einen** [SqlDriver].
  *
  * Erzeugen: `createInMemoryJvmLocalData()` (Tests/Desktop), `createAndroidLocalData(context)`,
  * `createNativeLocalData()` (iOS/watchOS). Synchron und nicht thread-sicher – ein Thread bzw. eine serielle Queue.
@@ -55,6 +55,8 @@ class LocalData(
             redacted = { replicas.isRedacted(it) },
         )
     val settings: SettingsRepository = SettingsRepository(database.settingQueries)
+    val health: HealthRepository =
+        HealthRepository(database.healthSeriesQueries) { database.matchHeaderQueries.countById(it).executeAsOne() > 0 }
     val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent, ::redactedAssignmentSlots)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
     val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver, replicas, cloudPulls, settings)
@@ -305,8 +307,9 @@ class LocalData(
 
         /**
          * Schema 14: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches;
-         * Freunde als Mitspieler (lokale Spieler-ID je Konto) und Verknüpfungshinweise (P2-E).
+         * Freunde als Mitspieler (lokale Spieler-ID je Konto) und Verknüpfungshinweise (P2-E); Schema 15: Puls und Schritte je
+         * Match und Quelle (`health_series`, Plan Puls H4).
          */
-        const val SCHEMA_VERSION: Long = 14
+        const val SCHEMA_VERSION: Long = 15
     }
 }

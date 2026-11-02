@@ -110,4 +110,28 @@ class MatchHistoryTest {
         assertEquals(HistoryOutcome.DRAW, matches.first().outcome())
         assertEquals(HistoryOutcome.ABANDONED, match(ResultReason.ABANDONED, Side.A).outcome())
     }
+
+    private fun gamesWon(
+        format: eu.advantly.core.model.MatchFormat,
+        points: String,
+        stop: Boolean = false,
+    ): Int {
+        val store = testStore()
+        val id = store.start(store.setupFor(format))
+        store.play(points)
+        if (stop) store.endMatch(EndReason.STOPPED)
+        return store.record(id)!!.summary.gamesWon
+    }
+
+    @Test
+    fun gamesWonCountsGamesInTennisAndPadelAndSetsInRallySports() {
+        // Tennis 6:0 0:6 [10:0]: Match-Tiebreak ist kein Spiel
+        assertEquals(6, gamesWon(Presets.TENNIS_BO3_MTB10.format(), "A".repeat(24) + "B".repeat(24) + "A".repeat(10)))
+        // Padel 6:0 1:1 beendet wie es steht: eingefrorener Satz zählt mit
+        assertEquals(7, gamesWon(Presets.PADEL_GOLDEN_BO3.format(), "A".repeat(24) + "AAAABBBB", stop = true))
+        // Pickleball, Badminton, Tischtennis: gewonnene Sätze („Games“)
+        assertEquals(2, gamesWon(Presets.PICKLEBALL_RALLY_BO3_15.format(), "A".repeat(15) + "B".repeat(15) + "A".repeat(15)))
+        assertEquals(2, gamesWon(Presets.BADMINTON_SINGLES_BO3_21.format(), "A".repeat(42)))
+        assertEquals(3, gamesWon(Presets.TABLE_TENNIS_SINGLES_BO5.format(), "B".repeat(11) + "A".repeat(33)))
+    }
 }

@@ -9,13 +9,17 @@ import eu.advantly.core.model.Player
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Surface
 import eu.advantly.core.scoring.Presets
+import eu.advantly.presentation.match.HealthRecords
+import eu.advantly.presentation.match.InMemoryHealthRecords
 import eu.advantly.presentation.match.LiveMatchPort
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.MatchSummary
+import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 
 /**
  * Beispieldaten für Desktop-Preview und Screenshots (kein Produktcode-Pfad): drei Gäste, drei beendete Matches
- * (Tennis, Padel, Badminton) und ein Padel-Favorit. Namen sind Daten, keine UI-Texte.
+ * (Tennis, Padel, Badminton) und ein Padel-Favorit, dazu Beispiel-Pulsdaten. Namen sind Daten, keine UI-Texte.
  */
 object DemoData {
     fun seed(model: AdvantlyAppModel) {
@@ -49,7 +53,25 @@ object DemoData {
             "AB".repeat(15) + "A".repeat(6),
         )
         players.saveFavorite(setup(Presets.PADEL_GOLDEN_BO3.format(), listOf(self, mia), listOf(jonas, tom), MatchMeta()))
+        // Beispiel-Gesundheitsdaten (nur mit dem In-Memory-Port): Pulskurve je Match und Höchstwerte am Start
+        (model.health as? InMemoryHealthRecords)?.let { health ->
+            model.history.matches.value
+                .forEach { health.setPulseTrack(it.matchId, pulse(it)) }
+            health.setRecords(HealthRecords(maxBpm = 178, maxStepsInSet = 2_431))
+        }
     }
+
+    /** Synthetischer Pulsverlauf im 5-s-Raster über die Matchdauer, mit gelegentlicher Lücke. */
+    private fun pulse(match: MatchSummary): PulseTrack {
+        val count = (match.durationMs / PULSE_INTERVAL_MS + 1).toInt()
+        return PulseTrack(
+            match.startedAtMs,
+            PULSE_INTERVAL_MS,
+            List(count) { i -> if (i % 37 == 36) null else 100 + (i * 13) % 45 + minOf(i, 30) },
+        )
+    }
+
+    private const val PULSE_INTERVAL_MS = 5_000L
 
     private fun setup(
         format: MatchFormat,

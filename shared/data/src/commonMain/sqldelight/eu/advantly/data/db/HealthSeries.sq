@@ -1,0 +1,62 @@
+-- Gesundheitsdaten (Plan Puls §3.4): Puls und kumulierte Schritte im 5-s-Raster je Match und Quelle (`HealthSeries`
+-- aus `shared/health`). Werte als CSV, `-` = keine Daten. Nicht in Outbox, Anti-Entropie, Cloud-Upload, Export oder Logs;
+-- verschwindet mit dem Match-Kopf.
+CREATE TABLE health_series (
+    match_id TEXT NOT NULL,
+    source_device_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    interval_ms INTEGER NOT NULL,
+    bpm_csv TEXT NOT NULL,
+    steps_csv TEXT NOT NULL,
+    clock_offset_ms INTEGER NOT NULL,
+    -- HealthQuality: OK, SPARSE_HR, NO_HR, GAPS
+    quality TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (match_id, source_device_id)
+);
+
+CREATE TRIGGER health_series_cleanup AFTER DELETE ON match_header BEGIN
+    DELETE FROM health_series WHERE match_id = old.id;
+END;
+
+revision:
+SELECT revision FROM health_series WHERE match_id = ? AND source_device_id = ?;
+
+put:
+INSERT OR REPLACE INTO health_series VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- Lesen nur für Matches, die das aktuelle Konto sehen darf (Replikat-Sperre wie match_header.history).
+forMatch:
+SELECT * FROM health_series
+WHERE match_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY source_device_id;
+
+readable:
+SELECT * FROM health_series
+WHERE match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY match_id, source_device_id;
+
+-- Eigene, noch nicht bestätigte Serien einer Uhr (Plan Puls §3.5).
+forSource:
+SELECT * FROM health_series
+WHERE source_device_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY match_id;
+
+-- Nur die Schlüssel samt Revision: billiger Fingerabdruck, ob sich lesbare Serien geändert haben.
+revisions:
+SELECT match_id, source_device_id, revision FROM health_series
+WHERE match_id IN (SELECT match_id FROM replica_readable_match)
+ORDER BY match_id, source_device_id;
+
+deleteForMatch:
+DELETE FROM health_series WHERE match_id = ?;
+
+deleteOne:
+DELETE FROM health_series WHERE match_id = ? AND source_device_id = ?;
+
+-- Unbestätigte Serien bleiben höchstens 7 Tage auf der Uhr (E5).
+deleteStartedBefore:
+DELETE FROM health_series WHERE start_ms < ?;
+
+deleteAll:
+DELETE FROM health_series;

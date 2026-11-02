@@ -5,9 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,11 +33,13 @@ import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.presentation.match.FavoriteLineup
+import eu.advantly.presentation.match.HealthRecords
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.match.isRated
+import eu.advantly.presentation.stats.gamesWon
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.common.AdvantlyCard
 import eu.advantly.ui.phone.common.SectionTitle
@@ -50,7 +55,9 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.history.HistoryItem
 import eu.advantly.ui.phone.live.OpenMatchCardContent
+import eu.advantly.ui.phone.platform.formatCount
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.home_empty
 import eu.advantly.ui.phone.resources.home_greeting
@@ -66,21 +73,30 @@ import eu.advantly.ui.phone.resources.home_resume
 import eu.advantly.ui.phone.resources.home_resume_finished
 import eu.advantly.ui.phone.resources.home_section_favorites
 import eu.advantly.ui.phone.resources.home_section_quick
+import eu.advantly.ui.phone.resources.home_section_recent
+import eu.advantly.ui.phone.resources.home_section_total
 import eu.advantly.ui.phone.resources.home_section_week
+import eu.advantly.ui.phone.resources.home_total_bpm
+import eu.advantly.ui.phone.resources.home_total_games
+import eu.advantly.ui.phone.resources.home_total_matches
+import eu.advantly.ui.phone.resources.home_total_max_pulse
+import eu.advantly.ui.phone.resources.home_total_max_steps
 import eu.advantly.ui.phone.resources.home_versus
 import eu.advantly.ui.phone.resources.home_week_matches
 import eu.advantly.ui.phone.resources.home_week_time
 import eu.advantly.ui.phone.resources.home_week_wins
+import eu.advantly.ui.phone.resources.stats_not_recorded
 import eu.advantly.ui.phone.resources.support_feedback
 import eu.advantly.ui.phone.resources.support_open
 import org.jetbrains.compose.resources.stringResource
 
 private const val WEEK_MS = 7L * 24 * 60 * 60 * 1000
+private const val RECENT_MATCHES = 5
 
 /**
  * H1 Start (04 §4.1): Begrüßung, Übersicht der offenen Matches (F22: mehrere Plätze, Kennzeichnung des Uhr-Matches),
- * „Neues Match“ (auch während andere laufen), Schnellstart („Wie letztes Mal“, Favoriten) und Wochenbilanz aus dem
- * Verlauf (ohne abgebrochene Matches, F21).
+ * „Neues Match“ (auch während andere laufen), Schnellstart („Wie letztes Mal“, Favoriten), Gesamtstatistik, Wochenbilanz
+ * und die letzten fünf Matches aus dem Verlauf (jeweils ohne abgebrochene Matches, F21).
  */
 @Composable
 fun HomeScreen(
@@ -95,6 +111,7 @@ fun HomeScreen(
     val last by model.players.lastSetup.collectAsState()
     val favorites by model.players.favorites.collectAsState()
     val history by model.history.matches.collectAsState()
+    val healthRecords by model.health.records.collectAsState()
     val runningCount = open.count { it.isRunning }
     Column(
         modifier
@@ -155,7 +172,19 @@ fun HomeScreen(
                 })
             }
         }
-        WeekSummary(history.filter { it.isRated }, clock.nowMs())
+        val rated = history.filter { it.isRated }
+        // Reihenfolge laut Nutzerwunsch: Gesamtstatistik, direkt darunter die letzten Spiele, dann die Wochenbilanz
+        TotalSummary(rated, healthRecords)
+        if (rated.isNotEmpty()) {
+            SectionTitle(stringResource(Res.string.home_section_recent))
+            Column(Modifier.testTag("recent_matches"), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                // Verlaufszeile ohne eigenen Seitenrand: der Startbildschirm hat ihn schon
+                rated.take(RECENT_MATCHES).forEachIndexed { index, match ->
+                    HistoryItem(match, index, onClick = { model.openResult(match.matchId) }, tag = "recent_item_$index", edgePadding = 0.dp)
+                }
+            }
+        }
+        WeekSummary(rated, clock.nowMs())
         if (history.isEmpty() && open.isEmpty()) {
             Text(
                 stringResource(Res.string.home_empty),
@@ -280,6 +309,44 @@ private fun FavoriteCard(
             }
         },
     )
+}
+
+/**
+ * Gesamtstatistik über alle gewerteten Matches: Matches, gewonnene Games ([gamesWon]) sowie Puls- und Schritt-Höchstwerte
+ * aus der Gesundheitsaufzeichnung („—“ ohne Daten).
+ */
+@Composable
+private fun TotalSummary(
+    rated: List<MatchSummary>,
+    health: HealthRecords,
+) {
+    if (rated.isEmpty()) return
+    val none = stringResource(Res.string.stats_not_recorded)
+    SectionTitle(stringResource(Res.string.home_section_total))
+    Column(Modifier.testTag("total_summary"), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            StatTile(rated.size.toString(), stringResource(Res.string.home_total_matches), Modifier.weight(1f).testTag("total_matches"))
+            StatTile(
+                rated.sumOf { it.gamesWon }.toString(),
+                stringResource(Res.string.home_total_games),
+                Modifier.weight(1f).testTag("total_games"),
+            )
+        }
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            StatTile(
+                health.maxBpm?.let { stringResource(Res.string.home_total_bpm, it) } ?: none,
+                stringResource(Res.string.home_total_max_pulse),
+                Modifier.weight(1f).fillMaxHeight().testTag("total_max_pulse"),
+                labelLines = 2,
+            )
+            StatTile(
+                health.maxStepsInSet?.let(::formatCount) ?: none,
+                stringResource(Res.string.home_total_max_steps),
+                Modifier.weight(1f).fillMaxHeight().testTag("total_max_steps"),
+                labelLines = 2,
+            )
+        }
+    }
 }
 
 /** Wochenbilanz (letzte 7 Tage): Matches, Siege, Spielzeit. */

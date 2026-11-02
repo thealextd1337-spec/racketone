@@ -361,6 +361,9 @@ object ScoringEngine {
         return pointHistory(created.config, created.lineup, ordered.filter { it != genesis }, created.scorerDeviceId ?: genesis.deviceId)
     }
 
+    /** Highlights der Zeitleiste über ein vollständiges Log ([MatchMoments.derive] auf [pointHistory]). */
+    fun moments(log: Collection<ScoreEvent>): List<MatchMoment> = MatchMoments.derive(pointHistory(log))
+
     /**
      * Wie [pointHistory] über ein Log ohne Genesis; der Startzähler [scorer] ist Pflicht (`null` nur bewusst für
      * Alt-Logs ohne Rollenprüfung, siehe 02 §7.5 Punkt 1).

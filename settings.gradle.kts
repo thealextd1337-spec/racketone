@@ -35,6 +35,8 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 include(":shared:core-model")
 include(":shared:core-scoring")
 include(":shared:sync-protocol")
+// Puls und Schritte je Match (P3, pure, inkl. watchOS)
+include(":shared:health")
 // Infrastruktur
 include(":shared:device-link")
 include(":shared:data")

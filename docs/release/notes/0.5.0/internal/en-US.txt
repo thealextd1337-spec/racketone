@@ -1,0 +1,6 @@
+New in 0.5.0:
+• Heart rate history (optional, switch on in your profile): curve with highlights like breaks, set points and comebacks. Stays on your watch and phone only.
+• Match detail: sets on top, then timeline, details, match format.
+• Home: overall stats and your last 5 matches.
+• Privacy policy version 7 – please confirm once.
+Please test: turn on heart rate history, play a match with the watch, view and delete the curve.

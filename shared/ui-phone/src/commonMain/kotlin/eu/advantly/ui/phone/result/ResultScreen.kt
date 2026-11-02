@@ -47,6 +47,7 @@ import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.presentation.match.isRated
 import eu.advantly.presentation.stats.MatchStatisticsCache
 import eu.advantly.presentation.stats.MatchStats
+import eu.advantly.presentation.stats.PulseTrack
 import eu.advantly.presentation.stats.Ratio
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.common.SectionTitle
@@ -111,8 +112,8 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * H8 Ergebnis (04 §4.1, §6 – nur Ergebnis-Hero, Stat-Kacheln und Vergleichsbalken): Endstand, Sätze, Dauer und
- * Kennzahlen aus `pointHistory` (02 §11.1, ohne Zusatzeingaben).
+ * H8 Ergebnis (04 §4.1, §6): oben Ergebnis-Hero und Sätze, darunter die Zeitleiste ([MatchTimeline]), dann Details
+ * (Dauer, Verlauf, Vergleich, Aufschläge aus `pointHistory`, 02 §11.1), Personen und ganz unten das Spielformat.
  */
 @Composable
 fun ResultScreen(
@@ -131,6 +132,12 @@ fun ResultScreen(
     canEditResult: Boolean = false,
     /** Sätze und/oder Aufschläger in einem Vorgang speichern (`MatchHistoryPort.correctResult`). */
     onCorrectResult: (List<CorrectedSet>?, List<GameServer>?) -> Boolean = { _, _ -> false },
+    /** Pulsverlauf für die Zeitleiste; `null` = nur Highlights. */
+    pulse: PulseTrack? = null,
+    /** Link „Pulsverlauf aktivieren“ (ohne Puls und ohne Einwilligung) → Einstellung im Profil; `null` = kein Link. */
+    onEnablePulse: (() -> Unit)? = null,
+    /** Stufe des Pulsverlaufs nachträglich ändern bzw. löschen (Plan Puls E2, [PulseVisibilitySection]). */
+    pulseSettings: @Composable (MatchRecord) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -218,24 +225,8 @@ fun ResultScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s),
         ) {
+            // Reihenfolge (Nutzerwunsch): Ergebnis und Sätze, Zeitleiste, Details, Personen, Spielformat ganz unten
             Hero(record.summary)
-            SectionTitle(stringResource(Res.string.detail_format))
-            Text(
-                formatLabel(record.summary.setup.format),
-                style = AdvantlyTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
-                color = AdvantlyTheme.colors.text,
-                modifier = Modifier.testTag("result_format_title"),
-            )
-            Text(
-                formatDescription(record.summary.setup.format),
-                style = AdvantlyTheme.typography.body,
-                color = AdvantlyTheme.colors.text2,
-                modifier = Modifier.testTag("result_format_description"),
-            )
-            SectionTitle(stringResource(Res.string.detail_lineup))
-            headToHead(record.summary.setup)
-            playerAssignments(record)
-            sharing(record)
             SectionTitle(stringResource(Res.string.detail_sets))
             record.summary.sets.forEachIndexed { index, set ->
                 Text(
@@ -266,6 +257,13 @@ fun ResultScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).testTag("result_edit"),
                 )
             }
+            MatchTimeline(
+                record.summary.setup,
+                stats,
+                pulse = pulse,
+                onEnablePulse = onEnablePulse,
+                corrected = record.summary.result.corrected,
+            )
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
@@ -274,6 +272,24 @@ fun ResultScreen(
             SectionTitle(stringResource(Res.string.result_section_compare))
             Comparison(record, stats)
             ServeStatistics(record.summary.setup, stats)
+            SectionTitle(stringResource(Res.string.detail_lineup))
+            headToHead(record.summary.setup)
+            playerAssignments(record)
+            sharing(record)
+            pulseSettings(record)
+            SectionTitle(stringResource(Res.string.detail_format))
+            Text(
+                formatLabel(record.summary.setup.format),
+                style = AdvantlyTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+                color = AdvantlyTheme.colors.text,
+                modifier = Modifier.testTag("result_format_title"),
+            )
+            Text(
+                formatDescription(record.summary.setup.format),
+                style = AdvantlyTheme.typography.body,
+                color = AdvantlyTheme.colors.text2,
+                modifier = Modifier.testTag("result_format_description"),
+            )
             AdvantlyButton(
                 text = stringResource(Res.string.result_play_again),
                 primary = true,

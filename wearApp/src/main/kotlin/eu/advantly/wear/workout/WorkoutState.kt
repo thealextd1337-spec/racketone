@@ -50,6 +50,8 @@ data class WorkoutUiState(
      * Puls-/Schritte-Spalten und kein Versand. Setzt [eu.advantly.wear.live.WatchTelemetryPolicy].
      */
     val telemetryAllowed: Boolean = true,
+    /** Der Pulsverlauf dieses Matches wird aufgezeichnet (roter Punkt neben dem Puls, Plan Puls E3). */
+    val healthRecording: Boolean = false,
 ) {
     override fun toString(): String = "WorkoutUiState(phase=$phase, telemetry=<redacted>)"
 }

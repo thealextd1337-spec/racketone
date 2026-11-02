@@ -171,6 +171,8 @@
 "start.telemetry.privateHint" = "Nur auf dieser Uhr und deinem iPhone.";
 "start.telemetry.offHint" = "Keine Anzeige, es wird nichts gesendet.";
 "fitness.telemetryOff" = "Puls ausgeblendet (Puls & Schritte: Gar nicht).";
+/* Plan Puls H7: roter Aufnahme-Punkt neben dem Puls (VoiceOver) */
+"health.recording" = "Pulsverlauf wird aufgezeichnet";
 
 /* Satzende-Dialog: Satznummer und Stand */
 "setend.title %@ %@" = "Satz %1$@ · %2$@";

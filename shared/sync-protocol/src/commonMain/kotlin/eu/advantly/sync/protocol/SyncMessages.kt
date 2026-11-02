@@ -42,6 +42,8 @@ enum class PeerKind {
  * @property minV älteste Version, die der Absender noch lesen kann
  * @property activeMatches Matches, die beim Absender gerade offen sind
  * @property session zufällige Kennung der Session-Instanz; fehlt bei älteren Absendern (Protokoll 3)
+ * @property healthProtocol `1` = der Absender versteht [HealthMessage] (Protokoll 6, Plan Puls §3.5); `null` bei älteren.
+ *   Steht zusätzlich zu [v] im Hello, weil eine Session ohne Konto nur Version 3 spricht.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -59,6 +61,7 @@ data class Hello(
     val recipientSession: String? = null,
     val localSources: List<OwnSource> = emptyList(),
     val adoptedSources: List<String> = emptyList(),
+    val healthProtocol: Int? = null,
 ) : SyncMessage
 
 /**
@@ -137,6 +140,7 @@ data class Events(
  *   (F22, 01 §4.3 „Uhr-Match“); `null` = keine Angabe (Uhr, ältere Absender)
  * @property telemetry Telemetrie-Sichtbarkeit des Besitzers (P2-J, F19/F29) mit Änderungszeit, von Handy **und** Uhr;
  *   `null` = nie geändert bzw. älterer Absender (Empfänger behält seinen Wert)
+ * @property healthConsent Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls §4), gleiche Regel wie [telemetry]; additiv
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -156,6 +160,7 @@ data class MatchMetaMessage(
     val telemetry: TelemetrySetting? = null,
     @EncodeDefault override val v: Int = ProtocolVersion.MIN_SUPPORTED,
     val stamp: MatchDataStamp? = null,
+    val healthConsent: HealthConsentSetting? = null,
 ) : SyncMessage {
     init {
         require(v >= 4 || stamp == null)
