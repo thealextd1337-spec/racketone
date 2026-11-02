@@ -39,6 +39,7 @@ import eu.advantly.cloud.sync.ScorerRolesPort
 import eu.advantly.cloud.sync.VisitorTeamMember
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.ScorerDevices
 import eu.advantly.presentation.friends.ScorerHandovers
@@ -124,6 +125,7 @@ private class Devices : ScorerDevices {
     override val phoneId = "jonas-phone"
     val scoring = mutableSetOf<String>()
     val ready = mutableSetOf<String>()
+    val uploads = mutableMapOf<String, Boolean>()
 
     override fun watchId() = "jonas-watch"
 
@@ -132,7 +134,14 @@ private class Devices : ScorerDevices {
     override fun handOver(
         matchId: String,
         deviceId: String,
-    ) = false
+    ): Handover? = null
+
+    override fun uploaded(eventId: String) = uploads[eventId]
+
+    override fun handBack(
+        matchId: String,
+        handover: Handover,
+    ) = scoring.add(matchId)
 
     override fun canTakeOver(matchId: String) = matchId in ready && matchId !in scoring
 
@@ -210,6 +219,7 @@ class HandoverUiTest {
     private val store = Store()
     private val pulled = Pulled(emptyMap())
     private val onServer = mutableSetOf<String>()
+    private var handovers: ScorerHandovers? = null
 
     private fun withLocale(
         locale: Locale,
@@ -243,6 +253,7 @@ class HandoverUiTest {
         val scope = CoroutineScope(Dispatchers.Unconfined + Job())
         val auth = FakePhoneAuth().apply { session.value = CloudSession(profile, true, consentStatus = ConsentStatus.CURRENT) }
         val handovers = ScorerHandovers(store, roles, { _, m -> m in onServer }, { p, m -> pulled.match(p, m) }, devices) {}
+        this.handovers = handovers
         val model = FriendsViewModel(auth, Nobody, { emptyList() }, null, scope, local = pulled, liveMatches = Live(), scorers = handovers)
         try {
             test(model)
@@ -274,6 +285,28 @@ class HandoverUiTest {
                     text("Jonas ist eingeladen", "live_handover_dialog")
                     screenshot("handover-abgeben-eingeladen-de")
                     assertEquals(listOf("invite m1 jonas"), roles.calls)
+                }
+            }
+        }
+
+    @Test fun rejectedHandoverShowsAHintUntilDismissedInGerman() =
+        withLocale(Locale.GERMAN) {
+            onServer += "m1"
+            store.invites = mapOf("m1" to ScorerInvite("jonas", sent = true, handover = Handover("sc-m1", "alex-phone", "jonas-phone")))
+            devices.uploads["sc-m1"] = false
+            withModel("alex") { model ->
+                checkNotNull(handovers).reconcile("alex")
+                model.open()
+                runDesktopComposeUiTest(width = 400, height = 400) {
+                    setContent { Dark { Column { LiveHandoverButton(model, "m1", listOf(FriendEntry("jonas", "Jonas"))) } } }
+                    onNodeWithTag("live_handover_failed").assertTextContains("Übergabe an Jonas fehlgeschlagen – du zählst weiter.")
+                    onNodeWithTag("live_handover").assertDoesNotExist()
+                    screenshot("handover-fehlgeschlagen-de")
+                    onNodeWithTag("live_handover_failed_ok").performClick()
+                    waitForIdle()
+                    onNodeWithTag("live_handover_failed").assertDoesNotExist()
+                    onNodeWithTag("live_handover").assertExists()
+                    assertEquals(emptyList<String>(), roles.calls)
                 }
             }
         }

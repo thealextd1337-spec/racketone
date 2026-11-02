@@ -38,6 +38,7 @@ import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.handover_accepted
 import eu.advantly.ui.phone.resources.handover_button
 import eu.advantly.ui.phone.resources.handover_cancel
+import eu.advantly.ui.phone.resources.handover_failed
 import eu.advantly.ui.phone.resources.handover_hint
 import eu.advantly.ui.phone.resources.handover_invited
 import eu.advantly.ui.phone.resources.handover_queued
@@ -89,9 +90,6 @@ fun LiveHandoverButton(
     if (state.access != FriendsAccess.READY || !model.canHandOver(matchId)) return
     val status = state.handovers[matchId]
     if (candidates.isEmpty() && status == null) return
-    var open by remember(matchId) { mutableStateOf(false) }
-    TextButton({ open = true }, modifier = Modifier.testTag("live_handover")) { Text(stringResource(Res.string.handover_button)) }
-    if (!open) return
     val unknown = stringResource(Res.string.friends_unknown)
 
     fun name(profileId: String) =
@@ -101,6 +99,21 @@ fun LiveHandoverButton(
                 ?.alias
                 ?.takeIf { it.isNotBlank() }
             ?: unknown
+    if (status?.phase == HandoverPhase.FAILED) {
+        // Server lehnte die Abgabe ab: dieses Handy bzw. die eigene Uhr zählt wieder; sichtbar ohne Dialog.
+        Text(
+            stringResource(Res.string.handover_failed, name(status.scorerId)),
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag("live_handover_failed"),
+        )
+        TextButton({ model.cancelHandover(matchId) }, modifier = Modifier.testTag("live_handover_failed_ok")) {
+            Text(stringResource(Res.string.friends_dismiss))
+        }
+        return
+    }
+    var open by remember(matchId) { mutableStateOf(false) }
+    TextButton({ open = true }, modifier = Modifier.testTag("live_handover")) { Text(stringResource(Res.string.handover_button)) }
+    if (!open) return
     AlertDialog(
         onDismissRequest = { open = false },
         title = { Text(stringResource(Res.string.handover_title)) },
@@ -120,6 +133,7 @@ fun LiveHandoverButton(
                             HandoverPhase.QUEUED -> Res.string.handover_queued
                             HandoverPhase.INVITED -> Res.string.handover_invited
                             HandoverPhase.ACCEPTED -> Res.string.handover_accepted
+                            HandoverPhase.FAILED -> Res.string.handover_failed
                         }
                     Text(stringResource(text, name(status.scorerId)), modifier = Modifier.testTag("live_handover_status"))
                     if (status.phase != HandoverPhase.ACCEPTED) {

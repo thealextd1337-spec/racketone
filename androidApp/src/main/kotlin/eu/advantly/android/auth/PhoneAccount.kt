@@ -260,7 +260,7 @@ internal class PhoneAccountCore private constructor(
             backend,
             ::onServer,
             { profile, match -> guarded(null) { cloudPulls.pulledMatch(profile, match) } },
-            PhoneScorerDevices(session) { runtime.allowed },
+            PhoneScorerDevices(session, { event -> guarded(null) { cloud.uploaded(event) } }) { runtime.allowed },
         ) {
             handoverPoll.restart()
             sync.syncNow()

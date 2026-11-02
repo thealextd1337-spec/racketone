@@ -16,6 +16,7 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.PendingVisitorStore
 import eu.advantly.presentation.friends.ScorerInvite
@@ -146,19 +147,29 @@ internal class AndroidPhoneSyncRecord(
         prefs.edit().putStringSet("visitors.pending.$profileId", entries).apply()
     }
 
-    // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), UUIDs ohne Schrägstrich.
+    // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), nach der Abgabe zusätzlich „/Event/von/an“ (wartet
+    // auf die Antwort des Servers); UUIDs ohne Schrägstrich.
     override fun scorerInvites(profileId: String): Map<String, ScorerInvite> =
         prefs
             .getStringSet("scorers.pending.$profileId", null)
             .orEmpty()
-            .mapNotNull { entry -> entry.split('/').takeIf { it.size == 3 }?.let { it[0] to ScorerInvite(it[1], it[2] == "1") } }
-            .toMap()
+            .mapNotNull { entry ->
+                val parts = entry.split('/')
+                val handover = if (parts.size == 6) Handover(parts[3], parts[4], parts[5]) else null
+                if (parts.size != 3 && handover == null) return@mapNotNull null
+                parts[0] to ScorerInvite(parts[1], parts[2] == "1", handover)
+            }.toMap()
 
     override fun setScorerInvites(
         profileId: String,
         invites: Map<String, ScorerInvite>,
     ) {
-        val entries = invites.map { (match, invite) -> "$match/${invite.scorerId}/${if (invite.sent) 1 else 0}" }.toSet()
+        val entries =
+            invites
+                .map { (match, invite) ->
+                    "$match/${invite.scorerId}/${if (invite.sent) 1 else 0}" +
+                        invite.handover?.let { "/${it.eventId}/${it.from}/${it.to}" }.orEmpty()
+                }.toSet()
         prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
     }
 

@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
+import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -110,10 +111,17 @@ class PhoneSyncJobsTest {
     /** Zählen weitergeben: Einladungen je Konto mit Sendestand, Logout entfernt sie. */
     @Test fun scorerInvitesSurviveReopenAndAreForgottenWithTheAccount() {
         val record = AndroidPhoneSyncRecord(app)
-        record.setScorerInvites("alice", mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true)))
+        val handedOver = ScorerInvite("tom", sent = true, handover = Handover("e1", "phone-1", "tom-watch"))
+        record.setScorerInvites(
+            "alice",
+            mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true), "m3" to handedOver),
+        )
         record.setScorerInvites("bob", mapOf("m9" to ScorerInvite("eve", sent = true)))
         val reopened = AndroidPhoneSyncRecord(app)
-        assertEquals(mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true)), reopened.scorerInvites("alice"))
+        assertEquals(
+            mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true), "m3" to handedOver),
+            reopened.scorerInvites("alice"),
+        )
         record.forget("alice")
         assertEquals(emptyMap<String, ScorerInvite>(), reopened.scorerInvites("alice"))
         assertEquals(mapOf("m9" to ScorerInvite("eve", sent = true)), reopened.scorerInvites("bob"))

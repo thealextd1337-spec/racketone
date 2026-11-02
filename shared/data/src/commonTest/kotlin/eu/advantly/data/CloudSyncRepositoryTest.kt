@@ -85,6 +85,7 @@ class CloudSyncRepositoryTest {
         assertEquals(rows, data.events.eventsFor("match"))
         assertEquals(listOf("three"), data.cloud.pendingEvents(10).map { it.id })
         assertEquals(mapOf("two" to "forbidden"), data.cloud.rejectedEvents())
+        assertEquals(listOf(true, false, null, true), listOf("one", "two", "three", "unknown").map(data.cloud::uploaded))
         // Verspätete Ablehnung darf eine bereits erfolgreiche Bestätigung nicht rückgängig machen.
         data.cloud.acknowledge(emptySet(), mapOf("one" to "forbidden"))
         assertEquals(mapOf("two" to "forbidden"), data.cloud.rejectedEvents())

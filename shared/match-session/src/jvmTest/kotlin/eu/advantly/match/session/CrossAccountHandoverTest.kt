@@ -19,6 +19,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -122,7 +123,7 @@ class CrossAccountHandoverTest {
                 .match(match),
         )
 
-        assertTrue(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
         assertFalse(alex.phone.recordPoint(Side.A), "Alex zählt nicht mehr")
         assertFalse(alex.phone.scoresHere(match))
         toJonas(match)
@@ -151,7 +152,7 @@ class CrossAccountHandoverTest {
         assertTrue(alex.watch.recordPoint(Side.A))
         settle()
 
-        assertTrue(alex.phone.handOverScoring(match, jonas.watch.deviceId))
+        assertNotNull(alex.phone.handOverScoring(match, jonas.watch.deviceId))
         settle()
         assertFalse(alex.watch.recordPoint(Side.B), "Alex' Uhr wechselt sofort in die Anzeige")
         assertEquals(
@@ -194,7 +195,7 @@ class CrossAccountHandoverTest {
         assertTrue(alex.watch.recordPoint(Side.A))
         settle()
 
-        assertTrue(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
         settle()
         assertFalse(alex.watch.recordPoint(Side.A))
         toJonas(match)
@@ -213,6 +214,28 @@ class CrossAccountHandoverTest {
                 .pointsPlayed,
             "gezogene Events gehen sofort an Alex' Uhr",
         )
+    }
+
+    /** M3: lehnt der Server die Abgabe ab, zählt Alex' Uhr wieder – sonst zählte niemand. */
+    @Test
+    fun rejectedHandoverHandsScoringBackToAlexWatch() {
+        val match = start(ScorerChoice.MyWatch)
+        settle()
+        assertTrue(alex.watch.recordPoint(Side.A))
+        settle()
+        val handover = assertNotNull(alex.phone.handOverScoring(match, jonas.phone.deviceId))
+        assertEquals(alex.watch.deviceId, handover.from)
+        assertEquals(jonas.phone.deviceId, handover.to)
+        settle()
+        assertFalse(alex.watch.recordPoint(Side.A))
+
+        assertTrue(alex.phone.handBackScoring(match, handover))
+        settle()
+        assertTrue(alex.watch.recordPoint(Side.B), "Alex' Uhr zählt wieder")
+        settle()
+        assertEquals(2, points(alex.phone, match))
+        assertEquals(listOf(jonas.phone.deviceId, alex.watch.deviceId), scorerChanges(alex.phoneData, match).takeLast(2))
+        assertFalse(alex.phone.handBackScoring(match, handover), "nur solange das abgelehnte Ziel zählt")
     }
 
     @Test

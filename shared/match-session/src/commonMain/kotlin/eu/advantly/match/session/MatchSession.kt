@@ -1113,12 +1113,30 @@ class MatchSession(
     fun handOverScoring(
         matchId: MatchId,
         target: DeviceId,
+    ): ScorerHandover? {
+        checkThread()
+        if (!config.parallelMatches) return null
+        val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return null
+        val from = m.scorer
+        if (m.status == MatchStatus.FINISHED || from == null || from == target || !isMine(from)) return null
+        val event = emit(m, ScorerChanged(target)) ?: return null
+        return ScorerHandover(event.id, from, target)
+    }
+
+    /**
+     * Abgabe gescheitert (der Server lehnte das `ScorerChanged` aus [handOverScoring] ab, z. B. weil die Rolle inzwischen
+     * entzogen ist): [ScorerHandover.from] zählt wieder. Nur solange laut Log noch [ScorerHandover.to] zählt – hat
+     * inzwischen jemand anderes übernommen, bleibt es dabei.
+     */
+    fun handBackScoring(
+        matchId: MatchId,
+        handover: ScorerHandover,
     ): Boolean {
         checkThread()
-        if (!config.parallelMatches) return false
+        if (!config.parallelMatches || !isMine(handover.from)) return false
         val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return false
-        if (m.status == MatchStatus.FINISHED || m.scorer == target || !isMine(m.scorer)) return false
-        return emit(m, ScorerChanged(target)) != null
+        if (m.status == MatchStatus.FINISHED || m.scorer != handover.to) return false
+        return emit(m, ScorerChanged(handover.from)) != null
     }
 
     /** Handy: Eines meiner Geräte (dieses Handy oder die eigene Uhr) zählt das laufende offene Match [matchId]. */
