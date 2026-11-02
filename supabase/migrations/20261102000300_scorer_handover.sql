@@ -14,14 +14,18 @@ returns boolean language sql stable security definer set search_path = '' as $$
                  and private.is_tournament_director(m.tournament_id, p_profile)));
 $$;
 
--- sync_pull: Rollen-Geräte (roles.deviceId) für alle Mitglieder, damit der abgebende Zähler ScorerChanged auf das
--- angenommene Gerät erzeugen kann. Rollen liefert sync_pull ohnehin nur an Mitglieder. Änderung am aktuellen Stand
--- (inkl. nachträglich eingefügter Bindungsprüfung), keine Kopie des Funktionskörpers.
+-- sync_pull: Rollen-Geräte (roles.deviceId) für Ersteller und Turnierleitung, damit der abgebende Zähler ScorerChanged
+-- auf das angenommene Gerät erzeugen kann; der Rolleninhaber sieht wie bisher sein eigenes. Andere Mitglieder nicht
+-- (Geräte-IDs fremder Konten sind kein Anzeigeinhalt). Änderung am aktuellen Stand (inkl. nachträglich eingefügter
+-- Bindungsprüfung), keine Kopie des Funktionskörpers.
 do $$
 declare
   v_old text := pg_get_functiondef('public.sync_pull(bigint,integer)'::regprocedure);
   v_new text := replace(v_old, $r$'deviceId', case when r.profile_id = v_uid then r.device_id end$r$,
-                        $r$'deviceId', r.device_id$r$);
+                        $r$'deviceId', case when r.profile_id = v_uid or m.created_by = v_uid
+                                                 or (m.tournament_id is not null
+                                                     and private.is_tournament_director(m.tournament_id, v_uid))
+                                            then r.device_id end$r$);
 begin
   if v_new = v_old then
     raise exception 'sync_pull: Rollen-Gerät nicht gefunden';
@@ -30,7 +34,8 @@ begin
 end;
 $$;
 
--- Bei angenommener Rolle darf das Gerät gewechselt werden (erneute Annahme); widerrufene Geräte nie.
+-- Bei angenommener Rolle darf das Gerät gewechselt werden (erneute Annahme mit Gerät); widerrufene Geräte nie. Eine
+-- erneute Annahme ohne Gerät würde die Bindung leeren und wird wie eine fehlende Einladung abgelehnt.
 create or replace function public.respond_scorer_invitation(p_match_id uuid, p_accept boolean,
                                                             p_device_id uuid default null)
 returns void language plpgsql security definer set search_path = '' as $$
@@ -41,7 +46,7 @@ begin
   perform private.require_cloud_binding();
   select * into v_r from public.match_roles r
    where r.match_id = p_match_id and r.profile_id = v_uid
-     and (r.status = 'invited' or (r.status = 'accepted' and p_accept))
+     and (r.status = 'invited' or (r.status = 'accepted' and p_accept and p_device_id is not null))
    for update;
   if not found then
     perform private.fail('no_pending_invitation');
@@ -80,10 +85,36 @@ returns void language sql security definer set search_path = '' as $$
             or r.match_id = any (array(select m.id from public.matches m where m.created_by = p_b)))));
 $$;
 
--- Zählerwechsel an alle Beteiligten (Ersteller, verknüpfte Mitspieler, angenommene Rollen) außer dem Auslöser.
+-- Zählerwechsel an alle Beteiligten (Ersteller, verknüpfte Mitspieler, angenommene Rollen) außer dem Auslöser – nur
+-- in laufenden Matches und nur, wenn das Zählen das Konto wechselt: Zielgerät gehört einem anderen Konto als das
+-- bisher zählende Gerät (letztes MatchCreated/ScorerChanged davor in Engine-Ordnung lamport, Gerät, ID; unbekannt →
+-- der Auslöser). Eigene Handy↔Uhr-Wechsel und Verlaufs-Uploads beendeter Matches melden nichts.
 create function private.notify_scorer_changed()
 returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_uuid constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  v_target_owner uuid;
+  v_previous text;
+  v_previous_owner uuid;
 begin
+  if not exists (select 1 from public.matches m
+                 where m.id = new.match_id and m.status in ('in_progress', 'paused', 'awaiting_decision')) then
+    return null;
+  end if;
+  if new.payload ->> 'scorerDeviceId' ~ v_uuid then
+    v_target_owner := (select d.profile_id from public.devices d where d.id = (new.payload ->> 'scorerDeviceId')::uuid);
+  end if;
+  v_previous := (select e.payload ->> 'scorerDeviceId' from public.match_events e
+                 where e.match_id = new.match_id and e.type in ('MatchCreated', 'ScorerChanged')
+                   and (e.lamport, e.device_id, e.id) < (new.lamport, new.device_id, new.id)
+                 order by e.lamport desc, e.device_id desc, e.id desc
+                 limit 1);
+  if v_previous ~ v_uuid then
+    v_previous_owner := (select d.profile_id from public.devices d where d.id = v_previous::uuid);
+  end if;
+  if v_target_owner is null or v_target_owner = coalesce(v_previous_owner, new.author_id) then
+    return null;
+  end if;
   perform private.notify(x.profile_id, 'scorer_changed', jsonb_build_object('matchId', new.match_id), new.author_id)
   from (select m.created_by as profile_id from public.matches m where m.id = new.match_id
         union select mp.profile_id from public.match_participants mp
