@@ -59,10 +59,20 @@ internal class AndroidPhoneSyncScheduler(
     fun scheduleAfterMatchEnd(
         profile: String,
         record: PhoneSyncRecord,
+    ) = scheduleUnlessBackingOff(profile, record, MATCH_END_SYNC_DELAY_MS)
+
+    /**
+     * Lauf nach [delayMs], außer ein Backoff ist geplant (dann bleibt dessen Termin: offline oder gestört, kein Hämmern).
+     * Live-Stand (plan-live-mitspieler §3.1) und Matchende; Netzbedingung und Doze regelt der JobScheduler.
+     */
+    fun scheduleUnlessBackingOff(
+        profile: String,
+        record: PhoneSyncRecord,
+        delayMs: Long,
     ) {
         val pending = jobs.getPendingJob(SYNC_JOB_ID)?.extras?.getString(PROFILE_EXTRA) == profile
         if (pending && record.failures(profile) > 0) return
-        schedule(profile, MATCH_END_SYNC_DELAY_MS)
+        schedule(profile, delayMs)
     }
 
     override fun cancel() {
@@ -110,6 +120,7 @@ internal class AndroidPhoneSyncRecord(
             .remove("last_backup.$profile")
             .remove("failures.$profile")
             .remove("visitors.pending.$profile")
+            // Altlast bis 0.5.x (Live-Upload nur mit Zuschauern); wird nicht mehr geschrieben.
             .remove("visitors.watched.$profile")
             .apply()
     }
@@ -129,15 +140,6 @@ internal class AndroidPhoneSyncRecord(
     ) {
         val entries = pending.flatMap { (match, visitors) -> visitors.map { "$match/$it" } }.toSet()
         prefs.edit().putStringSet("visitors.pending.$profileId", entries).apply()
-    }
-
-    override fun watched(profileId: String): Set<String> = prefs.getStringSet("visitors.watched.$profileId", null).orEmpty().toSet()
-
-    override fun setWatched(
-        profileId: String,
-        matchIds: Set<String>,
-    ) {
-        prefs.edit().putStringSet("visitors.watched.$profileId", matchIds).apply()
     }
 
     companion object {

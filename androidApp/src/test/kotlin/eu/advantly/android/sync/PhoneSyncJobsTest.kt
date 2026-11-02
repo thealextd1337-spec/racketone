@@ -94,18 +94,15 @@ class PhoneSyncJobsTest {
         assertEquals(setOf("last_backup.bob", "failures.bob"), prefs.all.keys)
     }
 
-    /** Zuschauer: vorgemerkte Benennungen und beobachtete Matches je Konto, Logout entfernt sie. */
+    /** Zuschauer: vorgemerkte Benennungen je Konto, Logout entfernt sie. */
     @Test fun visitorQueueSurvivesReopenAndIsForgottenWithTheAccount() {
         val record = AndroidPhoneSyncRecord(app)
         record.setPending("alice", mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")))
-        record.setWatched("alice", setOf("m3"))
         record.setPending("bob", mapOf("m9" to setOf("eve")))
         val reopened = AndroidPhoneSyncRecord(app)
         assertEquals(mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")), reopened.pending("alice"))
-        assertEquals(setOf("m3"), reopened.watched("alice"))
         record.forget("alice")
         assertEquals(emptyMap<String, Set<String>>(), reopened.pending("alice"))
-        assertEquals(emptySet<String>(), reopened.watched("alice"))
         assertEquals(mapOf("m9" to setOf("eve")), reopened.pending("bob"))
     }
 
@@ -128,6 +125,23 @@ class PhoneSyncJobsTest {
         scheduler.cancel()
         scheduler.scheduleAfterMatchEnd("alice", record)
         assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+    }
+
+    /** Live-Stand: sofort bzw. nach der Drosselung, mit Netzbedingung; ein Backoff bleibt auch hier bestehen. */
+    @Test fun liveUploadIsANetworkJobThatKeepsAnActiveBackoff() {
+        val scheduler = AndroidPhoneSyncScheduler(app)
+        val record = AndroidPhoneSyncRecord(app)
+        scheduler.scheduleUnlessBackingOff("alice", record, 0)
+        val job = jobs.getPendingJob(SYNC_JOB_ID)!!
+        assertEquals(0L, job.minLatencyMillis)
+        assertEquals(JobInfo.NETWORK_TYPE_ANY, job.networkType)
+        scheduler.scheduleUnlessBackingOff("alice", record, 6_000)
+        assertEquals(6_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+
+        record.save("alice", null, 2)
+        scheduler.schedule("alice", 60_000)
+        scheduler.scheduleUnlessBackingOff("alice", record, 0)
+        assertEquals(60_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
     }
 
     /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */

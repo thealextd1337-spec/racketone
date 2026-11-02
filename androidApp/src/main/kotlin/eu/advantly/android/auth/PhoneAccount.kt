@@ -34,7 +34,7 @@ import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
-import eu.advantly.presentation.friends.LiveVisitorUpload
+import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
 import eu.advantly.presentation.support.SupportViewModel
@@ -47,7 +47,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.security.MessageDigest
@@ -94,6 +93,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.backend,
                     core.sharedMatches,
                     core.visitors,
+                    core.backend,
                 ),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
@@ -192,13 +192,14 @@ internal class PhoneAccountCore private constructor(
                 runtime.allowed
             }, storageAction = runtime::storageAction, telemetry = backend)
         }
+    private val syncScheduler = AndroidPhoneSyncScheduler(context)
     val sync =
         PhoneSyncCoordinator(
             auth,
             session,
             pull,
             upload,
-            AndroidPhoneSyncScheduler(context),
+            syncScheduler,
             record,
             runtime.scope,
             hostAccessAllowed = { runtime.allowed },
@@ -207,26 +208,28 @@ internal class PhoneAccountCore private constructor(
 
     /**
      * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
-     * wurde), und gehen nach jedem Abgleich hinaus. Ein Match mit Zuschauern lädt während des Spiels höchstens alle
-     * 30 s den Live-Stand hoch, sonst bleibt es beim Abgleich am Matchende.
+     * wurde), und gehen nach jedem Abgleich hinaus.
      */
     val visitors =
         VisitorQueue(record, backend, { profile, match ->
             guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
         }) { sync.syncNow() }
-    private val liveVisitors =
-        LiveVisitorUpload(visitors, System::currentTimeMillis, { delayMs, run ->
-            runtime.scope.launch {
-                delay(delayMs)
-                run()
-            }
-        }) { sync.syncNow() }
+
+    /**
+     * Live-Stand für Mitspieler und Zuschauer (plan-live-mitspieler §3.1): jedes laufende Match dieses Handys (auch von
+     * seiner Uhr gezählt) sofort beim Start, danach höchstens alle 10 s bei Änderung. Als JobScheduler-Auftrag mit
+     * Netzbedingung: ohne Netz kein Versuch, Doze verschiebt ihn, ein Backoff bleibt bestehen.
+     */
+    private val liveScores =
+        LiveScoreUpload(System::currentTimeMillis, { profile, delayMs ->
+            syncScheduler.scheduleUnlessBackingOff(profile, record, delayMs)
+        })
     private val scoreListener =
         SessionListener { state ->
             val profile = auth.session.value?.profileId
             state.matches
                 .filter { it.state.status != MatchStatus.FINISHED }
-                .forEach { liveVisitors.onScore(profile, it.id.value, it.eventCount) }
+                .forEach { liveScores.onScore(profile, it.id.value, it.eventCount) }
         }
 
     private suspend fun flushVisitors() {

@@ -112,7 +112,6 @@ private class UiVisitors : VisitorsPort {
 
 private class UiStore : PendingVisitorStore {
     var pending = emptyMap<String, Set<String>>()
-    var watched = emptySet<String>()
 
     override fun pending(profileId: String) = pending
 
@@ -121,15 +120,6 @@ private class UiStore : PendingVisitorStore {
         pending: Map<String, Set<String>>,
     ) {
         this.pending = pending
-    }
-
-    override fun watched(profileId: String) = watched
-
-    override fun setWatched(
-        profileId: String,
-        matchIds: Set<String>,
-    ) {
-        watched = matchIds
     }
 }
 

@@ -22,14 +22,6 @@ interface PendingVisitorStore {
         profileId: String,
         pending: Map<String, Set<String>>,
     )
-
-    /** Matches mit mindestens einem bestätigten Visitor: nur sie laden den Live-Stand während des Spiels hoch. */
-    fun watched(profileId: String): Set<String>
-
-    fun setWatched(
-        profileId: String,
-        matchIds: Set<String>,
-    )
 }
 
 /**
@@ -74,20 +66,6 @@ class VisitorQueue(
         visitorId: String,
     ) = removePending(profileId, matchId, visitorId)
 
-    fun isWatched(
-        profileId: String,
-        matchId: String,
-    ): Boolean = matchId in store.watched(profileId) || pending(profileId, matchId).isNotEmpty()
-
-    fun setWatched(
-        profileId: String,
-        matchId: String,
-        watched: Boolean,
-    ) {
-        val current = store.watched(profileId)
-        if ((matchId in current) != watched) store.setWatched(profileId, if (watched) current + matchId else current - matchId)
-    }
-
     /**
      * Vorgemerkte Benennungen hochgeladener Matches senden. Endgültige Ablehnungen (kein Freund mehr, schon Mitspieler,
      * Match nicht erlaubt) verwerfen den Eintrag still; Netz-, Bindungs- und Limitfehler bleiben für den nächsten Lauf.
@@ -101,7 +79,6 @@ class VisitorQueue(
                 for (visitorId in visitors) {
                     try {
                         port.addVisitor(profileId, matchId, visitorId)
-                        setWatched(profileId, matchId, true)
                         added = true
                     } catch (e: CancellationException) {
                         throw e
@@ -150,41 +127,37 @@ class VisitorQueue(
 }
 
 /**
- * Live-Stand für Visitor während des Spiels: Nach einer Zähländerung eines Matches mit Visitor höchstens alle
- * [intervalMs] einen Abgleich ([syncNow]), damit Zuschauer nicht erst am Matchende etwas sehen. Ohne Visitor nichts.
+ * Live-Upload (plan-live-mitspieler §3.1, E2): Jedes laufende Match eines angemeldeten Kontos geht sofort beim ersten
+ * Sehen hoch (Kopf, löst auch `match_shared` aus), danach nach jeder Zähländerung höchstens alle [intervalMs]. Ein
+ * geplanter Abgleich nimmt alle Änderungen bis zu seinem Lauf mit, deshalb plant eine Änderung davor nichts Neues.
+ * [schedule] plant einen Abgleich nach der Wartezeit (Host: JobScheduler mit Netzbedingung, übersteht Doze).
  */
-class LiveVisitorUpload(
-    private val queue: VisitorQueue,
+class LiveScoreUpload(
     private val nowMs: () -> Long,
-    /** Führt den Block nach der Wartezeit aus (Host: Coroutine mit `delay`). */
-    private val schedule: (delayMs: Long, run: () -> Unit) -> Unit,
+    private val schedule: (profileId: String, delayMs: Long) -> Unit,
     private val intervalMs: Long = INTERVAL_MS,
-    private val syncNow: () -> Unit,
 ) {
     private val counts = mutableMapOf<String, Int>()
-    private var lastSyncMs: Long? = null
-    private var armed = false
+    private var plannedAtMs: Long? = null
 
-    /** Stand eines laufenden Matches; nur eine geänderte [eventCount] zählt als Zähländerung. */
+    /** Stand eines laufenden Matches; nur ein neues Match oder eine geänderte [eventCount] zählt. */
     fun onScore(
         profileId: String?,
         matchId: String,
         eventCount: Int,
     ) {
         val previous = counts.put(matchId, eventCount)
-        if (profileId == null || previous == null || previous == eventCount) return
-        if (armed || !queue.isWatched(profileId, matchId)) return
-        armed = true
-        val wait = lastSyncMs?.let { it + intervalMs - nowMs() }?.coerceAtLeast(0) ?: 0
-        schedule(wait) {
-            armed = false
-            lastSyncMs = nowMs()
-            syncNow()
-        }
+        if (profileId == null || previous == eventCount) return
+        val now = nowMs()
+        val planned = plannedAtMs
+        if (planned != null && planned > now) return
+        val at = if (planned == null) now else maxOf(now, planned + intervalMs)
+        plannedAtMs = at
+        schedule(profileId, at - now)
     }
 
     companion object {
-        const val INTERVAL_MS = 30_000L
+        const val INTERVAL_MS = 10_000L
     }
 }
 

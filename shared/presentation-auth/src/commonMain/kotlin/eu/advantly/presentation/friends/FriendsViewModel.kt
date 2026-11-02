@@ -8,6 +8,7 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.FoundProfile
 import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
+import eu.advantly.cloud.sync.LiveMatchesPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.cloud.sync.SharedMatchesPort
@@ -60,6 +61,10 @@ data class FriendsState(
     val watching: List<WatchedMatch>? = null,
     /** Fehler beim Laden/Beenden von [watching]. */
     val watchingError: String? = null,
+    /** Laufende fremde Matches, die ich verfolge (Bereich „Live“); `null` = noch nicht geladen. */
+    val live: List<LiveEntry>? = null,
+    /** Fehler beim letzten Laden von [live]; die zuletzt geladene Liste bleibt stehen. */
+    val liveError: String? = null,
 )
 
 /**
@@ -79,6 +84,8 @@ class FriendsViewModel(
     private val local: SharedMatchesLocal? = null,
     /** Zuschauer (F16/F25); ohne Warteschlange bleiben Zuschauer-Abschnitte und „Ich schaue zu“ aus. */
     private val visitorQueue: VisitorQueue? = null,
+    /** Bereich „Live“ (plan-live-mitspieler §3.1); ohne Port bleibt er aus. */
+    private val liveMatches: LiveMatchesPort? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -99,6 +106,7 @@ class FriendsViewModel(
     /** Match der Zuschauer-Verwaltung; Zähler verwirft „Ich schaue zu“-Antworten, die vor einem Beenden begannen. */
     private var visitorMatch: String? = null
     private var watchingRevision = 0L
+    private var liveLoad: Job? = null
 
     private class Stale : Exception()
 
@@ -258,10 +266,7 @@ class FriendsViewModel(
         loadVisitors()
     }
 
-    /**
-     * Aktive Zuschauer vom Server; ein noch nicht hochgeladenes Match zeigt nur vorgemerkte. Kennt das Match keine
-     * Zuschauer mehr, endet auch der Live-Upload während des Spiels.
-     */
+    /** Aktive Zuschauer vom Server; ein noch nicht hochgeladenes Match zeigt nur vorgemerkte. */
     fun loadVisitors() {
         val queue = visitorQueue ?: return
         val id = visitorMatch ?: return
@@ -274,7 +279,6 @@ class FriendsViewModel(
             val confirmed = if (onServer) queue.port.matchVisitors(session.profileId, id) else emptyList()
             current(session)
             if (visitorMatch != id) return@quiet
-            if (onServer) queue.setWatched(session.profileId, id, confirmed.isNotEmpty())
             val entries = confirmed.map { VisitorEntry(it.profileId, it.alias, it.canRevoke) }
             show { copy(visitors = localVisitors(session.profileId, id, entries)) }
         }
@@ -299,7 +303,6 @@ class FriendsViewModel(
             try {
                 profileIds.forEach { queue.port.addVisitor(session.profileId, id, it) }
                 current(session)
-                queue.setWatched(session.profileId, id, true)
             } finally {
                 if (visitorMatch == id && started(session)) loadVisitors()
             }
@@ -351,6 +354,26 @@ class FriendsViewModel(
         }
     }
 
+    /** `true`: der Bereich „Live“ gibt es (Port vorhanden). */
+    val hasLive: Boolean get() = liveMatches != null
+
+    /**
+     * Bereich „Live“ laden; die UI ruft das alle paar Sekunden, solange er sichtbar ist. Eine noch laufende Abfrage
+     * deckt den nächsten Aufruf ab (langsames Netz stapelt keine Anfragen).
+     */
+    fun loadLive() {
+        val port = liveMatches ?: return
+        if (liveLoad?.isActive == true) return
+        val revision = watchingRevision
+        liveLoad =
+            quiet({ error -> show { copy(liveError = error) } }) { session ->
+                val live = port.liveMatches(session.profileId).mapNotNull { it.toLiveEntry() }
+                current(session)
+                if (revision != watchingRevision) return@quiet
+                show { copy(live = live, liveError = null) }
+            }
+    }
+
     /** Nicht mehr zuschauen (Widerruf durch den Visitor selbst). */
     fun stopWatching(matchId: String) {
         val queue = visitorQueue ?: return
@@ -358,12 +381,12 @@ class FriendsViewModel(
             queue.port.revokeVisitor(session.profileId, matchId, session.profileId)
             current(session)
             watchingRevision++
-            show { copy(watching = watching?.filter { it.match.id != matchId }) }
+            show { copy(watching = watching?.filter { it.match.id != matchId }, live = live?.filter { it.matchId != matchId }) }
         }
     }
 
     fun dismissVisitorError() {
-        show { copy(visitors = visitors?.copy(error = null), watchingError = null) }
+        show { copy(visitors = visitors?.copy(error = null), watchingError = null, liveError = null) }
     }
 
     private fun readyProfile(): String? = shown?.profileId?.takeIf { mutable.value.access == FriendsAccess.READY }
@@ -413,11 +436,11 @@ class FriendsViewModel(
     private fun quiet(
         onError: (String) -> Unit,
         block: suspend (CloudSession) -> Unit,
-    ) {
-        val session = shown ?: return
-        if (mutable.value.access != FriendsAccess.READY) return
+    ): Job? {
+        val session = shown ?: return null
+        if (mutable.value.access != FriendsAccess.READY) return null
         val started = epoch
-        scope.launch {
+        return scope.launch {
             try {
                 // Vor dem RPC: Das SDK kann schon ein anderes Konto tragen, während [shown] noch nachhinkt.
                 auth.requireAccountSession(session)
@@ -452,6 +475,8 @@ class FriendsViewModel(
             epoch++
             action?.cancel()
             action = null
+            liveLoad?.cancel()
+            liveLoad = null
             overlay.clear()
             shareOverlay.clear()
             goneMatches.clear()
