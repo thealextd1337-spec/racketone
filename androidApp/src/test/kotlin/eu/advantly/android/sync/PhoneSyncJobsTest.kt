@@ -9,6 +9,7 @@ import android.content.Context
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
 import eu.advantly.presentation.friends.AcceptIssue
+import eu.advantly.presentation.friends.EventOrder
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.ScorerAccept
 import eu.advantly.presentation.friends.ScorerInvite
@@ -135,15 +136,15 @@ class PhoneSyncJobsTest {
         val accepts =
             mapOf(
                 "m1" to ScorerAccept("jonas-watch", 1_700_000_000_000),
-                "m2" to ScorerAccept("jonas-phone", 5, changes = 2, issue = AcceptIssue.FELL_BACK),
+                "m2" to ScorerAccept("jonas-phone", 5, EventOrder(12, "alex-watch"), AcceptIssue.FELL_BACK),
             )
         record.setScorerAccepts("jonas", accepts)
-        record.setScorerAccepts("bob", mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)))
+        record.setScorerAccepts("bob", mapOf("m9" to ScorerAccept("bob-phone", 7, EventOrder.START, AcceptIssue.TIMED_OUT)))
         val reopened = AndroidPhoneSyncRecord(app)
         assertEquals(accepts, reopened.scorerAccepts("jonas"))
         record.forget("jonas")
         assertEquals(emptyMap<String, ScorerAccept>(), reopened.scorerAccepts("jonas"))
-        assertEquals(mapOf("m9" to ScorerAccept("bob-phone", 7, 0, AcceptIssue.TIMED_OUT)), reopened.scorerAccepts("bob"))
+        assertEquals(mapOf("m9" to ScorerAccept("bob-phone", 7, EventOrder.START, AcceptIssue.TIMED_OUT)), reopened.scorerAccepts("bob"))
     }
 
     /** P3-3: Ein Matchende plant nach 10 s, verkürzt aber keinen aktiven Backoff. */

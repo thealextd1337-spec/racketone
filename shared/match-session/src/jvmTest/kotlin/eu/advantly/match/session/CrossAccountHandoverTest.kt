@@ -238,6 +238,19 @@ class CrossAccountHandoverTest {
         assertFalse(alex.phone.handBackScoring(match, handover), "nur solange das abgelehnte Ziel zählt")
     }
 
+    /** N4: Die Antwort kommt ohne Replay aus dem Cache, bis neue Events ankommen (hier: Alex beendet das Match). */
+    @Test
+    fun theTakeOverAnswerFollowsNewlyPulledEvents() {
+        val match = start(ScorerChoice.ThisDevice)
+        assertTrue(alex.phone.recordPoint(Side.A))
+        toJonas(match)
+        assertTrue(jonas.phone.canTakeOverAsRole(match))
+        assertTrue(jonas.phone.canTakeOverAsRole(match), "unverändert")
+        assertTrue(alex.phone.endMatch())
+        toJonas(match)
+        assertFalse(jonas.phone.canTakeOverAsRole(match), "neue Events: neu berechnet, das Match ist beendet")
+    }
+
     @Test
     fun emergencyTakeOverNeedsCompleteStateAndDropsLateAlexPoints() {
         val match = start(ScorerChoice.ThisDevice)

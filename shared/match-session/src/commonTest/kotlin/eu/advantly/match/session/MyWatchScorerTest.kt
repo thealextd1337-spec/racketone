@@ -11,6 +11,8 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -89,13 +91,16 @@ class MyWatchScorerTest {
     fun neverConnectedWatchTakesOverOnFirstContact() {
         val rig = Rig(watchOnline = false)
         assertTrue(rig.phone.knownDevices(PeerKind.WATCH).isEmpty())
-        rig.phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
+        val id = rig.phone.create(format, SINGLES, scorer = ScorerChoice.MyWatch)
         assertEquals(
             MatchSession.PENDING_WATCH,
             rig.phone.state.value.match
                 ?.scorerDeviceId,
         )
         assertFalse(rig.phone.recordPoint(Side.A))
+        // Zählen weitergeben (plan-live-mitspieler §3.4): zählt als meines, abgeben erst nach der Meldung der Uhr
+        assertTrue(rig.phone.scoresHere(id))
+        assertNull(rig.phone.handOverScoring(id, DeviceId("jonas-phone")))
 
         rig.network.setConnected("watch", true)
         rig.settle()
@@ -123,6 +128,8 @@ class MyWatchScorerTest {
             rig.phone.state.value.match
                 ?.rejectedByRoleCount,
         )
+        assertTrue(rig.phone.scoresHere(id))
+        assertNotNull(rig.phone.handOverScoring(id, DeviceId("jonas-phone")), "gemeldete Uhr: Abgabe möglich")
     }
 
     @Test

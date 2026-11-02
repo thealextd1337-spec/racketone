@@ -7,6 +7,7 @@ import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ScorerHandover
+import eu.advantly.presentation.friends.EventOrder
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.ScorerChanges
 import eu.advantly.presentation.friends.ScorerDevices
@@ -42,10 +43,12 @@ internal class PhoneScorerDevices(
     override fun scorerChanges(matchId: String): ScorerChanges? {
         if (!allowed()) return null
         val events = log(matchId).takeIf { it.isNotEmpty() } ?: return null
-        val changes = events.filter { it.payload is ScorerChanged }
         // Jüngster nach Lamport, bei Gleichstand wie die Engine-Ordnung nach Gerät
-        val last = changes.maxWithOrNull(compareBy({ it.lamport }, { it.deviceId.value }))?.payload as? ScorerChanged
-        return ScorerChanges(changes.size, last?.scorerDeviceId?.value)
+        val last =
+            events
+                .filter { it.payload is ScorerChanged }
+                .maxWithOrNull(compareBy({ it.lamport }, { it.deviceId.value })) ?: return ScorerChanges(EventOrder.START, null)
+        return ScorerChanges(EventOrder(last.lamport, last.deviceId.value), (last.payload as ScorerChanged).scorerDeviceId?.value)
     }
 
     override fun handOver(

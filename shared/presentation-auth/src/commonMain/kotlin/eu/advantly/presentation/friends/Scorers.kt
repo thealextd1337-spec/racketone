@@ -39,18 +39,31 @@ enum class AcceptIssue {
 
 /**
  * Angenommene Zähl-Einladung des Empfängers, deren Wechsel noch aussteht: angenommen mit [device] um [acceptedAtMs]
- * (Wanduhr, übersteht Neustarts); [changes]: Zählerwechsel im lokalen Log bei Annahme (`null`: Log war noch leer).
+ * (Wanduhr, übersteht Neustarts); [since]: jüngster Zählerwechsel im lokalen Log bei Annahme (`null`: Log war noch leer).
  */
 data class ScorerAccept(
     val device: String,
     val acceptedAtMs: Long,
-    val changes: Int? = null,
+    val since: EventOrder? = null,
     val issue: AcceptIssue? = null,
 )
 
-/** Zählerwechsel im lokalen Log eines Matches: Anzahl und Zielgerät des jüngsten. */
+/** Engine-Ordnung eines Events: [lamport], bei Gleichstand [device]. */
+data class EventOrder(
+    val lamport: Long,
+    val device: String,
+) : Comparable<EventOrder> {
+    override fun compareTo(other: EventOrder) = compareValuesBy(this, other, EventOrder::lamport, EventOrder::device)
+
+    companion object {
+        /** Vor jedem Event: das Log hat noch keinen Zählerwechsel. */
+        val START = EventOrder(-1, "")
+    }
+}
+
+/** Jüngster Zählerwechsel im lokalen Log eines Matches: seine Ordnung ([EventOrder.START] ohne Wechsel) und sein Ziel. */
 data class ScorerChanges(
-    val count: Int,
+    val last: EventOrder,
     val lastTarget: String?,
 )
 
@@ -131,7 +144,8 @@ data class HandoverStatus(
  * - **Abgebendes Handy:** [invite] lädt ein (vor dem Upload des Matches vorgemerkt, [flush] sendet nach dem Abgleich).
  *   [reconcile] nach jedem Abgleich: Sobald die gezogene Rolle angenommen ist, erzeugt dieses Handy `ScorerChanged` auf das
  *   angenommene Gerät; erledigt ist die Abgabe erst, wenn der Server es angenommen hat. Lehnt er es ab, zählt das vorige
- *   eigene Gerät wieder ([HandoverPhase.FAILED]). Ablehnung oder Widerruf der Einladung beenden die Abgabe.
+ *   eigene Gerät wieder ([HandoverPhase.FAILED]) – außer die Rolle wurde inzwischen mit einem anderen Gerät angenommen,
+ *   dann geht die Abgabe dorthin. Ablehnung oder Widerruf der Einladung beenden die Abgabe.
  * - **Empfänger:** [accept] registriert bei Bedarf die eigene Uhr, nimmt an und wartet (gespeichert), bis der Wechsel
  *   gezogen ist – höchstens [ACCEPT_LIMIT_MS]. Ein späterer Wechsel auf ein anderes Gerät, Widerruf oder Matchende beenden
  *   das Warten vorher; der Grund bleibt als [AcceptIssue] sichtbar, bis er weggeklickt ist.
@@ -238,9 +252,21 @@ class ScorerHandovers(
 
                     false -> {
                         devices.handBack(matchId, handover)
-                        remove(profileId, matchId)
-                        failed[profileId to matchId] = invite.scorerId
-                        requestSync() // Rückgabe sofort hochladen
+                        // Annahme inzwischen mit einem anderen Gerät: an dieses abgeben statt aufzugeben. Wird auch das
+                        // abgelehnt, ist es das angenommene Gerät – dann FAILED; erneut nur nach echtem Gerätewechsel.
+                        val role = pulled(profileId, matchId)?.roleOf(invite.scorerId)
+                        val again =
+                            role
+                                ?.deviceId
+                                ?.takeIf { role.status == "accepted" && it != handover.to }
+                                ?.let { devices.handOver(matchId, it) }
+                        if (again != null) {
+                            put(profileId, matchId, invite.copy(handover = again))
+                        } else {
+                            remove(profileId, matchId)
+                            failed[profileId to matchId] = invite.scorerId
+                        }
+                        requestSync() // Rückgabe bzw. neue Abgabe sofort hochladen
                     }
 
                     null -> {}
@@ -250,12 +276,14 @@ class ScorerHandovers(
             val role = pulled(profileId, matchId)?.roleOf(invite.scorerId)
             val device = role?.deviceId
             when {
-                // Match beendet oder ein anderes Gerät zählt inzwischen (Notfall-Übernahme): nichts mehr abzugeben
+                // Match beendet oder ein anderes Gerät zählt inzwischen (Notfall-Übernahme): nichts mehr abzugeben.
+                // „Meine Uhr“ vor ihrer Meldung zählt als meines: Die Abgabe wartet, bis sie sich gemeldet hat.
                 !devices.scoring(matchId) -> {
                     remove(profileId, matchId)
                 }
 
-                role?.status in setOf("declined", "revoked") -> {
+                // Angenommen ohne Gerät gibt es kein Ziel (der Server lässt das nicht mehr zu): wie ein Widerruf
+                role?.status in setOf("declined", "revoked") || (role?.status == "accepted" && device == null) -> {
                     remove(profileId, matchId)
                 }
 
@@ -302,15 +330,16 @@ class ScorerHandovers(
                                 accept.copy(issue = AcceptIssue.ENDED)
                             }
 
-                            // (b) später ein Wechsel auf ein anderes Gerät, z. B. die Rückgabe nach einer abgelehnten Abgabe
-                            accept.changes != null && changes != null && changes.count > accept.changes &&
+                            // (b) ein späterer Wechsel (Engine-Ordnung nach dem bei Annahme jüngsten) auf ein anderes Gerät,
+                            // z. B. die Rückgabe nach einer abgelehnten Abgabe; erst jetzt gezogene ältere Wechsel zählen nicht
+                            accept.since != null && changes != null && changes.last > accept.since &&
                                 changes.lastTarget != accept.device -> {
                                 accept.copy(issue = AcceptIssue.FELL_BACK)
                             }
 
                             // (d) Frist; war das Log bei Annahme leer, gilt der erste bekannte Stand als Ausgangspunkt
                             else -> {
-                                (if (accept.changes == null) accept.copy(changes = changes?.count) else accept).timedOut(now)
+                                (if (accept.since == null) accept.copy(since = changes?.last) else accept).timedOut(now)
                             }
                         }
                     next?.let { matchId to it }
@@ -340,7 +369,7 @@ class ScorerHandovers(
                 devices.phoneId
             }
         port.respondScorerInvitation(profileId, matchId, true, device)
-        val accept = ScorerAccept(device, nowMs(), devices.scorerChanges(matchId)?.count)
+        val accept = ScorerAccept(device, nowMs(), devices.scorerChanges(matchId)?.last)
         store.setScorerAccepts(profileId, store.scorerAccepts(profileId) + (matchId to accept))
         requestSync()
     }

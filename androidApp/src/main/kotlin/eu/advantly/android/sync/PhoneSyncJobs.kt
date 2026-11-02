@@ -19,6 +19,7 @@ import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
 import eu.advantly.presentation.friends.AcceptIssue
+import eu.advantly.presentation.friends.EventOrder
 import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.PendingScorerStore
@@ -191,7 +192,8 @@ internal class AndroidPhoneSyncRecord(
         prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
     }
 
-    // Empfänger (§3.4): „Match/Gerät/angenommen um/Wechsel|-/Grund|-“; UUIDs ohne Schrägstrich.
+    // Empfänger (§3.4): „Match/Gerät/angenommen um/Lamport:Gerät des jüngsten Wechsels|-/Grund|-“; UUIDs ohne
+    // Schrägstrich und Doppelpunkt.
     override fun scorerAccepts(profileId: String): Map<String, ScorerAccept> =
         prefs
             .getStringSet("scorers.accepted.$profileId", null)
@@ -200,7 +202,11 @@ internal class AndroidPhoneSyncRecord(
                 val parts = entry.split('/').takeIf { it.size == 5 } ?: return@mapNotNull null
                 val at = parts[2].toLongOrNull() ?: return@mapNotNull null
                 val issue = AcceptIssue.entries.firstOrNull { it.name == parts[4] }
-                parts[0] to ScorerAccept(parts[1], at, parts[3].toIntOrNull(), issue)
+                val since =
+                    parts[3].split(':', limit = 2).takeIf { it.size == 2 }?.let { (lamport, device) ->
+                        lamport.toLongOrNull()?.let { EventOrder(it, device) }
+                    }
+                parts[0] to ScorerAccept(parts[1], at, since, issue)
             }.toMap()
 
     override fun setScorerAccepts(
@@ -209,8 +215,9 @@ internal class AndroidPhoneSyncRecord(
     ) {
         val entries =
             accepts
-                .map { (match, a) -> "$match/${a.device}/${a.acceptedAtMs}/${a.changes ?: "-"}/${a.issue?.name ?: "-"}" }
-                .toSet()
+                .map { (match, a) ->
+                    "$match/${a.device}/${a.acceptedAtMs}/${a.since?.let { "${it.lamport}:${it.device}" } ?: "-"}/${a.issue?.name ?: "-"}"
+                }.toSet()
         prefs.edit().putStringSet("scorers.accepted.$profileId", entries).apply()
     }
 
@@ -313,8 +320,7 @@ internal fun onLiveScore(
             if (running.isEmpty()) return@SessionListener
             val account = profile()
             running.forEach {
-                val scoring = it.scorerDeviceId == MatchSession.PENDING_WATCH || session.scoresHere(it.id)
-                upload.onScore(account, it.id.value, it.eventCount, scoring)
+                upload.onScore(account, it.id.value, it.eventCount, session.scoresHere(it.id))
             }
         }
     session.addListener(listener)

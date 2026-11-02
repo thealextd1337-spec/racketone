@@ -38,6 +38,7 @@ import eu.advantly.cloud.sync.PulledRole
 import eu.advantly.cloud.sync.ScorerRolesPort
 import eu.advantly.cloud.sync.VisitorTeamMember
 import eu.advantly.presentation.friends.AcceptIssue
+import eu.advantly.presentation.friends.EventOrder
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.Handover
@@ -363,7 +364,7 @@ class HandoverUiTest {
     @Test fun anOpenHandoverEndsAfterTheTimeLimitWithAHintAndCanBeRetriedInGerman() =
         withLocale(Locale.GERMAN) {
             pulled.roles = mapOf("m1" to PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
-            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, changes = 1))
+            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, since = EventOrder(1, "alex-watch")))
             withModel("jonas") { model ->
                 runDesktopComposeUiTest(width = 400, height = 1000) {
                     setContent { Dark { LiveFollowScreen(model, "m1", onBack = {}, clock = clock) } }
@@ -386,8 +387,8 @@ class HandoverUiTest {
     @Test fun aFallbackToThePreviousScorerShowsAHintUntilDismissedInEnglish() =
         withLocale(Locale.ENGLISH) {
             pulled.roles = mapOf("m1" to PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
-            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, changes = 1))
-            devices.changes = ScorerChanges(2, "alex-watch")
+            store.accepts = mapOf("m1" to ScorerAccept("jonas-phone", now, since = EventOrder(1, "alex-watch")))
+            devices.changes = ScorerChanges(EventOrder(2, "alex-watch"), "alex-watch")
             withModel("jonas") { model ->
                 checkNotNull(handovers).reconcile("jonas")
                 assertEquals(AcceptIssue.FELL_BACK, store.accepts["m1"]?.issue)

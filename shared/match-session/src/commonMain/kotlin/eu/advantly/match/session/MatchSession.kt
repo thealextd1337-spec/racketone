@@ -1139,10 +1139,13 @@ class MatchSession(
         return emit(m, ScorerChanged(handover.from)) != null
     }
 
-    /** Handy: Eines meiner Geräte (dieses Handy oder die eigene Uhr) zählt das laufende offene Match [matchId]. */
+    /**
+     * Handy: Eines meiner Geräte zählt das laufende offene Match [matchId] – dieses Handy, die eigene Uhr oder „Meine Uhr“
+     * vor ihrer ersten Meldung ([PENDING_WATCH]; abgeben lässt sich erst, wenn sie sich gemeldet hat).
+     */
     fun scoresHere(matchId: MatchId): Boolean {
         checkThread()
-        return opened[matchId]?.let { it.status != MatchStatus.FINISHED && isMine(it.scorer) } == true
+        return opened[matchId]?.let { it.status != MatchStatus.FINISHED && (it.scorer == PENDING_WATCH || isMine(it.scorer)) } == true
     }
 
     /**
@@ -1153,7 +1156,7 @@ class MatchSession(
     fun canTakeOverAsRole(matchId: MatchId): Boolean {
         checkThread()
         if (!config.parallelMatches || !foreign(matchId) || !replicaReady(matchId)) return false
-        val m = opened[matchId] ?: detached(matchId) ?: return false
+        val m = opened[matchId]?.let { DetachedHead(it.scorer, it.status) } ?: detachedHead(matchId) ?: return false
         return m.status != MatchStatus.FINISHED && !isMine(m.scorer)
     }
 
@@ -1591,7 +1594,7 @@ class MatchSession(
         for (record in data.matches.active()) {
             val id = record.id
             if (watchAssignment?.matchId == id || !foreign(id)) continue
-            val scorer = (opened[id] ?: detached(id))?.scorer
+            val scorer = if (id in opened) opened.getValue(id).scorer else detachedHead(id)?.scorer
             if (!isMine(scorer)) continue
             if (id !in opened && (!replicaReady(id) || openWithoutFocus(id) == null)) continue
             if (isWatchDevice(scorer) && assignToWatch(id)) adopted += id
@@ -1746,6 +1749,23 @@ class MatchSession(
         if (assignment?.explicit == true) return m.record.createdAtMs > assignment.assignedAtMs
         val assigned = data.matches.get(target) ?: return true
         return m.record.createdAtMs > assigned.createdAtMs
+    }
+
+    /** Zähler und Status eines Matches. */
+    private class DetachedHead(
+        val scorer: DeviceId?,
+        val status: MatchStatus,
+    )
+
+    /** [DetachedHead] nicht geöffneter Matches je Event-Anzahl: Abgleich und Live-Anzeige prüfen sie oft, Replays sind teuer. */
+    private val detachedHeads = HashMap<MatchId, Pair<Long, DetachedHead>>()
+
+    /** Wie [detached], aber nur Zähler und Status – neu berechnet erst, wenn sich die Event-Anzahl des Matches ändert. */
+    private fun detachedHead(matchId: MatchId): DetachedHead? {
+        val count = data.events.count(matchId.value)
+        detachedHeads[matchId]?.let { (cached, head) -> if (cached == count) return head }
+        val m = detached(matchId) ?: return null.also { detachedHeads.remove(matchId) }
+        return DetachedHead(m.scorer, m.status).also { detachedHeads[matchId] = count to it }
     }
 
     /** Nicht geöffnetes Match als Arbeitskopie (z. B. für eine Übergabe), ohne die Liste der offenen zu ändern. */

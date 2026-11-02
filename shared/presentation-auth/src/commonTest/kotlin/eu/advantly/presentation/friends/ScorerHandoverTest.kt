@@ -87,6 +87,9 @@ internal class FakeDevices : ScorerDevices {
     val handedBack = mutableListOf<Pair<String, String>>()
     val changes = mutableMapOf<String, ScorerChanges>()
 
+    /** Zählt, kann aber (noch) nicht abgeben – wie „Meine Uhr“ vor ihrer Meldung. */
+    val blocked = mutableSetOf<String>()
+
     /** Server-Antwort je Event (fehlt: ausstehend). */
     val uploads = mutableMapOf<String, Boolean>()
 
@@ -100,7 +103,7 @@ internal class FakeDevices : ScorerDevices {
         matchId: String,
         deviceId: String,
     ): Handover? {
-        if (matchId !in scoring) return null
+        if (matchId !in scoring || matchId in blocked) return null
         scoring -= matchId
         handedOver += matchId to deviceId
         return Handover("sc-$matchId", phoneId, deviceId)
@@ -151,6 +154,12 @@ class ScorerHandoverTest {
     private var syncs = 0
     private var now = 1_000_000L
     private val handovers = handovers()
+
+    /** Zählerwechsel an [target] mit Ordnung [lamport] (Gerät des Erzeugers spielt hier keine Rolle). */
+    private fun change(
+        lamport: Long,
+        target: String,
+    ) = ScorerChanges(EventOrder(lamport, "alex-device"), target)
 
     /** Neue Instanz über demselben Speicher (wie nach einem Prozess-Neustart). */
     private fun handovers() = ScorerHandovers(store, port, { _, m -> m in onServer }, { _, m -> pulled[m] }, devices, { now }) { syncs++ }
@@ -214,16 +223,58 @@ class ScorerHandoverTest {
             assertTrue(port.calls.none { it.startsWith("revoke") }, "Wegklicken entzieht keine Rolle")
         }
 
+    /** N3: Abgelehnt, weil die Rolle inzwischen mit einem anderen Gerät angenommen ist: einmal dorthin abgeben. */
+    @Test fun aHandoverRejectedAfterADeviceChangeGoesToTheNewDevice() =
+        runBlocking {
+            onServer += "m1"
+            devices.scoring += "m1"
+            handovers.invite("alex", "m1", "jonas")
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            assertTrue(handovers.reconcile("alex"))
+
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-watch"))
+            devices.uploads["sc-m1"] = false
+            assertTrue(handovers.reconcile("alex"), "neue Abgabe wartet auf den Server")
+            assertEquals(listOf("m1" to "phone-1"), devices.handedBack)
+            assertEquals(listOf("m1" to "jonas-phone", "m1" to "jonas-watch"), devices.handedOver)
+            assertEquals(HandoverPhase.ACCEPTED, handovers.status("alex", "m1")?.phase)
+
+            // Auch das neue Gerät abgelehnt (gleich dem angenommenen): keine Schleife, FAILED
+            assertFalse(handovers.reconcile("alex"))
+            assertEquals(2, devices.handedBack.size)
+            assertEquals(2, devices.handedOver.size)
+            assertEquals(HandoverPhase.FAILED, handovers.status("alex", "m1")?.phase)
+        }
+
+    /** M3: „Meine Uhr“ vor ihrer Meldung zählt als meines – die Einladung bleibt, bis abgegeben werden kann. */
+    @Test fun anInvitationWaitsWhileTheGiversDeviceCannotHandOverYet() =
+        runBlocking {
+            onServer += "m1"
+            devices.scoring += "m1"
+            devices.blocked += "m1"
+            handovers.invite("alex", "m1", "jonas")
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            assertTrue(handovers.reconcile("alex"))
+            assertEquals(HandoverPhase.ACCEPTED, handovers.status("alex", "m1")?.phase)
+            assertTrue(devices.handedOver.isEmpty())
+            devices.blocked -= "m1" // Uhr meldet sich
+            assertTrue(handovers.reconcile("alex"))
+            assertEquals(listOf("m1" to "jonas-phone"), devices.handedOver)
+        }
+
     @Test fun declinedRevokedOrNoLongerScoredInvitationsEnd() =
         runBlocking {
-            onServer += setOf("m1", "m2", "m3")
-            devices.scoring += setOf("m1", "m2")
+            onServer += setOf("m1", "m2", "m3", "m4")
+            devices.scoring += setOf("m1", "m2", "m4")
             handovers.invite("alex", "m1", "jonas")
             handovers.invite("alex", "m2", "jonas")
             handovers.invite("alex", "m3", "jonas")
+            handovers.invite("alex", "m4", "jonas")
             pulled["m1"] = memberMatch("m1", PulledRole("jonas", null, "scorer", "declined"))
             pulled["m2"] = memberMatch("m2", PulledRole("jonas", null, "scorer", "revoked"))
             pulled["m3"] = memberMatch("m3", PulledRole("jonas", null, "scorer", "accepted", "jonas-phone"))
+            // N2: angenommen ohne Gerät (alter Server) – kein Ziel, wie ein Widerruf statt ewig zu warten
+            pulled["m4"] = memberMatch("m4", PulledRole("jonas", null, "scorer", "accepted"))
 
             assertFalse(handovers.reconcile("alex"))
             assertTrue(handovers.statuses("alex").isEmpty())
@@ -303,14 +354,14 @@ class ScorerHandoverTest {
 
     @Test fun aLaterChangeToAnotherDeviceMeansTheGiverKeepsScoring() =
         runBlocking {
-            devices.changes["m1"] = ScorerChanges(1, "alex-watch")
+            devices.changes["m1"] = change(1, "alex-watch")
             acceptOnPhone("m1")
             assertTrue(handovers.reconcile("jonas"))
             // Wechsel auf mein Gerät gezogen, die Session hat ihn noch nicht übernommen: weiter warten
-            devices.changes["m1"] = ScorerChanges(2, "phone-1")
+            devices.changes["m1"] = change(2, "phone-1")
             assertTrue(handovers.reconcile("jonas"))
             // Abgabe am Server abgelehnt, die Rückgabe an die Uhr des Abgebenden kommt an
-            devices.changes["m1"] = ScorerChanges(3, "alex-watch")
+            devices.changes["m1"] = change(3, "alex-watch")
             assertFalse(handovers.reconcile("jonas"))
             assertEquals(AcceptIssue.FELL_BACK, handovers.acceptIssue("jonas", "m1"))
             assertFalse(handovers.awaiting("jonas", "m1"))
@@ -321,12 +372,25 @@ class ScorerHandoverTest {
             assertTrue(store.scorerAccepts("jonas").isEmpty())
         }
 
+    /** N1: Erst nach der Annahme gezogene, ältere Wechsel des Abgebenden (Handy↔Uhr) sind kein Rückfall. */
+    @Test fun olderChangesArrivingAfterAcceptanceAreNoFallback() =
+        runBlocking {
+            devices.changes["m1"] = change(40, "alex-watch")
+            acceptOnPhone("m1")
+            devices.changes["m1"] = change(40, "alex-watch") // jüngster bleibt; ältere (30: Uhr→Handy) kamen dazu
+            assertTrue(handovers.reconcile("jonas"))
+            assertNull(handovers.acceptIssue("jonas", "m1"))
+            devices.changes["m1"] = ScorerChanges(EventOrder(40, "alex-phone"), "alex-phone")
+            assertFalse(handovers.reconcile("jonas"), "gleicher Lamport, späteres Gerät: später in Engine-Ordnung")
+            assertEquals(AcceptIssue.FELL_BACK, handovers.acceptIssue("jonas", "m1"))
+        }
+
     @Test fun anEmptyLogAtAcceptanceTakesTheFirstKnownStateAsBaseline() =
         runBlocking {
             acceptOnPhone("m1")
-            devices.changes["m1"] = ScorerChanges(1, "alex-watch")
+            devices.changes["m1"] = change(1, "alex-watch")
             assertTrue(handovers.reconcile("jonas"), "erster Stand, kein Rückfall")
-            devices.changes["m1"] = ScorerChanges(2, "alex-phone")
+            devices.changes["m1"] = change(2, "alex-phone")
             assertFalse(handovers.reconcile("jonas"))
             assertEquals(AcceptIssue.FELL_BACK, handovers.acceptIssue("jonas", "m1"))
         }
