@@ -29,7 +29,7 @@ select is(tests.result(current_setting('tests.push')::jsonb, 'events', 3), 'reje
 select is((select payload from public.match_events where id = 'e3700000-0000-7000-8000-000000000002') -> 'sets' -> 0 -> 'tiebreak',
           '{"A":7,"B":4}'::jsonb, 'Payload unverändert');
 
--- Mitspieler bob darf Events hochladen, aber kein Ergebnis korrigieren (P2-4)
+-- Mitspieler bob (ohne Zählrolle) korrigiert kein Ergebnis (P2-4) und zählt nicht (Review H4)
 select tests.authenticate_as('bob');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e3700000-0000-7000-8000-000000000011', 'a3700000-0000-7000-8000-000000000001', tests.device('b1'), 1,
@@ -42,7 +42,7 @@ select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e3700000-0000-7000-8000-000000000013', 'a3700000-0000-7000-8000-000000000001', tests.device('b1'), 1,
                         'PointWon', '{"side":"B"}')))), 'events', 0),
-          'accepted', 'übrige Events des Mitspielers unverändert');
+          'rejected:scoring_revoked', 'übrige Events des Mitspielers ohne Zählrolle: scoring_revoked (Review H4)');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e3700000-0000-7000-8000-000000000014', 'a3700000-0000-7000-8000-000000000001', tests.device('b1'), 2,
                         'PlayerAssigned', '{"slot":"x","assignedBy":"y"}')))), 'events', 0),

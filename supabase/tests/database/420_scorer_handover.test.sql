@@ -35,7 +35,7 @@ select is(public.sync_push(jsonb_build_object('matches', jsonb_build_array(jsonb
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e4200000-0000-7000-8000-000000000011', 'a4200000-0000-7000-8000-000000000001', tests.device('b1'), 1,
                         'PointWon', '{"side":"B"}')))), 'events', 0),
-          'accepted', 'Mitspieler darf weiterhin Events hochladen (Engine entscheidet)');
+          'rejected:scoring_revoked', 'Mitspieler ohne Rolle: keine neuen Eingaben (Review H4)');
 
 -- Einladung, Annahme mit dem Handy; Rollen-Gerät für alle Mitglieder sichtbar
 select tests.authenticate_as('alice');

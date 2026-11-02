@@ -1,6 +1,6 @@
 -- Account-Löschung (Karenz, Anonymisierung, Kaskaden) und Datenexport. Eigene Gäste wie der Account (23.10.2026).
 begin;
-select plan(46);
+select plan(47);
 
 select tests.world();
 select tests.publish_consent_documents();
@@ -34,9 +34,8 @@ select is(tests.result(public.sync_push(jsonb_build_object(
      tests.part('s-bob', 'A', 1, 'Bob', tests.uid('bob')),
      tests.part('s-kim', 'B', 1, 'Kim', null, 'b8000000-0000-7000-8000-000000000001')))),
   'events', jsonb_build_array(
-     current_setting('tests.bob_assign')::jsonb,
-     tests.event('e8000000-0000-7000-8000-000000000012', 'a8000000-0000-7000-8000-000000000001', tests.device('b1'), 1, 'PointWon', '{"side":"B"}')))),
-  'events', 0), 'accepted', 'bobs Match mit Dummy Kim, Zuweisung mit Klarnamen; bob zählt in alices Match');
+     current_setting('tests.bob_assign')::jsonb))),
+  'events', 0), 'accepted', 'bobs Match mit Dummy Kim, Zuweisung mit Klarnamen');
 select is(public.assign_player('b8000000-0000-7000-8000-000000000001', tests.uid('alice')), 1, 'Kim → alice zugewiesen');
 
 -- alice übergibt das Zählen an bobs angenommenes Gerät (eigenes Event mit fremder Geräte-ID in der Payload)
@@ -50,6 +49,11 @@ select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build
             tests.event('e8000000-0000-7000-8000-000000000004', 'a8000000-0000-7000-8000-000000000001', tests.device('a1'), 4, 'ScorerChanged',
                         jsonb_build_object('scorerDeviceId', tests.device('b1')))))), 'events', 0),
           'accepted', 'Übergabe an bobs Gerät');
+select tests.authenticate_as('bob');
+select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
+            tests.event('e8000000-0000-7000-8000-000000000012', 'a8000000-0000-7000-8000-000000000001', tests.device('b1'), 1, 'PointWon', '{"side":"B"}')))),
+          'events', 0), 'accepted', 'bob zählt in alices Match');
+select tests.authenticate_as('alice');
 
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e8000000-0000-7000-8000-000000000005', 'a8000000-0000-7000-8000-000000000001', tests.device('a1'), 5, 'PointWon',

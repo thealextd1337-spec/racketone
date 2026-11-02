@@ -107,7 +107,7 @@ select is((select p -> 'participants' -> 0 ->> 'displayName'
           'Alice', 'sync_pull liefert das Match mit aufgelöstem Alias (F18)');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e1000000-0000-7000-8000-000000000020', 'a1000000-0000-7000-8000-000000000001', tests.device('b1'), 1, 'PointWon', '{"side":"B"}')))), 'events', 0),
-          'accepted', 'Teilnehmer darf hochladen (Wirkung entscheidet die Engine per Zählerrolle)');
+          'rejected:scoring_revoked', 'Teilnehmer ohne Zählrolle: keine neuen Eingaben (Review H4)');
 select is(tests.result(public.sync_push(jsonb_build_object('events', jsonb_build_array(
             tests.event('e1000000-0000-7000-8000-000000000021', 'a1000000-0000-7000-8000-000000000001', tests.device('b1'), 2, 'PlayerAssigned',
                         '{"slot":"x","assignedBy":"y"}')))), 'events', 0),
