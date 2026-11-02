@@ -88,7 +88,7 @@ class HomeOverviewUiTest {
                 onNodeWithTag("total_max_steps").performScrollTo().assert(hasAnyDescendant(hasText("12.345")))
 
                 fun y(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y
-                assertTrue(y("total_summary") < y("recent_matches") && y("recent_matches") < y("week_summary"))
+                assertTrue(y("week_summary") < y("total_summary") && y("total_summary") < y("recent_matches"))
             }
             Locale.setDefault(Locale.US)
             assertEquals("12,345", formatCount(12_345))

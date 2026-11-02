@@ -173,7 +173,8 @@ fun HomeScreen(
             }
         }
         val rated = history.filter { it.isRated }
-        // Reihenfolge laut Nutzerwunsch: Gesamtstatistik, direkt darunter die letzten Spiele, dann die Wochenbilanz
+        // Reihenfolge laut Nutzerwunsch (02.11.): Wochenbilanz, Gesamtstatistik, direkt darunter die letzten Spiele
+        WeekSummary(rated, clock.nowMs())
         TotalSummary(rated, healthRecords)
         if (rated.isNotEmpty()) {
             SectionTitle(stringResource(Res.string.home_section_recent))
@@ -184,7 +185,6 @@ fun HomeScreen(
                 }
             }
         }
-        WeekSummary(rated, clock.nowMs())
         if (history.isEmpty() && open.isEmpty()) {
             Text(
                 stringResource(Res.string.home_empty),

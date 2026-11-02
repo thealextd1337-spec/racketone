@@ -127,6 +127,11 @@ Rückmeldungen nach 0.5.0:
   - Risiko: Nach einer Wiederherstellung könnte ein altes Workout wieder aufgenommen werden.
   - Lösung: den Zustand in eine eigene, ausgeschlossene Datei mit festem Namen oder in `no_backup` verlegen; Test in `ManifestTest`.
 
+## 7a. Startseite: Wochenbilanz oben (umgesetzt)
+
+- Nutzerwunsch 02.11.: Reihenfolge jetzt Wochenbilanz (letzte 7 Tage) → Gesamtstatistik → letzte 5 Spiele
+  (`HomeScreen.kt`, Test `HomeOverviewUiTest`).
+
 ## 8. Datenschutzerklärung
 
 - §3.4 nennt als Ort für das Einschalten nur „Profil → Puls & Schritte“. Mit 0.5.1 kommen „bei der Anmeldung“ und
