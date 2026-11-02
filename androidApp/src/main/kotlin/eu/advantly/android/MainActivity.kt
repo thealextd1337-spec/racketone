@@ -198,6 +198,8 @@ class MainActivity : ComponentActivity() {
             AdvantlyApp(
                 model = model,
                 versionName = BuildConfig.VERSION_NAME,
+                // versionCode = buildNumber * 10 + Formfaktor (AndroidApplicationConventionPlugin)
+                buildNumber = BuildConfig.VERSION_CODE / 10,
                 buildCommit = getString(R.string.build_git_commit),
                 buildTimeUtc = getString(R.string.build_time_utc),
                 debugTools = BuildConfig.DEBUG,

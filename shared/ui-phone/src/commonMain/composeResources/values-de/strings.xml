@@ -679,6 +679,13 @@
     <string name="watch_update_opened">Auf der Uhr geöffnet – dort auf Aktualisieren tippen.</string>
     <string name="watch_update_failed">Uhr nicht erreichbar. Auf der Uhr: Play Store → Apps verwalten → Advantly.</string>
     <string name="watch_update_manual">Aktualisiere Advantly auf der Uhr im App Store.</string>
+    <string name="whats_new_title">Was ist neu in Advantly %1$s</string>
+    <string name="whats_new_actions">Für dich offen</string>
+    <string name="whats_new_done">Los geht’s</string>
+    <string name="whats_new_11_1">Neuer Spielverlauf im Match-Detail: jeder Satz untereinander, mit Momentum, Puls und Highlights in einer Grafik.</string>
+    <string name="whats_new_11_2">Größere Aufschlag-Tasten auf der Uhr: „2. Aufschlag“ und „Doppelfehler“ stehen groß rechts neben dem Spielstand.</string>
+    <string name="whats_new_11_3">Pulsverläufe exportieren und importieren: im Profil unter „Puls &amp; Schritte“ – für ein neues Handy, ganz ohne Cloud.</string>
+    <string name="whats_new_11_4">„Pulsverlauf aufzeichnen“ kannst du jetzt direkt hier einschalten. Aktualisiere auch die App auf deiner Uhr, damit alles zusammenpasst.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>

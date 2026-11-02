@@ -679,6 +679,13 @@
     <string name="watch_update_opened">Opened on your watch – tap Update there.</string>
     <string name="watch_update_failed">Watch not reachable. On your watch: Play Store → Manage apps → Advantly.</string>
     <string name="watch_update_manual">Update Advantly on your watch in the App Store.</string>
+    <string name="whats_new_title">What’s new in Advantly %1$s</string>
+    <string name="whats_new_actions">Open for you</string>
+    <string name="whats_new_done">Let’s go</string>
+    <string name="whats_new_11_1">New match flow in the match details: each set below the other, with momentum, heart rate and highlights in one chart.</string>
+    <string name="whats_new_11_2">Bigger serve buttons on the watch: “2nd serve” and “Double fault” now sit large to the right of the score.</string>
+    <string name="whats_new_11_3">Export and import heart rate histories: in your profile under “Heart rate &amp; steps” – for a new phone, without any cloud.</string>
+    <string name="whats_new_11_4">You can now turn on “Record heart rate history” right here. Please also update the app on your watch so everything fits together.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>
