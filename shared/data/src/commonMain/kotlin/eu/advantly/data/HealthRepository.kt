@@ -26,11 +26,13 @@ data class HealthRecords(
 
 /**
  * Lokale Gesundheitsdaten (Plan Puls §3.4), getrennt von den Spieldaten: kein Weg in Outbox, Anti-Entropie, Cloud-Upload,
- * Export oder Logs. Gelesen wird nur, was zu einem für das aktuelle Konto lesbaren Match gehört; das Löschen eines
- * Match-Kopfs entfernt die Serien per Trigger.
+ * Export oder Logs. Jede Serie gehört dem Kontobereich ([scope]), in dem sie gespeichert wurde; gelesen, ersetzt und
+ * gelöscht wird nur im aktuellen Bereich und nur, was zu einem für das aktuelle Konto lesbaren Match gehört (ein Mitspieler
+ * mit eigenem Konto auf demselben Gerät sieht sie nicht). Das Löschen eines Match-Kopfs entfernt die Serien per Trigger.
  */
 class HealthRepository internal constructor(
     private val queries: HealthSeriesQueries,
+    private val scope: () -> String,
     private val headerExists: (String) -> Boolean,
 ) {
     /** Speichert [stored], wenn der Match-Kopf existiert und die Revision höher als die gespeicherte ist. `true` = übernommen. */
@@ -40,23 +42,24 @@ class HealthRepository internal constructor(
             val source = stored.sourceDeviceId.value
             // Ohne Kopf (unbekannt oder gelöscht) bliebe die Zeile verwaist, weil kein Lösch-Trigger sie je erreicht.
             if (!headerExists(match)) return@transactionWithResult false
-            val current = queries.revision(match, source).executeAsOneOrNull()
+            val current = queries.revision(scope(), match, source).executeAsOneOrNull()
             if (current != null && current >= stored.revision) return@transactionWithResult false
             with(stored.series) {
-                queries.put(match, source, startMs, intervalMs, csv(bpm), csv(steps), clockOffsetMs, quality.name, stored.revision)
+                queries.put(scope(), match, source, startMs, intervalMs, csv(bpm), csv(steps), clockOffsetMs, quality.name, stored.revision)
             }
             true
         }
 
     /** Alle Serien eines lesbaren Matches, nach Quelle sortiert. */
-    fun forMatch(matchId: MatchId): List<StoredHealthSeries> = queries.forMatch(matchId.value).executeAsList().map { it.toStored() }
+    fun forMatch(matchId: MatchId): List<StoredHealthSeries> =
+        queries.forMatch(scope(), matchId.value).executeAsList().map { it.toStored() }
 
     /** Alle lesbaren Serien, z. B. für „meiste Schritte in einem Satz“ (Satzgrenzen rechnet `presentation`). */
-    fun allSeries(): List<StoredHealthSeries> = queries.readable().executeAsList().map { it.toStored() }
+    fun allSeries(): List<StoredHealthSeries> = queries.readable(scope()).executeAsList().map { it.toStored() }
 
     /** (Match, Quelle, Revision) aller lesbaren Serien ohne Messwerte: ändert sich, sobald eine Serie dazukommt, ersetzt oder gelöscht wird. */
     fun revisions(): List<Triple<MatchId, DeviceId, Long>> =
-        queries.revisions().executeAsList().map { Triple(MatchId(it.match_id), DeviceId(it.source_device_id), it.revision) }
+        queries.revisions(scope()).executeAsList().map { Triple(MatchId(it.match_id), DeviceId(it.source_device_id), it.revision) }
 
     /** Höchster Puls über alle lesbaren Serien. */
     fun records(): HealthRecords {
@@ -68,20 +71,27 @@ class HealthRepository internal constructor(
     }
 
     /** Lesbare Serien der Quelle [source] (Uhr: eigene, noch nicht vom Handy bestätigte Aufnahmen). */
-    fun forSource(source: DeviceId): List<StoredHealthSeries> = queries.forSource(source.value).executeAsList().map { it.toStored() }
+    fun forSource(source: DeviceId): List<StoredHealthSeries> =
+        queries.forSource(scope(), source.value).executeAsList().map { it.toStored() }
 
-    fun deleteForMatch(matchId: MatchId) = queries.deleteForMatch(matchId.value)
+    /** Erster Kontobereich [scope] des Geräts übernimmt Serien, die vorher ohne Bereich gespeichert wurden. */
+    internal fun adoptUnscoped(scope: String) = queries.adoptUnscoped(scope)
+
+    fun deleteForMatch(matchId: MatchId) = queries.deleteForMatch(scope(), matchId.value)
 
     fun delete(
         matchId: MatchId,
         source: DeviceId,
-    ) = queries.deleteOne(matchId.value, source.value)
+    ) = queries.deleteOne(scope(), matchId.value, source.value)
 
-    /** Alle Serien, die vor [startMs] begonnen haben (Haltedauer auf der Uhr). */
+    /** Alle Serien aller Kontobereiche, die vor [startMs] begonnen haben (Haltedauer auf der Uhr). */
     fun deleteStartedBefore(startMs: Long) = queries.deleteStartedBefore(startMs)
 
-    /** „Alle Gesundheitsdaten löschen“ bzw. Widerruf der Einwilligung: alle Serien aller Konten auf diesem Gerät. */
-    fun deleteAll() = queries.deleteAll()
+    /**
+     * „Alle Gesundheitsdaten löschen“ bzw. Widerruf der Einwilligung: die Serien des aktuellen Kontobereichs, die vor
+     * [startedBeforeMs] begonnen haben (Standard: alle). Andere Konten auf diesem Gerät entscheiden selbst.
+     */
+    fun deleteAll(startedBeforeMs: Long = Long.MAX_VALUE) = queries.deleteInScopeStartedBefore(scope(), startedBeforeMs)
 
     private fun Health_series.toStored(): StoredHealthSeries =
         StoredHealthSeries(
