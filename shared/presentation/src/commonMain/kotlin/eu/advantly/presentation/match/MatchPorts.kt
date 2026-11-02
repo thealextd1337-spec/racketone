@@ -310,6 +310,14 @@ interface LiveMatchPort {
     val deviceStatuses: StateFlow<List<DeviceStatus>>
     val localAppBuild: AppBuild? get() = null
 
+    /** Gerätelokaler Merker der Phone-UI (Plan 0.5.1: „Später“ beim Uhr-Update, „Was ist neu?“); `null` = nie gesetzt. */
+    fun localNote(key: String): String? = null
+
+    fun putLocalNote(
+        key: String,
+        value: String,
+    ) {}
+
     /**
      * Versionsunterschied zu einem gekoppelten Gerät, auch ohne aktives Match (z. B. Schritt „Wer zählt?“); `null` = keiner.
      * Die In-Memory-Implementierung liefert immer `null`.

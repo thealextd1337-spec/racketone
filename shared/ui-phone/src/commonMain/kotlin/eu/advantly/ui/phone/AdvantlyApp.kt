@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.match.LiveMatchSnapshot
@@ -32,6 +33,7 @@ import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
 import eu.advantly.presentation.stats.transfer
 import eu.advantly.presentation.support.SupportViewModel
+import eu.advantly.ui.phone.app.AdoptedHealthConsentDialog
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.app.AppTab
 import eu.advantly.ui.phone.app.ComingSoonScreen
@@ -41,7 +43,10 @@ import eu.advantly.ui.phone.app.MiniScoreBar
 import eu.advantly.ui.phone.app.Overlay
 import eu.advantly.ui.phone.app.ProfileScreen
 import eu.advantly.ui.phone.app.TabBar
+import eu.advantly.ui.phone.app.WHATS_NEW_KEY
+import eu.advantly.ui.phone.app.WhatsNewSheet
 import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
+import eu.advantly.ui.phone.app.whatsNewPoints
 import eu.advantly.ui.phone.auth.AccountGate
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
 import eu.advantly.ui.phone.common.LocalSelfAliases
@@ -89,6 +94,7 @@ import org.jetbrains.compose.resources.stringResource
  * @param authModel Konto (Pflicht, 0.3.0): ohne nutzbares Konto zeigt die App nur den Konto-Fluss; `null` (Build ohne Backend,
  *   iOS) zählt ohne Konto
  * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Konto-Fluss wartet, bis er entschieden ist
+ * @param buildNumber `advantly.buildNumber` dieser App für „Was ist neu?“ (Plan 0.5.1 §6); `0` = nie zeigen (Preview)
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -112,6 +118,7 @@ fun AdvantlyApp(
     onShareText: ((String) -> Unit)? = null,
     watchInstall: WatchInstallHost? = null,
     recoveryHold: Boolean = false,
+    buildNumber: Int = 0,
 ) {
     val accountState = authModel?.state?.collectAsState()?.value
     val archived by model.players.archivedPlayerIds.collectAsState()
@@ -137,6 +144,38 @@ fun AdvantlyApp(
         model.onVisitorsChosen = authModel?.friends?.let { friends -> { id, visitors -> friends.queueVisitors(id.value, visitors) } }
         onDispose { model.onVisitorsChosen = null }
     }
+    // Schritt HEALTH im Konto-Einstieg nur, solange „Pulsverlauf aufzeichnen“ auf diesem Gerät offen ist (Plan 0.5.1 §5.1).
+    DisposableEffect(model, authModel) {
+        authModel?.healthDecisionOpen = { model.telemetry.healthConsentOpen.value }
+        onDispose { authModel?.healthDecisionOpen = null }
+    }
+    val healthToConfirm by model.telemetry.healthConsentToConfirm.collectAsState()
+    // „Was ist neu?“ (Plan 0.5.1 §6): nach einem Update, erst nach dem Zustimmungs-Gate, nie in einem laufenden Match.
+    val openMatches by model.live.openMatches.collectAsState()
+    var lastSeenBuild by remember(model) { mutableStateOf(model.live.localNote(WHATS_NEW_KEY)?.toIntOrNull()) }
+    val seeWhatsNew = {
+        model.live.putLocalNote(WHATS_NEW_KEY, buildNumber.toString())
+        lastSeenBuild = buildNumber
+    }
+    // Neuinstallation bzw. neue Anmeldung: Der Einstieg fragt selbst (Schritt HEALTH) und übernimmt den Stand. Ohne
+    // Konto-Host (iOS, Build ohne Backend) gilt ein fehlender Stand als Neuinstallation.
+    val signingIn =
+        (accountState?.unconfirmed == false && accountState.step in SIGN_IN_STEPS) || (authModel == null && lastSeenBuild == null)
+    // Im Recovery-Hold schreibt die App nichts (geschützte Daten bleiben unverändert).
+    LaunchedEffect(signingIn, buildNumber, recoveryHold) {
+        if (signingIn && !recoveryHold && buildNumber > 0 && lastSeenBuild != buildNumber) seeWhatsNew()
+    }
+    val whatsNewPoints = remember(buildNumber) { whatsNewPoints(buildNumber) }
+    val showWhatsNew =
+        buildNumber > 0 &&
+            !signingIn &&
+            (lastSeenBuild ?: 0) < buildNumber &&
+            whatsNewPoints.isNotEmpty() &&
+            (accountState == null || (accountState.step == AuthStep.ACCOUNT && !accountState.unconfirmed && !accountRequired)) &&
+            !recoveryHold &&
+            navigator.top == null &&
+            openMatches.none { it.isRunning }
+    BackHandler(enabled = showWhatsNew) { seeWhatsNew() }
     CompositionLocalProvider(
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
@@ -148,7 +187,7 @@ fun AdvantlyApp(
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
                 // oder für Screenreader erreichbar.
-                if (navigator.top == null || accountRequired) {
+                if ((navigator.top == null && !showWhatsNew) || accountRequired) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
                         Box(Modifier.weight(1f)) {
@@ -298,9 +337,12 @@ fun AdvantlyApp(
                         Unit
                     }
                 }
+                if (showWhatsNew) WhatsNewSheet(model, versionName, whatsNewPoints, watchInstall, onDone = seeWhatsNew)
                 if (!accountRequired) {
                     model.pendingScorerChoice?.let { ScorerDialog(model) }
                     model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }
+                    // Plan 0.5.1 §5.4: nicht über dem laufenden Live-Score
+                    if (healthToConfirm && navigator.top != Overlay.Live) AdoptedHealthConsentDialog(model.telemetry)
                 }
             }
         }
@@ -344,7 +386,7 @@ private fun TabLayer(
                         showSupport = false
                     }
                 } else {
-                    AccountGate(authModel, googleCredential, onSupport, onShareExport)
+                    AccountGate(authModel, googleCredential, onSupport, onShareExport, model.telemetry)
                 }
             }
             active?.let { snapshot -> MiniScoreBar(snapshot, onClick = { navigator.push(Overlay.Live) }, more = open.size - 1) }
@@ -488,3 +530,6 @@ private fun WatchTakeOverDialog(
         modifier = Modifier.testTag("watch_takeover_dialog"),
     )
 }
+
+/** Schritte einer Anmeldung (Neuinstallation, Abmeldung): kein „Was ist neu?“ danach. */
+private val SIGN_IN_STEPS = setOf(AuthStep.AGE, AuthStep.PROVIDER, AuthStep.CODE)

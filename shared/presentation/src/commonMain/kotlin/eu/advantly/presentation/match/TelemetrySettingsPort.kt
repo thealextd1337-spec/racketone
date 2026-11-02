@@ -25,6 +25,15 @@ interface TelemetrySettingsPort {
     /** Ein Widerruf löscht alle Pulsverläufe auf Handy und Uhr (die Rückfrage stellt die UI). */
     fun setHealthConsent(enabled: Boolean)
 
+    /** Auf diesem Gerät noch nie entschieden (`HealthConsent.isDefault`): Einstieg und „Was ist neu?“ fragen (Plan 0.5.1 §5/§6). */
+    val healthConsentOpen: StateFlow<Boolean>
+
+    /** „an“ kam von der Uhr, ohne eigene Entscheidung des Handys: einmal nachfragen (Plan 0.5.1 §5.4). */
+    val healthConsentToConfirm: StateFlow<Boolean>
+
+    /** Antwort auf die Rückfrage: [keep] = beibehalten, sonst Widerruf (löscht wie [setHealthConsent]). */
+    fun confirmHealthConsent(keep: Boolean)
+
     /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät. */
     fun deleteAllHealthData()
 
@@ -61,9 +70,14 @@ data class PulseSetting(
 class InMemoryTelemetrySettings(
     initial: TelemetryVisibility = TelemetryVisibility.DEFAULT,
     consent: Boolean = false,
+    toConfirm: Boolean = false,
 ) : TelemetrySettingsPort {
     private val mutable = MutableStateFlow(initial)
     private val consentFlow = MutableStateFlow(consent)
+    private val openFlow = MutableStateFlow(!consent)
+    private val toConfirmFlow = MutableStateFlow(toConfirm && consent)
+    override val healthConsentOpen: StateFlow<Boolean> = openFlow.asStateFlow()
+    override val healthConsentToConfirm: StateFlow<Boolean> = toConfirmFlow.asStateFlow()
     private val revisionFlow = MutableStateFlow(0L)
     private val pulse = mutableMapOf<MatchId, PulseSetting>()
     override val telemetryVisibility: StateFlow<TelemetryVisibility> = mutable.asStateFlow()
@@ -75,8 +89,17 @@ class InMemoryTelemetrySettings(
     }
 
     override fun setHealthConsent(enabled: Boolean) {
-        if (consentFlow.value && !enabled) deleteAllHealthData()
+        if (consentFlow.value == enabled) return
+        if (consentFlow.value) deleteAllHealthData()
         consentFlow.value = enabled
+        openFlow.value = false
+        toConfirmFlow.value = false
+    }
+
+    override fun confirmHealthConsent(keep: Boolean) {
+        if (!toConfirmFlow.value) return
+        toConfirmFlow.value = false
+        if (!keep) setHealthConsent(false)
     }
 
     override fun deleteAllHealthData() {

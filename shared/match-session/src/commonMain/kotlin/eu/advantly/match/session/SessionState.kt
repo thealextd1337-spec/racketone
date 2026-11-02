@@ -40,6 +40,8 @@ import eu.advantly.sync.protocol.PeerKind
  * @property pairingConflict Uhr: ein vertrautes Handy mit anderer Pairing-Autorität wurde abgelehnt (Handy ersetzt,
  *   wiederhergestellt oder neu gekoppelt). Nur die ausdrückliche Neukopplung ([MatchSession.repairPairing]) löst das.
  * @property healthConsent Einwilligung „Pulsverlauf aufzeichnen“ (Plan Puls H5), auf den eigenen Geräten abgeglichen
+ * @property healthConsentToConfirm Handy: „an“ kam von der Uhr, ohne eigene Entscheidung des Handys – einmal nachfragen
+ *   ([MatchSession.confirmHealthConsent], Plan 0.5.1 §5.4)
  */
 data class SessionState(
     val match: ActiveMatch?,
@@ -53,6 +55,7 @@ data class SessionState(
     val lifecycleRevision: Long = 0,
     val pairingConflict: Boolean = false,
     val healthConsent: HealthConsent = HealthConsent(),
+    val healthConsentToConfirm: Boolean = false,
 ) {
     /** Kurzform für Anzeige und Versandentscheidung. */
     val telemetryVisibility: TelemetryVisibility get() = telemetry.visibility

@@ -42,6 +42,61 @@ class HealthSyncTest {
         return c to id
     }
 
+    private fun Device.toConfirm() = session.state.value.healthConsentToConfirm
+
+    /** Plan 0.5.1 §5.4: Handy ohne eigene Entscheidung übernimmt „an“ von der Uhr → einmal nachfragen; Beibehalten. */
+    @Test
+    fun anAdoptedConsentIsConfirmedOnceOnThePhone() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        assertTrue(c["phone"].consent())
+        assertTrue(c["phone"].toConfirm())
+        assertFalse(c["watch"].toConfirm(), "nur das Handy fragt")
+        assertEquals("1", c["phone"].data.settings.get("session.healthConsent.toConfirm"), "überdauert einen Neustart")
+        c["phone"].session.confirmHealthConsent(keep = true)
+        c.settle()
+        assertFalse(c["phone"].toConfirm())
+        assertNull(c["phone"].data.settings.get("session.healthConsent.toConfirm"))
+        val consent =
+            c["phone"]
+                .session.state.value.healthConsent
+        assertEquals(2, consent.counter)
+        assertEquals(
+            c["phone"]
+                .session.state.value.healthConsent,
+            c["watch"]
+                .session.state.value.healthConsent,
+        )
+        assertTrue(c["watch"].consent())
+        c["phone"].session.confirmHealthConsent(keep = false)
+        assertTrue(c["phone"].consent(), "ohne offene Frage ändert die Antwort nichts")
+    }
+
+    @Test
+    fun switchingOffTheAdoptedConsentRevokesOnBothDevices() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        c["phone"].session.confirmHealthConsent(keep = false)
+        c.settle()
+        assertFalse(c["phone"].consent())
+        assertFalse(c["watch"].consent())
+        assertFalse(c["phone"].toConfirm())
+    }
+
+    @Test
+    fun aPhoneThatDecidedItselfIsNotAskedAgain() {
+        val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
+        c["phone"].session.setHealthConsent(true)
+        c["phone"].session.setHealthConsent(false)
+        c.settle()
+        c["watch"].session.setHealthConsent(true)
+        c.settle()
+        assertTrue(c["phone"].consent())
+        assertFalse(c["phone"].toConfirm())
+    }
+
     @Test
     fun consentDefaultsOffSyncsAndTheSeriesReachesThePhoneOnce() {
         val c = Cluster("phone" to PeerKind.PHONE, "watch" to PeerKind.WATCH)
