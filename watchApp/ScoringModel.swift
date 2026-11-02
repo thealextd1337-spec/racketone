@@ -69,9 +69,12 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     private var serveBarWork: DispatchWorkItem?
     /// Ausblendzeitpunkt der Aufschlag-Leiste (Restzeit-Anzeige in den Segmenten).
     @Published private(set) var serveBarDeadline = Date.distantPast
+    /// Erscheinen der Aufschlag-Tasten; erst `serveBarArm` danach wählen sie etwas (Fehl-Tipp direkt nach dem Punkt).
+    private var serveBarShownAt = Date.distantPast
     /// Zeiten aus der Kotlin-Facade (gleich wie Wear OS).
     static let serveBarVisible = TimeInterval(AdvantlyWatch.shared.serveBarVisibleMillis()) / 1000
     static let serveBarAfterChoice = TimeInterval(AdvantlyWatch.shared.serveBarAfterChoiceMillis()) / 1000
+    static let serveBarArm = TimeInterval(AdvantlyWatch.shared.serveBarArmMillis()) / 1000
     static let holdToRemove = TimeInterval(AdvantlyWatch.shared.holdToRemoveMillis()) / 1000
     @Published var actionButtonMode = ActionButtonMode.stored {
         didSet {
@@ -133,9 +136,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         serverChoiceContext = nil
         silentUntil = Date().addingTimeInterval(0.3)
         if let snap = snapshot, snap.isScorer, snap.serveInfoEnabled, !snap.lastPointId.isEmpty {
-            serveBarPointId = snap.lastPointId
-            serveBarDeadline = Date().addingTimeInterval(Self.serveBarVisible)
-            scheduleServeBarDismiss(after: Self.serveBarVisible)
+            showServeBar(snap.lastPointId)
         }
     }
 
@@ -426,9 +427,7 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         }
         dismissServeBar()
         if after.serveInfoEnabled && !after.lastPointId.isEmpty {
-            serveBarPointId = after.lastPointId
-            serveBarDeadline = Date().addingTimeInterval(Self.serveBarVisible)
-            scheduleServeBarDismiss(after: Self.serveBarVisible)
+            showServeBar(after.lastPointId)
         }
         if banner == .pointRemoved { banner = nil }
         lockedUntil = now.addingTimeInterval(Self.lockInterval)
@@ -456,6 +455,13 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
         Haptics.undo()
         show(.undo(from: ScoreText.short(before), to: ScoreText.short(after)))
         afterCommand(after)
+    }
+
+    private func showServeBar(_ pointId: String) {
+        serveBarPointId = pointId
+        serveBarShownAt = Date()
+        serveBarDeadline = serveBarShownAt.addingTimeInterval(Self.serveBarVisible)
+        scheduleServeBarDismiss(after: Self.serveBarVisible)
     }
 
     func dismissServeBar() {
@@ -504,6 +510,8 @@ final class ScoringModel: NSObject, ObservableObject, WatchScoringListener {
     func setServeInfo(pointId: String, value: String) {
         guard let snap = snapshot, snap.isScorer, snap.serveInfoEnabled,
               !pointId.isEmpty, pointId == serveBarPointId, pointId == snap.lastPointId else { return }
+        // Schneller zweiter Tipp direkt nach dem Punkt (rechts oben „2. Aufschlag“): still ignorieren (wie Wear OS)
+        guard Date() >= serveBarShownAt.addingTimeInterval(Self.serveBarArm) else { return }
         guard scoring.setServeInfo(pointId: pointId, value: value) != nil else {
             rejected()
             return

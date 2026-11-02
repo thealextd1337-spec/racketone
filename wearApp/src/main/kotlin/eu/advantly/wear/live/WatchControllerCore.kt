@@ -367,7 +367,8 @@ internal class WatchControllerCore(
     fun setServe(outcome: ServeOutcome): Boolean {
         val live = mutableState.value.live ?: return false
         val bar = live.serveBar ?: return false
-        if (locked || outcome !in bar.options) return false
+        // Schneller zweiter Tipp direkt nach dem Punkt: still ignorieren, kein Fehl-Wert (Review N1)
+        if (locked || outcome !in bar.options || !serveBar.isArmed(elapsed())) return false
         val match = session.state.value.match ?: return false
         val value =
             if (outcome == bar.selected) {

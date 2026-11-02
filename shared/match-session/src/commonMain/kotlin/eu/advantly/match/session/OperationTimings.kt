@@ -8,6 +8,12 @@ object OperationTimings {
     /** Aufschlag-Leiste nach dem Punkt: so lange sichtbar, wenn nichts gewählt wird. */
     const val SERVE_BAR_VISIBLE_MILLIS: Long = 5_000
 
+    /**
+     * Schutzfenster nach dem Erscheinen der Aufschlag-Tasten: erst danach wählen sie etwas. Ein schneller zweiter Tipp
+     * direkt nach dem Punkt (rechts oben liegt „2. Aufschlag“) bleibt so ohne Wirkung (Review N1).
+     */
+    const val SERVE_BAR_ARM_MILLIS: Long = 250
+
     /** Nach einer Auswahl bleibt die Leiste noch so lange stehen (Markierung, Korrektur) – verlängert nie. */
     const val SERVE_BAR_AFTER_CHOICE_MILLIS: Long = 1_500
 

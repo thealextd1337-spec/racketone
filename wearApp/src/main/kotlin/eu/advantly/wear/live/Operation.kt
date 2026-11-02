@@ -65,6 +65,7 @@ class ServeBarTimer(
 ) {
     private var pointId: EventId? = null
     private var hideAt: Long = Long.MIN_VALUE
+    private var shownAt: Long = Long.MIN_VALUE
 
     /** Ein Punkt wurde hier gezählt: Leiste für [point] zeigen. */
     fun onPoint(
@@ -72,8 +73,12 @@ class ServeBarTimer(
         nowMillis: Long,
     ) {
         pointId = point
+        shownAt = nowMillis
         hideAt = nowMillis + visibleMillis
     }
+
+    /** Schutzfenster wie [eu.advantly.wear.scoring.TapGuard]: Tasten wählen erst [ARM_MILLIS] nach dem Erscheinen. */
+    fun isArmed(nowMillis: Long): Boolean = nowMillis - shownAt >= ARM_MILLIS
 
     /** Wert gewählt: noch kurz zeigen, dann ausblenden (verkürzt nur, verlängert nie). */
     fun onChosen(nowMillis: Long) {
@@ -100,6 +105,7 @@ class ServeBarTimer(
     companion object {
         const val VISIBLE_MILLIS = OperationTimings.SERVE_BAR_VISIBLE_MILLIS
         const val AFTER_CHOICE_MILLIS = OperationTimings.SERVE_BAR_AFTER_CHOICE_MILLIS
+        const val ARM_MILLIS = OperationTimings.SERVE_BAR_ARM_MILLIS
     }
 }
 

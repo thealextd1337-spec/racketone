@@ -178,6 +178,25 @@ class WatchControllerOperationTest {
         assertFalse(c.setServe(ServeOutcome.DOUBLE_FAULT))
     }
 
+    /** Review N1: Ein schneller zweiter Tipp direkt nach dem Punkt (rechts oben „2. Aufschlag“) wählt nichts. */
+    @Test
+    fun serveButtonsIgnoreTapsRightAfterThePointAppears() {
+        startOnWatch(server = Side.A)
+        h.scheduler.advanceBy(300)
+        assertTrue(c.point(Side.B))
+        val haptics = h.haptics.size
+        h.scheduler.advanceBy(ServeBarTimer.ARM_MILLIS - 1)
+        assertNotNull(live.serveBar)
+        assertFalse("noch im Schutzfenster", c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertNull(match.lastPoint?.serve)
+        assertEquals("still, keine Fehler-Haptik", haptics, h.haptics.size)
+        h.scheduler.advanceBy(1)
+        assertTrue(c.setServe(ServeOutcome.SECOND_SERVE_IN))
+        assertEquals(ServeOutcome.SECOND_SERVE_IN, match.lastPoint?.serve)
+        // Korrektur gleich danach bleibt möglich (das Fenster gilt nur fürs Erscheinen)
+        assertTrue(c.setServe(ServeOutcome.DOUBLE_FAULT))
+    }
+
     /**
      * Feldtest 2026-10-16: Die Leiste muss nach JEDEM Punkt stehen (Aufschlag-Statistik ist Default an) – über Spiel- und
      * Satzgrenzen, im Tiebreak, im Doppel trotz offener Aufschlägerwahl und im Padel; sie hat in der Aktionsleiste Vorrang.

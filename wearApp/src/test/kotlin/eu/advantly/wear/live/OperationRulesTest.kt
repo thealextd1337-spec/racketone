@@ -228,6 +228,16 @@ class OperationRulesTest {
     }
 
     @Test
+    fun serveBarTimerArmsTheButtonsShortlyAfterAppearing() {
+        val timer = ServeBarTimer()
+        timer.onPoint(EventId("p1"), 1_000)
+        assertFalse(timer.isArmed(1_000))
+        assertFalse(timer.isArmed(1_000 + ServeBarTimer.ARM_MILLIS - 1))
+        assertTrue(timer.isArmed(1_000 + ServeBarTimer.ARM_MILLIS))
+        assertEquals(250L, ServeBarTimer.ARM_MILLIS)
+    }
+
+    @Test
     fun serveBarTimerReportsTheEndWithoutInputExactlyOnce() {
         val timer = ServeBarTimer(visibleMillis = 5_000, afterChoiceMillis = 1_500)
         val p1 = EventId("p1")
