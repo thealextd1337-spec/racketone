@@ -553,16 +553,10 @@
     <string name="detail_net_duration">Playing time</string>
     <string name="detail_elapsed_duration">Duration</string>
     <string name="detail_break_saved">Break points saved</string>
-    <string name="detail_momentum">Momentum by game</string>
-    <string name="detail_momentum_rally">Momentum by game</string>
-    <string name="detail_momentum_sets">Momentum by game</string>
-    <string name="detail_momentum_hint">Rally difference by game (set.game): orange = us, blue = opponents. A circle marks a break.</string>
     <string name="detail_progress_empty">No rallies recorded.</string>
     <string name="detail_game">Set %1$d · game %2$d</string>
     <string name="detail_rally_game">Game %1$d</string>
     <string name="detail_rally_set">Game %1$d</string>
-    <string name="detail_momentum_rally_hint">Rally difference by game: orange = us, blue = opponents.</string>
-    <string name="detail_momentum_sets_hint">Rally difference by game: orange = us, blue = opponents.</string>
     <string name="detail_breaks">Breaks</string>
     <string name="detail_tiebreak">Tiebreak</string>
     <string name="detail_break">Break</string>
@@ -897,11 +891,7 @@
     <string name="watching_tiebreak">Tiebreak</string>
     <string name="friends_error_visitor_not_friend">Only friends can be added as spectators.</string>
     <string name="friends_error_already_member">This friend already plays in the match.</string>
-    <string name="timeline_title">Timeline</string>
-    <string name="timeline_hint">Tap a marker to see the score before the point.</string>
-    <string name="timeline_empty">No highlights in this match.</string>
-    <string name="timeline_highlights">Highlights</string>
-    <string name="timeline_pulse">Heart rate (trend): %1$d–%2$d bpm</string>
+    <string name="timeline_title">Match flow</string>
     <string name="timeline_card_pulse">Avg. heart rate (trend): %1$d bpm</string>
     <string name="timeline_quality_sparse">Few heart rate values – the curve shows only a rough trend.</string>
     <string name="timeline_quality_gaps">The heart rate has gaps or does not fit the match time.</string>
@@ -910,7 +900,16 @@
     <string name="timeline_clock">%1$d:%2$s</string>
     <string name="timeline_score_before">Score before the point: %1$s</string>
     <string name="timeline_marker_a11y">%1$s, %2$s</string>
-    <string name="timeline_corrected">The result was corrected afterwards – the timeline shows the points as they were counted.</string>
+    <string name="timeline_corrected">The result was corrected afterwards – the match flow shows the points as they were counted.</string>
+    <string name="timeline_legend_pulse">Heart rate · avg %1$d · max %2$d</string>
+    <string name="timeline_legend_serve">Serve (top us, bottom opponents)</string>
+    <string name="timeline_set">Set %1$d</string>
+    <string name="timeline_breaks_a11y">%1$d breaks</string>
+    <string name="timeline_game_duration">Duration: %1$s min</string>
+    <string name="timeline_game_pulse">Heart rate avg %1$d · max %2$d bpm</string>
+    <string name="timeline_serve">Serve: %1$s</string>
+    <string name="timeline_pulse_pending">Heart rate history is being transferred from the watch …</string>
+    <string name="timeline_pulse_overdue">No heart rate history from the watch yet – open the watch app near your phone</string>
     <string name="moment_break_point">Break point</string>
     <string name="moment_break">Break</string>
     <string name="moment_golden_point">Golden point</string>
