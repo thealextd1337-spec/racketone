@@ -8,10 +8,21 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Zähl-Einladung eines eigenen Matches an [scorerId]; [sent]: am Server (sonst wartet sie auf den Upload des Matches). */
+/**
+ * Zähl-Einladung eines eigenen Matches an [scorerId]; [sent]: am Server (sonst wartet sie auf den Upload des Matches);
+ * [handover]: bereits abgegeben, die Antwort des Servers auf das `ScorerChanged` steht noch aus.
+ */
 data class ScorerInvite(
     val scorerId: String,
     val sent: Boolean = false,
+    val handover: Handover? = null,
+)
+
+/** Erzeugtes `ScorerChanged` einer Abgabe: Event [eventId] von [from] (eigenes Gerät, zählte vorher) an [to]. */
+data class Handover(
+    val eventId: String,
+    val from: String,
+    val to: String,
 )
 
 /** Persistente Zähl-Einladungen je Konto (Host: z. B. SharedPreferences): Match-ID → Einladung. */
@@ -35,10 +46,19 @@ interface ScorerDevices {
     /** Eines meiner Geräte zählt das laufende Match [matchId]. */
     fun scoring(matchId: String): Boolean
 
-    /** Abgabe an [deviceId] (`ScorerChanged`); `false`, wenn keines meiner Geräte zählt. */
+    /** Abgabe an [deviceId] (`ScorerChanged`); `null`, wenn keines meiner Geräte zählt. */
     fun handOver(
         matchId: String,
         deviceId: String,
+    ): Handover?
+
+    /** Antwort des Servers auf das Event: `true` angenommen (oder lokal unbekannt), `false` abgelehnt, `null` ausstehend. */
+    fun uploaded(eventId: String): Boolean?
+
+    /** Abgelehnte Abgabe: [Handover.from] zählt wieder, solange laut Log noch [Handover.to] zählt. */
+    fun handBack(
+        matchId: String,
+        handover: Handover,
     ): Boolean
 
     /** Notfall-Übernahme möglich: Fremd-Match mit vollständigem Stand, keines meiner Geräte zählt. */
@@ -57,6 +77,9 @@ enum class HandoverPhase {
 
     /** Angenommen; die Abgabe folgt beim nächsten Abgleich. */
     ACCEPTED,
+
+    /** Der Server lehnte die Abgabe ab; dieses Handy bzw. die eigene Uhr zählt weiter (Hinweis bis zum Wegklicken). */
+    FAILED,
 }
 
 data class HandoverStatus(
@@ -68,7 +91,8 @@ data class HandoverStatus(
  * Zählen an ein anderes Konto weitergeben (plan-live-mitspieler §3.4, E6 „Abgabe durch den aktuellen Zähler“):
  * - **Abgebendes Handy:** [invite] lädt ein (vor dem Upload des Matches vorgemerkt, [flush] sendet nach dem Abgleich).
  *   [reconcile] nach jedem Abgleich: Sobald die gezogene Rolle angenommen ist, erzeugt dieses Handy `ScorerChanged` auf das
- *   angenommene Gerät; Ablehnung oder Widerruf beenden die Abgabe.
+ *   angenommene Gerät; erledigt ist die Abgabe erst, wenn der Server es angenommen hat. Lehnt er es ab, zählt das vorige
+ *   eigene Gerät wieder ([HandoverPhase.FAILED]). Ablehnung oder Widerruf der Einladung beenden die Abgabe.
  * - **Empfänger:** [accept] registriert bei Bedarf die eigene Uhr, nimmt an und wartet, bis der Wechsel gezogen ist.
  * [requestSync] stößt einen Abgleich an. Aufrufe auf dem seriellen Host-Kontext.
  */
@@ -85,10 +109,14 @@ class ScorerHandovers(
     /** Angenommene Einladungen, deren Zählerwechsel noch nicht gezogen ist (nur im Speicher). */
     private val awaiting = mutableSetOf<String>()
 
+    /** Vom Server abgelehnte Abgaben (Konto, Match) → eingeladene Person, bis der Hinweis weggeklickt ist (nur im Speicher). */
+    private val failed = mutableMapOf<Pair<String, String>, String>()
+
     fun status(
         profileId: String,
         matchId: String,
     ): HandoverStatus? {
+        failed[profileId to matchId]?.let { return HandoverStatus(it, HandoverPhase.FAILED) }
         val invite = store.scorerInvites(profileId)[matchId] ?: return null
         val accepted = invite.sent && pulled(profileId, matchId)?.roleOf(invite.scorerId)?.status == "accepted"
         val phase =
@@ -102,9 +130,7 @@ class ScorerHandovers(
 
     /** Laufende Abgaben dieses Kontos. */
     fun statuses(profileId: String): Map<String, HandoverStatus> =
-        store
-            .scorerInvites(profileId)
-            .keys
+        (store.scorerInvites(profileId).keys + failed.keys.filter { it.first == profileId }.map { it.second })
             .mapNotNull { id -> status(profileId, id)?.let { id to it } }
             .toMap()
 
@@ -124,11 +150,12 @@ class ScorerHandovers(
         requestSync()
     }
 
-    /** Einladung zurücknehmen (vorgemerkt nur lokal, sonst Rolle am Server entziehen). */
+    /** Einladung zurücknehmen (vorgemerkt nur lokal, sonst Rolle am Server entziehen); nach [HandoverPhase.FAILED] nur den Hinweis. */
     suspend fun cancel(
         profileId: String,
         matchId: String,
     ) {
+        if (failed.remove(profileId to matchId) != null) return
         val invite = store.scorerInvites(profileId)[matchId] ?: return
         if (invite.sent) port.revokeScorer(profileId, matchId, invite.scorerId)
         remove(profileId, matchId)
@@ -161,6 +188,25 @@ class ScorerHandovers(
     fun reconcile(profileId: String): Boolean {
         for ((matchId, invite) in store.scorerInvites(profileId)) {
             if (!invite.sent) continue
+            val handover = invite.handover
+            if (handover != null) {
+                // Lehnt der Server das ScorerChanged ab (z. B. Rolle oder Gerät inzwischen geändert), zählte sonst niemand.
+                when (devices.uploaded(handover.eventId)) {
+                    true -> {
+                        remove(profileId, matchId)
+                    }
+
+                    false -> {
+                        devices.handBack(matchId, handover)
+                        remove(profileId, matchId)
+                        failed[profileId to matchId] = invite.scorerId
+                        requestSync() // Rückgabe sofort hochladen
+                    }
+
+                    null -> {}
+                }
+                continue
+            }
             val role = pulled(profileId, matchId)?.roleOf(invite.scorerId)
             val device = role?.deviceId
             when {
@@ -173,9 +219,11 @@ class ScorerHandovers(
                     remove(profileId, matchId)
                 }
 
-                role?.status == "accepted" && device != null && devices.handOver(matchId, device) -> {
-                    remove(profileId, matchId)
-                    requestSync() // ScorerChanged sofort hochladen
+                role?.status == "accepted" && device != null -> {
+                    devices.handOver(matchId, device)?.let {
+                        put(profileId, matchId, invite.copy(handover = it))
+                        requestSync() // ScorerChanged sofort hochladen
+                    }
                 }
             }
         }

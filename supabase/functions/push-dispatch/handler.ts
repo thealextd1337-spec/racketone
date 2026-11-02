@@ -1,10 +1,13 @@
 import { type Backend } from "../export-my-data/backend.ts";
 import { type PushResult, type Send } from "./fcm.ts";
 
-export const BATCH_LIMIT = 20;
+// Laufzeit (pg_net wartet 30 s, 20261102000200): neue Batches nur bis BUDGET_MS, neue Sende-Runden nur bis
+// SEND_DEADLINE_MS; eine Runde dauert höchstens OAuth + FCM (je 4 s Timeout in fcm.ts). Ein Lauf endet damit nach
+// spätestens rund 22 s plus Ack. Nicht mehr gesendete Ziele gehen als `deadline` zurück; der Minuten-Cron holt sie nach.
+export const BATCH_LIMIT = 10;
 const CONCURRENCY = 10;
-// Neue Batches nur innerhalb dieses Budgets; der pg_net-Aufruf wartet 20 s, Rest holt der Minuten-Cron.
-const BUDGET_MS = 15_000;
+export const BUDGET_MS = 10_000;
+export const SEND_DEADLINE_MS = 14_000;
 const DATA_KEYS = ["v", "kind", "matchId", "profileId", "role"];
 
 interface Target {
@@ -89,44 +92,65 @@ export function handler(
         }
         if (!batch.length) break;
         // Ein Ergebnis je Ziel (Token); ein Eintrag ohne Ziel wird als Fehler quittiert (Server verwirft nach 5 Versuchen).
-        const jobs: (() => Promise<Result>)[] = [];
+        const jobs: {
+          id: number;
+          token?: string;
+          run: () => Promise<Result>;
+        }[] = [];
         for (const entry of batch) {
           const id = entry?.id;
           if (typeof id !== "number") throw new Error();
           const data = toData(entry.message);
           const targets = Array.isArray(entry.targets) ? entry.targets : [];
           if (!targets.length) {
-            jobs.push(() =>
-              Promise.resolve({ id, result: "error", error: "no_target" })
-            );
+            jobs.push({
+              id,
+              run: () =>
+                Promise.resolve({ id, result: "error", error: "no_target" }),
+            });
           }
           for (const target of targets) {
             const token = typeof target?.token === "string" ? target.token : "";
-            jobs.push(async (): Promise<Result> => {
-              if (!data) {
-                return { id, token, result: "error", error: "invalid_message" };
-              }
-              // shortcut: nur FCM; APNs kommt mit dem iOS-Konto (E9).
-              if (target.provider !== "fcm" || !token) {
-                return {
-                  id,
-                  token,
-                  result: "error",
-                  error: "unsupported_target",
-                };
-              }
-              const result = await send(token, data);
-              return result === "error"
-                ? { id, token, result, error: "fcm_failed" }
-                : { id, token, result };
+            jobs.push({
+              id,
+              token,
+              run: async (): Promise<Result> => {
+                if (!data) {
+                  return {
+                    id,
+                    token,
+                    result: "error",
+                    error: "invalid_message",
+                  };
+                }
+                // shortcut: nur FCM; APNs kommt mit dem iOS-Konto (E9).
+                if (target.provider !== "fcm" || !token) {
+                  return {
+                    id,
+                    token,
+                    result: "error",
+                    error: "unsupported_target",
+                  };
+                }
+                const result = await send(token, data);
+                return result === "error"
+                  ? { id, token, result, error: "fcm_failed" }
+                  : { id, token, result };
+              },
             });
           }
         }
         const results: Result[] = [];
         for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+          if (now() - started >= SEND_DEADLINE_MS) {
+            for (const { id, token } of jobs.slice(i)) {
+              results.push({ id, token, result: "error", error: "deadline" });
+            }
+            break;
+          }
           results.push(
             ...await Promise.all(
-              jobs.slice(i, i + CONCURRENCY).map((job) => job()),
+              jobs.slice(i, i + CONCURRENCY).map((job) => job.run()),
             ),
           );
         }

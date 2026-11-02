@@ -17,6 +17,9 @@ SELECT count(*) FROM match_event WHERE cloud_state = 0;
 rejectedEvents:
 SELECT id, cloud_rejection FROM match_event WHERE cloud_state = 2 ORDER BY id;
 
+cloudState:
+SELECT cloud_state FROM match_event WHERE id = ?;
+
 markUploaded:
 UPDATE match_event SET cloud_state = 1, cloud_rejection = NULL WHERE id = ?;
 

@@ -32,9 +32,12 @@ enum class PushKind(
 }
 
 /** Abschnitt des Freunde-Tabs, den ein Antippen öffnet. */
-enum class FriendsSection { FEED, FRIENDS, REQUESTS, WATCHING }
+enum class FriendsSection { FEED, FRIENDS, REQUESTS, LIVE }
 
-/** Ziel einer Benachrichtigung; [matchId] öffnet im Feed das Match-Detail. */
+/**
+ * Ziel einer Benachrichtigung. [matchId] öffnet im Feed das Match-Detail, im Bereich „Live“ die Live-Ansicht des
+ * Matches (mit Zähl-Einladung); läuft es nicht mehr, das Feed-Detail, sonst bleibt der Bereich „Live“.
+ */
 data class PushTarget(
     val section: FriendsSection,
     val matchId: String? = null,
@@ -46,14 +49,22 @@ data class PushMessage(
     val matchId: String? = null,
     val profileId: String? = null,
 ) {
-    // shortcut: Match-Arten öffnen das Feed-Detail, bis der Bereich „Live“ (PR 2) ein eigenes Ziel bietet.
+    /** Zuweisungen betreffen meist beendete Matches (Feed); alles rund ums laufende Match öffnet „Live“. */
     val target: PushTarget
         get() =
             when (kind) {
                 PushKind.FRIEND_REQUEST -> PushTarget(FriendsSection.REQUESTS)
+
                 PushKind.FRIEND_ACCEPTED -> PushTarget(FriendsSection.FRIENDS)
-                PushKind.VISITOR_INVITED -> PushTarget(FriendsSection.WATCHING)
-                else -> PushTarget(FriendsSection.FEED, matchId)
+
+                PushKind.PLAYER_ASSIGNED -> PushTarget(FriendsSection.FEED, matchId)
+
+                PushKind.MATCH_SHARED,
+                PushKind.VISITOR_INVITED,
+                PushKind.SCORER_INVITED,
+                PushKind.SCORER_RESPONDED,
+                PushKind.SCORER_CHANGED,
+                -> PushTarget(FriendsSection.LIVE, matchId)
             }
 
     companion object {

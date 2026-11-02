@@ -971,6 +971,7 @@
     <string name="handover_queued">The invitation to %1$s goes out once the match is uploaded.</string>
     <string name="handover_invited">%1$s is invited. You keep scoring until they accept.</string>
     <string name="handover_accepted">%1$s accepted – handing over …</string>
+    <string name="handover_failed">Handover to %1$s failed – you keep scoring.</string>
     <string name="handover_cancel">Withdraw invitation</string>
     <string name="scorer_invitation">You’re invited to keep score</string>
     <string name="scorer_accept_phone">Score on this phone</string>

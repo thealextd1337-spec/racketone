@@ -1,7 +1,8 @@
 -- Plan Live PR 5: Push-Outbox – actor_id, Zusammenfassen, Token-RPC, claim/ack nur für service_role, Prüfung beim
--- Versand (Token, Blockierung, Sichtbarkeit, Freundschaft, Auslöser), Limit je Stunde, Aufbewahrung, Scheduler.
+-- Versand (Token, Blockierung, Sichtbarkeit, Freundschaft, Auslöser, Match-Arten nur für Matches der letzten 24 h),
+-- Limit je Stunde, Aufbewahrung, Scheduler.
 begin;
-select plan(49);
+select plan(52);
 
 select tests.world();
 select tests.publish_consent_documents();
@@ -73,6 +74,15 @@ select is((select array_agg(actor_id order by id) from ops.notification_outbox w
 select lives_ok($$ select private.notify(tests.uid('bob'), 'scorer_changed',
                     jsonb_build_object('matchId', gen_random_uuid()), tests.uid('alice')) $$, 'neue Art scorer_changed');
 delete from ops.notification_outbox where kind = 'scorer_changed';
+-- Gesendet: der nächste gleiche Eintrag ist eine neue Nachricht (Inhalt kann sich geändert haben)
+update ops.notification_outbox set sent_at = now()
+ where profile_id = tests.uid('dave') and kind = 'friend_request' and actor_id = tests.uid('alice');
+select private.notify(tests.uid('dave'), 'friend_request', jsonb_build_object('profileId', tests.uid('alice')),
+                      tests.uid('alice'));
+select is((select array_agg(sent_at is null order by id) from ops.notification_outbox
+           where profile_id = tests.uid('dave') and kind = 'friend_request' and actor_id = tests.uid('alice')),
+          array[false, true], 'nach dem Senden nicht mehr zusammengefasst');
+delete from ops.notification_outbox where sent_at is not null;
 
 -- carol fragt dave an, dave blockiert carol (Anfrage bleibt für den Test bestehen)
 select tests.authenticate_as('carol');
@@ -85,8 +95,16 @@ select tests.authenticate_as('alice');
 select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_build_array(
   tests.match('a4100000-0000-7000-8000-000000000001', jsonb_build_array(
       tests.part('a4100000-0000-7000-8000-0000000000f1', 'A', 1, 'Alice', tests.uid('alice')),
-      tests.part('a4100000-0000-7000-8000-0000000000f2', 'B', 1, 'Bob', tests.uid('bob'))))))), 'matches', 0),
+      tests.part('a4100000-0000-7000-8000-0000000000f2', 'B', 1, 'Bob', tests.uid('bob'))),
+    jsonb_build_object('startedAt', now()))))), 'matches', 0),
   'created', 'Match mit bob angelegt (match_shared)');
+-- Erstbackup: ein vor Tagen begonnenes Match meldet nichts
+select is(tests.result(public.sync_push(jsonb_build_object('matches', jsonb_build_array(
+  tests.match('a4100000-0000-7000-8000-000000000002', jsonb_build_array(
+      tests.part('a4100000-0000-7000-8000-0000000000f3', 'A', 1, 'Alice', tests.uid('alice')),
+      tests.part('a4100000-0000-7000-8000-0000000000f4', 'B', 1, 'Bob', tests.uid('bob'))),
+    jsonb_build_object('startedAt', now() - interval '3 days'))))), 'matches', 0),
+  'created', 'altes Match mit bob hochgeladen (Erstbackup)');
 select lives_ok($$ select public.add_match_visitor('a4100000-0000-7000-8000-000000000001', tests.uid('vera')) $$,
                 'vera als Zuschauerin');
 select tests.authenticate_as('bob');
@@ -118,6 +136,8 @@ reset role;
 select is((select array_agg(kind || ':' || attempts order by id) from ops.notification_outbox),
           array['friend_request:1', 'match_shared:1', 'player_claimed:0'],
           'Unzustellbares gelöscht (fremde Anfrage, blockiert, ohne Token, widerrufen, an sich selbst), Rest geleast');
+select ok(not exists (select 1 from ops.notification_outbox where payload ->> 'matchId' = 'a4100000-0000-7000-8000-000000000002'),
+          'Erstbackup: match_shared für ein altes Match verworfen');
 set local role service_role;
 select is(public.claim_push_batch_v1(100), '[]'::jsonb, 'geleaste Einträge werden nicht erneut geliefert');
 select throws_ok($$ select public.claim_push_batch_v1(0) $$, 'P0001', 'invalid_limit', 'Limit 1..500');

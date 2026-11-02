@@ -2,6 +2,7 @@ package eu.advantly.android.auth
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import eu.advantly.android.sync.onLiveScore
 import eu.advantly.android.sync.onMatchFinished
 import eu.advantly.android.sync.onTelemetryChanged
 import eu.advantly.cloud.sync.CloudInstallation
@@ -16,6 +17,7 @@ import eu.advantly.cloud.sync.PullResponse
 import eu.advantly.cloud.sync.PushBatch
 import eu.advantly.cloud.sync.PushResponse
 import eu.advantly.cloud.sync.SupabasePhoneAuth
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
@@ -30,6 +32,7 @@ import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.auth.PhoneSyncBlock
 import eu.advantly.presentation.auth.PhoneSyncState
 import eu.advantly.presentation.auth.PhoneSyncStatus
+import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
@@ -56,6 +59,7 @@ import kotlinx.coroutines.yield
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -803,6 +807,29 @@ class PhoneSyncCoordinatorTest {
                 assertEquals(1, finished)
                 f.phone.recordPoint(eu.advantly.core.model.Side.A)
                 assertEquals(1, finished)
+            } finally {
+                remove()
+                f.close()
+            }
+        }
+
+    /** M6: Live-Upload nur, solange eines meiner Geräte zählt – nach der Übergabe an ein anderes Konto nicht mehr. */
+    @Test fun liveUploadFollowsOnlyMatchesMyDevicesScore() =
+        runBlocking {
+            val f = Fixture(this)
+            var now = 0L
+            val scheduled = mutableListOf<Long>()
+            val remove = onLiveScore(f.phone, LiveScoreUpload({ now }, { _, delay -> scheduled += delay })) { "alice" }
+            try {
+                val id = f.match()
+                assertEquals("Kopf sofort beim Start", listOf(0L), scheduled)
+                now += 20_000
+                assertTrue(f.phone.recordPoint(eu.advantly.core.model.Side.A))
+                assertEquals(listOf(0L, 0L), scheduled)
+                now += 20_000
+                // Das ScorerChanged selbst lädt der Übergabe-Ablauf hoch (requestSync); danach zählt ein anderes Konto.
+                assertNotNull(f.phone.handOverScoring(id, DeviceId("d0000000-0000-7000-8000-0000000000b1")))
+                assertEquals("zählt ein anderes Konto: kein weiterer Upload", 2, scheduled.size)
             } finally {
                 remove()
                 f.close()

@@ -41,6 +41,7 @@ import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.push.FriendsSection
 import eu.advantly.presentation.push.NotificationSettingsPort
 import eu.advantly.presentation.push.PushTarget
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -158,12 +159,40 @@ fun FriendsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var openFeed by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.access) { if (state.access == FriendsAccess.READY) model.open() }
-    LaunchedEffect(link) {
-        if (link != null) {
-            segment = Segment.valueOf(link.section.name)
-            openFeed = link.matchId
-            onLinkHandled()
+    // Erst mit nutzbarer Sitzung: „Live“ prüft am Server, ob das Match noch läuft (sonst Feed-Detail, falls vorhanden).
+    LaunchedEffect(link, state.access == FriendsAccess.READY) {
+        if (link == null || model.state.value.access != FriendsAccess.READY) return@LaunchedEffect
+        val id = link.matchId
+        openFeed = null
+        when (link.section) {
+            FriendsSection.FEED -> {
+                segment = Segment.FEED
+                openFeed = id
+            }
+
+            FriendsSection.FRIENDS -> {
+                segment = Segment.FRIENDS
+            }
+
+            FriendsSection.REQUESTS -> {
+                segment = Segment.REQUESTS
+            }
+
+            FriendsSection.LIVE -> {
+                segment = Segment.LIVE
+                if (id != null) {
+                    model.loadLive()?.join()
+                    val current = model.state.value
+                    if (current.live.orEmpty().any { it.matchId == id }) {
+                        onOpenLive(id)
+                    } else if (current.feed.any { it.id == id }) {
+                        segment = Segment.FEED
+                        openFeed = id
+                    }
+                }
+            }
         }
+        onLinkHandled()
     }
     val colors = AdvantlyTheme.colors
     Column(

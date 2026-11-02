@@ -318,22 +318,40 @@ class VisitorsViewModelTest {
         val scheduled = mutableListOf<Pair<String, Long>>()
         val upload = LiveScoreUpload({ now }, { profile, delay -> scheduled += profile to delay })
 
-        upload.onScore(null, "m0", 1) // abgemeldet: nichts
+        upload.onScore(null, "m0", 1, scoring = true) // abgemeldet: nichts
         assertTrue(scheduled.isEmpty())
-        upload.onScore("alice", "m1", 3) // neues laufendes Match: Kopf sofort
+        upload.onScore("alice", "m1", 3, scoring = true) // neues laufendes Match: Kopf sofort
         assertEquals(listOf("alice" to 0L), scheduled)
-        upload.onScore("alice", "m1", 3) // unverändert
+        upload.onScore("alice", "m1", 3, scoring = true) // unverändert
         now = 4_000
-        upload.onScore("alice", "m1", 4) // zu früh: einmal planen, frühestens 10 s nach dem letzten
-        upload.onScore("alice", "m1", 5) // schon geplant, der Lauf nimmt es mit
+        upload.onScore("alice", "m1", 4, scoring = true) // zu früh: einmal planen, frühestens 10 s nach dem letzten
+        upload.onScore("alice", "m1", 5, scoring = true) // schon geplant, der Lauf nimmt es mit
         assertEquals(listOf("alice" to 0L, "alice" to 6_000L), scheduled)
         now = 25_000
-        upload.onScore("alice", "m2", 1) // länger nichts geändert: sofort
+        upload.onScore("alice", "m2", 1, scoring = true) // länger nichts geändert: sofort
         assertEquals("alice" to 0L, scheduled.last())
         now = 26_000
-        upload.onScore("alice", "m1", 6)
+        upload.onScore("alice", "m1", 6, scoring = true)
         assertEquals("alice" to 9_000L, scheduled.last())
         assertEquals(4, scheduled.size)
+    }
+
+    @Test fun liveUploadIgnoresPulledEventsWhileAnotherAccountScores() {
+        var now = 0L
+        val scheduled = mutableListOf<Long>()
+        val upload = LiveScoreUpload({ now }, { _, delay -> scheduled += delay })
+        upload.onScore("alice", "m1", 3, scoring = true)
+        // Nach der Übergabe an bob: gezogene Events von bob stoßen keinen weiteren Abgleich an (kein Ping-Pong).
+        for (count in 4..9) {
+            now += 10_000
+            upload.onScore("alice", "m1", count, scoring = false)
+        }
+        upload.onScore("alice", "m2", 1, scoring = false) // fremdes Match, das bob zählt
+        assertEquals(listOf(0L), scheduled)
+        // alice zählt wieder (Rückgabe): die nächste Änderung geht sofort hoch.
+        now += 10_000
+        upload.onScore("alice", "m1", 10, scoring = true)
+        assertEquals(listOf(0L, 0L), scheduled)
     }
 
     private fun json(text: String) = Json.parseToJsonElement(text) as JsonObject

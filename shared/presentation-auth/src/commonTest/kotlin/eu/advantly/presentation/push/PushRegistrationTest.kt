@@ -160,13 +160,19 @@ class PushRegistrationTest {
     }
 
     @Test fun everyKindHasChannelAndTarget() {
-        val targets = PushKind.entries.associateWith { PushMessage(it, MATCH, ALEX).target }
-        assertEquals(PushTarget(FriendsSection.REQUESTS), targets[PushKind.FRIEND_REQUEST])
-        assertEquals(PushTarget(FriendsSection.FRIENDS), targets[PushKind.FRIEND_ACCEPTED])
-        assertEquals(PushTarget(FriendsSection.WATCHING), targets[PushKind.VISITOR_INVITED])
-        for (kind in listOf(PushKind.PLAYER_ASSIGNED, PushKind.MATCH_SHARED, PushKind.SCORER_INVITED, PushKind.SCORER_CHANGED)) {
-            assertEquals(PushTarget(FriendsSection.FEED, MATCH), targets[kind])
-        }
+        val expected =
+            mapOf(
+                PushKind.FRIEND_REQUEST to PushTarget(FriendsSection.REQUESTS),
+                PushKind.FRIEND_ACCEPTED to PushTarget(FriendsSection.FRIENDS),
+                PushKind.PLAYER_ASSIGNED to PushTarget(FriendsSection.FEED, MATCH),
+                PushKind.MATCH_SHARED to PushTarget(FriendsSection.LIVE, MATCH),
+                PushKind.VISITOR_INVITED to PushTarget(FriendsSection.LIVE, MATCH),
+                PushKind.SCORER_INVITED to PushTarget(FriendsSection.LIVE, MATCH),
+                PushKind.SCORER_RESPONDED to PushTarget(FriendsSection.LIVE, MATCH),
+                PushKind.SCORER_CHANGED to PushTarget(FriendsSection.LIVE, MATCH),
+            )
+        assertEquals(PushKind.entries.toSet(), expected.keys, "jede Art hat ein festgelegtes Ziel")
+        for ((kind, target) in expected) assertEquals(target, PushMessage(kind, MATCH, ALEX).target, kind.name)
         assertEquals(PushChannel.SCORING, PushKind.SCORER_RESPONDED.channel)
         assertEquals(PushChannel.MATCHES, PushKind.VISITOR_INVITED.channel)
     }

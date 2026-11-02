@@ -6,6 +6,7 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.os.Build
 import android.os.PersistableBundle
 import eu.advantly.android.BuildConfig
 import eu.advantly.android.auth.PhoneSyncRecord
@@ -16,6 +17,8 @@ import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.presentation.friends.Handover
+import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.PendingScorerStore
 import eu.advantly.presentation.friends.PendingVisitorStore
 import eu.advantly.presentation.friends.ScorerInvite
@@ -51,6 +54,18 @@ internal class AndroidPhoneSyncScheduler(
         jobs.schedule(job(SYNC_JOB_ID, profile).setMinimumLatency(delayMs).build())
     }
 
+    /**
+     * Sofortiger Live-Upload als Expedited Job (API 31+): läuft auch in Doze, wenn die Uhr zählt und das Handy in der
+     * Tasche liegt. Ohne Quote führt das System ihn als normalen Auftrag aus; lehnt es ihn ab, gilt der normale Weg.
+     */
+    private fun scheduleNow(profile: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val result = runCatching { jobs.schedule(job(SYNC_JOB_ID, profile).setExpedited(true).build()) }.getOrNull()
+            if (result == JobScheduler.RESULT_SUCCESS) return
+        }
+        schedule(profile, 0)
+    }
+
     override fun ensurePeriodic(profile: String) {
         // Unverändert lassen: Ein Neuplanen bei jedem App-Start verschöbe den Takt immer weiter.
         if (jobs.getPendingJob(PERIODIC_SYNC_JOB_ID)?.extras?.getString(PROFILE_EXTRA) == profile) return
@@ -74,7 +89,7 @@ internal class AndroidPhoneSyncScheduler(
     ) {
         val pending = jobs.getPendingJob(SYNC_JOB_ID)?.extras?.getString(PROFILE_EXTRA) == profile
         if (pending && record.failures(profile) > 0) return
-        schedule(profile, delayMs)
+        if (delayMs <= 0) scheduleNow(profile) else schedule(profile, delayMs)
     }
 
     override fun cancel() {
@@ -146,19 +161,29 @@ internal class AndroidPhoneSyncRecord(
         prefs.edit().putStringSet("visitors.pending.$profileId", entries).apply()
     }
 
-    // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), UUIDs ohne Schrägstrich.
+    // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), nach der Abgabe zusätzlich „/Event/von/an“ (wartet
+    // auf die Antwort des Servers); UUIDs ohne Schrägstrich.
     override fun scorerInvites(profileId: String): Map<String, ScorerInvite> =
         prefs
             .getStringSet("scorers.pending.$profileId", null)
             .orEmpty()
-            .mapNotNull { entry -> entry.split('/').takeIf { it.size == 3 }?.let { it[0] to ScorerInvite(it[1], it[2] == "1") } }
-            .toMap()
+            .mapNotNull { entry ->
+                val parts = entry.split('/')
+                val handover = if (parts.size == 6) Handover(parts[3], parts[4], parts[5]) else null
+                if (parts.size != 3 && handover == null) return@mapNotNull null
+                parts[0] to ScorerInvite(parts[1], parts[2] == "1", handover)
+            }.toMap()
 
     override fun setScorerInvites(
         profileId: String,
         invites: Map<String, ScorerInvite>,
     ) {
-        val entries = invites.map { (match, invite) -> "$match/${invite.scorerId}/${if (invite.sent) 1 else 0}" }.toSet()
+        val entries =
+            invites
+                .map { (match, invite) ->
+                    "$match/${invite.scorerId}/${if (invite.sent) 1 else 0}" +
+                        invite.handover?.let { "/${it.eventId}/${it.from}/${it.to}" }.orEmpty()
+                }.toSet()
         prefs.edit().putStringSet("scorers.pending.$profileId", entries).apply()
     }
 
@@ -170,7 +195,8 @@ internal class AndroidPhoneSyncRecord(
 /**
  * Matchende auch ohne Activity (etwa ein empfangenes Uhr-Match über den Listener-Service): ein Abgleich, sobald Netz
  * da ist. Nur mit lokalem Konto; der Auftrag läuft ausschließlich für dieses Konto. Ebenso eine geänderte
- * Telemetrie-Wahl (H0, auch von der Uhr): der Lauf bringt sie ins Konto.
+ * Telemetrie-Wahl (H0, auch von der Uhr): der Lauf bringt sie ins Konto. Und der Live-Stand ([onLiveScore]): Punkte
+ * der Uhr kommen auch ohne Activity und ohne Konto-Host über den Listener-Service herein.
  */
 internal fun scheduleSyncAfterMatchEnd(
     context: Context,
@@ -179,21 +205,51 @@ internal fun scheduleSyncAfterMatchEnd(
     if (BuildConfig.SUPABASE_URL.isBlank()) return {}
     val scheduler = AndroidPhoneSyncScheduler(context)
     val record = AndroidPhoneSyncRecord(context)
-    val schedule = {
+    val profile = {
         AndroidInstallationGuard
             .storage(context) {
                 session.data.accountIdentities.profile
                     .orEmpty()
             }?.takeIf { it.isNotEmpty() }
-            ?.let { scheduler.scheduleAfterMatchEnd(it, record) }
+    }
+    val schedule = {
+        profile()?.let { scheduler.scheduleAfterMatchEnd(it, record) }
         Unit
     }
     val removeMatch = onMatchFinished(session, schedule)
     val removeTelemetry = onTelemetryChanged(session, schedule)
+    val live =
+        LiveScoreUpload(System::currentTimeMillis, { account, delayMs -> scheduler.scheduleUnlessBackingOff(account, record, delayMs) })
+    val removeLive = onLiveScore(session, live, profile)
     return {
         removeMatch()
         removeTelemetry()
+        removeLive()
     }
+}
+
+/**
+ * Live-Stand für Mitspieler und Zuschauer (plan-live-mitspieler §3.1): jedes laufende Match, das dieses Handy oder seine
+ * Uhr zählt (auch „Meine Uhr“, bevor sie sich gemeldet hat), sofort beim Start, danach höchstens alle 10 s bei
+ * Änderung ([LiveScoreUpload]); nach einer Übergabe an ein anderes Konto nicht mehr.
+ */
+internal fun onLiveScore(
+    session: MatchSession,
+    upload: LiveScoreUpload,
+    profile: () -> String?,
+): () -> Unit {
+    val listener =
+        SessionListener { state ->
+            val running = state.matches.filter { it.state.status != MatchStatus.FINISHED }
+            if (running.isEmpty()) return@SessionListener
+            val account = profile()
+            running.forEach {
+                val scoring = it.scorerDeviceId == MatchSession.PENDING_WATCH || session.scoresHere(it.id)
+                upload.onScore(account, it.id.value, it.eventCount, scoring)
+            }
+        }
+    session.addListener(listener)
+    return { session.removeListener(listener) }
 }
 
 /** Meldet jede Änderung der Telemetrie-Wahl (lokal, von der Uhr, aus dem Konto oder durch Kontowechsel). */

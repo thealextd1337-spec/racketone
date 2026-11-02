@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,12 +71,15 @@ import org.jetbrains.compose.resources.stringResource
 /** Bereich „Live“ und Detail: Abfrage alle 5 s, solange sichtbar (Realtime ist aus, plan-live-mitspieler E1). */
 internal const val LIVE_POLL_MS = 5_000L
 
-/** Startseite: nur der Hinweis auf laufende Fremd-Matches, daher seltener. */
+/** Startseite: nur der Hinweis auf laufende Fremd-Matches, daher seltener – 15 s, solange zuletzt etwas live war. */
 internal const val HOME_LIVE_POLL_MS = 15_000L
+
+/** Startseite ohne laufende Fremd-Matches: selten nachsehen (Serverlast, Akku). */
+internal const val HOME_IDLE_POLL_MS = 60_000L
 
 /**
  * Fragt „Live“ alle [intervalMs] ab, solange die App im Vordergrund und die Ansicht sichtbar ist; liefert die Uhrzeit
- * im Sekundentakt für „Stand vor X s“.
+ * im Sekundentakt für „Stand vor X s“. Ein geänderter Takt zählt ab der letzten Abfrage, ohne den Effekt neu zu starten.
  */
 @Composable
 private fun rememberLivePolling(
@@ -84,16 +88,18 @@ private fun rememberLivePolling(
     clock: WallClock,
 ): Long {
     var now by remember { mutableLongStateOf(clock.nowMs()) }
+    val interval by rememberUpdatedState(intervalMs)
     val scope = rememberCoroutineScope()
-    LifecycleResumeEffect(model, intervalMs) {
+    LifecycleResumeEffect(model) {
         val job =
             scope.launch {
-                var next = Long.MIN_VALUE
+                var last: Long? = null
                 while (true) {
                     now = clock.nowMs()
-                    if (now >= next) {
+                    // Takt ab der letzten Abfrage, mit dem aktuellen Intervall (das Ergebnis kann es gerade geändert haben).
+                    if (last == null || now - last >= interval) {
                         model.loadLive()
-                        next = now + intervalMs
+                        last = now
                     }
                     delay(1_000)
                 }
@@ -153,8 +159,8 @@ fun HomeLiveSection(
 ) {
     val state by model.state.collectAsState()
     if (state.access != FriendsAccess.READY || !model.hasLive) return
-    val now = rememberLivePolling(model, HOME_LIVE_POLL_MS, clock)
     val live = state.live.orEmpty()
+    val now = rememberLivePolling(model, if (live.isEmpty()) HOME_IDLE_POLL_MS else HOME_LIVE_POLL_MS, clock)
     if (live.isEmpty()) return
     Column(Modifier.fillMaxWidth().testTag("home_live")) {
         SectionTitle(stringResource(Res.string.live_badge))

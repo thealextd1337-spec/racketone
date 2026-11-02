@@ -5,11 +5,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
@@ -38,6 +42,10 @@ import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.PendingVisitorStore
 import eu.advantly.presentation.friends.VisitorQueue
 import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.push.FriendsSection
+import eu.advantly.presentation.push.PushKind
+import eu.advantly.presentation.push.PushMessage
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.ui.phone.auth.FakePhoneAuth
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import kotlinx.coroutines.CoroutineScope
@@ -258,6 +266,45 @@ class LiveUiTest {
             }
         }
 
+    @Test fun matchPushOpensTheLiveViewWhileRunningAndOtherwiseStaysInLive() =
+        withLocale(Locale.GERMAN) {
+            val live = UiLive(listOf(running))
+            withModel(live) { model ->
+                runDesktopComposeUiTest(width = 400, height = 1200) {
+                    var opened: String? = null
+                    var link by mutableStateOf<PushTarget?>(null)
+                    setContent {
+                        Dark {
+                            FriendsScreen(
+                                model,
+                                onOpenAccount = {},
+                                onShareText = null,
+                                onOpenLive = { opened = it },
+                                clock = clock,
+                                link = link,
+                                onLinkHandled = { link = null },
+                            )
+                        }
+                    }
+                    // Zähl-Einladung zu einem laufenden Match: Live-Ansicht (dort steht die Einladung).
+                    link = PushMessage(PushKind.SCORER_INVITED, "m1").target
+                    waitForIdle()
+                    assertEquals("m1", opened)
+                    assertEquals(null, link)
+                    // Zuschauer-Einladung (früher Absturz über valueOf): Match läuft nicht mehr → Bereich „Live“.
+                    opened = null
+                    link = PushMessage(PushKind.VISITOR_INVITED, "m9").target
+                    waitForIdle()
+                    assertEquals(null, opened)
+                    assertEquals(null, link)
+                    onNodeWithTag("friends_live").assertIsDisplayed()
+                    link = PushTarget(FriendsSection.REQUESTS)
+                    waitForIdle()
+                    onNodeWithTag("friends_live").assertDoesNotExist()
+                }
+            }
+        }
+
     @Test fun detailShowsBigScoreServeAndStaysOnlyADisplayInEnglish() =
         withLocale(Locale.ENGLISH) {
             val live = UiLive(listOf(running))
@@ -303,6 +350,32 @@ class LiveUiTest {
                     waitForIdle()
                     assertEquals(listOf("revoke:m2:me"), visitors.calls)
                     assertEquals(1, back)
+                }
+            }
+        }
+
+    @Test fun homePollsEveryMinuteWithoutLiveMatchesAndEvery15SecondsWithThem() =
+        withLocale(Locale.GERMAN) {
+            val live = UiLive(emptyList())
+            var wall = NOW
+            withModel(live) { model ->
+                runDesktopComposeUiTest(width = 400, height = 700) {
+                    setContent { Dark { HomeLiveSection(model, WallClock { wall }) {} } }
+                    waitForIdle()
+                    assertEquals(1, live.calls)
+
+                    fun after(ms: Long) {
+                        wall += ms
+                        mainClock.advanceTimeBy(1_500)
+                        waitForIdle()
+                    }
+                    after(20_000)
+                    assertEquals(1, live.calls, "ohne Live-Match kein Abruf nach 20 s")
+                    live.matches = listOf(running)
+                    after(41_000)
+                    assertEquals(2, live.calls, "nach einer Minute")
+                    after(16_000)
+                    assertEquals(3, live.calls, "mit Live-Match wieder alle 15 s")
                 }
             }
         }

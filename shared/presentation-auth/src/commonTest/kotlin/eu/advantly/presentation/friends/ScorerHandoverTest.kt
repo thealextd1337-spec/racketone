@@ -74,6 +74,10 @@ internal class FakeDevices : ScorerDevices {
     val scoring = mutableSetOf<String>()
     val ready = mutableSetOf<String>()
     val handedOver = mutableListOf<Pair<String, String>>()
+    val handedBack = mutableListOf<Pair<String, String>>()
+
+    /** Server-Antwort je Event (fehlt: ausstehend). */
+    val uploads = mutableMapOf<String, Boolean>()
 
     override fun watchId() = watch
 
@@ -82,10 +86,21 @@ internal class FakeDevices : ScorerDevices {
     override fun handOver(
         matchId: String,
         deviceId: String,
-    ): Boolean {
-        if (matchId !in scoring) return false
+    ): Handover? {
+        if (matchId !in scoring) return null
         scoring -= matchId
         handedOver += matchId to deviceId
+        return Handover("sc-$matchId", phoneId, deviceId)
+    }
+
+    override fun uploaded(eventId: String) = uploads[eventId]
+
+    override fun handBack(
+        matchId: String,
+        handover: Handover,
+    ): Boolean {
+        scoring += matchId
+        handedBack += matchId to handover.from
         return true
     }
 
@@ -145,10 +160,41 @@ class ScorerHandoverTest {
 
             pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-watch"))
             assertEquals(HandoverPhase.ACCEPTED, handovers.status("alex", "m1")?.phase)
-            assertFalse(handovers.reconcile("alex"), "Abgabe erledigt, keine Abfrage mehr")
+            assertTrue(handovers.reconcile("alex"), "abgegeben, Antwort des Servers steht aus")
             assertEquals(listOf("m1" to "jonas-watch"), devices.handedOver)
-            assertNull(handovers.status("alex", "m1"))
             assertEquals(2, syncs, "ScorerChanged sofort hochladen")
+            assertTrue(handovers.reconcile("alex"))
+            assertEquals(listOf("m1" to "jonas-watch"), devices.handedOver, "nur einmal abgeben")
+
+            devices.uploads["sc-m1"] = true
+            assertFalse(handovers.reconcile("alex"), "Abgabe vom Server angenommen, keine Abfrage mehr")
+            assertNull(handovers.status("alex", "m1"))
+            assertTrue(devices.handedBack.isEmpty())
+        }
+
+    @Test fun aRejectedHandoverHandsScoringBackAndShowsAHintUntilDismissed() =
+        runBlocking {
+            onServer += "m1"
+            devices.scoring += "m1"
+            handovers.invite("alex", "m1", "jonas")
+            pulled["m1"] = memberMatch("m1", PulledRole("jonas", "Jonas", "scorer", "accepted", "jonas-phone"))
+            assertTrue(handovers.reconcile("alex"))
+            val before = syncs
+
+            // z. B. scorer_target_forbidden: Jonas hat inzwischen das Gerät gewechselt
+            devices.uploads["sc-m1"] = false
+            assertFalse(handovers.reconcile("alex"))
+            assertEquals(listOf("m1" to "phone-1"), devices.handedBack, "das vorige eigene Gerät zählt wieder")
+            assertTrue(devices.scoring("m1"))
+            assertEquals(before + 1, syncs, "Rückgabe sofort hochladen")
+            assertTrue(store.scorerInvites("alex").isEmpty())
+            assertEquals(mapOf("m1" to HandoverStatus("jonas", HandoverPhase.FAILED)), handovers.statuses("alex"))
+            assertFalse(handovers.reconcile("alex"))
+            assertEquals(1, devices.handedBack.size, "nur einmal zurückgeben")
+
+            handovers.cancel("alex", "m1")
+            assertNull(handovers.status("alex", "m1"))
+            assertTrue(port.calls.none { it.startsWith("revoke") }, "Wegklicken entzieht keine Rolle")
         }
 
     @Test fun declinedRevokedOrNoLongerScoredInvitationsEnd() =

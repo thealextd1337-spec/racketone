@@ -23,7 +23,8 @@ $$;
 
 -- Auslöser ist ohne Angabe der Aufrufer; bisherige Aufrufer bleiben unverändert (Standardwert auth.uid()).
 -- Zusammenfassen: gleiche Art, gleicher Empfänger und gleiches Match (sonst gleicher Auslöser) innerhalb von 10 min
--- erzeugt keinen zweiten Eintrag. Benachrichtigungen an sich selbst entstehen nicht.
+-- erzeugt keinen zweiten Eintrag, solange der vorige noch nicht gesendet ist (danach kann sich der Inhalt geändert
+-- haben: Einladung → Widerruf → erneut, Antwort abgelehnt → angenommen). Benachrichtigungen an sich selbst entstehen nicht.
 drop function private.notify(uuid, text, jsonb);
 create function private.notify(p_profile uuid, p_kind text, p_payload jsonb default '{}'::jsonb,
                                p_actor uuid default auth.uid())
@@ -34,6 +35,7 @@ returns void language sql security definer set search_path = '' as $$
     and not exists (
       select 1 from ops.notification_outbox o
       where o.profile_id = p_profile and o.kind = p_kind and o.created_at > now() - interval '10 minutes'
+        and o.sent_at is null
         and coalesce(o.payload ->> 'matchId', o.actor_id::text, '')
             = coalesce(p_payload ->> 'matchId', p_actor::text, ''));
 $$;
@@ -42,6 +44,9 @@ grant execute on function private.notify(uuid, text, jsonb, uuid) to service_rol
 
 -- Prüfung beim Versand (Stand jetzt, nicht beim Eintragen): Empfänger aktiv, nicht der Auslöser, Auslöser aktiv und
 -- nicht blockiert, Match noch sichtbar bzw. Freundschaft (Anfrage) noch vorhanden, mindestens ein Push-Token.
+-- match_shared, player_assigned und scorer_changed nur für Matches, die in den letzten 24 h begonnen haben: Ein
+-- Erstbackup alter Matches meldet sonst jedes einzelne. Maßgeblich ist der Beginn laut Client (started_at), nicht
+-- der Status – der bleibt beim Backup bis zur Projektion (nach dem letzten Event-Batch) auf in_progress.
 create function private.push_deliverable(p_row ops.notification_outbox)
 returns boolean language sql stable security definer set search_path = '' as $$
   select p_row.kind = any (private.push_kinds())
@@ -53,6 +58,8 @@ returns boolean language sql stable security definer set search_path = '' as $$
           when p_row.payload ? 'matchId' then exists (
             select 1 from public.matches m
             where m.id = (p_row.payload ->> 'matchId')::uuid and m.deleted_at is null
+              and (p_row.kind not in ('match_shared', 'player_assigned', 'scorer_changed')
+                   or coalesce(m.started_at, m.created_at) > now() - interval '24 hours')
               and (private.is_match_member(m.id, p_row.profile_id) or private.is_match_visitor(m.id, p_row.profile_id)))
           when p_row.actor_id is null then false
           when p_row.kind = 'friend_request' then exists (
@@ -202,7 +209,9 @@ begin
   if v_url is null or v_secret is null or length(v_secret) < 32 then
     raise exception using message = 'push_scheduler_unavailable';
   end if;
-  execute 'select net.http_post(url := $1, headers := $2, body := $3, timeout_milliseconds := 20000)'
+  -- 30 s: push-dispatch endet spätestens nach rund 22 s (Budget und Frist in handler.ts). Ein Verbindungsabbruch
+  -- mitten im Batch ließe geleaste Einträge ohne Ack zurück (erneuter Versand erst nach 2 min).
+  execute 'select net.http_post(url := $1, headers := $2, body := $3, timeout_milliseconds := 30000)'
     into v_request using v_url || '/functions/v1/push-dispatch',
       jsonb_build_object('Content-Type', 'application/json', 'x-push-dispatch-secret', v_secret), '{}'::jsonb;
   return v_request;

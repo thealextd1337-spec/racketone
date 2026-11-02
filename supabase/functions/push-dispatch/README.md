@@ -7,10 +7,10 @@ der App.
 
 ```
 POST /functions/v1/push-dispatch   Header x-push-dispatch-secret: <PUSH_DISPATCH_SECRET>
-  → claim_push_batch_v1(p_limit := 20)   je Eintrag {id, message, targets: [{deviceId, provider, token}]}
+  → claim_push_batch_v1(p_limit := 10)   je Eintrag {id, message, targets: [{deviceId, provider, token}]}
   → FCM messages:send je Ziel (data-only, android.priority=high, ttl=3600s)
   → ack_push_batch_v1(p_results := [{id, token, result, error?}])  result = sent | error | invalid_token
-  → wiederholt, solange volle Batches kommen und das Zeitbudget (15 s) reicht
+  → wiederholt, solange volle Batches kommen und das Zeitbudget (10 s) reicht
 Antwort 200 {contractVersion: 1, sent, error, invalid_token}; 401 falscher Schlüssel; 503 nicht konfiguriert/Backendfehler
 ```
 
@@ -25,6 +25,16 @@ Antwort 200 {contractVersion: 1, sent, error, invalid_token}; 401 falscher Schl�
   401/429/5xx/Netzfehler → `error`.
 - Das OAuth-Token (Scope `firebase.messaging`) wird per RS256-JWT aus dem
   Service-Account geholt und je Instanz bis 5 min vor Ablauf wiederverwendet.
+- Laufzeit: neue Batches nur in den ersten 10 s, neue Sende-Runden (10 parallel)
+  nur in den ersten 14 s; OAuth und FCM haben je 4 s Timeout. Ein Lauf endet
+  damit nach spätestens rund 22 s plus Ack, sicher innerhalb des pg_net-Timeouts
+  von 30 s. Nicht mehr gesendete Ziele gehen als `error`/`deadline` zurück und
+  kommen nach dem Rückoff erneut.
+- **Idempotenz:** Doppelte Zustellung ist möglich (Ack geht verloren, Lease
+  läuft nach 2 min ab). Die App zeigt jede Nachricht unter einer festen
+  Notification-ID aus Art, Match und Auslöser (`showPush` in
+  `androidApp/.../push/AndroidPush.kt`); eine zweite Zustellung ersetzt also die
+  vorhandene Benachrichtigung, statt eine weitere anzuzeigen.
 
 ## Konfiguration (Function-Secrets, nicht im Repo)
 

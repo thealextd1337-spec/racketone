@@ -31,18 +31,15 @@ import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.cloud.sync.pulledFeed
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.cloud.sync.pulledMatch
-import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
-import eu.advantly.match.session.SessionListener
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
-import eu.advantly.presentation.friends.LiveScoreUpload
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
@@ -260,27 +257,10 @@ internal class PhoneAccountCore private constructor(
             backend,
             ::onServer,
             { profile, match -> guarded(null) { cloudPulls.pulledMatch(profile, match) } },
-            PhoneScorerDevices(session) { runtime.allowed },
+            PhoneScorerDevices(session, { event -> guarded(null) { cloud.uploaded(event) } }) { runtime.allowed },
         ) {
             handoverPoll.restart()
             sync.syncNow()
-        }
-
-    /**
-     * Live-Stand für Mitspieler und Zuschauer (plan-live-mitspieler §3.1): jedes laufende Match dieses Handys (auch von
-     * seiner Uhr gezählt) sofort beim Start, danach höchstens alle 10 s bei Änderung. Als JobScheduler-Auftrag mit
-     * Netzbedingung: ohne Netz kein Versuch, Doze verschiebt ihn, ein Backoff bleibt bestehen.
-     */
-    private val liveScores =
-        LiveScoreUpload(System::currentTimeMillis, { profile, delayMs ->
-            syncScheduler.scheduleUnlessBackingOff(profile, record, delayMs)
-        })
-    private val scoreListener =
-        SessionListener { state ->
-            val profile = auth.session.value?.profileId
-            state.matches
-                .filter { it.state.status != MatchStatus.FINISHED }
-                .forEach { liveScores.onScore(profile, it.id.value, it.eventCount) }
         }
 
     private suspend fun flushVisitors() {
@@ -360,7 +340,6 @@ internal class PhoneAccountCore private constructor(
 
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
-        session.addListener(scoreListener)
         // Uhr-Zuschauen (plan-live-mitspieler §3.2): Abruf nur mit angemeldetem Konto.
         PhoneLiveViews.provider = AccountLiveViews(backend, { auth.session.value?.profileId })
         runtime.scope.launch {
@@ -380,7 +359,6 @@ internal class PhoneAccountCore private constructor(
     /** Nur für einen widerrufenen Kern: Hosts erst leeren, dann Auth und Laufzeit schließen. */
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
-        session.removeListener(scoreListener)
         PhoneLiveViews.provider = LiveViewsProvider.Empty
         refreshAccount = null
         sync.close()

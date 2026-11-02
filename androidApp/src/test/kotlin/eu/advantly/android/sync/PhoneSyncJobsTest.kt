@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
+import eu.advantly.presentation.friends.Handover
 import eu.advantly.presentation.friends.ScorerInvite
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -110,10 +111,17 @@ class PhoneSyncJobsTest {
     /** Zählen weitergeben: Einladungen je Konto mit Sendestand, Logout entfernt sie. */
     @Test fun scorerInvitesSurviveReopenAndAreForgottenWithTheAccount() {
         val record = AndroidPhoneSyncRecord(app)
-        record.setScorerInvites("alice", mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true)))
+        val handedOver = ScorerInvite("tom", sent = true, handover = Handover("e1", "phone-1", "tom-watch"))
+        record.setScorerInvites(
+            "alice",
+            mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true), "m3" to handedOver),
+        )
         record.setScorerInvites("bob", mapOf("m9" to ScorerInvite("eve", sent = true)))
         val reopened = AndroidPhoneSyncRecord(app)
-        assertEquals(mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true)), reopened.scorerInvites("alice"))
+        assertEquals(
+            mapOf("m1" to ScorerInvite("jonas"), "m2" to ScorerInvite("bea", sent = true), "m3" to handedOver),
+            reopened.scorerInvites("alice"),
+        )
         record.forget("alice")
         assertEquals(emptyMap<String, ScorerInvite>(), reopened.scorerInvites("alice"))
         assertEquals(mapOf("m9" to ScorerInvite("eve", sent = true)), reopened.scorerInvites("bob"))
@@ -140,7 +148,10 @@ class PhoneSyncJobsTest {
         assertEquals(MATCH_END_SYNC_DELAY_MS, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
     }
 
-    /** Live-Stand: sofort bzw. nach der Drosselung, mit Netzbedingung; ein Backoff bleibt auch hier bestehen. */
+    /**
+     * Live-Stand: sofort als Expedited Job (läuft auch in Doze, Handy in der Tasche), nach der Drosselung als normaler
+     * Auftrag, beide mit Netzbedingung; ein Backoff bleibt auch hier bestehen.
+     */
     @Test fun liveUploadIsANetworkJobThatKeepsAnActiveBackoff() {
         val scheduler = AndroidPhoneSyncScheduler(app)
         val record = AndroidPhoneSyncRecord(app)
@@ -148,8 +159,11 @@ class PhoneSyncJobsTest {
         val job = jobs.getPendingJob(SYNC_JOB_ID)!!
         assertEquals(0L, job.minLatencyMillis)
         assertEquals(JobInfo.NETWORK_TYPE_ANY, job.networkType)
+        assertTrue(job.isExpedited)
+        assertEquals("alice", job.extras.getString(PROFILE_EXTRA))
         scheduler.scheduleUnlessBackingOff("alice", record, 6_000)
         assertEquals(6_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
+        assertFalse(jobs.getPendingJob(SYNC_JOB_ID)!!.isExpedited)
 
         record.save("alice", null, 2)
         scheduler.schedule("alice", 60_000)
