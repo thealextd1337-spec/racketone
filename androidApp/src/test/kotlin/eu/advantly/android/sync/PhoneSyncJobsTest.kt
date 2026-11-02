@@ -190,6 +190,33 @@ class PhoneSyncJobsTest {
         assertEquals(60_000L, jobs.getPendingJob(SYNC_JOB_ID)!!.minLatencyMillis)
     }
 
+    /** Live-Übertragung: Start als Vordergrunddienst mit Benachrichtigung, Stopp, Upload nur über den laufenden Dienst. */
+    @Test fun liveRelayRunsAsConnectedDeviceForegroundServiceUntilStopped() {
+        assertFalse("ohne Dienst plant der Aufrufer einen Job", LiveRelayService.upload("alice", 0))
+        LiveRelayService.update(app, true)
+        assertEquals(LiveRelayService::class.java.name, shadowOf(app).nextStartedService.component?.className)
+
+        val controller = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
+        val service = controller.get()
+        val shadow = shadowOf(service)
+        assertEquals(LiveRelayService.NOTIFICATION_ID, shadow.lastForegroundNotificationId)
+        assertEquals("Sharing live score", shadow.lastForegroundNotification.extras.getString("android.title"))
+        assertFalse(shadow.isStoppedBySelf)
+        assertTrue(LiveRelayService.upload("alice", 10_000))
+
+        LiveRelayService.update(app, false)
+        assertTrue(shadow.isStoppedBySelf)
+        controller.destroy()
+        assertFalse(LiveRelayService.upload("alice", 0))
+
+        // Stopp vor dem Start: erst in den Vordergrund (Pflicht), dann sofort wieder beenden
+        LiveRelayService.update(app, true)
+        LiveRelayService.update(app, false)
+        val late = Robolectric.buildService(LiveRelayService::class.java).create().startCommand(0, 1)
+        assertTrue(shadowOf(late.get()).isStoppedBySelf)
+        late.destroy()
+    }
+
     /** P3-1: Endet ein ersetzter Lauf erst nach dem Start seines Nachfolgers, meldet er nicht dessen Ende. */
     @Test fun aReplacedRunNeverFinishesItsSuccessor() {
         val service = Robolectric.buildService(PhoneSyncJobService::class.java).create().get()
