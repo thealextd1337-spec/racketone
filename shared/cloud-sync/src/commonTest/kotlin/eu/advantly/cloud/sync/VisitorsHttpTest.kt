@@ -8,6 +8,7 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
@@ -142,5 +143,69 @@ class VisitorsHttpTest {
             reply = """{"not":"a list"}""" to HttpStatusCode.OK
             assertEquals("cloud_response_invalid", assertFailsWith<CloudException> { backend.myVisitorMatches("alice") }.reason)
             assertFailsWith<IllegalArgumentException> { backend.addVisitor("alice", "m1", "") }
+        }
+
+    /** Zähl-Rollen (plan-live-mitspieler §3.4): Namen und Parameter wie in den Migrationen, nur über die gebundene Sitzung. */
+    @Test fun scorerRoleRpcsUseTheMigrationContract(): Unit =
+        runBlocking {
+            var reply = "" to HttpStatusCode.OK
+            val (backend, calls) = backend { reply }
+            assertEquals("device_not_authorized", assertFailsWith<CloudException> { backend.inviteScorer("alice", "m1", "jonas") }.reason)
+            backend.bindDevice("phone")
+            assertEquals("cloud_session_changed", assertFailsWith<CloudException> { backend.inviteScorer("bob", "m1", "jonas") }.reason)
+            assertTrue(calls.isEmpty())
+
+            backend.inviteScorer("alice", "m1", "jonas")
+            backend.revokeScorer("alice", "m1", "jonas")
+            backend.registerWatch("alice", "watch-1", "phone")
+            backend.respondScorerInvitation("alice", "m1", true, "watch-1")
+            backend.respondScorerInvitation("alice", "m1", false, null)
+            assertEquals(
+                listOf(
+                    "rpc/invite_scorer",
+                    "rpc/revoke_scorer",
+                    "rpc/register_device",
+                    "rpc/respond_scorer_invitation",
+                    "rpc/respond_scorer_invitation",
+                ),
+                calls.map { it.path },
+            )
+            assertTrue(calls.all { it.bearer == "Bearer token-a" })
+            val pair = JsonObject(mapOf("p_match_id" to JsonPrimitive("m1"), "p_profile_id" to JsonPrimitive("jonas")))
+            assertEquals(pair, calls[0].body)
+            assertEquals(pair, calls[1].body)
+            assertEquals(
+                JsonObject(
+                    mapOf(
+                        "p_id" to JsonPrimitive("watch-1"),
+                        "p_kind" to JsonPrimitive("watch"),
+                        "p_platform" to JsonPrimitive("wearos"),
+                        "p_paired_with" to JsonPrimitive("phone"),
+                    ),
+                ),
+                calls[2].body,
+            )
+            assertEquals(
+                JsonObject(
+                    mapOf(
+                        "p_match_id" to JsonPrimitive("m1"),
+                        "p_accept" to JsonPrimitive(true),
+                        "p_device_id" to JsonPrimitive("watch-1"),
+                    ),
+                ),
+                calls[3].body,
+            )
+            assertEquals(JsonNull, calls[4].body!!["p_device_id"])
+            assertEquals(JsonPrimitive(false), calls[4].body!!["p_accept"])
+
+            reply = """{"code":"P0001","message":"no_pending_invitation"}""" to HttpStatusCode.BadRequest
+            assertEquals(
+                "no_pending_invitation",
+                assertFailsWith<CloudException> { backend.respondScorerInvitation("alice", "m1", true, "phone") }.reason,
+            )
+            reply = """{"code":"P0001","message":"scorer_not_allowed"}""" to HttpStatusCode.BadRequest
+            assertEquals("scorer_not_allowed", assertFailsWith<CloudException> { backend.inviteScorer("alice", "m1", "eve") }.reason)
+            assertFailsWith<IllegalArgumentException> { backend.respondScorerInvitation("alice", "m1", false, "phone") }
+            assertFailsWith<IllegalArgumentException> { backend.registerWatch("alice", "phone", "phone") }
         }
 }

@@ -57,6 +57,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.friends.WizardHandover
 import eu.advantly.ui.phone.friends.WizardVisitors
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
@@ -106,6 +107,9 @@ fun WizardScreen(
     /** Gewählte Zuschauer (Profil-IDs, F16) im letzten Schritt; nur mit Freunden sichtbar. */
     visitors: Set<String> = emptySet(),
     onVisitorsChange: (Set<String>) -> Unit = {},
+    /** „Mitspieler zählt“ (plan-live-mitspieler §3.4): gewählte gesetzte Person mit Konto, bekommt beim Start eine Einladung. */
+    handover: String? = null,
+    onHandoverChange: (String?) -> Unit = {},
 ) {
     val state by wizard.state.collectAsState()
     // Uhr installiert/entfernt → Standard „Meine Uhr“ bzw. Rückfall auf „Dieses Handy“ (04 §3.1), reaktiv
@@ -153,6 +157,8 @@ fun WizardScreen(
 
                 WizardStep.SCORER -> {
                     ScorerStep(wizard, state, busyMatch)
+                    val seated = friends.filter { wizard.isFriendSeated(it.profileId) && !it.alias.isNullOrBlank() }
+                    WizardHandover(seated, handover?.takeIf { id -> seated.any { it.profileId == id } }, onHandoverChange)
                     // Schon als Mitspieler gesetzte Freunde schauen nicht zusätzlich zu.
                     val pickable = friends.filter { !wizard.isFriendSeated(it.profileId) && !it.alias.isNullOrBlank() }
                     WizardVisitors(

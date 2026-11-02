@@ -23,6 +23,7 @@ import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
@@ -59,9 +60,11 @@ import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.FriendsScreen
 import eu.advantly.ui.phone.friends.HomeLiveSection
 import eu.advantly.ui.phone.friends.LiveFollowScreen
+import eu.advantly.ui.phone.friends.LiveHandoverButton
 import eu.advantly.ui.phone.friends.LiveVisitorsButton
 import eu.advantly.ui.phone.friends.MatchSharingSection
 import eu.advantly.ui.phone.friends.MatchVisitorsSection
+import eu.advantly.ui.phone.friends.handoverCandidates
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
@@ -145,7 +148,11 @@ fun AdvantlyApp(
     // Im Assistenten gewählte Zuschauer gehen an den Konto-Host (vorgemerkt bis zum Upload des Matches).
     DisposableEffect(model, authModel) {
         model.onVisitorsChosen = authModel?.friends?.let { friends -> { id, visitors -> friends.queueVisitors(id.value, visitors) } }
-        onDispose { model.onVisitorsChosen = null }
+        model.onHandoverChosen = authModel?.friends?.let { friends -> { id, profile -> friends.queueHandover(id.value, profile) } }
+        onDispose {
+            model.onVisitorsChosen = null
+            model.onHandoverChosen = null
+        }
     }
     // Schritt HEALTH im Konto-Einstieg nur, solange „Pulsverlauf aufzeichnen“ auf diesem Gerät offen ist (Plan 0.5.1 §5.1).
     DisposableEffect(model, authModel) {
@@ -231,14 +238,17 @@ fun AdvantlyApp(
                                     .orEmpty()
                             // Zuschauer-Wahl lebt nur, solange der Assistent offen ist.
                             var visitors by remember { mutableStateOf(emptySet<String>()) }
+                            var handover by remember { mutableStateOf<String?>(null) }
                             WizardScreen(
                                 model.wizard,
                                 onClose = { navigator.pop() },
-                                onStart = { model.finishWizard(visitors) },
+                                onStart = { model.finishWizard(visitors, handover) },
                                 busyMatch = model.watchMatch(),
                                 friends = friends,
                                 visitors = visitors,
                                 onVisitorsChange = { visitors = it },
+                                handover = handover.takeIf { authModel?.friends?.hasHandover == true },
+                                onHandoverChange = { handover = it },
                             )
                         }
                     }
@@ -255,7 +265,17 @@ fun AdvantlyApp(
                                 autoBenchmark = autoBenchmark,
                                 onBenchmarkFinished = onBenchmarkFinished,
                                 visitors = { snapshot ->
-                                    authModel?.friends?.let { friends -> LiveVisitorsButton(friends, snapshot.matchId.value) }
+                                    authModel?.friends?.let { friends ->
+                                        LiveVisitorsButton(friends, snapshot.matchId.value)
+                                        // Abgeben kann nur, wessen Gerät zählt (Handy oder eigene Uhr)
+                                        if (snapshot.isRunning && (snapshot.isScorer || snapshot.watchScores)) {
+                                            LiveHandoverButton(
+                                                friends,
+                                                snapshot.matchId.value,
+                                                handoverCandidates(friends, snapshot, model.players),
+                                            )
+                                        }
+                                    }
                                 },
                             )
                         }
@@ -329,7 +349,16 @@ fun AdvantlyApp(
                     is Overlay.Following -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             authModel?.friends?.let { friends ->
-                                LiveFollowScreen(friends, top.matchId, onBack = { navigator.pop() }, clock = model.clock)
+                                LiveFollowScreen(
+                                    friends,
+                                    top.matchId,
+                                    onBack = { navigator.pop() },
+                                    clock = model.clock,
+                                    onScore = { id ->
+                                        navigator.pop()
+                                        model.openMatch(MatchId(id))
+                                    },
+                                )
                             }
                         }
                     }

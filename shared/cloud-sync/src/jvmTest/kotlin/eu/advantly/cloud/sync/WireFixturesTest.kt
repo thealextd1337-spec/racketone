@@ -68,6 +68,18 @@ class WireFixturesTest {
         assertEquals(listOf("self", null), match.participants.map { it.linkStatus })
     }
 
+    /** PR 8/9: Die Erstellerin sieht das Gerät, mit dem die Zähl-Rolle angenommen wurde (Ziel ihres `ScorerChanged`). */
+    @Test
+    fun syncPullWithAcceptedScorerDevice() {
+        val json = fixture("sync_pull_scorer_accepted.json").jsonObject
+        val matches = json.getValue("matches").jsonArray.map { it.jsonObject }
+        keysMatch(PulledRole.serializer(), matches.flatMap { m -> m.getValue("roles").jsonArray.map { it.jsonObject } }, "Rolle")
+        val match = CloudJson.decodeFromJsonElement(PullResponse.serializer(), json).matches.single()
+        val role = match.roleOf(match.roles.single().profileId)
+        assertEquals("accepted", role?.status)
+        assertEquals("d0000000-0000-7000-8000-0000000000b2", role?.deviceId)
+    }
+
     @Test
     fun pulledEventsAndWatermarks() {
         val events = fixture("pull_match_events.json").jsonArray.map { it.jsonObject }

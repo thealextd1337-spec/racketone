@@ -39,4 +39,9 @@ select 'cloud_match_readiness.json', public.cloud_match_readiness_v1('a9500000-0
 -- Plan Live PR 1: bob ist eingeladene Zähler-Person des laufenden Matches von alice.
 select tests.authenticate_as('bob');
 select 'cloud_my_live_matches.json', public.cloud_my_live_matches_v1()::text;
+-- Plan Live PR 9: bob registriert seine Uhr und nimmt die Zähl-Rolle mit ihr an; alice (Erstellerin) sieht das Gerät.
+select public.register_device(tests.device('b2'), 'watch', 'wearos', tests.device('b1'));
+select public.respond_scorer_invitation('a9500000-0000-7000-8000-000000000001', true, tests.device('b2'));
+select tests.authenticate_as('alice');
+select 'sync_pull_scorer_accepted.json', public.sync_pull(0)::text;
 rollback;

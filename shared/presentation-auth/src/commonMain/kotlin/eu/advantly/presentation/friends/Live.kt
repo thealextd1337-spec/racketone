@@ -18,6 +18,14 @@ data class LiveEntry(
     val scorerConnected: Boolean,
     /** Letzte Änderung am Server; `null` bei unlesbarem Zeitstempel. */
     val updatedAtMs: Long?,
+    /** Meine Zähl-Rolle laut letztem Abgleich: `invited` (Einladung offen), `accepted`, sonst `null` (§3.4). */
+    val scorerRole: String? = null,
+    /** Eines meiner Geräte zählt dieses Match (nach der Übergabe): Zählen öffnen statt nur anzeigen. */
+    val scoring: Boolean = false,
+    /** Notfall-Übernahme möglich: angenommene Rolle und vollständiger Stand. */
+    val canTakeOver: Boolean = false,
+    /** Angenommen, der Zählerwechsel ist noch nicht angekommen. */
+    val awaiting: Boolean = false,
 ) {
     val matchId: String get() = score.match.id
 }
