@@ -908,6 +908,7 @@
     <string name="timeline_clock">%1$d:%2$s</string>
     <string name="timeline_score_before">Score before the point: %1$s</string>
     <string name="timeline_marker_a11y">%1$s, %2$s</string>
+    <string name="timeline_corrected">The result was corrected afterwards – the timeline shows the points as they were counted.</string>
     <string name="moment_break_point">Break point</string>
     <string name="moment_break">Break</string>
     <string name="moment_golden_point">Golden point</string>

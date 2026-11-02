@@ -257,7 +257,13 @@ fun ResultScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).testTag("result_edit"),
                 )
             }
-            MatchTimeline(record.summary.setup, stats, pulse = pulse, onEnablePulse = onEnablePulse)
+            MatchTimeline(
+                record.summary.setup,
+                stats,
+                pulse = pulse,
+                onEnablePulse = onEnablePulse,
+                corrected = record.summary.result.corrected,
+            )
             Row(Modifier.padding(top = Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 StatTile(durationText(record.summary.durationMs), stringResource(Res.string.detail_elapsed_duration), Modifier.weight(1f))
                 StatTile(durationText(stats.netDurationMs), stringResource(Res.string.detail_net_duration), Modifier.weight(1f))
