@@ -130,7 +130,7 @@ select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_ob
 select is(tests.result(pg_temp.push('alice',jsonb_build_object('players','[{"id":"22010000-0000-4000-8000-000000000002","kind":"guest","displayName":""}]'::jsonb)),'players',0),'rejected:invalid','Arbitrary empty name remains invalid');
 select is(tests.result(pg_temp.push('alice',pg_temp.proof('alice',jsonb_build_object('matches',jsonb_build_array(tests.match(
  '22000000-0000-4000-8000-000000000002',jsonb_build_array(tests.part('unknown-empty','A',1,''))))))),'matches',0),
- 'rejected:invalid','Arbitrary empty participant name remains invalid');
+ 'updated','Arbitrary empty participant name no longer rejects the match (20261103000100)');
 select is(tests.result(pg_temp.push('alice',jsonb_build_object('players','[{"id":"22010000-0000-4000-8000-000000000004","kind":"guest","displayName":"Changed"}]'::jsonb)),'players',0),'rejected:player_owned_by_other','Other owner stays denied');
 
 insert into batches values('cross',jsonb_build_object('matches',jsonb_build_array(tests.match('22000000-0000-4000-8000-000000000002',jsonb_build_array(
