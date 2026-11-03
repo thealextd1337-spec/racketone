@@ -1647,7 +1647,7 @@ class ReplicaLifecycleStoreTest {
             f.sql("UPDATE cloud_metadata SET uploaded_revision=revision WHERE kind='PARTICIPANTS' AND entity_id='other-match'")
             val otherState = f.data.cloud.metadataState(CloudMetadataKind.PARTICIPANTS, other)!!
             assertEquals(
-                "",
+                "?",
                 f.data.cloud
                     .uploadParticipants(other, "A")!!
                     .participants
@@ -1680,7 +1680,7 @@ class ReplicaLifecycleStoreTest {
             assertEquals(otherState.uploadedRevision, updatedOther.uploadedRevision)
             assertEquals(otherState, updatedOther)
             assertEquals(
-                "",
+                "?",
                 f.data.cloud
                     .uploadParticipants(other, "A")!!
                     .participants

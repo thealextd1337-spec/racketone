@@ -85,7 +85,7 @@ class MetadataGuestMappingRegressionTest {
                         .single()
                         .version.revision
                 assertEquals(
-                    "",
+                    "?",
                     selected.batch.matches
                         .single()
                         .participants!!

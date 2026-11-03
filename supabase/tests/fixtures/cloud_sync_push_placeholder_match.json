@@ -1,0 +1,124 @@
+{
+    "devices": [],
+    "players": [
+        {
+            "id": "45000000-0000-4000-8000-000000000001",
+            "kind": "self",
+            "displayName": "",
+            "deleted": false
+        }
+    ],
+    "matches": [
+        {
+            "id": "45300000-0000-4000-8000-000000000001",
+            "sport": "tennis",
+            "discipline": "singles",
+            "format": {
+                "formatVersion": 1,
+                "presetId": "TENNIS_SINGLES_BO3",
+                "sport": "TENNIS",
+                "discipline": "SINGLES",
+                "match": {
+                    "mode": "BEST_OF",
+                    "bestOf": 3
+                },
+                "game": {
+                    "deuceMode": "ADVANTAGE"
+                },
+                "set": {
+                    "gamesToWin": 6,
+                    "tiebreakAt": 6,
+                    "tiebreak": {
+                        "pointsToWin": 7,
+                        "winBy": 2,
+                        "endChange": {
+                            "first": 6,
+                            "every": 6
+                        }
+                    }
+                },
+                "decidingSet": null,
+                "matchTiebreak": null
+            },
+            "meta": {},
+            "startedAt": "2026-11-03T10:00:00Z",
+            "deleted": false,
+            "participants": [
+                {
+                    "slotId": "45000000-0000-4000-8000-000000000001",
+                    "team": "A",
+                    "position": 1,
+                    "displayName": "?",
+                    "playerId": "45000000-0000-4000-8000-000000000001"
+                },
+                {
+                    "slotId": "placeholder:45100000-0000-7000-8000-000000000001",
+                    "team": "B",
+                    "position": 1,
+                    "displayName": "?"
+                }
+            ],
+            "projection": {
+                "status": "in_progress",
+                "startedAt": "2026-11-03T10:00:00Z",
+                "summary": {},
+                "liveState": {
+                    "sets": [],
+                    "status": "in_progress"
+                },
+                "eventCount": 0
+            }
+        }
+    ],
+    "events": [
+        {
+            "id": "45400000-0000-4000-8000-000000000001",
+            "matchId": "45300000-0000-4000-8000-000000000001",
+            "deviceId": "45200000-0000-4000-8000-000000000001",
+            "deviceSeq": 1,
+            "lamport": 1,
+            "wallClockMs": 1793700000000,
+            "type": "MatchCreated",
+            "payload": {
+                "type": "MatchCreated",
+                "config": {
+                    "formatVersion": 1,
+                    "presetId": "TENNIS_SINGLES_BO3",
+                    "sport": "TENNIS",
+                    "discipline": "SINGLES",
+                    "match": {
+                        "mode": "BEST_OF",
+                        "bestOf": 3
+                    },
+                    "game": {
+                        "deuceMode": "ADVANTAGE"
+                    },
+                    "set": {
+                        "gamesToWin": 6,
+                        "tiebreakAt": 6,
+                        "tiebreak": {
+                            "pointsToWin": 7,
+                            "winBy": 2,
+                            "endChange": {
+                                "first": 6,
+                                "every": 6
+                            }
+                        }
+                    },
+                    "decidingSet": null,
+                    "matchTiebreak": null
+                },
+                "lineup": {
+                    "A": [
+                        "45000000-0000-4000-8000-000000000001"
+                    ],
+                    "B": [
+                        "placeholder:45100000-0000-7000-8000-000000000001"
+                    ],
+                    "firstServer": "45000000-0000-4000-8000-000000000001"
+                },
+                "createdBy": "45000000-0000-4000-8000-000000000001"
+            }
+        }
+    ]
+}
