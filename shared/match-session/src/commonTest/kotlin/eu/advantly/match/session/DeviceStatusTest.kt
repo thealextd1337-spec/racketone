@@ -25,7 +25,7 @@ class DeviceStatusTest {
     private val build = AppBuild("0.1.0", "223dff1")
 
     @Test
-    fun commitComparisonKeepsUnknownAndDirtyBuildsYellow() {
+    fun compatibleSameVersionIsGreenRegardlessOfCommit() {
         val peer =
             DeviceStatus(
                 "watch",
@@ -35,14 +35,13 @@ class DeviceStatusTest {
                 reachable = true,
             )
         assertEquals(DeviceLight.GREEN, peer.light(build))
-        assertEquals(DeviceLight.YELLOW, peer.light(build.copy(commit = "223dff1-dirty")))
-        assertEquals(
-            DeviceLight.YELLOW,
-            peer.copy(appBuild = build.copy(commit = "223dff1-dirty")).light(build.copy(commit = "223dff1-dirty")),
-        )
+        // Getrennt gebaute Handy-/Uhr-Builds derselben Version (0.6.1: 131/142) sind technisch gleichwertig.
+        assertEquals(DeviceLight.GREEN, peer.light(build.copy(commit = "a48fa00")))
+        assertEquals(DeviceLight.GREEN, peer.light(build.copy(commit = "223dff1-dirty")))
+        assertEquals(DeviceLight.GREEN, peer.copy(appBuild = build.copy(commit = "unknown")).light(build.copy(commit = "unknown")))
+        assertEquals(DeviceLight.YELLOW, peer.light(build.copy(version = "0.1.1")), "Andere Version: Update empfohlen")
         assertEquals(DeviceLight.YELLOW, peer.copy(appBuild = null).light(build))
-        assertEquals(DeviceLight.YELLOW, peer.copy(appBuild = build.copy(commit = "unknown")).light(build.copy(commit = "unknown")))
-        assertEquals(DeviceLight.YELLOW, peer.light(build.copy(commit = "a48fa00")))
+        assertEquals(DeviceLight.YELLOW, peer.light(null))
         assertEquals(DeviceLight.RED, peer.copy(reachable = false).light(build))
         for (status in listOf(CompatibilityStatus.PEER_TOO_OLD, CompatibilityStatus.PEER_TOO_NEW)) {
             assertEquals(DeviceLight.RED, peer.copy(compatibility = status).light(build))

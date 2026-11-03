@@ -72,7 +72,8 @@ class WatchStatusUiTest {
                             compatibility = CompatibilityStatus.COMPATIBLE,
                             reachable = true,
                         ) to
-                            if (de) "Entwicklungsbuild" else "Development build",
+                            // Gleiche Version, nur anderer bzw. lokaler Build-Stand: technisch passend, also grün.
+                            if (de) "Verbunden · gleiche Version" else "Connected · same version",
                     )
                 variants.forEachIndexed { index, (device, hint) ->
                     runOnIdle { store.setDeviceStatuses(listOf(device)) }
@@ -124,9 +125,9 @@ class WatchStatusUiTest {
                         if (locale.language ==
                             "de"
                         ) {
-                            "gleicher App-Stand"
+                            "gleiche Version"
                         } else {
-                            "same app build"
+                            "same version"
                         },
                         substring = true,
                     )

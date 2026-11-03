@@ -667,7 +667,7 @@
     <string name="auth_deletion">Account deletion has been requested. Cancel the request to keep using Advantly, or sign out.</string>
     <string name="profile_restore_previous">Restore previous data</string>
     <string name="device_details">Watch connection</string>
-    <string name="device_green">Connected · same app build</string>
+    <string name="device_green">Connected · same version</string>
     <string name="device_yellow">Connected · update recommended</string>
     <string name="device_red">Unreachable</string>
     <string name="device_gray">No watch paired</string>
@@ -705,6 +705,8 @@
     <string name="whats_new_12_4">More safety: heart rate histories now belong to your account, and deletions reliably reach your watch too.</string>
     <string name="whats_new_13_1">Cloud backup fixed: your matches now really reach the cloud again – the basis for live, shared matches and notifications for your friends.</string>
     <string name="whats_new_13_2">Please confirm the updated privacy policy (version 9) when asked – until then your matches are not backed up.</string>
+    <string name="whats_new_15_1">Clearer watch icon: green now simply means everything fits – phone and watch are connected and run the same version.</string>
+    <string name="whats_new_15_2">While your watch scores a match with friends, your phone shows “Sharing live score” – allow notifications for Advantly to see it.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

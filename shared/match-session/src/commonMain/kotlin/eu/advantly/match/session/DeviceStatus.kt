@@ -20,13 +20,16 @@ data class DeviceStatus(
     val reachable: Boolean = false,
     val appInstalled: Boolean? = null,
 ) {
+    /** Grün, sobald alles technisch passt (kompatibel, gleiche App-Version); der Build-Stand (Commit) zählt nicht. */
     fun light(local: AppBuild?): DeviceLight =
         when {
             appInstalled == false -> DeviceLight.GRAY
             !reachable || (compatibility != null && compatibility != CompatibilityStatus.COMPATIBLE) -> DeviceLight.RED
-            compatibility == CompatibilityStatus.COMPATIBLE && sameCommit(local?.commit, appBuild?.commit) -> DeviceLight.GREEN
+            compatibility == CompatibilityStatus.COMPATIBLE && sameVersion(local) -> DeviceLight.GREEN
             else -> DeviceLight.YELLOW
         }
+
+    private fun sameVersion(local: AppBuild?): Boolean = appBuild?.version != null && appBuild.version == local?.version
 }
 
 /** Ergänzender Kontaktnachweis im aktiven Match; ohne Match zählt allein die Plattform-Erreichbarkeit. */
@@ -36,8 +39,3 @@ fun contactIsFresh(
     nowMs: Long,
     lastContactMs: Long?,
 ): Boolean = lastContactMs != null && nowMs - lastContactMs in 0..DEVICE_CONTACT_TIMEOUT_MS
-
-private fun sameCommit(
-    local: String?,
-    remote: String?,
-): Boolean = local != null && local.matches(Regex("[0-9a-fA-F]{7,40}")) && local == remote
