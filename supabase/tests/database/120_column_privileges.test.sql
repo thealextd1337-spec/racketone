@@ -22,24 +22,24 @@ select results_eq($q$
  select c.table_name::text collate "C", c.column_name::text collate "C", p.priv collate "C"
  from information_schema.columns c cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(priv)
  where c.table_schema = 'public' and has_column_privilege('authenticated',
-   format('public.%I',c.table_name), c.column_name, p.priv)
+   format('%I.%I',c.table_schema,c.table_name), c.column_name, p.priv)
  order by 1,2,3
 $q$, $$ select tbl collate "C", col collate "C", priv collate "C" from expected_writes order by 1,2,3 $$,
   'authenticated schreibt exakt die freigegebenen Spalten');
 select is_empty($q$
  select c.table_name, c.column_name from information_schema.columns c
- where c.table_schema = 'public' and (has_column_privilege('anon', format('public.%I',c.table_name),c.column_name,'INSERT')
-   or has_column_privilege('anon', format('public.%I',c.table_name),c.column_name,'UPDATE')
-   or has_column_privilege('anon', format('public.%I',c.table_name),c.column_name,'REFERENCES'))
+ where c.table_schema = 'public' and (has_column_privilege('anon', format('%I.%I',c.table_schema,c.table_name),c.column_name,'INSERT')
+   or has_column_privilege('anon', format('%I.%I',c.table_schema,c.table_name),c.column_name,'UPDATE')
+   or has_column_privilege('anon', format('%I.%I',c.table_schema,c.table_name),c.column_name,'REFERENCES'))
 $q$, 'anon hat keinerlei Spaltenschreibrechte');
 select is_empty($q$
  select c.table_name, c.column_name from information_schema.columns c
  where c.table_schema = 'public' and c.table_name <> 'country_age_rules'
-   and has_column_privilege('anon', format('public.%I',c.table_name),c.column_name,'SELECT')
+   and has_column_privilege('anon', format('%I.%I',c.table_schema,c.table_name),c.column_name,'SELECT')
 $q$, 'anon liest nur die Länderregeln');
 select is_empty($q$
  select c.table_name, c.column_name from information_schema.columns c
- where c.table_schema = 'public' and has_column_privilege('authenticated',format('public.%I',c.table_name),c.column_name,'SELECT')
+ where c.table_schema = 'public' and has_column_privilege('authenticated',format('%I.%I',c.table_schema,c.table_name),c.column_name,'SELECT')
  and (c.table_name not in ('country_age_rules','profiles','profile_settings','user_blocks','friendships','devices',
    'players','player_assignment_rejections','tournaments','tournament_courts','tournament_staff','matches',
    'match_participants','match_link_rejections','match_roles','match_visitors','match_events','invites','entitlements')

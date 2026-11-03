@@ -99,9 +99,12 @@ class CloudUploadRunner(
                         val update = OutboxPlanner.evaluate(batch, response)
                         val acknowledged = current.snapshot.acknowledgedMetadata(batch, response)
                         val incomplete = update.retry.isNotEmpty() || acknowledged != current.snapshot.metadataRevisions
-                        // Ohne jeden Fortschritt brächte dieselbe Auswahl dasselbe Ergebnis (etwa ein dauerhaft abgelehntes
-                        // Match, dessen Events dann `unknown_match` bleiben): nicht im Minutentakt wiederholen.
-                        val stuck = incomplete && update.uploaded.isEmpty() && update.rejected.isEmpty() && acknowledged.isEmpty()
+                        // Ohne jeden Fortschritt und mit dauerhaft abgelehntem Match (dessen Events dann `unknown_match` bleiben)
+                        // brächte dieselbe Auswahl dasselbe Ergebnis: nicht im Minutentakt wiederholen. Fehlende Antworten
+                        // bleiben dagegen wiederholbar (PARTIAL).
+                        val stuck =
+                            incomplete && update.uploaded.isEmpty() && update.rejected.isEmpty() && acknowledged.isEmpty() &&
+                                response.matches.any { it.result == "rejected" }
                         val next = uploads.nextUpload(current, maxEventsPerBatch)
                         attempt = next
                         mutable.value =
