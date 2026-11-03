@@ -1,0 +1,4 @@
+Neu in 0.6.2:
+• Uhr-Symbol grün, sobald Handy und Uhr verbunden sind und dieselbe Version haben.
+• Hinweis: „Live-Stand wird übertragen“ erscheint nur mit erlaubten Benachrichtigungen.
+Bitte testen: Uhr-Symbol nach dem Update grün.

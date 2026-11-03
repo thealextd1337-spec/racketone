@@ -1,0 +1,4 @@
+New in 0.6.2:
+• Watch icon turns green as soon as phone and watch are connected and run the same version.
+• Note: “Sharing live score” only shows with notifications allowed.
+Please test: watch icon is green after the update.
