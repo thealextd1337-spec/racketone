@@ -99,6 +99,9 @@ class CloudUploadRunner(
                         val update = OutboxPlanner.evaluate(batch, response)
                         val acknowledged = current.snapshot.acknowledgedMetadata(batch, response)
                         val incomplete = update.retry.isNotEmpty() || acknowledged != current.snapshot.metadataRevisions
+                        // Ohne jeden Fortschritt brächte dieselbe Auswahl dasselbe Ergebnis (etwa ein dauerhaft abgelehntes
+                        // Match, dessen Events dann `unknown_match` bleiben): nicht im Minutentakt wiederholen.
+                        val stuck = incomplete && update.uploaded.isEmpty() && update.rejected.isEmpty() && acknowledged.isEmpty()
                         val next = uploads.nextUpload(current, maxEventsPerBatch)
                         attempt = next
                         mutable.value =
@@ -108,6 +111,10 @@ class CloudUploadRunner(
                                 missingEventResponseIds = batch.events.map { it.id }.toSet() - response.events.mapNotNull { it.id }.toSet(),
                                 outcome =
                                     when {
+                                        stuck -> {
+                                            CloudUploadOutcome.BLOCKED
+                                        }
+
                                         incomplete -> {
                                             CloudUploadOutcome.PARTIAL
                                         }

@@ -353,6 +353,33 @@ class CloudUploadRunnerTest {
         }
 
     @Test
+    fun permanentlyRejectedMatchBlocksInsteadOfRetryingEveryRun(): Unit =
+        runBlocking {
+            // Staging 03.11.2026: Match `rejected/invalid`, seine Events daher `unknown_match` – ohne Fortschritt.
+            Fixture(answer = { batch, _ ->
+                accepted(batch).copy(
+                    matches = batch.matches.map { ItemResult(it.id, "rejected", "invalid") },
+                    events = batch.events.map { ItemResult(it.id, "rejected", "unknown_match") },
+                )
+            }).use { fixture ->
+                fixture.backend.bindDevice("caller-phone")
+                val runner = fixture.runner()
+                // Erster Lauf quittiert noch die Spieler: Fortschritt, also wie bisher PARTIAL.
+                assertEquals(CloudUploadOutcome.PARTIAL, runner.uploadNow().outcome)
+                val stuck = runner.uploadNow()
+                assertEquals(CloudUploadOutcome.BLOCKED, stuck.outcome)
+                assertEquals(2, fixture.batches.size)
+                assertEquals(1L, stuck.inventory?.pendingEvents)
+                assertTrue(
+                    fixture.data.cloud
+                        .rejectedEvents()
+                        .isEmpty(),
+                    "Events bleiben für einen späteren Lauf ausstehend",
+                )
+            }
+        }
+
+    @Test
     fun metadataNotesAndMissingResponsesStopTheRunAndRemainVisible(): Unit =
         runBlocking {
             Fixture(answer = { batch, _ ->
