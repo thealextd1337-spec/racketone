@@ -339,7 +339,7 @@ class ReplicaFoundationReviewRegressionTest {
                     .b,
             )
             assertEquals(
-                "",
+                "?",
                 f.data.cloud
                     .uploadParticipants("match", "A")!!
                     .participants

@@ -95,6 +95,9 @@ internal fun CloudSyncRepository.uploadHeader(id: String): CloudMatchHeader? =
         CloudMatchHeader(it.id, it.sport, it.discipline, it.format_json, it.meta_json, it.created_at_ms, it.previous_match_id)
     }
 
+/** Sprachneutraler Snapshot-Name für Plätze ohne Namen; derselbe Wert, den der Server für leere Namen einsetzt. */
+internal const val UNNAMED_PARTICIPANT = "?"
+
 internal fun CloudSyncRepository.uploadParticipants(
     id: String,
     profileId: String,
@@ -129,7 +132,9 @@ internal fun CloudSyncRepository.uploadParticipants(
                 val redacted =
                     slot.value in redactedSlots ||
                         playerId?.let { database.replicaLifecycleQueries.isRedacted(it.value).executeAsOne() > 0 } == true
-                val name = if (redacted) "" else player?.display_name ?: legacy?.displayName.orEmpty()
+                // Namenlose Plätze (Platzhalter, Self ohne Namen) nie leer senden: der Server lehnte sonst das ganze Match ab.
+                val name =
+                    if (redacted) "" else (player?.display_name ?: legacy?.displayName).orEmpty().ifBlank { UNNAMED_PARTICIPANT }
                 // Freund: Profil-ID nur aus der Zuordnung des hochladenden Kontos, nie aus Slot-ID oder Lineup.
                 val friend =
                     playerId?.value?.takeIf { !redacted && player?.kind == PlayerKind.FRIEND.name }?.let {

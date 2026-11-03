@@ -69,7 +69,7 @@ class CloudMetadataReviewRegressionTest {
         val selected = data.cloudUploads.capture(session, 100)
         val old = selected.participants.single()
         assertEquals(
-            "",
+            "?",
             old.value.participants
                 .last()
                 .displayName,
@@ -91,7 +91,7 @@ class CloudMetadataReviewRegressionTest {
                 .displayName,
         )
         assertEquals(
-            "",
+            "?",
             old.value.participants
                 .last()
                 .displayName,
@@ -466,7 +466,7 @@ class CloudMetadataReviewRegressionTest {
                 .uploadParticipants("match", "alice")!!
                 .participants
                 .last()
-        assertEquals("", person.displayName)
+        assertEquals("?", person.displayName)
         assertNull(person.playerId)
         db.matchAssignmentQueries.putIdentity("match", guest.value, null, null)
         person =
@@ -474,7 +474,7 @@ class CloudMetadataReviewRegressionTest {
                 .uploadParticipants("match", "alice")!!
                 .participants
                 .last()
-        assertEquals("", person.displayName)
+        assertEquals("?", person.displayName)
         assertNull(person.playerId)
     }
 }
