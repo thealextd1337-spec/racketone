@@ -1,0 +1,4 @@
+New in 0.6.1:
+• Cloud backup fixed: matches with yourself or unnamed slots were not uploaded so far.
+• Rejected uploads are no longer retried every minute.
+Please test: a match with a friend, who gets the live score and a notification.
