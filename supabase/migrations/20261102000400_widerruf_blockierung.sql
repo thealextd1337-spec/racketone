@@ -51,7 +51,8 @@ $$;
 -- get_visitor_match (damit cloud_get_visitor_match_v1), my_visitor_matches, tournament_overview sowie Readiness und
 -- Redaktions-Paging (nach der Epochenprüfung, damit veraltete Clients weiter restart_required bekommen).
 -- Antwort jeweils wie ohne Recht (forbidden bzw. leer), kein eigener Fehlercode als Orakel.
--- Nicht betroffen: Zählerwechsel- und Push-Prüfungen (eigene Regeln), der Konto-Export (Art. 15, eigene Daten).
+-- Nicht betroffen: Zählerwechsel- und Push-Prüfungen (eigene Regeln). Der Konto-Export stellt solche Matches nur zurück
+-- (Abschnitt am Ende).
 create function private.blocked_from_live(p_match uuid, p_profile uuid default auth.uid())
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.matches m
@@ -106,5 +107,48 @@ begin
     end if;
     execute replace(v_definition, v_seam.old, v_seam.new);
   end loop;
+end;
+$$;
+
+-- Konto-Export (Art. 15) bei Blockierung: export_my_data lieferte verknüpfte laufende Matches samt Events auch dann, wenn
+-- Exportierender und Ersteller sich blockiert haben – ein wiederholter Export hätte die Live-Sperre oben umgangen.
+-- Entscheidung (03.11.2026): Solche Matches (blocked_from_live: laufend, fremder Ersteller, Blockierung in einer der
+-- beiden Richtungen) fehlen im Export bis zum Matchende; danach sind sie wie jedes beendete gemeinsame Match enthalten.
+-- Die Auskunft ist damit nur aufgeschoben, nicht verweigert: Die Daten bleiben vollständig gespeichert, und das Manifest
+-- nennt neutral die Anzahl zurückgestellter Matches (deferredLiveMatches, ohne IDs oder Namen – sonst wieder ein Orakel
+-- für den laufenden Stand). Eigene Matches (Ersteller) sind nie betroffen, blocked_from_live schließt sie aus.
+-- Rollen (roles) und Zuschauerrechte (visitorOf) bleiben im Export: nur Match-ID und eigene Zeitstempel, kein Spielstand.
+-- Stand 20261028001000; Seam-Technik wie oben, export_my_data ist security definer (RLS greift dort nicht).
+do $$
+declare
+  v_seam record;
+  v_definition text;
+begin
+  select pg_get_functiondef('public.export_my_data()'::regprocedure) into v_definition;
+  for v_seam in select * from (values
+    ($s$    'blockedCount', (select count(*) from public.user_blocks b where b.blocker_id = v_uid),
+$s$,
+     $s$    'blockedCount', (select count(*) from public.user_blocks b where b.blocker_id = v_uid),
+    'deferredLiveMatches', (select count(*) from public.matches m
+                            where exists (select 1 from public.match_participants mp
+                                          where mp.match_id = m.id and mp.profile_id = v_uid)
+                              and private.blocked_from_live(m.id, v_uid)),
+$s$),
+    ($s$                where m.created_by = v_uid
+                   or exists (select 1 from public.match_participants mp
+                              where mp.match_id = m.id and mp.profile_id = v_uid)),
+$s$,
+     $s$                where (m.created_by = v_uid
+                   or exists (select 1 from public.match_participants mp
+                              where mp.match_id = m.id and mp.profile_id = v_uid))
+                  and not private.blocked_from_live(m.id, v_uid)),
+$s$)
+  ) s(old, new) loop
+    if array_length(string_to_array(v_definition, v_seam.old), 1) <> 2 then
+      raise exception 'Unerwartete Seam in export_my_data';
+    end if;
+    v_definition := replace(v_definition, v_seam.old, v_seam.new);
+  end loop;
+  execute v_definition;
 end;
 $$;
